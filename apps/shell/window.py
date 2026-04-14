@@ -34,27 +34,199 @@ _STATUS_HTML = """
     <meta charset="UTF-8">
     <title>Hermes-Yachiyo</title>
     <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: -apple-system, "Helvetica Neue", sans-serif;
+            font-family: -apple-system, "Helvetica Neue", "PingFang SC", sans-serif;
             background: #1a1a2e;
             color: #e0e0e0;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
+            padding: 24px;
+            line-height: 1.6;
         }
-        h1 { color: #6495ed; margin-bottom: 0.2em; }
-        .status { color: #90ee90; font-size: 1.2em; }
-        .info { color: #888; margin-top: 2em; font-size: 0.9em; }
+        .header {
+            text-align: center;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #333;
+            margin-bottom: 20px;
+        }
+        .header h1 { color: #6495ed; font-size: 1.6em; margin-bottom: 4px; }
+        .header .subtitle { color: #888; font-size: 0.9em; }
+        .header .run-badge {
+            display: inline-block;
+            background: #1e3a1e;
+            color: #90ee90;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            margin-top: 8px;
+        }
+        .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+        .card {
+            background: #2d2d54;
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .card h3 { color: #6495ed; font-size: 0.95em; margin-bottom: 10px; }
+        .card .row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 0.9em; }
+        .card .row .label { color: #999; }
+        .card .row .value { color: #e0e0e0; }
+        .card .row .value.ok { color: #90ee90; }
+        .card .row .value.warn { color: #ffd700; }
+        .modes {
+            background: #2d2d54;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        .modes h3 { color: #6495ed; font-size: 0.95em; margin-bottom: 12px; }
+        .mode-list { display: flex; gap: 12px; }
+        .mode-btn {
+            flex: 1;
+            background: #3a3a6a;
+            border: 1px solid #555;
+            color: #ccc;
+            padding: 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            text-align: center;
+            transition: border-color 0.2s;
+        }
+        .mode-btn:hover { border-color: #6495ed; color: #fff; }
+        .mode-btn.active { border-color: #6495ed; color: #fff; background: #4a4a8a; }
+        .mode-btn .icon { font-size: 1.4em; display: block; margin-bottom: 4px; }
+        .mode-btn .name { font-size: 0.85em; }
+        .mode-btn .desc { font-size: 0.75em; color: #888; margin-top: 2px; }
+        .footer {
+            text-align: center;
+            color: #555;
+            font-size: 0.8em;
+            padding-top: 12px;
+            border-top: 1px solid #333;
+        }
     </style>
 </head>
 <body>
-    <h1>Hermes-Yachiyo</h1>
-    <p class="status">● 运行中</p>
-    <p class="info">桌面优先本地个人 agent</p>
-    <p class="info">Bridge API: http://{host}:{port}</p>
+    <div class="header">
+        <h1>Hermes-Yachiyo</h1>
+        <div class="subtitle">桌面优先本地个人 Agent</div>
+        <div class="run-badge" id="run-badge">● 运行中</div>
+    </div>
+
+    <div class="cards">
+        <div class="card">
+            <h3>Hermes Agent</h3>
+            <div class="row"><span class="label">状态</span><span class="value" id="hermes-status">检测中…</span></div>
+            <div class="row"><span class="label">版本</span><span class="value" id="hermes-version">—</span></div>
+            <div class="row"><span class="label">平台</span><span class="value" id="hermes-platform">—</span></div>
+        </div>
+        <div class="card">
+            <h3>Yachiyo 工作空间</h3>
+            <div class="row"><span class="label">状态</span><span class="value" id="ws-status">检测中…</span></div>
+            <div class="row"><span class="label">路径</span><span class="value" id="ws-path" style="font-size:0.8em;">—</span></div>
+            <div class="row"><span class="label">创建时间</span><span class="value" id="ws-created">—</span></div>
+        </div>
+        <div class="card">
+            <h3>运行信息</h3>
+            <div class="row"><span class="label">运行时间</span><span class="value" id="app-uptime">—</span></div>
+            <div class="row"><span class="label">版本</span><span class="value" id="app-version">—</span></div>
+            <div class="row"><span class="label">Bridge</span><span class="value" id="app-bridge">—</span></div>
+        </div>
+        <div class="card">
+            <h3>任务统计</h3>
+            <div class="row"><span class="label">等待中</span><span class="value" id="task-pending">0</span></div>
+            <div class="row"><span class="label">运行中</span><span class="value" id="task-running">0</span></div>
+            <div class="row"><span class="label">已完成</span><span class="value" id="task-completed">0</span></div>
+        </div>
+    </div>
+
+    <div class="modes">
+        <h3>显示模式</h3>
+        <div class="mode-list">
+            <div class="mode-btn active" id="mode-window">
+                <span class="icon">🖥️</span>
+                <span class="name">窗口模式</span>
+                <span class="desc">标准窗口</span>
+            </div>
+            <div class="mode-btn" id="mode-bubble">
+                <span class="icon">💬</span>
+                <span class="name">气泡模式</span>
+                <span class="desc">即将推出</span>
+            </div>
+            <div class="mode-btn" id="mode-live2d">
+                <span class="icon">🎭</span>
+                <span class="name">Live2D</span>
+                <span class="desc">即将推出</span>
+            </div>
+            <div class="mode-btn" id="mode-settings">
+                <span class="icon">⚙️</span>
+                <span class="name">设置</span>
+                <span class="desc">应用配置</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        Bridge API: http://{host}:{port} · Hermes-Yachiyo v0.1.0
+    </div>
+
+    <script>
+    async function refreshDashboard() {
+        try {
+            if (!window.pywebview || !window.pywebview.api) return;
+            const data = await window.pywebview.api.get_dashboard_data();
+            if (data.error) return;
+
+            // Hermes
+            const hs = document.getElementById('hermes-status');
+            if (data.hermes.ready) {
+                hs.textContent = '✅ 已就绪';
+                hs.className = 'value ok';
+            } else {
+                hs.textContent = '⚠️ ' + data.hermes.status;
+                hs.className = 'value warn';
+            }
+            document.getElementById('hermes-version').textContent = data.hermes.version || '未知';
+            document.getElementById('hermes-platform').textContent = data.hermes.platform;
+
+            // Workspace
+            const ws = document.getElementById('ws-status');
+            if (data.workspace.initialized) {
+                ws.textContent = '✅ 已初始化';
+                ws.className = 'value ok';
+            } else {
+                ws.textContent = '⚠️ 未初始化';
+                ws.className = 'value warn';
+            }
+            document.getElementById('ws-path').textContent = data.workspace.path || '—';
+            document.getElementById('ws-created').textContent = data.workspace.created_at || '—';
+
+            // App
+            const uptime = data.app.uptime_seconds;
+            const min = Math.floor(uptime / 60);
+            const sec = Math.floor(uptime % 60);
+            document.getElementById('app-uptime').textContent = min > 0 ? min + '分' + sec + '秒' : sec + '秒';
+            document.getElementById('app-version').textContent = 'v' + data.app.version;
+
+            // Tasks
+            document.getElementById('task-pending').textContent = data.tasks.pending || 0;
+            document.getElementById('task-running').textContent = data.tasks.running || 0;
+            document.getElementById('task-completed').textContent = data.tasks.completed || 0;
+        } catch(e) {}
+    }
+
+    // 首次加载和定时刷新
+    document.addEventListener('DOMContentLoaded', function() {
+        // pywebview ready 后刷新数据
+        if (window.pywebview) {
+            refreshDashboard();
+        }
+        setInterval(refreshDashboard, 5000);
+    });
+
+    // pywebview ready 事件
+    window.addEventListener('pywebviewready', function() {
+        refreshDashboard();
+    });
+    </script>
 </body>
 </html>
 """
@@ -207,22 +379,24 @@ def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
     """创建并显示主窗口（阻塞主线程）- 正常模式"""
     if not _HAS_WEBVIEW:
         logger.warning("pywebview 未安装，以无窗口模式运行")
-        # 无窗口模式下保持主线程活跃
+        _print_console_dashboard(runtime, config)
         import threading
-
         threading.Event().wait()
         return
+
+    from apps.shell.main_api import MainWindowAPI
+    api = MainWindowAPI(runtime)
 
     html = _STATUS_HTML.format(host=config.bridge_host, port=config.bridge_port)
 
     webview.create_window(
         title="Hermes-Yachiyo",
         html=html,
-        width=480,
-        height=360,
+        width=560,
+        height=520,
         resizable=True,
     )
-    webview.start()
+    webview.start(api=api, debug=False)
 
 
 def create_installer_window(install_info: "HermesInstallInfo", config: "AppConfig") -> None:
@@ -380,6 +554,18 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
         init_section=init_section,
         suggestions_section=suggestions_section,
     )
+
+
+def _print_console_dashboard(runtime: "HermesRuntime", config: "AppConfig") -> None:
+    """在控制台显示仪表盘信息（无 pywebview 时的备选方案）"""
+    status = runtime.get_status()
+    print("\n" + "=" * 60)
+    print("Hermes-Yachiyo - 正常模式（控制台）")
+    print("=" * 60)
+    print(f"Hermes 状态: {status.get('hermes_status', '未知')}")
+    print(f"Bridge 地址: http://{config.bridge_host}:{config.bridge_port}")
+    print(f"显示模式: {config.display_mode}")
+    print("=" * 60)
 
 
 def _print_console_install_info(install_info: "HermesInstallInfo") -> None:

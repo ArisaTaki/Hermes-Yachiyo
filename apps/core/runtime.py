@@ -72,7 +72,7 @@ class HermesRuntime:
         )
         
         # 2. 根据安装状态决定启动策略
-        if self._hermes_install_info.status != HermesInstallStatus.INSTALLED:
+        if self._hermes_install_info.status != HermesInstallStatus.READY:
             logger.warning(
                 "Hermes Agent 未正确安装: %s", 
                 self._hermes_install_info.status
@@ -121,7 +121,7 @@ class HermesRuntime:
         """检查 Hermes Agent 是否就绪可用"""
         if not self._hermes_install_info:
             return False
-        return self._hermes_install_info.status == HermesInstallStatus.INSTALLED
+        return self._hermes_install_info.status == HermesInstallStatus.READY
 
     def get_hermes_install_guidance(self) -> dict | None:
         """获取 Hermes 安装引导信息"""

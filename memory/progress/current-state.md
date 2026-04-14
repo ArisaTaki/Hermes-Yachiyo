@@ -127,5 +127,29 @@
 - ✅ 跨平台支持策略
 - ✅ 分层检测和动态界面引导
 
+### Milestone 5 — 正常模式主界面与仪表盘
+
+- ✅ apps/shell/main_api.py — 主窗口 WebView API（MainWindowAPI）
+  - get_dashboard_data(): 汇聚 runtime 状态、Hermes 状态、工作空间状态、任务统计
+- ✅ apps/shell/window.py — 正常模式主界面
+  - 完整仪表盘 HTML 模板（_STATUS_HTML）：Hermes 状态、工作空间状态、运行信息、任务统计、显示模式切换入口
+  - create_main_window() 集成 MainWindowAPI（api= 参数传入 webview.start()）
+  - 控制台备选方案 _print_console_dashboard()
+  - 窗口尺寸扩大至 560x520
+- ✅ 产品状态流定义：
+  1. NOT_INSTALLED → 安装引导模式
+  2. INSTALLED_NOT_INITIALIZED → 工作空间初始化引导模式
+  3. READY → 正常模式主界面（仪表盘 + 设置入口 + 模式切换占位）
+- ✅ 主界面仪表盘内容：
+  - Hermes Agent 状态/版本/平台
+  - Yachiyo 工作空间状态/路径/创建时间
+  - 运行时间/版本
+  - 任务统计（等待/运行/完成）
+  - 显示模式切换按钮占位（窗口/气泡/Live2D）
+  - 设置入口占位
+
+## 当前状态
+完整可运行的桌面应用骨架，具备正常模式主界面和完整启动状态流。
+
 ## 下一步
 **AstrBot 插件实现**：QQ 命令路由到 bridge API 或 Hapi Codex。
