@@ -116,39 +116,54 @@ def is_version_compatible(version: str) -> bool:
         return False
 
 
-def check_hermes_configuration() -> Tuple[bool, str]:
-    """检查 Hermes Agent 配置状态
+def check_yachiyo_workspace() -> Tuple[bool, str]:
+    """检查 Yachiyo 工作空间初始化状态
+    
+    检查 Yachiyo 特定的工作空间目录和配置，不检查 Hermes 官方配置。
     
     Returns:
-        Tuple[bool, str]: (是否配置完成, 错误信息)
+        Tuple[bool, str]: (是否已初始化, 错误信息)
     """
     try:
-        # 1. 检查 HERMES_HOME 环境变量
+        # 1. 确定 Hermes Home（优先环境变量，否则默认）
         hermes_home = os.getenv("HERMES_HOME")
         if not hermes_home:
-            return False, "HERMES_HOME 环境变量未设置"
+            hermes_home = os.path.expanduser("~/.hermes")
         
-        # 2. 检查 HERMES_HOME 目录是否存在
-        if not os.path.exists(hermes_home):
-            return False, f"HERMES_HOME 目录不存在: {hermes_home}"
-        
-        # 3. 检查基本目录结构
-        required_dirs = ["logs", "memory", "tasks", "config"]
-        missing_dirs = []
-        for dir_name in required_dirs:
-            dir_path = os.path.join(hermes_home, dir_name)
-            if not os.path.exists(dir_path):
-                missing_dirs.append(dir_name)
-        
-        if missing_dirs:
-            return False, f"缺少必要目录: {', '.join(missing_dirs)}"
-        
-        # 4. 检查 yachiyo 工作空间
+        # 2. 检查 Yachiyo 工作空间目录
         yachiyo_workspace = os.path.join(hermes_home, "yachiyo")
         if not os.path.exists(yachiyo_workspace):
-            return False, "Yachiyo 工作空间未创建"
+            return False, f"Yachiyo 工作空间目录不存在: {yachiyo_workspace}"
         
-        # 5. 简单的 hermes 配置验证（可选）
+        # 3. 检查 Yachiyo 基本配置文件（如果需要的话）
+        # 这里可以检查 Yachiyo 特定的配置文件或标识文件
+        yachiyo_init_file = os.path.join(yachiyo_workspace, ".yachiyo_init")
+        if not os.path.exists(yachiyo_init_file):
+            return False, "Yachiyo 工作空间未完成初始化"
+        
+        return True, ""
+        
+    except Exception as e:
+        logger.error("Yachiyo 工作空间检查失败: %s", e)
+        return False, f"工作空间检查失败: {e}"
+
+
+def check_hermes_basic_readiness() -> Tuple[bool, str]:
+    """检查 Hermes Agent 基本可用性
+    
+    只检查 Hermes 本身是否安装且可用，不涉及 Yachiyo 特定配置。
+    
+    Returns:
+        Tuple[bool, str]: (是否可用, 错误信息)  
+    """
+    try:
+        # 1. 检查命令可用性（已包含版本检查）
+        command_exists, error_message = check_hermes_command()
+        if not command_exists:
+            return False, error_message or "Hermes 命令不可用"
+        
+        # 2. 简单验证 Hermes 工作状态
+        # 这里不检查复杂配置，只确保 Hermes 基本可用
         try:
             result = subprocess.run(
                 ["hermes", "--version"], 
@@ -158,16 +173,15 @@ def check_hermes_configuration() -> Tuple[bool, str]:
                 check=False
             )
             if result.returncode != 0:
-                return False, "hermes 命令执行失败"
+                return False, "Hermes 命令执行异常"
         except Exception as e:
-            logger.warning("hermes 命令测试失败: %s", e)
-            return False, f"hermes 命令测试失败: {e}"
+            return False, f"Hermes 验证失败: {e}"
         
         return True, ""
         
     except Exception as e:
-        logger.error("配置检查失败: %s", e)
-        return False, f"配置检查失败: {e}"
+        logger.error("Hermes 基本可用性检查失败: %s", e)
+        return False, f"Hermes 检查失败: {e}"
 
 
 def get_hermes_home() -> str:
@@ -186,6 +200,10 @@ def get_hermes_home() -> str:
 
 def check_hermes_installation() -> HermesInstallInfo:
     """完整的 Hermes Agent 安装检测
+    
+    分层检测：
+    1. Hermes Agent 本身的安装状态
+    2. Yachiyo 工作空间的初始化状态
     
     Returns:
         HermesInstallInfo: 详细的检测结果
@@ -209,7 +227,7 @@ def check_hermes_installation() -> HermesInstallInfo:
         install_info.error_message = f"不支持的平台: {install_info.platform}"
         return install_info
     
-    # 2. 命令存在检查
+    # 2. Hermes Agent 安装检查
     command_exists, error_message = check_hermes_command()
     install_info.command_exists = command_exists
     
@@ -224,7 +242,7 @@ def check_hermes_installation() -> HermesInstallInfo:
         ]
         return install_info
     
-    # 3. 版本兼容性检查
+    # 3. Hermes Agent 版本兼容性检查
     version_info = get_hermes_version()
     install_info.version_info = version_info
     
@@ -246,21 +264,32 @@ def check_hermes_installation() -> HermesInstallInfo:
         ]
         return install_info
     
-    # 4. 配置状态检查  
-    config_ok, config_error = check_hermes_configuration()
-    hermes_home = get_hermes_home()
-    install_info.hermes_home = hermes_home
-    
-    if not config_ok:
-        install_info.status = HermesInstallStatus.INSTALLED_NOT_CONFIGURED
-        install_info.error_message = config_error
+    # 4. Hermes Agent 基本可用性验证
+    hermes_ready, hermes_error = check_hermes_basic_readiness()
+    if not hermes_ready:
+        install_info.status = HermesInstallStatus.INCOMPATIBLE_VERSION
+        install_info.error_message = f"Hermes Agent 不可用: {hermes_error}"
         install_info.suggestions = [
-            f"请设置 HERMES_HOME 环境变量: {hermes_home}",
-            "运行 Hermes 环境设置以完成目录结构创建",
-            "创建 Yachiyo 工作空间目录"
+            "请检查 Hermes Agent 安装和配置",
+            "尝试重新安装或更新 Hermes Agent"
         ]
         return install_info
     
-    # 5. 一切就绪
+    # 5. Yachiyo 工作空间初始化检查
+    hermes_home = get_hermes_home()
+    install_info.hermes_home = hermes_home
+    
+    workspace_ok, workspace_error = check_yachiyo_workspace()
+    if not workspace_ok:
+        install_info.status = HermesInstallStatus.INSTALLED_NOT_INITIALIZED
+        install_info.error_message = workspace_error
+        install_info.suggestions = [
+            "Hermes Agent 已安装，需要初始化 Yachiyo 工作空间",
+            f"工作空间位置: {hermes_home}/yachiyo",
+            "请运行初始化向导完成设置"
+        ]
+        return install_info
+    
+    # 6. 一切就绪
     install_info.status = HermesInstallStatus.READY
     return install_info

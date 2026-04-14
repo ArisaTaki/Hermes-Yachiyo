@@ -33,17 +33,42 @@
 - ✅ apps/bridge/routes/hermes.py — Hermes 环境设置 API
 - ✅ apps/bridge/routes/status.py — 暴露 Hermes 安装状态
 
-### Milestone 3 — 启动流程三状态联动
+### Milestone 3 — 启动流程三状态联动（已修正）
 
-- ✅ packages/protocol/enums.py — 完善 HermesInstallStatus 三状态模型
-- ✅ apps/installer/hermes_check.py — 增强配置状态检测
+- ✅ packages/protocol/enums.py — 修正 HermesInstallStatus 三状态模型
+  - NOT_INSTALLED: Hermes Agent 未安装
+  - INSTALLED_NOT_INITIALIZED: Hermes Agent 已安装，但 Yachiyo 工作空间未初始化
+  - READY: Hermes Agent 已安装且 Yachiyo 工作空间已初始化
+- ✅ apps/installer/hermes_check.py — 修正检测逻辑
+  - 区分 Hermes installation/readiness 和 Yachiyo workspace initialization
+  - check_hermes_basic_readiness(): 仅检查 Hermes 本身可用性
+  - check_yachiyo_workspace(): 检查 Yachiyo 工作空间初始化状态
+  - 不把 HERMES_HOME 可选项等同于配置状态
 - ✅ apps/shell/app.py — 三状态启动流程分离
-- ✅ apps/shell/window.py — 动态界面内容生成
-- ✅ apps/installer/hermes_install.py — 配置指导生成
+- ✅ apps/shell/window.py — 工作空间初始化界面内容
+- ✅ apps/installer/hermes_install.py — 工作空间初始化指导
 - ✅ 三状态分流:
   - NOT_INSTALLED: 安装引导模式
-  - INSTALLED_NOT_CONFIGURED: 配置引导模式  
+  - INSTALLED_NOT_INITIALIZED: 工作空间初始化引导模式
   - READY: 正常启动模式
+
+## 状态检测逻辑确认
+
+### 分层检测设计
+1. **Hermes Agent 层**: 
+   - 平台支持检查
+   - 命令存在性检查
+   - 版本兼容性检查  
+   - 基本可用性验证
+2. **Yachiyo 工作空间层**:
+   - 检查 yachiyo/ 目录是否存在
+   - 检查 .yachiyo_init 标识文件
+   - 不依赖 HERMES_HOME 环境变量（可选覆盖项）
+
+### 状态判定规则
+- **未安装**: Hermes Agent 命令不存在或版本不兼容
+- **已安装未初始化**: Hermes Agent 可用，但 Yachiyo 工作空间未初始化  
+- **已就绪**: Hermes Agent 可用且 Yachiyo 工作空间已初始化
 
 ## 架构边界确认
 
@@ -51,17 +76,17 @@
 - apps/core: runtime + state + task orchestration + Hermes 安装检测，不直接暴露 HTTP
 - apps/bridge: FastAPI 内部通信桥梁，仅供 UI 和 AstrBot 调用
 - apps/locald: 本地能力适配器
-- apps/installer: Hermes Agent 视为外部运行时依赖，提供三状态检测与完整引导
+- apps/installer: Hermes Agent 视为外部运行时依赖，提供分层检测与引导
 - integrations/astrbot-plugin: QQ 桥接，路由到 Hermes 或 Hapi
 
 ## 当前状态
 完整可运行的桌面应用骨架，具备：
 - ✅ 正确架构分层和职责边界
-- ✅ Hermes Agent 外部依赖管理和三状态检测
-- ✅ 启动流程三状态联动（正常 vs 配置引导 vs 安装引导）
+- ✅ Hermes Agent 外部依赖管理和分层状态检测
+- ✅ 启动流程三状态联动（正常 vs 工作空间初始化 vs 安装引导）
 - ✅ shell → core → bridge 完整连通
 - ✅ 跨平台支持策略
-- ✅ 三状态动态界面引导
+- ✅ 分层检测和动态界面引导
 
 ## 下一步
 **AstrBot 插件实现**：QQ 命令路由到 bridge API 或 Hapi Codex。

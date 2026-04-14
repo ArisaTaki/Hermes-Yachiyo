@@ -45,8 +45,8 @@ class HermesInstallGuide:
         elif install_info.status == HermesInstallStatus.INCOMPATIBLE_VERSION:
             return HermesInstallGuide._get_upgrade_instructions(install_info)
         
-        elif install_info.status == HermesInstallStatus.INSTALLED_NOT_CONFIGURED:
-            return HermesInstallGuide._get_setup_instructions(install_info)
+        elif install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED:
+            return HermesInstallGuide._get_workspace_init_instructions(install_info)
         
         else:
             return {
@@ -153,32 +153,30 @@ class HermesInstallGuide:
         }
 
     @staticmethod
-    def _get_setup_instructions(install_info: HermesInstallInfo) -> Dict[str, any]:
-        """环境配置指导 - Hermes 已安装但未完成配置"""
+    def _get_workspace_init_instructions(install_info: HermesInstallInfo) -> Dict[str, any]:
+        """Yachiyo 工作空间初始化指导 - Hermes 已安装，需要初始化 Yachiyo 工作空间"""
+        hermes_home = install_info.hermes_home or "~/.hermes"
+        yachiyo_workspace = f"{hermes_home}/yachiyo"
+        
         return {
-            "status": "setup_required",
-            "message": "Hermes Agent 已安装，需要完成环境配置",
+            "status": "workspace_init_required",
+            "message": "Hermes Agent 已安装并可用，需要初始化 Yachiyo 工作空间",
             "actions": [
-                "1. 设置 HERMES_HOME 环境变量",
-                f"   export HERMES_HOME={install_info.hermes_home or '~/.hermes'}",
+                "1. 创建 Yachiyo 工作空间目录",
+                f"   mkdir -p {yachiyo_workspace}",
                 "",
-                "2. 创建必要的目录结构",
-                "   mkdir -p $HERMES_HOME/{logs,memory,tasks,config,yachiyo}",
+                "2. 初始化工作空间结构",
+                f"   cd {yachiyo_workspace}",
+                "   touch .yachiyo_init",
                 "",
-                "3. 将环境变量持久化到 Shell 配置文件",
-                "   # 对于 Bash 用户:",
-                f"   echo 'export HERMES_HOME={install_info.hermes_home or '~/.hermes'}' >> ~/.bashrc",
-                "   # 对于 Zsh 用户:",
-                f"   echo 'export HERMES_HOME={install_info.hermes_home or '~/.hermes'}' >> ~/.zshrc",
+                "3. 创建项目配置（可选）",
+                "   mkdir -p projects configs logs",
                 "",
-                "4. 重新加载配置或重启终端",
-                "   source ~/.bashrc  # 或 source ~/.zshrc",
+                "4. 验证初始化",
+                f"   ls -la {yachiyo_workspace}",
                 "",
-                "5. 验证配置",
-                "   hermes --version",
-                "   echo $HERMES_HOME",
-                "",
-                "6. 重新启动 Hermes-Yachiyo"
+                "5. 重新启动 Hermes-Yachiyo",
+                "   工作空间初始化完成后，应用将进入正常模式"
             ],
             "auto_setup_available": True
         }

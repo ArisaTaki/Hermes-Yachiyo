@@ -41,12 +41,12 @@ def main() -> None:
     
     # 2. 根据安装状态决定启动模式
     if hermes_install_info.status == HermesInstallStatus.READY:
-        # Hermes 已安装且配置完成：正常启动模式
-        logger.info("Hermes Agent 已就绪，进入正常启动模式")
+        # Hermes 已安装且 Yachiyo 工作空间已初始化：正常启动模式
+        logger.info("Hermes Agent 已就绪，Yachiyo 工作空间已初始化，进入正常启动模式")
         _start_normal_mode(config)
-    elif hermes_install_info.status == HermesInstallStatus.INSTALLED_NOT_CONFIGURED:
-        # Hermes 已安装但未配置：配置引导模式
-        logger.info("Hermes Agent 已安装但未配置，进入配置引导模式")
+    elif hermes_install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED:
+        # Hermes 已安装但 Yachiyo 工作空间未初始化：初始化引导模式
+        logger.info("Hermes Agent 已安装，需要初始化 Yachiyo 工作空间，进入初始化引导模式")
         _start_setup_mode(config, hermes_install_info)
     else:
         # Hermes 未安装或其他问题：安装引导模式
@@ -100,8 +100,8 @@ def _start_normal_mode(config) -> None:
 
 
 def _start_setup_mode(config, hermes_install_info) -> None:
-    """配置引导模式：Hermes 已安装但需要配置"""
-    logger.info("启动 Hermes Agent 配置引导界面")
+    """初始化引导模式：Hermes 已安装但 Yachiyo 工作空间需要初始化"""
+    logger.info("启动 Yachiyo 工作空间初始化引导界面")
 
     # 简单的退出信号处理
     def _shutdown(signum: int, frame: object) -> None:
@@ -110,7 +110,7 @@ def _start_setup_mode(config, hermes_install_info) -> None:
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    # 主线程运行配置引导窗口
+    # 主线程运行初始化引导窗口
     create_installer_window(install_info=hermes_install_info, config=config)
 
 

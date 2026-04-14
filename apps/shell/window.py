@@ -234,7 +234,7 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
     # 状态样式和消息
     status_mapping = {
         HermesInstallStatus.NOT_INSTALLED: ("warning", "Hermes Agent 未安装"),
-        HermesInstallStatus.INSTALLED_NOT_CONFIGURED: ("info", "Hermes Agent 已安装，需要配置"),
+        HermesInstallStatus.INSTALLED_NOT_INITIALIZED: ("info", "Hermes Agent 已安装，需要初始化 Yachiyo 工作空间"),
         HermesInstallStatus.INCOMPATIBLE_VERSION: ("warning", "Hermes Agent 版本不兼容"),
         HermesInstallStatus.PLATFORM_UNSUPPORTED: ("", "平台不支持"),
         HermesInstallStatus.WSL2_REQUIRED: ("info", "需要 WSL2 环境"),
@@ -251,9 +251,9 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
         error_info = f"<strong>详情：</strong>{install_info.error_message}"
     
     # 根据状态确定主标题和步骤内容
-    if install_info.status == HermesInstallStatus.INSTALLED_NOT_CONFIGURED:
-        main_title = "配置 Hermes Agent"
-        steps_title = "配置步骤："
+    if install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED:
+        main_title = "初始化 Yachiyo 工作空间"
+        steps_title = "初始化步骤："
     else:
         main_title = "安装 Hermes Agent"
         steps_title = "安装步骤："
