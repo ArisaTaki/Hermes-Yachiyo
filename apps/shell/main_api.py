@@ -50,6 +50,17 @@ class MainWindowAPI:
                     "created_at": workspace.get("created_at"),
                 },
                 "tasks": status.get("task_counts", {}),
+                "bridge": {
+                    "enabled": self._config.bridge_enabled,
+                    "host": self._config.bridge_host,
+                    "port": self._config.bridge_port,
+                    "url": f"http://{self._config.bridge_host}:{self._config.bridge_port}",
+                    "running": "unknown",  # 占位：后续可对 bridge 做健康检查
+                },
+                "integrations": {
+                    "astrbot": {"status": "not_connected"},
+                    "hapi": {"status": "not_connected"},
+                },
             }
         except Exception as e:
             logger.error("获取仪表盘数据失败: %s", e)

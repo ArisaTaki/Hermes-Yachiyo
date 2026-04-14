@@ -112,6 +112,14 @@ _BUBBLE_HTML = """
             <span class="label">运行时间</span>
             <span class="value" id="uptime">—</span>
         </div>
+        <div class="status-row">
+            <span class="label">Bridge</span>
+            <span class="value" id="bridge-status">—</span>
+        </div>
+        <div class="status-row">
+            <span class="label">AstrBot</span>
+            <span class="value" id="astrbot-status">—</span>
+        </div>
     </div>
 
     <div class="actions">
@@ -139,6 +147,14 @@ _BUBBLE_HTML = """
             const sec = d.app.uptime_seconds;
             const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
             document.getElementById('uptime').textContent = m > 0 ? m + '分' + s + '秒' : s + '秒';
+
+            const brEl = document.getElementById('bridge-status');
+            brEl.textContent = d.bridge.enabled ? '✅ ' + d.bridge.addr : '❌ 已禁用';
+            brEl.className = 'value ' + (d.bridge.enabled ? 'ok' : '');
+
+            const abEl = document.getElementById('astrbot-status');
+            abEl.textContent = d.astrbot.status === 'not_connected' ? '⏳ 未接入' : d.astrbot.status;
+            abEl.className = 'value';
 
             document.getElementById('hint').textContent = '已更新';
             setTimeout(function(){ document.getElementById('hint').textContent = ''; }, 2000);
@@ -196,6 +212,11 @@ class BubbleWindowAPI:
                     "uptime_seconds": round(status.get("uptime_seconds", 0), 1),
                     "version": status.get("version", "0.1.0"),
                 },
+                "bridge": {
+                    "enabled": self._config.bridge_enabled,
+                    "addr": f"{self._config.bridge_host}:{self._config.bridge_port}",
+                },
+                "astrbot": {"status": "not_connected"},
             }
         except Exception as e:
             logger.error("获取气泡数据失败: %s", e)

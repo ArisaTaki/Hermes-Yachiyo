@@ -200,6 +200,24 @@
 3. _start_normal_mode() 调用 launch_mode(runtime, config)
 4. launch_mode() 根据 config.display_mode 选择对应 runner
 
+### Milestone 7 — Bridge 状态接入主界面与 Bubble
+
+- ✅ apps/shell/main_api.py — `get_dashboard_data()` 新增
+  - `bridge`: enabled / host / port / url / running(占位)
+  - `integrations`: astrbot / hapi 占位状态（not_connected）
+- ✅ apps/shell/window.py — 主界面仪表盘更新
+  - card3 “运行信息”：新增 Bridge 启用状态 + Bridge 地址行
+  - 新增全宽“集成服务”卡（span 2）：AstrBot / Hapi 占位状态
+  - `refreshDashboard()` JS 同步填充这些元素
+- ✅ apps/shell/modes/bubble.py — 气泡模式增加
+  - `get_bubble_data()` 新增 `bridge` (enabled+addr) 和 `astrbot` 状态字段
+  - HTML 增加 Bridge / AstrBot 两行精简展示
+  - JS 填充 bridge-status 和 astrbot-status
+
+## 当前占位状态
+- Bridge running 字段：`unknown`，后续可对 bridge 做健康检查时填入真实状态
+- AstrBot / Hapi 工作模式：`not_connected`，待 AstrBot 插件实现后更新
+
 ## 下一步
 
 **AstrBot 插件实现**：QQ 命令路由到 bridge API 或 Hapi Codex。

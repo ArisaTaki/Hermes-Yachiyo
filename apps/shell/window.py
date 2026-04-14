@@ -221,13 +221,19 @@ _STATUS_HTML = """
             <h3>运行信息</h3>
             <div class="row"><span class="label">运行时间</span><span class="value" id="app-uptime">—</span></div>
             <div class="row"><span class="label">版本</span><span class="value" id="app-version">—</span></div>
-            <div class="row"><span class="label">Bridge</span><span class="value" id="app-bridge">—</span></div>
+            <div class="row"><span class="label">Bridge</span><span class="value" id="bridge-enabled">—</span></div>
+            <div class="row"><span class="label">Bridge 地址</span><span class="value" id="bridge-addr" style="font-size:0.8em;">—</span></div>
         </div>
         <div class="card">
             <h3>任务统计</h3>
             <div class="row"><span class="label">等待中</span><span class="value" id="task-pending">0</span></div>
             <div class="row"><span class="label">运行中</span><span class="value" id="task-running">0</span></div>
             <div class="row"><span class="label">已完成</span><span class="value" id="task-completed">0</span></div>
+        </div>
+        <div class="card" style="grid-column: span 2;">
+            <h3>集成服务</h3>
+            <div class="row"><span class="label">AstrBot / QQ</span><span class="value" id="int-astrbot">—</span></div>
+            <div class="row"><span class="label">Hapi / Codex</span><span class="value" id="int-hapi">—</span></div>
         </div>
     </div>
 
@@ -452,10 +458,21 @@ _STATUS_HTML = """
             document.getElementById('app-uptime').textContent = min > 0 ? min + '分' + sec + '秒' : sec + '秒';
             document.getElementById('app-version').textContent = 'v' + data.app.version;
 
+            // Bridge
+            const brEl = document.getElementById('bridge-enabled');
+            brEl.textContent = data.bridge.enabled ? '✅ 已启用' : '❌ 已禁用';
+            brEl.className = 'value ' + (data.bridge.enabled ? 'ok' : 'warn');
+            document.getElementById('bridge-addr').textContent = data.bridge.url;
+
             // Tasks
             document.getElementById('task-pending').textContent = data.tasks.pending || 0;
             document.getElementById('task-running').textContent = data.tasks.running || 0;
             document.getElementById('task-completed').textContent = data.tasks.completed || 0;
+
+            // Integrations
+            const intLabels = {'not_connected': '⏳ 未接入', 'connected': '✅ 已连接', 'error': '❌ 错误'};
+            document.getElementById('int-astrbot').textContent = intLabels[data.integrations.astrbot.status] || data.integrations.astrbot.status;
+            document.getElementById('int-hapi').textContent = intLabels[data.integrations.hapi.status] || data.integrations.hapi.status;
         } catch(e) {}
     }
 

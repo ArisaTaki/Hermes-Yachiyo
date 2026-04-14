@@ -2,7 +2,47 @@
 
 ## 本轮完成内容
 
-将 bubble 模式从占位提示窗口推进为最小可用模式。
+将 Bridge 状态接入主界面仪表盘和气泡模式，同时为 AstrBot / Hapi 预留集成占位。
+
+### 主界面展示的 Bridge 信息
+
+| 展示内容 | 位置 | 说明 |
+|--------|------|------|
+| Bridge 启用状态 | card3 “运行信息” | ✅ 已启用 / ❌ 已禁用 |
+| Bridge 地址 | card3 “运行信息” | http://host:port |
+| AstrBot / QQ | 新增全宽集成服务卡 | ⏳ 未接入（占位） |
+| Hapi / Codex | 新增全宽集成服务卡 | ⏳ 未接入（占位） |
+
+### bubble 模式展示的精简状态
+
+| 行 | 内容 |
+|----|------|
+| Bridge | ✅ 127.0.0.1:8420 / ❌ 已禁用 |
+| AstrBot | ⏳ 未接入（占位） |
+
+气泡模式不展示 Hapi，保持轻量；完整集成信息通过“打开主窗口”入口查看。
+
+### AstrBot / QQ 接入状态占位
+
+- `get_dashboard_data()` 返回 `integrations.astrbot.status = "not_connected"`
+- `get_dashboard_data()` 返回 `integrations.hapi.status = "not_connected"`
+- `get_bubble_data()` 返回 `astrbot.status = "not_connected"`
+- 主界面和气泡均显示 `⏳ 未接入`
+- 状态字符串设计为可扩展：后续改为 `connected` / `error` 即可最新展示
+
+## 修改的文件
+
+| 文件 | 变更 |
+|------|------|
+| apps/shell/main_api.py | `get_dashboard_data()` 新增 bridge + integrations 字段 |
+| apps/shell/window.py | card3 增 bridge 行，新增集成服务全宽卡 |
+| apps/shell/modes/bubble.py | `get_bubble_data()` 增 bridge/astrbot，HTML/JS 增 2 行 |
+| memory/progress/current-state.md | 更新 Milestone 7 |
+| memory/handoff/session-summary.md | 更新本轮总结 |
+
+## 下一步重点
+
+**AstrBot 插件实现**：QQ 命令路由到 bridge API 或 Hapi Codex。
 
 ### bubble 模式新增能力
 
@@ -37,6 +77,7 @@ pywebview 支持在 API 回调中调用 `webview.create_window()`，新窗口会
 ### live2d 后续接入方式
 
 live2d 保持占位实现不变。后续接入时只需修改 `apps/shell/modes/live2d.py`：
+
 1. 替换 `_LIVE2D_HTML` 为嵌入 Live2D WebGL 渲染器的 HTML
 2. 添加 `Live2DWindowAPI` 提供角色控制 / 互动接口
 3. `main_api.py` 中 live2d 的 `available` 改为 `True`
@@ -66,7 +107,7 @@ live2d 保持占位实现不变。后续接入时只需修改 `apps/shell/modes/
 
 | 文件 | 变更 |
 |------|------|
-| apps/shell/modes/__init__.py | 实现 launch_mode() 分发器 |
+| apps/shell/modes/**init**.py | 实现 launch_mode() 分发器 |
 | apps/shell/modes/window.py | 新建，窗口模式 runner |
 | apps/shell/modes/bubble.py | 实现气泡模式占位 runner |
 | apps/shell/modes/live2d.py | 实现 Live2D 模式占位 runner |
@@ -76,7 +117,7 @@ live2d 保持占位实现不变。后续接入时只需修改 `apps/shell/modes/
 
 ## 下一步重点
 
-__AstrBot 插件实现__：QQ 命令路由到 bridge API 或 Hapi Codex。
+**AstrBot 插件实现**：QQ 命令路由到 bridge API 或 Hapi Codex。
 
 ### 可编辑配置项实现
 
