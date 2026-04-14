@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from apps.shell.config import AppConfig
     from packages.protocol.install import HermesInstallInfo
 
+from packages.protocol.enums import HermesInstallStatus
+
 logger = logging.getLogger(__name__)
 
 # 正常状态页 HTML
@@ -138,6 +140,27 @@ _INSTALLER_HTML = """
             color: #888;
             font-size: 0.9em;
         }
+        .init-button {
+            background: #6495ed;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1.1em;
+            margin: 20px 0;
+            transition: background-color 0.3s;
+        }
+        .init-button:hover {
+            background: #5a7fd8;
+        }
+        .init-section {
+            background: #2d2d54;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #6495ed;
+        }
     </style>
 </head>
 <body>
@@ -157,6 +180,8 @@ _INSTALLER_HTML = """
             <h3>{steps_title}</h3>
             {install_steps}
         </div>
+
+        {init_section}
 
         {suggestions_section}
 
@@ -212,6 +237,12 @@ def create_installer_window(install_info: "HermesInstallInfo", config: "AppConfi
         return
 
     html = _generate_installer_html(install_info)
+    
+    # 如果是工作空间初始化模式，启用 API
+    api = None
+    if install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED:
+        from apps.shell.installer_api import InstallerWebViewAPI
+        api = InstallerWebViewAPI()
 
     webview.create_window(
         title="Hermes-Yachiyo - Hermes Agent 安装引导",
@@ -220,7 +251,7 @@ def create_installer_window(install_info: "HermesInstallInfo", config: "AppConfi
         height=600,
         resizable=True,
     )
-    webview.start()
+    webview.start(api=api, debug=False)
 
 
 def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
@@ -274,6 +305,57 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                 steps_html.append(f'<div class="step">{action}</div>')
         install_steps = "\n".join(steps_html)
     
+    # 初始化按钮区域
+    init_section = ""
+    if install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED and guidance.get("can_initialize", False):
+        init_section = f"""
+        <div class="init-section">
+            <h3>🚀 快速初始化</h3>
+            <p>系统可以自动为您创建 Yachiyo 工作空间，包括必要的目录结构和配置文件。</p>
+            <button class="init-button" onclick="initializeWorkspace()">自动初始化工作空间</button>
+            <div id="init-status" style="margin-top: 10px; color: #888;"></div>
+        </div>
+        <script>
+        async function initializeWorkspace() {{
+            const button = document.querySelector('.init-button');
+            const status = document.getElementById('init-status');
+            
+            button.disabled = true;
+            button.textContent = '正在初始化...';
+            status.textContent = '正在创建工作空间，请稍候...';
+            status.style.color = '#6495ed';
+            
+            try {{
+                // 调用 WebView 初始化功能（如果支持的话）
+                if (window.pywebview && window.pywebview.api && window.pywebview.api.initialize_workspace) {{
+                    const result = await window.pywebview.api.initialize_workspace();
+                    if (result.success) {{
+                        status.textContent = '✅ 初始化成功！正在重启应用...';
+                        status.style.color = '#90ee90';
+                        // 延迟重启，让用户看到成功消息
+                        setTimeout(() => {{
+                            if (window.pywebview && window.pywebview.api && window.pywebview.api.restart_app) {{
+                                window.pywebview.api.restart_app();
+                            }} else {{
+                                status.textContent = '请手动重启 Hermes-Yachiyo 以继续';
+                            }}
+                        }}, 2000);
+                    }} else {{
+                        throw new Error(result.error || '初始化失败');
+                    }}
+                }} else {{
+                    throw new Error('自动初始化功能不可用，请手动执行初始化步骤');
+                }}
+            }} catch (error) {{
+                button.disabled = false;
+                button.textContent = '重新尝试初始化';
+                status.textContent = '❌ ' + error.message;
+                status.style.color = '#ff6b6b';
+            }}
+        }}
+        </script>
+        """
+    
     # 建议部分
     suggestions_section = ""
     if install_info.suggestions:
@@ -295,6 +377,7 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
         platform=install_info.platform,
         error_info=error_info,
         install_steps=install_steps,
+        init_section=init_section,
         suggestions_section=suggestions_section,
     )
 

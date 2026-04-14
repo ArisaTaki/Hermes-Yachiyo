@@ -33,6 +33,23 @@
 - ✅ apps/bridge/routes/hermes.py — Hermes 环境设置 API
 - ✅ apps/bridge/routes/status.py — 暴露 Hermes 安装状态
 
+### Milestone 4 — Yachiyo 工作空间初始化流程
+
+- ✅ apps/installer/workspace_init.py — 完整工作空间初始化器
+- ✅ apps/shell/installer_api.py — WebView API 支持自动初始化
+- ✅ apps/shell/window.py — 初始化界面和按钮支持
+- ✅ apps/installer/hermes_install.py — 初始化指导内容更新
+- ✅ 工作空间结构：
+  - ~/.hermes/yachiyo/ 主目录
+  - projects/, configs/, logs/, cache/, templates/ 子目录
+  - .yachiyo_init 标记文件
+  - yachiyo.json, environments.json, default.json 配置文件
+- ✅ 初始化流程：
+  - WebView 界面显示"自动初始化"按钮
+  - 点击后调用 JavaScript → WebView API → Python 初始化器
+  - 创建完整工作空间结构和配置
+  - 自动重启进入正常模式
+
 ### Milestone 3 — 启动流程三状态联动（已修正）
 
 - ✅ packages/protocol/enums.py — 修正 HermesInstallStatus 三状态模型
@@ -51,6 +68,27 @@
   - NOT_INSTALLED: 安装引导模式
   - INSTALLED_NOT_INITIALIZED: 工作空间初始化引导模式
   - READY: 正常启动模式
+
+## 初始化流程完整性
+
+### 创建的目录结构
+```
+~/.hermes/yachiyo/
+├── .yachiyo_init          # 初始化标记文件
+├── projects/              # 项目配置和数据
+├── configs/               # Yachiyo 应用配置
+│   ├── yachiyo.json      # 主配置文件
+│   └── environments.json # 环境配置
+├── logs/                  # Yachiyo 应用日志
+├── cache/                 # 临时缓存
+└── templates/             # 配置模板
+    └── default.json      # 默认项目模板
+```
+
+### 完整用户流程
+1. **新用户**: 安装 Hermes Agent → 初始化 Yachiyo 工作空间 → 正常使用
+2. **Hermes 老用户**: 直接初始化 Yachiyo 工作空间 → 正常使用
+3. **完整用户**: 直接正常使用
 
 ## 状态检测逻辑确认
 
@@ -72,11 +110,11 @@
 
 ## 架构边界确认
 
-- apps/shell: 桌面壳（pywebview 仅为 MVP 原型，不影响长期边界），支持三状态启动分离
+- apps/shell: 桌面壳（pywebview 仅为 MVP 原型，不影响长期边界），支持三状态启动分离和自动初始化
 - apps/core: runtime + state + task orchestration + Hermes 安装检测，不直接暴露 HTTP
 - apps/bridge: FastAPI 内部通信桥梁，仅供 UI 和 AstrBot 调用
 - apps/locald: 本地能力适配器
-- apps/installer: Hermes Agent 视为外部运行时依赖，提供分层检测与引导
+- apps/installer: Hermes Agent 视为外部运行时依赖，提供分层检测、引导和工作空间初始化
 - integrations/astrbot-plugin: QQ 桥接，路由到 Hermes 或 Hapi
 
 ## 当前状态
@@ -84,6 +122,7 @@
 - ✅ 正确架构分层和职责边界
 - ✅ Hermes Agent 外部依赖管理和分层状态检测
 - ✅ 启动流程三状态联动（正常 vs 工作空间初始化 vs 安装引导）
+- ✅ 完整的工作空间初始化流程（自动 + 手动）
 - ✅ shell → core → bridge 完整连通
 - ✅ 跨平台支持策略
 - ✅ 分层检测和动态界面引导

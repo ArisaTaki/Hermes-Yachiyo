@@ -162,15 +162,19 @@ class HermesInstallGuide:
             "status": "workspace_init_required",
             "message": "Hermes Agent 已安装并可用，需要初始化 Yachiyo 工作空间",
             "actions": [
+                "🎯 自动初始化（推荐）",
+                "   点击下方\"自动初始化\"按钮，系统将自动创建工作空间",
+                "",
+                "📁 手动初始化步骤",
                 "1. 创建 Yachiyo 工作空间目录",
                 f"   mkdir -p {yachiyo_workspace}",
                 "",
-                "2. 初始化工作空间结构",
+                "2. 初始化基础结构",
                 f"   cd {yachiyo_workspace}",
-                "   touch .yachiyo_init",
+                "   mkdir -p projects configs logs cache templates",
                 "",
-                "3. 创建项目配置（可选）",
-                "   mkdir -p projects configs logs",
+                "3. 创建初始化标记",
+                "   touch .yachiyo_init",
                 "",
                 "4. 验证初始化",
                 f"   ls -la {yachiyo_workspace}",
@@ -178,7 +182,8 @@ class HermesInstallGuide:
                 "5. 重新启动 Hermes-Yachiyo",
                 "   工作空间初始化完成后，应用将进入正常模式"
             ],
-            "auto_setup_available": True
+            "auto_setup_available": True,
+            "can_initialize": True
         }
 
 
