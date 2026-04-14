@@ -2,7 +2,59 @@
 
 ## 本轮完成内容
 
-将 Bridge 状态接入主界面仪表盘和气泡模式，同时为 AstrBot / Hapi 预留集成占位。
+### Milestone 8 — Bridge 状态从占位升级为最小真实状态
+
+| 文件 | 变更 |
+|------|------|
+| apps/bridge/server.py | 新增 `_state` 变量 + `get_bridge_state()`，start_bridge() 异常时设 failed |
+| apps/shell/main_api.py | `_bridge_status()` 组合四状态；dashboard `bridge.running` 字段真实化 |
+| apps/shell/modes/bubble.py | 导入 get_bridge_state，添加 `_bridge_status()`，JS 改为四状态标签 |
+| apps/shell/window.py | `refreshDashboard()` bridge 行改为四状态标签展示 |
+
+**四状态**：`disabled` / `enabled_not_started` / `running` / `failed`
+
+---
+
+### Milestone 9 — AstrBot 插件最小桥接骨架
+
+新建文件结构：
+
+```
+integrations/astrbot-plugin/
+├── main.py          ← 重写：入口 on_y_command() + parse_y_command()
+├── config.py        ← PluginConfig 数据类（新建）
+├── api_client.py    ← HermesClient + HapiClient（新建）
+├── command_router.py← 路由分发 + 帮助文本（新建）
+└── handlers/
+    ├── __init__.py  ← 注册表 + dispatch()（新建）
+    ├── status.py    ← /y status（新建）
+    ├── tasks.py     ← /y tasks（新建）
+    ├── screen.py    ← /y screen（新建）
+    ├── window.py    ← /y window（新建）
+    ├── do.py        ← /y do（新建）
+    └── codex.py     ← /y codex → Hapi 占位（新建）
+```
+
+**命令映射**：
+
+| 命令 | 路由目标 | Bridge 端点 | 状态 |
+|------|---------|------------|------|
+| /y status | Hermes Bridge | GET /status | ✅ 最小实现 |
+| /y tasks | Hermes Bridge | GET /tasks | ✅ 最小实现 |
+| /y screen | Hermes Bridge | GET /screen/current | ✅ 元信息；图片待联调 |
+| /y window | Hermes Bridge | GET /system/active-window | ✅ 最小实现 |
+| /y do \<task\> | Hermes Bridge | POST /tasks | ✅ 最小实现 |
+| /y codex \<task\> | Hapi | POST /codex | ⚠️ 占位，端点待确认 |
+
+**仍为占位的部分**：
+- `codex.py`：Hapi /codex schema 待确认
+- `screen.py`：base64 → AstrBot 图片消息待联调
+- AstrBot 宿主绑定：`on_y_command()` 入口已定义，与 AstrBot 事件系统挂钩待联调
+
+## 下一步重点
+
+**AstrBot 宿主绑定**：在 AstrBot 插件框架中注册 /y 命令，调用 `on_y_command(text, sender_id, config)`。
+
 
 ### 主界面展示的 Bridge 信息
 

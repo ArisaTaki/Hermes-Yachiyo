@@ -214,7 +214,40 @@
   - HTML 增加 Bridge / AstrBot 两行精简展示
   - JS 填充 bridge-status 和 astrbot-status
 
-### Milestone 8 — Bridge 状态从占位升级为最小真实状态
+### Milestone 9 — AstrBot 插件最小桥接骨架
+
+- ✅ integrations/astrbot-plugin/config.py — `PluginConfig` 数据类
+  - `hermes_url` / `hapi_url` / `allowed_senders` / `timeout`
+- ✅ integrations/astrbot-plugin/api_client.py — HTTP 客户端封装（依赖 `httpx`）
+  - `HermesClient`: get_status / list_tasks / create_task / get_screen / get_active_window
+  - `HapiClient`: run_codex（占位，Hapi /codex 端点待确认）
+- ✅ integrations/astrbot-plugin/command_router.py — 命令路由分发
+  - `HERMES_COMMANDS`: status / tasks / screen / window / do → Hermes Bridge
+  - `HAPI_COMMANDS`: codex → Hapi
+  - `route()`: 未知命令返回帮助文本，捕获异常返回错误提示
+- ✅ integrations/astrbot-plugin/handlers/ — 各命令 handler 模块
+  - `__init__.py`: 注册表 + `dispatch()` 统一入口
+  - `status.py`: GET /status → 格式化运行状态摘要
+  - `tasks.py`: GET /tasks → 格式化任务列表（最多显示 10 条）
+  - `screen.py`: GET /screen/current → 元信息摘要（图片发送待联调）
+  - `window.py`: GET /system/active-window → 活动窗口信息
+  - `do.py`: POST /tasks → 创建任务并返回 ID/状态
+  - `codex.py`: POST Hapi /codex → 占位实现
+- ✅ integrations/astrbot-plugin/main.py — 重写为插件入口
+  - `parse_y_command()`: 拆分 '/y sub args'
+  - `on_y_command()`: 权限校验 + 路由（AstrBot 宿主调用此函数）
+
+## 当前占位状态
+
+- `codex.py` handler：Hapi /codex 端点 schema 待确认后完整实现
+- `screen.py` handler：图片 base64 → AstrBot 图片消息转换待联调后启用
+- `allowed_senders` 权限校验：逻辑已就位，AstrBot 宿主传入 sender_id 后生效
+- AstrBot 宿主绑定：`on_y_command()` 入口已定义，与 AstrBot 事件系统的挂钩待联调
+
+## 下一步
+
+**AstrBot 宿主绑定**：在 AstrBot 插件框架中注册 /y 命令监听，调用 `on_y_command()`。
+
 
 - ✅ apps/bridge/server.py — 新增 `_state: str = "not_started"` 模块变量 + `get_bridge_state()`
   - `_state` 取值：`not_started | running | failed`
