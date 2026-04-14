@@ -18,8 +18,9 @@ from apps.bridge.server import start_bridge, stop_bridge
 from apps.core.runtime import HermesRuntime
 from apps.installer.hermes_check import check_hermes_installation
 from apps.shell.config import load_config
+from apps.shell.modes import launch_mode
 from apps.shell.tray import create_tray
-from apps.shell.window import create_installer_window, create_main_window
+from apps.shell.window import create_installer_window
 from packages.protocol.enums import HermesInstallStatus
 
 logger = logging.getLogger(__name__)
@@ -98,7 +99,7 @@ def _start_normal_mode(config) -> None:
         logger.info("系统托盘已禁用，跳过启动")
 
     # 主线程运行窗口（pywebview 需要在主线程）
-    create_main_window(runtime=runtime, config=config)
+    launch_mode(runtime, config)
 
     # 窗口关闭后执行清理
     if config.bridge_enabled:

@@ -72,6 +72,7 @@
 ## 初始化流程完整性
 
 ### 创建的目录结构
+
 ```
 ~/.hermes/yachiyo/
 ├── .yachiyo_init          # 初始化标记文件
@@ -86,6 +87,7 @@
 ```
 
 ### 完整用户流程
+
 1. **新用户**: 安装 Hermes Agent → 初始化 Yachiyo 工作空间 → 正常使用
 2. **Hermes 老用户**: 直接初始化 Yachiyo 工作空间 → 正常使用
 3. **完整用户**: 直接正常使用
@@ -93,7 +95,8 @@
 ## 状态检测逻辑确认
 
 ### 分层检测设计
-1. **Hermes Agent 层**: 
+
+1. **Hermes Agent 层**:
    - 平台支持检查
    - 命令存在性检查
    - 版本兼容性检查  
@@ -104,6 +107,7 @@
    - 不依赖 HERMES_HOME 环境变量（可选覆盖项）
 
 ### 状态判定规则
+
 - **未安装**: Hermes Agent 命令不存在或版本不兼容
 - **已安装未初始化**: Hermes Agent 可用，但 Yachiyo 工作空间未初始化  
 - **已就绪**: Hermes Agent 可用且 Yachiyo 工作空间已初始化
@@ -118,7 +122,9 @@
 - integrations/astrbot-plugin: QQ 桥接，路由到 Hermes 或 Hapi
 
 ## 当前状态
+
 完整可运行的桌面应用骨架，具备：
+
 - ✅ 正确架构分层和职责边界
 - ✅ Hermes Agent 外部依赖管理和分层状态检测
 - ✅ 启动流程三状态联动（正常 vs 工作空间初始化 vs 安装引导）
@@ -163,7 +169,32 @@
   - 设置入口占位
 
 ## 当前状态
-完整可运行的桌面应用骨架，具备正常模式主界面、可编辑设置面板、配置持久化和完整启动状态流。
+
+完整可运行的桌面应用骨架，具备正常模式主界面、可编辑设置面板、配置持久化、完整启动状态流和显示模式切换骨架。
+
+### Milestone 6 — 显示模式切换骨架
+
+- ✅ apps/shell/modes/__init__.py — 模式分发器 `launch_mode(runtime, config)`
+  - 根据 config.display_mode 分发到对应模式 runner
+  - 未知模式自动回退为 window
+  - 每个模式模块导出 `run(runtime, config)` 函数
+- ✅ apps/shell/modes/window.py — 窗口模式 runner（真正实现）
+  - 委托 apps/shell/window.create_main_window()
+- ✅ apps/shell/modes/bubble.py — 气泡模式 runner（占位实现）
+  - 显示专属占位窗口（360×300），提示"即将推出"
+  - 预留 run() 接口，后续完整实现时只需修改此文件
+- ✅ apps/shell/modes/live2d.py — Live2D 模式 runner（占位实现）
+  - 显示专属占位窗口（400×320），提示"即将推出"
+  - 预留 run() 接口，后续完整实现时只需修改此文件
+- ✅ apps/shell/app.py — _start_normal_mode() 改用 launch_mode(runtime, config)
+  - 模式分支逻辑收敛到 modes/ 下，app.py 不再有模式分支
+
+### display_mode 生效方式
+1. 用户在设置面板修改 display_mode → update_settings() 写入 ~/.hermes-yachiyo/config.json
+2. 下次启动时 load_config() 读取新值
+3. _start_normal_mode() 调用 launch_mode(runtime, config)
+4. launch_mode() 根据 config.display_mode 选择对应 runner
 
 ## 下一步
+
 **AstrBot 插件实现**：QQ 命令路由到 bridge API 或 Hapi Codex。
