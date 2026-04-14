@@ -131,9 +131,12 @@
 
 - ✅ apps/shell/main_api.py — 主窗口 WebView API（MainWindowAPI）
   - get_dashboard_data(): 汇聚 runtime 状态、Hermes 状态、工作空间状态、任务统计
+  - get_settings_data(): 提供设置页完整数据（Hermes、工作空间、显示模式、Bridge、集成服务、应用配置）
 - ✅ apps/shell/window.py — 正常模式主界面
   - 完整仪表盘 HTML 模板（_STATUS_HTML）：Hermes 状态、工作空间状态、运行信息、任务统计、显示模式切换入口
+  - 设置面板：点击设置按钮切换显示，展示完整配置信息（只读）
   - create_main_window() 集成 MainWindowAPI（api= 参数传入 webview.start()）
+  - 模板渲染改用 .replace() 避免 CSS 花括号与 .format() 冲突
   - 控制台备选方案 _print_console_dashboard()
   - 窗口尺寸扩大至 560x520
 - ✅ 产品状态流定义：
@@ -149,7 +152,7 @@
   - 设置入口占位
 
 ## 当前状态
-完整可运行的桌面应用骨架，具备正常模式主界面和完整启动状态流。
+完整可运行的桌面应用骨架，具备正常模式主界面、设置面板和完整启动状态流。
 
 ## 下一步
 **AstrBot 插件实现**：QQ 命令路由到 bridge API 或 Hapi Codex。

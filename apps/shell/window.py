@@ -102,6 +102,63 @@ _STATUS_HTML = """
             padding-top: 12px;
             border-top: 1px solid #333;
         }
+        /* 设置面板 */
+        .settings-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .settings-header h3 { color: #6495ed; font-size: 1.1em; }
+        .settings-close {
+            color: #888;
+            cursor: pointer;
+            font-size: 0.85em;
+            padding: 4px 10px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        .settings-close:hover { background: #3a3a6a; color: #fff; }
+        .settings-section {
+            background: #2d2d54;
+            border-radius: 8px;
+            padding: 14px 16px;
+            margin-bottom: 12px;
+        }
+        .settings-section h4 {
+            color: #ffd700;
+            font-size: 0.85em;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #3a3a6a;
+        }
+        .settings-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 3px 0;
+            font-size: 0.85em;
+        }
+        .settings-row .label { color: #999; }
+        .settings-row .value { color: #e0e0e0; }
+        .settings-row .value.ok { color: #90ee90; }
+        .settings-row .value.warn { color: #ffd700; }
+        .settings-modes { margin-top: 8px; }
+        .settings-mode-item {
+            display: inline-block;
+            font-size: 0.8em;
+            margin-right: 10px;
+            color: #ccc;
+        }
+        .tag {
+            display: inline-block;
+            font-size: 0.75em;
+            padding: 1px 6px;
+            border-radius: 3px;
+            background: #3a3a6a;
+            color: #888;
+        }
+        .tag.ok { background: #1e3a1e; color: #90ee90; }
+        .tag.active-tag { background: #2a2a5a; color: #6495ed; }
     </style>
 </head>
 <body>
@@ -156,7 +213,7 @@ _STATUS_HTML = """
                 <span class="name">Live2D</span>
                 <span class="desc">即将推出</span>
             </div>
-            <div class="mode-btn" id="mode-settings">
+            <div class="mode-btn" id="mode-settings" onclick="toggleSettings()">
                 <span class="icon">⚙️</span>
                 <span class="name">设置</span>
                 <span class="desc">应用配置</span>
@@ -164,11 +221,119 @@ _STATUS_HTML = """
         </div>
     </div>
 
-    <div class="footer">
-        Bridge API: http://{host}:{port} · Hermes-Yachiyo v0.1.0
+    <!-- 设置面板（默认隐藏） -->
+    <div id="settings-panel" style="display:none;">
+        <div class="settings-header">
+            <h3>⚙️ 应用设置</h3>
+            <span class="settings-close" onclick="toggleSettings()">✕ 返回</span>
+        </div>
+
+        <div class="settings-section">
+            <h4>Hermes Agent</h4>
+            <div class="settings-row"><span class="label">安装状态</span><span class="value" id="s-hermes-status">—</span></div>
+            <div class="settings-row"><span class="label">版本</span><span class="value" id="s-hermes-version">—</span></div>
+            <div class="settings-row"><span class="label">平台</span><span class="value" id="s-hermes-platform">—</span></div>
+            <div class="settings-row"><span class="label">命令可用</span><span class="value" id="s-hermes-cmd">—</span></div>
+            <div class="settings-row"><span class="label">Hermes Home</span><span class="value" id="s-hermes-home" style="font-size:0.8em;">—</span></div>
+        </div>
+
+        <div class="settings-section">
+            <h4>Yachiyo 工作空间</h4>
+            <div class="settings-row"><span class="label">初始化状态</span><span class="value" id="s-ws-status">—</span></div>
+            <div class="settings-row"><span class="label">路径</span><span class="value" id="s-ws-path" style="font-size:0.8em;">—</span></div>
+            <div class="settings-row"><span class="label">创建时间</span><span class="value" id="s-ws-created">—</span></div>
+        </div>
+
+        <div class="settings-section">
+            <h4>显示模式</h4>
+            <div class="settings-row"><span class="label">当前模式</span><span class="value" id="s-display-mode">—</span></div>
+            <div id="s-display-modes" class="settings-modes"></div>
+        </div>
+
+        <div class="settings-section">
+            <h4>Bridge / 内部通信</h4>
+            <div class="settings-row"><span class="label">地址</span><span class="value" id="s-bridge-url">—</span></div>
+        </div>
+
+        <div class="settings-section">
+            <h4>集成服务</h4>
+            <div class="settings-row"><span class="label" id="s-int-astrbot-name">AstrBot / QQ</span><span class="value" id="s-int-astrbot-status">—</span></div>
+            <div class="settings-row"><span class="label" id="s-int-hapi-name">Hapi / Codex</span><span class="value" id="s-int-hapi-status">—</span></div>
+        </div>
+
+        <div class="settings-section">
+            <h4>应用</h4>
+            <div class="settings-row"><span class="label">版本</span><span class="value" id="s-app-version">—</span></div>
+            <div class="settings-row"><span class="label">日志级别</span><span class="value" id="s-app-loglevel">—</span></div>
+            <div class="settings-row"><span class="label">启动最小化</span><span class="value" id="s-app-minimized">—</span></div>
+        </div>
+    </div>
+
+    <div class="footer" id="main-footer">
+        Bridge API: http://{{HOST}}:{{PORT}} · Hermes-Yachiyo v0.1.0
     </div>
 
     <script>
+    let settingsOpen = false;
+
+    function toggleSettings() {
+        settingsOpen = !settingsOpen;
+        document.getElementById('settings-panel').style.display = settingsOpen ? 'block' : 'none';
+        // 隐藏/显示仪表盘区域
+        document.querySelector('.cards').style.display = settingsOpen ? 'none' : 'grid';
+        document.querySelector('.modes').style.display = settingsOpen ? 'none' : 'block';
+        // 高亮设置按钮
+        document.getElementById('mode-settings').classList.toggle('active', settingsOpen);
+        document.getElementById('mode-window').classList.toggle('active', !settingsOpen);
+        if (settingsOpen) refreshSettings();
+    }
+
+    async function refreshSettings() {
+        try {
+            if (!window.pywebview || !window.pywebview.api) return;
+            const d = await window.pywebview.api.get_settings_data();
+            if (d.error) return;
+
+            // Hermes
+            const hsEl = document.getElementById('s-hermes-status');
+            hsEl.textContent = d.hermes.ready ? '✅ 已就绪' : '⚠️ ' + d.hermes.status;
+            hsEl.className = 'value ' + (d.hermes.ready ? 'ok' : 'warn');
+            document.getElementById('s-hermes-version').textContent = d.hermes.version || '未知';
+            document.getElementById('s-hermes-platform').textContent = d.hermes.platform;
+            document.getElementById('s-hermes-cmd').textContent = d.hermes.command_exists ? '✅ 是' : '❌ 否';
+            document.getElementById('s-hermes-home').textContent = d.hermes.hermes_home || '~/.hermes (默认)';
+
+            // Workspace
+            const wsEl = document.getElementById('s-ws-status');
+            wsEl.textContent = d.workspace.initialized ? '✅ 已初始化' : '⚠️ 未初始化';
+            wsEl.className = 'value ' + (d.workspace.initialized ? 'ok' : 'warn');
+            document.getElementById('s-ws-path').textContent = d.workspace.path || '—';
+            document.getElementById('s-ws-created').textContent = d.workspace.created_at || '—';
+
+            // Display
+            const modeNames = {'window': '窗口模式', 'bubble': '气泡模式', 'live2d': 'Live2D 模式'};
+            document.getElementById('s-display-mode').textContent = modeNames[d.display.current_mode] || d.display.current_mode;
+            const modesDiv = document.getElementById('s-display-modes');
+            modesDiv.innerHTML = d.display.available_modes.map(function(m) {
+                const tag = m.available ? '<span class="tag ok">可用</span>' : '<span class="tag">即将推出</span>';
+                const active = m.id === d.display.current_mode ? ' <span class="tag active-tag">当前</span>' : '';
+                return '<div class="settings-mode-item">' + m.name + ' ' + tag + active + '</div>';
+            }).join('');
+
+            // Bridge
+            document.getElementById('s-bridge-url').textContent = d.bridge.url;
+
+            // Integrations
+            const statusLabels = {'not_configured': '⏳ 未配置', 'connected': '✅ 已连接', 'error': '❌ 错误'};
+            document.getElementById('s-int-astrbot-status').textContent = statusLabels[d.integrations.astrbot.status] || d.integrations.astrbot.status;
+            document.getElementById('s-int-hapi-status').textContent = statusLabels[d.integrations.hapi.status] || d.integrations.hapi.status;
+
+            // App
+            document.getElementById('s-app-version').textContent = 'v' + d.app.version;
+            document.getElementById('s-app-loglevel').textContent = d.app.log_level;
+            document.getElementById('s-app-minimized').textContent = d.app.start_minimized ? '是' : '否';
+        } catch(e) {}
+    }
     async function refreshDashboard() {
         try {
             if (!window.pywebview || !window.pywebview.api) return;
@@ -385,9 +550,9 @@ def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
         return
 
     from apps.shell.main_api import MainWindowAPI
-    api = MainWindowAPI(runtime)
+    api = MainWindowAPI(runtime, config)
 
-    html = _STATUS_HTML.format(host=config.bridge_host, port=config.bridge_port)
+    html = _STATUS_HTML.replace("{{HOST}}", config.bridge_host).replace("{{PORT}}", str(config.bridge_port))
 
     webview.create_window(
         title="Hermes-Yachiyo",
