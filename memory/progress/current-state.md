@@ -214,9 +214,27 @@
   - HTML 增加 Bridge / AstrBot 两行精简展示
   - JS 填充 bridge-status 和 astrbot-status
 
+### Milestone 8 — Bridge 状态从占位升级为最小真实状态
+
+- ✅ apps/bridge/server.py — 新增 `_state: str = "not_started"` 模块变量 + `get_bridge_state()`
+  - `_state` 取值：`not_started | running | failed`
+  - `start_bridge()` 启动前设为 `running`，try/except 捕获异常后设为 `failed`
+- ✅ apps/shell/main_api.py — 新增 `_bridge_status()` 辅助方法，组合四状态
+  - `disabled`：bridge_enabled == False
+  - `enabled_not_started`：已启用但 get_bridge_state() == "not_started"
+  - `running`：get_bridge_state() == "running"
+  - `failed`：get_bridge_state() == "failed"
+  - `get_dashboard_data()` 中 bridge.running 字段改为 `self._bridge_status()`
+- ✅ apps/shell/modes/bubble.py — 导入 `get_bridge_state`，添加 `_bridge_status()` 辅助方法
+  - `get_bubble_data()` 中 bridge 字典新增 `running` 字段
+  - JS `refreshData()` 改为四状态标签展示（⛔/⏳/✅/❌）
+- ✅ apps/shell/window.py — `refreshDashboard()` bridge 行改为四状态标签
+  - Bridge 地址栏：disabled 时显示"—"
+
 ## 当前占位状态
-- Bridge running 字段：`unknown`，后续可对 bridge 做健康检查时填入真实状态
+
 - AstrBot / Hapi 工作模式：`not_connected`，待 AstrBot 插件实现后更新
+- Bridge 状态精度：`_state = "running"` 在 `.run()` 调用前设置，无法区分"正在绑定"和"已成功监听"；MVP 阶段可接受
 
 ## 下一步
 

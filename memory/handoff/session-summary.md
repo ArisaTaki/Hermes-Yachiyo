@@ -9,7 +9,7 @@
 | 展示内容 | 位置 | 说明 |
 |--------|------|------|
 | Bridge 启用状态 | card3 “运行信息” | ✅ 已启用 / ❌ 已禁用 |
-| Bridge 地址 | card3 “运行信息” | http://host:port |
+| Bridge 地址 | card3 “运行信息” | <http://host:port> |
 | AstrBot / QQ | 新增全宽集成服务卡 | ⏳ 未接入（占位） |
 | Hapi / Codex | 新增全宽集成服务卡 | ⏳ 未接入（占位） |
 
