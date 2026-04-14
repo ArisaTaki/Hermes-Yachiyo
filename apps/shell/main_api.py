@@ -7,6 +7,7 @@
 import logging
 from typing import TYPE_CHECKING, Any, Dict
 
+from apps.bridge.server import get_bridge_state
 from apps.installer.workspace_init import get_workspace_status
 from apps.shell.config import save_config
 
@@ -23,6 +24,24 @@ class MainWindowAPI:
     def __init__(self, runtime: "HermesRuntime", config: "AppConfig") -> None:
         self._runtime = runtime
         self._config = config
+
+    def _bridge_status(self) -> str:
+        """组合 config.bridge_enabled 与实际运行状态，返回四状态字符串。
+
+        Returns:
+            "disabled"            — bridge_enabled 为 False
+            "enabled_not_started" — 已启用但尚未启动（启动中或配置刚改）
+            "running"             — 正在运行
+            "failed"              — 启动后异常退出
+        """
+        if not self._config.bridge_enabled:
+            return "disabled"
+        state = get_bridge_state()
+        if state == "running":
+            return "running"
+        if state == "failed":
+            return "failed"
+        return "enabled_not_started"
     
     def get_dashboard_data(self) -> Dict[str, Any]:
         """获取仪表盘数据"""
@@ -55,7 +74,7 @@ class MainWindowAPI:
                     "host": self._config.bridge_host,
                     "port": self._config.bridge_port,
                     "url": f"http://{self._config.bridge_host}:{self._config.bridge_port}",
-                    "running": "unknown",  # 占位：后续可对 bridge 做健康检查
+                    "running": self._bridge_status(),
                 },
                 "integrations": {
                     "astrbot": {"status": "not_connected"},

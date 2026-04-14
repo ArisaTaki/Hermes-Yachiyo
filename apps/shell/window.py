@@ -459,10 +459,16 @@ _STATUS_HTML = """
             document.getElementById('app-version').textContent = 'v' + data.app.version;
 
             // Bridge
+            const bridgeLabels = {
+                'disabled': '⛔ 已禁用',
+                'enabled_not_started': '⏳ 启动中',
+                'running': '✅ 运行中',
+                'failed': '❌ 异常退出'
+            };
             const brEl = document.getElementById('bridge-enabled');
-            brEl.textContent = data.bridge.enabled ? '✅ 已启用' : '❌ 已禁用';
-            brEl.className = 'value ' + (data.bridge.enabled ? 'ok' : 'warn');
-            document.getElementById('bridge-addr').textContent = data.bridge.url;
+            brEl.textContent = bridgeLabels[data.bridge.running] || data.bridge.running;
+            brEl.className = 'value ' + (data.bridge.running === 'running' ? 'ok' : data.bridge.running === 'failed' ? 'warn' : '');
+            document.getElementById('bridge-addr').textContent = data.bridge.running !== 'disabled' ? data.bridge.url : '—';
 
             // Tasks
             document.getElementById('task-pending').textContent = data.tasks.pending || 0;

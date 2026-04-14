@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Dict
 
+from apps.bridge.server import get_bridge_state
 from apps.installer.workspace_init import get_workspace_status
 
 if TYPE_CHECKING:
@@ -148,9 +149,15 @@ _BUBBLE_HTML = """
             const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
             document.getElementById('uptime').textContent = m > 0 ? m + '分' + s + '秒' : s + '秒';
 
+            const bridgeLabels = {
+                'disabled': '⛔ 已禁用',
+                'enabled_not_started': '⏳ 启动中',
+                'running': '✅ 运行中',
+                'failed': '❌ 异常退出'
+            };
             const brEl = document.getElementById('bridge-status');
-            brEl.textContent = d.bridge.enabled ? '✅ ' + d.bridge.addr : '❌ 已禁用';
-            brEl.className = 'value ' + (d.bridge.enabled ? 'ok' : '');
+            brEl.textContent = bridgeLabels[d.bridge.running] || d.bridge.running;
+            brEl.className = 'value ' + (d.bridge.running === 'running' ? 'ok' : '');
 
             const abEl = document.getElementById('astrbot-status');
             abEl.textContent = d.astrbot.status === 'not_connected' ? '⏳ 未接入' : d.astrbot.status;
@@ -194,6 +201,17 @@ class BubbleWindowAPI:
         self._config = config
         self._bubble_window = None  # 由 run() 注入
 
+    def _bridge_status(self) -> str:
+        """组合 config.bridge_enabled 与实际运行状态，返回四状态字符串。"""
+        if not self._config.bridge_enabled:
+            return "disabled"
+        state = get_bridge_state()
+        if state == "running":
+            return "running"
+        if state == "failed":
+            return "failed"
+        return "enabled_not_started"
+
     def get_bubble_data(self) -> Dict[str, Any]:
         """获取气泡状态摘要"""
         try:
@@ -214,6 +232,7 @@ class BubbleWindowAPI:
                 },
                 "bridge": {
                     "enabled": self._config.bridge_enabled,
+                    "running": self._bridge_status(),
                     "addr": f"{self._config.bridge_host}:{self._config.bridge_port}",
                 },
                 "astrbot": {"status": "not_connected"},

@@ -33,14 +33,28 @@ app.include_router(hermes.router)
 
 _server: uvicorn.Server | None = None
 
+# Bridge 运行状态：not_started | running | failed
+_state: str = "not_started"
+
+
+def get_bridge_state() -> str:
+    """返回 Bridge 当前运行状态"""
+    return _state
+
 
 def start_bridge(host: str = "127.0.0.1", port: int = 8420) -> None:
     """启动 Bridge API（阻塞，应在后台线程调用）"""
-    global _server
+    global _server, _state
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     _server = uvicorn.Server(config)
+    _state = "running"
     logger.info("Bridge API 启动: http://%s:%d", host, port)
-    _server.run()
+    try:
+        _server.run()
+    except Exception:
+        _state = "failed"
+        logger.exception("Bridge API 异常退出")
+        raise
 
 
 def stop_bridge() -> None:
