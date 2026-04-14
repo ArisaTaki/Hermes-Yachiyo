@@ -2,54 +2,60 @@
 
 ## 本轮完成内容
 
-实现了正常模式设置面板，在主界面中提供完整的只读配置信息展示。
+将正常模式设置面板从只读展示升级为可编辑配置界面，支持修改并持久化基础配置项。
 
-### 设置面板实现
-**apps/shell/window.py** — 设置面板（_STATUS_HTML 内嵌）:
-- 点击主界面底部"⚙️ 设置"按钮切换显示
-- 设置面板显示时隐藏仪表盘卡片和模式切换区
-- 点击"✕ 返回"关闭设置面板回到仪表盘
+### 可编辑配置项实现
+| 配置项 | 控件类型 | 位置 |
+|--------|----------|------|
+| 显示模式 | select 下拉（window/bubble/live2d） | 显示模式分组 |
+| Bridge 开关 | toggle 开关 | Bridge 分组 |
+| Bridge 地址 | input 文本框 | Bridge 分组 |
+| Bridge 端口 | input 数字框（1024-65535） | Bridge 分组 |
+| 系统托盘开关 | toggle 开关 | 应用分组 |
 
-### 设置页展示的配置项
-| 分组 | 配置项 |
-|------|--------|
-| Hermes Agent | 安装状态、版本、平台、命令可用、Hermes Home |
-| Yachiyo 工作空间 | 初始化状态、路径、创建时间 |
-| 显示模式 | 当前模式、可用模式列表（标注可用/即将推出/当前） |
-| Bridge 内部通信 | 地址 |
-| 集成服务 | AstrBot/QQ 状态、Hapi/Codex 状态 |
-| 应用 | 版本、日志级别、启动最小化 |
+### config.py 扩展
+- 新增 `bridge_enabled: bool = True` — Bridge 启用开关
+- 新增 `tray_enabled: bool = True` — 系统托盘启用开关
+- load_config() / save_config() 自动覆盖新字段
 
-### MainWindowAPI 扩展
-**apps/shell/main_api.py**:
-- 修正 `Dict[str, any]` → `Dict[str, Any]`（规范类型标注）
-- 新增 `get_settings_data()` 方法：提供设置页完整数据
-- 构造函数新增 `config` 参数用于提供配置信息
-- 设置数据包含 hermes/workspace/display/bridge/integrations/app 六个分组
+### main_api.py 扩展
+- `get_settings_data()` 返回 bridge.enabled 和 app.tray_enabled 新字段
+- 新增 `update_settings(changes)` 方法：
+  - 白名单校验：仅允许 display_mode, bridge_enabled, bridge_host, bridge_port, tray_enabled
+  - 类型校验：int/str/bool 分别验证，JS float→int 自动转换
+  - 值域校验：display_mode 只接受 window/bubble/live2d，bridge_port 限 1024-65535
+  - 通过后 setattr 修改运行时配置 + save_config() 持久化
+  - 返回 {ok, applied, errors} 结构
 
-### 模板渲染修正
-- `_STATUS_HTML` 改用 `.replace("{{HOST}}", ...).replace("{{PORT}}", ...)` 替代 `.format()`
-- 避免 CSS 花括号被误解为 Python format 占位符
-- JS 中不再需要双花括号转义
+### window.py 设置面板改造
+- 显示模式：`<select>` 替代纯文本
+- Bridge 开关：toggle 滑块
+- Bridge 地址/端口：`<input>` 替代纯文本
+- 系统托盘：toggle 滑块
+- 新增 CSS：.s-select / .s-input / .s-toggle / .save-hint
+- 新增 JS `onSettingChange(key, value)`：调用 update_settings + 显示保存结果 + 3秒后自动清除
+- 修改后自动调用 refreshSettings() 同步最新值
 
-## 设置页如何进入
-1. 正常模式主界面底部"显示模式"区有"⚙️ 设置"按钮
-2. 点击后仪表盘隐藏，设置面板滑入
-3. 自动调用 `get_settings_data()` 加载数据
-4. 点击"✕ 返回"回到仪表盘
+### app.py 启动逻辑改造
+- Bridge 启动受 `config.bridge_enabled` 控制（False 时跳过启动）
+- 系统托盘启动受 `config.tray_enabled` 控制（False 时跳过启动）
+- 退出清理逻辑同步适配开关状态
 
-## 后续 Bubble / Live2D 配置接入方式
-- `get_settings_data()` 已返回 `display.available_modes` 列表
-- 每个模式包含 `id`、`name`、`available` 字段
-- 后续实现时：将 `available` 改为 `True`，添加 mode switch API
-- 设置页自动展示可切换的模式按钮
+## 架构边界保持
+- shell 是产品入口，config 由 shell 管理
+- core 不暴露 HTTP
+- bridge 只是内部通信桥，受 shell 配置控制
+- 配置修改通过 WebView API（MainWindowAPI），不走 bridge HTTP
 
 ## 修改的文件
 | 文件 | 变更 |
 |------|------|
-| apps/shell/main_api.py | 新增 get_settings_data()，修正类型标注，构造函数新增 config 参数 |
-| apps/shell/window.py | 新增设置面板 HTML/CSS/JS，修改模板渲染方式，create_main_window() 传入 config |
+| apps/shell/config.py | 新增 bridge_enabled、tray_enabled 字段 |
+| apps/shell/main_api.py | 新增 update_settings()，settings data 增加新字段 |
+| apps/shell/window.py | 设置面板改为可编辑控件，新增 CSS/JS |
+| apps/shell/app.py | bridge/tray 启动受配置开关控制 |
 | memory/progress/current-state.md | 更新 Milestone 5 |
 | memory/handoff/session-summary.md | 更新本轮总结 |
 
-**下一步重点**：实现 AstrBot 插件的 QQ 命令路由功能。
+## 下一步重点
+实现 AstrBot 插件的 QQ 命令路由功能。

@@ -135,6 +135,7 @@ _STATUS_HTML = """
         .settings-row {
             display: flex;
             justify-content: space-between;
+            align-items: center;
             padding: 3px 0;
             font-size: 0.85em;
         }
@@ -159,6 +160,41 @@ _STATUS_HTML = """
         }
         .tag.ok { background: #1e3a1e; color: #90ee90; }
         .tag.active-tag { background: #2a2a5a; color: #6495ed; }
+        /* 可编辑控件 */
+        .s-select {
+            background: #3a3a6a; color: #e0e0e0; border: 1px solid #555;
+            border-radius: 4px; padding: 3px 8px; font-size: 0.85em;
+            cursor: pointer; outline: none;
+        }
+        .s-select:focus { border-color: #6495ed; }
+        .s-input {
+            background: #3a3a6a; color: #e0e0e0; border: 1px solid #555;
+            border-radius: 4px; padding: 3px 8px; font-size: 0.85em;
+            width: 160px; outline: none;
+        }
+        .s-input:focus { border-color: #6495ed; }
+        .s-toggle {
+            position: relative; display: inline-block; width: 38px; height: 20px;
+            cursor: pointer;
+        }
+        .s-toggle input { opacity: 0; width: 0; height: 0; }
+        .s-toggle .slider {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: #555; border-radius: 10px; transition: background 0.2s;
+        }
+        .s-toggle .slider::before {
+            content: ""; position: absolute; height: 14px; width: 14px;
+            left: 3px; bottom: 3px; background: #e0e0e0;
+            border-radius: 50%; transition: transform 0.2s;
+        }
+        .s-toggle input:checked + .slider { background: #6495ed; }
+        .s-toggle input:checked + .slider::before { transform: translateX(18px); }
+        .save-hint {
+            text-align: right; font-size: 0.8em; color: #888;
+            margin-top: 6px; min-height: 1.2em;
+        }
+        .save-hint.ok { color: #90ee90; }
+        .save-hint.err { color: #ff6b6b; }
     </style>
 </head>
 <body>
@@ -246,13 +282,28 @@ _STATUS_HTML = """
 
         <div class="settings-section">
             <h4>显示模式</h4>
-            <div class="settings-row"><span class="label">当前模式</span><span class="value" id="s-display-mode">—</span></div>
+            <div class="settings-row"><span class="label">当前模式</span>
+                <select class="s-select" id="s-display-mode" onchange="onSettingChange('display_mode', this.value)">
+                    <option value="window">窗口模式</option>
+                    <option value="bubble" disabled>气泡模式（即将推出）</option>
+                    <option value="live2d" disabled>Live2D 模式（即将推出）</option>
+                </select>
+            </div>
             <div id="s-display-modes" class="settings-modes"></div>
         </div>
 
         <div class="settings-section">
             <h4>Bridge / 内部通信</h4>
-            <div class="settings-row"><span class="label">地址</span><span class="value" id="s-bridge-url">—</span></div>
+            <div class="settings-row"><span class="label">启用</span>
+                <label class="s-toggle"><input type="checkbox" id="s-bridge-enabled" onchange="onSettingChange('bridge_enabled', this.checked)"><span class="slider"></span></label>
+            </div>
+            <div class="settings-row"><span class="label">地址</span>
+                <input class="s-input" id="s-bridge-host" value="" placeholder="127.0.0.1" onchange="onSettingChange('bridge_host', this.value)">
+            </div>
+            <div class="settings-row"><span class="label">端口</span>
+                <input class="s-input" id="s-bridge-port" type="number" min="1024" max="65535" value="" onchange="onSettingChange('bridge_port', parseInt(this.value))">
+            </div>
+            <div class="settings-row"><span class="label">完整地址</span><span class="value" id="s-bridge-url">—</span></div>
         </div>
 
         <div class="settings-section">
@@ -265,8 +316,12 @@ _STATUS_HTML = """
             <h4>应用</h4>
             <div class="settings-row"><span class="label">版本</span><span class="value" id="s-app-version">—</span></div>
             <div class="settings-row"><span class="label">日志级别</span><span class="value" id="s-app-loglevel">—</span></div>
+            <div class="settings-row"><span class="label">系统托盘</span>
+                <label class="s-toggle"><input type="checkbox" id="s-tray-enabled" onchange="onSettingChange('tray_enabled', this.checked)"><span class="slider"></span></label>
+            </div>
             <div class="settings-row"><span class="label">启动最小化</span><span class="value" id="s-app-minimized">—</span></div>
         </div>
+        <div class="save-hint" id="save-hint"></div>
     </div>
 
     <div class="footer" id="main-footer">
@@ -311,8 +366,7 @@ _STATUS_HTML = """
             document.getElementById('s-ws-created').textContent = d.workspace.created_at || '—';
 
             // Display
-            const modeNames = {'window': '窗口模式', 'bubble': '气泡模式', 'live2d': 'Live2D 模式'};
-            document.getElementById('s-display-mode').textContent = modeNames[d.display.current_mode] || d.display.current_mode;
+            document.getElementById('s-display-mode').value = d.display.current_mode;
             const modesDiv = document.getElementById('s-display-modes');
             modesDiv.innerHTML = d.display.available_modes.map(function(m) {
                 const tag = m.available ? '<span class="tag ok">可用</span>' : '<span class="tag">即将推出</span>';
@@ -321,6 +375,9 @@ _STATUS_HTML = """
             }).join('');
 
             // Bridge
+            document.getElementById('s-bridge-enabled').checked = d.bridge.enabled;
+            document.getElementById('s-bridge-host').value = d.bridge.host;
+            document.getElementById('s-bridge-port').value = d.bridge.port;
             document.getElementById('s-bridge-url').textContent = d.bridge.url;
 
             // Integrations
@@ -331,9 +388,33 @@ _STATUS_HTML = """
             // App
             document.getElementById('s-app-version').textContent = 'v' + d.app.version;
             document.getElementById('s-app-loglevel').textContent = d.app.log_level;
+            document.getElementById('s-tray-enabled').checked = d.app.tray_enabled;
             document.getElementById('s-app-minimized').textContent = d.app.start_minimized ? '是' : '否';
         } catch(e) {}
     }
+    async function onSettingChange(key, value) {
+        const hint = document.getElementById('save-hint');
+        try {
+            if (!window.pywebview || !window.pywebview.api) return;
+            const changes = {};
+            changes[key] = value;
+            const res = await window.pywebview.api.update_settings(changes);
+            if (res.ok) {
+                hint.textContent = '✓ 已保存';
+                hint.className = 'save-hint ok';
+                // 刷新设置面板以反映新值
+                refreshSettings();
+            } else {
+                hint.textContent = '✗ ' + (res.error || res.errors.join('; '));
+                hint.className = 'save-hint err';
+            }
+        } catch(e) {
+            hint.textContent = '✗ 保存失败';
+            hint.className = 'save-hint err';
+        }
+        setTimeout(function(){ hint.textContent = ''; hint.className = 'save-hint'; }, 3000);
+    }
+
     async function refreshDashboard() {
         try {
             if (!window.pywebview || !window.pywebview.api) return;

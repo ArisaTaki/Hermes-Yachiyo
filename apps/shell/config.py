@@ -19,7 +19,9 @@ class AppConfig:
 
     bridge_host: str = "127.0.0.1"
     bridge_port: int = 8420
+    bridge_enabled: bool = True
     display_mode: str = "window"  # window | bubble | live2d
+    tray_enabled: bool = True
     start_minimized: bool = False
     log_level: str = "INFO"
 

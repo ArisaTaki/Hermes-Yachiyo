@@ -63,38 +63,46 @@ def _start_normal_mode(config) -> None:
     # 将 Runtime 注入 Bridge（shell → core → bridge 连通）
     set_runtime(runtime)
 
-    # 启动内部 Bridge/API（后台线程）
-    bridge_thread = threading.Thread(
-        target=start_bridge,
-        kwargs={"host": config.bridge_host, "port": config.bridge_port},
-        daemon=True,
-        name="bridge-api",
-    )
-    bridge_thread.start()
+    # 启动内部 Bridge/API（后台线程）— 受配置控制
+    if config.bridge_enabled:
+        bridge_thread = threading.Thread(
+            target=start_bridge,
+            kwargs={"host": config.bridge_host, "port": config.bridge_port},
+            daemon=True,
+            name="bridge-api",
+        )
+        bridge_thread.start()
+    else:
+        logger.info("Bridge 已禁用，跳过启动")
 
     # 注册退出信号
     def _shutdown(signum: int, frame: object) -> None:
-        stop_bridge()
+        if config.bridge_enabled:
+            stop_bridge()
         runtime.stop()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    # 启动系统托盘（后台线程）
-    tray_thread = threading.Thread(
-        target=create_tray,
-        kwargs={"runtime": runtime},
-        daemon=True,
-        name="system-tray",
-    )
-    tray_thread.start()
+    # 启动系统托盘（后台线程）— 受配置控制
+    if config.tray_enabled:
+        tray_thread = threading.Thread(
+            target=create_tray,
+            kwargs={"runtime": runtime},
+            daemon=True,
+            name="system-tray",
+        )
+        tray_thread.start()
+    else:
+        logger.info("系统托盘已禁用，跳过启动")
 
     # 主线程运行窗口（pywebview 需要在主线程）
     create_main_window(runtime=runtime, config=config)
 
     # 窗口关闭后执行清理
-    stop_bridge()
+    if config.bridge_enabled:
+        stop_bridge()
     runtime.stop()
 
 

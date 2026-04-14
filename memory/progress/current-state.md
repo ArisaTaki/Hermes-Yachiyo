@@ -132,17 +132,28 @@
 - ✅ apps/shell/main_api.py — 主窗口 WebView API（MainWindowAPI）
   - get_dashboard_data(): 汇聚 runtime 状态、Hermes 状态、工作空间状态、任务统计
   - get_settings_data(): 提供设置页完整数据（Hermes、工作空间、显示模式、Bridge、集成服务、应用配置）
+  - update_settings(changes): 修改白名单内配置项并持久化（display_mode, bridge_enabled, bridge_host, bridge_port, tray_enabled）
 - ✅ apps/shell/window.py — 正常模式主界面
   - 完整仪表盘 HTML 模板（_STATUS_HTML）：Hermes 状态、工作空间状态、运行信息、任务统计、显示模式切换入口
-  - 设置面板：点击设置按钮切换显示，展示完整配置信息（只读）
+  - 设置面板：可编辑配置项
+    - 显示模式：select 下拉选择
+    - Bridge 开关：toggle 开关
+    - Bridge 地址/端口：input 输入框
+    - 系统托盘开关：toggle 开关
+    - 保存状态提示（自动保存，3秒后消失）
   - create_main_window() 集成 MainWindowAPI（api= 参数传入 webview.start()）
   - 模板渲染改用 .replace() 避免 CSS 花括号与 .format() 冲突
   - 控制台备选方案 _print_console_dashboard()
   - 窗口尺寸扩大至 560x520
+- ✅ apps/shell/config.py — 应用配置
+  - 新增 bridge_enabled（默认 True）
+  - 新增 tray_enabled（默认 True）
+  - load_config() / save_config() 支持持久化
+- ✅ apps/shell/app.py — Bridge 和 Tray 受配置开关控制
 - ✅ 产品状态流定义：
   1. NOT_INSTALLED → 安装引导模式
   2. INSTALLED_NOT_INITIALIZED → 工作空间初始化引导模式
-  3. READY → 正常模式主界面（仪表盘 + 设置入口 + 模式切换占位）
+  3. READY → 正常模式主界面（仪表盘 + 可编辑设置 + 模式切换占位）
 - ✅ 主界面仪表盘内容：
   - Hermes Agent 状态/版本/平台
   - Yachiyo 工作空间状态/路径/创建时间
@@ -152,7 +163,7 @@
   - 设置入口占位
 
 ## 当前状态
-完整可运行的桌面应用骨架，具备正常模式主界面、设置面板和完整启动状态流。
+完整可运行的桌面应用骨架，具备正常模式主界面、可编辑设置面板、配置持久化和完整启动状态流。
 
 ## 下一步
 **AstrBot 插件实现**：QQ 命令路由到 bridge API 或 Hapi Codex。
