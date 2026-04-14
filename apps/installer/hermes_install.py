@@ -98,17 +98,17 @@ class HermesInstallGuide:
         if platform == Platform.MACOS:
             base_info.update({
                 "actions": [
-                    "方式1 - 使用 Homebrew (推荐):",
-                    "  brew install hermesagent/tap/hermes",
+                    "方式1 - 使用官方安装脚本 (推荐):",
+                    "  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
                     "",
                     "方式2 - 下载二进制文件:",
-                    "  访问 https://github.com/hermesagent/hermes/releases",
+                    "  访问 https://github.com/NousResearch/hermes-agent/releases",
                     "  下载 macOS 版本并添加到 PATH"
                 ],
                 "links": [
                     {
                         "title": "Hermes Agent 发布页",
-                        "url": "https://github.com/hermesagent/hermes/releases"
+                        "url": "https://github.com/NousResearch/hermes-agent/releases"
                     }
                 ]
             })
@@ -116,18 +116,17 @@ class HermesInstallGuide:
         elif platform in [Platform.LINUX, Platform.WINDOWS_WSL2]:
             base_info.update({
                 "actions": [
-                    "方式1 - 使用包管理器:",
-                    "  # Ubuntu/Debian",
-                    "  curl -fsSL https://get.hermesagent.io | sudo bash",
+                    "方式1 - 使用官方安装脚本:",
+                    "  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
                     "",
                     "方式2 - 下载二进制文件:",
-                    "  访问 https://github.com/hermesagent/hermes/releases",
+                    "  访问 https://github.com/NousResearch/hermes-agent/releases",
                     "  下载 Linux 版本并添加到 PATH"
                 ],
                 "links": [
                     {
                         "title": "Hermes Agent 安装文档",
-                        "url": "https://docs.hermesagent.io/installation"
+                        "url": "https://github.com/NousResearch/hermes-agent#installation"
                     }
                 ]
             })
@@ -146,8 +145,9 @@ class HermesInstallGuide:
             "message": f"需要升级 Hermes Agent (当前版本: {current_version})",
             "actions": [
                 "请升级到最新版本的 Hermes Agent",
-                "macOS: brew upgrade hermes",
-                "Linux: 重新运行安装脚本或下载最新二进制文件",
+                "重新运行官方安装脚本:",
+                "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
+                "或下载最新二进制文件并替换",
                 "升级完成后重新启动 Hermes-Yachiyo"
             ]
         }
@@ -173,7 +173,7 @@ def get_platform_specific_suggestions(platform: Platform) -> List[str]:
     """获取平台特定的建议"""
     if platform == Platform.MACOS:
         return [
-            "建议使用 Homebrew 安装 Hermes Agent",
+            "建议使用官方安装脚本安装 Hermes Agent",
             "确保 Xcode Command Line Tools 已安装"
         ]
     

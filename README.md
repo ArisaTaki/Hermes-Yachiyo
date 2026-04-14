@@ -63,24 +63,24 @@ Hermes-Yachiyo 是一个**桌面优先的本地个人 agent 应用**，基于 He
 
 ### Hermes Agent 安装
 
-Hermes-Yachiyo 依赖 [Hermes Agent](https://github.com/hermesagent/hermes) 作为底层运行时，需要先安装：
+Hermes-Yachiyo 依赖 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 作为底层运行时，需要先安装：
 
 **macOS:**
 ```bash
-# 使用 Homebrew (推荐)
-brew install hermesagent/tap/hermes
+# 使用官方安装脚本 (推荐)
+curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
 
 # 或下载二进制文件
-# 访问 https://github.com/hermesagent/hermes/releases
+# 访问 https://github.com/NousResearch/hermes-agent/releases
 ```
 
 **Linux / WSL2:**
 ```bash
 # 使用官方安装脚本
-curl -fsSL https://get.hermesagent.io | sudo bash
+curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
 
 # 或下载二进制文件
-# 访问 https://github.com/hermesagent/hermes/releases
+# 访问 https://github.com/NousResearch/hermes-agent/releases
 ```
 
 **Windows:**

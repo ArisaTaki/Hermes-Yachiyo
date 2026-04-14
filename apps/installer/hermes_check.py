@@ -163,7 +163,7 @@ def check_hermes_installation() -> HermesInstallInfo:
         install_info.status = HermesInstallStatus.NOT_INSTALLED
         install_info.error_message = error_message
         install_info.suggestions = [
-            "请安装 Hermes Agent: https://github.com/hermesagent/hermes",
+            "请安装 Hermes Agent: https://github.com/NousResearch/hermes-agent",
             "确保 hermes 命令在 PATH 环境变量中"
         ]
         return install_info
