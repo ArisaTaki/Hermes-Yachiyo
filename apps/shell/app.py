@@ -40,13 +40,17 @@ def main() -> None:
     )
     
     # 2. 根据安装状态决定启动模式
-    if hermes_install_info.status == HermesInstallStatus.INSTALLED:
-        # Hermes 可用：正常启动模式
-        logger.info("Hermes Agent 已安装，进入正常启动模式")
+    if hermes_install_info.status == HermesInstallStatus.READY:
+        # Hermes 已安装且配置完成：正常启动模式
+        logger.info("Hermes Agent 已就绪，进入正常启动模式")
         _start_normal_mode(config)
+    elif hermes_install_info.status == HermesInstallStatus.INSTALLED_NOT_CONFIGURED:
+        # Hermes 已安装但未配置：配置引导模式
+        logger.info("Hermes Agent 已安装但未配置，进入配置引导模式")
+        _start_setup_mode(config, hermes_install_info)
     else:
-        # Hermes 不可用：安装引导模式
-        logger.info("Hermes Agent 不可用，进入安装引导模式")
+        # Hermes 未安装或其他问题：安装引导模式
+        logger.info("Hermes Agent 未安装或存在问题，进入安装引导模式")
         _start_installer_mode(config, hermes_install_info)
 
 
@@ -92,6 +96,22 @@ def _start_normal_mode(config) -> None:
     # 窗口关闭后执行清理
     stop_bridge()
     runtime.stop()
+
+
+
+def _start_setup_mode(config, hermes_install_info) -> None:
+    """配置引导模式：Hermes 已安装但需要配置"""
+    logger.info("启动 Hermes Agent 配置引导界面")
+
+    # 简单的退出信号处理
+    def _shutdown(signum: int, frame: object) -> None:
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    # 主线程运行配置引导窗口
+    create_installer_window(install_info=hermes_install_info, config=config)
 
 
 def _start_installer_mode(config, hermes_install_info) -> None:

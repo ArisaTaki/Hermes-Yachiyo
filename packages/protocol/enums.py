@@ -62,12 +62,12 @@ class HermesInstallStatus(StrEnum):
     """Hermes Agent 安装状态"""
 
     NOT_CHECKED = "not_checked"  # 尚未检测
-    NOT_INSTALLED = "not_installed"  # 未安装
-    INCOMPATIBLE_VERSION = "incompatible_version"  # 版本不兼容
+    NOT_INSTALLED = "not_installed"  # 未安装 - 需要安装引导
+    INSTALLED_NOT_CONFIGURED = "installed_not_configured"  # 已安装但未配置 - 需要配置引导
+    INCOMPATIBLE_VERSION = "incompatible_version"  # 版本不兼容 - 需要升级
     PLATFORM_UNSUPPORTED = "platform_unsupported"  # 平台不支持
     WSL2_REQUIRED = "wsl2_required"  # Windows 用户需要 WSL2
-    INSTALLED = "installed"  # 已正确安装
-    SETUP_REQUIRED = "setup_required"  # 需要环境设置
+    READY = "ready"  # 已安装且配置完成，可正常使用
 
 
 class Platform(StrEnum):

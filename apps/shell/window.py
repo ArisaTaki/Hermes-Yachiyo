@@ -150,11 +150,11 @@ _INSTALLER_HTML = """
             {error_info}
         </div>
 
-        <h2>安装 Hermes Agent</h2>
+        <h2>{main_title}</h2>
         <p>Hermes-Yachiyo 需要 <a href="https://github.com/NousResearch/hermes-agent" target="_blank">Hermes Agent</a> 作为底层运行时。</p>
         
         <div class="install-steps">
-            <h3>安装步骤：</h3>
+            <h3>{steps_title}</h3>
             {install_steps}
         </div>
 
@@ -234,10 +234,10 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
     # 状态样式和消息
     status_mapping = {
         HermesInstallStatus.NOT_INSTALLED: ("warning", "Hermes Agent 未安装"),
+        HermesInstallStatus.INSTALLED_NOT_CONFIGURED: ("info", "Hermes Agent 已安装，需要配置"),
         HermesInstallStatus.INCOMPATIBLE_VERSION: ("warning", "Hermes Agent 版本不兼容"),
         HermesInstallStatus.PLATFORM_UNSUPPORTED: ("", "平台不支持"),
         HermesInstallStatus.WSL2_REQUIRED: ("info", "需要 WSL2 环境"),
-        HermesInstallStatus.SETUP_REQUIRED: ("info", "需要环境设置"),
     }
     
     status_class, status_message = status_mapping.get(
@@ -250,7 +250,15 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
     if install_info.error_message:
         error_info = f"<strong>详情：</strong>{install_info.error_message}"
     
-    # 安装步骤
+    # 根据状态确定主标题和步骤内容
+    if install_info.status == HermesInstallStatus.INSTALLED_NOT_CONFIGURED:
+        main_title = "配置 Hermes Agent"
+        steps_title = "配置步骤："
+    else:
+        main_title = "安装 Hermes Agent"
+        steps_title = "安装步骤："
+    
+    # 安装/配置步骤
     install_steps = ""
     if "actions" in guidance:
         steps_html = []
@@ -280,6 +288,8 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
         """
     
     return _INSTALLER_HTML.format(
+        main_title=main_title,
+        steps_title=steps_title,
         status_class=status_class,
         status_message=status_message,
         platform=install_info.platform,

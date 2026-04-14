@@ -2,84 +2,90 @@
 
 ## 本轮完成内容
 
-完成了 shell 与 installer 的首次启动联动，实现了启动流程模式分离。
+完善了 Hermes 首次启动状态模型，实现了三状态启动流程分离。
 
-### 启动流程联动完成
-- **apps/shell/app.py**: 启动时检查 Hermes Agent 安装状态
-- **启动模式分离**:
-  - 正常模式：Hermes 已安装且可用 → 启动 core + bridge + 主窗口
-  - 安装引导模式：Hermes 未安装或不可用 → 显示安装引导界面
-- **WebView 安装引导界面**: 完整的安装指导页面，包含状态检测、平台说明、安装步骤、官方链接
-- **控制台备选方案**: 无 pywebview 时的安装信息显示
+### 三状态模型完善
+- **明确状态定义**：
+  - NOT_INSTALLED: 未安装 - 需要安装引导
+  - INSTALLED_NOT_CONFIGURED: 已安装但未配置 - 需要配置引导
+  - READY: 已安装且配置完成 - 可正常使用
 
-### 启动流程实现细节
-- **检查逻辑**: 应用启动前调用 installer.hermes_check.check_hermes_installation()
-- **状态判断**: 根据 HermesInstallStatus 决定进入正常模式还是安装引导模式
-- **用户体验**: 
-  - 未安装时不进入正常主界面
-  - 明确展示当前状态、平台说明、安装建议
-  - 支持 WebView 图形界面和控制台文本界面
+### 检测逻辑增强
+- **apps/installer/hermes_check.py**: 
+  - 新增 check_hermes_configuration() 配置状态检测
+  - 检查 HERMES_HOME 环境变量、目录结构、yachiyo 工作空间
+  - 更新主检测函数支持三状态分流
+- **packages/protocol/enums.py**: 更新状态枚举，统一到协议层
 
-### Window 管理增强
+### 启动流程三状态分离
+- **apps/shell/app.py**: 
+  - 根据三种状态进行不同启动路径：
+    - READY → 正常启动模式
+    - INSTALLED_NOT_CONFIGURED → 配置引导模式  
+    - 其他状态 → 安装引导模式
+  - 新增 _start_setup_mode() 配置引导函数
+
+### 界面动态内容
 - **apps/shell/window.py**: 
-  - create_main_window(): 正常运行模式的主窗口
-  - create_installer_window(): 安装引导模式的引导窗口
-  - 动态 HTML 生成，展示详细安装步骤和状态
-  - 完整的安装引导 HTML 模板，包含样式和交互
+  - 动态生成页面标题和内容（安装 vs 配置）
+  - 支持状态相关的提示和步骤展示
+- **apps/installer/hermes_install.py**: 
+  - 更新配置指导，提供详细的环境设置步骤
+  - 包含目录创建、环境变量设置、配置验证
 
-### 安装引导界面完善
-- **状态展示**: 检测结果、平台信息、错误详情
-- **安装步骤**: 分平台的详细安装指令和命令
-- **官方链接**: NousResearch/hermes-agent 仓库、发布页面、安装文档
-- **响应式设计**: 深色主题、代码高亮、清晰的信息层次
+### 配置检测细节
+配置状态检测包括：
+1. HERMES_HOME 环境变量是否设置
+2. HERMES_HOME 目录是否存在
+3. 必要子目录是否齐全 (logs, memory, tasks, config)
+4. Yachiyo 工作空间是否创建
+5. hermes 命令是否可正常执行
 
-### 回退机制
-- **无 pywebview 环境**: 自动回退到控制台显示安装信息
-- **错误处理**: WebView 启动失败时的优雅降级
-- **保持运行**: 无窗口模式下保持主线程活跃
+## 架构优势
 
-## 架构边界确认
+### 协议层统一
+- 状态模型在 packages/protocol/enums.py 统一定义
+- 避免只在 shell 层分支判断，提升可维护性
+- 其他模块可复用状态判断逻辑
 
-已严格遵守架构边界：
-- **apps/core**: 不暴露 HTTP，纯运行时管理
-- **apps/bridge**: 只做内部通信桥，非产品入口
-- **apps/shell**: 产品入口，支持启动模式分离
-- **apps/locald**: 只负责本地能力适配
-- **apps/installer**: 只负责 Hermes 检测/安装/配置引导
-- **Hapi**: 继续负责 Codex CLI，不迁入 Hermes-Yachiyo
+### 用户体验改进
+- **未安装用户**: 看到安装指导和官方脚本
+- **已安装未配置用户**: 看到具体配置步骤，无需重新安装
+- **已就绪用户**: 直接进入正常使用模式
+
+### 可扩展性
+- 状态模型可继续扩展（如部分配置损坏、权限问题等）
+- 检测逻辑模块化，易于增加新的检查项
+- 引导界面支持动态内容生成
+
+## 文件修改清单
+
+**协议层**: packages/protocol/enums.py - 状态枚举更新
+**检测层**: apps/installer/hermes_check.py - 配置检测逻辑
+**启动层**: apps/shell/app.py - 三状态启动分流  
+**界面层**: apps/shell/window.py - 动态内容生成
+**指导层**: apps/installer/hermes_install.py - 配置引导生成
 
 ## 当前完整状态
 
-**完整可运行的桌面应用**，具备：
-1. ✅ 正确的五层架构分离
-2. ✅ Hermes Agent 外部依赖管理
-3. ✅ 启动流程联动（正常 vs 安装引导模式）
-4. ✅ 完整的安装引导用户体验
-5. ✅ shell → core → bridge 完整连通
-6. ✅ 跨平台支持策略
-7. ✅ 官方仓库链接和安装脚本
+**三状态启动流程就绪**，具备：
+1. ✅ 协议层统一的状态模型
+2. ✅ 完整的配置状态检测  
+3. ✅ 三种启动模式分离
+4. ✅ 动态界面内容生成
+5. ✅ 详细的配置引导步骤
+6. ✅ 用户友好的状态提示
 
 **下一步重点**：实现 AstrBot 插件的 QQ 命令路由功能。
 
-## 技术要点
-
-### 启动流程分离
-```python
-# apps/shell/app.py
-def main():
-    install_info = check_hermes_installation()
-    if install_info.status == HermesInstallStatus.INSTALLED:
-        # 正常模式：启动完整应用
-        start_normal_mode()
-    else:
-        # 安装引导模式：显示安装引导
-        start_installer_mode(install_info)
+## 三状态启动流程
 ```
-
-### 双窗口模式
-- **正常模式窗口**: 状态页 + Bridge API 信息
-- **安装引导窗口**: 详细安装检测结果和指导
-
-### 可替换性保持
-- pywebview 只是 MVP 桌面壳方案，不影响核心架构
-- FastAPI 只是内部通信实现，可替换为其他 IPC 方式
+检测 Hermes Agent
+    ↓
+┌─── READY ───→ 正常启动模式
+│              (core + bridge + 主窗口)
+├─── INSTALLED_NOT_CONFIGURED ───→ 配置引导模式
+│                               (配置步骤界面)
+└─── NOT_INSTALLED / 其他问题 ───→ 安装引导模式
+                                 (安装步骤界面)
+```

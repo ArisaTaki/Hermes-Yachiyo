@@ -116,6 +116,60 @@ def is_version_compatible(version: str) -> bool:
         return False
 
 
+def check_hermes_configuration() -> Tuple[bool, str]:
+    """检查 Hermes Agent 配置状态
+    
+    Returns:
+        Tuple[bool, str]: (是否配置完成, 错误信息)
+    """
+    try:
+        # 1. 检查 HERMES_HOME 环境变量
+        hermes_home = os.getenv("HERMES_HOME")
+        if not hermes_home:
+            return False, "HERMES_HOME 环境变量未设置"
+        
+        # 2. 检查 HERMES_HOME 目录是否存在
+        if not os.path.exists(hermes_home):
+            return False, f"HERMES_HOME 目录不存在: {hermes_home}"
+        
+        # 3. 检查基本目录结构
+        required_dirs = ["logs", "memory", "tasks", "config"]
+        missing_dirs = []
+        for dir_name in required_dirs:
+            dir_path = os.path.join(hermes_home, dir_name)
+            if not os.path.exists(dir_path):
+                missing_dirs.append(dir_name)
+        
+        if missing_dirs:
+            return False, f"缺少必要目录: {', '.join(missing_dirs)}"
+        
+        # 4. 检查 yachiyo 工作空间
+        yachiyo_workspace = os.path.join(hermes_home, "yachiyo")
+        if not os.path.exists(yachiyo_workspace):
+            return False, "Yachiyo 工作空间未创建"
+        
+        # 5. 简单的 hermes 配置验证（可选）
+        try:
+            result = subprocess.run(
+                ["hermes", "--version"], 
+                capture_output=True, 
+                text=True, 
+                timeout=5,
+                check=False
+            )
+            if result.returncode != 0:
+                return False, "hermes 命令执行失败"
+        except Exception as e:
+            logger.warning("hermes 命令测试失败: %s", e)
+            return False, f"hermes 命令测试失败: {e}"
+        
+        return True, ""
+        
+    except Exception as e:
+        logger.error("配置检查失败: %s", e)
+        return False, f"配置检查失败: {e}"
+
+
 def get_hermes_home() -> str:
     """获取 HERMES_HOME 路径（当前或推荐）"""
     # 1. 检查环境变量
@@ -164,6 +218,8 @@ def check_hermes_installation() -> HermesInstallInfo:
         install_info.error_message = error_message
         install_info.suggestions = [
             "请安装 Hermes Agent: https://github.com/NousResearch/hermes-agent",
+            "macOS: curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
+            "Linux: curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
             "确保 hermes 命令在 PATH 环境变量中"
         ]
         return install_info
@@ -185,21 +241,26 @@ def check_hermes_installation() -> HermesInstallInfo:
         install_info.status = HermesInstallStatus.INCOMPATIBLE_VERSION
         install_info.error_message = f"Hermes 版本 {version_info.version} 不兼容，需要 {HERMES_MIN_VERSION}+"
         install_info.suggestions = [
-            f"请升级 Hermes Agent 到 {HERMES_MIN_VERSION}+ 版本"
+            f"请升级 Hermes Agent 到 {HERMES_MIN_VERSION}+ 版本",
+            "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash"
         ]
         return install_info
     
-    # 4. HERMES_HOME 检查
+    # 4. 配置状态检查  
+    config_ok, config_error = check_hermes_configuration()
     hermes_home = get_hermes_home()
     install_info.hermes_home = hermes_home
     
-    if not os.getenv("HERMES_HOME"):
-        install_info.status = HermesInstallStatus.SETUP_REQUIRED
+    if not config_ok:
+        install_info.status = HermesInstallStatus.INSTALLED_NOT_CONFIGURED
+        install_info.error_message = config_error
         install_info.suggestions = [
-            f"建议设置 HERMES_HOME 环境变量: {hermes_home}",
-            "运行 Hermes 环境设置以完成配置"
+            f"请设置 HERMES_HOME 环境变量: {hermes_home}",
+            "运行 Hermes 环境设置以完成目录结构创建",
+            "创建 Yachiyo 工作空间目录"
         ]
-    else:
-        install_info.status = HermesInstallStatus.INSTALLED
+        return install_info
     
+    # 5. 一切就绪
+    install_info.status = HermesInstallStatus.READY
     return install_info

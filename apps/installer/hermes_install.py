@@ -26,7 +26,7 @@ class HermesInstallGuide:
         Returns:
             包含安装指导信息的字典
         """
-        if install_info.status == HermesInstallStatus.INSTALLED:
+        if install_info.status == HermesInstallStatus.READY:
             return {
                 "status": "ready",
                 "message": "Hermes Agent 已正确安装并配置",
@@ -45,7 +45,7 @@ class HermesInstallGuide:
         elif install_info.status == HermesInstallStatus.INCOMPATIBLE_VERSION:
             return HermesInstallGuide._get_upgrade_instructions(install_info)
         
-        elif install_info.status == HermesInstallStatus.SETUP_REQUIRED:
+        elif install_info.status == HermesInstallStatus.INSTALLED_NOT_CONFIGURED:
             return HermesInstallGuide._get_setup_instructions(install_info)
         
         else:
@@ -154,16 +154,31 @@ class HermesInstallGuide:
 
     @staticmethod
     def _get_setup_instructions(install_info: HermesInstallInfo) -> Dict[str, any]:
-        """环境设置指导"""
+        """环境配置指导 - Hermes 已安装但未完成配置"""
         return {
             "status": "setup_required",
-            "message": "Hermes Agent 已安装，需要完成环境设置",
+            "message": "Hermes Agent 已安装，需要完成环境配置",
             "actions": [
                 "1. 设置 HERMES_HOME 环境变量",
-                f"   export HERMES_HOME={install_info.hermes_home}",
-                "2. 将环境变量添加到 ~/.bashrc 或 ~/.zshrc",
-                "3. 重新启动终端或运行 source ~/.bashrc",
-                "4. 重新启动 Hermes-Yachiyo"
+                f"   export HERMES_HOME={install_info.hermes_home or '~/.hermes'}",
+                "",
+                "2. 创建必要的目录结构",
+                "   mkdir -p $HERMES_HOME/{logs,memory,tasks,config,yachiyo}",
+                "",
+                "3. 将环境变量持久化到 Shell 配置文件",
+                "   # 对于 Bash 用户:",
+                f"   echo 'export HERMES_HOME={install_info.hermes_home or '~/.hermes'}' >> ~/.bashrc",
+                "   # 对于 Zsh 用户:",
+                f"   echo 'export HERMES_HOME={install_info.hermes_home or '~/.hermes'}' >> ~/.zshrc",
+                "",
+                "4. 重新加载配置或重启终端",
+                "   source ~/.bashrc  # 或 source ~/.zshrc",
+                "",
+                "5. 验证配置",
+                "   hermes --version",
+                "   echo $HERMES_HOME",
+                "",
+                "6. 重新启动 Hermes-Yachiyo"
             ],
             "auto_setup_available": True
         }
