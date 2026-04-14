@@ -2,32 +2,57 @@
 
 ## 本轮完成内容
 
-实现显示模式切换骨架，将模式分支逻辑收敛到 `apps/shell/modes/` 下。
+将 bubble 模式从占位提示窗口推进为最小可用模式。
 
-### 模式组织方式
+### bubble 模式新增能力
 
-```
-apps/shell/modes/
-├── __init__.py   # 分发器 launch_mode(runtime, config)
-├── window.py     # 窗口模式 runner（真正实现，委托 window.py）
-├── bubble.py     # 气泡模式 runner（占位，独立窗口）
-└── live2d.py     # Live2D 模式 runner（占位，独立窗口）
-```
+| 能力 | 说明 |
+|------|------|
+| 状态摘要 | 显示 Hermes Agent 就绪状态、工作空间初始化状态、运行时间 |
+| 打开主窗口 | 在当前 pywebview 会话中创建第二个完整仪表盘窗口 |
+| 刷新状态 | 手动刷新数据，15 秒自动刷新 |
+| 关闭入口 | `close_bubble()` 销毁气泡窗口 |
+| 常驻最前 | `on_top=True` 使气泡窗口保持在其他窗口上层 |
 
-每个模式模块导出统一接口 `run(runtime: HermesRuntime, config: AppConfig) -> None`，由分发器根据 `config.display_mode` 调用。
+### bubble 与 window 模式的区别
 
-### 占位实现说明
+| 对比项 | window 模式 | bubble 模式 |
+|--------|-------------|-------------|
+| 窗口尺寸 | 560×520，可调 | 320×280，固定 |
+| 内容 | 完整仪表盘 + 可编辑设置面板 | 状态摘要 + 操作按钮 |
+| API | MainWindowAPI（get_dashboard/settings/update） | BubbleWindowAPI（get_bubble_data/open_main/close） |
+| on_top | 否 | 是（常驻最前） |
+| 设置编辑 | ✅ 支持 | ❌ 不支持（通过「打开主窗口」进入完整设置） |
 
-| 模式 | 实现状态 | 占位行为 |
-|------|----------|----------|
-| window | ✅ 真正实现 | 调用 create_main_window() |
-| bubble | ⏳ 占位 | 360×300 专属提示窗口 |
-| live2d | ⏳ 占位 | 400×320 专属提示窗口 |
+### open_main_window 实现说明
 
-### display_mode 影响启动流程
+pywebview 支持在 API 回调中调用 `webview.create_window()`，新窗口会加入当前 `start()` 的事件循环。
+当前实现：气泡窗口持有全局 `BubbleWindowAPI`（通过 `webview.start(api=api)`），主窗口以只读仪表盘形式创建，共享同一 webview 会话。
 
-1. 设置页修改 display_mode → `update_settings()` 写入 `~/.hermes-yachiyo/config.json`
-2. 下次启动 → `load_config()` 读取新值
+### main_api.py 同步变更
+
+- `get_settings_data()` 中 bubble 的 `available` 改为 `True`
+- 设置页可选模式下拉 bubble 选项对用户可见
+
+### live2d 后续接入方式
+
+live2d 保持占位实现不变。后续接入时只需修改 `apps/shell/modes/live2d.py`：
+1. 替换 `_LIVE2D_HTML` 为嵌入 Live2D WebGL 渲染器的 HTML
+2. 添加 `Live2DWindowAPI` 提供角色控制 / 互动接口
+3. `main_api.py` 中 live2d 的 `available` 改为 `True`
+
+## 修改的文件
+
+| 文件 | 变更 |
+|------|------|
+| apps/shell/modes/bubble.py | 重写为最小可用实现（BubbleWindowAPI + 状态摘要 UI） |
+| apps/shell/main_api.py | bubble available 改为 True |
+| memory/progress/current-state.md | 更新 Milestone 6 |
+| memory/handoff/session-summary.md | 更新本轮总结 |
+
+## 下一步重点
+
+**AstrBot 插件实现**：QQ 命令路由到 bridge API 或 Hapi Codex。
 3. `_start_normal_mode(config)` → `launch_mode(runtime, config)`
 4. `launch_mode()` 根据 `config.display_mode` 分发到对应 runner
 
@@ -51,7 +76,7 @@ apps/shell/modes/
 
 ## 下一步重点
 
-**AstrBot 插件实现**：QQ 命令路由到 bridge API 或 Hapi Codex。
+__AstrBot 插件实现__：QQ 命令路由到 bridge API 或 Hapi Codex。
 
 ### 可编辑配置项实现
 

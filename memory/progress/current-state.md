@@ -174,15 +174,19 @@
 
 ### Milestone 6 — 显示模式切换骨架
 
-- ✅ apps/shell/modes/__init__.py — 模式分发器 `launch_mode(runtime, config)`
+- ✅ apps/shell/modes/**init**.py — 模式分发器 `launch_mode(runtime, config)`
   - 根据 config.display_mode 分发到对应模式 runner
   - 未知模式自动回退为 window
   - 每个模式模块导出 `run(runtime, config)` 函数
 - ✅ apps/shell/modes/window.py — 窗口模式 runner（真正实现）
   - 委托 apps/shell/window.create_main_window()
-- ✅ apps/shell/modes/bubble.py — 气泡模式 runner（占位实现）
-  - 显示专属占位窗口（360×300），提示"即将推出"
-  - 预留 run() 接口，后续完整实现时只需修改此文件
+- ✅ apps/shell/modes/bubble.py — 气泡模式 runner（最小可用实现）
+  - 320×280 轻量悬浮窗口（on_top=True）
+  - 显示 Hermes 状态、工作空间状态、运行时间
+  - BubbleWindowAPI: get_bubble_data() / open_main_window() / close_bubble()
+  - open_main_window(): 在当前 webview 会话中创建第二个完整仪表盘窗口
+  - 15 秒自动刷新 + 手动刷新按钮
+- ✅ apps/shell/main_api.py — bubble available 改为 True
 - ✅ apps/shell/modes/live2d.py — Live2D 模式 runner（占位实现）
   - 显示专属占位窗口（400×320），提示"即将推出"
   - 预留 run() 接口，后续完整实现时只需修改此文件
@@ -190,6 +194,7 @@
   - 模式分支逻辑收敛到 modes/ 下，app.py 不再有模式分支
 
 ### display_mode 生效方式
+
 1. 用户在设置面板修改 display_mode → update_settings() 写入 ~/.hermes-yachiyo/config.json
 2. 下次启动时 load_config() 读取新值
 3. _start_normal_mode() 调用 launch_mode(runtime, config)

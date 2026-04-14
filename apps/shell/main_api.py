@@ -81,7 +81,7 @@ class MainWindowAPI:
                     "current_mode": self._config.display_mode,
                     "available_modes": [
                         {"id": "window", "name": "窗口模式", "available": True},
-                        {"id": "bubble", "name": "气泡模式", "available": False},
+                        {"id": "bubble", "name": "气泡模式", "available": True},
                         {"id": "live2d", "name": "Live2D 模式", "available": False},
                     ],
                 },
