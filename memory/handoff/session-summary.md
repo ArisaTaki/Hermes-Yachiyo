@@ -1,37 +1,49 @@
 # Session Summary
 
+# Session Summary
+
 ## 本轮完成内容
 
-基于修正后的 desktop-first 产品形态，完成了仓库骨架和 protocol schema。
+实现了 Hermes Agent 安装引导层，将 Hermes Agent 视为外部运行时依赖。
 
-### 产品形态修正
+### Hermes Agent 作为外部依赖
+- 不再将 Hermes Agent 视为项目内嵌库
+- 实现安装检测、版本兼容性检查、平台支持验证
+- 提供分平台安装指导和环境配置引导
 
-- 从「纯 FastAPI 后端服务」修正为「桌面优先本地应用」
-- pywebview 作为 MVP 桌面壳原型（不影响 core/bridge/protocol 长期边界）
-- FastAPI 降级为内部通信桥梁层
+### 新增模块
 
-### 五层架构
+**apps/installer/**:
+- hermes_check.py: 检测 hermes 命令、版本兼容性、平台支持
+- hermes_install.py: 分平台安装指导（macOS/Linux/WSL2），不含复杂自动安装
+- hermes_setup.py: HERMES_HOME 环境规划、目录结构创建、环境变量配置
 
-1. App Shell (apps/shell/) — 桌面壳入口，托盘/窗口/模式
-2. Core Runtime (apps/core/) — Hermes 封装，任务/状态管理，不暴露 HTTP
-3. Local Capabilities (apps/locald/) — 截图/活动窗口适配器
-4. Bridge/API (apps/bridge/) — 内部 FastAPI，非产品本体
-5. AstrBot Plugin (integrations/) — QQ 桥接骨架
+**packages/protocol/install.py**:
+- HermesInstallStatus, Platform 枚举
+- HermesInstallInfo, HermesVersionInfo, HermesSetupRequest/Response 模型
 
-### 创建的文件（30 个）
+### 集成到 Core Runtime
+- apps/core/runtime.py: 启动时执行 Hermes 安装检测
+- 不阻止启动，允许用户在 UI 中查看安装状态和引导
+- 增强 get_status() 包含 Hermes 安装信息
 
-- apps/shell/: app.py, tray.py, window.py, config.py, modes/
-- apps/core/: runtime.py, state.py
-- apps/bridge/: server.py, routes/ (status, tasks, screen, system)
-- apps/locald/: screenshot.py, active_window.py
-- packages/protocol/: enums.py, schemas.py, errors.py, events.py
-- packages/tasking/, packages/security/ — 占位
-- integrations/astrbot-plugin/: main.py
+### Bridge API 扩展
+- apps/bridge/routes/hermes.py: Hermes 环境设置 API
+- GET /hermes/install-info: 安装状态和引导信息
+- POST /hermes/setup: Hermes 环境设置
+- GET /hermes/environment: 当前环境信息
 
-### 待后续完成
+### 平台支持策略
+- macOS: Homebrew 或二进制文件
+- Linux/WSL2: 官方安装脚本或二进制文件  
+- Windows: 强制要求使用 WSL2，不支持原生 Windows
 
-- Bridge 路由接入 Runtime 实例
-- 任务生命周期与持久化
-- 安全策略模块
-- AstrBot 实际 HTTP 调用
-- 基础测试
+### HERMES_HOME 策略
+- 默认: ~/.hermes
+- Yachiyo 工作空间: $HERMES_HOME/yachiyo
+- 环境变量持久化到 .bashrc/.zshrc
+- 目录结构自动创建（logs, memory, tasks, config）
+
+### 文档更新
+- README 更新：环境要求、Hermes Agent 安装、API 路由、目录结构
+- memory 进度文件同步更新

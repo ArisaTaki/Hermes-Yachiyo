@@ -55,10 +55,42 @@ Hermes-Yachiyo 是一个**桌面优先的本地个人 agent 应用**，基于 He
 
 ## 快速开始
 
-### 环境要求
+## 环境要求
 
 - Python 3.11+
-- macOS（当前本地适配器实现）
+- macOS、Linux 或 Windows (WSL2)
+- **Hermes Agent**: 外部运行时依赖，需单独安装
+
+### Hermes Agent 安装
+
+Hermes-Yachiyo 依赖 [Hermes Agent](https://github.com/hermesagent/hermes) 作为底层运行时，需要先安装：
+
+**macOS:**
+```bash
+# 使用 Homebrew (推荐)
+brew install hermesagent/tap/hermes
+
+# 或下载二进制文件
+# 访问 https://github.com/hermesagent/hermes/releases
+```
+
+**Linux / WSL2:**
+```bash
+# 使用官方安装脚本
+curl -fsSL https://get.hermesagent.io | sudo bash
+
+# 或下载二进制文件
+# 访问 https://github.com/hermesagent/hermes/releases
+```
+
+**Windows:**
+```bash
+# Windows 用户需要使用 WSL2
+# 1. 安装 WSL2: https://docs.microsoft.com/zh-cn/windows/wsl/install
+# 2. 在 WSL2 中按 Linux 步骤安装 Hermes Agent
+```
+
+安装完成后，确认 `hermes --version` 命令可正常执行。
 
 ### 安装与运行
 
@@ -106,21 +138,26 @@ apps/
     config.py        # 用户配置
     modes/           # 显示模式
   core/            # Core Runtime
-    runtime.py       # Hermes 运行时
+    runtime.py       # Hermes 运行时 + 安装检测集成
     state.py         # 应用状态管理
   bridge/          # 内部 API 桥梁
     deps.py          # 依赖注入
     server.py        # FastAPI 服务
-    routes/          # API 路由
+    routes/          # API 路由 (+ hermes.py)
   locald/          # 本地能力适配器
     screenshot.py    # 截图（macOS）
     active_window.py # 活动窗口（macOS）
+  installer/       # Hermes Agent 安装引导层
+    hermes_check.py  # 安装检测
+    hermes_install.py # 安装指导
+    hermes_setup.py  # 环境设置
 packages/
   protocol/        # Schema 定义
-    enums.py         # 枚举
+    enums.py         # 枚举 (+ Hermes 相关)
     schemas.py       # 请求/响应模型
     errors.py        # 错误模型
     events.py        # 审计事件
+    install.py       # 安装相关模型
   tasking/         # 任务生命周期（占位）
   security/        # 安全模块（占位）
 integrations/
@@ -130,9 +167,10 @@ integrations/
 
 ### 连通链路
 
-1. **启动流程**: `shell/app.py` → 创建 `HermesRuntime` → 注入 `bridge/deps.py` → 启动桥接 API
+1. **启动流程**: `shell/app.py` → 创建 `HermesRuntime` → Hermes 安装检测 → 注入 `bridge/deps.py` → 启动桥接 API
 2. **任务流程**: Bridge 路由 → `deps.get_runtime()` → `core/state.py` → 任务操作
-3. **显示流程**: Shell → 托盘/窗口 → pywebview → Bridge API 状态查询
+3. **安装流程**: `installer/hermes_check.py` → 检测 → `hermes_install.py` → 引导 → `hermes_setup.py` → 环境配置
+4. **显示流程**: Shell → 托盘/窗口 → pywebview → Bridge API 状态查询
 
 ### 开发指导
 

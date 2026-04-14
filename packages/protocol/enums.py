@@ -39,6 +39,9 @@ class ErrorCode(StrEnum):
     RISK_DENIED = "risk_denied"
     INTERNAL_ERROR = "internal_error"
     ADAPTER_ERROR = "adapter_error"
+    HERMES_NOT_INSTALLED = "hermes_not_installed"
+    HERMES_INCOMPATIBLE = "hermes_incompatible"
+    PLATFORM_UNSUPPORTED = "platform_unsupported"
 
 
 class AuditAction(StrEnum):
@@ -51,3 +54,26 @@ class AuditAction(StrEnum):
     SCREEN_CAPTURED = "screen_captured"
     WINDOW_QUERIED = "window_queried"
     RISK_DENIED = "risk_denied"
+    HERMES_INSTALL_CHECK = "hermes_install_check"
+    HERMES_INSTALL_ATTEMPT = "hermes_install_attempt"
+
+
+class HermesInstallStatus(StrEnum):
+    """Hermes Agent 安装状态"""
+
+    NOT_CHECKED = "not_checked"  # 尚未检测
+    NOT_INSTALLED = "not_installed"  # 未安装
+    INCOMPATIBLE_VERSION = "incompatible_version"  # 版本不兼容
+    PLATFORM_UNSUPPORTED = "platform_unsupported"  # 平台不支持
+    WSL2_REQUIRED = "wsl2_required"  # Windows 用户需要 WSL2
+    INSTALLED = "installed"  # 已正确安装
+    SETUP_REQUIRED = "setup_required"  # 需要环境设置
+
+
+class Platform(StrEnum):
+    """支持的平台"""
+
+    MACOS = "macos"
+    LINUX = "linux" 
+    WINDOWS_WSL2 = "windows_wsl2"
+    WINDOWS_NATIVE = "windows_native"  # 不支持，需提示使用 WSL2

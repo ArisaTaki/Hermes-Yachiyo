@@ -15,7 +15,7 @@ import logging
 import uvicorn
 from fastapi import FastAPI
 
-from apps.bridge.routes import screen, status, system, tasks
+from apps.bridge.routes import hermes, screen, status, system, tasks
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ app.include_router(status.router)
 app.include_router(tasks.router)
 app.include_router(screen.router)
 app.include_router(system.router)
+app.include_router(hermes.router)
 
 _server: uvicorn.Server | None = None
 
