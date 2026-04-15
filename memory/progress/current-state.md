@@ -671,3 +671,47 @@ launch()
 2. `Live2DWindowAPI.load_model()` / `play_motion()` / `set_expression()` 方法实现
 3. HTML 中的 `<canvas id="live2d">` 替换 `.character-placeholder`
 4. pywebview 透明窗口支持（角色贴屏显示）
+
+
+### Milestone 25 — Live2D 模型配置入口骨架
+
+**`apps/shell/config.py`**
+- 新增 `Live2DConfig` dataclass，字段：
+  - `model_name: str = ""`            — 角色模型显示名
+  - `model_path: str = ""`            — .moc3 模型目录路径
+  - `idle_motion_group: str = "Idle"` — 待机动作组（Cubism 约定）
+  - `enable_expressions: bool = False`— 表情系统开关（等待渲染器）
+  - `enable_physics: bool = False`    — 物理模拟开关（等待渲染器）
+  - `window_on_top: bool = True`      — 角色窗口置顶
+  - `is_model_configured()` 方法：name 和 path 都不为空则返回 True
+- `AppConfig` 新增 `live2d: Live2DConfig` 字段（`field(default_factory=Live2DConfig)`）
+- `load_config()` 更新：特殊处理嵌套 live2d 配置的反序列化
+
+**`apps/shell/settings.py`** ← 新文件
+- `build_settings_html(config: AppConfig) -> str`：独立设置页 HTML，供 live2d 模式的 `open_settings()` 使用
+- 包含区块：显示模式 / Live2D 配置（含状态、模型名、路径、动作/表情/物理开关）/ Bridge 配置 / AstrBot 集成占位
+
+**`apps/shell/window.py`** — 主窗口设置面板
+- 在"显示模式"section 之后新增"Live2D 模式配置"section（含 badge `骨架`）
+- 7 个展示字段：model_configured / model_name / model_path / idle_motion_group / enable_expressions / enable_physics / 渲染器状态（只读占位）
+- `refreshSettings()` JS 新增 Live2D 字段填充逻辑（读取 `d.live2d`）
+
+**`apps/shell/main_api.py`** — get_settings_data()
+- 返回值新增 `"live2d"` 键，包含所有 `Live2DConfig` 字段 + `renderer_available: False`
+
+**`apps/shell/modes/live2d.py`** — get_live2d_status()
+- `model` 字段从全硬编码更新为读取 `config.live2d`：
+  - `configured`: 是否已配置模型（`is_model_configured()`）
+  - `name`: 模型显示名
+  - `path`: 模型路径
+  - `idle_motion_group`, `expressions_enabled`, `physics_enabled`
+- 前端 JS `label.textContent` 逻辑分三态：
+  - 已加载（未来渲染器）→ 显示模型名
+  - 已配置未加载 → "已配置模型: hiyori · 渲染器待实现"
+  - 未配置 → "角色模型未配置"
+
+**真正接入 Live2D 还差：**
+1. `apps/shell/modes/live2d_renderer.py` — Live2D Cubism SDK 封装
+2. `Live2DWindowAPI.load_model()` / `play_motion()` / `set_expression()` 实现
+3. HTML canvas 替换占位 div
+4. pywebview 透明窗口支持

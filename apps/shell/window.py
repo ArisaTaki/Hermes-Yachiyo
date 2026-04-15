@@ -299,6 +299,20 @@ _STATUS_HTML = """
         </div>
 
         <div class="settings-section">
+            <h4>Live2D 模式配置 <span style="background:#1a1a3e;border:1px solid #6495ed33;color:#9988cc;font-size:0.75em;padding:1px 7px;border-radius:10px;margin-left:6px;">骨架</span></h4>
+            <div class="settings-row"><span class="label">模型已配置</span><span class="value" id="s-l2d-configured">—</span></div>
+            <div class="settings-row"><span class="label">模型名称</span><span class="value" id="s-l2d-model-name" style="font-size:0.85em;">—</span></div>
+            <div class="settings-row"><span class="label">模型路径</span><span class="value" id="s-l2d-model-path" style="font-size:0.78em;word-break:break-all;">—</span></div>
+            <div class="settings-row"><span class="label">待机动作组</span><span class="value" id="s-l2d-idle-group">—</span></div>
+            <div class="settings-row"><span class="label">表情系统</span><span class="value" id="s-l2d-expressions">—</span></div>
+            <div class="settings-row"><span class="label">物理模拟</span><span class="value" id="s-l2d-physics">—</span></div>
+            <div class="settings-row" style="border-top:1px solid #3a3a5a;margin-top:4px;padding-top:6px;">
+                <span class="label" style="color:#666;font-size:0.82em;">接入状态</span>
+                <span class="value" style="color:#666;font-size:0.82em;font-style:italic;">渲染器未实现</span>
+            </div>
+        </div>
+
+        <div class="settings-section">
             <h4>Bridge / 内部通信</h4>
             <div class="settings-row"><span class="label">启用</span>
                 <label class="s-toggle"><input type="checkbox" id="s-bridge-enabled" onchange="onSettingChange('bridge_enabled', this.checked)"><span class="slider"></span></label>
@@ -379,6 +393,21 @@ _STATUS_HTML = """
                 const active = m.id === d.display.current_mode ? ' <span class="tag active-tag">当前</span>' : '';
                 return '<div class="settings-mode-item">' + m.name + ' ' + tag + active + '</div>';
             }).join('');
+
+            // Live2D 配置
+            if (d.live2d) {
+                const l2d = d.live2d;
+                const cfgEl = document.getElementById('s-l2d-configured');
+                cfgEl.textContent = l2d.model_configured ? '✅ 已配置' : '⚠️ 未配置';
+                cfgEl.className = 'value ' + (l2d.model_configured ? 'ok' : 'warn');
+                document.getElementById('s-l2d-model-name').textContent = l2d.model_name || '（未设置）';
+                document.getElementById('s-l2d-model-name').className = 'value' + (l2d.model_name ? '' : ' dim');
+                document.getElementById('s-l2d-model-path').textContent = l2d.model_path || '（未设置）';
+                document.getElementById('s-l2d-model-path').className = 'value' + (l2d.model_path ? '' : ' dim');
+                document.getElementById('s-l2d-idle-group').textContent = l2d.idle_motion_group || 'Idle';
+                document.getElementById('s-l2d-expressions').textContent = l2d.enable_expressions ? '✅ 启用' : '— 禁用';
+                document.getElementById('s-l2d-physics').textContent = l2d.enable_physics ? '✅ 启用' : '— 禁用';
+            }
 
             // Bridge
             document.getElementById('s-bridge-enabled').checked = d.bridge.enabled;

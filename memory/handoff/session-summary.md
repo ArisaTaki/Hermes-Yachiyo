@@ -532,3 +532,13 @@ startup.py 同时表达两个决策维度：startup_mode + display_mode，都集
 live2d.py 新增 Live2DWindowAPI（状态/主窗口/设置），角色舞台区+状态条+工具栏 HTML 骨架。
 与 bubble 模式边界：bubble 横版最小摘要，live2d 竖版角色舞台。
 真正接入还差：live2d_renderer.py + load_model/play_motion API + canvas 替换。
+
+
+## Milestone 25 — Live2D 模型配置入口骨架
+
+新增 `Live2DConfig` dataclass 到 config.py（model_name/model_path/idle_motion_group/enable_expressions/enable_physics/window_on_top + is_model_configured()）。
+AppConfig 新增 live2d 字段，load_config() 处理嵌套反序列化。
+新建 `apps/shell/settings.py`：build_settings_html(config) → 独立设置窗口（live2d.open_settings() 使用）。
+window.py 设置面板新增 Live2D 配置区块（7 个字段），refreshSettings() JS 填充 d.live2d。
+main_api.py get_settings_data() 新增 live2d 键，包含所有配置 + renderer_available=False。
+live2d.py model 字段改为读取 config.live2d，前端 label 分三态展示（加载中/已配置未加载/未配置）。

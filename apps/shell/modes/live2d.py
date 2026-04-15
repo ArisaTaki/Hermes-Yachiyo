@@ -191,9 +191,13 @@ _LIVE2D_HTML = """
             icon.textContent = running > 0 ? '⚡' : '🎤';
 
             const label = document.getElementById('stage-label');
-            label.textContent = d.model.loaded
-                ? d.model.name
-                : 'LIVE2D · 角色模型待加载';
+            if (d.model.loaded) {
+                label.textContent = d.model.name || 'LIVE2D · 模型已加载';
+            } else if (d.model.configured) {
+                label.textContent = 'LIVE2D · 已配置模型: ' + (d.model.name || '未命名') + ' · 渲染器待实现';
+            } else {
+                label.textContent = 'LIVE2D · 角色模型未配置';
+            }
         } catch(e) {}
     }
 
@@ -262,10 +266,15 @@ class Live2DWindowAPI:
                 "workspace": {
                     "initialized": workspace.get("initialized", False),
                 },
-                # 角色模型状态 — 未来由 Live2DRenderer 填充
+                # 角色模型状态：从配置读取，渲染器就绪后改为从 Live2DRenderer 动态获取
                 "model": {
-                    "loaded": False,        # TODO: Live2DRenderer.is_loaded()
-                    "name": "",             # TODO: Live2DRenderer.current_model_name
+                    "loaded": False,        # TODO: Live2DRenderer.is_loaded()（当前渲染器未实现）
+                    "configured": self._config.live2d.is_model_configured(),
+                    "name": self._config.live2d.model_name or "",
+                    "path": self._config.live2d.model_path or "",
+                    "idle_motion_group": self._config.live2d.idle_motion_group,
+                    "expressions_enabled": self._config.live2d.enable_expressions,
+                    "physics_enabled": self._config.live2d.enable_physics,
                     "available_motions": [],  # TODO: Live2DRenderer.list_motions()
                 },
                 "bridge": {

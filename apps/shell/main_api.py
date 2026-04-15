@@ -115,6 +115,16 @@ class MainWindowAPI:
                         {"id": "live2d", "name": "Live2D 模式", "available": False},
                     ],
                 },
+                "live2d": {
+                    "model_configured": self._config.live2d.is_model_configured(),
+                    "model_name": self._config.live2d.model_name or "",
+                    "model_path": self._config.live2d.model_path or "",
+                    "idle_motion_group": self._config.live2d.idle_motion_group,
+                    "enable_expressions": self._config.live2d.enable_expressions,
+                    "enable_physics": self._config.live2d.enable_physics,
+                    "window_on_top": self._config.live2d.window_on_top,
+                    "renderer_available": False,  # 等待 live2d_renderer.py 实现
+                },
                 "bridge": {
                     "enabled": self._config.bridge_enabled,
                     "host": self._config.bridge_host,
