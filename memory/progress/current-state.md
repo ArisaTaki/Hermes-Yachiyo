@@ -893,3 +893,30 @@ if summary and summary.renderer_entry:
 - 独立设置窗口：`onchange` → `saveLive2D()` → `update_settings()` → 返回 `live2d_state` → `updateLive2DState()` → DOM 即时更新
 - 主窗口设置面板：`onSettingChange()` → `update_settings()` → `refreshSettings()` → `get_settings_data()` → 重新渲染（已有）
 - Live2D 模式窗口：`refreshStatus()` 每 10 秒轮询 `get_live2d_status()`（已有）
+
+
+### Milestone 32 — 通用配置保存后即时刷新闭环
+
+**`apps/shell/main_api.py`**
+- 新增 `_current_app_state() -> dict` 方法：返回当前可编辑配置快照
+  - 包含：`display_mode` / `bridge`（enabled/host/port/url/running）/ `tray_enabled`
+- `update_settings()` 在成功保存后始终附带 `app_state`（所有保存操作都带）
+
+**`apps/shell/window.py`**
+- 新增 JS `applyAppState(state)` 函数：直接更新 DOM，无需额外 API 调用
+  - 设置面板：display_mode 下拉 / bridge toggle+host+port+url / tray toggle
+  - 仪表盘 Bridge 卡：bridge-enabled 状态标签 + bridge-addr（即时同步）
+- `onSettingChange()` 重构：
+  - 保存成功 → `applyAppState(res.app_state)` 直接更新（1 次 API 调用）
+  - display_mode 或 live2d.* 变更时，额外调用 `refreshSettings()` 重新渲染标签列表
+
+**刷新策略对照表：**
+
+| 配置字段 | 触发方式 | 刷新路径 | API 调用数 |
+|---------|---------|---------|----------|
+| bridge_enabled | toggle | applyAppState → 设置面板+仪表盘同步 | 1 |
+| bridge_host | input | applyAppState → 设置面板+仪表盘同步 | 1 |
+| bridge_port | input | applyAppState → 设置面板+仪表盘同步 | 1 |
+| tray_enabled | toggle | applyAppState → 设置面板同步 | 1 |
+| display_mode | select | applyAppState + refreshSettings（标签列表重渲染） | 2 |
+| live2d.* | input/toggle | applyAppState + refreshSettings（live2d 只读区刷新） | 2 |

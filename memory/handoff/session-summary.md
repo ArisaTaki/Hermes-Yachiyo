@@ -1,46 +1,44 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 31: 保存后重新校验与即时状态刷新
+## 本轮完成内容 — Milestone 32: 通用配置保存后即时刷新闭环
 
 ### 修改的文件
 
 | 文件 | 变更 |
 |------|------|
-| apps/shell/modes/live2d.py | 新增 `get_live2d_state()`；`update_settings()` 返回 `live2d_state` |
-| apps/shell/main_api.py | `update_settings()` 对 live2d.* 字段返回最新校验状态 `live2d_state` |
-| apps/shell/settings.py | read-only span 加 ID；新增 `_STATE_LABELS` + `updateLive2DState(state)` JS；`saveLive2D()` 成功后刷新 DOM |
-| memory/progress/current-state.md | Milestone 31 记录 |
+| apps/shell/main_api.py | 新增 `_current_app_state()`；`update_settings()` 始终附带 `app_state` |
+| apps/shell/window.py | 新增 `applyAppState(state)` JS；重构 `onSettingChange()` |
+| memory/progress/current-state.md | Milestone 32 记录 |
 | memory/handoff/session-summary.md | 本次汇报 |
 
-### 刷新闭环三路径
-
-| 场景 | 触发 | 刷新方式 |
-|------|------|---------|
-| 独立设置窗口（settings.py） | `onchange` → `saveLive2D()` | `update_settings()` 返回 `live2d_state` → `updateLive2DState()` 更新 DOM |
-| 主窗口设置面板（window.py） | `onSettingChange()` | `update_settings()` 成功 → `refreshSettings()` → `get_settings_data()` 重新渲染 |
-| Live2D 模式窗口（live2d.py） | 定时 10s | `refreshStatus()` → `get_live2d_status()` 轮询 |
-
-### 新增 `live2d_state` 返回字段结构
+### `app_state` 返回结构
 
 ```json
 {
-  "model_state": "path_valid",
-  "model_name": "hiyori",
-  "model_path": "/path/to/model",
-  "idle_motion_group": "Idle",
-  "summary": {
-    "available": true,
-    "model3_json": "hiyori.model3.json",
-    "moc3_file": "hiyori.moc3",
-    "found_in_subdir": false,
-    "renderer_entry": "/abs/path/hiyori.model3.json"
-  }
+  "display_mode": "window",
+  "bridge": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 8765,
+    "url": "http://127.0.0.1:8765",
+    "running": "running"
+  },
+  "tray_enabled": true
 }
 ```
 
-### 仍为占位的部分
+### 刷新策略
 
-| 功能 | 状态 |
-|------|------|
-| Live2D 模型实际加载/渲染 | 等待 live2d_renderer.py |
-| model_state = LOADED | 等待渲染器实现 |
+| 配置字段 | API 调用数 | 刷新范围 |
+|---------|----------|---------|
+| bridge_enabled / host / port | 1 | 设置面板 + 仪表盘 Bridge 卡 |
+| tray_enabled | 1 | 设置面板 tray toggle |
+| display_mode | 2 | applyAppState + refreshSettings（标签列表） |
+| live2d.* | 2 | applyAppState + refreshSettings（live2d 只读区） |
+
+### 架构决策
+
+- `_current_app_state()` 是轻量快照，不调用 runtime/workspace，只读 config
+- `applyAppState()` 纯 DOM 操作，不发起 API 调用
+- 仪表盘 Bridge 状态卡借助 `_bridge_status()` 实时反映 bridge.running
+- `display_mode`/`live2d.*` 因需重渲染标签列表仍调用 `refreshSettings()`，其余字段 1 次 API 即完成

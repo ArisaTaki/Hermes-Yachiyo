@@ -252,13 +252,30 @@ class MainWindowAPI:
                 return {"ok": False, "error": f"保存失败: {e}", "applied": applied}
 
         result: Dict[str, Any] = {"ok": True, "applied": applied, "errors": errors}
-        # 若有 live2d 字段变更，把最新校验状态一并返回（设置页可直接刷新 UI）
-        if any(k.startswith("live2d.") for k in applied):
-            result["live2d_state"] = {
-                "model_state": self._config.live2d.validate().value,
-                "model_name": self._config.live2d.model_name or "",
-                "model_path": self._config.live2d.model_path or "",
-                "idle_motion_group": self._config.live2d.idle_motion_group,
-                "summary": _serialize_summary(self._config.live2d.scan()),
-            }
+        if applied:
+            # 保存成功后始终附带最新通用配置状态，设置页和仪表盘可直接刷新
+            result["app_state"] = self._current_app_state()
+            # live2d 字段额外附带详细校验结果
+            if any(k.startswith("live2d.") for k in applied):
+                result["live2d_state"] = {
+                    "model_state": self._config.live2d.validate().value,
+                    "model_name": self._config.live2d.model_name or "",
+                    "model_path": self._config.live2d.model_path or "",
+                    "idle_motion_group": self._config.live2d.idle_motion_group,
+                    "summary": _serialize_summary(self._config.live2d.scan()),
+                }
         return result
+
+    def _current_app_state(self) -> Dict[str, Any]:
+        """返回当前可编辑配置的最新状态快照，供保存后即时刷新 UI。"""
+        return {
+            "display_mode": self._config.display_mode,
+            "bridge": {
+                "enabled": self._config.bridge_enabled,
+                "host": self._config.bridge_host,
+                "port": self._config.bridge_port,
+                "url": f"http://{self._config.bridge_host}:{self._config.bridge_port}",
+                "running": self._bridge_status(),
+            },
+            "tray_enabled": self._config.tray_enabled,
+        }

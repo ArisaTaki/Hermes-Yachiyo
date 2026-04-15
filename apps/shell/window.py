@@ -468,6 +468,46 @@ _STATUS_HTML = """
             document.getElementById('s-app-minimized').textContent = d.app.start_minimized ? '是' : '否';
         } catch(e) {}
     }
+
+    // 用 app_state 快照直接刷新设置面板和仪表盘（无需额外 API round-trip）
+    function applyAppState(state) {
+        if (!state) return;
+        // 设置面板：显示模式下拉
+        const modeEl = document.getElementById('s-display-mode');
+        if (modeEl) modeEl.value = state.display_mode;
+        // 设置面板：Bridge
+        if (state.bridge) {
+            const beEl = document.getElementById('s-bridge-enabled');
+            if (beEl) beEl.checked = state.bridge.enabled;
+            const bhEl = document.getElementById('s-bridge-host');
+            if (bhEl && document.activeElement !== bhEl) bhEl.value = state.bridge.host;
+            const bpEl = document.getElementById('s-bridge-port');
+            if (bpEl && document.activeElement !== bpEl) bpEl.value = state.bridge.port;
+            const buEl = document.getElementById('s-bridge-url');
+            if (buEl) buEl.textContent = state.bridge.url;
+        }
+        // 设置面板：托盘
+        const trayEl = document.getElementById('s-tray-enabled');
+        if (trayEl) trayEl.checked = !!state.tray_enabled;
+
+        // 仪表盘：Bridge 状态卡（即时同步，无需等 refreshDashboard 轮询）
+        if (state.bridge) {
+            const bridgeLabels = {
+                'disabled': '⛔ 已禁用',
+                'enabled_not_started': '⏳ 启动中',
+                'running': '✅ 运行中',
+                'failed': '❌ 异常退出'
+            };
+            const brEl = document.getElementById('bridge-enabled');
+            if (brEl) {
+                brEl.textContent = bridgeLabels[state.bridge.running] || state.bridge.running;
+                brEl.className = 'value ' + (state.bridge.running === 'running' ? 'ok' : state.bridge.running === 'failed' ? 'warn' : '');
+            }
+            const baEl = document.getElementById('bridge-addr');
+            if (baEl) baEl.textContent = state.bridge.running !== 'disabled' ? state.bridge.url : '—';
+        }
+    }
+
     async function onSettingChange(key, value) {
         const hint = document.getElementById('save-hint');
         try {
@@ -478,10 +518,19 @@ _STATUS_HTML = """
             if (res.ok) {
                 hint.textContent = '✓ 已保存';
                 hint.className = 'save-hint ok';
-                // 刷新设置面板以反映新值
-                refreshSettings();
+                if (res.app_state) {
+                    // 用返回快照直接更新大部分字段（1 次 API 调用）
+                    applyAppState(res.app_state);
+                    // display_mode 变更需要重新渲染 available_modes 标签列表
+                    if (key === 'display_mode' || key.startsWith('live2d.')) {
+                        refreshSettings();
+                    }
+                } else {
+                    refreshSettings();
+                }
             } else {
-                hint.textContent = '✗ ' + (res.error || res.errors.join('; '));
+                const errMsg = res.error || (Array.isArray(res.errors) ? res.errors.join('; ') : '保存失败');
+                hint.textContent = '✗ ' + errMsg;
                 hint.className = 'save-hint err';
             }
         } catch(e) {
