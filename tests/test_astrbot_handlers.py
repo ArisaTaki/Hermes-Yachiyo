@@ -14,11 +14,11 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-# ── 注册 astrbot-plugin 为可导入包 ─────────────────────────
+# ── 注册 astrbot_plugin 为可导入包 ─────────────────────────
 _PLUGIN_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "integrations",
-    "astrbot-plugin",
+    "astrbot_plugin",
 )
 
 

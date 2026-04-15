@@ -29,5 +29,10 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["apps*", "packages*", "integrations*"]
+exclude = ["memory*", "tests*", "docs*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
