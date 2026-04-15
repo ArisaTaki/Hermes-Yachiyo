@@ -1,41 +1,44 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 35: Bridge 最小控制闭环
+## 本轮完成内容 — Milestone 36: 冲刺到可运行测试
 
-### 修改的文件
+### 测试套件 — 105 tests, all passed
 
-| 文件 | 变更 |
-|------|------|
-| apps/bridge/server.py | 新增 `restart_bridge()` + `get_running_config()` + 停止后自动归零状态 |
-| apps/shell/main_api.py | 新增 `restart_bridge()` API — 停止旧实例 → 用保存配置重启 → 刷新 boot_config |
-| apps/shell/integration_status.py | AstrBot 新增 config_dirty 漂移警告 blocker |
-| apps/shell/window.py | 设置页 bridge 区新增"应用配置并重启 Bridge"按钮 + JS restartBridge() |
-| apps/shell/modes/bubble.py | 新增 `restart_bridge()` API 供气泡模式消费 |
-| memory/progress/current-state.md | Milestone 35 记录 |
-| memory/handoff/session-summary.md | 本次汇报 |
+建立了完整测试基础设施，覆盖项目核心模块：
 
-### Bridge 控制动作
+| 测试文件 | 数量 | 覆盖 |
+|---------|------|------|
+| test_protocol.py | 14 | Enum、TaskInfo、Request/Response 模型 |
+| test_state.py | 11 | 任务创建/取消/状态推进/终态保护 |
+| test_executor.py | 7 | HermesCallError、SimulatedExecutor |
+| test_effect_policy.py | 9 | 设置生效策略查询和混合效果 |
+| test_integration_status.py | 11 | Bridge/AstrBot/Hapi 状态 + config_dirty |
+| test_astrbot_handlers.py | 32 | 全 handler 输出、ACL、错误格式化 |
+| test_startup.py | 6 | startup 决策树全路径 |
 
-- `restart_bridge(host, port)` — 停止旧 uvicorn 实例 → 等待线程退出(5s) → 新线程启动
-- 失败路径覆盖：bridge 未启用 / 停止超时 / 端口无效 / 启动异常
-- 成功后 `_bridge_boot_config` 重新对齐 → `config_dirty` 归零
+### 关键技术决策
 
-### Bridge restart 前后状态变化
+- **astrbot-plugin 连字符目录**：使用 `importlib.util.spec_from_file_location` 注册为 `astrbot_plugin` 包解决导入问题
+- **Bridge mock 注入**：conftest 在测试加载前注入 fake uvicorn/fastapi modules，避免真实服务依赖
+- **pytest-asyncio strict mode**：所有异步 handler 测试使用 `@pytest.mark.asyncio` 标注
 
-| 阶段 | config_dirty | drift_details | boot_url | 重启按钮 |
-|------|-------------|---------------|----------|---------|
-| 修改后保存 | true | "端口: 8420→9000" | http://127.0.0.1:8420 | 显示 |
-| 重启成功后 | false | [] | http://127.0.0.1:9000 | 隐藏 |
-| 重启失败 | true | 保持 | 保持旧值 | 仍显示 |
+### 如何接手
 
-### AstrBot 依赖关系提示
+```bash
+# 运行全部测试
+cd /path/to/Hermes-Yachiyo
+.venv/bin/python -m pytest tests/ -v
 
-- bridge 配置漂移时新增 blocker: "Bridge 配置已修改但尚未重启，AstrBot 可能使用旧地址"
-- bridge 重启成功后 blocker 自动消除
-- bridge 未启用/异常时原有 blocker 保持
+# 运行桌面应用
+.venv/bin/python -m apps.shell.app
 
-### 架构决策
+# 测试依赖
+pip install pytest pytest-asyncio httpx
+```
 
-- `restart_bridge()` 在 `server.py` 层实现（停止+启动），`main_api.py` 层只负责调用 + 刷新 boot_config
-- `start_bridge()` 正常退出（被 should_exit 停止）时自动归零为 `not_started`
-- bubble 模式也有 `restart_bridge()` 入口，共享同一个 server 层实现
+### 下一步建议
+
+1. **Task 系统真实 CLI 联调** — 当前 HermesExecutor 有 CLI 调用骨架但未经真机测试
+2. **AstrBot 真实 QQ 联调** — handler 输出已覆盖测试，可尝试真实 AstrBot 环境接入
+3. **Live2D 渲染器** — 配置/校验/摘要层已完备，可开始 moc3 渲染实现
+4. **Bridge HTTPS/认证** — 当前 bridge 无认证，生产使用需增加

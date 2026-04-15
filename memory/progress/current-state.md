@@ -1066,3 +1066,46 @@ if summary and summary.renderer_entry:
 | apps/shell/integration_status.py | AstrBot config_dirty 漂移 blocker |
 | apps/shell/window.py | 重启按钮 + restartBridge() JS |
 | apps/shell/modes/bubble.py | 新增 restart_bridge() |
+
+
+### Milestone 36 — 冲刺到可运行测试
+
+**测试套件**
+建立了完整测试基础设施，7 个测试文件、105 个测试用例，全部通过。
+
+| 测试文件 | 测试用例数 | 覆盖范围 |
+|---------|-----------|---------|
+| test_protocol.py | 14 | Enum 值、TaskInfo、Request/Response 模型、ScreenshotResponse、ActiveWindowResponse |
+| test_state.py | 11 | AppState 任务创建/取消/状态推进/终态保护/完整生命周期 |
+| test_executor.py | 7 | HermesCallError、HermesInvokeResult、SimulatedExecutor |
+| test_effect_policy.py | 9 | get_effect 策略查询、build_effects_summary 混合效果 |
+| test_integration_status.py | 11 | BridgeStatus/AstrBotStatus/HapiStatus/IntegrationSnapshot + config_dirty 漂移 |
+| test_astrbot_handlers.py | 32 | 命令解析、ACL、帮助/未知命令、8 个 handler 输出格式、错误格式化、状态工具函数 |
+| test_startup.py | 6 | resolve_startup_mode 决策树全路径 |
+
+**测试基础设施**
+- `tests/conftest.py` — Bridge mock 注入（避免真实 uvicorn/fastapi 依赖）+ fixtures
+- `importlib.util.spec_from_file_location` 解决 astrbot-plugin 连字符目录导入问题
+- pytest + pytest-asyncio 异步 handler 测试
+
+**如何运行测试**
+```bash
+cd /path/to/Hermes-Yachiyo
+.venv/bin/python -m pytest tests/ -v
+```
+
+**文件变更**
+| 文件 | 变更 |
+|------|------|
+| tests/__init__.py | 新增 — 包标记 |
+| tests/conftest.py | 新增 — mock 注入 + fixtures |
+| tests/test_protocol.py | 新增 — protocol schema 测试 |
+| tests/test_state.py | 新增 — AppState 生命周期测试 |
+| tests/test_executor.py | 新增 — executor 模型测试 |
+| tests/test_effect_policy.py | 新增 — 设置生效策略测试 |
+| tests/test_integration_status.py | 新增 — 集成状态统一来源测试 |
+| tests/test_astrbot_handlers.py | 新增 — AstrBot 全 handler 输出/错误/ACL 测试 |
+| tests/test_startup.py | 新增 — startup 决策路径测试 |
+| apps/__init__.py | 新增 — 包标记 |
+| packages/__init__.py | 新增 — 包标记 |
+| integrations/__init__.py | 新增 — 包标记 |
