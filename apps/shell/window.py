@@ -1249,16 +1249,17 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
         </div>
         """
     
-    return _INSTALLER_HTML.format(
-        main_title=main_title,
-        steps_title=steps_title,
-        status_class=status_class,
-        status_message=status_message,
-        platform=install_info.platform,
-        error_info=error_info,
-        install_steps=install_steps,
-        init_section=init_section + install_section,
-        suggestions_section=suggestions_section,
+    return (
+        _INSTALLER_HTML
+        .replace("{status_class}", status_class)
+        .replace("{status_message}", status_message)
+        .replace("{platform}", str(install_info.platform))
+        .replace("{error_info}", error_info)
+        .replace("{main_title}", main_title)
+        .replace("{steps_title}", steps_title)
+        .replace("{install_steps}", install_steps)
+        .replace("{init_section}", init_section + install_section)
+        .replace("{suggestions_section}", suggestions_section)
     )
 
 
