@@ -366,6 +366,10 @@ _STATUS_HTML = """
             <div class="settings-row" id="s-bridge-boot-row" style="display:none;"><span class="label" style="color:#888;font-size:0.82em;">运行地址</span><span class="value" id="s-bridge-boot-url" style="font-size:0.82em;color:#888;">—</span></div>
             <div class="bridge-dirty-hint" id="bridge-dirty-hint">⚠️ Bridge 配置已修改，需重启 Bridge 后生效</div>
             <div class="bridge-drift-details" id="bridge-drift-details" style="display:none;font-size:0.78em;color:#cc8844;padding:4px 8px;"></div>
+            <div id="bridge-restart-row" style="display:none;padding:6px 8px;">
+                <button id="bridge-restart-btn" onclick="restartBridge()" style="background:#4a90d9;color:#fff;border:none;border-radius:4px;padding:5px 14px;cursor:pointer;font-size:0.85em;">🔄 应用配置并重启 Bridge</button>
+                <span id="bridge-restart-msg" style="font-size:0.8em;margin-left:8px;"></span>
+            </div>
         </div>
 
         <div class="settings-section">
@@ -514,6 +518,9 @@ _STATUS_HTML = """
             } else {
                 driftEl.style.display = 'none';
             }
+            // 重启按钮：仅 config_dirty 且 bridge 已启用时显示
+            const restartRow = document.getElementById('bridge-restart-row');
+            if (restartRow) restartRow.style.display = (d.bridge.config_dirty && d.bridge.enabled) ? 'block' : 'none';
 
             // Integrations — AstrBot
             const abStatusLabels = {
@@ -590,6 +597,9 @@ _STATUS_HTML = """
                     driftEl.style.display = 'block';
                 } else { driftEl.style.display = 'none'; }
             }
+            // 重启按钮
+            const restartRow = document.getElementById('bridge-restart-row');
+            if (restartRow) restartRow.style.display = (state.bridge.config_dirty && state.bridge.enabled) ? 'block' : 'none';
         }
         // 设置面板：托盘
         const trayEl = document.getElementById('s-tray-enabled');
@@ -681,6 +691,32 @@ _STATUS_HTML = """
             hint.className = 'save-hint err';
         }
         setTimeout(function(){ hint.textContent = ''; hint.className = 'save-hint'; }, 3000);
+    }
+
+    async function restartBridge() {
+        const btn = document.getElementById('bridge-restart-btn');
+        const msg = document.getElementById('bridge-restart-msg');
+        if (btn) { btn.disabled = true; btn.textContent = '⏳ 重启中…'; }
+        if (msg) { msg.textContent = ''; msg.style.color = ''; }
+        try {
+            const result = await window.pywebview.api.restart_bridge();
+            if (result.ok) {
+                if (msg) { msg.textContent = '✅ Bridge 已重启'; msg.style.color = '#66bb6a'; }
+                if (result.app_state) applyAppState(result.app_state);
+                refreshDashboard();
+                // 稍后隐藏重启行（因为 config_dirty 应该已消除）
+                setTimeout(function(){
+                    const row = document.getElementById('bridge-restart-row');
+                    if (row) row.style.display = 'none';
+                    if (msg) msg.textContent = '';
+                }, 2000);
+            } else {
+                if (msg) { msg.textContent = '❌ ' + (result.error || '重启失败'); msg.style.color = '#ef5350'; }
+            }
+        } catch(e) {
+            if (msg) { msg.textContent = '❌ 操作异常'; msg.style.color = '#ef5350'; }
+        }
+        if (btn) { btn.disabled = false; btn.textContent = '🔄 应用配置并重启 Bridge'; }
     }
 
     async function refreshDashboard() {

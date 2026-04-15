@@ -261,3 +261,52 @@ class MainWindowAPI:
                 "hapi": snap.hapi.to_dict(),
             },
         }
+
+    def restart_bridge(self) -> Dict[str, Any]:
+        """重启 Bridge 并用当前已保存的配置重新对齐。
+
+        操作流程：
+          1. 检查 bridge_enabled
+          2. 调用 server.restart_bridge() 停止旧实例 + 启动新线程
+          3. 刷新 _bridge_boot_config（重新对齐）
+          4. 返回最新 app_state 供前端刷新
+        """
+        from apps.bridge.server import restart_bridge as _restart
+
+        if not self._config.bridge_enabled:
+            return {
+                "ok": False,
+                "error": "Bridge 未启用，请先在设置中启用 Bridge",
+                "app_state": self._current_app_state(),
+            }
+
+        host = self._config.bridge_host
+        port = self._config.bridge_port
+
+        try:
+            result = _restart(host=host, port=port)
+        except Exception as exc:
+            logger.error("Bridge 重启异常: %s", exc)
+            return {
+                "ok": False,
+                "error": f"Bridge 重启失败: {exc}",
+                "app_state": self._current_app_state(),
+            }
+
+        if result.get("ok"):
+            # 重启成功 → 刷新 boot_config 使 config_dirty 归零
+            self._bridge_boot_config = {
+                "enabled": self._config.bridge_enabled,
+                "host": host,
+                "port": port,
+            }
+            logger.info("Bridge 重启成功，boot_config 已刷新")
+        else:
+            logger.warning("Bridge 重启失败: %s", result.get("error"))
+
+        return {
+            "ok": result.get("ok", False),
+            "error": result.get("error"),
+            "pending": result.get("pending", False),
+            "app_state": self._current_app_state(),
+        }

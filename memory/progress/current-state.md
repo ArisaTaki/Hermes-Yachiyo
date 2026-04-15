@@ -1030,3 +1030,39 @@ if summary and summary.renderer_entry:
 | apps/shell/modes/bubble.py | 消费 integration_status，增强展示 |
 | apps/shell/window.py | 仪表盘+设置页 bridge/astrbot 展示增强 |
 | apps/shell/settings.py | bridge 运行状态 + AstrBot 接入状态 + 依赖说明 |
+
+
+### Milestone 35 — Bridge 最小控制闭环
+
+**Bridge 控制动作**
+- `apps/bridge/server.py` 新增 `restart_bridge(host, port)` — 停止旧 uvicorn 实例 → 等待旧线程退出(最多5s) → 新后台线程启动
+- `start_bridge()` 正常退出（被 should_exit 停止）时自动归零为 `not_started`
+- 新增 `get_running_config()` 返回当前实际使用的 host/port
+- 失败路径覆盖：bridge 未启用 / 停止超时 / 端口无效 / 启动异常
+
+**MainWindowAPI.restart_bridge()**
+- 检查 bridge_enabled
+- 调用 server.restart_bridge() 停止 + 重启
+- 成功后刷新 `_bridge_boot_config` → config_dirty 归零
+- 返回最新 app_state 供前端刷新
+
+**设置页 UI**
+- bridge 区新增"🔄 应用配置并重启 Bridge"按钮（仅 config_dirty + bridge 已启用时显示）
+- JS `restartBridge()` 函数：调用 API → 显示结果 → 刷新 dashboard → 自动隐藏按钮
+- 成功: "✅ Bridge 已重启" / 失败: "❌ ..." 提示
+
+**AstrBot 漂移警告**
+- `get_astrbot_status()` 新增：bridge running + config_dirty 时增加 blocker "Bridge 配置已修改但尚未重启，AstrBot 可能使用旧地址"
+- bridge 重启成功后 blocker 自动消除
+
+**Bubble 模式**
+- `BubbleWindowAPI` 新增 `restart_bridge()` API，共享同一 server 层实现
+
+**文件变更**
+| 文件 | 变更 |
+|------|------|
+| apps/bridge/server.py | 新增 restart_bridge / get_running_config / 停止后归零 |
+| apps/shell/main_api.py | 新增 restart_bridge() API |
+| apps/shell/integration_status.py | AstrBot config_dirty 漂移 blocker |
+| apps/shell/window.py | 重启按钮 + restartBridge() JS |
+| apps/shell/modes/bubble.py | 新增 restart_bridge() |

@@ -176,8 +176,11 @@ def get_astrbot_status(bridge_status: BridgeStatus) -> AstrBotStatus:
         state = "configured_not_connected"
     else:
         # bridge running — 当前阶段仍为占位，标记为 not_configured
-        # 未来真实接入后切换为 connected
         state = "not_configured"
+
+    # bridge 配置漂移时，AstrBot 可能使用旧地址
+    if bridge_status.config_dirty and bridge_ready:
+        blockers.append("Bridge 配置已修改但尚未重启，AstrBot 可能使用旧地址")
 
     label, description = ASTRBOT_STATES[state]
     return AstrBotStatus(

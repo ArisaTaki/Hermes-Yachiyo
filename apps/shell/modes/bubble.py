@@ -273,6 +273,32 @@ class BubbleWindowAPI:
         except Exception as e:
             logger.error("关闭气泡窗口失败: %s", e)
 
+    def restart_bridge(self) -> Dict[str, Any]:
+        """重启 Bridge 并刷新 boot_config。"""
+        from apps.bridge.server import restart_bridge as _restart
+
+        if not self._config.bridge_enabled:
+            return {"ok": False, "error": "Bridge 未启用"}
+
+        try:
+            result = _restart(
+                host=self._config.bridge_host, port=self._config.bridge_port
+            )
+        except Exception as exc:
+            return {"ok": False, "error": f"Bridge 重启失败: {exc}"}
+
+        if result.get("ok"):
+            self._bridge_boot_config = {
+                "enabled": self._config.bridge_enabled,
+                "host": self._config.bridge_host,
+                "port": self._config.bridge_port,
+            }
+        return {
+            "ok": result.get("ok", False),
+            "error": result.get("error"),
+            "data": self.get_bubble_data(),
+        }
+
 
 def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
     """运行气泡模式（阻塞主线程）"""
