@@ -741,3 +741,29 @@ launch()
 **`apps/shell/settings.py`**
 - HTML 模板：`模型已配置` → `配置状态`，占位改为 `{model_state_label}`
 - `build_settings_html()` 用 `_MODEL_STATE_LABELS` 字典映射四态文本和 CSS 类
+
+
+### Milestone 27 — Live2D 配置资源目录结构检查
+
+**`apps/shell/config.py`**
+- `ModelState` 枚举新增 `PATH_NOT_LIVE2D`（目录存在但无模型文件），完整五态：
+  `NOT_CONFIGURED → PATH_INVALID → PATH_NOT_LIVE2D → PATH_VALID → LOADED`
+- 新增 `check_live2d_model_dir(path: Path) -> bool`：
+  - 检查目录（及一级子目录）中是否存在 `*.moc3` 或 `*.model3.json`
+  - 这是 Live2D Cubism 3/4 模型的两个特征文件
+- `Live2DConfig.validate()` 新增第三层：路径存在 + 无特征文件 → `PATH_NOT_LIVE2D`
+
+**`apps/shell/modes/live2d.py`**
+- 前端 stateLabels 新增 `path_not_live2d` 条目
+
+**`apps/shell/window.py`**
+- 设置面板 JS stateMap 新增 `path_not_live2d` 条目（⚠️ 黄色 warn）
+
+**`apps/shell/settings.py`**
+- `_MODEL_STATE_LABELS` 新增 `path_not_live2d` 条目（含特征文件说明）
+
+**校验层级（validate() 实现）：**
+1. name/path 是否填写    → NOT_CONFIGURED
+2. 目录是否存在且为目录  → PATH_INVALID
+3. 是否含模型特征文件    → PATH_NOT_LIVE2D
+4. 渲染器是否可用        → PATH_VALID（渲染器返回 LOADED）

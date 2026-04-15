@@ -399,10 +399,11 @@ _STATUS_HTML = """
                 const l2d = d.live2d;
                 const stateEl = document.getElementById('s-l2d-state');
                 const stateMap = {
-                    'not_configured': {text: '⚪ 未配置', cls: ''},
-                    'path_invalid':   {text: '❌ 路径无效', cls: 'warn'},
-                    'path_valid':     {text: '✅ 路径存在 · 渲染器待实现', cls: 'ok'},
-                    'loaded':         {text: '✅ 已加载', cls: 'ok'},
+                    'not_configured':  {text: '⚪ 未配置', cls: ''},
+                    'path_invalid':    {text: '❌ 路径不存在', cls: 'warn'},
+                    'path_not_live2d': {text: '⚠️ 目录无模型文件', cls: 'warn'},
+                    'path_valid':      {text: '✅ 模型目录就绪 · 渲染器待实现', cls: 'ok'},
+                    'loaded':          {text: '✅ 已加载', cls: 'ok'},
                 };
                 const stInfo = stateMap[l2d.model_state] || {text: l2d.model_state, cls: ''};
                 stateEl.textContent = stInfo.text;

@@ -194,7 +194,8 @@ _LIVE2D_HTML = """
             const modelState = d.model.state || 'not_configured';
             const stateLabels = {
                 'not_configured':  'LIVE2D · 角色模型未配置',
-                'path_invalid':    'LIVE2D · 模型路径无效: ' + (d.model.name || '未命名'),
+                'path_invalid':    'LIVE2D · 模型路径不存在: ' + (d.model.name || '未命名'),
+                'path_not_live2d': 'LIVE2D · 目录无模型文件: ' + (d.model.name || '未命名'),
                 'path_valid':      'LIVE2D · 模型就绪: ' + (d.model.name || '未命名') + ' · 渲染器待实现',
                 'loaded':          d.model.name || 'LIVE2D · 模型已加载',
             };

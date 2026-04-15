@@ -21,17 +21,46 @@ DisplayModeValue = Literal["window", "bubble", "live2d"]
 class ModelState(StrEnum):
     """Live2D 模型配置校验状态。
 
-    状态迁移路径（当前可达的用竖线标注）：
-        NOT_CONFIGURED  → 用户填写配置 →
-        PATH_INVALID    → 路径修正或模型目录就位 →
-        PATH_VALID      → 渲染器实现后 →
-        LOADED          （未来，需要 live2d_renderer.py）
+    状态迁移路径（→ 表示用户操作或系统变化可触发）：
+
+        NOT_CONFIGURED  → 填写 model_name + model_path
+        PATH_INVALID    → 创建或修正目录
+        PATH_NOT_LIVE2D → 在目录内放入 .moc3 / .model3.json 文件
+        PATH_VALID      → live2d_renderer.py 实现后自动升级
+        LOADED          （未来，由 Live2DRenderer 设置）
     """
 
-    NOT_CONFIGURED = "not_configured"   # model_name 或 model_path 为空
-    PATH_INVALID = "path_invalid"       # 路径已填写但目录不存在
-    PATH_VALID = "path_valid"           # 路径存在，但渲染器尚未实现
-    LOADED = "loaded"                   # 渲染器已加载模型（未来）
+    NOT_CONFIGURED  = "not_configured"   # model_name 或 model_path 为空
+    PATH_INVALID    = "path_invalid"     # 路径已填写但目录不存在
+    PATH_NOT_LIVE2D = "path_not_live2d"  # 目录存在但不含 Live2D 模型文件
+    PATH_VALID      = "path_valid"       # 目录含模型文件，渲染器尚未实现
+    LOADED          = "loaded"           # 渲染器已加载模型（未来）
+
+
+# Live2D Cubism 模型目录的特征文件（glob 模式）
+# .moc3        — 二进制模型数据（Cubism 3/4 必须）
+# .model3.json — 模型清单/描述符（Cubism 3/4 必须）
+_LIVE2D_SIGNATURE_GLOBS = ("*.moc3", "*.model3.json")
+
+
+def check_live2d_model_dir(path: Path) -> bool:
+    """检查目录是否像一个 Live2D Cubism 模型目录。
+
+    判断依据：在目录（含一级子目录）中找到至少一个 .moc3 或 .model3.json 文件。
+    仅做文件名匹配，不解析文件内容。
+
+    Returns:
+        True  — 目录内有 Live2D 特征文件
+        False — 目录为空或不含特征文件
+    """
+    for pattern in _LIVE2D_SIGNATURE_GLOBS:
+        # 先检查根目录
+        if any(path.glob(pattern)):
+            return True
+        # 再检查一级子目录（部分打包方式把 moc3 放在子目录）
+        if any(path.glob(f"*/{pattern}")):
+            return True
+    return False
 
 
 @dataclass
@@ -55,15 +84,19 @@ class Live2DConfig:
     def validate(self) -> ModelState:
         """校验当前配置，返回对应状态。
 
-        - 未填写 → NOT_CONFIGURED
-        - 已填写但目录不存在 → PATH_INVALID
-        - 目录存在但渲染器未实现 → PATH_VALID
-        - 渲染器已加载 → LOADED（永远不会由此方法返回，留给 Live2DRenderer）
+        校验层级（从浅到深）：
+          1. 字段是否填写      → NOT_CONFIGURED
+          2. 目录是否存在      → PATH_INVALID
+          3. 是否含模型文件    → PATH_NOT_LIVE2D
+          4. 渲染器是否可用    → PATH_VALID（渲染器实现后由其返回 LOADED）
         """
         if not self.is_model_configured():
             return ModelState.NOT_CONFIGURED
-        if not Path(self.model_path).expanduser().exists():
+        p = Path(self.model_path).expanduser()
+        if not p.exists() or not p.is_dir():
             return ModelState.PATH_INVALID
+        if not check_live2d_model_dir(p):
+            return ModelState.PATH_NOT_LIVE2D
         return ModelState.PATH_VALID
 
 

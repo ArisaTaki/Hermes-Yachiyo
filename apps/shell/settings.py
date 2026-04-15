@@ -111,10 +111,11 @@ def build_settings_html(config: "AppConfig") -> str:
     model_state = l2d.validate()
 
     _MODEL_STATE_LABELS = {
-        "not_configured": ("⚪ 未配置", ""),
-        "path_invalid":   ("❌ 路径无效", "warn"),
-        "path_valid":     ("✅ 路径存在 · 渲染器待实现", "ok"),
-        "loaded":         ("✅ 已加载", "ok"),
+        "not_configured":  ("⚪ 未配置", ""),
+        "path_invalid":    ("❌ 路径不存在", "warn"),
+        "path_not_live2d": ("⚠️ 目录无模型文件（缺少 .moc3 / .model3.json）", "warn"),
+        "path_valid":      ("✅ 模型目录就绪 · 渲染器待实现", "ok"),
+        "loaded":          ("✅ 已加载", "ok"),
     }
     state_label, state_class = _MODEL_STATE_LABELS.get(model_state.value, (model_state.value, ""))
 
