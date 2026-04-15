@@ -1,6 +1,49 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 10: AstrBot Handler 输出格式完善
+## 本轮完成内容 — Milestone 11: 统一 AstrBot 错误与不可用状态反馈
+
+### 修改的文件
+
+| 文件 | 变更 |
+|------|------|
+| integrations/astrbot-plugin/handlers/utils.py | 新增 `fmt_error()` + `_fmt_http_error()` |
+| integrations/astrbot-plugin/command_router.py | catch 块改用 `fmt_error(exc, command)` |
+| integrations/astrbot-plugin/handlers/codex.py | 不再发起 HTTP，直接返回占位消息 |
+| integrations/astrbot-plugin/handlers/status.py | hermes_ready=False 时新增指引行 |
+
+### 统一的错误分类与口径
+
+| 场景 | 输出 |
+|------|------|
+| Bridge 不可达（连接被拒绝） | ⚠️ 无法连接到 Hermes-Yachiyo\n请确认桌面应用正在运行，Bridge 已启用 |
+| 连接超时 | ⚠️ 连接 Hermes-Yachiyo 超时\n请检查桌面应用是否正常运行 |
+| 读取超时 | ⚠️ 请求 /y {cmd} 超时\nBridge 响应过慢，请稍后重试 |
+| HTTP 503（Hermes 未就绪） | ⚠️ Hermes Agent 未就绪\n请在桌面应用中确认 Hermes 安装状态 |
+| HTTP 500/5xx（Bridge 内部错误） | ⚠️ Bridge 内部错误 [状态码]\n{detail} |
+| HTTP 422（参数有误） | ⚠️ 请求参数有误\n{detail} |
+| HTTP 404（资源不存在） | ⚠️ 资源不存在\n{detail} |
+| HTTP 4xx（其他客户端错误） | ⚠️ 请求错误 [状态码]\n{detail} |
+| /y codex（Hapi 占位） | 🤖 /y codex 即将推出\nCodex CLI 通过 Hapi 执行，后端端点正在对接中 |
+| Hermes 未就绪（来自 /status） | 正常输出 + 末行：请在桌面应用中完成 Hermes 安装配置 |
+| 未知异常 | ⚠️ 未知错误\n{exc} |
+
+### 架构决策
+
+- **所有命令统一通过 command_router.py 的 catch 块处理异常**，各 handler 无需单独捕获
+- **codex.py 不发起网络请求**：Hapi 端点未确认前，直接返回占位文案，避免产生噪音错误
+- **错误分类逻辑在 utils.py**，不在 handler 或 router 中内联，可复用
+
+### 仍为占位的部分
+
+| 命令 | 状态 | 说明 |
+|------|------|------|
+| /y codex | ⚠️ 占位 | Hapi /codex 端点确认后接入 |
+| /y screen（图片） | ⚠️ 占位 | base64 → AstrBot 图片消息待联调 |
+| AstrBot 宿主绑定 | ⚠️ 待完成 | on_y_command() 与 AstrBot 事件系统挂钩 |
+
+## 下一步重点
+
+**AstrBot 宿主绑定**：在 AstrBot 插件框架中注册 /y 命令监听，调用 `on_y_command()`。
 
 ### 目标
 完善 AstrBot bridge 各命令的用户可读 QQ 输出格式。

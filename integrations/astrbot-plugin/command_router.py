@@ -55,4 +55,5 @@ async def route(command: str, args: str, config: PluginConfig) -> str:
         return await dispatch(command, args, config)
     except Exception as exc:
         logger.exception("命令执行失败: /y %s", command)
-        return f"❌ 执行失败: {exc}"
+        from .handlers.utils import fmt_error
+        return fmt_error(exc, command)

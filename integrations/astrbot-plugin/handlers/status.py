@@ -36,5 +36,7 @@ async def handle(args: str, config: PluginConfig) -> str:
     ]
     if failed:
         lines.append(f"失败任务: {fmt_status_icon('failed')} {failed}")
+    if not hermes_ready:
+        lines.append("请在桌面应用中完成 Hermes 安装配置")
 
     return "\n".join(lines)

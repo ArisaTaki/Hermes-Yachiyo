@@ -260,11 +260,26 @@
 - ✅ handlers/screen.py: 格式大写化，时间格式化，文案整洁
 - ✅ handlers/do.py: 状态显示为中文标签，ID 截短为 8 位
 
+### Milestone 11 — 统一 AstrBot 错误与不可用状态反馈
+
+- ✅ handlers/utils.py — 新增 `fmt_error(exc, command)` + `_fmt_http_error()`
+  - 连接失败 → "⚠️ 无法连接到 Hermes-Yachiyo，请确认桌面应用运行"
+  - 连接超时 → "⚠️ 连接超时"
+  - 读取超时 → "⚠️ 请求超时，请稍后重试"
+  - HTTP 503 → "⚠️ Hermes Agent 未就绪（含桌面应用指引）"
+  - HTTP 5xx → "⚠️ Bridge 内部错误 [状态码]"
+  - HTTP 422/404/4xx → 对应可读提示
+  - RuntimeError（来自 _raise_readable）→ 解析 [状态码] 后分类
+  - 其他 → "⚠️ 未知错误"
+- ✅ command_router.py — catch 块统一改用 `fmt_error(exc, command)`
+- ✅ handlers/codex.py — 不发起 HTTP 请求，直接返回清晰占位消息
+- ✅ handlers/status.py — `hermes_ready=False` 时新增桌面应用指引行
+
 ## 当前占位状态
 
-- `codex.py`：Hapi /codex 端点 schema 待确认
-- `screen.py`：base64 → AstrBot 图片消息待联调
-- AstrBot 宿主绑定：`on_y_command()` 入口已定义，与 AstrBot 事件系统的挂钩待联调
+- `/y codex`：直接返回"即将推出"（Hapi 端点待确认）
+- `/y screen` 图片发送：base64 → AstrBot 图片消息待联调
+- AstrBot 宿主绑定：`on_y_command()` 入口已定义，与 AstrBot 事件系统挂钩待联调
 
 ## Bridge 状态模型（Milestone 8）
 
