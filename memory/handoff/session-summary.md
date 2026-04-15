@@ -377,3 +377,25 @@ live2d 保持占位实现不变。后续接入时只需修改 `apps/shell/modes/
 ### 下一步
 
 AstrBot 宿主绑定：on_y_command() 与 AstrBot 事件系统挂钩。
+
+---
+
+## Milestone 13 — 任务状态最小推进
+
+### 变更文件
+
+| 文件 | 变更 |
+|------|------|
+| apps/core/task_runner.py | 新建：最小 asyncio 任务状态推进器 |
+| apps/bridge/server.py | 新增 _lifespan，启动/停止 TaskRunner |
+| integrations/astrbot-plugin/handlers/tasks.py | 状态标签改为完整文字 + updated_at |
+
+### 任务状态链路
+
+- PENDING → RUNNING（2s）→ COMPLETED（+5s），TaskRunner 在 Bridge lifespan 中启动
+- cancel 直接置终态，TaskRunner 检测到终态冲突静默跳过
+- 真实 Hermes 集成时只替换 `_execute()` 模拟逻辑
+
+### 下一步
+
+AstrBot 宿主绑定 / 真实 Hermes Agent 执行接入

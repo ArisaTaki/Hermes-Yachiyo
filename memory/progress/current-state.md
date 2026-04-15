@@ -320,3 +320,30 @@
 ## 下一步
 
 **AstrBot 宿主绑定**：在 AstrBot 插件框架中注册 /y 命令，调用 `on_y_command()`。
+
+### Milestone 13 — 任务状态最小推进
+
+- ✅ apps/core/task_runner.py（新建）— 最小 asyncio 任务执行器
+  - TaskRunner: 轮询 PENDING 任务，分派到独立协程
+  - PENDING → RUNNING（2 秒延迟）
+  - RUNNING → COMPLETED（再 5 秒，result 写入占位说明）
+  - 异常时置 FAILED，cancelled_error 静默退出
+  - stop() 优雅取消所有子协程
+- ✅ apps/bridge/server.py — 新增 `_lifespan` FastAPI 生命周期
+  - 启动时创建 TaskRunner 并调用 runner.start()
+  - 停止时调用 runner.stop()
+  - Runtime 未注入时优雅降级（跳过启动，不崩溃）
+- ✅ integrations/astrbot-plugin/handlers/tasks.py — 状态展示升级
+  - 每条任务显示完整状态标签（⏳ 等待中 / 🔄 运行中 / ✅ 已完成 / …）
+  - 时间戳改为 updated_at（体现最新状态变更时间）
+
+### 任务状态链路
+
+1. `/y do <描述>` → 创建 PENDING 任务
+2. ~2 秒后 → TaskRunner 推进至 RUNNING
+3. ~再 5 秒后 → TaskRunner 推进至 COMPLETED（result 为占位说明）
+4. `/y tasks` → 实时显示当前状态（含图标+文字标签）
+5. `/y check <id>` → 详情含 result/error 字段
+6. `/y cancel <id>` → 直接置 CANCELLED（TaskRunner 遇到终态冲突静默跳过）
+
+真实 Hermes 集成时，只需替换 `TaskRunner._execute()` 中的模拟逻辑。
