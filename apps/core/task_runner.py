@@ -140,11 +140,21 @@ class TaskRunner:
 
         except Exception as exc:
             logger.exception("任务执行失败: %s", task_id)
+            # 若是 HermesCallError，使用结构化错误字符串
+            try:
+                from apps.core.executor import HermesCallError
+                error_str = (
+                    exc.to_error_string()
+                    if isinstance(exc, HermesCallError)
+                    else f"{type(exc).__name__}: {exc}"
+                )
+            except ImportError:
+                error_str = f"{type(exc).__name__}: {exc}"
             try:
                 self._state.update_task_status(
                     task_id,
                     TaskStatus.FAILED,
-                    error=f"{type(exc).__name__}: {exc}",
+                    error=error_str,
                 )
             except Exception:
                 pass

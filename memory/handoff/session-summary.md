@@ -459,3 +459,21 @@ AstrBot 宿主绑定 / 真实 Hermes Agent 执行接入
 - 确认 hermes run --prompt 是正确 CLI 接口
 - 测试机安装 Hermes Agent
 - (可选) 流式输出支持
+
+
+---
+
+## Milestone 17 — HermesExecutor 最小真实验证闭环
+
+### 变更文件
+
+| 文件 | 变更 |
+|------|------|
+| apps/core/executor.py | HermesInvokeResult dataclass + invoke_hermes_cli() 独立函数 + probe_hermes_available() |
+| apps/core/task_runner.py | FAILED 时使用 HermesCallError.to_error_string() |
+
+### 关键设计
+
+- invoke_hermes_cli() 是最小调用单元，不抛异常，统一返回结构化结果
+- CLI 接口变更只改 _HERMES_CMD 常量 + invoke_hermes_cli() 函数
+- 失败信息完整保存到 TaskInfo.error（returncode + stderr）

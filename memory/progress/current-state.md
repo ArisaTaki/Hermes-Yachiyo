@@ -418,3 +418,41 @@
 - 确认 hermes run --prompt 是正确 CLI 接口（或切换 HTTP API）
 - 在测试机安装 Hermes Agent，验证 select_executor 自动切换
 - 处理 Hermes 流式输出（当前收集全部 stdout）
+
+
+### Milestone 17 — HermesExecutor 最小真实验证闭环
+
+- apps/core/executor.py — 重构为职责分离三层
+  - `HermesInvokeResult`（dataclass）: 结构化调用结果
+    - success / stdout / stderr / returncode / error_message
+    - output property: 成功时返回 stdout，失败时返回空串
+    - to_task_error(): 格式化为可写入 TaskInfo.error 的字符串
+  - `invoke_hermes_cli(description)`: 独立异步函数，最小调用单元
+    - 构造 cmd → create_subprocess_exec → wait_for(communicate, 60s)
+    - 所有失败路径均返回 HermesInvokeResult（不抛出），调用方决定如何处理
+    - FileNotFoundError / asyncio.TimeoutError / returncode!=0 → success=False
+  - `probe_hermes_available()`: 独立同步函数，hermes --version 探测
+  - `HermesCallError.to_error_string()`: 结构化错误 → 可写入 error 字段的字符串
+  - `HermesExecutor._call_hermes()`: 调用 invoke_hermes_cli()，映射结果/异常
+  - `HermesExecutor.is_available()`: 委托 probe_hermes_available()
+  - `select_executor()`: 改用 probe_hermes_available() 直接探测
+- apps/core/task_runner.py — FAILED 时使用 HermesCallError.to_error_string()
+
+### 当前 HermesExecutor 实际调用链
+
+1. `invoke_hermes_cli(description)` → `hermes run --prompt "<description>"`
+2. 等待 stdout/stderr，最多 60 秒
+3. 返回 `HermesInvokeResult`（结构化）
+4. `_call_hermes()` 映射：success=True → 返回 output；success=False → 抛 HermesCallError
+5. `run()` 捕获 → fallback 或 重抛
+6. `TaskRunner._execute_with_state()` 捕获 → update_task_status(FAILED, error=to_error_string())
+
+### 调用成功 / 失败路径
+
+| 场景 | HermesInvokeResult | TaskInfo |
+|------|-------------------|----------|
+| 正常输出 | success=True, stdout=... | status=COMPLETED, result=stdout |
+| hermes 命令未找到 | success=False, error_message=... | status=FAILED, error="hermes 命令未找到..." |
+| 超时（60s） | success=False, error_message=... | status=FAILED, error="Hermes 执行超时..." |
+| returncode != 0 | success=False, stderr=... | status=FAILED, error="exit=N | stderr: ..." |
+| stdout 为空 | success=True, stdout="[完毕无输出]" | status=COMPLETED, result="[完毕无输出]" |
