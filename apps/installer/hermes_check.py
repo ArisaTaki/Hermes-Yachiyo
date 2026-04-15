@@ -6,10 +6,11 @@
 import logging
 import os
 import platform
+import re
 import subprocess
 from typing import Tuple
 
-from packages.protocol.enums import HermesInstallStatus, Platform
+from packages.protocol.enums import HermesInstallStatus, HermesReadinessLevel, Platform
 from packages.protocol.install import HermesInstallInfo, HermesVersionInfo
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,12 @@ def check_hermes_command(hermes_path: str = "hermes") -> Tuple[bool, str | None]
 
 
 def get_hermes_version() -> HermesVersionInfo | None:
-    """获取 Hermes Agent 版本信息"""
+    """获取 Hermes Agent 版本信息
+
+    ``hermes --version`` 第一行格式为：
+    ``Hermes Agent v0.9.0 (2026.4.13)``
+    使用正则从第一行提取 ``vX.Y.Z``，避免与后续 Python/SDK 版本混淆。
+    """
     try:
         result = subprocess.run(
             ["hermes", "--version"],
@@ -93,18 +99,28 @@ def get_hermes_version() -> HermesVersionInfo | None:
         )
         if result.returncode != 0:
             return None
-        
-        version_text = result.stdout.strip()
-        # 解析版本信息（格式可能是 "hermes 1.2.3" 或包含更多信息）
+
+        # 只解析第一行（"Hermes Agent v0.9.0 (2026.4.13)"）
+        first_line = (result.stdout.strip().splitlines() or [""])[0]
         version_info = HermesVersionInfo()
-        
-        # 简单解析版本号
-        parts = version_text.split()
-        for part in parts:
-            if part[0].isdigit() and "." in part:
-                version_info.version = part
-                break
-        
+
+        # 优先匹配 vX.Y.Z 格式（Hermes 自身版本）
+        m = re.search(r'v(\d+\.\d+(?:\.\d+)?)', first_line)
+        if m:
+            version_info.version = m.group(1)
+        else:
+            # 降级：从第一行找任意 digit.digit 形式（不跨行，避免拾取 Python 版本）
+            for part in first_line.split():
+                clean = part.strip("v().,")
+                if clean and clean[0].isdigit() and "." in clean:
+                    version_info.version = clean
+                    break
+
+        # 提取构建日期 "(YYYY.M.D)"
+        bd = re.search(r'\((\d{4}\.\d+\.\d+)\)', first_line)
+        if bd:
+            version_info.build_date = bd.group(1)
+
         return version_info
     except Exception as e:
         logger.warning("获取 Hermes 版本信息失败: %s", e)
@@ -269,6 +285,63 @@ def get_hermes_home() -> str:
     return default_hermes_home
 
 
+def check_hermes_doctor_readiness() -> Tuple[HermesReadinessLevel, list[str], int]:
+    """通过 ``hermes doctor`` 检测 Hermes 能力就绪程度。
+
+    解析策略：
+    - 扫描 ``◆ Tool Availability`` 节的 ``⚠`` 行，提取受限工具名
+    - 解析末尾摘要 ``Found N issue(s)`` 获取 issue 计数
+    - 若解析失败（超时/命令不存在），静默返回 ``UNKNOWN``，不阻塞启动
+
+    Returns:
+        (readiness_level, limited_tool_names, issues_count)
+    """
+    try:
+        result = subprocess.run(
+            ["hermes", "doctor"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        output = result.stdout + result.stderr
+
+        # 解析末尾 issue 数
+        m = re.search(r'Found (\d+) issue', output)
+        issues_count = int(m.group(1)) if m else 0
+
+        # 解析 Tool Availability 节的受限工具
+        limited_tools: list[str] = []
+        in_tools_section = False
+        for line in output.splitlines():
+            stripped = line.strip()
+            if "Tool Availability" in stripped or (stripped.startswith("◆") and "Tool" in stripped):
+                in_tools_section = True
+                continue
+            if in_tools_section and stripped.startswith("◆"):
+                in_tools_section = False
+                continue
+            if in_tools_section and "⚠" in line:
+                # 格式: "  ⚠ toolname (reason)"
+                nm = re.match(r'\s*⚠\s+(\w+)', line)
+                if nm:
+                    limited_tools.append(nm.group(1))
+
+        if issues_count == 0 and not limited_tools:
+            return HermesReadinessLevel.FULL_READY, [], 0
+        else:
+            return HermesReadinessLevel.BASIC_READY, limited_tools, issues_count
+
+    except FileNotFoundError:
+        # hermes 命令不存在（理论上不应到达此处，安装检测已先行）
+        return HermesReadinessLevel.UNKNOWN, [], 0
+    except subprocess.TimeoutExpired:
+        logger.debug("hermes doctor 超时，跳过就绪分级")
+        return HermesReadinessLevel.UNKNOWN, [], 0
+    except Exception as exc:
+        logger.debug("hermes doctor 检测失败，跳过就绪分级: %s", exc)
+        return HermesReadinessLevel.UNKNOWN, [], 0
+
+
 def check_hermes_installation() -> HermesInstallInfo:
     """完整的 Hermes Agent 安装检测
     
@@ -384,7 +457,12 @@ def check_hermes_installation() -> HermesInstallInfo:
         ]
         return install_info
     
-    # 7. 一切就绪
+    # 7. 一切就绪 — 检测能力等级
+    readiness_level, limited_tools, issues_count = check_hermes_doctor_readiness()
+    install_info.readiness_level = readiness_level
+    install_info.limited_tools = limited_tools
+    install_info.doctor_issues_count = issues_count
+
     install_info.status = HermesInstallStatus.READY
     return install_info
 

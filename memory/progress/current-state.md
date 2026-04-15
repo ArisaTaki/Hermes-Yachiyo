@@ -1277,3 +1277,56 @@ queue = ctypes.addressof(main_q_obj)
 - `_dispatch_main_q` 在 system Python 3.13 和 venv Python（Anaconda 3.13.12）均验证可用
 - `dispatch_async_f` 可正常调用
 - `py_compile` 语法检查通过
+
+### Milestone 40 — Hermes 就绪状态细化分级
+
+**问题**：
+1. 版本显示错误：`get_hermes_version()` 从 `hermes --version` 多行输出中匹配到 `3.11.12`（Python 版本），而非 `v0.9.0`（Hermes 版本）
+2. 就绪状态二元：`is_hermes_ready()` 只有 True/False，无法区分"基础可用"与"完整就绪"
+3. `hermes doctor` 的工具受限信息未被 UI 消费
+
+**解决方案**：
+
+新增独立 `HermesReadinessLevel` 枚举（与 `HermesInstallStatus` 正交，仅在 READY 时有意义）：
+
+| 值 | 含义 |
+|----|------|
+| `unknown` | 未检测或检测失败 |
+| `basic_ready` | 至少一个 auth 可用，部分工具受限 |
+| `full_ready` | 无遗留 issue |
+
+**修复：版本解析**
+
+- 旧：遍历全部 split token，命中 `3.11.12`（Python 版本，在后续行）
+- 新：只解析第一行，正则匹配 `v(\d+\.\d+(?:\.\d+)?)` → `0.9.0`
+
+**新函数：`check_hermes_doctor_readiness()`**
+
+- 运行 `hermes doctor`（30s 超时），失败静默返回 `UNKNOWN`
+- 解析 `◆ Tool Availability` 节的 `⚠ toolname` 行，提取受限工具名
+- 解析 `Found N issue(s)` 行获取 issue 数
+- 返回 `(HermesReadinessLevel, limited_tools, issues_count)`
+
+**实测结果（当前环境）**：
+
+```
+readiness_level: basic_ready
+limited_tools: ['homeassistant', 'image_gen', 'moa', 'rl', 'messaging', 'vision', 'web']
+doctor_issues_count: 1
+```
+
+**变更**：
+
+- ✅ `packages/protocol/enums.py` — 新增 `HermesReadinessLevel` 枚举（3 值）
+- ✅ `packages/protocol/install.py` — `HermesInstallInfo` 新增 `readiness_level`, `limited_tools`, `doctor_issues_count` 字段
+- ✅ `apps/installer/hermes_check.py`
+  - `get_hermes_version()` 修复：前导行正则匹配 `v\d+.\d+` + 捕获 build_date
+  - 新增 `check_hermes_doctor_readiness()` 函数
+  - `check_hermes_installation()` READY 分支调用 doctor 检测
+- ✅ `apps/core/runtime.py` — `get_status()` 包含 `readiness_level`, `limited_tools`, `doctor_issues_count`
+- ✅ `apps/shell/main_api.py` — `get_dashboard_data()` + `get_settings_data()` 传递 readiness 数据
+- ✅ `apps/shell/window.py`
+  - 仪表盘 Hermes 卡：新增 `hermes-limited-row`（受限工具）
+  - 设置面板 Hermes 节：新增 `s-hermes-readiness`（能力就绪）+ `s-hermes-limited-row`（受限工具）
+  - `refreshDashboard()` JS：按 readiness_level 显示"完整就绪 / 基础可用 · 部分工具受限"
+  - `refreshSettings()` JS：按 readiness_level 分级显示，受限工具提示"运行 hermes setup 可补全"

@@ -58,6 +58,19 @@ class AuditAction(StrEnum):
     HERMES_INSTALL_ATTEMPT = "hermes_install_attempt"
 
 
+class HermesReadinessLevel(StrEnum):
+    """Hermes Agent 能力就绪等级（仅在 HermesInstallStatus.READY 时有意义）
+
+    描述 Hermes 自身的能力完整程度，与安装状态正交：
+    - 安装状态用于控制启动路由（安装向导 / 初始化 / 正常模式）
+    - 就绪等级用于在正常模式 UI 中向用户展示能力细节
+    """
+
+    UNKNOWN = "unknown"          # 未检测 or 检测失败（不阻塞正常运行）
+    BASIC_READY = "basic_ready"  # 基础可用：至少一个 auth 工作，部分工具受限
+    FULL_READY = "full_ready"    # 完整就绪：无遗留 issue，所有推荐能力均已配置
+
+
 class HermesInstallStatus(StrEnum):
     """Hermes Agent 安装状态"""
 

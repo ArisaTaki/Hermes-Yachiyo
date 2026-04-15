@@ -4,7 +4,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from .enums import HermesInstallStatus, Platform
+from .enums import HermesInstallStatus, HermesReadinessLevel, Platform
 
 
 class HermesVersionInfo(BaseModel):
@@ -46,6 +46,15 @@ class HermesInstallInfo(BaseModel):
     
     suggestions: list[str] = Field(default_factory=list)
     """安装建议"""
+
+    readiness_level: HermesReadinessLevel = HermesReadinessLevel.UNKNOWN
+    """能力就绪等级（仅在 status=READY 时有意义）"""
+
+    limited_tools: list[str] = Field(default_factory=list)
+    """受限工具名称列表（hermes doctor 检测到的 ⚠ 工具）"""
+
+    doctor_issues_count: int = 0
+    """hermes doctor 报告的 issue 数（0 表示完整就绪）"""
 
 
 class HermesSetupRequest(BaseModel):

@@ -79,6 +79,9 @@ class MainWindowAPI:
                     "version": hermes_info.get("version"),
                     "platform": hermes_info.get("platform", "unknown"),
                     "ready": self._runtime.is_hermes_ready(),
+                    "readiness_level": hermes_info.get("readiness_level", "unknown"),
+                    "limited_tools": hermes_info.get("limited_tools", []),
+                    "doctor_issues_count": hermes_info.get("doctor_issues_count", 0),
                 },
                 "workspace": {
                     "path": workspace.get("workspace_path", ""),
@@ -112,6 +115,9 @@ class MainWindowAPI:
                     "command_exists": hermes_info.get("command_exists", False),
                     "hermes_home": hermes_info.get("hermes_home", ""),
                     "ready": self._runtime.is_hermes_ready(),
+                    "readiness_level": hermes_info.get("readiness_level", "unknown"),
+                    "limited_tools": hermes_info.get("limited_tools", []),
+                    "doctor_issues_count": hermes_info.get("doctor_issues_count", 0),
                 },
                 "workspace": {
                     "path": workspace.get("workspace_path", ""),

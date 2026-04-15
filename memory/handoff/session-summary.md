@@ -1,6 +1,74 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 39: 修复 GCD dispatch_get_main_queue 符号不可用
+## 本轮完成内容 — Milestone 40: Hermes 就绪状态细化分级
+
+### 问题
+
+1. **版本显示错误**：`hermes --version` 输出为多行，旧解析器扫描全部 token 命中 `3.11.12`（Python 版本），未能提取 `v0.9.0`（Hermes 版本）
+2. **状态二元**：UI 显示"已就绪"但实际有 7 项工具受限，用户无法感知
+3. **`hermes doctor` 信息未被消费**
+
+### 根因
+
+- `hermes --version` 第一行：`Hermes Agent v0.9.0 (2026.4.13)`；Python 版本 `3.11.12` 出现在后续行
+- `HermesInstallStatus.READY` 是二元状态，不描述能力完整程度
+
+### 解决方案
+
+新增 `HermesReadinessLevel`（`basic_ready` / `full_ready` / `unknown`）与 `check_hermes_doctor_readiness()` 函数：
+
+| 分级 | 含义 |
+|------|------|
+| `basic_ready` | 可运行，但部分工具受限（当前实测状态） |
+| `full_ready` | 零 issue，完整就绪 |
+| `unknown` | doctor 超时/失败，不阻塞启动 |
+
+### 修改文件
+
+| 文件 | 变更 |
+|------|------|
+| `packages/protocol/enums.py` | 新增 `HermesReadinessLevel` |
+| `packages/protocol/install.py` | `HermesInstallInfo` 新增 readiness 字段 |
+| `apps/installer/hermes_check.py` | 修复版本解析；新增 `check_hermes_doctor_readiness()` |
+| `apps/core/runtime.py` | `get_status()` 包含 readiness 数据 |
+| `apps/shell/main_api.py` | 传递 readiness 数据到前端 |
+| `apps/shell/window.py` | 仪表盘/设置面板：分级显示状态 + 受限工具列表 |
+
+### 当前环境实测
+
+```
+version: 0.9.0  (修复前误显示 3.11.12)
+readiness_level: basic_ready
+limited_tools: homeassistant, image_gen, moa, rl, messaging, vision, web
+doctor_issues_count: 1  (建议 hermes setup)
+```
+
+### UI 展示效果
+
+- 仪表盘 Hermes 卡：`⚠️ 基础可用 · 部分工具受限` + 受限工具行
+- 设置面板：能力就绪行 + 受限工具行（含"运行 hermes setup 可补全"提示）
+
+### 已验证通过链路
+
+install → setup → workspace init → ready → normal mode → runtime → bridge → tray (GCD) → **readiness 分级显示**
+
+### 如何接手
+
+```bash
+cd /Users/hacchiroku/AI/Hermes-Yachiyo
+.venv/bin/python -m apps.shell.app
+```
+
+### 下一步建议
+
+1. **Task 系统真实 CLI 联调**
+2. **AstrBot 真实 QQ 联调**
+3. **Live2D 渲染器**
+4. **Bridge HTTPS/认证**
+
+---
+
+## 历史记录 — Milestone 39: 修复 GCD dispatch_get_main_queue 符号不可用
 
 ### 问题
 

@@ -113,6 +113,9 @@ class HermesRuntime:
                     else None
                 ),
                 "hermes_home": self._hermes_install_info.hermes_home,
+                "readiness_level": self._hermes_install_info.readiness_level,
+                "limited_tools": self._hermes_install_info.limited_tools,
+                "doctor_issues_count": self._hermes_install_info.doctor_issues_count,
             }
         
         return status

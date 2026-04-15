@@ -229,6 +229,7 @@ _STATUS_HTML = """
             <div class="row"><span class="label">状态</span><span class="value" id="hermes-status">检测中…</span></div>
             <div class="row"><span class="label">版本</span><span class="value" id="hermes-version">—</span></div>
             <div class="row"><span class="label">平台</span><span class="value" id="hermes-platform">—</span></div>
+            <div class="row" id="hermes-limited-row" style="display:none;"><span class="label" style="font-size:0.82em;color:#cc8844;">受限工具</span><span class="value warn" id="hermes-limited" style="font-size:0.8em;">—</span></div>
         </div>
         <div class="card">
             <h3>Yachiyo 工作空间</h3>
@@ -294,6 +295,8 @@ _STATUS_HTML = """
         <div class="settings-section">
             <h4>Hermes Agent</h4>
             <div class="settings-row"><span class="label">安装状态</span><span class="value" id="s-hermes-status">—</span></div>
+            <div class="settings-row"><span class="label">能力就绪</span><span class="value" id="s-hermes-readiness">—</span></div>
+            <div class="settings-row" id="s-hermes-limited-row" style="display:none;"><span class="label" style="color:#cc8844;">受限工具</span><span class="value warn" id="s-hermes-limited" style="font-size:0.8em;">—</span></div>
             <div class="settings-row"><span class="label">版本</span><span class="value" id="s-hermes-version">—</span></div>
             <div class="settings-row"><span class="label">平台</span><span class="value" id="s-hermes-platform">—</span></div>
             <div class="settings-row"><span class="label">命令可用</span><span class="value" id="s-hermes-cmd">—</span></div>
@@ -422,10 +425,42 @@ _STATUS_HTML = """
             const d = await window.pywebview.api.get_settings_data();
             if (d.error) return;
 
-            // Hermes
+            // Hermes Agent — 按 readiness_level 分级显示
             const hsEl = document.getElementById('s-hermes-status');
-            hsEl.textContent = d.hermes.ready ? '✅ 已就绪' : '⚠️ ' + d.hermes.status;
-            hsEl.className = 'value ' + (d.hermes.ready ? 'ok' : 'warn');
+            const srl = d.hermes.readiness_level;
+            if (srl === 'full_ready') {
+                hsEl.textContent = '✅ 完整就绪'; hsEl.className = 'value ok';
+            } else if (srl === 'basic_ready') {
+                hsEl.textContent = '⚠️ 基础可用'; hsEl.className = 'value warn';
+            } else if (d.hermes.ready) {
+                hsEl.textContent = '✅ 已就绪'; hsEl.className = 'value ok';
+            } else {
+                hsEl.textContent = '⚠️ ' + d.hermes.status; hsEl.className = 'value warn';
+            }
+            // 能力就绪行
+            const rlEl = document.getElementById('s-hermes-readiness');
+            if (rlEl) {
+                const rlLabels = {
+                    full_ready: '✅ 完整就绪',
+                    basic_ready: '⚠️ 基础可用（部分工具受限）',
+                    unknown: '—'
+                };
+                rlEl.textContent = rlLabels[srl] || (d.hermes.ready ? '✅ 已就绪' : '—');
+                rlEl.className = 'value' + (srl === 'full_ready' ? ' ok' : srl === 'basic_ready' ? ' warn' : '');
+            }
+            // 受限工具行
+            const sLimRow = document.getElementById('s-hermes-limited-row');
+            const sLimEl = document.getElementById('s-hermes-limited');
+            if (sLimRow && sLimEl) {
+                const limited = d.hermes.limited_tools || [];
+                if (limited.length > 0) {
+                    sLimRow.style.display = 'flex';
+                    const issueHint = d.hermes.doctor_issues_count > 0 ? ' — 运行 hermes setup 可补全' : '';
+                    sLimEl.textContent = limited.join('、') + issueHint;
+                } else {
+                    sLimRow.style.display = 'none';
+                }
+            }
             document.getElementById('s-hermes-version').textContent = d.hermes.version || '未知';
             document.getElementById('s-hermes-platform').textContent = d.hermes.platform;
             document.getElementById('s-hermes-cmd').textContent = d.hermes.command_exists ? '✅ 是' : '❌ 否';
@@ -725,9 +760,16 @@ _STATUS_HTML = """
             const data = await window.pywebview.api.get_dashboard_data();
             if (data.error) return;
 
-            // Hermes
+            // Hermes Agent — 按 readiness_level 分级显示
             const hs = document.getElementById('hermes-status');
-            if (data.hermes.ready) {
+            const rl = data.hermes.readiness_level;
+            if (rl === 'full_ready') {
+                hs.textContent = '✅ 完整就绪';
+                hs.className = 'value ok';
+            } else if (rl === 'basic_ready') {
+                hs.textContent = '⚠️ 基础可用 · 部分工具受限';
+                hs.className = 'value warn';
+            } else if (data.hermes.ready) {
                 hs.textContent = '✅ 已就绪';
                 hs.className = 'value ok';
             } else {
@@ -736,6 +778,18 @@ _STATUS_HTML = """
             }
             document.getElementById('hermes-version').textContent = data.hermes.version || '未知';
             document.getElementById('hermes-platform').textContent = data.hermes.platform;
+            // 受限工具行
+            const limRow = document.getElementById('hermes-limited-row');
+            const limEl = document.getElementById('hermes-limited');
+            if (limRow && limEl) {
+                const tools = data.hermes.limited_tools || [];
+                if (tools.length > 0) {
+                    limRow.style.display = 'flex';
+                    limEl.textContent = tools.join('、');
+                } else {
+                    limRow.style.display = 'none';
+                }
+            }
 
             // Workspace
             const ws = document.getElementById('ws-status');
