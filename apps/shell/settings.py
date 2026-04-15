@@ -47,6 +47,27 @@ h2 {{ color: #6495ed; font-size: 1.1em; margin-bottom: 16px; }}
     border: 1px solid #6495ed33; color: #9988cc;
     padding: 1px 8px; border-radius: 10px; font-size: 0.8em;
 }}
+.s-input {{
+    background: #1a1a3e; color: #e0e0e0; border: 1px solid #4a4a7a;
+    border-radius: 4px; padding: 3px 6px; font-size: 0.85em;
+    flex: 1; min-width: 0; text-align: right;
+}}
+.s-input:focus {{ outline: none; border-color: #6495ed; }}
+.s-toggle {{ position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }}
+.s-toggle input {{ opacity: 0; width: 0; height: 0; }}
+.slider {{
+    position: absolute; cursor: pointer; inset: 0;
+    background: #444; border-radius: 20px; transition: .2s;
+}}
+.slider:before {{
+    content: ""; position: absolute; height: 14px; width: 14px;
+    left: 3px; bottom: 3px; background: white;
+    border-radius: 50%; transition: .2s;
+}}
+input:checked + .slider {{ background: #6495ed; }}
+input:checked + .slider:before {{ transform: translateX(16px); }}
+.save-hint {{ font-size: 0.82em; margin-top: 8px; color: #90ee90; min-height: 1.2em; }}
+.save-hint.err {{ color: #ff6b6b; }}
 </style>
 </head>
 <body>
@@ -61,11 +82,13 @@ h2 {{ color: #6495ed; font-size: 1.1em; margin-bottom: 16px; }}
 <div class="section">
     <h4>Live2D 模式配置 <span class="badge">骨架</span></h4>
     <div class="row"><span class="label">配置状态</span>
-        <span class="value {model_state_class}">{model_state_label}</span></div>
-    <div class="row"><span class="label">当前模型</span>
-        <span class="value {model_name_class}">{model_name}</span></div>
+        <span class="value {model_state_class}" id="sw-l2d-state">{model_state_label}</span></div>
+    <div class="row"><span class="label">模型名称</span>
+        <input class="s-input" id="sw-model-name" value="{model_name_val}" placeholder="hiyori"
+               onchange="saveLive2D('model_name', this.value)"></div>
     <div class="row"><span class="label">模型路径</span>
-        <span class="value {model_path_class}" style="font-size:0.8em;word-break:break-all;">{model_path}</span></div>
+        <input class="s-input" id="sw-model-path" value="{model_path_val}" placeholder="/path/to/model"
+               style="font-size:0.78em;" onchange="saveLive2D('model_path', this.value)"></div>
     <div class="row"><span class="label">检测到 .model3.json</span>
         <span class="value {summary_json_class}" style="font-size:0.82em;">{summary_model3_json}</span></div>
     <div class="row"><span class="label">检测到 .moc3</span>
@@ -75,17 +98,22 @@ h2 {{ color: #6495ed; font-size: 1.1em; margin-bottom: 16px; }}
     <div class="row"><span class="label">渲染器入口候选</span>
         <span class="value {summary_entry_class}" style="font-size:0.75em;word-break:break-all;">{summary_renderer_entry}</span></div>
     <div class="row"><span class="label">待机动作组</span>
-        <span class="value">{idle_motion_group}</span></div>
+        <input class="s-input" id="sw-idle-group" value="{idle_motion_group}" placeholder="Idle"
+               onchange="saveLive2D('idle_motion_group', this.value)"></div>
     <div class="row"><span class="label">表情系统</span>
-        <span class="value {expr_class}">{enable_expressions}</span></div>
+        <label class="s-toggle"><input type="checkbox" id="sw-expressions" {expr_checked}
+               onchange="saveLive2D('enable_expressions', this.checked)"><span class="slider"></span></label></div>
     <div class="row"><span class="label">物理模拟</span>
-        <span class="value {phys_class}">{enable_physics}</span></div>
+        <label class="s-toggle"><input type="checkbox" id="sw-physics" {phys_checked}
+               onchange="saveLive2D('enable_physics', this.checked)"><span class="slider"></span></label></div>
     <div class="row"><span class="label">窗口置顶</span>
-        <span class="value">{window_on_top}</span></div>
+        <label class="s-toggle"><input type="checkbox" id="sw-on-top" {on_top_checked}
+               onchange="saveLive2D('window_on_top', this.checked)"><span class="slider"></span></label></div>
     <div class="row" style="border-top:1px solid #4a3a4a; margin-top:6px; padding-top:8px;">
         <span class="label" style="color:#888;font-size:0.82em;">接入状态</span>
         <span class="value dim">渲染器未实现 · 等待 live2d_renderer.py</span>
     </div>
+    <div class="save-hint" id="sw-hint"></div>
 </div>
 
 <div class="section">
@@ -101,6 +129,33 @@ h2 {{ color: #6495ed; font-size: 1.1em; margin-bottom: 16px; }}
     <div class="row"><span class="label">连接状态</span>
         <span class="value dim">未接入 · 需配置 AstrBot 插件</span></div>
 </div>
+
+<script>
+async function saveLive2D(field, value) {{
+    const hint = document.getElementById('sw-hint');
+    try {{
+        if (!window.pywebview || !window.pywebview.api) {{
+            hint.textContent = '⚠️ pywebview API 未就绪';
+            hint.className = 'save-hint err';
+            return;
+        }}
+        const changes = {{}};
+        changes['live2d.' + field] = value;
+        const res = await window.pywebview.api.update_settings(changes);
+        if (res.ok) {{
+            hint.textContent = '✓ 已保存';
+            hint.className = 'save-hint';
+        }} else {{
+            hint.textContent = '✗ ' + (res.error || (res.errors && res.errors.join('; ')) || '保存失败');
+            hint.className = 'save-hint err';
+        }}
+    }} catch(e) {{
+        hint.textContent = '✗ 调用失败';
+        hint.className = 'save-hint err';
+    }}
+    setTimeout(function() {{ hint.textContent = ''; hint.className = 'save-hint'; }}, 3000);
+}}
+</script>
 </body>
 </html>
 """
@@ -147,13 +202,17 @@ def build_settings_html(config: "AppConfig") -> str:
 
     return _SETTINGS_HTML.format(
         display_mode=config.display_mode,
-        # Live2D 配置
+        # Live2D 配置状态（只读）
         model_state_label=state_label,
         model_state_class=state_class,
-        model_name=l2d.model_name if l2d.model_name else "（未设置）",
-        model_name_class="" if l2d.model_name else "dim",
-        model_path=l2d.model_path if l2d.model_path else "（未设置）",
-        model_path_class="" if l2d.model_path else "dim",
+        # 输入控件初始值
+        model_name_val=l2d.model_name or "",
+        model_path_val=l2d.model_path or "",
+        idle_motion_group=l2d.idle_motion_group or "Idle",
+        expr_checked="checked" if l2d.enable_expressions else "",
+        phys_checked="checked" if l2d.enable_physics else "",
+        on_top_checked="checked" if l2d.window_on_top else "",
+        # 摘要（只读）
         summary_model3_json=s_json,
         summary_json_class=s_json_cls,
         summary_moc3=s_moc3,
@@ -161,13 +220,7 @@ def build_settings_html(config: "AppConfig") -> str:
         summary_file_loc=s_loc,
         summary_renderer_entry=s_entry,
         summary_entry_class=s_entry_cls,
-        idle_motion_group=l2d.idle_motion_group or "Idle",
-        enable_expressions="✅ 启用" if l2d.enable_expressions else "— 禁用",
-        expr_class="ok" if l2d.enable_expressions else "",
-        enable_physics="✅ 启用" if l2d.enable_physics else "— 禁用",
-        phys_class="ok" if l2d.enable_physics else "",
-        window_on_top="✅ 置顶" if l2d.window_on_top else "— 不置顶",
-        # Bridge
+        # Bridge（只读）
         bridge_enabled="✅ 已启用" if config.bridge_enabled else "⛔ 已禁用",
         bridge_class="ok" if config.bridge_enabled else "",
         bridge_addr=f"http://{config.bridge_host}:{config.bridge_port}",

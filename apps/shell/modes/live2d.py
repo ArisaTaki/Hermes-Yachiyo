@@ -310,8 +310,48 @@ class Live2DWindowAPI:
         except Exception as exc:
             logger.error("打开主窗口失败: %s", exc)
 
+    def update_settings(self, changes: dict) -> dict:
+        """保存配置变更，供设置页调用。支持 live2d.* 前缀的嵌套字段。"""
+        from apps.shell.config import save_config
+
+        _EDITABLE_LIVE2D_FIELDS: dict[str, type] = {
+            "model_name": str,
+            "model_path": str,
+            "idle_motion_group": str,
+            "enable_expressions": bool,
+            "enable_physics": bool,
+            "window_on_top": bool,
+        }
+
+        applied: dict[str, object] = {}
+        errors: list[str] = []
+
+        for key, value in changes.items():
+            prefix, _, sub_key = key.partition(".")
+            if prefix == "live2d" and sub_key:
+                if sub_key not in _EDITABLE_LIVE2D_FIELDS:
+                    errors.append(f"不可编辑字段: {key}")
+                    continue
+                expected = _EDITABLE_LIVE2D_FIELDS[sub_key]
+                if not isinstance(value, expected):
+                    errors.append(f"类型错误: {key} 期望 {expected.__name__}")
+                    continue
+                setattr(self._config.live2d, sub_key, value)
+                applied[key] = value
+            else:
+                errors.append(f"不支持的字段: {key}")
+
+        if applied:
+            try:
+                save_config(self._config)
+            except Exception as exc:
+                logger.error("设置保存失败: %s", exc)
+                return {"ok": False, "error": str(exc), "applied": applied}
+
+        return {"ok": True, "applied": applied, **({"errors": errors} if errors else {})}
+
     def open_settings(self) -> None:
-        """打开设置页（占位，后续接入 settings 模块）。"""
+        """打开设置页，传入当前 API 实例以支持保存操作。"""
         try:
             import webview  # type: ignore[import]
             from apps.shell.settings import build_settings_html
@@ -320,8 +360,9 @@ class Live2DWindowAPI:
                 title="Hermes-Yachiyo — 设置",
                 html=build_settings_html(self._config),
                 width=520,
-                height=460,
+                height=480,
                 resizable=False,
+                js_api=self,
             )
         except Exception as exc:
             logger.error("打开设置页失败: %s", exc)

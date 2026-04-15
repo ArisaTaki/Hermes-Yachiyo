@@ -1,6 +1,54 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 11: 统一 AstrBot 错误与不可用状态反馈
+## 本轮完成内容 — Milestone 30: Live2D 配置最小可编辑能力
+
+### 修改的文件
+
+| 文件 | 变更 |
+|------|------|
+| apps/shell/settings.py | HTML 模板重构为可编辑控件版（input + toggle）；build_settings_html() 参数更新 |
+| apps/shell/modes/live2d.py | Live2DWindowAPI 新增 update_settings()；open_settings() 传入 js_api=self |
+| apps/shell/main_api.py | update_settings() 支持 live2d.* 嵌套字段；_EDITABLE_LIVE2D_FIELDS 白名单 |
+| apps/shell/window.py | Live2D 设置区域输入控件 + refreshSettings() active-element 守护 |
+| memory/progress/current-state.md | Milestone 30 记录 |
+| memory/handoff/session-summary.md | 本次汇报 |
+
+### Live2D 可编辑字段
+
+| 字段 | 控件 |
+|------|------|
+| live2d.model_name | text input |
+| live2d.model_path | text input |
+| live2d.idle_motion_group | text input |
+| live2d.enable_expressions | toggle checkbox |
+| live2d.enable_physics | toggle checkbox |
+| live2d.window_on_top | toggle checkbox |
+
+### 两处设置入口
+
+1. **主窗口内嵌设置面板**（window.py）
+   - 通过 `MainWindowAPI.update_settings({'live2d.*': value})` 保存
+   - `refreshSettings()` 填充 `.value`/`.checked`，active-element 守护防止覆盖输入
+
+2. **Live2D 模式独立设置窗口**（settings.py + live2d.py）
+   - `open_settings()` 传 `js_api=self`（Live2DWindowAPI 实例）
+   - JS `saveLive2D(field, value)` → `window.pywebview.api.update_settings({'live2d.field': value})`
+   - 保存结果在"已保存"提示区显示（3秒后消失）
+
+### 架构决策
+
+- `Live2DWindowAPI.update_settings()` 独立实现（不调用 main_api），保持模式边界清晰
+- `_EDITABLE_LIVE2D_FIELDS` 白名单在两处各自维护（main_api / live2d.py），字段一致
+- 真正渲染逻辑继续留给未来 `live2d_renderer.py`，本次不触及
+
+### 仍为占位的部分
+
+| 功能 | 状态 |
+|------|------|
+| Live2D 模型实际加载/渲染 | 等待 live2d_renderer.py |
+| 配置修改后热更新模型 | 等待渲染器实现 |
+| model_state = PATH_VALID / LOADED | 等待渲染器实现 |
+
 
 ### 修改的文件
 

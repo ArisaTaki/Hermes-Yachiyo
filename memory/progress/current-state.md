@@ -831,3 +831,43 @@ summary = config.live2d.scan()
 if summary and summary.renderer_entry:
     renderer.load(summary.renderer_entry)  # 唯一入口
 ```
+
+
+### Milestone 30 — Live2D 配置最小可编辑能力
+
+**`apps/shell/main_api.py`**
+- `update_settings()` 新增 `live2d.*` 前缀嵌套字段支持
+  - `_EDITABLE_LIVE2D_FIELDS` 白名单：model_name / model_path / idle_motion_group / enable_expressions / enable_physics / window_on_top
+  - 字段名以 `live2d.` 开头 → 写入 `config.live2d.*`，同步保存配置
+
+**`apps/shell/window.py`**（主窗口内嵌设置面板）
+- Live2D 设置区域 HTML 改为可编辑控件：
+  - model_name / model_path / idle_motion_group → `<input class="s-input">`
+  - enable_expressions / enable_physics / window_on_top → `<label class="s-toggle">` + checkbox
+- JS `onSettingChange(key, value)` 支持 `live2d.*` 前缀写入
+- JS `refreshSettings()` 填充 `.value` / `.checked`，加 active-element 守护（防止用户输入被覆盖）
+
+**`apps/shell/settings.py`**（Live2D 模式独立设置窗口）
+- HTML 模板 `_SETTINGS_HTML` 重构为带输入控件版本：
+  - model_name / model_path / idle_motion_group → `<input class="s-input">` with `onchange="saveLive2D(...)"`
+  - enable_expressions / enable_physics / window_on_top → `<label class="s-toggle">`
+  - 新增 `save-hint` 显示区（3秒后消失）
+  - 新增 JS `saveLive2D(field, value)` → `window.pywebview.api.update_settings({'live2d.<field>': value})`
+- `build_settings_html()` 参数改为输入控件初始值（`model_name_val` / `expr_checked` 等）
+
+**`apps/shell/modes/live2d.py`**（Live2DWindowAPI）
+- 新增 `update_settings(changes: dict) -> dict` 方法
+  - 独立处理 `live2d.*` 前缀字段，不依赖 main_api
+  - 应用变更后调用 `save_config()`
+  - 返回 `{ok, applied, errors?}`
+- `open_settings()` 传入 `js_api=self`，让设置窗口可调用 `update_settings`
+
+**可编辑字段一览：**
+| 字段 | 控件类型 | 默认值 |
+|------|---------|--------|
+| model_name | text input | 空 |
+| model_path | text input | 空 |
+| idle_motion_group | text input | Idle |
+| enable_expressions | toggle | False |
+| enable_physics | toggle | False |
+| window_on_top | toggle | False |

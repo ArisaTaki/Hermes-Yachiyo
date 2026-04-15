@@ -182,11 +182,21 @@ class MainWindowAPI:
         "bridge_port": int,
         "tray_enabled": bool,
     }
+    # Live2D 嵌套字段白名单（key 格式：live2d.<field_name>）
+    _EDITABLE_LIVE2D_FIELDS: Dict[str, type] = {
+        "model_name":         str,
+        "model_path":         str,
+        "idle_motion_group":  str,
+        "enable_expressions": bool,
+        "enable_physics":     bool,
+        "window_on_top":      bool,
+    }
     _VALID_DISPLAY_MODES = {"window", "bubble", "live2d"}
 
     def update_settings(self, changes: Dict[str, Any]) -> Dict[str, Any]:
-        """修改基础配置项并持久化
+        """修改配置项并持久化。
 
+        支持顶层字段（如 display_mode）和嵌套 live2d 字段（如 live2d.model_name）。
         仅允许修改白名单内的字段，返回最终生效的值。
         """
         if not isinstance(changes, dict):
@@ -196,19 +206,32 @@ class MainWindowAPI:
         errors: list[str] = []
 
         for key, value in changes.items():
+            # --- 嵌套 live2d.* 字段 ---
+            if key.startswith("live2d."):
+                sub_key = key[len("live2d."):]
+                if sub_key not in self._EDITABLE_LIVE2D_FIELDS:
+                    errors.append(f"不支持修改: {key}")
+                    continue
+                expected = self._EDITABLE_LIVE2D_FIELDS[sub_key]
+                if not isinstance(value, expected):
+                    errors.append(f"{key} 类型错误，期望 {expected.__name__}")
+                    continue
+                setattr(self._config.live2d, sub_key, value)
+                applied[key] = value
+                continue
+
+            # --- 顶层字段 ---
             if key not in self._EDITABLE_FIELDS:
                 errors.append(f"不支持修改: {key}")
                 continue
 
             expected = self._EDITABLE_FIELDS[key]
-            # 类型校验 (JS int 可能传 float)
             if expected is int and isinstance(value, float) and value == int(value):
                 value = int(value)
             if not isinstance(value, expected):
                 errors.append(f"{key} 类型错误，期望 {expected.__name__}")
                 continue
 
-            # 值域校验
             if key == "display_mode" and value not in self._VALID_DISPLAY_MODES:
                 errors.append(f"无效的显示模式: {value}")
                 continue
