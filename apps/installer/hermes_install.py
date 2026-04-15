@@ -45,6 +45,19 @@ class HermesInstallGuide:
         elif install_info.status == HermesInstallStatus.INCOMPATIBLE_VERSION:
             return HermesInstallGuide._get_upgrade_instructions(install_info)
         
+        elif install_info.status == HermesInstallStatus.INSTALLED_NEEDS_SETUP:
+            return {
+                "status": "needs_setup",
+                "message": "Hermes Agent 已安装，需要完成初始配置",
+                "actions": [
+                    "Hermes Agent 安装成功，但尚未完成初始配置。",
+                    "请在终端中运行以下命令完成交互式配置：",
+                    "  hermes setup",
+                    "配置过程会要求你设置 API 密钥、模型偏好等选项。",
+                    "完成后回到此窗口点击「重新检测」按钮继续。",
+                ],
+            }
+
         elif install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED:
             return HermesInstallGuide._get_workspace_init_instructions(install_info)
         

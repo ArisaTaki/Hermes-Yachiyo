@@ -1,13 +1,60 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 36: 冲刺到可运行测试
+## 本轮完成内容 — Milestone 37: Hermes Setup 阶段纳入状态流
 
-### 测试套件 — 105 tests, all passed
+### 问题
 
-建立了完整测试基础设施，覆盖项目核心模块：
+Hermes 安装后需要 `hermes setup` 交互式配置，但之前的状态流没有这个阶段，导致用户看起来像"卡住了"。
 
-| 测试文件 | 数量 | 覆盖 |
-|---------|------|------|
+### 解决方案
+
+将状态流从三级扩展为四级：
+
+```
+NOT_INSTALLED → INSTALLED_NEEDS_SETUP → INSTALLED_NOT_INITIALIZED → READY
+     安装引导        Setup 配置            工作空间初始化         正常模式
+```
+
+### 修改文件
+
+| 文件 | 变更 |
+|------|------|
+| packages/protocol/enums.py | 新增 `INSTALLED_NEEDS_SETUP` 枚举值 |
+| apps/installer/hermes_check.py | 新增 `check_hermes_setup()` + 插入 check_hermes_installation() |
+| apps/installer/hermes_install.py | 新增 `INSTALLED_NEEDS_SETUP` 安装指导分支 |
+| apps/shell/startup.py | 显式映射 `INSTALLED_NEEDS_SETUP → INSTALLER` |
+| apps/shell/installer_api.py | 新增 `open_hermes_setup_terminal()` — macOS/Linux 终端拉起 |
+| apps/shell/window.py | Setup 引导 UI + 按钮 + JS 逻辑 + 窗口标题适配 |
+| tests/test_startup.py | 新增 `test_needs_setup_to_installer` |
+| memory/progress/current-state.md | Milestone 37 记录 |
+
+### Setup 引导 UI
+
+- 窗口标题：「Hermes-Yachiyo - 配置 Hermes Agent」
+- 状态栏：蓝色 info 样式，显示「Hermes Agent 已安装，需要完成初始配置」
+- 操作区：
+  - 「开始配置 Hermes」按钮 → 打开 Terminal.app 执行 `hermes setup`
+  - 「我已完成配置，重新检测」按钮 → recheck_status() → 按结果跳转
+
+### macOS Terminal 拉起实现
+
+使用 osascript AppleScript：
+```applescript
+tell application "Terminal"
+    activate
+    do script "hermes setup"
+end tell
+```
+
+### 用户流程闭环
+
+1. 安装完成 → recheck 检测到 `installed_needs_setup` → 自动重启进入 setup 引导
+2. 用户点击「开始配置 Hermes」→ Terminal.app 打开并执行 `hermes setup`
+3. 用户在终端完成交互式配置
+4. 用户回到应用点击「重新检测」
+5. 检测通过 → 进入工作空间初始化 → 完成 → 正常模式
+
+### 如何接手
 | test_protocol.py | 14 | Enum、TaskInfo、Request/Response 模型 |
 | test_state.py | 11 | 任务创建/取消/状态推进/终态保护 |
 | test_executor.py | 7 | HermesCallError、SimulatedExecutor |

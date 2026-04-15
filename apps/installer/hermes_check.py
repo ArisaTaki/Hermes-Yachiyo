@@ -120,6 +120,44 @@ def is_version_compatible(version: str) -> bool:
         return False
 
 
+def check_hermes_setup() -> Tuple[bool, str]:
+    """检查 Hermes Agent 是否已完成 setup（交互式配置）。
+
+    检测策略（按优先级）：
+    1. ``hermes status`` 返回 0 → setup 已完成
+    2. HERMES_HOME 下存在 config.yaml / config.yml / config.json → setup 已完成
+    3. 以上均不满足 → 需要 setup
+
+    Returns:
+        (setup_done, error_message)
+    """
+    # 策略 1: hermes status 退出码
+    try:
+        result = subprocess.run(
+            ["hermes", "status"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            return True, ""
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+    except Exception as exc:
+        logger.debug("hermes status 执行异常: %s", exc)
+
+    # 策略 2: 配置文件存在性
+    hermes_home = os.getenv("HERMES_HOME", os.path.expanduser("~/.hermes"))
+    config_candidates = [
+        os.path.join(hermes_home, "config.yaml"),
+        os.path.join(hermes_home, "config.yml"),
+        os.path.join(hermes_home, "config.json"),
+    ]
+    for cfg_path in config_candidates:
+        if os.path.isfile(cfg_path):
+            return True, ""
+
+    return False, "Hermes Agent 已安装但尚未完成初始配置（hermes setup）"
+
+
 def check_yachiyo_workspace() -> Tuple[bool, str]:
     """检查 Yachiyo 工作空间初始化状态
     
@@ -279,7 +317,19 @@ def check_hermes_installation() -> HermesInstallInfo:
         ]
         return install_info
     
-    # 5. Yachiyo 工作空间初始化检查
+    # 5. Hermes setup（交互式配置）检查
+    setup_done, setup_error = check_hermes_setup()
+    if not setup_done:
+        install_info.status = HermesInstallStatus.INSTALLED_NEEDS_SETUP
+        install_info.error_message = setup_error
+        install_info.suggestions = [
+            "Hermes Agent 已安装，但需要完成初始配置",
+            "请在终端中运行 hermes setup 完成交互式配置",
+            "配置完成后回到此应用点击「重新检测」"
+        ]
+        return install_info
+
+    # 6. Yachiyo 工作空间初始化检查
     hermes_home = get_hermes_home()
     install_info.hermes_home = hermes_home
     
@@ -294,7 +344,7 @@ def check_hermes_installation() -> HermesInstallInfo:
         ]
         return install_info
     
-    # 6. 一切就绪
+    # 7. 一切就绪
     install_info.status = HermesInstallStatus.READY
     return install_info
 

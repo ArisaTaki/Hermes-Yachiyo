@@ -998,11 +998,13 @@ def create_installer_window(install_info: "HermesInstallInfo", config: "AppConfi
     api = InstallerWebViewAPI()
 
     is_init_mode = install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED
-    window_title = (
-        "Hermes-Yachiyo - 初始化工作空间"
-        if is_init_mode
-        else "Hermes-Yachiyo - 安装 Hermes Agent"
-    )
+    is_setup_mode = install_info.status == HermesInstallStatus.INSTALLED_NEEDS_SETUP
+    if is_init_mode:
+        window_title = "Hermes-Yachiyo - 初始化工作空间"
+    elif is_setup_mode:
+        window_title = "Hermes-Yachiyo - 配置 Hermes Agent"
+    else:
+        window_title = "Hermes-Yachiyo - 安装 Hermes Agent"
 
     webview.create_window(
         title=window_title,
@@ -1026,6 +1028,7 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
     # 状态样式和消息
     status_mapping = {
         HermesInstallStatus.NOT_INSTALLED: ("warning", "Hermes Agent 未安装"),
+        HermesInstallStatus.INSTALLED_NEEDS_SETUP: ("info", "Hermes Agent 已安装，需要完成初始配置"),
         HermesInstallStatus.INSTALLED_NOT_INITIALIZED: ("info", "Hermes Agent 已安装，需要初始化 Yachiyo 工作空间"),
         HermesInstallStatus.INITIALIZING: ("info", "正在初始化 Yachiyo 工作空间..."),
         HermesInstallStatus.INCOMPATIBLE_VERSION: ("warning", "Hermes Agent 版本不兼容"),
@@ -1044,7 +1047,10 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
         error_info = f"<strong>详情：</strong>{install_info.error_message}"
     
     # 根据状态确定主标题和步骤内容
-    if install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED:
+    if install_info.status == HermesInstallStatus.INSTALLED_NEEDS_SETUP:
+        main_title = "配置 Hermes Agent"
+        steps_title = "配置说明："
+    elif install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED:
         main_title = "初始化 Yachiyo 工作空间"
         steps_title = "初始化步骤："
     else:
@@ -1155,6 +1161,9 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                 } else if (s.needs_init) {
                     result.innerHTML = '<span style="color:#ffd700">✅ Hermes 已安装，正在进入初始化向导...</span>' + shellNote;
                     setTimeout(() => window.pywebview.api.restart_app(), 1500);
+                } else if (s.status === 'installed_needs_setup') {
+                    result.innerHTML = '<span style="color:#ffd700">✅ Hermes 已安装，需要完成初始配置。正在跳转...</span>' + shellNote;
+                    setTimeout(() => window.pywebview.api.restart_app(), 1500);
                 } else if (s.needs_env_refresh) {
                     // PATH 已注入但完整检测仍未通过（版本不兼容等边缘情况）
                     // 重启后用刷新后的环境重新走完整检测流程
@@ -1178,7 +1187,96 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
 
     # 初始化按钮区域（INSTALLED_NOT_INITIALIZED 状态）
     init_section = ""
-    if install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED and guidance.get("can_initialize", False):
+
+    # setup 引导区域（INSTALLED_NEEDS_SETUP 状态）
+    if install_info.status == HermesInstallStatus.INSTALLED_NEEDS_SETUP:
+        init_section = """
+        <div class="init-section">
+            <h3>⚙️ 配置 Hermes Agent</h3>
+            <p>Hermes Agent 已成功安装，但需要完成初始配置才能正常使用。<br>
+               点击下方按钮将自动打开终端，运行 <code>hermes setup</code> 交互式配置向导。</p>
+            <p style="color:#888;font-size:0.88em;margin-top:8px;">
+                配置过程需要在终端中完成。完成后请回到此窗口点击「重新检测」。</p>
+            <div style="display:flex; gap:12px; margin-top:16px; flex-wrap:wrap;">
+                <button class="init-button" id="setup-btn" onclick="openSetupTerminal()" style="margin:0;">
+                    开始配置 Hermes
+                </button>
+                <button class="init-button" id="recheck-btn" onclick="recheckAfterSetup()"
+                        style="margin:0; background:#3a3a6a; border:1px solid #6495ed;">
+                    我已完成配置，重新检测
+                </button>
+            </div>
+            <div id="setup-status" style="margin-top:12px;"></div>
+        </div>
+        <script>
+        async function openSetupTerminal() {
+            const btn = document.getElementById('setup-btn');
+            const status = document.getElementById('setup-status');
+            btn.disabled = true;
+            btn.textContent = '正在打开终端...';
+            status.innerHTML = '';
+
+            try {
+                if (!window.pywebview || !window.pywebview.api) {
+                    throw new Error('WebView API 不可用');
+                }
+                const resp = await window.pywebview.api.open_hermes_setup_terminal();
+                if (resp.success) {
+                    btn.textContent = '已打开终端';
+                    status.innerHTML =
+                        '<span style="color:#6495ed">✅ 终端已打开，请在终端中完成 Hermes 配置。</span>' +
+                        '<br><span style="color:#888;font-size:0.88em;">' +
+                        '完成后回到此窗口，点击右侧「重新检测」按钮继续。</span>';
+                } else {
+                    throw new Error(resp.error || '无法打开终端');
+                }
+            } catch (err) {
+                btn.disabled = false;
+                btn.textContent = '开始配置 Hermes';
+                status.innerHTML =
+                    '<span style="color:#ff6b6b">❌ ' + err.message + '</span>' +
+                    '<br><span style="color:#888;font-size:0.88em;">您也可以手动打开终端并运行 hermes setup</span>';
+            }
+        }
+
+        async function recheckAfterSetup() {
+            const btn = document.getElementById('recheck-btn');
+            const status = document.getElementById('setup-status');
+            btn.disabled = true;
+            btn.textContent = '检测中...';
+            status.innerHTML = '<span style="color:#6495ed">⏳ 正在检测 Hermes 配置状态...</span>';
+
+            try {
+                const s = await window.pywebview.api.recheck_status();
+                if (s.ready) {
+                    status.innerHTML = '<span style="color:#90ee90">✅ 配置完成！正在进入主界面...</span>';
+                    setTimeout(() => window.pywebview.api.restart_app(), 1500);
+                } else if (s.needs_init) {
+                    status.innerHTML = '<span style="color:#ffd700">✅ Hermes 配置完成，正在进入工作空间初始化...</span>';
+                    setTimeout(() => window.pywebview.api.restart_app(), 1500);
+                } else if (s.status === 'installed_needs_setup') {
+                    btn.disabled = false;
+                    btn.textContent = '我已完成配置，重新检测';
+                    status.innerHTML =
+                        '<span style="color:#ffd700">⚠️ Hermes 配置尚未完成。</span>' +
+                        '<br><span style="color:#888;">请确认已在终端中完成 hermes setup，然后再次点击"重新检测"。</span>';
+                } else {
+                    btn.disabled = false;
+                    btn.textContent = '我已完成配置，重新检测';
+                    status.innerHTML =
+                        '<span style="color:#ff6b6b">⚠️ 检测异常：' + s.status +
+                        (s.message ? '（' + s.message + '）' : '') + '</span>';
+                }
+            } catch (err) {
+                btn.disabled = false;
+                btn.textContent = '我已完成配置，重新检测';
+                status.innerHTML = '<span style="color:#ff6b6b">❌ 检测失败：' + err.message + '</span>';
+            }
+        }
+        </script>
+        """
+
+    elif install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED and guidance.get("can_initialize", False):
         init_section = """
         <div class="init-section">
             <h3>🚀 快速初始化</h3>

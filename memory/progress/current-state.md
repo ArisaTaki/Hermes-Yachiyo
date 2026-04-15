@@ -109,7 +109,8 @@
 ### 状态判定规则
 
 - **未安装**: Hermes Agent 命令不存在或版本不兼容
-- **已安装未初始化**: Hermes Agent 可用，但 Yachiyo 工作空间未初始化  
+- **已安装未配置**: Hermes Agent 可用，但 `hermes setup` 未完成
+- **已安装未初始化**: Hermes Agent 可用且已配置，但 Yachiyo 工作空间未初始化  
 - **已就绪**: Hermes Agent 可用且 Yachiyo 工作空间已初始化
 
 ## 架构边界确认
@@ -127,7 +128,7 @@
 
 - ✅ 正确架构分层和职责边界
 - ✅ Hermes Agent 外部依赖管理和分层状态检测
-- ✅ 启动流程三状态联动（正常 vs 工作空间初始化 vs 安装引导）
+- ✅ 启动流程四状态联动（安装引导 vs Setup 配置 vs 工作空间初始化 vs 正常模式）
 - ✅ 完整的工作空间初始化流程（自动 + 手动）
 - ✅ shell → core → bridge 完整连通
 - ✅ 跨平台支持策略
@@ -1109,3 +1110,39 @@ cd /path/to/Hermes-Yachiyo
 | apps/__init__.py | 新增 — 包标记 |
 | packages/__init__.py | 新增 — 包标记 |
 | integrations/__init__.py | 新增 — 包标记 |
+
+### Milestone 37 — Hermes Setup 阶段纳入状态流
+
+将 Hermes 安装后的 `hermes setup` 交互式配置阶段纳入正式产品流，解决用户安装完成后"卡在 setup"的体验问题。
+
+**状态流更新（四状态）**：
+```
+NOT_INSTALLED → 安装引导
+INSTALLED_NEEDS_SETUP → Setup 配置引导（新增）
+INSTALLED_NOT_INITIALIZED → Yachiyo 工作空间初始化向导
+READY → 正常主界面
+```
+
+**变更**：
+- ✅ packages/protocol/enums.py — 新增 `INSTALLED_NEEDS_SETUP` 枚举值
+- ✅ apps/installer/hermes_check.py
+  - 新增 `check_hermes_setup()` 检测函数（`hermes status` 退出码 + 配置文件存在性）
+  - `check_hermes_installation()` 在步骤 4（基本可用性验证）与步骤 6（工作空间初始化）之间插入 setup 检查
+- ✅ apps/installer/hermes_install.py — `get_install_instructions()` 新增 `INSTALLED_NEEDS_SETUP` 分支
+- ✅ apps/shell/startup.py — `_INSTALL_STATUS_TO_MODE` 显式映射 `INSTALLED_NEEDS_SETUP → INSTALLER`
+- ✅ apps/shell/installer_api.py — 新增 `open_hermes_setup_terminal()` 方法
+  - macOS: osascript 在 Terminal.app 中执行 `hermes setup`
+  - Linux: 按优先级尝试 gnome-terminal / xfce4-terminal / konsole / x-terminal-emulator / xterm
+- ✅ apps/shell/window.py
+  - `_generate_installer_html()` 新增 `INSTALLED_NEEDS_SETUP` 状态样式 + 标题映射
+  - 新增 setup 引导 UI 区块：
+    - 「开始配置 Hermes」按钮 → 调用 `open_hermes_setup_terminal()`
+    - 「我已完成配置，重新检测」按钮 → 调用 `recheck_status()` + 状态跳转
+  - `recheckAfterInstall()` 增加 `installed_needs_setup` 状态分支（安装后重检可能落入 setup 阶段）
+  - `create_installer_window()` 窗口标题适配三种模式
+- ✅ tests/test_startup.py — 新增 `test_needs_setup_to_installer`
+
+**Setup 检测策略**：
+1. `hermes status` 退出码为 0 → setup 已完成
+2. HERMES_HOME 下存在 config.yaml / config.yml / config.json → setup 已完成
+3. 以上均不满足 → 需要 setup

@@ -156,6 +156,70 @@ class InstallerWebViewAPI:
 
         threading.Thread(target=_delayed, daemon=True).start()
 
+    def open_hermes_setup_terminal(self) -> Dict[str, Any]:
+        """在系统终端中打开 ``hermes setup`` 交互式配置。
+
+        macOS: 使用 ``open -a Terminal`` 或 osascript 在 Terminal.app 中执行。
+        Linux: 尝试 gnome-terminal / xterm / x-terminal-emulator。
+
+        Returns:
+            {"success": bool, "error": str | None}
+        """
+        import platform as _platform
+        import subprocess
+
+        system = _platform.system()
+
+        try:
+            if system == "Darwin":
+                # macOS: 用 osascript 在 Terminal.app 中跑 hermes setup
+                script = (
+                    'tell application "Terminal"\n'
+                    "    activate\n"
+                    '    do script "hermes setup"\n'
+                    "end tell"
+                )
+                subprocess.Popen(
+                    ["osascript", "-e", script],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            elif system == "Linux":
+                # Linux: 按优先级尝试常见终端模拟器
+                for terminal_cmd in [
+                    ["gnome-terminal", "--", "hermes", "setup"],
+                    ["xfce4-terminal", "-e", "hermes setup"],
+                    ["konsole", "-e", "hermes", "setup"],
+                    ["x-terminal-emulator", "-e", "hermes setup"],
+                    ["xterm", "-e", "hermes setup"],
+                ]:
+                    try:
+                        subprocess.Popen(
+                            terminal_cmd,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                        break
+                    except FileNotFoundError:
+                        continue
+                else:
+                    return {
+                        "success": False,
+                        "error": "未找到可用的终端模拟器，请手动打开终端运行 hermes setup",
+                    }
+            else:
+                return {
+                    "success": False,
+                    "error": f"当前平台 ({system}) 不支持自动打开终端，请手动运行 hermes setup",
+                }
+
+            logger.info("已在系统终端中启动 hermes setup")
+            return {"success": True, "error": None}
+
+        except Exception as exc:
+            logger.error("打开终端执行 hermes setup 失败: %s", exc)
+            return {"success": False, "error": str(exc)}
+
 
 # 安装进度共享状态（简单字典，单次安装生命周期内使用）
 _install_state: Dict[str, Any] = {
