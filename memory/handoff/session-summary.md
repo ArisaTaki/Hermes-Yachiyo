@@ -1,44 +1,64 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 32: 通用配置保存后即时刷新闭环
+## 本轮完成内容 — Milestone 33: 设置生效策略 + 运行时反馈 + 控制入口
 
 ### 修改的文件
 
 | 文件 | 变更 |
 |------|------|
-| apps/shell/main_api.py | 新增 `_current_app_state()`；`update_settings()` 始终附带 `app_state` |
-| apps/shell/window.py | 新增 `applyAppState(state)` JS；重构 `onSettingChange()` |
-| memory/progress/current-state.md | Milestone 32 记录 |
+| apps/shell/effect_policy.py | **新增** — 集中定义设置生效策略模型 |
+| apps/shell/main_api.py | `_bridge_boot_config` 快照；`_current_app_state()` 增加 `config_dirty`；`update_settings()` 返回 `effects` |
+| apps/shell/modes/live2d.py | `update_settings()` 返回 `effects` |
+| apps/shell/window.py | 新增 `showEffectHints()` JS + `effect-hints` UI + `bridge-dirty-hint` + CSS |
+| apps/shell/settings.py | 新增 `showEffectHints()` JS + `effect-hints` UI + CSS |
+| memory/progress/current-state.md | Milestone 33 记录 |
 | memory/handoff/session-summary.md | 本次汇报 |
 
-### `app_state` 返回结构
+### 设置生效策略模型
+
+```
+EffectType 枚举:
+  IMMEDIATE            — 即时反映到 UI 和内存配置
+  REQUIRES_MODE_RESTART — 需重启当前显示模式
+  REQUIRES_BRIDGE_RESTART — 需重启 Bridge
+  REQUIRES_APP_RESTART  — 需重启整个应用
+```
+
+### 字段 → 策略映射
+
+| 字段 | 策略 |
+|------|------|
+| live2d.model_name/path/idle/expressions/physics | IMMEDIATE |
+| live2d.window_on_top | REQUIRES_MODE_RESTART |
+| display_mode | REQUIRES_MODE_RESTART |
+| bridge_enabled/host/port | REQUIRES_BRIDGE_RESTART |
+| tray_enabled | REQUIRES_APP_RESTART |
+
+### `update_settings()` 返回结构新增
 
 ```json
 {
-  "display_mode": "window",
-  "bridge": {
-    "enabled": true,
-    "host": "127.0.0.1",
-    "port": 8765,
-    "url": "http://127.0.0.1:8765",
-    "running": "running"
+  "ok": true,
+  "applied": {"bridge_host": "0.0.0.0"},
+  "effects": {
+    "effects": [{"key": "bridge_host", "effect": "requires_bridge_restart", "message": "Bridge 地址变更需重启 Bridge 后生效"}],
+    "has_immediate": false,
+    "has_restart_bridge": true,
+    "hint": "需重启 Bridge后生效"
   },
-  "tray_enabled": true
+  "app_state": { "bridge": { "config_dirty": true, ... } }
 }
 ```
 
-### 刷新策略
+### Bridge 配置漂移检测
 
-| 配置字段 | API 调用数 | 刷新范围 |
-|---------|----------|---------|
-| bridge_enabled / host / port | 1 | 设置面板 + 仪表盘 Bridge 卡 |
-| tray_enabled | 1 | 设置面板 tray toggle |
-| display_mode | 2 | applyAppState + refreshSettings（标签列表） |
-| live2d.* | 2 | applyAppState + refreshSettings（live2d 只读区） |
+- `_bridge_boot_config` 记录启动时 bridge 配置快照
+- `_current_app_state()` 对比当前配置与快照，返回 `bridge.config_dirty`
+- 设置页 Bridge 区域显示 `bridge-dirty-hint` 黄色提示条
 
 ### 架构决策
 
-- `_current_app_state()` 是轻量快照，不调用 runtime/workspace，只读 config
-- `applyAppState()` 纯 DOM 操作，不发起 API 调用
-- 仪表盘 Bridge 状态卡借助 `_bridge_status()` 实时反映 bridge.running
-- `display_mode`/`live2d.*` 因需重渲染标签列表仍调用 `refreshSettings()`，其余字段 1 次 API 即完成
+- 生效策略集中在 `effect_policy.py`，不散落在前端字符串
+- `update_settings()` 统一返回 `effects`，主窗口和独立设置窗口共享同一消费逻辑
+- display_mode 采用"保存 + 下次启动生效"策略（MVP 推荐）
+- Bridge 当前不自动重启，仅提示用户配置已变更

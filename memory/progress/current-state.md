@@ -920,3 +920,56 @@ if summary and summary.renderer_entry:
 | tray_enabled | toggle | applyAppState → 设置面板同步 | 1 |
 | display_mode | select | applyAppState + refreshSettings（标签列表重渲染） | 2 |
 | live2d.* | input/toggle | applyAppState + refreshSettings（live2d 只读区刷新） | 2 |
+
+
+### Milestone 33 — 设置生效策略 + 运行时反馈 + 控制入口
+
+**新增 `apps/shell/effect_policy.py`**
+- `EffectType` 枚举：`IMMEDIATE` / `REQUIRES_MODE_RESTART` / `REQUIRES_BRIDGE_RESTART` / `REQUIRES_APP_RESTART`
+- `_FIELD_POLICIES` 集中注册表：11 个可编辑字段 → (效果类型, 用户友好文案)
+- `get_effect(key)` → 查询单字段策略
+- `build_effects_summary(applied_keys)` → 生成统一 effects 摘要，含分级提示
+
+**策略分配：**
+
+| 字段 | 生效策略 |
+|------|---------|
+| live2d.model_name | immediate |
+| live2d.model_path | immediate |
+| live2d.idle_motion_group | immediate |
+| live2d.enable_expressions | immediate |
+| live2d.enable_physics | immediate |
+| live2d.window_on_top | requires_mode_restart |
+| display_mode | requires_mode_restart |
+| bridge_enabled | requires_bridge_restart |
+| bridge_host | requires_bridge_restart |
+| bridge_port | requires_bridge_restart |
+| tray_enabled | requires_app_restart |
+
+**`apps/shell/main_api.py` 变更**
+- 新增 `_bridge_boot_config` 快照：记录 bridge 启动时的配置
+- `_current_app_state()` 新增 `bridge.config_dirty` 字段：检测已保存配置与运行配置差异
+- `update_settings()` 返回新增 `effects` 字段：来自 `build_effects_summary()`
+
+**`apps/shell/modes/live2d.py` 变更**
+- `update_settings()` 返回新增 `effects` 字段（与 main_api 一致的格式）
+
+**`apps/shell/window.py` 变更**
+- 新增 CSS：`effect-hints` / `effect-hint-row` / 四级颜色分类 / `bridge-dirty-hint`
+- Bridge 设置区新增 `bridge-dirty-hint` 提示条：当 bridge.config_dirty 时显示
+- `applyAppState()` 增加 bridge config_dirty 联动
+- 新增 JS `showEffectHints(effects)` 函数：根据 effects 数据渲染分级提示
+- `onSettingChange()` 保存成功后调用 `showEffectHints(res.effects)`
+
+**`apps/shell/settings.py` 变更**
+- 新增 CSS：`effect-hints` 分级提示样式
+- 新增 `effect-hints` DOM 容器
+- 新增 JS `showEffectHints(effects)` 函数
+- `saveLive2D()` 保存成功后调用 `showEffectHints(res.effects)`
+
+**用户体验流程：**
+1. 修改 bridge_host → 保存 → 提示 "🔌 Bridge 地址变更需重启 Bridge 后生效"
+2. 修改 display_mode → 保存 → 提示 "🔄 显示模式将在下次启动时生效"
+3. 修改 live2d.model_path → 保存 → 提示 "✓ 模型路径已更新，已重新校验"
+4. 修改 tray_enabled → 保存 → 提示 "⚡ 托盘设置将在下次启动时生效"
+5. Bridge 区域：当已保存配置与运行配置不一致时，显示黄色漂移提示条

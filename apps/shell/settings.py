@@ -68,6 +68,18 @@ input:checked + .slider {{ background: #6495ed; }}
 input:checked + .slider:before {{ transform: translateX(16px); }}
 .save-hint {{ font-size: 0.82em; margin-top: 8px; color: #90ee90; min-height: 1.2em; }}
 .save-hint.err {{ color: #ff6b6b; }}
+.effect-hints {{
+    margin-top: 6px; padding: 6px 10px; border-radius: 6px;
+    font-size: 0.82em; line-height: 1.5;
+    background: #151528; border: 1px solid #3a3a5a;
+    display: none;
+}}
+.effect-hints.visible {{ display: block; }}
+.effect-hint-row {{ display: flex; align-items: center; gap: 5px; }}
+.effect-hint-immediate {{ color: #90ee90; }}
+.effect-hint-mode {{ color: #ffd700; }}
+.effect-hint-bridge {{ color: #ffa07a; }}
+.effect-hint-app {{ color: #ff8c8c; }}
 </style>
 </head>
 <body>
@@ -114,6 +126,7 @@ input:checked + .slider:before {{ transform: translateX(16px); }}
         <span class="value dim">渲染器未实现 · 等待 live2d_renderer.py</span>
     </div>
     <div class="save-hint" id="sw-hint"></div>
+    <div class="effect-hints" id="sw-effects"></div>
 </div>
 
 <div class="section">
@@ -184,6 +197,25 @@ function updateLive2DState(state) {{
     }}
 }}
 
+function showEffectHints(effects) {{
+    const box = document.getElementById('sw-effects');
+    if (!box || !effects || !effects.effects) {{ if (box) box.classList.remove('visible'); return; }}
+    const iconMap = {{
+        'immediate': ['✓', 'effect-hint-immediate'],
+        'requires_mode_restart': ['🔄', 'effect-hint-mode'],
+        'requires_bridge_restart': ['🔌', 'effect-hint-bridge'],
+        'requires_app_restart': ['⚡', 'effect-hint-app'],
+    }};
+    let html = '';
+    for (const e of effects.effects) {{
+        const [icon, cls] = iconMap[e.effect] || ['•', ''];
+        html += '<div class="effect-hint-row ' + cls + '"><span>' + icon + '</span><span>' + e.message + '</span></div>';
+    }}
+    box.innerHTML = html;
+    box.classList.add('visible');
+    setTimeout(function() {{ box.classList.remove('visible'); }}, 5000);
+}}
+
 async function saveLive2D(field, value) {{
     const hint = document.getElementById('sw-hint');
     try {{
@@ -198,8 +230,8 @@ async function saveLive2D(field, value) {{
         if (res.ok) {{
             hint.textContent = '✓ 已保存';
             hint.className = 'save-hint';
-            // 保存成功后用返回的最新状态刷新只读字段
             if (res.live2d_state) updateLive2DState(res.live2d_state);
+            showEffectHints(res.effects);
         }} else {{
             hint.textContent = '✗ ' + (res.error || (res.errors && res.errors.join('; ')) || '保存失败');
             hint.className = 'save-hint err';

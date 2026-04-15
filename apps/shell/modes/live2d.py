@@ -330,6 +330,7 @@ class Live2DWindowAPI:
     def update_settings(self, changes: dict) -> dict:
         """保存配置变更，供设置页调用。支持 live2d.* 前缀的嵌套字段。"""
         from apps.shell.config import save_config
+        from apps.shell.effect_policy import build_effects_summary
 
         _EDITABLE_LIVE2D_FIELDS: dict[str, type] = {
             "model_name": str,
@@ -365,9 +366,10 @@ class Live2DWindowAPI:
                 logger.error("设置保存失败: %s", exc)
                 return {"ok": False, "error": str(exc), "applied": applied}
 
-        # 保存成功后重新校验，把最新状态一并返回给前端
         live2d_state = self.get_live2d_state() if applied else None
         result: dict = {"ok": True, "applied": applied}
+        if applied:
+            result["effects"] = build_effects_summary(list(applied.keys()))
         if live2d_state is not None:
             result["live2d_state"] = live2d_state
         if errors:

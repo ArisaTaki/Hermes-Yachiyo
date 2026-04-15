@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 from apps.bridge.server import get_bridge_state
 from apps.installer.workspace_init import get_workspace_status
 from apps.shell.config import ModelSummary, save_config
+from apps.shell.effect_policy import build_effects_summary
 
 if TYPE_CHECKING:
     from apps.core.runtime import HermesRuntime
@@ -42,6 +43,12 @@ class MainWindowAPI:
     def __init__(self, runtime: "HermesRuntime", config: "AppConfig") -> None:
         self._runtime = runtime
         self._config = config
+        # 记录 bridge 启动时的配置快照，用于检测配置漂移
+        self._bridge_boot_config = {
+            "enabled": config.bridge_enabled,
+            "host": config.bridge_host,
+            "port": config.bridge_port,
+        }
 
     def _bridge_status(self) -> str:
         """组合 config.bridge_enabled 与实际运行状态，返回四状态字符串。
@@ -253,9 +260,8 @@ class MainWindowAPI:
 
         result: Dict[str, Any] = {"ok": True, "applied": applied, "errors": errors}
         if applied:
-            # 保存成功后始终附带最新通用配置状态，设置页和仪表盘可直接刷新
             result["app_state"] = self._current_app_state()
-            # live2d 字段额外附带详细校验结果
+            result["effects"] = build_effects_summary(list(applied.keys()))
             if any(k.startswith("live2d.") for k in applied):
                 result["live2d_state"] = {
                     "model_state": self._config.live2d.validate().value,
@@ -267,7 +273,16 @@ class MainWindowAPI:
         return result
 
     def _current_app_state(self) -> Dict[str, Any]:
-        """返回当前可编辑配置的最新状态快照，供保存后即时刷新 UI。"""
+        """返回当前可编辑配置的最新状态快照，供保存后即时刷新 UI。
+
+        包含 bridge 配置漂移检测：当已保存的配置与当前运行的 bridge 配置不一致时，
+        bridge.config_dirty=True，前端可据此提示用户需重启 bridge。
+        """
+        bridge_dirty = (
+            self._config.bridge_enabled != self._bridge_boot_config["enabled"]
+            or self._config.bridge_host != self._bridge_boot_config["host"]
+            or self._config.bridge_port != self._bridge_boot_config["port"]
+        )
         return {
             "display_mode": self._config.display_mode,
             "bridge": {
@@ -276,6 +291,7 @@ class MainWindowAPI:
                 "port": self._config.bridge_port,
                 "url": f"http://{self._config.bridge_host}:{self._config.bridge_port}",
                 "running": self._bridge_status(),
+                "config_dirty": bridge_dirty,
             },
             "tray_enabled": self._config.tray_enabled,
         }

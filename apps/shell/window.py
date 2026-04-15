@@ -195,6 +195,25 @@ _STATUS_HTML = """
         }
         .save-hint.ok { color: #90ee90; }
         .save-hint.err { color: #ff6b6b; }
+        .effect-hints {
+            margin-top: 8px; padding: 8px 10px; border-radius: 6px;
+            font-size: 0.82em; line-height: 1.6;
+            background: #1a1a2e; border: 1px solid #3a3a5a;
+            display: none;
+        }
+        .effect-hints.visible { display: block; }
+        .effect-hint-row { display: flex; align-items: center; gap: 6px; }
+        .effect-hint-row .icon { flex-shrink: 0; }
+        .effect-hint-immediate { color: #90ee90; }
+        .effect-hint-mode { color: #ffd700; }
+        .effect-hint-bridge { color: #ffa07a; }
+        .effect-hint-app { color: #ff8c8c; }
+        .bridge-dirty-hint {
+            margin-top: 4px; padding: 4px 8px; border-radius: 4px;
+            font-size: 0.78em; color: #ffa07a; background: #2a1a1a;
+            border: 1px solid #553322; display: none;
+        }
+        .bridge-dirty-hint.visible { display: block; }
     </style>
 </head>
 <body>
@@ -341,6 +360,7 @@ _STATUS_HTML = """
                 <input class="s-input" id="s-bridge-port" type="number" min="1024" max="65535" value="" onchange="onSettingChange('bridge_port', parseInt(this.value))">
             </div>
             <div class="settings-row"><span class="label">完整地址</span><span class="value" id="s-bridge-url">—</span></div>
+            <div class="bridge-dirty-hint" id="bridge-dirty-hint">⚠️ Bridge 配置已修改，需重启 Bridge 后生效</div>
         </div>
 
         <div class="settings-section">
@@ -359,6 +379,7 @@ _STATUS_HTML = """
             <div class="settings-row"><span class="label">启动最小化</span><span class="value" id="s-app-minimized">—</span></div>
         </div>
         <div class="save-hint" id="save-hint"></div>
+        <div class="effect-hints" id="effect-hints"></div>
     </div>
 
     <div class="footer" id="main-footer">
@@ -485,6 +506,11 @@ _STATUS_HTML = """
             if (bpEl && document.activeElement !== bpEl) bpEl.value = state.bridge.port;
             const buEl = document.getElementById('s-bridge-url');
             if (buEl) buEl.textContent = state.bridge.url;
+            // Bridge 配置漂移提示
+            const dirtyEl = document.getElementById('bridge-dirty-hint');
+            if (dirtyEl) {
+                dirtyEl.classList.toggle('visible', !!state.bridge.config_dirty);
+            }
         }
         // 设置面板：托盘
         const trayEl = document.getElementById('s-tray-enabled');
@@ -508,6 +534,25 @@ _STATUS_HTML = """
         }
     }
 
+    function showEffectHints(effects) {
+        const box = document.getElementById('effect-hints');
+        if (!box || !effects || !effects.effects) { if (box) box.classList.remove('visible'); return; }
+        const iconMap = {
+            'immediate': ['✓', 'effect-hint-immediate'],
+            'requires_mode_restart': ['🔄', 'effect-hint-mode'],
+            'requires_bridge_restart': ['🔌', 'effect-hint-bridge'],
+            'requires_app_restart': ['⚡', 'effect-hint-app'],
+        };
+        let html = '';
+        for (const e of effects.effects) {
+            const [icon, cls] = iconMap[e.effect] || ['•', ''];
+            html += '<div class="effect-hint-row ' + cls + '"><span class="icon">' + icon + '</span><span>' + e.message + '</span></div>';
+        }
+        box.innerHTML = html;
+        box.classList.add('visible');
+        setTimeout(function() { box.classList.remove('visible'); }, 5000);
+    }
+
     async function onSettingChange(key, value) {
         const hint = document.getElementById('save-hint');
         try {
@@ -519,15 +564,14 @@ _STATUS_HTML = """
                 hint.textContent = '✓ 已保存';
                 hint.className = 'save-hint ok';
                 if (res.app_state) {
-                    // 用返回快照直接更新大部分字段（1 次 API 调用）
                     applyAppState(res.app_state);
-                    // display_mode 变更需要重新渲染 available_modes 标签列表
                     if (key === 'display_mode' || key.startsWith('live2d.')) {
                         refreshSettings();
                     }
                 } else {
                     refreshSettings();
                 }
+                showEffectHints(res.effects);
             } else {
                 const errMsg = res.error || (Array.isArray(res.errors) ? res.errors.join('; ') : '保存失败');
                 hint.textContent = '✗ ' + errMsg;
