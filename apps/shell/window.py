@@ -998,7 +998,10 @@ def create_installer_window(install_info: "HermesInstallInfo", config: "AppConfi
     api = InstallerWebViewAPI()
 
     is_init_mode = install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED
-    is_setup_mode = install_info.status == HermesInstallStatus.INSTALLED_NEEDS_SETUP
+    is_setup_mode = install_info.status in (
+        HermesInstallStatus.INSTALLED_NEEDS_SETUP,
+        HermesInstallStatus.SETUP_IN_PROGRESS,
+    )
     if is_init_mode:
         window_title = "Hermes-Yachiyo - 初始化工作空间"
     elif is_setup_mode:
@@ -1029,6 +1032,7 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
     status_mapping = {
         HermesInstallStatus.NOT_INSTALLED: ("warning", "Hermes Agent 未安装"),
         HermesInstallStatus.INSTALLED_NEEDS_SETUP: ("info", "Hermes Agent 已安装，需要完成初始配置"),
+        HermesInstallStatus.SETUP_IN_PROGRESS: ("info", "Hermes Agent 配置中，请在终端中完成配置"),
         HermesInstallStatus.INSTALLED_NOT_INITIALIZED: ("info", "Hermes Agent 已安装，需要初始化 Yachiyo 工作空间"),
         HermesInstallStatus.INITIALIZING: ("info", "正在初始化 Yachiyo 工作空间..."),
         HermesInstallStatus.INCOMPATIBLE_VERSION: ("warning", "Hermes Agent 版本不兼容"),
@@ -1050,6 +1054,9 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
     if install_info.status == HermesInstallStatus.INSTALLED_NEEDS_SETUP:
         main_title = "配置 Hermes Agent"
         steps_title = "配置说明："
+    elif install_info.status == HermesInstallStatus.SETUP_IN_PROGRESS:
+        main_title = "配置 Hermes Agent"
+        steps_title = "配置进行中："
     elif install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED:
         main_title = "初始化 Yachiyo 工作空间"
         steps_title = "初始化步骤："
@@ -1164,6 +1171,9 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                 } else if (s.status === 'installed_needs_setup') {
                     result.innerHTML = '<span style="color:#ffd700">✅ Hermes 已安装，需要完成初始配置。正在跳转...</span>' + shellNote;
                     setTimeout(() => window.pywebview.api.restart_app(), 1500);
+                } else if (s.status === 'setup_in_progress') {
+                    result.innerHTML = '<span style="color:#ffd700">✅ Hermes 配置中，正在跳转...</span>' + shellNote;
+                    setTimeout(() => window.pywebview.api.restart_app(), 1500);
                 } else if (s.needs_env_refresh) {
                     // PATH 已注入但完整检测仍未通过（版本不兼容等边缘情况）
                     // 重启后用刷新后的环境重新走完整检测流程
@@ -1188,9 +1198,16 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
     # 初始化按钮区域（INSTALLED_NOT_INITIALIZED 状态）
     init_section = ""
 
-    # setup 引导区域（INSTALLED_NEEDS_SETUP 状态）
-    if install_info.status == HermesInstallStatus.INSTALLED_NEEDS_SETUP:
-        init_section = """
+    # setup 引导区域（INSTALLED_NEEDS_SETUP 或 SETUP_IN_PROGRESS 状态）
+    if install_info.status in (
+        HermesInstallStatus.INSTALLED_NEEDS_SETUP,
+        HermesInstallStatus.SETUP_IN_PROGRESS,
+    ):
+        is_already_running = install_info.status == HermesInstallStatus.SETUP_IN_PROGRESS
+        initial_display_setup = "none" if is_already_running else "inline-block"
+        initial_display_running = "block" if is_already_running else "none"
+        initial_btn_disabled = "disabled" if is_already_running else ""
+        init_section = f"""
         <div class="init-section">
             <h3>⚙️ 配置 Hermes Agent</h3>
             <p>Hermes Agent 已成功安装，但需要完成初始配置才能正常使用。<br>
@@ -1198,7 +1215,8 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
             <p style="color:#888;font-size:0.88em;margin-top:8px;">
                 配置过程需要在终端中完成。完成后请回到此窗口点击「重新检测」。</p>
             <div style="display:flex; gap:12px; margin-top:16px; flex-wrap:wrap;">
-                <button class="init-button" id="setup-btn" onclick="openSetupTerminal()" style="margin:0;">
+                <button class="init-button" id="setup-btn" onclick="openSetupTerminal()"
+                        style="margin:0; display:{initial_display_setup};" {initial_btn_disabled}>
                     开始配置 Hermes
                 </button>
                 <button class="init-button" id="recheck-btn" onclick="recheckAfterSetup()"
@@ -1206,73 +1224,119 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                     我已完成配置，重新检测
                 </button>
             </div>
+            <div id="setup-running-hint" style="display:{initial_display_running};
+                 margin-top:12px; padding:10px; background:#1e3a1e; border-radius:6px; border-left:3px solid #90ee90;">
+                <span style="color:#90ee90;">⏳ 配置终端已打开，请在终端中完成 Hermes 配置。</span><br>
+                <span style="color:#888;font-size:0.88em;">完成后回到此窗口，点击「我已完成配置，重新检测」按钮继续。</span>
+            </div>
             <div id="setup-status" style="margin-top:12px;"></div>
         </div>
         <script>
-        async function openSetupTerminal() {
+        let _setupPollTimer = null;
+
+        async function openSetupTerminal() {{
             const btn = document.getElementById('setup-btn');
             const status = document.getElementById('setup-status');
+            const hint = document.getElementById('setup-running-hint');
             btn.disabled = true;
             btn.textContent = '正在打开终端...';
             status.innerHTML = '';
 
-            try {
-                if (!window.pywebview || !window.pywebview.api) {
+            try {{
+                if (!window.pywebview || !window.pywebview.api) {{
                     throw new Error('WebView API 不可用');
-                }
+                }}
                 const resp = await window.pywebview.api.open_hermes_setup_terminal();
-                if (resp.success) {
-                    btn.textContent = '已打开终端';
-                    status.innerHTML =
-                        '<span style="color:#6495ed">✅ 终端已打开，请在终端中完成 Hermes 配置。</span>' +
-                        '<br><span style="color:#888;font-size:0.88em;">' +
-                        '完成后回到此窗口，点击右侧「重新检测」按钮继续。</span>';
-                } else {
+                if (resp.success) {{
+                    if (resp.already_running) {{
+                        btn.style.display = 'none';
+                        hint.style.display = 'block';
+                        hint.innerHTML =
+                            '<span style="color:#ffd700;">⚠️ 配置终端已打开，请勿重复启动。</span><br>' +
+                            '<span style="color:#888;font-size:0.88em;">请在已打开的终端中完成 Hermes 配置，然后点击「重新检测」。</span>';
+                    }} else {{
+                        btn.style.display = 'none';
+                        hint.style.display = 'block';
+                        startSetupPolling();
+                    }}
+                }} else {{
                     throw new Error(resp.error || '无法打开终端');
-                }
-            } catch (err) {
+                }}
+            }} catch (err) {{
                 btn.disabled = false;
                 btn.textContent = '开始配置 Hermes';
+                btn.style.display = 'inline-block';
                 status.innerHTML =
                     '<span style="color:#ff6b6b">❌ ' + err.message + '</span>' +
                     '<br><span style="color:#888;font-size:0.88em;">您也可以手动打开终端并运行 hermes setup</span>';
-            }
-        }
+            }}
+        }}
 
-        async function recheckAfterSetup() {
+        function startSetupPolling() {{
+            // 每 3 秒检测 setup 进程是否仍在运行
+            if (_setupPollTimer) return;
+            _setupPollTimer = setInterval(async function() {{
+                try {{
+                    const p = await window.pywebview.api.check_setup_process();
+                    const hint = document.getElementById('setup-running-hint');
+                    const btn = document.getElementById('setup-btn');
+                    if (!p.running) {{
+                        // setup 进程结束，更新 UI
+                        clearInterval(_setupPollTimer);
+                        _setupPollTimer = null;
+                        hint.innerHTML =
+                            '<span style="color:#ffd700;">💡 配置终端已关闭。</span><br>' +
+                            '<span style="color:#888;font-size:0.88em;">如果已完成配置，请点击「重新检测」；如需重新配置，可再次点击下方按钮。</span>';
+                        btn.disabled = false;
+                        btn.textContent = '重新打开配置终端';
+                        btn.style.display = 'inline-block';
+                    }}
+                }} catch(e) {{}}
+            }}, 3000);
+        }}
+
+        async function recheckAfterSetup() {{
             const btn = document.getElementById('recheck-btn');
             const status = document.getElementById('setup-status');
             btn.disabled = true;
             btn.textContent = '检测中...';
             status.innerHTML = '<span style="color:#6495ed">⏳ 正在检测 Hermes 配置状态...</span>';
 
-            try {
+            try {{
                 const s = await window.pywebview.api.recheck_status();
-                if (s.ready) {
+                if (s.ready) {{
                     status.innerHTML = '<span style="color:#90ee90">✅ 配置完成！正在进入主界面...</span>';
                     setTimeout(() => window.pywebview.api.restart_app(), 1500);
-                } else if (s.needs_init) {
+                }} else if (s.needs_init) {{
                     status.innerHTML = '<span style="color:#ffd700">✅ Hermes 配置完成，正在进入工作空间初始化...</span>';
                     setTimeout(() => window.pywebview.api.restart_app(), 1500);
-                } else if (s.status === 'installed_needs_setup') {
+                }} else if (s.status === 'installed_needs_setup' || s.status === 'setup_in_progress') {{
                     btn.disabled = false;
                     btn.textContent = '我已完成配置，重新检测';
                     status.innerHTML =
                         '<span style="color:#ffd700">⚠️ Hermes 配置尚未完成。</span>' +
-                        '<br><span style="color:#888;">请确认已在终端中完成 hermes setup，然后再次点击"重新检测"。</span>';
-                } else {
+                        '<br><span style="color:#888;">请确认已在终端中完成 hermes setup，然后再次点击「重新检测」。</span>';
+                }} else {{
                     btn.disabled = false;
                     btn.textContent = '我已完成配置，重新检测';
                     status.innerHTML =
                         '<span style="color:#ff6b6b">⚠️ 检测异常：' + s.status +
                         (s.message ? '（' + s.message + '）' : '') + '</span>';
-                }
-            } catch (err) {
+                }}
+            }} catch (err) {{
                 btn.disabled = false;
                 btn.textContent = '我已完成配置，重新检测';
                 status.innerHTML = '<span style="color:#ff6b6b">❌ 检测失败：' + err.message + '</span>';
-            }
-        }
+            }}
+        }}
+
+        // 如果页面加载时 setup 已在运行，立即开始轮询
+        document.addEventListener('DOMContentLoaded', function() {{
+            const hint = document.getElementById('setup-running-hint');
+            if (hint && hint.style.display !== 'none') {{
+                startSetupPolling();
+            }}
+        }});
         </script>
         """
 

@@ -58,6 +58,17 @@ class HermesInstallGuide:
                 ],
             }
 
+        elif install_info.status == HermesInstallStatus.SETUP_IN_PROGRESS:
+            return {
+                "status": "setup_in_progress",
+                "message": "Hermes Agent 配置进行中",
+                "actions": [
+                    "hermes setup 正在终端中运行。",
+                    "请在终端中完成交互式配置。",
+                    "完成后回到此窗口点击「重新检测」按钮继续。",
+                ],
+            }
+
         elif install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED:
             return HermesInstallGuide._get_workspace_init_instructions(install_info)
         

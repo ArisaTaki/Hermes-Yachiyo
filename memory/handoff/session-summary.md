@@ -1,32 +1,34 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 37: Hermes Setup 阶段纳入状态流
+## 本轮完成内容 — Milestone 37 增强: Setup 进程检测与防重复
 
 ### 问题
 
-Hermes 安装后需要 `hermes setup` 交互式配置，但之前的状态流没有这个阶段，导致用户看起来像"卡住了"。
+上一轮已将 `hermes setup` 阶段纳入状态流，但缺少：
+1. `setup_in_progress` 状态 — 无法区分"需要 setup"和"setup 正在运行"
+2. 进程检测 — 无法检测 `hermes setup` 是否已在终端运行
+3. 防重复启动 — 用户可能重复点击"开始配置"打开多个终端
 
 ### 解决方案
 
-将状态流从三级扩展为四级：
+将状态流从四级扩展为五级：
 
 ```
-NOT_INSTALLED → INSTALLED_NEEDS_SETUP → INSTALLED_NOT_INITIALIZED → READY
-     安装引导        Setup 配置            工作空间初始化         正常模式
+NOT_INSTALLED → INSTALLED_NEEDS_SETUP → SETUP_IN_PROGRESS → INSTALLED_NOT_INITIALIZED → READY
+     安装引导        Setup 配置引导       Setup 进行中         工作空间初始化         正常模式
 ```
 
 ### 修改文件
 
 | 文件 | 变更 |
 |------|------|
-| packages/protocol/enums.py | 新增 `INSTALLED_NEEDS_SETUP` 枚举值 |
-| apps/installer/hermes_check.py | 新增 `check_hermes_setup()` + 插入 check_hermes_installation() |
-| apps/installer/hermes_install.py | 新增 `INSTALLED_NEEDS_SETUP` 安装指导分支 |
-| apps/shell/startup.py | 显式映射 `INSTALLED_NEEDS_SETUP → INSTALLER` |
-| apps/shell/installer_api.py | 新增 `open_hermes_setup_terminal()` — macOS/Linux 终端拉起 |
-| apps/shell/window.py | Setup 引导 UI + 按钮 + JS 逻辑 + 窗口标题适配 |
-| tests/test_startup.py | 新增 `test_needs_setup_to_installer` |
-| memory/progress/current-state.md | Milestone 37 记录 |
+| packages/protocol/enums.py | 新增 `SETUP_IN_PROGRESS` 枚举值 |
+| apps/installer/hermes_check.py | 新增 `is_hermes_setup_running()` 进程检测 + 检测链集成 |
+| apps/installer/hermes_install.py | 新增 `SETUP_IN_PROGRESS` 安装指导分支 |
+| apps/shell/startup.py | 映射 `SETUP_IN_PROGRESS → INSTALLER` |
+| apps/shell/installer_api.py | `open_hermes_setup_terminal()` 防重复 + 新增 `check_setup_process()` |
+| apps/shell/window.py | Setup UI 增强：进程状态提示 + 轮询 + 防重复按钮 |
+| tests/test_startup.py | 新增 `test_setup_in_progress_to_installer` |
 
 ### Setup 引导 UI
 
@@ -39,6 +41,7 @@ NOT_INSTALLED → INSTALLED_NEEDS_SETUP → INSTALLED_NOT_INITIALIZED → READY
 ### macOS Terminal 拉起实现
 
 使用 osascript AppleScript：
+
 ```applescript
 tell application "Terminal"
     activate
@@ -55,6 +58,7 @@ end tell
 5. 检测通过 → 进入工作空间初始化 → 完成 → 正常模式
 
 ### 如何接手
+
 | test_protocol.py | 14 | Enum、TaskInfo、Request/Response 模型 |
 | test_state.py | 11 | 任务创建/取消/状态推进/终态保护 |
 | test_executor.py | 7 | HermesCallError、SimulatedExecutor |

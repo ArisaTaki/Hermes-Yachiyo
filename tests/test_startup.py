@@ -37,3 +37,7 @@ class TestResolveStartupMode:
     def test_needs_setup_to_installer(self):
         info = _FakeInstallInfo(HermesInstallStatus.INSTALLED_NEEDS_SETUP)
         assert resolve_startup_mode(info) == StartupMode.INSTALLER
+
+    def test_setup_in_progress_to_installer(self):
+        info = _FakeInstallInfo(HermesInstallStatus.SETUP_IN_PROGRESS)
+        assert resolve_startup_mode(info) == StartupMode.INSTALLER

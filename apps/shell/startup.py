@@ -45,6 +45,7 @@ _INSTALL_STATUS_TO_MODE: dict[HermesInstallStatus, StartupMode] = {
     HermesInstallStatus.READY: StartupMode.NORMAL,
     HermesInstallStatus.INSTALLED_NOT_INITIALIZED: StartupMode.INIT_WIZARD,
     HermesInstallStatus.INSTALLED_NEEDS_SETUP: StartupMode.INSTALLER,
+    HermesInstallStatus.SETUP_IN_PROGRESS: StartupMode.INSTALLER,
 }
 
 

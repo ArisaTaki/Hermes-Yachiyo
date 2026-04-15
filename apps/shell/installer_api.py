@@ -159,14 +159,27 @@ class InstallerWebViewAPI:
     def open_hermes_setup_terminal(self) -> Dict[str, Any]:
         """在系统终端中打开 ``hermes setup`` 交互式配置。
 
+        在启动前先检测是否已有 hermes setup 进程在运行，避免重复启动。
+
         macOS: 使用 ``open -a Terminal`` 或 osascript 在 Terminal.app 中执行。
         Linux: 尝试 gnome-terminal / xterm / x-terminal-emulator。
 
         Returns:
-            {"success": bool, "error": str | None}
+            {"success": bool, "error": str | None, "already_running": bool}
         """
         import platform as _platform
         import subprocess
+
+        from apps.installer.hermes_check import is_hermes_setup_running
+
+        # 先检测是否已有 setup 进程在运行
+        if is_hermes_setup_running():
+            logger.info("hermes setup 进程已在运行，跳过重复启动")
+            return {
+                "success": True,
+                "error": None,
+                "already_running": True,
+            }
 
         system = _platform.system()
 
@@ -214,11 +227,23 @@ class InstallerWebViewAPI:
                 }
 
             logger.info("已在系统终端中启动 hermes setup")
-            return {"success": True, "error": None}
+            return {"success": True, "error": None, "already_running": False}
 
         except Exception as exc:
             logger.error("打开终端执行 hermes setup 失败: %s", exc)
-            return {"success": False, "error": str(exc)}
+            return {"success": False, "error": str(exc), "already_running": False}
+
+    def check_setup_process(self) -> Dict[str, Any]:
+        """检查 hermes setup 进程是否正在运行。
+
+        供前端轮询使用，用于更新 UI 状态。
+
+        Returns:
+            {"running": bool}
+        """
+        from apps.installer.hermes_check import is_hermes_setup_running
+
+        return {"running": is_hermes_setup_running()}
 
 
 # 安装进度共享状态（简单字典，单次安装生命周期内使用）

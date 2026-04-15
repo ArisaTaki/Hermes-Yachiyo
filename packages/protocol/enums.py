@@ -69,6 +69,7 @@ class HermesInstallStatus(StrEnum):
     PLATFORM_UNSUPPORTED = "platform_unsupported"  # 平台不支持
     WSL2_REQUIRED = "wsl2_required"          # Windows 用户需要 WSL2
     INSTALLED_NEEDS_SETUP = "installed_needs_setup"  # Hermes 已安装但未完成 setup 配置
+    SETUP_IN_PROGRESS = "setup_in_progress"          # hermes setup 进程正在运行中
     INSTALLED_NOT_INITIALIZED = "installed_not_initialized"  # Hermes 已安装，但 Yachiyo 工作空间未初始化
     INITIALIZING = "initializing"            # Yachiyo 工作空间正在初始化
     READY = "ready"                          # Hermes 已安装且 Yachiyo 工作空间已初始化

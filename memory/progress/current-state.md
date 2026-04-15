@@ -110,6 +110,7 @@
 
 - **未安装**: Hermes Agent 命令不存在或版本不兼容
 - **已安装未配置**: Hermes Agent 可用，但 `hermes setup` 未完成
+- **配置进行中**: `hermes setup` 进程正在终端中运行
 - **已安装未初始化**: Hermes Agent 可用且已配置，但 Yachiyo 工作空间未初始化  
 - **已就绪**: Hermes Agent 可用且 Yachiyo 工作空间已初始化
 
@@ -128,7 +129,7 @@
 
 - ✅ 正确架构分层和职责边界
 - ✅ Hermes Agent 外部依赖管理和分层状态检测
-- ✅ 启动流程四状态联动（安装引导 vs Setup 配置 vs 工作空间初始化 vs 正常模式）
+- ✅ 启动流程五状态联动（安装引导 vs Setup 配置 vs Setup 进行中 vs 工作空间初始化 vs 正常模式）
 - ✅ 完整的工作空间初始化流程（自动 + 手动）
 - ✅ shell → core → bridge 完整连通
 - ✅ 跨平台支持策略
@@ -299,7 +300,7 @@
 - ✅ integrations/astrbot-plugin/api_client.py — 新增 `get_task(task_id)` + `cancel_task(task_id)`
 - ✅ integrations/astrbot-plugin/handlers/check.py（新建）— `/y check <id>` 查询任务详情
 - ✅ integrations/astrbot-plugin/handlers/cancel.py（新建）— `/y cancel <id>` 取消任务
-- ✅ integrations/astrbot-plugin/handlers/__init__.py — 注册 check + cancel handler
+- ✅ integrations/astrbot-plugin/handlers/**init**.py — 注册 check + cancel handler
 - ✅ integrations/astrbot-plugin/command_router.py — HERMES_COMMANDS 加入 check/cancel，帮助文本更新
 - ✅ integrations/astrbot-plugin/handlers/do.py — 输出完整 task_id，提示 `/y check <id> 查询进度`
 
@@ -364,6 +365,7 @@
 ### 接入 Hermes 的路径
 
 后续真正接 Hermes 只需两步：
+
 1. 补全 `apps/core/executor.py` 中 `HermesExecutor.run()`
 2. 在 Bridge lifespan 构造 TaskRunner 时传入 `HermesExecutor()`
 
@@ -394,7 +396,6 @@
 | `runtime.is_hermes_ready()` 在真机上返回 True | ❌ 依赖 Hermes 安装 |
 | `select_executor()` 自动切换生效 | ✅ 逻辑已就位 |
 
-
 ### Milestone 16 — HermesExecutor 最小真实调用路径
 
 - apps/core/executor.py — HermesExecutor 完整 subprocess 实现
@@ -419,7 +420,6 @@
 - 确认 hermes run --prompt 是正确 CLI 接口（或切换 HTTP API）
 - 在测试机安装 Hermes Agent，验证 select_executor 自动切换
 - 处理 Hermes 流式输出（当前收集全部 stdout）
-
 
 ### Milestone 17 — HermesExecutor 最小真实验证闭环
 
@@ -458,7 +458,6 @@
 | returncode != 0 | success=False, stderr=... | status=FAILED, error="exit=N | stderr: ..." |
 | stdout 为空 | success=True, stdout="[完毕无输出]" | status=COMPLETED, result="[完毕无输出]" |
 
-
 ### Milestone 18 — 真实 Hermes 安装流程
 
 - packages/protocol/enums.py — HermesInstallStatus 新增两个状态
@@ -493,11 +492,10 @@
    - INSTALLED_NOT_INITIALIZED → 重启进入初始化向导
    - 其他 → 显示错误，允许重试
 
-
 ### Milestone 19 — 安装后环境刷新感知检测
 
 **问题根因**：Hermes 官方安装脚本把二进制写入 `~/.local/bin` 等目录后，
-当前 Python 进程的 PATH 不会自动刷新，导致 `recheck_status()` 
+当前 Python 进程的 PATH 不会自动刷新，导致 `recheck_status()`
 调用 `subprocess.run(["hermes", "--version"])` 时仍然 `FileNotFoundError`，
 误判为 Hermes 仍未安装。
 
@@ -508,11 +506,13 @@
 3. **登录 Shell 探测** — `bash/zsh -lc "command -v hermes"`，会 source 用户 rc 文件
 
 **返回值区分**：
+
 - `(path, needs_env_refresh=False)` — 在当前 PATH 找到，环境正常
 - `(path, needs_env_refresh=True)` — 通过备用途径找到，当前进程需重启
 - `(None, False)` — 完全未找到
 
 **新增函数**（`apps/installer/hermes_check.py`）：
+
 - `find_hermes_in_common_paths()` → `str | None`
 - `probe_hermes_via_login_shell()` → `str | None`
 - `locate_hermes_binary()` → `tuple[str | None, bool]`
@@ -520,13 +520,14 @@
 - `_check_hermes_installation_with_cmd(hermes_cmd)` — 使用指定路径执行完整检测
 
 **`recheck_status()`**（`apps/shell/installer_api.py`）：
+
 - 改用 `check_hermes_installation_post_install()`
 - 新增返回字段 `needs_env_refresh: bool`
 
 **前端处理**（`apps/shell/window.py` JS）：
+
 - `needs_env_refresh=True` → 显示"已安装，环境待刷新，5秒后自动重启"
 - 不再将此情况误报为"安装失败"
-
 
 ### Milestone 20 — 安装成功后自动过渡闭环
 
@@ -556,7 +557,6 @@
   → INSTALLED_NOT_INITIALIZED → restart → 初始化向导
   → needs_env_refresh=True（边缘情况）→ restart → 重新检测
 
-
 ### Milestone 21 — 初始化向导完整闭环
 
 **修复三处问题：**
@@ -578,6 +578,7 @@
    - 失败 → 显示错误，允许重试
 
 **完整首次启动状态流（已闭环）：**
+
 ```
 not_installed
   → 安装引导页（含安装按钮，API 已挂载）
@@ -599,7 +600,6 @@ ready
   → 直接进入主界面
 ```
 
-
 ### Milestone 22 — 统一启动决策层
 
 **新文件 `apps/shell/startup.py`**
@@ -610,37 +610,42 @@ ready
 | `_INSTALL_STATUS_TO_MODE` | 状态 → 模式的唯一映射表 |
 | `resolve_startup_mode(install_info)` | 纯映射函数，无副作用，易测试 |
 | `run_normal_mode(config)` | 启动 Runtime + Bridge + 主窗口 |
-| `run_installer_mode(config, install_info)` | 合并原来的 _start_setup_mode + _start_installer_mode |
+| `run_installer_mode(config, install_info)` | 合并原来的 _start_setup_mode +_start_installer_mode |
 | `launch(config)` | 统一入口：check → resolve → dispatch |
 
 **`apps/shell/app.py` 精简为 3 行逻辑：**
+
 ```python
 config = load_config()
 launch(config)  # 所有状态判断在 startup.py
 ```
 
 **扩展方式（后续新增状态只需）：**
+
 1. 在 `_INSTALL_STATUS_TO_MODE` 加一行映射
 2. 如需新模式，加对应的 `run_xxx_mode()` 并在 `launch()` 里分发
-
 
 ### Milestone 23 — startup 决策层与显示模式系统衔接
 
 **`apps/shell/modes/__init__.py`**
+
 - 新增 `DisplayMode` StrEnum：WINDOW / BUBBLE / LIVE2D
 - 新增 `resolve_display_mode(config) -> DisplayMode`：解析配置，未知值回退为 WINDOW
 - `launch_mode()` 内部改用 `DisplayMode` 枚举分发，不再比较字符串
 
 **`apps/shell/startup.py`**
+
 - `run_normal_mode()` 第一步显式调用 `resolve_display_mode(config)` 并记录日志
 - 日志格式：`startup_mode=NORMAL, display_mode=window/bubble/live2d`
 - `launch()` 在 NORMAL 分支也先解析 display_mode 并输出完整决策日志
 
 **`apps/shell/config.py`**
+
 - `display_mode` 字段改用 `Literal["window", "bubble", "live2d"]` 类型注解
 - 新增 `DisplayModeValue` 类型别名
 
 **两个维度在 startup.py 中的表达：**
+
 ```
 launch()
   → resolve_startup_mode(install_info)  → NORMAL / INIT_WIZARD / INSTALLER
@@ -648,7 +653,6 @@ launch()
   → logger.info("startup_mode=NORMAL, display_mode=window")
   → run_normal_mode() → launch_mode() → run()
 ```
-
 
 ### Milestone 24 — Live2D 模式骨架
 
@@ -664,19 +668,21 @@ launch()
 | 窗口 | 380×560，竖版，可缩放，挂载 `Live2DWindowAPI` |
 
 **与 bubble 模式的边界：**
+
 - bubble：180×280 横版，最小化状态摘要，主窗口入口
 - live2d：380×560 竖版，角色舞台区占主体，状态条在底部，设置入口
 
 **未来接入 Live2D 还差：**
+
 1. `apps/shell/modes/live2d_renderer.py` — 封装 Live2D SDK（moc3 加载、动作系统）
 2. `Live2DWindowAPI.load_model()` / `play_motion()` / `set_expression()` 方法实现
 3. HTML 中的 `<canvas id="live2d">` 替换 `.character-placeholder`
 4. pywebview 透明窗口支持（角色贴屏显示）
 
-
 ### Milestone 25 — Live2D 模型配置入口骨架
 
 **`apps/shell/config.py`**
+
 - 新增 `Live2DConfig` dataclass，字段：
   - `model_name: str = ""`            — 角色模型显示名
   - `model_path: str = ""`            — .moc3 模型目录路径
@@ -689,18 +695,22 @@ launch()
 - `load_config()` 更新：特殊处理嵌套 live2d 配置的反序列化
 
 **`apps/shell/settings.py`** ← 新文件
+
 - `build_settings_html(config: AppConfig) -> str`：独立设置页 HTML，供 live2d 模式的 `open_settings()` 使用
 - 包含区块：显示模式 / Live2D 配置（含状态、模型名、路径、动作/表情/物理开关）/ Bridge 配置 / AstrBot 集成占位
 
 **`apps/shell/window.py`** — 主窗口设置面板
+
 - 在"显示模式"section 之后新增"Live2D 模式配置"section（含 badge `骨架`）
 - 7 个展示字段：model_configured / model_name / model_path / idle_motion_group / enable_expressions / enable_physics / 渲染器状态（只读占位）
 - `refreshSettings()` JS 新增 Live2D 字段填充逻辑（读取 `d.live2d`）
 
 **`apps/shell/main_api.py`** — get_settings_data()
+
 - 返回值新增 `"live2d"` 键，包含所有 `Live2DConfig` 字段 + `renderer_available: False`
 
 **`apps/shell/modes/live2d.py`** — get_live2d_status()
+
 - `model` 字段从全硬编码更新为读取 `config.live2d`：
   - `configured`: 是否已配置模型（`is_model_configured()`）
   - `name`: 模型显示名
@@ -712,15 +722,16 @@ launch()
   - 未配置 → "角色模型未配置"
 
 **真正接入 Live2D 还差：**
+
 1. `apps/shell/modes/live2d_renderer.py` — Live2D Cubism SDK 封装
 2. `Live2DWindowAPI.load_model()` / `play_motion()` / `set_expression()` 实现
 3. HTML canvas 替换占位 div
 4. pywebview 透明窗口支持
 
-
 ### Milestone 26 — Live2D 配置最小校验与状态闭环
 
 **`apps/shell/config.py`**
+
 - 新增 `ModelState(StrEnum)` 枚举：
   - `NOT_CONFIGURED` — model_name 或 model_path 为空
   - `PATH_INVALID`   — 路径已填写但目录不存在
@@ -729,24 +740,28 @@ launch()
 - `Live2DConfig.validate() -> ModelState`：调用 `Path.expanduser().exists()` 校验路径
 
 **`apps/shell/modes/live2d.py`**
+
 - `get_live2d_status()` model 字段新增 `state` 键（`validate().value`）
 - 前端 JS label 改用 4 条 stateLabels 字典映射，覆盖全部状态
 
 **`apps/shell/window.py`**
+
 - 设置面板 Live2D 区块：`s-l2d-configured` → `s-l2d-state`（四态文本 + CSS 类）
 - JS `refreshSettings()` 改用 stateMap 字典填充颜色和文字
 
 **`apps/shell/main_api.py`**
+
 - `get_settings_data()` live2d 键新增 `model_state` 字段
 
 **`apps/shell/settings.py`**
+
 - HTML 模板：`模型已配置` → `配置状态`，占位改为 `{model_state_label}`
 - `build_settings_html()` 用 `_MODEL_STATE_LABELS` 字典映射四态文本和 CSS 类
-
 
 ### Milestone 27 — Live2D 配置资源目录结构检查
 
 **`apps/shell/config.py`**
+
 - `ModelState` 枚举新增 `PATH_NOT_LIVE2D`（目录存在但无模型文件），完整五态：
   `NOT_CONFIGURED → PATH_INVALID → PATH_NOT_LIVE2D → PATH_VALID → LOADED`
 - 新增 `check_live2d_model_dir(path: Path) -> bool`：
@@ -755,24 +770,28 @@ launch()
 - `Live2DConfig.validate()` 新增第三层：路径存在 + 无特征文件 → `PATH_NOT_LIVE2D`
 
 **`apps/shell/modes/live2d.py`**
+
 - 前端 stateLabels 新增 `path_not_live2d` 条目
 
 **`apps/shell/window.py`**
+
 - 设置面板 JS stateMap 新增 `path_not_live2d` 条目（⚠️ 黄色 warn）
 
 **`apps/shell/settings.py`**
+
 - `_MODEL_STATE_LABELS` 新增 `path_not_live2d` 条目（含特征文件说明）
 
 **校验层级（validate() 实现）：**
+
 1. name/path 是否填写    → NOT_CONFIGURED
 2. 目录是否存在且为目录  → PATH_INVALID
 3. 是否含模型特征文件    → PATH_NOT_LIVE2D
 4. 渲染器是否可用        → PATH_VALID（渲染器返回 LOADED）
 
-
 ### Milestone 28 — Live2D 配置最小模型信息摘要
 
 **`apps/shell/config.py`**
+
 - 新增 `ModelSummary` dataclass（纯静态文件名摘要）：
   - `model3_json: str`       — 检测到的 .model3.json 文件名
   - `moc3_file: str`         — 检测到的 .moc3 文件名
@@ -781,31 +800,35 @@ launch()
   - `extra_moc3_count: int`  — 额外 .moc3 文件数量（多模型目录提示）
   - `is_empty()` 方法
 - 新增 `scan_live2d_model_dir(path: Path) -> ModelSummary`：
-  - 根目录优先扫描 *.moc3 / *.model3.json
+  - 根目录优先扫描 *.moc3 /*.model3.json
   - 找不到再扫一级子目录，取第一个有内容的子目录
 - `Live2DConfig.scan() -> ModelSummary | None`：目录不存在或未配置返回 None
 
 **`apps/shell/main_api.py`**
+
 - 新增 `_serialize_summary(summary)` 辅助函数（ModelSummary → dict）
 - `get_settings_data()` live2d 键新增 `summary` 字段
 - 导入 `ModelSummary`
 
 **`apps/shell/modes/live2d.py`**
+
 - `get_live2d_status()` model 字段新增 `summary` 键
 - 导入 `_serialize_summary`
 
 **`apps/shell/window.py`**
+
 - 设置面板 Live2D 区块新增三行：检测到 .model3.json / 检测到 .moc3 / 文件位置
 - JS `refreshSettings()` 新增摘要字段填充逻辑（extra_moc3_count 拼接提示）
 
 **`apps/shell/settings.py`**
+
 - HTML 模板新增三行摘要展示
 - `build_settings_html()` 新增摘要格式化逻辑（含子目录名 / extra_moc3_count）
-
 
 ### Milestone 29 — Live2D 摘要补主候选入口整理
 
 **`apps/shell/config.py`** — ModelSummary + scan_live2d_model_dir()
+
 - `ModelSummary` 新增两个绝对路径字段：
   - `primary_model3_json_abs: str` — .model3.json 的绝对路径（渲染器首选入口）
   - `primary_moc3_abs: str`        — .moc3 的绝对路径（兜底）
@@ -813,35 +836,40 @@ launch()
 - `scan_live2d_model_dir()` 在扫描时同步填充 `primary_*_abs` 字段（`.resolve()`）
 
 **`apps/shell/main_api.py`** — _serialize_summary()
+
 - 返回 dict 新增三个字段：
   - `primary_model3_json_abs`
   - `primary_moc3_abs`
   - `renderer_entry`（推荐入口，model3.json 优先）
 
 **`apps/shell/window.py`**
+
 - 设置面板 Live2D 区块新增"渲染器入口候选"行（显示绝对路径，小字）
 - JS `refreshSettings()` 填充 `s.renderer_entry`，有值绿色，无值暗灰
 
 **`apps/shell/settings.py`**
+
 - HTML 模板新增"渲染器入口候选"行
 - `build_settings_html()` 新增 `s_entry` / `s_entry_cls` 格式化
 
 **renderer 接入时的消费方式（文档化）：**
+
 ```python
 summary = config.live2d.scan()
 if summary and summary.renderer_entry:
     renderer.load(summary.renderer_entry)  # 唯一入口
 ```
 
-
 ### Milestone 30 — Live2D 配置最小可编辑能力
 
 **`apps/shell/main_api.py`**
+
 - `update_settings()` 新增 `live2d.*` 前缀嵌套字段支持
   - `_EDITABLE_LIVE2D_FIELDS` 白名单：model_name / model_path / idle_motion_group / enable_expressions / enable_physics / window_on_top
   - 字段名以 `live2d.` 开头 → 写入 `config.live2d.*`，同步保存配置
 
 **`apps/shell/window.py`**（主窗口内嵌设置面板）
+
 - Live2D 设置区域 HTML 改为可编辑控件：
   - model_name / model_path / idle_motion_group → `<input class="s-input">`
   - enable_expressions / enable_physics / window_on_top → `<label class="s-toggle">` + checkbox
@@ -849,6 +877,7 @@ if summary and summary.renderer_entry:
 - JS `refreshSettings()` 填充 `.value` / `.checked`，加 active-element 守护（防止用户输入被覆盖）
 
 **`apps/shell/settings.py`**（Live2D 模式独立设置窗口）
+
 - HTML 模板 `_SETTINGS_HTML` 重构为带输入控件版本：
   - model_name / model_path / idle_motion_group → `<input class="s-input">` with `onchange="saveLive2D(...)"`
   - enable_expressions / enable_physics / window_on_top → `<label class="s-toggle">`
@@ -857,6 +886,7 @@ if summary and summary.renderer_entry:
 - `build_settings_html()` 参数改为输入控件初始值（`model_name_val` / `expr_checked` 等）
 
 **`apps/shell/modes/live2d.py`**（Live2DWindowAPI）
+
 - 新增 `update_settings(changes: dict) -> dict` 方法
   - 独立处理 `live2d.*` 前缀字段，不依赖 main_api
   - 应用变更后调用 `save_config()`
@@ -864,6 +894,7 @@ if summary and summary.renderer_entry:
 - `open_settings()` 传入 `js_api=self`，让设置窗口可调用 `update_settings`
 
 **可编辑字段一览：**
+
 | 字段 | 控件类型 | 默认值 |
 |------|---------|--------|
 | model_name | text input | 空 |
@@ -873,17 +904,19 @@ if summary and summary.renderer_entry:
 | enable_physics | toggle | False |
 | window_on_top | toggle | False |
 
-
 ### Milestone 31 — 保存后重新校验与即时状态刷新
 
 **`apps/shell/modes/live2d.py`**
+
 - 新增 `get_live2d_state() -> dict`：调用 `validate()` + `scan()` + `_serialize_summary()`，返回完整当前状态
 - `update_settings()` 保存成功后调用 `get_live2d_state()` 并将结果作为 `live2d_state` 字段一并返回
 
 **`apps/shell/main_api.py`**
+
 - `update_settings()` 当 `applied` 中包含 `live2d.*` 字段时，将最新校验结果（validate + scan）作为 `live2d_state` 字段返回
 
 **`apps/shell/settings.py`**（独立设置窗口）
+
 - read-only span 元素补 ID：`sw-summary-json` / `sw-summary-moc3` / `sw-summary-loc` / `sw-summary-entry`
 - 新增 JS `_STATE_LABELS` 字典和 `updateLive2DState(state)` 函数：
   - 更新 `sw-l2d-state` 文本与颜色
@@ -891,19 +924,21 @@ if summary and summary.renderer_entry:
 - `saveLive2D()` 保存成功后，若 `res.live2d_state` 存在则立即调用 `updateLive2DState(res.live2d_state)`
 
 **刷新闭环：**
+
 - 独立设置窗口：`onchange` → `saveLive2D()` → `update_settings()` → 返回 `live2d_state` → `updateLive2DState()` → DOM 即时更新
 - 主窗口设置面板：`onSettingChange()` → `update_settings()` → `refreshSettings()` → `get_settings_data()` → 重新渲染（已有）
 - Live2D 模式窗口：`refreshStatus()` 每 10 秒轮询 `get_live2d_status()`（已有）
 
-
 ### Milestone 32 — 通用配置保存后即时刷新闭环
 
 **`apps/shell/main_api.py`**
+
 - 新增 `_current_app_state() -> dict` 方法：返回当前可编辑配置快照
   - 包含：`display_mode` / `bridge`（enabled/host/port/url/running）/ `tray_enabled`
 - `update_settings()` 在成功保存后始终附带 `app_state`（所有保存操作都带）
 
 **`apps/shell/window.py`**
+
 - 新增 JS `applyAppState(state)` 函数：直接更新 DOM，无需额外 API 调用
   - 设置面板：display_mode 下拉 / bridge toggle+host+port+url / tray toggle
   - 仪表盘 Bridge 卡：bridge-enabled 状态标签 + bridge-addr（即时同步）
@@ -922,10 +957,10 @@ if summary and summary.renderer_entry:
 | display_mode | select | applyAppState + refreshSettings（标签列表重渲染） | 2 |
 | live2d.* | input/toggle | applyAppState + refreshSettings（live2d 只读区刷新） | 2 |
 
-
 ### Milestone 33 — 设置生效策略 + 运行时反馈 + 控制入口
 
 **新增 `apps/shell/effect_policy.py`**
+
 - `EffectType` 枚举：`IMMEDIATE` / `REQUIRES_MODE_RESTART` / `REQUIRES_BRIDGE_RESTART` / `REQUIRES_APP_RESTART`
 - `_FIELD_POLICIES` 集中注册表：11 个可编辑字段 → (效果类型, 用户友好文案)
 - `get_effect(key)` → 查询单字段策略
@@ -948,14 +983,17 @@ if summary and summary.renderer_entry:
 | tray_enabled | requires_app_restart |
 
 **`apps/shell/main_api.py` 变更**
+
 - 新增 `_bridge_boot_config` 快照：记录 bridge 启动时的配置
 - `_current_app_state()` 新增 `bridge.config_dirty` 字段：检测已保存配置与运行配置差异
 - `update_settings()` 返回新增 `effects` 字段：来自 `build_effects_summary()`
 
 **`apps/shell/modes/live2d.py` 变更**
+
 - `update_settings()` 返回新增 `effects` 字段（与 main_api 一致的格式）
 
 **`apps/shell/window.py` 变更**
+
 - 新增 CSS：`effect-hints` / `effect-hint-row` / 四级颜色分类 / `bridge-dirty-hint`
 - Bridge 设置区新增 `bridge-dirty-hint` 提示条：当 bridge.config_dirty 时显示
 - `applyAppState()` 增加 bridge config_dirty 联动
@@ -963,22 +1001,24 @@ if summary and summary.renderer_entry:
 - `onSettingChange()` 保存成功后调用 `showEffectHints(res.effects)`
 
 **`apps/shell/settings.py` 变更**
+
 - 新增 CSS：`effect-hints` 分级提示样式
 - 新增 `effect-hints` DOM 容器
 - 新增 JS `showEffectHints(effects)` 函数
 - `saveLive2D()` 保存成功后调用 `showEffectHints(res.effects)`
 
 **用户体验流程：**
+
 1. 修改 bridge_host → 保存 → 提示 "🔌 Bridge 地址变更需重启 Bridge 后生效"
 2. 修改 display_mode → 保存 → 提示 "🔄 显示模式将在下次启动时生效"
 3. 修改 live2d.model_path → 保存 → 提示 "✓ 模型路径已更新，已重新校验"
 4. 修改 tray_enabled → 保存 → 提示 "⚡ 托盘设置将在下次启动时生效"
 5. Bridge 区域：当已保存配置与运行配置不一致时，显示黄色漂移提示条
 
-
 ### Milestone 34 — Bridge 运行控制 + AstrBot 接入可观测性
 
 **新增 `apps/shell/integration_status.py`**
+
 - 集中产出 Bridge / AstrBot / Hapi 运行时状态
 - `BridgeStatus` dataclass：四状态(disabled/enabled_not_started/running/failed) + config_dirty + drift_details + boot_config
 - `AstrBotStatus` dataclass：四状态(not_configured/configured_not_connected/connected/unknown) + bridge_ready + blockers
@@ -996,6 +1036,7 @@ if summary and summary.renderer_entry:
 | failed | 启动后异常退出 | ❌ 异常退出 |
 
 **Bridge 配置漂移展示**
+
 - `_bridge_boot_config` 记录启动时快照
 - `drift_details` 列出每个差异字段（如 "地址: 127.0.0.1 → 0.0.0.0"）
 - 设置页新增"运行地址"行（仅 dirty 时显示）+ 差异明细区
@@ -1011,12 +1052,14 @@ if summary and summary.renderer_entry:
 | unknown | 无法判定 | ❓ 状态未知 |
 
 **状态来源统一**
+
 - `main_api.py` 的 `get_dashboard_data()` / `get_settings_data()` / `_current_app_state()` 全部消费 `get_integration_snapshot()`
 - `bubble.py` 的 `get_bubble_data()` 消费 `get_integration_snapshot()`
 - `settings.py` 的 `build_settings_html()` 通过辅助函数获取 bridge/astrbot 状态
 - 不再各自硬编码 "not_connected"
 
 **UI 变更**
+
 - 仪表盘集成服务卡：AstrBot 行增加说明行 + blockers 行
 - 设置页 Bridge 区：新增"运行状态"行 + "运行地址"行 + drift_details 差异明细
 - 设置页集成服务区：AstrBot 行增加说明/blocker + "AstrBot 是什么？" 依赖说明
@@ -1024,6 +1067,7 @@ if summary and summary.renderer_entry:
 - 独立设置窗口：Bridge 运行状态行 + AstrBot 接入状态 + 依赖说明
 
 **文件变更**
+
 | 文件 | 变更 |
 |------|------|
 | apps/shell/integration_status.py | **新增** — 统一状态产出源 |
@@ -1032,34 +1076,39 @@ if summary and summary.renderer_entry:
 | apps/shell/window.py | 仪表盘+设置页 bridge/astrbot 展示增强 |
 | apps/shell/settings.py | bridge 运行状态 + AstrBot 接入状态 + 依赖说明 |
 
-
 ### Milestone 35 — Bridge 最小控制闭环
 
 **Bridge 控制动作**
+
 - `apps/bridge/server.py` 新增 `restart_bridge(host, port)` — 停止旧 uvicorn 实例 → 等待旧线程退出(最多5s) → 新后台线程启动
 - `start_bridge()` 正常退出（被 should_exit 停止）时自动归零为 `not_started`
 - 新增 `get_running_config()` 返回当前实际使用的 host/port
 - 失败路径覆盖：bridge 未启用 / 停止超时 / 端口无效 / 启动异常
 
 **MainWindowAPI.restart_bridge()**
+
 - 检查 bridge_enabled
 - 调用 server.restart_bridge() 停止 + 重启
 - 成功后刷新 `_bridge_boot_config` → config_dirty 归零
 - 返回最新 app_state 供前端刷新
 
 **设置页 UI**
+
 - bridge 区新增"🔄 应用配置并重启 Bridge"按钮（仅 config_dirty + bridge 已启用时显示）
 - JS `restartBridge()` 函数：调用 API → 显示结果 → 刷新 dashboard → 自动隐藏按钮
 - 成功: "✅ Bridge 已重启" / 失败: "❌ ..." 提示
 
 **AstrBot 漂移警告**
+
 - `get_astrbot_status()` 新增：bridge running + config_dirty 时增加 blocker "Bridge 配置已修改但尚未重启，AstrBot 可能使用旧地址"
 - bridge 重启成功后 blocker 自动消除
 
 **Bubble 模式**
+
 - `BubbleWindowAPI` 新增 `restart_bridge()` API，共享同一 server 层实现
 
 **文件变更**
+
 | 文件 | 变更 |
 |------|------|
 | apps/bridge/server.py | 新增 restart_bridge / get_running_config / 停止后归零 |
@@ -1067,7 +1116,6 @@ if summary and summary.renderer_entry:
 | apps/shell/integration_status.py | AstrBot config_dirty 漂移 blocker |
 | apps/shell/window.py | 重启按钮 + restartBridge() JS |
 | apps/shell/modes/bubble.py | 新增 restart_bridge() |
-
 
 ### Milestone 36 — 冲刺到可运行测试
 
@@ -1085,20 +1133,23 @@ if summary and summary.renderer_entry:
 | test_startup.py | 6 | resolve_startup_mode 决策树全路径 |
 
 **测试基础设施**
+
 - `tests/conftest.py` — Bridge mock 注入（避免真实 uvicorn/fastapi 依赖）+ fixtures
 - `importlib.util.spec_from_file_location` 解决 astrbot-plugin 连字符目录导入问题
 - pytest + pytest-asyncio 异步 handler 测试
 
 **如何运行测试**
+
 ```bash
 cd /path/to/Hermes-Yachiyo
 .venv/bin/python -m pytest tests/ -v
 ```
 
 **文件变更**
+
 | 文件 | 变更 |
 |------|------|
-| tests/__init__.py | 新增 — 包标记 |
+| tests/**init**.py | 新增 — 包标记 |
 | tests/conftest.py | 新增 — mock 注入 + fixtures |
 | tests/test_protocol.py | 新增 — protocol schema 测试 |
 | tests/test_state.py | 新增 — AppState 生命周期测试 |
@@ -1107,42 +1158,54 @@ cd /path/to/Hermes-Yachiyo
 | tests/test_integration_status.py | 新增 — 集成状态统一来源测试 |
 | tests/test_astrbot_handlers.py | 新增 — AstrBot 全 handler 输出/错误/ACL 测试 |
 | tests/test_startup.py | 新增 — startup 决策路径测试 |
-| apps/__init__.py | 新增 — 包标记 |
-| packages/__init__.py | 新增 — 包标记 |
-| integrations/__init__.py | 新增 — 包标记 |
+| apps/**init**.py | 新增 — 包标记 |
+| packages/**init**.py | 新增 — 包标记 |
+| integrations/**init**.py | 新增 — 包标记 |
 
 ### Milestone 37 — Hermes Setup 阶段纳入状态流
 
 将 Hermes 安装后的 `hermes setup` 交互式配置阶段纳入正式产品流，解决用户安装完成后"卡在 setup"的体验问题。
 
-**状态流更新（四状态）**：
+**状态流更新（五状态）**：
+
 ```
 NOT_INSTALLED → 安装引导
-INSTALLED_NEEDS_SETUP → Setup 配置引导（新增）
+INSTALLED_NEEDS_SETUP → Setup 配置引导
+SETUP_IN_PROGRESS → Setup 进行中（终端已打开）
 INSTALLED_NOT_INITIALIZED → Yachiyo 工作空间初始化向导
 READY → 正常主界面
 ```
 
 **变更**：
-- ✅ packages/protocol/enums.py — 新增 `INSTALLED_NEEDS_SETUP` 枚举值
+
+- ✅ packages/protocol/enums.py — 新增 `INSTALLED_NEEDS_SETUP` + `SETUP_IN_PROGRESS` 枚举值
 - ✅ apps/installer/hermes_check.py
   - 新增 `check_hermes_setup()` 检测函数（`hermes status` 退出码 + 配置文件存在性）
-  - `check_hermes_installation()` 在步骤 4（基本可用性验证）与步骤 6（工作空间初始化）之间插入 setup 检查
-- ✅ apps/installer/hermes_install.py — `get_install_instructions()` 新增 `INSTALLED_NEEDS_SETUP` 分支
-- ✅ apps/shell/startup.py — `_INSTALL_STATUS_TO_MODE` 显式映射 `INSTALLED_NEEDS_SETUP → INSTALLER`
-- ✅ apps/shell/installer_api.py — 新增 `open_hermes_setup_terminal()` 方法
-  - macOS: osascript 在 Terminal.app 中执行 `hermes setup`
-  - Linux: 按优先级尝试 gnome-terminal / xfce4-terminal / konsole / x-terminal-emulator / xterm
+  - 新增 `is_hermes_setup_running()` 进程检测（`ps aux` 匹配 hermes setup 进程）
+  - `check_hermes_installation()` setup 检查时先检测进程在运行 → `SETUP_IN_PROGRESS`
+- ✅ apps/installer/hermes_install.py — `get_install_instructions()` 新增 `INSTALLED_NEEDS_SETUP` + `SETUP_IN_PROGRESS` 分支
+- ✅ apps/shell/startup.py — `_INSTALL_STATUS_TO_MODE` 显式映射两个 setup 状态 → INSTALLER
+- ✅ apps/shell/installer_api.py
+  - `open_hermes_setup_terminal()` 增加防重复检测（`is_hermes_setup_running()` 前置检查）
+  - 返回值新增 `already_running` 字段
+  - 新增 `check_setup_process()` 方法供前端轮询进程状态
 - ✅ apps/shell/window.py
-  - `_generate_installer_html()` 新增 `INSTALLED_NEEDS_SETUP` 状态样式 + 标题映射
-  - 新增 setup 引导 UI 区块：
-    - 「开始配置 Hermes」按钮 → 调用 `open_hermes_setup_terminal()`
-    - 「我已完成配置，重新检测」按钮 → 调用 `recheck_status()` + 状态跳转
-  - `recheckAfterInstall()` 增加 `installed_needs_setup` 状态分支（安装后重检可能落入 setup 阶段）
-  - `create_installer_window()` 窗口标题适配三种模式
-- ✅ tests/test_startup.py — 新增 `test_needs_setup_to_installer`
+  - `status_mapping` + 标题逻辑处理 `SETUP_IN_PROGRESS`
+  - setup 引导 UI 增强：
+    - 进程正在运行时隐藏「开始配置」按钮，显示「配置终端已打开」提示
+    - 打开终端后自动轮询进程状态（3 秒间隔）
+    - 进程结束后恢复按钮，提供「重新打开配置终端」选项
+    - 已有进程运行时点击「开始配置」不会重复启动
+  - `recheckAfterInstall()` 支持 `setup_in_progress` 状态跳转
+  - `create_installer_window()` 窗口标题适配 setup 进行中
+- ✅ tests/test_startup.py — 新增 `test_setup_in_progress_to_installer`
 
 **Setup 检测策略**：
+
 1. `hermes status` 退出码为 0 → setup 已完成
 2. HERMES_HOME 下存在 config.yaml / config.yml / config.json → setup 已完成
-3. 以上均不满足 → 需要 setup
+3. 以上均不满足 → 检测是否有 setup 进程 → `SETUP_IN_PROGRESS` 或 `INSTALLED_NEEDS_SETUP`
+
+**进程检测策略**：
+
+- `ps aux` 匹配含 "hermes" 和 "setup" 的行（排除 grep 和 python 自身）

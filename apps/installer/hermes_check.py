@@ -158,6 +158,35 @@ def check_hermes_setup() -> Tuple[bool, str]:
     return False, "Hermes Agent 已安装但尚未完成初始配置（hermes setup）"
 
 
+def is_hermes_setup_running() -> bool:
+    """检测 hermes setup 进程是否正在运行。
+
+    macOS/Linux: 通过 pgrep 或 /proc 检测包含 "hermes" 且参数含 "setup" 的进程。
+    """
+    import platform as _platform
+
+    system = _platform.system()
+
+    try:
+        if system in ("Darwin", "Linux"):
+            # 使用 ps aux 查找 hermes setup 进程（排除自身 grep）
+            result = subprocess.run(
+                ["ps", "aux"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    # 匹配 "hermes setup" 但排除 grep 自身和 Python 进程
+                    if "hermes" in line and "setup" in line:
+                        if "grep" not in line and "python" not in line.lower():
+                            logger.debug("检测到 hermes setup 进程: %s", line.strip())
+                            return True
+    except Exception as exc:
+        logger.debug("检测 hermes setup 进程失败: %s", exc)
+
+    return False
+
+
 def check_yachiyo_workspace() -> Tuple[bool, str]:
     """检查 Yachiyo 工作空间初始化状态
     
@@ -320,6 +349,17 @@ def check_hermes_installation() -> HermesInstallInfo:
     # 5. Hermes setup（交互式配置）检查
     setup_done, setup_error = check_hermes_setup()
     if not setup_done:
+        # 检测 setup 进程是否正在运行
+        if is_hermes_setup_running():
+            install_info.status = HermesInstallStatus.SETUP_IN_PROGRESS
+            install_info.error_message = "hermes setup 正在终端中运行"
+            install_info.suggestions = [
+                "Hermes Agent 配置正在进行中",
+                "请在终端中完成 hermes setup 交互式配置",
+                "完成后回到此应用点击「重新检测」"
+            ]
+            return install_info
+
         install_info.status = HermesInstallStatus.INSTALLED_NEEDS_SETUP
         install_info.error_message = setup_error
         install_info.suggestions = [
