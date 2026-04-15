@@ -73,3 +73,40 @@ class AppState:
         task.updated_at = _now()
         logger.info("任务已取消: %s", task_id)
         return task
+
+    def update_task_status(
+        self,
+        task_id: str,
+        status: TaskStatus,
+        result: str | None = None,
+        error: str | None = None,
+    ) -> TaskInfo:
+        """更新任务状态。供执行器或外部调用者推进任务生命周期。
+
+        合法状态流转：
+          pending   → running | cancelled | failed
+          running   → completed | cancelled | failed
+          其他终态（completed/cancelled/failed）不可再变更
+
+        Raises:
+            KeyError:  任务不存在
+            ValueError: 非法状态流转
+        """
+        task = self._tasks.get(task_id)
+        if task is None:
+            raise KeyError(f"任务 {task_id} 不存在")
+
+        _TERMINAL = {TaskStatus.COMPLETED, TaskStatus.CANCELLED, TaskStatus.FAILED}
+        if task.status in _TERMINAL:
+            raise ValueError(
+                f"任务 {task_id} 已处于终态 {task.status.value}，不可再变更"
+            )
+
+        task.status = status
+        task.updated_at = _now()
+        if result is not None:
+            task.result = result
+        if error is not None:
+            task.error = error
+        logger.info("任务状态已更新: %s → %s", task_id, status.value)
+        return task

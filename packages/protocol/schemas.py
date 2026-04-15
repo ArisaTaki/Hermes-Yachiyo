@@ -45,6 +45,12 @@ class TaskInfo(BaseModel):
     error: str | None = None
 
 
+class TaskGetResponse(BaseModel):
+    """GET /tasks/{task_id} 响应"""
+
+    task: TaskInfo
+
+
 class TaskCreateResponse(BaseModel):
     """POST /tasks 响应"""
 

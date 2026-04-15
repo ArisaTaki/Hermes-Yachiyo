@@ -1,4 +1,4 @@
-"""任务路由: GET /tasks, POST /tasks, POST /tasks/{task_id}/cancel"""
+"""任务路由: GET /tasks, GET /tasks/{task_id}, POST /tasks, POST /tasks/{task_id}/cancel"""
 
 from fastapi import APIRouter, HTTPException
 
@@ -9,6 +9,7 @@ from packages.protocol.schemas import (
     TaskCancelResponse,
     TaskCreateRequest,
     TaskCreateResponse,
+    TaskGetResponse,
     TaskListResponse,
 )
 
@@ -20,6 +21,24 @@ async def list_tasks() -> TaskListResponse:
     state = get_runtime().state
     tasks = state.list_tasks()
     return TaskListResponse(tasks=tasks, total=len(tasks))
+
+
+@router.get(
+    "/tasks/{task_id}",
+    response_model=TaskGetResponse,
+    responses={404: {"model": ErrorResponse}},
+)
+async def get_task(task_id: str) -> TaskGetResponse:
+    task = get_runtime().state.get_task(task_id)
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail=ErrorResponse(
+                error=ErrorCode.NOT_FOUND,
+                message=f"任务 {task_id} 不存在",
+            ).model_dump(),
+        )
+    return TaskGetResponse(task=task)
 
 
 @router.post("/tasks", response_model=TaskCreateResponse, status_code=201)

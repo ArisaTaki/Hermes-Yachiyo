@@ -22,11 +22,11 @@ async def handle(args: str, config: PluginConfig) -> str:
     task_id = task.get("task_id", "?")
     status  = task.get("status", "pending")
     desc    = task.get("description", "")[:60]
-    tid_short = task_id[:8]
 
     return (
         f"✅ 任务已提交\n"
-        f"ID: {tid_short}\n"
+        f"ID: {task_id}\n"
         f"描述: {desc}\n"
-        f"状态: {fmt_status(status)}"
+        f"状态: {fmt_status(status)}\n"
+        f"用 /y check {task_id[:8]} 查询进度"
     )

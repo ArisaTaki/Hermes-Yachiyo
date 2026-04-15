@@ -288,6 +288,35 @@
 - `apps/shell/modes/bubble.py`：四状态标签展示
 - `apps/shell/window.py`：bridge 行四状态标签展示
 
+### Milestone 12 — 最小任务闭环
+
+- ✅ apps/core/state.py — 新增 `update_task_status(task_id, status, result, error)`
+  - 合法状态流转保护：终态（completed/cancelled/failed）不可再变更
+  - 供未来执行器模块调用，当前不自动触发
+- ✅ packages/protocol/schemas.py — 新增 `TaskGetResponse`
+- ✅ apps/bridge/routes/tasks.py — 新增 `GET /tasks/{task_id}` 端点（404 if not found）
+- ✅ integrations/astrbot-plugin/api_client.py — 新增 `get_task(task_id)` + `cancel_task(task_id)`
+- ✅ integrations/astrbot-plugin/handlers/check.py（新建）— `/y check <id>` 查询任务详情
+- ✅ integrations/astrbot-plugin/handlers/cancel.py（新建）— `/y cancel <id>` 取消任务
+- ✅ integrations/astrbot-plugin/handlers/__init__.py — 注册 check + cancel handler
+- ✅ integrations/astrbot-plugin/command_router.py — HERMES_COMMANDS 加入 check/cancel，帮助文本更新
+- ✅ integrations/astrbot-plugin/handlers/do.py — 输出完整 task_id，提示 `/y check <id> 查询进度`
+
+### 任务链路完整性
+
+- `/y do <描述>` → POST /tasks → 返回完整 task_id + `/y check <id>` 使用提示
+- `/y tasks` → GET /tasks → 列出全部任务（含短 ID + 时间）
+- `/y check <id>` → GET /tasks/{id} → 任务详情（描述/状态/创建时间/结果/错误）
+- `/y cancel <id>` → POST /tasks/{id}/cancel → 取消任务
+- 任务当前保持 PENDING 状态（无执行引擎），是真实状态而非 bug
+
+## 当前占位状态
+
+- `/y codex`：直接返回"即将推出"（Hapi 端点待确认）
+- `/y screen` 图片发送：base64 → AstrBot 图片消息待联调
+- AstrBot 宿主绑定：`on_y_command()` 入口已定义，与 AstrBot 事件系统挂钩待联调
+- 任务执行引擎：任务状态保持 PENDING，`update_task_status()` 已备好接口
+
 ## 下一步
 
 **AstrBot 宿主绑定**：在 AstrBot 插件框架中注册 /y 命令，调用 `on_y_command()`。

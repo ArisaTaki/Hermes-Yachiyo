@@ -15,19 +15,21 @@ logger = logging.getLogger(__name__)
 
 # ── 路由表 ────────────────────────────────────────────
 
-HERMES_COMMANDS: frozenset[str] = frozenset({"status", "tasks", "screen", "window", "do"})
+HERMES_COMMANDS: frozenset[str] = frozenset({"status", "tasks", "screen", "window", "do", "check", "cancel"})
 HAPI_COMMANDS: frozenset[str] = frozenset({"codex"})
 ALL_COMMANDS: frozenset[str] = HERMES_COMMANDS | HAPI_COMMANDS
 
 HELP_TEXT = (
     "Yachiyo 命令列表：\n"
-    "  /y status        — 查看 Hermes Agent 运行状态\n"
-    "  /y tasks         — 查看任务列表\n"
-    "  /y screen        — 获取当前屏幕截图\n"
-    "  /y window        — 查看当前活动窗口\n"
-    "  /y do <任务>     — 创建新任务\n"
-    "  /y codex <任务>  — 通过 Hapi 执行 Codex 任务\n"
-    "  /y help          — 显示此帮助"
+    "  /y status           — 查看 Hermes Agent 运行状态\n"
+    "  /y tasks            — 查看任务列表\n"
+    "  /y do <任务>        — 创建新任务\n"
+    "  /y check <任务ID>   — 查询任务详情\n"
+    "  /y cancel <任务ID>  — 取消任务\n"
+    "  /y screen           — 获取当前屏幕截图\n"
+    "  /y window           — 查看当前活动窗口\n"
+    "  /y codex <任务>     — 通过 Hapi 执行 Codex 任务\n"
+    "  /y help             — 显示此帮助"
 )
 
 

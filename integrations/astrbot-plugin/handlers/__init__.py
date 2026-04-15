@@ -7,15 +7,17 @@ from ..config import PluginConfig
 
 def _registry() -> dict:
     """延迟加载各 handler 模块，避免循环导入。"""
-    from . import codex, do, screen, status, tasks, window
+    from . import cancel, check, codex, do, screen, status, tasks, window
 
     return {
         "status": status.handle,
-        "tasks": tasks.handle,
+        "tasks":  tasks.handle,
         "screen": screen.handle,
         "window": window.handle,
-        "do": do.handle,
-        "codex": codex.handle,
+        "do":     do.handle,
+        "check":  check.handle,
+        "cancel": cancel.handle,
+        "codex":  codex.handle,
     }
 
 

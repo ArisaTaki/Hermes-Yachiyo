@@ -348,3 +348,32 @@ live2d 保持占位实现不变。后续接入时只需修改 `apps/shell/modes/
 ## 下一步重点
 
 实现 AstrBot 插件的 QQ 命令路由功能。
+
+---
+
+## Milestone 12 — 最小任务闭环
+
+### 变更文件
+
+| 文件 | 变更 |
+|------|------|
+| apps/core/state.py | 新增 update_task_status()，含终态保护 |
+| packages/protocol/schemas.py | 新增 TaskGetResponse |
+| apps/bridge/routes/tasks.py | 新增 GET /tasks/{task_id} 端点 |
+| integrations/astrbot-plugin/api_client.py | 新增 get_task() + cancel_task() |
+| integrations/astrbot-plugin/handlers/check.py | 新建：/y check <id> |
+| integrations/astrbot-plugin/handlers/cancel.py | 新建：/y cancel <id> |
+| integrations/astrbot-plugin/handlers/__init__.py | 注册 check + cancel |
+| integrations/astrbot-plugin/command_router.py | HERMES_COMMANDS 更新，帮助文本更新 |
+| integrations/astrbot-plugin/handlers/do.py | 输出完整 task_id + 使用提示 |
+
+### 任务链路
+
+- `/y do <描述>` → POST /tasks → 返回 task_id + 提示
+- `/y tasks` → 列出全部任务
+- `/y check <id>` → 查询单任务详情
+- `/y cancel <id>` → 取消任务
+
+### 下一步
+
+AstrBot 宿主绑定：on_y_command() 与 AstrBot 事件系统挂钩。

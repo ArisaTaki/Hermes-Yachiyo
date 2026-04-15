@@ -72,6 +72,14 @@ class HermesClient:
             {"description": description, "task_type": "general", "risk_level": "low"},
         )
 
+    async def get_task(self, task_id: str) -> Dict[str, Any]:
+        """GET /tasks/{task_id}"""
+        return await self._get(f"/tasks/{task_id}")
+
+    async def cancel_task(self, task_id: str) -> Dict[str, Any]:
+        """POST /tasks/{task_id}/cancel"""
+        return await self._post(f"/tasks/{task_id}/cancel", {})
+
     async def get_screen(self) -> Dict[str, Any]:
         """GET /screen/current"""
         return await self._get("/screen/current")
