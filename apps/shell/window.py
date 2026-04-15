@@ -748,7 +748,101 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                 steps_html.append(f'<div class="step">{action}</div>')
         install_steps = "\n".join(steps_html)
     
-    # 初始化按钮区域
+    # 安装按钮区域（NOT_INSTALLED 状态）
+    install_section = ""
+    if install_info.status == HermesInstallStatus.NOT_INSTALLED:
+        install_section = """
+        <div class="init-section">
+            <h3>🚀 一键安装 Hermes Agent</h3>
+            <p>点击下方按钮，系统将自动运行官方安装脚本。<br>
+               需要网络连接，安装约需 1-3 分钟。</p>
+            <button class="init-button" id="install-btn" onclick="startInstall()">安装 Hermes Agent</button>
+            <div id="install-progress" style="display:none; margin-top:12px;">
+                <div style="color:#6495ed; margin-bottom:6px;">⏳ 安装中，请稍候...</div>
+                <pre id="install-log" style="background:#111;padding:10px;border-radius:6px;
+                     max-height:200px;overflow-y:auto;font-size:11px;color:#aaa;white-space:pre-wrap;"></pre>
+            </div>
+            <div id="install-result" style="margin-top:10px;"></div>
+        </div>
+        <script>
+        let _pollTimer = null;
+
+        async function startInstall() {
+            const btn = document.getElementById('install-btn');
+            const progress = document.getElementById('install-progress');
+            const result = document.getElementById('install-result');
+            btn.disabled = true;
+            btn.textContent = '安装中...';
+            progress.style.display = 'block';
+            result.textContent = '';
+
+            try {
+                if (!window.pywebview || !window.pywebview.api) {
+                    throw new Error('WebView API 不可用');
+                }
+                const resp = await window.pywebview.api.install_hermes();
+                if (!resp.started) {
+                    throw new Error(resp.error || '无法启动安装');
+                }
+                // 开始轮询进度
+                _pollTimer = setInterval(pollProgress, 1500);
+            } catch (err) {
+                btn.disabled = false;
+                btn.textContent = '重新安装';
+                result.innerHTML = '<span style="color:#ff6b6b">❌ ' + err.message + '</span>';
+            }
+        }
+
+        async function pollProgress() {
+            try {
+                const p = await window.pywebview.api.get_install_progress();
+                const log = document.getElementById('install-log');
+                if (p.lines && p.lines.length > 0) {
+                    log.textContent = p.lines.join('\\n');
+                    log.scrollTop = log.scrollHeight;
+                }
+                if (!p.running) {
+                    clearInterval(_pollTimer);
+                    _pollTimer = null;
+                    if (p.success) {
+                        await recheckAfterInstall();
+                    } else {
+                        const btn = document.getElementById('install-btn');
+                        const result = document.getElementById('install-result');
+                        btn.disabled = false;
+                        btn.textContent = '重新安装';
+                        result.innerHTML = '<span style="color:#ff6b6b">❌ 安装失败：' + (p.message || '未知错误') + '</span>';
+                    }
+                }
+            } catch (err) {
+                // 轮询异常，继续等待
+            }
+        }
+
+        async function recheckAfterInstall() {
+            const result = document.getElementById('install-result');
+            result.innerHTML = '<span style="color:#6495ed">⏳ 正在验证安装结果...</span>';
+            try {
+                const s = await window.pywebview.api.recheck_status();
+                if (s.ready) {
+                    result.innerHTML = '<span style="color:#90ee90">✅ 安装成功！正在重启...</span>';
+                    setTimeout(() => window.pywebview.api.restart_app(), 1500);
+                } else if (s.needs_init) {
+                    result.innerHTML = '<span style="color:#ffd700">✅ Hermes 已安装，正在进入初始化向导...</span>';
+                    setTimeout(() => window.pywebview.api.restart_app(), 1500);
+                } else {
+                    result.innerHTML = '<span style="color:#ff6b6b">⚠️ 安装后检测异常：' + s.status + '（' + s.message + '）</span>';
+                    document.getElementById('install-btn').disabled = false;
+                    document.getElementById('install-btn').textContent = '重新安装';
+                }
+            } catch (err) {
+                result.innerHTML = '<span style="color:#ff6b6b">⚠️ 无法重新检测状态：' + err.message + '</span>';
+            }
+        }
+        </script>
+        """
+
+    # 初始化按钮区域（INSTALLED_NOT_INITIALIZED 状态）
     init_section = ""
     if install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED and guidance.get("can_initialize", False):
         init_section = f"""
@@ -820,7 +914,7 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
         platform=install_info.platform,
         error_info=error_info,
         install_steps=install_steps,
-        init_section=init_section,
+        init_section=init_section + install_section,
         suggestions_section=suggestions_section,
     )
 

@@ -208,3 +208,140 @@ def get_platform_specific_suggestions(platform: Platform) -> List[str]:
         ]
     
     return []
+
+# ── 真实安装执行 ────────────────────────────────────────────────────────────────
+
+import asyncio
+import dataclasses
+import subprocess
+import sys
+
+# 官方安装脚本 URL
+HERMES_INSTALL_SCRIPT_URL = (
+    "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
+)
+
+
+@dataclasses.dataclass
+class InstallResult:
+    """hermes 安装执行结果"""
+
+    success: bool
+    message: str = ""
+    stdout: str = ""
+    stderr: str = ""
+    returncode: int = -1
+
+    def to_error_string(self) -> str:
+        parts = [self.message] if self.message else []
+        if self.returncode not in (-1, 0):
+            parts.append(f"exit={self.returncode}")
+        if self.stderr:
+            parts.append(f"stderr: {self.stderr[:200]}")
+        return " | ".join(parts) if parts else "安装失败"
+
+
+async def run_hermes_install(
+    on_output=None,
+    timeout: float = 300.0,
+) -> InstallResult:
+    """运行 Hermes Agent 官方安装脚本。
+
+    执行：curl -fsSL <install_script_url> | bash
+
+    Args:
+        on_output: 可选回调 (line: str) → None，实时接收安装输出行
+        timeout:   安装超时秒数（默认 5 分钟）
+
+    Returns:
+        InstallResult（成功或失败均返回，不抛出）
+    """
+    from packages.protocol.enums import Platform
+    from apps.installer.hermes_check import detect_platform
+
+    platform = detect_platform()
+
+    # Windows 原生环境不支持
+    if platform.value == "windows_native":
+        return InstallResult(
+            success=False,
+            message="Windows 原生环境不支持，请在 WSL2 中安装 Hermes Agent",
+            returncode=-1,
+        )
+
+    logger.info("开始安装 Hermes Agent（脚本: %s）", HERMES_INSTALL_SCRIPT_URL)
+
+    # 构造管道命令：curl ... | bash
+    cmd = [
+        "bash", "-c",
+        f"curl -fsSL {HERMES_INSTALL_SCRIPT_URL} | bash"
+    ]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,  # 合并 stderr 到 stdout，方便实时展示
+        )
+    except FileNotFoundError:
+        return InstallResult(
+            success=False,
+            message="bash 或 curl 命令未找到，无法执行安装脚本",
+            returncode=-1,
+        )
+    except Exception as exc:
+        return InstallResult(
+            success=False,
+            message=f"启动安装进程失败: {exc}",
+            returncode=-1,
+        )
+
+    stdout_lines: list[str] = []
+
+    # 实时读取输出，支持回调
+    try:
+        async def _read_output():
+            assert proc.stdout is not None
+            while True:
+                line_bytes = await proc.stdout.readline()
+                if not line_bytes:
+                    break
+                line = line_bytes.decode(errors="replace").rstrip()
+                stdout_lines.append(line)
+                if on_output is not None:
+                    try:
+                        on_output(line)
+                    except Exception:
+                        pass
+
+        await asyncio.wait_for(_read_output(), timeout=timeout)
+        await proc.wait()
+
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+        return InstallResult(
+            success=False,
+            message=f"安装超时（{timeout:.0f}s），进程已终止",
+            stdout="\n".join(stdout_lines),
+            returncode=-1,
+        )
+
+    rc = proc.returncode if proc.returncode is not None else -1
+    combined_output = "\n".join(stdout_lines)
+
+    if rc != 0:
+        return InstallResult(
+            success=False,
+            message=f"安装脚本执行失败（exit={rc}）",
+            stdout=combined_output,
+            returncode=rc,
+        )
+
+    logger.info("Hermes Agent 安装脚本执行成功")
+    return InstallResult(
+        success=True,
+        message="Hermes Agent 安装完成",
+        stdout=combined_output,
+        returncode=rc,
+    )

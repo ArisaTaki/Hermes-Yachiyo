@@ -61,13 +61,15 @@ class AuditAction(StrEnum):
 class HermesInstallStatus(StrEnum):
     """Hermes Agent 安装状态"""
 
-    NOT_CHECKED = "not_checked"  # 尚未检测
-    NOT_INSTALLED = "not_installed"  # Hermes Agent 未安装
-    INCOMPATIBLE_VERSION = "incompatible_version"  # Hermes Agent 版本不兼容
+    NOT_CHECKED = "not_checked"              # 尚未检测
+    NOT_INSTALLED = "not_installed"          # Hermes Agent 未安装
+    INSTALLING = "installing"                # 正在安装中
+    INSTALL_FAILED = "install_failed"        # 安装失败
+    INCOMPATIBLE_VERSION = "incompatible_version"  # 版本不兼容
     PLATFORM_UNSUPPORTED = "platform_unsupported"  # 平台不支持
-    WSL2_REQUIRED = "wsl2_required"  # Windows 用户需要 WSL2
+    WSL2_REQUIRED = "wsl2_required"          # Windows 用户需要 WSL2
     INSTALLED_NOT_INITIALIZED = "installed_not_initialized"  # Hermes 已安装，但 Yachiyo 工作空间未初始化
-    READY = "ready"  # Hermes 已安装且 Yachiyo 工作空间已初始化
+    READY = "ready"                          # Hermes 已安装且 Yachiyo 工作空间已初始化
 
 
 class Platform(StrEnum):

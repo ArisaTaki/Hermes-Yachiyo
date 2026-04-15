@@ -477,3 +477,21 @@ AstrBot 宿主绑定 / 真实 Hermes Agent 执行接入
 - invoke_hermes_cli() 是最小调用单元，不抛异常，统一返回结构化结果
 - CLI 接口变更只改 _HERMES_CMD 常量 + invoke_hermes_cli() 函数
 - 失败信息完整保存到 TaskInfo.error（returncode + stderr）
+
+
+---
+
+## Milestone 18 — 真实 Hermes 安装流程
+
+### 变更文件
+
+| 文件 | 变更 |
+|------|------|
+| packages/protocol/enums.py | INSTALLING + INSTALL_FAILED 枚举值 |
+| apps/installer/hermes_install.py | InstallResult dataclass + run_hermes_install() |
+| apps/shell/installer_api.py | install_hermes() + get_install_progress() + recheck_status() |
+| apps/shell/window.py | NOT_INSTALLED 界面新增一键安装+进度+重检流程 |
+
+### 安装完成流程
+
+NOT_INSTALLED → 点击安装 → 后台脚本 → 轮询进度 → recheck_status() → READY/INIT/失败

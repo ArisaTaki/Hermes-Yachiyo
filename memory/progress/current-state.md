@@ -456,3 +456,38 @@
 | 超时（60s） | success=False, error_message=... | status=FAILED, error="Hermes 执行超时..." |
 | returncode != 0 | success=False, stderr=... | status=FAILED, error="exit=N | stderr: ..." |
 | stdout 为空 | success=True, stdout="[完毕无输出]" | status=COMPLETED, result="[完毕无输出]" |
+
+
+### Milestone 18 — 真实 Hermes 安装流程
+
+- packages/protocol/enums.py — HermesInstallStatus 新增两个状态
+  - INSTALLING: 安装正在进行中
+  - INSTALL_FAILED: 安装失败（此状态由前端记录，后端不持久化）
+- apps/installer/hermes_install.py — 新增真实安装执行函数
+  - InstallResult dataclass: 结构化安装结果（success/message/stdout/stderr/returncode）
+  - run_hermes_install(on_output, timeout): 运行官方安装脚本
+    - 命令: bash -c "curl -fsSL <官方脚本URL> | bash"
+    - 实时输出回调 on_output(line)
+    - 默认超时 300s（5分钟）
+    - Windows 原生环境直接拒绝
+    - 所有失败路径返回 InstallResult（不抛出）
+- apps/shell/installer_api.py — InstallerWebViewAPI 新增三个方法
+  - install_hermes(): 在后台线程启动安装，立即返回 {started: bool}
+  - get_install_progress(): 前端轮询，返回 {running, lines[-50:], success, message}
+  - recheck_status(): 安装完成后重新检测，返回 {status, ready, needs_init}
+- apps/shell/window.py — 安装界面新增安装 UI 区域
+  - NOT_INSTALLED 状态显示"一键安装"按钮
+  - 安装进行中显示实时日志滚动（pre 元素）
+  - 安装完成后调用 recheck_status() 决定下一步
+  - 成功 → 重启进入正常模式；需初始化 → 重启进入初始化向导；失败 → 显示错误可重试
+
+### 完整安装流程
+
+1. 启动 → check_hermes_installation() → NOT_INSTALLED
+2. 进入 installer 界面，显示"安装 Hermes Agent"按钮
+3. 用户点击 → install_hermes() → 后台线程运行脚本
+4. 前端 1.5s 轮询 get_install_progress() → 实时显示日志
+5. 安装完成 → recheck_status()
+   - READY → 重启进入正常模式
+   - INSTALLED_NOT_INITIALIZED → 重启进入初始化向导
+   - 其他 → 显示错误，允许重试
