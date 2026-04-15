@@ -347,3 +347,23 @@
 6. `/y cancel <id>` → 直接置 CANCELLED（TaskRunner 遇到终态冲突静默跳过）
 
 真实 Hermes 集成时，只需替换 `TaskRunner._execute()` 中的模拟逻辑。
+
+### Milestone 14 — TaskRunner 执行策略抽象
+
+- ✅ apps/core/executor.py（新建）— 执行策略模块
+  - `ExecutionStrategy`（ABC）: 抽象接口，`run(task) → str`
+  - `SimulatedExecutor`: MVP 模拟实现（sleep 占位，不调用外部服务）
+  - `HermesExecutor`: Hermes Agent 接入存根，带详细 TODO 注释，当前抛出 NotImplementedError
+- ✅ apps/core/task_runner.py — 重构为策略注入模式
+  - `TaskRunner(state, executor=None)`: executor 默认为 SimulatedExecutor
+  - 内部拆分为 `_dispatch_pending()` 调度 + `_execute_with_state()` 状态机包装
+  - 日志中记录当前 executor 类名，便于区分运行模式
+  - 具体执行逻辑全部移入 executor.run()，TaskRunner 只管状态推进
+
+### 接入 Hermes 的路径
+
+后续真正接 Hermes 只需两步：
+1. 补全 `apps/core/executor.py` 中 `HermesExecutor.run()`
+2. 在 Bridge lifespan 构造 TaskRunner 时传入 `HermesExecutor()`
+
+其余链路（状态机、Bridge API、AstrBot 展示）**无需改动**。

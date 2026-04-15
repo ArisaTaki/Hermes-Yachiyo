@@ -399,3 +399,19 @@ AstrBot 宿主绑定：on_y_command() 与 AstrBot 事件系统挂钩。
 ### 下一步
 
 AstrBot 宿主绑定 / 真实 Hermes Agent 执行接入
+
+---
+
+## Milestone 14 — TaskRunner 执行策略抽象
+
+### 变更文件
+
+| 文件 | 变更 |
+|------|------|
+| apps/core/executor.py | 新建：ExecutionStrategy ABC + SimulatedExecutor + HermesExecutor 存根 |
+| apps/core/task_runner.py | 重构：executor 策略注入，_execute_with_state() 纯状态机 |
+
+### 接入 Hermes 路径
+
+- 补全 `HermesExecutor.run()` → 传入 `TaskRunner(state, HermesExecutor())`
+- 其余链路不变

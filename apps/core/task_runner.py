@@ -1,10 +1,13 @@
-"""最小任务执行器
+"""任务调度器
 
-MVP 阶段：模拟任务状态推进
-  PENDING → RUNNING（约 2 秒后）
-  RUNNING → COMPLETED（再约 5 秒后）
+TaskRunner 只负责：
+  - 轮询 AppState 中的 PENDING 任务
+  - 将每个任务分派到独立 asyncio.Task
+  - 推进任务状态（PENDING → RUNNING → COMPLETED/FAILED）
+  - 将具体"如何执行"委托给 ExecutionStrategy
 
-当 Hermes Agent 真正集成后，_execute() 负责将任务提交给 Hermes 并回传结果。
+默认使用 SimulatedExecutor（MVP 占位）。
+切换到真实 Hermes 只需在 __init__ 传入 HermesExecutor()。
 不直接暴露 HTTP，不依赖 Bridge 层。
 """
 
@@ -13,28 +16,41 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from apps.core.executor import ExecutionStrategy, SimulatedExecutor
 from apps.core.state import AppState
 from packages.protocol.enums import TaskStatus
 
 logger = logging.getLogger(__name__)
 
-_POLL_INTERVAL: float = 2.0   # 轮询间隔（秒）
-_RUN_DELAY: float = 2.0       # PENDING → RUNNING 延迟（秒）
-_COMPLETE_DELAY: float = 5.0  # RUNNING → COMPLETED 延迟（秒）
+_POLL_INTERVAL: float = 2.0  # 轮询间隔（秒）
 
 
 class TaskRunner:
-    """最小任务状态推进器
+    """任务调度器
 
     轮询 AppState 中的 PENDING 任务并推进其生命周期。
     每个任务在独立的 asyncio.Task 中执行，互不阻塞。
+
+    Args:
+        state:    AppState 实例（由 Core Runtime 持有）
+        executor: 执行策略，默认 SimulatedExecutor。
+                  传入 HermesExecutor() 即可切换到真实 Hermes 执行。
     """
 
-    def __init__(self, state: AppState) -> None:
+    def __init__(
+        self,
+        state: AppState,
+        executor: ExecutionStrategy | None = None,
+    ) -> None:
         self._state = state
+        self._executor: ExecutionStrategy = executor or SimulatedExecutor()
         self._in_progress: dict[str, asyncio.Task] = {}
         self._running = False
         self._loop_task: asyncio.Task | None = None
+
+    @property
+    def executor(self) -> ExecutionStrategy:
+        return self._executor
 
     async def start(self) -> None:
         """启动后台轮询循环"""
@@ -44,7 +60,11 @@ class TaskRunner:
         self._loop_task = asyncio.create_task(
             self._poll_loop(), name="task-runner-poll"
         )
-        logger.info("TaskRunner 已启动（poll_interval=%.1fs）", _POLL_INTERVAL)
+        logger.info(
+            "TaskRunner 已启动（executor=%s, poll_interval=%.1fs）",
+            type(self._executor).__name__,
+            _POLL_INTERVAL,
+        )
 
     async def stop(self) -> None:
         """停止轮询循环及所有进行中的任务子协程"""
@@ -59,7 +79,7 @@ class TaskRunner:
             t.cancel()
         logger.info("TaskRunner 已停止")
 
-    # ── 内部方法 ────────────────────────────────────────────
+    # ── 内部调度 ────────────────────────────────────────────────
 
     async def _poll_loop(self) -> None:
         while self._running:
@@ -77,7 +97,7 @@ class TaskRunner:
                 and task.task_id not in self._in_progress
             ):
                 coro_task = asyncio.create_task(
-                    self._execute(task.task_id, task.description),
+                    self._execute_with_state(task.task_id),
                     name=f"task-{task.task_id}",
                 )
                 self._in_progress[task.task_id] = coro_task
@@ -85,39 +105,46 @@ class TaskRunner:
                     lambda ft, tid=task.task_id: self._in_progress.pop(tid, None)
                 )
 
-    async def _execute(self, task_id: str, description: str) -> None:
-        """执行单个任务：PENDING → RUNNING → COMPLETED/FAILED"""
+    async def _execute_with_state(self, task_id: str) -> None:
+        """状态机包装层：推进状态，将实际执行委托给 self._executor。
+
+        调用链：
+          PENDING  →（executor.run() 开始前）→  RUNNING
+          RUNNING  →（executor.run() 成功后）→  COMPLETED
+          RUNNING  →（executor.run() 抛出）  →  FAILED
+          任何阶段 → asyncio.CancelledError   →  静默退出
+          终态冲突（task 已被 cancel）         →  静默跳过
+        """
+        task = self._state.get_task(task_id)
+        if task is None:
+            return
+
         try:
-            await asyncio.sleep(_RUN_DELAY)
+            # ① 标记 RUNNING（在 executor.run() 开始前，体现"正在处理"）
             self._state.update_task_status(task_id, TaskStatus.RUNNING)
-            logger.info("任务开始执行: %s", task_id)
+            logger.info("任务开始执行: %s [%s]", task_id, type(self._executor).__name__)
 
-            await asyncio.sleep(_COMPLETE_DELAY)
+            # ② 委托给执行策略（模拟 or Hermes）
+            result = await self._executor.run(task)
 
-            # MVP 阶段：直接标记完成，result 为占位说明
-            # 真实集成时：在此处调用 Hermes Agent 并填写实际结果
-            self._state.update_task_status(
-                task_id,
-                TaskStatus.COMPLETED,
-                result=f"已完成（占位）：{description[:60]}",
-            )
+            # ③ 标记 COMPLETED
+            self._state.update_task_status(task_id, TaskStatus.COMPLETED, result=result)
             logger.info("任务已完成: %s", task_id)
 
         except asyncio.CancelledError:
-            # 外部取消（stop() 时），静默退出
             logger.info("任务协程已取消: %s", task_id)
 
         except (KeyError, ValueError) as exc:
-            # 任务已被 cancel_task() 直接置为终态，忽略状态更新冲突
+            # 任务已被 cancel_task() 直接置为终态，终态保护触发，静默忽略
             logger.debug("任务状态跳过 (%s): %s", task_id, exc)
 
-        except Exception:
-            logger.exception("任务执行异常: %s", task_id)
+        except Exception as exc:
+            logger.exception("任务执行失败: %s", task_id)
             try:
                 self._state.update_task_status(
                     task_id,
                     TaskStatus.FAILED,
-                    error="执行器内部异常",
+                    error=f"{type(exc).__name__}: {exc}",
                 )
             except Exception:
                 pass
