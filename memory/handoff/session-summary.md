@@ -437,3 +437,25 @@ AstrBot 宿主绑定 / 真实 Hermes Agent 执行接入
 
 - `_call_hermes()` 实现（确认接口后：subprocess CLI 或 HTTP API）
 - Hermes Agent 实际安装到测试机
+
+
+---
+
+## Milestone 16 — HermesExecutor 最小真实调用路径
+
+### 变更文件
+
+- apps/core/executor.py: 整体重写，HermesExecutor 实现 subprocess 调用路径
+
+### 核心设计
+
+- HermesCallError: 自定义异常，携带 returncode + stderr
+- _call_hermes(): asyncio subprocess exec，60s 超时，超时后 proc.kill()
+- fallback_to_simulated 开关：生产默认 False（FAILED 可见），调试可设 True
+- CLI 命令集中在 _HERMES_CMD 常量，接口变更只改一处
+
+### 接 Hermes 还差什么
+
+- 确认 hermes run --prompt 是正确 CLI 接口
+- 测试机安装 Hermes Agent
+- (可选) 流式输出支持

@@ -392,3 +392,29 @@
 | 实现 `HermesExecutor._call_hermes()` | ❌ 待实现 |
 | `runtime.is_hermes_ready()` 在真机上返回 True | ❌ 依赖 Hermes 安装 |
 | `select_executor()` 自动切换生效 | ✅ 逻辑已就位 |
+
+
+### Milestone 16 — HermesExecutor 最小真实调用路径
+
+- apps/core/executor.py — HermesExecutor 完整 subprocess 实现
+  - 新增 HermesCallError(RuntimeError): 携带 returncode + stderr
+  - _HERMES_CMD = [hermes, run, --prompt]: CLI 接口假设，集中管理
+  - HermesExecutor(fallback_to_simulated=False): 可选降级开关
+  - _call_hermes(description): asyncio.create_subprocess_exec 真实调用
+    - FileNotFoundError → HermesCallError
+    - asyncio.TimeoutError(60s) → 终止进程 + 抛出
+    - returncode != 0 → HermesCallError(stderr[:200])
+    - stdout 空 → 返回占位说明
+  - run(task): 捕获失败，按 fallback 开关决定降级或抛出
+
+### 回退策略
+
+- Bridge 启动：is_available()=False → 全局使用 SimulatedExecutor
+- 单次执行（fallback=False，默认）：失败 → 任务 FAILED，错误可见
+- 单次执行（fallback=True，调试）：失败 → 降级 Simulated，任务 COMPLETED
+
+### 真正完整接入还差什么
+
+- 确认 hermes run --prompt 是正确 CLI 接口（或切换 HTTP API）
+- 在测试机安装 Hermes Agent，验证 select_executor 自动切换
+- 处理 Hermes 流式输出（当前收集全部 stdout）
