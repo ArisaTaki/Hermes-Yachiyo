@@ -300,7 +300,7 @@ _STATUS_HTML = """
 
         <div class="settings-section">
             <h4>Live2D 模式配置 <span style="background:#1a1a3e;border:1px solid #6495ed33;color:#9988cc;font-size:0.75em;padding:1px 7px;border-radius:10px;margin-left:6px;">骨架</span></h4>
-            <div class="settings-row"><span class="label">模型已配置</span><span class="value" id="s-l2d-configured">—</span></div>
+            <div class="settings-row"><span class="label">配置状态</span><span class="value" id="s-l2d-state">—</span></div>
             <div class="settings-row"><span class="label">模型名称</span><span class="value" id="s-l2d-model-name" style="font-size:0.85em;">—</span></div>
             <div class="settings-row"><span class="label">模型路径</span><span class="value" id="s-l2d-model-path" style="font-size:0.78em;word-break:break-all;">—</span></div>
             <div class="settings-row"><span class="label">待机动作组</span><span class="value" id="s-l2d-idle-group">—</span></div>
@@ -397,9 +397,16 @@ _STATUS_HTML = """
             // Live2D 配置
             if (d.live2d) {
                 const l2d = d.live2d;
-                const cfgEl = document.getElementById('s-l2d-configured');
-                cfgEl.textContent = l2d.model_configured ? '✅ 已配置' : '⚠️ 未配置';
-                cfgEl.className = 'value ' + (l2d.model_configured ? 'ok' : 'warn');
+                const stateEl = document.getElementById('s-l2d-state');
+                const stateMap = {
+                    'not_configured': {text: '⚪ 未配置', cls: ''},
+                    'path_invalid':   {text: '❌ 路径无效', cls: 'warn'},
+                    'path_valid':     {text: '✅ 路径存在 · 渲染器待实现', cls: 'ok'},
+                    'loaded':         {text: '✅ 已加载', cls: 'ok'},
+                };
+                const stInfo = stateMap[l2d.model_state] || {text: l2d.model_state, cls: ''};
+                stateEl.textContent = stInfo.text;
+                stateEl.className = 'value' + (stInfo.cls ? ' ' + stInfo.cls : '');
                 document.getElementById('s-l2d-model-name').textContent = l2d.model_name || '（未设置）';
                 document.getElementById('s-l2d-model-name').className = 'value' + (l2d.model_name ? '' : ' dim');
                 document.getElementById('s-l2d-model-path').textContent = l2d.model_path || '（未设置）';

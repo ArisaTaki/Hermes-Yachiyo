@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import asdict, dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal
 
@@ -15,6 +16,22 @@ _CONFIG_FILE = _CONFIG_DIR / "config.json"
 
 # 合法的 display_mode 值，与 DisplayMode 枚举保持同步
 DisplayModeValue = Literal["window", "bubble", "live2d"]
+
+
+class ModelState(StrEnum):
+    """Live2D 模型配置校验状态。
+
+    状态迁移路径（当前可达的用竖线标注）：
+        NOT_CONFIGURED  → 用户填写配置 →
+        PATH_INVALID    → 路径修正或模型目录就位 →
+        PATH_VALID      → 渲染器实现后 →
+        LOADED          （未来，需要 live2d_renderer.py）
+    """
+
+    NOT_CONFIGURED = "not_configured"   # model_name 或 model_path 为空
+    PATH_INVALID = "path_invalid"       # 路径已填写但目录不存在
+    PATH_VALID = "path_valid"           # 路径存在，但渲染器尚未实现
+    LOADED = "loaded"                   # 渲染器已加载模型（未来）
 
 
 @dataclass
@@ -32,8 +49,22 @@ class Live2DConfig:
     window_on_top: bool = True        # 角色窗口是否置顶
 
     def is_model_configured(self) -> bool:
-        """是否已配置模型（名称和路径都不为空）。"""
+        """是否已填写了模型名和路径（不检查路径是否存在）。"""
         return bool(self.model_name and self.model_path)
+
+    def validate(self) -> ModelState:
+        """校验当前配置，返回对应状态。
+
+        - 未填写 → NOT_CONFIGURED
+        - 已填写但目录不存在 → PATH_INVALID
+        - 目录存在但渲染器未实现 → PATH_VALID
+        - 渲染器已加载 → LOADED（永远不会由此方法返回，留给 Live2DRenderer）
+        """
+        if not self.is_model_configured():
+            return ModelState.NOT_CONFIGURED
+        if not Path(self.model_path).expanduser().exists():
+            return ModelState.PATH_INVALID
+        return ModelState.PATH_VALID
 
 
 @dataclass

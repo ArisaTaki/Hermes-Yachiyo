@@ -60,8 +60,8 @@ h2 {{ color: #6495ed; font-size: 1.1em; margin-bottom: 16px; }}
 
 <div class="section">
     <h4>Live2D 模式配置 <span class="badge">骨架</span></h4>
-    <div class="row"><span class="label">模型已配置</span>
-        <span class="value {model_ok_class}">{model_configured}</span></div>
+    <div class="row"><span class="label">配置状态</span>
+        <span class="value {model_state_class}">{model_state_label}</span></div>
     <div class="row"><span class="label">当前模型</span>
         <span class="value {model_name_class}">{model_name}</span></div>
     <div class="row"><span class="label">模型路径</span>
@@ -108,13 +108,21 @@ def build_settings_html(config: "AppConfig") -> str:
         完整 HTML 字符串
     """
     l2d = config.live2d
-    configured = l2d.is_model_configured()
+    model_state = l2d.validate()
+
+    _MODEL_STATE_LABELS = {
+        "not_configured": ("⚪ 未配置", ""),
+        "path_invalid":   ("❌ 路径无效", "warn"),
+        "path_valid":     ("✅ 路径存在 · 渲染器待实现", "ok"),
+        "loaded":         ("✅ 已加载", "ok"),
+    }
+    state_label, state_class = _MODEL_STATE_LABELS.get(model_state.value, (model_state.value, ""))
 
     return _SETTINGS_HTML.format(
         display_mode=config.display_mode,
         # Live2D 配置
-        model_configured="✅ 已配置" if configured else "⚠️ 未配置",
-        model_ok_class="ok" if configured else "warn",
+        model_state_label=state_label,
+        model_state_class=state_class,
         model_name=l2d.model_name if l2d.model_name else "（未设置）",
         model_name_class="" if l2d.model_name else "dim",
         model_path=l2d.model_path if l2d.model_path else "（未设置）",

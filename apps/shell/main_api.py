@@ -116,6 +116,7 @@ class MainWindowAPI:
                     ],
                 },
                 "live2d": {
+                    "model_state": self._config.live2d.validate().value,
                     "model_configured": self._config.live2d.is_model_configured(),
                     "model_name": self._config.live2d.model_name or "",
                     "model_path": self._config.live2d.model_path or "",

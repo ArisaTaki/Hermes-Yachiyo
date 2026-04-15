@@ -542,3 +542,11 @@ AppConfig 新增 live2d 字段，load_config() 处理嵌套反序列化。
 window.py 设置面板新增 Live2D 配置区块（7 个字段），refreshSettings() JS 填充 d.live2d。
 main_api.py get_settings_data() 新增 live2d 键，包含所有配置 + renderer_available=False。
 live2d.py model 字段改为读取 config.live2d，前端 label 分三态展示（加载中/已配置未加载/未配置）。
+
+
+## Milestone 26 — Live2D 配置最小校验与状态闭环
+
+新增 `ModelState` StrEnum（NOT_CONFIGURED / PATH_INVALID / PATH_VALID / LOADED）和 `Live2DConfig.validate()` 方法（检查路径是否存在）。
+live2d.py model 字段加入 `state` 键，前端 label 用四态字典映射。
+window.py 设置面板 s-l2d-configured → s-l2d-state，JS stateMap 四态着色。
+main_api.py 新增 `model_state` 字段，settings.py 同步改为四态标签。

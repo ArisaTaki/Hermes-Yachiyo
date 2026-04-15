@@ -191,13 +191,14 @@ _LIVE2D_HTML = """
             icon.textContent = running > 0 ? '⚡' : '🎤';
 
             const label = document.getElementById('stage-label');
-            if (d.model.loaded) {
-                label.textContent = d.model.name || 'LIVE2D · 模型已加载';
-            } else if (d.model.configured) {
-                label.textContent = 'LIVE2D · 已配置模型: ' + (d.model.name || '未命名') + ' · 渲染器待实现';
-            } else {
-                label.textContent = 'LIVE2D · 角色模型未配置';
-            }
+            const modelState = d.model.state || 'not_configured';
+            const stateLabels = {
+                'not_configured':  'LIVE2D · 角色模型未配置',
+                'path_invalid':    'LIVE2D · 模型路径无效: ' + (d.model.name || '未命名'),
+                'path_valid':      'LIVE2D · 模型就绪: ' + (d.model.name || '未命名') + ' · 渲染器待实现',
+                'loaded':          d.model.name || 'LIVE2D · 模型已加载',
+            };
+            label.textContent = stateLabels[modelState] || 'LIVE2D · 状态未知';
         } catch(e) {}
     }
 
@@ -269,6 +270,7 @@ class Live2DWindowAPI:
                 # 角色模型状态：从配置读取，渲染器就绪后改为从 Live2DRenderer 动态获取
                 "model": {
                     "loaded": False,        # TODO: Live2DRenderer.is_loaded()（当前渲染器未实现）
+                    "state": self._config.live2d.validate().value,
                     "configured": self._config.live2d.is_model_configured(),
                     "name": self._config.live2d.model_name or "",
                     "path": self._config.live2d.model_path or "",

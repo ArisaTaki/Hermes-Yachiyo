@@ -715,3 +715,29 @@ launch()
 2. `Live2DWindowAPI.load_model()` / `play_motion()` / `set_expression()` 实现
 3. HTML canvas 替换占位 div
 4. pywebview 透明窗口支持
+
+
+### Milestone 26 — Live2D 配置最小校验与状态闭环
+
+**`apps/shell/config.py`**
+- 新增 `ModelState(StrEnum)` 枚举：
+  - `NOT_CONFIGURED` — model_name 或 model_path 为空
+  - `PATH_INVALID`   — 路径已填写但目录不存在
+  - `PATH_VALID`     — 路径存在，渲染器未实现
+  - `LOADED`         — 渲染器已加载（未来，不由 validate() 返回）
+- `Live2DConfig.validate() -> ModelState`：调用 `Path.expanduser().exists()` 校验路径
+
+**`apps/shell/modes/live2d.py`**
+- `get_live2d_status()` model 字段新增 `state` 键（`validate().value`）
+- 前端 JS label 改用 4 条 stateLabels 字典映射，覆盖全部状态
+
+**`apps/shell/window.py`**
+- 设置面板 Live2D 区块：`s-l2d-configured` → `s-l2d-state`（四态文本 + CSS 类）
+- JS `refreshSettings()` 改用 stateMap 字典填充颜色和文字
+
+**`apps/shell/main_api.py`**
+- `get_settings_data()` live2d 键新增 `model_state` 字段
+
+**`apps/shell/settings.py`**
+- HTML 模板：`模型已配置` → `配置状态`，占位改为 `{model_state_label}`
+- `build_settings_html()` 用 `_MODEL_STATE_LABELS` 字典映射四态文本和 CSS 类
