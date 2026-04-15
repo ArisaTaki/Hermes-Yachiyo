@@ -68,25 +68,41 @@ def resolve_startup_mode(install_info: "HermesInstallInfo") -> StartupMode:
 # ── 各模式启动函数 ─────────────────────────────────────────────────────────────
 
 def run_normal_mode(config: "AppConfig") -> None:
-    """正常模式：启动 Core Runtime + Bridge + 主界面窗口。"""
+    """正常模式：启动 Core Runtime + Bridge + 主界面窗口。
+
+    启动流程：
+      1. 解析并记录 display mode（window / bubble / live2d）
+      2. 初始化 Core Runtime
+      3. 将 Runtime 注入 Bridge
+      4. 按配置启动 Bridge（后台线程）
+      5. 按配置启动系统托盘（后台线程）
+      6. 主线程进入对应 display mode（阻塞直到窗口关闭）
+    """
     from apps.bridge.deps import set_runtime
     from apps.bridge.server import start_bridge, stop_bridge
     from apps.core.runtime import HermesRuntime
-    from apps.shell.modes import launch_mode
+    from apps.shell.modes import DisplayMode, launch_mode, resolve_display_mode
     from apps.shell.tray import create_tray
 
+    # ① 解析 display mode — 在此层明确记录，方便排查启动决策
+    display_mode: DisplayMode = resolve_display_mode(config)
+    logger.info(
+        "启动决策确认: startup_mode=NORMAL, display_mode=%s", display_mode
+    )
+
+    # ② Core Runtime
     runtime = HermesRuntime(config)
     runtime.start()
     set_runtime(runtime)
 
+    # ③ Bridge
     if config.bridge_enabled:
-        bridge_thread = threading.Thread(
+        threading.Thread(
             target=start_bridge,
             kwargs={"host": config.bridge_host, "port": config.bridge_port},
             daemon=True,
             name="bridge-api",
-        )
-        bridge_thread.start()
+        ).start()
     else:
         logger.info("Bridge 已禁用，跳过启动")
 
@@ -99,6 +115,7 @@ def run_normal_mode(config: "AppConfig") -> None:
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
+    # ④ 系统托盘
     if config.tray_enabled:
         threading.Thread(
             target=create_tray,
@@ -109,7 +126,7 @@ def run_normal_mode(config: "AppConfig") -> None:
     else:
         logger.info("系统托盘已禁用，跳过启动")
 
-    # pywebview 需要在主线程运行
+    # ⑤ 主线程进入 display mode（阻塞）
     launch_mode(runtime, config)
 
     # 窗口关闭后清理
@@ -143,9 +160,11 @@ def launch(config: "AppConfig") -> None:
     流程：
       1. 检测 Hermes 安装状态
       2. 映射为 StartupMode
-      3. 分发到对应模式启动函数
+      3. 若为 NORMAL，解析 DisplayMode 并记录完整启动决策
+      4. 分发到对应模式启动函数
     """
     from apps.installer.hermes_check import check_hermes_installation
+    from apps.shell.modes import resolve_display_mode
 
     logger.info("检查 Hermes Agent 安装状态...")
     install_info = check_hermes_installation()
@@ -155,8 +174,12 @@ def launch(config: "AppConfig") -> None:
     mode = resolve_startup_mode(install_info)
 
     if mode == StartupMode.NORMAL:
+        display_mode = resolve_display_mode(config)
+        logger.info(
+            "启动决策: startup_mode=%s, display_mode=%s",
+            mode, display_mode,
+        )
         run_normal_mode(config)
     else:
-        # INSTALLER 和 INIT_WIZARD 都走 run_installer_mode，
-        # 窗口内部根据 install_info.status 区分 UI。
+        logger.info("启动决策: startup_mode=%s", mode)
         run_installer_mode(config, install_info)

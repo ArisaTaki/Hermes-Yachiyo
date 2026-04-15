@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Literal
 
 logger = logging.getLogger(__name__)
 
 _CONFIG_DIR = Path.home() / ".hermes-yachiyo"
 _CONFIG_FILE = _CONFIG_DIR / "config.json"
+
+# 合法的 display_mode 值，与 DisplayMode 枚举保持同步
+DisplayModeValue = Literal["window", "bubble", "live2d"]
 
 
 @dataclass
@@ -20,7 +24,7 @@ class AppConfig:
     bridge_host: str = "127.0.0.1"
     bridge_port: int = 8420
     bridge_enabled: bool = True
-    display_mode: str = "window"  # window | bubble | live2d
+    display_mode: DisplayModeValue = "window"   # 合法值见 DisplayMode 枚举
     tray_enabled: bool = True
     start_minimized: bool = False
     log_level: str = "INFO"

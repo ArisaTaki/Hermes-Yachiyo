@@ -621,3 +621,29 @@ launch(config)  # 所有状态判断在 startup.py
 **扩展方式（后续新增状态只需）：**
 1. 在 `_INSTALL_STATUS_TO_MODE` 加一行映射
 2. 如需新模式，加对应的 `run_xxx_mode()` 并在 `launch()` 里分发
+
+
+### Milestone 23 — startup 决策层与显示模式系统衔接
+
+**`apps/shell/modes/__init__.py`**
+- 新增 `DisplayMode` StrEnum：WINDOW / BUBBLE / LIVE2D
+- 新增 `resolve_display_mode(config) -> DisplayMode`：解析配置，未知值回退为 WINDOW
+- `launch_mode()` 内部改用 `DisplayMode` 枚举分发，不再比较字符串
+
+**`apps/shell/startup.py`**
+- `run_normal_mode()` 第一步显式调用 `resolve_display_mode(config)` 并记录日志
+- 日志格式：`startup_mode=NORMAL, display_mode=window/bubble/live2d`
+- `launch()` 在 NORMAL 分支也先解析 display_mode 并输出完整决策日志
+
+**`apps/shell/config.py`**
+- `display_mode` 字段改用 `Literal["window", "bubble", "live2d"]` 类型注解
+- 新增 `DisplayModeValue` 类型别名
+
+**两个维度在 startup.py 中的表达：**
+```
+launch()
+  → resolve_startup_mode(install_info)  → NORMAL / INIT_WIZARD / INSTALLER
+  → resolve_display_mode(config)        → WINDOW / BUBBLE / LIVE2D（仅 NORMAL 时）
+  → logger.info("startup_mode=NORMAL, display_mode=window")
+  → run_normal_mode() → launch_mode() → run()
+```

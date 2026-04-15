@@ -519,3 +519,9 @@ PATH 注入 + 真正重启 + JS 流程修正。
 
 新建 `apps/shell/startup.py`：StartupMode + 映射表 + launch()。
 app.py 精简为加载配置后直接 launch(config)，状态分支不再分散。
+
+
+## Milestone 23 — startup 决策层与显示模式衔接
+
+DisplayMode 枚举 + resolve_display_mode() 加入 modes/__init__.py。
+startup.py 同时表达两个决策维度：startup_mode + display_mode，都集中在一处记录。

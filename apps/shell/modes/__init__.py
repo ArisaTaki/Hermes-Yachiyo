@@ -1,12 +1,18 @@
 """显示模式系统
 
-提供统一的模式分发入口 launch_mode()，根据 config.display_mode 启动对应的显示模式。
+提供 DisplayMode 枚举、resolve_display_mode() 解析函数和统一分发入口 launch_mode()。
 每个模式模块导出一个 run(runtime, config) 函数，负责阻塞主线程直到界面关闭。
+
+模式说明：
+  window  — 全功能主窗口（默认）
+  bubble  — 轻量悬浮气泡小窗口
+  live2d  — Live2D 角色驱动窗口（当前为占位）
 """
 
 from __future__ import annotations
 
 import logging
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -15,26 +21,49 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_SUPPORTED_MODES = ("window", "bubble", "live2d")
+
+class DisplayMode(StrEnum):
+    """显示模式枚举"""
+
+    WINDOW = "window"    # 全功能主窗口
+    BUBBLE = "bubble"    # 轻量悬浮气泡
+    LIVE2D = "live2d"    # Live2D 角色（占位）
+
+
+_DEFAULT_DISPLAY_MODE = DisplayMode.WINDOW
+
+
+def resolve_display_mode(config: "AppConfig") -> DisplayMode:
+    """从配置中解析显示模式，未知值回退为 WINDOW。
+
+    Args:
+        config: 应用配置对象
+
+    Returns:
+        DisplayMode 枚举值
+    """
+    raw = getattr(config, "display_mode", None) or ""
+    try:
+        mode = DisplayMode(raw)
+    except ValueError:
+        logger.warning("未知显示模式 %r，回退为 %s", raw, _DEFAULT_DISPLAY_MODE)
+        mode = _DEFAULT_DISPLAY_MODE
+    return mode
 
 
 def launch_mode(runtime: "HermesRuntime", config: "AppConfig") -> None:
     """根据 config.display_mode 启动对应显示模式（阻塞主线程）。
 
-    未知模式自动回退为 window。
+    调用方通常已通过 resolve_display_mode() 记录了决策日志；
+    此处只负责分发，不重复记录。
     """
-    mode = config.display_mode
-    if mode not in _SUPPORTED_MODES:
-        logger.warning("未知显示模式 %r，回退为 window 模式", mode)
-        mode = "window"
+    mode = resolve_display_mode(config)
 
-    logger.info("启动显示模式: %s", mode)
-
-    if mode == "window":
+    if mode == DisplayMode.WINDOW:
         from apps.shell.modes.window import run
-    elif mode == "bubble":
+    elif mode == DisplayMode.BUBBLE:
         from apps.shell.modes.bubble import run
-    else:  # live2d
+    else:  # LIVE2D
         from apps.shell.modes.live2d import run
 
     run(runtime, config)
