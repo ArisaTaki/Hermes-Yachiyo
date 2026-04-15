@@ -973,3 +973,60 @@ if summary and summary.renderer_entry:
 3. 修改 live2d.model_path → 保存 → 提示 "✓ 模型路径已更新，已重新校验"
 4. 修改 tray_enabled → 保存 → 提示 "⚡ 托盘设置将在下次启动时生效"
 5. Bridge 区域：当已保存配置与运行配置不一致时，显示黄色漂移提示条
+
+
+### Milestone 34 — Bridge 运行控制 + AstrBot 接入可观测性
+
+**新增 `apps/shell/integration_status.py`**
+- 集中产出 Bridge / AstrBot / Hapi 运行时状态
+- `BridgeStatus` dataclass：四状态(disabled/enabled_not_started/running/failed) + config_dirty + drift_details + boot_config
+- `AstrBotStatus` dataclass：四状态(not_configured/configured_not_connected/connected/unknown) + bridge_ready + blockers
+- `HapiStatus` dataclass：四状态(not_configured/configured_not_connected/connected/unknown)
+- `get_integration_snapshot()` 一次性获取全部集成状态
+- `to_dict()` / `to_dashboard_dict()` 供前端消费
+
+**Bridge 状态模型**
+
+| 状态 | 条件 | 展示 |
+|------|------|------|
+| disabled | bridge_enabled=False | ⛔ 已禁用 |
+| enabled_not_started | enabled 但进程未完成启动 | ⏳ 启动中 |
+| running | uvicorn 正常运行 | ✅ 运行中 |
+| failed | 启动后异常退出 | ❌ 异常退出 |
+
+**Bridge 配置漂移展示**
+- `_bridge_boot_config` 记录启动时快照
+- `drift_details` 列出每个差异字段（如 "地址: 127.0.0.1 → 0.0.0.0"）
+- 设置页新增"运行地址"行（仅 dirty 时显示）+ 差异明细区
+- 仪表盘 bridge 卡即时同步
+
+**AstrBot 接入状态**
+
+| 状态 | 条件 | 展示 |
+|------|------|------|
+| not_configured | bridge 运行但用户未配置 AstrBot 插件 | ⚪ 未配置 |
+| configured_not_connected | bridge 异常/未启动 | ⏳ 已配置但未连接 |
+| connected | 未来真实接入 | ✅ 已连接 |
+| unknown | 无法判定 | ❓ 状态未知 |
+
+**状态来源统一**
+- `main_api.py` 的 `get_dashboard_data()` / `get_settings_data()` / `_current_app_state()` 全部消费 `get_integration_snapshot()`
+- `bubble.py` 的 `get_bubble_data()` 消费 `get_integration_snapshot()`
+- `settings.py` 的 `build_settings_html()` 通过辅助函数获取 bridge/astrbot 状态
+- 不再各自硬编码 "not_connected"
+
+**UI 变更**
+- 仪表盘集成服务卡：AstrBot 行增加说明行 + blockers 行
+- 设置页 Bridge 区：新增"运行状态"行 + "运行地址"行 + drift_details 差异明细
+- 设置页集成服务区：AstrBot 行增加说明/blocker + "AstrBot 是什么？" 依赖说明
+- Bubble 模式：bridge 状态增加 ⚠️ dirty 标记，AstrBot 显示 label 而非硬编码文案
+- 独立设置窗口：Bridge 运行状态行 + AstrBot 接入状态 + 依赖说明
+
+**文件变更**
+| 文件 | 变更 |
+|------|------|
+| apps/shell/integration_status.py | **新增** — 统一状态产出源 |
+| apps/shell/main_api.py | 消费 integration_status，移除硬编码 |
+| apps/shell/modes/bubble.py | 消费 integration_status，增强展示 |
+| apps/shell/window.py | 仪表盘+设置页 bridge/astrbot 展示增强 |
+| apps/shell/settings.py | bridge 运行状态 + AstrBot 接入状态 + 依赖说明 |

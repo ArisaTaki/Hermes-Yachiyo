@@ -252,6 +252,8 @@ _STATUS_HTML = """
         <div class="card" style="grid-column: span 2;">
             <h3>集成服务</h3>
             <div class="row"><span class="label">AstrBot / QQ</span><span class="value" id="int-astrbot">—</span></div>
+            <div class="row" id="int-astrbot-desc-row" style="display:none;"><span class="label" style="font-size:0.78em;color:#777;">说明</span><span class="value" id="int-astrbot-desc" style="font-size:0.78em;color:#888;">—</span></div>
+            <div class="row" id="int-astrbot-blocker-row" style="display:none;"><span class="label" style="font-size:0.78em;color:#cc8844;">前置条件</span><span class="value" id="int-astrbot-blocker" style="font-size:0.78em;color:#cc8844;">—</span></div>
             <div class="row"><span class="label">Hapi / Codex</span><span class="value" id="int-hapi">—</span></div>
         </div>
     </div>
@@ -350,6 +352,7 @@ _STATUS_HTML = """
 
         <div class="settings-section">
             <h4>Bridge / 内部通信</h4>
+            <div class="settings-row"><span class="label">运行状态</span><span class="value" id="s-bridge-state">—</span></div>
             <div class="settings-row"><span class="label">启用</span>
                 <label class="s-toggle"><input type="checkbox" id="s-bridge-enabled" onchange="onSettingChange('bridge_enabled', this.checked)"><span class="slider"></span></label>
             </div>
@@ -359,14 +362,22 @@ _STATUS_HTML = """
             <div class="settings-row"><span class="label">端口</span>
                 <input class="s-input" id="s-bridge-port" type="number" min="1024" max="65535" value="" onchange="onSettingChange('bridge_port', parseInt(this.value))">
             </div>
-            <div class="settings-row"><span class="label">完整地址</span><span class="value" id="s-bridge-url">—</span></div>
+            <div class="settings-row"><span class="label">保存地址</span><span class="value" id="s-bridge-url">—</span></div>
+            <div class="settings-row" id="s-bridge-boot-row" style="display:none;"><span class="label" style="color:#888;font-size:0.82em;">运行地址</span><span class="value" id="s-bridge-boot-url" style="font-size:0.82em;color:#888;">—</span></div>
             <div class="bridge-dirty-hint" id="bridge-dirty-hint">⚠️ Bridge 配置已修改，需重启 Bridge 后生效</div>
+            <div class="bridge-drift-details" id="bridge-drift-details" style="display:none;font-size:0.78em;color:#cc8844;padding:4px 8px;"></div>
         </div>
 
         <div class="settings-section">
             <h4>集成服务</h4>
-            <div class="settings-row"><span class="label" id="s-int-astrbot-name">AstrBot / QQ</span><span class="value" id="s-int-astrbot-status">—</span></div>
-            <div class="settings-row"><span class="label" id="s-int-hapi-name">Hapi / Codex</span><span class="value" id="s-int-hapi-status">—</span></div>
+            <div class="settings-row"><span class="label">AstrBot / QQ</span><span class="value" id="s-int-astrbot-status">—</span></div>
+            <div class="settings-row" id="s-int-astrbot-desc-row" style="display:none;"><span class="label" style="font-size:0.78em;color:#777;">说明</span><span class="value" id="s-int-astrbot-desc" style="font-size:0.78em;color:#888;">—</span></div>
+            <div class="settings-row" id="s-int-astrbot-blocker-row" style="display:none;"><span class="label" style="font-size:0.78em;color:#cc8844;">前置条件</span><span class="value" id="s-int-astrbot-blocker" style="font-size:0.78em;color:#cc8844;">—</span></div>
+            <div class="settings-row"><span class="label">Hapi / Codex</span><span class="value" id="s-int-hapi-status">—</span></div>
+            <div class="settings-row" style="border-top:1px solid #3a3a5a;margin-top:4px;padding-top:6px;">
+                <span class="label" style="color:#666;font-size:0.78em;">AstrBot 是什么？</span>
+                <span class="value" style="color:#666;font-size:0.75em;">通过 QQ 远程控制 Yachiyo 的桥接入口，依赖 Bridge 运行</span>
+            </div>
         </div>
 
         <div class="settings-section">
@@ -472,15 +483,59 @@ _STATUS_HTML = """
             }
 
             // Bridge
+            const bridgeStateLabels = {
+                'disabled': '⛔ 已禁用', 'enabled_not_started': '⏳ 启动中',
+                'running': '✅ 运行中', 'failed': '❌ 异常退出'
+            };
+            const bsEl = document.getElementById('s-bridge-state');
+            bsEl.textContent = bridgeStateLabels[d.bridge.state] || d.bridge.state;
+            bsEl.className = 'value' + (d.bridge.state === 'running' ? ' ok' : d.bridge.state === 'failed' ? ' warn' : '');
             document.getElementById('s-bridge-enabled').checked = d.bridge.enabled;
-            document.getElementById('s-bridge-host').value = d.bridge.host;
-            document.getElementById('s-bridge-port').value = d.bridge.port;
+            const bhEl = document.getElementById('s-bridge-host');
+            if (document.activeElement !== bhEl) bhEl.value = d.bridge.host;
+            const bpEl = document.getElementById('s-bridge-port');
+            if (document.activeElement !== bpEl) bpEl.value = d.bridge.port;
             document.getElementById('s-bridge-url').textContent = d.bridge.url;
+            // 运行地址 vs 保存地址
+            const bootRow = document.getElementById('s-bridge-boot-row');
+            const bootUrlEl = document.getElementById('s-bridge-boot-url');
+            if (d.bridge.config_dirty && d.bridge.boot_config) {
+                bootRow.style.display = 'flex';
+                bootUrlEl.textContent = d.bridge.boot_config.url;
+            } else {
+                bootRow.style.display = 'none';
+            }
+            // 漂移提示
+            document.getElementById('bridge-dirty-hint').classList.toggle('visible', !!d.bridge.config_dirty);
+            const driftEl = document.getElementById('bridge-drift-details');
+            if (d.bridge.config_dirty && d.bridge.drift_details && d.bridge.drift_details.length > 0) {
+                driftEl.innerHTML = d.bridge.drift_details.join('<br>');
+                driftEl.style.display = 'block';
+            } else {
+                driftEl.style.display = 'none';
+            }
 
-            // Integrations
-            const statusLabels = {'not_configured': '⏳ 未配置', 'connected': '✅ 已连接', 'error': '❌ 错误'};
-            document.getElementById('s-int-astrbot-status').textContent = statusLabels[d.integrations.astrbot.status] || d.integrations.astrbot.status;
-            document.getElementById('s-int-hapi-status').textContent = statusLabels[d.integrations.hapi.status] || d.integrations.hapi.status;
+            // Integrations — AstrBot
+            const abStatusLabels = {
+                'not_configured': '⚪ 未配置', 'configured_not_connected': '⏳ 已配置但未连接',
+                'connected': '✅ 已连接', 'unknown': '❓ 状态未知'
+            };
+            const abData = d.integrations.astrbot || {};
+            document.getElementById('s-int-astrbot-status').textContent = abData.label || abStatusLabels[abData.status] || abData.status || '—';
+            const abDescRow = document.getElementById('s-int-astrbot-desc-row');
+            const abDescEl = document.getElementById('s-int-astrbot-desc');
+            if (abData.description) {
+                abDescRow.style.display = 'flex'; abDescEl.textContent = abData.description;
+            } else { abDescRow.style.display = 'none'; }
+            const abBlockRow = document.getElementById('s-int-astrbot-blocker-row');
+            const abBlockEl = document.getElementById('s-int-astrbot-blocker');
+            if (abData.blockers && abData.blockers.length > 0) {
+                abBlockRow.style.display = 'flex'; abBlockEl.textContent = abData.blockers.join('；');
+            } else { abBlockRow.style.display = 'none'; }
+
+            // Integrations — Hapi
+            const hapiData = d.integrations.hapi || {};
+            document.getElementById('s-int-hapi-status').textContent = hapiData.label || abStatusLabels[hapiData.status] || hapiData.status || '—';
 
             // App
             document.getElementById('s-app-version').textContent = 'v' + d.app.version;
@@ -498,6 +553,16 @@ _STATUS_HTML = """
         if (modeEl) modeEl.value = state.display_mode;
         // 设置面板：Bridge
         if (state.bridge) {
+            const bridgeStateLabels = {
+                'disabled': '⛔ 已禁用', 'enabled_not_started': '⏳ 启动中',
+                'running': '✅ 运行中', 'failed': '❌ 异常退出'
+            };
+            const bsEl = document.getElementById('s-bridge-state');
+            if (bsEl) {
+                const bs = state.bridge.state || state.bridge.running;
+                bsEl.textContent = bridgeStateLabels[bs] || bs;
+                bsEl.className = 'value' + (bs === 'running' ? ' ok' : bs === 'failed' ? ' warn' : '');
+            }
             const beEl = document.getElementById('s-bridge-enabled');
             if (beEl) beEl.checked = state.bridge.enabled;
             const bhEl = document.getElementById('s-bridge-host');
@@ -506,31 +571,65 @@ _STATUS_HTML = """
             if (bpEl && document.activeElement !== bpEl) bpEl.value = state.bridge.port;
             const buEl = document.getElementById('s-bridge-url');
             if (buEl) buEl.textContent = state.bridge.url;
-            // Bridge 配置漂移提示
+            // 运行地址 vs 保存地址
+            const bootRow = document.getElementById('s-bridge-boot-row');
+            const bootUrlEl = document.getElementById('s-bridge-boot-url');
+            if (bootRow && bootUrlEl) {
+                if (state.bridge.config_dirty && state.bridge.boot_config) {
+                    bootRow.style.display = 'flex';
+                    bootUrlEl.textContent = state.bridge.boot_config.url;
+                } else { bootRow.style.display = 'none'; }
+            }
+            // 漂移提示 + 差异明细
             const dirtyEl = document.getElementById('bridge-dirty-hint');
-            if (dirtyEl) {
-                dirtyEl.classList.toggle('visible', !!state.bridge.config_dirty);
+            if (dirtyEl) dirtyEl.classList.toggle('visible', !!state.bridge.config_dirty);
+            const driftEl = document.getElementById('bridge-drift-details');
+            if (driftEl) {
+                if (state.bridge.config_dirty && state.bridge.drift_details && state.bridge.drift_details.length > 0) {
+                    driftEl.innerHTML = state.bridge.drift_details.join('<br>');
+                    driftEl.style.display = 'block';
+                } else { driftEl.style.display = 'none'; }
             }
         }
         // 设置面板：托盘
         const trayEl = document.getElementById('s-tray-enabled');
         if (trayEl) trayEl.checked = !!state.tray_enabled;
 
-        // 仪表盘：Bridge 状态卡（即时同步，无需等 refreshDashboard 轮询）
+        // 仪表盘：Bridge 状态卡
         if (state.bridge) {
             const bridgeLabels = {
-                'disabled': '⛔ 已禁用',
-                'enabled_not_started': '⏳ 启动中',
-                'running': '✅ 运行中',
-                'failed': '❌ 异常退出'
+                'disabled': '⛔ 已禁用', 'enabled_not_started': '⏳ 启动中',
+                'running': '✅ 运行中', 'failed': '❌ 异常退出'
             };
+            const brState = state.bridge.running || state.bridge.state;
             const brEl = document.getElementById('bridge-enabled');
             if (brEl) {
-                brEl.textContent = bridgeLabels[state.bridge.running] || state.bridge.running;
-                brEl.className = 'value ' + (state.bridge.running === 'running' ? 'ok' : state.bridge.running === 'failed' ? 'warn' : '');
+                brEl.textContent = bridgeLabels[brState] || brState;
+                brEl.className = 'value ' + (brState === 'running' ? 'ok' : brState === 'failed' ? 'warn' : '');
             }
             const baEl = document.getElementById('bridge-addr');
-            if (baEl) baEl.textContent = state.bridge.running !== 'disabled' ? state.bridge.url : '—';
+            if (baEl) baEl.textContent = brState !== 'disabled' ? state.bridge.url : '—';
+        }
+
+        // 仪表盘：集成服务卡
+        if (state.integrations) {
+            const abData = state.integrations.astrbot || {};
+            const abEl = document.getElementById('int-astrbot');
+            if (abEl) abEl.textContent = abData.label || '—';
+            const abDescRow = document.getElementById('int-astrbot-desc-row');
+            const abDescEl = document.getElementById('int-astrbot-desc');
+            if (abDescRow && abDescEl && abData.description) {
+                abDescRow.style.display = 'flex'; abDescEl.textContent = abData.description;
+            } else if (abDescRow) { abDescRow.style.display = 'none'; }
+            const abBlockRow = document.getElementById('int-astrbot-blocker-row');
+            const abBlockEl = document.getElementById('int-astrbot-blocker');
+            if (abBlockRow && abBlockEl && abData.blockers && abData.blockers.length > 0) {
+                abBlockRow.style.display = 'flex'; abBlockEl.textContent = abData.blockers.join('；');
+            } else if (abBlockRow) { abBlockRow.style.display = 'none'; }
+
+            const hapiData = state.integrations.hapi || {};
+            const hapiEl = document.getElementById('int-hapi');
+            if (hapiEl) hapiEl.textContent = hapiData.label || '—';
         }
     }
 
@@ -639,9 +738,22 @@ _STATUS_HTML = """
             document.getElementById('task-completed').textContent = data.tasks.completed || 0;
 
             // Integrations
-            const intLabels = {'not_connected': '⏳ 未接入', 'connected': '✅ 已连接', 'error': '❌ 错误'};
-            document.getElementById('int-astrbot').textContent = intLabels[data.integrations.astrbot.status] || data.integrations.astrbot.status;
-            document.getElementById('int-hapi').textContent = intLabels[data.integrations.hapi.status] || data.integrations.hapi.status;
+            const abData = data.integrations.astrbot || {};
+            const abEl = document.getElementById('int-astrbot');
+            abEl.textContent = abData.label || '—';
+            abEl.className = 'value' + (abData.status === 'connected' ? ' ok' : '');
+            const abDescRow = document.getElementById('int-astrbot-desc-row');
+            const abDescEl = document.getElementById('int-astrbot-desc');
+            if (abDescRow && abDescEl && abData.description) {
+                abDescRow.style.display = 'flex'; abDescEl.textContent = abData.description;
+            } else if (abDescRow) { abDescRow.style.display = 'none'; }
+            const abBlockRow = document.getElementById('int-astrbot-blocker-row');
+            const abBlockEl = document.getElementById('int-astrbot-blocker');
+            if (abBlockRow && abBlockEl && abData.blockers && abData.blockers.length > 0) {
+                abBlockRow.style.display = 'flex'; abBlockEl.textContent = abData.blockers.join('；');
+            } else if (abBlockRow) { abBlockRow.style.display = 'none'; }
+            const hapiData = data.integrations.hapi || {};
+            document.getElementById('int-hapi').textContent = hapiData.label || '—';
         } catch(e) {}
     }
 

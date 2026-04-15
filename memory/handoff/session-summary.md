@@ -1,64 +1,57 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 33: 设置生效策略 + 运行时反馈 + 控制入口
+## 本轮完成内容 — Milestone 34: Bridge 运行控制 + AstrBot 接入可观测性
 
 ### 修改的文件
 
 | 文件 | 变更 |
 |------|------|
-| apps/shell/effect_policy.py | **新增** — 集中定义设置生效策略模型 |
-| apps/shell/main_api.py | `_bridge_boot_config` 快照；`_current_app_state()` 增加 `config_dirty`；`update_settings()` 返回 `effects` |
-| apps/shell/modes/live2d.py | `update_settings()` 返回 `effects` |
-| apps/shell/window.py | 新增 `showEffectHints()` JS + `effect-hints` UI + `bridge-dirty-hint` + CSS |
-| apps/shell/settings.py | 新增 `showEffectHints()` JS + `effect-hints` UI + CSS |
-| memory/progress/current-state.md | Milestone 33 记录 |
+| apps/shell/integration_status.py | **新增** — Bridge/AstrBot/Hapi 状态统一产出源 |
+| apps/shell/main_api.py | 全部消费 integration_status，移除硬编码状态 |
+| apps/shell/modes/bubble.py | 消费 integration_status，AstrBot 展示 label+blockers |
+| apps/shell/window.py | 仪表盘+设置页 bridge/astrbot 展示增强 |
+| apps/shell/settings.py | bridge 运行状态 + AstrBot 接入状态 + 依赖说明 |
+| memory/progress/current-state.md | Milestone 34 记录 |
 | memory/handoff/session-summary.md | 本次汇报 |
 
-### 设置生效策略模型
+### Bridge 状态模型
 
 ```
-EffectType 枚举:
-  IMMEDIATE            — 即时反映到 UI 和内存配置
-  REQUIRES_MODE_RESTART — 需重启当前显示模式
-  REQUIRES_BRIDGE_RESTART — 需重启 Bridge
-  REQUIRES_APP_RESTART  — 需重启整个应用
+disabled             — bridge_enabled=False
+enabled_not_started  — enabled 但进程未完成启动
+running              — uvicorn 正常运行
+failed               — 启动后异常退出
 ```
 
-### 字段 → 策略映射
-
-| 字段 | 策略 |
-|------|------|
-| live2d.model_name/path/idle/expressions/physics | IMMEDIATE |
-| live2d.window_on_top | REQUIRES_MODE_RESTART |
-| display_mode | REQUIRES_MODE_RESTART |
-| bridge_enabled/host/port | REQUIRES_BRIDGE_RESTART |
-| tray_enabled | REQUIRES_APP_RESTART |
-
-### `update_settings()` 返回结构新增
+### Bridge 配置漂移展示
 
 ```json
 {
-  "ok": true,
-  "applied": {"bridge_host": "0.0.0.0"},
-  "effects": {
-    "effects": [{"key": "bridge_host", "effect": "requires_bridge_restart", "message": "Bridge 地址变更需重启 Bridge 后生效"}],
-    "has_immediate": false,
-    "has_restart_bridge": true,
-    "hint": "需重启 Bridge后生效"
-  },
-  "app_state": { "bridge": { "config_dirty": true, ... } }
+  "config_dirty": true,
+  "drift_details": ["地址: 127.0.0.1 → 0.0.0.0", "端口: 8420 → 9999"],
+  "boot_config": {"enabled": true, "host": "127.0.0.1", "port": 8420, "url": "..."},
+  "url": "http://0.0.0.0:9999"
 }
 ```
 
-### Bridge 配置漂移检测
+### AstrBot 接入状态
 
-- `_bridge_boot_config` 记录启动时 bridge 配置快照
-- `_current_app_state()` 对比当前配置与快照，返回 `bridge.config_dirty`
-- 设置页 Bridge 区域显示 `bridge-dirty-hint` 黄色提示条
+```
+not_configured             — Bridge 运行但用户未配置 AstrBot
+configured_not_connected   — Bridge 异常/未启动，AstrBot 无法连接
+connected                  — 未来真实接入后使用
+unknown                    — 无法判定
+```
+
+### 状态来源统一
+
+所有消费者（main_api / bubble / settings / window）统一通过 `get_integration_snapshot()` 获取状态：
+- 不再各自硬编码 "not_connected" / "not_configured"
+- 不再各自拼装 bridge 状态字符串
+- AstrBot blockers 由 integration_status 根据 bridge 状态自动计算
 
 ### 架构决策
 
-- 生效策略集中在 `effect_policy.py`，不散落在前端字符串
-- `update_settings()` 统一返回 `effects`，主窗口和独立设置窗口共享同一消费逻辑
-- display_mode 采用"保存 + 下次启动生效"策略（MVP 推荐）
-- Bridge 当前不自动重启，仅提示用户配置已变更
+- `integration_status.py` 是只读状态计算层，不持有状态，不触发副作用
+- `BridgeStatus.to_dashboard_dict()` 保持向后兼容 `running` 字段名
+- AstrBot 当前阶段为占位逻辑，bridge running 时标记 not_configured，未来接入真实健康检查后自动升级为 connected

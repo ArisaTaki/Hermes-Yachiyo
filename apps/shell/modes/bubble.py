@@ -8,8 +8,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Dict
 
-from apps.bridge.server import get_bridge_state
 from apps.installer.workspace_init import get_workspace_status
+from apps.shell.integration_status import get_integration_snapshot
 
 if TYPE_CHECKING:
     from apps.core.runtime import HermesRuntime
@@ -156,12 +156,14 @@ _BUBBLE_HTML = """
                 'failed': '❌ 异常退出'
             };
             const brEl = document.getElementById('bridge-status');
-            brEl.textContent = bridgeLabels[d.bridge.running] || d.bridge.running;
-            brEl.className = 'value ' + (d.bridge.running === 'running' ? 'ok' : '');
+            let bridgeText = bridgeLabels[d.bridge.running] || d.bridge.running;
+            if (d.bridge.config_dirty) bridgeText += ' ⚠️';
+            brEl.textContent = bridgeText;
+            brEl.className = 'value ' + (d.bridge.running === 'running' ? 'ok' : d.bridge.running === 'failed' ? 'warn' : '');
 
             const abEl = document.getElementById('astrbot-status');
-            abEl.textContent = d.astrbot.status === 'not_connected' ? '⏳ 未接入' : d.astrbot.status;
-            abEl.className = 'value';
+            abEl.textContent = d.astrbot.label || '—';
+            abEl.className = 'value' + (d.astrbot.status === 'connected' ? ' ok' : '');
 
             document.getElementById('hint').textContent = '已更新';
             setTimeout(function(){ document.getElementById('hint').textContent = ''; }, 2000);
@@ -200,23 +202,23 @@ class BubbleWindowAPI:
         self._runtime = runtime
         self._config = config
         self._bubble_window = None  # 由 run() 注入
+        self._bridge_boot_config = {
+            "enabled": config.bridge_enabled,
+            "host": config.bridge_host,
+            "port": config.bridge_port,
+        }
 
     def _bridge_status(self) -> str:
         """组合 config.bridge_enabled 与实际运行状态，返回四状态字符串。"""
-        if not self._config.bridge_enabled:
-            return "disabled"
-        state = get_bridge_state()
-        if state == "running":
-            return "running"
-        if state == "failed":
-            return "failed"
-        return "enabled_not_started"
+        snap = get_integration_snapshot(self._config, self._bridge_boot_config)
+        return snap.bridge.state
 
     def get_bubble_data(self) -> Dict[str, Any]:
         """获取气泡状态摘要"""
         try:
             status = self._runtime.get_status()
             workspace = get_workspace_status()
+            snap = get_integration_snapshot(self._config, self._bridge_boot_config)
             hermes_info = status.get("hermes", {})
             return {
                 "hermes": {
@@ -232,10 +234,11 @@ class BubbleWindowAPI:
                 },
                 "bridge": {
                     "enabled": self._config.bridge_enabled,
-                    "running": self._bridge_status(),
+                    "running": snap.bridge.state,
                     "addr": f"{self._config.bridge_host}:{self._config.bridge_port}",
+                    "config_dirty": snap.bridge.config_dirty,
                 },
-                "astrbot": {"status": "not_connected"},
+                "astrbot": snap.astrbot.to_dict(),
             }
         except Exception as e:
             logger.error("获取气泡数据失败: %s", e)

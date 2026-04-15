@@ -131,6 +131,8 @@ input:checked + .slider:before {{ transform: translateX(16px); }}
 
 <div class="section">
     <h4>Bridge / 内部通信</h4>
+    <div class="row"><span class="label">运行状态</span>
+        <span class="value {bridge_state_class}">{bridge_state_label}</span></div>
     <div class="row"><span class="label">启用</span>
         <span class="value {bridge_class}">{bridge_enabled}</span></div>
     <div class="row"><span class="label">地址</span>
@@ -139,8 +141,14 @@ input:checked + .slider:before {{ transform: translateX(16px); }}
 
 <div class="section">
     <h4>AstrBot / QQ 集成</h4>
-    <div class="row"><span class="label">连接状态</span>
-        <span class="value dim">未接入 · 需配置 AstrBot 插件</span></div>
+    <div class="row"><span class="label">接入状态</span>
+        <span class="value {astrbot_class}">{astrbot_label}</span></div>
+    <div class="row"><span class="label" style="font-size:0.78em;color:#777;">说明</span>
+        <span class="value" style="font-size:0.78em;color:#888;">{astrbot_desc}</span></div>
+    <div class="row" style="border-top:1px solid #4a3a4a;margin-top:4px;padding-top:6px;">
+        <span class="label" style="color:#666;font-size:0.78em;">依赖关系</span>
+        <span class="value" style="color:#666;font-size:0.75em;">AstrBot 通过 QQ 远程调用 Yachiyo，依赖 Bridge 运行</span>
+    </div>
 </div>
 
 <script>
@@ -311,4 +319,46 @@ def build_settings_html(config: "AppConfig") -> str:
         bridge_enabled="✅ 已启用" if config.bridge_enabled else "⛔ 已禁用",
         bridge_class="ok" if config.bridge_enabled else "",
         bridge_addr=f"http://{config.bridge_host}:{config.bridge_port}",
+        bridge_state_label=_bridge_state_label(config),
+        bridge_state_class=_bridge_state_class(config),
+        # AstrBot（只读）
+        astrbot_label=_astrbot_label(config),
+        astrbot_class=_astrbot_class(config),
+        astrbot_desc=_astrbot_desc(config),
     )
+
+
+def _bridge_state_label(config: "AppConfig") -> str:
+    from apps.bridge.server import get_bridge_state
+    if not config.bridge_enabled:
+        return "⛔ 已禁用"
+    s = get_bridge_state()
+    return {"running": "✅ 运行中", "failed": "❌ 异常退出"}.get(s, "⏳ 启动中")
+
+
+def _bridge_state_class(config: "AppConfig") -> str:
+    from apps.bridge.server import get_bridge_state
+    if not config.bridge_enabled:
+        return ""
+    s = get_bridge_state()
+    return {"running": "ok", "failed": "warn"}.get(s, "")
+
+
+def _astrbot_label(config: "AppConfig") -> str:
+    from apps.bridge.server import get_bridge_state
+    if not config.bridge_enabled:
+        return "⚪ 未配置"
+    s = get_bridge_state()
+    if s != "running":
+        return "⏳ 已配置但未连接"
+    return "⚪ 未配置"
+
+
+def _astrbot_class(config: "AppConfig") -> str:
+    return ""
+
+
+def _astrbot_desc(config: "AppConfig") -> str:
+    if not config.bridge_enabled:
+        return "Bridge 未启用，AstrBot 无法连接"
+    return "需在 AstrBot 中安装并配置 Hermes-Yachiyo 插件"

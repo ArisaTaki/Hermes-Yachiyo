@@ -7,10 +7,10 @@
 import logging
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from apps.bridge.server import get_bridge_state
 from apps.installer.workspace_init import get_workspace_status
 from apps.shell.config import ModelSummary, save_config
 from apps.shell.effect_policy import build_effects_summary
+from apps.shell.integration_status import get_integration_snapshot
 
 if TYPE_CHECKING:
     from apps.core.runtime import HermesRuntime
@@ -51,29 +51,21 @@ class MainWindowAPI:
         }
 
     def _bridge_status(self) -> str:
-        """组合 config.bridge_enabled 与实际运行状态，返回四状态字符串。
+        """组合 config.bridge_enabled 与实际运行状态，返回四状态字符串。"""
+        snap = get_integration_snapshot(self._config, self._bridge_boot_config)
+        return snap.bridge.state
 
-        Returns:
-            "disabled"            — bridge_enabled 为 False
-            "enabled_not_started" — 已启用但尚未启动（启动中或配置刚改）
-            "running"             — 正在运行
-            "failed"              — 启动后异常退出
-        """
-        if not self._config.bridge_enabled:
-            return "disabled"
-        state = get_bridge_state()
-        if state == "running":
-            return "running"
-        if state == "failed":
-            return "failed"
-        return "enabled_not_started"
+    def _get_snapshot(self):
+        """获取集成服务统一快照。"""
+        return get_integration_snapshot(self._config, self._bridge_boot_config)
     
     def get_dashboard_data(self) -> Dict[str, Any]:
         """获取仪表盘数据"""
         try:
             status = self._runtime.get_status()
             workspace = get_workspace_status()
-            
+            snap = self._get_snapshot()
+
             hermes_info = status.get("hermes", {})
             
             return {
@@ -94,16 +86,10 @@ class MainWindowAPI:
                     "created_at": workspace.get("created_at"),
                 },
                 "tasks": status.get("task_counts", {}),
-                "bridge": {
-                    "enabled": self._config.bridge_enabled,
-                    "host": self._config.bridge_host,
-                    "port": self._config.bridge_port,
-                    "url": f"http://{self._config.bridge_host}:{self._config.bridge_port}",
-                    "running": self._bridge_status(),
-                },
+                "bridge": snap.bridge.to_dashboard_dict(),
                 "integrations": {
-                    "astrbot": {"status": "not_connected"},
-                    "hapi": {"status": "not_connected"},
+                    "astrbot": snap.astrbot.to_dict(),
+                    "hapi": snap.hapi.to_dict(),
                 },
             }
         except Exception as e:
@@ -115,6 +101,7 @@ class MainWindowAPI:
         try:
             status = self._runtime.get_status()
             workspace = get_workspace_status()
+            snap = self._get_snapshot()
             hermes_info = status.get("hermes", {})
 
             return {
@@ -149,26 +136,13 @@ class MainWindowAPI:
                     "enable_expressions": self._config.live2d.enable_expressions,
                     "enable_physics": self._config.live2d.enable_physics,
                     "window_on_top": self._config.live2d.window_on_top,
-                    "renderer_available": False,  # 等待 live2d_renderer.py 实现
+                    "renderer_available": False,
                     "summary": _serialize_summary(self._config.live2d.scan()),
                 },
-                "bridge": {
-                    "enabled": self._config.bridge_enabled,
-                    "host": self._config.bridge_host,
-                    "port": self._config.bridge_port,
-                    "url": f"http://{self._config.bridge_host}:{self._config.bridge_port}",
-                },
+                "bridge": snap.bridge.to_dict(),
                 "integrations": {
-                    "astrbot": {
-                        "name": "AstrBot / QQ",
-                        "status": "not_configured",
-                        "description": "QQ 消息桥接（即将推出）",
-                    },
-                    "hapi": {
-                        "name": "Hapi / Codex",
-                        "status": "not_configured",
-                        "description": "Codex CLI 执行后端（即将推出）",
-                    },
+                    "astrbot": snap.astrbot.to_dict(),
+                    "hapi": snap.hapi.to_dict(),
                 },
                 "app": {
                     "version": status.get("version", "0.1.0"),
@@ -275,23 +249,15 @@ class MainWindowAPI:
     def _current_app_state(self) -> Dict[str, Any]:
         """返回当前可编辑配置的最新状态快照，供保存后即时刷新 UI。
 
-        包含 bridge 配置漂移检测：当已保存的配置与当前运行的 bridge 配置不一致时，
-        bridge.config_dirty=True，前端可据此提示用户需重启 bridge。
+        包含 bridge 完整状态（含配置漂移检测和差异明细）以及集成服务状态。
         """
-        bridge_dirty = (
-            self._config.bridge_enabled != self._bridge_boot_config["enabled"]
-            or self._config.bridge_host != self._bridge_boot_config["host"]
-            or self._config.bridge_port != self._bridge_boot_config["port"]
-        )
+        snap = self._get_snapshot()
         return {
             "display_mode": self._config.display_mode,
-            "bridge": {
-                "enabled": self._config.bridge_enabled,
-                "host": self._config.bridge_host,
-                "port": self._config.bridge_port,
-                "url": f"http://{self._config.bridge_host}:{self._config.bridge_port}",
-                "running": self._bridge_status(),
-                "config_dirty": bridge_dirty,
-            },
+            "bridge": snap.bridge.to_dashboard_dict(),
             "tray_enabled": self._config.tray_enabled,
+            "integrations": {
+                "astrbot": snap.astrbot.to_dict(),
+                "hapi": snap.hapi.to_dict(),
+            },
         }
