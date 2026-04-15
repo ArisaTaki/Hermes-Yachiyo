@@ -554,3 +554,46 @@
   → READY → restart → 主界面
   → INSTALLED_NOT_INITIALIZED → restart → 初始化向导
   → needs_env_refresh=True（边缘情况）→ restart → 重新检测
+
+
+### Milestone 21 — 初始化向导完整闭环
+
+**修复三处问题：**
+
+1. **WebView API 始终挂载**（window.py）
+   - 原来只有 INSTALLED_NOT_INITIALIZED 才传 `api`，NOT_INSTALLED 时 `api=None`
+   - 安装按钮 JS 调用 `window.pywebview.api.install_hermes()` 会静默失败
+   - 修复：`create_installer_window` 始终创建并传入 `InstallerWebViewAPI()`
+   - 窗口标题按状态区分："初始化工作空间" vs "安装 Hermes Agent"
+
+2. **INITIALIZING 枚举状态**（enums.py）
+   - 新增 `INITIALIZING = "initializing"`，完善首次启动状态机
+
+3. **init section 进度反馈**（window.py）
+   - 新增 `<pre id="init-log">` 进度日志区域
+   - JS 按步骤追加日志：创建目录 → 创建项目 → 完成
+   - created_items 逐条展示
+   - 成功 → "正在进入主界面..." → 1.5s 后 restart_app()
+   - 失败 → 显示错误，允许重试
+
+**完整首次启动状态流（已闭环）：**
+```
+not_installed
+  → 安装引导页（含安装按钮，API 已挂载）
+  → install_hermes() [后台线程]
+  → 轮询进度 → 安装完成
+  → recheck_status()（PATH 注入）
+  → installed_not_initialized → restart
+  或 → ready → restart
+
+installed_not_initialized
+  → 初始化向导页（含初始化按钮，API 已挂载）
+  → initialize_workspace()（同步）
+  → 逐步展示 created_items
+  → 初始化完成 → restart_app()（Popen 重新拉起）
+  → 新进程 check_hermes_installation() → READY
+  → _start_normal_mode → 主界面
+
+ready
+  → 直接进入主界面
+```

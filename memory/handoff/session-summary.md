@@ -507,3 +507,9 @@ NOT_INSTALLED → 点击安装 → 后台脚本 → 轮询进度 → recheck_sta
 
 PATH 注入 + 真正重启 + JS 流程修正。
 安装完成后应用自动重拉起，进入 READY 或初始化向导，无中间悬停态。
+
+
+## Milestone 21 — 初始化向导完整闭环
+
+三处修复：API 始终挂载 + INITIALIZING 枚举 + init 进度 log。
+首次启动 not_installed → installing → installed_not_initialized → initializing → ready → 主界面 全链路闭环。

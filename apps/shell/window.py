@@ -669,7 +669,7 @@ def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
 
 
 def create_installer_window(install_info: "HermesInstallInfo", config: "AppConfig") -> None:
-    """创建并显示安装引导窗口（阻塞主线程）- 安装引导模式"""
+    """创建并显示安装引导/初始化向导窗口（阻塞主线程）"""
     if not _HAS_WEBVIEW:
         logger.warning("pywebview 未安装，显示控制台安装信息")
         _print_console_install_info(install_info)
@@ -680,15 +680,20 @@ def create_installer_window(install_info: "HermesInstallInfo", config: "AppConfi
         return
 
     html = _generate_installer_html(install_info)
-    
-    # 如果是工作空间初始化模式，启用 API
-    api = None
-    if install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED:
-        from apps.shell.installer_api import InstallerWebViewAPI
-        api = InstallerWebViewAPI()
+
+    # 始终提供 API：安装按钮和初始化按钮都依赖 pywebview.api
+    from apps.shell.installer_api import InstallerWebViewAPI
+    api = InstallerWebViewAPI()
+
+    is_init_mode = install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED
+    window_title = (
+        "Hermes-Yachiyo - 初始化工作空间"
+        if is_init_mode
+        else "Hermes-Yachiyo - 安装 Hermes Agent"
+    )
 
     webview.create_window(
-        title="Hermes-Yachiyo - Hermes Agent 安装引导",
+        title=window_title,
         html=html,
         width=800,
         height=600,
@@ -709,6 +714,7 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
     status_mapping = {
         HermesInstallStatus.NOT_INSTALLED: ("warning", "Hermes Agent 未安装"),
         HermesInstallStatus.INSTALLED_NOT_INITIALIZED: ("info", "Hermes Agent 已安装，需要初始化 Yachiyo 工作空间"),
+        HermesInstallStatus.INITIALIZING: ("info", "正在初始化 Yachiyo 工作空间..."),
         HermesInstallStatus.INCOMPATIBLE_VERSION: ("warning", "Hermes Agent 版本不兼容"),
         HermesInstallStatus.PLATFORM_UNSUPPORTED: ("", "平台不支持"),
         HermesInstallStatus.WSL2_REQUIRED: ("info", "需要 WSL2 环境"),
@@ -860,51 +866,62 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
     # 初始化按钮区域（INSTALLED_NOT_INITIALIZED 状态）
     init_section = ""
     if install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED and guidance.get("can_initialize", False):
-        init_section = f"""
+        init_section = """
         <div class="init-section">
             <h3>🚀 快速初始化</h3>
-            <p>系统可以自动为您创建 Yachiyo 工作空间，包括必要的目录结构和配置文件。</p>
-            <button class="init-button" onclick="initializeWorkspace()">自动初始化工作空间</button>
-            <div id="init-status" style="margin-top: 10px; color: #888;"></div>
+            <p>点击下方按钮，系统将自动创建 Yachiyo 工作空间（目录结构 + 默认配置）。<br>
+               初始化完成后会自动进入主界面。</p>
+            <button class="init-button" id="init-btn" onclick="initializeWorkspace()">初始化工作空间</button>
+            <div id="init-progress" style="display:none; margin-top:12px;">
+                <pre id="init-log" style="background:#111;padding:10px;border-radius:6px;
+                     max-height:150px;overflow-y:auto;font-size:11px;color:#aaa;white-space:pre-wrap;"></pre>
+            </div>
+            <div id="init-status" style="margin-top:10px;"></div>
         </div>
         <script>
-        async function initializeWorkspace() {{
-            const button = document.querySelector('.init-button');
+        function appendInitLog(line) {
+            const log = document.getElementById('init-log');
+            log.textContent += line + '\\n';
+            log.scrollTop = log.scrollHeight;
+        }
+
+        async function initializeWorkspace() {
+            const btn = document.getElementById('init-btn');
+            const progress = document.getElementById('init-progress');
             const status = document.getElementById('init-status');
-            
-            button.disabled = true;
-            button.textContent = '正在初始化...';
-            status.textContent = '正在创建工作空间，请稍候...';
-            status.style.color = '#6495ed';
-            
-            try {{
-                // 调用 WebView 初始化功能（如果支持的话）
-                if (window.pywebview && window.pywebview.api && window.pywebview.api.initialize_workspace) {{
-                    const result = await window.pywebview.api.initialize_workspace();
-                    if (result.success) {{
-                        status.textContent = '✅ 初始化成功！正在重启应用...';
-                        status.style.color = '#90ee90';
-                        // 延迟重启，让用户看到成功消息
-                        setTimeout(() => {{
-                            if (window.pywebview && window.pywebview.api && window.pywebview.api.restart_app) {{
-                                window.pywebview.api.restart_app();
-                            }} else {{
-                                status.textContent = '请手动重启 Hermes-Yachiyo 以继续';
-                            }}
-                        }}, 2000);
-                    }} else {{
-                        throw new Error(result.error || '初始化失败');
-                    }}
-                }} else {{
-                    throw new Error('自动初始化功能不可用，请手动执行初始化步骤');
-                }}
-            }} catch (error) {{
-                button.disabled = false;
-                button.textContent = '重新尝试初始化';
-                status.textContent = '❌ ' + error.message;
-                status.style.color = '#ff6b6b';
-            }}
-        }}
+
+            btn.disabled = true;
+            btn.textContent = '初始化中...';
+            progress.style.display = 'block';
+            status.innerHTML = '';
+
+            appendInitLog('▶ 开始初始化 Yachiyo 工作空间...');
+
+            try {
+                if (!window.pywebview || !window.pywebview.api) {
+                    throw new Error('WebView API 不可用');
+                }
+
+                appendInitLog('  正在创建目录结构...');
+                const result = await window.pywebview.api.initialize_workspace();
+
+                if (result.success) {
+                    if (result.created_items && result.created_items.length > 0) {
+                        result.created_items.forEach(item => appendInitLog('  ✓ ' + item));
+                    }
+                    appendInitLog('✅ 工作空间初始化完成');
+                    status.innerHTML = '<span style="color:#90ee90">✅ 初始化成功！正在进入主界面...</span>';
+                    setTimeout(() => window.pywebview.api.restart_app(), 1500);
+                } else {
+                    throw new Error(result.error || '初始化失败');
+                }
+            } catch (err) {
+                appendInitLog('❌ 错误：' + err.message);
+                btn.disabled = false;
+                btn.textContent = '重新尝试初始化';
+                status.innerHTML = '<span style="color:#ff6b6b">❌ ' + err.message + '</span>';
+            }
+        }
         </script>
         """
     
