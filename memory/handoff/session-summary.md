@@ -1,10 +1,68 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 37 增强: Setup 进程检测与防重复
+## 本轮完成内容 — Milestone 38: macOS 托盘主线程修复
+
+### 问题
+
+进入 normal mode 后，`system-tray` 子线程调用 `create_tray()` → pystray 0.19.5 darwin 后端在 `__init__` 中直接创建 AppKit UI 对象（NSStatusBar / NSStatusItem 等）→ `NSWindow should only be instantiated on the main thread!` → 崩溃。
+
+### 根因
+
+- pystray darwin 后端的构造函数直接调用 `AppKit.NSStatusBar.systemStatusBar().statusItemWithLength_()` 等，必须主线程
+- 原代码用 `threading.Thread` 在子线程启动 `create_tray()` → `icon.run()` → 违反 macOS AppKit 线程要求
+
+### 解决方案
+
+利用 **GCD `dispatch_async_f`** + **pystray `run_detached()`**：
+
+- `_dispatch_to_main_queue(fn)` — 在 `webview.start()` 前从主线程调用，将回调入队 GCD 主队列
+- GCD 主队列与主线程 run loop 绑定：`NSApp.run()` 启动后自动在主线程执行回调
+- 回调中构造 `pystray.Icon(...)` + 调用 `icon.run_detached()`
+- `pystray._darwin._run_detached()` 只做 `_mark_ready()`，不运行第二个 NSApp 事件循环
+- 图标通过 pywebview 已运行的 NSApp 接收系统事件
+
+### 修改文件
+
+| 文件 | 变更 |
+|------|------|
+| `apps/shell/tray.py` | 新增 `_GCD_CALLBACKS`, `_dispatch_to_main_queue()`, `create_tray_macos()`, `_create_tray_main_thread()` |
+| `apps/shell/startup.py` | macOS 调 `create_tray_macos()`，其余平台保持 threading.Thread |
+
+### 修复后启动流程
+
+```
+main thread: create_tray_macos(runtime)  ← GCD 入队（非阻塞）
+main thread: launch_mode() → webview.start() → NSApp.run() 开始
+                                              ↓
+                              GCD 主队列处理（主线程）：
+                              pystray.Icon() 构造 ✓
+                              icon.run_detached() 激活 ✓
+                              托盘图标挂载到 pywebview NSApp 循环 ✓
+```
+
+### 已验证通过链路
+
+Hermes 安装 → setup → workspace init → 自动重启 → ready → normal mode → runtime → bridge → **tray（修复后）**
+
+### 如何接手
+
+```bash
+# 运行桌面应用（使用 venv 中的 Python）
+cd /Users/hacchiroku/AI/Hermes-Yachiyo
+.venv/bin/python -m apps.shell.app
+```
+
+### 下一步建议
+
+1. **Task 系统真实 CLI 联调** — HermesExecutor 有 CLI 调用骨架，需真机测试
+2. **AstrBot 真实 QQ 联调** — handler 已覆盖测试
+3. **Live2D 渲染器** — 配置/校验/摘要层完备，可开始 moc3 渲染
+4. **Bridge HTTPS/认证** — 当前无认证，生产环境需要
 
 ### 问题
 
 上一轮已将 `hermes setup` 阶段纳入状态流，但缺少：
+
 1. `setup_in_progress` 状态 — 无法区分"需要 setup"和"setup 正在运行"
 2. 进程检测 — 无法检测 `hermes setup` 是否已在终端运行
 3. 防重复启动 — 用户可能重复点击"开始配置"打开多个终端

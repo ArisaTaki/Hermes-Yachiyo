@@ -77,16 +77,18 @@ def run_normal_mode(config: "AppConfig") -> None:
       2. 初始化 Core Runtime
       3. 将 Runtime 注入 Bridge
       4. 按配置启动 Bridge（后台线程）
-      5. 按配置启动系统托盘（后台线程）
+      5. 按配置启动系统托盘
+         - macOS: GCD dispatch_async_f 入队到主线程，NSApp.run() 后执行
+         - 其他: 后台 daemon 线程
       6. 主线程进入对应 display mode（阻塞直到窗口关闭）
     """
     from apps.bridge.deps import set_runtime
     from apps.bridge.server import start_bridge, stop_bridge
     from apps.core.runtime import HermesRuntime
     from apps.shell.modes import DisplayMode, launch_mode, resolve_display_mode
-    from apps.shell.tray import create_tray
+    from apps.shell.tray import create_tray, create_tray_macos
+    import platform as _platform
 
-    # ① 解析 display mode — 在此层明确记录，方便排查启动决策
     display_mode: DisplayMode = resolve_display_mode(config)
     logger.info(
         "启动决策确认: startup_mode=NORMAL, display_mode=%s", display_mode
@@ -118,13 +120,21 @@ def run_normal_mode(config: "AppConfig") -> None:
     signal.signal(signal.SIGTERM, _shutdown)
 
     # ④ 系统托盘
+    # macOS 要求 AppKit UI 对象（NSStatusBar / NSWindow 等）在主线程创建。
+    # 通过 GCD dispatch_async_f 入队，待 webview.start() 启动 NSApp.run() 后
+    # 在主线程自动执行，避免子线程直接调用 pystray icon.run() 导致的崩溃。
+    # 其他平台保持原有后台线程方式不变。
     if config.tray_enabled:
-        threading.Thread(
-            target=create_tray,
-            kwargs={"runtime": runtime},
-            daemon=True,
-            name="system-tray",
-        ).start()
+        if _platform.system() == "Darwin":
+            create_tray_macos(runtime)
+            logger.info("系统托盘：macOS GCD 调度已入队（主线程，NSApp 启动后执行）")
+        else:
+            threading.Thread(
+                target=create_tray,
+                kwargs={"runtime": runtime},
+                daemon=True,
+                name="system-tray",
+            ).start()
     else:
         logger.info("系统托盘已禁用，跳过启动")
 

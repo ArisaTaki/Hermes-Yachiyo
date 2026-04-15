@@ -1209,3 +1209,35 @@ READY → 正常主界面
 **进程检测策略**：
 
 - `ps aux` 匹配含 "hermes" 和 "setup" 的行（排除 grep 和 python 自身）
+
+### Milestone 38 — macOS 托盘主线程修复
+
+**问题**：normal mode 进入后 `system-tray` 子线程调用 `create_tray()` → `pystray.Icon.__init__()` → `AppKit.NSStatusBar.systemStatusBar().statusItemWithLength_()` 等 AppKit UI 对象创建在非主线程 → `NSWindow should only be instantiated on the main thread!` 崩溃。
+
+**根因**：pystray 0.19.5 darwin 后端在构造函数中直接创建 NSStatusItem，必须在主线程执行。当前代码通过 `threading.Thread` 在子线程调用，违反 macOS AppKit 线程要求。
+
+**解决方案**：GCD `dispatch_async_f` + pystray `run_detached()`
+
+| 关键点 | 说明 |
+|--------|------|
+| GCD 主队列与主线程 run loop 绑定 | 在 `webview.start()` 之前入队，NSApp 启动后自动在主线程执行 |
+| `pystray._darwin._run_detached()` 只调用 `_mark_ready()` | 不启动第二个 `NSApp.run()`，图标挂载到 pywebview 的 NSApp 循环 |
+| `ctypes.CDLL(None)` + `dispatch_async_f` | 跨平台安全，不依赖 PyObjC 私有 API |
+
+**变更**：
+
+- ✅ `apps/shell/tray.py`
+  - 保留原 `create_tray()` 供非 macOS 使用
+  - 新增 `_GCD_CALLBACKS` — 防止 ctypes CFUNCTYPE 被 GC
+  - 新增 `_dispatch_to_main_queue(fn)` — GCD dispatch_async_f 封装
+  - 新增 `create_tray_macos(runtime)` — macOS 入口，GCD 调度，非阻塞
+  - 新增 `_create_tray_main_thread(runtime)` — 在主线程构造 Icon + run_detached()
+- ✅ `apps/shell/startup.py`
+  - `run_normal_mode()` platform 分支：macOS 调 `create_tray_macos()`，其余平台保持线程方式
+  - 更新注释说明托盘线程模型差异
+
+**修复后行为**：
+1. startup.py 在主线程调用 `create_tray_macos(runtime)` → GCD 入队（非阻塞）
+2. `launch_mode()` → `webview.start()` → macOS NSApp.run() 开始
+3. GCD 主队列处理：`pystray.Icon(...)` 在主线程构造，`icon.run_detached()` 激活
+4. 托盘图标正常显示，事件由 pywebview 的 NSApp 分发
