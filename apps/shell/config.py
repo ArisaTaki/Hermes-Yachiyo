@@ -67,17 +67,30 @@ class ModelSummary:
 
     仅做文件名级别的静态扫描，不加载任何数据。
     供设置页和状态条展示用，真正解析由未来 Live2DRenderer 负责。
+
+    主候选字段（primary_*_abs）是未来 Live2DRenderer 的入口输入：
+      - Live2DRenderer 通常以 .model3.json 为唯一入口
+      - .moc3 路径由 model3.json 内部引用，此处仅作冗余提示
     """
 
-    model3_json: str = ""       # 检测到的 .model3.json 文件名（如 "hiyori.model3.json"），无则空
-    moc3_file: str = ""         # 检测到的 .moc3 文件名（如 "hiyori.moc3"），无则空
-    found_in_subdir: bool = False  # 特征文件是否位于子目录（而非根目录）
-    subdir_name: str = ""       # 若 found_in_subdir=True，记录子目录名（如 "hiyori"）
-    extra_moc3_count: int = 0   # 除第一个外额外检测到的 .moc3 数量（多模型目录提示）
+    model3_json: str = ""          # 检测到的 .model3.json 文件名，无则空
+    moc3_file: str = ""            # 检测到的 .moc3 文件名，无则空
+    found_in_subdir: bool = False  # 特征文件是否位于子目录
+    subdir_name: str = ""          # 子目录名（found_in_subdir=True 时）
+    extra_moc3_count: int = 0      # 额外 .moc3 数量（多模型目录提示）
+
+    # 主候选绝对路径 — 供未来 Live2DRenderer 直接消费
+    primary_model3_json_abs: str = ""  # .model3.json 的绝对路径，渲染器首选入口
+    primary_moc3_abs: str = ""         # .moc3 的绝对路径，model3.json 引用的兜底
 
     def is_empty(self) -> bool:
         """摘要是否为空（未找到任何特征文件）。"""
         return not self.model3_json and not self.moc3_file
+
+    @property
+    def renderer_entry(self) -> str:
+        """渲染器推荐入口路径：优先 model3.json，其次 moc3，无则空字符串。"""
+        return self.primary_model3_json_abs or self.primary_moc3_abs
 
 
 def scan_live2d_model_dir(path: Path) -> ModelSummary:
@@ -85,20 +98,23 @@ def scan_live2d_model_dir(path: Path) -> ModelSummary:
 
     扫描顺序：根目录优先，找不到再看一级子目录。
     每类文件只记录第一个（按文件名字母序），多余的计入 extra_moc3_count。
+    主候选绝对路径（primary_*_abs）直接在此填充，供 Live2DRenderer 消费。
     """
     summary = ModelSummary()
 
     # 优先扫描根目录
-    root_moc3  = sorted(path.glob("*.moc3"))
-    root_json  = sorted(path.glob("*.model3.json"))
+    root_moc3 = sorted(path.glob("*.moc3"))
+    root_json = sorted(path.glob("*.model3.json"))
 
     if root_moc3 or root_json:
         summary.found_in_subdir = False
         if root_moc3:
             summary.moc3_file = root_moc3[0].name
+            summary.primary_moc3_abs = str(root_moc3[0].resolve())
             summary.extra_moc3_count = len(root_moc3) - 1
         if root_json:
             summary.model3_json = root_json[0].name
+            summary.primary_model3_json_abs = str(root_json[0].resolve())
         return summary
 
     # 根目录无特征文件，扫描一级子目录
@@ -110,9 +126,11 @@ def scan_live2d_model_dir(path: Path) -> ModelSummary:
             summary.subdir_name = subdir.name
             if sub_moc3:
                 summary.moc3_file = sub_moc3[0].name
+                summary.primary_moc3_abs = str(sub_moc3[0].resolve())
                 summary.extra_moc3_count = len(sub_moc3) - 1
             if sub_json:
                 summary.model3_json = sub_json[0].name
+                summary.primary_model3_json_abs = str(sub_json[0].resolve())
             return summary  # 取第一个有内容的子目录即止
 
     return summary  # 空摘要

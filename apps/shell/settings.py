@@ -72,6 +72,8 @@ h2 {{ color: #6495ed; font-size: 1.1em; margin-bottom: 16px; }}
         <span class="value {summary_moc3_class}" style="font-size:0.82em;">{summary_moc3}</span></div>
     <div class="row"><span class="label">文件位置</span>
         <span class="value" style="font-size:0.82em;">{summary_file_loc}</span></div>
+    <div class="row"><span class="label">渲染器入口候选</span>
+        <span class="value {summary_entry_class}" style="font-size:0.75em;word-break:break-all;">{summary_renderer_entry}</span></div>
     <div class="row"><span class="label">待机动作组</span>
         <span class="value">{idle_motion_group}</span></div>
     <div class="row"><span class="label">表情系统</span>
@@ -128,17 +130,20 @@ def build_settings_html(config: "AppConfig") -> str:
 
     # 摘要字段格式化
     if summary and not summary.is_empty():
-        s_json    = summary.model3_json or "—"
+        s_json     = summary.model3_json or "—"
         s_json_cls = "ok" if summary.model3_json else "dim"
-        s_moc3    = summary.moc3_file or "—"
+        s_moc3     = summary.moc3_file or "—"
         if summary.extra_moc3_count > 0:
             s_moc3 += f" (+{summary.extra_moc3_count})"
         s_moc3_cls = "ok" if summary.moc3_file else "dim"
-        s_loc     = f"子目录: {summary.subdir_name}" if summary.found_in_subdir else "根目录"
+        s_loc      = f"子目录: {summary.subdir_name}" if summary.found_in_subdir else "根目录"
+        s_entry    = summary.renderer_entry or "—"
+        s_entry_cls = "ok" if summary.renderer_entry else "dim"
     else:
         s_json, s_json_cls = "—", "dim"
         s_moc3, s_moc3_cls = "—", "dim"
         s_loc = "—"
+        s_entry, s_entry_cls = "—", "dim"
 
     return _SETTINGS_HTML.format(
         display_mode=config.display_mode,
@@ -154,6 +159,8 @@ def build_settings_html(config: "AppConfig") -> str:
         summary_moc3=s_moc3,
         summary_moc3_class=s_moc3_cls,
         summary_file_loc=s_loc,
+        summary_renderer_entry=s_entry,
+        summary_entry_class=s_entry_cls,
         idle_motion_group=l2d.idle_motion_group or "Idle",
         enable_expressions="✅ 启用" if l2d.enable_expressions else "— 禁用",
         expr_class="ok" if l2d.enable_expressions else "",

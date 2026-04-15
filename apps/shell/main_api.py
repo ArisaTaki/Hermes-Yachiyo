@@ -29,6 +29,10 @@ def _serialize_summary(summary: Optional[ModelSummary]) -> Dict[str, Any]:
         "found_in_subdir": summary.found_in_subdir,
         "subdir_name": summary.subdir_name,
         "extra_moc3_count": summary.extra_moc3_count,
+        # 主候选绝对路径 — 供未来 Live2DRenderer 消费
+        "primary_model3_json_abs": summary.primary_model3_json_abs,
+        "primary_moc3_abs": summary.primary_moc3_abs,
+        "renderer_entry": summary.renderer_entry,  # 推荐入口（model3.json 优先）
     }
 
 

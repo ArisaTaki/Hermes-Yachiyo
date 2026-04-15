@@ -800,3 +800,34 @@ launch()
 **`apps/shell/settings.py`**
 - HTML 模板新增三行摘要展示
 - `build_settings_html()` 新增摘要格式化逻辑（含子目录名 / extra_moc3_count）
+
+
+### Milestone 29 — Live2D 摘要补主候选入口整理
+
+**`apps/shell/config.py`** — ModelSummary + scan_live2d_model_dir()
+- `ModelSummary` 新增两个绝对路径字段：
+  - `primary_model3_json_abs: str` — .model3.json 的绝对路径（渲染器首选入口）
+  - `primary_moc3_abs: str`        — .moc3 的绝对路径（兜底）
+- 新增 `renderer_entry` property：优先返回 model3.json 路径，其次 moc3，无则空
+- `scan_live2d_model_dir()` 在扫描时同步填充 `primary_*_abs` 字段（`.resolve()`）
+
+**`apps/shell/main_api.py`** — _serialize_summary()
+- 返回 dict 新增三个字段：
+  - `primary_model3_json_abs`
+  - `primary_moc3_abs`
+  - `renderer_entry`（推荐入口，model3.json 优先）
+
+**`apps/shell/window.py`**
+- 设置面板 Live2D 区块新增"渲染器入口候选"行（显示绝对路径，小字）
+- JS `refreshSettings()` 填充 `s.renderer_entry`，有值绿色，无值暗灰
+
+**`apps/shell/settings.py`**
+- HTML 模板新增"渲染器入口候选"行
+- `build_settings_html()` 新增 `s_entry` / `s_entry_cls` 格式化
+
+**renderer 接入时的消费方式（文档化）：**
+```python
+summary = config.live2d.scan()
+if summary and summary.renderer_entry:
+    renderer.load(summary.renderer_entry)  # 唯一入口
+```

@@ -566,3 +566,11 @@ validate() 新增第三层检查：目录存在但无特征文件 → PATH_NOT_L
 Live2DConfig.scan() 方法 → None 或 ModelSummary。
 _serialize_summary() 辅助函数在 main_api.py，live2d.py 共用。
 设置页（window.py + settings.py）新增三行：model3.json / moc3 / 文件位置。
+
+
+## Milestone 29 — Live2D 摘要主候选入口整理
+
+ModelSummary 新增 primary_model3_json_abs / primary_moc3_abs（绝对路径）+ renderer_entry property（model3.json 优先）。
+scan_live2d_model_dir() 扫描时用 .resolve() 直接填充绝对路径。
+_serialize_summary() 携带三个新字段，settings/window 新增"渲染器入口候选"行（小字绿/暗灰）。
+接入模式文档化：renderer.load(summary.renderer_entry)。
