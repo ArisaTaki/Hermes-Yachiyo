@@ -310,6 +310,23 @@ class Live2DWindowAPI:
         except Exception as exc:
             logger.error("打开主窗口失败: %s", exc)
 
+    def get_live2d_state(self) -> Dict[str, Any]:
+        """返回当前 Live2D 配置的校验状态与摘要。
+
+        保存后立即调用可获得最新校验结果，无需重新打开设置页。
+        """
+        from apps.shell.main_api import _serialize_summary
+
+        state = self._config.live2d.validate()
+        summary = self._config.live2d.scan()
+        return {
+            "model_state": state.value,
+            "model_name": self._config.live2d.model_name or "",
+            "model_path": self._config.live2d.model_path or "",
+            "idle_motion_group": self._config.live2d.idle_motion_group,
+            "summary": _serialize_summary(summary),
+        }
+
     def update_settings(self, changes: dict) -> dict:
         """保存配置变更，供设置页调用。支持 live2d.* 前缀的嵌套字段。"""
         from apps.shell.config import save_config
@@ -348,7 +365,14 @@ class Live2DWindowAPI:
                 logger.error("设置保存失败: %s", exc)
                 return {"ok": False, "error": str(exc), "applied": applied}
 
-        return {"ok": True, "applied": applied, **({"errors": errors} if errors else {})}
+        # 保存成功后重新校验，把最新状态一并返回给前端
+        live2d_state = self.get_live2d_state() if applied else None
+        result: dict = {"ok": True, "applied": applied}
+        if live2d_state is not None:
+            result["live2d_state"] = live2d_state
+        if errors:
+            result["errors"] = errors
+        return result
 
     def open_settings(self) -> None:
         """打开设置页，传入当前 API 实例以支持保存操作。"""

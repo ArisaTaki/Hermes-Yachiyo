@@ -871,3 +871,25 @@ if summary and summary.renderer_entry:
 | enable_expressions | toggle | False |
 | enable_physics | toggle | False |
 | window_on_top | toggle | False |
+
+
+### Milestone 31 — 保存后重新校验与即时状态刷新
+
+**`apps/shell/modes/live2d.py`**
+- 新增 `get_live2d_state() -> dict`：调用 `validate()` + `scan()` + `_serialize_summary()`，返回完整当前状态
+- `update_settings()` 保存成功后调用 `get_live2d_state()` 并将结果作为 `live2d_state` 字段一并返回
+
+**`apps/shell/main_api.py`**
+- `update_settings()` 当 `applied` 中包含 `live2d.*` 字段时，将最新校验结果（validate + scan）作为 `live2d_state` 字段返回
+
+**`apps/shell/settings.py`**（独立设置窗口）
+- read-only span 元素补 ID：`sw-summary-json` / `sw-summary-moc3` / `sw-summary-loc` / `sw-summary-entry`
+- 新增 JS `_STATE_LABELS` 字典和 `updateLive2DState(state)` 函数：
+  - 更新 `sw-l2d-state` 文本与颜色
+  - 更新 4 个摘要字段（model3_json / moc3_file / 文件位置 / renderer_entry）
+- `saveLive2D()` 保存成功后，若 `res.live2d_state` 存在则立即调用 `updateLive2DState(res.live2d_state)`
+
+**刷新闭环：**
+- 独立设置窗口：`onchange` → `saveLive2D()` → `update_settings()` → 返回 `live2d_state` → `updateLive2DState()` → DOM 即时更新
+- 主窗口设置面板：`onSettingChange()` → `update_settings()` → `refreshSettings()` → `get_settings_data()` → 重新渲染（已有）
+- Live2D 模式窗口：`refreshStatus()` 每 10 秒轮询 `get_live2d_status()`（已有）

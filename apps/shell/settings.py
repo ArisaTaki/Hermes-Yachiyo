@@ -90,13 +90,13 @@ input:checked + .slider:before {{ transform: translateX(16px); }}
         <input class="s-input" id="sw-model-path" value="{model_path_val}" placeholder="/path/to/model"
                style="font-size:0.78em;" onchange="saveLive2D('model_path', this.value)"></div>
     <div class="row"><span class="label">检测到 .model3.json</span>
-        <span class="value {summary_json_class}" style="font-size:0.82em;">{summary_model3_json}</span></div>
+        <span class="value {summary_json_class}" id="sw-summary-json" style="font-size:0.82em;">{summary_model3_json}</span></div>
     <div class="row"><span class="label">检测到 .moc3</span>
-        <span class="value {summary_moc3_class}" style="font-size:0.82em;">{summary_moc3}</span></div>
+        <span class="value {summary_moc3_class}" id="sw-summary-moc3" style="font-size:0.82em;">{summary_moc3}</span></div>
     <div class="row"><span class="label">文件位置</span>
-        <span class="value" style="font-size:0.82em;">{summary_file_loc}</span></div>
+        <span class="value" id="sw-summary-loc" style="font-size:0.82em;">{summary_file_loc}</span></div>
     <div class="row"><span class="label">渲染器入口候选</span>
-        <span class="value {summary_entry_class}" style="font-size:0.75em;word-break:break-all;">{summary_renderer_entry}</span></div>
+        <span class="value {summary_entry_class}" id="sw-summary-entry" style="font-size:0.75em;word-break:break-all;">{summary_renderer_entry}</span></div>
     <div class="row"><span class="label">待机动作组</span>
         <input class="s-input" id="sw-idle-group" value="{idle_motion_group}" placeholder="Idle"
                onchange="saveLive2D('idle_motion_group', this.value)"></div>
@@ -131,6 +131,59 @@ input:checked + .slider:before {{ transform: translateX(16px); }}
 </div>
 
 <script>
+const _STATE_LABELS = {{
+    'not_configured':  ['⚪ 未配置', ''],
+    'path_invalid':    ['❌ 路径不存在', 'warn'],
+    'path_not_live2d': ['⚠️ 目录无模型文件（缺少 .moc3 / .model3.json）', 'warn'],
+    'path_valid':      ['✅ 模型目录就绪 · 渲染器待实现', 'ok'],
+    'loaded':          ['✅ 已加载', 'ok'],
+}};
+
+function updateLive2DState(state) {{
+    if (!state) return;
+    // 配置状态标签
+    const stEl = document.getElementById('sw-l2d-state');
+    if (stEl) {{
+        const [label, cls] = _STATE_LABELS[state.model_state] || [state.model_state, ''];
+        stEl.textContent = label;
+        stEl.className = 'value' + (cls ? ' ' + cls : '');
+    }}
+    // 摘要只读字段
+    const s = state.summary || {{}};
+    const jsonEl  = document.getElementById('sw-summary-json');
+    const moc3El  = document.getElementById('sw-summary-moc3');
+    const locEl   = document.getElementById('sw-summary-loc');
+    const entryEl = document.getElementById('sw-summary-entry');
+    if (!s.available) {{
+        if (jsonEl)  {{ jsonEl.textContent = '—';  jsonEl.className = 'value dim'; }}
+        if (moc3El)  {{ moc3El.textContent = '—';  moc3El.className = 'value dim'; }}
+        if (locEl)   {{ locEl.textContent  = '—'; }}
+        if (entryEl) {{ entryEl.textContent = '—'; entryEl.className = 'value dim'; }}
+        return;
+    }}
+    if (jsonEl) {{
+        jsonEl.textContent = s.model3_json || '—';
+        jsonEl.className = 'value' + (s.model3_json ? ' ok' : ' dim');
+        jsonEl.style.fontSize = '0.82em';
+    }}
+    if (moc3El) {{
+        let moc3Text = s.moc3_file || '—';
+        if (s.extra_moc3_count > 0) moc3Text += ' (+' + s.extra_moc3_count + ')';
+        moc3El.textContent = moc3Text;
+        moc3El.className = 'value' + (s.moc3_file ? ' ok' : ' dim');
+        moc3El.style.fontSize = '0.82em';
+    }}
+    if (locEl) {{
+        locEl.textContent = s.found_in_subdir ? ('子目录: ' + s.subdir_name) : '根目录';
+        locEl.style.fontSize = '0.82em';
+    }}
+    if (entryEl) {{
+        entryEl.textContent = s.renderer_entry || '—';
+        entryEl.className = 'value' + (s.renderer_entry ? ' ok' : ' dim');
+        entryEl.style.fontSize = '0.75em';
+    }}
+}}
+
 async function saveLive2D(field, value) {{
     const hint = document.getElementById('sw-hint');
     try {{
@@ -145,6 +198,8 @@ async function saveLive2D(field, value) {{
         if (res.ok) {{
             hint.textContent = '✓ 已保存';
             hint.className = 'save-hint';
+            // 保存成功后用返回的最新状态刷新只读字段
+            if (res.live2d_state) updateLive2DState(res.live2d_state);
         }} else {{
             hint.textContent = '✗ ' + (res.error || (res.errors && res.errors.join('; ')) || '保存失败');
             hint.className = 'save-hint err';

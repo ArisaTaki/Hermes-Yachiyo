@@ -251,4 +251,14 @@ class MainWindowAPI:
                 logger.error("配置保存失败: %s", e)
                 return {"ok": False, "error": f"保存失败: {e}", "applied": applied}
 
-        return {"ok": True, "applied": applied, "errors": errors}
+        result: Dict[str, Any] = {"ok": True, "applied": applied, "errors": errors}
+        # 若有 live2d 字段变更，把最新校验状态一并返回（设置页可直接刷新 UI）
+        if any(k.startswith("live2d.") for k in applied):
+            result["live2d_state"] = {
+                "model_state": self._config.live2d.validate().value,
+                "model_name": self._config.live2d.model_name or "",
+                "model_path": self._config.live2d.model_path or "",
+                "idle_motion_group": self._config.live2d.idle_motion_group,
+                "summary": _serialize_summary(self._config.live2d.scan()),
+            }
+        return result
