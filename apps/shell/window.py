@@ -975,8 +975,9 @@ def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
         width=560,
         height=520,
         resizable=True,
+        js_api=api,
     )
-    webview.start(api=api, debug=False)
+    webview.start(debug=False)
 
 
 def create_installer_window(install_info: "HermesInstallInfo", config: "AppConfig") -> None:
@@ -1009,8 +1010,9 @@ def create_installer_window(install_info: "HermesInstallInfo", config: "AppConfi
         width=800,
         height=600,
         resizable=True,
+        js_api=api,
     )
-    webview.start(api=api, debug=False)
+    webview.start(debug=False)
 
 
 def _generate_installer_html(install_info: "HermesInstallInfo") -> str:

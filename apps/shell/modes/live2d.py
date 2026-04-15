@@ -413,8 +413,9 @@ def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
             width=380,
             height=560,
             resizable=True,
+            js_api=api,
         )
-        webview.start(api=api, debug=False)
+        webview.start(debug=False)
     except ImportError:
         logger.warning("pywebview 未安装，Live2D 模式无法展示")
 

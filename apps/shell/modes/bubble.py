@@ -314,9 +314,10 @@ def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
             height=280,
             resizable=False,
             on_top=True,
+            js_api=api,
         )
         api._bubble_window = win
-        webview.start(api=api, debug=False)
+        webview.start(debug=False)
     except ImportError:
         logger.warning("pywebview 未安装，气泡模式无法展示")
 
