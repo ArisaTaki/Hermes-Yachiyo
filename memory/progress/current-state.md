@@ -647,3 +647,27 @@ launch()
   → logger.info("startup_mode=NORMAL, display_mode=window")
   → run_normal_mode() → launch_mode() → run()
 ```
+
+
+### Milestone 24 — Live2D 模式骨架
+
+**`apps/shell/modes/live2d.py`** 从纯占位提升为可接入骨架：
+
+| 组件 | 内容 |
+|------|------|
+| `Live2DWindowAPI` | 独立 API 类，方法：`get_live2d_status()` / `open_main_window()` / `open_settings()` |
+| `get_live2d_status()` | 返回 hermes / tasks / workspace / model / bridge 五组状态数据 |
+| `model` 字段 | `loaded=False`, `name=""`, `available_motions=[]`，带 TODO 注释指向 `Live2DRenderer` |
+| HTML 骨架 | 角色舞台区（占位动画）+ 状态条（hermes/任务状态）+ 工具栏（主窗口/设置/刷新） |
+| 角色图标 | 根据任务运行状态切换 🎤 / ⚡（未来由 Live2D 动作系统替换） |
+| 窗口 | 380×560，竖版，可缩放，挂载 `Live2DWindowAPI` |
+
+**与 bubble 模式的边界：**
+- bubble：180×280 横版，最小化状态摘要，主窗口入口
+- live2d：380×560 竖版，角色舞台区占主体，状态条在底部，设置入口
+
+**未来接入 Live2D 还差：**
+1. `apps/shell/modes/live2d_renderer.py` — 封装 Live2D SDK（moc3 加载、动作系统）
+2. `Live2DWindowAPI.load_model()` / `play_motion()` / `set_expression()` 方法实现
+3. HTML 中的 `<canvas id="live2d">` 替换 `.character-placeholder`
+4. pywebview 透明窗口支持（角色贴屏显示）
