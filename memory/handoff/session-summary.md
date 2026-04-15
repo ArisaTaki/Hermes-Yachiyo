@@ -415,3 +415,25 @@ AstrBot 宿主绑定 / 真实 Hermes Agent 执行接入
 
 - 补全 `HermesExecutor.run()` → 传入 `TaskRunner(state, HermesExecutor())`
 - 其余链路不变
+
+---
+
+## Milestone 15 — HermesExecutor 最小接入骨架
+
+### 变更文件
+
+| 文件 | 变更 |
+|------|------|
+| apps/core/executor.py | HermesExecutor 骨架：is_available()、run()、_call_hermes() 存根 + select_executor() 工厂 |
+| apps/bridge/server.py | lifespan 改用 select_executor(rt)，导入整理 |
+
+### 执行器选择逻辑
+
+`select_executor(runtime)` 在 Bridge 启动时调用：
+- `runtime.is_hermes_ready()` AND `HermesExecutor.is_available()` → 选 HermesExecutor
+- 否则 → SimulatedExecutor（安全回退）
+
+### 接 Hermes 还差什么
+
+- `_call_hermes()` 实现（确认接口后：subprocess CLI 或 HTTP API）
+- Hermes Agent 实际安装到测试机

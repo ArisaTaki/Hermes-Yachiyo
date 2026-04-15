@@ -367,3 +367,28 @@
 2. 在 Bridge lifespan 构造 TaskRunner 时传入 `HermesExecutor()`
 
 其余链路（状态机、Bridge API、AstrBot 展示）**无需改动**。
+
+### Milestone 15 — HermesExecutor 最小接入骨架
+
+- ✅ apps/core/executor.py — 大幅扩展
+  - `ExecutionStrategy` 新增 `name` property（日志/状态展示用）
+  - `SimulatedExecutor` 无逻辑变化，仅注释更新
+  - `HermesExecutor` 完整骨架：
+    - `is_available()`: 同步探测（subprocess hermes --version，超时 5s）
+    - `run()`: 状态日志 + 委托 `_call_hermes()`
+    - `_call_hermes()`: 详细注释两种接入方式（subprocess CLI / HTTP API），当前抛 NotImplementedError
+    - 失败回退策略：`is_available()` 失败 → select_executor 回退 Simulated；run() 失败 → TaskRunner 标记 FAILED
+  - `select_executor(runtime)` 工厂函数：
+    - runtime.is_hermes_ready() 且 HermesExecutor.is_available() → HermesExecutor
+    - 其他 → SimulatedExecutor（安全回退）
+- ✅ apps/bridge/server.py — lifespan 改用 select_executor(rt) 选择执行器
+  - 导入整理，去除重复 import
+
+### 接入 Hermes 还差什么
+
+| 步骤 | 状态 |
+|------|------|
+| 确认 Hermes Agent 接口形式（CLI / HTTP） | ❌ 待确认 |
+| 实现 `HermesExecutor._call_hermes()` | ❌ 待实现 |
+| `runtime.is_hermes_ready()` 在真机上返回 True | ❌ 依赖 Hermes 安装 |
+| `select_executor()` 自动切换生效 | ✅ 逻辑已就位 |

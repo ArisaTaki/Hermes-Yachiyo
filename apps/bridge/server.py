@@ -26,12 +26,13 @@ logger = logging.getLogger(__name__)
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Bridge 启动/停止时管理后台 TaskRunner"""
     from apps.bridge.deps import get_runtime
+    from apps.core.executor import select_executor
     from apps.core.task_runner import TaskRunner
 
     runner: TaskRunner | None = None
     try:
         rt = get_runtime()
-        runner = TaskRunner(rt.state)
+        runner = TaskRunner(rt.state, executor=select_executor(rt))
         await runner.start()
     except RuntimeError:
         # Runtime 尚未注入（测试场景），跳过
