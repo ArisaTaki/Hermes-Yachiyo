@@ -303,6 +303,9 @@ _STATUS_HTML = """
             <div class="settings-row"><span class="label">配置状态</span><span class="value" id="s-l2d-state">—</span></div>
             <div class="settings-row"><span class="label">模型名称</span><span class="value" id="s-l2d-model-name" style="font-size:0.85em;">—</span></div>
             <div class="settings-row"><span class="label">模型路径</span><span class="value" id="s-l2d-model-path" style="font-size:0.78em;word-break:break-all;">—</span></div>
+            <div class="settings-row"><span class="label">检测到 .model3.json</span><span class="value" id="s-l2d-model3-json" style="font-size:0.82em;">—</span></div>
+            <div class="settings-row"><span class="label">检测到 .moc3</span><span class="value" id="s-l2d-moc3" style="font-size:0.82em;">—</span></div>
+            <div class="settings-row"><span class="label">文件位置</span><span class="value" id="s-l2d-file-loc" style="font-size:0.82em;">—</span></div>
             <div class="settings-row"><span class="label">待机动作组</span><span class="value" id="s-l2d-idle-group">—</span></div>
             <div class="settings-row"><span class="label">表情系统</span><span class="value" id="s-l2d-expressions">—</span></div>
             <div class="settings-row"><span class="label">物理模拟</span><span class="value" id="s-l2d-physics">—</span></div>
@@ -412,6 +415,16 @@ _STATUS_HTML = """
                 document.getElementById('s-l2d-model-name').className = 'value' + (l2d.model_name ? '' : ' dim');
                 document.getElementById('s-l2d-model-path').textContent = l2d.model_path || '（未设置）';
                 document.getElementById('s-l2d-model-path').className = 'value' + (l2d.model_path ? '' : ' dim');
+                // 摘要信息
+                const s = l2d.summary || {};
+                document.getElementById('s-l2d-model3-json').textContent = s.model3_json || '—';
+                document.getElementById('s-l2d-model3-json').className = 'value' + (s.model3_json ? ' ok' : ' dim');
+                document.getElementById('s-l2d-moc3').textContent =
+                    s.moc3_file ? s.moc3_file + (s.extra_moc3_count > 0 ? ' (+' + s.extra_moc3_count + ')' : '') : '—';
+                document.getElementById('s-l2d-moc3').className = 'value' + (s.moc3_file ? ' ok' : ' dim');
+                document.getElementById('s-l2d-file-loc').textContent =
+                    !s.available ? '—' :
+                    (s.found_in_subdir ? '子目录: ' + (s.subdir_name || '?') : '根目录');
                 document.getElementById('s-l2d-idle-group').textContent = l2d.idle_motion_group || 'Idle';
                 document.getElementById('s-l2d-expressions').textContent = l2d.enable_expressions ? '✅ 启用' : '— 禁用';
                 document.getElementById('s-l2d-physics').textContent = l2d.enable_physics ? '✅ 启用' : '— 禁用';

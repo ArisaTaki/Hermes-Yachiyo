@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 from apps.bridge.server import get_bridge_state
 from apps.installer.workspace_init import get_workspace_status
+from apps.shell.main_api import _serialize_summary
 
 if TYPE_CHECKING:
     from apps.core.runtime import HermesRuntime
@@ -279,6 +280,7 @@ class Live2DWindowAPI:
                     "expressions_enabled": self._config.live2d.enable_expressions,
                     "physics_enabled": self._config.live2d.enable_physics,
                     "available_motions": [],  # TODO: Live2DRenderer.list_motions()
+                    "summary": _serialize_summary(self._config.live2d.scan()),
                 },
                 "bridge": {
                     "running": get_bridge_state(),

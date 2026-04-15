@@ -5,17 +5,31 @@
 """
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from apps.bridge.server import get_bridge_state
 from apps.installer.workspace_init import get_workspace_status
-from apps.shell.config import save_config
+from apps.shell.config import ModelSummary, save_config
 
 if TYPE_CHECKING:
     from apps.core.runtime import HermesRuntime
     from apps.shell.config import AppConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _serialize_summary(summary: Optional[ModelSummary]) -> Dict[str, Any]:
+    """将 ModelSummary 转为 JSON 安全字典，None 时返回空摘要。"""
+    if summary is None:
+        return {"available": False}
+    return {
+        "available": not summary.is_empty(),
+        "model3_json": summary.model3_json,
+        "moc3_file": summary.moc3_file,
+        "found_in_subdir": summary.found_in_subdir,
+        "subdir_name": summary.subdir_name,
+        "extra_moc3_count": summary.extra_moc3_count,
+    }
 
 
 class MainWindowAPI:
@@ -125,6 +139,7 @@ class MainWindowAPI:
                     "enable_physics": self._config.live2d.enable_physics,
                     "window_on_top": self._config.live2d.window_on_top,
                     "renderer_available": False,  # 等待 live2d_renderer.py 实现
+                    "summary": _serialize_summary(self._config.live2d.scan()),
                 },
                 "bridge": {
                     "enabled": self._config.bridge_enabled,

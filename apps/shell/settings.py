@@ -66,6 +66,12 @@ h2 {{ color: #6495ed; font-size: 1.1em; margin-bottom: 16px; }}
         <span class="value {model_name_class}">{model_name}</span></div>
     <div class="row"><span class="label">模型路径</span>
         <span class="value {model_path_class}" style="font-size:0.8em;word-break:break-all;">{model_path}</span></div>
+    <div class="row"><span class="label">检测到 .model3.json</span>
+        <span class="value {summary_json_class}" style="font-size:0.82em;">{summary_model3_json}</span></div>
+    <div class="row"><span class="label">检测到 .moc3</span>
+        <span class="value {summary_moc3_class}" style="font-size:0.82em;">{summary_moc3}</span></div>
+    <div class="row"><span class="label">文件位置</span>
+        <span class="value" style="font-size:0.82em;">{summary_file_loc}</span></div>
     <div class="row"><span class="label">待机动作组</span>
         <span class="value">{idle_motion_group}</span></div>
     <div class="row"><span class="label">表情系统</span>
@@ -109,6 +115,7 @@ def build_settings_html(config: "AppConfig") -> str:
     """
     l2d = config.live2d
     model_state = l2d.validate()
+    summary = l2d.scan()
 
     _MODEL_STATE_LABELS = {
         "not_configured":  ("⚪ 未配置", ""),
@@ -119,6 +126,20 @@ def build_settings_html(config: "AppConfig") -> str:
     }
     state_label, state_class = _MODEL_STATE_LABELS.get(model_state.value, (model_state.value, ""))
 
+    # 摘要字段格式化
+    if summary and not summary.is_empty():
+        s_json    = summary.model3_json or "—"
+        s_json_cls = "ok" if summary.model3_json else "dim"
+        s_moc3    = summary.moc3_file or "—"
+        if summary.extra_moc3_count > 0:
+            s_moc3 += f" (+{summary.extra_moc3_count})"
+        s_moc3_cls = "ok" if summary.moc3_file else "dim"
+        s_loc     = f"子目录: {summary.subdir_name}" if summary.found_in_subdir else "根目录"
+    else:
+        s_json, s_json_cls = "—", "dim"
+        s_moc3, s_moc3_cls = "—", "dim"
+        s_loc = "—"
+
     return _SETTINGS_HTML.format(
         display_mode=config.display_mode,
         # Live2D 配置
@@ -128,6 +149,11 @@ def build_settings_html(config: "AppConfig") -> str:
         model_name_class="" if l2d.model_name else "dim",
         model_path=l2d.model_path if l2d.model_path else "（未设置）",
         model_path_class="" if l2d.model_path else "dim",
+        summary_model3_json=s_json,
+        summary_json_class=s_json_cls,
+        summary_moc3=s_moc3,
+        summary_moc3_class=s_moc3_cls,
+        summary_file_loc=s_loc,
         idle_motion_group=l2d.idle_motion_group or "Idle",
         enable_expressions="✅ 启用" if l2d.enable_expressions else "— 禁用",
         expr_class="ok" if l2d.enable_expressions else "",

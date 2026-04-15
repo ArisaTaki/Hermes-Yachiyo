@@ -767,3 +767,36 @@ launch()
 2. 目录是否存在且为目录  → PATH_INVALID
 3. 是否含模型特征文件    → PATH_NOT_LIVE2D
 4. 渲染器是否可用        → PATH_VALID（渲染器返回 LOADED）
+
+
+### Milestone 28 — Live2D 配置最小模型信息摘要
+
+**`apps/shell/config.py`**
+- 新增 `ModelSummary` dataclass（纯静态文件名摘要）：
+  - `model3_json: str`       — 检测到的 .model3.json 文件名
+  - `moc3_file: str`         — 检测到的 .moc3 文件名
+  - `found_in_subdir: bool`  — 文件是否在子目录
+  - `subdir_name: str`       — 子目录名（found_in_subdir=True 时）
+  - `extra_moc3_count: int`  — 额外 .moc3 文件数量（多模型目录提示）
+  - `is_empty()` 方法
+- 新增 `scan_live2d_model_dir(path: Path) -> ModelSummary`：
+  - 根目录优先扫描 *.moc3 / *.model3.json
+  - 找不到再扫一级子目录，取第一个有内容的子目录
+- `Live2DConfig.scan() -> ModelSummary | None`：目录不存在或未配置返回 None
+
+**`apps/shell/main_api.py`**
+- 新增 `_serialize_summary(summary)` 辅助函数（ModelSummary → dict）
+- `get_settings_data()` live2d 键新增 `summary` 字段
+- 导入 `ModelSummary`
+
+**`apps/shell/modes/live2d.py`**
+- `get_live2d_status()` model 字段新增 `summary` 键
+- 导入 `_serialize_summary`
+
+**`apps/shell/window.py`**
+- 设置面板 Live2D 区块新增三行：检测到 .model3.json / 检测到 .moc3 / 文件位置
+- JS `refreshSettings()` 新增摘要字段填充逻辑（extra_moc3_count 拼接提示）
+
+**`apps/shell/settings.py`**
+- HTML 模板新增三行摘要展示
+- `build_settings_html()` 新增摘要格式化逻辑（含子目录名 / extra_moc3_count）

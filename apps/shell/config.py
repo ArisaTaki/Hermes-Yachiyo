@@ -54,13 +54,68 @@ def check_live2d_model_dir(path: Path) -> bool:
         False — 目录为空或不含特征文件
     """
     for pattern in _LIVE2D_SIGNATURE_GLOBS:
-        # 先检查根目录
         if any(path.glob(pattern)):
             return True
-        # 再检查一级子目录（部分打包方式把 moc3 放在子目录）
         if any(path.glob(f"*/{pattern}")):
             return True
     return False
+
+
+@dataclass
+class ModelSummary:
+    """从模型目录扫描得到的最小摘要信息。
+
+    仅做文件名级别的静态扫描，不加载任何数据。
+    供设置页和状态条展示用，真正解析由未来 Live2DRenderer 负责。
+    """
+
+    model3_json: str = ""       # 检测到的 .model3.json 文件名（如 "hiyori.model3.json"），无则空
+    moc3_file: str = ""         # 检测到的 .moc3 文件名（如 "hiyori.moc3"），无则空
+    found_in_subdir: bool = False  # 特征文件是否位于子目录（而非根目录）
+    subdir_name: str = ""       # 若 found_in_subdir=True，记录子目录名（如 "hiyori"）
+    extra_moc3_count: int = 0   # 除第一个外额外检测到的 .moc3 数量（多模型目录提示）
+
+    def is_empty(self) -> bool:
+        """摘要是否为空（未找到任何特征文件）。"""
+        return not self.model3_json and not self.moc3_file
+
+
+def scan_live2d_model_dir(path: Path) -> ModelSummary:
+    """扫描 Live2D 模型目录，返回最小文件摘要。
+
+    扫描顺序：根目录优先，找不到再看一级子目录。
+    每类文件只记录第一个（按文件名字母序），多余的计入 extra_moc3_count。
+    """
+    summary = ModelSummary()
+
+    # 优先扫描根目录
+    root_moc3  = sorted(path.glob("*.moc3"))
+    root_json  = sorted(path.glob("*.model3.json"))
+
+    if root_moc3 or root_json:
+        summary.found_in_subdir = False
+        if root_moc3:
+            summary.moc3_file = root_moc3[0].name
+            summary.extra_moc3_count = len(root_moc3) - 1
+        if root_json:
+            summary.model3_json = root_json[0].name
+        return summary
+
+    # 根目录无特征文件，扫描一级子目录
+    for subdir in sorted(p for p in path.iterdir() if p.is_dir()):
+        sub_moc3 = sorted(subdir.glob("*.moc3"))
+        sub_json = sorted(subdir.glob("*.model3.json"))
+        if sub_moc3 or sub_json:
+            summary.found_in_subdir = True
+            summary.subdir_name = subdir.name
+            if sub_moc3:
+                summary.moc3_file = sub_moc3[0].name
+                summary.extra_moc3_count = len(sub_moc3) - 1
+            if sub_json:
+                summary.model3_json = sub_json[0].name
+            return summary  # 取第一个有内容的子目录即止
+
+    return summary  # 空摘要
 
 
 @dataclass
@@ -81,7 +136,7 @@ class Live2DConfig:
         """是否已填写了模型名和路径（不检查路径是否存在）。"""
         return bool(self.model_name and self.model_path)
 
-    def validate(self) -> ModelState:
+    def validate(self) -> "ModelState":
         """校验当前配置，返回对应状态。
 
         校验层级（从浅到深）：
@@ -98,6 +153,15 @@ class Live2DConfig:
         if not check_live2d_model_dir(p):
             return ModelState.PATH_NOT_LIVE2D
         return ModelState.PATH_VALID
+
+    def scan(self) -> "ModelSummary | None":
+        """扫描模型目录，返回摘要。目录不存在或未配置则返回 None。"""
+        if not self.is_model_configured():
+            return None
+        p = Path(self.model_path).expanduser()
+        if not p.exists() or not p.is_dir():
+            return None
+        return scan_live2d_model_dir(p)
 
 
 @dataclass

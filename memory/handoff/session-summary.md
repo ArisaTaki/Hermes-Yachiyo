@@ -558,3 +558,11 @@ ModelState 枚举新增 PATH_NOT_LIVE2D，共五态。
 新增 check_live2d_model_dir()：检查 *.moc3 / *.model3.json（根目录 + 一级子目录）。
 validate() 新增第三层检查：目录存在但无特征文件 → PATH_NOT_LIVE2D。
 四处标签映射（live2d.py JS / window.py JS / settings.py）同步新增 path_not_live2d 条目。
+
+
+## Milestone 28 — Live2D 最小模型信息摘要
+
+新增 ModelSummary dataclass + scan_live2d_model_dir()：根目录→一级子目录顺序扫描 *.moc3 / *.model3.json，记录文件名、位置、extra count。
+Live2DConfig.scan() 方法 → None 或 ModelSummary。
+_serialize_summary() 辅助函数在 main_api.py，live2d.py 共用。
+设置页（window.py + settings.py）新增三行：model3.json / moc3 / 文件位置。
