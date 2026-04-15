@@ -17,6 +17,7 @@ class StatusResponse(BaseModel):
     version: str = "0.1.0"
     uptime_seconds: float
     task_counts: dict[TaskStatus, int] = Field(default_factory=dict)
+    hermes_ready: bool = False
 
 
 # ── 任务 ──────────────────────────────────────────────

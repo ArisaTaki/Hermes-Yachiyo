@@ -16,6 +16,18 @@ from .config import PluginConfig
 logger = logging.getLogger(__name__)
 
 
+def _raise_readable(resp: httpx.Response) -> None:
+    """从 HTTP 错误响应中提取可读错误信息并抛出 RuntimeError。"""
+    try:
+        detail = resp.json().get("detail") or resp.json().get("message")
+        if isinstance(detail, dict):
+            detail = detail.get("message", str(detail))
+        msg = detail or resp.text[:200]
+    except Exception:
+        msg = resp.text[:200] or f"HTTP {resp.status_code}"
+    raise RuntimeError(f"[{resp.status_code}] {msg}")
+
+
 class HermesClient:
     """Hermes-Yachiyo Bridge API 客户端。
 
@@ -34,13 +46,15 @@ class HermesClient:
     async def _get(self, path: str) -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.get(f"{self._base}{path}")
-            resp.raise_for_status()
+            if resp.is_error:
+                _raise_readable(resp)
             return resp.json()
 
     async def _post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.post(f"{self._base}{path}", json=body)
-            resp.raise_for_status()
+            if resp.is_error:
+                _raise_readable(resp)
             return resp.json()
 
     async def get_status(self) -> Dict[str, Any]:

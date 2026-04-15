@@ -1,8 +1,79 @@
 # Session Summary
 
-## 本轮完成内容
+## 本轮完成内容 — Milestone 10: AstrBot Handler 输出格式完善
 
-### Milestone 8 — Bridge 状态从占位升级为最小真实状态
+### 目标
+完善 AstrBot bridge 各命令的用户可读 QQ 输出格式。
+
+### 修改的文件
+
+| 文件 | 变更 |
+|------|------|
+| packages/protocol/schemas.py | `StatusResponse` 新增 `hermes_ready: bool = False` |
+| apps/bridge/routes/status.py | `/status` 端点填充 `hermes_ready = rt.is_hermes_ready()` |
+| integrations/astrbot-plugin/api_client.py | 新增 `_raise_readable()` 函数，HTTP 错误时提取 JSON detail 字段 |
+| integrations/astrbot-plugin/handlers/utils.py | 新建：`fmt_status / fmt_status_icon / fmt_uptime / fmt_dt` 共享工具 |
+| integrations/astrbot-plugin/handlers/status.py | 新增 Hermes Agent 就绪状态行；任务统计改用图标精简格式 |
+| integrations/astrbot-plugin/handlers/tasks.py | 每条任务新增短 ID（8位）和创建时间 |
+| integrations/astrbot-plugin/handlers/window.py | 新增查询时间行；空标题改为"（无标题）" |
+| integrations/astrbot-plugin/handlers/screen.py | 格式大写、时间格式化、文案整洁 |
+| integrations/astrbot-plugin/handlers/do.py | 状态改为中文标签（fmt_status）；ID 截短为 8 位；文案改为"任务已提交" |
+
+### 各命令输出格式
+
+**/y status**
+```
+📊 Hermes-Yachiyo 状态
+版本: v0.1.0  运行: 5m 3s
+Hermes Agent: ✅ 已就绪
+任务: ⏳ 0  🔄 0  ✅ 0
+```
+
+**/y tasks（有任务时）**
+```
+📋 任务列表（共 2 条）
+  ⏳ [abc12345] 帮我写一段代码
+       04-15 08:22:47
+  ✅ [def67890] 截图
+       04-15 07:10:00
+```
+
+**/y window**
+```
+🪟 当前活动窗口
+应用: Visual Studio Code
+标题: main.py - project
+PID: 12345
+查询时间: 04-15 08:22:47
+```
+
+**/y screen**
+```
+📸 截图已获取
+分辨率: 1920×1080  格式: PNG
+拍摄时间: 04-15 08:22:47
+（图片消息待 AstrBot 联调后发送）
+```
+
+**/y do 帮我查看文件**
+```
+✅ 任务已提交
+ID: abc12345
+描述: 帮我查看文件
+状态: ⏳ 等待中
+```
+
+### 仍为占位的部分
+
+| 命令 | 状态 | 说明 |
+|------|------|------|
+| /y codex | ⚠️ 占位 | Hapi /codex 端点 schema 待确认 |
+| /y screen（图片） | ⚠️ 占位 | base64 → AstrBot 图片消息待联调 |
+| AstrBot 宿主绑定 | ⚠️ 待完成 | on_y_command() 与 AstrBot 事件系统挂钩 |
+
+## 下一步重点
+
+**AstrBot 宿主绑定**：在 AstrBot 插件框架中注册 /y 命令监听，调用 `on_y_command()`。
 
 | 文件 | 变更 |
 |------|------|

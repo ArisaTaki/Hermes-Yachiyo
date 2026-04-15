@@ -6,6 +6,7 @@ import logging
 
 from ..api_client import HermesClient
 from ..config import PluginConfig
+from .utils import fmt_dt
 
 logger = logging.getLogger(__name__)
 
@@ -14,16 +15,16 @@ async def handle(args: str, config: PluginConfig) -> str:
     client = HermesClient(config)
     data = await client.get_screen()
 
-    width = data.get("width", 0)
+    width  = data.get("width", 0)
     height = data.get("height", 0)
-    captured_at = data.get("captured_at", "")
-    fmt = data.get("format", "png")
+    fmt    = data.get("format", "png").upper()
+    ts     = fmt_dt(data.get("captured_at", ""))
 
     # TODO: AstrBot 支持图片消息后，将 image_base64 包装成图片消息对象返回
-    #       目前只返回元信息摘要
-    return (
-        f"📸 截图已获取\n"
-        f"格式: {fmt}  分辨率: {width}×{height}\n"
-        f"时间: {captured_at}\n"
-        "（图片发送能力待 AstrBot 联调后启用）"
-    )
+    lines = [
+        "📸 截图已获取",
+        f"分辨率: {width}×{height}  格式: {fmt}",
+        f"拍摄时间: {ts}",
+        "（图片消息待 AstrBot 联调后发送）",
+    ]
+    return "\n".join(lines)

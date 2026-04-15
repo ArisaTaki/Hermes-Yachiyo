@@ -248,27 +248,31 @@
 
 **AstrBot 宿主绑定**：在 AstrBot 插件框架中注册 /y 命令监听，调用 `on_y_command()`。
 
+### Milestone 10 — AstrBot Handler 输出格式完善
 
-- ✅ apps/bridge/server.py — 新增 `_state: str = "not_started"` 模块变量 + `get_bridge_state()`
-  - `_state` 取值：`not_started | running | failed`
-  - `start_bridge()` 启动前设为 `running`，try/except 捕获异常后设为 `failed`
-- ✅ apps/shell/main_api.py — 新增 `_bridge_status()` 辅助方法，组合四状态
-  - `disabled`：bridge_enabled == False
-  - `enabled_not_started`：已启用但 get_bridge_state() == "not_started"
-  - `running`：get_bridge_state() == "running"
-  - `failed`：get_bridge_state() == "failed"
-  - `get_dashboard_data()` 中 bridge.running 字段改为 `self._bridge_status()`
-- ✅ apps/shell/modes/bubble.py — 导入 `get_bridge_state`，添加 `_bridge_status()` 辅助方法
-  - `get_bubble_data()` 中 bridge 字典新增 `running` 字段
-  - JS `refreshData()` 改为四状态标签展示（⛔/⏳/✅/❌）
-- ✅ apps/shell/window.py — `refreshDashboard()` bridge 行改为四状态标签
-  - Bridge 地址栏：disabled 时显示"—"
+- ✅ packages/protocol/schemas.py — `StatusResponse` 新增 `hermes_ready: bool`
+- ✅ apps/bridge/routes/status.py — `/status` 端点填充 `hermes_ready`
+- ✅ integrations/astrbot-plugin/api_client.py — `_raise_readable()` 提取 JSON 错误详情
+- ✅ integrations/astrbot-plugin/handlers/utils.py（新建）— `fmt_status / fmt_status_icon / fmt_uptime / fmt_dt`
+- ✅ handlers/status.py: 新增 Hermes Agent 就绪状态行，任务统计用图标精简格式
+- ✅ handlers/tasks.py: 每条任务显示短 ID + 创建时间
+- ✅ handlers/window.py: 新增查询时间行
+- ✅ handlers/screen.py: 格式大写化，时间格式化，文案整洁
+- ✅ handlers/do.py: 状态显示为中文标签，ID 截短为 8 位
 
 ## 当前占位状态
 
-- AstrBot / Hapi 工作模式：`not_connected`，待 AstrBot 插件实现后更新
-- Bridge 状态精度：`_state = "running"` 在 `.run()` 调用前设置，无法区分"正在绑定"和"已成功监听"；MVP 阶段可接受
+- `codex.py`：Hapi /codex 端点 schema 待确认
+- `screen.py`：base64 → AstrBot 图片消息待联调
+- AstrBot 宿主绑定：`on_y_command()` 入口已定义，与 AstrBot 事件系统的挂钩待联调
+
+## Bridge 状态模型（Milestone 8）
+
+- `apps/bridge/server.py`：`_state` 取值 `not_started | running | failed`
+- `apps/shell/main_api.py`：四状态 `disabled / enabled_not_started / running / failed`
+- `apps/shell/modes/bubble.py`：四状态标签展示
+- `apps/shell/window.py`：bridge 行四状态标签展示
 
 ## 下一步
 
-**AstrBot 插件实现**：QQ 命令路由到 bridge API 或 Hapi Codex。
+**AstrBot 宿主绑定**：在 AstrBot 插件框架中注册 /y 命令，调用 `on_y_command()`。

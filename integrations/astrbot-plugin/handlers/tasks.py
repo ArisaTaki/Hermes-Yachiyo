@@ -6,19 +6,11 @@ import logging
 
 from ..api_client import HermesClient
 from ..config import PluginConfig
+from .utils import fmt_dt, fmt_status_icon
 
 logger = logging.getLogger(__name__)
 
 _MAX_DISPLAY = 10
-
-# TaskStatus 枚举值 → 短标签映射（与 Bridge 保持一致）
-_STATUS_LABEL: dict[str, str] = {
-    "pending": "⏳",
-    "running": "🔄",
-    "completed": "✅",
-    "cancelled": "🚫",
-    "failed": "❌",
-}
 
 
 async def handle(args: str, config: PluginConfig) -> str:
@@ -33,9 +25,12 @@ async def handle(args: str, config: PluginConfig) -> str:
 
     lines = [f"📋 任务列表（共 {total} 条）"]
     for t in tasks[:_MAX_DISPLAY]:
-        icon = _STATUS_LABEL.get(t.get("status", ""), "❓")
-        desc = t.get("description", "")[:40]
-        lines.append(f"  {icon} {desc}")
+        icon = fmt_status_icon(t.get("status", ""))
+        tid = t.get("task_id", "")[:8]          # 短 ID，最多 8 位
+        desc = t.get("description", "")[:36]    # 截断过长描述
+        created = fmt_dt(t.get("created_at", ""))
+        lines.append(f"  {icon} [{tid}] {desc}")
+        lines.append(f"       {created}")
 
     if total > _MAX_DISPLAY:
         lines.append(f"  … 共 {total} 条，仅显示前 {_MAX_DISPLAY} 条")
