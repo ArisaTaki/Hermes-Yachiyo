@@ -1,6 +1,66 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 38: macOS 托盘主线程修复
+## 本轮完成内容 — Milestone 39: 修复 GCD dispatch_get_main_queue 符号不可用
+
+### 问题
+
+`AttributeError: dlsym(RTLD_DEFAULT, dispatch_get_main_queue): symbol not found`
+
+Milestone 38 实现的 GCD 方案在实际运行时报错，因为 `dispatch_get_main_queue` 在 macOS libdispatch 中是内联函数，不作为符号导出，`ctypes.CDLL(None).dispatch_get_main_queue` 失败。
+
+### 根因
+
+```c
+// Apple libdispatch 真实定义（内联，不导出符号）：
+DISPATCH_INLINE DISPATCH_ALWAYS_INLINE
+dispatch_queue_main_t dispatch_get_main_queue(void) {
+    return DISPATCH_GLOBAL_OBJECT(dispatch_queue_main_t, _dispatch_main_q);
+}
+```
+
+底层对象 `_dispatch_main_q` 是稳定导出的符号，其地址 = 主队列句柄。
+
+### 修复
+
+```python
+# 旧（symbol not found）:
+lib.dispatch_get_main_queue.restype = ctypes.c_void_p
+queue = lib.dispatch_get_main_queue()
+
+# 新（正确）:
+main_q_obj = ctypes.c_void_p.in_dll(lib, "_dispatch_main_q")
+queue = ctypes.addressof(main_q_obj)
+```
+
+同时在 `create_tray_macos()` 加 try/except 受控降级，GCD 失败时跳过 tray 不崩溃。
+
+### 修改文件
+
+| 文件 | 变更 |
+|------|------|
+| `apps/shell/tray.py` | `_dispatch_to_main_queue()` 取主队列方式从 `dispatch_get_main_queue()` 改为 `_dispatch_main_q` 取址；`create_tray_macos()` 加 try/except 降级 |
+
+### 已验证通过链路
+
+Hermes 安装 → setup → workspace init → ready → normal mode → runtime → bridge → **tray GCD 方案（修复）**
+
+### 如何接手
+
+```bash
+cd /Users/hacchiroku/AI/Hermes-Yachiyo
+.venv/bin/python -m apps.shell.app
+```
+
+### 下一步建议
+
+1. **Task 系统真实 CLI 联调** — HermesExecutor 有 CLI 调用骨架，需真机测试
+2. **AstrBot 真实 QQ 联调** — handler 已覆盖测试
+3. **Live2D 渲染器** — 配置/校验/摘要层完备，可开始 moc3 渲染
+4. **Bridge HTTPS/认证** — 当前无认证，生产环境需要
+
+---
+
+## 历史记录 — Milestone 38: macOS 托盘主线程修复
 
 ### 问题
 

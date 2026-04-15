@@ -1237,7 +1237,43 @@ READY → 正常主界面
   - 更新注释说明托盘线程模型差异
 
 **修复后行为**：
+
 1. startup.py 在主线程调用 `create_tray_macos(runtime)` → GCD 入队（非阻塞）
 2. `launch_mode()` → `webview.start()` → macOS NSApp.run() 开始
 3. GCD 主队列处理：`pystray.Icon(...)` 在主线程构造，`icon.run_detached()` 激活
 4. 托盘图标正常显示，事件由 pywebview 的 NSApp 分发
+
+### Milestone 39 — 修复 GCD dispatch_get_main_queue 符号不可用
+
+**问题**：Milestone 38 的 GCD 方案在启动时报 `AttributeError: dlsym(RTLD_DEFAULT, dispatch_get_main_queue): symbol not found`。
+
+**根因**：`dispatch_get_main_queue()` 在 macOS libdispatch 中是 `DISPATCH_INLINE DISPATCH_ALWAYS_INLINE` 内联函数，**不作为符号导出**，`dlsym` 查找失败。底层真正的主队列对象是 `_dispatch_main_q`，`dispatch_get_main_queue()` C 实现就是 `return &_dispatch_main_q`。
+
+**修复**（一行改动）：
+
+```python
+# 旧（失败）:
+lib.dispatch_get_main_queue.restype = ctypes.c_void_p
+queue = lib.dispatch_get_main_queue()
+
+# 新（正确）:
+main_q_obj = ctypes.c_void_p.in_dll(lib, "_dispatch_main_q")
+queue = ctypes.addressof(main_q_obj)
+```
+
+`_dispatch_main_q` 是 libdispatch 的稳定导出符号，macOS 10.6+ 全版本可用。
+
+**同时新增受控降级**：`create_tray_macos()` 包裹 try/except，GCD 整体失败时只 log warning，不崩溃，不影响主窗口/bridge/bubble/live2d。
+
+**变更**：
+
+- ✅ `apps/shell/tray.py`
+  - `_dispatch_to_main_queue()` — 替换取主队列句柄的方式：`dispatch_get_main_queue()` → `ctypes.c_void_p.in_dll(lib, "_dispatch_main_q")` + `ctypes.addressof()`
+  - `create_tray_macos()` — 新增 try/except 受控降级
+  - 更新模块/函数注释，说明内联函数不可 dlsym 的原因
+
+**验证**：
+
+- `_dispatch_main_q` 在 system Python 3.13 和 venv Python（Anaconda 3.13.12）均验证可用
+- `dispatch_async_f` 可正常调用
+- `py_compile` 语法检查通过

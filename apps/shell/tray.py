@@ -8,6 +8,10 @@ macOS 注意事项
 pystray 的 darwin 后端在构造时即调用 AppKit.NSStatusBar 等对象，
 这些 AppKit UI 对象必须在主线程创建。因此在 macOS 下不能在子线程调用
 ``pystray.Icon(...)``；应使用 ``create_tray_macos()`` 通过 GCD 调度。
+
+GCD 主队列的获取：``dispatch_get_main_queue()`` 在 libdispatch 中是内联
+函数，不导出符号；底层对象 ``_dispatch_main_q`` 可通过 ctypes.c_void_p.in_dll
+取址，其地址即为主队列句柄，在所有 macOS 版本（10.6+）上稳定可用。
 """
 
 from __future__ import annotations
@@ -76,6 +80,10 @@ def _dispatch_to_main_queue(fn) -> None:
 
     可在主线程或子线程调用。若在 ``NSApp.run()`` 启动之前入队，
     回调会在 NSApp 运行后自动执行（GCD 主队列与主线程 run loop 绑定）。
+
+    注意：``dispatch_get_main_queue()`` 在 macOS libdispatch 中是内联函数，
+    不导出符号，无法通过 dlsym 访问。底层主队列对象是 ``_dispatch_main_q``，
+    其地址即为主队列句柄（``dispatch_get_main_queue()`` 本质是 ``return &_dispatch_main_q``）。
     """
     import ctypes
 
@@ -98,12 +106,16 @@ def _dispatch_to_main_queue(fn) -> None:
     _GCD_CALLBACKS.append(_cb)  # 防止被 GC
 
     lib = ctypes.CDLL(None)  # RTLD_DEFAULT，macOS 下包含 libdispatch
-    lib.dispatch_get_main_queue.restype = ctypes.c_void_p
-    queue = lib.dispatch_get_main_queue()
+
+    # dispatch_get_main_queue() 是内联函数，不作为符号导出。
+    # 底层主队列对象 _dispatch_main_q 稳定导出，其地址即为主队列句柄。
+    main_q_obj = ctypes.c_void_p.in_dll(lib, "_dispatch_main_q")
+    queue = ctypes.addressof(main_q_obj)
+
     lib.dispatch_async_f.argtypes = [
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
     ]
-    lib.dispatch_async_f(ctypes.c_void_p(queue), None, _cb)
+    lib.dispatch_async_f(queue, None, _cb)
 
 
 def create_tray_macos(runtime: "HermesRuntime") -> None:
@@ -115,6 +127,9 @@ def create_tray_macos(runtime: "HermesRuntime") -> None:
 
     pystray 0.19 darwin 后端的 ``_run_detached()`` 不启动独立的 NSApp
     事件循环，仅将图标挂载到 pywebview 已在主线程运行的 NSApp 事件循环上。
+
+    受控降级：若 GCD 调度配置失败（如底层符号不可用），会记录警告并跳过
+    托盘，不影响主窗口、bridge 及其他模块的正常运行。
     """
     if not _HAS_TRAY:
         logger.warning("pystray 未安装，跳过系统托盘")
@@ -127,8 +142,14 @@ def create_tray_macos(runtime: "HermesRuntime") -> None:
         except Exception as exc:
             logger.error("macOS 托盘创建失败: %s", exc, exc_info=True)
 
-    _dispatch_to_main_queue(_create_on_main)
-    logger.info("系统托盘：GCD 调度已入队，将在 NSApp 启动后在主线程创建")
+    try:
+        _dispatch_to_main_queue(_create_on_main)
+        logger.info("系统托盘：GCD 调度已入队，将在 NSApp 启动后在主线程创建")
+    except Exception as exc:
+        # GCD 调度配置失败（如符号不可用）→ 受控降级，跳过托盘，不崩溃
+        logger.warning(
+            "macOS 托盘 GCD 调度失败，已跳过系统托盘（不影响主窗口/bridge）: %s", exc
+        )
 
 
 def _create_tray_main_thread(runtime: "HermesRuntime") -> None:
