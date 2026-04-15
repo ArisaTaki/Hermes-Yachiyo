@@ -830,8 +830,18 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                 } else if (s.needs_init) {
                     result.innerHTML = '<span style="color:#ffd700">✅ Hermes 已安装，正在进入初始化向导...</span>';
                     setTimeout(() => window.pywebview.api.restart_app(), 1500);
+                } else if (s.needs_env_refresh) {
+                    // 安装脚本成功执行，二进制已落盘，但当前进程 PATH 未刷新
+                    result.innerHTML =
+                        '<span style="color:#ffd700">✅ Hermes Agent 已安装完成。</span><br>' +
+                        '<span style="color:#aaa">Shell 环境尚未刷新（PATH 未更新），' +
+                        '重启应用后可正常使用。</span>';
+                    document.getElementById('install-btn').disabled = true;
+                    document.getElementById('install-btn').textContent = '请重启应用';
+                    // 5 秒后自动重启
+                    setTimeout(() => window.pywebview.api.restart_app(), 5000);
                 } else {
-                    result.innerHTML = '<span style="color:#ff6b6b">⚠️ 安装后检测异常：' + s.status + '（' + s.message + '）</span>';
+                    result.innerHTML = '<span style="color:#ff6b6b">⚠️ 安装后检测异常：' + s.status + '（' + (s.message || '未知') + '）</span>';
                     document.getElementById('install-btn').disabled = false;
                     document.getElementById('install-btn').textContent = '重新安装';
                 }

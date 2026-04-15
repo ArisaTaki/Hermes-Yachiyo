@@ -495,3 +495,9 @@ AstrBot 宿主绑定 / 真实 Hermes Agent 执行接入
 ### 安装完成流程
 
 NOT_INSTALLED → 点击安装 → 后台脚本 → 轮询进度 → recheck_status() → READY/INIT/失败
+
+
+## Milestone 19 — 安装后环境刷新感知检测
+
+三级探测策略：当前 PATH → 常见路径扫描 → 登录 Shell
+`recheck_status()` 新增 `needs_env_refresh` 字段，前端区分"正常可用"与"需重启刷新PATH"两种成功路径。

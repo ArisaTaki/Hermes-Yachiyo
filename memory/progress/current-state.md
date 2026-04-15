@@ -491,3 +491,37 @@
    - READY → 重启进入正常模式
    - INSTALLED_NOT_INITIALIZED → 重启进入初始化向导
    - 其他 → 显示错误，允许重试
+
+
+### Milestone 19 — 安装后环境刷新感知检测
+
+**问题根因**：Hermes 官方安装脚本把二进制写入 `~/.local/bin` 等目录后，
+当前 Python 进程的 PATH 不会自动刷新，导致 `recheck_status()` 
+调用 `subprocess.run(["hermes", "--version"])` 时仍然 `FileNotFoundError`，
+误判为 Hermes 仍未安装。
+
+**修复方案**：新增 `locate_hermes_binary()` 三级探测策略：
+
+1. **当前 PATH**（`shutil.which("hermes")`）— 正常启动场景，最快
+2. **常见安装路径扫描** — 直接检查 `~/.local/bin/hermes`、`~/.hermes/bin/hermes` 等 8 个路径
+3. **登录 Shell 探测** — `bash/zsh -lc "command -v hermes"`，会 source 用户 rc 文件
+
+**返回值区分**：
+- `(path, needs_env_refresh=False)` — 在当前 PATH 找到，环境正常
+- `(path, needs_env_refresh=True)` — 通过备用途径找到，当前进程需重启
+- `(None, False)` — 完全未找到
+
+**新增函数**（`apps/installer/hermes_check.py`）：
+- `find_hermes_in_common_paths()` → `str | None`
+- `probe_hermes_via_login_shell()` → `str | None`
+- `locate_hermes_binary()` → `tuple[str | None, bool]`
+- `check_hermes_installation_post_install()` → `tuple[HermesInstallInfo, bool]`
+- `_check_hermes_installation_with_cmd(hermes_cmd)` — 使用指定路径执行完整检测
+
+**`recheck_status()`**（`apps/shell/installer_api.py`）：
+- 改用 `check_hermes_installation_post_install()`
+- 新增返回字段 `needs_env_refresh: bool`
+
+**前端处理**（`apps/shell/window.py` JS）：
+- `needs_env_refresh=True` → 显示"已安装，环境待刷新，5秒后自动重启"
+- 不再将此情况误报为"安装失败"

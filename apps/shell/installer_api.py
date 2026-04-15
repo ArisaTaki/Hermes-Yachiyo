@@ -104,20 +104,28 @@ class InstallerWebViewAPI:
     def recheck_status(self) -> Dict[str, Any]:
         """重新检测 Hermes 安装状态。
 
-        安装完成后调用，让前端决定下一步流程。
+        安装完成后调用，使用安装后感知策略（登录 Shell + 常见路径扫描），
+        避免因当前进程 PATH 未刷新而误判"仍未安装"。
 
         Returns:
-            {"status": str, "message": str, "ready": bool}
+            {
+                "status": str,
+                "message": str,
+                "ready": bool,
+                "needs_init": bool,
+                "needs_env_refresh": bool,   # True → 找到 hermes 但需重启以刷新 PATH
+            }
         """
-        from apps.installer.hermes_check import check_hermes_installation
-
-        info = check_hermes_installation()
+        from apps.installer.hermes_check import check_hermes_installation_post_install
         from packages.protocol.enums import HermesInstallStatus
+
+        info, needs_env_refresh = check_hermes_installation_post_install()
         return {
             "status": info.status.value,
             "message": info.error_message or "",
             "ready": info.status == HermesInstallStatus.READY,
             "needs_init": info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED,
+            "needs_env_refresh": needs_env_refresh,
         }
 
     def restart_app(self) -> None:
