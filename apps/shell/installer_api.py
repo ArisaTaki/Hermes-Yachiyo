@@ -129,12 +129,31 @@ class InstallerWebViewAPI:
         }
 
     def restart_app(self) -> None:
-        """重启应用（退出当前进程，依赖外部重启）"""
+        """重启应用：先启动新进程，再退出当前进程。
+
+        使用 sys.executable + sys.argv 重新启动，确保应用以相同参数重新加载。
+        若无法自动重启（路径异常等），仅退出当前进程并在日志中给出提示。
+        """
         logger.info("正在重启应用...")
-        def _delayed():
+
+        def _delayed() -> None:
+            import subprocess
+            import sys
             import time
+
             time.sleep(0.8)
-            os._exit(0)
+            try:
+                subprocess.Popen(
+                    [sys.executable] + sys.argv,
+                    close_fds=True,
+                    start_new_session=True,
+                )
+                logger.info("新进程已启动（%s %s）", sys.executable, sys.argv)
+            except Exception as exc:
+                logger.warning("自动重启失败，请手动重启应用: %s", exc)
+            finally:
+                os._exit(0)
+
         threading.Thread(target=_delayed, daemon=True).start()
 
 

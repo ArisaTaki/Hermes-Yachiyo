@@ -824,24 +824,29 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
             result.innerHTML = '<span style="color:#6495ed">⏳ 正在验证安装结果...</span>';
             try {
                 const s = await window.pywebview.api.recheck_status();
+
+                // needs_env_refresh 仅作提示：应用内 PATH 已修复，但用户 Shell 仍需手动 reload
+                const shellNote = s.needs_env_refresh
+                    ? '<br><span style="color:#888;font-size:0.88em">提示：打开新终端或执行 source ~/.bashrc 后，Shell 中也可直接使用 hermes 命令</span>'
+                    : '';
+
                 if (s.ready) {
-                    result.innerHTML = '<span style="color:#90ee90">✅ 安装成功！正在重启...</span>';
+                    result.innerHTML = '<span style="color:#90ee90">✅ 安装成功！正在进入主界面...</span>' + shellNote;
                     setTimeout(() => window.pywebview.api.restart_app(), 1500);
                 } else if (s.needs_init) {
-                    result.innerHTML = '<span style="color:#ffd700">✅ Hermes 已安装，正在进入初始化向导...</span>';
+                    result.innerHTML = '<span style="color:#ffd700">✅ Hermes 已安装，正在进入初始化向导...</span>' + shellNote;
                     setTimeout(() => window.pywebview.api.restart_app(), 1500);
                 } else if (s.needs_env_refresh) {
-                    // 安装脚本成功执行，二进制已落盘，但当前进程 PATH 未刷新
+                    // PATH 已注入但完整检测仍未通过（版本不兼容等边缘情况）
+                    // 重启后用刷新后的环境重新走完整检测流程
                     result.innerHTML =
-                        '<span style="color:#ffd700">✅ Hermes Agent 已安装完成。</span><br>' +
-                        '<span style="color:#aaa">Shell 环境尚未刷新（PATH 未更新），' +
-                        '重启应用后可正常使用。</span>';
-                    document.getElementById('install-btn').disabled = true;
-                    document.getElementById('install-btn').textContent = '请重启应用';
-                    // 5 秒后自动重启
-                    setTimeout(() => window.pywebview.api.restart_app(), 5000);
+                        '<span style="color:#ffd700">✅ Hermes 安装完成，正在重启以完成初始化...</span>' +
+                        (s.message ? '<br><span style="color:#aaa">' + s.message + '</span>' : '');
+                    setTimeout(() => window.pywebview.api.restart_app(), 2000);
                 } else {
-                    result.innerHTML = '<span style="color:#ff6b6b">⚠️ 安装后检测异常：' + s.status + '（' + (s.message || '未知') + '）</span>';
+                    result.innerHTML =
+                        '<span style="color:#ff6b6b">⚠️ 安装后检测异常：' + s.status +
+                        (s.message ? '（' + s.message + '）' : '') + '</span>';
                     document.getElementById('install-btn').disabled = false;
                     document.getElementById('install-btn').textContent = '重新安装';
                 }

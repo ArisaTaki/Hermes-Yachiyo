@@ -371,6 +371,19 @@ def probe_hermes_via_login_shell() -> str | None:
     return None
 
 
+def _inject_hermes_bin_dir(hermes_bin_path: str) -> None:
+    """将 hermes 所在目录注入当前进程 PATH 环境变量。
+
+    安装脚本执行完毕后二进制已落盘，但 Python 进程的 PATH 快照未更新。
+    通过修改 os.environ["PATH"] 使后续的子进程调用（subprocess.run）也能找到 hermes。
+    """
+    bin_dir = os.path.dirname(os.path.abspath(hermes_bin_path))
+    current_path = os.environ.get("PATH", "")
+    if bin_dir not in current_path.split(os.pathsep):
+        os.environ["PATH"] = bin_dir + os.pathsep + current_path
+        logger.info("已将 %s 注入当前进程 PATH（安装后环境修复）", bin_dir)
+
+
 def locate_hermes_binary() -> tuple[str | None, bool]:
     """定位 hermes 可执行文件，感知当前进程 PATH 是否过期。
 
@@ -379,26 +392,31 @@ def locate_hermes_binary() -> tuple[str | None, bool]:
     2. 常见安装路径扫描（安装后 PATH 未刷新时的快速回退）
     3. 登录 Shell 探测（最可靠，但稍慢）
 
+    找到备用路径时会自动调用 ``_inject_hermes_bin_dir()``，
+    使当前进程及子进程后续均可通过 "hermes" 命令直接调用。
+
     Returns:
         Tuple:
-            - path: hermes 绝对路径，或 None（未找到）
-            - needs_env_refresh: True 表示通过 PATH 外途径找到，
-              当前进程需要重启才能正常使用 hermes 命令。
+            - path: hermes 可用路径（已在 PATH 中时为命令名，否则为绝对路径）
+            - needs_env_refresh: True 表示通过备用途径找到并已注入 PATH，
+              用户的 Shell 会话仍需 ``source ~/.bashrc`` 才能使用 hermes 命令。
     """
     import shutil
 
     # 策略 1：当前 PATH
     if shutil.which("hermes"):
-        return "hermes", False  # 在 PATH 中，直接用命令名即可
+        return "hermes", False
 
     # 策略 2：常见路径直接扫描
     common_path = find_hermes_in_common_paths()
     if common_path:
+        _inject_hermes_bin_dir(common_path)
         return common_path, True
 
     # 策略 3：登录 Shell（source rc 文件后重新 which）
     login_path = probe_hermes_via_login_shell()
     if login_path:
+        _inject_hermes_bin_dir(login_path)
         return login_path, True
 
     return None, False
@@ -408,99 +426,27 @@ def check_hermes_installation_post_install() -> tuple["HermesInstallInfo", bool]
     """安装完成后的 Hermes 状态检测。
 
     与 ``check_hermes_installation()`` 的区别：
-    - 使用 ``locate_hermes_binary()`` 代替单纯依赖当前进程 PATH
-    - 返回额外的 ``needs_env_refresh`` 布尔值
+    - 先调用 ``locate_hermes_binary()``，若发现 PATH 过期则自动注入修复
+    - 修复后直接复用 ``check_hermes_installation()`` 标准流程
+    - 返回额外的 ``needs_env_refresh`` 布尔值（提示用户 Shell 仍需手动刷新）
 
     Returns:
         Tuple:
-            - HermesInstallInfo: 安装状态
-            - needs_env_refresh: True 表示二进制已在磁盘上，
-              但当前进程环境尚未刷新，重启应用后可正常使用。
+            - HermesInstallInfo: 安装状态（注入 PATH 后已准确）
+            - needs_env_refresh: True 表示本次通过备用途径找到 hermes 并已注入 PATH，
+              用户的 Shell 环境仍需手动刷新（不影响应用本身的继续运行）。
     """
     hermes_path, needs_env_refresh = locate_hermes_binary()
 
     if hermes_path is None:
-        # 完全找不到
-        info = check_hermes_installation()
-        return info, False
+        # 完全找不到：走标准检测，返回 NOT_INSTALLED
+        return check_hermes_installation(), False
 
     if needs_env_refresh:
-        # 通过 PATH 外途径找到，用绝对路径做版本检测
         logger.info(
-            "安装后检测：通过备用路径找到 hermes（%s），当前进程 PATH 尚未刷新",
+            "安装后检测：通过备用路径找到 hermes（%s），PATH 已注入，继续标准检测",
             hermes_path,
         )
-        # 复用完整检测逻辑，但把命令替换为绝对路径
-        install_info = _check_hermes_installation_with_cmd(hermes_path)
-        return install_info, True
 
-    # 在正常 PATH 中找到，走标准流程
-    return check_hermes_installation(), False
-
-
-def _check_hermes_installation_with_cmd(hermes_cmd: str) -> "HermesInstallInfo":
-    """内部辅助：使用指定命令/路径执行完整安装检测。
-
-    与 ``check_hermes_installation()`` 逻辑一致，
-    仅将 hermes 调用替换为 ``hermes_cmd``。
-    """
-    install_info = HermesInstallInfo(
-        status=HermesInstallStatus.NOT_CHECKED,
-        platform=detect_platform(),
-    )
-
-    # 平台检查（与主流程相同）
-    if install_info.platform == Platform.WINDOWS_NATIVE:
-        install_info.status = HermesInstallStatus.WSL2_REQUIRED
-        return install_info
-    if install_info.platform not in [Platform.MACOS, Platform.LINUX, Platform.WINDOWS_WSL2]:
-        install_info.status = HermesInstallStatus.PLATFORM_UNSUPPORTED
-        return install_info
-
-    # 命令可用性（使用指定路径）
-    command_exists, error_message = check_hermes_command(hermes_path=hermes_cmd)
-    install_info.command_exists = command_exists
-
-    if not command_exists:
-        install_info.status = HermesInstallStatus.NOT_INSTALLED
-        install_info.error_message = error_message
-        return install_info
-
-    # 版本检测（使用指定路径）
-    try:
-        result = subprocess.run(
-            [hermes_cmd, "--version"],
-            capture_output=True, text=True, timeout=10,
-        )
-        version_info = HermesVersionInfo()
-        if result.returncode == 0:
-            parts = result.stdout.strip().split()
-            for part in parts:
-                if part and part[0].isdigit() and "." in part:
-                    version_info.version = part
-                    break
-        install_info.version_info = version_info
-    except Exception:
-        install_info.version_info = None
-
-    if not install_info.version_info or not install_info.version_info.version:
-        install_info.status = HermesInstallStatus.INCOMPATIBLE_VERSION
-        install_info.error_message = "无法获取版本信息"
-        return install_info
-
-    if not is_version_compatible(install_info.version_info.version):
-        install_info.status = HermesInstallStatus.INCOMPATIBLE_VERSION
-        install_info.error_message = f"版本 {install_info.version_info.version} 不兼容"
-        return install_info
-
-    # Yachiyo workspace 检查
-    hermes_home = get_hermes_home()
-    install_info.hermes_home = hermes_home
-    workspace_ok, workspace_error = check_yachiyo_workspace()
-    if not workspace_ok:
-        install_info.status = HermesInstallStatus.INSTALLED_NOT_INITIALIZED
-        install_info.error_message = workspace_error
-        return install_info
-
-    install_info.status = HermesInstallStatus.READY
-    return install_info
+    # PATH 已更新（注入或本来就有），走标准检测流程即可
+    return check_hermes_installation(), needs_env_refresh

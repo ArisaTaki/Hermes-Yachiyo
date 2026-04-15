@@ -525,3 +525,32 @@
 **前端处理**（`apps/shell/window.py` JS）：
 - `needs_env_refresh=True` → 显示"已安装，环境待刷新，5秒后自动重启"
 - 不再将此情况误报为"安装失败"
+
+
+### Milestone 20 — 安装成功后自动过渡闭环
+
+**修复三处问题：**
+
+1. **PATH 注入**（hermes_check.py）
+   - 新增 `_inject_hermes_bin_dir(path)` 函数
+   - `locate_hermes_binary()` 找到备用路径时自动注入 `os.environ["PATH"]`
+   - 后续子进程（subprocess.run）同样能找到 hermes，无需绝对路径
+   - 删除了不再需要的 `_check_hermes_installation_with_cmd()`
+   - `check_hermes_installation_post_install()` 简化为：注入PATH → 调用标准流程
+
+2. **真正重启**（installer_api.py）
+   - `restart_app()` 改为先 `subprocess.Popen([sys.executable] + sys.argv)`，再 `os._exit(0)`
+   - 应用会自动重新拉起，不再停留在"安装成功应用已关闭"的中间态
+
+3. **JS 过渡逻辑**（window.py）
+   - `recheckAfterInstall()` 优先判断 `ready` / `needs_init`，再检查 `needs_env_refresh`
+   - `ready=True`（含 `needs_env_refresh=True`）→ 1.5s 后重启进入主界面
+   - `needs_init=True` → 1.5s 后重启进入初始化向导
+   - `needs_env_refresh=True` 但状态仍未通过 → 2s 后重启重新检测
+   - `needs_env_refresh` 现在仅作 Shell 提示，不再阻塞正常流程
+
+**安装后完整状态流：**
+安装脚本执行 → `recheck_status()` → PATH注入 → 标准检测：
+  → READY → restart → 主界面
+  → INSTALLED_NOT_INITIALIZED → restart → 初始化向导
+  → needs_env_refresh=True（边缘情况）→ restart → 重新检测

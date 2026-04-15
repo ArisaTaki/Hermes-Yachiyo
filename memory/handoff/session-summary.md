@@ -501,3 +501,9 @@ NOT_INSTALLED → 点击安装 → 后台脚本 → 轮询进度 → recheck_sta
 
 三级探测策略：当前 PATH → 常见路径扫描 → 登录 Shell
 `recheck_status()` 新增 `needs_env_refresh` 字段，前端区分"正常可用"与"需重启刷新PATH"两种成功路径。
+
+
+## Milestone 20 — 安装成功后自动过渡闭环
+
+PATH 注入 + 真正重启 + JS 流程修正。
+安装完成后应用自动重拉起，进入 READY 或初始化向导，无中间悬停态。
