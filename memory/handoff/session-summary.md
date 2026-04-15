@@ -513,3 +513,9 @@ PATH 注入 + 真正重启 + JS 流程修正。
 
 三处修复：API 始终挂载 + INITIALIZING 枚举 + init 进度 log。
 首次启动 not_installed → installing → installed_not_initialized → initializing → ready → 主界面 全链路闭环。
+
+
+## Milestone 22 — 统一启动决策层
+
+新建 `apps/shell/startup.py`：StartupMode + 映射表 + launch()。
+app.py 精简为加载配置后直接 launch(config)，状态分支不再分散。

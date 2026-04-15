@@ -597,3 +597,27 @@ installed_not_initialized
 ready
   → 直接进入主界面
 ```
+
+
+### Milestone 22 — 统一启动决策层
+
+**新文件 `apps/shell/startup.py`**
+
+| 组件 | 职责 |
+|------|------|
+| `StartupMode` (StrEnum) | `NORMAL` / `INIT_WIZARD` / `INSTALLER` |
+| `_INSTALL_STATUS_TO_MODE` | 状态 → 模式的唯一映射表 |
+| `resolve_startup_mode(install_info)` | 纯映射函数，无副作用，易测试 |
+| `run_normal_mode(config)` | 启动 Runtime + Bridge + 主窗口 |
+| `run_installer_mode(config, install_info)` | 合并原来的 _start_setup_mode + _start_installer_mode |
+| `launch(config)` | 统一入口：check → resolve → dispatch |
+
+**`apps/shell/app.py` 精简为 3 行逻辑：**
+```python
+config = load_config()
+launch(config)  # 所有状态判断在 startup.py
+```
+
+**扩展方式（后续新增状态只需）：**
+1. 在 `_INSTALL_STATUS_TO_MODE` 加一行映射
+2. 如需新模式，加对应的 `run_xxx_mode()` 并在 `launch()` 里分发
