@@ -1,216 +1,286 @@
-# Hermes-Yachiyo
+<div align="center">
 
-Hermes-Yachiyo 是一个**桌面优先的本地个人 agent 应用**，基于 Hermes Agent 构建。
+# 🌸 Hermes-Yachiyo
 
-## 产品形态
+**桌面优先的本地个人 Agent 应用**
 
-- 🖥️ **桌面优先**：本地运行的桌面应用，系统托盘常驻
-- 🔄 **多显示模式**：窗口模式 / 气泡模式 / Live2D 模式（预留）
-- 🏠 **本地优先**：无需网络连接即可运行核心功能
-- 🔌 **可选桥接**：可通过 AstrBot 插件接入 QQ
+基于 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 构建的智能桌面助手
 
-## 架构分层
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://python.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/Tests-105%20passed-brightgreen.svg)](#测试)
+
+**[English](README.en.md)** | **中文** | **[日本語](README.ja.md)**
+
+</div>
+
+---
+
+## ✨ 特性
+
+- 🖥️ **桌面优先** — 本地运行的桌面应用，系统托盘常驻，无需部署服务器
+- 🔄 **三种显示模式** — 窗口模式 / 气泡悬浮模式 / Live2D 角色模式
+- 🤖 **智能任务系统** — 可插拔执行策略，支持模拟执行与 Hermes CLI 真实执行
+- 🎨 **Live2D 就绪** — 完整的模型配置、目录扫描、校验体系，等待渲染器接入
+- ⚙️ **完整设置系统** — 即时生效 / 需重启分级提示，保存即反馈
+- 🔌 **QQ 桥接** — 通过 AstrBot 插件远程控制（`/y` 命令族）
+- 🏗️ **严格分层** — Shell / Core / Bridge / Locald / Protocol 职责清晰
+
+## 📸 显示模式
+
+| 窗口模式 | 气泡模式 | Live2D 模式 |
+|:---:|:---:|:---:|
+| 560×520 完整仪表盘 | 320×280 悬浮状态 | 380×560 角色骨架 |
+| 任务统计 · 设置面板 | 自动刷新 · 一键展开 | 动作占位 · 配置入口 |
+
+## 🏛️ 架构
 
 ```
-┌─────────────────────────────────────────────┐
-│          Hermes-Yachiyo 桌面应用             │
-│                                             │
-│  ┌─── App Shell ──────────────────────────┐ │
-│  │  启动入口 → 托盘 + 窗口管理              │ │
-│  │  显示模式: window / bubble / live2d    │ │
-│  │  设置界面 (pywebview)                  │ │
-│  └────────────────────────────────────────┘ │
-│                    │                        │
-│  ┌─── Core Runtime ──────────────────────┐ │
-│  │  Hermes Agent 封装                     │ │
-│  │  任务管理 / 状态管理                    │ │
-│  │  不暴露 HTTP（纯本地运行时）            │ │
-│  └────────────────────────────────────────┘ │
-│                    │                        │
-│  ┌─── Local Capabilities ────────────────┐ │
-│  │  截图 / 活动窗口 / 本地硬件能力         │ │
-│  └────────────────────────────────────────┘ │
-│                    │                        │
-│  ┌─── Bridge API (内部，可选) ────────────┐ │
-│  │  FastAPI，仅供 UI 和 AstrBot 调用       │ │
-│  └────────────────────────────────────────┘ │
-└─────────────────────────────────────────────┘
-         ↑ HTTP (可选)
-┌────────┴──────┐      ┌──────────┐
-│ AstrBot Plugin │ ──→  │   Hapi   │
-│ (QQ 桥接)      │      │ (Codex)  │
-└───────────────┘      └──────────┘
+┌────────────────────────────────────────────────┐
+│             Hermes-Yachiyo 桌面应用              │
+│                                                │
+│  ┌── App Shell (apps/shell) ────────────────┐  │
+│  │  启动入口 · 系统托盘 · 窗口管理            │  │
+│  │  显示模式: window / bubble / live2d       │  │
+│  │  设置系统 · 生效策略 · 集成状态            │  │
+│  └───────────────────────────────────────────┘  │
+│                      │                         │
+│  ┌── Core Runtime (apps/core) ───────────────┐  │
+│  │  Hermes Agent 封装 · 任务状态管理           │  │
+│  │  TaskRunner · 执行策略 · 不暴露 HTTP       │  │
+│  └───────────────────────────────────────────┘  │
+│                      │                         │
+│  ┌── Local (apps/locald) ────────────────────┐  │
+│  │  截图 · 活动窗口 · 本地硬件能力             │  │
+│  └───────────────────────────────────────────┘  │
+│                      │                         │
+│  ┌── Bridge (apps/bridge) ───────────────────┐  │
+│  │  内部 FastAPI · 仅供 UI 和 AstrBot 调用    │  │
+│  │  可重启 · 配置漂移检测 · 状态机            │  │
+│  └───────────────────────────────────────────┘  │
+└────────────────────────────────────────────────┘
+           ↑ HTTP (本地，可选)
+  ┌────────┴───────┐        ┌───────────┐
+  │  AstrBot Plugin │  ───→  │   Hapi    │
+  │  (QQ 远程桥接)   │        │  (Codex)  │
+  └────────────────┘        └───────────┘
 ```
 
-### 模块职责
+## 🚀 快速开始
 
-| 模块 | 路径 | 职责 | 边界 |
-|------|------|------|------|
-| **App Shell** | `apps/shell/` | 桌面壳入口、托盘、窗口、配置 | pywebview 只是 MVP 方案，可替换 |
-| **Core Runtime** | `apps/core/` | Hermes 封装、任务/状态管理 | 不暴露 HTTP，纯本地运行时 |
-| **Local Capabilities** | `apps/locald/` | 截图、活动窗口、本地硬件能力 | 平台适配层 |
-| **Bridge API** | `apps/bridge/` | 内部 FastAPI | 仅作通信桥梁，非产品本体 |
-| **Protocol** | `packages/protocol/` | Schema、枚举、请求/响应模型 | 跨层数据定义 |
-| **AstrBot Plugin** | `integrations/astrbot-plugin/` | QQ 命令路由桥接 | 薄桥层，不实现本地逻辑 |
-
-## 快速开始
-
-## 环境要求
+### 环境要求
 
 - Python 3.11+
-- macOS、Linux 或 Windows (WSL2)
-- **Hermes Agent**: 外部运行时依赖，需单独安装
-
-### Hermes Agent 安装
-
-Hermes-Yachiyo 依赖 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 作为底层运行时，需要先安装：
-
-**macOS:**
-```bash
-# 使用官方安装脚本 (推荐)
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
-
-# 或下载二进制文件
-# 访问 https://github.com/NousResearch/hermes-agent/releases
-```
-
-**Linux / WSL2:**
-```bash
-# 使用官方安装脚本
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
-
-# 或下载二进制文件
-# 访问 https://github.com/NousResearch/hermes-agent/releases
-```
-
-**Windows:**
-```bash
-# Windows 用户需要使用 WSL2
-# 1. 安装 WSL2: https://docs.microsoft.com/zh-cn/windows/wsl/install
-# 2. 在 WSL2 中按 Linux 步骤安装 Hermes Agent
-```
-
-安装完成后，确认 `hermes --version` 命令可正常执行。
+- macOS / Linux / Windows (WSL2)
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent)（应用内可引导安装）
 
 ### 安装与运行
 
 ```bash
-# 1. 克隆仓库
+# 克隆并安装
 git clone <repo-url>
 cd Hermes-Yachiyo
-
-# 2. 创建虚拟环境
 python3 -m venv .venv
 source .venv/bin/activate
-
-# 3. 安装依赖
 pip install -e .
 
-# 4. 启动应用
+# 启动桌面应用
 hermes-yachiyo
-# 或直接运行
+# 或
 python -m apps.shell.app
 ```
 
-### 功能验证
+### 首次启动流程
 
-启动后可以：
+应用会自动检测 Hermes Agent 状态，引导完成初始化：
 
-- 在系统托盘查看状态
-- 通过窗口界面查看运行信息
-- 访问内部 API: <http://127.0.0.1:8420>
-  - `GET /status` - 运行状态
-  - `GET /tasks` - 任务列表
-  - `POST /tasks` - 创建任务
-  - `GET /screen/current` - 截图
-  - `GET /system/active-window` - 活动窗口
+```
+未安装 Hermes → 安装引导界面（一键安装）
+    ↓
+已安装未初始化 → 工作区初始化向导
+    ↓
+就绪 → 进入正常模式 → 当前显示模式
+```
 
-## 开发
+## ⚙️ 配置系统
 
-### 目录结构
+配置文件位于 `~/.hermes-yachiyo/config.json`，可通过设置界面可视化编辑。
+
+| 配置项 | 默认值 | 生效策略 |
+|--------|--------|---------|
+| `display_mode` | `window` | 需重启模式 |
+| `bridge_enabled` | `true` | 需重启 Bridge |
+| `bridge_host` | `127.0.0.1` | 需重启 Bridge |
+| `bridge_port` | `8420` | 需重启 Bridge |
+| `tray_enabled` | `true` | 需重启应用 |
+| `live2d.model_name` | — | 即时生效 |
+| `live2d.model_path` | — | 即时生效 |
+| `live2d.enable_expressions` | `false` | 即时生效 |
+| `live2d.enable_physics` | `false` | 即时生效 |
+| `live2d.window_on_top` | `false` | 需重启模式 |
+
+保存设置后，界面会即时显示每项配置的生效状态提示。
+
+## 🤖 任务系统
+
+任务生命周期：`PENDING → RUNNING → COMPLETED / CANCELLED / FAILED`
+
+**执行策略：**
+- **SimulatedExecutor** — 模拟执行，用于 MVP 测试
+- **HermesExecutor** — 真实调用 `hermes run --prompt`，自动检测可用性
+
+```bash
+# 通过 Bridge API
+curl http://127.0.0.1:8420/tasks -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"description": "分析当前目录结构"}'
+
+# 通过 QQ
+/y do 分析当前目录结构
+/y check abc123
+/y cancel abc123
+```
+
+## 🔌 QQ 桥接（AstrBot 插件）
+
+通过 AstrBot 插件接入 QQ，所有命令以 `/y` 开头：
+
+| 命令 | 说明 |
+|------|------|
+| `/y status` | 查看系统状态 |
+| `/y tasks` | 任务列表 |
+| `/y do <描述>` | 创建任务 |
+| `/y check <id>` | 查询任务详情 |
+| `/y cancel <id>` | 取消任务 |
+| `/y screen` | 截图信息 |
+| `/y window` | 当前活动窗口 |
+| `/y codex <描述>` | Codex 执行（Hapi，即将推出） |
+| `/y help` | 命令帮助 |
+
+插件只做路由桥接，不实现本地逻辑。错误提示已覆盖连接失败、超时、服务未就绪等场景。
+
+## 🎨 Live2D 支持
+
+当前阶段提供完整的配置与校验框架，尚未接入渲染 SDK：
+
+- **五级状态校验**：未配置 → 路径无效 → 非模型目录 → 路径有效 → 已加载
+- **目录自动扫描**：检测 `.moc3` / `.model3.json` 文件（支持 Cubism 3/4）
+- **模型摘要提取**：主候选文件、来源目录、渲染器入口
+- **设置页可编辑**：模型名称、路径、空闲动作组、表情/物理开关
+- **即时刷新**：保存后立即重新校验并更新显示
+
+## 🔗 Bridge API
+
+内部 FastAPI 服务，供 UI 和 AstrBot 调用：
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/status` | GET | 运行状态与任务统计 |
+| `/tasks` | GET | 任务列表 |
+| `/tasks` | POST | 创建任务 |
+| `/tasks/{id}` | GET | 任务详情 |
+| `/tasks/{id}/cancel` | POST | 取消任务 |
+| `/screen/current` | GET | 截图（base64） |
+| `/system/active-window` | GET | 活动窗口信息 |
+| `/hermes/status` | GET | Hermes 安装状态 |
+
+Bridge 支持运行时重启、配置漂移检测、状态机管理（disabled / enabled_not_started / running / failed）。
+
+## 🧪 测试
+
+```bash
+# 运行全部测试
+.venv/bin/python -m pytest tests/ -v
+
+# 105 tests, all passed
+```
+
+| 测试模块 | 数量 | 覆盖范围 |
+|---------|------|---------|
+| `test_protocol` | 14 | 枚举、数据模型、请求/响应 |
+| `test_state` | 11 | 任务生命周期、终态保护 |
+| `test_executor` | 7 | 执行器模型、模拟执行 |
+| `test_effect_policy` | 9 | 设置生效策略 |
+| `test_integration_status` | 11 | Bridge/AstrBot/Hapi 状态 |
+| `test_astrbot_handlers` | 32 | 全 handler 输出与错误格式 |
+| `test_startup` | 6 | 启动决策树 |
+
+## 📁 目录结构
 
 ```
 apps/
-  shell/           # 桌面应用壳
-    app.py           # 主入口
-    tray.py          # 系统托盘
-    window.py        # pywebview 窗口
-    config.py        # 用户配置
-    modes/           # 显示模式
-  core/            # Core Runtime
-    runtime.py       # Hermes 运行时 + 安装检测集成
-    state.py         # 应用状态管理
-  bridge/          # 内部 API 桥梁
-    deps.py          # 依赖注入
-    server.py        # FastAPI 服务
-    routes/          # API 路由 (+ hermes.py)
-  locald/          # 本地能力适配器
-    screenshot.py    # 截图（macOS）
-    active_window.py # 活动窗口（macOS）
-  installer/       # Hermes Agent 安装引导层
-    hermes_check.py  # 安装检测
-    hermes_install.py # 安装指导
-    hermes_setup.py  # 环境设置
+  shell/              # 桌面应用壳
+    app.py              # 主入口
+    startup.py          # 启动决策
+    window.py           # 主窗口 (pywebview)
+    config.py           # 配置管理 + Live2D 校验
+    effect_policy.py    # 设置生效策略
+    integration_status.py  # 集成状态统一来源
+    main_api.py         # 窗口 API
+    settings.py         # 设置页构建
+    tray.py             # 系统托盘
+    modes/              # 显示模式
+      bubble.py           # 气泡悬浮模式
+      live2d.py           # Live2D 角色模式
+  core/               # 核心运行时（不暴露 HTTP）
+    runtime.py          # Hermes 运行时封装
+    state.py            # 任务状态管理
+    executor.py         # 执行策略（模拟 / Hermes CLI）
+    task_runner.py      # 任务调度轮询
+  bridge/             # 内部通信桥
+    server.py           # FastAPI 服务（可重启）
+    deps.py             # 依赖注入
+    routes/             # API 路由
+  locald/             # 本地能力适配
+    screenshot.py       # 截图（macOS）
+    active_window.py    # 活动窗口（macOS）
+  installer/          # Hermes 安装引导
+    hermes_check.py     # 安装检测
+    hermes_install.py   # 安装执行
+    workspace_init.py   # 工作区初始化
 packages/
-  protocol/        # Schema 定义
-    enums.py         # 枚举 (+ Hermes 相关)
-    schemas.py       # 请求/响应模型
-    errors.py        # 错误模型
-    events.py        # 审计事件
-    install.py       # 安装相关模型
-  tasking/         # 任务生命周期（占位）
-  security/        # 安全模块（占位）
+  protocol/           # 跨层数据定义
+    enums.py            # 枚举
+    schemas.py          # 请求/响应模型
+    install.py          # 安装模型
 integrations/
-  astrbot-plugin/  # QQ 桥接插件
-    main.py          # 命令路由骨架
+  astrbot-plugin/     # QQ 桥接插件
+    main.py             # 入口与 ACL
+    command_router.py   # 命令路由
+    api_client.py       # HTTP 客户端
+    handlers/           # 各命令 handler
+tests/                # 测试套件（105 tests）
 ```
 
-### 连通链路
+## 🔧 开发指南
 
-1. **启动流程**: `shell/app.py` → 创建 `HermesRuntime` → Hermes 安装检测 → 注入 `bridge/deps.py` → 启动桥接 API
-2. **任务流程**: Bridge 路由 → `deps.get_runtime()` → `core/state.py` → 任务操作
-3. **安装流程**: `installer/hermes_check.py` → 检测 → `hermes_install.py` → 引导 → `hermes_setup.py` → 环境配置
-4. **显示流程**: Shell → 托盘/窗口 → pywebview → Bridge API 状态查询
+### 严格边界
 
-### 开发指导
+| 模块 | 允许 | 禁止 |
+|------|------|------|
+| `apps/core` | 运行时、状态、执行器 | 暴露 HTTP |
+| `apps/bridge` | 内部 API、依赖注入 | 实现业务逻辑 |
+| `apps/shell` | 产品入口、UI、配置 | 直接访问 Bridge 以外的状态 |
+| `apps/locald` | 平台能力适配 | 处理业务逻辑 |
+| `astrbot-plugin` | 命令路由、格式化 | 实现本地机器控制 |
 
-#### 严格边界
+### 添加新功能
 
-- `apps/core` **不暴露** HTTP，只负责运行时与状态
-- `apps/bridge` **只作** 内部通信桥梁，不是产品本体  
-- `apps/shell` 是产品入口，但 pywebview 可替换为其他桌面技术
-- `apps/locald` 只负责本地能力适配，不处理业务逻辑
-- `integrations/astrbot-plugin` 只做 QQ 路由，不实现本地机器控制
+1. **新本地能力** → `apps/locald/` 添加适配器 → `apps/bridge/routes/` 暴露端点
+2. **新任务类型** → `packages/protocol/enums.py` 添加枚举 → `apps/core/state.py` 处理
+3. **新显示模式** → `apps/shell/modes/` 实现 → `startup.py` 集成
 
-#### 添加新功能
+## 📋 后续规划
 
-1. **新的本地能力**: 在 `apps/locald/` 添加适配器 → 在 `apps/bridge/routes/` 暴露 API
-2. **新的任务类型**: 更新 `packages/protocol/enums.py` → 在 `apps/core/state.py` 处理逻辑
-3. **新的显示模式**: 在 `apps/shell/modes/` 实现 → 在 `apps/shell/window.py` 集成
+- [ ] Live2D Cubism SDK 渲染器接入
+- [ ] HermesExecutor 真机 CLI 联调
+- [ ] Hapi Codex 后端对接
+- [ ] 任务持久化（当前为内存存储）
+- [ ] 跨平台适配（Windows / Linux）
+- [ ] AstrBot 真实 QQ 环境联调
+- [ ] Bridge HTTPS + 认证
+- [ ] 桌面壳技术升级（替换 pywebview）
 
-## AstrBot 集成
-
-AstrBot 插件提供 QQ 桥接能力：
-
-```
-QQ 用户 → AstrBot → integrations/astrbot-plugin/main.py
-
-命令路由:
-- /y status /tasks /screen /window /do → Hermes-Yachiyo Bridge
-- /y codex → Hapi (现有 Codex 后端)
-```
-
-插件职责严格限制为：解析命令 → 鉴权 → HTTP 调用 → 格式化响应。
-
-## 后续规划
-
-- [ ] 实现任务持久化（`packages/tasking`）
-- [ ] 实现安全策略（`packages/security`）  
-- [ ] 桌面壳迁移到更完整的方案（替换 pywebview）
-- [ ] 气泡模式与 Live2D 模式实现
-- [ ] 跨平台本地能力适配（Windows/Linux）
-- [ ] AstrBot 插件的实际 HTTP 调用实现
-
-## 许可证
+## 📄 许可证
 
 MIT
