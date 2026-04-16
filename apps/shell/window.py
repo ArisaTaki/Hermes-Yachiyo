@@ -515,100 +515,100 @@ _STATUS_HTML = """
 
     // ── 聊天功能 ────────────────────────────────────────────────────────────────
 
-    async function openChat() {{
-        try {{
+    async function openChat() {
+        try {
             if (!window.pywebview || !window.pywebview.api) throw new Error('WebView API 不可用');
             await window.pywebview.api.open_chat();
-        }} catch(e) {{
+        } catch(e) {
             console.error('openChat error:', e);
-        }}
-    }}
+        }
+    }
 
-    async function loadExecutorInfo() {{
-        try {{
+    async function loadExecutorInfo() {
+        try {
             if (!window.pywebview || !window.pywebview.api) return;
             const r = await window.pywebview.api.get_executor_info();
             const el = document.getElementById('chat-executor');
-            if (el && r.executor) {{
+            if (el && r.executor) {
                 el.textContent = r.executor === 'HermesExecutor' ? '🚀 Hermes' : '🔬 模拟';
-            }}
-        }} catch(e) {{}}
-    }}
+            }
+        } catch(e) {}
+    }
 
     // ── Hermes 能力补全操作 ────────────────────────────────────────────────────
 
-    function toggleHermesEnhancePanel() {{
+    function toggleHermesEnhancePanel() {
         const panel = document.getElementById('hermes-enhance-panel');
         const btn = document.getElementById('hermes-enhance-btn');
         if (!panel) return;
         const visible = panel.style.display !== 'none';
         panel.style.display = visible ? 'none' : 'block';
         if (btn) btn.textContent = visible ? '🔧 补全 Hermes 能力' : '🔼 收起';
-    }}
+    }
 
-    async function openHermesCmd(cmd) {{
+    async function openHermesCmd(cmd) {
         // 状态提示元素（仪表盘或设置页，两者共用同一函数）
         const statusIds = ['hermes-enhance-status', 's-hermes-enhance-status'];
-        function setStatus(msg) {{
-            statusIds.forEach(function(id) {{
+        function setStatus(msg) {
+            statusIds.forEach(function(id) {
                 const el = document.getElementById(id);
                 if (el) el.innerHTML = msg;
-            }});
-        }}
+            });
+        }
         setStatus('<span style="color:#9ab4d8">⏳ 正在打开终端...</span>');
-        try {{
+        try {
             if (!window.pywebview || !window.pywebview.api) throw new Error('WebView API 不可用');
             const r = await window.pywebview.api.open_terminal_command(cmd);
-            if (r.success) {{
+            if (r.success) {
                 setStatus('<span style="color:#90ee90">✅ 终端已打开，请在终端中完成操作，完成后点击「重新检测」。</span>');
-            }} else {{
+            } else {
                 setStatus('<span style="color:#ff6b6b">❌ ' + (r.error || '无法打开终端') + '<br><span style="color:#888;font-size:0.88em;">请手动打开终端运行：' + cmd + '</span></span>');
-            }}
-        }} catch(e) {{
+            }
+        } catch(e) {
             setStatus('<span style="color:#ff6b6b">❌ ' + e.message + '</span>');
-        }}
-    }}
+        }
+    }
 
-    async function recheckHermes() {{
+    async function recheckHermes() {
         const statusIds = ['hermes-enhance-status', 's-hermes-enhance-status'];
-        function setStatus(msg) {{
-            statusIds.forEach(function(id) {{
+        function setStatus(msg) {
+            statusIds.forEach(function(id) {
                 const el = document.getElementById(id);
                 if (el) el.innerHTML = msg;
-            }});
-        }}
+            });
+        }
         setStatus('<span style="color:#9ab4d8">⏳ 正在重新检测 Hermes 状态...</span>');
-        try {{
+        try {
             if (!window.pywebview || !window.pywebview.api) throw new Error('WebView API 不可用');
             const data = await window.pywebview.api.recheck_hermes();
             if (data.error) throw new Error(data.error);
             // 刷新仪表盘（直接用返回的最新数据）
             const rl = data.hermes ? data.hermes.readiness_level : 'unknown';
             const hs = document.getElementById('hermes-status');
-            if (hs) {{
-                if (rl === 'full_ready') {{ hs.textContent = '✅ 完整就绪'; hs.className = 'value ok'; }}
-                else if (rl === 'basic_ready') {{ hs.textContent = '⚠️ 基础可用 · 部分工具受限'; hs.className = 'value warn'; }}
-                else {{ hs.textContent = data.hermes.ready ? '✅ 已就绪' : '⚠️ ' + (data.hermes.status || ''); hs.className = data.hermes.ready ? 'value ok' : 'value warn'; }}
-            }}
+            if (hs) {
+                if (rl === 'full_ready') { hs.textContent = '✅ 完整就绪'; hs.className = 'value ok'; }
+                else if (rl === 'basic_ready') { hs.textContent = '⚠️ 基础可用 · 部分工具受限'; hs.className = 'value warn'; }
+                else { hs.textContent = data.hermes.ready ? '✅ 已就绪' : '⚠️ ' + (data.hermes.status || ''); hs.className = data.hermes.ready ? 'value ok' : 'value warn'; }
+            }
             const enhRow = document.getElementById('hermes-enhance-row');
             if (enhRow) enhRow.style.display = (rl === 'basic_ready') ? 'block' : 'none';
             const sEnhSec = document.getElementById('s-hermes-enhance-section');
             if (sEnhSec) sEnhSec.style.display = (rl === 'basic_ready') ? 'block' : 'none';
-            if (rl === 'full_ready') {{
+            if (rl === 'full_ready') {
                 setStatus('<span style="color:#90ee90">✅ Hermes 已完整就绪！受限工具已补全。</span>');
                 // 补全后隐藏操作面板
                 const panel = document.getElementById('hermes-enhance-panel');
                 if (panel) panel.style.display = 'none';
-            }} else if (rl === 'basic_ready') {{
+            } else if (rl === 'basic_ready') {
                 const tools = (data.hermes && data.hermes.limited_tools) || [];
                 setStatus('<span style="color:#ffd700">⚠️ 仍有受限工具：' + tools.join('、') + '。可继续运行 hermes setup 完善配置。</span>');
-            }} else {{
+            } else {
                 setStatus('<span style="color:#9ab4d8">重检完成。当前状态：' + (rl || '未知') + '</span>');
-            }}
-        }} catch(e) {{
+            }
+        } catch(e) {
             setStatus('<span style="color:#ff6b6b">❌ 检测失败：' + e.message + '</span>');
-        }}
-    }}
+        }
+    }
 
     async function refreshSettings() {
         try {

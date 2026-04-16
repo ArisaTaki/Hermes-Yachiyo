@@ -179,42 +179,42 @@ _BUBBLE_HTML = """
     </div>
 
     <script>
-    async function openChat() {{
-        try {{
+    async function openChat() {
+        try {
             if (window.pywebview && window.pywebview.api)
                 await window.pywebview.api.open_chat();
-        }} catch(e) {{ console.error('openChat error:', e); }}
-    }}
+        } catch(e) { console.error('openChat error:', e); }
+    }
 
-    async function openMain() {{
-        try {{
+    async function openMain() {
+        try {
             if (window.pywebview && window.pywebview.api)
                 await window.pywebview.api.open_main_window();
-        }} catch(e) {{}}
-    }}
+        } catch(e) {}
+    }
 
-    async function closeBubble() {{
-        try {{
+    async function closeBubble() {
+        try {
             if (window.pywebview && window.pywebview.api)
                 await window.pywebview.api.close_bubble();
-        }} catch(e) {{}}
-    }}
+        } catch(e) {}
+    }
 
-    async function loadStatus() {{
-        try {{
+    async function loadStatus() {
+        try {
             if (!window.pywebview || !window.pywebview.api) return;
             const d = await window.pywebview.api.get_bubble_data();
             if (d.error) return;
             document.getElementById('hermes-status').textContent = d.hermes.ready ? '✅ Hermes' : '⚠️ Hermes';
             const ex = await window.pywebview.api.get_executor_info();
             document.getElementById('executor-info').textContent = ex.executor === 'HermesExecutor' ? '🚀 Hermes' : '🔬 模拟';
-        }} catch(e) {{}}
-    }}
+        } catch(e) {}
+    }
 
-    document.addEventListener('DOMContentLoaded', function() {{
+    document.addEventListener('DOMContentLoaded', function() {
         if (window.pywebview) loadStatus();
-    }});
-    window.addEventListener('pywebviewready', function() {{ loadStatus(); }});
+    });
+    window.addEventListener('pywebviewready', function() { loadStatus(); });
     </script>
 </body>
 </html>
@@ -287,17 +287,20 @@ class BubbleWindowAPI:
         """在当前 pywebview 会话中打开完整主窗口"""
         try:
             import webview  # type: ignore[import]
+            from apps.shell.main_api import MainWindowAPI
             from apps.shell.window import _STATUS_HTML
 
             html = _STATUS_HTML.replace("{{HOST}}", self._config.bridge_host).replace(
                 "{{PORT}}", str(self._config.bridge_port)
             )
+            api = MainWindowAPI(self._runtime, self._config)
             webview.create_window(
                 title="Hermes-Yachiyo — 主窗口",
                 html=html,
                 width=560,
                 height=620,
                 resizable=True,
+                js_api=api,
             )
         except Exception as e:
             logger.error("打开主窗口失败: %s", e)
@@ -331,5 +334,3 @@ def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
         webview.start(debug=False)
     except ImportError:
         logger.warning("pywebview 未安装，气泡模式无法展示")
-
-

@@ -12,6 +12,7 @@ Core Runtime 职责：
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import threading
 import time
@@ -152,18 +153,21 @@ class HermesRuntime:
         if self._task_runner is None:
             return
 
-        if self._task_runner_loop is not None:
-            # 在事件循环中调度停止
-            async def _stop():
-                await self._task_runner.stop()
-                self._task_runner_loop.stop()
-
-            self._task_runner_loop.call_soon_threadsafe(
-                lambda: asyncio.ensure_future(_stop(), loop=self._task_runner_loop)
-            )
+        loop = self._task_runner_loop
+        if loop is not None and loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(self._task_runner.stop(), loop)
+            try:
+                future.result(timeout=3.0)
+            except concurrent.futures.TimeoutError:
+                logger.warning("TaskRunner stop 超时，将继续请求事件循环停止")
+            except Exception as exc:
+                logger.warning("TaskRunner stop 异常: %s", exc)
+            loop.call_soon_threadsafe(loop.stop)
 
         if self._task_runner_thread is not None:
             self._task_runner_thread.join(timeout=3.0)
+            if self._task_runner_thread.is_alive():
+                logger.warning("TaskRunner 线程未在超时时间内退出")
 
         self._task_runner = None
         self._task_runner_loop = None

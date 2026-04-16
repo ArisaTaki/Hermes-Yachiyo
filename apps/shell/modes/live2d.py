@@ -52,8 +52,8 @@ _LIVE2D_HTML = """
     <meta charset="UTF-8">
     <title>Hermes-Yachiyo — Live2D 模式</title>
     <style>
-        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
             font-family: -apple-system, "Helvetica Neue", "PingFang SC", sans-serif;
             background: #1a1a2e;
             color: #e0e0e0;
@@ -61,10 +61,10 @@ _LIVE2D_HTML = """
             display: flex;
             flex-direction: column;
             overflow: hidden;
-        }}
+        }
 
         /* ── 角色区（未来放 Live2D canvas）── */
-        .character-stage {{
+        .character-stage {
             height: 180px;
             flex-shrink: 0;
             display: flex;
@@ -73,23 +73,23 @@ _LIVE2D_HTML = """
             justify-content: center;
             position: relative;
             background: linear-gradient(180deg, #12122a 0%, #1a1a3e 100%);
-        }}
-        .character-placeholder {{
+        }
+        .character-placeholder {
             font-size: 4em;
             opacity: 0.6;
             animation: float 3s ease-in-out infinite;
-        }}
-        @keyframes float {{
-            0%, 100% {{ transform: translateY(0); }}
-            50%       {{ transform: translateY(-6px); }}
-        }}
-        .stage-label {{
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50%       { transform: translateY(-6px); }
+        }
+        .stage-label {
             font-size: 0.7em;
             color: #555;
             letter-spacing: 0.1em;
             margin-top: 4px;
-        }}
-        .dev-badge {{
+        }
+        .dev-badge {
             position: absolute;
             top: 8px;
             right: 8px;
@@ -99,17 +99,17 @@ _LIVE2D_HTML = """
             font-size: 0.65em;
             padding: 2px 6px;
             border-radius: 8px;
-        }}
+        }
 
         /* ── 聊天区 ── */
-        .chat-area {{
+        .chat-area {
             flex: 1;
             display: flex;
             flex-direction: column;
             padding: 10px;
             min-height: 0;
-        }}
-        .chat-messages {{
+        }
+        .chat-messages {
             flex: 1;
             overflow-y: auto;
             background: #12122a;
@@ -117,39 +117,39 @@ _LIVE2D_HTML = """
             padding: 10px;
             margin-bottom: 10px;
             font-size: 0.88em;
-        }}
-        .chat-msg {{
+        }
+        .chat-msg {
             margin-bottom: 8px;
             padding: 8px 10px;
             border-radius: 8px;
             line-height: 1.5;
-        }}
-        .chat-msg.user {{
+        }
+        .chat-msg.user {
             background: #3a4a7a;
             margin-left: 30px;
             border-left: 3px solid #6495ed;
-        }}
-        .chat-msg.assistant {{
+        }
+        .chat-msg.assistant {
             background: #2a3a3a;
             margin-right: 30px;
             border-left: 3px solid #90ee90;
-        }}
-        .chat-msg.system {{
+        }
+        .chat-msg.system {
             background: #2a2a3a;
             text-align: center;
             color: #666;
             font-size: 0.85em;
-        }}
-        .chat-msg .role {{ font-size: 0.72em; color: #888; margin-bottom: 2px; }}
-        .chat-msg .content {{ color: #ddd; white-space: pre-wrap; word-break: break-word; }}
-        .chat-msg.pending .content {{ color: #aaa; }}
-        .chat-msg.error .content {{ color: #ffaaaa; }}
-        .chat-input-row {{
+        }
+        .chat-msg .role { font-size: 0.72em; color: #888; margin-bottom: 2px; }
+        .chat-msg .content { color: #ddd; white-space: pre-wrap; word-break: break-word; }
+        .chat-msg.pending .content { color: #aaa; }
+        .chat-msg.error .content { color: #ffaaaa; }
+        .chat-input-row {
             display: flex;
             gap: 8px;
             flex-shrink: 0;
-        }}
-        .chat-input {{
+        }
+        .chat-input {
             flex: 1;
             background: #2d2d54;
             color: #e0e0e0;
@@ -158,10 +158,10 @@ _LIVE2D_HTML = """
             padding: 10px 12px;
             font-size: 0.9em;
             outline: none;
-        }}
-        .chat-input:focus {{ border-color: #6495ed; }}
-        .chat-input::placeholder {{ color: #555; }}
-        .chat-send {{
+        }
+        .chat-input:focus { border-color: #6495ed; }
+        .chat-input::placeholder { color: #555; }
+        .chat-send {
             background: #4a6a9a;
             border: none;
             color: #fff;
@@ -169,12 +169,12 @@ _LIVE2D_HTML = """
             border-radius: 6px;
             cursor: pointer;
             font-size: 0.9em;
-        }}
-        .chat-send:hover {{ background: #5a7aaa; }}
-        .chat-send:disabled {{ background: #3a3a5a; color: #666; cursor: not-allowed; }}
+        }
+        .chat-send:hover { background: #5a7aaa; }
+        .chat-send:disabled { background: #3a3a5a; color: #666; cursor: not-allowed; }
 
         /* ── 状态条 ── */
-        .status-bar {{
+        .status-bar {
             background: #12122a;
             border-top: 1px solid #2a2a4a;
             padding: 6px 12px;
@@ -183,19 +183,19 @@ _LIVE2D_HTML = """
             font-size: 0.75em;
             align-items: center;
             flex-shrink: 0;
-        }}
-        .status-chip {{
+        }
+        .status-chip {
             background: #2d2d54;
             border-radius: 10px;
             padding: 2px 8px;
             color: #888;
-        }}
-        .status-chip.ok {{ color: #90ee90; }}
-        .status-chip.warn {{ color: #ffd700; }}
-        .spacer {{ flex: 1; }}
+        }
+        .status-chip.ok { color: #90ee90; }
+        .status-chip.warn { color: #ffd700; }
+        .spacer { flex: 1; }
 
         /* ── 底部工具栏 ── */
-        .toolbar {{
+        .toolbar {
             background: #0e0e22;
             border-top: 1px solid #222244;
             padding: 8px 12px;
@@ -203,8 +203,8 @@ _LIVE2D_HTML = """
             gap: 8px;
             align-items: center;
             flex-shrink: 0;
-        }}
-        .btn {{
+        }
+        .btn {
             background: #2d2d54;
             border: 1px solid #444;
             color: #ccc;
@@ -212,9 +212,9 @@ _LIVE2D_HTML = """
             border-radius: 5px;
             font-size: 0.8em;
             cursor: pointer;
-        }}
-        .btn:hover {{ background: #3a3a6a; border-color: #6495ed; color: #fff; }}
-        .btn.primary {{ border-color: #6495ed; color: #6495ed; }}
+        }
+        .btn:hover { background: #3a3a6a; border-color: #6495ed; color: #fff; }
+        .btn.primary { border-color: #6495ed; color: #6495ed; }
     </style>
 </head>
 <body>
@@ -250,15 +250,15 @@ _LIVE2D_HTML = """
     </div>
 
     <script>
-    async function openChat() {{
-        try {{
+    async function openChat() {
+        try {
             if (window.pywebview && window.pywebview.api)
                 await window.pywebview.api.open_chat();
-        }} catch(e) {{ console.error('openChat error:', e); }}
-    }}
+        } catch(e) { console.error('openChat error:', e); }
+    }
 
-    async function refreshStatus() {{
-        try {{
+    async function refreshStatus() {
+        try {
             if (!window.pywebview || !window.pywebview.api) return;
             const d = await window.pywebview.api.get_live2d_status();
             if (d.error) return;
@@ -272,36 +272,36 @@ _LIVE2D_HTML = """
 
             const label = document.getElementById('stage-label');
             const modelState = d.model.state || 'not_configured';
-            const stateLabels = {{
+            const stateLabels = {
                 'not_configured':  'LIVE2D · 角色模型未配置',
                 'path_invalid':    'LIVE2D · 模型路径不存在',
                 'path_not_live2d': 'LIVE2D · 目录无模型文件',
                 'path_valid':      'LIVE2D · 模型就绪: ' + (d.model.name || ''),
                 'loaded':          d.model.name || 'LIVE2D',
-            }};
+            };
             label.textContent = stateLabels[modelState] || 'LIVE2D';
-        }} catch(e) {{}}
-    }}
+        } catch(e) {}
+    }
 
-    async function openMainWindow() {{
-        try {{
+    async function openMainWindow() {
+        try {
             if (window.pywebview && window.pywebview.api)
                 await window.pywebview.api.open_main_window();
-        }} catch(e) {{}}
-    }}
+        } catch(e) {}
+    }
 
-    async function openSettings() {{
-        try {{
+    async function openSettings() {
+        try {
             if (window.pywebview && window.pywebview.api)
                 await window.pywebview.api.open_settings();
-        }} catch(e) {{}}
-    }}
+        } catch(e) {}
+    }
 
-    document.addEventListener('DOMContentLoaded', function() {{
+    document.addEventListener('DOMContentLoaded', function() {
         if (window.pywebview) refreshStatus();
         setInterval(refreshStatus, 10000);
-    }});
-    window.addEventListener('pywebviewready', function() {{ refreshStatus(); }});
+    });
+    window.addEventListener('pywebviewready', function() { refreshStatus(); });
     </script>
 </body>
 </html>
@@ -389,17 +389,20 @@ class Live2DWindowAPI:
         """在当前会话中打开完整主窗口仪表盘。"""
         try:
             import webview  # type: ignore[import]
+            from apps.shell.main_api import MainWindowAPI
             from apps.shell.window import _STATUS_HTML
 
             html = _STATUS_HTML.replace("{{HOST}}", self._config.bridge_host).replace(
                 "{{PORT}}", str(self._config.bridge_port)
             )
+            api = MainWindowAPI(self._runtime, self._config)
             webview.create_window(
                 title="Hermes-Yachiyo — 主窗口",
                 html=html,
                 width=560,
                 height=620,
                 resizable=True,
+                js_api=api,
             )
         except Exception as exc:
             logger.error("打开主窗口失败: %s", exc)
@@ -512,4 +515,3 @@ def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
         webview.start(debug=False)
     except ImportError:
         logger.warning("pywebview 未安装，Live2D 模式无法展示")
-

@@ -1593,3 +1593,26 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 - `python3 -m pytest tests/ -q` → 117 passed
 - `.venv/bin/python -m compileall apps packages integrations tests` → passed
 - `.venv/bin/python -m pytest tests/ -q` 当前失败原因：`.venv` 未安装 pytest；README 已补充 `pip install -e ".[dev]"`
+
+### Milestone 48 — Copilot Review 修复闭环
+
+**目标**：处理 PR #1 中 Copilot 两次 review 后仍成立的问题。
+
+**处理结果**：
+
+| Review 点 | 处理 |
+|-----------|------|
+| 主窗口 / bubble / live2d HTML 中未渲染的 `{{` / `}}` | 正常模式、bubble、live2d 中不经过模板渲染的 CSS/JS 已改回单花括号；保留 `{{HOST}}` / `{{PORT}}` 占位 |
+| bubble/live2d 打开主窗口未传 `js_api` | `open_main_window()` 改为挂载 `MainWindowAPI(runtime, config)` |
+| ChatSession 多窗口并发读写 | `ChatSession` 增加内部 `RLock`，公开读写方法加锁，ChatAPI 不再直接遍历裸 `messages` |
+| `_pending_message_id` 过早清空 | `is_processing()` 改为根据仍处于 pending/processing 的 user 消息计算；assistant 回复完成单个任务后不会影响其他待处理消息 |
+| `link_message_to_task()` 过早切换 PROCESSING | link 阶段仅建立 task_id 关联，保持 PENDING；任务 RUNNING 后再切 PROCESSING |
+| TaskRunner 跨线程停止方式脆弱 | 改用 `asyncio.run_coroutine_threadsafe()` 等待 stop 结果，再停止 loop 并检查线程是否退出 |
+| ChatAPI 缺少单测 | 新增 `tests/test_chat_api.py`，覆盖 send、RUNNING、COMPLETED 去重、FAILED、多个 pending |
+| 未使用导入 | 清理 `chat_api.py` 和 `test_chat_store.py` 中未使用的导入 |
+
+**验证**：
+
+- `python3 -m pytest tests/ -q` → 122 passed
+- `.venv/bin/python -m compileall apps packages integrations tests` → passed
+- `git diff --check` → passed

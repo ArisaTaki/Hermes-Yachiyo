@@ -1,8 +1,5 @@
 """ChatStore 测试 — SQLite 持久化层"""
 
-import os
-import tempfile
-
 import pytest
 
 from apps.core.chat_store import ChatStore, StoredMessage

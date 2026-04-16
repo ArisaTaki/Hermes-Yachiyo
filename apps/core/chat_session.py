@@ -21,6 +21,7 @@ ChatSession 是三种显示模式（window / bubble / live2d）共享的消息�
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -64,20 +65,22 @@ class ChatMessage:
 class ChatSession:
     """聊天会话状态容器
     
-    线程安全性：当前假设单线程访问（pywebview 主线程 + asyncio）。
-    如果需要多线程，后续可加锁。
+    线程安全性：多窗口 WebView API 和 TaskRunner 可能并发读写同一会话，
+    所有公开读写方法都通过内部 RLock 保护。
     """
     session_id: str = field(default_factory=lambda: uuid4().hex[:8])
     messages: List[ChatMessage] = field(default_factory=list)
     _pending_message_id: Optional[str] = field(default=None, repr=False)
     _store: Optional["ChatStore"] = field(default=None, repr=False)
+    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
     def attach_store(self, store: "ChatStore", load_existing: bool = True) -> None:
         """绑定持久化层，并创建/加载会话。"""
-        self._store = store
-        store.create_session(self.session_id)
-        if load_existing:
-            self._load_messages_from_store()
+        with self._lock:
+            self._store = store
+            store.create_session(self.session_id)
+            if load_existing:
+                self._load_messages_from_store()
 
     def _load_messages_from_store(self) -> None:
         """从持久化层恢复当前会话消息。"""
@@ -131,29 +134,34 @@ class ChatSession:
     
     def add_user_message(self, content: str) -> str:
         """添加用户消息，返回 message_id"""
-        msg_id = uuid4().hex[:12]
-        msg = ChatMessage(
-            message_id=msg_id,
-            role=MessageRole.USER,
-            content=content,
-            status=MessageStatus.PENDING,
-            created_at=datetime.now(timezone.utc),
-        )
-        self.messages.append(msg)
-        self._pending_message_id = msg_id
-        self._persist_message(msg)
+        with self._lock:
+            msg_id = uuid4().hex[:12]
+            msg = ChatMessage(
+                message_id=msg_id,
+                role=MessageRole.USER,
+                content=content,
+                status=MessageStatus.PENDING,
+                created_at=datetime.now(timezone.utc),
+            )
+            self.messages.append(msg)
+            self._pending_message_id = msg_id
+            self._persist_message(msg)
         logger.info("用户消息已添加: %s (len=%d)", msg_id, len(content))
         return msg_id
     
     def link_message_to_task(self, message_id: str, task_id: str) -> bool:
-        """将消息与任务关联"""
-        for msg in self.messages:
-            if msg.message_id == message_id:
-                msg.task_id = task_id
-                msg.status = MessageStatus.PROCESSING
-                self._persist_message(msg)
-                logger.debug("消息 %s 关联任务 %s", message_id, task_id)
-                return True
+        """将消息与任务关联。
+
+        这里只建立关联，不代表任务已经开始运行。用户消息保持 PENDING，
+        直到 TaskStatus.RUNNING 同步过来后再切换为 PROCESSING。
+        """
+        with self._lock:
+            for msg in self.messages:
+                if msg.message_id == message_id:
+                    msg.task_id = task_id
+                    self._persist_message(msg)
+                    logger.debug("消息 %s 关联任务 %s", message_id, task_id)
+                    return True
         return False
     
     def add_assistant_message(
@@ -163,104 +171,153 @@ class ChatSession:
         error: Optional[str] = None,
     ) -> str:
         """添加 assistant 回复消息"""
-        msg_id = uuid4().hex[:12]
-        status = MessageStatus.FAILED if error else MessageStatus.COMPLETED
-        msg = ChatMessage(
-            message_id=msg_id,
-            role=MessageRole.ASSISTANT,
-            content=content,
-            status=status,
-            created_at=datetime.now(timezone.utc),
-            task_id=task_id,
-            error=error,
-        )
-        self.messages.append(msg)
-        
-        # 更新对应 user 消息状态
-        if task_id:
-            for m in self.messages:
-                if m.task_id == task_id and m.role == MessageRole.USER:
-                    m.status = status
-                    self._persist_message(m)
-                    break
-        
-        self._pending_message_id = None
-        self._persist_message(msg)
+        with self._lock:
+            msg_id = uuid4().hex[:12]
+            status = MessageStatus.FAILED if error else MessageStatus.COMPLETED
+            msg = ChatMessage(
+                message_id=msg_id,
+                role=MessageRole.ASSISTANT,
+                content=content,
+                status=status,
+                created_at=datetime.now(timezone.utc),
+                task_id=task_id,
+                error=error,
+            )
+            self.messages.append(msg)
+
+            # 更新对应 user 消息状态
+            if task_id:
+                for m in self.messages:
+                    if m.task_id == task_id and m.role == MessageRole.USER:
+                        m.status = status
+                        self._persist_message(m)
+                        break
+
+            self._pending_message_id = self._find_active_message_id_locked()
+            self._persist_message(msg)
         logger.info("Assistant 回复已添加: %s (task=%s)", msg_id, task_id)
         return msg_id
     
     def add_system_message(self, content: str) -> str:
         """添加系统消息（提示、状态更新等）"""
-        msg_id = uuid4().hex[:12]
-        msg = ChatMessage(
-            message_id=msg_id,
-            role=MessageRole.SYSTEM,
-            content=content,
-            status=MessageStatus.COMPLETED,
-            created_at=datetime.now(timezone.utc),
-        )
-        self.messages.append(msg)
-        self._persist_message(msg)
-        return msg_id
+        with self._lock:
+            msg_id = uuid4().hex[:12]
+            msg = ChatMessage(
+                message_id=msg_id,
+                role=MessageRole.SYSTEM,
+                content=content,
+                status=MessageStatus.COMPLETED,
+                created_at=datetime.now(timezone.utc),
+            )
+            self.messages.append(msg)
+            self._persist_message(msg)
+            return msg_id
     
     def mark_message_failed(self, message_id: str, error: str) -> bool:
         """标记消息处理失败"""
-        for msg in self.messages:
-            if msg.message_id == message_id:
-                msg.status = MessageStatus.FAILED
-                msg.error = error
-                self._pending_message_id = None
-                self._persist_message(msg)
-                return True
+        with self._lock:
+            for msg in self.messages:
+                if msg.message_id == message_id:
+                    msg.status = MessageStatus.FAILED
+                    msg.error = error
+                    self._pending_message_id = self._find_active_message_id_locked()
+                    self._persist_message(msg)
+                    return True
+        return False
+
+    def mark_message_processing(self, message_id: str) -> bool:
+        """标记用户消息进入执行中状态。"""
+        with self._lock:
+            for msg in self.messages:
+                if msg.message_id == message_id:
+                    msg.status = MessageStatus.PROCESSING
+                    self._pending_message_id = message_id
+                    self._persist_message(msg)
+                    return True
         return False
     
     def get_messages(self, limit: int = 50) -> List[ChatMessage]:
         """获取最近 N 条消息"""
-        return self.messages[-limit:]
+        with self._lock:
+            return list(self.messages[-limit:])
+
+    def get_all_messages(self) -> List[ChatMessage]:
+        """获取当前会话全部消息的快照。"""
+        with self._lock:
+            return list(self.messages)
+
+    def has_assistant_reply(self, task_id: str) -> bool:
+        """是否已经存在某个任务对应的 assistant 回复。"""
+        with self._lock:
+            return any(
+                m.role == MessageRole.ASSISTANT and m.task_id == task_id
+                for m in self.messages
+            )
+
+    def message_count(self) -> int:
+        """当前会话消息数量。"""
+        with self._lock:
+            return len(self.messages)
     
     def get_last_assistant_message(self) -> Optional[ChatMessage]:
         """获取最新一条 assistant 消息"""
-        for msg in reversed(self.messages):
-            if msg.role == MessageRole.ASSISTANT:
-                return msg
+        with self._lock:
+            for msg in reversed(self.messages):
+                if msg.role == MessageRole.ASSISTANT:
+                    return msg
         return None
     
     def is_processing(self) -> bool:
         """是否有消息正在处理中"""
-        return self._pending_message_id is not None
+        with self._lock:
+            return self._find_active_message_id_locked() is not None
     
     def get_pending_message_id(self) -> Optional[str]:
         """获取当前等待回复的消息 ID"""
-        return self._pending_message_id
+        with self._lock:
+            self._pending_message_id = self._find_active_message_id_locked()
+            return self._pending_message_id
     
     def clear(self) -> None:
         """清空会话"""
-        self.messages.clear()
-        self._pending_message_id = None
-        self.session_id = uuid4().hex[:8]
-        if self._store is not None:
-            self._store.create_session(self.session_id)
+        with self._lock:
+            self.messages.clear()
+            self._pending_message_id = None
+            self.session_id = uuid4().hex[:8]
+            if self._store is not None:
+                self._store.create_session(self.session_id)
         logger.info("会话已清空，新 session_id=%s", self.session_id)
     
     def to_dict(self) -> dict:
         """序列化为字典（供 API 返回）"""
-        return {
-            "session_id": self.session_id,
-            "message_count": len(self.messages),
-            "is_processing": self.is_processing(),
-            "messages": [
-                {
-                    "id": m.message_id,
-                    "role": m.role.value,
-                    "content": m.content,
-                    "status": m.status.value,
-                    "task_id": m.task_id,
-                    "error": m.error,
-                    "created_at": m.created_at.isoformat(),
-                }
-                for m in self.messages
-            ],
-        }
+        with self._lock:
+            return {
+                "session_id": self.session_id,
+                "message_count": len(self.messages),
+                "is_processing": self._find_active_message_id_locked() is not None,
+                "messages": [
+                    {
+                        "id": m.message_id,
+                        "role": m.role.value,
+                        "content": m.content,
+                        "status": m.status.value,
+                        "task_id": m.task_id,
+                        "error": m.error,
+                        "created_at": m.created_at.isoformat(),
+                    }
+                    for m in self.messages
+                ],
+            }
+
+    def _find_active_message_id_locked(self) -> Optional[str]:
+        """查找仍在等待或执行中的用户消息。调用方需持有 _lock。"""
+        for msg in self.messages:
+            if (
+                msg.role == MessageRole.USER
+                and msg.status in (MessageStatus.PENDING, MessageStatus.PROCESSING)
+            ):
+                return msg.message_id
+        return None
 
 
 # 全局会话实例（单会话 MVP）

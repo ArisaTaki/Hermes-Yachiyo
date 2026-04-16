@@ -206,6 +206,7 @@ pip install -e ".[dev]"
 | `test_executor` | エグゼキューターモデル、シミュレーション実行 |
 | `test_chat_store` | SQLite セッション/メッセージ CRUD |
 | `test_chat_session` | セッション復元、クリア後の永続化、孤立タスクメッセージ |
+| `test_chat_api` | メッセージ送信、タスク状態同期、assistant 返信の重複防止 |
 | `test_effect_policy` | 設定効果ポリシー |
 | `test_integration_status` | Bridge/AstrBot/Hapi ステータス |
 | `test_astrbot_handlers` | 全ハンドラー出力とエラーフォーマット |

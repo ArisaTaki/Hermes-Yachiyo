@@ -206,6 +206,7 @@ pip install -e ".[dev]"
 | `test_executor` | Executor models, simulated execution |
 | `test_chat_store` | SQLite session/message CRUD |
 | `test_chat_session` | Session restore, post-clear persistence, orphaned task messages |
+| `test_chat_api` | Message sending, task-status sync, assistant reply deduplication |
 | `test_effect_policy` | Settings effect policies |
 | `test_integration_status` | Bridge/AstrBot/Hapi status |
 | `test_astrbot_handlers` | All handler output & error formatting |

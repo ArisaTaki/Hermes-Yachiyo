@@ -13,13 +13,12 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict
 
 from apps.core.chat_session import (
     ChatSession,
     MessageRole,
     MessageStatus,
-    get_chat_session,
 )
 from packages.protocol.enums import TaskStatus, TaskType
 
@@ -141,7 +140,7 @@ class ChatAPI:
           - FAILED: 标记消息失败
           - RUNNING: 更新消息状态为 processing
         """
-        for msg in self._session.messages:
+        for msg in self._session.get_all_messages():
             if msg.role != MessageRole.USER:
                 continue
             if msg.task_id is None:
@@ -155,11 +154,7 @@ class ChatAPI:
 
             if task.status == TaskStatus.COMPLETED:
                 # 检查是否已有对应的 assistant 回复
-                has_reply = any(
-                    m.role == MessageRole.ASSISTANT and m.task_id == msg.task_id
-                    for m in self._session.messages
-                )
-                if not has_reply:
+                if not self._session.has_assistant_reply(msg.task_id):
                     result = task.result or "[任务已完成，无输出]"
                     self._session.add_assistant_message(result, task_id=msg.task_id)
                     logger.debug("自动添加 assistant 回复: task=%s", msg.task_id)
@@ -168,11 +163,7 @@ class ChatAPI:
                 error = task.error or "任务执行失败"
                 self._session.mark_message_failed(msg.message_id, error)
                 # 同时添加一条 assistant 错误消息
-                has_reply = any(
-                    m.role == MessageRole.ASSISTANT and m.task_id == msg.task_id
-                    for m in self._session.messages
-                )
-                if not has_reply:
+                if not self._session.has_assistant_reply(msg.task_id):
                     self._session.add_assistant_message(
                         f"❌ {error}",
                         task_id=msg.task_id,
@@ -181,13 +172,13 @@ class ChatAPI:
 
             elif task.status == TaskStatus.RUNNING:
                 if msg.status != MessageStatus.PROCESSING:
-                    msg.status = MessageStatus.PROCESSING
+                    self._session.mark_message_processing(msg.message_id)
 
     def get_session_info(self) -> Dict[str, Any]:
         """获取会话元信息"""
         return {
             "session_id": self._session.session_id,
-            "message_count": len(self._session.messages),
+            "message_count": self._session.message_count(),
             "is_processing": self._session.is_processing(),
             "pending_message_id": self._session.get_pending_message_id(),
         }
