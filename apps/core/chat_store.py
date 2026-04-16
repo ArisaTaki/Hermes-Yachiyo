@@ -26,6 +26,7 @@ from typing import List, Optional
 logger = logging.getLogger(__name__)
 
 _DB_FILENAME = "chat.db"
+_SESSION_TITLE_MAX_CHARS = 36
 
 
 def _get_db_path() -> str:
@@ -36,6 +37,14 @@ def _get_db_path() -> str:
     return os.path.join(yachiyo_dir, _DB_FILENAME)
 
 
+def make_session_title(content: str, max_chars: int = _SESSION_TITLE_MAX_CHARS) -> str:
+    """从首条用户消息生成会话列表标题。"""
+    title = " ".join((content or "").split())
+    if len(title) <= max_chars:
+        return title
+    return title[: max_chars - 3].rstrip() + "..."
+
+
 @dataclass
 class StoredSession:
     """持久化的会话记录"""
@@ -43,6 +52,7 @@ class StoredSession:
     title: str
     created_at: str  # ISO 格式
     message_count: int = 0
+    hermes_session_id: Optional[str] = None
 
 
 @dataclass
@@ -83,7 +93,8 @@ class ChatStore:
                 CREATE TABLE IF NOT EXISTS chat_sessions (
                     session_id TEXT PRIMARY KEY,
                     title      TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    hermes_session_id TEXT
                 );
                 CREATE TABLE IF NOT EXISTS chat_messages (
                     message_id TEXT PRIMARY KEY,
@@ -99,6 +110,11 @@ class ChatStore:
                 CREATE INDEX IF NOT EXISTS idx_messages_session
                     ON chat_messages(session_id, created_at);
             """)
+            # 兼容旧表结构升级
+            try:
+                conn.execute("ALTER TABLE chat_sessions ADD COLUMN hermes_session_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # 列已存在
             conn.commit()
         logger.info("ChatStore 初始化完成: %s", self._db_path)
 
@@ -121,7 +137,15 @@ class ChatStore:
             conn = self._get_conn()
             rows = conn.execute(
                 """
-                SELECT s.session_id, s.title, s.created_at,
+                SELECT s.session_id, s.title, s.created_at, s.hermes_session_id,
+                       (
+                           SELECT um.content
+                           FROM chat_messages um
+                           WHERE um.session_id = s.session_id
+                             AND um.role = 'user'
+                           ORDER BY um.created_at ASC
+                           LIMIT 1
+                       ) AS first_user_content,
                        COUNT(m.message_id) AS message_count
                 FROM chat_sessions s
                 LEFT JOIN chat_messages m ON m.session_id = s.session_id
@@ -134,12 +158,78 @@ class ChatStore:
         return [
             StoredSession(
                 session_id=r["session_id"],
-                title=r["title"],
+                title=r["title"] or make_session_title(r["first_user_content"] or ""),
                 created_at=r["created_at"],
                 message_count=r["message_count"],
+                hermes_session_id=r["hermes_session_id"],
             )
             for r in rows
         ]
+
+    def get_session(self, session_id: str) -> Optional[StoredSession]:
+        """获取单个会话信息"""
+        with self._lock:
+            conn = self._get_conn()
+            row = conn.execute(
+                """
+                SELECT s.session_id, s.title, s.created_at, s.hermes_session_id,
+                       COUNT(m.message_id) AS message_count
+                FROM chat_sessions s
+                LEFT JOIN chat_messages m ON m.session_id = s.session_id
+                WHERE s.session_id = ?
+                GROUP BY s.session_id
+                """,
+                (session_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return StoredSession(
+            session_id=row["session_id"],
+            title=row["title"],
+            created_at=row["created_at"],
+            message_count=row["message_count"],
+            hermes_session_id=row["hermes_session_id"],
+        )
+
+    def update_hermes_session_id(self, session_id: str, hermes_session_id: str) -> None:
+        """更新会话的 Hermes session ID"""
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(
+                "UPDATE chat_sessions SET hermes_session_id = ? WHERE session_id = ?",
+                (hermes_session_id, session_id),
+            )
+            conn.commit()
+
+    def update_session_title(self, session_id: str, title: str) -> None:
+        """更新会话标题。"""
+        title = (title or "").strip()
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(
+                "UPDATE chat_sessions SET title = ? WHERE session_id = ?",
+                (title, session_id),
+            )
+            conn.commit()
+
+    def set_session_title_if_empty(self, session_id: str, title: str) -> bool:
+        """仅当标题为空时写入标题，返回是否发生更新。"""
+        title = (title or "").strip()
+        if not title:
+            return False
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.execute(
+                """
+                UPDATE chat_sessions
+                SET title = ?
+                WHERE session_id = ?
+                  AND title = ''
+                """,
+                (title, session_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     def delete_session(self, session_id: str) -> None:
         """删除会话及其所有消息"""

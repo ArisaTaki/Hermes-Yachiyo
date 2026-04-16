@@ -10,6 +10,10 @@ from apps.core.executor import (
     SimulatedExecutor,
     _HERMES_CMD,
     _HERMES_FLAGS,
+    _parse_bridge_event,
+    _parse_hermes_output,
+    _parse_hermes_title,
+    _resolve_hermes_python,
 )
 from packages.protocol.enums import RiskLevel, TaskStatus, TaskType
 from packages.protocol.schemas import TaskInfo
@@ -100,3 +104,90 @@ class TestSimulatedExecutor:
         finally:
             mod._SIM_RUN_DELAY = original_run
             mod._SIM_COMPLETE_DELAY = original_complete
+
+
+class TestParseHermesOutput:
+    def test_parse_with_session_id(self):
+        stdout = "ok\n\nsession_id: 20260416_212134_893a8f"
+        content, sid = _parse_hermes_output(stdout)
+        assert content == "ok"
+        assert sid == "20260416_212134_893a8f"
+
+    def test_parse_multiline_content(self):
+        stdout = "line1\nline2\nline3\n\nsession_id: abc123"
+        content, sid = _parse_hermes_output(stdout)
+        assert content == "line1\nline2\nline3"
+        assert sid == "abc123"
+
+    def test_parse_no_session_id(self):
+        stdout = "just a normal output"
+        content, sid = _parse_hermes_output(stdout)
+        assert content == "just a normal output"
+        assert sid is None
+
+    def test_parse_quiet_output_preserves_code_indentation(self):
+        stdout = "```python\n    print('ok')\n```\n\nsession_id: code_sess"
+        content, sid = _parse_hermes_output(stdout)
+        assert content == "```python\n    print('ok')\n```"
+        assert sid == "code_sess"
+
+    def test_parse_empty_output(self):
+        content, sid = _parse_hermes_output("")
+        assert content == ""
+        assert sid is None
+
+    def test_parse_nonquiet_output_strips_hermes_chrome(self):
+        stdout = (
+            "╭─ $ Hermes ─╮\n"
+            "│ Hello from Hermes │\n"
+            "╰────────────╯\n"
+            "Session: sess_456\n"
+            "Title: Greeting summary\n"
+            "Duration: 1.2s\n"
+        )
+
+        content, sid = _parse_hermes_output(stdout)
+
+        assert content == "Hello from Hermes"
+        assert sid == "sess_456"
+        assert _parse_hermes_title(stdout) == "Greeting summary"
+
+    def test_parse_deduplicates_repeated_paragraphs(self):
+        stdout = (
+            "Hi! I'm Hermes.\n\n"
+            "Hi! I'm Hermes.\n\n"
+            "What would you like to work on today?\n"
+            "session_id: sess_dup\n"
+        )
+
+        content, sid = _parse_hermes_output(stdout)
+
+        assert content == "Hi! I'm Hermes.\n\nWhat would you like to work on today?"
+        assert sid == "sess_dup"
+
+    def test_hermes_invoke_result_with_session_id(self):
+        r = HermesInvokeResult(
+            success=True, stdout="ok", returncode=0,
+            hermes_session_id="sess_123",
+            hermes_title="Test title",
+        )
+        assert r.hermes_session_id == "sess_123"
+        assert r.hermes_title == "Test title"
+        assert r.output == "ok"
+
+
+class TestHermesStreamBridgeHelpers:
+    def test_parse_bridge_event(self):
+        event = _parse_bridge_event('{"type":"delta","delta":"hi"}')
+        assert event == {"type": "delta", "delta": "hi"}
+
+    def test_parse_bridge_event_ignores_non_json(self):
+        assert _parse_bridge_event("Available Tools") is None
+
+    def test_resolve_hermes_python_from_launcher(self, tmp_path):
+        py = tmp_path / "python"
+        py.write_text("")
+        launcher = tmp_path / "hermes"
+        launcher.write_text(f"#!{py}\n")
+
+        assert _resolve_hermes_python(str(launcher)) == str(py)

@@ -298,6 +298,16 @@ class HermesRuntime:
             "reason": None,
         }
 
+    def switch_session(self, session_id: str) -> None:
+        """切换到指定会话，更新运行时引用。"""
+        from apps.core.chat_session import switch_chat_session
+        self._chat_session = switch_chat_session(session_id)
+        # 更新 HermesExecutor 的 chat_session 引用
+        if self._task_runner is not None:
+            from apps.core.executor import HermesExecutor
+            if isinstance(self._task_runner.executor, HermesExecutor):
+                self._task_runner.executor._chat_session = self._chat_session
+
     def cancel_task_runner_task(self, task_id: str) -> bool:
         """取消 TaskRunner 中已经分派的任务协程。"""
         if self._task_runner is None:

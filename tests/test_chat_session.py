@@ -3,6 +3,9 @@
 from apps.core.chat_session import ChatSession, MessageRole, MessageStatus
 from apps.core.chat_store import ChatStore, StoredMessage
 
+import apps.core.chat_session as _cs_mod
+import apps.core.chat_store as _store_mod
+
 
 def test_chat_session_restores_messages(tmp_path):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
@@ -171,5 +174,136 @@ def test_session_restore_no_duplicate_assistant(tmp_path):
         ]
         assert len(assistant_msgs) == 1
         assert assistant_msgs[0].content == "回复"
+    finally:
+        store.close()
+
+
+def test_set_hermes_session_id_persists(tmp_path):
+    """set_hermes_session_id 应同时更新内存和数据库"""
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        session = ChatSession(session_id="s1")
+        session.attach_store(store, load_existing=False)
+        session.set_hermes_session_id("hermes_abc")
+        assert session.hermes_session_id == "hermes_abc"
+
+        # 从 DB 验证
+        stored = store.get_session("s1")
+        assert stored is not None
+        assert stored.hermes_session_id == "hermes_abc"
+    finally:
+        store.close()
+
+
+def test_hermes_session_id_restored_on_attach(tmp_path):
+    """attach_store(load_existing=True) 恢复 hermes_session_id"""
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        session = ChatSession(session_id="s1")
+        session.attach_store(store, load_existing=False)
+        session.set_hermes_session_id("hermes_xyz")
+
+        restored = ChatSession(session_id="s1")
+        restored.attach_store(store, load_existing=True)
+        assert restored.hermes_session_id == "hermes_xyz"
+    finally:
+        store.close()
+
+
+def test_clear_resets_hermes_session_id(tmp_path):
+    """clear() 应重置 hermes_session_id"""
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        session = ChatSession(session_id="s1")
+        session.attach_store(store, load_existing=False)
+        session.set_hermes_session_id("hermes_old")
+        session.clear()
+        assert session.hermes_session_id is None
+    finally:
+        store.close()
+
+
+def test_user_message_sets_session_summary_title(tmp_path):
+    """首条用户消息会作为会话列表标题摘要。"""
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        session = ChatSession(session_id="s1")
+        session.attach_store(store, load_existing=False)
+
+        session.add_user_message("  帮我分析这个项目\n并列出需要修复的问题  ")
+        session.add_user_message("第二条不应覆盖标题")
+
+        stored = store.get_session("s1")
+        assert stored is not None
+        assert stored.title == "帮我分析这个项目 并列出需要修复的问题"
+    finally:
+        store.close()
+
+
+def test_set_session_title_overrides_summary_title(tmp_path):
+    """Hermes 自动标题可覆盖首条用户消息兜底标题。"""
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        session = ChatSession(session_id="s1")
+        session.attach_store(store, load_existing=False)
+
+        session.add_user_message("请帮我看看这个项目")
+        session.set_session_title("Hermes 自动摘要标题")
+
+        stored = store.get_session("s1")
+        assert stored is not None
+        assert stored.title == "Hermes 自动摘要标题"
+    finally:
+        store.close()
+
+
+def test_get_assistant_message_for_task(tmp_path):
+    """可按 task_id 取回已存在的 assistant 消息。"""
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        session = ChatSession(session_id="s1")
+        session.attach_store(store, load_existing=False)
+        user_id = session.add_user_message("流式测试")
+        session.link_message_to_task(user_id, "t1")
+        session.upsert_assistant_message("t1", "部分输出", MessageStatus.PROCESSING)
+
+        assistant = session.get_assistant_message_for_task("t1")
+
+        assert assistant is not None
+        assert assistant.content == "部分输出"
+        assert session.get_assistant_message_for_task("missing") is None
+    finally:
+        store.close()
+
+
+def test_switch_chat_session(tmp_path):
+    """switch_chat_session 切换到已有会话并加载消息"""
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        # 创建两个会话
+        s1 = ChatSession(session_id="s1")
+        s1.attach_store(store, load_existing=False)
+        s1.add_user_message("会话1消息")
+        s1.set_hermes_session_id("hid_1")
+
+        s2 = ChatSession(session_id="s2")
+        s2.attach_store(store, load_existing=False)
+        s2.add_user_message("会话2消息A")
+        s2.add_user_message("会话2消息B")
+
+        # monkeypatch get_chat_store 返回相同 store
+        original = _store_mod.get_chat_store
+        _store_mod.get_chat_store = lambda: store
+        try:
+            switched = _cs_mod.switch_chat_session("s1")
+            assert switched.session_id == "s1"
+            assert switched.message_count() == 1
+            assert switched.hermes_session_id == "hid_1"
+
+            switched2 = _cs_mod.switch_chat_session("s2")
+            assert switched2.session_id == "s2"
+            assert switched2.message_count() == 2
+        finally:
+            _store_mod.get_chat_store = original
     finally:
         store.close()

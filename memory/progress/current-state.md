@@ -1657,3 +1657,48 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 - `python3 -m pytest tests/ -q` → 134 passed
 - `python3 -m compileall apps packages integrations tests` → passed
 - `git diff --check` → passed
+
+### Milestone 51 — 重复 assistant 修复 + Processing UI + 多轮对话 + 历史会话
+
+**目标**：修复重复 assistant 消息、增加聊天处理中展示、实现 Hermes `--resume` 多轮对话、历史会话加载/切换、消息按 task 关联排序。
+
+**Phase 1: 重复 assistant 修复**
+
+根因：`ChatAPI._sync_task_status_to_messages()` 中 `has_assistant_reply()` + `add_assistant_message()` 是两次独立加锁操作（TOCTOU 竞态条件）。
+
+| 变更 | 处理 |
+|------|------|
+| `ChatSession.upsert_assistant_message()` | 新增原子方法，同一把 RLock 内完成"查找已有 → 更新/创建"，保证幂等 |
+| `ChatAPI._sync_task_status_to_messages()` | 全面替换为 `upsert_assistant_message()`，RUNNING→PROCESSING 占位、COMPLETED→更新、FAILED→更新 |
+| 终态降级保护 | 已 COMPLETED/FAILED 的消息不会被 PROCESSING 回退 |
+
+**Phase 2: Processing UI**
+
+| 变更 | 处理 |
+|------|------|
+| 聊天窗口 CSS | 新增 `.processing` 类 + `@keyframes thinking-dots` 动画 |
+| 消息渲染 | assistant PROCESSING 消息显示"正在思考..."动画气泡 |
+| 轮询间隔 | 1500ms → 800ms |
+
+**Phase 3: Hermes `--resume` 多轮对话**
+
+| 变更 | 处理 |
+|------|------|
+| `ChatSession.hermes_session_id` | 新增字段，记录 Hermes CLI 返回的 session ID |
+| `chat_sessions` 表 | 新增 `hermes_session_id` 列（可选） |
+| `invoke_hermes_cli()` | 新增 `hermes_session_id` 参数，非空时附加 `--resume` |
+| `HermesExecutor.run()` | 接收 `ChatSession`，用 `hermes_session_id` 调用 CLI，解析返回 session ID |
+| stdout 解析 | 正则提取 `[Session: ...]` 行并写入 ChatSession |
+
+**Phase 4: 历史会话加载/切换**
+
+| 变更 | 处理 |
+|------|------|
+| `ChatWindowAPI.load_session()` | 加载指定 session 的消息到 ChatSession |
+| 聊天窗口 UI | header 新增历史会话图标按钮，点击展示下拉菜单 |
+
+**Phase 5: 消息排序优化**
+
+| 变更 | 处理 |
+|------|------|
+| `ChatAPI.get_messages()` | 返回前按 task 关联排序，user 消息后紧跟其 assistant 回复 |

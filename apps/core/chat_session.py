@@ -70,6 +70,7 @@ class ChatSession:
     """
     session_id: str = field(default_factory=lambda: uuid4().hex[:8])
     messages: List[ChatMessage] = field(default_factory=list)
+    hermes_session_id: Optional[str] = field(default=None)
     _pending_message_id: Optional[str] = field(default=None, repr=False)
     _store: Optional["ChatStore"] = field(default=None, repr=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
@@ -81,6 +82,10 @@ class ChatSession:
             store.create_session(self.session_id)
             if load_existing:
                 self._load_messages_from_store()
+                # 恢复 hermes_session_id
+                stored_session = store.get_session(self.session_id)
+                if stored_session and stored_session.hermes_session_id:
+                    self.hermes_session_id = stored_session.hermes_session_id
 
     def _load_messages_from_store(self) -> None:
         """从持久化层恢复当前会话消息。"""
@@ -131,6 +136,16 @@ class ChatSession:
             error=msg.error,
             created_at=msg.created_at.isoformat(),
         ))
+
+    def _ensure_summary_title_locked(self, content: str) -> None:
+        """为无标题会话写入首条用户消息摘要。调用方需持有 _lock。"""
+        if self._store is None:
+            return
+        from apps.core.chat_store import make_session_title
+
+        title = make_session_title(content)
+        if title:
+            self._store.set_session_title_if_empty(self.session_id, title)
     
     def add_user_message(self, content: str) -> str:
         """添加用户消息，返回 message_id"""
@@ -146,6 +161,7 @@ class ChatSession:
             self.messages.append(msg)
             self._pending_message_id = msg_id
             self._persist_message(msg)
+            self._ensure_summary_title_locked(content)
         logger.info("用户消息已添加: %s (len=%d)", msg_id, len(content))
         return msg_id
     
@@ -331,6 +347,14 @@ class ChatSession:
                 for m in self.messages
             )
 
+    def get_assistant_message_for_task(self, task_id: str) -> Optional[ChatMessage]:
+        """获取某个任务对应的 assistant 消息。"""
+        with self._lock:
+            for msg in self.messages:
+                if msg.role == MessageRole.ASSISTANT and msg.task_id == task_id:
+                    return msg
+        return None
+
     def message_count(self) -> int:
         """当前会话消息数量。"""
         with self._lock:
@@ -360,10 +384,29 @@ class ChatSession:
         with self._lock:
             self.messages.clear()
             self._pending_message_id = None
+            self.hermes_session_id = None
             self.session_id = uuid4().hex[:8]
             if self._store is not None:
                 self._store.create_session(self.session_id)
         logger.info("会话已清空，新 session_id=%s", self.session_id)
+
+    def set_hermes_session_id(self, hermes_id: str) -> None:
+        """记录 Hermes CLI 返回的 session ID，用于后续 --resume。"""
+        with self._lock:
+            self.hermes_session_id = hermes_id
+            if self._store is not None:
+                self._store.update_hermes_session_id(self.session_id, hermes_id)
+        logger.info("Hermes session ID 已设置: %s", hermes_id)
+
+    def set_session_title(self, title: str) -> None:
+        """更新当前会话标题。"""
+        title = (title or "").strip()
+        if not title:
+            return
+        with self._lock:
+            if self._store is not None:
+                self._store.update_session_title(self.session_id, title)
+        logger.info("会话标题已更新: %s", title)
     
     def to_dict(self) -> dict:
         """序列化为字典（供 API 返回）"""
@@ -415,6 +458,20 @@ def get_chat_session() -> ChatSession:
             _global_session = ChatSession()
         _global_session.attach_store(store)
         logger.info("初始化全局 ChatSession: %s", _global_session.session_id)
+    return _global_session
+
+
+def switch_chat_session(session_id: str) -> ChatSession:
+    """切换到指定历史会话，返回新的 ChatSession 实例。
+
+    会从数据库加载该会话的消息和 hermes_session_id。
+    若 session_id 不存在则创建空会话。
+    """
+    global _global_session
+    from apps.core.chat_store import get_chat_store
+    _global_session = ChatSession(session_id=session_id)
+    _global_session.attach_store(get_chat_store(), load_existing=True)
+    logger.info("切换到会话: %s (messages=%d)", session_id, _global_session.message_count())
     return _global_session
 
 

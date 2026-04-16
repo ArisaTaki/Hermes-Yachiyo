@@ -164,12 +164,13 @@ def test_completing_one_of_multiple_messages_keeps_processing_true(tmp_path):
 
         messages = api.get_messages()["messages"]
 
-        assert len(messages) == 3  # user1(completed) + user2(pending) + assistant1(completed)
+        # 排序后: user1(completed) → assistant1(completed) → user2(pending)
+        assert len(messages) == 3
         assert messages[0]["status"] == "completed"
-        assert messages[1]["task_id"] == second["task_id"]
-        assert messages[1]["status"] == "pending"
-        assert messages[2]["role"] == "assistant"
-        assert messages[2]["content"] == "任务一完成"
+        assert messages[1]["role"] == "assistant"
+        assert messages[1]["content"] == "任务一完成"
+        assert messages[2]["task_id"] == second["task_id"]
+        assert messages[2]["status"] == "pending"
         assert api.get_session_info()["is_processing"] is True
     finally:
         store.close()
@@ -238,5 +239,58 @@ def test_processing_to_failed_updates_same_message(tmp_path):
         assert msgs_failed[1]["id"] == placeholder_id
         assert msgs_failed[1]["status"] == "failed"
         assert "崩溃" in msgs_failed[1]["content"]
+    finally:
+        store.close()
+
+
+def test_running_task_preserves_streamed_assistant_content(tmp_path):
+    """RUNNING 状态轮询不应清空执行器已经写入的流式内容。"""
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        result = api.send_message("流式任务")
+        task_id = result["task_id"]
+        runtime.state.update_task_status(task_id, TaskStatus.RUNNING)
+        runtime.chat_session.upsert_assistant_message(
+            task_id,
+            "部分流式输出",
+            MessageStatus.PROCESSING,
+        )
+
+        messages = api.get_messages()["messages"]
+
+        assert len(messages) == 2
+        assert messages[1]["role"] == "assistant"
+        assert messages[1]["status"] == "processing"
+        assert messages[1]["content"] == "部分流式输出"
+    finally:
+        store.close()
+
+
+def test_message_sorting_pairs_user_with_assistant(tmp_path):
+    """消息排序：user 消息后紧跟其关联的 assistant 回复"""
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        r1 = api.send_message("任务一")
+        r2 = api.send_message("任务二")
+
+        # 任务二先完成
+        runtime.state.update_task_status(r2["task_id"], TaskStatus.RUNNING)
+        runtime.state.update_task_status(r2["task_id"], TaskStatus.COMPLETED, result="二完成")
+        # 任务一后完成
+        runtime.state.update_task_status(r1["task_id"], TaskStatus.RUNNING)
+        runtime.state.update_task_status(r1["task_id"], TaskStatus.COMPLETED, result="一完成")
+
+        msgs = api.get_messages()["messages"]
+        assert len(msgs) == 4  # 2 user + 2 assistant
+
+        # user1 → assistant1, user2 → assistant2
+        assert msgs[0]["role"] == "user"
+        assert msgs[0]["task_id"] == r1["task_id"]
+        assert msgs[1]["role"] == "assistant"
+        assert msgs[1]["content"] == "一完成"
+        assert msgs[2]["role"] == "user"
+        assert msgs[2]["task_id"] == r2["task_id"]
+        assert msgs[3]["role"] == "assistant"
+        assert msgs[3]["content"] == "二完成"
     finally:
         store.close()

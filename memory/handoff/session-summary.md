@@ -1,39 +1,38 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 46: CLI 修复 + 聊天窗口独立化 + SQLite 持久化
+## 本轮完成内容 — Milestone 51: 重复 assistant 修复 + Processing UI + 多轮对话 + 历史会话
 
-### Phase 1: HermesExecutor CLI 修复
+### Milestone 47: 重复 assistant 修复 + Processing UI
 
-- `_HERMES_CMD` 从 `["hermes", "run", "--prompt"]` 修正为 `["hermes", "chat", "-q"]`
-- 新增 `_HERMES_FLAGS = ["-Q", "--source", "tool"]`（安静模式 + 第三方标记）
-- exit=2 错误不再暴露 argparse 原始 usage 文本，改为友好提示
-- 验证：`hermes chat -q "hi" -Q --source tool` 正常返回 session_id
+**根因**：`ChatAPI._sync_task_status_to_messages()` 中 `has_assistant_reply()` + `add_assistant_message()` 是两次独立加锁操作（TOCTOU 竞态），并发轮询可同时通过检查并各自新增 assistant 消息。
 
-### Phase 2: 独立聊天窗口
+**修复**：
+- 新增 `ChatSession.upsert_assistant_message(task_id, content, status, error)` — 在同一把 RLock 内完成"查找 → 更新/创建"，原子不可分割
+- `ChatAPI._sync_task_status_to_messages()` 全面改用 `upsert_assistant_message()`
+- RUNNING → 创建 PROCESSING 占位消息；COMPLETED → 更新同一条消息；FAILED → 更新同一条消息
+- 不允许从终态（COMPLETED/FAILED）回退到 PROCESSING
 
-- 新建 `apps/shell/chat_window.py`：独立 pywebview 窗口（420×600）
-- ChatWindowAPI 封装所有聊天操作 + 历史会话列表
-- 单例管理：已开则聚焦，关闭事件自动清理引用
-- 主窗口嵌入式聊天面板 → 「打开聊天窗口」按钮
+**Processing UI**：
+- 聊天窗口新增 `.processing` CSS 类 + `@keyframes thinking-dots` 打字动画
+- assistant PROCESSING 气泡显示"正在思考..."动画
+- 轮询间隔从 1500ms 缩短到 800ms
 
-### Phase 3: SQLite 持久化
+### Milestone 51: 多轮对话 + 历史会话 + 消息排序
 
-- 新建 `apps/core/chat_store.py`：基于 `~/.hermes/yachiyo/chat.db`
-- 表结构：chat_sessions + chat_messages（WAL 模式，外键约束）
-- ChatSession.attach_store() 自动绑定，消息写入/状态更新自动同步到 DB
-- get_chat_session() 初始化时自动创建 store 并绑定
+**`--resume SESSION_ID` 多轮对话**：
+- `ChatSession` 增加 `hermes_session_id` 字段，记录 Hermes CLI 返回的 session ID
+- `invoke_hermes_cli()` 支持 `hermes_session_id` 参数，自动附加 `--resume`
+- `HermesExecutor` 从 `ChatSession` 读取 session ID 并传入 CLI
+- Hermes stdout 中的 `[Session: xxx]` 自动解析并存入 `ChatSession`
+- 同一个 Yachiyo 会话内的多次查询共享 Hermes 上下文
 
-### Phase 5: Bubble/Live2D 适配
+**历史会话加载**：
+- `ChatWindowAPI.load_session(session_id)` 加载历史会话消息到当前 ChatSession
+- 聊天窗口 header 新增历史会话下拉菜单
+- UI 支持切换到历史会话查看消息
 
-- bubble.py：移除嵌入式聊天 UI，改为 `open_chat()` → 独立聊天窗口
-- live2d.py：同上，移除 ChatAPI 依赖，改为 `open_chat()`
-- 三模式统一入口：`open_chat_window(runtime)` from chat_window.py
-
-### 测试
-
-- `test_executor.py`：新增 CLI 命令常量验证测试
-- `test_chat_store.py`（新建）：6 个 CRUD 测试用例
-- 全部 14 测试通过
+**消息排序优化**：
+- `get_messages()` 返回时按 task 关联关系重排：user 消息后紧跟其 assistant 回复
 
 ### 消息发送链路（更新）
 
@@ -45,17 +44,16 @@
     → ChatSession.link_message_to_task() → SQLite 更新
   → TaskRunner 轮询 PENDING 任务
   → HermesExecutor.run()
-    → invoke_hermes_cli(query) → hermes chat -q "query" -Q --source tool
+    → invoke_hermes_cli(query, hermes_session_id) → hermes chat -q "query" -Q --source tool [--resume ID]
   → AppState.update_task_status(COMPLETED)
   → UI 轮询 get_messages()
     → ChatAPI._sync_task_status_to_messages()
-    → ChatSession.add_assistant_message() → SQLite 持久化
-  → 渲染 assistant 回复
+    → ChatSession.upsert_assistant_message() → 原子创建/更新 → SQLite 持久化
+  → 渲染 assistant 回复（按 task 关联排序）
 ```
 
 ### 下一步建议
 
-1. **流式 token UI**：支持逐字显示 agent 回复
+1. **字符级 token streaming**：需 Hermes 底层支持增量输出
 2. **Live2D 渲染器**：接入 PixiJS / CubismSDK
-3. **历史会话加载**：从 SQLite 恢复历史会话
-4. **Hermes session 关联**：用 `--resume SESSION_ID` 支持多轮对话
+3. **处理进度百分比**：需 Hermes 提供进度回调

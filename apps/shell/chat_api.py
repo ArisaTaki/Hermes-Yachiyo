@@ -13,9 +13,10 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, List
 
 from apps.core.chat_session import (
+    ChatMessage,
     ChatSession,
     MessageRole,
     MessageStatus,
@@ -102,6 +103,9 @@ class ChatAPI:
           - 任务 FAILED → 标记消息失败
           - 任务 RUNNING → 更新消息状态为 processing
 
+        消息排序：保证每条 user 消息紧跟其关联的 assistant 回复，
+        避免并发任务完成顺序不一致导致消息错位。
+
         Returns:
             {"ok": True, "session_id": str, "messages": [...], "is_processing": bool}
         """
@@ -110,6 +114,7 @@ class ChatAPI:
             self._sync_task_status_to_messages()
 
             messages = self._session.get_messages(limit)
+            sorted_msgs = self._sort_messages_by_task(messages)
             return {
                 "ok": True,
                 "session_id": self._session.session_id,
@@ -124,13 +129,52 @@ class ChatAPI:
                         "error": m.error,
                         "created_at": m.created_at.isoformat(),
                     }
-                    for m in messages
+                    for m in sorted_msgs
                 ],
             }
 
         except Exception as exc:
             logger.error("获取消息列表失败: %s", exc)
             return {"ok": False, "error": str(exc), "messages": []}
+
+    @staticmethod
+    def _sort_messages_by_task(messages: List[ChatMessage]) -> List[ChatMessage]:
+        """按 task 关联重排消息，保证 user 消息紧跟其 assistant 回复。
+
+        算法：遍历消息列表，将 assistant 消息按 task_id 索引。
+        输出时，每条 user 消息后立即插入对应 assistant 消息。
+        system 消息和无 task_id 的消息保持原始顺序。
+        """
+        # 建立 task_id → assistant 消息的映射
+        assistant_by_task: dict[str, ChatMessage] = {}
+        for msg in messages:
+            if msg.role == MessageRole.ASSISTANT and msg.task_id:
+                assistant_by_task[msg.task_id] = msg
+
+        result: list[ChatMessage] = []
+        placed_assistant_ids: set[str] = set()
+
+        for msg in messages:
+            if msg.role == MessageRole.ASSISTANT and msg.task_id:
+                # assistant 消息由 user 消息触发插入，跳过
+                continue
+            result.append(msg)
+            # user 消息后紧跟其关联的 assistant 回复
+            if msg.role == MessageRole.USER and msg.task_id:
+                assistant = assistant_by_task.get(msg.task_id)
+                if assistant is not None:
+                    result.append(assistant)
+                    placed_assistant_ids.add(assistant.message_id)
+
+        # 兜底：无 task_id 的 assistant 消息追加末尾
+        for msg in messages:
+            if (
+                msg.role == MessageRole.ASSISTANT
+                and not msg.task_id
+            ):
+                result.append(msg)
+
+        return result
 
     def _sync_task_status_to_messages(self) -> None:
         """将任务状态同步到关联的消息
@@ -183,11 +227,20 @@ class ChatAPI:
                 )
 
             elif task.status == TaskStatus.RUNNING:
-                self._session.upsert_assistant_message(
-                    task_id=msg.task_id,
-                    content="",
-                    status=MessageStatus.PROCESSING,
-                )
+                assistant = self._session.get_assistant_message_for_task(msg.task_id)
+                if assistant is None:
+                    self._session.upsert_assistant_message(
+                        task_id=msg.task_id,
+                        content="",
+                        status=MessageStatus.PROCESSING,
+                    )
+                elif assistant.status != MessageStatus.PROCESSING:
+                    self._session.upsert_assistant_message(
+                        task_id=msg.task_id,
+                        content=assistant.content,
+                        status=MessageStatus.PROCESSING,
+                        error=assistant.error,
+                    )
 
     def get_session_info(self) -> Dict[str, Any]:
         """获取会话元信息"""
