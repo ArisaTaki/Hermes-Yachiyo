@@ -337,32 +337,41 @@ async def run_hermes_install(
                     break
                 line = line_bytes.decode(errors="replace").rstrip()
 
-                # 检测交互式 TUI 输出：ANSI 转义码或常见 TUI 菜单字符
-                # hermes setup 在 stdin=DEVNULL 时仍会先把菜单渲染到 stdout，
-                # 这些行对用户无意义且容易造成误解，替换为单行通知。
+                # 检测 hermes setup 的关键特征文字（而非泛化的 ANSI/TUI 字符）
+                # 这些是 setup wizard 独有的文字，installer banner 不会触发
+                setup_keywords = (
+                    "Setup Wizard",
+                    "How would you like to set up Hermes",
+                    "Select by number, Enter to confirm",
+                    "Quick setup",
+                    "Full setup",
+                    "configure your Hermes Agent",
+                )
+                is_setup_line = any(kw in line for kw in setup_keywords)
+
+                if is_setup_line and not _tui_flag[0]:
+                    _tui_flag[0] = True
+                    # 发送特殊标记，让前端知道需要打开终端做 setup
+                    if on_output is not None:
+                        try:
+                            on_output("__SETUP_TRIGGERED__")
+                        except Exception:
+                            pass
+                    # 发送用户可见的通知
+                    notice = (
+                        "─── 检测到 Hermes 配置向导，正在打开终端窗口... ───"
+                    )
+                    stdout_lines.append(notice)
+                    if on_output is not None:
+                        try:
+                            on_output(notice)
+                        except Exception:
+                            pass
+
+                # 过滤带 ANSI 转义码的行（TUI 渲染残留），但仍保留普通文本
                 has_ansi = "\x1b[" in line or "\x1b(" in line
-                has_tui = any(c in line for c in ("❯", "›", "»", "◆", "◇", "✔", "✖", "⠋", "⠙", "⠹"))
-                if has_ansi or has_tui:
-                    if not _tui_flag[0]:
-                        _tui_flag[0] = True
-                        # 发送特殊标记，让前端知道需要打开终端做 setup
-                        # 这个标记不会显示给用户，只用于前端检测
-                        if on_output is not None:
-                            try:
-                                on_output("__SETUP_TRIGGERED__")
-                            except Exception:
-                                pass
-                        # 然后发送用户可见的通知
-                        notice = (
-                            "─── 安装脚本触发了交互式配置，正在打开终端窗口... ───"
-                        )
-                        stdout_lines.append(notice)
-                        if on_output is not None:
-                            try:
-                                on_output(notice)
-                            except Exception:
-                                pass
-                    continue  # 跳过 TUI 原始行，不写入日志
+                if has_ansi:
+                    continue  # 跳过 ANSI 行，不写入日志
 
                 stdout_lines.append(line)
                 if on_output is not None:
