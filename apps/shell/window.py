@@ -1334,24 +1334,23 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                 // 检测到 setup TUI，自动打开终端（只执行一次）
                 if (p.setup_triggered && !_setupTerminalOpened) {
                     _setupTerminalOpened = true;
-                    // 显示提示
-                    const result = document.getElementById('install-result');
-                    result.innerHTML =
-                        '<span style="color:#ffd700">⚙️ 正在打开终端进行 Hermes 配置...</span><br>' +
-                        '<span style="color:#888;font-size:0.88em">请在弹出的终端窗口中完成配置，完成后回到此窗口。</span>';
                     // 自动打开终端
                     try {
                         await window.pywebview.api.open_hermes_setup_terminal();
                     } catch (e) {
-                        result.innerHTML =
-                            '<span style="color:#ff6b6b">⚠️ 无法自动打开终端，请手动运行 hermes setup</span>';
+                        // 打开失败也继续，显示手动提示
                     }
+                    // 显示配置引导 UI（含重新检测按钮）
+                    showSetupWaitingUI();
                 }
 
                 if (!p.running) {
                     clearInterval(_pollTimer);
                     _pollTimer = null;
-                    if (p.success) {
+                    // 如果之前触发了 setup，现在安装进程结束了，也显示重检按钮
+                    if (_setupTerminalOpened) {
+                        showSetupWaitingUI();
+                    } else if (p.success) {
                         await recheckAfterInstall();
                     } else {
                         const btn = document.getElementById('install-btn');
@@ -1363,6 +1362,92 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                 }
             } catch (err) {
                 // 轮询异常，继续等待
+            }
+        }
+
+        function showSetupWaitingUI() {
+            // 隐藏安装按钮，显示配置引导
+            const installBtn = document.getElementById('install-btn');
+            if (installBtn) installBtn.style.display = 'none';
+
+            const result = document.getElementById('install-result');
+            result.innerHTML = `
+                <div style="padding:16px; background:#1a2a3a; border-radius:8px; border-left:4px solid #ffd700;">
+                    <div style="color:#ffd700; font-size:1.05em; margin-bottom:8px;">⚙️ 请在终端中完成 Hermes 配置</div>
+                    <div style="color:#ccc; margin-bottom:12px;">
+                        配置向导已在新的终端窗口中打开。<br>
+                        <span style="color:#aaa; font-size:0.9em;">完成后点击下方按钮继续。</span>
+                    </div>
+                    <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                        <button onclick="recheckAfterSetupFromInstall()"
+                                id="setup-recheck-btn"
+                                style="padding:10px 20px; background:#2d5a2d; border:1px solid #4a8a4a;
+                                       color:#90ee90; border-radius:6px; cursor:pointer; font-size:0.95em;">
+                            ✅ 我已完成配置，继续
+                        </button>
+                        <button onclick="reopenSetupTerminal()"
+                                style="padding:10px 16px; background:#2a2a4a; border:1px solid #6495ed;
+                                       color:#6495ed; border-radius:6px; cursor:pointer; font-size:0.9em;">
+                            🔄 重新打开终端
+                        </button>
+                    </div>
+                </div>`;
+        }
+
+        async function reopenSetupTerminal() {
+            try {
+                await window.pywebview.api.open_hermes_setup_terminal();
+            } catch (e) {
+                alert('无法打开终端，请手动运行：hermes setup');
+            }
+        }
+
+        async function recheckAfterSetupFromInstall() {
+            const btn = document.getElementById('setup-recheck-btn');
+            if (btn) { btn.disabled = true; btn.textContent = '检测中...'; }
+
+            try {
+                const s = await window.pywebview.api.recheck_status();
+                const result = document.getElementById('install-result');
+
+                if (s.ready) {
+                    result.innerHTML = '<span style="color:#90ee90">✅ 配置完成！正在进入主界面...</span>';
+                    setTimeout(() => window.pywebview.api.restart_app(), 1500);
+                } else if (s.needs_init) {
+                    result.innerHTML = '<span style="color:#ffd700">✅ Hermes 已配置，正在进入工作空间初始化...</span>';
+                    setTimeout(() => window.pywebview.api.restart_app(), 1500);
+                } else if (s.status === 'installed_needs_setup' || s.status === 'setup_in_progress') {
+                    if (btn) { btn.disabled = false; btn.textContent = '✅ 我已完成配置，继续'; }
+                    result.innerHTML = `
+                        <div style="padding:16px; background:#3a2a1a; border-radius:8px; border-left:4px solid #ffd700;">
+                            <div style="color:#ffd700; margin-bottom:8px;">⚠️ Hermes 配置尚未完成</div>
+                            <div style="color:#ccc; margin-bottom:12px;">
+                                请确认已在终端中完成 <code>hermes setup</code>，然后再次点击「继续」。
+                            </div>
+                            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                                <button onclick="recheckAfterSetupFromInstall()"
+                                        id="setup-recheck-btn"
+                                        style="padding:10px 20px; background:#2d5a2d; border:1px solid #4a8a4a;
+                                               color:#90ee90; border-radius:6px; cursor:pointer; font-size:0.95em;">
+                                    ✅ 我已完成配置，继续
+                                </button>
+                                <button onclick="reopenSetupTerminal()"
+                                        style="padding:10px 16px; background:#2a2a4a; border:1px solid #6495ed;
+                                               color:#6495ed; border-radius:6px; cursor:pointer; font-size:0.9em;">
+                                    🔄 重新打开终端
+                                </button>
+                            </div>
+                        </div>`;
+                } else {
+                    if (btn) { btn.disabled = false; btn.textContent = '✅ 我已完成配置，继续'; }
+                    result.innerHTML =
+                        '<span style="color:#ff6b6b">⚠️ 检测异常：' + s.status +
+                        (s.message ? '（' + s.message + '）' : '') + '</span>';
+                }
+            } catch (err) {
+                if (btn) { btn.disabled = false; btn.textContent = '✅ 我已完成配置，继续'; }
+                const result = document.getElementById('install-result');
+                result.innerHTML = '<span style="color:#ff6b6b">⚠️ 检测失败：' + err.message + '</span>';
             }
         }
 
