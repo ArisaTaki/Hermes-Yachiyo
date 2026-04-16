@@ -1616,3 +1616,23 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 - `python3 -m pytest tests/ -q` → 122 passed
 - `.venv/bin/python -m compileall apps packages integrations tests` → passed
 - `git diff --check` → passed
+
+### Milestone 49 — 最新 Copilot Review 修复闭环
+
+**目标**：处理 PR #1 中 Copilot 对 `6481e1f` 新增的 review 记录。
+
+**处理结果**：
+
+| Review 点 | 处理 |
+|-----------|------|
+| 主窗口 JS 仍调用未定义的 `refreshMessages()` | 移除主窗口 `DOMContentLoaded` / `pywebviewready` 中的无效调用 |
+| TaskRunner loop 在线程内初始化，停止时可能尚未 ready | 增加 `_task_runner_loop_ready` 事件，并在事件循环进入 `run_forever()` 后才标记可停止 |
+| `TaskStatus.CANCELLED` 未同步到聊天消息 | 取消任务会把 user 消息标记为 failed，并补一条 assistant 取消提示 |
+| HermesExecutor 超时注释仍写 `hermes run` | 更新为当前实际命令 `hermes chat -q` |
+| Live2D API docstring 仍描述旧的内嵌聊天接口 | 改为说明 Live2D 只负责打开独立聊天窗口，不直接提供聊天读写 API |
+
+**验证**：
+
+- `python3 -m pytest tests/ -q` → 123 passed
+- `python3 -m compileall apps packages integrations tests` → passed
+- `git diff --check` → passed

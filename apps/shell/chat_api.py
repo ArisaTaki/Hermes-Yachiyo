@@ -138,6 +138,7 @@ class ChatAPI:
         遍历所有 user 消息，检查其关联任务的状态：
           - COMPLETED: 添加 assistant 回复（如果尚未添加）
           - FAILED: 标记消息失败
+          - CANCELLED: 标记消息失败并补取消提示
           - RUNNING: 更新消息状态为 processing
         """
         for msg in self._session.get_all_messages():
@@ -166,6 +167,16 @@ class ChatAPI:
                 if not self._session.has_assistant_reply(msg.task_id):
                     self._session.add_assistant_message(
                         f"❌ {error}",
+                        task_id=msg.task_id,
+                        error=error,
+                    )
+
+            elif task.status == TaskStatus.CANCELLED:
+                error = "任务已取消"
+                self._session.mark_message_failed(msg.message_id, error)
+                if not self._session.has_assistant_reply(msg.task_id):
+                    self._session.add_assistant_message(
+                        f"⚠️ {error}",
                         task_id=msg.task_id,
                         error=error,
                     )

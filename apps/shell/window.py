@@ -1049,7 +1049,6 @@ _STATUS_HTML = """
         // pywebview ready 后刷新数据
         if (window.pywebview) {
             refreshDashboard();
-            refreshMessages();
             loadExecutorInfo();
         }
         setInterval(refreshDashboard, 5000);
@@ -1058,7 +1057,6 @@ _STATUS_HTML = """
     // pywebview ready 事件
     window.addEventListener('pywebviewready', function() {
         refreshDashboard();
-        refreshMessages();
         loadExecutorInfo();
     });
     </script>

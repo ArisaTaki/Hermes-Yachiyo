@@ -311,12 +311,16 @@ _LIVE2D_HTML = """
 # ── WebView API ───────────────────────────────────────────────────────────────
 
 class Live2DWindowAPI:
-    """Live2D 模式 WebView API（含聊天功能）
+    """Live2D 模式 WebView API。
 
     当前职责：
       - 提供状态数据给前端（get_live2d_status）
-      - 提供聊天功能（send_message / get_messages / clear_session）
+      - 提供打开独立聊天窗口的入口（open_chat）
       - 提供打开主窗口 / 设置页的入口
+
+    说明：
+      - 当前类不直接提供 send_message / get_messages / clear_session
+        这类聊天消息读写接口；聊天交互由独立聊天窗口承载。
 
     未来扩展点（接入 Live2D 时新增方法）：
       - load_model(model_path: str) → 加载角色模型

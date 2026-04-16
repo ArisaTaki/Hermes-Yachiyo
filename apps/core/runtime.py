@@ -47,6 +47,7 @@ class HermesRuntime:
         self._task_runner: "TaskRunner | None" = None
         self._task_runner_thread: threading.Thread | None = None
         self._task_runner_loop: asyncio.AbstractEventLoop | None = None
+        self._task_runner_loop_ready = threading.Event()
 
     @property
     def state(self) -> AppState:
@@ -126,6 +127,7 @@ class HermesRuntime:
 
         executor = select_executor(self)
         self._task_runner = TaskRunner(self._state, executor=executor)
+        self._task_runner_loop_ready.clear()
 
         def run_loop():
             loop = asyncio.new_event_loop()
@@ -133,7 +135,11 @@ class HermesRuntime:
             self._task_runner_loop = loop
             try:
                 loop.run_until_complete(self._task_runner.start())
+                loop.call_soon(self._task_runner_loop_ready.set)
                 loop.run_forever()
+            except Exception:
+                self._task_runner_loop_ready.set()
+                logger.exception("TaskRunner 事件循环异常退出")
             finally:
                 loop.close()
 
@@ -143,6 +149,8 @@ class HermesRuntime:
             daemon=True,
         )
         self._task_runner_thread.start()
+        if not self._task_runner_loop_ready.wait(timeout=3.0):
+            logger.warning("TaskRunner 事件循环未在超时时间内就绪")
         logger.info(
             "TaskRunner 已在独立线程启动 (executor=%s)",
             type(self._task_runner.executor).__name__,
@@ -152,6 +160,10 @@ class HermesRuntime:
         """停止 TaskRunner 及其事件循环"""
         if self._task_runner is None:
             return
+
+        if self._task_runner_thread is not None and self._task_runner_thread.is_alive():
+            if not self._task_runner_loop_ready.wait(timeout=3.0):
+                logger.warning("TaskRunner loop 尚未就绪，无法提交停止协程")
 
         loop = self._task_runner_loop
         if loop is not None and loop.is_running():
@@ -172,6 +184,7 @@ class HermesRuntime:
         self._task_runner = None
         self._task_runner_loop = None
         self._task_runner_thread = None
+        self._task_runner_loop_ready.clear()
         logger.info("TaskRunner 已停止")
 
     def get_status(self) -> dict:

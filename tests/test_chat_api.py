@@ -96,6 +96,26 @@ def test_failed_task_marks_user_failed_and_adds_error_reply(tmp_path):
         store.close()
 
 
+def test_cancelled_task_marks_user_failed_and_adds_cancel_reply(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        result = api.send_message("取消任务")
+        task_id = result["task_id"]
+        runtime.state.cancel_task(task_id)
+
+        messages = api.get_messages()["messages"]
+
+        assert len(messages) == 2
+        assert messages[0]["status"] == "failed"
+        assert messages[0]["error"] == "任务已取消"
+        assert messages[1]["role"] == "assistant"
+        assert messages[1]["status"] == "failed"
+        assert "任务已取消" in messages[1]["content"]
+        assert api.get_session_info()["is_processing"] is False
+    finally:
+        store.close()
+
+
 def test_completing_one_of_multiple_messages_keeps_processing_true(tmp_path):
     api, runtime, store = _make_api(tmp_path)
     try:

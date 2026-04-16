@@ -89,7 +89,7 @@ class HermesInvokeResult:
 _HERMES_CMD: list[str] = ["hermes", "chat", "-q"]
 _HERMES_FLAGS: list[str] = ["-Q", "--source", "tool"]
 
-_EXEC_TIMEOUT: float = 60.0   # hermes run 执行超时（秒）
+_EXEC_TIMEOUT: float = 60.0   # hermes chat -q 执行超时（秒）
 _PROBE_TIMEOUT: float = 5.0   # hermes --version 探测超时（秒）
 
 
