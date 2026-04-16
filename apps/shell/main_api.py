@@ -337,10 +337,12 @@ class MainWindowAPI:
 
         try:
             if system == "Darwin":
+                # Terminal.app AppleScript：不使用 "make new document"（会报错 -2710）
+                # 直接 do script "cmd" 会在新窗口中执行
                 script = (
                     'tell application "Terminal"\n'
                     "    activate\n"
-                    f'    set w to do script "{cmd}" in (make new document)\n'
+                    f'    do script "{cmd}"\n'
                     "end tell"
                 )
                 subprocess.Popen(
