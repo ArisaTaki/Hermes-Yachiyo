@@ -1406,3 +1406,33 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
   - `refreshSettings()` 中控制 `s-hermes-enhance-section` 显隐
 
 **验证**：107 tests passed
+
+### Milestone 43 — Installer 安装后 Setup 阶段内联展示修复
+
+**背景**：
+即使修复了 `stdin=DEVNULL`，`hermes setup` 在 stdin EOF 前仍会把 TUI 菜单文字（ANSI 转义码 + 菜单字符）输出到 stdout，这些文字被 `run_hermes_install()` 捕获并传给 `install-log` pre 元素，用户看到不可交互的假 setup 菜单界面。
+
+原 `recheckAfterInstall()` 检测到 `installed_needs_setup` 时调用 `restart_app()`（1500ms），过渡不明确。
+
+**修复内容**：
+
+1. `apps/installer/hermes_install.py` — `_read_output()` 新增 TUI 输出过滤
+   - 检测 ANSI 转义码（`\x1b[`、`\x1b(`）和 TUI 字符（`❯`、`◆`、`✔` 等）
+   - 首次检测到 TUI 行时替换为单行中文通知，后续 TUI 行全部跳过
+   - 使用 `_tui_flag` 列表实现可变闭包
+
+2. `apps/shell/window.py` — 安装后配置引导内联展示
+   - `recheckAfterInstall()` 中 `installed_needs_setup`/`setup_in_progress` 分支不再调用 `restart_app()`
+   - 改为调用 `showPostInstallSetupUI()` 直接内联渲染配置引导区块
+   - 新增 3 个 JS 函数：`showPostInstallSetupUI()`、`openPostInstallSetup()`、`recheckAfterPostInstallSetup()`
+
+**正确用户流**：
+安装完成 → `recheckAfterInstall()` → `installed_needs_setup` → `showPostInstallSetupUI()` 内联渲染
+→ [▶ 开始配置 Hermes] → Terminal.app 新窗口 → hermes setup
+→ [🔄 已完成配置，重新检测] → `recheck_status()` → ready → `restart_app()`
+
+**变更文件**：
+- ✅ `apps/installer/hermes_install.py`
+- ✅ `apps/shell/window.py`
+
+**验证**：68 同步测试通过

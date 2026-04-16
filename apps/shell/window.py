@@ -1363,12 +1363,10 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                 } else if (s.needs_init) {
                     result.innerHTML = '<span style="color:#ffd700">✅ Hermes 已安装，正在进入初始化向导...</span>' + shellNote;
                     setTimeout(() => window.pywebview.api.restart_app(), 1500);
-                } else if (s.status === 'installed_needs_setup') {
-                    result.innerHTML = '<span style="color:#ffd700">✅ Hermes 已安装，需要完成初始配置。正在跳转...</span>' + shellNote;
-                    setTimeout(() => window.pywebview.api.restart_app(), 1500);
-                } else if (s.status === 'setup_in_progress') {
-                    result.innerHTML = '<span style="color:#ffd700">✅ Hermes 配置中，正在跳转...</span>' + shellNote;
-                    setTimeout(() => window.pywebview.api.restart_app(), 1500);
+                } else if (s.status === 'installed_needs_setup' || s.status === 'setup_in_progress') {
+                    // 安装成功，但 hermes setup 尚未完成
+                    // 不重启——直接在当前页面渲染配置引导 UI，避免用户混淆
+                    showPostInstallSetupUI(shellNote);
                 } else if (s.needs_env_refresh) {
                     // PATH 已注入但完整检测仍未通过（版本不兼容等边缘情况）
                     // 重启后用刷新后的环境重新走完整检测流程
@@ -1385,6 +1383,100 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                 }
             } catch (err) {
                 result.innerHTML = '<span style="color:#ff6b6b">⚠️ 无法重新检测状态：' + err.message + '</span>';
+            }
+        }
+
+        // 安装成功后检测到 installed_needs_setup / setup_in_progress 时，
+        // 在当前页面内直接渲染配置引导区块，不重启应用。
+        function showPostInstallSetupUI(shellNote) {
+            // 隐藏安装进度区域和安装按钮，只保留配置引导
+            const progress = document.getElementById('install-progress');
+            const installBtn = document.getElementById('install-btn');
+            if (progress) progress.style.display = 'none';
+            if (installBtn) installBtn.style.display = 'none';
+
+            const result = document.getElementById('install-result');
+            result.innerHTML = `
+                <div style="padding:20px; background:#1a2a1a; border-radius:8px; border-left:4px solid #90ee90; margin-bottom:12px;">
+                    <div style="color:#90ee90; font-size:1.05em; margin-bottom:8px;">✅ Hermes 已成功安装</div>
+                    <div style="color:#ccc; margin-bottom:16px;">
+                        现在需要完成初次配置，让 Hermes 了解您的偏好与工具设置。<br>
+                        <span style="color:#aaa; font-size:0.9em;">配置过程在独立终端中进行，完成后回到此窗口点击「重新检测」。</span>
+                    </div>
+                    ${shellNote || ''}
+                    <div style="display:flex; gap:12px; flex-wrap:wrap; margin-top:12px;">
+                        <button onclick="openPostInstallSetup()"
+                                id="post-install-setup-btn"
+                                style="padding:10px 20px; background:#2d5a2d; border:1px solid #4a8a4a;
+                                       color:#90ee90; border-radius:6px; cursor:pointer; font-size:0.95em;">
+                            ▶ 开始配置 Hermes
+                        </button>
+                        <button onclick="recheckAfterPostInstallSetup()"
+                                id="post-install-recheck-btn"
+                                style="padding:10px 20px; background:#2a2a4a; border:1px solid #6495ed;
+                                       color:#6495ed; border-radius:6px; cursor:pointer; font-size:0.95em;">
+                            🔄 已完成配置，重新检测
+                        </button>
+                    </div>
+                    <div id="post-install-hint" style="margin-top:12px;"></div>
+                </div>`;
+        }
+
+        async function openPostInstallSetup() {
+            const btn = document.getElementById('post-install-setup-btn');
+            const hint = document.getElementById('post-install-hint');
+            if (btn) { btn.disabled = true; btn.textContent = '正在打开终端...'; }
+            if (hint) hint.innerHTML = '';
+
+            try {
+                if (!window.pywebview || !window.pywebview.api) {
+                    throw new Error('WebView API 不可用');
+                }
+                const resp = await window.pywebview.api.open_hermes_setup_terminal();
+                if (resp && resp.success) {
+                    if (hint) hint.innerHTML =
+                        '<span style="color:#90ee90">✅ 终端已打开，请在终端中完成 Hermes 配置。</span><br>' +
+                        '<span style="color:#aaa; font-size:0.88em;">完成后点击「已完成配置，重新检测」按钮继续。</span>';
+                    if (btn) btn.style.display = 'none';
+                } else {
+                    throw new Error((resp && resp.error) || '无法打开终端');
+                }
+            } catch (err) {
+                if (btn) { btn.disabled = false; btn.textContent = '▶ 开始配置 Hermes'; }
+                if (hint) hint.innerHTML =
+                    '<span style="color:#ff6b6b">❌ ' + err.message + '</span><br>' +
+                    '<span style="color:#aaa; font-size:0.88em;">您也可以手动打开终端并运行：hermes setup</span>';
+            }
+        }
+
+        async function recheckAfterPostInstallSetup() {
+            const btn = document.getElementById('post-install-recheck-btn');
+            const hint = document.getElementById('post-install-hint');
+            if (btn) { btn.disabled = true; btn.textContent = '检测中...'; }
+            if (hint) hint.innerHTML = '<span style="color:#6495ed">⏳ 正在检测 Hermes 配置状态...</span>';
+
+            try {
+                const s = await window.pywebview.api.recheck_status();
+                if (s.ready) {
+                    if (hint) hint.innerHTML = '<span style="color:#90ee90">✅ 配置完成！正在进入主界面...</span>';
+                    setTimeout(() => window.pywebview.api.restart_app(), 1500);
+                } else if (s.needs_init) {
+                    if (hint) hint.innerHTML = '<span style="color:#ffd700">✅ Hermes 配置完成，正在进入工作空间初始化...</span>';
+                    setTimeout(() => window.pywebview.api.restart_app(), 1500);
+                } else if (s.status === 'installed_needs_setup' || s.status === 'setup_in_progress') {
+                    if (btn) { btn.disabled = false; btn.textContent = '🔄 已完成配置，重新检测'; }
+                    if (hint) hint.innerHTML =
+                        '<span style="color:#ffd700">⚠️ Hermes 配置尚未完成。</span><br>' +
+                        '<span style="color:#aaa; font-size:0.88em;">请确认已在终端中完成 hermes setup，然后再次点击「重新检测」。</span>';
+                } else {
+                    if (btn) { btn.disabled = false; btn.textContent = '🔄 已完成配置，重新检测'; }
+                    if (hint) hint.innerHTML =
+                        '<span style="color:#ff6b6b">⚠️ 检测异常：' + s.status +
+                        (s.message ? '（' + s.message + '）' : '') + '</span>';
+                }
+            } catch (err) {
+                if (btn) { btn.disabled = false; btn.textContent = '🔄 已完成配置，重新检测'; }
+                if (hint) hint.innerHTML = '<span style="color:#ff6b6b">⚠️ 检测失败：' + err.message + '</span>';
             }
         }
         </script>

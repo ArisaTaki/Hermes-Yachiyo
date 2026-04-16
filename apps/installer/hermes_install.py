@@ -325,6 +325,9 @@ async def run_hermes_install(
     stdout_lines: list[str] = []
 
     # 实时读取输出，支持回调
+    # 用列表包装布尔标志，允许嵌套函数修改（Python 闭包可变性）
+    _tui_flag = [False]  # [0]: 是否已打印 TUI 通知行
+
     try:
         async def _read_output():
             assert proc.stdout is not None
@@ -333,6 +336,27 @@ async def run_hermes_install(
                 if not line_bytes:
                     break
                 line = line_bytes.decode(errors="replace").rstrip()
+
+                # 检测交互式 TUI 输出：ANSI 转义码或常见 TUI 菜单字符
+                # hermes setup 在 stdin=DEVNULL 时仍会先把菜单渲染到 stdout，
+                # 这些行对用户无意义且容易造成误解，替换为单行通知。
+                has_ansi = "\x1b[" in line or "\x1b(" in line
+                has_tui = any(c in line for c in ("❯", "›", "»", "◆", "◇", "✔", "✖", "⠋", "⠙", "⠹"))
+                if has_ansi or has_tui:
+                    if not _tui_flag[0]:
+                        _tui_flag[0] = True
+                        notice = (
+                            "─── [安装脚本触发了交互式配置步骤，该步骤将在独立终端中引导完成，"
+                            "安装完成后请点击「开始配置 Hermes」按钮] ───"
+                        )
+                        stdout_lines.append(notice)
+                        if on_output is not None:
+                            try:
+                                on_output(notice)
+                            except Exception:
+                                pass
+                    continue  # 跳过 TUI 原始行，不写入日志
+
                 stdout_lines.append(line)
                 if on_output is not None:
                     try:
