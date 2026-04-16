@@ -227,11 +227,17 @@ class ChatStore:
 # ── 全局实例 ──────────────────────────────────────────────────────────────────
 
 _global_store: Optional[ChatStore] = None
+_global_store_lock = threading.RLock()
 
 
 def get_chat_store() -> ChatStore:
     """获取全局 ChatStore 单例"""
     global _global_store
-    if _global_store is None:
-        _global_store = ChatStore()
+    store = _global_store
+    if store is not None:
+        return store
+
+    with _global_store_lock:
+        if _global_store is None:
+            _global_store = ChatStore()
     return _global_store

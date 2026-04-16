@@ -12,6 +12,11 @@ class _RuntimeStub:
         self.state = AppState()
         self.chat_session = ChatSession(session_id="s1")
         self.chat_session.attach_store(store, load_existing=False)
+        self.cancelled_runner_tasks: list[str] = []
+
+    def cancel_task_runner_task(self, task_id: str) -> bool:
+        self.cancelled_runner_tasks.append(task_id)
+        return True
 
 
 def _make_api(tmp_path):
@@ -48,7 +53,10 @@ def test_running_task_marks_message_processing(tmp_path):
 
         messages = api.get_messages()["messages"]
 
+        assert len(messages) == 2  # user + assistant placeholder
         assert messages[0]["status"] == "processing"
+        assert messages[1]["role"] == "assistant"
+        assert messages[1]["status"] == "processing"
         assert api.get_session_info()["is_processing"] is True
     finally:
         store.close()
@@ -116,6 +124,34 @@ def test_cancelled_task_marks_user_failed_and_adds_cancel_reply(tmp_path):
         store.close()
 
 
+def test_clear_session_cancels_active_task_and_persists_cancel(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        result = api.send_message("清空前仍在执行")
+        task_id = result["task_id"]
+        old_session_id = runtime.chat_session.session_id
+        runtime.state.update_task_status(task_id, TaskStatus.RUNNING)
+
+        cleared = api.clear_session()
+
+        assert cleared["ok"] is True
+        assert cleared["cancelled_tasks"] == 1
+        assert cleared["session_id"] != old_session_id
+        assert runtime.state.get_task(task_id).status == TaskStatus.CANCELLED
+        assert runtime.cancelled_runner_tasks == [task_id]
+        assert api.get_messages()["messages"] == []
+
+        old_messages = store.load_messages(old_session_id)
+        assert len(old_messages) == 2
+        assert old_messages[0].status == "failed"
+        assert old_messages[0].error == "任务已取消"
+        assert old_messages[1].role == "assistant"
+        assert old_messages[1].status == "failed"
+        assert old_messages[1].error == "任务已取消"
+    finally:
+        store.close()
+
+
 def test_completing_one_of_multiple_messages_keeps_processing_true(tmp_path):
     api, runtime, store = _make_api(tmp_path)
     try:
@@ -128,10 +164,79 @@ def test_completing_one_of_multiple_messages_keeps_processing_true(tmp_path):
 
         messages = api.get_messages()["messages"]
 
-        assert len(messages) == 3
+        assert len(messages) == 3  # user1(completed) + user2(pending) + assistant1(completed)
         assert messages[0]["status"] == "completed"
         assert messages[1]["task_id"] == second["task_id"]
         assert messages[1]["status"] == "pending"
+        assert messages[2]["role"] == "assistant"
+        assert messages[2]["content"] == "任务一完成"
         assert api.get_session_info()["is_processing"] is True
+    finally:
+        store.close()
+
+
+def test_get_messages_idempotent_no_duplicate_assistant(tmp_path):
+    """多次 get_messages 不会生成重复 assistant 消息"""
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        result = api.send_message("幂等测试")
+        task_id = result["task_id"]
+        runtime.state.update_task_status(task_id, TaskStatus.RUNNING)
+        runtime.state.update_task_status(task_id, TaskStatus.COMPLETED, result="结果")
+
+        # 调用多次 get_messages
+        for _ in range(5):
+            msgs = api.get_messages()["messages"]
+
+        assert len(msgs) == 2
+        assistant_msgs = [m for m in msgs if m["role"] == "assistant"]
+        assert len(assistant_msgs) == 1
+        assert assistant_msgs[0]["content"] == "结果"
+    finally:
+        store.close()
+
+
+def test_processing_to_completed_updates_same_message(tmp_path):
+    """processing 占位 → completed 应更新同一条消息，而非新增"""
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        result = api.send_message("状态迁移")
+        task_id = result["task_id"]
+
+        # RUNNING → 产生 processing placeholder
+        runtime.state.update_task_status(task_id, TaskStatus.RUNNING)
+        msgs_processing = api.get_messages()["messages"]
+        assert len(msgs_processing) == 2
+        placeholder_id = msgs_processing[1]["id"]
+        assert msgs_processing[1]["status"] == "processing"
+
+        # COMPLETED → 更新同一条 assistant 消息
+        runtime.state.update_task_status(task_id, TaskStatus.COMPLETED, result="最终回复")
+        msgs_completed = api.get_messages()["messages"]
+        assert len(msgs_completed) == 2
+        assert msgs_completed[1]["id"] == placeholder_id  # 同一条消息
+        assert msgs_completed[1]["status"] == "completed"
+        assert msgs_completed[1]["content"] == "最终回复"
+    finally:
+        store.close()
+
+
+def test_processing_to_failed_updates_same_message(tmp_path):
+    """processing 占位 → failed 应更新同一条消息"""
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        result = api.send_message("失败迁移")
+        task_id = result["task_id"]
+
+        runtime.state.update_task_status(task_id, TaskStatus.RUNNING)
+        msgs_processing = api.get_messages()["messages"]
+        placeholder_id = msgs_processing[1]["id"]
+
+        runtime.state.update_task_status(task_id, TaskStatus.FAILED, error="崩溃")
+        msgs_failed = api.get_messages()["messages"]
+        assert len(msgs_failed) == 2
+        assert msgs_failed[1]["id"] == placeholder_id
+        assert msgs_failed[1]["status"] == "failed"
+        assert "崩溃" in msgs_failed[1]["content"]
     finally:
         store.close()

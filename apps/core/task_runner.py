@@ -52,6 +52,22 @@ class TaskRunner:
     def executor(self) -> ExecutionStrategy:
         return self._executor
 
+    def set_executor(self, executor: ExecutionStrategy) -> str:
+        """切换后续任务使用的执行器，返回切换前的执行器名称。"""
+        previous = self._executor.name
+        self._executor = executor
+        logger.info("TaskRunner 执行器已切换: %s -> %s", previous, executor.name)
+        return previous
+
+    def cancel_task(self, task_id: str) -> bool:
+        """取消已经分派到事件循环中的任务协程。"""
+        task = self._in_progress.get(task_id)
+        if task is None:
+            return False
+        task.cancel()
+        logger.info("TaskRunner 已请求取消任务协程: %s", task_id)
+        return True
+
     async def start(self) -> None:
         """启动后台轮询循环"""
         if self._running:

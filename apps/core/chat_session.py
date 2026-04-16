@@ -170,7 +170,11 @@ class ChatSession:
         task_id: Optional[str] = None,
         error: Optional[str] = None,
     ) -> str:
-        """添加 assistant 回复消息"""
+        """添加 assistant 回复消息（向后兼容）
+
+        注意：对于 task 关联的 assistant 消息，应优先使用
+        upsert_assistant_message() 以保证幂等性。
+        """
         with self._lock:
             msg_id = uuid4().hex[:12]
             status = MessageStatus.FAILED if error else MessageStatus.COMPLETED
@@ -190,6 +194,8 @@ class ChatSession:
                 for m in self.messages:
                     if m.task_id == task_id and m.role == MessageRole.USER:
                         m.status = status
+                        if error:
+                            m.error = error
                         self._persist_message(m)
                         break
 
@@ -197,6 +203,77 @@ class ChatSession:
             self._persist_message(msg)
         logger.info("Assistant 回复已添加: %s (task=%s)", msg_id, task_id)
         return msg_id
+
+    def upsert_assistant_message(
+        self,
+        task_id: str,
+        content: str,
+        status: MessageStatus = MessageStatus.COMPLETED,
+        error: Optional[str] = None,
+    ) -> str:
+        """原子性地创建或更新 task_id 对应的 assistant 消息。
+
+        同一个 task_id 至多只有一条 assistant 消息。
+        已存在则更新 content/status/error，否则创建。
+        同时同步更新关联 user 消息的状态。
+
+        幂等：多次调用相同参数不会产生重复消息。
+        线程安全：check + create/update 在同一把锁内完成。
+        """
+        with self._lock:
+            # ① 查找已有的 assistant 消息
+            existing: Optional[ChatMessage] = None
+            for msg in self.messages:
+                if msg.role == MessageRole.ASSISTANT and msg.task_id == task_id:
+                    existing = msg
+                    break
+
+            if existing is not None:
+                # 不允许从终态回退到 PROCESSING
+                if (
+                    existing.status in (MessageStatus.COMPLETED, MessageStatus.FAILED)
+                    and status == MessageStatus.PROCESSING
+                ):
+                    return existing.message_id
+                existing.content = content
+                existing.status = status
+                existing.error = error
+                self._persist_message(existing)
+                msg_id = existing.message_id
+                logger.debug(
+                    "Assistant 消息已更新: %s (task=%s, status=%s)",
+                    msg_id, task_id, status.value,
+                )
+            else:
+                # ② 不存在，创建新消息
+                msg_id = uuid4().hex[:12]
+                new_msg = ChatMessage(
+                    message_id=msg_id,
+                    role=MessageRole.ASSISTANT,
+                    content=content,
+                    status=status,
+                    created_at=datetime.now(timezone.utc),
+                    task_id=task_id,
+                    error=error,
+                )
+                self.messages.append(new_msg)
+                self._persist_message(new_msg)
+                logger.info(
+                    "Assistant 消息已创建: %s (task=%s, status=%s)",
+                    msg_id, task_id, status.value,
+                )
+
+            # ③ 同步更新关联 user 消息状态
+            for m in self.messages:
+                if m.task_id == task_id and m.role == MessageRole.USER:
+                    m.status = status
+                    if status == MessageStatus.FAILED and error:
+                        m.error = error
+                    self._persist_message(m)
+                    break
+
+            self._pending_message_id = self._find_active_message_id_locked()
+            return msg_id
     
     def add_system_message(self, content: str) -> str:
         """添加系统消息（提示、状态更新等）"""

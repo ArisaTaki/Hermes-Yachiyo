@@ -1636,3 +1636,24 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 - `python3 -m pytest tests/ -q` → 123 passed
 - `python3 -m compileall apps packages integrations tests` → passed
 - `git diff --check` → passed
+
+### Milestone 50 — 最新 Copilot Review 第二轮修复
+
+**目标**：处理 PR #1 中 Copilot 对 `2ecdc69` 新增的 5 条 review 记录。
+
+**处理结果**：
+
+| Review 点 | 处理 |
+|-----------|------|
+| `recheck_hermes()` 重检后 TaskRunner 仍使用旧 executor | 新增 TaskRunner executor 热切换；重检 Hermes 后替换后续任务使用的执行器，不重启、不打断已有任务 |
+| `clear_session()` 清空旧会话但不取消 pending/running 任务 | 清空前同步任务状态，取消旧会话活动任务，取消 TaskRunner in-flight 协程，并持久化取消提示 |
+| `get_chat_store()` 全局单例初始化无锁 | 增加模块级 `RLock` 和 double-checked locking |
+| `open_chat_window()` 窗口单例无锁 | 增加模块级 `RLock`，将检查、复用、创建、关闭回调状态更新放入同一临界区 |
+| `add_assistant_message(error=...)` 不同步 user error | 关联 user 消息在失败时同步写入 `error` 并持久化 |
+
+**验证**：
+
+- `python3 -m pytest tests/test_chat_api.py tests/test_chat_session.py tests/test_chat_store.py tests/test_runtime.py -q` → 26 passed
+- `python3 -m pytest tests/ -q` → 134 passed
+- `python3 -m compileall apps packages integrations tests` → passed
+- `git diff --check` → passed

@@ -232,6 +232,103 @@ class HermesRuntime:
         )
         return self._hermes_install_info
 
+    def refresh_task_runner_executor(self) -> dict:
+        """根据最新 Hermes 状态切换 TaskRunner 后续任务使用的执行器。
+
+        仅替换 executor，不重启 TaskRunner，避免已有 RUNNING 任务被取消后
+        留在不可收敛状态。
+        """
+        if self._task_runner is None:
+            return {
+                "updated": False,
+                "executor": "none",
+                "previous_executor": None,
+                "reason": "task_runner_not_started",
+            }
+
+        from apps.core.executor import select_executor
+
+        new_executor = select_executor(self)
+        previous = self._task_runner.executor.name
+
+        def apply_executor() -> None:
+            self._task_runner.set_executor(new_executor)
+
+        loop = self._task_runner_loop
+        if (
+            loop is not None
+            and loop.is_running()
+            and threading.current_thread() is not self._task_runner_thread
+        ):
+            done = threading.Event()
+            errors: list[BaseException] = []
+
+            def apply_in_loop() -> None:
+                try:
+                    apply_executor()
+                except BaseException as exc:
+                    errors.append(exc)
+                finally:
+                    done.set()
+
+            loop.call_soon_threadsafe(apply_in_loop)
+            if not done.wait(timeout=3.0):
+                logger.warning("TaskRunner 执行器切换超时")
+                return {
+                    "updated": False,
+                    "executor": previous,
+                    "previous_executor": previous,
+                    "reason": "timeout",
+                }
+            if errors:
+                logger.warning("TaskRunner 执行器切换失败: %s", errors[0])
+                return {
+                    "updated": False,
+                    "executor": previous,
+                    "previous_executor": previous,
+                    "reason": str(errors[0]),
+                }
+        else:
+            apply_executor()
+
+        return {
+            "updated": previous != new_executor.name,
+            "executor": new_executor.name,
+            "previous_executor": previous,
+            "reason": None,
+        }
+
+    def cancel_task_runner_task(self, task_id: str) -> bool:
+        """取消 TaskRunner 中已经分派的任务协程。"""
+        if self._task_runner is None:
+            return False
+
+        def cancel_task() -> bool:
+            return self._task_runner.cancel_task(task_id)
+
+        loop = self._task_runner_loop
+        if (
+            loop is not None
+            and loop.is_running()
+            and threading.current_thread() is not self._task_runner_thread
+        ):
+            done = threading.Event()
+            result = {"cancelled": False}
+
+            def cancel_in_loop() -> None:
+                try:
+                    result["cancelled"] = cancel_task()
+                finally:
+                    done.set()
+
+            loop.call_soon_threadsafe(cancel_in_loop)
+            if not done.wait(timeout=3.0):
+                logger.warning("TaskRunner 任务协程取消超时: %s", task_id)
+                return False
+            return result["cancelled"]
+
+        return cancel_task()
+
     def get_hermes_install_guidance(self) -> dict | None:
         """获取 Hermes 安装引导信息"""
         if not self._hermes_install_info:

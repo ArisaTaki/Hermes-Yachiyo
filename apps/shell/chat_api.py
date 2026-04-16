@@ -135,11 +135,14 @@ class ChatAPI:
     def _sync_task_status_to_messages(self) -> None:
         """将任务状态同步到关联的消息
 
-        遍历所有 user 消息，检查其关联任务的状态：
-          - COMPLETED: 添加 assistant 回复（如果尚未添加）
-          - FAILED: 标记消息失败
-          - CANCELLED: 标记消息失败并补取消提示
-          - RUNNING: 更新消息状态为 processing
+        使用 upsert_assistant_message() 保证幂等：
+          - RUNNING: 创建/更新 assistant 占位消息（PROCESSING）
+          - COMPLETED: 更新 assistant 消息为最终结果
+          - FAILED: 更新 assistant 消息为错误信息
+          - CANCELLED: 更新 assistant 消息为取消提示
+
+        同一个 task_id 永远只对应一条 assistant 消息，
+        无论此方法被并发调用多少次都不会产生重复。
         """
         for msg in self._session.get_all_messages():
             if msg.role != MessageRole.USER:
@@ -154,36 +157,37 @@ class ChatAPI:
                 continue
 
             if task.status == TaskStatus.COMPLETED:
-                # 检查是否已有对应的 assistant 回复
-                if not self._session.has_assistant_reply(msg.task_id):
-                    result = task.result or "[任务已完成，无输出]"
-                    self._session.add_assistant_message(result, task_id=msg.task_id)
-                    logger.debug("自动添加 assistant 回复: task=%s", msg.task_id)
+                result = task.result or "[任务已完成，无输出]"
+                self._session.upsert_assistant_message(
+                    task_id=msg.task_id,
+                    content=result,
+                    status=MessageStatus.COMPLETED,
+                )
 
             elif task.status == TaskStatus.FAILED:
                 error = task.error or "任务执行失败"
-                self._session.mark_message_failed(msg.message_id, error)
-                # 同时添加一条 assistant 错误消息
-                if not self._session.has_assistant_reply(msg.task_id):
-                    self._session.add_assistant_message(
-                        f"❌ {error}",
-                        task_id=msg.task_id,
-                        error=error,
-                    )
+                self._session.upsert_assistant_message(
+                    task_id=msg.task_id,
+                    content=f"❌ {error}",
+                    status=MessageStatus.FAILED,
+                    error=error,
+                )
 
             elif task.status == TaskStatus.CANCELLED:
                 error = "任务已取消"
-                self._session.mark_message_failed(msg.message_id, error)
-                if not self._session.has_assistant_reply(msg.task_id):
-                    self._session.add_assistant_message(
-                        f"⚠️ {error}",
-                        task_id=msg.task_id,
-                        error=error,
-                    )
+                self._session.upsert_assistant_message(
+                    task_id=msg.task_id,
+                    content=f"⚠️ {error}",
+                    status=MessageStatus.FAILED,
+                    error=error,
+                )
 
             elif task.status == TaskStatus.RUNNING:
-                if msg.status != MessageStatus.PROCESSING:
-                    self._session.mark_message_processing(msg.message_id)
+                self._session.upsert_assistant_message(
+                    task_id=msg.task_id,
+                    content="",
+                    status=MessageStatus.PROCESSING,
+                )
 
     def get_session_info(self) -> Dict[str, Any]:
         """获取会话元信息"""
@@ -197,9 +201,59 @@ class ChatAPI:
     def clear_session(self) -> Dict[str, Any]:
         """清空会话"""
         try:
+            self._sync_task_status_to_messages()
+            cancelled_count = self._cancel_active_session_tasks()
             self._session.clear()
-            logger.info("会话已清空")
-            return {"ok": True, "session_id": self._session.session_id}
+            logger.info("会话已清空，已取消旧会话任务数=%d", cancelled_count)
+            return {
+                "ok": True,
+                "session_id": self._session.session_id,
+                "cancelled_tasks": cancelled_count,
+            }
         except Exception as exc:
             logger.error("清空会话失败: %s", exc)
             return {"ok": False, "error": str(exc)}
+
+    def _cancel_active_session_tasks(self) -> int:
+        """取消当前会话中仍在等待/执行的任务，并持久化取消提示。"""
+        active_task_ids: list[str] = []
+        seen: set[str] = set()
+
+        for msg in self._session.get_all_messages():
+            if msg.role != MessageRole.USER:
+                continue
+            if msg.status not in (MessageStatus.PENDING, MessageStatus.PROCESSING):
+                continue
+            if not msg.task_id or msg.task_id in seen:
+                continue
+            seen.add(msg.task_id)
+            active_task_ids.append(msg.task_id)
+
+        cancelled = 0
+        for task_id in active_task_ids:
+            task = self._state.get_task(task_id)
+            if task is None:
+                continue
+            if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+                try:
+                    self._state.cancel_task(task_id)
+                    cancel_runner_task = getattr(
+                        self._runtime, "cancel_task_runner_task", None
+                    )
+                    if callable(cancel_runner_task):
+                        cancel_runner_task(task_id)
+                    cancelled += 1
+                except (KeyError, ValueError):
+                    logger.debug("任务取消跳过: %s", task_id, exc_info=True)
+
+            task = self._state.get_task(task_id)
+            if task is not None and task.status == TaskStatus.CANCELLED:
+                error = "任务已取消"
+                self._session.upsert_assistant_message(
+                    task_id=task_id,
+                    content=f"⚠️ {error}",
+                    status=MessageStatus.FAILED,
+                    error=error,
+                )
+
+        return cancelled

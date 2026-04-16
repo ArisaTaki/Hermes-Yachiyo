@@ -397,12 +397,21 @@ class MainWindowAPI:
             get_dashboard_data() 的最新结果（包含 hermes.readiness_level 等字段）
         """
         logger.info("手动触发 Hermes 就绪状态重检...")
+        executor_refresh = {
+            "updated": False,
+            "executor": "unknown",
+            "previous_executor": None,
+            "reason": "refresh_failed",
+        }
         try:
             self._runtime.refresh_hermes_installation()
+            executor_refresh = self._runtime.refresh_task_runner_executor()
         except Exception as exc:
             logger.warning("重新检测 Hermes 状态失败: %s", exc)
 
-        return self.get_dashboard_data()
+        data = self.get_dashboard_data()
+        data["executor_refresh"] = executor_refresh
+        return data
 
     # ──────────────────────────────────────────────────────────────────────────
     # 聊天 API（委托 ChatAPI）

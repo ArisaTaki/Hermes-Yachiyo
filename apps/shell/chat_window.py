@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import TYPE_CHECKING, Any, Dict
 
 if TYPE_CHECKING:
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 # ── 聊天窗口单例管理 ──────────────────────────────────────────────────────────
 
 _chat_window: Any = None  # webview.Window | None
+_chat_window_lock = threading.RLock()
 
 
 class ChatWindowAPI:
@@ -82,34 +84,36 @@ def open_chat_window(runtime: "HermesRuntime") -> bool:
         logger.warning("pywebview 未安装，无法打开聊天窗口")
         return False
 
-    # 如果窗口已存在且未关闭，聚焦
-    if _chat_window is not None:
-        try:
-            _chat_window.show()
-            _chat_window.on_top = True
-            _chat_window.on_top = False
-            return True
-        except Exception:
-            _chat_window = None
+    with _chat_window_lock:
+        # 如果窗口已存在且未关闭，聚焦
+        if _chat_window is not None:
+            try:
+                _chat_window.show()
+                _chat_window.on_top = True
+                _chat_window.on_top = False
+                return True
+            except Exception:
+                _chat_window = None
 
-    api = ChatWindowAPI(runtime)
-    _chat_window = webview.create_window(
-        title="Yachiyo - 对话",
-        html=_CHAT_HTML,
-        width=420,
-        height=600,
-        resizable=True,
-        js_api=api,
-        on_top=False,
-    )
+        api = ChatWindowAPI(runtime)
+        _chat_window = webview.create_window(
+            title="Yachiyo - 对话",
+            html=_CHAT_HTML,
+            width=420,
+            height=600,
+            resizable=True,
+            js_api=api,
+            on_top=False,
+        )
 
-    def _on_closed():
-        global _chat_window
-        _chat_window = None
+        def _on_closed():
+            global _chat_window
+            with _chat_window_lock:
+                _chat_window = None
 
-    _chat_window.events.closed += _on_closed
-    logger.info("聊天窗口已创建")
-    return True
+        _chat_window.events.closed += _on_closed
+        logger.info("聊天窗口已创建")
+        return True
 
 
 # ── 聊天窗口 HTML ─────────────────────────────────────────────────────────────
@@ -185,6 +189,21 @@ _CHAT_HTML = r"""
         .msg.error { border-left-color: #ff6b6b; }
         .msg.error .content { color: #ffaaaa; }
         .msg.pending { opacity: 0.7; }
+        .msg.processing {
+            opacity: 0.85;
+            border-left-color: #f0c060;
+        }
+        .msg.processing .content { color: #bbb; }
+        @keyframes thinking-dots {
+            0%, 20% { content: ''; }
+            40% { content: '.'; }
+            60% { content: '..'; }
+            80%, 100% { content: '...'; }
+        }
+        .thinking-indicator::after {
+            animation: thinking-dots 1.4s steps(1) infinite;
+            content: '';
+        }
         .input-area {
             padding: 12px 16px;
             border-top: 1px solid #333;
@@ -317,11 +336,22 @@ function renderMessages(msgs) {
     let html = '';
     for (const m of msgs) {
         const label = m.role === 'user' ? '你' : (m.role === 'assistant' ? 'Yachiyo' : '系统');
-        const sc = m.status === 'failed' ? 'error' : (m.status === 'pending' || m.status === 'processing' ? 'pending' : '');
-        const suffix = m.status === 'pending' ? ' · 等待中' : (m.status === 'processing' ? ' · 处理中' : '');
+        const isProcessing = m.status === 'processing';
+        const sc = m.status === 'failed' ? 'error' : (isProcessing ? 'processing' : (m.status === 'pending' ? 'pending' : ''));
+        const suffix = m.status === 'pending' ? ' · 等待中' : (isProcessing ? ' · 处理中' : '');
+
+        let displayContent;
+        if (isProcessing && m.role === 'assistant') {
+            displayContent = m.content
+                ? escapeHtml(m.content)
+                : '<span class="thinking-indicator">正在思考</span>';
+        } else {
+            displayContent = escapeHtml(m.content);
+        }
+
         html += '<div class="msg ' + m.role + ' ' + sc + '">';
         html += '<div class="role">' + label + suffix + '</div>';
-        html += '<div class="content">' + escapeHtml(m.content) + '</div>';
+        html += '<div class="content">' + displayContent + '</div>';
         html += '</div>';
     }
     container.innerHTML = html;
@@ -341,7 +371,7 @@ function setStatus(t) {
 
 function startPolling() {
     if (polling) return;
-    polling = setInterval(refreshMessages, 1500);
+    polling = setInterval(refreshMessages, 800);
 }
 
 function stopPolling() {

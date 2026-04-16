@@ -204,8 +204,9 @@ pip install -e ".[dev]"
 | `test_state` | 任务生命周期、终态保护 |
 | `test_executor` | 执行器模型、模拟执行 |
 | `test_chat_store` | SQLite 会话/消息 CRUD |
-| `test_chat_session` | 会话恢复、清空后持久化、孤立任务消息恢复 |
-| `test_chat_api` | 消息发送、任务状态同步、取消/失败闭环、assistant 回复去重 |
+| `test_chat_session` | 会话恢复、清空后持久化、孤立任务消息恢复、assistant 幂等更新 |
+| `test_chat_api` | 消息发送、任务状态同步、取消/失败闭环、清空会话取消旧任务 |
+| `test_runtime` | TaskRunner 执行器热切换 |
 | `test_effect_policy` | 设置生效策略 |
 | `test_integration_status` | Bridge/AstrBot/Hapi 状态 |
 | `test_astrbot_handlers` | 全 handler 输出与错误格式 |
