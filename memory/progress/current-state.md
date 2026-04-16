@@ -1330,3 +1330,41 @@ doctor_issues_count: 1
   - 设置面板 Hermes 节：新增 `s-hermes-readiness`（能力就绪）+ `s-hermes-limited-row`（受限工具）
   - `refreshDashboard()` JS：按 readiness_level 显示"完整就绪 / 基础可用 · 部分工具受限"
   - `refreshSettings()` JS：按 readiness_level 分级显示，受限工具提示"运行 hermes setup 可补全"
+
+### Milestone 41 — Hermes Setup 交互性修复
+
+**问题**：
+Hermes 官方安装脚本（`curl ... | bash`）在安装完二进制后，自动在末尾调用 `hermes setup` 作为
+post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，`hermes setup` 的 TUI
+菜单输出被 PIPE 到 GUI 安装日志区域，用户能看到 setup 菜单但 stdin 无 PTY，无法通过方向键/
+回车进行交互。
+
+**根因**：
+- `asyncio.create_subprocess_exec()` 未指定 stdin，默认继承父进程 stdin（pywebview 进程中无真实 TTY）
+- 安装脚本非零退出（因 `hermes setup` 被 EOF 中断）导致 `success=False`，但 hermes 二进制已安装
+
+**修复**：
+1. `run_hermes_install()` 加 `stdin=asyncio.subprocess.DEVNULL`：
+   - 安装脚本中的 `hermes setup` 立即获得 stdin EOF 而退出（不阻塞、不显示 TUI）
+   - 安装日志只包含脚本的非交互输出
+2. 非零退出时回退检查：若 `hermes --version` 可用，视为"安装成功，等待 setup"并返回 `success=True`
+3. `open_hermes_setup_terminal()` osascript 改用 `make new document`：
+   - 强制打开新 Terminal.app 窗口（不复用已有 Tab）
+   - 确保用户能清楚看到并聚焦到配置终端
+
+**正确用户流程（修复后）**：
+1. 用户点击"安装 Hermes" → 安装脚本在后台运行，GUI 显示安装日志
+2. 安装脚本完成（含 setup 自动失败/退出）→ `recheck_status()` 检测到 `INSTALLED_NEEDS_SETUP`
+3. App 重启 → 显示"⚙️ 配置 Hermes Agent"引导页
+4. 用户点击"开始配置 Hermes" → **真实 Terminal.app 新窗口打开，运行 `hermes setup`**
+5. 用户在 Terminal.app 中完成交互式配置（完整 PTY，方向键/回车均可用）
+6. 回到 GUI，点击"我已完成配置，重新检测" → 进入正常模式
+
+**变更文件**：
+- ✅ `apps/installer/hermes_install.py`
+  - `asyncio.create_subprocess_exec()` 新增 `stdin=asyncio.subprocess.DEVNULL`
+  - 非零退出时增加 hermes 可用性回退检查（`hermes --version`）
+- ✅ `apps/shell/installer_api.py`
+  - `open_hermes_setup_terminal()` osascript：`do script "hermes setup"` → `do script "hermes setup" in (make new document)`
+
+**验证**：107 tests passed

@@ -185,11 +185,13 @@ class InstallerWebViewAPI:
 
         try:
             if system == "Darwin":
-                # macOS: 用 osascript 在 Terminal.app 中跑 hermes setup
+                # macOS: 用 osascript 在 Terminal.app 新窗口中运行 hermes setup
+                # 使用 make new document 强制打开新窗口，确保用户能看到并聚焦到配置终端。
+                # 不使用已有窗口，避免命令被插入用户当前操作的 Tab 中。
                 script = (
                     'tell application "Terminal"\n'
                     "    activate\n"
-                    '    do script "hermes setup"\n'
+                    "    set w to do script \"hermes setup\" in (make new document)\n"
                     "end tell"
                 )
                 subprocess.Popen(

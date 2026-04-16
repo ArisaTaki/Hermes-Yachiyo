@@ -304,8 +304,10 @@ async def run_hermes_install(
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
+            stdin=asyncio.subprocess.DEVNULL,   # 明确关闭 stdin，防止安装脚本末尾的
+                                                 # hermes setup 等交互程序阻塞等待输入
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,  # 合并 stderr 到 stdout，方便实时展示
+            stderr=asyncio.subprocess.STDOUT,   # 合并 stderr 到 stdout，方便实时展示
         )
     except FileNotFoundError:
         return InstallResult(
@@ -355,6 +357,33 @@ async def run_hermes_install(
     combined_output = "\n".join(stdout_lines)
 
     if rc != 0:
+        # 安装脚本非零退出时，先检查 hermes 命令是否已经可用。
+        # 常见原因：官方安装脚本末尾自动调用 hermes setup，
+        # 由于我们关闭了 stdin（DEVNULL），hermes setup 立即退出导致脚本返回非零，
+        # 但 hermes 二进制本身已安装成功。
+        try:
+            import subprocess as _subprocess
+            _check = _subprocess.run(
+                ["hermes", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            if _check.returncode == 0:
+                logger.info(
+                    "安装脚本返回 exit=%d，但 hermes 命令已可用 (%s)，视为安装成功",
+                    rc,
+                    _check.stdout.strip().splitlines()[0] if _check.stdout.strip() else "unknown version",
+                )
+                return InstallResult(
+                    success=True,
+                    message="Hermes Agent 安装完成（需要完成 hermes setup 配置）",
+                    stdout=combined_output,
+                    returncode=0,
+                )
+        except Exception as _exc:
+            logger.debug("安装后 hermes 可用性回退检查失败: %s", _exc)
+
         return InstallResult(
             success=False,
             message=f"安装脚本执行失败（exit={rc}）",
