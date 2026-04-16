@@ -345,9 +345,16 @@ async def run_hermes_install(
                 if has_ansi or has_tui:
                     if not _tui_flag[0]:
                         _tui_flag[0] = True
+                        # 发送特殊标记，让前端知道需要打开终端做 setup
+                        # 这个标记不会显示给用户，只用于前端检测
+                        if on_output is not None:
+                            try:
+                                on_output("__SETUP_TRIGGERED__")
+                            except Exception:
+                                pass
+                        # 然后发送用户可见的通知
                         notice = (
-                            "─── [安装脚本触发了交互式配置步骤，该步骤将在独立终端中引导完成，"
-                            "安装完成后请点击「开始配置 Hermes」按钮] ───"
+                            "─── 安装脚本触发了交互式配置，正在打开终端窗口... ───"
                         )
                         stdout_lines.append(notice)
                         if on_output is not None:

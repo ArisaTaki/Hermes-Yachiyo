@@ -47,11 +47,17 @@ class InstallerWebViewAPI:
         _install_state["running"] = True
         _install_state["lines"] = []
         _install_state["result"] = None
+        _install_state["setup_triggered"] = False
+        _install_state["setup_terminal_opened"] = False
 
         def _run():
             from apps.installer.hermes_install import run_hermes_install
 
             def _on_line(line: str) -> None:
+                # 检测特殊标记：安装脚本触发了 hermes setup
+                if line == "__SETUP_TRIGGERED__":
+                    _install_state["setup_triggered"] = True
+                    return  # 不加入 lines，只设置标志
                 _install_state["lines"].append(line)
 
             loop = asyncio.new_event_loop()
@@ -91,6 +97,7 @@ class InstallerWebViewAPI:
                 "lines": List[str],       # 安装输出行（最近 50 行）
                 "success": bool | None,   # None 表示仍在进行中
                 "message": str,
+                "setup_triggered": bool,  # True 表示检测到 setup TUI，需打开终端
             }
         """
         result = _install_state.get("result")
@@ -99,6 +106,7 @@ class InstallerWebViewAPI:
             "lines": list(_install_state["lines"])[-50:],
             "success": result.success if result is not None else None,
             "message": result.message if result is not None else "",
+            "setup_triggered": _install_state.get("setup_triggered", False),
         }
 
     def recheck_status(self) -> Dict[str, Any]:
@@ -252,4 +260,6 @@ _install_state: Dict[str, Any] = {
     "running": False,
     "lines": [],
     "result": None,
+    "setup_triggered": False,  # True 表示检测到 hermes setup TUI，需打开终端
+    "setup_terminal_opened": False,  # True 表示已自动打开过终端
 }

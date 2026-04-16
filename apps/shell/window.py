@@ -1320,6 +1320,8 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
             }
         }
 
+        let _setupTerminalOpened = false;  // 防止重复打开终端
+
         async function pollProgress() {
             try {
                 const p = await window.pywebview.api.get_install_progress();
@@ -1328,6 +1330,24 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                     log.textContent = p.lines.join('\\n');
                     log.scrollTop = log.scrollHeight;
                 }
+
+                // 检测到 setup TUI，自动打开终端（只执行一次）
+                if (p.setup_triggered && !_setupTerminalOpened) {
+                    _setupTerminalOpened = true;
+                    // 显示提示
+                    const result = document.getElementById('install-result');
+                    result.innerHTML =
+                        '<span style="color:#ffd700">⚙️ 正在打开终端进行 Hermes 配置...</span><br>' +
+                        '<span style="color:#888;font-size:0.88em">请在弹出的终端窗口中完成配置，完成后回到此窗口。</span>';
+                    // 自动打开终端
+                    try {
+                        await window.pywebview.api.open_hermes_setup_terminal();
+                    } catch (e) {
+                        result.innerHTML =
+                            '<span style="color:#ff6b6b">⚠️ 无法自动打开终端，请手动运行 hermes setup</span>';
+                    }
+                }
+
                 if (!p.running) {
                     clearInterval(_pollTimer);
                     _pollTimer = null;
