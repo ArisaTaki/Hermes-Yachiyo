@@ -13,8 +13,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 import uvicorn
 from fastapi import FastAPI
@@ -24,32 +22,10 @@ from apps.bridge.routes import hermes, screen, status, system, tasks
 logger = logging.getLogger(__name__)
 
 
-@asynccontextmanager
-async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Bridge 启动/停止时管理后台 TaskRunner"""
-    from apps.bridge.deps import get_runtime
-    from apps.core.executor import select_executor
-    from apps.core.task_runner import TaskRunner
-
-    runner: TaskRunner | None = None
-    try:
-        rt = get_runtime()
-        runner = TaskRunner(rt.state, executor=select_executor(rt))
-        await runner.start()
-    except RuntimeError:
-        logger.warning("Bridge lifespan: Runtime 未注入，TaskRunner 跳过启动")
-
-    yield
-
-    if runner is not None:
-        await runner.stop()
-
-
 app = FastAPI(
     title="Hermes-Yachiyo Bridge",
     description="内部通信 API，非产品本体",
     version="0.1.0",
-    lifespan=_lifespan,
 )
 
 app.include_router(status.router)

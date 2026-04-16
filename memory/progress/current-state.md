@@ -1570,3 +1570,26 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 4. **exit=2 友好处理**：不再暴露 argparse 原始 usage 错误
 
 **验证**：14 测试全通过
+
+### Milestone 47 — 运行时所有权收敛 + 聊天持久化修复
+
+**目标**：修复 Milestone 46 后暴露的运行时和持久化边界问题。
+
+**修改内容**：
+
+| 文件 | 说明 |
+|------|------|
+| `apps/bridge/server.py` | 移除 Bridge lifespan 内的第二个 TaskRunner，Bridge 只做 HTTP 转发 |
+| `apps/core/runtime.py` | 新增 `refresh_hermes_installation()`，统一刷新 Hermes 检测缓存 |
+| `apps/shell/main_api.py` | `recheck_hermes()` 改为调用 Runtime 刷新方法，修复写错 `_install_info` 字段的问题 |
+| `apps/core/chat_store.py` | SQLite 连接改为 `check_same_thread=False`，并用 `RLock` 保护 CRUD |
+| `apps/core/chat_session.py` | 启动时恢复最近会话；清空后创建新 session 记录；重启后孤立的 pending/processing 消息标记为 failed |
+| `apps/core/state.py` | `AppState` 增加 `RLock`，保护任务 dict 的读写 |
+| `tests/test_chat_session.py` | 新增会话恢复、清空后持久化、孤立处理中消息恢复测试 |
+| `README*.md` | 同步 Hermes CLI 命令、Hermes 安装状态端点、测试依赖说明和测试表 |
+
+**验证**：
+
+- `python3 -m pytest tests/ -q` → 117 passed
+- `.venv/bin/python -m compileall apps packages integrations tests` → passed
+- `.venv/bin/python -m pytest tests/ -q` 当前失败原因：`.venv` 未安装 pytest；README 已补充 `pip install -e ".[dev]"`

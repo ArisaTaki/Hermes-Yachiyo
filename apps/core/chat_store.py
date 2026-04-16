@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import List, Optional
@@ -63,11 +64,12 @@ class ChatStore:
     def __init__(self, db_path: Optional[str] = None) -> None:
         self._db_path = db_path or _get_db_path()
         self._conn: Optional[sqlite3.Connection] = None
+        self._lock = threading.RLock()
         self._init_db()
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
-            self._conn = sqlite3.connect(self._db_path)
+            self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
             self._conn.row_factory = sqlite3.Row
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
@@ -75,28 +77,29 @@ class ChatStore:
 
     def _init_db(self) -> None:
         """创建表结构（幂等）"""
-        conn = self._get_conn()
-        conn.executescript("""
-            CREATE TABLE IF NOT EXISTS chat_sessions (
-                session_id TEXT PRIMARY KEY,
-                title      TEXT NOT NULL DEFAULT '',
-                created_at TEXT NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS chat_messages (
-                message_id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                role       TEXT NOT NULL,
-                content    TEXT NOT NULL,
-                status     TEXT NOT NULL DEFAULT 'completed',
-                task_id    TEXT,
-                error      TEXT,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_messages_session
-                ON chat_messages(session_id, created_at);
-        """)
-        conn.commit()
+        with self._lock:
+            conn = self._get_conn()
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS chat_sessions (
+                    session_id TEXT PRIMARY KEY,
+                    title      TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    message_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    role       TEXT NOT NULL,
+                    content    TEXT NOT NULL,
+                    status     TEXT NOT NULL DEFAULT 'completed',
+                    task_id    TEXT,
+                    error      TEXT,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_messages_session
+                    ON chat_messages(session_id, created_at);
+            """)
+            conn.commit()
         logger.info("ChatStore 初始化完成: %s", self._db_path)
 
     # ── 会话 CRUD ─────────────────────────────────────────────────────────────
@@ -104,28 +107,30 @@ class ChatStore:
     def create_session(self, session_id: str, title: str = "") -> None:
         """创建新会话"""
         now = datetime.now(timezone.utc).isoformat()
-        conn = self._get_conn()
-        conn.execute(
-            "INSERT OR IGNORE INTO chat_sessions (session_id, title, created_at) VALUES (?, ?, ?)",
-            (session_id, title, now),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(
+                "INSERT OR IGNORE INTO chat_sessions (session_id, title, created_at) VALUES (?, ?, ?)",
+                (session_id, title, now),
+            )
+            conn.commit()
 
     def list_sessions(self, limit: int = 20) -> List[StoredSession]:
         """列出最近的会话"""
-        conn = self._get_conn()
-        rows = conn.execute(
-            """
-            SELECT s.session_id, s.title, s.created_at,
-                   COUNT(m.message_id) AS message_count
-            FROM chat_sessions s
-            LEFT JOIN chat_messages m ON m.session_id = s.session_id
-            GROUP BY s.session_id
-            ORDER BY s.created_at DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                """
+                SELECT s.session_id, s.title, s.created_at,
+                       COUNT(m.message_id) AS message_count
+                FROM chat_sessions s
+                LEFT JOIN chat_messages m ON m.session_id = s.session_id
+                GROUP BY s.session_id
+                ORDER BY s.created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
         return [
             StoredSession(
                 session_id=r["session_id"],
@@ -138,61 +143,65 @@ class ChatStore:
 
     def delete_session(self, session_id: str) -> None:
         """删除会话及其所有消息"""
-        conn = self._get_conn()
-        conn.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
-        conn.execute("DELETE FROM chat_sessions WHERE session_id = ?", (session_id,))
-        conn.commit()
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM chat_sessions WHERE session_id = ?", (session_id,))
+            conn.commit()
 
     # ── 消息 CRUD ─────────────────────────────────────────────────────────────
 
     def save_message(self, msg: StoredMessage) -> None:
         """保存单条消息（INSERT OR REPLACE）"""
-        conn = self._get_conn()
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO chat_messages
-                (message_id, session_id, role, content, status, task_id, error, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                msg.message_id,
-                msg.session_id,
-                msg.role,
-                msg.content,
-                msg.status,
-                msg.task_id,
-                msg.error,
-                msg.created_at,
-            ),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(
+                """
+                INSERT OR REPLACE INTO chat_messages
+                    (message_id, session_id, role, content, status, task_id, error, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    msg.message_id,
+                    msg.session_id,
+                    msg.role,
+                    msg.content,
+                    msg.status,
+                    msg.task_id,
+                    msg.error,
+                    msg.created_at,
+                ),
+            )
+            conn.commit()
 
     def update_message_status(
         self, message_id: str, status: str, error: Optional[str] = None
     ) -> None:
         """更新消息状态"""
-        conn = self._get_conn()
-        conn.execute(
-            "UPDATE chat_messages SET status = ?, error = ? WHERE message_id = ?",
-            (status, error, message_id),
-        )
-        conn.commit()
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(
+                "UPDATE chat_messages SET status = ?, error = ? WHERE message_id = ?",
+                (status, error, message_id),
+            )
+            conn.commit()
 
     def load_messages(
         self, session_id: str, limit: int = 100
     ) -> List[StoredMessage]:
         """加载会话消息（按时间正序）"""
-        conn = self._get_conn()
-        rows = conn.execute(
-            """
-            SELECT message_id, session_id, role, content, status, task_id, error, created_at
-            FROM chat_messages
-            WHERE session_id = ?
-            ORDER BY created_at ASC
-            LIMIT ?
-            """,
-            (session_id, limit),
-        ).fetchall()
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                """
+                SELECT message_id, session_id, role, content, status, task_id, error, created_at
+                FROM chat_messages
+                WHERE session_id = ?
+                ORDER BY created_at ASC
+                LIMIT ?
+                """,
+                (session_id, limit),
+            ).fetchall()
         return [
             StoredMessage(
                 message_id=r["message_id"],
@@ -209,9 +218,10 @@ class ChatStore:
 
     def close(self) -> None:
         """关闭数据库连接"""
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
 
 
 # ── 全局实例 ──────────────────────────────────────────────────────────────────

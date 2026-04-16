@@ -205,6 +205,16 @@ class HermesRuntime:
             return False
         return self._hermes_install_info.status == HermesInstallStatus.READY
 
+    def refresh_hermes_installation(self) -> HermesInstallInfo:
+        """重新检测 Hermes Agent 状态并写回运行时缓存。"""
+        self._hermes_install_info = check_hermes_installation()
+        logger.info(
+            "Hermes 安装状态已刷新: status=%s, platform=%s",
+            self._hermes_install_info.status,
+            self._hermes_install_info.platform,
+        )
+        return self._hermes_install_info
+
     def get_hermes_install_guidance(self) -> dict | None:
         """获取 Hermes 安装引导信息"""
         if not self._hermes_install_info:

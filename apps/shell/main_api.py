@@ -396,15 +396,9 @@ class MainWindowAPI:
         Returns:
             get_dashboard_data() 的最新结果（包含 hermes.readiness_level 等字段）
         """
-        from apps.installer.hermes_check import check_hermes_installation
-        from apps.core.runtime import HermesRuntime
-
         logger.info("手动触发 Hermes 就绪状态重检...")
         try:
-            info = check_hermes_installation()
-            # 将最新检测结果写回 runtime，使后续 get_status() 也感知
-            if hasattr(self._runtime, "_install_info"):
-                self._runtime._install_info = info  # type: ignore[attr-defined]
+            self._runtime.refresh_hermes_installation()
         except Exception as exc:
             logger.warning("重新检测 Hermes 状态失败: %s", exc)
 
