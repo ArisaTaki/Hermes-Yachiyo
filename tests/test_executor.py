@@ -8,6 +8,8 @@ from apps.core.executor import (
     HermesCallError,
     HermesInvokeResult,
     SimulatedExecutor,
+    _HERMES_CMD,
+    _HERMES_FLAGS,
 )
 from packages.protocol.enums import RiskLevel, TaskStatus, TaskType
 from packages.protocol.schemas import TaskInfo
@@ -28,6 +30,13 @@ def _make_task(desc: str = "test") -> TaskInfo:
 
 
 class TestHermesCallError:
+    def test_hermes_cmd_uses_chat_subcommand(self):
+        """CLI 命令应使用 hermes chat -q 而非 hermes run --prompt"""
+        assert _HERMES_CMD == ["hermes", "chat", "-q"]
+        assert "-Q" in _HERMES_FLAGS
+        assert "--source" in _HERMES_FLAGS
+        assert "tool" in _HERMES_FLAGS
+
     def test_basic_error(self):
         exc = HermesCallError("命令失败")
         assert str(exc) == "命令失败"

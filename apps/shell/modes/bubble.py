@@ -10,7 +10,6 @@ import logging
 from typing import TYPE_CHECKING, Any, Dict
 
 from apps.installer.workspace_init import get_workspace_status
-from apps.shell.chat_api import ChatAPI
 from apps.shell.integration_status import get_integration_snapshot
 
 if TYPE_CHECKING:
@@ -163,20 +162,16 @@ _BUBBLE_HTML = """
     </div>
 
     <div class="chat-area">
-        <div class="chat-messages" id="chat-messages">
-            <div class="chat-msg system"><span class="content">发送消息开始对话</span></div>
-        </div>
-        <div class="chat-input-row">
-            <input type="text" class="chat-input" id="chat-input" 
-                   placeholder="输入消息..." 
-                   onkeypress="if(event.key==='Enter') sendMessage()">
-            <button class="chat-send" id="chat-send" onclick="sendMessage()">发送</button>
+        <div style="text-align:center;padding:12px 0;">
+            <button class="chat-send" onclick="openChat()" style="width:100%;padding:12px;font-size:1em;border-radius:6px;">
+                💬 打开聊天窗口
+            </button>
         </div>
     </div>
 
     <div class="actions">
         <div class="btn primary" onclick="openMain()">🖥 主窗口</div>
-        <div class="btn" onclick="clearChat()">清空</div>
+        <div class="btn primary" onclick="openChat()">💬 对话</div>
         <div class="btn danger" onclick="closeBubble()">✕</div>
     </div>
     <div class="status-row">
@@ -184,85 +179,11 @@ _BUBBLE_HTML = """
     </div>
 
     <script>
-    let isSending = false;
-    let pollTimer = null;
-
-    async function sendMessage() {{
-        if (isSending) return;
-        const input = document.getElementById('chat-input');
-        const text = (input.value || '').trim();
-        if (!text) return;
-
-        isSending = true;
-        document.getElementById('chat-send').disabled = true;
-        input.disabled = true;
-
+    async function openChat() {{
         try {{
-            if (!window.pywebview || !window.pywebview.api) throw new Error('API 不可用');
-            const r = await window.pywebview.api.send_message(text);
-            if (!r.ok) throw new Error(r.error || '发送失败');
-            input.value = '';
-            await refreshMessages();
-            startPolling();
-        }} catch(e) {{
-            console.error('sendMessage error:', e);
-        }} finally {{
-            isSending = false;
-            document.getElementById('chat-send').disabled = false;
-            input.disabled = false;
-            input.focus();
-        }}
-    }}
-
-    async function refreshMessages() {{
-        try {{
-            if (!window.pywebview || !window.pywebview.api) return;
-            const r = await window.pywebview.api.get_messages(20);
-            if (!r.ok) return;
-            renderMessages(r.messages);
-            if (!r.is_processing) stopPolling();
-        }} catch(e) {{}}
-    }}
-
-    function renderMessages(messages) {{
-        const container = document.getElementById('chat-messages');
-        if (!messages || messages.length === 0) {{
-            container.innerHTML = '<div class="chat-msg system"><span class="content">发送消息开始对话</span></div>';
-            return;
-        }}
-        // 只显示最近几条
-        const recent = messages.slice(-6);
-        let html = '';
-        for (const m of recent) {{
-            const cls = m.role + (m.status === 'failed' ? ' error' : (m.status === 'pending' || m.status === 'processing' ? ' pending' : ''));
-            html += '<div class="chat-msg ' + cls + '"><span class="content">' + escapeHtml(m.content) + '</span></div>';
-        }}
-        container.innerHTML = html;
-        container.scrollTop = container.scrollHeight;
-    }}
-
-    function escapeHtml(text) {{
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }}
-
-    function startPolling() {{
-        if (pollTimer) return;
-        pollTimer = setInterval(refreshMessages, 1500);
-    }}
-
-    function stopPolling() {{
-        if (pollTimer) {{ clearInterval(pollTimer); pollTimer = null; }}
-    }}
-
-    async function clearChat() {{
-        try {{
-            if (window.pywebview && window.pywebview.api) {{
-                await window.pywebview.api.clear_session();
-                await refreshMessages();
-            }}
-        }} catch(e) {{}}
+            if (window.pywebview && window.pywebview.api)
+                await window.pywebview.api.open_chat();
+        }} catch(e) {{ console.error('openChat error:', e); }}
     }}
 
     async function openMain() {{
@@ -291,9 +212,9 @@ _BUBBLE_HTML = """
     }}
 
     document.addEventListener('DOMContentLoaded', function() {{
-        if (window.pywebview) {{ refreshMessages(); loadStatus(); }}
+        if (window.pywebview) loadStatus();
     }});
-    window.addEventListener('pywebviewready', function() {{ refreshMessages(); loadStatus(); }});
+    window.addEventListener('pywebviewready', function() {{ loadStatus(); }});
     </script>
 </body>
 </html>
@@ -301,12 +222,11 @@ _BUBBLE_HTML = """
 
 
 class BubbleWindowAPI:
-    """气泡模式 WebView API（含聊天功能）"""
+    """气泡模式 WebView API"""
 
     def __init__(self, runtime: "HermesRuntime", config: "AppConfig") -> None:
         self._runtime = runtime
         self._config = config
-        self._chat_api = ChatAPI(runtime)
         self._bubble_window = None  # 由 run() 注入
         self._bridge_boot_config = {
             "enabled": config.bridge_enabled,
@@ -315,7 +235,6 @@ class BubbleWindowAPI:
         }
 
     def _bridge_status(self) -> str:
-        """组合 config.bridge_enabled 与实际运行状态，返回四状态字符串。"""
         snap = get_integration_snapshot(self._config, self._bridge_boot_config)
         return snap.bridge.state
 
@@ -350,28 +269,19 @@ class BubbleWindowAPI:
             logger.error("获取气泡数据失败: %s", e)
             return {"error": str(e)}
 
-    # ── 聊天 API（委托 ChatAPI）──────────────────────────────────────────────
-
-    def send_message(self, text: str) -> Dict[str, Any]:
-        """发送用户消息"""
-        return self._chat_api.send_message(text)
-
-    def get_messages(self, limit: int = 20) -> Dict[str, Any]:
-        """获取消息列表"""
-        return self._chat_api.get_messages(limit)
-
-    def clear_session(self) -> Dict[str, Any]:
-        """清空会话"""
-        return self._chat_api.clear_session()
-
     def get_executor_info(self) -> Dict[str, Any]:
-        """获取当前执行器信息"""
         runner = self._runtime.task_runner
         if runner is None:
             return {"executor": "none", "available": False}
         return {"executor": runner.executor.name, "available": True}
 
     # ── 窗口操作 ────────────────────────────────────────────────────────────
+
+    def open_chat(self) -> Dict[str, Any]:
+        """打开独立聊天窗口"""
+        from apps.shell.chat_window import open_chat_window
+        ok = open_chat_window(self._runtime)
+        return {"ok": ok}
 
     def open_main_window(self) -> None:
         """在当前 pywebview 会话中打开完整主窗口"""

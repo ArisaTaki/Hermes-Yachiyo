@@ -1,0 +1,227 @@
+"""聊天持久化层
+
+SQLite 存储聊天会话与消息，供 ChatSession 消费。
+数据库位置：~/.hermes/yachiyo/chat.db
+
+表结构：
+  - chat_sessions: 会话元信息（id、创建时间、标题）
+  - chat_messages: 消息记录（关联 session_id）
+
+职责边界：
+  - ChatStore 只做 CRUD，不含业务逻辑
+  - ChatSession 调用 ChatStore 完成持久化
+  - UI 层不直接接触 ChatStore
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import sqlite3
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import List, Optional
+
+logger = logging.getLogger(__name__)
+
+_DB_FILENAME = "chat.db"
+
+
+def _get_db_path() -> str:
+    """获取数据库文件路径：~/.hermes/yachiyo/chat.db"""
+    hermes_home = os.getenv("HERMES_HOME", os.path.expanduser("~/.hermes"))
+    yachiyo_dir = os.path.join(hermes_home, "yachiyo")
+    os.makedirs(yachiyo_dir, exist_ok=True)
+    return os.path.join(yachiyo_dir, _DB_FILENAME)
+
+
+@dataclass
+class StoredSession:
+    """持久化的会话记录"""
+    session_id: str
+    title: str
+    created_at: str  # ISO 格式
+    message_count: int = 0
+
+
+@dataclass
+class StoredMessage:
+    """持久化的消息记录"""
+    message_id: str
+    session_id: str
+    role: str       # user / assistant / system
+    content: str
+    status: str     # pending / processing / completed / failed
+    task_id: Optional[str]
+    error: Optional[str]
+    created_at: str  # ISO 格式
+
+
+class ChatStore:
+    """SQLite 聊天持久化"""
+
+    def __init__(self, db_path: Optional[str] = None) -> None:
+        self._db_path = db_path or _get_db_path()
+        self._conn: Optional[sqlite3.Connection] = None
+        self._init_db()
+
+    def _get_conn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            self._conn = sqlite3.connect(self._db_path)
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA foreign_keys=ON")
+        return self._conn
+
+    def _init_db(self) -> None:
+        """创建表结构（幂等）"""
+        conn = self._get_conn()
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS chat_sessions (
+                session_id TEXT PRIMARY KEY,
+                title      TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                message_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                role       TEXT NOT NULL,
+                content    TEXT NOT NULL,
+                status     TEXT NOT NULL DEFAULT 'completed',
+                task_id    TEXT,
+                error      TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_messages_session
+                ON chat_messages(session_id, created_at);
+        """)
+        conn.commit()
+        logger.info("ChatStore 初始化完成: %s", self._db_path)
+
+    # ── 会话 CRUD ─────────────────────────────────────────────────────────────
+
+    def create_session(self, session_id: str, title: str = "") -> None:
+        """创建新会话"""
+        now = datetime.now(timezone.utc).isoformat()
+        conn = self._get_conn()
+        conn.execute(
+            "INSERT OR IGNORE INTO chat_sessions (session_id, title, created_at) VALUES (?, ?, ?)",
+            (session_id, title, now),
+        )
+        conn.commit()
+
+    def list_sessions(self, limit: int = 20) -> List[StoredSession]:
+        """列出最近的会话"""
+        conn = self._get_conn()
+        rows = conn.execute(
+            """
+            SELECT s.session_id, s.title, s.created_at,
+                   COUNT(m.message_id) AS message_count
+            FROM chat_sessions s
+            LEFT JOIN chat_messages m ON m.session_id = s.session_id
+            GROUP BY s.session_id
+            ORDER BY s.created_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [
+            StoredSession(
+                session_id=r["session_id"],
+                title=r["title"],
+                created_at=r["created_at"],
+                message_count=r["message_count"],
+            )
+            for r in rows
+        ]
+
+    def delete_session(self, session_id: str) -> None:
+        """删除会话及其所有消息"""
+        conn = self._get_conn()
+        conn.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM chat_sessions WHERE session_id = ?", (session_id,))
+        conn.commit()
+
+    # ── 消息 CRUD ─────────────────────────────────────────────────────────────
+
+    def save_message(self, msg: StoredMessage) -> None:
+        """保存单条消息（INSERT OR REPLACE）"""
+        conn = self._get_conn()
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO chat_messages
+                (message_id, session_id, role, content, status, task_id, error, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                msg.message_id,
+                msg.session_id,
+                msg.role,
+                msg.content,
+                msg.status,
+                msg.task_id,
+                msg.error,
+                msg.created_at,
+            ),
+        )
+        conn.commit()
+
+    def update_message_status(
+        self, message_id: str, status: str, error: Optional[str] = None
+    ) -> None:
+        """更新消息状态"""
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE chat_messages SET status = ?, error = ? WHERE message_id = ?",
+            (status, error, message_id),
+        )
+        conn.commit()
+
+    def load_messages(
+        self, session_id: str, limit: int = 100
+    ) -> List[StoredMessage]:
+        """加载会话消息（按时间正序）"""
+        conn = self._get_conn()
+        rows = conn.execute(
+            """
+            SELECT message_id, session_id, role, content, status, task_id, error, created_at
+            FROM chat_messages
+            WHERE session_id = ?
+            ORDER BY created_at ASC
+            LIMIT ?
+            """,
+            (session_id, limit),
+        ).fetchall()
+        return [
+            StoredMessage(
+                message_id=r["message_id"],
+                session_id=r["session_id"],
+                role=r["role"],
+                content=r["content"],
+                status=r["status"],
+                task_id=r["task_id"],
+                error=r["error"],
+                created_at=r["created_at"],
+            )
+            for r in rows
+        ]
+
+    def close(self) -> None:
+        """关闭数据库连接"""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+
+# ── 全局实例 ──────────────────────────────────────────────────────────────────
+
+_global_store: Optional[ChatStore] = None
+
+
+def get_chat_store() -> ChatStore:
+    """获取全局 ChatStore 单例"""
+    global _global_store
+    if _global_store is None:
+        _global_store = ChatStore()
+    return _global_store

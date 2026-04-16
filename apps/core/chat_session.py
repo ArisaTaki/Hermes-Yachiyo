@@ -24,8 +24,11 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from apps.core.chat_store import ChatStore
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +70,28 @@ class ChatSession:
     session_id: str = field(default_factory=lambda: uuid4().hex[:8])
     messages: List[ChatMessage] = field(default_factory=list)
     _pending_message_id: Optional[str] = field(default=None, repr=False)
+    _store: Optional["ChatStore"] = field(default=None, repr=False)
+
+    def attach_store(self, store: "ChatStore") -> None:
+        """绑定持久化层，并创建/加载会话"""
+        self._store = store
+        store.create_session(self.session_id)
+
+    def _persist_message(self, msg: ChatMessage) -> None:
+        """将消息写入持久化层（若已绑定）"""
+        if self._store is None:
+            return
+        from apps.core.chat_store import StoredMessage
+        self._store.save_message(StoredMessage(
+            message_id=msg.message_id,
+            session_id=self.session_id,
+            role=msg.role.value,
+            content=msg.content,
+            status=msg.status.value,
+            task_id=msg.task_id,
+            error=msg.error,
+            created_at=msg.created_at.isoformat(),
+        ))
     
     def add_user_message(self, content: str) -> str:
         """添加用户消息，返回 message_id"""
@@ -80,6 +105,7 @@ class ChatSession:
         )
         self.messages.append(msg)
         self._pending_message_id = msg_id
+        self._persist_message(msg)
         logger.info("用户消息已添加: %s (len=%d)", msg_id, len(content))
         return msg_id
     
@@ -89,6 +115,7 @@ class ChatSession:
             if msg.message_id == message_id:
                 msg.task_id = task_id
                 msg.status = MessageStatus.PROCESSING
+                self._persist_message(msg)
                 logger.debug("消息 %s 关联任务 %s", message_id, task_id)
                 return True
         return False
@@ -118,9 +145,11 @@ class ChatSession:
             for m in self.messages:
                 if m.task_id == task_id and m.role == MessageRole.USER:
                     m.status = status
+                    self._persist_message(m)
                     break
         
         self._pending_message_id = None
+        self._persist_message(msg)
         logger.info("Assistant 回复已添加: %s (task=%s)", msg_id, task_id)
         return msg_id
     
@@ -135,6 +164,7 @@ class ChatSession:
             created_at=datetime.now(timezone.utc),
         )
         self.messages.append(msg)
+        self._persist_message(msg)
         return msg_id
     
     def mark_message_failed(self, message_id: str, error: str) -> bool:
@@ -144,6 +174,7 @@ class ChatSession:
                 msg.status = MessageStatus.FAILED
                 msg.error = error
                 self._pending_message_id = None
+                self._persist_message(msg)
                 return True
         return False
     
@@ -200,10 +231,12 @@ _global_session: Optional[ChatSession] = None
 
 
 def get_chat_session() -> ChatSession:
-    """获取全局聊天会话（单例）"""
+    """获取全局聊天会话（单例），自动绑定持久化层"""
     global _global_session
     if _global_session is None:
+        from apps.core.chat_store import get_chat_store
         _global_session = ChatSession()
+        _global_session.attach_store(get_chat_store())
         logger.info("初始化全局 ChatSession: %s", _global_session.session_id)
     return _global_session
 
@@ -211,6 +244,8 @@ def get_chat_session() -> ChatSession:
 def reset_chat_session() -> ChatSession:
     """重置全局会话（测试/清空用）"""
     global _global_session
+    from apps.core.chat_store import get_chat_store
     _global_session = ChatSession()
+    _global_session.attach_store(get_chat_store())
     logger.info("重置全局 ChatSession: %s", _global_session.session_id)
     return _global_session

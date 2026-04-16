@@ -81,9 +81,13 @@ class HermesInvokeResult:
 
 # ── 独立 CLI 调用函数 ─────────────────────────────────────────────────────────
 
-# Hermes CLI 命令前缀。当前假设：hermes run --prompt "<description>"
-# 若接口变更，只需修改此常量，无需改动类逻辑。
-_HERMES_CMD: list[str] = ["hermes", "run", "--prompt"]
+# Hermes CLI 命令前缀。
+# hermes chat -q "<query>" -Q --source tool
+#   -q: 非交互单次查询
+#   -Q: 安静模式（仅输出最终结果）
+#   --source tool: 标记为第三方集成调用
+_HERMES_CMD: list[str] = ["hermes", "chat", "-q"]
+_HERMES_FLAGS: list[str] = ["-Q", "--source", "tool"]
 
 _EXEC_TIMEOUT: float = 60.0   # hermes run 执行超时（秒）
 _PROBE_TIMEOUT: float = 5.0   # hermes --version 探测超时（秒）
@@ -101,15 +105,15 @@ async def invoke_hermes_cli(description: str) -> HermesInvokeResult:
     HermesExecutor._call_hermes() 调用此函数并根据 result.success 决定后续处理。
     若 CLI 接口变更（如改为 HTTP API），只需替换本函数，类逻辑不变。
 
-    调用命令：hermes run --prompt "<description>"
+    调用命令：hermes chat -q "<query>" -Q --source tool
 
     Args:
-        description: 任务描述字符串，直接作为 --prompt 参数传入
+        description: 用户查询字符串，直接作为 -q 参数传入
 
     Returns:
         HermesInvokeResult（不抛出异常，失败信息写入 result.error_message）
     """
-    cmd = [*_HERMES_CMD, description]
+    cmd = [*_HERMES_CMD, description, *_HERMES_FLAGS]
     logger.debug("[Hermes CLI] 执行: %s", " ".join(cmd))
 
     # ① 启动 subprocess
@@ -152,12 +156,17 @@ async def invoke_hermes_cli(description: str) -> HermesInvokeResult:
 
     # ③ 判断成功
     if rc != 0:
+        # 对 exit=2（argparse usage error）给出友好提示而非原始 stderr
+        if rc == 2:
+            err_msg = "Hermes 命令调用失败，请检查 Hermes Agent 版本是否兼容"
+        else:
+            err_msg = f"Hermes 执行失败（exit={rc}）"
         return HermesInvokeResult(
             success=False,
             stdout=stdout,
             stderr=stderr,
             returncode=rc,
-            error_message=f"Hermes 执行失败（exit={rc}）",
+            error_message=err_msg,
         )
 
     return HermesInvokeResult(
@@ -309,7 +318,7 @@ def select_executor(runtime: "HermesRuntime | None" = None) -> ExecutionStrategy
     """
     if runtime is not None and runtime.is_hermes_ready():
         if probe_hermes_available():
-            logger.info("select_executor: 选用 HermesExecutor（hermes run --prompt）")
+            logger.info("select_executor: 选用 HermesExecutor（hermes chat -q）")
             return HermesExecutor()
         logger.info(
             "select_executor: Hermes 报告就绪但命令不可用，回退 SimulatedExecutor"

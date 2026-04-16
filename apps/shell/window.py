@@ -102,61 +102,7 @@ _STATUS_HTML = """
             padding: 16px;
             margin-bottom: 20px;
         }
-        .chat-panel h3 { color: #6495ed; font-size: 0.95em; margin-bottom: 12px; }
-        .chat-messages {
-            max-height: 200px;
-            overflow-y: auto;
-            margin-bottom: 12px;
-            padding: 8px;
-            background: #1a1a2e;
-            border-radius: 6px;
-            min-height: 80px;
-        }
-        .chat-msg {
-            margin-bottom: 10px;
-            padding: 8px 10px;
-            border-radius: 6px;
-            font-size: 0.88em;
-            line-height: 1.5;
-        }
-        .chat-msg.user {
-            background: #3a4a7a;
-            margin-left: 20px;
-            border-left: 3px solid #6495ed;
-        }
-        .chat-msg.assistant {
-            background: #2a3a3a;
-            margin-right: 20px;
-            border-left: 3px solid #90ee90;
-        }
-        .chat-msg.system {
-            background: #3a3a4a;
-            text-align: center;
-            color: #888;
-            font-size: 0.82em;
-        }
-        .chat-msg .role { font-size: 0.75em; color: #888; margin-bottom: 3px; }
-        .chat-msg .content { color: #e0e0e0; white-space: pre-wrap; word-break: break-word; }
-        .chat-msg.error { border-left-color: #ff6b6b; }
-        .chat-msg.error .content { color: #ffaaaa; }
-        .chat-msg.pending .content { color: #aaaacc; }
-        .chat-input-row {
-            display: flex;
-            gap: 8px;
-        }
-        .chat-input {
-            flex: 1;
-            background: #3a3a6a;
-            color: #e0e0e0;
-            border: 1px solid #555;
-            border-radius: 6px;
-            padding: 10px 12px;
-            font-size: 0.9em;
-            outline: none;
-            resize: none;
-        }
-        .chat-input:focus { border-color: #6495ed; }
-        .chat-input::placeholder { color: #666; }
+        .chat-panel h3 { color: #6495ed; font-size: 0.95em; margin-bottom: 0; }
         .chat-send-btn {
             background: #4a6a9a;
             border: none;
@@ -168,26 +114,7 @@ _STATUS_HTML = """
             transition: background 0.2s;
         }
         .chat-send-btn:hover { background: #5a7aaa; }
-        .chat-send-btn:disabled { background: #3a3a5a; color: #666; cursor: not-allowed; }
-        .chat-status {
-            font-size: 0.78em;
-            color: #888;
-            margin-top: 6px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .chat-status .executor { color: #6a9a6a; }
-        .chat-clear-btn {
-            background: transparent;
-            border: 1px solid #555;
-            color: #888;
-            padding: 2px 8px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.85em;
-        }
-        .chat-clear-btn:hover { border-color: #888; color: #ccc; }
+        .executor { color: #6a9a6a; }
         .footer {
             text-align: center;
             color: #555;
@@ -412,26 +339,16 @@ _STATUS_HTML = """
         </div>
     </div>
 
-    <!-- 聊天面板 -->
+    <!-- 聊天入口 -->
     <div class="chat-panel" id="chat-panel">
-        <h3>💬 对话</h3>
-        <div class="chat-messages" id="chat-messages">
-            <div class="chat-msg system">
-                <span class="content">发送消息开始对话</span>
-            </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+            <h3>💬 对话</h3>
+            <span class="executor" id="chat-executor" style="font-size:0.8em;">—</span>
         </div>
-        <div class="chat-input-row">
-            <input type="text" class="chat-input" id="chat-input" 
-                   placeholder="输入消息..." 
-                   onkeypress="if(event.key==='Enter') sendMessage()">
-            <button class="chat-send-btn" id="chat-send-btn" onclick="sendMessage()">发送</button>
-        </div>
-        <div class="chat-status">
-            <span id="chat-status-text">就绪</span>
-            <span>
-                <span class="executor" id="chat-executor">—</span>
-                <button class="chat-clear-btn" onclick="clearChat()">清空</button>
-            </span>
+        <div style="margin-top:10px;">
+            <button class="chat-send-btn" onclick="openChat()" style="width:100%;padding:14px;font-size:1em;">
+                打开聊天窗口
+            </button>
         </div>
     </div>
 
@@ -582,8 +499,6 @@ _STATUS_HTML = """
 
     <script>
     let settingsOpen = false;
-    let chatPolling = null;
-    let isSending = false;
 
     function toggleSettings() {
         settingsOpen = !settingsOpen;
@@ -600,105 +515,12 @@ _STATUS_HTML = """
 
     // ── 聊天功能 ────────────────────────────────────────────────────────────────
 
-    async function sendMessage() {{
-        if (isSending) return;
-        const input = document.getElementById('chat-input');
-        const text = (input.value || '').trim();
-        if (!text) return;
-
-        isSending = true;
-        const btn = document.getElementById('chat-send-btn');
-        btn.disabled = true;
-        input.disabled = true;
-        setStatus('发送中...');
-
+    async function openChat() {{
         try {{
             if (!window.pywebview || !window.pywebview.api) throw new Error('WebView API 不可用');
-            const r = await window.pywebview.api.send_message(text);
-            if (!r.ok) throw new Error(r.error || '发送失败');
-            input.value = '';
-            setStatus('等待回复...');
-            // 立即刷新一次消息列表
-            await refreshMessages();
-            // 开始轮询
-            startPolling();
+            await window.pywebview.api.open_chat();
         }} catch(e) {{
-            setStatus('❌ ' + e.message);
-        }} finally {{
-            isSending = false;
-            btn.disabled = false;
-            input.disabled = false;
-            input.focus();
-        }}
-    }}
-
-    async function refreshMessages() {{
-        try {{
-            if (!window.pywebview || !window.pywebview.api) return;
-            const r = await window.pywebview.api.get_messages(50);
-            if (!r.ok) return;
-            renderMessages(r.messages);
-            if (!r.is_processing) {{
-                stopPolling();
-                setStatus('就绪');
-            }} else {{
-                setStatus('处理中...');
-            }}
-        }} catch(e) {{
-            console.error('refreshMessages error:', e);
-        }}
-    }}
-
-    function renderMessages(messages) {{
-        const container = document.getElementById('chat-messages');
-        if (!messages || messages.length === 0) {{
-            container.innerHTML = '<div class="chat-msg system"><span class="content">发送消息开始对话</span></div>';
-            return;
-        }}
-        let html = '';
-        for (const m of messages) {{
-            const roleLabel = m.role === 'user' ? '你' : (m.role === 'assistant' ? 'Yachiyo' : '系统');
-            const statusClass = m.status === 'failed' ? 'error' : (m.status === 'pending' || m.status === 'processing' ? 'pending' : '');
-            html += '<div class="chat-msg ' + m.role + ' ' + statusClass + '">';
-            html += '<div class="role">' + roleLabel + (m.status === 'pending' ? ' · 等待中' : (m.status === 'processing' ? ' · 处理中' : '')) + '</div>';
-            html += '<div class="content">' + escapeHtml(m.content) + '</div>';
-            html += '</div>';
-        }}
-        container.innerHTML = html;
-        container.scrollTop = container.scrollHeight;
-    }}
-
-    function escapeHtml(text) {{
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }}
-
-    function setStatus(text) {{
-        const el = document.getElementById('chat-status-text');
-        if (el) el.textContent = text;
-    }}
-
-    function startPolling() {{
-        if (chatPolling) return;
-        chatPolling = setInterval(refreshMessages, 1500);
-    }}
-
-    function stopPolling() {{
-        if (chatPolling) {{
-            clearInterval(chatPolling);
-            chatPolling = null;
-        }}
-    }}
-
-    async function clearChat() {{
-        try {{
-            if (!window.pywebview || !window.pywebview.api) return;
-            await window.pywebview.api.clear_session();
-            await refreshMessages();
-            setStatus('会话已清空');
-        }} catch(e) {{
-            setStatus('❌ ' + e.message);
+            console.error('openChat error:', e);
         }}
     }}
 

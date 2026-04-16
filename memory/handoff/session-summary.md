@@ -1,66 +1,61 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 44 & 45: 统一聊天层 + 三模式消息共享
+## 本轮完成内容 — Milestone 46: CLI 修复 + 聊天窗口独立化 + SQLite 持久化
 
-### 第一阶段：主窗口最小可用聊天界面（Milestone 44）
+### Phase 1: HermesExecutor CLI 修复
 
-**新增/修改文件**：
+- `_HERMES_CMD` 从 `["hermes", "run", "--prompt"]` 修正为 `["hermes", "chat", "-q"]`
+- 新增 `_HERMES_FLAGS = ["-Q", "--source", "tool"]`（安静模式 + 第三方标记）
+- exit=2 错误不再暴露 argparse 原始 usage 文本，改为友好提示
+- 验证：`hermes chat -q "hi" -Q --source tool` 正常返回 session_id
 
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `apps/shell/chat_api.py` | 新建 | ChatAPI 类：send_message、get_messages、clear_session |
-| `apps/core/runtime.py` | 修改 | 集成 TaskRunner 启动/停止（独立线程事件循环） |
-| `apps/shell/main_api.py` | 修改 | 组合 ChatAPI 方法暴露给 WebView |
-| `apps/shell/window.py` | 修改 | _STATUS_HTML 新增聊天面板 |
+### Phase 2: 独立聊天窗口
 
-**消息发送链路**：
+- 新建 `apps/shell/chat_window.py`：独立 pywebview 窗口（420×600）
+- ChatWindowAPI 封装所有聊天操作 + 历史会话列表
+- 单例管理：已开则聚焦，关闭事件自动清理引用
+- 主窗口嵌入式聊天面板 → 「打开聊天窗口」按钮
+
+### Phase 3: SQLite 持久化
+
+- 新建 `apps/core/chat_store.py`：基于 `~/.hermes/yachiyo/chat.db`
+- 表结构：chat_sessions + chat_messages（WAL 模式，外键约束）
+- ChatSession.attach_store() 自动绑定，消息写入/状态更新自动同步到 DB
+- get_chat_session() 初始化时自动创建 store 并绑定
+
+### Phase 5: Bubble/Live2D 适配
+
+- bubble.py：移除嵌入式聊天 UI，改为 `open_chat()` → 独立聊天窗口
+- live2d.py：同上，移除 ChatAPI 依赖，改为 `open_chat()`
+- 三模式统一入口：`open_chat_window(runtime)` from chat_window.py
+
+### 测试
+
+- `test_executor.py`：新增 CLI 命令常量验证测试
+- `test_chat_store.py`（新建）：6 个 CRUD 测试用例
+- 全部 14 测试通过
+
+### 消息发送链路（更新）
 
 ```
-用户输入 → sendMessage() [JS]
+用户输入 → sendMessage() [JS, 聊天窗口]
   → ChatAPI.send_message() [Python]
-    → ChatSession.add_user_message()
+    → ChatSession.add_user_message() → SQLite 持久化
     → AppState.create_task()
-    → ChatSession.link_message_to_task()
+    → ChatSession.link_message_to_task() → SQLite 更新
   → TaskRunner 轮询 PENDING 任务
-  → ExecutionStrategy.run() （Simulated 或 Hermes）
+  → HermesExecutor.run()
+    → invoke_hermes_cli(query) → hermes chat -q "query" -Q --source tool
   → AppState.update_task_status(COMPLETED)
   → UI 轮询 get_messages()
     → ChatAPI._sync_task_status_to_messages()
-    → ChatSession.add_assistant_message()
+    → ChatSession.add_assistant_message() → SQLite 持久化
   → 渲染 assistant 回复
 ```
-
-### 第二阶段：Bubble/Live2D 模式聊天入口（Milestone 45）
-
-**修改文件**：
-
-| 文件 | 操作 | 说明 |
-|------|------|------|
-| `apps/shell/modes/bubble.py` | 修改 | 集成 ChatAPI，添加聊天输入框和消息预览 |
-| `apps/shell/modes/live2d.py` | 修改 | 集成 ChatAPI，添加聊天界面 |
-
-**三模式消息共享**：
-
-- `ChatSession` 是单例，三模式通过同一个实例读写消息
-- 任一模式发送的消息，切换到其他模式后可见
-- 执行器信息统一暴露（🚀 Hermes / 🔬 模拟）
-
-**UI 差异化**：
-
-| 模式 | 尺寸 | 特点 |
-|------|------|------|
-| window | 560×620 | 完整仪表盘 + 聊天面板 |
-| bubble | 320×380 | 精简聊天 + 状态栏（置顶悬浮） |
-| live2d | 400×640 | 角色占位区 + 聊天区 + 工具栏 |
-
-### 执行器选择
-
-- `select_executor(runtime)` 根据 Hermes 就绪状态自动选择
-- Hermes 就绪 → `HermesExecutor`（调用 `hermes run --prompt`）
-- Hermes 未就绪 → `SimulatedExecutor`（模拟响应）
 
 ### 下一步建议
 
 1. **流式 token UI**：支持逐字显示 agent 回复
 2. **Live2D 渲染器**：接入 PixiJS / CubismSDK
-3. **任务系统 E2E**：完整任务生命周期测试
+3. **历史会话加载**：从 SQLite 恢复历史会话
+4. **Hermes session 关联**：用 `--resume SESSION_ID` 支持多轮对话

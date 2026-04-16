@@ -1281,6 +1281,7 @@ queue = ctypes.addressof(main_q_obj)
 ### Milestone 40 — Hermes 就绪状态细化分级
 
 **问题**：
+
 1. 版本显示错误：`get_hermes_version()` 从 `hermes --version` 多行输出中匹配到 `3.11.12`（Python 版本），而非 `v0.9.0`（Hermes 版本）
 2. 就绪状态二元：`is_hermes_ready()` 只有 True/False，无法区分"基础可用"与"完整就绪"
 3. `hermes doctor` 的工具受限信息未被 UI 消费
@@ -1340,10 +1341,12 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 回车进行交互。
 
 **根因**：
+
 - `asyncio.create_subprocess_exec()` 未指定 stdin，默认继承父进程 stdin（pywebview 进程中无真实 TTY）
 - 安装脚本非零退出（因 `hermes setup` 被 EOF 中断）导致 `success=False`，但 hermes 二进制已安装
 
 **修复**：
+
 1. `run_hermes_install()` 加 `stdin=asyncio.subprocess.DEVNULL`：
    - 安装脚本中的 `hermes setup` 立即获得 stdin EOF 而退出（不阻塞、不显示 TUI）
    - 安装日志只包含脚本的非交互输出
@@ -1353,6 +1356,7 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
    - 确保用户能清楚看到并聚焦到配置终端
 
 **正确用户流程（修复后）**：
+
 1. 用户点击"安装 Hermes" → 安装脚本在后台运行，GUI 显示安装日志
 2. 安装脚本完成（含 setup 自动失败/退出）→ `recheck_status()` 检测到 `INSTALLED_NEEDS_SETUP`
 3. App 重启 → 显示"⚙️ 配置 Hermes Agent"引导页
@@ -1361,6 +1365,7 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 6. 回到 GUI，点击"我已完成配置，重新检测" → 进入正常模式
 
 **变更文件**：
+
 - ✅ `apps/installer/hermes_install.py`
   - `asyncio.create_subprocess_exec()` 新增 `stdin=asyncio.subprocess.DEVNULL`
   - 非零退出时增加 hermes 可用性回退检查（`hermes --version`）
@@ -1377,6 +1382,7 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 **新增功能**：
 
 #### 1. 仪表盘 Hermes Agent 卡
+
 - `basic_ready` 时自动显示 **[🔧 补全 Hermes 能力]** 按钮
 - 点击展开 inline 操作面板，包含：
   - **▶ hermes setup** — 在 Terminal.app 新窗口中运行（配置模型/API 密钥/工具开关）
@@ -1385,10 +1391,12 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 - `full_ready` 后面板自动收起，状态行更新为"✅ 完整就绪"
 
 #### 2. 设置页 Hermes Agent 节
+
 - `basic_ready` 时自动显示同款操作区（`s-hermes-enhance-section`）
 - 三个操作按钮与仪表盘面板共用同一套逻辑
 
 #### 3. 新增 main_api.py 方法
+
 - `open_terminal_command(cmd)` — 通用终端启动方法，macOS 用 osascript `make new document`，Linux 尝试 gnome-terminal 等
 - `recheck_hermes()` — 触发 `check_hermes_installation()` 重检，返回最新 `get_dashboard_data()`
 
@@ -1397,6 +1405,7 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 > 完成以下操作可解锁更多能力。
 
 **变更文件**：
+
 - ✅ `apps/shell/main_api.py` — 新增 `open_terminal_command()` / `recheck_hermes()`
 - ✅ `apps/shell/window.py`
   - 仪表盘 Hermes 卡：`hermes-enhance-row`（按钮） + `hermes-enhance-panel`（inline 面板）
@@ -1432,6 +1441,7 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 → [🔄 已完成配置，重新检测] → `recheck_status()` → ready → `restart_app()`
 
 **变更文件**：
+
 - ✅ `apps/installer/hermes_install.py`
 - ✅ `apps/shell/window.py`
 
@@ -1458,6 +1468,7 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
    - window/bubble/live2d 都从同一个 ChatSession 读写
 
 2. **消息发送链路**：
+
    ```
    用户输入 → sendMessage() [JS]
      → ChatAPI.send_message() [Python]
@@ -1487,6 +1498,7 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
    - 清空会话按钮
 
 **当前执行器**：取决于 Hermes 安装状态
+
 - `HermesExecutor`：Hermes 就绪时使用
 - `SimulatedExecutor`：Hermes 未就绪时使用模拟
 
@@ -1511,6 +1523,7 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
    - 通过同一个 `ChatSession` 单例共享消息状态
 
 2. **消息共享验证**：
+
    ```
    window 发送消息 → ChatSession 更新
      ↓
@@ -1529,3 +1542,31 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
    - UI 显示当前使用的执行器（🚀 Hermes / 🔬 模拟）
 
 **验证**：imports 测试通过
+
+### Milestone 46 — HermesExecutor CLI 修复 + 聊天窗口独立化 + SQLite 持久化
+
+**目标**：修复 `hermes run --prompt` CLI 调用错误，将聊天 UI 从主窗口拆分为独立窗口，添加 SQLite 持久化。
+
+**修改文件**：
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `apps/core/executor.py` | 修改 | CLI 命令修复：`hermes run --prompt` → `hermes chat -q` + `-Q --source tool` |
+| `apps/core/chat_store.py` | 新建 | SQLite 持久化层（sessions + messages 表） |
+| `apps/core/chat_session.py` | 修改 | 集成 ChatStore，消息自动持久化 |
+| `apps/shell/chat_window.py` | 新建 | 独立聊天窗口（pywebview），单例管理 |
+| `apps/shell/main_api.py` | 修改 | 新增 `open_chat()` 方法 |
+| `apps/shell/window.py` | 修改 | 嵌入式聊天 → 「打开聊天窗口」按钮 |
+| `apps/shell/modes/bubble.py` | 修改 | 嵌入式聊天 → 打开独立聊天窗口 |
+| `apps/shell/modes/live2d.py` | 修改 | 嵌入式聊天 → 打开独立聊天窗口 |
+| `tests/test_executor.py` | 修改 | CLI 命令常量验证测试 |
+| `tests/test_chat_store.py` | 新建 | ChatStore CRUD 测试（6 cases） |
+
+**关键变更**：
+
+1. **CLI 修复**：`_HERMES_CMD = ["hermes", "chat", "-q"]` + `_HERMES_FLAGS = ["-Q", "--source", "tool"]`
+2. **SQLite 持久化**：`~/.hermes/yachiyo/chat.db`，ChatSession 自动绑定
+3. **独立聊天窗口**：三模式统一通过 `open_chat_window(runtime)` 打开
+4. **exit=2 友好处理**：不再暴露 argparse 原始 usage 错误
+
+**验证**：14 测试全通过

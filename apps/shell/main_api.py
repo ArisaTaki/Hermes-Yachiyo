@@ -439,3 +439,9 @@ class MainWindowAPI:
             "executor": runner.executor.name,
             "available": True,
         }
+
+    def open_chat(self) -> Dict[str, Any]:
+        """打开独立聊天窗口"""
+        from apps.shell.chat_window import open_chat_window
+        ok = open_chat_window(self._runtime)
+        return {"ok": ok}
