@@ -230,6 +230,40 @@ _STATUS_HTML = """
             <div class="row"><span class="label">版本</span><span class="value" id="hermes-version">—</span></div>
             <div class="row"><span class="label">平台</span><span class="value" id="hermes-platform">—</span></div>
             <div class="row" id="hermes-limited-row" style="display:none;"><span class="label" style="font-size:0.82em;color:#cc8844;">受限工具</span><span class="value warn" id="hermes-limited" style="font-size:0.8em;">—</span></div>
+            <!-- 补全能力入口：仅在 basic_ready 时显示 -->
+            <div id="hermes-enhance-row" style="display:none;margin-top:10px;">
+                <button onclick="toggleHermesEnhancePanel()" id="hermes-enhance-btn"
+                    style="width:100%;padding:6px 0;background:#2a3a5a;border:1px solid #4a6a9a;
+                           border-radius:5px;color:#9ab4d8;font-size:0.84em;cursor:pointer;">
+                    🔧 补全 Hermes 能力
+                </button>
+            </div>
+            <!-- inline 操作面板 -->
+            <div id="hermes-enhance-panel" style="display:none;margin-top:8px;padding:10px;
+                 background:#1a2a3a;border-radius:6px;border-left:3px solid #cc8844;">
+                <div style="color:#cc8844;font-size:0.82em;margin-bottom:8px;">
+                    当前处于<b>基础可用</b>状态，部分高级工具（如消息平台、图像生成等）尚未配置。
+                    完成以下操作可解锁更多能力：
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                    <button onclick="openHermesCmd('hermes setup')"
+                        style="padding:5px 10px;background:#1e3a1e;border:1px solid #4a7a4a;
+                               border-radius:4px;color:#90ee90;font-size:0.82em;cursor:pointer;text-align:left;">
+                        ▶ 运行 <code>hermes setup</code> — 配置模型/API 密钥/工具开关
+                    </button>
+                    <button onclick="openHermesCmd('hermes doctor')"
+                        style="padding:5px 10px;background:#2a2a1e;border:1px solid #7a7a4a;
+                               border-radius:4px;color:#d4d490;font-size:0.82em;cursor:pointer;text-align:left;">
+                        🔍 运行 <code>hermes doctor</code> — 查看能力诊断详情
+                    </button>
+                    <button onclick="recheckHermes()"
+                        style="padding:5px 10px;background:#2a1e3a;border:1px solid #6a4a9a;
+                               border-radius:4px;color:#b090d8;font-size:0.82em;cursor:pointer;text-align:left;">
+                        🔄 重新检测 Hermes 状态
+                    </button>
+                </div>
+                <div id="hermes-enhance-status" style="margin-top:8px;font-size:0.8em;min-height:1em;"></div>
+            </div>
         </div>
         <div class="card">
             <h3>Yachiyo 工作空间</h3>
@@ -301,6 +335,32 @@ _STATUS_HTML = """
             <div class="settings-row"><span class="label">平台</span><span class="value" id="s-hermes-platform">—</span></div>
             <div class="settings-row"><span class="label">命令可用</span><span class="value" id="s-hermes-cmd">—</span></div>
             <div class="settings-row"><span class="label">Hermes Home</span><span class="value" id="s-hermes-home" style="font-size:0.8em;">—</span></div>
+            <!-- 补全能力操作区（basic_ready 时显示）-->
+            <div id="s-hermes-enhance-section" style="display:none;margin-top:12px;padding:10px;
+                 background:#1a2a3a;border-radius:6px;border-left:3px solid #cc8844;">
+                <div style="color:#cc8844;font-size:0.82em;margin-bottom:8px;">
+                    <b>基础可用 · 部分工具受限。</b>
+                    完成以下配置可解锁更多 Hermes 能力：
+                </div>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                    <button onclick="openHermesCmd('hermes setup')"
+                        style="padding:5px 10px;background:#1e3a1e;border:1px solid #4a7a4a;
+                               border-radius:4px;color:#90ee90;font-size:0.82em;cursor:pointer;text-align:left;">
+                        ▶ 运行 <code>hermes setup</code> — 配置模型 / API 密钥 / 工具开关
+                    </button>
+                    <button onclick="openHermesCmd('hermes doctor')"
+                        style="padding:5px 10px;background:#2a2a1e;border:1px solid #7a7a4a;
+                               border-radius:4px;color:#d4d490;font-size:0.82em;cursor:pointer;text-align:left;">
+                        🔍 运行 <code>hermes doctor</code> — 查看能力诊断详情
+                    </button>
+                    <button onclick="recheckHermes()"
+                        style="padding:5px 10px;background:#2a1e3a;border:1px solid #6a4a9a;
+                               border-radius:4px;color:#b090d8;font-size:0.82em;cursor:pointer;text-align:left;">
+                        🔄 重新检测 Hermes 状态
+                    </button>
+                </div>
+                <div id="s-hermes-enhance-status" style="margin-top:8px;font-size:0.8em;min-height:1em;"></div>
+            </div>
         </div>
 
         <div class="settings-section">
@@ -419,6 +479,81 @@ _STATUS_HTML = """
         if (settingsOpen) refreshSettings();
     }
 
+    // ── Hermes 能力补全操作 ────────────────────────────────────────────────────
+
+    function toggleHermesEnhancePanel() {{
+        const panel = document.getElementById('hermes-enhance-panel');
+        const btn = document.getElementById('hermes-enhance-btn');
+        if (!panel) return;
+        const visible = panel.style.display !== 'none';
+        panel.style.display = visible ? 'none' : 'block';
+        if (btn) btn.textContent = visible ? '🔧 补全 Hermes 能力' : '🔼 收起';
+    }}
+
+    async function openHermesCmd(cmd) {{
+        // 状态提示元素（仪表盘或设置页，两者共用同一函数）
+        const statusIds = ['hermes-enhance-status', 's-hermes-enhance-status'];
+        function setStatus(msg) {{
+            statusIds.forEach(function(id) {{
+                const el = document.getElementById(id);
+                if (el) el.innerHTML = msg;
+            }});
+        }}
+        setStatus('<span style="color:#9ab4d8">⏳ 正在打开终端...</span>');
+        try {{
+            if (!window.pywebview || !window.pywebview.api) throw new Error('WebView API 不可用');
+            const r = await window.pywebview.api.open_terminal_command(cmd);
+            if (r.success) {{
+                setStatus('<span style="color:#90ee90">✅ 终端已打开，请在终端中完成操作，完成后点击「重新检测」。</span>');
+            }} else {{
+                setStatus('<span style="color:#ff6b6b">❌ ' + (r.error || '无法打开终端') + '<br><span style="color:#888;font-size:0.88em;">请手动打开终端运行：' + cmd + '</span></span>');
+            }}
+        }} catch(e) {{
+            setStatus('<span style="color:#ff6b6b">❌ ' + e.message + '</span>');
+        }}
+    }}
+
+    async function recheckHermes() {{
+        const statusIds = ['hermes-enhance-status', 's-hermes-enhance-status'];
+        function setStatus(msg) {{
+            statusIds.forEach(function(id) {{
+                const el = document.getElementById(id);
+                if (el) el.innerHTML = msg;
+            }});
+        }}
+        setStatus('<span style="color:#9ab4d8">⏳ 正在重新检测 Hermes 状态...</span>');
+        try {{
+            if (!window.pywebview || !window.pywebview.api) throw new Error('WebView API 不可用');
+            const data = await window.pywebview.api.recheck_hermes();
+            if (data.error) throw new Error(data.error);
+            // 刷新仪表盘（直接用返回的最新数据）
+            const rl = data.hermes ? data.hermes.readiness_level : 'unknown';
+            const hs = document.getElementById('hermes-status');
+            if (hs) {{
+                if (rl === 'full_ready') {{ hs.textContent = '✅ 完整就绪'; hs.className = 'value ok'; }}
+                else if (rl === 'basic_ready') {{ hs.textContent = '⚠️ 基础可用 · 部分工具受限'; hs.className = 'value warn'; }}
+                else {{ hs.textContent = data.hermes.ready ? '✅ 已就绪' : '⚠️ ' + (data.hermes.status || ''); hs.className = data.hermes.ready ? 'value ok' : 'value warn'; }}
+            }}
+            const enhRow = document.getElementById('hermes-enhance-row');
+            if (enhRow) enhRow.style.display = (rl === 'basic_ready') ? 'block' : 'none';
+            const sEnhSec = document.getElementById('s-hermes-enhance-section');
+            if (sEnhSec) sEnhSec.style.display = (rl === 'basic_ready') ? 'block' : 'none';
+            if (rl === 'full_ready') {{
+                setStatus('<span style="color:#90ee90">✅ Hermes 已完整就绪！受限工具已补全。</span>');
+                // 补全后隐藏操作面板
+                const panel = document.getElementById('hermes-enhance-panel');
+                if (panel) panel.style.display = 'none';
+            }} else if (rl === 'basic_ready') {{
+                const tools = (data.hermes && data.hermes.limited_tools) || [];
+                setStatus('<span style="color:#ffd700">⚠️ 仍有受限工具：' + tools.join('、') + '。可继续运行 hermes setup 完善配置。</span>');
+            }} else {{
+                setStatus('<span style="color:#9ab4d8">重检完成。当前状态：' + (rl || '未知') + '</span>');
+            }}
+        }} catch(e) {{
+            setStatus('<span style="color:#ff6b6b">❌ 检测失败：' + e.message + '</span>');
+        }}
+    }}
+
     async function refreshSettings() {
         try {
             if (!window.pywebview || !window.pywebview.api) return;
@@ -465,6 +600,9 @@ _STATUS_HTML = """
             document.getElementById('s-hermes-platform').textContent = d.hermes.platform;
             document.getElementById('s-hermes-cmd').textContent = d.hermes.command_exists ? '✅ 是' : '❌ 否';
             document.getElementById('s-hermes-home').textContent = d.hermes.hermes_home || '~/.hermes (默认)';
+            // 设置页补全能力区：仅 basic_ready 时显示
+            const sEnhSec = document.getElementById('s-hermes-enhance-section');
+            if (sEnhSec) sEnhSec.style.display = (srl === 'basic_ready') ? 'block' : 'none';
 
             // Workspace
             const wsEl = document.getElementById('s-ws-status');
@@ -790,6 +928,9 @@ _STATUS_HTML = """
                     limRow.style.display = 'none';
                 }
             }
+            // 补全能力入口：仅 basic_ready 时显示
+            const enhRow = document.getElementById('hermes-enhance-row');
+            if (enhRow) enhRow.style.display = (rl === 'basic_ready') ? 'block' : 'none';
 
             // Workspace
             const ws = document.getElementById('ws-status');

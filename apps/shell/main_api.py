@@ -316,3 +316,91 @@ class MainWindowAPI:
             "pending": result.get("pending", False),
             "app_state": self._current_app_state(),
         }
+
+    def open_terminal_command(self, cmd: str) -> Dict[str, Any]:
+        """在系统终端中执行指定命令（交互式，需要用户参与）。
+
+        macOS：通过 osascript 在 Terminal.app 新窗口中运行。
+        Linux：按优先级尝试 gnome-terminal / xfce4-terminal / xterm。
+
+        Args:
+            cmd: 要在终端中运行的命令字符串，如 "hermes setup"
+
+        Returns:
+            {"success": bool, "error": str | None}
+        """
+        import platform as _platform
+        import subprocess
+
+        system = _platform.system()
+        logger.info("open_terminal_command: system=%s cmd=%r", system, cmd)
+
+        try:
+            if system == "Darwin":
+                script = (
+                    'tell application "Terminal"\n'
+                    "    activate\n"
+                    f'    set w to do script "{cmd}" in (make new document)\n'
+                    "end tell"
+                )
+                subprocess.Popen(
+                    ["osascript", "-e", script],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            elif system == "Linux":
+                for terminal_cmd in [
+                    ["gnome-terminal", "--", "bash", "-c", cmd],
+                    ["xfce4-terminal", "-e", cmd],
+                    ["konsole", "-e", cmd],
+                    ["x-terminal-emulator", "-e", cmd],
+                    ["xterm", "-e", cmd],
+                ]:
+                    try:
+                        subprocess.Popen(
+                            terminal_cmd,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                        break
+                    except FileNotFoundError:
+                        continue
+                else:
+                    return {
+                        "success": False,
+                        "error": "未找到可用的终端模拟器，请手动打开终端",
+                    }
+            else:
+                return {
+                    "success": False,
+                    "error": f"当前平台（{system}）不支持自动打开终端，请手动运行：{cmd}",
+                }
+
+            logger.info("已在系统终端中启动命令: %r", cmd)
+            return {"success": True, "error": None}
+
+        except Exception as exc:
+            logger.error("open_terminal_command 失败: %s", exc)
+            return {"success": False, "error": str(exc)}
+
+    def recheck_hermes(self) -> Dict[str, Any]:
+        """重新检测 Hermes 安装 / 就绪状态，并刷新仪表盘数据。
+
+        用于用户完成 hermes setup / hermes doctor 后手动触发重新检测。
+
+        Returns:
+            get_dashboard_data() 的最新结果（包含 hermes.readiness_level 等字段）
+        """
+        from apps.installer.hermes_check import check_hermes_installation
+        from apps.core.runtime import HermesRuntime
+
+        logger.info("手动触发 Hermes 就绪状态重检...")
+        try:
+            info = check_hermes_installation()
+            # 将最新检测结果写回 runtime，使后续 get_status() 也感知
+            if hasattr(self._runtime, "_install_info"):
+                self._runtime._install_info = info  # type: ignore[attr-defined]
+        except Exception as exc:
+            logger.warning("重新检测 Hermes 状态失败: %s", exc)
+
+        return self.get_dashboard_data()

@@ -1,52 +1,49 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 41: Hermes Setup 交互性修复
+## 本轮完成内容 — Milestone 42: Hermes 能力补全入口
 
 ### 问题
 
-`hermes setup` 的 TUI 菜单显示在 GUI 安装日志区域，但用户无法通过方向键/回车进行交互。
-
-### 根因
-
-`run_hermes_install()` 运行 `curl ... | bash` 时未设置 `stdin=DEVNULL`。官方安装脚本在安装
-完二进制后自动调用 `hermes setup`，该进程的 TUI 输出被 PIPE 到 GUI，但无 PTY、无 stdin，
-用户只能看到菜单文字，无法交互。
+主界面只展示受限工具列表（只读），没有操作入口，用户不知道如何补全能力。
 
 ### 解决方案
 
-| 修复点 | 变更 |
-|--------|------|
-| `run_hermes_install()` stdin | 加 `stdin=asyncio.subprocess.DEVNULL`，强制安装脚本中的交互程序立即得到 EOF |
-| 非零退出回退检查 | `rc!=0` 时调用 `hermes --version`，若可用则仍返回 `success=True` |
-| `open_hermes_setup_terminal()` | osascript 改用 `make new document`，确保打开新 Terminal 窗口 |
+在仪表盘和设置页均新增 `basic_ready` 状态下的操作入口，支持：
+- 打开 Terminal.app 运行 `hermes setup`（配置向导）
+- 打开 Terminal.app 运行 `hermes doctor`（诊断）
+- 原地重新检测 Hermes 状态并刷新 UI
 
 ### 修改文件
 
-| 文件 | 变更内容 |
-|------|---------|
-| `apps/installer/hermes_install.py` | `stdin=DEVNULL`；非零退出时 hermes 可用性回退检查 |
-| `apps/shell/installer_api.py` | osascript `make new document` 强制新窗口 |
-| `memory/progress/current-state.md` | 新增 Milestone 41 |
+| 文件 | 变更 |
+|------|------|
+| `apps/shell/main_api.py` | 新增 `open_terminal_command(cmd)` + `recheck_hermes()` |
+| `apps/shell/window.py` | 仪表盘补全按钮 + inline 面板；设置页操作区；`refreshDashboard/Settings` 控制显隐；3 个新 JS 函数 |
+| `memory/progress/current-state.md` | 新增 Milestone 42 |
 | `memory/handoff/session-summary.md` | 本文件 |
 
-### 正确用户流程（修复后）
+### 当前状态
 
 ```
-安装 Hermes → 安装日志（无交互 setup 输出）
-→ recheck_status() 检测 INSTALLED_NEEDS_SETUP
-→ App 重启 → "⚙️ 配置 Hermes Agent" 引导页
-→ 点击"开始配置 Hermes"
-→ Terminal.app 新窗口打开，运行 hermes setup（完整 PTY，全交互）
-→ 用户完成配置，回 GUI 点击"我已完成配置，重新检测"
-→ 进入正常模式
+basic_ready 时：
+  仪表盘 Hermes 卡 → [🔧 补全 Hermes 能力] 按钮
+    → 展开 inline 面板
+        ├─ [▶ hermes setup]   → Terminal.app 新窗口
+        ├─ [🔍 hermes doctor] → Terminal.app 新窗口
+        └─ [🔄 重新检测]      → 重检 + 刷新 UI
+
+  设置页 Hermes 节 → 同款操作区
+
+full_ready 后：
+  面板自动收起，状态行显示"✅ 完整就绪"
 ```
 
 ### 测试状态
 
-- 107 tests passed（新增 2 个 startup 测试来自 Milestone 37 的 SETUP_IN_PROGRESS 状态）
+107 tests passed
 
 ### 下一步建议
 
-- 如果 Hermes 官方安装脚本有非标准 post-install 行为，可在 `run_hermes_install()` 中增加
-  `hermes setup` 输出的关键词检测，在日志中提示用户"检测到 setup 需要，将在独立终端中引导完成"
-- 可测试 macOS 上的完整安装流程：安装 → setup → workspace init → 正常模式
+- 可考虑为 `hermes setup` 的各子项（auth / model / tools）提供更细粒度的入口
+- 可增加"hermes setup 完成后自动触发 recheck"的轮询机制（类似 installer 的 setup polling）
+- Live2D 渲染器实现（当前仍为占位）

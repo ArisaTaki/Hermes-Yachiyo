@@ -1368,3 +1368,41 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
   - `open_hermes_setup_terminal()` osascript：`do script "hermes setup"` → `do script "hermes setup" in (make new document)`
 
 **验证**：107 tests passed
+
+### Milestone 42 — Hermes 能力补全入口
+
+**背景**：
+主界面已能展示 `basic_ready` + 受限工具列表，但只有只读文字，用户没有操作入口。
+
+**新增功能**：
+
+#### 1. 仪表盘 Hermes Agent 卡
+- `basic_ready` 时自动显示 **[🔧 补全 Hermes 能力]** 按钮
+- 点击展开 inline 操作面板，包含：
+  - **▶ hermes setup** — 在 Terminal.app 新窗口中运行（配置模型/API 密钥/工具开关）
+  - **🔍 hermes doctor** — 在 Terminal.app 新窗口中运行（查看诊断详情）
+  - **🔄 重新检测 Hermes 状态** — 调用后端重检，立即刷新仪表盘状态
+- `full_ready` 后面板自动收起，状态行更新为"✅ 完整就绪"
+
+#### 2. 设置页 Hermes Agent 节
+- `basic_ready` 时自动显示同款操作区（`s-hermes-enhance-section`）
+- 三个操作按钮与仪表盘面板共用同一套逻辑
+
+#### 3. 新增 main_api.py 方法
+- `open_terminal_command(cmd)` — 通用终端启动方法，macOS 用 osascript `make new document`，Linux 尝试 gnome-terminal 等
+- `recheck_hermes()` — 触发 `check_hermes_installation()` 重检，返回最新 `get_dashboard_data()`
+
+**文案设计**（面向产品）：
+> 当前处于**基础可用**状态，部分高级工具（如消息平台、图像生成等）尚未配置。
+> 完成以下操作可解锁更多能力。
+
+**变更文件**：
+- ✅ `apps/shell/main_api.py` — 新增 `open_terminal_command()` / `recheck_hermes()`
+- ✅ `apps/shell/window.py`
+  - 仪表盘 Hermes 卡：`hermes-enhance-row`（按钮） + `hermes-enhance-panel`（inline 面板）
+  - 设置页 Hermes 节：`s-hermes-enhance-section`（操作区）
+  - JS：`toggleHermesEnhancePanel()` / `openHermesCmd(cmd)` / `recheckHermes()`
+  - `refreshDashboard()` 中控制 `hermes-enhance-row` 显隐
+  - `refreshSettings()` 中控制 `s-hermes-enhance-section` 显隐
+
+**验证**：107 tests passed
