@@ -1,65 +1,66 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 43: Installer 安装后 Setup 阶段内联展示修复
+## 本轮完成内容 — Milestone 44 & 45: 统一聊天层 + 三模式消息共享
 
-### 问题
+### 第一阶段：主窗口最小可用聊天界面（Milestone 44）
 
-1. `hermes setup` 的 TUI 菜单文字（ANSI 转义码 + 菜单字符）在 `stdin=DEVNULL` 下仍会先输出到 stdout，被 install log 捕获并显示为"假 setup 界面"
-2. 用户看到不可交互的 setup 菜单文字，误以为系统卡住
-3. 原 `recheckAfterInstall()` 的 `installed_needs_setup` 分支调用 `restart_app()`（1500ms 后），过渡不明确
+**新增/修改文件**：
 
-### 修复方案
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `apps/shell/chat_api.py` | 新建 | ChatAPI 类：send_message、get_messages、clear_session |
+| `apps/core/runtime.py` | 修改 | 集成 TaskRunner 启动/停止（独立线程事件循环） |
+| `apps/shell/main_api.py` | 修改 | 组合 ChatAPI 方法暴露给 WebView |
+| `apps/shell/window.py` | 修改 | _STATUS_HTML 新增聊天面板 |
 
-**Python 侧**（`apps/installer/hermes_install.py`）：
-- `_read_output()` 新增 TUI 行检测 + 过滤逻辑
-- 用 `_tui_flag` 列表（可变闭包）追踪是否已打印通知
-- 首次检测到 TUI 行替换为单行中文通知，后续跳过
-
-**前端侧**（`apps/shell/window.py`）：
-- `recheckAfterInstall()` 中 `installed_needs_setup`/`setup_in_progress` 不再 `restart_app()`
-- 改为调用 `showPostInstallSetupUI()` 内联渲染配置引导区块
-- 新增 `openPostInstallSetup()` — 调用 `open_hermes_setup_terminal()`
-- 新增 `recheckAfterPostInstallSetup()` — 重检状态，就绪则 `restart_app()`
-
-### 正确用户流
+**消息发送链路**：
 
 ```
-安装完成
-  → recheckAfterInstall()
-  → 检测到 installed_needs_setup
-  → showPostInstallSetupUI() 内联渲染（隐藏日志区）
-      → [▶ 开始配置 Hermes]
-          → Terminal.app 新窗口（make new document）
-          → 用户在终端完成 hermes setup
-      → [🔄 已完成配置，重新检测]
-          → recheck_status()
-          → ready → restart_app() → 进入主界面
+用户输入 → sendMessage() [JS]
+  → ChatAPI.send_message() [Python]
+    → ChatSession.add_user_message()
+    → AppState.create_task()
+    → ChatSession.link_message_to_task()
+  → TaskRunner 轮询 PENDING 任务
+  → ExecutionStrategy.run() （Simulated 或 Hermes）
+  → AppState.update_task_status(COMPLETED)
+  → UI 轮询 get_messages()
+    → ChatAPI._sync_task_status_to_messages()
+    → ChatSession.add_assistant_message()
+  → 渲染 assistant 回复
 ```
 
-### 修改文件
+### 第二阶段：Bubble/Live2D 模式聊天入口（Milestone 45）
 
-| 文件 | 变更 |
-|------|------|
-| `apps/installer/hermes_install.py` | `_read_output()` 新增 TUI 输出过滤 |
-| `apps/shell/window.py` | `recheckAfterInstall()` 改为内联渲染；3 个新 JS 函数 |
-| `memory/progress/current-state.md` | 新增 Milestone 43 |
-| `memory/handoff/session-summary.md` | 本文件 |
+**修改文件**：
 
-### 当前状态
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `apps/shell/modes/bubble.py` | 修改 | 集成 ChatAPI，添加聊天输入框和消息预览 |
+| `apps/shell/modes/live2d.py` | 修改 | 集成 ChatAPI，添加聊天界面 |
 
-```
-installer 流程：
-  NOT_INSTALLED → 安装 → 安装完成
-    → installed_needs_setup: 内联渲染配置引导 UI（不重启）
-        → Terminal.app hermes setup
-        → 重检 → ready → restart_app()
-    → needs_init: restart_app() → 工作空间初始化
-    → ready: restart_app() → 主界面
-```
+**三模式消息共享**：
+
+- `ChatSession` 是单例，三模式通过同一个实例读写消息
+- 任一模式发送的消息，切换到其他模式后可见
+- 执行器信息统一暴露（🚀 Hermes / 🔬 模拟）
+
+**UI 差异化**：
+
+| 模式 | 尺寸 | 特点 |
+|------|------|------|
+| window | 560×620 | 完整仪表盘 + 聊天面板 |
+| bubble | 320×380 | 精简聊天 + 状态栏（置顶悬浮） |
+| live2d | 400×640 | 角色占位区 + 聊天区 + 工具栏 |
+
+### 执行器选择
+
+- `select_executor(runtime)` 根据 Hermes 就绪状态自动选择
+- Hermes 就绪 → `HermesExecutor`（调用 `hermes run --prompt`）
+- Hermes 未就绪 → `SimulatedExecutor`（模拟响应）
 
 ### 下一步建议
 
-1. **任务系统 E2E**：/y do → task 创建 → task 状态推进 → /y check → /y cancel 完整链路真实可测
-2. **bubble 模式完善**：补全气泡模式的任务状态展示和快捷操作
-3. **live2d renderer 占位**：WebView 中加载 PixiJS / CubismSDK 最小骨架
-4. **pytest-asyncio 修复**：安装 `pytest-asyncio`，让异步测试可以正常跑通（目前 21 个异步测试因缺少插件而跳过）
+1. **流式 token UI**：支持逐字显示 agent 回复
+2. **Live2D 渲染器**：接入 PixiJS / CubismSDK
+3. **任务系统 E2E**：完整任务生命周期测试

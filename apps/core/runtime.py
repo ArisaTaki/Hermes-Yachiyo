@@ -3,22 +3,28 @@
 Core Runtime 职责：
 - Hermes Agent 封装与生命周期
 - 任务编排与状态管理  
+- 聊天会话管理
 - Hermes 安装检测与引导
+- TaskRunner 启动与停止
 - 不直接暴露 HTTP 路由（由 apps/bridge 负责）
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import threading
 import time
 from typing import TYPE_CHECKING
 
+from apps.core.chat_session import ChatSession, get_chat_session
 from apps.core.state import AppState
 from apps.installer.hermes_check import check_hermes_installation
 from packages.protocol.enums import HermesInstallStatus
 from packages.protocol.install import HermesInstallInfo
 
 if TYPE_CHECKING:
+    from apps.core.task_runner import TaskRunner
     from apps.shell.config import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -27,19 +33,27 @@ logger = logging.getLogger(__name__)
 class HermesRuntime:
     """Hermes Agent 运行时
 
-    管理应用生命周期、任务状态、Hermes Agent 集成。
+    管理应用生命周期、任务状态、聊天会话、Hermes Agent 集成。
     """
 
     def __init__(self, config: "AppConfig") -> None:
         self._config = config
         self._state = AppState()
+        self._chat_session: ChatSession = get_chat_session()
         self._start_time: float | None = None
         self._running = False
         self._hermes_install_info: HermesInstallInfo | None = None
+        self._task_runner: "TaskRunner | None" = None
+        self._task_runner_thread: threading.Thread | None = None
+        self._task_runner_loop: asyncio.AbstractEventLoop | None = None
 
     @property
     def state(self) -> AppState:
         return self._state
+
+    @property
+    def chat_session(self) -> ChatSession:
+        return self._chat_session
 
     @property
     def running(self) -> bool:
@@ -55,6 +69,11 @@ class HermesRuntime:
     def hermes_install_info(self) -> HermesInstallInfo | None:
         """Hermes Agent 安装检测信息"""
         return self._hermes_install_info
+
+    @property
+    def task_runner(self) -> "TaskRunner | None":
+        """任务调度器（启动后才有）"""
+        return self._task_runner
 
     def start(self) -> None:
         """启动运行时"""
@@ -82,14 +101,74 @@ class HermesRuntime:
         # 3. 启动核心服务
         self._start_time = time.time()
         self._running = True
+        
+        # 4. 启动 TaskRunner（在独立线程的事件循环中）
+        self._start_task_runner()
+        
         logger.info("Hermes Runtime 已启动 (uptime=%.2fs)", self.uptime)
 
     def stop(self) -> None:
         """停止运行时"""
         if not self._running:
             return
+        
+        # 停止 TaskRunner
+        self._stop_task_runner()
+        
         self._running = False
         logger.info("Hermes Runtime 已停止")
+
+    def _start_task_runner(self) -> None:
+        """在独立线程中启动 TaskRunner 事件循环"""
+        from apps.core.executor import select_executor
+        from apps.core.task_runner import TaskRunner
+
+        executor = select_executor(self)
+        self._task_runner = TaskRunner(self._state, executor=executor)
+
+        def run_loop():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            self._task_runner_loop = loop
+            try:
+                loop.run_until_complete(self._task_runner.start())
+                loop.run_forever()
+            finally:
+                loop.close()
+
+        self._task_runner_thread = threading.Thread(
+            target=run_loop,
+            name="task-runner-thread",
+            daemon=True,
+        )
+        self._task_runner_thread.start()
+        logger.info(
+            "TaskRunner 已在独立线程启动 (executor=%s)",
+            type(self._task_runner.executor).__name__,
+        )
+
+    def _stop_task_runner(self) -> None:
+        """停止 TaskRunner 及其事件循环"""
+        if self._task_runner is None:
+            return
+
+        if self._task_runner_loop is not None:
+            # 在事件循环中调度停止
+            async def _stop():
+                await self._task_runner.stop()
+                self._task_runner_loop.stop()
+
+            self._task_runner_loop.call_soon_threadsafe(
+                lambda: asyncio.ensure_future(_stop(), loop=self._task_runner_loop)
+            )
+
+        if self._task_runner_thread is not None:
+            self._task_runner_thread.join(timeout=3.0)
+
+        self._task_runner = None
+        self._task_runner_loop = None
+        self._task_runner_thread = None
+        logger.info("TaskRunner 已停止")
 
     def get_status(self) -> dict:
         """获取运行时状态摘要"""

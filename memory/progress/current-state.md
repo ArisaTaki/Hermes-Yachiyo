@@ -1436,3 +1436,96 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 - ✅ `apps/shell/window.py`
 
 **验证**：68 同步测试通过
+
+### Milestone 44 — 主窗口最小可用聊天界面
+
+**目标**：建立统一 chat/session state，主窗口支持消息发送与接收。
+
+**新增/修改文件**：
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `apps/shell/chat_api.py` | 新建 | ChatAPI 类：send_message、get_messages、clear_session |
+| `apps/core/runtime.py` | 修改 | 集成 TaskRunner 启动/停止（独立线程事件循环） |
+| `apps/shell/main_api.py` | 修改 | 组合 ChatAPI 方法暴露给 WebView |
+| `apps/shell/window.py` | 修改 | _STATUS_HTML 新增聊天面板 |
+
+**架构设计**：
+
+1. **统一消息状态**：
+   - `ChatSession`（`apps/core/chat_session.py`）是三种模式共享的消息状态容器
+   - 消息通过 `task_id` 与任务关联
+   - window/bubble/live2d 都从同一个 ChatSession 读写
+
+2. **消息发送链路**：
+   ```
+   用户输入 → sendMessage() [JS]
+     → ChatAPI.send_message() [Python]
+       → ChatSession.add_user_message()
+       → AppState.create_task()
+       → ChatSession.link_message_to_task()
+     → TaskRunner 轮询 PENDING 任务
+     → ExecutionStrategy.run() （Simulated 或 Hermes）
+     → AppState.update_task_status(COMPLETED)
+     → UI 轮询 get_messages()
+       → ChatAPI._sync_task_status_to_messages()
+       → ChatSession.add_assistant_message()
+     → 渲染 assistant 回复
+   ```
+
+3. **执行器选择**：
+   - `select_executor(runtime)` 根据 Hermes 就绪状态自动选择
+   - Hermes 就绪 → `HermesExecutor`（调用 `hermes run --prompt`）
+   - Hermes 未就绪 → `SimulatedExecutor`（模拟响应）
+
+4. **UI 功能**：
+   - 输入框 + 发送按钮
+   - 消息列表（用户消息/assistant回复/系统消息）
+   - 发送中状态指示（pending/processing）
+   - 错误提示（failed 状态）
+   - 执行器类型显示（Hermes / 模拟）
+   - 清空会话按钮
+
+**当前执行器**：取决于 Hermes 安装状态
+- `HermesExecutor`：Hermes 就绪时使用
+- `SimulatedExecutor`：Hermes 未就绪时使用模拟
+
+**验证**：imports 测试通过
+
+### Milestone 45 — Bubble/Live2D 模式聊天入口
+
+**目标**：在已完成的共享 chat/session state 基础上，为 bubble 和 live2d 模式添加聊天功能。
+
+**修改文件**：
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `apps/shell/modes/bubble.py` | 修改 | 集成 ChatAPI，添加聊天输入框和消息预览 |
+| `apps/shell/modes/live2d.py` | 修改 | 集成 ChatAPI，添加聊天界面（角色区 + 消息区） |
+
+**架构设计**：
+
+1. **ChatAPI 复用**：
+   - BubbleWindowAPI 和 Live2DWindowAPI 都持有 `ChatAPI(runtime)` 实例
+   - 委托 `send_message()`、`get_messages()`、`clear_session()` 方法
+   - 通过同一个 `ChatSession` 单例共享消息状态
+
+2. **消息共享验证**：
+   ```
+   window 发送消息 → ChatSession 更新
+     ↓
+   切换到 bubble → get_messages() → 看到相同消息
+     ↓
+   切换到 live2d → get_messages() → 看到相同消息
+   ```
+
+3. **UI 差异化**：
+   - **window 模式**：完整仪表盘 + 聊天面板（560×620）
+   - **bubble 模式**：精简聊天 + 状态栏（320×380，置顶悬浮）
+   - **live2d 模式**：角色占位区 + 聊天区 + 工具栏（400×640）
+
+4. **执行器信息**：
+   - 三模式都暴露 `get_executor_info()` 方法
+   - UI 显示当前使用的执行器（🚀 Hermes / 🔬 模拟）
+
+**验证**：imports 测试通过
