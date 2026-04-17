@@ -7,6 +7,7 @@ pywebview 的使用不影响 core / bridge / protocol 的长期边界。
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -25,6 +26,9 @@ if TYPE_CHECKING:
 from packages.protocol.enums import HermesInstallStatus
 
 logger = logging.getLogger(__name__)
+
+_EXIT_DIALOG_TITLE = "退出 Hermes-Yachiyo？"
+_EXIT_DIALOG_MESSAGE = "退出会关闭主界面、对话窗口并停止后台服务。是否继续？"
 
 # 正常状态页 HTML
 _STATUS_HTML = """
@@ -1222,7 +1226,7 @@ def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
 
     html = _STATUS_HTML.replace("{{HOST}}", config.bridge_host).replace("{{PORT}}", str(config.bridge_port))
 
-    webview.create_window(
+    window = webview.create_window(
         title="Hermes-Yachiyo",
         html=html,
         width=560,
@@ -1230,7 +1234,67 @@ def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
         resizable=True,
         js_api=api,
     )
+    _bind_main_window_exit(window)
     webview.start(debug=False)
+
+
+def _bind_main_window_exit(main_window: object):
+    """为主窗口绑定退出确认，并在确认后关闭附属窗口。"""
+    exit_confirmed = False
+
+    def _on_closing() -> bool:
+        nonlocal exit_confirmed
+        if exit_confirmed:
+            return True
+
+        if not _confirm_main_window_exit(main_window):
+            logger.info("用户取消退出 Hermes-Yachiyo")
+            return False
+
+        exit_confirmed = True
+        logger.info("用户确认退出 Hermes-Yachiyo，正在关闭附属窗口")
+        _close_auxiliary_windows(main_window)
+        return True
+
+    main_window.events.closing += _on_closing
+    return _on_closing
+
+
+def _confirm_main_window_exit(main_window: object) -> bool:
+    """显示主窗口退出确认框。"""
+    try:
+        create_dialog = getattr(main_window, "create_confirmation_dialog", None)
+        if callable(create_dialog):
+            return bool(create_dialog(_EXIT_DIALOG_TITLE, _EXIT_DIALOG_MESSAGE))
+
+        evaluate_js = getattr(main_window, "evaluate_js", None)
+        if callable(evaluate_js):
+            return bool(evaluate_js(f"confirm({json.dumps(_EXIT_DIALOG_MESSAGE)})"))
+    except Exception as exc:
+        logger.warning("退出确认框显示失败，将继续退出: %s", exc)
+
+    return True
+
+
+def _close_auxiliary_windows(main_window: object) -> None:
+    """关闭聊天窗口及其他非主窗口的 pywebview 窗口。"""
+    try:
+        from apps.shell.chat_window import close_chat_window
+        close_chat_window()
+    except Exception as exc:
+        logger.warning("关闭聊天窗口时发生异常: %s", exc)
+
+    webview_module = globals().get("webview")
+    if webview_module is None:
+        return
+
+    for window in list(getattr(webview_module, "windows", []) or []):
+        if window is main_window:
+            continue
+        try:
+            window.destroy()
+        except Exception as exc:
+            logger.debug("关闭附属窗口失败: %s", exc)
 
 
 def create_installer_window(install_info: "HermesInstallInfo", config: "AppConfig") -> None:

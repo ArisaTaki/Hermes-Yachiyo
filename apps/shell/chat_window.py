@@ -142,6 +142,30 @@ def open_chat_window(runtime: "HermesRuntime") -> bool:
         return True
 
 
+def close_chat_window() -> bool:
+    """关闭独立聊天窗口。
+
+    返回值表示调用时是否存在需要关闭的聊天窗口。
+    """
+    global _chat_window
+
+    if not _HAS_WEBVIEW:
+        return False
+
+    with _chat_window_lock:
+        window = _chat_window
+        if window is None:
+            return False
+        _chat_window = None
+
+    try:
+        window.destroy()
+        logger.info("聊天窗口已关闭")
+    except Exception as exc:
+        logger.warning("关闭聊天窗口失败: %s", exc)
+    return True
+
+
 # ── 聊天窗口 HTML ─────────────────────────────────────────────────────────────
 
 _CHAT_HTML = r"""
