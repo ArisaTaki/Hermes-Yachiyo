@@ -150,6 +150,7 @@ class ChatStore:
                 FROM chat_sessions s
                 LEFT JOIN chat_messages m ON m.session_id = s.session_id
                 GROUP BY s.session_id
+                HAVING COUNT(m.message_id) > 0
                 ORDER BY s.created_at DESC
                 LIMIT ?
                 """,

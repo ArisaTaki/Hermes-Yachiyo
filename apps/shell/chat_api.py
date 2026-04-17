@@ -300,6 +300,7 @@ class ChatAPI:
                 "session_id": next_session_id,
                 "cancelled_tasks": cancelled_count,
                 "remaining_sessions": len(remaining),
+                "empty": not remaining,
             }
         except Exception as exc:
             logger.error("删除当前会话失败: %s", exc)

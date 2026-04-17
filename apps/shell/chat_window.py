@@ -297,6 +297,8 @@ _CHAT_HTML = r"""
             font-size: 0.82em;
         }
         .header-btn:hover { border-color: #888; color: #ccc; }
+        .header-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .header-btn:disabled:hover { border-color: #444; color: #888; }
         .session-select {
             background: #2d2d54;
             color: #aaa;
@@ -317,7 +319,7 @@ _CHAT_HTML = r"""
             <select class="session-select" id="session-select" onchange="switchSession(this.value)" title="切换会话"></select>
             <span class="executor" id="executor-badge">—</span>
             <button class="header-btn" onclick="newChat()">新对话</button>
-            <button class="header-btn" onclick="deleteChat()" title="删除此对话">删除</button>
+            <button class="header-btn" id="delete-session-btn" onclick="deleteChat()" title="删除此对话">删除</button>
         </div>
     </div>
     <div class="messages" id="messages">
@@ -334,6 +336,11 @@ _CHAT_HTML = r"""
 let polling = null;
 let sending = false;
 const POLL_INTERVAL_MS = 500;
+const TYPE_BASE_CHARS_PER_SECOND = 85;
+const TYPE_MAX_CHARS_PER_SECOND = 360;
+let typewriterFrame = null;
+let typewriterLastTs = 0;
+const messageRenderState = new Map();
 
 async function sendMessage() {
     if (sending) return;
@@ -384,11 +391,15 @@ async function refreshMessages() {
 function renderMessages(msgs) {
     const container = document.getElementById('messages');
     if (!msgs || msgs.length === 0) {
+        messageRenderState.clear();
         container.innerHTML = '<div class="empty-hint">发送消息开始对话 ✨</div>';
         return;
     }
     let html = '';
+    let needsTypewriter = false;
+    const visibleIds = new Set();
     for (const m of msgs) {
+        visibleIds.add(m.id);
         const label = m.role === 'user' ? '你' : (m.role === 'assistant' ? 'Yachiyo' : '系统');
         const isProcessing = m.status === 'processing';
         const sc = m.status === 'failed' ? 'error' : (isProcessing ? 'processing' : (m.status === 'pending' ? 'pending' : ''));
@@ -396,26 +407,101 @@ function renderMessages(msgs) {
 
         let displayContent;
         if (isProcessing && m.role === 'assistant') {
-            displayContent = m.content
-                ? escapeHtml(m.content)
-                : '<span class="typing-indicator"><span>.</span><span>.</span><span>.</span></span>';
+            displayContent = renderAssistantContent(m);
+            needsTypewriter = needsTypewriter || shouldContinueTyping(m.id);
+        } else if (m.role === 'assistant' && m.content) {
+            displayContent = renderAssistantContent(m);
+            needsTypewriter = needsTypewriter || shouldContinueTyping(m.id);
         } else {
+            messageRenderState.delete(m.id);
             displayContent = escapeHtml(m.content);
         }
 
         html += '<div class="msg ' + m.role + ' ' + sc + '">';
         html += '<div class="role">' + label + suffix + '</div>';
-        html += '<div class="content">' + displayContent + '</div>';
+        html += '<div class="content" data-message-id="' + escapeHtml(m.id) + '">' + displayContent + '</div>';
         html += '</div>';
+    }
+    for (const id of Array.from(messageRenderState.keys())) {
+        if (!visibleIds.has(id)) messageRenderState.delete(id);
     }
     container.innerHTML = html;
     container.scrollTop = container.scrollHeight;
+    if (needsTypewriter) startTypewriter();
 }
 
 function escapeHtml(t) {
     const d = document.createElement('div');
     d.textContent = t;
     return d.innerHTML;
+}
+
+function renderAssistantContent(m) {
+    if (!m.content) {
+        if (!messageRenderState.has(m.id)) {
+            messageRenderState.set(m.id, { shown: '', target: '' });
+        }
+        return '<span class="typing-indicator"><span>.</span><span>.</span><span>.</span></span>';
+    }
+    let state = messageRenderState.get(m.id);
+    if (!state) {
+        state = {
+            shown: m.status === 'processing' ? '' : m.content,
+            target: m.content
+        };
+        messageRenderState.set(m.id, state);
+    } else if (state.target !== m.content) {
+        state.target = m.content;
+        if (!state.target.startsWith(state.shown)) {
+            state.shown = m.status === 'processing' ? '' : state.target;
+        }
+    }
+    return escapeHtml(state.shown);
+}
+
+function shouldContinueTyping(id) {
+    const state = messageRenderState.get(id);
+    return !!state && state.shown.length < state.target.length;
+}
+
+function startTypewriter() {
+    if (typewriterFrame) return;
+    typewriterLastTs = 0;
+    typewriterFrame = requestAnimationFrame(tickTypewriter);
+}
+
+function tickTypewriter(ts) {
+    if (!typewriterLastTs) typewriterLastTs = ts;
+    const elapsed = Math.max(0.016, (ts - typewriterLastTs) / 1000);
+    typewriterLastTs = ts;
+    let pending = false;
+
+    for (const [id, state] of messageRenderState.entries()) {
+        if (state.shown.length >= state.target.length) continue;
+        const remaining = state.target.length - state.shown.length;
+        const speed = Math.min(
+            TYPE_MAX_CHARS_PER_SECOND,
+            TYPE_BASE_CHARS_PER_SECOND + Math.floor(remaining / 4)
+        );
+        const step = Math.max(1, Math.floor(speed * elapsed));
+        state.shown = state.target.slice(0, state.shown.length + step);
+        const el = document.querySelector('[data-message-id="' + cssEscape(id) + '"]');
+        if (el) el.innerHTML = escapeHtml(state.shown);
+        if (state.shown.length < state.target.length) pending = true;
+    }
+
+    const container = document.getElementById('messages');
+    if (container) container.scrollTop = container.scrollHeight;
+    if (pending) {
+        typewriterFrame = requestAnimationFrame(tickTypewriter);
+    } else {
+        typewriterFrame = null;
+    }
+}
+
+function cssEscape(value) {
+    if (window.CSS && CSS.escape) return CSS.escape(value);
+    return String(value).replace(/"/g, '\\"');
 }
 
 function setStatus(t) {
@@ -441,7 +527,7 @@ async function deleteChat() {
         if (!r.ok) throw new Error(r.error || '删除失败');
         await loadSessions();
         await refreshMessages();
-        setStatus('已删除此对话');
+        setStatus(r.empty ? '暂无对话' : '已删除此对话');
     } catch(e) {
         setStatus('❌ ' + e.message);
     }
@@ -481,6 +567,17 @@ async function loadSessions() {
         const sel = document.getElementById('session-select');
         if (!sel) return;
         sel.innerHTML = '';
+        const deleteBtn = document.getElementById('delete-session-btn');
+        if (!r.sessions || r.sessions.length === 0) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = '无对话';
+            opt.selected = true;
+            sel.appendChild(opt);
+            if (deleteBtn) deleteBtn.disabled = true;
+            return;
+        }
+        if (deleteBtn) deleteBtn.disabled = false;
         for (const s of r.sessions) {
             const opt = document.createElement('option');
             opt.value = s.session_id;

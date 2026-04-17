@@ -18,6 +18,16 @@ class TestChatStore:
     def test_create_and_list_sessions(self, store: ChatStore):
         store.create_session("s1", title="测试会话")
         store.create_session("s2", title="另一个会话")
+        store.save_message(StoredMessage(
+            message_id="m1", session_id="s1", role="user",
+            content="hi", status="completed", task_id=None,
+            error=None, created_at="2026-01-01T00:00:00+00:00",
+        ))
+        store.save_message(StoredMessage(
+            message_id="m2", session_id="s2", role="user",
+            content="hello", status="completed", task_id=None,
+            error=None, created_at="2026-01-01T00:00:01+00:00",
+        ))
         sessions = store.list_sessions()
         assert len(sessions) == 2
         assert sessions[0].session_id in ("s1", "s2")
@@ -72,8 +82,13 @@ class TestChatStore:
     def test_duplicate_session_ignored(self, store: ChatStore):
         store.create_session("s1", title="first")
         store.create_session("s1", title="second")  # INSERT OR IGNORE
-        sessions = store.list_sessions()
-        assert len(sessions) == 1
+        session = store.get_session("s1")
+        assert session is not None
+        assert session.title == "first"
+
+    def test_list_sessions_hides_empty_sessions(self, store: ChatStore):
+        store.create_session("empty")
+        assert store.list_sessions() == []
 
     def test_message_count_in_session_list(self, store: ChatStore):
         store.create_session("s1")
@@ -112,6 +127,11 @@ class TestChatStore:
 
     def test_hermes_session_id_in_list_sessions(self, store: ChatStore):
         store.create_session("s1")
+        store.save_message(StoredMessage(
+            message_id="m1", session_id="s1", role="user",
+            content="hi", status="completed", task_id=None,
+            error=None, created_at="2026-01-01T00:00:00+00:00",
+        ))
         store.update_hermes_session_id("s1", "hermes_xyz")
         sessions = store.list_sessions()
         assert sessions[0].hermes_session_id == "hermes_xyz"

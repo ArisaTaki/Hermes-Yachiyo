@@ -174,6 +174,8 @@ def test_delete_current_session_removes_session_and_cancels_active_task(tmp_path
         assert deleted["deleted_session_id"] == old_session_id
         assert deleted["session_id"] != old_session_id
         assert deleted["cancelled_tasks"] == 1
+        assert deleted["remaining_sessions"] == 0
+        assert deleted["empty"] is True
         assert runtime.state.get_task(task_id).status == TaskStatus.CANCELLED
         assert runtime.cancelled_runner_tasks == [task_id]
         assert store.get_session(old_session_id) is None
@@ -198,6 +200,8 @@ def test_delete_current_session_switches_to_remaining_recent_session(tmp_path):
         assert deleted["ok"] is True
         assert deleted["deleted_session_id"] == "s1"
         assert deleted["session_id"] == "s2"
+        assert deleted["remaining_sessions"] == 1
+        assert deleted["empty"] is False
         assert runtime.chat_session.session_id == "s2"
         assert api.get_messages()["messages"][0]["content"] == "保留的会话"
     finally:
