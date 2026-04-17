@@ -122,6 +122,16 @@ _HERMES_META_PREFIXES = (
     "Resume this session",
     "hermes --resume",
 )
+_STREAM_BRIDGE_FALLBACK_MARKERS = (
+    "无法定位 Hermes Python 解释器",
+    "Hermes streaming bridge 文件不存在",
+    "Hermes Python 解释器不存在",
+    "启动 Hermes streaming bridge 失败",
+    "ModuleNotFoundError",
+    "ImportError",
+    "No module named",
+    "cannot import",
+)
 
 
 def _clean_hermes_line(line: str, strip_stream_padding: bool = False) -> Optional[str]:
@@ -439,6 +449,20 @@ async def _invoke_hermes_stream_bridge(
         )
 
 
+def _should_fallback_from_stream_bridge(result: HermesInvokeResult) -> bool:
+    """判断 stream bridge 失败是否应回退到普通 CLI。"""
+    if result.success:
+        return False
+    detail = "\n".join(part for part in (result.error_message, result.stderr) if part)
+    if any(marker in detail for marker in _STREAM_BRIDGE_FALLBACK_MARKERS):
+        return True
+    return (
+        not result.stdout
+        and result.returncode not in (-1, 0)
+        and "Hermes streaming bridge 执行失败" in detail
+    )
+
+
 async def invoke_hermes_cli(
     description: str,
     hermes_session_id: Optional[str] = None,
@@ -454,7 +478,8 @@ async def invoke_hermes_cli(
       - 返回 HermesInvokeResult（成功或失败均返回，不抛出）
 
     调用命令：hermes chat -q "<query>" -Q --source tool [--resume SESSION_ID]
-    若传入 on_update，则使用 Hermes streaming bridge 读取 agent token 回调。
+    若传入 on_update，则优先使用 Hermes streaming bridge 读取 agent token 回调；
+    bridge 不可用时回退普通 CLI，仍返回最终结果。
 
     Args:
         description: 用户查询字符串，直接作为 -q 参数传入
@@ -465,10 +490,22 @@ async def invoke_hermes_cli(
         HermesInvokeResult（不抛出异常，失败信息写入 result.error_message）
     """
     if on_update is not None:
-        return await _invoke_hermes_stream_bridge(
+        stream_result = await _invoke_hermes_stream_bridge(
             description,
             hermes_session_id,
             on_update,
+        )
+        if stream_result.success or not _should_fallback_from_stream_bridge(stream_result):
+            return stream_result
+
+        logger.warning(
+            "Hermes streaming bridge 不可用，回退普通 CLI: %s",
+            stream_result.error_message,
+        )
+        return await invoke_hermes_cli(
+            description,
+            hermes_session_id=hermes_session_id,
+            on_update=None,
         )
 
     cmd = [*_HERMES_CMD, description, *_HERMES_FLAGS]

@@ -659,13 +659,20 @@ function renderInlineMarkdown(text) {
 
 function sanitizeMarkdownUrl(url) {
     const value = String(url || '').trim();
-    const normalized = value.replace(/&amp;/g, '&').toLowerCase();
-    if (
-        normalized.startsWith('http://') ||
-        normalized.startsWith('https://') ||
-        normalized.startsWith('mailto:')
-    ) {
-        return value;
+    if (!value) {
+        return '';
+    }
+    try {
+        const parsed = new URL(value);
+        if (
+            parsed.protocol === 'http:' ||
+            parsed.protocol === 'https:' ||
+            parsed.protocol === 'mailto:'
+        ) {
+            return value;
+        }
+    } catch (e) {
+        return '';
     }
     return '';
 }

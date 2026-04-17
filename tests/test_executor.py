@@ -16,6 +16,7 @@ from apps.core.executor import (
     _parse_hermes_title,
     _resolve_hermes_python,
 )
+import apps.core.executor as executor_mod
 from packages.protocol.enums import RiskLevel, TaskStatus, TaskType
 from packages.protocol.schemas import TaskInfo
 from datetime import datetime, timezone
@@ -202,3 +203,80 @@ class TestHermesStreamBridgeHelpers:
         launcher.write_text(f"#!{py}\n")
 
         assert _resolve_hermes_python(str(launcher)) == str(py)
+
+    @pytest.mark.asyncio
+    async def test_invoke_falls_back_to_cli_when_stream_bridge_unavailable(
+        self,
+        monkeypatch,
+    ):
+        async def fake_stream_bridge(description, hermes_session_id, on_update):
+            return HermesInvokeResult(
+                success=False,
+                returncode=-1,
+                error_message="无法定位 Hermes Python 解释器，不能启用流式 bridge",
+            )
+
+        class FakeProcess:
+            returncode = 0
+
+            async def communicate(self):
+                return (b"fallback output\nsession_id: fallback_sess\n", b"")
+
+        calls = []
+
+        async def fake_create_subprocess_exec(*cmd, **kwargs):
+            calls.append(cmd)
+            return FakeProcess()
+
+        monkeypatch.setattr(
+            executor_mod,
+            "_invoke_hermes_stream_bridge",
+            fake_stream_bridge,
+        )
+        monkeypatch.setattr(
+            executor_mod.asyncio,
+            "create_subprocess_exec",
+            fake_create_subprocess_exec,
+        )
+        updates = []
+
+        result = await executor_mod.invoke_hermes_cli("hello", on_update=updates.append)
+
+        assert result.success is True
+        assert result.output == "fallback output"
+        assert result.hermes_session_id == "fallback_sess"
+        assert len(calls) == 1
+        assert calls[0][:3] == tuple(_HERMES_CMD)
+        assert "hello" in calls[0]
+        assert updates == []
+
+    @pytest.mark.asyncio
+    async def test_invoke_does_not_fallback_for_task_level_stream_failure(
+        self,
+        monkeypatch,
+    ):
+        async def fake_stream_bridge(description, hermes_session_id, on_update):
+            return HermesInvokeResult(
+                success=False,
+                returncode=1,
+                error_message="Hermes runtime credentials are not available",
+            )
+
+        async def fake_create_subprocess_exec(*cmd, **kwargs):
+            raise AssertionError("non-stream fallback should not run")
+
+        monkeypatch.setattr(
+            executor_mod,
+            "_invoke_hermes_stream_bridge",
+            fake_stream_bridge,
+        )
+        monkeypatch.setattr(
+            executor_mod.asyncio,
+            "create_subprocess_exec",
+            fake_create_subprocess_exec,
+        )
+
+        result = await executor_mod.invoke_hermes_cli("hello", on_update=lambda _: None)
+
+        assert result.success is False
+        assert result.error_message == "Hermes runtime credentials are not available"

@@ -11,6 +11,15 @@ def test_chat_window_renders_messages_as_markdown():
     assert ".markdown pre" in _CHAT_HTML
 
 
+def test_chat_window_markdown_links_use_url_protocol_whitelist():
+    assert "function sanitizeMarkdownUrl(url)" in _CHAT_HTML
+    assert "const parsed = new URL(value);" in _CHAT_HTML
+    assert "parsed.protocol === 'http:'" in _CHAT_HTML
+    assert "parsed.protocol === 'https:'" in _CHAT_HTML
+    assert "parsed.protocol === 'mailto:'" in _CHAT_HTML
+    assert ".replace(/&amp;/g, '&')" not in _CHAT_HTML
+
+
 def test_chat_window_scroll_following_respects_user_position():
     assert "SCROLL_BOTTOM_THRESHOLD" in _CHAT_HTML
     assert "bindMessageScroll()" in _CHAT_HTML
