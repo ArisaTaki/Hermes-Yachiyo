@@ -193,7 +193,7 @@ _CHAT_HTML = r"""
             line-height: 1.6;
             max-width: 88%;
             word-break: break-word;
-            white-space: pre-wrap;
+            white-space: normal;
         }
         .msg.user {
             background: #3a4a7a;
@@ -218,6 +218,66 @@ _CHAT_HTML = r"""
             color: #888;
             margin-bottom: 3px;
         }
+        .msg .content { white-space: normal; }
+        .markdown p { margin: 0 0 0.75em; }
+        .markdown p:last-child,
+        .markdown ul:last-child,
+        .markdown ol:last-child,
+        .markdown blockquote:last-child,
+        .markdown pre:last-child { margin-bottom: 0; }
+        .markdown h1,
+        .markdown h2,
+        .markdown h3 {
+            color: #eef2f2;
+            font-weight: 700;
+            line-height: 1.35;
+            margin: 0.95em 0 0.35em;
+        }
+        .markdown h1:first-child,
+        .markdown h2:first-child,
+        .markdown h3:first-child { margin-top: 0; }
+        .markdown h1 { font-size: 1.25em; }
+        .markdown h2 { font-size: 1.14em; }
+        .markdown h3 { font-size: 1.05em; }
+        .markdown ul,
+        .markdown ol {
+            margin: 0.2em 0 0.75em 1.35em;
+            padding-left: 0.55em;
+        }
+        .markdown li { margin: 0.15em 0; }
+        .markdown strong { color: #f0f4f4; font-weight: 700; }
+        .markdown em { color: #e2e8e8; }
+        .markdown code {
+            background: rgba(8, 12, 20, 0.45);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 4px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 0.92em;
+            padding: 0.08em 0.28em;
+        }
+        .markdown pre {
+            background: rgba(8, 12, 20, 0.62);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 6px;
+            margin: 0.45em 0 0.85em;
+            overflow-x: auto;
+            padding: 8px 10px;
+            white-space: pre;
+        }
+        .markdown pre code {
+            background: transparent;
+            border: none;
+            display: block;
+            padding: 0;
+            white-space: pre;
+        }
+        .markdown blockquote {
+            border-left: 3px solid #90ee90;
+            color: #c7d0d0;
+            margin: 0.4em 0 0.8em;
+            padding-left: 0.8em;
+        }
+        .markdown a { color: #9cbcff; text-decoration: underline; }
         .msg.error { border-left-color: #ff6b6b; }
         .msg.error .content { color: #ffaaaa; }
         .msg.pending { opacity: 0.7; }
@@ -338,8 +398,10 @@ let sending = false;
 const POLL_INTERVAL_MS = 500;
 const TYPE_BASE_CHARS_PER_SECOND = 85;
 const TYPE_MAX_CHARS_PER_SECOND = 360;
+const SCROLL_BOTTOM_THRESHOLD = 72;
 let typewriterFrame = null;
 let typewriterLastTs = 0;
+let stickToBottom = true;
 const messageRenderState = new Map();
 
 async function sendMessage() {
@@ -360,6 +422,7 @@ async function sendMessage() {
         if (!r.ok) throw new Error(r.error || '发送失败');
         input.value = '';
         setStatus('等待回复...');
+        stickToBottom = true;
         await refreshMessages();
         await loadSessions();
         startPolling();
@@ -393,8 +456,11 @@ function renderMessages(msgs) {
     if (!msgs || msgs.length === 0) {
         messageRenderState.clear();
         container.innerHTML = '<div class="empty-hint">发送消息开始对话 ✨</div>';
+        stickToBottom = true;
         return;
     }
+    const shouldScroll = shouldAutoScroll(container);
+    const previousScrollTop = container.scrollTop;
     let html = '';
     let needsTypewriter = false;
     const visibleIds = new Set();
@@ -414,19 +480,23 @@ function renderMessages(msgs) {
             needsTypewriter = needsTypewriter || shouldContinueTyping(m.id);
         } else {
             messageRenderState.delete(m.id);
-            displayContent = escapeHtml(m.content);
+            displayContent = renderMarkdown(m.content);
         }
 
         html += '<div class="msg ' + m.role + ' ' + sc + '">';
         html += '<div class="role">' + label + suffix + '</div>';
-        html += '<div class="content" data-message-id="' + escapeHtml(m.id) + '">' + displayContent + '</div>';
+        html += '<div class="content markdown" data-message-id="' + escapeHtml(m.id) + '">' + displayContent + '</div>';
         html += '</div>';
     }
     for (const id of Array.from(messageRenderState.keys())) {
         if (!visibleIds.has(id)) messageRenderState.delete(id);
     }
     container.innerHTML = html;
-    container.scrollTop = container.scrollHeight;
+    if (shouldScroll) {
+        scrollToBottom(container);
+    } else {
+        container.scrollTop = previousScrollTop;
+    }
     if (needsTypewriter) startTypewriter();
 }
 
@@ -434,6 +504,145 @@ function escapeHtml(t) {
     const d = document.createElement('div');
     d.textContent = t;
     return d.innerHTML;
+}
+
+function renderMarkdown(text) {
+    const source = String(text || '').replace(/\r\n/g, '\n');
+    if (!source) return '';
+
+    const lines = source.split('\n');
+    let html = '';
+    let paragraph = [];
+    let listType = null;
+    let inCode = false;
+    let codeLines = [];
+
+    function flushParagraph() {
+        if (paragraph.length === 0) return;
+        html += '<p>' + paragraph.map(renderInlineMarkdown).join('<br>') + '</p>';
+        paragraph = [];
+    }
+
+    function closeList() {
+        if (!listType) return;
+        html += '</' + listType + '>';
+        listType = null;
+    }
+
+    function openList(type) {
+        if (listType === type) return;
+        closeList();
+        listType = type;
+        html += '<' + type + '>';
+    }
+
+    function flushCode() {
+        html += '<pre><code>' + escapeHtml(codeLines.join('\n')) + '</code></pre>';
+        codeLines = [];
+        inCode = false;
+    }
+
+    for (const line of lines) {
+        if (line.trim().startsWith('```')) {
+            if (inCode) {
+                flushCode();
+            } else {
+                flushParagraph();
+                closeList();
+                inCode = true;
+                codeLines = [];
+            }
+            continue;
+        }
+
+        if (inCode) {
+            codeLines.push(line);
+            continue;
+        }
+
+        if (!line.trim()) {
+            flushParagraph();
+            closeList();
+            continue;
+        }
+
+        const heading = line.match(/^(#{1,3})\s+(.+)$/);
+        if (heading) {
+            flushParagraph();
+            closeList();
+            const level = heading[1].length;
+            html += '<h' + level + '>' + renderInlineMarkdown(heading[2]) + '</h' + level + '>';
+            continue;
+        }
+
+        const quote = line.match(/^>\s?(.*)$/);
+        if (quote) {
+            flushParagraph();
+            closeList();
+            html += '<blockquote>' + renderInlineMarkdown(quote[1]) + '</blockquote>';
+            continue;
+        }
+
+        const unordered = line.match(/^\s*[-*+]\s+(.+)$/);
+        if (unordered) {
+            flushParagraph();
+            openList('ul');
+            html += '<li>' + renderInlineMarkdown(unordered[1]) + '</li>';
+            continue;
+        }
+
+        const ordered = line.match(/^\s*\d+\.\s+(.+)$/);
+        if (ordered) {
+            flushParagraph();
+            openList('ol');
+            html += '<li>' + renderInlineMarkdown(ordered[1]) + '</li>';
+            continue;
+        }
+
+        closeList();
+        paragraph.push(line);
+    }
+
+    if (inCode) flushCode();
+    flushParagraph();
+    closeList();
+    return html;
+}
+
+function renderInlineMarkdown(text) {
+    const codes = [];
+    let value = escapeHtml(text);
+    value = value.replace(/`([^`]+)`/g, function(_, code) {
+        const token = '\u0000CODE' + codes.length + '\u0000';
+        codes.push('<code>' + code + '</code>');
+        return token;
+    });
+    value = value.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, function(_, label, url) {
+        const safeUrl = sanitizeMarkdownUrl(url);
+        if (!safeUrl) return label;
+        return '<a href="' + safeUrl + '" target="_blank" rel="noreferrer">' + label + '</a>';
+    });
+    value = value.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    value = value.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+    value = value.replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, '$1<em>$2</em>');
+    value = value.replace(/(^|[^_])_([^_\s][^_]*?)_/g, '$1<em>$2</em>');
+    codes.forEach(function(code, i) {
+        value = value.replace('\u0000CODE' + i + '\u0000', code);
+    });
+    return value;
+}
+
+function sanitizeMarkdownUrl(url) {
+    const value = String(url || '').trim();
+    const normalized = value.replace(/&amp;/g, '&').toLowerCase();
+    if (
+        normalized.startsWith('http://') ||
+        normalized.startsWith('https://') ||
+        normalized.startsWith('mailto:')
+    ) {
+        return value;
+    }
+    return '';
 }
 
 function renderAssistantContent(m) {
@@ -456,7 +665,7 @@ function renderAssistantContent(m) {
             state.shown = m.status === 'processing' ? '' : state.target;
         }
     }
-    return escapeHtml(state.shown);
+    return renderMarkdown(state.shown);
 }
 
 function shouldContinueTyping(id) {
@@ -486,12 +695,12 @@ function tickTypewriter(ts) {
         const step = Math.max(1, Math.floor(speed * elapsed));
         state.shown = state.target.slice(0, state.shown.length + step);
         const el = document.querySelector('[data-message-id="' + cssEscape(id) + '"]');
-        if (el) el.innerHTML = escapeHtml(state.shown);
+        if (el) el.innerHTML = renderMarkdown(state.shown);
         if (state.shown.length < state.target.length) pending = true;
     }
 
     const container = document.getElementById('messages');
-    if (container) container.scrollTop = container.scrollHeight;
+    if (container && shouldAutoScroll(container)) scrollToBottom(container);
     if (pending) {
         typewriterFrame = requestAnimationFrame(tickTypewriter);
     } else {
@@ -502,6 +711,27 @@ function tickTypewriter(ts) {
 function cssEscape(value) {
     if (window.CSS && CSS.escape) return CSS.escape(value);
     return String(value).replace(/"/g, '\\"');
+}
+
+function isNearBottom(container) {
+    return container.scrollHeight - container.scrollTop - container.clientHeight <= SCROLL_BOTTOM_THRESHOLD;
+}
+
+function shouldAutoScroll(container) {
+    return stickToBottom || isNearBottom(container);
+}
+
+function scrollToBottom(container) {
+    container.scrollTop = container.scrollHeight;
+    stickToBottom = true;
+}
+
+function bindMessageScroll() {
+    const container = document.getElementById('messages');
+    if (!container) return;
+    container.addEventListener('scroll', function() {
+        stickToBottom = isNearBottom(container);
+    }, { passive: true });
 }
 
 function setStatus(t) {
@@ -526,6 +756,7 @@ async function deleteChat() {
         const r = await window.pywebview.api.delete_current_session();
         if (!r.ok) throw new Error(r.error || '删除失败');
         await loadSessions();
+        stickToBottom = true;
         await refreshMessages();
         setStatus(r.empty ? '暂无对话' : '已删除此对话');
     } catch(e) {
@@ -539,6 +770,7 @@ async function newChat() {
         stopPolling();
         await window.pywebview.api.new_session();
         await loadSessions();
+        stickToBottom = true;
         await refreshMessages();
         setStatus('新对话已创建');
         const input = document.getElementById('input');
@@ -597,6 +829,7 @@ async function switchSession(sessionId) {
         const r = await window.pywebview.api.load_session(sessionId);
         if (!r.ok) { setStatus('❌ ' + (r.error || '切换失败')); return; }
         await loadSessions();
+        stickToBottom = true;
         await refreshMessages();
         setStatus('已切换会话');
     } catch(e) {
@@ -607,6 +840,7 @@ async function switchSession(sessionId) {
 // 启动
 document.addEventListener('DOMContentLoaded', function() {
     setTimeout(function() {
+        bindMessageScroll();
         loadExecutor();
         loadSessions();
         refreshMessages();
