@@ -450,7 +450,7 @@ class MainWindowAPI:
         return {"ok": ok}
 
     def quit_app(self) -> Dict[str, Any]:
-        """关闭主窗口及附属窗口，触发正常应用清理流程。"""
+        """执行退出前清理；主窗口由前端随后关闭。"""
         try:
             from apps.shell.window import request_app_exit
             request_app_exit()

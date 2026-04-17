@@ -543,10 +543,10 @@ _STATUS_HTML = """
         if (!confirm('退出会关闭主界面、对话窗口并停止后台服务。是否继续？')) return;
         try {
             if (window.pywebview && window.pywebview.api) {
-                await window.pywebview.api.quit_app();
-            } else {
-                window.close();
+                const r = await window.pywebview.api.quit_app();
+                if (r && r.ok === false) throw new Error(r.error || '退出失败');
             }
+            setTimeout(function() { window.close(); }, 0);
         } catch(e) {
             console.error('quitApp error:', e);
             window.close();
@@ -1286,18 +1286,12 @@ def _bind_main_window_exit(main_window: object):
 
 
 def request_app_exit() -> None:
-    """由页面内退出按钮触发的完整退出流程。"""
+    """由页面内退出按钮触发的退出前清理。
+
+    当前主窗口必须由前端在 API 返回后关闭。不要在 pywebview API 回调里
+    destroy 当前窗口，否则 macOS WebView 可能卡在等待 JS promise 返回的状态。
+    """
     _close_auxiliary_windows(main_window=None)
-
-    webview_module = globals().get("webview")
-    if webview_module is None:
-        return
-
-    for window in list(getattr(webview_module, "windows", []) or []):
-        try:
-            window.destroy()
-        except Exception as exc:
-            logger.debug("关闭窗口失败: %s", exc)
 
 
 def _close_auxiliary_windows(main_window: object | None) -> None:
