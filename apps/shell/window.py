@@ -8,6 +8,7 @@ pywebview 的使用不影响 core / bridge / protocol 的长期边界。
 from __future__ import annotations
 
 import logging
+import threading
 from typing import TYPE_CHECKING
 
 try:
@@ -27,6 +28,9 @@ from packages.protocol.enums import HermesInstallStatus
 logger = logging.getLogger(__name__)
 
 _EXIT_DIALOG_MESSAGE = "退出会关闭主界面、对话窗口并停止后台服务。是否继续？"
+_EXIT_DELAY_SECONDS = 0.1
+_exit_timer: threading.Timer | None = None
+_exit_timer_lock = threading.Lock()
 
 # 正常状态页 HTML
 _STATUS_HTML = """
@@ -126,6 +130,43 @@ _STATUS_HTML = """
             font-size: 0.86em;
         }
         .app-exit-btn:hover { border-color: #dd6b7a; color: #ffb1bd; background: #2d242e; }
+        .exit-dialog-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(8, 8, 16, 0.55);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            z-index: 20;
+        }
+        .exit-dialog-backdrop.visible { display: flex; }
+        .exit-dialog {
+            background: #252548;
+            border: 1px solid #56568a;
+            border-radius: 8px;
+            max-width: 360px;
+            padding: 18px;
+            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+        }
+        .exit-dialog h3 { color: #ffb1bd; font-size: 1.05em; margin-bottom: 8px; }
+        .exit-dialog p { color: #c8c8d8; font-size: 0.9em; margin-bottom: 14px; }
+        .exit-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+        .exit-dialog-actions button {
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.88em;
+            padding: 7px 12px;
+        }
+        .exit-cancel-btn { background: #33335c; border: 1px solid #55557a; color: #ddd; }
+        .exit-confirm-btn { background: #53303a; border: 1px solid #b85a6a; color: #ffd3da; }
+        .exit-confirm-btn:disabled { cursor: wait; opacity: 0.65; }
+        .exit-dialog-error {
+            color: #ffaaaa;
+            font-size: 0.82em;
+            min-height: 1.2em;
+            margin-bottom: 10px;
+        }
         .executor { color: #6a9a6a; }
         .footer {
             text-align: center;
@@ -367,6 +408,18 @@ _STATUS_HTML = """
         </div>
     </div>
 
+    <div class="exit-dialog-backdrop" id="exit-dialog" role="dialog" aria-modal="true">
+        <div class="exit-dialog">
+            <h3>退出 Hermes-Yachiyo？</h3>
+            <p>退出会关闭主界面、对话窗口并停止后台服务。是否继续？</p>
+            <div class="exit-dialog-error" id="exit-dialog-error"></div>
+            <div class="exit-dialog-actions">
+                <button class="exit-cancel-btn" onclick="hideExitDialog()">取消</button>
+                <button class="exit-confirm-btn" id="exit-confirm-btn" onclick="confirmQuitApp()">退出</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 设置面板（默认隐藏） -->
     <div id="settings-panel" style="display:none;">
         <div class="settings-header">
@@ -539,17 +592,45 @@ _STATUS_HTML = """
         }
     }
 
-    async function quitApp() {
-        if (!confirm('退出会关闭主界面、对话窗口并停止后台服务。是否继续？')) return;
+    function quitApp() {
+        const dialog = document.getElementById('exit-dialog');
+        const err = document.getElementById('exit-dialog-error');
+        const btn = document.getElementById('exit-confirm-btn');
+        if (err) err.textContent = '';
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '退出';
+        }
+        if (dialog) dialog.classList.add('visible');
+    }
+
+    function hideExitDialog() {
+        const dialog = document.getElementById('exit-dialog');
+        if (dialog) dialog.classList.remove('visible');
+    }
+
+    async function confirmQuitApp() {
+        const btn = document.getElementById('exit-confirm-btn');
+        const err = document.getElementById('exit-dialog-error');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '正在退出...';
+        }
+        if (err) err.textContent = '';
         try {
             if (window.pywebview && window.pywebview.api) {
                 const r = await window.pywebview.api.quit_app();
                 if (r && r.ok === false) throw new Error(r.error || '退出失败');
+            } else {
+                window.close();
             }
-            setTimeout(function() { window.close(); }, 0);
         } catch(e) {
             console.error('quitApp error:', e);
-            window.close();
+            if (err) err.textContent = e.message || '退出失败';
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '退出';
+            }
         }
     }
 
@@ -1286,12 +1367,33 @@ def _bind_main_window_exit(main_window: object):
 
 
 def request_app_exit() -> None:
-    """由页面内退出按钮触发的退出前清理。
+    """由页面内退出按钮触发的完整退出流程。
 
-    当前主窗口必须由前端在 API 返回后关闭。不要在 pywebview API 回调里
-    destroy 当前窗口，否则 macOS WebView 可能卡在等待 JS promise 返回的状态。
+    实际窗口销毁延迟到 API 回调返回后执行，避免 macOS WebView 卡在等待
+    JavaScript promise 返回的状态。
     """
+    global _exit_timer
+    with _exit_timer_lock:
+        if _exit_timer is not None and _exit_timer.is_alive():
+            return
+        _exit_timer = threading.Timer(_EXIT_DELAY_SECONDS, _destroy_all_windows_for_exit)
+        _exit_timer.daemon = True
+        _exit_timer.start()
+
+
+def _destroy_all_windows_for_exit() -> None:
+    """关闭聊天窗口及所有 pywebview 窗口。"""
     _close_auxiliary_windows(main_window=None)
+
+    webview_module = globals().get("webview")
+    if webview_module is None:
+        return
+
+    for window in list(getattr(webview_module, "windows", []) or []):
+        try:
+            window.destroy()
+        except Exception as exc:
+            logger.debug("关闭窗口失败: %s", exc)
 
 
 def _close_auxiliary_windows(main_window: object | None) -> None:
