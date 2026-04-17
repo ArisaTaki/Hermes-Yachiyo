@@ -194,16 +194,22 @@ def test_delete_current_session_switches_to_remaining_recent_session(tmp_path):
         other = ChatSession(session_id="s2")
         other.attach_store(store, load_existing=False)
         other.add_user_message("保留的会话")
+        another = ChatSession(session_id="s3")
+        another.attach_store(store, load_existing=False)
+        another.add_user_message("另一个保留会话")
 
         deleted = api.delete_current_session()
 
         assert deleted["ok"] is True
         assert deleted["deleted_session_id"] == "s1"
-        assert deleted["session_id"] == "s2"
-        assert deleted["remaining_sessions"] == 1
+        assert deleted["session_id"] in {"s2", "s3"}
+        assert deleted["remaining_sessions"] == 2
         assert deleted["empty"] is False
-        assert runtime.chat_session.session_id == "s2"
-        assert api.get_messages()["messages"][0]["content"] == "保留的会话"
+        assert runtime.chat_session.session_id == deleted["session_id"]
+        assert api.get_messages()["messages"][0]["content"] in {
+            "保留的会话",
+            "另一个保留会话",
+        }
     finally:
         _store_mod.get_chat_store = original_get_store
         store.close()

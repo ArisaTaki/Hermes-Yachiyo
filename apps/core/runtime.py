@@ -2,7 +2,7 @@
 
 Core Runtime 职责：
 - Hermes Agent 封装与生命周期
-- 任务编排与状态管理  
+- 任务编排与状态管理
 - 聊天会话管理
 - Hermes 安装检测与引导
 - TaskRunner 启动与停止
@@ -81,42 +81,42 @@ class HermesRuntime:
         """启动运行时"""
         if self._running:
             return
-        
+
         logger.info("正在启动 Hermes Runtime...")
-        
+
         # 1. 检测 Hermes Agent 安装状态
         self._hermes_install_info = check_hermes_installation()
         logger.info(
-            "Hermes 安装检测完成: status=%s, platform=%s", 
-            self._hermes_install_info.status, 
+            "Hermes 安装检测完成: status=%s, platform=%s",
+            self._hermes_install_info.status,
             self._hermes_install_info.platform
         )
-        
+
         # 2. 根据安装状态决定启动策略
         if self._hermes_install_info.status != HermesInstallStatus.READY:
             logger.warning(
-                "Hermes Agent 未正确安装: %s", 
+                "Hermes Agent 未正确安装: %s",
                 self._hermes_install_info.status
             )
             # 注意：不阻止启动，允许用户在 UI 中查看安装指导
-        
+
         # 3. 启动核心服务
         self._start_time = time.time()
         self._running = True
-        
+
         # 4. 启动 TaskRunner（在独立线程的事件循环中）
         self._start_task_runner()
-        
+
         logger.info("Hermes Runtime 已启动 (uptime=%.2fs)", self.uptime)
 
     def stop(self) -> None:
         """停止运行时"""
         if not self._running:
             return
-        
+
         # 停止 TaskRunner
         self._stop_task_runner()
-        
+
         self._running = False
         logger.info("Hermes Runtime 已停止")
 
@@ -196,7 +196,7 @@ class HermesRuntime:
             "uptime_seconds": self.uptime,
             "task_counts": self._state.get_task_counts(),
         }
-        
+
         # 添加 Hermes 安装状态
         if self._hermes_install_info:
             status["hermes"] = {
@@ -204,8 +204,8 @@ class HermesRuntime:
                 "platform": self._hermes_install_info.platform,
                 "command_exists": self._hermes_install_info.command_exists,
                 "version": (
-                    self._hermes_install_info.version_info.version 
-                    if self._hermes_install_info.version_info 
+                    self._hermes_install_info.version_info.version
+                    if self._hermes_install_info.version_info
                     else None
                 ),
                 "hermes_home": self._hermes_install_info.hermes_home,
@@ -213,7 +213,7 @@ class HermesRuntime:
                 "limited_tools": self._hermes_install_info.limited_tools,
                 "doctor_issues_count": self._hermes_install_info.doctor_issues_count,
             }
-        
+
         return status
 
     def is_hermes_ready(self) -> bool:
@@ -355,6 +355,6 @@ class HermesRuntime:
         """获取 Hermes 安装引导信息"""
         if not self._hermes_install_info:
             return None
-        
+
         from apps.installer.hermes_install import HermesInstallGuide
         return HermesInstallGuide.get_install_instructions(self._hermes_install_info)

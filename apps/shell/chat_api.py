@@ -277,6 +277,7 @@ class ChatAPI:
             store = get_chat_store()
             store.delete_session(deleted_session_id)
             remaining = store.list_sessions(limit=1)
+            remaining_count = store.count_sessions()
 
             if remaining:
                 next_session_id = remaining[0].session_id
@@ -299,7 +300,7 @@ class ChatAPI:
                 "deleted_session_id": deleted_session_id,
                 "session_id": next_session_id,
                 "cancelled_tasks": cancelled_count,
-                "remaining_sessions": len(remaining),
+                "remaining_sessions": remaining_count,
                 "empty": not remaining,
             }
         except Exception as exc:

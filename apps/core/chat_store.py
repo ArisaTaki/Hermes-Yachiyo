@@ -167,6 +167,23 @@ class ChatStore:
             for r in rows
         ]
 
+    def count_sessions(self) -> int:
+        """统计可见历史会话数（不包含无消息的空白工作会话）。"""
+        with self._lock:
+            conn = self._get_conn()
+            row = conn.execute(
+                """
+                SELECT COUNT(*) AS count
+                FROM chat_sessions s
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM chat_messages m
+                    WHERE m.session_id = s.session_id
+                )
+                """
+            ).fetchone()
+        return int(row["count"])
+
     def get_session(self, session_id: str) -> Optional[StoredSession]:
         """获取单个会话信息"""
         with self._lock:

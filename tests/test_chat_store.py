@@ -90,6 +90,17 @@ class TestChatStore:
         store.create_session("empty")
         assert store.list_sessions() == []
 
+    def test_count_sessions_hides_empty_sessions(self, store: ChatStore):
+        store.create_session("empty")
+        store.create_session("visible")
+        store.save_message(StoredMessage(
+            message_id="m1", session_id="visible", role="user",
+            content="hi", status="completed", task_id=None,
+            error=None, created_at="2026-01-01T00:00:00+00:00",
+        ))
+
+        assert store.count_sessions() == 1
+
     def test_message_count_in_session_list(self, store: ChatStore):
         store.create_session("s1")
         for i in range(3):
