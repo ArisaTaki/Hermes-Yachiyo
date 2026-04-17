@@ -7,7 +7,6 @@ pywebview 的使用不影响 core / bridge / protocol 的长期边界。
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -27,7 +26,6 @@ from packages.protocol.enums import HermesInstallStatus
 
 logger = logging.getLogger(__name__)
 
-_EXIT_DIALOG_TITLE = "退出 Hermes-Yachiyo？"
 _EXIT_DIALOG_MESSAGE = "退出会关闭主界面、对话窗口并停止后台服务。是否继续？"
 
 # 正常状态页 HTML
@@ -118,6 +116,16 @@ _STATUS_HTML = """
             transition: background 0.2s;
         }
         .chat-send-btn:hover { background: #5a7aaa; }
+        .app-exit-btn {
+            background: transparent;
+            border: 1px solid #66404a;
+            color: #c98a96;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.86em;
+        }
+        .app-exit-btn:hover { border-color: #dd6b7a; color: #ffb1bd; background: #2d242e; }
         .executor { color: #6a9a6a; }
         .footer {
             text-align: center;
@@ -354,6 +362,9 @@ _STATUS_HTML = """
                 打开聊天窗口
             </button>
         </div>
+        <div style="margin-top:10px;text-align:right;">
+            <button class="app-exit-btn" onclick="quitApp()">退出应用</button>
+        </div>
     </div>
 
     <!-- 设置面板（默认隐藏） -->
@@ -525,6 +536,20 @@ _STATUS_HTML = """
             await window.pywebview.api.open_chat();
         } catch(e) {
             console.error('openChat error:', e);
+        }
+    }
+
+    async function quitApp() {
+        if (!confirm('退出会关闭主界面、对话窗口并停止后台服务。是否继续？')) return;
+        try {
+            if (window.pywebview && window.pywebview.api) {
+                await window.pywebview.api.quit_app();
+            } else {
+                window.close();
+            }
+        } catch(e) {
+            console.error('quitApp error:', e);
+            window.close();
         }
     }
 
@@ -1239,20 +1264,20 @@ def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
 
 
 def _bind_main_window_exit(main_window: object):
-    """为主窗口绑定退出确认，并在确认后关闭附属窗口。"""
-    exit_confirmed = False
+    """主窗口关闭时同步关闭附属窗口。
+
+    不在 pywebview closing 回调里弹确认框，避免 macOS WebView 关闭事件重入卡死。
+    显式退出确认由页面内的 quitApp() 完成。
+    """
+    closing = False
 
     def _on_closing() -> bool:
-        nonlocal exit_confirmed
-        if exit_confirmed:
+        nonlocal closing
+        if closing:
             return True
 
-        if not _confirm_main_window_exit(main_window):
-            logger.info("用户取消退出 Hermes-Yachiyo")
-            return False
-
-        exit_confirmed = True
-        logger.info("用户确认退出 Hermes-Yachiyo，正在关闭附属窗口")
+        closing = True
+        logger.info("主窗口关闭，正在关闭附属窗口")
         _close_auxiliary_windows(main_window)
         return True
 
@@ -1260,23 +1285,22 @@ def _bind_main_window_exit(main_window: object):
     return _on_closing
 
 
-def _confirm_main_window_exit(main_window: object) -> bool:
-    """显示主窗口退出确认框。"""
-    try:
-        create_dialog = getattr(main_window, "create_confirmation_dialog", None)
-        if callable(create_dialog):
-            return bool(create_dialog(_EXIT_DIALOG_TITLE, _EXIT_DIALOG_MESSAGE))
+def request_app_exit() -> None:
+    """由页面内退出按钮触发的完整退出流程。"""
+    _close_auxiliary_windows(main_window=None)
 
-        evaluate_js = getattr(main_window, "evaluate_js", None)
-        if callable(evaluate_js):
-            return bool(evaluate_js(f"confirm({json.dumps(_EXIT_DIALOG_MESSAGE)})"))
-    except Exception as exc:
-        logger.warning("退出确认框显示失败，将继续退出: %s", exc)
+    webview_module = globals().get("webview")
+    if webview_module is None:
+        return
 
-    return True
+    for window in list(getattr(webview_module, "windows", []) or []):
+        try:
+            window.destroy()
+        except Exception as exc:
+            logger.debug("关闭窗口失败: %s", exc)
 
 
-def _close_auxiliary_windows(main_window: object) -> None:
+def _close_auxiliary_windows(main_window: object | None) -> None:
     """关闭聊天窗口及其他非主窗口的 pywebview 窗口。"""
     try:
         from apps.shell.chat_window import close_chat_window
@@ -1286,6 +1310,9 @@ def _close_auxiliary_windows(main_window: object) -> None:
 
     webview_module = globals().get("webview")
     if webview_module is None:
+        return
+
+    if main_window is None:
         return
 
     for window in list(getattr(webview_module, "windows", []) or []):

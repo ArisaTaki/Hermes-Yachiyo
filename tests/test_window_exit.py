@@ -18,15 +18,9 @@ class FakeEvents:
 
 
 class FakeWindow:
-    def __init__(self, confirm_result=True):
-        self.confirm_result = confirm_result
-        self.dialog_calls = []
+    def __init__(self):
         self.destroyed = False
         self.events = FakeEvents()
-
-    def create_confirmation_dialog(self, title, message):
-        self.dialog_calls.append((title, message))
-        return self.confirm_result
 
     def destroy(self):
         self.destroyed = True
@@ -37,27 +31,8 @@ class FakeWebview:
         self.windows = windows
 
 
-def test_main_window_close_cancel_keeps_auxiliary_windows(monkeypatch):
-    main = FakeWindow(confirm_result=False)
-    aux = FakeWindow()
-    closed_chat = []
-
-    monkeypatch.setattr(chat_window, "close_chat_window", lambda: closed_chat.append(True))
-    monkeypatch.setattr(window_mod, "webview", FakeWebview([main, aux]), raising=False)
-
-    handler = window_mod._bind_main_window_exit(main)
-
-    assert main.events.closing.handler is handler
-    assert handler() is False
-    assert closed_chat == []
-    assert aux.destroyed is False
-    assert main.dialog_calls == [
-        (window_mod._EXIT_DIALOG_TITLE, window_mod._EXIT_DIALOG_MESSAGE)
-    ]
-
-
-def test_main_window_close_confirm_closes_auxiliary_windows(monkeypatch):
-    main = FakeWindow(confirm_result=True)
+def test_main_window_native_close_closes_auxiliary_windows_without_dialog(monkeypatch):
+    main = FakeWindow()
     aux = FakeWindow()
     closed_chat = []
 
@@ -70,6 +45,21 @@ def test_main_window_close_confirm_closes_auxiliary_windows(monkeypatch):
     assert closed_chat == [True]
     assert aux.destroyed is True
     assert main.destroyed is False
+
+
+def test_request_app_exit_closes_every_window(monkeypatch):
+    main = FakeWindow()
+    aux = FakeWindow()
+    closed_chat = []
+
+    monkeypatch.setattr(chat_window, "close_chat_window", lambda: closed_chat.append(True))
+    monkeypatch.setattr(window_mod, "webview", FakeWebview([main, aux]), raising=False)
+
+    window_mod.request_app_exit()
+
+    assert closed_chat == [True]
+    assert main.destroyed is True
+    assert aux.destroyed is True
 
 
 def test_close_chat_window_destroys_existing_window(monkeypatch):

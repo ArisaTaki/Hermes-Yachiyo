@@ -14,6 +14,8 @@ def test_chat_window_renders_messages_as_markdown():
 def test_chat_window_scroll_following_respects_user_position():
     assert "SCROLL_BOTTOM_THRESHOLD" in _CHAT_HTML
     assert "bindMessageScroll()" in _CHAT_HTML
-    assert "stickToBottom = isNearBottom(container)" in _CHAT_HTML
+    assert "if (event.deltaY < 0) stickToBottom = false" in _CHAT_HTML
+    assert "if (currentTop < lastMessageScrollTop)" in _CHAT_HTML
+    assert "return stickToBottom;" in _CHAT_HTML
     assert "if (shouldScroll) {" in _CHAT_HTML
     assert "if (container && shouldAutoScroll(container)) scrollToBottom(container)" in _CHAT_HTML

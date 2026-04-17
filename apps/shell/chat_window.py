@@ -422,10 +422,11 @@ let sending = false;
 const POLL_INTERVAL_MS = 500;
 const TYPE_BASE_CHARS_PER_SECOND = 85;
 const TYPE_MAX_CHARS_PER_SECOND = 360;
-const SCROLL_BOTTOM_THRESHOLD = 72;
+const SCROLL_BOTTOM_THRESHOLD = 12;
 let typewriterFrame = null;
 let typewriterLastTs = 0;
 let stickToBottom = true;
+let lastMessageScrollTop = 0;
 const messageRenderState = new Map();
 
 async function sendMessage() {
@@ -742,19 +743,30 @@ function isNearBottom(container) {
 }
 
 function shouldAutoScroll(container) {
-    return stickToBottom || isNearBottom(container);
+    return stickToBottom;
 }
 
 function scrollToBottom(container) {
     container.scrollTop = container.scrollHeight;
+    lastMessageScrollTop = container.scrollTop;
     stickToBottom = true;
 }
 
 function bindMessageScroll() {
     const container = document.getElementById('messages');
     if (!container) return;
+    lastMessageScrollTop = container.scrollTop;
+    container.addEventListener('wheel', function(event) {
+        if (event.deltaY < 0) stickToBottom = false;
+    }, { passive: true });
     container.addEventListener('scroll', function() {
-        stickToBottom = isNearBottom(container);
+        const currentTop = container.scrollTop;
+        if (currentTop < lastMessageScrollTop) {
+            stickToBottom = false;
+        } else if (isNearBottom(container)) {
+            stickToBottom = true;
+        }
+        lastMessageScrollTop = currentTop;
     }, { passive: true });
 }
 

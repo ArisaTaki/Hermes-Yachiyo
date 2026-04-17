@@ -448,3 +448,13 @@ class MainWindowAPI:
         from apps.shell.chat_window import open_chat_window
         ok = open_chat_window(self._runtime)
         return {"ok": ok}
+
+    def quit_app(self) -> Dict[str, Any]:
+        """关闭主窗口及附属窗口，触发正常应用清理流程。"""
+        try:
+            from apps.shell.window import request_app_exit
+            request_app_exit()
+            return {"ok": True}
+        except Exception as exc:
+            logger.error("退出应用失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
