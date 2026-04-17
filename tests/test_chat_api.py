@@ -1,6 +1,8 @@
 """ChatAPI 测试 — 消息发送与任务状态同步"""
 
-from apps.core.chat_session import ChatSession, MessageRole, MessageStatus
+from datetime import datetime, timezone
+
+from apps.core.chat_session import ChatMessage, ChatSession, MessageRole, MessageStatus
 from apps.core.chat_store import ChatStore
 import apps.core.chat_store as _store_mod
 from apps.core.state import AppState
@@ -29,6 +31,22 @@ def _make_api(tmp_path):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _RuntimeStub(store)
     return ChatAPI(runtime), runtime, store
+
+
+def _chat_message(
+    message_id: str,
+    role: MessageRole,
+    content: str = "",
+    task_id: str | None = None,
+) -> ChatMessage:
+    return ChatMessage(
+        message_id=message_id,
+        role=role,
+        content=content,
+        status=MessageStatus.COMPLETED,
+        created_at=datetime.now(timezone.utc),
+        task_id=task_id,
+    )
 
 
 def test_send_message_creates_task_and_links_user_message(tmp_path):
@@ -357,3 +375,27 @@ def test_message_sorting_pairs_user_with_assistant(tmp_path):
         assert msgs[3]["content"] == "二完成"
     finally:
         store.close()
+
+
+def test_message_sorting_keeps_unpaired_task_assistant():
+    """分页截断 user 消息时，带 task_id 的 assistant 仍应返回给前端。"""
+    assistant = _chat_message(
+        "a1",
+        MessageRole.ASSISTANT,
+        content="分页截断后仍可见的回复",
+        task_id="t1",
+    )
+
+    sorted_msgs = ChatAPI._sort_messages_by_task([assistant])
+
+    assert sorted_msgs == [assistant]
+
+
+def test_message_sorting_does_not_duplicate_untracked_assistant():
+    """无 task_id 的 assistant 消息保持原始位置且不会被重复追加。"""
+    system = _chat_message("s1", MessageRole.SYSTEM, content="系统提示")
+    assistant = _chat_message("a1", MessageRole.ASSISTANT, content="旧回复")
+
+    sorted_msgs = ChatAPI._sort_messages_by_task([system, assistant])
+
+    assert [msg.message_id for msg in sorted_msgs] == ["s1", "a1"]

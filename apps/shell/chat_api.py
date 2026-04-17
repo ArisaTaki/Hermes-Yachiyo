@@ -152,6 +152,7 @@ class ChatAPI:
                 assistant_by_task[msg.task_id] = msg
 
         result: list[ChatMessage] = []
+        inserted_assistant_ids: set[str] = set()
 
         for msg in messages:
             if msg.role == MessageRole.ASSISTANT and msg.task_id:
@@ -163,12 +164,14 @@ class ChatAPI:
                 assistant = assistant_by_task.get(msg.task_id)
                 if assistant is not None:
                     result.append(assistant)
+                    inserted_assistant_ids.add(assistant.message_id)
 
-        # 兜底：无 task_id 的 assistant 消息追加末尾
+        # 兜底：分页/limit 截断时 user 可能不在当前列表，不能丢弃这些 assistant。
         for msg in messages:
             if (
                 msg.role == MessageRole.ASSISTANT
-                and not msg.task_id
+                and msg.task_id
+                and msg.message_id not in inserted_assistant_ids
             ):
                 result.append(msg)
 

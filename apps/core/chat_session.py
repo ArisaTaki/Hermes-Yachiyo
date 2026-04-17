@@ -443,22 +443,31 @@ class ChatSession:
 # 全局会话实例（单会话 MVP）
 # 后续可扩展为多会话管理器
 _global_session: Optional[ChatSession] = None
+_global_session_lock = threading.RLock()
 
 
 def get_chat_session() -> ChatSession:
     """获取全局聊天会话（单例），自动绑定持久化层"""
     global _global_session
-    if _global_session is None:
+    session = _global_session
+    if session is not None:
+        return session
+
+    with _global_session_lock:
+        if _global_session is not None:
+            return _global_session
+
         from apps.core.chat_store import get_chat_store
         store = get_chat_store()
         sessions = store.list_sessions(limit=1)
         if sessions:
-            _global_session = ChatSession(session_id=sessions[0].session_id)
+            session = ChatSession(session_id=sessions[0].session_id)
         else:
-            _global_session = ChatSession()
-        _global_session.attach_store(store)
-        logger.info("初始化全局 ChatSession: %s", _global_session.session_id)
-    return _global_session
+            session = ChatSession()
+        session.attach_store(store)
+        _global_session = session
+        logger.info("初始化全局 ChatSession: %s", session.session_id)
+        return session
 
 
 def switch_chat_session(session_id: str) -> ChatSession:
@@ -469,17 +478,21 @@ def switch_chat_session(session_id: str) -> ChatSession:
     """
     global _global_session
     from apps.core.chat_store import get_chat_store
-    _global_session = ChatSession(session_id=session_id)
-    _global_session.attach_store(get_chat_store(), load_existing=True)
-    logger.info("切换到会话: %s (messages=%d)", session_id, _global_session.message_count())
-    return _global_session
+    with _global_session_lock:
+        session = ChatSession(session_id=session_id)
+        session.attach_store(get_chat_store(), load_existing=True)
+        _global_session = session
+    logger.info("切换到会话: %s (messages=%d)", session_id, session.message_count())
+    return session
 
 
 def reset_chat_session() -> ChatSession:
     """重置全局会话（测试/清空用）"""
     global _global_session
     from apps.core.chat_store import get_chat_store
-    _global_session = ChatSession()
-    _global_session.attach_store(get_chat_store(), load_existing=False)
-    logger.info("重置全局 ChatSession: %s", _global_session.session_id)
-    return _global_session
+    with _global_session_lock:
+        session = ChatSession()
+        session.attach_store(get_chat_store(), load_existing=False)
+        _global_session = session
+    logger.info("重置全局 ChatSession: %s", session.session_id)
+    return session

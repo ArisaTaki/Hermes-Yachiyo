@@ -1,5 +1,9 @@
 """ChatSession 测试 — 会话恢复与清空后的持久化闭环"""
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 from apps.core.chat_session import ChatSession, MessageRole, MessageStatus
 from apps.core.chat_store import ChatStore, StoredMessage
 
@@ -307,3 +311,43 @@ def test_switch_chat_session(tmp_path):
             _store_mod.get_chat_store = original
     finally:
         store.close()
+
+
+def test_get_chat_session_initializes_global_once_under_concurrency(monkeypatch):
+    """多线程首次访问全局会话时只应初始化并 attach 一次。"""
+
+    class SlowStore:
+        def __init__(self) -> None:
+            self.list_calls = 0
+            self.create_calls = 0
+            self._lock = threading.Lock()
+
+        def list_sessions(self, limit: int = 1):
+            with self._lock:
+                self.list_calls += 1
+            time.sleep(0.02)
+            return []
+
+        def create_session(self, session_id: str, title: str = "") -> None:
+            with self._lock:
+                self.create_calls += 1
+
+        def load_messages(self, session_id: str):
+            return []
+
+        def get_session(self, session_id: str):
+            return None
+
+    store = SlowStore()
+    monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
+    monkeypatch.setattr(_cs_mod, "_global_session", None)
+
+    try:
+        with ThreadPoolExecutor(max_workers=12) as executor:
+            sessions = list(executor.map(lambda _: _cs_mod.get_chat_session(), range(24)))
+
+        assert len({id(session) for session in sessions}) == 1
+        assert store.list_calls == 1
+        assert store.create_calls == 1
+    finally:
+        _cs_mod._global_session = None

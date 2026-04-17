@@ -27,7 +27,6 @@ from packages.protocol.enums import HermesInstallStatus
 
 logger = logging.getLogger(__name__)
 
-_EXIT_DIALOG_MESSAGE = "退出会关闭主界面、对话窗口并停止后台服务。是否继续？"
 _EXIT_DELAY_SECONDS = 0.1
 _exit_timer: threading.Timer | None = None
 _exit_timer_lock = threading.Lock()
