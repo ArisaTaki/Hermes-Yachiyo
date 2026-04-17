@@ -2,6 +2,7 @@
 
 from apps.core.chat_session import ChatSession, MessageRole, MessageStatus
 from apps.core.chat_store import ChatStore
+import apps.core.chat_store as _store_mod
 from apps.core.state import AppState
 from apps.shell.chat_api import ChatAPI
 from packages.protocol.enums import TaskStatus
@@ -9,6 +10,7 @@ from packages.protocol.enums import TaskStatus
 
 class _RuntimeStub:
     def __init__(self, store: ChatStore) -> None:
+        self.store = store
         self.state = AppState()
         self.chat_session = ChatSession(session_id="s1")
         self.chat_session.attach_store(store, load_existing=False)
@@ -17,6 +19,10 @@ class _RuntimeStub:
     def cancel_task_runner_task(self, task_id: str) -> bool:
         self.cancelled_runner_tasks.append(task_id)
         return True
+
+    def switch_session(self, session_id: str) -> None:
+        self.chat_session = ChatSession(session_id=session_id)
+        self.chat_session.attach_store(self.store, load_existing=True)
 
 
 def _make_api(tmp_path):
@@ -149,6 +155,53 @@ def test_clear_session_cancels_active_task_and_persists_cancel(tmp_path):
         assert old_messages[1].status == "failed"
         assert old_messages[1].error == "任务已取消"
     finally:
+        store.close()
+
+
+def test_delete_current_session_removes_session_and_cancels_active_task(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+    original_get_store = _store_mod.get_chat_store
+    _store_mod.get_chat_store = lambda: store
+    try:
+        result = api.send_message("删除前仍在执行")
+        task_id = result["task_id"]
+        old_session_id = runtime.chat_session.session_id
+        runtime.state.update_task_status(task_id, TaskStatus.RUNNING)
+
+        deleted = api.delete_current_session()
+
+        assert deleted["ok"] is True
+        assert deleted["deleted_session_id"] == old_session_id
+        assert deleted["session_id"] != old_session_id
+        assert deleted["cancelled_tasks"] == 1
+        assert runtime.state.get_task(task_id).status == TaskStatus.CANCELLED
+        assert runtime.cancelled_runner_tasks == [task_id]
+        assert store.get_session(old_session_id) is None
+        assert store.load_messages(old_session_id) == []
+        assert api.get_messages()["messages"] == []
+    finally:
+        _store_mod.get_chat_store = original_get_store
+        store.close()
+
+
+def test_delete_current_session_switches_to_remaining_recent_session(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+    original_get_store = _store_mod.get_chat_store
+    _store_mod.get_chat_store = lambda: store
+    try:
+        other = ChatSession(session_id="s2")
+        other.attach_store(store, load_existing=False)
+        other.add_user_message("保留的会话")
+
+        deleted = api.delete_current_session()
+
+        assert deleted["ok"] is True
+        assert deleted["deleted_session_id"] == "s1"
+        assert deleted["session_id"] == "s2"
+        assert runtime.chat_session.session_id == "s2"
+        assert api.get_messages()["messages"][0]["content"] == "保留的会话"
+    finally:
+        _store_mod.get_chat_store = original_get_store
         store.close()
 
 

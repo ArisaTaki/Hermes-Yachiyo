@@ -6,6 +6,7 @@ import pytest
 
 from apps.core.executor import (
     HermesCallError,
+    HermesExecutor,
     HermesInvokeResult,
     SimulatedExecutor,
     _HERMES_CMD,
@@ -104,6 +105,16 @@ class TestSimulatedExecutor:
         finally:
             mod._SIM_RUN_DELAY = original_run
             mod._SIM_COMPLETE_DELAY = original_complete
+
+
+class TestHermesExecutor:
+    def test_set_chat_session_updates_reference(self):
+        executor = HermesExecutor()
+        session = object()
+
+        executor.set_chat_session(session)  # type: ignore[arg-type]
+
+        assert executor._chat_session is session
 
 
 class TestParseHermesOutput:

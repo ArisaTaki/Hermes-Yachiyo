@@ -45,3 +45,14 @@ def test_refresh_task_runner_executor_without_runner_is_noop(tmp_path, monkeypat
 
     assert result["updated"] is False
     assert result["reason"] == "task_runner_not_started"
+
+
+def test_switch_session_syncs_executor_via_public_method(tmp_path, monkeypatch):
+    runtime = _make_runtime(tmp_path, monkeypatch)
+    executor = HermesExecutor(chat_session=runtime.chat_session)
+    runtime._task_runner = TaskRunner(runtime.state, executor=executor)
+
+    runtime.switch_session("next-session")
+
+    assert runtime.chat_session.session_id == "next-session"
+    assert executor._chat_session is runtime.chat_session

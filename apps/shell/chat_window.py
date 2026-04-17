@@ -52,6 +52,10 @@ class ChatWindowAPI:
         """创建一个新会话。"""
         return self._chat_api.clear_session()
 
+    def delete_current_session(self) -> Dict[str, Any]:
+        """删除当前会话。"""
+        return self._chat_api.delete_current_session()
+
     def get_executor_info(self) -> Dict[str, Any]:
         runner = self._runtime.task_runner
         if runner is None:
@@ -313,7 +317,7 @@ _CHAT_HTML = r"""
             <select class="session-select" id="session-select" onchange="switchSession(this.value)" title="切换会话"></select>
             <span class="executor" id="executor-badge">—</span>
             <button class="header-btn" onclick="newChat()">新对话</button>
-            <button class="header-btn" onclick="clearChat()">清空</button>
+            <button class="header-btn" onclick="deleteChat()" title="删除此对话">删除</button>
         </div>
     </div>
     <div class="messages" id="messages">
@@ -329,7 +333,7 @@ _CHAT_HTML = r"""
 <script>
 let polling = null;
 let sending = false;
-const POLL_INTERVAL_MS = 120;
+const POLL_INTERVAL_MS = 500;
 
 async function sendMessage() {
     if (sending) return;
@@ -428,13 +432,16 @@ function stopPolling() {
     if (polling) { clearInterval(polling); polling = null; }
 }
 
-async function clearChat() {
+async function deleteChat() {
     try {
         if (!window.pywebview || !window.pywebview.api) return;
-        await window.pywebview.api.clear_session();
+        if (!confirm('删除此对话？此操作不可恢复。')) return;
+        stopPolling();
+        const r = await window.pywebview.api.delete_current_session();
+        if (!r.ok) throw new Error(r.error || '删除失败');
         await loadSessions();
         await refreshMessages();
-        setStatus('会话已清空');
+        setStatus('已删除此对话');
     } catch(e) {
         setStatus('❌ ' + e.message);
     }

@@ -91,8 +91,15 @@ class TaskRunner:
                 await self._loop_task
             except asyncio.CancelledError:
                 pass
-        for t in list(self._in_progress.values()):
+        tasks = list(self._in_progress.values())
+        for t in tasks:
             t.cancel()
+        if tasks:
+            await asyncio.gather(
+                *tasks,
+                return_exceptions=True,
+            )
+            self._in_progress.clear()
         logger.info("TaskRunner 已停止")
 
     # ── 内部调度 ────────────────────────────────────────────────

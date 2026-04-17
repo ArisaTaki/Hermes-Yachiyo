@@ -270,6 +270,21 @@ def _emit_stream_update(on_update: Callable[[str], None], content: str) -> None:
         logger.debug("Hermes 流式内容回写失败", exc_info=True)
 
 
+async def _terminate_process(proc: asyncio.subprocess.Process) -> None:
+    """取消/超时时终止子进程并回收管道资源。"""
+    if proc.returncode is not None:
+        return
+    try:
+        proc.terminate()
+    except ProcessLookupError:
+        return
+    try:
+        await asyncio.wait_for(proc.communicate(), timeout=3.0)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.communicate()
+
+
 async def _consume_stream_bridge(
     proc: asyncio.subprocess.Process,
     payload: dict[str, Any],
@@ -412,9 +427,11 @@ async def _invoke_hermes_stream_bridge(
             _consume_stream_bridge(proc, payload, on_update),
             timeout=_EXEC_TIMEOUT,
         )
+    except asyncio.CancelledError:
+        await _terminate_process(proc)
+        raise
     except asyncio.TimeoutError:
-        proc.kill()
-        await proc.communicate()
+        await _terminate_process(proc)
         return HermesInvokeResult(
             success=False,
             returncode=-1,
@@ -486,9 +503,11 @@ async def invoke_hermes_cli(
         )
         stdout = stdout_bytes.decode(errors="replace").strip()
         stderr = stderr_bytes.decode(errors="replace").strip()
+    except asyncio.CancelledError:
+        await _terminate_process(proc)
+        raise
     except asyncio.TimeoutError:
-        proc.kill()
-        await proc.communicate()
+        await _terminate_process(proc)
         return HermesInvokeResult(
             success=False,
             returncode=-1,
@@ -609,6 +628,10 @@ class HermesExecutor(ExecutionStrategy):
     ) -> None:
         self._fallback = fallback_to_simulated
         self._sim = SimulatedExecutor()
+        self._chat_session = chat_session
+
+    def set_chat_session(self, chat_session: Optional["ChatSession"]) -> None:
+        """更新后续任务使用的聊天会话引用。"""
         self._chat_session = chat_session
 
     def is_available(self) -> bool:

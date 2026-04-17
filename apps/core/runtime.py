@@ -302,11 +302,23 @@ class HermesRuntime:
         """切换到指定会话，更新运行时引用。"""
         from apps.core.chat_session import switch_chat_session
         self._chat_session = switch_chat_session(session_id)
-        # 更新 HermesExecutor 的 chat_session 引用
+        self._sync_executor_chat_session(self._chat_session)
+
+    def _sync_executor_chat_session(self, chat_session: ChatSession) -> None:
+        """通过执行器公开接口同步 chat_session。"""
         if self._task_runner is not None:
-            from apps.core.executor import HermesExecutor
-            if isinstance(self._task_runner.executor, HermesExecutor):
-                self._task_runner.executor._chat_session = self._chat_session
+            executor = self._task_runner.executor
+            set_chat_session = getattr(executor, "set_chat_session", None)
+            if callable(set_chat_session):
+                set_chat_session(chat_session)
+                return
+            if hasattr(executor, "chat_session"):
+                setattr(executor, "chat_session", chat_session)
+                return
+            logger.debug(
+                "当前执行器未提供公开的 chat_session 更新接口，跳过同步: executor=%s",
+                type(executor).__name__,
+            )
 
     def cancel_task_runner_task(self, task_id: str) -> bool:
         """取消 TaskRunner 中已经分派的任务协程。"""
