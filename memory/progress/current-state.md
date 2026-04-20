@@ -1684,7 +1684,6 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 | Nous Portal/MiMo | 无 label | 不含 route_label | model, runtime（route_label 被过滤） |
 | 未来新版 | 不确定 | **kwargs | 所有非 None 值 |
 
-
 **根因**：`apps/core/hermes_stream_bridge.py` 中 `_run()` 对 `_resolve_turn_agent_config()` 返回值使用硬字典访问（`route["label"]`、`route["model"]`、`route["runtime"]`、`route["signature"]`）。Nous Portal / MiMo / 其他非 OpenAI-compatible provider 路径下，Hermes 返回的 route dict 可能不包含 `"label"` 键，导致 `KeyError: 'label'`，整个任务失败。
 
 **修复**：
@@ -1714,3 +1713,52 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 
 - 若 `route_label=None` 导致 Hermes 某些功能降级，可在 bridge 中用 `route.get("model", "")` 派生 label 兜底
 - `_debug_route()` 为临时诊断日志，问题稳定后可按 provider 路径整理文档后移除
+
+### Milestone 54 — Bubble + Live2D 接入统一聊天入口
+
+- ✅ apps/shell/chat_bridge.py（新建）— 统一聊天摘要桥接层
+  - `ChatBridge(runtime)` 内部持有 `ChatAPI`，供 bubble/live2d 使用
+  - `send_quick_message(text)` — 委托 ChatAPI.send_message()
+  - `get_recent_summary(count=3)` — 获取最近 N 条消息摘要，内容截断至 80 字符
+  - `_normalize_count(count)` — 规整外部传入的摘要条数，避免 `count=0` 因 `-0` 语义返回全部消息
+  - `get_session_status()` — 会话状态（无消息/处理中/就绪），错误时也返回 `{ok: false, error: ...}`
+  - `_truncate(text, max_len)` — 通用截断函数
+- ✅ apps/shell/modes/bubble.py — 从状态面板改造为轻量聊天入口
+  - 移除旧 `get_bubble_data()` / `get_executor_info()` / `_bridge_status()` 等方法
+  - 新增 `ChatBridge` 集成，API 暴露 `send_quick_message` / `get_recent_summary` / `get_session_status`
+  - HTML 改为：状态标签 + 最近 3 条消息摘要 + 输入行 + "完整对话"/"主窗口"/"关闭" 操作栏
+  - JS 活跃轮询 1200ms / 空闲轮询 5000ms，避免跨模式消息在空闲时不可见
+  - `pywebviewready` 触发即时刷新；思考态使用真实 span 点动画，不再依赖 CSS content 动画
+  - 窗口 320×380，on_top=True
+- ✅ apps/shell/modes/live2d.py — 角色舞台增加聊天能力
+  - 新增 `ChatBridge` 实例及 `send_quick_message` / `get_recent_summary` 方法
+  - HTML chat-area 从单按钮改为消息列表 + 输入行
+  - JS 增加 `sendMsg()` / `refreshMessages()` / 活跃-空闲轮询
+  - `pywebviewready` 触发即时刷新；思考态使用真实 span 点动画
+  - 角色图标交互：处理中 ⚡ / 空闲 🎤
+  - 保留全部原有非聊天方法
+- ✅ tests/test_chat_bridge.py（新建）— 19 个测试用例
+  - 截断函数、空会话、快捷发送、摘要内容、处理中/就绪状态标签
+  - 摘要条数边界：`count=0` / 非法 count 稳定返回空摘要
+  - 三模式共享状态验证：bubble 发送 → live2d 可见，反之亦然
+  - 失败任务在摘要中正确显示
+  - 错误状态 API 契约、空闲轮询、WebView ready 启动和真实点动画
+
+### 三模式聊天角色定义
+
+| 模式 | 角色 | 聊天能力 | 轮询间隔 |
+|------|------|----------|----------|
+| Window | 完整聊天窗口 | 全功能（ChatAPI 直接） | 800ms |
+| Bubble | 轻量浮窗入口 | 摘要 + 快捷发送（ChatBridge） | 活跃 1200ms / 空闲 5000ms |
+| Live2D | 角色舞台入口 | 摘要 + 快捷发送（ChatBridge） | 活跃 1200ms / 空闲 5000ms |
+
+### 消息共享链路
+
+```
+Bubble / Live2D → ChatBridge → ChatAPI → ChatSession → ChatStore (SQLite)
+Window          → ChatAPI    → ChatSession → ChatStore (SQLite)
+```
+
+所有模式共享同一个 `runtime.chat_session` 单例，任一入口发送的消息对其他入口即时可见。
+
+**测试结果**：222 passed（+19 新增，0 回归）
