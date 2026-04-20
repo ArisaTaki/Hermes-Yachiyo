@@ -1,6 +1,15 @@
 """Chat window frontend contract checks."""
 
-from apps.shell.chat_window import _CHAT_HTML
+from apps.core.chat_session import ChatSession
+from apps.core.chat_store import ChatStore
+import apps.core.chat_store as _store_mod
+from apps.shell.chat_window import ChatWindowAPI, _CHAT_HTML
+
+
+class _RuntimeStub:
+    def __init__(self, chat_session):
+        self.chat_session = chat_session
+        self.task_runner = None
 
 
 def test_chat_window_renders_messages_as_markdown():
@@ -28,3 +37,33 @@ def test_chat_window_scroll_following_respects_user_position():
     assert "return stickToBottom;" in _CHAT_HTML
     assert "if (shouldScroll) {" in _CHAT_HTML
     assert "if (container && shouldAutoScroll(container)) scrollToBottom(container)" in _CHAT_HTML
+
+
+def test_list_sessions_includes_current_empty_session(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        current = ChatSession(session_id="current-empty")
+        current.attach_store(store, load_existing=False)
+
+        history = ChatSession(session_id="history")
+        history.attach_store(store, load_existing=False)
+        history.add_user_message("历史会话")
+
+        monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
+
+        result = ChatWindowAPI(_RuntimeStub(current)).list_sessions()
+
+        assert result["ok"] is True
+        assert result["current_session_id"] == "current-empty"
+        session_ids = [item["session_id"] for item in result["sessions"]]
+        assert "current-empty" in session_ids
+        assert "history" in session_ids
+
+        current_item = next(
+            item for item in result["sessions"]
+            if item["session_id"] == "current-empty"
+        )
+        assert current_item["title"] == "新对话"
+        assert current_item["message_count"] == 0
+    finally:
+        store.close()

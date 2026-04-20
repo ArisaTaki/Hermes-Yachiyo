@@ -19,6 +19,7 @@ from apps.core.executor import (
     _resolve_hermes_python,
 )
 import apps.core.executor as executor_mod
+import apps.core.hermes_stream_bridge as bridge_mod
 from packages.protocol.enums import RiskLevel, TaskStatus, TaskType
 from packages.protocol.schemas import TaskInfo
 from datetime import datetime, timezone
@@ -524,3 +525,29 @@ class TestBuildInitAgentKwargs:
         )
         assert "Hermes API 参数不兼容" in msg
         assert "route_label" in msg
+
+    def test_debug_route_is_disabled_by_default(self, monkeypatch, capsys):
+        """默认不输出 route 诊断日志，避免把配置写入 stderr。"""
+        monkeypatch.delenv("HERMES_YACHIYO_DEBUG_ROUTE", raising=False)
+
+        bridge_mod._debug_route({"api_key": "secret-token", "model": "m"})
+
+        assert capsys.readouterr().err == ""
+
+    def test_debug_route_logs_keys_only_when_enabled(self, monkeypatch, capsys):
+        """显式开启诊断时只输出 key，不输出敏感 value。"""
+        monkeypatch.setenv("HERMES_YACHIYO_DEBUG_ROUTE", "1")
+
+        bridge_mod._debug_route({
+            "api_key": "secret-token",
+            "endpoint": "https://internal.example",
+            "request_overrides": {"Authorization": "Bearer abc"},
+        })
+        err = capsys.readouterr().err
+
+        assert "api_key" in err
+        assert "endpoint" in err
+        assert "request_overrides" in err
+        assert "secret-token" not in err
+        assert "internal.example" not in err
+        assert "Bearer abc" not in err

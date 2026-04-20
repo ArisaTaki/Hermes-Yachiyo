@@ -23,6 +23,8 @@ from typing import Any, Optional
 
 
 _EVENT_STDOUT = sys.stdout
+_DEBUG_ROUTE_ENV = "HERMES_YACHIYO_DEBUG_ROUTE"
+_DEBUG_ROUTE_TRUE_VALUES = {"1", "true", "yes", "on", "debug"}
 
 
 def _emit(event_type: str, **payload: Any) -> None:
@@ -59,12 +61,18 @@ def _get_session_title(cli: Any, session_id: str) -> Optional[str]:
     return title if isinstance(title, str) and title else None
 
 
-def _debug_route(route: Any) -> None:
-    """把 _resolve_turn_agent_config 的返回值打印到 stderr，供开发者对比不同 provider 路径。
+def _is_debug_route_enabled() -> bool:
+    value = os.environ.get(_DEBUG_ROUTE_ENV, "")
+    return value.strip().lower() in _DEBUG_ROUTE_TRUE_VALUES
 
-    此日志为临时诊断用途：帮助确认 label 字段在哪些 provider/api_mode 路径下缺失。
-    不影响生产逻辑，仅写入 stderr（由父进程捕获，不污染事件流）。
+
+def _debug_route(route: Any) -> None:
+    """按显式开关输出 route 结构，供开发者对比不同 provider 路径。
+
+    只输出结构信息，不输出 value，避免泄漏 token、endpoint 或 request 配置。
     """
+    if not _is_debug_route_enabled():
+        return
     try:
         if route is None:
             print("[yachiyo-debug] route=None", file=sys.stderr, flush=True)
@@ -75,15 +83,9 @@ def _debug_route(route: Any) -> None:
                 file=sys.stderr,
                 flush=True,
             )
-            for k, v in route.items():
-                print(
-                    f"[yachiyo-debug]   route[{k!r}] = {v!r}",
-                    file=sys.stderr,
-                    flush=True,
-                )
         else:
             print(
-                f"[yachiyo-debug] route type={type(route).__name__} repr={repr(route)[:200]}",
+                f"[yachiyo-debug] route type={type(route).__name__}",
                 file=sys.stderr,
                 flush=True,
             )
@@ -183,15 +185,8 @@ def _run(payload: dict[str, Any]) -> int:
         if route_sig != cli._active_agent_route_signature:
             cli.agent = None
 
-        # label 字段在部分 provider 路径下可能不存在，此处安全降级为 None；
-        # 仅用于日志，不直接传给 _init_agent()
+        # label 字段在部分 provider 路径下可能不存在，此处安全降级为 None。
         route_label = route.get("label")
-        print(
-            f"[yachiyo-debug] _init_agent: route_label={route_label!r}, "
-            f"model={route.get('model')!r}, runtime={route.get('runtime')!r}",
-            file=sys.stderr,
-            flush=True,
-        )
 
         # 使用签名检查构建 kwargs，避免向旧版 Hermes _init_agent 传入它不认识的参数
         init_kwargs = _build_init_agent_kwargs(
@@ -201,6 +196,13 @@ def _run(payload: dict[str, Any]) -> int:
             route_label=route_label,
             request_overrides=route.get("request_overrides"),
         )
+        if _is_debug_route_enabled():
+            print(
+                "[yachiyo-debug] _init_agent kwargs="
+                f"{list(init_kwargs.keys())}, route_label_present={route_label is not None}",
+                file=sys.stderr,
+                flush=True,
+            )
         try:
             ok = cli._init_agent(**init_kwargs)
         except TypeError as exc:
@@ -210,11 +212,13 @@ def _run(payload: dict[str, Any]) -> int:
             }
             try:
                 ok = cli._init_agent(**fallback_kwargs)
-                print(
-                    f"[yachiyo-debug] _init_agent fallback succeeded (removed route_label)",
-                    file=sys.stderr,
-                    flush=True,
-                )
+                if _is_debug_route_enabled():
+                    print(
+                        "[yachiyo-debug] _init_agent fallback succeeded "
+                        "(removed route_label)",
+                        file=sys.stderr,
+                        flush=True,
+                    )
             except Exception as exc2:
                 _emit(
                     "error",

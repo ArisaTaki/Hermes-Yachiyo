@@ -66,19 +66,33 @@ class ChatWindowAPI:
         """列出历史会话"""
         from apps.core.chat_store import get_chat_store
         store = get_chat_store()
+        current_session = self._runtime.chat_session
+        current_session_id = current_session.session_id
         sessions = store.list_sessions(limit=20)
+        session_items = [
+            {
+                "session_id": s.session_id,
+                "title": s.title,
+                "created_at": s.created_at,
+                "message_count": s.message_count,
+            }
+            for s in sessions
+        ]
+        if not any(item["session_id"] == current_session_id for item in session_items):
+            stored_current = store.get_session(current_session_id)
+            session_items.insert(
+                0,
+                {
+                    "session_id": current_session_id,
+                    "title": (stored_current.title if stored_current else "") or "新对话",
+                    "created_at": stored_current.created_at if stored_current else "",
+                    "message_count": stored_current.message_count if stored_current else 0,
+                },
+            )
         return {
             "ok": True,
-            "current_session_id": self._runtime.chat_session.session_id,
-            "sessions": [
-                {
-                    "session_id": s.session_id,
-                    "title": s.title,
-                    "created_at": s.created_at,
-                    "message_count": s.message_count,
-                }
-                for s in sessions
-            ],
+            "current_session_id": current_session_id,
+            "sessions": session_items,
         }
 
     def load_session(self, session_id: str) -> Dict[str, Any]:
