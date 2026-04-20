@@ -1,6 +1,7 @@
 """Executor 测试 — SimulatedExecutor、HermesCallError、HermesInvokeResult"""
 
 import asyncio
+import json
 
 import pytest
 
@@ -11,6 +12,7 @@ from apps.core.executor import (
     SimulatedExecutor,
     _HERMES_CMD,
     _HERMES_FLAGS,
+    _humanize_bridge_error,
     _parse_bridge_event,
     _parse_hermes_output,
     _parse_hermes_title,
@@ -280,3 +282,245 @@ class TestHermesStreamBridgeHelpers:
 
         assert result.success is False
         assert result.error_message == "Hermes runtime credentials are not available"
+
+
+class TestHumanizeBridgeError:
+    """_humanize_bridge_error 把 bridge 原始异常前缀转为用户可读描述。"""
+
+    def test_keyerror_label_is_humanized(self):
+        msg = _humanize_bridge_error("KeyError: 'label'")
+        assert "KeyError: 'label'" in msg
+        assert "Hermes provider 配置字段缺失" in msg
+        # 不能原样暴露原始异常给用户
+        assert msg != "KeyError: 'label'"
+
+    def test_attribute_error_is_humanized(self):
+        msg = _humanize_bridge_error("AttributeError: 'NoneType' object has no attribute 'run'")
+        assert "Hermes API 结构不兼容" in msg
+
+    def test_type_error_is_humanized(self):
+        msg = _humanize_bridge_error("TypeError: unexpected keyword argument")
+        assert "Hermes API 参数不兼容" in msg
+
+    def test_non_exception_message_unchanged(self):
+        msg = _humanize_bridge_error("Hermes runtime credentials are not available")
+        assert msg == "Hermes runtime credentials are not available"
+
+    def test_empty_message_unchanged(self):
+        assert _humanize_bridge_error("") == ""
+
+    def test_unknown_exception_unchanged(self):
+        msg = _humanize_bridge_error("ZeroDivisionError: division by zero")
+        assert msg == "ZeroDivisionError: division by zero"
+
+
+class TestConsumeStreamBridgeRobustness:
+    """_consume_stream_bridge 对 provider 差异事件结构的鲁棒性测试。"""
+
+    def _make_proc_from_lines(self, lines: list[str]):
+        """构造一个返回指定行序列的假进程。"""
+        encoded = b"\n".join(line.encode() for line in lines) + b"\n"
+
+        class FakeStream:
+            def __init__(self, data: bytes):
+                self._data = data
+                self._pos = 0
+
+            async def readline(self) -> bytes:
+                if self._pos >= len(self._data):
+                    return b""
+                end = self._data.find(b"\n", self._pos)
+                if end == -1:
+                    chunk = self._data[self._pos:]
+                    self._pos = len(self._data)
+                    return chunk
+                chunk = self._data[self._pos : end + 1]
+                self._pos = end + 1
+                return chunk
+
+            async def read(self) -> bytes:
+                return b""
+
+        class FakeStdin:
+            def write(self, data: bytes): pass
+            async def drain(self): pass
+            def close(self): pass
+
+        class FakeProc:
+            returncode = 0
+            stdin = FakeStdin()
+
+            def __init__(self, stdout_data: bytes):
+                self.stdout = FakeStream(stdout_data)
+                self.stderr = FakeStream(b"")
+
+            async def wait(self) -> int:
+                return 0
+
+        return FakeProc(encoded)
+
+    @pytest.mark.asyncio
+    async def test_error_event_with_keyerror_label_is_humanized(self):
+        """bridge 输出 KeyError: 'label' 时，error_message 应是用户友好描述。"""
+        lines = [json.dumps({"type": "error", "message": "KeyError: 'label'"})]
+        proc = self._make_proc_from_lines(lines)
+        updates = []
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            updates.append,
+        )
+
+        assert result.success is False
+        assert "KeyError" in result.error_message
+        assert "Hermes provider 配置字段缺失" in result.error_message
+
+    @pytest.mark.asyncio
+    async def test_unknown_event_type_does_not_crash(self):
+        """未知事件类型只记录日志，不崩溃，不影响最终结果。"""
+        lines = [
+            json.dumps({"type": "unknown_future_event", "data": "something"}),
+            json.dumps({"type": "done", "response": "hello world", "session_id": "s1"}),
+        ]
+        proc = self._make_proc_from_lines(lines)
+        updates = []
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            updates.append,
+        )
+
+        assert result.success is True
+        assert result.stdout == "hello world"
+
+    @pytest.mark.asyncio
+    async def test_boundary_event_does_not_affect_result(self):
+        """boundary 事件被静默忽略，不产生内容也不导致失败。"""
+        lines = [
+            json.dumps({"type": "delta", "delta": "partial"}),
+            json.dumps({"type": "boundary"}),
+            json.dumps({"type": "done", "response": "full response", "session_id": "s2"}),
+        ]
+        proc = self._make_proc_from_lines(lines)
+        updates = []
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            updates.append,
+        )
+
+        assert result.success is True
+        assert result.stdout == "full response"
+
+    @pytest.mark.asyncio
+    async def test_done_event_without_streaming_yields_final_response(self):
+        """只有 done 事件（无 delta），应降级为最终完整回复，不失败。"""
+        lines = [
+            json.dumps({"type": "done", "response": "完整回复", "session_id": "s3"}),
+        ]
+        proc = self._make_proc_from_lines(lines)
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            lambda _: None,
+        )
+
+        assert result.success is True
+        assert result.stdout == "完整回复"
+        assert result.hermes_session_id == "s3"
+
+    @pytest.mark.asyncio
+    async def test_done_event_with_failed_flag_marks_failure(self):
+        """done 事件中 failed=True 时，result 应为失败。"""
+        lines = [
+            json.dumps({"type": "done", "response": "", "failed": True}),
+        ]
+        proc = self._make_proc_from_lines(lines)
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            lambda _: None,
+        )
+
+        assert result.success is False
+
+
+class TestBuildInitAgentKwargs:
+    """_build_init_agent_kwargs 根据 _init_agent 签名动态过滤参数。"""
+
+    def _call(self, fn, **kw):
+        from apps.core.hermes_stream_bridge import _build_init_agent_kwargs
+        return _build_init_agent_kwargs(fn, **kw)
+
+    def _defaults(self):
+        return dict(
+            model_override="deepseek",
+            runtime_override="openai",
+            route_label="my-label",
+            request_overrides=None,
+        )
+
+    def test_route_label_excluded_when_not_in_signature(self):
+        """函数签名无 route_label 时，kwargs 中不应含该键。"""
+        def fake_init(self, model_override=None, runtime_override=None):
+            pass
+
+        result = self._call(fake_init, **self._defaults())
+        assert "route_label" not in result
+        assert result.get("model_override") == "deepseek"
+
+    def test_route_label_included_when_in_signature(self):
+        """函数签名含 route_label 时，kwargs 中应包含该键。"""
+        def fake_init(self, model_override=None, runtime_override=None, route_label=None):
+            pass
+
+        result = self._call(fake_init, **self._defaults())
+        assert "route_label" in result
+        assert result["route_label"] == "my-label"
+
+    def test_request_overrides_excluded_when_not_in_signature(self):
+        """函数签名无 request_overrides 时，kwargs 中不应含该键。"""
+        def fake_init(self, model_override=None, runtime_override=None):
+            pass
+
+        kw = {**self._defaults(), "request_overrides": {"key": "val"}}
+        result = self._call(fake_init, **kw)
+        assert "request_overrides" not in result
+
+    def test_var_keyword_function_gets_all_nonnull_candidates(self):
+        """函数接受 **kwargs 时，所有非 None 候选均可传入。"""
+        def fake_init(self, **kwargs):
+            pass
+
+        result = self._call(fake_init, **self._defaults())
+        assert "model_override" in result
+        assert "runtime_override" in result
+        assert "route_label" in result
+
+    def test_signature_inspection_failure_returns_safe_defaults(self):
+        """inspect.signature 失败时，只返回 model_override 和 runtime_override。"""
+        # C 内置函数通常无法获取 Python signature
+        result = self._call(len, **self._defaults())
+        assert set(result.keys()) <= {"model_override", "runtime_override"}
+
+    def test_route_label_none_excluded_even_when_var_keyword(self):
+        """route_label=None 时，即便函数接受 **kwargs，也不传入 None 值。"""
+        def fake_init(self, **kwargs):
+            pass
+
+        kw = {**self._defaults(), "route_label": None}
+        result = self._call(fake_init, **kw)
+        assert "route_label" not in result
+
+    def test_error_event_with_route_label_typeerror_is_humanized(self):
+        """bridge emit 的 TypeError: route_label 错误消息应被人性化。"""
+        msg = _humanize_bridge_error(
+            "TypeError: _init_agent() got an unexpected keyword argument 'route_label'"
+        )
+        assert "Hermes API 参数不兼容" in msg
+        assert "route_label" in msg

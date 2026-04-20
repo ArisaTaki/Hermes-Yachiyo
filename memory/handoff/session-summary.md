@@ -1,59 +1,62 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 51: 重复 assistant 修复 + Processing UI + 多轮对话 + 历史会话
+## 本轮完成内容 — Milestone 53: _init_agent() 参数兼容性修复
 
-### Milestone 47: 重复 assistant 修复 + Processing UI
+### 问题
 
-**根因**：`ChatAPI._sync_task_status_to_messages()` 中 `has_assistant_reply()` + `add_assistant_message()` 是两次独立加锁操作（TOCTOU 竞态），并发轮询可同时通过检查并各自新增 assistant 消息。
-
-**修复**：
-- 新增 `ChatSession.upsert_assistant_message(task_id, content, status, error)` — 在同一把 RLock 内完成"查找 → 更新/创建"，原子不可分割
-- `ChatAPI._sync_task_status_to_messages()` 全面改用 `upsert_assistant_message()`
-- RUNNING → 创建 PROCESSING 占位消息；COMPLETED → 更新同一条消息；FAILED → 更新同一条消息
-- 不允许从终态（COMPLETED/FAILED）回退到 PROCESSING
-
-**Processing UI**：
-- 聊天窗口新增 `.processing` CSS 类 + `@keyframes thinking-dots` 打字动画
-- assistant PROCESSING 气泡显示"正在思考..."动画
-- 轮询间隔从 1500ms 缩短到 800ms
-
-### Milestone 51: 多轮对话 + 历史会话 + 消息排序
-
-**`--resume SESSION_ID` 多轮对话**：
-- `ChatSession` 增加 `hermes_session_id` 字段，记录 Hermes CLI 返回的 session ID
-- `invoke_hermes_cli()` 支持 `hermes_session_id` 参数，自动附加 `--resume`
-- `HermesExecutor` 从 `ChatSession` 读取 session ID 并传入 CLI
-- Hermes stdout 中的 `[Session: xxx]` 自动解析并存入 `ChatSession`
-- 同一个 Yachiyo 会话内的多次查询共享 Hermes 上下文
-
-**历史会话加载**：
-- `ChatWindowAPI.load_session(session_id)` 加载历史会话消息到当前 ChatSession
-- 聊天窗口 header 新增历史会话下拉菜单
-- UI 支持切换到历史会话查看消息
-
-**消息排序优化**：
-- `get_messages()` 返回时按 task 关联关系重排：user 消息后紧跟其 assistant 回复
-
-### 消息发送链路（更新）
+Milestone 52 已把 `route["label"]` → `route.get("label")` 防止 KeyError，但 `route_label=None` 仍被硬传给 `cli._init_agent()`。Nous Portal / MiMo 路径下当前 Hermes 版本的 `_init_agent()` 不接受 `route_label` 参数，引发：
 
 ```
-用户输入 → sendMessage() [JS, 聊天窗口]
-  → ChatAPI.send_message() [Python]
-    → ChatSession.add_user_message() → SQLite 持久化
+TypeError: HermesCLI._init_agent() got an unexpected keyword argument 'route_label'
+```
+
+上轮的 `except TypeError` 捕获了错误但直接 emit error 返回失败，任务仍然失败。
+
+### 修复
+
+**`apps/core/hermes_stream_bridge.py`**：
+- 新增 `_build_init_agent_kwargs(init_agent_fn, ...)` — 用 `inspect.signature()` 检查 `_init_agent` 实际接受的参数
+- 三种情况自动处理：签名含 `route_label` → 传；不含 → 不传；函数接受 `**kwargs` → 传所有非 None 值；`inspect.signature` 失败 → 保守只传 `model_override`/`runtime_override`
+- `_run()` 全面改用 `_build_init_agent_kwargs()` 构建 `init_kwargs`
+- 保留 `TypeError` 兜底：若仍触发 TypeError，自动去掉 `route_label` 再重试
+
+**`tests/test_executor.py`**：新增 `TestBuildInitAgentKwargs`（7 用例）
+
+测试：200 passed
+
+### 消息发送链路（当前）
+
+```
+用户输入 → sendMessage() [JS]
+  → ChatAPI.send_message()
+    → ChatSession.add_user_message() → SQLite
     → AppState.create_task()
-    → ChatSession.link_message_to_task() → SQLite 更新
   → TaskRunner 轮询 PENDING 任务
   → HermesExecutor.run()
-    → invoke_hermes_cli(query, hermes_session_id) → hermes chat -q "query" -Q --source tool [--resume ID]
+    → invoke_hermes_cli(query, hermes_session_id)
+      → _invoke_hermes_stream_bridge()
+        → hermes_stream_bridge.py [Hermes 解释器]
+          → _resolve_turn_agent_config() → route dict（防御式 .get()）
+          → _build_init_agent_kwargs(cli._init_agent, ...) → 签名过滤
+          → cli._init_agent(**init_kwargs)  ← 只传函数接受的参数
+          → run_conversation() → delta/done/error events
+  → _consume_stream_bridge() → upsert_assistant_message()
   → AppState.update_task_status(COMPLETED)
-  → UI 轮询 get_messages()
-    → ChatAPI._sync_task_status_to_messages()
-    → ChatSession.upsert_assistant_message() → 原子创建/更新 → SQLite 持久化
-  → 渲染 assistant 回复（按 task 关联排序）
+  → UI 渲染 assistant 回复
 ```
+
+### provider 路径对比
+
+| provider | route keys | _init_agent 接受 route_label | init_kwargs 实际包含 |
+|---|---|---|---|
+| DeepSeek/OpenAI-compatible | 含 label | 是（旧版） | model, runtime, route_label, request_overrides |
+| Nous Portal / MiMo | 无 label | 否（当前版） | model, runtime |
+| 未来 **kwargs 版 | 不确定 | **kwargs | 所有非 None |
 
 ### 下一步建议
 
-1. **字符级 token streaming**：需 Hermes 底层支持增量输出
-2. **Live2D 渲染器**：接入 PixiJS / CubismSDK
-3. **处理进度百分比**：需 Hermes 提供进度回调
+1. 发送几条消息，对比 DeepSeek 和 Nous Portal 路径 stderr 中的 `[yachiyo-debug]` 日志确认路径正常
+2. 两个路径均通过后，可考虑移除 `_debug_route()` 和 `_init_agent` 调试日志
+3. token streaming 依赖 Hermes 底层 callback 增量输出
+
+

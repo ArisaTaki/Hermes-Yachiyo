@@ -1658,47 +1658,59 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 - `python3 -m compileall apps packages integrations tests` → passed
 - `git diff --check` → passed
 
-### Milestone 51 — 重复 assistant 修复 + Processing UI + 多轮对话 + 历史会话
+### Milestone 53 — _init_agent() 参数兼容性修复
 
-**目标**：修复重复 assistant 消息、增加聊天处理中展示、实现 Hermes `--resume` 多轮对话、历史会话加载/切换、消息按 task 关联排序。
+**根因**：Milestone 52 将 `route["label"]` 改为 `route.get("label")` 后，`route_label=None` 仍然被传给 `cli._init_agent()`。当前安装的 Hermes 版本（Nous Portal 路径）`_init_agent()` 不接受 `route_label` 参数，引发 `TypeError: got an unexpected keyword argument 'route_label'`。
 
-**Phase 1: 重复 assistant 修复**
+上轮的 `except TypeError` 块捕获了异常但直接 emit error 并 return 1，任务仍失败。
 
-根因：`ChatAPI._sync_task_status_to_messages()` 中 `has_assistant_reply()` + `add_assistant_message()` 是两次独立加锁操作（TOCTOU 竞态条件）。
-
-| 变更 | 处理 |
-|------|------|
-| `ChatSession.upsert_assistant_message()` | 新增原子方法，同一把 RLock 内完成"查找已有 → 更新/创建"，保证幂等 |
-| `ChatAPI._sync_task_status_to_messages()` | 全面替换为 `upsert_assistant_message()`，RUNNING→PROCESSING 占位、COMPLETED→更新、FAILED→更新 |
-| 终态降级保护 | 已 COMPLETED/FAILED 的消息不会被 PROCESSING 回退 |
-
-**Phase 2: Processing UI**
+**修复**：
 
 | 变更 | 处理 |
 |------|------|
-| 聊天窗口 CSS | 新增 `.processing` 类 + `@keyframes thinking-dots` 动画 |
-| 消息渲染 | assistant PROCESSING 消息显示"正在思考..."动画气泡 |
-| 轮询间隔 | 1500ms → 800ms |
+| `hermes_stream_bridge.py` | 新增 `_build_init_agent_kwargs(init_agent_fn, ...)` — 用 `inspect.signature()` 检查 `_init_agent` 实际接受的参数，只传支持的 kwargs |
+| `hermes_stream_bridge.py` | 支持三种情况：① 签名含 `route_label` → 传；② 签名不含 → 不传；③ 函数接受 `**kwargs` → 传所有非 None 值；④ `inspect.signature` 失败 → 只传 `model_override` / `runtime_override` |
+| `hermes_stream_bridge.py` | `_run()` 改用 `_build_init_agent_kwargs()` 构建 `init_kwargs`，再用 `cli._init_agent(**init_kwargs)` 调用 |
+| `hermes_stream_bridge.py` | 保留 `TypeError` 兜底路径：若 `_build_init_agent_kwargs` 结果仍引发 TypeError，自动去掉 `route_label` 后再试一次 |
+| `tests/test_executor.py` | 新增 `TestBuildInitAgentKwargs`（7 用例）：签名无 route_label → 排除、签名有 → 包含、**kwargs → 全传非 None、inspect 失败 → 保守降级、None 值不传 |
 
-**Phase 3: Hermes `--resume` 多轮对话**
+**测试结果**：200 passed（+7 新增，0 失败）
 
-| 变更 | 处理 |
-|------|------|
-| `ChatSession.hermes_session_id` | 新增字段，记录 Hermes CLI 返回的 session ID |
-| `chat_sessions` 表 | 新增 `hermes_session_id` 列（可选） |
-| `invoke_hermes_cli()` | 新增 `hermes_session_id` 参数，非空时附加 `--resume` |
-| `HermesExecutor.run()` | 接收 `ChatSession`，用 `hermes_session_id` 调用 CLI，解析返回 session ID |
-| stdout 解析 | 正则提取 `[Session: ...]` 行并写入 ChatSession |
+**三种路径的实际行为**：
 
-**Phase 4: 历史会话加载/切换**
+| provider 路径 | route keys | _init_agent 签名 | 实际传入 kwargs |
+|---|---|---|---|
+| DeepSeek/OpenAI | 含 label | 含 route_label | model, runtime, route_label, request_overrides |
+| Nous Portal/MiMo | 无 label | 不含 route_label | model, runtime（route_label 被过滤） |
+| 未来新版 | 不确定 | **kwargs | 所有非 None 值 |
 
-| 变更 | 处理 |
-|------|------|
-| `ChatWindowAPI.load_session()` | 加载指定 session 的消息到 ChatSession |
-| 聊天窗口 UI | header 新增历史会话图标按钮，点击展示下拉菜单 |
 
-**Phase 5: 消息排序优化**
+**根因**：`apps/core/hermes_stream_bridge.py` 中 `_run()` 对 `_resolve_turn_agent_config()` 返回值使用硬字典访问（`route["label"]`、`route["model"]`、`route["runtime"]`、`route["signature"]`）。Nous Portal / MiMo / 其他非 OpenAI-compatible provider 路径下，Hermes 返回的 route dict 可能不包含 `"label"` 键，导致 `KeyError: 'label'`，整个任务失败。
+
+**修复**：
 
 | 变更 | 处理 |
 |------|------|
-| `ChatAPI.get_messages()` | 返回前按 task 关联排序，user 消息后紧跟其 assistant 回复 |
+| `hermes_stream_bridge.py` | 新增 `_debug_route()` 打印 route 结构到 stderr（供诊断不同 provider 路径差异） |
+| `hermes_stream_bridge.py` | `route["signature"]` / `route["model"]` / `route["runtime"]` / `route["label"]` 全部改为 `route.get("key")` 防御式访问 |
+| `hermes_stream_bridge.py` | 对 `_init_agent()` 包裹 try/except `TypeError` / `Exception`，捕获 Hermes 版本不兼容的参数异常 |
+| `hermes_stream_bridge.py` | 若 route 不是 dict，emit 结构化 error 而非引发 KeyError |
+| `executor.py` | 新增 `_BRIDGE_RAW_EXCEPTION_TO_FRIENDLY` 映射表：`KeyError:`/`AttributeError:`/`TypeError:` 等 → 用户可读描述 |
+| `executor.py` | 新增 `_humanize_bridge_error(message)` 函数：检测原始异常前缀，转换为可读提示 |
+| `executor.py` | `_consume_stream_bridge` 中 error 事件调用 `_humanize_bridge_error()`，`boundary` 事件静默忽略，未知事件类型 debug log 跳过 |
+| `tests/test_executor.py` | 新增 `TestHumanizeBridgeError`（6 个用例）：KeyError/AttributeError/TypeError/普通消息/空串 |
+| `tests/test_executor.py` | 新增 `TestConsumeStreamBridgeRobustness`（5 个用例）：KeyError label 被人性化、未知事件不崩溃、boundary 不影响结果、仅 done 无 delta 降级为完整回复、done failed=True |
+
+**测试结果**：193 passed（+11 新增，0 失败）
+
+**诊断方式（不同 provider 路径对比）**：
+
+启动后聊天，`stderr` 中 `[yachiyo-debug] route keys=...` 行会记录 Hermes 的 route dict 结构。
+
+- DeepSeek/OpenAI-compatible 路径会包含 `label`、`model`、`runtime`、`signature`
+- Nous Portal / MiMo 路径可能缺少 `label`，需对比 keys 列表
+
+**后续增强项**：
+
+- 若 `route_label=None` 导致 Hermes 某些功能降级，可在 bridge 中用 `route.get("model", "")` 派生 label 兜底
+- `_debug_route()` 为临时诊断日志，问题稳定后可按 provider 路径整理文档后移除

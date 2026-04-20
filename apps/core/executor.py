@@ -133,6 +133,32 @@ _STREAM_BRIDGE_FALLBACK_MARKERS = (
     "cannot import",
 )
 
+# bridge 内部原始异常模式 → 用户友好描述
+# 这些异常由 hermes_stream_bridge.py 的 main() 捕获后以 "ExcType: msg" 格式输出，
+# 在显示给用户前需要转换为可读提示。
+_BRIDGE_RAW_EXCEPTION_TO_FRIENDLY: dict[str, str] = {
+    "KeyError:": "Hermes provider 配置字段缺失",
+    "AttributeError:": "Hermes API 结构不兼容",
+    "TypeError:": "Hermes API 参数不兼容",
+    "RuntimeError:": "Hermes 运行时错误",
+    "ValueError:": "Hermes 配置值错误",
+    "AssertionError:": "Hermes 断言失败",
+}
+
+
+def _humanize_bridge_error(message: str) -> str:
+    """把 bridge 输出的原始 Python 异常消息转换为用户可读提示。
+
+    例：'KeyError: 'label'' → 'Hermes provider 配置字段缺失（KeyError: 'label'）'
+    若不匹配任何已知异常前缀，原样返回。
+    """
+    if not message:
+        return message
+    for pattern, friendly in _BRIDGE_RAW_EXCEPTION_TO_FRIENDLY.items():
+        if message.startswith(pattern):
+            return f"{friendly}（{message}）"
+    return message
+
 
 def _clean_hermes_line(line: str, strip_stream_padding: bool = False) -> Optional[str]:
     """过滤 Hermes CLI 的 Rich 边框和摘要行，保留真实回复文本。"""
@@ -349,9 +375,16 @@ async def _consume_stream_bridge(
                 hermes_title = title if isinstance(title, str) and title else hermes_title
                 failed = bool(event.get("failed"))
             elif event_type == "error":
-                message = event.get("message")
-                error_message = message if isinstance(message, str) else "Hermes streaming bridge 调用失败"
+                raw_message = event.get("message")
+                raw_message = raw_message if isinstance(raw_message, str) else "Hermes streaming bridge 调用失败"
+                error_message = _humanize_bridge_error(raw_message)
                 failed = True
+            elif event_type == "boundary":
+                # 流内边界标记，不含有效内容，直接忽略
+                pass
+            elif event_type is not None:
+                # 未知事件类型：不崩溃，仅记录 debug 日志
+                logger.debug("忽略未知 bridge 事件类型: %s", event_type)
 
         stderr_bytes = await stderr_task
         stderr = stderr_bytes.decode(errors="replace").strip()

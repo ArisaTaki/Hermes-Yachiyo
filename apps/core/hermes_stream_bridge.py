@@ -14,6 +14,7 @@ only agent text deltas, not Rich banners, tool lists, or startup messages.
 from __future__ import annotations
 
 import contextlib
+import inspect
 import json
 import os
 import sys
@@ -58,6 +59,82 @@ def _get_session_title(cli: Any, session_id: str) -> Optional[str]:
     return title if isinstance(title, str) and title else None
 
 
+def _debug_route(route: Any) -> None:
+    """把 _resolve_turn_agent_config 的返回值打印到 stderr，供开发者对比不同 provider 路径。
+
+    此日志为临时诊断用途：帮助确认 label 字段在哪些 provider/api_mode 路径下缺失。
+    不影响生产逻辑，仅写入 stderr（由父进程捕获，不污染事件流）。
+    """
+    try:
+        if route is None:
+            print("[yachiyo-debug] route=None", file=sys.stderr, flush=True)
+            return
+        if isinstance(route, dict):
+            print(
+                f"[yachiyo-debug] route keys={list(route.keys())}",
+                file=sys.stderr,
+                flush=True,
+            )
+            for k, v in route.items():
+                print(
+                    f"[yachiyo-debug]   route[{k!r}] = {v!r}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+        else:
+            print(
+                f"[yachiyo-debug] route type={type(route).__name__} repr={repr(route)[:200]}",
+                file=sys.stderr,
+                flush=True,
+            )
+    except Exception:
+        pass
+
+
+def _build_init_agent_kwargs(
+    init_agent_fn: Any,
+    *,
+    model_override: Any,
+    runtime_override: Any,
+    route_label: Any,
+    request_overrides: Any,
+) -> dict[str, Any]:
+    """运行时检查 _init_agent() 的签名，只传入函数实际接受的参数。
+
+    Hermes 不同版本 / provider 路径下 _init_agent() 的签名并不稳定：
+    - 某些版本支持 route_label 参数
+    - 另一些版本不支持，直接传会引发 TypeError: unexpected keyword argument
+
+    通过 inspect.signature 动态构建 kwargs，避免硬编码参数名与 Hermes 内部 API 绑定。
+    """
+    candidates: dict[str, Any] = {
+        "model_override": model_override,
+        "runtime_override": runtime_override,
+        "route_label": route_label,
+        "request_overrides": request_overrides,
+    }
+
+    try:
+        sig = inspect.signature(init_agent_fn)
+    except (ValueError, TypeError):
+        # 获取签名失败时保守处理：只传最基础的两个参数
+        return {
+            "model_override": model_override,
+            "runtime_override": runtime_override,
+        }
+
+    # 部分 Hermes 版本使用 **kwargs，此时所有候选均可传
+    has_var_keyword = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD
+        for p in sig.parameters.values()
+    )
+    if has_var_keyword:
+        return {k: v for k, v in candidates.items() if v is not None}
+
+    accepted = set(sig.parameters.keys())
+    return {k: v for k, v in candidates.items() if k in accepted}
+
+
 def _run(payload: dict[str, Any]) -> int:
     description = str(payload.get("description") or "")
     resume = payload.get("resume")
@@ -86,15 +163,71 @@ def _run(payload: dict[str, Any]) -> int:
             return 1
 
         route = cli._resolve_turn_agent_config(description)
-        if route["signature"] != cli._active_agent_route_signature:
+
+        # 诊断日志：记录 route 的完整结构，帮助对比 provider 路径差异
+        _debug_route(route)
+
+        # 防御式解析：_resolve_turn_agent_config 在不同 provider/api_mode（如
+        # Nous Portal、MiMo 等）下返回的 dict 可能缺少 "label"、"model"、
+        # "runtime"、"signature" 等字段，不能假定全部存在。
+        if not isinstance(route, dict):
+            _emit(
+                "error",
+                message=(
+                    f"Hermes agent 路由配置类型不符（期望 dict，实际 {type(route).__name__}）"
+                ),
+            )
+            return 1
+
+        route_sig = route.get("signature")
+        if route_sig != cli._active_agent_route_signature:
             cli.agent = None
 
-        ok = cli._init_agent(
-            model_override=route["model"],
-            runtime_override=route["runtime"],
-            route_label=route["label"],
+        # label 字段在部分 provider 路径下可能不存在，此处安全降级为 None；
+        # 仅用于日志，不直接传给 _init_agent()
+        route_label = route.get("label")
+        print(
+            f"[yachiyo-debug] _init_agent: route_label={route_label!r}, "
+            f"model={route.get('model')!r}, runtime={route.get('runtime')!r}",
+            file=sys.stderr,
+            flush=True,
+        )
+
+        # 使用签名检查构建 kwargs，避免向旧版 Hermes _init_agent 传入它不认识的参数
+        init_kwargs = _build_init_agent_kwargs(
+            cli._init_agent,
+            model_override=route.get("model"),
+            runtime_override=route.get("runtime"),
+            route_label=route_label,
             request_overrides=route.get("request_overrides"),
         )
+        try:
+            ok = cli._init_agent(**init_kwargs)
+        except TypeError as exc:
+            # 签名检测失败兜底：去掉 route_label 后再试一次
+            fallback_kwargs = {
+                k: v for k, v in init_kwargs.items() if k != "route_label"
+            }
+            try:
+                ok = cli._init_agent(**fallback_kwargs)
+                print(
+                    f"[yachiyo-debug] _init_agent fallback succeeded (removed route_label)",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            except Exception as exc2:
+                _emit(
+                    "error",
+                    message=f"Hermes agent 初始化参数不兼容（{exc2}）",
+                )
+                return 1
+        except Exception as exc:
+            _emit(
+                "error",
+                message=f"Hermes agent 初始化失败（{type(exc).__name__}）",
+            )
+            return 1
+
         if not ok:
             _emit("error", message="Hermes agent 初始化失败")
             return 1
