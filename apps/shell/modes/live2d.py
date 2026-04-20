@@ -146,13 +146,21 @@ _LIVE2D_HTML = """
         .chat-msg.pending .content { color: #aaa; }
         .chat-msg.processing .content { color: #aaa; }
         .chat-msg.error .content { color: #ffaaaa; }
-        @keyframes thinking-dots {
-            0%, 20% { content: ''; }
-            40% { content: '.'; }
-            60% { content: '..'; }
-            80%, 100% { content: '...'; }
+        @keyframes thinking-dot {
+            0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+            40% { opacity: 1; transform: translateY(-1px); }
         }
-        .thinking::after { animation: thinking-dots 1.4s steps(1) infinite; content: ''; }
+        .thinking { display: inline-flex; align-items: center; gap: 2px; }
+        .thinking .dot {
+            animation: thinking-dot 1.2s ease-in-out infinite;
+            display: inline-block;
+        }
+        .thinking .dot:nth-child(2) {
+            animation-delay: 0.15s;
+        }
+        .thinking .dot:nth-child(3) {
+            animation-delay: 0.3s;
+        }
         .chat-input-row {
             display: flex;
             gap: 8px;
@@ -263,7 +271,11 @@ _LIVE2D_HTML = """
     </div>
 
     <script>
+    const ACTIVE_POLL_INTERVAL_MS = 1200;
+    const IDLE_POLL_INTERVAL_MS = 5000;
     let polling = null;
+    let pollingIntervalMs = null;
+    let statusPolling = null;
     let sending = false;
 
     function escapeHtml(t) {
@@ -286,7 +298,7 @@ _LIVE2D_HTML = """
             if (!r.ok) throw new Error(r.error || '发送失败');
             input.value = '';
             await refreshMessages();
-            startPolling();
+            startActivePolling();
         } catch(e) {
             console.error('send error:', e);
         } finally {
@@ -306,7 +318,7 @@ _LIVE2D_HTML = """
             const container = document.getElementById('chat-messages');
             if (r.empty || !r.messages || r.messages.length === 0) {
                 container.innerHTML = '<div style="text-align:center;color:#555;padding:15px 8px;font-size:0.85em;">发送消息开始对话 ✨</div>';
-                stopPolling();
+                startIdlePolling();
                 return;
             }
 
@@ -318,7 +330,7 @@ _LIVE2D_HTML = """
                          : m.status === 'pending' ? 'pending' : '';
                 let content;
                 if (m.status === 'processing' && m.role === 'assistant') {
-                    content = m.content ? escapeHtml(m.content) : '<span class="thinking">正在思考</span>';
+                    content = m.content ? escapeHtml(m.content) : renderThinking();
                 } else {
                     content = escapeHtml(m.content);
                 }
@@ -334,17 +346,40 @@ _LIVE2D_HTML = """
             const icon = document.getElementById('char-icon');
             if (icon) icon.textContent = r.is_processing ? '⚡' : '🎤';
 
-            if (!r.is_processing) stopPolling();
+            if (r.is_processing) {
+                startActivePolling();
+            } else {
+                startIdlePolling();
+            }
         } catch(e) {}
     }
 
-    function startPolling() {
-        if (polling) return;
-        polling = setInterval(refreshMessages, 1200);
+    function renderThinking() {
+        return '<span class="thinking" aria-label="正在思考">'
+             + '<span class="dot" aria-hidden="true">.</span>'
+             + '<span class="dot" aria-hidden="true">.</span>'
+             + '<span class="dot" aria-hidden="true">.</span>'
+             + '</span>';
+    }
+
+    function setPollingInterval(intervalMs) {
+        if (polling && pollingIntervalMs === intervalMs) return;
+        stopPolling();
+        pollingIntervalMs = intervalMs;
+        polling = setInterval(refreshMessages, intervalMs);
+    }
+
+    function startActivePolling() {
+        setPollingInterval(ACTIVE_POLL_INTERVAL_MS);
+    }
+
+    function startIdlePolling() {
+        setPollingInterval(IDLE_POLL_INTERVAL_MS);
     }
 
     function stopPolling() {
         if (polling) { clearInterval(polling); polling = null; }
+        pollingIntervalMs = null;
     }
 
     async function openChat() {
@@ -394,12 +429,19 @@ _LIVE2D_HTML = """
         } catch(e) {}
     }
 
+    function bootstrap() {
+        refreshStatus();
+        refreshMessages();
+        startIdlePolling();
+        if (!statusPolling) {
+            statusPolling = setInterval(refreshStatus, 10000);
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
-        setTimeout(function() {
-            refreshStatus();
-            refreshMessages();
-        }, 500);
+        setTimeout(bootstrap, 500);
     });
+    window.addEventListener('pywebviewready', bootstrap);
     </script>
 </body>
 </html>

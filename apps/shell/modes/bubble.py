@@ -92,13 +92,21 @@ _BUBBLE_HTML = """
         .chat-msg.processing .content { color: #aaa; }
         .chat-msg.error .content { color: #ffaaaa; }
         .empty-hint { text-align: center; color: #555; padding: 15px 8px; font-size: 0.85em; }
-        @keyframes thinking-dots {
-            0%, 20% { content: ''; }
-            40% { content: '.'; }
-            60% { content: '..'; }
-            80%, 100% { content: '...'; }
+        @keyframes thinking-dot {
+            0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+            40% { opacity: 1; transform: translateY(-1px); }
         }
-        .thinking::after { animation: thinking-dots 1.4s steps(1) infinite; content: ''; }
+        .thinking { display: inline-flex; align-items: center; gap: 2px; }
+        .thinking .dot {
+            animation: thinking-dot 1.2s ease-in-out infinite;
+            display: inline-block;
+        }
+        .thinking .dot:nth-child(2) {
+            animation-delay: 0.15s;
+        }
+        .thinking .dot:nth-child(3) {
+            animation-delay: 0.3s;
+        }
         /* 输入区 */
         .chat-input-row {
             display: flex;
@@ -175,7 +183,10 @@ _BUBBLE_HTML = """
     </div>
 
 <script>
+const ACTIVE_POLL_INTERVAL_MS = 1200;
+const IDLE_POLL_INTERVAL_MS = 5000;
 let polling = null;
+let pollingIntervalMs = null;
 let sending = false;
 
 function escapeHtml(t) {
@@ -198,7 +209,7 @@ async function sendMsg() {
         if (!r.ok) throw new Error(r.error || '发送失败');
         input.value = '';
         await refreshSummary();
-        startPolling();
+        startActivePolling();
     } catch(e) {
         console.error('send error:', e);
     } finally {
@@ -232,7 +243,7 @@ async function refreshSummary() {
         const container = document.getElementById('chat-summary');
         if (r.empty || !r.messages || r.messages.length === 0) {
             container.innerHTML = '<div class="empty-hint">发送消息开始对话 ✨</div>';
-            stopPolling();
+            startIdlePolling();
             return;
         }
 
@@ -243,7 +254,7 @@ async function refreshSummary() {
                      : m.status === 'pending' ? 'pending' : '';
             let content;
             if (m.status === 'processing' && m.role === 'assistant') {
-                content = m.content ? escapeHtml(m.content) : '<span class="thinking">正在思考</span>';
+                content = m.content ? escapeHtml(m.content) : renderThinking();
             } else {
                 content = escapeHtml(m.content);
             }
@@ -254,17 +265,40 @@ async function refreshSummary() {
         container.innerHTML = html;
         container.scrollTop = container.scrollHeight;
 
-        if (!r.is_processing) stopPolling();
+        if (r.is_processing) {
+            startActivePolling();
+        } else {
+            startIdlePolling();
+        }
     } catch(e) {}
 }
 
-function startPolling() {
-    if (polling) return;
-    polling = setInterval(refreshSummary, 1200);
+function renderThinking() {
+    return '<span class="thinking" aria-label="正在思考">'
+         + '<span class="dot" aria-hidden="true">.</span>'
+         + '<span class="dot" aria-hidden="true">.</span>'
+         + '<span class="dot" aria-hidden="true">.</span>'
+         + '</span>';
+}
+
+function setPollingInterval(intervalMs) {
+    if (polling && pollingIntervalMs === intervalMs) return;
+    stopPolling();
+    pollingIntervalMs = intervalMs;
+    polling = setInterval(refreshSummary, intervalMs);
+}
+
+function startActivePolling() {
+    setPollingInterval(ACTIVE_POLL_INTERVAL_MS);
+}
+
+function startIdlePolling() {
+    setPollingInterval(IDLE_POLL_INTERVAL_MS);
 }
 
 function stopPolling() {
     if (polling) { clearInterval(polling); polling = null; }
+    pollingIntervalMs = null;
 }
 
 async function openChat() {
@@ -288,11 +322,15 @@ async function closeBubble() {
     } catch(e) {}
 }
 
+function bootstrap() {
+    refreshSummary();
+    startIdlePolling();
+}
+
 document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(function() {
-        refreshSummary();
-    }, 500);
+    setTimeout(bootstrap, 500);
 });
+window.addEventListener('pywebviewready', bootstrap);
 </script>
 </body>
 </html>

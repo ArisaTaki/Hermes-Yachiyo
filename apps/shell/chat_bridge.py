@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict
 
 from apps.shell.chat_api import ChatAPI
 
@@ -133,6 +133,7 @@ class ChatBridge:
                 label = "就绪"
 
             return {
+                "ok": True,
                 "session_id": info["session_id"],
                 "message_count": count,
                 "is_processing": processing,
@@ -140,4 +141,11 @@ class ChatBridge:
             }
         except Exception as exc:
             logger.error("获取会话状态失败: %s", exc)
-            return {"session_id": "", "message_count": 0, "is_processing": False, "status_label": "错误"}
+            return {
+                "ok": False,
+                "error": str(exc),
+                "session_id": "",
+                "message_count": 0,
+                "is_processing": False,
+                "status_label": "错误",
+            }

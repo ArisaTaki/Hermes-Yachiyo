@@ -1,9 +1,11 @@
 """ChatBridge 测试 — 统一摘要层与三模式共享验证"""
 
-from apps.core.chat_session import ChatSession, MessageRole, MessageStatus
+from apps.core.chat_session import ChatSession
 from apps.core.chat_store import ChatStore
 from apps.core.state import AppState
 from apps.shell.chat_bridge import ChatBridge, _truncate
+from apps.shell.modes.bubble import _BUBBLE_HTML
+from apps.shell.modes.live2d import _LIVE2D_HTML
 from packages.protocol.enums import TaskStatus
 
 
@@ -58,9 +60,29 @@ def test_empty_session_status(tmp_path):
     bridge, runtime, store = _make_bridge(tmp_path)
     try:
         status = bridge.get_session_status()
+        assert status["ok"] is True
         assert status["status_label"] == "暂无对话"
         assert status["message_count"] == 0
         assert status["is_processing"] is False
+    finally:
+        store.close()
+
+
+def test_session_status_error_has_consistent_api_contract(tmp_path):
+    bridge, runtime, store = _make_bridge(tmp_path)
+
+    class BrokenChatAPI:
+        def get_session_info(self):
+            raise RuntimeError("boom")
+
+    try:
+        bridge._chat_api = BrokenChatAPI()  # type: ignore[assignment]
+
+        status = bridge.get_session_status()
+
+        assert status["ok"] is False
+        assert status["error"] == "boom"
+        assert status["status_label"] == "错误"
     finally:
         store.close()
 
@@ -248,3 +270,28 @@ def test_failed_task_in_summary(tmp_path):
         assert len(summary["messages"]) == 2
     finally:
         store.close()
+
+
+def test_bubble_html_keeps_idle_polling_for_cross_mode_updates():
+    assert "const IDLE_POLL_INTERVAL_MS = 5000;" in _BUBBLE_HTML
+    assert "function startIdlePolling()" in _BUBBLE_HTML
+    assert "function startActivePolling()" in _BUBBLE_HTML
+    assert "startIdlePolling();" in _BUBBLE_HTML
+    assert "window.addEventListener('pywebviewready', bootstrap);" in _BUBBLE_HTML
+
+
+def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
+    assert "const IDLE_POLL_INTERVAL_MS = 5000;" in _LIVE2D_HTML
+    assert "function startIdlePolling()" in _LIVE2D_HTML
+    assert "function startActivePolling()" in _LIVE2D_HTML
+    assert "startIdlePolling();" in _LIVE2D_HTML
+    assert "window.addEventListener('pywebviewready', bootstrap);" in _LIVE2D_HTML
+
+
+def test_thinking_dots_use_real_elements_not_content_animation():
+    for html in (_BUBBLE_HTML, _LIVE2D_HTML):
+        assert "@keyframes thinking-dot" in html
+        assert "@keyframes thinking-dots" not in html
+        assert "content: '.'" not in html
+        assert '<span class="dot" aria-hidden="true">.</span>' in html
+        assert '<span class="label">正在思考</span>' not in html

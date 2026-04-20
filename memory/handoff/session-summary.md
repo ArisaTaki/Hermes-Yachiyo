@@ -14,17 +14,20 @@
 
 - 移除 `get_bubble_data()` 等旧方法，换用 `ChatBridge`
 - HTML：状态标签 + 最近 3 条消息摘要 + 快捷输入 + 操作栏
-- 1200ms 轮询（处理中自动启动，空闲停止）
+- 1200ms 活跃轮询 / 5000ms 空闲轮询，支持跨模式消息可见
+- `pywebviewready` 触发即时刷新；思考态使用真实 span 点动画
 
 **更新 `apps/shell/modes/live2d.py`** — 角色舞台增加聊天能力
 
 - 新增 `ChatBridge` 实例及对应 API 方法
 - chat-area 从单按钮改为消息列表 + 输入行
 - 角色图标交互：⚡处理中 / 🎤空闲
+- 与 Bubble 共用活跃/空闲轮询策略和 `pywebviewready` 启动刷新
 
-**新建 `tests/test_chat_bridge.py`** — 15 个测试用例
+**新建 `tests/test_chat_bridge.py`** — 19 个测试用例
 
 - 截断、空会话、快捷发送、摘要、摘要条数边界、状态标签、三模式共享验证
+- 覆盖错误状态 API 契约、空闲轮询、WebView ready 启动和真实点动画
 
 ### 消息共享架构
 
@@ -37,7 +40,7 @@ Window          → ChatAPI    → ChatSession → ChatStore (SQLite)
 
 ### 测试结果
 
-218 passed（+15 新增，0 回归）
+222 passed（+19 新增，0 回归）
 
 ### 下一步建议
 
