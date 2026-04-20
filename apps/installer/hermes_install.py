@@ -244,6 +244,7 @@ import sys
 HERMES_INSTALL_SCRIPT_URL = (
     "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
 )
+HERMES_INSTALL_TIMEOUT_SECONDS = 900.0
 
 
 @dataclasses.dataclass
@@ -267,7 +268,7 @@ class InstallResult:
 
 async def run_hermes_install(
     on_output=None,
-    timeout: float = 300.0,
+    timeout: float = HERMES_INSTALL_TIMEOUT_SECONDS,
 ) -> InstallResult:
     """运行 Hermes Agent 官方安装脚本。
 
@@ -275,7 +276,7 @@ async def run_hermes_install(
 
     Args:
         on_output: 可选回调 (line: str) → None，实时接收安装输出行
-        timeout:   安装超时秒数（默认 5 分钟）
+        timeout:   安装超时秒数（默认 15 分钟）
 
     Returns:
         InstallResult（成功或失败均返回，不抛出）

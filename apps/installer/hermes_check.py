@@ -128,12 +128,33 @@ def get_hermes_version() -> HermesVersionInfo | None:
 
 
 def is_version_compatible(version: str) -> bool:
-    """检查版本是否兼容（简单字符串比较）"""
-    try:
-        # 简单的版本比较（实际应该用 packaging.version）
-        return version >= HERMES_MIN_VERSION
-    except Exception:
+    """检查版本是否兼容。
+
+    Hermes 版本形如 ``0.10.0``。不能使用字符串比较，否则 ``0.10.0``
+    会被错误判断为小于 ``0.8.0``。
+    """
+    current = _parse_version_parts(version)
+    minimum = _parse_version_parts(HERMES_MIN_VERSION)
+    if current is None or minimum is None:
         return False
+    width = max(len(current), len(minimum))
+    current = current + (0,) * (width - len(current))
+    minimum = minimum + (0,) * (width - len(minimum))
+    return current >= minimum
+
+
+def _parse_version_parts(version: str) -> tuple[int, ...] | None:
+    """从版本字符串中提取可比较的数字分段。"""
+    if not version:
+        return None
+
+    match = re.search(r"\d+(?:\.\d+)*", version)
+    if not match:
+        return None
+
+    parts = tuple(int(part) for part in match.group(0).split("."))
+    target_len = max(3, len(parts))
+    return parts + (0,) * (target_len - len(parts))
 
 
 def check_hermes_setup() -> Tuple[bool, str]:

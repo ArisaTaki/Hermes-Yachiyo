@@ -1526,7 +1526,7 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
         <div class="init-section">
             <h3>🚀 一键安装 Hermes Agent</h3>
             <p>点击下方按钮，系统将自动运行官方安装脚本。<br>
-               需要网络连接，安装约需 1-3 分钟。</p>
+               需要网络连接，网络较慢时最多会等待 15 分钟。</p>
             <button class="init-button" id="install-btn" onclick="startInstall()">安装 Hermes Agent</button>
             <div id="install-progress" style="display:none; margin-top:12px;">
                 <div style="color:#6495ed; margin-bottom:6px;">⏳ 安装中，请稍候...</div>
