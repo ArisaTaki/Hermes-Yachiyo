@@ -8,7 +8,7 @@
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-105%20passed-brightgreen.svg)](#测试)
+[![Tests](https://img.shields.io/badge/Tests-pytest%20suite-brightgreen.svg)](#测试)
 
 **[English](README.en.md)** | **中文** | **[日本語](README.ja.md)**
 
@@ -127,7 +127,7 @@ python -m apps.shell.app
 
 **执行策略：**
 - **SimulatedExecutor** — 模拟执行，用于 MVP 测试
-- **HermesExecutor** — 真实调用 `hermes run --prompt`，自动检测可用性
+- **HermesExecutor** — 真实调用 `hermes chat -q <prompt> -Q --source tool`，自动检测可用性
 
 ```bash
 # 通过 Bridge API
@@ -182,28 +182,35 @@ curl http://127.0.0.1:8420/tasks -X POST \
 | `/tasks/{id}/cancel` | POST | 取消任务 |
 | `/screen/current` | GET | 截图（base64） |
 | `/system/active-window` | GET | 活动窗口信息 |
-| `/hermes/status` | GET | Hermes 安装状态 |
+| `/hermes/install-info` | GET | Hermes 安装状态 |
 
 Bridge 支持运行时重启、配置漂移检测、状态机管理（disabled / enabled_not_started / running / failed）。
 
 ## 🧪 测试
 
 ```bash
+# 安装测试依赖
+pip install -e ".[dev]"
+
 # 运行全部测试
 .venv/bin/python -m pytest tests/ -v
 
-# 105 tests, all passed
+# 测试数量以当前 pytest 收集结果为准
 ```
 
-| 测试模块 | 数量 | 覆盖范围 |
-|---------|------|---------|
-| `test_protocol` | 14 | 枚举、数据模型、请求/响应 |
-| `test_state` | 11 | 任务生命周期、终态保护 |
-| `test_executor` | 7 | 执行器模型、模拟执行 |
-| `test_effect_policy` | 9 | 设置生效策略 |
-| `test_integration_status` | 11 | Bridge/AstrBot/Hapi 状态 |
-| `test_astrbot_handlers` | 32 | 全 handler 输出与错误格式 |
-| `test_startup` | 6 | 启动决策树 |
+| 测试模块 | 覆盖范围 |
+|---------|---------|
+| `test_protocol` | 枚举、数据模型、请求/响应 |
+| `test_state` | 任务生命周期、终态保护 |
+| `test_executor` | 执行器模型、模拟执行 |
+| `test_chat_store` | SQLite 会话/消息 CRUD |
+| `test_chat_session` | 会话恢复、清空后持久化、孤立任务消息恢复、assistant 幂等更新 |
+| `test_chat_api` | 消息发送、任务状态同步、取消/失败闭环、清空会话取消旧任务 |
+| `test_runtime` | TaskRunner 执行器热切换 |
+| `test_effect_policy` | 设置生效策略 |
+| `test_integration_status` | Bridge/AstrBot/Hapi 状态 |
+| `test_astrbot_handlers` | 全 handler 输出与错误格式 |
+| `test_startup` | 启动决策树 |
 
 ## 📁 目录结构
 

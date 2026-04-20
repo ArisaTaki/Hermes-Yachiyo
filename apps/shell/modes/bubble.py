@@ -1,6 +1,7 @@
 """气泡模式
 
-轻量悬浮小窗口，显示状态摘要并提供打开主窗口 / 关闭入口。
+轻量悬浮小窗口，显示状态摘要 + 聊天入口 + 打开主窗口 / 关闭入口。
+共享 ChatSession，三模式消息互通。
 """
 
 from __future__ import annotations
@@ -29,154 +30,169 @@ _BUBBLE_HTML = """
             font-family: -apple-system, "Helvetica Neue", "PingFang SC", sans-serif;
             background: #1a1a2e;
             color: #e0e0e0;
-            padding: 16px;
+            padding: 12px;
             line-height: 1.5;
             user-select: none;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
         .header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding-bottom: 12px;
+            padding-bottom: 8px;
             border-bottom: 1px solid #333;
-            margin-bottom: 12px;
+            margin-bottom: 8px;
+            flex-shrink: 0;
         }
-        .header .title { color: #6495ed; font-size: 1em; font-weight: 600; }
+        .header .title { color: #6495ed; font-size: 0.95em; font-weight: 600; }
         .header .mode-tag {
             background: #2d2d54;
             color: #888;
-            font-size: 0.75em;
-            padding: 2px 8px;
+            font-size: 0.7em;
+            padding: 2px 6px;
             border-radius: 10px;
         }
-        .status-block {
-            background: #2d2d54;
-            border-radius: 6px;
-            padding: 10px 12px;
-            margin-bottom: 10px;
-        }
-        .status-row {
+        /* 聊天区域 */
+        .chat-area {
+            flex: 1;
             display: flex;
-            justify-content: space-between;
-            font-size: 0.85em;
-            padding: 3px 0;
+            flex-direction: column;
+            min-height: 0;
         }
-        .status-row .label { color: #999; }
-        .status-row .value { color: #e0e0e0; }
-        .status-row .value.ok { color: #90ee90; }
-        .status-row .value.warn { color: #ffd700; }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            background: #12122a;
+            border-radius: 6px;
+            padding: 8px;
+            margin-bottom: 8px;
+            font-size: 0.82em;
+            min-height: 60px;
+        }
+        .chat-msg {
+            margin-bottom: 6px;
+            padding: 5px 8px;
+            border-radius: 5px;
+            line-height: 1.4;
+        }
+        .chat-msg.user {
+            background: #3a4a7a;
+            margin-left: 15px;
+            border-left: 2px solid #6495ed;
+        }
+        .chat-msg.assistant {
+            background: #2a3a3a;
+            margin-right: 15px;
+            border-left: 2px solid #90ee90;
+        }
+        .chat-msg.system {
+            background: #2a2a3a;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+        }
+        .chat-msg .content { color: #ddd; white-space: pre-wrap; word-break: break-word; }
+        .chat-msg.pending .content { color: #aaa; }
+        .chat-msg.error .content { color: #ffaaaa; }
+        .chat-input-row {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .chat-input {
+            flex: 1;
+            background: #2d2d54;
+            color: #e0e0e0;
+            border: 1px solid #444;
+            border-radius: 5px;
+            padding: 7px 10px;
+            font-size: 0.85em;
+            outline: none;
+        }
+        .chat-input:focus { border-color: #6495ed; }
+        .chat-input::placeholder { color: #555; }
+        .chat-send {
+            background: #4a6a9a;
+            border: none;
+            color: #fff;
+            padding: 7px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.85em;
+        }
+        .chat-send:hover { background: #5a7aaa; }
+        .chat-send:disabled { background: #3a3a5a; color: #666; cursor: not-allowed; }
+        /* 底部工具栏 */
         .actions {
             display: flex;
-            gap: 8px;
-            margin-top: 12px;
+            gap: 6px;
+            margin-top: 8px;
+            flex-shrink: 0;
         }
         .btn {
             flex: 1;
             background: #2d2d54;
             border: 1px solid #444;
             color: #ccc;
-            padding: 8px 0;
+            padding: 6px 0;
             border-radius: 5px;
-            font-size: 0.82em;
+            font-size: 0.78em;
             cursor: pointer;
             text-align: center;
-            transition: background 0.15s, border-color 0.15s;
         }
         .btn:hover { background: #3a3a6a; border-color: #6495ed; color: #fff; }
         .btn.primary { border-color: #6495ed; color: #6495ed; }
-        .btn.primary:hover { background: #4a4a8a; color: #fff; }
         .btn.danger:hover { border-color: #ff6b6b; color: #ff6b6b; background: #2d2424; }
-        .refresh-hint {
-            text-align: center;
+        .status-row {
             font-size: 0.72em;
             color: #555;
-            margin-top: 8px;
+            text-align: center;
+            margin-top: 4px;
+            flex-shrink: 0;
         }
+        .status-row .ok { color: #6a9a6a; }
     </style>
 </head>
 <body>
     <div class="header">
-        <span class="title">💬 Hermes-Yachiyo</span>
-        <span class="mode-tag">气泡模式</span>
+        <span class="title">💬 Yachiyo</span>
+        <span class="mode-tag">气泡</span>
     </div>
 
-    <div class="status-block">
-        <div class="status-row">
-            <span class="label">Hermes Agent</span>
-            <span class="value" id="hermes-status">检测中…</span>
-        </div>
-        <div class="status-row">
-            <span class="label">工作空间</span>
-            <span class="value" id="ws-status">检测中…</span>
-        </div>
-        <div class="status-row">
-            <span class="label">运行时间</span>
-            <span class="value" id="uptime">—</span>
-        </div>
-        <div class="status-row">
-            <span class="label">Bridge</span>
-            <span class="value" id="bridge-status">—</span>
-        </div>
-        <div class="status-row">
-            <span class="label">AstrBot</span>
-            <span class="value" id="astrbot-status">—</span>
+    <div class="chat-area">
+        <div style="text-align:center;padding:12px 0;">
+            <button class="chat-send" onclick="openChat()" style="width:100%;padding:12px;font-size:1em;border-radius:6px;">
+                💬 打开聊天窗口
+            </button>
         </div>
     </div>
 
     <div class="actions">
         <div class="btn primary" onclick="openMain()">🖥 主窗口</div>
-        <div class="btn" onclick="refreshData()">↺ 刷新</div>
+        <div class="btn primary" onclick="openChat()">💬 对话</div>
         <div class="btn danger" onclick="closeBubble()">✕</div>
     </div>
-    <div class="refresh-hint" id="hint">正在加载…</div>
+    <div class="status-row">
+        <span id="hermes-status">—</span> · <span class="ok" id="executor-info">—</span>
+    </div>
 
     <script>
-    async function refreshData() {
+    async function openChat() {
         try {
-            if (!window.pywebview || !window.pywebview.api) return;
-            const d = await window.pywebview.api.get_bubble_data();
-            if (d.error) { document.getElementById('hint').textContent = '数据获取失败'; return; }
-
-            const hsEl = document.getElementById('hermes-status');
-            hsEl.textContent = d.hermes.ready ? '✅ 已就绪' : '⚠️ ' + d.hermes.status;
-            hsEl.className = 'value ' + (d.hermes.ready ? 'ok' : 'warn');
-
-            const wsEl = document.getElementById('ws-status');
-            wsEl.textContent = d.workspace.initialized ? '✅ 已初始化' : '⚠️ 未初始化';
-            wsEl.className = 'value ' + (d.workspace.initialized ? 'ok' : 'warn');
-
-            const sec = d.app.uptime_seconds;
-            const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
-            document.getElementById('uptime').textContent = m > 0 ? m + '分' + s + '秒' : s + '秒';
-
-            const bridgeLabels = {
-                'disabled': '⛔ 已禁用',
-                'enabled_not_started': '⏳ 启动中',
-                'running': '✅ 运行中',
-                'failed': '❌ 异常退出'
-            };
-            const brEl = document.getElementById('bridge-status');
-            let bridgeText = bridgeLabels[d.bridge.running] || d.bridge.running;
-            if (d.bridge.config_dirty) bridgeText += ' ⚠️';
-            brEl.textContent = bridgeText;
-            brEl.className = 'value ' + (d.bridge.running === 'running' ? 'ok' : d.bridge.running === 'failed' ? 'warn' : '');
-
-            const abEl = document.getElementById('astrbot-status');
-            abEl.textContent = d.astrbot.label || '—';
-            abEl.className = 'value' + (d.astrbot.status === 'connected' ? ' ok' : '');
-
-            document.getElementById('hint').textContent = '已更新';
-            setTimeout(function(){ document.getElementById('hint').textContent = ''; }, 2000);
-        } catch(e) {
-            document.getElementById('hint').textContent = '加载失败';
-        }
+            if (window.pywebview && window.pywebview.api)
+                await window.pywebview.api.open_chat();
+        } catch(e) { console.error('openChat error:', e); }
     }
+
     async function openMain() {
         try {
             if (window.pywebview && window.pywebview.api)
                 await window.pywebview.api.open_main_window();
         } catch(e) {}
     }
+
     async function closeBubble() {
         try {
             if (window.pywebview && window.pywebview.api)
@@ -184,11 +200,21 @@ _BUBBLE_HTML = """
         } catch(e) {}
     }
 
+    async function loadStatus() {
+        try {
+            if (!window.pywebview || !window.pywebview.api) return;
+            const d = await window.pywebview.api.get_bubble_data();
+            if (d.error) return;
+            document.getElementById('hermes-status').textContent = d.hermes.ready ? '✅ Hermes' : '⚠️ Hermes';
+            const ex = await window.pywebview.api.get_executor_info();
+            document.getElementById('executor-info').textContent = ex.executor === 'HermesExecutor' ? '🚀 Hermes' : '🔬 模拟';
+        } catch(e) {}
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
-        if (window.pywebview) refreshData();
-        setInterval(refreshData, 15000);
+        if (window.pywebview) loadStatus();
     });
-    window.addEventListener('pywebviewready', function() { refreshData(); });
+    window.addEventListener('pywebviewready', function() { loadStatus(); });
     </script>
 </body>
 </html>
@@ -209,7 +235,6 @@ class BubbleWindowAPI:
         }
 
     def _bridge_status(self) -> str:
-        """组合 config.bridge_enabled 与实际运行状态，返回四状态字符串。"""
         snap = get_integration_snapshot(self._config, self._bridge_boot_config)
         return snap.bridge.state
 
@@ -244,23 +269,38 @@ class BubbleWindowAPI:
             logger.error("获取气泡数据失败: %s", e)
             return {"error": str(e)}
 
+    def get_executor_info(self) -> Dict[str, Any]:
+        runner = self._runtime.task_runner
+        if runner is None:
+            return {"executor": "none", "available": False}
+        return {"executor": runner.executor.name, "available": True}
+
+    # ── 窗口操作 ────────────────────────────────────────────────────────────
+
+    def open_chat(self) -> Dict[str, Any]:
+        """打开独立聊天窗口"""
+        from apps.shell.chat_window import open_chat_window
+        ok = open_chat_window(self._runtime)
+        return {"ok": ok}
+
     def open_main_window(self) -> None:
         """在当前 pywebview 会话中打开完整主窗口"""
         try:
             import webview  # type: ignore[import]
+            from apps.shell.main_api import MainWindowAPI
             from apps.shell.window import _STATUS_HTML
 
             html = _STATUS_HTML.replace("{{HOST}}", self._config.bridge_host).replace(
                 "{{PORT}}", str(self._config.bridge_port)
             )
-            # 创建主窗口，共享当前会话；主窗口使用 MainWindowAPI 需独立 api，
-            # 此处直接展示只读仪表盘（不绑定可写 API）供用户查看状态。
+            api = MainWindowAPI(self._runtime, self._config)
             webview.create_window(
                 title="Hermes-Yachiyo — 主窗口",
                 html=html,
                 width=560,
-                height=520,
+                height=620,
                 resizable=True,
+                js_api=api,
             )
         except Exception as e:
             logger.error("打开主窗口失败: %s", e)
@@ -272,32 +312,6 @@ class BubbleWindowAPI:
                 self._bubble_window.destroy()
         except Exception as e:
             logger.error("关闭气泡窗口失败: %s", e)
-
-    def restart_bridge(self) -> Dict[str, Any]:
-        """重启 Bridge 并刷新 boot_config。"""
-        from apps.bridge.server import restart_bridge as _restart
-
-        if not self._config.bridge_enabled:
-            return {"ok": False, "error": "Bridge 未启用"}
-
-        try:
-            result = _restart(
-                host=self._config.bridge_host, port=self._config.bridge_port
-            )
-        except Exception as exc:
-            return {"ok": False, "error": f"Bridge 重启失败: {exc}"}
-
-        if result.get("ok"):
-            self._bridge_boot_config = {
-                "enabled": self._config.bridge_enabled,
-                "host": self._config.bridge_host,
-                "port": self._config.bridge_port,
-            }
-        return {
-            "ok": result.get("ok", False),
-            "error": result.get("error"),
-            "data": self.get_bubble_data(),
-        }
 
 
 def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
@@ -311,7 +325,7 @@ def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
             title="Hermes-Yachiyo",
             html=_BUBBLE_HTML,
             width=320,
-            height=280,
+            height=380,  # 增加高度以容纳聊天区域
             resizable=False,
             on_top=True,
             js_api=api,
@@ -320,5 +334,3 @@ def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
         webview.start(debug=False)
     except ImportError:
         logger.warning("pywebview 未安装，气泡模式无法展示")
-
-

@@ -2,12 +2,14 @@
 
 为正常模式主窗口提供 JavaScript 可调用的 API。
 通过 Core Runtime 获取数据，不直接访问 Bridge。
+集成 ChatAPI 提供聊天功能。
 """
 
 import logging
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from apps.installer.workspace_init import get_workspace_status
+from apps.shell.chat_api import ChatAPI
 from apps.shell.config import ModelSummary, save_config
 from apps.shell.effect_policy import build_effects_summary
 from apps.shell.integration_status import get_integration_snapshot
@@ -43,6 +45,7 @@ class MainWindowAPI:
     def __init__(self, runtime: "HermesRuntime", config: "AppConfig") -> None:
         self._runtime = runtime
         self._config = config
+        self._chat_api = ChatAPI(runtime)
         # 记录 bridge 启动时的配置快照，用于检测配置漂移
         self._bridge_boot_config = {
             "enabled": config.bridge_enabled,
@@ -393,16 +396,65 @@ class MainWindowAPI:
         Returns:
             get_dashboard_data() 的最新结果（包含 hermes.readiness_level 等字段）
         """
-        from apps.installer.hermes_check import check_hermes_installation
-        from apps.core.runtime import HermesRuntime
-
         logger.info("手动触发 Hermes 就绪状态重检...")
+        executor_refresh = {
+            "updated": False,
+            "executor": "unknown",
+            "previous_executor": None,
+            "reason": "refresh_failed",
+        }
         try:
-            info = check_hermes_installation()
-            # 将最新检测结果写回 runtime，使后续 get_status() 也感知
-            if hasattr(self._runtime, "_install_info"):
-                self._runtime._install_info = info  # type: ignore[attr-defined]
+            self._runtime.refresh_hermes_installation()
+            executor_refresh = self._runtime.refresh_task_runner_executor()
         except Exception as exc:
             logger.warning("重新检测 Hermes 状态失败: %s", exc)
 
-        return self.get_dashboard_data()
+        data = self.get_dashboard_data()
+        data["executor_refresh"] = executor_refresh
+        return data
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # 聊天 API（委托 ChatAPI）
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def send_message(self, text: str) -> Dict[str, Any]:
+        """发送用户消息"""
+        return self._chat_api.send_message(text)
+
+    def get_messages(self, limit: int = 50) -> Dict[str, Any]:
+        """获取消息列表"""
+        return self._chat_api.get_messages(limit)
+
+    def get_session_info(self) -> Dict[str, Any]:
+        """获取会话元信息"""
+        return self._chat_api.get_session_info()
+
+    def clear_session(self) -> Dict[str, Any]:
+        """清空会话"""
+        return self._chat_api.clear_session()
+
+    def get_executor_info(self) -> Dict[str, Any]:
+        """获取当前执行器信息"""
+        runner = self._runtime.task_runner
+        if runner is None:
+            return {"executor": "none", "available": False}
+        return {
+            "executor": runner.executor.name,
+            "available": True,
+        }
+
+    def open_chat(self) -> Dict[str, Any]:
+        """打开独立聊天窗口"""
+        from apps.shell.chat_window import open_chat_window
+        ok = open_chat_window(self._runtime)
+        return {"ok": ok}
+
+    def quit_app(self) -> Dict[str, Any]:
+        """执行退出前清理；主窗口由前端随后关闭。"""
+        try:
+            from apps.shell.window import request_app_exit
+            request_app_exit()
+            return {"ok": True}
+        except Exception as exc:
+            logger.error("退出应用失败: %s", exc)
+            return {"ok": False, "error": str(exc)}

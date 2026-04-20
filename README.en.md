@@ -8,7 +8,7 @@ An intelligent desktop assistant built on [Hermes Agent](https://github.com/Nous
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-105%20passed-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-pytest%20suite-brightgreen.svg)](#testing)
 
 **English** | **[中文](README.md)** | **[日本語](README.ja.md)**
 
@@ -128,7 +128,7 @@ Task lifecycle: `PENDING → RUNNING → COMPLETED / CANCELLED / FAILED`
 **Execution Strategies:**
 
 - **SimulatedExecutor** — Mock execution for MVP testing
-- **HermesExecutor** — Real `hermes run --prompt` calls with auto-detection
+- **HermesExecutor** — Real `hermes chat -q <prompt> -Q --source tool` calls with auto-detection
 
 ```bash
 # Via Bridge API
@@ -183,28 +183,34 @@ Internal FastAPI service for UI and AstrBot consumption:
 | `/tasks/{id}/cancel` | POST | Cancel task |
 | `/screen/current` | GET | Screenshot (base64) |
 | `/system/active-window` | GET | Active window info |
-| `/hermes/status` | GET | Hermes installation status |
+| `/hermes/install-info` | GET | Hermes installation status |
 
 Bridge supports runtime restart, config drift detection, and state machine management (disabled / enabled_not_started / running / failed).
 
 ## 🧪 Testing
 
 ```bash
+# Install test dependencies
+pip install -e ".[dev]"
+
 # Run all tests
 .venv/bin/python -m pytest tests/ -v
 
-# 105 tests, all passed
+# Test count follows the current pytest collection
 ```
 
-| Test Module | Count | Coverage |
-|-------------|-------|----------|
-| `test_protocol` | 14 | Enums, data models, request/response |
-| `test_state` | 11 | Task lifecycle, terminal state protection |
-| `test_executor` | 7 | Executor models, simulated execution |
-| `test_effect_policy` | 9 | Settings effect policies |
-| `test_integration_status` | 11 | Bridge/AstrBot/Hapi status |
-| `test_astrbot_handlers` | 32 | All handler output & error formatting |
-| `test_startup` | 6 | Startup decision tree |
+| Test Module | Coverage |
+|-------------|----------|
+| `test_protocol` | Enums, data models, request/response |
+| `test_state` | Task lifecycle, terminal state protection |
+| `test_executor` | Executor models, simulated execution |
+| `test_chat_store` | SQLite session/message CRUD |
+| `test_chat_session` | Session restore, post-clear persistence, orphaned task messages |
+| `test_chat_api` | Message sending, task-status sync, assistant reply deduplication |
+| `test_effect_policy` | Settings effect policies |
+| `test_integration_status` | Bridge/AstrBot/Hapi status |
+| `test_astrbot_handlers` | All handler output & error formatting |
+| `test_startup` | Startup decision tree |
 
 ## 📁 Project Structure
 

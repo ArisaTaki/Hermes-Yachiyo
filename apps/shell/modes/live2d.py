@@ -1,7 +1,8 @@
 """Live2D 模式骨架
 
 当前状态：预留骨架，尚未接入 Live2D SDK / 运行时。
-窗口展示角色占位区域 + 状态信息 + 打开主窗口 / 设置入口。
+窗口展示角色占位区域 + 聊天界面 + 打开主窗口 / 设置入口。
+共享 ChatSession，三模式消息互通。
 
 后续接入 Live2D 时的扩展点：
   1. Live2DRenderer（在 apps/shell/modes/live2d_renderer.py 中实现）
@@ -64,7 +65,8 @@ _LIVE2D_HTML = """
 
         /* ── 角色区（未来放 Live2D canvas）── */
         .character-stage {
-            flex: 1;
+            height: 180px;
+            flex-shrink: 0;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -73,39 +75,120 @@ _LIVE2D_HTML = """
             background: linear-gradient(180deg, #12122a 0%, #1a1a3e 100%);
         }
         .character-placeholder {
-            font-size: 5em;
+            font-size: 4em;
             opacity: 0.6;
-            margin-bottom: 8px;
             animation: float 3s ease-in-out infinite;
         }
         @keyframes float {
             0%, 100% { transform: translateY(0); }
-            50%       { transform: translateY(-8px); }
+            50%       { transform: translateY(-6px); }
         }
         .stage-label {
-            font-size: 0.75em;
+            font-size: 0.7em;
             color: #555;
             letter-spacing: 0.1em;
+            margin-top: 4px;
         }
-        /* 未来 Live2D canvas 将替换 .character-placeholder */
-        /* canvas#live2d { width: 100%; height: 100%; position: absolute; top:0; left:0; } */
+        .dev-badge {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: #2a1a2e;
+            border: 1px solid #6a2a6a;
+            color: #cc88cc;
+            font-size: 0.65em;
+            padding: 2px 6px;
+            border-radius: 8px;
+        }
+
+        /* ── 聊天区 ── */
+        .chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            min-height: 0;
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            background: #12122a;
+            border-radius: 8px;
+            padding: 10px;
+            margin-bottom: 10px;
+            font-size: 0.88em;
+        }
+        .chat-msg {
+            margin-bottom: 8px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            line-height: 1.5;
+        }
+        .chat-msg.user {
+            background: #3a4a7a;
+            margin-left: 30px;
+            border-left: 3px solid #6495ed;
+        }
+        .chat-msg.assistant {
+            background: #2a3a3a;
+            margin-right: 30px;
+            border-left: 3px solid #90ee90;
+        }
+        .chat-msg.system {
+            background: #2a2a3a;
+            text-align: center;
+            color: #666;
+            font-size: 0.85em;
+        }
+        .chat-msg .role { font-size: 0.72em; color: #888; margin-bottom: 2px; }
+        .chat-msg .content { color: #ddd; white-space: pre-wrap; word-break: break-word; }
+        .chat-msg.pending .content { color: #aaa; }
+        .chat-msg.error .content { color: #ffaaaa; }
+        .chat-input-row {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .chat-input {
+            flex: 1;
+            background: #2d2d54;
+            color: #e0e0e0;
+            border: 1px solid #444;
+            border-radius: 6px;
+            padding: 10px 12px;
+            font-size: 0.9em;
+            outline: none;
+        }
+        .chat-input:focus { border-color: #6495ed; }
+        .chat-input::placeholder { color: #555; }
+        .chat-send {
+            background: #4a6a9a;
+            border: none;
+            color: #fff;
+            padding: 10px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9em;
+        }
+        .chat-send:hover { background: #5a7aaa; }
+        .chat-send:disabled { background: #3a3a5a; color: #666; cursor: not-allowed; }
 
         /* ── 状态条 ── */
         .status-bar {
             background: #12122a;
             border-top: 1px solid #2a2a4a;
-            padding: 8px 14px;
+            padding: 6px 12px;
             display: flex;
-            gap: 12px;
-            font-size: 0.78em;
+            gap: 10px;
+            font-size: 0.75em;
             align-items: center;
+            flex-shrink: 0;
         }
         .status-chip {
             background: #2d2d54;
             border-radius: 10px;
-            padding: 2px 10px;
+            padding: 2px 8px;
             color: #888;
-            white-space: nowrap;
         }
         .status-chip.ok { color: #90ee90; }
         .status-chip.warn { color: #ffd700; }
@@ -115,63 +198,65 @@ _LIVE2D_HTML = """
         .toolbar {
             background: #0e0e22;
             border-top: 1px solid #222244;
-            padding: 8px 14px;
+            padding: 8px 12px;
             display: flex;
             gap: 8px;
             align-items: center;
+            flex-shrink: 0;
         }
         .btn {
             background: #2d2d54;
             border: 1px solid #444;
             color: #ccc;
-            padding: 6px 14px;
+            padding: 6px 12px;
             border-radius: 5px;
-            font-size: 0.82em;
+            font-size: 0.8em;
             cursor: pointer;
-            white-space: nowrap;
         }
         .btn:hover { background: #3a3a6a; border-color: #6495ed; color: #fff; }
         .btn.primary { border-color: #6495ed; color: #6495ed; }
-        .btn.primary:hover { background: #4a4a8a; color: #fff; }
-
-        /* ── 开发提示 ── */
-        .dev-badge {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: #2a1a2e;
-            border: 1px solid #6a2a6a;
-            color: #cc88cc;
-            font-size: 0.7em;
-            padding: 3px 8px;
-            border-radius: 10px;
-        }
     </style>
 </head>
 <body>
     <!-- 角色舞台区 -->
     <div class="character-stage">
-        <div class="dev-badge">骨架模式 · 待接入 Live2D</div>
+        <div class="dev-badge">骨架 · 待接入 Live2D</div>
         <div class="character-placeholder" id="char-icon">🎤</div>
         <div class="stage-label" id="stage-label">LIVE2D · 角色模型待加载</div>
+    </div>
+
+    <!-- 聊天入口 -->
+    <div class="chat-area">
+        <div style="text-align:center;padding:20px 10px;">
+            <button class="chat-send" onclick="openChat()" style="width:100%;padding:14px;font-size:1em;border-radius:8px;">
+                💬 打开聊天窗口
+            </button>
+        </div>
     </div>
 
     <!-- 状态条 -->
     <div class="status-bar">
         <span class="status-chip" id="chip-hermes">Hermes …</span>
-        <span class="status-chip" id="chip-task">任务 …</span>
+        <span class="status-chip" id="chip-executor">—</span>
         <span class="spacer"></span>
-        <span class="status-chip" id="chip-mode" style="color:#9988cc;">live2d 模式</span>
+        <span class="status-chip" style="color:#9988cc;">live2d</span>
     </div>
 
     <!-- 工具栏 -->
     <div class="toolbar">
         <button class="btn primary" onclick="openMainWindow()">🖥 主窗口</button>
+        <button class="btn primary" onclick="openChat()">💬 对话</button>
         <button class="btn" onclick="openSettings()">⚙ 设置</button>
-        <button class="btn" onclick="refreshStatus()">↺ 刷新</button>
     </div>
 
     <script>
+    async function openChat() {
+        try {
+            if (window.pywebview && window.pywebview.api)
+                await window.pywebview.api.open_chat();
+        } catch(e) { console.error('openChat error:', e); }
+    }
+
     async function refreshStatus() {
         try {
             if (!window.pywebview || !window.pywebview.api) return;
@@ -179,28 +264,22 @@ _LIVE2D_HTML = """
             if (d.error) return;
 
             const hChip = document.getElementById('chip-hermes');
-            hChip.textContent = d.hermes.ready ? '✅ Hermes 就绪' : '⚠️ Hermes ' + d.hermes.status;
+            hChip.textContent = d.hermes.ready ? '✅ Hermes' : '⚠️ Hermes';
             hChip.className = 'status-chip ' + (d.hermes.ready ? 'ok' : 'warn');
 
-            const tChip = document.getElementById('chip-task');
-            const running = d.tasks.running || 0;
-            tChip.textContent = running > 0 ? '▶ ' + running + ' 任务运行中' : '○ 无任务';
-            tChip.className = 'status-chip ' + (running > 0 ? 'ok' : '');
-
-            // 根据状态切换角色图标（未来由 Live2D 动作系统替换）
-            const icon = document.getElementById('char-icon');
-            icon.textContent = running > 0 ? '⚡' : '🎤';
+            const ex = await window.pywebview.api.get_executor_info();
+            document.getElementById('chip-executor').textContent = ex.executor === 'HermesExecutor' ? '🚀 Hermes' : '🔬 模拟';
 
             const label = document.getElementById('stage-label');
             const modelState = d.model.state || 'not_configured';
             const stateLabels = {
                 'not_configured':  'LIVE2D · 角色模型未配置',
-                'path_invalid':    'LIVE2D · 模型路径不存在: ' + (d.model.name || '未命名'),
-                'path_not_live2d': 'LIVE2D · 目录无模型文件: ' + (d.model.name || '未命名'),
-                'path_valid':      'LIVE2D · 模型就绪: ' + (d.model.name || '未命名') + ' · 渲染器待实现',
-                'loaded':          d.model.name || 'LIVE2D · 模型已加载',
+                'path_invalid':    'LIVE2D · 模型路径不存在',
+                'path_not_live2d': 'LIVE2D · 目录无模型文件',
+                'path_valid':      'LIVE2D · 模型就绪: ' + (d.model.name || ''),
+                'loaded':          d.model.name || 'LIVE2D',
             };
-            label.textContent = stateLabels[modelState] || 'LIVE2D · 状态未知';
+            label.textContent = stateLabels[modelState] || 'LIVE2D';
         } catch(e) {}
     }
 
@@ -232,11 +311,16 @@ _LIVE2D_HTML = """
 # ── WebView API ───────────────────────────────────────────────────────────────
 
 class Live2DWindowAPI:
-    """Live2D 模式 WebView API
+    """Live2D 模式 WebView API。
 
     当前职责：
       - 提供状态数据给前端（get_live2d_status）
+      - 提供打开独立聊天窗口的入口（open_chat）
       - 提供打开主窗口 / 设置页的入口
+
+    说明：
+      - 当前类不直接提供 send_message / get_messages / clear_session
+        这类聊天消息读写接口；聊天交互由独立聊天窗口承载。
 
     未来扩展点（接入 Live2D 时新增方法）：
       - load_model(model_path: str) → 加载角色模型
@@ -291,21 +375,38 @@ class Live2DWindowAPI:
             logger.error("获取 Live2D 状态失败: %s", exc)
             return {"error": str(exc)}
 
+    # ── 窗口操作 ────────────────────────────────────────────────────────────
+
+    def get_executor_info(self) -> Dict[str, Any]:
+        runner = self._runtime.task_runner
+        if runner is None:
+            return {"executor": "none", "available": False}
+        return {"executor": runner.executor.name, "available": True}
+
+    def open_chat(self) -> Dict[str, Any]:
+        """打开独立聊天窗口"""
+        from apps.shell.chat_window import open_chat_window
+        ok = open_chat_window(self._runtime)
+        return {"ok": ok}
+
     def open_main_window(self) -> None:
         """在当前会话中打开完整主窗口仪表盘。"""
         try:
             import webview  # type: ignore[import]
+            from apps.shell.main_api import MainWindowAPI
             from apps.shell.window import _STATUS_HTML
 
             html = _STATUS_HTML.replace("{{HOST}}", self._config.bridge_host).replace(
                 "{{PORT}}", str(self._config.bridge_port)
             )
+            api = MainWindowAPI(self._runtime, self._config)
             webview.create_window(
                 title="Hermes-Yachiyo — 主窗口",
                 html=html,
                 width=560,
-                height=520,
+                height=620,
                 resizable=True,
+                js_api=api,
             )
         except Exception as exc:
             logger.error("打开主窗口失败: %s", exc)
@@ -399,10 +500,10 @@ class Live2DWindowAPI:
 def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
     """Live2D 模式入口（阻塞主线程）。
 
-    当前为骨架实现：角色舞台区展示占位动画，底部工具栏提供主窗口 / 设置入口。
+    当前为骨架实现：角色舞台区展示占位动画 + 聊天界面。
     等待 Live2DRenderer 实现后替换 .character-placeholder。
     """
-    logger.info("启动 Live2D 模式（骨架实现，角色模型未加载）")
+    logger.info("启动 Live2D 模式（骨架实现，含聊天）")
     try:
         import webview  # type: ignore[import]
 
@@ -410,12 +511,11 @@ def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
         webview.create_window(
             title="Hermes-Yachiyo",
             html=_LIVE2D_HTML,
-            width=380,
-            height=560,
+            width=400,
+            height=640,  # 增加高度以容纳聊天区域
             resizable=True,
             js_api=api,
         )
         webview.start(debug=False)
     except ImportError:
         logger.warning("pywebview 未安装，Live2D 模式无法展示")
-

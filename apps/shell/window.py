@@ -8,6 +8,7 @@ pywebview 的使用不影响 core / bridge / protocol 的长期边界。
 from __future__ import annotations
 
 import logging
+import threading
 from typing import TYPE_CHECKING
 
 try:
@@ -25,6 +26,10 @@ if TYPE_CHECKING:
 from packages.protocol.enums import HermesInstallStatus
 
 logger = logging.getLogger(__name__)
+
+_EXIT_DELAY_SECONDS = 0.1
+_exit_timer: threading.Timer | None = None
+_exit_timer_lock = threading.Lock()
 
 # 正常状态页 HTML
 _STATUS_HTML = """
@@ -95,6 +100,73 @@ _STATUS_HTML = """
         .mode-btn .icon { font-size: 1.4em; display: block; margin-bottom: 4px; }
         .mode-btn .name { font-size: 0.85em; }
         .mode-btn .desc { font-size: 0.75em; color: #888; margin-top: 2px; }
+        /* 聊天面板样式 */
+        .chat-panel {
+            background: #2d2d54;
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        .chat-panel h3 { color: #6495ed; font-size: 0.95em; margin-bottom: 0; }
+        .chat-send-btn {
+            background: #4a6a9a;
+            border: none;
+            color: #fff;
+            padding: 10px 18px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: background 0.2s;
+        }
+        .chat-send-btn:hover { background: #5a7aaa; }
+        .app-exit-btn {
+            background: transparent;
+            border: 1px solid #66404a;
+            color: #c98a96;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.86em;
+        }
+        .app-exit-btn:hover { border-color: #dd6b7a; color: #ffb1bd; background: #2d242e; }
+        .exit-dialog-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(8, 8, 16, 0.55);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            z-index: 20;
+        }
+        .exit-dialog-backdrop.visible { display: flex; }
+        .exit-dialog {
+            background: #252548;
+            border: 1px solid #56568a;
+            border-radius: 8px;
+            max-width: 360px;
+            padding: 18px;
+            box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+        }
+        .exit-dialog h3 { color: #ffb1bd; font-size: 1.05em; margin-bottom: 8px; }
+        .exit-dialog p { color: #c8c8d8; font-size: 0.9em; margin-bottom: 14px; }
+        .exit-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+        .exit-dialog-actions button {
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.88em;
+            padding: 7px 12px;
+        }
+        .exit-cancel-btn { background: #33335c; border: 1px solid #55557a; color: #ddd; }
+        .exit-confirm-btn { background: #53303a; border: 1px solid #b85a6a; color: #ffd3da; }
+        .exit-confirm-btn:disabled { cursor: wait; opacity: 0.65; }
+        .exit-dialog-error {
+            color: #ffaaaa;
+            font-size: 0.82em;
+            min-height: 1.2em;
+            margin-bottom: 10px;
+        }
+        .executor { color: #6a9a6a; }
         .footer {
             text-align: center;
             color: #555;
@@ -319,6 +391,34 @@ _STATUS_HTML = """
         </div>
     </div>
 
+    <!-- 聊天入口 -->
+    <div class="chat-panel" id="chat-panel">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+            <h3>💬 对话</h3>
+            <span class="executor" id="chat-executor" style="font-size:0.8em;">—</span>
+        </div>
+        <div style="margin-top:10px;">
+            <button class="chat-send-btn" onclick="openChat()" style="width:100%;padding:14px;font-size:1em;">
+                打开聊天窗口
+            </button>
+        </div>
+        <div style="margin-top:10px;text-align:right;">
+            <button class="app-exit-btn" onclick="quitApp()">退出应用</button>
+        </div>
+    </div>
+
+    <div class="exit-dialog-backdrop" id="exit-dialog" role="dialog" aria-modal="true">
+        <div class="exit-dialog">
+            <h3>退出 Hermes-Yachiyo？</h3>
+            <p>退出会关闭主界面、对话窗口并停止后台服务。是否继续？</p>
+            <div class="exit-dialog-error" id="exit-dialog-error"></div>
+            <div class="exit-dialog-actions">
+                <button class="exit-cancel-btn" onclick="hideExitDialog()">取消</button>
+                <button class="exit-confirm-btn" id="exit-confirm-btn" onclick="confirmQuitApp()">退出</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 设置面板（默认隐藏） -->
     <div id="settings-panel" style="display:none;">
         <div class="settings-header">
@@ -473,86 +573,151 @@ _STATUS_HTML = """
         // 隐藏/显示仪表盘区域
         document.querySelector('.cards').style.display = settingsOpen ? 'none' : 'grid';
         document.querySelector('.modes').style.display = settingsOpen ? 'none' : 'block';
+        document.getElementById('chat-panel').style.display = settingsOpen ? 'none' : 'block';
         // 高亮设置按钮
         document.getElementById('mode-settings').classList.toggle('active', settingsOpen);
         document.getElementById('mode-window').classList.toggle('active', !settingsOpen);
         if (settingsOpen) refreshSettings();
     }
 
+    // ── 聊天功能 ────────────────────────────────────────────────────────────────
+
+    async function openChat() {
+        try {
+            if (!window.pywebview || !window.pywebview.api) throw new Error('WebView API 不可用');
+            await window.pywebview.api.open_chat();
+        } catch(e) {
+            console.error('openChat error:', e);
+        }
+    }
+
+    function quitApp() {
+        const dialog = document.getElementById('exit-dialog');
+        const err = document.getElementById('exit-dialog-error');
+        const btn = document.getElementById('exit-confirm-btn');
+        if (err) err.textContent = '';
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '退出';
+        }
+        if (dialog) dialog.classList.add('visible');
+    }
+
+    function hideExitDialog() {
+        const dialog = document.getElementById('exit-dialog');
+        if (dialog) dialog.classList.remove('visible');
+    }
+
+    async function confirmQuitApp() {
+        const btn = document.getElementById('exit-confirm-btn');
+        const err = document.getElementById('exit-dialog-error');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '正在退出...';
+        }
+        if (err) err.textContent = '';
+        try {
+            if (window.pywebview && window.pywebview.api) {
+                const r = await window.pywebview.api.quit_app();
+                if (r && r.ok === false) throw new Error(r.error || '退出失败');
+            } else {
+                window.close();
+            }
+        } catch(e) {
+            console.error('quitApp error:', e);
+            if (err) err.textContent = e.message || '退出失败';
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '退出';
+            }
+        }
+    }
+
+    async function loadExecutorInfo() {
+        try {
+            if (!window.pywebview || !window.pywebview.api) return;
+            const r = await window.pywebview.api.get_executor_info();
+            const el = document.getElementById('chat-executor');
+            if (el && r.executor) {
+                el.textContent = r.executor === 'HermesExecutor' ? '🚀 Hermes' : '🔬 模拟';
+            }
+        } catch(e) {}
+    }
+
     // ── Hermes 能力补全操作 ────────────────────────────────────────────────────
 
-    function toggleHermesEnhancePanel() {{
+    function toggleHermesEnhancePanel() {
         const panel = document.getElementById('hermes-enhance-panel');
         const btn = document.getElementById('hermes-enhance-btn');
         if (!panel) return;
         const visible = panel.style.display !== 'none';
         panel.style.display = visible ? 'none' : 'block';
         if (btn) btn.textContent = visible ? '🔧 补全 Hermes 能力' : '🔼 收起';
-    }}
+    }
 
-    async function openHermesCmd(cmd) {{
+    async function openHermesCmd(cmd) {
         // 状态提示元素（仪表盘或设置页，两者共用同一函数）
         const statusIds = ['hermes-enhance-status', 's-hermes-enhance-status'];
-        function setStatus(msg) {{
-            statusIds.forEach(function(id) {{
+        function setStatus(msg) {
+            statusIds.forEach(function(id) {
                 const el = document.getElementById(id);
                 if (el) el.innerHTML = msg;
-            }});
-        }}
+            });
+        }
         setStatus('<span style="color:#9ab4d8">⏳ 正在打开终端...</span>');
-        try {{
+        try {
             if (!window.pywebview || !window.pywebview.api) throw new Error('WebView API 不可用');
             const r = await window.pywebview.api.open_terminal_command(cmd);
-            if (r.success) {{
+            if (r.success) {
                 setStatus('<span style="color:#90ee90">✅ 终端已打开，请在终端中完成操作，完成后点击「重新检测」。</span>');
-            }} else {{
+            } else {
                 setStatus('<span style="color:#ff6b6b">❌ ' + (r.error || '无法打开终端') + '<br><span style="color:#888;font-size:0.88em;">请手动打开终端运行：' + cmd + '</span></span>');
-            }}
-        }} catch(e) {{
+            }
+        } catch(e) {
             setStatus('<span style="color:#ff6b6b">❌ ' + e.message + '</span>');
-        }}
-    }}
+        }
+    }
 
-    async function recheckHermes() {{
+    async function recheckHermes() {
         const statusIds = ['hermes-enhance-status', 's-hermes-enhance-status'];
-        function setStatus(msg) {{
-            statusIds.forEach(function(id) {{
+        function setStatus(msg) {
+            statusIds.forEach(function(id) {
                 const el = document.getElementById(id);
                 if (el) el.innerHTML = msg;
-            }});
-        }}
+            });
+        }
         setStatus('<span style="color:#9ab4d8">⏳ 正在重新检测 Hermes 状态...</span>');
-        try {{
+        try {
             if (!window.pywebview || !window.pywebview.api) throw new Error('WebView API 不可用');
             const data = await window.pywebview.api.recheck_hermes();
             if (data.error) throw new Error(data.error);
             // 刷新仪表盘（直接用返回的最新数据）
             const rl = data.hermes ? data.hermes.readiness_level : 'unknown';
             const hs = document.getElementById('hermes-status');
-            if (hs) {{
-                if (rl === 'full_ready') {{ hs.textContent = '✅ 完整就绪'; hs.className = 'value ok'; }}
-                else if (rl === 'basic_ready') {{ hs.textContent = '⚠️ 基础可用 · 部分工具受限'; hs.className = 'value warn'; }}
-                else {{ hs.textContent = data.hermes.ready ? '✅ 已就绪' : '⚠️ ' + (data.hermes.status || ''); hs.className = data.hermes.ready ? 'value ok' : 'value warn'; }}
-            }}
+            if (hs) {
+                if (rl === 'full_ready') { hs.textContent = '✅ 完整就绪'; hs.className = 'value ok'; }
+                else if (rl === 'basic_ready') { hs.textContent = '⚠️ 基础可用 · 部分工具受限'; hs.className = 'value warn'; }
+                else { hs.textContent = data.hermes.ready ? '✅ 已就绪' : '⚠️ ' + (data.hermes.status || ''); hs.className = data.hermes.ready ? 'value ok' : 'value warn'; }
+            }
             const enhRow = document.getElementById('hermes-enhance-row');
             if (enhRow) enhRow.style.display = (rl === 'basic_ready') ? 'block' : 'none';
             const sEnhSec = document.getElementById('s-hermes-enhance-section');
             if (sEnhSec) sEnhSec.style.display = (rl === 'basic_ready') ? 'block' : 'none';
-            if (rl === 'full_ready') {{
+            if (rl === 'full_ready') {
                 setStatus('<span style="color:#90ee90">✅ Hermes 已完整就绪！受限工具已补全。</span>');
                 // 补全后隐藏操作面板
                 const panel = document.getElementById('hermes-enhance-panel');
                 if (panel) panel.style.display = 'none';
-            }} else if (rl === 'basic_ready') {{
+            } else if (rl === 'basic_ready') {
                 const tools = (data.hermes && data.hermes.limited_tools) || [];
                 setStatus('<span style="color:#ffd700">⚠️ 仍有受限工具：' + tools.join('、') + '。可继续运行 hermes setup 完善配置。</span>');
-            }} else {{
+            } else {
                 setStatus('<span style="color:#9ab4d8">重检完成。当前状态：' + (rl || '未知') + '</span>');
-            }}
-        }} catch(e) {{
+            }
+        } catch(e) {
             setStatus('<span style="color:#ff6b6b">❌ 检测失败：' + e.message + '</span>');
-        }}
-    }}
+        }
+    }
 
     async function refreshSettings() {
         try {
@@ -993,6 +1158,7 @@ _STATUS_HTML = """
         // pywebview ready 后刷新数据
         if (window.pywebview) {
             refreshDashboard();
+            loadExecutorInfo();
         }
         setInterval(refreshDashboard, 5000);
     });
@@ -1000,6 +1166,7 @@ _STATUS_HTML = """
     // pywebview ready 事件
     window.addEventListener('pywebviewready', function() {
         refreshDashboard();
+        loadExecutorInfo();
     });
     </script>
 </body>
@@ -1164,7 +1331,7 @@ def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
 
     html = _STATUS_HTML.replace("{{HOST}}", config.bridge_host).replace("{{PORT}}", str(config.bridge_port))
 
-    webview.create_window(
+    window = webview.create_window(
         title="Hermes-Yachiyo",
         html=html,
         width=560,
@@ -1172,7 +1339,84 @@ def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
         resizable=True,
         js_api=api,
     )
+    _bind_main_window_exit(window)
     webview.start(debug=False)
+
+
+def _bind_main_window_exit(main_window: object):
+    """主窗口关闭时同步关闭附属窗口。
+
+    不在 pywebview closing 回调里弹确认框，避免 macOS WebView 关闭事件重入卡死。
+    显式退出确认由页面内的 quitApp() 完成。
+    """
+    closing = False
+
+    def _on_closing() -> bool:
+        nonlocal closing
+        if closing:
+            return True
+
+        closing = True
+        logger.info("主窗口关闭，正在关闭附属窗口")
+        _close_auxiliary_windows(main_window)
+        return True
+
+    main_window.events.closing += _on_closing
+    return _on_closing
+
+
+def request_app_exit() -> None:
+    """由页面内退出按钮触发的完整退出流程。
+
+    实际窗口销毁延迟到 API 回调返回后执行，避免 macOS WebView 卡在等待
+    JavaScript promise 返回的状态。
+    """
+    global _exit_timer
+    with _exit_timer_lock:
+        if _exit_timer is not None and _exit_timer.is_alive():
+            return
+        _exit_timer = threading.Timer(_EXIT_DELAY_SECONDS, _destroy_all_windows_for_exit)
+        _exit_timer.daemon = True
+        _exit_timer.start()
+
+
+def _destroy_all_windows_for_exit() -> None:
+    """关闭聊天窗口及所有 pywebview 窗口。"""
+    _close_auxiliary_windows(main_window=None)
+
+    webview_module = globals().get("webview")
+    if webview_module is None:
+        return
+
+    for window in list(getattr(webview_module, "windows", []) or []):
+        try:
+            window.destroy()
+        except Exception as exc:
+            logger.debug("关闭窗口失败: %s", exc)
+
+
+def _close_auxiliary_windows(main_window: object | None) -> None:
+    """关闭聊天窗口及其他非主窗口的 pywebview 窗口。"""
+    try:
+        from apps.shell.chat_window import close_chat_window
+        close_chat_window()
+    except Exception as exc:
+        logger.warning("关闭聊天窗口时发生异常: %s", exc)
+
+    webview_module = globals().get("webview")
+    if webview_module is None:
+        return
+
+    if main_window is None:
+        return
+
+    for window in list(getattr(webview_module, "windows", []) or []):
+        if window is main_window:
+            continue
+        try:
+            window.destroy()
+        except Exception as exc:
+            logger.debug("关闭附属窗口失败: %s", exc)
 
 
 def create_installer_window(install_info: "HermesInstallInfo", config: "AppConfig") -> None:
@@ -1282,7 +1526,7 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
         <div class="init-section">
             <h3>🚀 一键安装 Hermes Agent</h3>
             <p>点击下方按钮，系统将自动运行官方安装脚本。<br>
-               需要网络连接，安装约需 1-3 分钟。</p>
+               需要网络连接，网络较慢时最多会等待 15 分钟。</p>
             <button class="init-button" id="install-btn" onclick="startInstall()">安装 Hermes Agent</button>
             <div id="install-progress" style="display:none; margin-top:12px;">
                 <div style="color:#6495ed; margin-bottom:6px;">⏳ 安装中，请稍候...</div>

@@ -1281,6 +1281,7 @@ queue = ctypes.addressof(main_q_obj)
 ### Milestone 40 — Hermes 就绪状态细化分级
 
 **问题**：
+
 1. 版本显示错误：`get_hermes_version()` 从 `hermes --version` 多行输出中匹配到 `3.11.12`（Python 版本），而非 `v0.9.0`（Hermes 版本）
 2. 就绪状态二元：`is_hermes_ready()` 只有 True/False，无法区分"基础可用"与"完整就绪"
 3. `hermes doctor` 的工具受限信息未被 UI 消费
@@ -1340,10 +1341,12 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 回车进行交互。
 
 **根因**：
+
 - `asyncio.create_subprocess_exec()` 未指定 stdin，默认继承父进程 stdin（pywebview 进程中无真实 TTY）
 - 安装脚本非零退出（因 `hermes setup` 被 EOF 中断）导致 `success=False`，但 hermes 二进制已安装
 
 **修复**：
+
 1. `run_hermes_install()` 加 `stdin=asyncio.subprocess.DEVNULL`：
    - 安装脚本中的 `hermes setup` 立即获得 stdin EOF 而退出（不阻塞、不显示 TUI）
    - 安装日志只包含脚本的非交互输出
@@ -1353,6 +1356,7 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
    - 确保用户能清楚看到并聚焦到配置终端
 
 **正确用户流程（修复后）**：
+
 1. 用户点击"安装 Hermes" → 安装脚本在后台运行，GUI 显示安装日志
 2. 安装脚本完成（含 setup 自动失败/退出）→ `recheck_status()` 检测到 `INSTALLED_NEEDS_SETUP`
 3. App 重启 → 显示"⚙️ 配置 Hermes Agent"引导页
@@ -1361,6 +1365,7 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 6. 回到 GUI，点击"我已完成配置，重新检测" → 进入正常模式
 
 **变更文件**：
+
 - ✅ `apps/installer/hermes_install.py`
   - `asyncio.create_subprocess_exec()` 新增 `stdin=asyncio.subprocess.DEVNULL`
   - 非零退出时增加 hermes 可用性回退检查（`hermes --version`）
@@ -1377,6 +1382,7 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 **新增功能**：
 
 #### 1. 仪表盘 Hermes Agent 卡
+
 - `basic_ready` 时自动显示 **[🔧 补全 Hermes 能力]** 按钮
 - 点击展开 inline 操作面板，包含：
   - **▶ hermes setup** — 在 Terminal.app 新窗口中运行（配置模型/API 密钥/工具开关）
@@ -1385,10 +1391,12 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 - `full_ready` 后面板自动收起，状态行更新为"✅ 完整就绪"
 
 #### 2. 设置页 Hermes Agent 节
+
 - `basic_ready` 时自动显示同款操作区（`s-hermes-enhance-section`）
 - 三个操作按钮与仪表盘面板共用同一套逻辑
 
 #### 3. 新增 main_api.py 方法
+
 - `open_terminal_command(cmd)` — 通用终端启动方法，macOS 用 osascript `make new document`，Linux 尝试 gnome-terminal 等
 - `recheck_hermes()` — 触发 `check_hermes_installation()` 重检，返回最新 `get_dashboard_data()`
 
@@ -1397,6 +1405,7 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 > 完成以下操作可解锁更多能力。
 
 **变更文件**：
+
 - ✅ `apps/shell/main_api.py` — 新增 `open_terminal_command()` / `recheck_hermes()`
 - ✅ `apps/shell/window.py`
   - 仪表盘 Hermes 卡：`hermes-enhance-row`（按钮） + `hermes-enhance-panel`（inline 面板）
@@ -1432,7 +1441,276 @@ post-install 步骤。由于 `run_hermes_install()` 未设置 `stdin=DEVNULL`，
 → [🔄 已完成配置，重新检测] → `recheck_status()` → ready → `restart_app()`
 
 **变更文件**：
+
 - ✅ `apps/installer/hermes_install.py`
 - ✅ `apps/shell/window.py`
 
 **验证**：68 同步测试通过
+
+### Milestone 44 — 主窗口最小可用聊天界面
+
+**目标**：建立统一 chat/session state，主窗口支持消息发送与接收。
+
+**新增/修改文件**：
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `apps/shell/chat_api.py` | 新建 | ChatAPI 类：send_message、get_messages、clear_session |
+| `apps/core/runtime.py` | 修改 | 集成 TaskRunner 启动/停止（独立线程事件循环） |
+| `apps/shell/main_api.py` | 修改 | 组合 ChatAPI 方法暴露给 WebView |
+| `apps/shell/window.py` | 修改 | _STATUS_HTML 新增聊天面板 |
+
+**架构设计**：
+
+1. **统一消息状态**：
+   - `ChatSession`（`apps/core/chat_session.py`）是三种模式共享的消息状态容器
+   - 消息通过 `task_id` 与任务关联
+   - window/bubble/live2d 都从同一个 ChatSession 读写
+
+2. **消息发送链路**：
+
+   ```
+   用户输入 → sendMessage() [JS]
+     → ChatAPI.send_message() [Python]
+       → ChatSession.add_user_message()
+       → AppState.create_task()
+       → ChatSession.link_message_to_task()
+     → TaskRunner 轮询 PENDING 任务
+     → ExecutionStrategy.run() （Simulated 或 Hermes）
+     → AppState.update_task_status(COMPLETED)
+     → UI 轮询 get_messages()
+       → ChatAPI._sync_task_status_to_messages()
+       → ChatSession.add_assistant_message()
+     → 渲染 assistant 回复
+   ```
+
+3. **执行器选择**：
+   - `select_executor(runtime)` 根据 Hermes 就绪状态自动选择
+   - Hermes 就绪 → `HermesExecutor`（调用 `hermes run --prompt`）
+   - Hermes 未就绪 → `SimulatedExecutor`（模拟响应）
+
+4. **UI 功能**：
+   - 输入框 + 发送按钮
+   - 消息列表（用户消息/assistant回复/系统消息）
+   - 发送中状态指示（pending/processing）
+   - 错误提示（failed 状态）
+   - 执行器类型显示（Hermes / 模拟）
+   - 清空会话按钮
+
+**当前执行器**：取决于 Hermes 安装状态
+
+- `HermesExecutor`：Hermes 就绪时使用
+- `SimulatedExecutor`：Hermes 未就绪时使用模拟
+
+**验证**：imports 测试通过
+
+### Milestone 45 — Bubble/Live2D 模式聊天入口
+
+**目标**：在已完成的共享 chat/session state 基础上，为 bubble 和 live2d 模式添加聊天功能。
+
+**修改文件**：
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `apps/shell/modes/bubble.py` | 修改 | 集成 ChatAPI，添加聊天输入框和消息预览 |
+| `apps/shell/modes/live2d.py` | 修改 | 集成 ChatAPI，添加聊天界面（角色区 + 消息区） |
+
+**架构设计**：
+
+1. **ChatAPI 复用**：
+   - BubbleWindowAPI 和 Live2DWindowAPI 都持有 `ChatAPI(runtime)` 实例
+   - 委托 `send_message()`、`get_messages()`、`clear_session()` 方法
+   - 通过同一个 `ChatSession` 单例共享消息状态
+
+2. **消息共享验证**：
+
+   ```
+   window 发送消息 → ChatSession 更新
+     ↓
+   切换到 bubble → get_messages() → 看到相同消息
+     ↓
+   切换到 live2d → get_messages() → 看到相同消息
+   ```
+
+3. **UI 差异化**：
+   - **window 模式**：完整仪表盘 + 聊天面板（560×620）
+   - **bubble 模式**：精简聊天 + 状态栏（320×380，置顶悬浮）
+   - **live2d 模式**：角色占位区 + 聊天区 + 工具栏（400×640）
+
+4. **执行器信息**：
+   - 三模式都暴露 `get_executor_info()` 方法
+   - UI 显示当前使用的执行器（🚀 Hermes / 🔬 模拟）
+
+**验证**：imports 测试通过
+
+### Milestone 46 — HermesExecutor CLI 修复 + 聊天窗口独立化 + SQLite 持久化
+
+**目标**：修复 `hermes run --prompt` CLI 调用错误，将聊天 UI 从主窗口拆分为独立窗口，添加 SQLite 持久化。
+
+**修改文件**：
+
+| 文件 | 操作 | 说明 |
+|------|------|------|
+| `apps/core/executor.py` | 修改 | CLI 命令修复：`hermes run --prompt` → `hermes chat -q` + `-Q --source tool` |
+| `apps/core/chat_store.py` | 新建 | SQLite 持久化层（sessions + messages 表） |
+| `apps/core/chat_session.py` | 修改 | 集成 ChatStore，消息自动持久化 |
+| `apps/shell/chat_window.py` | 新建 | 独立聊天窗口（pywebview），单例管理 |
+| `apps/shell/main_api.py` | 修改 | 新增 `open_chat()` 方法 |
+| `apps/shell/window.py` | 修改 | 嵌入式聊天 → 「打开聊天窗口」按钮 |
+| `apps/shell/modes/bubble.py` | 修改 | 嵌入式聊天 → 打开独立聊天窗口 |
+| `apps/shell/modes/live2d.py` | 修改 | 嵌入式聊天 → 打开独立聊天窗口 |
+| `tests/test_executor.py` | 修改 | CLI 命令常量验证测试 |
+| `tests/test_chat_store.py` | 新建 | ChatStore CRUD 测试（6 cases） |
+
+**关键变更**：
+
+1. **CLI 修复**：`_HERMES_CMD = ["hermes", "chat", "-q"]` + `_HERMES_FLAGS = ["-Q", "--source", "tool"]`
+2. **SQLite 持久化**：`~/.hermes/yachiyo/chat.db`，ChatSession 自动绑定
+3. **独立聊天窗口**：三模式统一通过 `open_chat_window(runtime)` 打开
+4. **exit=2 友好处理**：不再暴露 argparse 原始 usage 错误
+
+**验证**：14 测试全通过
+
+### Milestone 47 — 运行时所有权收敛 + 聊天持久化修复
+
+**目标**：修复 Milestone 46 后暴露的运行时和持久化边界问题。
+
+**修改内容**：
+
+| 文件 | 说明 |
+|------|------|
+| `apps/bridge/server.py` | 移除 Bridge lifespan 内的第二个 TaskRunner，Bridge 只做 HTTP 转发 |
+| `apps/core/runtime.py` | 新增 `refresh_hermes_installation()`，统一刷新 Hermes 检测缓存 |
+| `apps/shell/main_api.py` | `recheck_hermes()` 改为调用 Runtime 刷新方法，修复写错 `_install_info` 字段的问题 |
+| `apps/core/chat_store.py` | SQLite 连接改为 `check_same_thread=False`，并用 `RLock` 保护 CRUD |
+| `apps/core/chat_session.py` | 启动时恢复最近会话；清空后创建新 session 记录；重启后孤立的 pending/processing 消息标记为 failed |
+| `apps/core/state.py` | `AppState` 增加 `RLock`，保护任务 dict 的读写 |
+| `tests/test_chat_session.py` | 新增会话恢复、清空后持久化、孤立处理中消息恢复测试 |
+| `README*.md` | 同步 Hermes CLI 命令、Hermes 安装状态端点、测试依赖说明和测试表 |
+
+**验证**：
+
+- `python3 -m pytest tests/ -q` → 117 passed
+- `.venv/bin/python -m compileall apps packages integrations tests` → passed
+- `.venv/bin/python -m pytest tests/ -q` 当前失败原因：`.venv` 未安装 pytest；README 已补充 `pip install -e ".[dev]"`
+
+### Milestone 48 — Copilot Review 修复闭环
+
+**目标**：处理 PR #1 中 Copilot 两次 review 后仍成立的问题。
+
+**处理结果**：
+
+| Review 点 | 处理 |
+|-----------|------|
+| 主窗口 / bubble / live2d HTML 中未渲染的 `{{` / `}}` | 正常模式、bubble、live2d 中不经过模板渲染的 CSS/JS 已改回单花括号；保留 `{{HOST}}` / `{{PORT}}` 占位 |
+| bubble/live2d 打开主窗口未传 `js_api` | `open_main_window()` 改为挂载 `MainWindowAPI(runtime, config)` |
+| ChatSession 多窗口并发读写 | `ChatSession` 增加内部 `RLock`，公开读写方法加锁，ChatAPI 不再直接遍历裸 `messages` |
+| `_pending_message_id` 过早清空 | `is_processing()` 改为根据仍处于 pending/processing 的 user 消息计算；assistant 回复完成单个任务后不会影响其他待处理消息 |
+| `link_message_to_task()` 过早切换 PROCESSING | link 阶段仅建立 task_id 关联，保持 PENDING；任务 RUNNING 后再切 PROCESSING |
+| TaskRunner 跨线程停止方式脆弱 | 改用 `asyncio.run_coroutine_threadsafe()` 等待 stop 结果，再停止 loop 并检查线程是否退出 |
+| ChatAPI 缺少单测 | 新增 `tests/test_chat_api.py`，覆盖 send、RUNNING、COMPLETED 去重、FAILED、多个 pending |
+| 未使用导入 | 清理 `chat_api.py` 和 `test_chat_store.py` 中未使用的导入 |
+
+**验证**：
+
+- `python3 -m pytest tests/ -q` → 122 passed
+- `.venv/bin/python -m compileall apps packages integrations tests` → passed
+- `git diff --check` → passed
+
+### Milestone 49 — 最新 Copilot Review 修复闭环
+
+**目标**：处理 PR #1 中 Copilot 对 `6481e1f` 新增的 review 记录。
+
+**处理结果**：
+
+| Review 点 | 处理 |
+|-----------|------|
+| 主窗口 JS 仍调用未定义的 `refreshMessages()` | 移除主窗口 `DOMContentLoaded` / `pywebviewready` 中的无效调用 |
+| TaskRunner loop 在线程内初始化，停止时可能尚未 ready | 增加 `_task_runner_loop_ready` 事件，并在事件循环进入 `run_forever()` 后才标记可停止 |
+| `TaskStatus.CANCELLED` 未同步到聊天消息 | 取消任务会把 user 消息标记为 failed，并补一条 assistant 取消提示 |
+| HermesExecutor 超时注释仍写 `hermes run` | 更新为当前实际命令 `hermes chat -q` |
+| Live2D API docstring 仍描述旧的内嵌聊天接口 | 改为说明 Live2D 只负责打开独立聊天窗口，不直接提供聊天读写 API |
+
+**验证**：
+
+- `python3 -m pytest tests/ -q` → 123 passed
+- `python3 -m compileall apps packages integrations tests` → passed
+- `git diff --check` → passed
+
+### Milestone 50 — 最新 Copilot Review 第二轮修复
+
+**目标**：处理 PR #1 中 Copilot 对 `2ecdc69` 新增的 5 条 review 记录。
+
+**处理结果**：
+
+| Review 点 | 处理 |
+|-----------|------|
+| `recheck_hermes()` 重检后 TaskRunner 仍使用旧 executor | 新增 TaskRunner executor 热切换；重检 Hermes 后替换后续任务使用的执行器，不重启、不打断已有任务 |
+| `clear_session()` 清空旧会话但不取消 pending/running 任务 | 清空前同步任务状态，取消旧会话活动任务，取消 TaskRunner in-flight 协程，并持久化取消提示 |
+| `get_chat_store()` 全局单例初始化无锁 | 增加模块级 `RLock` 和 double-checked locking |
+| `open_chat_window()` 窗口单例无锁 | 增加模块级 `RLock`，将检查、复用、创建、关闭回调状态更新放入同一临界区 |
+| `add_assistant_message(error=...)` 不同步 user error | 关联 user 消息在失败时同步写入 `error` 并持久化 |
+
+**验证**：
+
+- `python3 -m pytest tests/test_chat_api.py tests/test_chat_session.py tests/test_chat_store.py tests/test_runtime.py -q` → 26 passed
+- `python3 -m pytest tests/ -q` → 134 passed
+- `python3 -m compileall apps packages integrations tests` → passed
+- `git diff --check` → passed
+
+### Milestone 53 — _init_agent() 参数兼容性修复
+
+**根因**：Milestone 52 将 `route["label"]` 改为 `route.get("label")` 后，`route_label=None` 仍然被传给 `cli._init_agent()`。当前安装的 Hermes 版本（Nous Portal 路径）`_init_agent()` 不接受 `route_label` 参数，引发 `TypeError: got an unexpected keyword argument 'route_label'`。
+
+上轮的 `except TypeError` 块捕获了异常但直接 emit error 并 return 1，任务仍失败。
+
+**修复**：
+
+| 变更 | 处理 |
+|------|------|
+| `hermes_stream_bridge.py` | 新增 `_build_init_agent_kwargs(init_agent_fn, ...)` — 用 `inspect.signature()` 检查 `_init_agent` 实际接受的参数，只传支持的 kwargs |
+| `hermes_stream_bridge.py` | 支持三种情况：① 签名含 `route_label` → 传；② 签名不含 → 不传；③ 函数接受 `**kwargs` → 传所有非 None 值；④ `inspect.signature` 失败 → 只传 `model_override` / `runtime_override` |
+| `hermes_stream_bridge.py` | `_run()` 改用 `_build_init_agent_kwargs()` 构建 `init_kwargs`，再用 `cli._init_agent(**init_kwargs)` 调用 |
+| `hermes_stream_bridge.py` | 保留 `TypeError` 兜底路径：若 `_build_init_agent_kwargs` 结果仍引发 TypeError，自动去掉 `route_label` 后再试一次 |
+| `tests/test_executor.py` | 新增 `TestBuildInitAgentKwargs`（7 用例）：签名无 route_label → 排除、签名有 → 包含、**kwargs → 全传非 None、inspect 失败 → 保守降级、None 值不传 |
+
+**测试结果**：200 passed（+7 新增，0 失败）
+
+**三种路径的实际行为**：
+
+| provider 路径 | route keys | _init_agent 签名 | 实际传入 kwargs |
+|---|---|---|---|
+| DeepSeek/OpenAI | 含 label | 含 route_label | model, runtime, route_label, request_overrides |
+| Nous Portal/MiMo | 无 label | 不含 route_label | model, runtime（route_label 被过滤） |
+| 未来新版 | 不确定 | **kwargs | 所有非 None 值 |
+
+
+**根因**：`apps/core/hermes_stream_bridge.py` 中 `_run()` 对 `_resolve_turn_agent_config()` 返回值使用硬字典访问（`route["label"]`、`route["model"]`、`route["runtime"]`、`route["signature"]`）。Nous Portal / MiMo / 其他非 OpenAI-compatible provider 路径下，Hermes 返回的 route dict 可能不包含 `"label"` 键，导致 `KeyError: 'label'`，整个任务失败。
+
+**修复**：
+
+| 变更 | 处理 |
+|------|------|
+| `hermes_stream_bridge.py` | 新增 `_debug_route()` 打印 route 结构到 stderr（供诊断不同 provider 路径差异） |
+| `hermes_stream_bridge.py` | `route["signature"]` / `route["model"]` / `route["runtime"]` / `route["label"]` 全部改为 `route.get("key")` 防御式访问 |
+| `hermes_stream_bridge.py` | 对 `_init_agent()` 包裹 try/except `TypeError` / `Exception`，捕获 Hermes 版本不兼容的参数异常 |
+| `hermes_stream_bridge.py` | 若 route 不是 dict，emit 结构化 error 而非引发 KeyError |
+| `executor.py` | 新增 `_BRIDGE_RAW_EXCEPTION_TO_FRIENDLY` 映射表：`KeyError:`/`AttributeError:`/`TypeError:` 等 → 用户可读描述 |
+| `executor.py` | 新增 `_humanize_bridge_error(message)` 函数：检测原始异常前缀，转换为可读提示 |
+| `executor.py` | `_consume_stream_bridge` 中 error 事件调用 `_humanize_bridge_error()`，`boundary` 事件静默忽略，未知事件类型 debug log 跳过 |
+| `tests/test_executor.py` | 新增 `TestHumanizeBridgeError`（6 个用例）：KeyError/AttributeError/TypeError/普通消息/空串 |
+| `tests/test_executor.py` | 新增 `TestConsumeStreamBridgeRobustness`（5 个用例）：KeyError label 被人性化、未知事件不崩溃、boundary 不影响结果、仅 done 无 delta 降级为完整回复、done failed=True |
+
+**测试结果**：193 passed（+11 新增，0 失败）
+
+**诊断方式（不同 provider 路径对比）**：
+
+启动后聊天，`stderr` 中 `[yachiyo-debug] route keys=...` 行会记录 Hermes 的 route dict 结构。
+
+- DeepSeek/OpenAI-compatible 路径会包含 `label`、`model`、`runtime`、`signature`
+- Nous Portal / MiMo 路径可能缺少 `label`，需对比 keys 列表
+
+**后续增强项**：
+
+- 若 `route_label=None` 导致 Hermes 某些功能降级，可在 bridge 中用 `route.get("model", "")` 派生 label 兜底
+- `_debug_route()` 为临时诊断日志，问题稳定后可按 provider 路径整理文档后移除
