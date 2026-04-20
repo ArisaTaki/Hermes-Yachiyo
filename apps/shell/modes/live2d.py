@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any, Dict
 
 from apps.bridge.server import get_bridge_state
 from apps.installer.workspace_init import get_workspace_status
+from apps.shell.chat_bridge import ChatBridge
 from apps.shell.main_api import _serialize_summary
 
 if TYPE_CHECKING:
@@ -143,7 +144,15 @@ _LIVE2D_HTML = """
         .chat-msg .role { font-size: 0.72em; color: #888; margin-bottom: 2px; }
         .chat-msg .content { color: #ddd; white-space: pre-wrap; word-break: break-word; }
         .chat-msg.pending .content { color: #aaa; }
+        .chat-msg.processing .content { color: #aaa; }
         .chat-msg.error .content { color: #ffaaaa; }
+        @keyframes thinking-dots {
+            0%, 20% { content: ''; }
+            40% { content: '.'; }
+            60% { content: '..'; }
+            80%, 100% { content: '...'; }
+        }
+        .thinking::after { animation: thinking-dots 1.4s steps(1) infinite; content: ''; }
         .chat-input-row {
             display: flex;
             gap: 8px;
@@ -227,10 +236,14 @@ _LIVE2D_HTML = """
 
     <!-- 聊天入口 -->
     <div class="chat-area">
-        <div style="text-align:center;padding:20px 10px;">
-            <button class="chat-send" onclick="openChat()" style="width:100%;padding:14px;font-size:1em;border-radius:8px;">
-                💬 打开聊天窗口
-            </button>
+        <div class="chat-messages" id="chat-messages">
+            <div style="text-align:center;color:#555;padding:15px 8px;font-size:0.85em;">发送消息开始对话 ✨</div>
+        </div>
+        <div class="chat-input-row">
+            <input type="text" class="chat-input" id="msg-input"
+                   placeholder="输入消息…"
+                   onkeypress="if(event.key==='Enter') sendMsg()">
+            <button class="chat-send" id="send-btn" onclick="sendMsg()">发送</button>
         </div>
     </div>
 
@@ -250,6 +263,90 @@ _LIVE2D_HTML = """
     </div>
 
     <script>
+    let polling = null;
+    let sending = false;
+
+    function escapeHtml(t) {
+        const d = document.createElement('div');
+        d.textContent = t;
+        return d.innerHTML;
+    }
+
+    async function sendMsg() {
+        if (sending) return;
+        const input = document.getElementById('msg-input');
+        const text = (input.value || '').trim();
+        if (!text) return;
+        sending = true;
+        document.getElementById('send-btn').disabled = true;
+        input.disabled = true;
+        try {
+            if (!window.pywebview || !window.pywebview.api) throw new Error('API 不可用');
+            const r = await window.pywebview.api.send_quick_message(text);
+            if (!r.ok) throw new Error(r.error || '发送失败');
+            input.value = '';
+            await refreshMessages();
+            startPolling();
+        } catch(e) {
+            console.error('send error:', e);
+        } finally {
+            sending = false;
+            document.getElementById('send-btn').disabled = false;
+            input.disabled = false;
+            input.focus();
+        }
+    }
+
+    async function refreshMessages() {
+        try {
+            if (!window.pywebview || !window.pywebview.api) return;
+            const r = await window.pywebview.api.get_recent_summary(3);
+            if (!r.ok) return;
+
+            const container = document.getElementById('chat-messages');
+            if (r.empty || !r.messages || r.messages.length === 0) {
+                container.innerHTML = '<div style="text-align:center;color:#555;padding:15px 8px;font-size:0.85em;">发送消息开始对话 ✨</div>';
+                stopPolling();
+                return;
+            }
+
+            let html = '';
+            for (const m of r.messages) {
+                const label = m.role === 'user' ? '你' : (m.role === 'assistant' ? 'Yachiyo' : '系统');
+                const sc = m.status === 'failed' ? 'error'
+                         : m.status === 'processing' ? 'processing'
+                         : m.status === 'pending' ? 'pending' : '';
+                let content;
+                if (m.status === 'processing' && m.role === 'assistant') {
+                    content = m.content ? escapeHtml(m.content) : '<span class="thinking">正在思考</span>';
+                } else {
+                    content = escapeHtml(m.content);
+                }
+                html += '<div class="chat-msg ' + m.role + ' ' + sc + '">';
+                html += '<div class="role">' + label + '</div>';
+                html += '<div class="content">' + content + '</div>';
+                html += '</div>';
+            }
+            container.innerHTML = html;
+            container.scrollTop = container.scrollHeight;
+
+            // 更新角色图标（处理中显示工作状态）
+            const icon = document.getElementById('char-icon');
+            if (icon) icon.textContent = r.is_processing ? '⚡' : '🎤';
+
+            if (!r.is_processing) stopPolling();
+        } catch(e) {}
+    }
+
+    function startPolling() {
+        if (polling) return;
+        polling = setInterval(refreshMessages, 1200);
+    }
+
+    function stopPolling() {
+        if (polling) { clearInterval(polling); polling = null; }
+    }
+
     async function openChat() {
         try {
             if (window.pywebview && window.pywebview.api)
@@ -298,10 +395,11 @@ _LIVE2D_HTML = """
     }
 
     document.addEventListener('DOMContentLoaded', function() {
-        if (window.pywebview) refreshStatus();
-        setInterval(refreshStatus, 10000);
+        setTimeout(function() {
+            refreshStatus();
+            refreshMessages();
+        }, 500);
     });
-    window.addEventListener('pywebviewready', function() { refreshStatus(); });
     </script>
 </body>
 </html>
@@ -331,6 +429,7 @@ class Live2DWindowAPI:
     def __init__(self, runtime: "HermesRuntime", config: "AppConfig") -> None:
         self._runtime = runtime
         self._config = config
+        self._chat_bridge = ChatBridge(runtime)
 
     def get_live2d_status(self) -> Dict[str, Any]:
         """返回当前运行状态，供前端状态条和图标切换使用。"""
@@ -374,6 +473,16 @@ class Live2DWindowAPI:
         except Exception as exc:
             logger.error("获取 Live2D 状态失败: %s", exc)
             return {"error": str(exc)}
+
+    # ── 聊天摘要与快捷发送 ──────────────────────────────────────────────────
+
+    def send_quick_message(self, text: str) -> Dict[str, Any]:
+        """快捷发消息到统一 ChatSession"""
+        return self._chat_bridge.send_quick_message(text)
+
+    def get_recent_summary(self, count: int = 3) -> Dict[str, Any]:
+        """获取最近 N 条消息摘要"""
+        return self._chat_bridge.get_recent_summary(count)
 
     # ── 窗口操作 ────────────────────────────────────────────────────────────
 
