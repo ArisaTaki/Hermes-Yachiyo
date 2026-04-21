@@ -1,4 +1,4 @@
-"""主窗口管理
+"""主控台与安装窗口管理
 
 MVP 实现：使用 pywebview 展示本地状态页或安装引导页。
 这只是桌面壳原型方案，后续允许迁移到更完整的桌面壳技术。
@@ -28,8 +28,11 @@ from packages.protocol.enums import HermesInstallStatus
 logger = logging.getLogger(__name__)
 
 _EXIT_DELAY_SECONDS = 0.1
+_RESTART_DELAY_SECONDS = 0.8
 _exit_timer: threading.Timer | None = None
 _exit_timer_lock = threading.Lock()
+_restart_timer: threading.Timer | None = None
+_restart_timer_lock = threading.Lock()
 
 # 正常状态页 HTML
 _STATUS_HTML = """
@@ -76,15 +79,15 @@ _STATUS_HTML = """
         .card .row .value { color: #e0e0e0; }
         .card .row .value.ok { color: #90ee90; }
         .card .row .value.warn { color: #ffd700; }
-        .modes {
+        .control-actions {
             background: #2d2d54;
             border-radius: 8px;
             padding: 16px;
             margin-bottom: 20px;
         }
-        .modes h3 { color: #6495ed; font-size: 0.95em; margin-bottom: 12px; }
-        .mode-list { display: flex; gap: 12px; }
-        .mode-btn {
+        .control-actions h3 { color: #6495ed; font-size: 0.95em; margin-bottom: 12px; }
+        .action-list { display: flex; gap: 12px; }
+        .action-btn {
             flex: 1;
             background: #3a3a6a;
             border: 1px solid #555;
@@ -95,11 +98,11 @@ _STATUS_HTML = """
             text-align: center;
             transition: border-color 0.2s;
         }
-        .mode-btn:hover { border-color: #6495ed; color: #fff; }
-        .mode-btn.active { border-color: #6495ed; color: #fff; background: #4a4a8a; }
-        .mode-btn .icon { font-size: 1.4em; display: block; margin-bottom: 4px; }
-        .mode-btn .name { font-size: 0.85em; }
-        .mode-btn .desc { font-size: 0.75em; color: #888; margin-top: 2px; }
+        .action-btn:hover { border-color: #6495ed; color: #fff; }
+        .action-btn.active { border-color: #6495ed; color: #fff; background: #4a4a8a; }
+        .action-btn .icon { font-size: 1.4em; display: block; margin-bottom: 4px; }
+        .action-btn .name { font-size: 0.85em; }
+        .action-btn .desc { font-size: 0.75em; color: #888; margin-top: 2px; }
         /* 会话中心面板样式 */
         .chat-panel {
             background: #2d2d54;
@@ -455,28 +458,28 @@ _STATUS_HTML = """
         </div>
     </div>
 
-    <div class="modes">
-        <h3>显示模式</h3>
-        <div class="mode-list">
-            <div class="mode-btn active" id="mode-window">
-                <span class="icon">🖥️</span>
-                <span class="name">窗口模式</span>
-                <span class="desc">总控台</span>
-            </div>
-            <div class="mode-btn" id="mode-bubble">
+    <div class="control-actions">
+        <h3>主控台</h3>
+        <div class="action-list">
+            <div class="action-btn" onclick="openChat()">
                 <span class="icon">💬</span>
-                <span class="name">气泡模式</span>
-                <span class="desc">轻量常驻聊天</span>
+                <span class="name">打开对话</span>
+                <span class="desc">Chat Window</span>
             </div>
-            <div class="mode-btn" id="mode-live2d">
+            <div class="action-btn" id="action-bubble" onclick="openModeSettings('bubble')">
+                <span class="icon">💬</span>
+                <span class="name">Bubble 设置</span>
+                <span class="desc">悬浮入口</span>
+            </div>
+            <div class="action-btn" id="action-live2d" onclick="openModeSettings('live2d')">
                 <span class="icon">🎭</span>
-                <span class="name">Live2D</span>
-                <span class="desc">角色聊天壳</span>
+                <span class="name">Live2D 设置</span>
+                <span class="desc">角色入口</span>
             </div>
-            <div class="mode-btn" id="mode-settings" onclick="toggleSettings()">
+            <div class="action-btn" id="action-settings" onclick="toggleSettings()">
                 <span class="icon">⚙️</span>
-                <span class="name">设置</span>
-                <span class="desc">通用与模式设置</span>
+                <span class="name">应用设置</span>
+                <span class="desc">Common</span>
             </div>
         </div>
     </div>
@@ -569,7 +572,6 @@ _STATUS_HTML = """
             <h4>显示模式</h4>
             <div class="settings-row"><span class="label">当前模式</span>
                 <select class="s-select" id="s-display-mode" onchange="onSettingChange('display_mode', this.value)">
-                    <option value="window">窗口模式</option>
                     <option value="bubble">气泡模式</option>
                     <option value="live2d">Live2D 模式</option>
                 </select>
@@ -580,13 +582,6 @@ _STATUS_HTML = """
         <div class="settings-section">
             <h4>模式设置</h4>
             <div class="mode-settings-list">
-                <div class="mode-settings-item">
-                    <div class="meta">
-                        <div class="title">🖥️ Window Mode</div>
-                        <div class="desc" id="s-window-summary">读取中…</div>
-                    </div>
-                    <button class="mode-settings-open" onclick="openModeSettings('window')">打开</button>
-                </div>
                 <div class="mode-settings-item">
                     <div class="meta">
                         <div class="title">💬 Bubble Mode</div>
@@ -669,11 +664,10 @@ _STATUS_HTML = """
         document.getElementById('settings-panel').style.display = settingsOpen ? 'block' : 'none';
         // 隐藏/显示仪表盘区域
         document.querySelector('.cards').style.display = settingsOpen ? 'none' : 'grid';
-        document.querySelector('.modes').style.display = settingsOpen ? 'none' : 'block';
+        document.querySelector('.control-actions').style.display = settingsOpen ? 'none' : 'block';
         document.getElementById('chat-panel').style.display = settingsOpen ? 'none' : 'block';
         // 高亮设置按钮
-        document.getElementById('mode-settings').classList.toggle('active', settingsOpen);
-        document.getElementById('mode-window').classList.toggle('active', !settingsOpen);
+        document.getElementById('action-settings').classList.toggle('active', settingsOpen);
         if (settingsOpen) refreshSettings();
     }
 
@@ -893,7 +887,6 @@ _STATUS_HTML = """
 
             // Mode settings summary
             if (d.mode_settings) {
-                document.getElementById('s-window-summary').textContent = d.mode_settings.window.summary;
                 document.getElementById('s-bubble-summary').textContent = d.mode_settings.bubble.summary;
                 document.getElementById('s-live2d-summary').textContent = d.mode_settings.live2d.summary;
             }
@@ -971,10 +964,8 @@ _STATUS_HTML = """
         const modeEl = document.getElementById('s-display-mode');
         if (modeEl) modeEl.value = state.display_mode;
         if (state.mode_settings) {
-            const windowSummary = document.getElementById('s-window-summary');
             const bubbleSummary = document.getElementById('s-bubble-summary');
             const live2dSummary = document.getElementById('s-live2d-summary');
-            if (windowSummary) windowSummary.textContent = state.mode_settings.window.summary;
             if (bubbleSummary) bubbleSummary.textContent = state.mode_settings.bubble.summary;
             if (live2dSummary) live2dSummary.textContent = state.mode_settings.live2d.summary;
         }
@@ -1090,11 +1081,11 @@ _STATUS_HTML = """
             changes[key] = value;
             const res = await window.pywebview.api.update_settings(changes);
             if (res.ok) {
-                hint.textContent = '✓ 已保存';
+                hint.textContent = res.restart_scheduled ? '✓ 已保存，正在重启应用…' : '✓ 已保存';
                 hint.className = 'save-hint ok';
                 if (res.app_state) {
                     applyAppState(res.app_state);
-                    if (key === 'display_mode') {
+                    if (key === 'display_mode' && !res.restart_scheduled) {
                         refreshSettings();
                     }
                 } else {
@@ -1215,10 +1206,10 @@ _STATUS_HTML = """
             document.getElementById('task-running').textContent = data.tasks.running || 0;
             document.getElementById('task-completed').textContent = data.tasks.completed || 0;
 
-            // Modes
-            const currentMode = (data.modes && data.modes.current) || 'window';
-            ['window', 'bubble', 'live2d'].forEach(function(modeId) {
-                const el = document.getElementById('mode-' + modeId);
+            // Display modes
+            const currentMode = (data.modes && data.modes.current) || 'bubble';
+            ['bubble', 'live2d'].forEach(function(modeId) {
+                const el = document.getElementById('action-' + modeId);
                 if (el) el.classList.toggle('active', currentMode === modeId && !settingsOpen);
             });
 
@@ -1440,9 +1431,9 @@ def open_main_window(
     *,
     bind_exit: bool = False,
 ) -> bool:
-    """在当前 webview 会话中打开 Window Mode 窗口。"""
+    """在当前 webview 会话中打开主控台窗口。"""
     if not _HAS_WEBVIEW:
-        logger.warning("pywebview 未安装，无法打开 Window Mode 窗口")
+        logger.warning("pywebview 未安装，无法打开主控台窗口")
         return False
 
     from apps.shell.main_api import MainWindowAPI
@@ -1452,7 +1443,7 @@ def open_main_window(
     window_config = config.window_mode
 
     window = webview.create_window(
-        title="Hermes-Yachiyo",
+        title="Hermes-Yachiyo Control Center",
         html=html,
         width=window_config.width,
         height=window_config.height,
@@ -1465,7 +1456,7 @@ def open_main_window(
 
 
 def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
-    """创建并显示主窗口（阻塞主线程）- Window mode。"""
+    """创建并显示主控台窗口（阻塞主线程）。"""
     if not _HAS_WEBVIEW:
         logger.warning("pywebview 未安装，以无窗口模式运行")
         _print_console_dashboard(runtime, config)
@@ -1524,6 +1515,37 @@ def request_app_exit() -> None:
         _exit_timer = threading.Timer(_EXIT_DELAY_SECONDS, _destroy_all_windows_for_exit)
         _exit_timer.daemon = True
         _exit_timer.start()
+
+
+def request_app_restart() -> None:
+    """延迟重启应用，确保 WebView API 调用可以先正常返回。"""
+    global _restart_timer
+    with _restart_timer_lock:
+        if _restart_timer is not None and _restart_timer.is_alive():
+            return
+        _restart_timer = threading.Timer(_RESTART_DELAY_SECONDS, _restart_process)
+        _restart_timer.daemon = True
+        _restart_timer.start()
+
+
+def _restart_process() -> None:
+    """启动新进程并退出当前进程。"""
+    import os
+    import subprocess
+    import sys
+
+    logger.info("正在重启 Hermes-Yachiyo 以应用显示模式变更")
+    try:
+        subprocess.Popen(
+            [sys.executable] + sys.argv,
+            close_fds=True,
+            start_new_session=True,
+        )
+        logger.info("新进程已启动（%s %s）", sys.executable, sys.argv)
+    except Exception as exc:
+        logger.warning("自动重启失败，请手动重启应用: %s", exc)
+    finally:
+        os._exit(0)
 
 
 def _destroy_all_windows_for_exit() -> None:

@@ -17,13 +17,19 @@ class TestGetEffect:
         etype, msg = get_effect("live2d.model_name")
         assert etype == EffectType.IMMEDIATE
 
+    def test_live2d_scale_is_immediate(self):
+        etype, msg = get_effect("live2d_mode.scale")
+        assert etype == EffectType.IMMEDIATE
+        assert "缩放" in msg
+
     def test_app_restart_field(self):
         etype, msg = get_effect("tray_enabled")
         assert etype == EffectType.REQUIRES_APP_RESTART
 
-    def test_mode_restart_field(self):
+    def test_display_mode_restarts_app(self):
         etype, msg = get_effect("display_mode")
-        assert etype == EffectType.REQUIRES_MODE_RESTART
+        assert etype == EffectType.REQUIRES_APP_RESTART
+        assert "重启" in msg
 
     def test_unknown_field_defaults_to_immediate(self):
         etype, msg = get_effect("unknown_field_xyz")
@@ -67,4 +73,4 @@ class TestBuildEffectsSummary:
         assert "effect" in effect
         assert "message" in effect
         assert effect["key"] == "display_mode"
-        assert effect["effect"] == "requires_mode_restart"
+        assert effect["effect"] == "requires_app_restart"

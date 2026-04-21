@@ -172,7 +172,9 @@
 
 ## 当前状态
 
-完整可运行的桌面应用骨架，具备正常模式主界面、可编辑设置面板、配置持久化、完整启动状态流和显示模式切换骨架。
+完整可运行的桌面助手骨架。当前产品结构是 `Bubble / Live2D` 两种显示模式 + 按需打开的 `Control Center` 主控台；Control Center 不再参与 display mode 切换。旧 `display_mode="window"` 配置会在读取时迁移为 `bubble`。
+
+> 下面 Milestone 55/56 保留历史改造记录；当前最终结构以 Milestone 57 和“当前产品职责确认”为准。
 
 ### Milestone 55 — 三模式统一架构重构
 
@@ -222,6 +224,65 @@
 - 真正 Live2D renderer / moc3 渲染接入
 - Bubble / Live2D 原生窗口位置恢复和更细 UI 打磨
 - 更精细的未读态与模式动画表现
+
+### Milestone 56 — Bubble / Live2D launcher 形态修正
+
+- ✅ `apps/shell/modes/bubble.py`
+  - Bubble 不再是完整聊天窗口壳，改为透明无边框圆形桌面 launcher
+  - 单击气泡展开 / 收起统一 `Chat Window`
+  - 右键菜单保留打开对话、主控台、设置、退出入口
+  - Bubble 尺寸运行时夹在 96–128px，避免旧配置把 launcher 撑成窗口
+- ✅ `apps/shell/modes/live2d.py`
+  - Live2D 不再显示状态面板和输入区，改为透明无边框角色 launcher
+  - 单击角色展开 / 收起统一 `Chat Window`
+  - 保留 Live2D renderer / model3.json 接入位，当前仍是 CSS 占位角色舞台
+- ✅ `apps/shell/config.py` / `apps/shell/mode_settings.py`
+  - Live2D 新增 `scale` 配置，可在设置里控制角色缩放
+  - Live2D 新增 `show_on_all_spaces`，用于 macOS 跨 Spaces / Mission Control 行为
+- ✅ `apps/shell/native_window.py`
+  - macOS 下 best-effort 设置 NSWindow level 与 collection behavior
+  - `window_on_top=True` 时可作为浮动窗口；关闭后回到普通窗口层级，可被其他窗口覆盖
+- ✅ `apps/shell/chat_window.py`
+  - 新增 `toggle_chat_window()`，Bubble / Live2D 共用同一展开逻辑
+- ✅ `apps/shell/main_api.py` / `apps/shell/window.py`
+  - 主设置中切换 `display_mode` 保存后自动调度应用重启
+  - `display_mode` 生效策略从“重启显示模式”升级为“重启应用”
+- ✅ `apps/shell/settings.py`
+  - 独立设置窗口改为 `Common + 当前模式设置`，不再只显示单模式字段
+
+### 当前交互确认
+
+- **Control Center**：独立主控台 / 设置 / 诊断入口，不再作为 display mode
+- **Bubble Mode**：桌面圆形 launcher，点击展开 Chat Window
+- **Live2D Mode**：桌面角色 launcher，点击展开 Chat Window
+- **Chat Window**：Bubble / Live2D 共享的完整对话框
+
+### Milestone 57 — Window Mode 移出显示模式体系
+
+- ✅ `apps/shell/config.py`
+  - `display_mode` 收敛为 `bubble | live2d`
+  - 默认启动模式改为 `bubble`
+  - 旧配置 `display_mode="window"` 读取时迁移为 `bubble`
+- ✅ `apps/shell/modes/__init__.py`
+  - 删除 Window 分发分支，未知 display mode 统一回退 Bubble
+  - `apps/shell/modes/window.py` 已移除，避免继续把主控台当显示模式
+- ✅ `apps/shell/mode_catalog.py` / `apps/shell/mode_settings.py`
+  - 模式列表只返回 Bubble / Live2D
+  - `mode_settings` 不再暴露 Window mode 分区
+- ✅ `apps/shell/window.py`
+  - 原 Window 页面改为 `Hermes-Yachiyo Control Center`
+  - 主控台保留 Hermes / Workspace / Bridge / Integration / Task / 会话概览
+  - 主控台操作区只提供打开对话、Bubble 设置、Live2D 设置、应用设置
+- ✅ Bubble / Live2D 右键菜单
+  - “主窗口”文案改为“主控台”
+  - 仍可从 launcher 打开 Control Center，不丢失诊断和配置能力
+
+### 当前产品职责确认
+
+- **Bubble**：默认桌面入口，圆形 launcher，点击展开 / 收起 Chat Window
+- **Live2D**：角色桌面入口，点击展开 / 收起 Chat Window
+- **Control Center**：按需打开的主控台，不参与 display mode 切换
+- **Chat Window**：统一完整对话窗口，Bubble / Live2D / Control Center 共用同一 `ChatSession`
 
 ### Milestone 6 — 显示模式切换骨架
 

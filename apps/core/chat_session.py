@@ -1,6 +1,6 @@
 """统一聊天/会话层
 
-ChatSession 是三种显示模式（window / bubble / live2d）共享的消息状态容器。
+ChatSession 是 Bubble / Live2D / Chat Window / 主控台摘要共享的消息状态容器。
 
 职责：
   - 管理当前会话的消息列表（user / assistant / system）

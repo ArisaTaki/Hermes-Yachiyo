@@ -4,9 +4,10 @@
 每个模式模块导出一个 run(runtime, config) 函数，负责阻塞主线程直到界面关闭。
 
 模式说明：
-  window  — 总控台 / 仪表盘 / 入口中心
   bubble  — 轻量常驻悬浮聊天模式
   live2d  — 角色聊天壳（保留 renderer 接入位）
+
+主控台是可从 launcher 打开的控制中心，不再作为 display mode 启动。
 """
 
 from __future__ import annotations
@@ -25,16 +26,15 @@ logger = logging.getLogger(__name__)
 class DisplayMode(StrEnum):
     """显示模式枚举"""
 
-    WINDOW = "window"    # 总控台
     BUBBLE = "bubble"    # 轻量常驻聊天模式
     LIVE2D = "live2d"    # 角色聊天壳
 
 
-_DEFAULT_DISPLAY_MODE = DisplayMode.WINDOW
+_DEFAULT_DISPLAY_MODE = DisplayMode.BUBBLE
 
 
 def resolve_display_mode(config: "AppConfig") -> DisplayMode:
-    """从配置中解析显示模式，未知值回退为 WINDOW。
+    """从配置中解析显示模式，未知值回退为 BUBBLE。
 
     Args:
         config: 应用配置对象
@@ -59,9 +59,7 @@ def launch_mode(runtime: "HermesRuntime", config: "AppConfig") -> None:
     """
     mode = resolve_display_mode(config)
 
-    if mode == DisplayMode.WINDOW:
-        from apps.shell.modes.window import run
-    elif mode == DisplayMode.BUBBLE:
+    if mode == DisplayMode.BUBBLE:
         from apps.shell.modes.bubble import run
     else:  # LIVE2D
         from apps.shell.modes.live2d import run

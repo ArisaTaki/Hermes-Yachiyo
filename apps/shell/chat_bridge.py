@@ -1,6 +1,6 @@
 """统一聊天摘要桥接层
 
-为 bubble / live2d / 主窗口等非完整聊天 UI 提供轻量级会话摘要读取。
+为 Bubble / Live2D / Control Center 等非完整聊天 UI 提供轻量级会话摘要读取。
 所有消息读写经由 ChatAPI → ChatSession → ChatStore，不引入独立状态。
 
 职责：
@@ -11,6 +11,7 @@
 使用方：
   - BubbleWindowAPI
   - Live2DWindowAPI
+  - MainWindowAPI（Control Center）
 
 不使用方（直接用 ChatAPI）：
   - ChatWindowAPI（完整聊天窗口）

@@ -3,6 +3,7 @@
 import importlib
 
 from apps.shell.config import AppConfig
+from apps.shell.modes import DisplayMode, resolve_display_mode
 from apps.shell.startup import StartupMode, resolve_startup_mode, run_normal_mode
 from packages.protocol.enums import HermesInstallStatus, Platform
 from packages.protocol.install import HermesInstallInfo
@@ -85,3 +86,10 @@ def test_run_normal_mode_reuses_startup_install_info(monkeypatch):
     assert len(runtime_instances) == 1
     assert started_with == [install_info]
     assert stopped == [True]
+
+
+def test_legacy_window_display_mode_resolves_to_bubble():
+    config = AppConfig()
+    config.display_mode = "window"  # type: ignore[assignment]
+
+    assert resolve_display_mode(config) == DisplayMode.BUBBLE

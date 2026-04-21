@@ -1,9 +1,10 @@
-"""模式元数据定义。
+"""显示模式元数据定义。
 
-三种模式在产品层是并列关系：
-- window: 总控台 / 仪表盘
+显示模式只负责桌面常驻入口：
 - bubble: 轻量常驻聊天模式
 - live2d: 角色聊天壳
+
+主控台是独立 Control Center，不参与 display mode 切换。
 """
 
 from __future__ import annotations
@@ -37,14 +38,6 @@ class ModeDescriptor:
 
 
 _MODE_CATALOG: dict[str, ModeDescriptor] = {
-    "window": ModeDescriptor(
-        id="window",
-        name="Window 模式",
-        icon="🖥️",
-        description="桌面总控台、状态仪表盘与入口中心",
-        settings_title="Window 设置",
-        settings_description="控制台尺寸、最近会话与最近消息概览等总控台偏好。",
-    ),
     "bubble": ModeDescriptor(
         id="bubble",
         name="Bubble 模式",
@@ -75,5 +68,5 @@ def list_mode_options() -> list[dict[str, Any]]:
 
 
 def get_mode_descriptor(mode_id: str) -> ModeDescriptor:
-    """获取单个模式元数据，未知值回退为 window。"""
-    return _MODE_CATALOG.get(mode_id, _MODE_CATALOG["window"])
+    """获取单个模式元数据，未知值回退为 bubble。"""
+    return _MODE_CATALOG.get(mode_id, _MODE_CATALOG["bubble"])

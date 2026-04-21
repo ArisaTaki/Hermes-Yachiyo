@@ -295,7 +295,8 @@ def test_bubble_html_keeps_idle_polling_for_cross_mode_updates():
     assert "window.addEventListener('pywebviewready', bootstrap);" in _BUBBLE_HTML
     assert "openSettings()" in _BUBBLE_HTML
     assert "Yachiyo" in _BUBBLE_HTML
-    assert "let expandedInitialized = false;" in _BUBBLE_HTML
+    assert "bubble-launcher" in _BUBBLE_HTML
+    assert "toggle_chat" in _BUBBLE_HTML
 
 
 def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
@@ -306,12 +307,12 @@ def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
     assert "window.addEventListener('pywebviewready', bootstrap);" in _LIVE2D_HTML
     assert "openSettings()" in _LIVE2D_HTML
     assert "renderer 预留" in _LIVE2D_HTML
+    assert "toggle_chat" in _LIVE2D_HTML
+    assert "--live2d-scale" in _LIVE2D_HTML
 
 
-def test_thinking_dots_use_real_elements_not_content_animation():
+def test_launcher_modes_do_not_embed_inline_chat_inputs():
     for html in (_BUBBLE_HTML, _LIVE2D_HTML):
-        assert "@keyframes thinking-dot" in html
-        assert "@keyframes thinking-dots" not in html
-        assert "content: '.'" not in html
-        assert '<span class="dot" aria-hidden="true">.</span>' in html
-        assert '<span class="label">正在思考</span>' not in html
+        assert "send_quick_message" not in html
+        assert "msg-input" not in html
+        assert "toggleChat()" in html

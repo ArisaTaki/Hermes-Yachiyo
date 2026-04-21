@@ -1,6 +1,6 @@
 """主界面 WebView API
 
-为正常模式主窗口提供 JavaScript 可调用的 API。
+为 Control Center 主控台提供 JavaScript 可调用的 API。
 通过 Core Runtime 获取数据，不直接访问 Bridge。
 集成 ChatAPI 提供聊天功能。
 """
@@ -47,7 +47,7 @@ def _serialize_summary(summary: Optional[ModelSummary]) -> Dict[str, Any]:
 
 
 class MainWindowAPI:
-    """正常模式主窗口 API"""
+    """Control Center 主控台 API。"""
     
     def __init__(self, runtime: "HermesRuntime", config: "AppConfig") -> None:
         self._runtime = runtime
@@ -166,6 +166,7 @@ class MainWindowAPI:
 
     def update_settings(self, changes: Dict[str, Any]) -> Dict[str, Any]:
         """修改配置项并持久化。"""
+        previous_display_mode = self._config.display_mode
         result = apply_settings_changes(self._config, changes)
         if result.get("ok"):
             applied = result.get("applied", {})
@@ -174,6 +175,20 @@ class MainWindowAPI:
                 result["app_state"] = self._current_app_state()
                 if "effects" not in result:
                     result["effects"] = build_effects_summary(list(applied.keys()))
+                if (
+                    "display_mode" in applied
+                    and applied["display_mode"] != previous_display_mode
+                ):
+                    try:
+                        from apps.shell.window import request_app_restart
+
+                        request_app_restart()
+                        result["restart_scheduled"] = True
+                        result["restart_reason"] = "display_mode_changed"
+                    except Exception as exc:
+                        logger.error("显示模式变更后自动重启失败: %s", exc)
+                        result["restart_scheduled"] = False
+                        result["restart_error"] = str(exc)
         return result
 
     def _current_app_state(self) -> Dict[str, Any]:

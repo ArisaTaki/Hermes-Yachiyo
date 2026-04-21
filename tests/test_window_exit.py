@@ -94,6 +94,20 @@ def test_request_app_exit_prepares_exit_without_destroying_current_window(monkey
     assert aux.destroyed is True
 
 
+def test_request_app_restart_is_delayed(monkeypatch):
+    FakeTimer.instances = []
+
+    monkeypatch.setattr(window_mod.threading, "Timer", FakeTimer)
+    monkeypatch.setattr(window_mod, "_restart_timer", None)
+
+    window_mod.request_app_restart()
+
+    assert len(FakeTimer.instances) == 1
+    assert FakeTimer.instances[0].interval == window_mod._RESTART_DELAY_SECONDS
+    assert FakeTimer.instances[0].started is True
+    assert FakeTimer.instances[0].daemon is True
+
+
 def test_bubble_close_requests_full_app_exit(monkeypatch):
     requested = []
     api = BubbleWindowAPI(runtime=object(), config=object())
@@ -114,10 +128,11 @@ def test_quit_button_uses_in_page_dialog_and_api_exit():
     assert "confirm('退出会关闭主界面" not in _STATUS_HTML
 
 
-def test_window_mode_html_keeps_chat_window_as_external_full_session():
+def test_control_center_html_keeps_chat_window_as_external_full_session():
     assert "打开 Chat Window" in _STATUS_HTML
     assert "id=\"chat-summary-list\"" in _STATUS_HTML
     assert "openModeSettings('bubble')" in _STATUS_HTML
+    assert "窗口模式" not in _STATUS_HTML
     assert "id=\"msg-input\"" not in _STATUS_HTML
 
 

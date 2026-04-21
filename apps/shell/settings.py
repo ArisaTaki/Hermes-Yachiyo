@@ -1,6 +1,6 @@
-"""模式设置窗口。
+"""设置窗口。
 
-该窗口只负责单一模式的设置，不再混合所有模式字段。
+展示 Common 全局设置与当前模式的专属设置。
 """
 
 from __future__ import annotations
@@ -28,9 +28,25 @@ class ModeSettingsAPI:
         return serialize_mode_window_data(self._config, self._mode_id)
 
     def update_settings(self, changes: dict[str, Any]) -> dict[str, Any]:
+        previous_display_mode = self._config.display_mode
         result = apply_settings_changes(self._config, changes)
         if result.get("ok"):
             result["settings"] = serialize_mode_window_data(self._config, self._mode_id)
+            applied = result.get("applied", {})
+            if (
+                "display_mode" in applied
+                and applied["display_mode"] != previous_display_mode
+            ):
+                try:
+                    from apps.shell.window import request_app_restart
+
+                    request_app_restart()
+                    result["restart_scheduled"] = True
+                    result["restart_reason"] = "display_mode_changed"
+                except Exception as exc:
+                    logger.error("显示模式变更后自动重启失败: %s", exc)
+                    result["restart_scheduled"] = False
+                    result["restart_error"] = str(exc)
         return result
 
 
@@ -131,7 +147,7 @@ input:checked + .slider:before { transform: translateX(20px); }
 </style>
 </head>
 <body>
-    <h2 id="mode-title">模式设置</h2>
+    <h2 id="mode-title">设置</h2>
     <div class="desc" id="mode-desc">读取中…</div>
     <div class="section">
         <h3>模式概览</h3>
@@ -151,7 +167,12 @@ input:checked + .slider:before { transform: translateX(20px); }
     </div>
 
     <div class="section">
-        <h3>设置项</h3>
+        <h3>Common</h3>
+        <div id="common-form"></div>
+    </div>
+
+    <div class="section">
+        <h3 id="part-title">当前模式设置</h3>
         <div id="mode-form"></div>
         <div class="hint" id="save-hint"></div>
     </div>
@@ -159,6 +180,7 @@ input:checked + .slider:before { transform: translateX(20px); }
 <script>
 let currentMode = '';
 let currentSettings = null;
+let currentCommon = null;
 
 function num(v, fallback) {
     const n = parseFloat(v);
@@ -186,6 +208,21 @@ function selectRow(key, label, value, options) {
     }).join('');
     return '<div class="row"><span class="label">' + label + '</span>'
         + '<select class="select" onchange="saveField(\\'' + key + '\\', this.value)">' + opts + '</select></div>';
+}
+
+function renderCommon(common) {
+    currentCommon = common || {};
+    const form = document.getElementById('common-form');
+    const modes = currentCommon.available_modes || [];
+    let html = '';
+    html += selectRow('display_mode', '显示模式', currentCommon.display_mode || currentMode, modes.map(function(mode) {
+        return { value: mode.id, label: mode.icon + ' ' + mode.name };
+    }));
+    html += boolRow('bridge_enabled', 'Bridge 启用', !!currentCommon.bridge_enabled);
+    html += inputRow('bridge_host', 'Bridge 地址', currentCommon.bridge_host || '127.0.0.1');
+    html += inputRow('bridge_port', 'Bridge 端口', currentCommon.bridge_port || 8420, 'number');
+    html += boolRow('tray_enabled', '系统托盘', !!currentCommon.tray_enabled);
+    form.innerHTML = html;
 }
 
 function escapeHtml(value) {
@@ -225,34 +262,15 @@ function renderForm(mode, cfg) {
     const form = document.getElementById('mode-form');
     let html = '';
 
-    if (mode === 'window') {
-        html += inputRow('window_mode.width', '窗口宽度', cfg.width, 'number');
-        html += inputRow('window_mode.height', '窗口高度', cfg.height, 'number');
-        html += inputRow('window_mode.recent_sessions_limit', '最近会话条数', cfg.recent_sessions_limit, 'number');
-        html += inputRow('window_mode.recent_messages_limit', '最近消息条数', cfg.recent_messages_limit, 'number');
-        html += boolRow('window_mode.open_chat_on_start', '启动即打开聊天窗口', cfg.open_chat_on_start);
-        html += boolRow('window_mode.show_runtime_panel', '显示运行状态卡', cfg.show_runtime_panel);
-        html += boolRow('window_mode.show_mode_overview', '显示模式概览', cfg.show_mode_overview);
-    } else if (mode === 'bubble') {
+    if (mode === 'bubble') {
         html += inputRow('bubble_mode.width', '气泡宽度', cfg.width, 'number');
         html += inputRow('bubble_mode.height', '气泡高度', cfg.height, 'number');
         html += inputRow('bubble_mode.position_x', '位置 X', cfg.position_x, 'number');
         html += inputRow('bubble_mode.position_y', '位置 Y', cfg.position_y, 'number');
         html += boolRow('bubble_mode.always_on_top', '窗口置顶', cfg.always_on_top);
         html += boolRow('bubble_mode.edge_snap', '靠边吸附', cfg.edge_snap);
-        html += boolRow('bubble_mode.expanded_on_start', '启动默认展开', cfg.expanded_on_start);
-        html += selectRow('bubble_mode.expand_trigger', '展开方式', cfg.expand_trigger, [
-            { value: 'click', label: '点击切换' },
-            { value: 'hover', label: '悬停展开（占位）' },
-        ]);
-        html += selectRow('bubble_mode.default_display', '默认展示内容', cfg.default_display, [
-            { value: 'icon', label: '仅图标' },
-            { value: 'summary', label: '摘要' },
-            { value: 'recent_reply', label: '最近回复' },
-        ]);
-        html += inputRow('bubble_mode.summary_count', '摘要条数', cfg.summary_count, 'number');
+        html += inputRow('bubble_mode.summary_count', '状态摘要条数', cfg.summary_count, 'number');
         html += boolRow('bubble_mode.show_unread_dot', '显示未读点', cfg.show_unread_dot);
-        html += boolRow('bubble_mode.auto_hide', '自动隐藏', cfg.auto_hide);
         html += inputRow('bubble_mode.opacity', '透明度', cfg.opacity, 'number', '0.01');
     } else if (mode === 'live2d') {
         html += inputRow('live2d_mode.model_name', '模型名称', cfg.model_name);
@@ -261,20 +279,10 @@ function renderForm(mode, cfg) {
         html += inputRow('live2d_mode.height', '窗口高度', cfg.height, 'number');
         html += inputRow('live2d_mode.position_x', '位置 X', cfg.position_x, 'number');
         html += inputRow('live2d_mode.position_y', '位置 Y', cfg.position_y, 'number');
+        html += inputRow('live2d_mode.scale', '角色缩放', cfg.scale, 'number', '0.01');
         html += boolRow('live2d_mode.window_on_top', '窗口置顶', cfg.window_on_top);
-        html += boolRow('live2d_mode.show_reply_bubble', '显示回复气泡', cfg.show_reply_bubble);
-        html += selectRow('live2d_mode.default_open_behavior', '默认打开行为', cfg.default_open_behavior, [
-            { value: 'stage', label: '角色舞台' },
-            { value: 'reply_bubble', label: '回复气泡' },
-            { value: 'chat_input', label: '输入入口' },
-        ]);
-        html += selectRow('live2d_mode.click_action', '点击行为', cfg.click_action, [
-            { value: 'open_chat', label: '打开聊天窗口' },
-            { value: 'focus_stage', label: '聚焦角色舞台' },
-            { value: 'toggle_reply', label: '切换回复气泡' },
-        ]);
+        html += boolRow('live2d_mode.show_on_all_spaces', 'macOS 所有桌面可见', cfg.show_on_all_spaces);
         html += boolRow('live2d_mode.auto_open_chat_window', '自动打开聊天窗口', cfg.auto_open_chat_window);
-        html += boolRow('live2d_mode.enable_quick_input', '启用最小输入入口', cfg.enable_quick_input);
         html += inputRow('live2d_mode.idle_motion_group', '待机动作组', cfg.idle_motion_group);
         html += boolRow('live2d_mode.enable_expressions', '启用表情系统', cfg.enable_expressions);
         html += boolRow('live2d_mode.enable_physics', '启用物理模拟', cfg.enable_physics);
@@ -300,7 +308,7 @@ async function saveField(key, value) {
         const result = await window.pywebview.api.update_settings(payload);
         if (!result.ok) throw new Error(result.error || (result.errors || []).join('; ') || '保存失败');
         if (result.settings) renderSettings(result.settings);
-        hint.textContent = '✓ 已保存';
+        hint.textContent = result.restart_scheduled ? '✓ 已保存，正在重启应用…' : '✓ 已保存';
         hint.className = 'hint';
     } catch (error) {
         hint.textContent = '✗ ' + error.message;
@@ -315,10 +323,12 @@ async function saveField(key, value) {
 function renderSettings(payload) {
     currentMode = payload.mode.id;
     currentSettings = payload.settings.config;
-    document.getElementById('mode-title').textContent = payload.mode.settings_title;
-    document.getElementById('mode-desc').textContent = payload.mode.settings_description;
+    renderCommon(payload.common);
+    document.getElementById('mode-title').textContent = '设置';
+    document.getElementById('mode-desc').textContent = 'Common + ' + payload.mode.name;
     document.getElementById('mode-summary').textContent = payload.settings.summary;
     document.getElementById('mode-name').textContent = payload.mode.icon + ' ' + payload.mode.name;
+    document.getElementById('part-title').textContent = payload.mode.name + ' 设置';
     renderForm(payload.mode.id, payload.settings.config);
 }
 
@@ -346,10 +356,10 @@ def open_mode_settings_window(config: "AppConfig", mode_id: str) -> bool:
 
     descriptor = get_mode_descriptor(mode_id)
     webview.create_window(
-        title=f"Hermes-Yachiyo — {descriptor.settings_title}",
+        title=f"Hermes-Yachiyo — 设置 · Common + {descriptor.name}",
         html=_SETTINGS_HTML,
         width=520,
-        height=620,
+        height=720,
         resizable=True,
         js_api=ModeSettingsAPI(config, descriptor.id),
     )

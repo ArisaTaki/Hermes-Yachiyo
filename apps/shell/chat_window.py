@@ -1,7 +1,7 @@
 """独立聊天窗口
 
-从主窗口拆出的聊天面板，作为独立 pywebview 窗口运行。
-三种模式（window / bubble / live2d）统一通过此窗口进入聊天。
+从主控台拆出的聊天面板，作为独立 pywebview 窗口运行。
+Bubble / Live2D 两种桌面入口统一通过此窗口进入聊天。
 """
 
 from __future__ import annotations
@@ -154,6 +154,23 @@ def open_chat_window(runtime: "HermesRuntime") -> bool:
         _chat_window.events.closed += _on_closed
         logger.info("聊天窗口已创建")
         return True
+
+
+def is_chat_window_open() -> bool:
+    """返回独立聊天窗口当前是否存在。"""
+    with _chat_window_lock:
+        return _chat_window is not None
+
+
+def toggle_chat_window(runtime: "HermesRuntime") -> bool:
+    """展开或收起独立聊天窗口。
+
+    返回切换后聊天窗口是否处于打开状态。
+    """
+    if is_chat_window_open():
+        close_chat_window()
+        return False
+    return open_chat_window(runtime)
 
 
 def close_chat_window() -> bool:

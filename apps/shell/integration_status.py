@@ -1,7 +1,7 @@
 """集成服务状态统一产出
 
 Bridge / AstrBot / Hapi 的运行时状态从这里集中获取，
-main_api / bubble / settings / window 只消费此模块的结果，不各自拼装。
+Control Center / Bubble / Live2D / Settings 只消费此模块的结果，不各自拼装。
 """
 
 from __future__ import annotations

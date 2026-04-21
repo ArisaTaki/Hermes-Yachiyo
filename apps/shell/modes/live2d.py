@@ -1,11 +1,10 @@
 """Live2D 模式。
 
-当前阶段先实现“角色聊天壳”而不实现真正 renderer：
-- 角色舞台 + 最近回复泡泡
-- 最小输入入口
-- 打开完整 Chat Window 入口
-- 统一读取 ChatSession 状态
-- 保留未来 renderer / moc3 / 动作系统接入位
+当前阶段实现桌面角色 launcher，而不是完整聊天窗口：
+- 透明无边框角色舞台
+- 点击角色展开/收起统一 Chat Window
+- 右键菜单提供主控台、模式设置、退出入口
+- 保留 renderer / moc3 / 动作系统接入位
 """
 
 from __future__ import annotations
@@ -24,213 +23,313 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_LIVE2D_HTML = """
+_LIVE2D_HTML = r"""
 <!DOCTYPE html>
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
-    <title>Hermes-Yachiyo — Live2D Mode</title>
+    <title>Hermes-Yachiyo Live2D</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: -apple-system, "Helvetica Neue", "PingFang SC", sans-serif;
-            background: linear-gradient(180deg, #17192b 0%, #111320 100%);
-            color: #eef1ff;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
+        html, body {
+            width: 100%;
+            height: 100%;
             overflow: hidden;
+            background: transparent;
+            font-family: -apple-system, "Helvetica Neue", "PingFang SC", sans-serif;
+            user-select: none;
         }
-        .stage {
-            position: relative;
-            height: 250px;
-            flex-shrink: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: radial-gradient(circle at top, rgba(97, 129, 255, 0.22), transparent 55%), #13162a;
-            border-bottom: 1px solid rgba(255,255,255,0.06);
-        }
-        .badge {
-            position: absolute;
-            top: 12px;
-            right: 12px;
-            font-size: 0.72rem;
-            color: #c0c8ef;
-            border: 1px solid rgba(126, 152, 255, 0.28);
-            background: rgba(20, 22, 40, 0.75);
-            border-radius: 999px;
-            padding: 4px 8px;
-        }
-        .model-status {
-            position: absolute;
-            top: 12px;
-            left: 12px;
-            font-size: 0.72rem;
-            color: #c6cefa;
-            background: rgba(20, 22, 40, 0.82);
-            border-radius: 999px;
-            padding: 4px 8px;
-        }
-        .character {
-            width: 150px;
-            height: 150px;
-            border-radius: 50%;
+        body {
             display: grid;
             place-items: center;
-            font-size: 4rem;
-            background: linear-gradient(180deg, rgba(112, 140, 255, 0.36), rgba(52, 68, 122, 0.3));
-            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
-            animation: float 3s ease-in-out infinite;
         }
-        @keyframes float {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-8px); }
+        @keyframes live2d-idle {
+            0%, 100% { transform: translateY(0) scale(var(--live2d-scale, 1)); }
+            50% { transform: translateY(-8px) scale(var(--live2d-scale, 1)); }
+        }
+        @keyframes unread-pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255, 100, 100, 0.72); }
+            70% { box-shadow: 0 0 0 13px rgba(255, 100, 100, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 100, 100, 0); }
         }
         @keyframes thinking-dot {
             0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
             40% { opacity: 1; transform: translateY(-1px); }
         }
-        .reply-bubble {
-            position: absolute;
-            max-width: 280px;
-            bottom: 24px;
-            right: 24px;
-            background: rgba(20, 24, 40, 0.94);
-            border: 1px solid rgba(126, 152, 255, 0.24);
-            border-radius: 14px;
-            padding: 10px 12px;
-            color: #dde4ff;
-            font-size: 0.84rem;
-            line-height: 1.45;
-            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
-        }
-        .reply-bubble.hidden { display: none; }
-        .panel {
-            flex: 1;
-            min-height: 0;
+        .stage {
+            position: relative;
+            width: min(92vw, 330px);
+            height: min(94vh, 610px);
             display: flex;
-            flex-direction: column;
-            gap: 10px;
-            padding: 12px;
-        }
-        .summary {
-            flex: 1;
-            min-height: 0;
-            overflow-y: auto;
-            background: rgba(12, 14, 24, 0.72);
-            border-radius: 14px;
-            padding: 12px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .message {
-            padding: 10px 12px;
-            border-radius: 12px;
-            line-height: 1.5;
-            font-size: 0.84rem;
-        }
-        .message.user { background: rgba(91, 122, 230, 0.16); margin-left: 36px; }
-        .message.assistant { background: rgba(68, 130, 88, 0.18); margin-right: 36px; }
-        .message.system { background: rgba(58, 61, 80, 0.72); color: #b0b6d8; }
-        .message.failed { color: #ffaaaa; }
-        .message.processing { color: #ffd36a; }
-        .thinking { display: inline-flex; align-items: center; gap: 2px; }
-        .thinking .dot {
-            animation: thinking-dot 1.2s ease-in-out infinite;
-            display: inline-block;
-        }
-        .thinking .dot:nth-child(2) { animation-delay: 0.15s; }
-        .thinking .dot:nth-child(3) { animation-delay: 0.3s; }
-        .empty-hint {
-            text-align: center;
-            color: #7d85ad;
-            padding: 18px 8px;
-            font-size: 0.84rem;
-        }
-        .input-row {
-            display: flex;
-            gap: 8px;
-        }
-        .input-row.hidden { display: none; }
-        .input {
-            flex: 1;
-            min-width: 0;
-            background: rgba(12, 14, 24, 0.84);
-            color: #eef1ff;
-            border: 1px solid rgba(126, 152, 255, 0.22);
-            border-radius: 12px;
-            padding: 10px 12px;
-        }
-        .input:focus { outline: none; border-color: #7e98ff; }
-        .btn-row {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        .btn {
-            flex: 1;
-            min-width: 110px;
-            padding: 9px 12px;
-            border-radius: 10px;
-            border: 1px solid rgba(126, 152, 255, 0.24);
-            background: #20243b;
-            color: #eef1ff;
+            align-items: flex-end;
+            justify-content: center;
             cursor: pointer;
-            font-size: 0.8rem;
         }
-        .btn.primary {
-            background: #4056a0;
-            border-color: #6381ff;
+        .character {
+            position: relative;
+            width: 250px;
+            height: 520px;
+            transform-origin: center bottom;
+            filter: drop-shadow(0 18px 22px rgba(0, 0, 0, 0.34));
+            animation: live2d-idle 4s ease-in-out infinite;
         }
-        .status-row {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            flex-wrap: wrap;
+        .hair-back {
+            position: absolute;
+            left: 37px;
+            top: 42px;
+            width: 176px;
+            height: 360px;
+            border-radius: 88px 88px 110px 110px;
+            background:
+                linear-gradient(90deg, transparent 0 10%, rgba(245, 212, 232, 0.92) 11% 18%, transparent 19% 81%, rgba(215, 234, 255, 0.92) 82% 89%, transparent 90%),
+                linear-gradient(180deg, #f7f8ff 0%, #eef1ff 56%, rgba(213, 250, 245, 0.94) 100%);
+            z-index: 1;
         }
-        .chip {
-            padding: 4px 8px;
-            border-radius: 999px;
-            background: rgba(26, 28, 46, 0.82);
-            color: #bbc4ef;
-            font-size: 0.74rem;
+        .head {
+            position: absolute;
+            left: 74px;
+            top: 55px;
+            width: 102px;
+            height: 112px;
+            border-radius: 48% 48% 45% 45%;
+            background: linear-gradient(180deg, #fff1ea 0%, #f6d4ca 100%);
+            z-index: 5;
+            box-shadow: inset 0 -8px 12px rgba(210, 120, 120, 0.08);
         }
-        .chip.ok { color: #8fe3a3; }
-        .chip.warn { color: #ffd36a; }
+        .bangs {
+            position: absolute;
+            left: 62px;
+            top: 42px;
+            width: 126px;
+            height: 72px;
+            border-radius: 70px 70px 32px 32px;
+            background: linear-gradient(180deg, #fff 0%, #edf2ff 100%);
+            z-index: 7;
+            clip-path: polygon(0 0, 100% 0, 94% 72%, 78% 43%, 67% 78%, 52% 40%, 42% 76%, 30% 44%, 17% 72%, 8% 44%);
+        }
+        .tail-left,
+        .tail-right {
+            position: absolute;
+            top: 74px;
+            width: 48px;
+            height: 330px;
+            background: linear-gradient(180deg, #f9fbff 0%, #eef3ff 62%, rgba(236, 198, 230, 0.94) 100%);
+            z-index: 2;
+            border-radius: 32px 32px 80% 80%;
+        }
+        .tail-left { left: 36px; transform: rotate(4deg); }
+        .tail-right { right: 36px; transform: rotate(-4deg); }
+        .ear-left,
+        .ear-right {
+            position: absolute;
+            top: 28px;
+            width: 38px;
+            height: 38px;
+            border: 7px solid #f7f9ff;
+            border-bottom-color: transparent;
+            border-radius: 50%;
+            z-index: 4;
+        }
+        .ear-left { left: 66px; }
+        .ear-right { right: 66px; }
+        .eye {
+            position: absolute;
+            top: 105px;
+            width: 13px;
+            height: 18px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 40% 36%, #ffffff 0 13%, #7c8ddb 14% 42%, #37395a 43% 100%);
+            z-index: 8;
+        }
+        .eye.left { left: 101px; }
+        .eye.right { right: 101px; }
+        .mouth {
+            position: absolute;
+            left: 50%;
+            top: 135px;
+            width: 18px;
+            height: 9px;
+            border-bottom: 2px solid #d77a87;
+            border-radius: 50%;
+            transform: translateX(-50%);
+            z-index: 8;
+        }
+        .neck {
+            position: absolute;
+            left: 108px;
+            top: 157px;
+            width: 34px;
+            height: 44px;
+            background: #f1c9c0;
+            z-index: 4;
+        }
+        .torso {
+            position: absolute;
+            left: 66px;
+            top: 182px;
+            width: 118px;
+            height: 142px;
+            border-radius: 42px 42px 30px 30px;
+            background: linear-gradient(180deg, #312a48 0 42%, #24394a 43% 100%);
+            z-index: 5;
+        }
+        .collar {
+            position: absolute;
+            left: 92px;
+            top: 176px;
+            width: 66px;
+            height: 54px;
+            background: #f1c9c0;
+            clip-path: polygon(0 0, 100% 0, 76% 100%, 50% 58%, 24% 100%);
+            z-index: 6;
+        }
+        .sleeve-left,
+        .sleeve-right {
+            position: absolute;
+            top: 206px;
+            width: 58px;
+            height: 96px;
+            background: linear-gradient(180deg, #354f67 0%, #2a3047 100%);
+            border-radius: 28px;
+            z-index: 4;
+        }
+        .sleeve-left { left: 24px; transform: rotate(18deg); }
+        .sleeve-right { right: 24px; transform: rotate(-18deg); }
+        .hand-left,
+        .hand-right {
+            position: absolute;
+            top: 293px;
+            width: 24px;
+            height: 34px;
+            background: #f2ccc4;
+            border-radius: 14px;
+            z-index: 3;
+        }
+        .hand-left { left: 21px; transform: rotate(20deg); }
+        .hand-right { right: 21px; transform: rotate(-20deg); }
+        .skirt {
+            position: absolute;
+            left: 44px;
+            top: 300px;
+            width: 162px;
+            height: 140px;
+            background:
+                linear-gradient(145deg, transparent 0 18%, #69d7c6 19% 43%, transparent 44%),
+                linear-gradient(215deg, transparent 0 18%, #7761a8 19% 43%, transparent 44%),
+                linear-gradient(180deg, #2c3048 0%, #2d3250 62%, #9ce7de 63% 100%);
+            clip-path: polygon(15% 0, 85% 0, 100% 82%, 76% 72%, 60% 100%, 49% 75%, 35% 100%, 23% 72%, 0 82%);
+            z-index: 4;
+        }
+        .leg-left,
+        .leg-right {
+            position: absolute;
+            top: 414px;
+            width: 28px;
+            height: 86px;
+            background: linear-gradient(180deg, #f6dbd4 0%, #eac5bd 100%);
+            border-radius: 16px;
+            z-index: 2;
+        }
+        .leg-left { left: 93px; }
+        .leg-right { right: 93px; }
+        .shoe-left,
+        .shoe-right {
+            position: absolute;
+            top: 492px;
+            width: 34px;
+            height: 18px;
+            background: #f8eee2;
+            border-radius: 12px 12px 8px 8px;
+            z-index: 2;
+        }
+        .shoe-left { left: 88px; }
+        .shoe-right { right: 88px; }
+        .status-dot {
+            position: absolute;
+            right: 38px;
+            top: 90px;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            border: 2px solid rgba(20, 20, 20, 0.76);
+            background: #71e28c;
+            z-index: 10;
+            display: none;
+        }
+        .status-dot.visible { display: block; }
+        .status-dot.processing {
+            background: #ffd166;
+            animation: unread-pulse 1.45s infinite;
+        }
+        .status-dot.failed,
+        .status-dot.attention {
+            background: #ff6b6b;
+            animation: unread-pulse 1.6s infinite;
+        }
+        .context-menu {
+            position: fixed;
+            right: 12px;
+            bottom: 12px;
+            min-width: 128px;
+            padding: 6px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(22, 24, 29, 0.96);
+            box-shadow: 0 16px 32px rgba(0, 0, 0, 0.36);
+            display: none;
+            z-index: 20;
+        }
+        .context-menu.visible { display: block; }
+        .menu-btn {
+            width: 100%;
+            border: 0;
+            background: transparent;
+            color: #eef2f7;
+            text-align: left;
+            padding: 7px 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .menu-btn:hover { background: rgba(255, 255, 255, 0.1); }
+        .menu-btn.danger { color: #ffb5b5; }
     </style>
 </head>
 <body>
-    <div class="stage">
-        <div class="model-status" id="model-status">模型读取中…</div>
-        <div class="badge">角色聊天壳 · renderer 预留</div>
-        <div class="character" id="character-icon">🎭</div>
-        <div class="reply-bubble" id="reply-bubble">等待回复…</div>
+    <div class="stage" id="stage" title="Yachiyo - 点击展开对话"
+         onclick="toggleChat()" oncontextmenu="showMenu(event)">
+        <div class="character" id="character" aria-label="Yachiyo Live2D renderer 预留">
+            <div class="hair-back"></div>
+            <div class="tail-left"></div>
+            <div class="tail-right"></div>
+            <div class="ear-left"></div>
+            <div class="ear-right"></div>
+            <div class="head"></div>
+            <div class="bangs"></div>
+            <div class="eye left"></div>
+            <div class="eye right"></div>
+            <div class="mouth"></div>
+            <div class="neck"></div>
+            <div class="collar"></div>
+            <div class="torso"></div>
+            <div class="sleeve-left"></div>
+            <div class="sleeve-right"></div>
+            <div class="hand-left"></div>
+            <div class="hand-right"></div>
+            <div class="skirt"></div>
+            <div class="leg-left"></div>
+            <div class="leg-right"></div>
+            <div class="shoe-left"></div>
+            <div class="shoe-right"></div>
+            <span class="status-dot" id="status-dot" aria-hidden="true"></span>
+        </div>
     </div>
 
-    <div class="panel">
-        <div class="status-row">
-            <span class="chip" id="chip-hermes">Hermes …</span>
-            <span class="chip" id="chip-executor">执行器 …</span>
-            <span class="chip" id="chip-bridge">Bridge …</span>
-            <span class="chip" id="chip-session">会话 …</span>
-        </div>
-
-        <div class="summary" id="summary">
-            <div class="empty-hint">从当前会话继续对话，或打开完整聊天窗口。</div>
-        </div>
-
-        <div class="input-row" id="input-row">
-            <input class="input" id="msg-input" placeholder="输入消息…" onkeypress="if(event.key==='Enter') sendMsg()">
-            <button class="btn primary" id="send-btn" type="button" onclick="sendMsg()">发送</button>
-        </div>
-
-        <div class="btn-row">
-            <button class="btn primary" type="button" onclick="openChat()">完整对话</button>
-            <button class="btn" type="button" onclick="openMainWindow()">主窗口</button>
-            <button class="btn" type="button" onclick="openSettings()">设置</button>
-        </div>
+    <div class="context-menu" id="context-menu">
+        <button class="menu-btn" type="button" onclick="openChat()">打开对话</button>
+        <button class="menu-btn" type="button" onclick="openMainWindow()">主控台</button>
+        <button class="menu-btn" type="button" onclick="openSettings()">设置</button>
+        <button class="menu-btn danger" type="button" onclick="closeLive2D()">退出</button>
     </div>
 
     <script>
@@ -238,13 +337,7 @@ _LIVE2D_HTML = """
     const IDLE_POLL_INTERVAL_MS = 5000;
     let polling = null;
     let pollingIntervalMs = null;
-    let sending = false;
-
-    function escapeHtml(value) {
-        const div = document.createElement('div');
-        div.textContent = value || '';
-        return div.innerHTML;
-    }
+    let toggling = false;
 
     function setPollingInterval(intervalMs) {
         if (polling && pollingIntervalMs === intervalMs) return;
@@ -261,59 +354,41 @@ _LIVE2D_HTML = """
         pollingIntervalMs = null;
     }
 
-    function renderThinking() {
-        return '<span class="thinking" aria-label="正在思考">'
-            + '<span class="dot" aria-hidden="true">.</span>'
-            + '<span class="dot" aria-hidden="true">.</span>'
-            + '<span class="dot" aria-hidden="true">.</span>'
-            + '</span>';
+    function hideMenu() {
+        document.getElementById('context-menu').classList.remove('visible');
+    }
+
+    function showMenu(event) {
+        event.preventDefault();
+        event.stopPropagation();
+        document.getElementById('context-menu').classList.toggle('visible');
     }
 
     function renderLive2D(view) {
         const live2d = view.live2d || {};
         const chat = view.chat || {};
+        const character = document.getElementById('character');
+        const scale = Math.max(0.4, Math.min(2.0, Number(live2d.scale || 1)));
+        character.style.setProperty('--live2d-scale', String(scale));
+        const dot = document.getElementById('status-dot');
+        let status = 'ready';
+        if (chat.is_processing) status = 'processing';
+        else if (chat.messages && chat.messages.some(function(m) { return m.status === 'failed'; })) status = 'failed';
 
-        const modelStateLabels = {
-            not_configured: '⚪ 模型未配置',
-            path_invalid: '❌ 模型路径不存在',
-            path_not_live2d: '⚠️ 目录无模型文件',
-            path_valid: '✅ 模型目录就绪 · renderer 待接入',
-            loaded: '✅ 模型已加载',
+        const hasAttention = !!chat.latest_reply && !chat.is_processing;
+        dot.className = 'status-dot visible ' + status + (hasAttention ? ' attention' : '');
+        dot.style.display = (hasAttention || chat.is_processing || status === 'failed') ? 'block' : 'none';
+
+        const stateLabels = {
+            not_configured: 'Live2D renderer 预留 - 模型未配置',
+            path_invalid: 'Live2D renderer 预留 - 模型路径不存在',
+            path_not_live2d: 'Live2D renderer 预留 - 目录无模型文件',
+            path_valid: 'Live2D renderer 预留 - 模型目录就绪',
+            loaded: 'Live2D 模型已加载',
         };
-        document.getElementById('model-status').textContent =
-            modelStateLabels[live2d.model_state] || (live2d.model_name || '角色聊天壳');
+        document.getElementById('stage').title =
+            (stateLabels[live2d.model_state] || 'Yachiyo Live2D') + '，点击展开对话';
 
-        const replyBubble = document.getElementById('reply-bubble');
-        replyBubble.classList.toggle('hidden', !live2d.show_reply_bubble);
-        replyBubble.textContent = chat.latest_reply || '等待回复…';
-
-        document.getElementById('chip-hermes').textContent = view.hermes.ready ? '✅ Hermes' : '⚠️ Hermes';
-        document.getElementById('chip-hermes').className = 'chip ' + (view.hermes.ready ? 'ok' : 'warn');
-        document.getElementById('chip-executor').textContent = view.executor_label || '执行器未知';
-        document.getElementById('chip-bridge').textContent = view.bridge_label || 'Bridge 未知';
-        document.getElementById('chip-session').textContent = chat.status_label || '会话未知';
-        document.getElementById('character-icon').textContent = chat.is_processing ? '⚡' : '🎭';
-
-        const inputRow = document.getElementById('input-row');
-        inputRow.classList.toggle('hidden', !live2d.enable_quick_input);
-
-        const container = document.getElementById('summary');
-        if (chat.empty || !chat.messages || chat.messages.length === 0) {
-            container.innerHTML = '<div class="empty-hint">从当前会话继续对话，或打开完整聊天窗口。</div>';
-            startIdlePolling();
-            return;
-        }
-
-        let html = '';
-        for (const msg of chat.messages) {
-            const cls = 'message ' + msg.role + ' ' + (msg.status || '');
-            const content = msg.status === 'processing' && msg.role === 'assistant' && !msg.content
-                ? renderThinking()
-                : escapeHtml(msg.content);
-            html += '<div class="' + cls + '">' + content + '</div>';
-        }
-        container.innerHTML = html;
-        container.scrollTop = container.scrollHeight;
         if (chat.is_processing) startActivePolling();
         else startIdlePolling();
     }
@@ -327,39 +402,38 @@ _LIVE2D_HTML = """
         } catch (error) {}
     }
 
-    async function sendMsg() {
-        if (sending) return;
-        const input = document.getElementById('msg-input');
-        const text = (input.value || '').trim();
-        if (!text) return;
-        sending = true;
-        document.getElementById('send-btn').disabled = true;
-        input.disabled = true;
+    async function toggleChat() {
+        if (toggling) return;
+        hideMenu();
+        toggling = true;
         try {
-            const result = await window.pywebview.api.send_quick_message(text);
-            if (!result.ok) throw new Error(result.error || '发送失败');
-            input.value = '';
-            await refreshLive2D();
-            startActivePolling();
-        } catch (error) {
-            console.error(error);
+            if (window.pywebview && window.pywebview.api) {
+                await window.pywebview.api.toggle_chat();
+                await refreshLive2D();
+            }
         } finally {
-            sending = false;
-            document.getElementById('send-btn').disabled = false;
-            input.disabled = false;
+            toggling = false;
         }
     }
 
     async function openChat() {
+        hideMenu();
         if (window.pywebview && window.pywebview.api) await window.pywebview.api.open_chat();
     }
 
     async function openMainWindow() {
+        hideMenu();
         if (window.pywebview && window.pywebview.api) await window.pywebview.api.open_main_window();
     }
 
     async function openSettings() {
+        hideMenu();
         if (window.pywebview && window.pywebview.api) await window.pywebview.api.open_settings();
+    }
+
+    async function closeLive2D() {
+        hideMenu();
+        if (window.pywebview && window.pywebview.api) await window.pywebview.api.close_live2d();
     }
 
     function bootstrap() {
@@ -367,6 +441,9 @@ _LIVE2D_HTML = """
         startIdlePolling();
     }
 
+    document.addEventListener('click', function(event) {
+        if (!event.target.closest('#context-menu')) hideMenu();
+    });
     document.addEventListener('DOMContentLoaded', function() { setTimeout(bootstrap, 300); });
     window.addEventListener('pywebviewready', bootstrap);
     </script>
@@ -389,12 +466,12 @@ class Live2DWindowAPI:
         runner = self._runtime.task_runner
         executor_label = "执行器不可用"
         if runner is not None:
-            executor_label = "🚀 Hermes" if runner.executor.name == "HermesExecutor" else "🔬 模拟"
+            executor_label = "Hermes" if runner.executor.name == "HermesExecutor" else "模拟"
 
         bridge_state = get_bridge_state()
         bridge_label_map = {
-            "running": "✅ Bridge",
-            "failed": "❌ Bridge",
+            "running": "Bridge 运行中",
+            "failed": "Bridge 异常",
         }
 
         return {
@@ -411,18 +488,28 @@ class Live2DWindowAPI:
                 "model_state": live2d.validate().value,
                 "model_name": live2d.model_name or "",
                 "model_path": live2d.model_path or "",
+                "scale": live2d.scale,
+                "window_on_top": live2d.window_on_top,
+                "show_on_all_spaces": live2d.show_on_all_spaces,
                 "show_reply_bubble": live2d.show_reply_bubble,
                 "enable_quick_input": live2d.enable_quick_input,
-                "click_action": live2d.click_action,
+                "click_action": "open_chat",
                 "default_open_behavior": live2d.default_open_behavior,
                 "summary": _serialize_summary(live2d.scan()),
             },
-            "bridge_label": bridge_label_map.get(bridge_state, "⏳ Bridge"),
+            "bridge_label": bridge_label_map.get(bridge_state, "Bridge 启动中"),
             "executor_label": executor_label,
         }
 
     def send_quick_message(self, text: str) -> Dict[str, Any]:
         return self._chat_bridge.send_quick_message(text)
+
+    def toggle_chat(self) -> Dict[str, Any]:
+        from apps.shell.chat_window import is_chat_window_open, toggle_chat_window
+
+        was_open = is_chat_window_open()
+        open_after_toggle = toggle_chat_window(self._runtime)
+        return {"ok": was_open or open_after_toggle, "open": open_after_toggle}
 
     def open_chat(self) -> Dict[str, Any]:
         from apps.shell.chat_window import open_chat_window
@@ -439,24 +526,66 @@ class Live2DWindowAPI:
 
         return {"ok": open_mode_settings_window(self._config, "live2d")}
 
+    def close_live2d(self) -> Dict[str, Any]:
+        try:
+            from apps.shell.window import request_app_exit
+
+            request_app_exit()
+            return {"ok": True}
+        except Exception as exc:
+            logger.error("退出 Live2D 模式失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
 
 def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
     """Live2D 模式入口（阻塞主线程）。"""
-    logger.info("启动 Live2D 模式（角色聊天壳）")
+    logger.info("启动 Live2D 模式（透明角色 launcher）")
     try:
         import webview  # type: ignore[import]
 
         live2d = config.live2d_mode
         api = Live2DWindowAPI(runtime, config)
-        webview.create_window(
+        win = webview.create_window(
             title="Hermes-Yachiyo Live2D",
             html=_LIVE2D_HTML,
             width=live2d.width,
             height=live2d.height,
-            resizable=True,
+            x=live2d.position_x,
+            y=live2d.position_y,
+            resizable=False,
             on_top=live2d.window_on_top,
             js_api=api,
+            frameless=True,
+            transparent=True,
+            easy_drag=True,
+            text_select=False,
         )
+        try:
+            from apps.shell.window import bind_app_window_exit
+
+            bind_app_window_exit(win, label="Live2D 窗口")
+        except Exception as exc:
+            logger.warning("绑定 Live2D 退出事件失败: %s", exc)
+
+        try:
+            from apps.shell.native_window import schedule_macos_window_behavior
+
+            schedule_macos_window_behavior(
+                title="Hermes-Yachiyo Live2D",
+                always_on_top=live2d.window_on_top,
+                show_on_all_spaces=live2d.show_on_all_spaces,
+            )
+        except Exception as exc:
+            logger.debug("调度 macOS Live2D 窗口行为失败: %s", exc)
+
+        if live2d.auto_open_chat_window:
+            try:
+                from apps.shell.chat_window import open_chat_window
+
+                open_chat_window(runtime)
+            except Exception as exc:
+                logger.warning("Live2D 启动时打开 Chat Window 失败: %s", exc)
+
         webview.start(debug=False)
     except ImportError:
         logger.warning("pywebview 未安装，Live2D 模式无法展示")

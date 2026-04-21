@@ -10,7 +10,6 @@ from apps.shell.config import (
     BubbleModeConfig,
     Live2DModeConfig,
     ModelSummary,
-    WindowModeConfig,
     save_config,
 )
 from apps.shell.effect_policy import build_effects_summary
@@ -43,15 +42,6 @@ _TOP_LEVEL_FIELDS: dict[str, type] = {
 }
 
 _MODE_FIELDS: dict[str, dict[str, type]] = {
-    "window_mode": {
-        "width": int,
-        "height": int,
-        "recent_sessions_limit": int,
-        "recent_messages_limit": int,
-        "open_chat_on_start": bool,
-        "show_runtime_panel": bool,
-        "show_mode_overview": bool,
-    },
     "bubble_mode": {
         "width": int,
         "height": int,
@@ -74,7 +64,9 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "height": int,
         "position_x": int,
         "position_y": int,
+        "scale": float,
         "window_on_top": bool,
+        "show_on_all_spaces": bool,
         "show_reply_bubble": bool,
         "default_open_behavior": str,
         "click_action": str,
@@ -89,7 +81,6 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
 _MODE_KEY_ALIASES = {
     "live2d": "live2d_mode",
     "bubble": "bubble_mode",
-    "window": "window_mode",
 }
 
 
@@ -102,11 +93,14 @@ def _coerce_numeric(expected: type, value: Any) -> Any:
 
 
 def _validate_field(key: str, value: Any) -> str | None:
-    if key == "display_mode" and value not in {"window", "bubble", "live2d"}:
+    if key == "display_mode" and value not in {"bubble", "live2d"}:
         return f"无效的显示模式: {value}"
     if key == "bridge_port" and not (1024 <= value <= 65535):
         return "bridge_port 须在 1024-65535 之间"
-    if key.endswith(".width") or key.endswith(".height"):
+    if key.startswith("bubble_mode.") and (key.endswith(".width") or key.endswith(".height")):
+        if not (80 <= value <= 180):
+            return f"{key} 须在 80-180 之间"
+    elif key.endswith(".width") or key.endswith(".height"):
         if value < 240:
             return f"{key} 不能小于 240"
     if key.endswith(".recent_sessions_limit") and not (1 <= value <= 10):
@@ -117,6 +111,8 @@ def _validate_field(key: str, value: Any) -> str | None:
         return "summary_count 须在 1-3 之间"
     if key.endswith(".opacity") and not (0.2 <= value <= 1.0):
         return "opacity 须在 0.2-1.0 之间"
+    if key.endswith(".scale") and not (0.4 <= value <= 2.0):
+        return "scale 须在 0.4-2.0 之间"
     if key.endswith(".expand_trigger") and value not in {"click", "hover"}:
         return "expand_trigger 仅支持 click / hover"
     if key.endswith(".default_display") and value not in {"icon", "summary", "recent_reply"}:
@@ -128,26 +124,8 @@ def _validate_field(key: str, value: Any) -> str | None:
     return None
 
 
-def _mode_object(config: AppConfig, mode_key: str) -> WindowModeConfig | BubbleModeConfig | Live2DModeConfig:
+def _mode_object(config: AppConfig, mode_key: str) -> BubbleModeConfig | Live2DModeConfig:
     return getattr(config, mode_key)
-
-
-def serialize_window_mode(config: AppConfig) -> dict[str, Any]:
-    mode = config.window_mode
-    return {
-        "id": "window",
-        "title": get_mode_descriptor("window").settings_title,
-        "summary": f"{mode.width}×{mode.height} · 最近会话 {mode.recent_sessions_limit} 条 · 最近消息 {mode.recent_messages_limit} 条",
-        "config": {
-            "width": mode.width,
-            "height": mode.height,
-            "recent_sessions_limit": mode.recent_sessions_limit,
-            "recent_messages_limit": mode.recent_messages_limit,
-            "open_chat_on_start": mode.open_chat_on_start,
-            "show_runtime_panel": mode.show_runtime_panel,
-            "show_mode_overview": mode.show_mode_overview,
-        },
-    }
 
 
 def serialize_bubble_mode(config: AppConfig) -> dict[str, Any]:
@@ -183,8 +161,9 @@ def serialize_live2d_mode(config: AppConfig) -> dict[str, Any]:
         "title": get_mode_descriptor("live2d").settings_title,
         "summary": (
             f"{mode.width}×{mode.height} · "
+            f"缩放 {mode.scale:.2f} · "
             f"{mode.model_name or '未配置模型'} · "
-            f"{'显示回复泡泡' if mode.show_reply_bubble else '角色壳模式'}"
+            f"{'置顶' if mode.window_on_top else '普通窗口'}"
         ),
         "config": {
             "model_state": model_state.value,
@@ -194,7 +173,9 @@ def serialize_live2d_mode(config: AppConfig) -> dict[str, Any]:
             "height": mode.height,
             "position_x": mode.position_x,
             "position_y": mode.position_y,
+            "scale": mode.scale,
             "window_on_top": mode.window_on_top,
+            "show_on_all_spaces": mode.show_on_all_spaces,
             "show_reply_bubble": mode.show_reply_bubble,
             "default_open_behavior": mode.default_open_behavior,
             "click_action": mode.click_action,
@@ -210,7 +191,6 @@ def serialize_live2d_mode(config: AppConfig) -> dict[str, Any]:
 
 def serialize_mode_settings(config: AppConfig) -> dict[str, Any]:
     return {
-        "window": serialize_window_mode(config),
         "bubble": serialize_bubble_mode(config),
         "live2d": serialize_live2d_mode(config),
     }
@@ -220,6 +200,7 @@ def serialize_mode_window_data(config: AppConfig, mode_id: str) -> dict[str, Any
     descriptor = get_mode_descriptor(mode_id)
     payload = serialize_mode_settings(config)[descriptor.id]
     return {
+        "common": serialize_common_settings(config),
         "mode": descriptor.to_dict(),
         "settings": payload,
     }
@@ -229,6 +210,17 @@ def build_display_settings(config: AppConfig) -> dict[str, Any]:
     return {
         "current_mode": config.display_mode,
         "available_modes": list_mode_options(),
+    }
+
+
+def serialize_common_settings(config: AppConfig) -> dict[str, Any]:
+    return {
+        "display_mode": config.display_mode,
+        "available_modes": list_mode_options(),
+        "bridge_enabled": config.bridge_enabled,
+        "bridge_host": config.bridge_host,
+        "bridge_port": config.bridge_port,
+        "tray_enabled": config.tray_enabled,
     }
 
 

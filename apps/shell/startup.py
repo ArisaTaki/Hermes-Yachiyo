@@ -76,7 +76,7 @@ def run_normal_mode(
     """正常模式：启动 Core Runtime + Bridge + 主界面窗口。
 
     启动流程：
-      1. 解析并记录 display mode（window / bubble / live2d）
+      1. 解析并记录 display mode（bubble / live2d）
       2. 初始化 Core Runtime
       3. 将 Runtime 注入 Bridge
       4. 按配置启动 Bridge（后台线程）

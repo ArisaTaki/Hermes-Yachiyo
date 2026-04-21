@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import apps.shell.config as config_mod
 from apps.core.chat_session import ChatSession
 from apps.core.chat_store import ChatStore
 from apps.core.state import AppState
@@ -103,7 +104,7 @@ def _fake_snapshot() -> _Snapshot:
 def test_dashboard_data_includes_chat_overview_and_modes(tmp_path, monkeypatch):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _RuntimeStub(store)
-    runtime.chat_session.add_user_message("来自 window mode")
+    runtime.chat_session.add_user_message("来自 control center")
     try:
         monkeypatch.setattr("apps.shell.main_api.get_workspace_status", lambda: {"initialized": True, "workspace_path": "/tmp/ws", "created_at": "now"})
         monkeypatch.setattr("apps.shell.main_api.get_integration_snapshot", lambda config, boot: _fake_snapshot())
@@ -111,9 +112,9 @@ def test_dashboard_data_includes_chat_overview_and_modes(tmp_path, monkeypatch):
         api = MainWindowAPI(runtime, AppConfig())
         data = api.get_dashboard_data()
 
-        assert data["modes"]["current"] == "window"
-        assert {item["id"] for item in data["modes"]["items"]} == {"window", "bubble", "live2d"}
-        assert data["chat"]["messages"][0]["content"] == "来自 window mode"
+        assert data["modes"]["current"] == "bubble"
+        assert {item["id"] for item in data["modes"]["items"]} == {"bubble", "live2d"}
+        assert data["chat"]["messages"][0]["content"] == "来自 control center"
         assert "recent_sessions" in data["chat"]
     finally:
         store.close()
@@ -133,8 +134,31 @@ def test_settings_data_exposes_mode_settings_summaries(tmp_path, monkeypatch):
         api = MainWindowAPI(runtime, config)
         data = api.get_settings_data()
 
-        assert data["mode_settings"]["window"]["id"] == "window"
+        assert set(data["mode_settings"]) == {"bubble", "live2d"}
         assert "摘要 2 条" in data["mode_settings"]["bubble"]["summary"]
         assert "hiyori" in data["mode_settings"]["live2d"]["summary"]
+    finally:
+        store.close()
+
+
+def test_display_mode_change_schedules_app_restart(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    restarted = []
+    try:
+        monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+        monkeypatch.setattr("apps.shell.main_api.get_integration_snapshot", lambda config, boot: _fake_snapshot())
+        monkeypatch.setattr("apps.shell.window.request_app_restart", lambda: restarted.append(True))
+
+        config = AppConfig(display_mode="bubble")
+        api = MainWindowAPI(runtime, config)
+        result = api.update_settings({"display_mode": "live2d"})
+
+        assert result["ok"] is True
+        assert result["restart_scheduled"] is True
+        assert result["restart_reason"] == "display_mode_changed"
+        assert restarted == [True]
+        assert config.display_mode == "live2d"
     finally:
         store.close()

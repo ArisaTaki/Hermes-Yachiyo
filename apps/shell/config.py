@@ -14,8 +14,9 @@ logger = logging.getLogger(__name__)
 _CONFIG_DIR = Path.home() / ".hermes-yachiyo"
 _CONFIG_FILE = _CONFIG_DIR / "config.json"
 
-# 合法的 display_mode 值，与 DisplayMode 枚举保持同步
-DisplayModeValue = Literal["window", "bubble", "live2d"]
+# 合法的 display_mode 值，与 DisplayMode 枚举保持同步。
+# 主控台不再是 display mode；旧配置中的 "window" 会迁移到 "bubble"。
+DisplayModeValue = Literal["bubble", "live2d"]
 BubbleDisplayValue = Literal["icon", "summary", "recent_reply"]
 BubbleExpandTriggerValue = Literal["click", "hover"]
 Live2DClickActionValue = Literal["focus_stage", "open_chat", "toggle_reply"]
@@ -142,9 +143,9 @@ def scan_live2d_model_dir(path: Path) -> ModelSummary:
 
 @dataclass
 class WindowModeConfig:
-    """Window 模式配置。
+    """主控台配置。
 
-    Window mode 负责总控台与入口中心，因此配置聚焦在控制台视图本身，
+    主控台负责状态仪表盘、诊断与入口中心，因此配置聚焦在控制台视图本身，
     不直接承担完整聊天窗口的消息区配置。
     """
 
@@ -161,8 +162,8 @@ class WindowModeConfig:
 class BubbleModeConfig:
     """Bubble 模式配置。"""
 
-    width: int = 320
-    height: int = 380
+    width: int = 112
+    height: int = 112
     position_x: int = 24
     position_y: int = 24
     always_on_top: bool = True
@@ -189,7 +190,9 @@ class Live2DModeConfig:
     height: int = 680
     position_x: int = 48
     position_y: int = 48
+    scale: float = 1.0                 # 角色缩放（参考 Live2DRenderer 的 SetScale）
     window_on_top: bool = True        # 角色窗口是否置顶
+    show_on_all_spaces: bool = True    # macOS: 置顶时加入所有 Spaces / 全屏辅助层
     show_reply_bubble: bool = True
     default_open_behavior: Live2DDefaultOpenValue = "reply_bubble"
     click_action: Live2DClickActionValue = "open_chat"
@@ -238,7 +241,7 @@ class AppConfig:
     bridge_host: str = "127.0.0.1"
     bridge_port: int = 8420
     bridge_enabled: bool = True
-    display_mode: DisplayModeValue = "window"   # 合法值见 DisplayMode 枚举
+    display_mode: DisplayModeValue = "bubble"   # 合法值见 DisplayMode 枚举
     tray_enabled: bool = True
     start_minimized: bool = False
     log_level: str = "INFO"
@@ -276,6 +279,15 @@ def _load_nested_dataclass(
     return cls(**valid)
 
 
+def normalize_display_mode(value: Any) -> DisplayModeValue:
+    """规范化 display mode，兼容旧版 window 配置。"""
+    if value == "live2d":
+        return "live2d"
+    if value not in (None, "", "bubble", "window"):
+        logger.warning("未知显示模式 %r，回退为 bubble", value)
+    return "bubble"
+
+
 def load_config() -> AppConfig:
     """从磁盘加载配置，不存在则返回默认值"""
     if _CONFIG_FILE.exists():
@@ -286,6 +298,8 @@ def load_config() -> AppConfig:
             live2d_mode = _load_nested_dataclass(
                 data, "live2d_mode", Live2DModeConfig, legacy_key="live2d"
             )
+            if "display_mode" in data:
+                data["display_mode"] = normalize_display_mode(data.get("display_mode"))
             config = AppConfig(
                 **{k: v for k, v in data.items() if k in AppConfig.__dataclass_fields__}
             )
