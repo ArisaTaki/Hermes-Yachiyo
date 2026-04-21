@@ -174,6 +174,55 @@
 
 完整可运行的桌面应用骨架，具备正常模式主界面、可编辑设置面板、配置持久化、完整启动状态流和显示模式切换骨架。
 
+### Milestone 55 — 三模式统一架构重构
+
+- ✅ `apps/shell/config.py`
+  - 新增 `WindowModeConfig` / `BubbleModeConfig` / `Live2DModeConfig`
+  - `AppConfig` 改为“通用配置 + 模式配置”结构
+  - 兼容旧 `live2d` 配置块读取，统一落到 `live2d_mode`
+- ✅ `apps/shell/mode_catalog.py`
+  - 定义三模式并列元数据：Window / Bubble / Live2D
+- ✅ `apps/shell/mode_settings.py`
+  - 集中处理模式设置序列化、校验、保存
+  - 支持 `window_mode.*` / `bubble_mode.*` / `live2d_mode.*`
+  - 兼容旧 `live2d.*` 更新键
+- ✅ `apps/shell/settings.py`
+  - 改为“单模式设置窗口”而非混合设置页
+  - Bubble / Live2D / Window 均可打开各自设置窗口
+- ✅ `apps/shell/window.py`
+  - Window Mode 明确为总控台
+  - 主窗口展示状态、模式入口、最近消息概览、最近会话概览
+  - 不再承载完整聊天 UI，只保留打开 Chat Window 入口
+- ✅ `apps/shell/modes/bubble.py`
+  - Bubble 从基础壳升级为完整轻量模式
+  - 支持展开/收起、最近摘要、短输入、状态标签、打开完整聊天、打开模式设置
+- ✅ `apps/shell/modes/live2d.py`
+  - Live2D 从配置壳升级为角色聊天壳
+  - 支持角色舞台、最近回复泡泡、最小输入入口、打开完整聊天、打开模式设置
+  - 继续保留 renderer 接入位，不实现真实 Live2D 渲染
+- ✅ `apps/shell/chat_bridge.py`
+  - 新增统一会话概览接口 `get_conversation_overview()` / `get_recent_sessions()`
+  - 供 Window / Bubble / Live2D 共享读取当前会话摘要
+
+### 现在的四个入口职责
+
+- **Window Mode**：总控台 / 仪表盘 / 模式入口 / 设置入口 / 最近会话与消息概览
+- **Chat Window**：完整会话空间，承载完整消息流和历史会话切换
+- **Bubble Mode**：常驻桌面轻量聊天模式，短输入 + 摘要 + 打开完整会话
+- **Live2D Mode**：角色聊天壳，角色舞台 + 回复气泡 + 最小输入入口
+
+### 统一聊天来源确认
+
+- Window / Bubble / Live2D / Chat Window 全部继续共享 `runtime.chat_session`
+- 摘要层统一经过 `ChatBridge → ChatAPI → ChatSession → ChatStore`
+- 未引入新的 assistant message / task 映射逻辑副本
+
+### 当前仍是后续精装修项
+
+- 真正 Live2D renderer / moc3 渲染接入
+- Bubble / Live2D 原生窗口位置恢复和更细 UI 打磨
+- 更精细的未读态与模式动画表现
+
 ### Milestone 6 — 显示模式切换骨架
 
 - ✅ apps/shell/modes/**init**.py — 模式分发器 `launch_mode(runtime, config)`

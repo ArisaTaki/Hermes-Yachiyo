@@ -100,7 +100,7 @@ _STATUS_HTML = """
         .mode-btn .icon { font-size: 1.4em; display: block; margin-bottom: 4px; }
         .mode-btn .name { font-size: 0.85em; }
         .mode-btn .desc { font-size: 0.75em; color: #888; margin-top: 2px; }
-        /* 聊天面板样式 */
+        /* 会话中心面板样式 */
         .chat-panel {
             background: #2d2d54;
             border-radius: 8px;
@@ -108,6 +108,96 @@ _STATUS_HTML = """
             margin-bottom: 20px;
         }
         .chat-panel h3 { color: #6495ed; font-size: 0.95em; margin-bottom: 0; }
+        .chat-panel .status-line {
+            font-size: 0.8em;
+            color: #a5aed4;
+        }
+        .recent-messages {
+            margin-top: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .recent-msg {
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 0.84em;
+            line-height: 1.5;
+            background: #242447;
+            color: #d8def6;
+        }
+        .recent-msg.user { border-left: 3px solid #6495ed; }
+        .recent-msg.assistant { border-left: 3px solid #90ee90; }
+        .recent-msg.system { border-left: 3px solid #888; color: #b2b2c4; }
+        .recent-msg.processing { color: #ffd700; }
+        .recent-msg.failed { color: #ffaaaa; }
+        .recent-sessions {
+            margin-top: 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .session-pill {
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.76em;
+            color: #c8cff3;
+            background: #242447;
+        }
+        .session-pill.current {
+            border: 1px solid #6495ed;
+            color: #ffffff;
+        }
+        .empty-state {
+            color: #777;
+            text-align: center;
+            font-size: 0.82em;
+            padding: 16px 8px;
+        }
+        .mode-settings-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 8px;
+        }
+        .mode-settings-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: #242447;
+        }
+        .mode-settings-item .meta {
+            min-width: 0;
+            flex: 1;
+        }
+        .mode-settings-item .meta .title {
+            color: #eef2ff;
+            font-size: 0.86em;
+            margin-bottom: 4px;
+        }
+        .mode-settings-item .meta .desc {
+            color: #9ba3cf;
+            font-size: 0.78em;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .mode-settings-open {
+            background: #3a4f92;
+            border: 1px solid #6495ed;
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.82em;
+        }
         .chat-send-btn {
             background: #4a6a9a;
             border: none;
@@ -371,35 +461,40 @@ _STATUS_HTML = """
             <div class="mode-btn active" id="mode-window">
                 <span class="icon">🖥️</span>
                 <span class="name">窗口模式</span>
-                <span class="desc">标准窗口</span>
+                <span class="desc">总控台</span>
             </div>
             <div class="mode-btn" id="mode-bubble">
                 <span class="icon">💬</span>
                 <span class="name">气泡模式</span>
-                <span class="desc">即将推出</span>
+                <span class="desc">轻量常驻聊天</span>
             </div>
             <div class="mode-btn" id="mode-live2d">
                 <span class="icon">🎭</span>
                 <span class="name">Live2D</span>
-                <span class="desc">即将推出</span>
+                <span class="desc">角色聊天壳</span>
             </div>
             <div class="mode-btn" id="mode-settings" onclick="toggleSettings()">
                 <span class="icon">⚙️</span>
                 <span class="name">设置</span>
-                <span class="desc">应用配置</span>
+                <span class="desc">通用与模式设置</span>
             </div>
         </div>
     </div>
 
-    <!-- 聊天入口 -->
+    <!-- 会话中心 -->
     <div class="chat-panel" id="chat-panel">
         <div style="display:flex;align-items:center;justify-content:space-between;">
-            <h3>💬 对话</h3>
+            <h3>💬 会话中心</h3>
             <span class="executor" id="chat-executor" style="font-size:0.8em;">—</span>
         </div>
-        <div style="margin-top:10px;">
+        <div class="status-line" id="chat-status" style="margin-top:8px;">正在读取当前会话状态…</div>
+        <div id="chat-summary-list" class="recent-messages">
+            <div class="empty-state">暂无消息。打开聊天窗口开始完整对话。</div>
+        </div>
+        <div id="chat-session-list" class="recent-sessions"></div>
+        <div style="margin-top:12px;">
             <button class="chat-send-btn" onclick="openChat()" style="width:100%;padding:14px;font-size:1em;">
-                打开聊天窗口
+                打开 Chat Window
             </button>
         </div>
         <div style="margin-top:10px;text-align:right;">
@@ -475,41 +570,37 @@ _STATUS_HTML = """
             <div class="settings-row"><span class="label">当前模式</span>
                 <select class="s-select" id="s-display-mode" onchange="onSettingChange('display_mode', this.value)">
                     <option value="window">窗口模式</option>
-                    <option value="bubble" disabled>气泡模式（即将推出）</option>
-                    <option value="live2d" disabled>Live2D 模式（即将推出）</option>
+                    <option value="bubble">气泡模式</option>
+                    <option value="live2d">Live2D 模式</option>
                 </select>
             </div>
             <div id="s-display-modes" class="settings-modes"></div>
         </div>
 
         <div class="settings-section">
-            <h4>Live2D 模式配置 <span style="background:#1a1a3e;border:1px solid #6495ed33;color:#9988cc;font-size:0.75em;padding:1px 7px;border-radius:10px;margin-left:6px;">骨架</span></h4>
-            <div class="settings-row"><span class="label">配置状态</span><span class="value" id="s-l2d-state">—</span></div>
-            <div class="settings-row"><span class="label">模型名称</span>
-                <input class="s-input" id="s-l2d-model-name" placeholder="hiyori" onchange="onSettingChange('live2d.model_name', this.value)">
-            </div>
-            <div class="settings-row"><span class="label">模型路径</span>
-                <input class="s-input" id="s-l2d-model-path" placeholder="/path/to/model" style="font-size:0.78em;" onchange="onSettingChange('live2d.model_path', this.value)">
-            </div>
-            <div class="settings-row"><span class="label">检测到 .model3.json</span><span class="value" id="s-l2d-model3-json" style="font-size:0.82em;">—</span></div>
-            <div class="settings-row"><span class="label">检测到 .moc3</span><span class="value" id="s-l2d-moc3" style="font-size:0.82em;">—</span></div>
-            <div class="settings-row"><span class="label">文件位置</span><span class="value" id="s-l2d-file-loc" style="font-size:0.82em;">—</span></div>
-            <div class="settings-row"><span class="label">渲染器入口候选</span><span class="value" id="s-l2d-renderer-entry" style="font-size:0.75em;word-break:break-all;">—</span></div>
-            <div class="settings-row"><span class="label">待机动作组</span>
-                <input class="s-input" id="s-l2d-idle-group" placeholder="Idle" onchange="onSettingChange('live2d.idle_motion_group', this.value)">
-            </div>
-            <div class="settings-row"><span class="label">表情系统</span>
-                <label class="s-toggle"><input type="checkbox" id="s-l2d-expressions" onchange="onSettingChange('live2d.enable_expressions', this.checked)"><span class="slider"></span></label>
-            </div>
-            <div class="settings-row"><span class="label">物理模拟</span>
-                <label class="s-toggle"><input type="checkbox" id="s-l2d-physics" onchange="onSettingChange('live2d.enable_physics', this.checked)"><span class="slider"></span></label>
-            </div>
-            <div class="settings-row"><span class="label">窗口置顶</span>
-                <label class="s-toggle"><input type="checkbox" id="s-l2d-on-top" onchange="onSettingChange('live2d.window_on_top', this.checked)"><span class="slider"></span></label>
-            </div>
-            <div class="settings-row" style="border-top:1px solid #3a3a5a;margin-top:4px;padding-top:6px;">
-                <span class="label" style="color:#666;font-size:0.82em;">接入状态</span>
-                <span class="value" style="color:#666;font-size:0.82em;font-style:italic;">渲染器未实现</span>
+            <h4>模式设置</h4>
+            <div class="mode-settings-list">
+                <div class="mode-settings-item">
+                    <div class="meta">
+                        <div class="title">🖥️ Window Mode</div>
+                        <div class="desc" id="s-window-summary">读取中…</div>
+                    </div>
+                    <button class="mode-settings-open" onclick="openModeSettings('window')">打开</button>
+                </div>
+                <div class="mode-settings-item">
+                    <div class="meta">
+                        <div class="title">💬 Bubble Mode</div>
+                        <div class="desc" id="s-bubble-summary">读取中…</div>
+                    </div>
+                    <button class="mode-settings-open" onclick="openModeSettings('bubble')">打开</button>
+                </div>
+                <div class="mode-settings-item">
+                    <div class="meta">
+                        <div class="title">🎭 Live2D Mode</div>
+                        <div class="desc" id="s-live2d-summary">读取中…</div>
+                    </div>
+                    <button class="mode-settings-open" onclick="openModeSettings('live2d')">打开</button>
+                </div>
             </div>
         </div>
 
@@ -567,6 +658,12 @@ _STATUS_HTML = """
     <script>
     let settingsOpen = false;
 
+    function escapeHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = value || '';
+        return div.innerHTML;
+    }
+
     function toggleSettings() {
         settingsOpen = !settingsOpen;
         document.getElementById('settings-panel').style.display = settingsOpen ? 'block' : 'none';
@@ -588,6 +685,15 @@ _STATUS_HTML = """
             await window.pywebview.api.open_chat();
         } catch(e) {
             console.error('openChat error:', e);
+        }
+    }
+
+    async function openModeSettings(modeId) {
+        try {
+            if (!window.pywebview || !window.pywebview.api) throw new Error('WebView API 不可用');
+            await window.pywebview.api.open_mode_settings(modeId);
+        } catch(e) {
+            console.error('openModeSettings error:', e);
         }
     }
 
@@ -780,48 +886,16 @@ _STATUS_HTML = """
             document.getElementById('s-display-mode').value = d.display.current_mode;
             const modesDiv = document.getElementById('s-display-modes');
             modesDiv.innerHTML = d.display.available_modes.map(function(m) {
-                const tag = m.available ? '<span class="tag ok">可用</span>' : '<span class="tag">即将推出</span>';
+                const tag = m.available ? '<span class="tag ok">可用</span>' : '<span class="tag">不可用</span>';
                 const active = m.id === d.display.current_mode ? ' <span class="tag active-tag">当前</span>' : '';
-                return '<div class="settings-mode-item">' + m.name + ' ' + tag + active + '</div>';
+                return '<div class="settings-mode-item">' + m.icon + ' ' + m.name + ' ' + tag + active + '</div>';
             }).join('');
 
-            // Live2D 配置
-            if (d.live2d) {
-                const l2d = d.live2d;
-                const stateEl = document.getElementById('s-l2d-state');
-                const stateMap = {
-                    'not_configured':  {text: '⚪ 未配置', cls: ''},
-                    'path_invalid':    {text: '❌ 路径不存在', cls: 'warn'},
-                    'path_not_live2d': {text: '⚠️ 目录无模型文件', cls: 'warn'},
-                    'path_valid':      {text: '✅ 模型目录就绪 · 渲染器待实现', cls: 'ok'},
-                    'loaded':          {text: '✅ 已加载', cls: 'ok'},
-                };
-                const stInfo = stateMap[l2d.model_state] || {text: l2d.model_state, cls: ''};
-                stateEl.textContent = stInfo.text;
-                stateEl.className = 'value' + (stInfo.cls ? ' ' + stInfo.cls : '');
-                // 填充输入控件（避免用户正在输入时被覆盖：只在非 focus 时更新）
-                const nameEl = document.getElementById('s-l2d-model-name');
-                if (document.activeElement !== nameEl) nameEl.value = l2d.model_name || '';
-                const pathEl = document.getElementById('s-l2d-model-path');
-                if (document.activeElement !== pathEl) pathEl.value = l2d.model_path || '';
-                const idleEl = document.getElementById('s-l2d-idle-group');
-                if (document.activeElement !== idleEl) idleEl.value = l2d.idle_motion_group || 'Idle';
-                document.getElementById('s-l2d-expressions').checked = !!l2d.enable_expressions;
-                document.getElementById('s-l2d-physics').checked = !!l2d.enable_physics;
-                document.getElementById('s-l2d-on-top').checked = l2d.window_on_top !== false;
-                // 摘要信息（只读）
-                const s = l2d.summary || {};
-                document.getElementById('s-l2d-model3-json').textContent = s.model3_json || '—';
-                document.getElementById('s-l2d-model3-json').className = 'value' + (s.model3_json ? ' ok' : ' dim');
-                document.getElementById('s-l2d-moc3').textContent =
-                    s.moc3_file ? s.moc3_file + (s.extra_moc3_count > 0 ? ' (+' + s.extra_moc3_count + ')' : '') : '—';
-                document.getElementById('s-l2d-moc3').className = 'value' + (s.moc3_file ? ' ok' : ' dim');
-                document.getElementById('s-l2d-file-loc').textContent =
-                    !s.available ? '—' :
-                    (s.found_in_subdir ? '子目录: ' + (s.subdir_name || '?') : '根目录');
-                const entryEl = document.getElementById('s-l2d-renderer-entry');
-                entryEl.textContent = s.renderer_entry || '—';
-                entryEl.className = 'value' + (s.renderer_entry ? ' ok' : ' dim');
+            // Mode settings summary
+            if (d.mode_settings) {
+                document.getElementById('s-window-summary').textContent = d.mode_settings.window.summary;
+                document.getElementById('s-bubble-summary').textContent = d.mode_settings.bubble.summary;
+                document.getElementById('s-live2d-summary').textContent = d.mode_settings.live2d.summary;
             }
 
             // Bridge
@@ -896,6 +970,14 @@ _STATUS_HTML = """
         // 设置面板：显示模式下拉
         const modeEl = document.getElementById('s-display-mode');
         if (modeEl) modeEl.value = state.display_mode;
+        if (state.mode_settings) {
+            const windowSummary = document.getElementById('s-window-summary');
+            const bubbleSummary = document.getElementById('s-bubble-summary');
+            const live2dSummary = document.getElementById('s-live2d-summary');
+            if (windowSummary) windowSummary.textContent = state.mode_settings.window.summary;
+            if (bubbleSummary) bubbleSummary.textContent = state.mode_settings.bubble.summary;
+            if (live2dSummary) live2dSummary.textContent = state.mode_settings.live2d.summary;
+        }
         // 设置面板：Bridge
         if (state.bridge) {
             const bridgeStateLabels = {
@@ -1012,7 +1094,7 @@ _STATUS_HTML = """
                 hint.className = 'save-hint ok';
                 if (res.app_state) {
                     applyAppState(res.app_state);
-                    if (key === 'display_mode' || key.startsWith('live2d.')) {
+                    if (key === 'display_mode') {
                         refreshSettings();
                     }
                 } else {
@@ -1132,6 +1214,41 @@ _STATUS_HTML = """
             document.getElementById('task-pending').textContent = data.tasks.pending || 0;
             document.getElementById('task-running').textContent = data.tasks.running || 0;
             document.getElementById('task-completed').textContent = data.tasks.completed || 0;
+
+            // Modes
+            const currentMode = (data.modes && data.modes.current) || 'window';
+            ['window', 'bubble', 'live2d'].forEach(function(modeId) {
+                const el = document.getElementById('mode-' + modeId);
+                if (el) el.classList.toggle('active', currentMode === modeId && !settingsOpen);
+            });
+
+            // Chat overview
+            const chat = data.chat || {};
+            const statusEl = document.getElementById('chat-status');
+            if (statusEl) {
+                statusEl.textContent = chat.status_label
+                    ? ('当前会话：' + chat.status_label)
+                    : '当前会话状态未知';
+            }
+            const summaryList = document.getElementById('chat-summary-list');
+            if (summaryList) {
+                if (chat.empty || !chat.messages || chat.messages.length === 0) {
+                    summaryList.innerHTML = '<div class="empty-state">暂无消息。打开聊天窗口开始完整对话。</div>';
+                } else {
+                    summaryList.innerHTML = chat.messages.map(function(msg) {
+                        const statusClass = msg.status ? ' ' + msg.status : '';
+                        return '<div class="recent-msg ' + msg.role + statusClass + '">' + escapeHtml(msg.content || '…') + '</div>';
+                    }).join('');
+                }
+            }
+            const sessionList = document.getElementById('chat-session-list');
+            if (sessionList) {
+                const sessions = chat.recent_sessions || [];
+                sessionList.innerHTML = sessions.map(function(session) {
+                    const current = session.is_current ? ' current' : '';
+                    return '<span class="session-pill' + current + '">' + escapeHtml(session.title) + '</span>';
+                }).join('');
+            }
 
             // Integrations
             const abData = data.integrations.astrbot || {};
@@ -1317,8 +1434,38 @@ _INSTALLER_HTML = """
 """
 
 
+def open_main_window(
+    runtime: "HermesRuntime",
+    config: "AppConfig",
+    *,
+    bind_exit: bool = False,
+) -> bool:
+    """在当前 webview 会话中打开 Window Mode 窗口。"""
+    if not _HAS_WEBVIEW:
+        logger.warning("pywebview 未安装，无法打开 Window Mode 窗口")
+        return False
+
+    from apps.shell.main_api import MainWindowAPI
+    api = MainWindowAPI(runtime, config)
+
+    html = _STATUS_HTML.replace("{{HOST}}", config.bridge_host).replace("{{PORT}}", str(config.bridge_port))
+    window_config = config.window_mode
+
+    window = webview.create_window(
+        title="Hermes-Yachiyo",
+        html=html,
+        width=window_config.width,
+        height=window_config.height,
+        resizable=True,
+        js_api=api,
+    )
+    if bind_exit:
+        _bind_main_window_exit(window)
+    return True
+
+
 def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
-    """创建并显示主窗口（阻塞主线程）- 正常模式"""
+    """创建并显示主窗口（阻塞主线程）- Window mode。"""
     if not _HAS_WEBVIEW:
         logger.warning("pywebview 未安装，以无窗口模式运行")
         _print_console_dashboard(runtime, config)
@@ -1326,20 +1473,14 @@ def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
         threading.Event().wait()
         return
 
-    from apps.shell.main_api import MainWindowAPI
-    api = MainWindowAPI(runtime, config)
+    open_main_window(runtime, config, bind_exit=True)
+    if config.window_mode.open_chat_on_start:
+        try:
+            from apps.shell.chat_window import open_chat_window
 
-    html = _STATUS_HTML.replace("{{HOST}}", config.bridge_host).replace("{{PORT}}", str(config.bridge_port))
-
-    window = webview.create_window(
-        title="Hermes-Yachiyo",
-        html=html,
-        width=560,
-        height=520,
-        resizable=True,
-        js_api=api,
-    )
-    _bind_main_window_exit(window)
+            open_chat_window(runtime)
+        except Exception as exc:
+            logger.warning("启动时打开 Chat Window 失败: %s", exc)
     webview.start(debug=False)
 
 

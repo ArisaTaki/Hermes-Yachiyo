@@ -101,6 +101,13 @@ def test_quit_button_uses_in_page_dialog_and_api_exit():
     assert "confirm('退出会关闭主界面" not in _STATUS_HTML
 
 
+def test_window_mode_html_keeps_chat_window_as_external_full_session():
+    assert "打开 Chat Window" in _STATUS_HTML
+    assert "id=\"chat-summary-list\"" in _STATUS_HTML
+    assert "openModeSettings('bubble')" in _STATUS_HTML
+    assert "id=\"msg-input\"" not in _STATUS_HTML
+
+
 def test_close_chat_window_destroys_existing_window(monkeypatch):
     win = FakeWindow()
 

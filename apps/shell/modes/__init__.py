@@ -4,9 +4,9 @@
 每个模式模块导出一个 run(runtime, config) 函数，负责阻塞主线程直到界面关闭。
 
 模式说明：
-  window  — 全功能主窗口（默认）
-  bubble  — 轻量悬浮气泡小窗口
-  live2d  — Live2D 角色驱动窗口（当前为占位）
+  window  — 总控台 / 仪表盘 / 入口中心
+  bubble  — 轻量常驻悬浮聊天模式
+  live2d  — 角色聊天壳（保留 renderer 接入位）
 """
 
 from __future__ import annotations
@@ -25,9 +25,9 @@ logger = logging.getLogger(__name__)
 class DisplayMode(StrEnum):
     """显示模式枚举"""
 
-    WINDOW = "window"    # 全功能主窗口
-    BUBBLE = "bubble"    # 轻量悬浮气泡
-    LIVE2D = "live2d"    # Live2D 角色（占位）
+    WINDOW = "window"    # 总控台
+    BUBBLE = "bubble"    # 轻量常驻聊天模式
+    LIVE2D = "live2d"    # 角色聊天壳
 
 
 _DEFAULT_DISPLAY_MODE = DisplayMode.WINDOW

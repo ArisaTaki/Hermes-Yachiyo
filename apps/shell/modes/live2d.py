@@ -1,31 +1,11 @@
-"""Live2D 模式骨架
+"""Live2D 模式。
 
-当前状态：预留骨架，尚未接入 Live2D SDK / 运行时。
-窗口展示角色占位区域 + 聊天界面 + 打开主窗口 / 设置入口。
-共享 ChatSession，三模式消息互通。
-
-后续接入 Live2D 时的扩展点：
-  1. Live2DRenderer（在 apps/shell/modes/live2d_renderer.py 中实现）
-     - 加载 .moc3 模型文件
-     - 管理动作系统（idle / react / speak）
-     - 驱动 WebGL canvas 渲染
-
-  2. CharacterController（角色状态机）
-     - 响应 RuntimeState（任务运行中 → 工作动作；空闲 → idle 动作）
-     - 接受语音/文字触发的表情切换
-
-  3. Live2DWindowAPI.load_model(model_path)
-     - 由设置页调用，切换当前角色模型
-
-  4. 窗口尺寸策略
-     - Live2D 角色窗口通常为竖版全透明（chromeless）
-     - 等待 pywebview 支持透明窗口后再实现
-
-架构边界：
-  - apps/shell/modes/live2d.py       → 本文件：模式入口 + API + HTML骨架
-  - apps/shell/modes/live2d_renderer → 未来：渲染引擎封装（当前不存在）
-  - apps/core/runtime.py             → 提供任务状态驱动角色动作的数据
-  - apps/shell/startup.py            → 模式选择（不感知 Live2D 内部细节）
+当前阶段先实现“角色聊天壳”而不实现真正 renderer：
+- 角色舞台 + 最近回复泡泡
+- 最小输入入口
+- 打开完整 Chat Window 入口
+- 统一读取 ChatSession 状态
+- 保留未来 renderer / moc3 / 动作系统接入位
 """
 
 from __future__ import annotations
@@ -36,7 +16,7 @@ from typing import TYPE_CHECKING, Any, Dict
 from apps.bridge.server import get_bridge_state
 from apps.installer.workspace_init import get_workspace_status
 from apps.shell.chat_bridge import ChatBridge
-from apps.shell.main_api import _serialize_summary
+from apps.shell.mode_settings import _serialize_summary
 
 if TYPE_CHECKING:
     from apps.core.runtime import HermesRuntime
@@ -44,230 +24,213 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ── HTML 骨架 ─────────────────────────────────────────────────────────────────
-
 _LIVE2D_HTML = """
 <!DOCTYPE html>
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
-    <title>Hermes-Yachiyo — Live2D 模式</title>
+    <title>Hermes-Yachiyo — Live2D Mode</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: -apple-system, "Helvetica Neue", "PingFang SC", sans-serif;
-            background: #1a1a2e;
-            color: #e0e0e0;
+            background: linear-gradient(180deg, #17192b 0%, #111320 100%);
+            color: #eef1ff;
             height: 100vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
         }
-
-        /* ── 角色区（未来放 Live2D canvas）── */
-        .character-stage {
-            height: 180px;
+        .stage {
+            position: relative;
+            height: 250px;
             flex-shrink: 0;
             display: flex;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
-            position: relative;
-            background: linear-gradient(180deg, #12122a 0%, #1a1a3e 100%);
+            background: radial-gradient(circle at top, rgba(97, 129, 255, 0.22), transparent 55%), #13162a;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
         }
-        .character-placeholder {
-            font-size: 4em;
-            opacity: 0.6;
+        .badge {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            font-size: 0.72rem;
+            color: #c0c8ef;
+            border: 1px solid rgba(126, 152, 255, 0.28);
+            background: rgba(20, 22, 40, 0.75);
+            border-radius: 999px;
+            padding: 4px 8px;
+        }
+        .model-status {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            font-size: 0.72rem;
+            color: #c6cefa;
+            background: rgba(20, 22, 40, 0.82);
+            border-radius: 999px;
+            padding: 4px 8px;
+        }
+        .character {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            font-size: 4rem;
+            background: linear-gradient(180deg, rgba(112, 140, 255, 0.36), rgba(52, 68, 122, 0.3));
+            box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
             animation: float 3s ease-in-out infinite;
         }
         @keyframes float {
             0%, 100% { transform: translateY(0); }
-            50%       { transform: translateY(-6px); }
+            50% { transform: translateY(-8px); }
         }
-        .stage-label {
-            font-size: 0.7em;
-            color: #555;
-            letter-spacing: 0.1em;
-            margin-top: 4px;
-        }
-        .dev-badge {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            background: #2a1a2e;
-            border: 1px solid #6a2a6a;
-            color: #cc88cc;
-            font-size: 0.65em;
-            padding: 2px 6px;
-            border-radius: 8px;
-        }
-
-        /* ── 聊天区 ── */
-        .chat-area {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            padding: 10px;
-            min-height: 0;
-        }
-        .chat-messages {
-            flex: 1;
-            overflow-y: auto;
-            background: #12122a;
-            border-radius: 8px;
-            padding: 10px;
-            margin-bottom: 10px;
-            font-size: 0.88em;
-        }
-        .chat-msg {
-            margin-bottom: 8px;
-            padding: 8px 10px;
-            border-radius: 8px;
-            line-height: 1.5;
-        }
-        .chat-msg.user {
-            background: #3a4a7a;
-            margin-left: 30px;
-            border-left: 3px solid #6495ed;
-        }
-        .chat-msg.assistant {
-            background: #2a3a3a;
-            margin-right: 30px;
-            border-left: 3px solid #90ee90;
-        }
-        .chat-msg.system {
-            background: #2a2a3a;
-            text-align: center;
-            color: #666;
-            font-size: 0.85em;
-        }
-        .chat-msg .role { font-size: 0.72em; color: #888; margin-bottom: 2px; }
-        .chat-msg .content { color: #ddd; white-space: pre-wrap; word-break: break-word; }
-        .chat-msg.pending .content { color: #aaa; }
-        .chat-msg.processing .content { color: #aaa; }
-        .chat-msg.error .content { color: #ffaaaa; }
         @keyframes thinking-dot {
             0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
             40% { opacity: 1; transform: translateY(-1px); }
         }
+        .reply-bubble {
+            position: absolute;
+            max-width: 280px;
+            bottom: 24px;
+            right: 24px;
+            background: rgba(20, 24, 40, 0.94);
+            border: 1px solid rgba(126, 152, 255, 0.24);
+            border-radius: 14px;
+            padding: 10px 12px;
+            color: #dde4ff;
+            font-size: 0.84rem;
+            line-height: 1.45;
+            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
+        }
+        .reply-bubble.hidden { display: none; }
+        .panel {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 12px;
+        }
+        .summary {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            background: rgba(12, 14, 24, 0.72);
+            border-radius: 14px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .message {
+            padding: 10px 12px;
+            border-radius: 12px;
+            line-height: 1.5;
+            font-size: 0.84rem;
+        }
+        .message.user { background: rgba(91, 122, 230, 0.16); margin-left: 36px; }
+        .message.assistant { background: rgba(68, 130, 88, 0.18); margin-right: 36px; }
+        .message.system { background: rgba(58, 61, 80, 0.72); color: #b0b6d8; }
+        .message.failed { color: #ffaaaa; }
+        .message.processing { color: #ffd36a; }
         .thinking { display: inline-flex; align-items: center; gap: 2px; }
         .thinking .dot {
             animation: thinking-dot 1.2s ease-in-out infinite;
             display: inline-block;
         }
-        .thinking .dot:nth-child(2) {
-            animation-delay: 0.15s;
+        .thinking .dot:nth-child(2) { animation-delay: 0.15s; }
+        .thinking .dot:nth-child(3) { animation-delay: 0.3s; }
+        .empty-hint {
+            text-align: center;
+            color: #7d85ad;
+            padding: 18px 8px;
+            font-size: 0.84rem;
         }
-        .thinking .dot:nth-child(3) {
-            animation-delay: 0.3s;
-        }
-        .chat-input-row {
+        .input-row {
             display: flex;
             gap: 8px;
-            flex-shrink: 0;
         }
-        .chat-input {
+        .input-row.hidden { display: none; }
+        .input {
             flex: 1;
-            background: #2d2d54;
-            color: #e0e0e0;
-            border: 1px solid #444;
-            border-radius: 6px;
+            min-width: 0;
+            background: rgba(12, 14, 24, 0.84);
+            color: #eef1ff;
+            border: 1px solid rgba(126, 152, 255, 0.22);
+            border-radius: 12px;
             padding: 10px 12px;
-            font-size: 0.9em;
-            outline: none;
         }
-        .chat-input:focus { border-color: #6495ed; }
-        .chat-input::placeholder { color: #555; }
-        .chat-send {
-            background: #4a6a9a;
-            border: none;
-            color: #fff;
-            padding: 10px 16px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 0.9em;
-        }
-        .chat-send:hover { background: #5a7aaa; }
-        .chat-send:disabled { background: #3a3a5a; color: #666; cursor: not-allowed; }
-
-        /* ── 状态条 ── */
-        .status-bar {
-            background: #12122a;
-            border-top: 1px solid #2a2a4a;
-            padding: 6px 12px;
-            display: flex;
-            gap: 10px;
-            font-size: 0.75em;
-            align-items: center;
-            flex-shrink: 0;
-        }
-        .status-chip {
-            background: #2d2d54;
-            border-radius: 10px;
-            padding: 2px 8px;
-            color: #888;
-        }
-        .status-chip.ok { color: #90ee90; }
-        .status-chip.warn { color: #ffd700; }
-        .spacer { flex: 1; }
-
-        /* ── 底部工具栏 ── */
-        .toolbar {
-            background: #0e0e22;
-            border-top: 1px solid #222244;
-            padding: 8px 12px;
+        .input:focus { outline: none; border-color: #7e98ff; }
+        .btn-row {
             display: flex;
             gap: 8px;
-            align-items: center;
-            flex-shrink: 0;
+            flex-wrap: wrap;
         }
         .btn {
-            background: #2d2d54;
-            border: 1px solid #444;
-            color: #ccc;
-            padding: 6px 12px;
-            border-radius: 5px;
-            font-size: 0.8em;
+            flex: 1;
+            min-width: 110px;
+            padding: 9px 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(126, 152, 255, 0.24);
+            background: #20243b;
+            color: #eef1ff;
             cursor: pointer;
+            font-size: 0.8rem;
         }
-        .btn:hover { background: #3a3a6a; border-color: #6495ed; color: #fff; }
-        .btn.primary { border-color: #6495ed; color: #6495ed; }
+        .btn.primary {
+            background: #4056a0;
+            border-color: #6381ff;
+        }
+        .status-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .chip {
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: rgba(26, 28, 46, 0.82);
+            color: #bbc4ef;
+            font-size: 0.74rem;
+        }
+        .chip.ok { color: #8fe3a3; }
+        .chip.warn { color: #ffd36a; }
     </style>
 </head>
 <body>
-    <!-- 角色舞台区 -->
-    <div class="character-stage">
-        <div class="dev-badge">骨架 · 待接入 Live2D</div>
-        <div class="character-placeholder" id="char-icon">🎤</div>
-        <div class="stage-label" id="stage-label">LIVE2D · 角色模型待加载</div>
+    <div class="stage">
+        <div class="model-status" id="model-status">模型读取中…</div>
+        <div class="badge">角色聊天壳 · renderer 预留</div>
+        <div class="character" id="character-icon">🎭</div>
+        <div class="reply-bubble" id="reply-bubble">等待回复…</div>
     </div>
 
-    <!-- 聊天入口 -->
-    <div class="chat-area">
-        <div class="chat-messages" id="chat-messages">
-            <div style="text-align:center;color:#555;padding:15px 8px;font-size:0.85em;">发送消息开始对话 ✨</div>
+    <div class="panel">
+        <div class="status-row">
+            <span class="chip" id="chip-hermes">Hermes …</span>
+            <span class="chip" id="chip-executor">执行器 …</span>
+            <span class="chip" id="chip-bridge">Bridge …</span>
+            <span class="chip" id="chip-session">会话 …</span>
         </div>
-        <div class="chat-input-row">
-            <input type="text" class="chat-input" id="msg-input"
-                   placeholder="输入消息…"
-                   onkeypress="if(event.key==='Enter') sendMsg()">
-            <button class="chat-send" id="send-btn" onclick="sendMsg()">发送</button>
+
+        <div class="summary" id="summary">
+            <div class="empty-hint">从当前会话继续对话，或打开完整聊天窗口。</div>
         </div>
-    </div>
 
-    <!-- 状态条 -->
-    <div class="status-bar">
-        <span class="status-chip" id="chip-hermes">Hermes …</span>
-        <span class="status-chip" id="chip-executor">—</span>
-        <span class="spacer"></span>
-        <span class="status-chip" style="color:#9988cc;">live2d</span>
-    </div>
+        <div class="input-row" id="input-row">
+            <input class="input" id="msg-input" placeholder="输入消息…" onkeypress="if(event.key==='Enter') sendMsg()">
+            <button class="btn primary" id="send-btn" type="button" onclick="sendMsg()">发送</button>
+        </div>
 
-    <!-- 工具栏 -->
-    <div class="toolbar">
-        <button class="btn primary" onclick="openMainWindow()">🖥 主窗口</button>
-        <button class="btn primary" onclick="openChat()">💬 对话</button>
-        <button class="btn" onclick="openSettings()">⚙ 设置</button>
+        <div class="btn-row">
+            <button class="btn primary" type="button" onclick="openChat()">完整对话</button>
+            <button class="btn" type="button" onclick="openMainWindow()">主窗口</button>
+            <button class="btn" type="button" onclick="openSettings()">设置</button>
+        </div>
     </div>
 
     <script>
@@ -275,13 +238,93 @@ _LIVE2D_HTML = """
     const IDLE_POLL_INTERVAL_MS = 5000;
     let polling = null;
     let pollingIntervalMs = null;
-    let statusPolling = null;
     let sending = false;
 
-    function escapeHtml(t) {
-        const d = document.createElement('div');
-        d.textContent = t;
-        return d.innerHTML;
+    function escapeHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = value || '';
+        return div.innerHTML;
+    }
+
+    function setPollingInterval(intervalMs) {
+        if (polling && pollingIntervalMs === intervalMs) return;
+        stopPolling();
+        pollingIntervalMs = intervalMs;
+        polling = setInterval(refreshLive2D, intervalMs);
+    }
+
+    function startActivePolling() { setPollingInterval(ACTIVE_POLL_INTERVAL_MS); }
+    function startIdlePolling() { setPollingInterval(IDLE_POLL_INTERVAL_MS); }
+    function stopPolling() {
+        if (polling) clearInterval(polling);
+        polling = null;
+        pollingIntervalMs = null;
+    }
+
+    function renderThinking() {
+        return '<span class="thinking" aria-label="正在思考">'
+            + '<span class="dot" aria-hidden="true">.</span>'
+            + '<span class="dot" aria-hidden="true">.</span>'
+            + '<span class="dot" aria-hidden="true">.</span>'
+            + '</span>';
+    }
+
+    function renderLive2D(view) {
+        const live2d = view.live2d || {};
+        const chat = view.chat || {};
+
+        const modelStateLabels = {
+            not_configured: '⚪ 模型未配置',
+            path_invalid: '❌ 模型路径不存在',
+            path_not_live2d: '⚠️ 目录无模型文件',
+            path_valid: '✅ 模型目录就绪 · renderer 待接入',
+            loaded: '✅ 模型已加载',
+        };
+        document.getElementById('model-status').textContent =
+            modelStateLabels[live2d.model_state] || (live2d.model_name || '角色聊天壳');
+
+        const replyBubble = document.getElementById('reply-bubble');
+        replyBubble.classList.toggle('hidden', !live2d.show_reply_bubble);
+        replyBubble.textContent = chat.latest_reply || '等待回复…';
+
+        document.getElementById('chip-hermes').textContent = view.hermes.ready ? '✅ Hermes' : '⚠️ Hermes';
+        document.getElementById('chip-hermes').className = 'chip ' + (view.hermes.ready ? 'ok' : 'warn');
+        document.getElementById('chip-executor').textContent = view.executor_label || '执行器未知';
+        document.getElementById('chip-bridge').textContent = view.bridge_label || 'Bridge 未知';
+        document.getElementById('chip-session').textContent = chat.status_label || '会话未知';
+        document.getElementById('character-icon').textContent = chat.is_processing ? '⚡' : '🎭';
+
+        const inputRow = document.getElementById('input-row');
+        inputRow.classList.toggle('hidden', !live2d.enable_quick_input);
+
+        const container = document.getElementById('summary');
+        if (chat.empty || !chat.messages || chat.messages.length === 0) {
+            container.innerHTML = '<div class="empty-hint">从当前会话继续对话，或打开完整聊天窗口。</div>';
+            startIdlePolling();
+            return;
+        }
+
+        let html = '';
+        for (const msg of chat.messages) {
+            const cls = 'message ' + msg.role + ' ' + (msg.status || '');
+            const content = msg.status === 'processing' && msg.role === 'assistant' && !msg.content
+                ? renderThinking()
+                : escapeHtml(msg.content);
+            html += '<div class="' + cls + '">' + content + '</div>';
+        }
+        container.innerHTML = html;
+        container.scrollTop = container.scrollHeight;
+        if (chat.is_processing) startActivePolling();
+        else startIdlePolling();
+    }
+
+    async function refreshLive2D() {
+        try {
+            if (!window.pywebview || !window.pywebview.api) return;
+            const view = await window.pywebview.api.get_live2d_view();
+            if (!view.ok) return;
+            renderLive2D(view);
+        } catch (error) {}
     }
 
     async function sendMsg() {
@@ -293,154 +336,38 @@ _LIVE2D_HTML = """
         document.getElementById('send-btn').disabled = true;
         input.disabled = true;
         try {
-            if (!window.pywebview || !window.pywebview.api) throw new Error('API 不可用');
-            const r = await window.pywebview.api.send_quick_message(text);
-            if (!r.ok) throw new Error(r.error || '发送失败');
+            const result = await window.pywebview.api.send_quick_message(text);
+            if (!result.ok) throw new Error(result.error || '发送失败');
             input.value = '';
-            await refreshMessages();
+            await refreshLive2D();
             startActivePolling();
-        } catch(e) {
-            console.error('send error:', e);
+        } catch (error) {
+            console.error(error);
         } finally {
             sending = false;
             document.getElementById('send-btn').disabled = false;
             input.disabled = false;
-            input.focus();
         }
-    }
-
-    async function refreshMessages() {
-        try {
-            if (!window.pywebview || !window.pywebview.api) return;
-            const r = await window.pywebview.api.get_recent_summary(3);
-            if (!r.ok) return;
-
-            const container = document.getElementById('chat-messages');
-            if (r.empty || !r.messages || r.messages.length === 0) {
-                container.innerHTML = '<div style="text-align:center;color:#555;padding:15px 8px;font-size:0.85em;">发送消息开始对话 ✨</div>';
-                startIdlePolling();
-                return;
-            }
-
-            let html = '';
-            for (const m of r.messages) {
-                const label = m.role === 'user' ? '你' : (m.role === 'assistant' ? 'Yachiyo' : '系统');
-                const sc = m.status === 'failed' ? 'error'
-                         : m.status === 'processing' ? 'processing'
-                         : m.status === 'pending' ? 'pending' : '';
-                let content;
-                if (m.status === 'processing' && m.role === 'assistant') {
-                    content = m.content ? escapeHtml(m.content) : renderThinking();
-                } else {
-                    content = escapeHtml(m.content);
-                }
-                html += '<div class="chat-msg ' + m.role + ' ' + sc + '">';
-                html += '<div class="role">' + label + '</div>';
-                html += '<div class="content">' + content + '</div>';
-                html += '</div>';
-            }
-            container.innerHTML = html;
-            container.scrollTop = container.scrollHeight;
-
-            // 更新角色图标（处理中显示工作状态）
-            const icon = document.getElementById('char-icon');
-            if (icon) icon.textContent = r.is_processing ? '⚡' : '🎤';
-
-            if (r.is_processing) {
-                startActivePolling();
-            } else {
-                startIdlePolling();
-            }
-        } catch(e) {}
-    }
-
-    function renderThinking() {
-        return '<span class="thinking" aria-label="正在思考">'
-             + '<span class="dot" aria-hidden="true">.</span>'
-             + '<span class="dot" aria-hidden="true">.</span>'
-             + '<span class="dot" aria-hidden="true">.</span>'
-             + '</span>';
-    }
-
-    function setPollingInterval(intervalMs) {
-        if (polling && pollingIntervalMs === intervalMs) return;
-        stopPolling();
-        pollingIntervalMs = intervalMs;
-        polling = setInterval(refreshMessages, intervalMs);
-    }
-
-    function startActivePolling() {
-        setPollingInterval(ACTIVE_POLL_INTERVAL_MS);
-    }
-
-    function startIdlePolling() {
-        setPollingInterval(IDLE_POLL_INTERVAL_MS);
-    }
-
-    function stopPolling() {
-        if (polling) { clearInterval(polling); polling = null; }
-        pollingIntervalMs = null;
     }
 
     async function openChat() {
-        try {
-            if (window.pywebview && window.pywebview.api)
-                await window.pywebview.api.open_chat();
-        } catch(e) { console.error('openChat error:', e); }
-    }
-
-    async function refreshStatus() {
-        try {
-            if (!window.pywebview || !window.pywebview.api) return;
-            const d = await window.pywebview.api.get_live2d_status();
-            if (d.error) return;
-
-            const hChip = document.getElementById('chip-hermes');
-            hChip.textContent = d.hermes.ready ? '✅ Hermes' : '⚠️ Hermes';
-            hChip.className = 'status-chip ' + (d.hermes.ready ? 'ok' : 'warn');
-
-            const ex = await window.pywebview.api.get_executor_info();
-            document.getElementById('chip-executor').textContent = ex.executor === 'HermesExecutor' ? '🚀 Hermes' : '🔬 模拟';
-
-            const label = document.getElementById('stage-label');
-            const modelState = d.model.state || 'not_configured';
-            const stateLabels = {
-                'not_configured':  'LIVE2D · 角色模型未配置',
-                'path_invalid':    'LIVE2D · 模型路径不存在',
-                'path_not_live2d': 'LIVE2D · 目录无模型文件',
-                'path_valid':      'LIVE2D · 模型就绪: ' + (d.model.name || ''),
-                'loaded':          d.model.name || 'LIVE2D',
-            };
-            label.textContent = stateLabels[modelState] || 'LIVE2D';
-        } catch(e) {}
+        if (window.pywebview && window.pywebview.api) await window.pywebview.api.open_chat();
     }
 
     async function openMainWindow() {
-        try {
-            if (window.pywebview && window.pywebview.api)
-                await window.pywebview.api.open_main_window();
-        } catch(e) {}
+        if (window.pywebview && window.pywebview.api) await window.pywebview.api.open_main_window();
     }
 
     async function openSettings() {
-        try {
-            if (window.pywebview && window.pywebview.api)
-                await window.pywebview.api.open_settings();
-        } catch(e) {}
+        if (window.pywebview && window.pywebview.api) await window.pywebview.api.open_settings();
     }
 
     function bootstrap() {
-        refreshStatus();
-        refreshMessages();
+        refreshLive2D();
         startIdlePolling();
-        if (!statusPolling) {
-            statusPolling = setInterval(refreshStatus, 10000);
-        }
     }
 
-    document.addEventListener('DOMContentLoaded', function() {
-        setTimeout(bootstrap, 500);
-    });
+    document.addEventListener('DOMContentLoaded', function() { setTimeout(bootstrap, 300); });
     window.addEventListener('pywebviewready', bootstrap);
     </script>
 </body>
@@ -448,223 +375,86 @@ _LIVE2D_HTML = """
 """
 
 
-# ── WebView API ───────────────────────────────────────────────────────────────
-
 class Live2DWindowAPI:
-    """Live2D 模式 WebView API。
-
-    当前职责：
-      - 提供状态数据给前端（get_live2d_status）
-      - 提供打开独立聊天窗口的入口（open_chat）
-      - 提供打开主窗口 / 设置页的入口
-
-    说明：
-      - 当前类不直接提供 send_message / get_messages / clear_session
-        这类聊天消息读写接口；聊天交互由独立聊天窗口承载。
-
-    未来扩展点（接入 Live2D 时新增方法）：
-      - load_model(model_path: str) → 加载角色模型
-      - play_motion(group: str, index: int) → 播放动作
-      - set_expression(expression_id: str) → 切换表情
-    """
+    """Live2D 模式 WebView API。"""
 
     def __init__(self, runtime: "HermesRuntime", config: "AppConfig") -> None:
         self._runtime = runtime
         self._config = config
         self._chat_bridge = ChatBridge(runtime)
 
-    def get_live2d_status(self) -> Dict[str, Any]:
-        """返回当前运行状态，供前端状态条和图标切换使用。"""
-        try:
-            status = self._runtime.get_status()
-            workspace = get_workspace_status()
-            hermes_info = status.get("hermes", {})
-            task_counts = status.get("task_counts", {})
+    def get_live2d_view(self) -> Dict[str, Any]:
+        live2d = self._config.live2d_mode
+        chat = self._chat_bridge.get_conversation_overview(summary_count=3, session_limit=3)
+        runner = self._runtime.task_runner
+        executor_label = "执行器不可用"
+        if runner is not None:
+            executor_label = "🚀 Hermes" if runner.executor.name == "HermesExecutor" else "🔬 模拟"
 
-            return {
-                "hermes": {
-                    "status": hermes_info.get("install_status", "unknown"),
-                    "ready": self._runtime.is_hermes_ready(),
-                },
-                "tasks": {
-                    "running": task_counts.get("running", 0),
-                    "pending": task_counts.get("pending", 0),
-                    "total": sum(task_counts.values()),
-                },
-                "workspace": {
-                    "initialized": workspace.get("initialized", False),
-                },
-                # 角色模型状态：从配置读取，渲染器就绪后改为从 Live2DRenderer 动态获取
-                "model": {
-                    "loaded": False,        # TODO: Live2DRenderer.is_loaded()（当前渲染器未实现）
-                    "state": self._config.live2d.validate().value,
-                    "configured": self._config.live2d.is_model_configured(),
-                    "name": self._config.live2d.model_name or "",
-                    "path": self._config.live2d.model_path or "",
-                    "idle_motion_group": self._config.live2d.idle_motion_group,
-                    "expressions_enabled": self._config.live2d.enable_expressions,
-                    "physics_enabled": self._config.live2d.enable_physics,
-                    "available_motions": [],  # TODO: Live2DRenderer.list_motions()
-                    "summary": _serialize_summary(self._config.live2d.scan()),
-                },
-                "bridge": {
-                    "running": get_bridge_state(),
-                    "addr": f"{self._config.bridge_host}:{self._config.bridge_port}",
-                },
-            }
-        except Exception as exc:
-            logger.error("获取 Live2D 状态失败: %s", exc)
-            return {"error": str(exc)}
+        bridge_state = get_bridge_state()
+        bridge_label_map = {
+            "running": "✅ Bridge",
+            "failed": "❌ Bridge",
+        }
 
-    # ── 聊天摘要与快捷发送 ──────────────────────────────────────────────────
+        return {
+            "ok": True,
+            "chat": chat,
+            "hermes": {
+                "ready": self._runtime.is_hermes_ready(),
+                "status": self._runtime.get_status().get("hermes", {}).get("install_status", "unknown"),
+            },
+            "workspace": {
+                "initialized": get_workspace_status().get("initialized", False),
+            },
+            "live2d": {
+                "model_state": live2d.validate().value,
+                "model_name": live2d.model_name or "",
+                "model_path": live2d.model_path or "",
+                "show_reply_bubble": live2d.show_reply_bubble,
+                "enable_quick_input": live2d.enable_quick_input,
+                "click_action": live2d.click_action,
+                "default_open_behavior": live2d.default_open_behavior,
+                "summary": _serialize_summary(live2d.scan()),
+            },
+            "bridge_label": bridge_label_map.get(bridge_state, "⏳ Bridge"),
+            "executor_label": executor_label,
+        }
 
     def send_quick_message(self, text: str) -> Dict[str, Any]:
-        """快捷发消息到统一 ChatSession"""
         return self._chat_bridge.send_quick_message(text)
 
-    def get_recent_summary(self, count: int = 3) -> Dict[str, Any]:
-        """获取最近 N 条消息摘要"""
-        return self._chat_bridge.get_recent_summary(count)
-
-    # ── 窗口操作 ────────────────────────────────────────────────────────────
-
-    def get_executor_info(self) -> Dict[str, Any]:
-        runner = self._runtime.task_runner
-        if runner is None:
-            return {"executor": "none", "available": False}
-        return {"executor": runner.executor.name, "available": True}
-
     def open_chat(self) -> Dict[str, Any]:
-        """打开独立聊天窗口"""
         from apps.shell.chat_window import open_chat_window
-        ok = open_chat_window(self._runtime)
-        return {"ok": ok}
 
-    def open_main_window(self) -> None:
-        """在当前会话中打开完整主窗口仪表盘。"""
-        try:
-            import webview  # type: ignore[import]
-            from apps.shell.main_api import MainWindowAPI
-            from apps.shell.window import _STATUS_HTML
+        return {"ok": open_chat_window(self._runtime)}
 
-            html = _STATUS_HTML.replace("{{HOST}}", self._config.bridge_host).replace(
-                "{{PORT}}", str(self._config.bridge_port)
-            )
-            api = MainWindowAPI(self._runtime, self._config)
-            webview.create_window(
-                title="Hermes-Yachiyo — 主窗口",
-                html=html,
-                width=560,
-                height=620,
-                resizable=True,
-                js_api=api,
-            )
-        except Exception as exc:
-            logger.error("打开主窗口失败: %s", exc)
+    def open_main_window(self) -> Dict[str, Any]:
+        from apps.shell.window import open_main_window
 
-    def get_live2d_state(self) -> Dict[str, Any]:
-        """返回当前 Live2D 配置的校验状态与摘要。
+        return {"ok": open_main_window(self._runtime, self._config)}
 
-        保存后立即调用可获得最新校验结果，无需重新打开设置页。
-        """
-        from apps.shell.main_api import _serialize_summary
+    def open_settings(self) -> Dict[str, Any]:
+        from apps.shell.settings import open_mode_settings_window
 
-        state = self._config.live2d.validate()
-        summary = self._config.live2d.scan()
-        return {
-            "model_state": state.value,
-            "model_name": self._config.live2d.model_name or "",
-            "model_path": self._config.live2d.model_path or "",
-            "idle_motion_group": self._config.live2d.idle_motion_group,
-            "summary": _serialize_summary(summary),
-        }
+        return {"ok": open_mode_settings_window(self._config, "live2d")}
 
-    def update_settings(self, changes: dict) -> dict:
-        """保存配置变更，供设置页调用。支持 live2d.* 前缀的嵌套字段。"""
-        from apps.shell.config import save_config
-        from apps.shell.effect_policy import build_effects_summary
-
-        _EDITABLE_LIVE2D_FIELDS: dict[str, type] = {
-            "model_name": str,
-            "model_path": str,
-            "idle_motion_group": str,
-            "enable_expressions": bool,
-            "enable_physics": bool,
-            "window_on_top": bool,
-        }
-
-        applied: dict[str, object] = {}
-        errors: list[str] = []
-
-        for key, value in changes.items():
-            prefix, _, sub_key = key.partition(".")
-            if prefix == "live2d" and sub_key:
-                if sub_key not in _EDITABLE_LIVE2D_FIELDS:
-                    errors.append(f"不可编辑字段: {key}")
-                    continue
-                expected = _EDITABLE_LIVE2D_FIELDS[sub_key]
-                if not isinstance(value, expected):
-                    errors.append(f"类型错误: {key} 期望 {expected.__name__}")
-                    continue
-                setattr(self._config.live2d, sub_key, value)
-                applied[key] = value
-            else:
-                errors.append(f"不支持的字段: {key}")
-
-        if applied:
-            try:
-                save_config(self._config)
-            except Exception as exc:
-                logger.error("设置保存失败: %s", exc)
-                return {"ok": False, "error": str(exc), "applied": applied}
-
-        live2d_state = self.get_live2d_state() if applied else None
-        result: dict = {"ok": True, "applied": applied}
-        if applied:
-            result["effects"] = build_effects_summary(list(applied.keys()))
-        if live2d_state is not None:
-            result["live2d_state"] = live2d_state
-        if errors:
-            result["errors"] = errors
-        return result
-
-    def open_settings(self) -> None:
-        """打开设置页，传入当前 API 实例以支持保存操作。"""
-        try:
-            import webview  # type: ignore[import]
-            from apps.shell.settings import build_settings_html
-
-            webview.create_window(
-                title="Hermes-Yachiyo — 设置",
-                html=build_settings_html(self._config),
-                width=520,
-                height=480,
-                resizable=False,
-                js_api=self,
-            )
-        except Exception as exc:
-            logger.error("打开设置页失败: %s", exc)
-
-
-# ── 模式入口 ──────────────────────────────────────────────────────────────────
 
 def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
-    """Live2D 模式入口（阻塞主线程）。
-
-    当前为骨架实现：角色舞台区展示占位动画 + 聊天界面。
-    等待 Live2DRenderer 实现后替换 .character-placeholder。
-    """
-    logger.info("启动 Live2D 模式（骨架实现，含聊天）")
+    """Live2D 模式入口（阻塞主线程）。"""
+    logger.info("启动 Live2D 模式（角色聊天壳）")
     try:
         import webview  # type: ignore[import]
 
+        live2d = config.live2d_mode
         api = Live2DWindowAPI(runtime, config)
         webview.create_window(
-            title="Hermes-Yachiyo",
+            title="Hermes-Yachiyo Live2D",
             html=_LIVE2D_HTML,
-            width=400,
-            height=640,  # 增加高度以容纳聊天区域
+            width=live2d.width,
+            height=live2d.height,
             resizable=True,
+            on_top=live2d.window_on_top,
             js_api=api,
         )
         webview.start(debug=False)

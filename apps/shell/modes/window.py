@@ -1,6 +1,7 @@
-"""窗口模式
+"""Window 模式。
 
-标准桌面窗口，使用 pywebview 展示主界面。
+Window mode 是总控台，不承载完整聊天消息区。
+完整会话由独立 Chat Window 承担。
 """
 
 from __future__ import annotations

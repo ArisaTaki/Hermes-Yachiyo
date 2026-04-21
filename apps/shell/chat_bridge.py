@@ -149,3 +149,73 @@ class ChatBridge:
                 "is_processing": False,
                 "status_label": "错误",
             }
+
+    def get_recent_sessions(self, limit: int = 4) -> Dict[str, Any]:
+        """获取最近会话列表，供 Window/Bubble/Live2D 概览使用。"""
+        try:
+            from apps.core.chat_store import get_chat_store
+
+            store = get_chat_store()
+            current_session_id = self._runtime.chat_session.session_id
+            sessions = store.list_sessions(limit=max(1, int(limit)))
+            items = [
+                {
+                    "session_id": item.session_id,
+                    "title": item.title or "新对话",
+                    "created_at": item.created_at,
+                    "message_count": item.message_count,
+                    "is_current": item.session_id == current_session_id,
+                }
+                for item in sessions
+            ]
+            if not any(item["session_id"] == current_session_id for item in items):
+                stored_current = store.get_session(current_session_id)
+                items.insert(
+                    0,
+                    {
+                        "session_id": current_session_id,
+                        "title": (stored_current.title if stored_current else "") or "当前会话",
+                        "created_at": stored_current.created_at if stored_current else "",
+                        "message_count": stored_current.message_count if stored_current else 0,
+                        "is_current": True,
+                    },
+                )
+            return {
+                "ok": True,
+                "current_session_id": current_session_id,
+                "sessions": items,
+            }
+        except Exception as exc:
+            logger.error("获取最近会话失败: %s", exc)
+            return {
+                "ok": False,
+                "error": str(exc),
+                "current_session_id": "",
+                "sessions": [],
+            }
+
+    def get_conversation_overview(
+        self,
+        summary_count: int = 3,
+        session_limit: int = 4,
+    ) -> Dict[str, Any]:
+        """获取供模式壳展示的统一会话概览。"""
+        summary = self.get_recent_summary(summary_count)
+        sessions = self.get_recent_sessions(session_limit)
+        latest_reply = ""
+        if summary.get("ok"):
+            for message in reversed(summary.get("messages", [])):
+                if message["role"] == "assistant":
+                    latest_reply = message["content"]
+                    break
+
+        return {
+            "ok": bool(summary.get("ok")) and bool(sessions.get("ok")),
+            "session_id": summary.get("session_id", ""),
+            "is_processing": summary.get("is_processing", False),
+            "empty": summary.get("empty", True),
+            "status_label": summary.get("status_label", "错误"),
+            "messages": summary.get("messages", []),
+            "latest_reply": latest_reply,
+            "recent_sessions": sessions.get("sessions", []),
+        }

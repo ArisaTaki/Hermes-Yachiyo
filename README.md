@@ -126,6 +126,7 @@ python -m apps.shell.app
 任务生命周期：`PENDING → RUNNING → COMPLETED / CANCELLED / FAILED`
 
 **执行策略：**
+
 - **SimulatedExecutor** — 模拟执行，用于 MVP 测试
 - **HermesExecutor** — 真实调用 `hermes chat -q <prompt> -Q --source tool`，自动检测可用性
 

@@ -1,7 +1,9 @@
-"""气泡模式
+"""Bubble 模式。
 
-轻量悬浮小窗口，显示最近消息摘要 + 快捷发送 + 打开聊天窗口 / 主窗口入口。
-共享 ChatSession，三模式消息互通。
+Bubble 是完整模式之一，不是纯快捷入口：
+- 共享统一 ChatSession / ChatStore / TaskRunner / Executor
+- 提供轻量摘要、短输入、状态反馈和完整聊天窗口入口
+- 独立持有 BubbleModeConfig
 """
 
 from __future__ import annotations
@@ -22,164 +24,257 @@ _BUBBLE_HTML = """
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
-    <title>Hermes-Yachiyo</title>
+    <title>Hermes-Yachiyo Bubble</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: -apple-system, "Helvetica Neue", "PingFang SC", sans-serif;
-            background: #1a1a2e;
-            color: #e0e0e0;
+            background: rgba(18, 20, 34, 0.96);
+            color: #eef2ff;
             padding: 10px;
-            line-height: 1.5;
-            user-select: none;
             height: 100vh;
             display: flex;
             flex-direction: column;
+            gap: 8px;
+        }
+        .shell {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            border-radius: 14px;
+            border: 1px solid rgba(118, 140, 255, 0.18);
+            background: linear-gradient(180deg, rgba(30,32,52,0.96) 0%, rgba(20,22,38,0.96) 100%);
+            overflow: hidden;
         }
         .header {
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            padding-bottom: 6px;
-            border-bottom: 1px solid #333;
-            margin-bottom: 6px;
-            flex-shrink: 0;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 10px 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            cursor: pointer;
         }
-        .header .title { color: #6495ed; font-size: 0.95em; font-weight: 600; }
-        .header .status-tag {
-            font-size: 0.7em;
-            padding: 2px 6px;
-            border-radius: 10px;
+        .identity {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
         }
-        .header .status-tag.ok { background: #1a2e1a; color: #90ee90; }
-        .header .status-tag.busy { background: #2e2a1a; color: #ffd700; }
-        .header .status-tag.empty { background: #2d2d54; color: #888; }
-        /* 消息摘要区 */
-        .chat-summary {
-            flex: 1;
-            overflow-y: auto;
-            background: #12122a;
-            border-radius: 6px;
-            padding: 8px;
-            margin-bottom: 6px;
-            font-size: 0.82em;
-            min-height: 50px;
+        .avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            background: #364173;
+            font-size: 1rem;
         }
-        .chat-msg {
-            margin-bottom: 5px;
-            padding: 5px 8px;
-            border-radius: 5px;
-            line-height: 1.4;
+        .title-wrap {
+            min-width: 0;
         }
-        .chat-msg.user {
-            background: #3a4a7a;
-            margin-left: 15px;
-            border-left: 2px solid #6495ed;
+        .title {
+            font-weight: 700;
+            font-size: 0.92rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
-        .chat-msg.assistant {
-            background: #2a3a3a;
-            margin-right: 15px;
-            border-left: 2px solid #90ee90;
+        .subtitle {
+            color: #9ca5d4;
+            font-size: 0.74rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 180px;
         }
-        .chat-msg.system {
-            background: #2a2a3a;
-            text-align: center;
-            color: #666;
-            font-size: 0.9em;
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ff6b6b;
+            box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.65);
+            animation: unread-pulse 1.6s infinite;
+            display: none;
         }
-        .chat-msg .content { color: #ddd; white-space: pre-wrap; word-break: break-word; }
-        .chat-msg.pending .content,
-        .chat-msg.processing .content { color: #aaa; }
-        .chat-msg.error .content { color: #ffaaaa; }
-        .empty-hint { text-align: center; color: #555; padding: 15px 8px; font-size: 0.85em; }
+        @keyframes unread-pulse {
+            0% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.65); }
+            70% { box-shadow: 0 0 0 8px rgba(255, 107, 107, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 107, 107, 0); }
+        }
         @keyframes thinking-dot {
             0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
             40% { opacity: 1; transform: translateY(-1px); }
         }
+        .status-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 3px 8px;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            background: #2a2d44;
+            color: #c0c7eb;
+        }
+        .status-chip.processing { color: #ffd36a; }
+        .status-chip.failed { color: #ff9f9f; }
+        .status-chip.ready { color: #8fe3a3; }
+        .toggle-btn {
+            background: transparent;
+            border: none;
+            color: #c8d0ff;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+        .body {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 10px 12px 12px;
+        }
+        .body.collapsed {
+            display: none;
+        }
+        .preview {
+            background: rgba(10, 12, 22, 0.65);
+            border-radius: 12px;
+            padding: 10px;
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+        }
+        .reply-highlight {
+            padding: 8px 10px;
+            border-radius: 10px;
+            background: rgba(84, 111, 224, 0.14);
+            border-left: 3px solid #7692ff;
+            margin-bottom: 8px;
+            font-size: 0.8rem;
+            color: #d7defc;
+        }
+        .summary-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .summary-item {
+            padding: 8px 10px;
+            border-radius: 10px;
+            font-size: 0.8rem;
+            line-height: 1.45;
+            color: #d6dbf5;
+        }
+        .summary-item.user { background: rgba(84, 111, 224, 0.16); }
+        .summary-item.assistant { background: rgba(56, 112, 84, 0.18); }
+        .summary-item.system { background: rgba(58, 58, 78, 0.7); color: #adb3d1; }
+        .summary-item.processing { color: #ffd36a; }
+        .summary-item.failed { color: #ffaaaa; }
         .thinking { display: inline-flex; align-items: center; gap: 2px; }
         .thinking .dot {
             animation: thinking-dot 1.2s ease-in-out infinite;
             display: inline-block;
         }
-        .thinking .dot:nth-child(2) {
-            animation-delay: 0.15s;
-        }
-        .thinking .dot:nth-child(3) {
-            animation-delay: 0.3s;
-        }
-        /* 输入区 */
-        .chat-input-row {
+        .thinking .dot:nth-child(2) { animation-delay: 0.15s; }
+        .thinking .dot:nth-child(3) { animation-delay: 0.3s; }
+        .recent-sessions {
             display: flex;
+            flex-wrap: wrap;
             gap: 6px;
-            flex-shrink: 0;
-            margin-bottom: 6px;
         }
-        .chat-input {
+        .session-pill {
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: #20243b;
+            color: #b8c1ee;
+            font-size: 0.72rem;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .session-pill.current {
+            border: 1px solid rgba(118, 146, 255, 0.5);
+            color: #eef2ff;
+        }
+        .empty-hint {
+            color: #7e86af;
+            text-align: center;
+            padding: 18px 8px;
+            font-size: 0.82rem;
+        }
+        .input-row {
+            display: flex;
+            gap: 8px;
+        }
+        .input {
             flex: 1;
-            background: #2d2d54;
-            color: #e0e0e0;
-            border: 1px solid #444;
-            border-radius: 5px;
-            padding: 7px 10px;
-            font-size: 0.85em;
-            outline: none;
+            min-width: 0;
+            padding: 8px 10px;
+            border-radius: 10px;
+            border: 1px solid rgba(118, 140, 255, 0.2);
+            background: rgba(12, 14, 24, 0.8);
+            color: #eef2ff;
         }
-        .chat-input:focus { border-color: #6495ed; }
-        .chat-input::placeholder { color: #555; }
-        .chat-send {
-            background: #4a6a9a;
-            border: none;
-            color: #fff;
-            padding: 7px 12px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 0.85em;
-        }
-        .chat-send:hover { background: #5a7aaa; }
-        .chat-send:disabled { background: #3a3a5a; color: #666; cursor: not-allowed; }
-        /* 底部工具栏 */
-        .actions {
+        .input:focus { outline: none; border-color: #7692ff; }
+        .btn-row {
             display: flex;
-            gap: 6px;
-            flex-shrink: 0;
+            gap: 8px;
         }
         .btn {
             flex: 1;
-            background: #2d2d54;
-            border: 1px solid #444;
-            color: #ccc;
-            padding: 5px 0;
-            border-radius: 5px;
-            font-size: 0.78em;
+            border: 1px solid rgba(118, 140, 255, 0.22);
+            background: #20243b;
+            color: #e6ebff;
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 0.78rem;
             cursor: pointer;
-            text-align: center;
         }
-        .btn:hover { background: #3a3a6a; border-color: #6495ed; color: #fff; }
-        .btn.primary { border-color: #6495ed; color: #6495ed; }
-        .btn.danger:hover { border-color: #ff6b6b; color: #ff6b6b; background: #2d2424; }
+        .btn.primary {
+            background: #3d518f;
+            border-color: #5e7cff;
+        }
     </style>
 </head>
 <body>
-    <div class="header">
-        <span class="title">💬 Yachiyo</span>
-        <span class="status-tag empty" id="status-tag">—</span>
-    </div>
+    <div class="shell">
+        <div class="header" onclick="toggleExpanded()">
+            <div class="identity">
+                <div class="avatar">💬</div>
+                <div class="title-wrap">
+                    <div class="title">
+                        <span>Bubble Mode</span>
+                        <span class="dot" id="unread-dot"></span>
+                    </div>
+                    <div class="subtitle" id="bubble-subtitle">轻量常驻聊天模式</div>
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <span class="status-chip" id="status-chip">读取中…</span>
+                <button class="toggle-btn" id="toggle-btn" type="button">▾</button>
+            </div>
+        </div>
 
-    <div class="chat-summary" id="chat-summary">
-        <div class="empty-hint">发送消息开始对话 ✨</div>
-    </div>
+        <div class="body" id="bubble-body">
+            <div class="preview" id="preview">
+                <div class="empty-hint">发送一条消息，从当前会话继续对话。</div>
+            </div>
 
-    <div class="chat-input-row">
-        <input type="text" class="chat-input" id="msg-input"
-               placeholder="输入消息…"
-               onkeypress="if(event.key==='Enter') sendMsg()">
-        <button class="chat-send" id="send-btn" onclick="sendMsg()">发送</button>
-    </div>
+            <div class="input-row">
+                <input class="input" id="msg-input" placeholder="输入短消息…" onkeypress="if(event.key==='Enter') sendMsg()">
+                <button class="btn primary" id="send-btn" type="button" onclick="sendMsg()">发送</button>
+            </div>
 
-    <div class="actions">
-        <div class="btn primary" onclick="openChat()">💬 完整对话</div>
-        <div class="btn primary" onclick="openMain()">🖥 主窗口</div>
-        <div class="btn danger" onclick="closeBubble()">✕</div>
+            <div class="btn-row">
+                <button class="btn primary" type="button" onclick="openChat()">完整对话</button>
+                <button class="btn" type="button" onclick="openMain()">主窗口</button>
+                <button class="btn" type="button" onclick="openSettings()">设置</button>
+                <button class="btn" type="button" onclick="closeBubble()">关闭</button>
+            </div>
+        </div>
     </div>
 
 <script>
@@ -188,104 +283,28 @@ const IDLE_POLL_INTERVAL_MS = 5000;
 let polling = null;
 let pollingIntervalMs = null;
 let sending = false;
+let expanded = true;
+let expandedInitialized = false;
 
-function escapeHtml(t) {
-    const d = document.createElement('div');
-    d.textContent = t;
-    return d.innerHTML;
-}
-
-async function sendMsg() {
-    if (sending) return;
-    const input = document.getElementById('msg-input');
-    const text = (input.value || '').trim();
-    if (!text) return;
-    sending = true;
-    document.getElementById('send-btn').disabled = true;
-    input.disabled = true;
-    try {
-        if (!window.pywebview || !window.pywebview.api) throw new Error('API 不可用');
-        const r = await window.pywebview.api.send_quick_message(text);
-        if (!r.ok) throw new Error(r.error || '发送失败');
-        input.value = '';
-        await refreshSummary();
-        startActivePolling();
-    } catch(e) {
-        console.error('send error:', e);
-    } finally {
-        sending = false;
-        document.getElementById('send-btn').disabled = false;
-        input.disabled = false;
-        input.focus();
-    }
-}
-
-async function refreshSummary() {
-    try {
-        if (!window.pywebview || !window.pywebview.api) return;
-        const r = await window.pywebview.api.get_recent_summary(3);
-        if (!r.ok) return;
-
-        // 更新状态标签
-        const tag = document.getElementById('status-tag');
-        if (r.empty) {
-            tag.textContent = '暂无对话';
-            tag.className = 'status-tag empty';
-        } else if (r.is_processing) {
-            tag.textContent = '处理中…';
-            tag.className = 'status-tag busy';
-        } else {
-            tag.textContent = '就绪';
-            tag.className = 'status-tag ok';
-        }
-
-        // 渲染消息摘要
-        const container = document.getElementById('chat-summary');
-        if (r.empty || !r.messages || r.messages.length === 0) {
-            container.innerHTML = '<div class="empty-hint">发送消息开始对话 ✨</div>';
-            startIdlePolling();
-            return;
-        }
-
-        let html = '';
-        for (const m of r.messages) {
-            const sc = m.status === 'failed' ? 'error'
-                     : m.status === 'processing' ? 'processing'
-                     : m.status === 'pending' ? 'pending' : '';
-            let content;
-            if (m.status === 'processing' && m.role === 'assistant') {
-                content = m.content ? escapeHtml(m.content) : renderThinking();
-            } else {
-                content = escapeHtml(m.content);
-            }
-            html += '<div class="chat-msg ' + m.role + ' ' + sc + '">';
-            html += '<div class="content">' + content + '</div>';
-            html += '</div>';
-        }
-        container.innerHTML = html;
-        container.scrollTop = container.scrollHeight;
-
-        if (r.is_processing) {
-            startActivePolling();
-        } else {
-            startIdlePolling();
-        }
-    } catch(e) {}
+function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = value || '';
+    return div.innerHTML;
 }
 
 function renderThinking() {
     return '<span class="thinking" aria-label="正在思考">'
-         + '<span class="dot" aria-hidden="true">.</span>'
-         + '<span class="dot" aria-hidden="true">.</span>'
-         + '<span class="dot" aria-hidden="true">.</span>'
-         + '</span>';
+        + '<span class="dot" aria-hidden="true">.</span>'
+        + '<span class="dot" aria-hidden="true">.</span>'
+        + '<span class="dot" aria-hidden="true">.</span>'
+        + '</span>';
 }
 
 function setPollingInterval(intervalMs) {
     if (polling && pollingIntervalMs === intervalMs) return;
     stopPolling();
     pollingIntervalMs = intervalMs;
-    polling = setInterval(refreshSummary, intervalMs);
+    polling = setInterval(refreshBubble, intervalMs);
 }
 
 function startActivePolling() {
@@ -297,39 +316,133 @@ function startIdlePolling() {
 }
 
 function stopPolling() {
-    if (polling) { clearInterval(polling); polling = null; }
+    if (polling) clearInterval(polling);
+    polling = null;
     pollingIntervalMs = null;
 }
 
-async function openChat() {
+function applyExpandedState() {
+    const body = document.getElementById('bubble-body');
+    const btn = document.getElementById('toggle-btn');
+    body.classList.toggle('collapsed', !expanded);
+    btn.textContent = expanded ? '▾' : '▸';
+}
+
+function toggleExpanded(force) {
+    expanded = typeof force === 'boolean' ? force : !expanded;
+    applyExpandedState();
+}
+
+function renderBubble(view) {
+    const chip = document.getElementById('status-chip');
+    const preview = document.getElementById('preview');
+    const subtitle = document.getElementById('bubble-subtitle');
+    const unreadDot = document.getElementById('unread-dot');
+    const bubble = view.bubble || {};
+    const chat = view.chat || {};
+
+    subtitle.textContent = bubble.subtitle || '轻量常驻聊天模式';
+    if (!expandedInitialized) {
+        expanded = bubble.expanded_on_start !== false;
+        expandedInitialized = true;
+    }
+    applyExpandedState();
+
+    const latestStatus = bubble.latest_status || 'empty';
+    chip.textContent = chat.status_label || '读取中…';
+    chip.className = 'status-chip ' + latestStatus;
+
+    unreadDot.style.display = bubble.show_unread_dot && bubble.has_attention ? 'inline-block' : 'none';
+
+    if (chat.empty || !chat.messages || chat.messages.length === 0) {
+        preview.innerHTML = '<div class="empty-hint">发送一条消息，从当前会话继续对话。</div>';
+        startIdlePolling();
+        return;
+    }
+
+    let html = '';
+    if (chat.latest_reply && bubble.default_display !== 'icon') {
+        html += '<div class="reply-highlight">' + escapeHtml(chat.latest_reply) + '</div>';
+    }
+    html += '<div class="summary-list">';
+    for (const msg of chat.messages) {
+        const cls = 'summary-item ' + msg.role + ' ' + (msg.status || '');
+        const content = msg.status === 'processing' && msg.role === 'assistant' && !msg.content
+            ? renderThinking()
+            : escapeHtml(msg.content);
+        html += '<div class="' + cls + '">' + content + '</div>';
+    }
+    html += '</div>';
+    if (chat.recent_sessions && chat.recent_sessions.length > 0) {
+        html += '<div style="margin-top:10px;" class="recent-sessions">';
+        for (const session of chat.recent_sessions) {
+            const current = session.is_current ? ' current' : '';
+            html += '<span class="session-pill' + current + '">' + escapeHtml(session.title) + '</span>';
+        }
+        html += '</div>';
+    }
+    preview.innerHTML = html;
+    preview.scrollTop = preview.scrollHeight;
+
+    if (chat.is_processing) startActivePolling();
+    else startIdlePolling();
+}
+
+async function refreshBubble() {
     try {
-        if (window.pywebview && window.pywebview.api)
-            await window.pywebview.api.open_chat();
-    } catch(e) {}
+        if (!window.pywebview || !window.pywebview.api) return;
+        const view = await window.pywebview.api.get_bubble_view();
+        if (!view.ok) return;
+        renderBubble(view);
+    } catch (error) {}
+}
+
+async function sendMsg() {
+    if (sending) return;
+    const input = document.getElementById('msg-input');
+    const text = (input.value || '').trim();
+    if (!text) return;
+    sending = true;
+    input.disabled = true;
+    document.getElementById('send-btn').disabled = true;
+    try {
+        const result = await window.pywebview.api.send_quick_message(text);
+        if (!result.ok) throw new Error(result.error || '发送失败');
+        input.value = '';
+        await refreshBubble();
+        startActivePolling();
+    } catch (error) {
+        console.error(error);
+    } finally {
+        sending = false;
+        input.disabled = false;
+        document.getElementById('send-btn').disabled = false;
+        input.focus();
+    }
+}
+
+async function openChat() {
+    if (window.pywebview && window.pywebview.api) await window.pywebview.api.open_chat();
 }
 
 async function openMain() {
-    try {
-        if (window.pywebview && window.pywebview.api)
-            await window.pywebview.api.open_main_window();
-    } catch(e) {}
+    if (window.pywebview && window.pywebview.api) await window.pywebview.api.open_main_window();
+}
+
+async function openSettings() {
+    if (window.pywebview && window.pywebview.api) await window.pywebview.api.open_settings();
 }
 
 async function closeBubble() {
-    try {
-        if (window.pywebview && window.pywebview.api)
-            await window.pywebview.api.close_bubble();
-    } catch(e) {}
+    if (window.pywebview && window.pywebview.api) await window.pywebview.api.close_bubble();
 }
 
 function bootstrap() {
-    refreshSummary();
+    refreshBubble();
     startIdlePolling();
 }
 
-document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(bootstrap, 500);
-});
+document.addEventListener('DOMContentLoaded', function() { setTimeout(bootstrap, 300); });
 window.addEventListener('pywebviewready', bootstrap);
 </script>
 </body>
@@ -338,88 +451,89 @@ window.addEventListener('pywebviewready', bootstrap);
 
 
 class BubbleWindowAPI:
-    """气泡模式 WebView API
-
-    聊天相关操作委托 ChatBridge（统一摘要层），
-    不直接调用 ChatSession/ChatStore。
-    """
+    """Bubble 模式 WebView API。"""
 
     def __init__(self, runtime: "HermesRuntime", config: "AppConfig") -> None:
         self._runtime = runtime
         self._config = config
         self._chat_bridge = ChatBridge(runtime)
-        self._bubble_window = None  # 由 run() 注入
+        self._bubble_window = None
 
-    # ── 聊天摘要与快捷发送 ──────────────────────────────────────────────────
+    def get_bubble_view(self) -> Dict[str, Any]:
+        bubble = self._config.bubble_mode
+        chat = self._chat_bridge.get_conversation_overview(
+            summary_count=bubble.summary_count,
+            session_limit=3,
+        )
+        latest_status = "ready"
+        if chat.get("empty"):
+            latest_status = "empty"
+        elif chat.get("is_processing"):
+            latest_status = "processing"
+        elif any(item.get("status") == "failed" for item in chat.get("messages", [])):
+            latest_status = "failed"
+
+        return {
+            "ok": True,
+            "chat": chat,
+            "bubble": {
+                "expanded_on_start": bubble.expanded_on_start,
+                "default_display": bubble.default_display,
+                "show_unread_dot": bubble.show_unread_dot,
+                "has_attention": bool(chat.get("latest_reply")) and not chat.get("is_processing"),
+                "latest_status": latest_status,
+                "subtitle": (
+                    "从当前会话继续对话"
+                    if not chat.get("empty")
+                    else "轻量常驻聊天模式"
+                ),
+            },
+        }
 
     def send_quick_message(self, text: str) -> Dict[str, Any]:
-        """快捷发消息到统一 ChatSession"""
         return self._chat_bridge.send_quick_message(text)
 
-    def get_recent_summary(self, count: int = 3) -> Dict[str, Any]:
-        """获取最近 N 条消息摘要"""
-        return self._chat_bridge.get_recent_summary(count)
-
-    def get_session_status(self) -> Dict[str, Any]:
-        """获取会话状态（不含消息内容）"""
-        return self._chat_bridge.get_session_status()
-
-    # ── 窗口操作 ────────────────────────────────────────────────────────────
-
     def open_chat(self) -> Dict[str, Any]:
-        """打开独立聊天窗口"""
         from apps.shell.chat_window import open_chat_window
-        ok = open_chat_window(self._runtime)
-        return {"ok": ok}
 
-    def open_main_window(self) -> None:
-        """在当前 pywebview 会话中打开完整主窗口"""
-        try:
-            import webview  # type: ignore[import]
-            from apps.shell.main_api import MainWindowAPI
-            from apps.shell.window import _STATUS_HTML
+        return {"ok": open_chat_window(self._runtime)}
 
-            html = _STATUS_HTML.replace("{{HOST}}", self._config.bridge_host).replace(
-                "{{PORT}}", str(self._config.bridge_port)
-            )
-            api = MainWindowAPI(self._runtime, self._config)
-            webview.create_window(
-                title="Hermes-Yachiyo — 主窗口",
-                html=html,
-                width=560,
-                height=620,
-                resizable=True,
-                js_api=api,
-            )
-        except Exception as e:
-            logger.error("打开主窗口失败: %s", e)
+    def open_main_window(self) -> Dict[str, Any]:
+        from apps.shell.window import open_main_window
+
+        return {"ok": open_main_window(self._runtime, self._config)}
+
+    def open_settings(self) -> Dict[str, Any]:
+        from apps.shell.settings import open_mode_settings_window
+
+        return {"ok": open_mode_settings_window(self._config, "bubble")}
 
     def close_bubble(self) -> None:
-        """关闭气泡窗口"""
         try:
             if self._bubble_window is not None:
                 self._bubble_window.destroy()
-        except Exception as e:
-            logger.error("关闭气泡窗口失败: %s", e)
+        except Exception as exc:
+            logger.error("关闭 Bubble 窗口失败: %s", exc)
 
 
 def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
-    """运行气泡模式（阻塞主线程）"""
-    logger.info("启动气泡模式")
+    """运行 Bubble 模式（阻塞主线程）。"""
+    logger.info("启动 Bubble 模式")
     try:
         import webview  # type: ignore[import]
 
+        bubble = config.bubble_mode
         api = BubbleWindowAPI(runtime, config)
         win = webview.create_window(
-            title="Hermes-Yachiyo",
+            title="Hermes-Yachiyo Bubble",
             html=_BUBBLE_HTML,
-            width=320,
-            height=380,  # 增加高度以容纳聊天区域
+            width=bubble.width,
+            height=bubble.height,
             resizable=False,
-            on_top=True,
+            on_top=bubble.always_on_top,
             js_api=api,
         )
         api._bubble_window = win
         webview.start(debug=False)
     except ImportError:
-        logger.warning("pywebview 未安装，气泡模式无法展示")
+        logger.warning("pywebview 未安装，Bubble 模式无法展示")

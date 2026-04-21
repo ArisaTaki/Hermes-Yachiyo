@@ -7,7 +7,7 @@ import logging
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +16,10 @@ _CONFIG_FILE = _CONFIG_DIR / "config.json"
 
 # 合法的 display_mode 值，与 DisplayMode 枚举保持同步
 DisplayModeValue = Literal["window", "bubble", "live2d"]
+BubbleDisplayValue = Literal["icon", "summary", "recent_reply"]
+BubbleExpandTriggerValue = Literal["click", "hover"]
+Live2DClickActionValue = Literal["focus_stage", "open_chat", "toggle_reply"]
+Live2DDefaultOpenValue = Literal["stage", "reply_bubble", "chat_input"]
 
 
 class ModelState(StrEnum):
@@ -137,18 +141,63 @@ def scan_live2d_model_dir(path: Path) -> ModelSummary:
 
 
 @dataclass
-class Live2DConfig:
+class WindowModeConfig:
+    """Window 模式配置。
+
+    Window mode 负责总控台与入口中心，因此配置聚焦在控制台视图本身，
+    不直接承担完整聊天窗口的消息区配置。
+    """
+
+    width: int = 960
+    height: int = 720
+    recent_sessions_limit: int = 4
+    recent_messages_limit: int = 3
+    open_chat_on_start: bool = False
+    show_runtime_panel: bool = True
+    show_mode_overview: bool = True
+
+
+@dataclass
+class BubbleModeConfig:
+    """Bubble 模式配置。"""
+
+    width: int = 340
+    height: int = 420
+    position_x: int = 24
+    position_y: int = 24
+    always_on_top: bool = True
+    edge_snap: bool = True
+    expanded_on_start: bool = True
+    expand_trigger: BubbleExpandTriggerValue = "click"
+    default_display: BubbleDisplayValue = "summary"
+    show_unread_dot: bool = True
+    auto_hide: bool = False
+    opacity: float = 0.92
+    summary_count: int = 3
+
+
+@dataclass
+class Live2DModeConfig:
     """Live2D 模式配置骨架。
 
-    当前字段为占位，等待 Live2DRenderer 实现后逐步填充。
+    当前阶段仍是角色聊天壳，保留未来 renderer / moc3 / 动作系统的接入位。
     """
 
     model_name: str = ""              # 角色模型名（如 "hiyori"），空字符串表示未配置
     model_path: str = ""              # 模型目录路径（含 .moc3 文件），空字符串表示未配置
+    width: int = 420
+    height: int = 680
+    position_x: int = 48
+    position_y: int = 48
+    window_on_top: bool = True        # 角色窗口是否置顶
+    show_reply_bubble: bool = True
+    default_open_behavior: Live2DDefaultOpenValue = "reply_bubble"
+    click_action: Live2DClickActionValue = "open_chat"
+    auto_open_chat_window: bool = False
+    enable_quick_input: bool = True
     idle_motion_group: str = "Idle"   # 待机动作组名（Live2D Cubism 约定）
     enable_expressions: bool = False  # 是否启用表情系统（等待渲染器支持）
     enable_physics: bool = False      # 是否启用物理模拟（等待渲染器支持）
-    window_on_top: bool = True        # 角色窗口是否置顶
 
     def is_model_configured(self) -> bool:
         """是否已填写了模型名和路径（不检查路径是否存在）。"""
@@ -193,7 +242,38 @@ class AppConfig:
     tray_enabled: bool = True
     start_minimized: bool = False
     log_level: str = "INFO"
-    live2d: Live2DConfig = field(default_factory=Live2DConfig)
+    window_mode: WindowModeConfig = field(default_factory=WindowModeConfig)
+    bubble_mode: BubbleModeConfig = field(default_factory=BubbleModeConfig)
+    live2d_mode: Live2DModeConfig = field(default_factory=Live2DModeConfig)
+
+    @property
+    def live2d(self) -> Live2DModeConfig:
+        """兼容旧代码路径：config.live2d -> config.live2d_mode。"""
+        return self.live2d_mode
+
+    @live2d.setter
+    def live2d(self, value: Live2DModeConfig) -> None:
+        self.live2d_mode = value
+
+
+def _load_nested_dataclass(
+    data: dict[str, Any],
+    key: str,
+    cls: type,
+    legacy_key: str | None = None,
+) -> Any:
+    """从配置字典中加载嵌套 dataclass，兼容旧字段名。"""
+    nested = data.pop(key, None)
+    if nested is None and legacy_key is not None:
+        nested = data.pop(legacy_key, None)
+    if not isinstance(nested, dict):
+        return cls()
+    valid = {
+        field_name: value
+        for field_name, value in nested.items()
+        if field_name in cls.__dataclass_fields__
+    }
+    return cls(**valid)
 
 
 def load_config() -> AppConfig:
@@ -201,16 +281,17 @@ def load_config() -> AppConfig:
     if _CONFIG_FILE.exists():
         try:
             data = json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
-            # 处理嵌套的 live2d 配置
-            live2d_data = data.pop("live2d", {})
-            live2d = Live2DConfig(**{
-                k: v for k, v in live2d_data.items()
-                if k in Live2DConfig.__dataclass_fields__
-            }) if live2d_data else Live2DConfig()
+            window_mode = _load_nested_dataclass(data, "window_mode", WindowModeConfig)
+            bubble_mode = _load_nested_dataclass(data, "bubble_mode", BubbleModeConfig)
+            live2d_mode = _load_nested_dataclass(
+                data, "live2d_mode", Live2DModeConfig, legacy_key="live2d"
+            )
             config = AppConfig(
                 **{k: v for k, v in data.items() if k in AppConfig.__dataclass_fields__}
             )
-            config.live2d = live2d
+            config.window_mode = window_mode
+            config.bubble_mode = bubble_mode
+            config.live2d_mode = live2d_mode
             return config
         except Exception:
             logger.warning("配置文件读取失败，使用默认配置")

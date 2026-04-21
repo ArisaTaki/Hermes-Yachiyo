@@ -254,6 +254,21 @@ def test_modes_do_not_create_independent_sessions(tmp_path):
         store.close()
 
 
+def test_conversation_overview_includes_recent_sessions(tmp_path):
+    bridge, runtime, store = _make_bridge(tmp_path)
+    try:
+        bridge.send_quick_message("overview")
+
+        overview = bridge.get_conversation_overview(summary_count=2, session_limit=3)
+
+        assert overview["ok"] is True
+        assert overview["messages"]
+        assert overview["recent_sessions"]
+        assert overview["recent_sessions"][0]["is_current"] is True
+    finally:
+        store.close()
+
+
 # ── 失败状态 ──────────────────────────────────────────────────────────────────
 
 def test_failed_task_in_summary(tmp_path):
@@ -278,6 +293,9 @@ def test_bubble_html_keeps_idle_polling_for_cross_mode_updates():
     assert "function startActivePolling()" in _BUBBLE_HTML
     assert "startIdlePolling();" in _BUBBLE_HTML
     assert "window.addEventListener('pywebviewready', bootstrap);" in _BUBBLE_HTML
+    assert "openSettings()" in _BUBBLE_HTML
+    assert "Bubble Mode" in _BUBBLE_HTML
+    assert "let expandedInitialized = false;" in _BUBBLE_HTML
 
 
 def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
@@ -286,6 +304,8 @@ def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
     assert "function startActivePolling()" in _LIVE2D_HTML
     assert "startIdlePolling();" in _LIVE2D_HTML
     assert "window.addEventListener('pywebviewready', bootstrap);" in _LIVE2D_HTML
+    assert "openSettings()" in _LIVE2D_HTML
+    assert "renderer 预留" in _LIVE2D_HTML
 
 
 def test_thinking_dots_use_real_elements_not_content_animation():

@@ -10,9 +10,16 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from apps.installer.workspace_init import get_workspace_status
 from apps.shell.chat_api import ChatAPI
-from apps.shell.config import ModelSummary, save_config
+from apps.shell.chat_bridge import ChatBridge
+from apps.shell.config import ModelSummary
 from apps.shell.effect_policy import build_effects_summary
 from apps.shell.integration_status import get_integration_snapshot
+from apps.shell.mode_catalog import list_mode_options
+from apps.shell.mode_settings import (
+    apply_settings_changes,
+    build_display_settings,
+    serialize_mode_settings,
+)
 
 if TYPE_CHECKING:
     from apps.core.runtime import HermesRuntime
@@ -46,6 +53,7 @@ class MainWindowAPI:
         self._runtime = runtime
         self._config = config
         self._chat_api = ChatAPI(runtime)
+        self._chat_bridge = ChatBridge(runtime)
         # 记录 bridge 启动时的配置快照，用于检测配置漂移
         self._bridge_boot_config = {
             "enabled": config.bridge_enabled,
@@ -97,6 +105,14 @@ class MainWindowAPI:
                     "astrbot": snap.astrbot.to_dict(),
                     "hapi": snap.hapi.to_dict(),
                 },
+                "modes": {
+                    "current": self._config.display_mode,
+                    "items": list_mode_options(),
+                },
+                "chat": self._chat_bridge.get_conversation_overview(
+                    summary_count=self._config.window_mode.recent_messages_limit,
+                    session_limit=self._config.window_mode.recent_sessions_limit,
+                ),
             }
         except Exception as e:
             logger.error("获取仪表盘数据失败: %s", e)
@@ -129,25 +145,9 @@ class MainWindowAPI:
                     "dirs": workspace.get("dirs", {}),
                 },
                 "display": {
-                    "current_mode": self._config.display_mode,
-                    "available_modes": [
-                        {"id": "window", "name": "窗口模式", "available": True},
-                        {"id": "bubble", "name": "气泡模式", "available": True},
-                        {"id": "live2d", "name": "Live2D 模式", "available": False},
-                    ],
+                    **build_display_settings(self._config),
                 },
-                "live2d": {
-                    "model_state": self._config.live2d.validate().value,
-                    "model_configured": self._config.live2d.is_model_configured(),
-                    "model_name": self._config.live2d.model_name or "",
-                    "model_path": self._config.live2d.model_path or "",
-                    "idle_motion_group": self._config.live2d.idle_motion_group,
-                    "enable_expressions": self._config.live2d.enable_expressions,
-                    "enable_physics": self._config.live2d.enable_physics,
-                    "window_on_top": self._config.live2d.window_on_top,
-                    "renderer_available": False,
-                    "summary": _serialize_summary(self._config.live2d.scan()),
-                },
+                "mode_settings": serialize_mode_settings(self._config),
                 "bridge": snap.bridge.to_dict(),
                 "integrations": {
                     "astrbot": snap.astrbot.to_dict(),
@@ -164,95 +164,16 @@ class MainWindowAPI:
             logger.error("获取设置数据失败: %s", e)
             return {"error": str(e)}
 
-    # ------ 可编辑配置项白名单 ------
-    _EDITABLE_FIELDS: Dict[str, type] = {
-        "display_mode": str,
-        "bridge_enabled": bool,
-        "bridge_host": str,
-        "bridge_port": int,
-        "tray_enabled": bool,
-    }
-    # Live2D 嵌套字段白名单（key 格式：live2d.<field_name>）
-    _EDITABLE_LIVE2D_FIELDS: Dict[str, type] = {
-        "model_name":         str,
-        "model_path":         str,
-        "idle_motion_group":  str,
-        "enable_expressions": bool,
-        "enable_physics":     bool,
-        "window_on_top":      bool,
-    }
-    _VALID_DISPLAY_MODES = {"window", "bubble", "live2d"}
-
     def update_settings(self, changes: Dict[str, Any]) -> Dict[str, Any]:
-        """修改配置项并持久化。
-
-        支持顶层字段（如 display_mode）和嵌套 live2d 字段（如 live2d.model_name）。
-        仅允许修改白名单内的字段，返回最终生效的值。
-        """
-        if not isinstance(changes, dict):
-            return {"ok": False, "error": "参数格式错误"}
-
-        applied: Dict[str, Any] = {}
-        errors: list[str] = []
-
-        for key, value in changes.items():
-            # --- 嵌套 live2d.* 字段 ---
-            if key.startswith("live2d."):
-                sub_key = key[len("live2d."):]
-                if sub_key not in self._EDITABLE_LIVE2D_FIELDS:
-                    errors.append(f"不支持修改: {key}")
-                    continue
-                expected = self._EDITABLE_LIVE2D_FIELDS[sub_key]
-                if not isinstance(value, expected):
-                    errors.append(f"{key} 类型错误，期望 {expected.__name__}")
-                    continue
-                setattr(self._config.live2d, sub_key, value)
-                applied[key] = value
-                continue
-
-            # --- 顶层字段 ---
-            if key not in self._EDITABLE_FIELDS:
-                errors.append(f"不支持修改: {key}")
-                continue
-
-            expected = self._EDITABLE_FIELDS[key]
-            if expected is int and isinstance(value, float) and value == int(value):
-                value = int(value)
-            if not isinstance(value, expected):
-                errors.append(f"{key} 类型错误，期望 {expected.__name__}")
-                continue
-
-            if key == "display_mode" and value not in self._VALID_DISPLAY_MODES:
-                errors.append(f"无效的显示模式: {value}")
-                continue
-            if key == "bridge_port":
-                if not (1024 <= value <= 65535):
-                    errors.append("bridge_port 须在 1024-65535 之间")
-                    continue
-
-            setattr(self._config, key, value)
-            applied[key] = value
-
-        if applied:
-            try:
-                save_config(self._config)
+        """修改配置项并持久化。"""
+        result = apply_settings_changes(self._config, changes)
+        if result.get("ok"):
+            applied = result.get("applied", {})
+            if applied:
                 logger.info("配置已保存: %s", applied)
-            except Exception as e:
-                logger.error("配置保存失败: %s", e)
-                return {"ok": False, "error": f"保存失败: {e}", "applied": applied}
-
-        result: Dict[str, Any] = {"ok": True, "applied": applied, "errors": errors}
-        if applied:
-            result["app_state"] = self._current_app_state()
-            result["effects"] = build_effects_summary(list(applied.keys()))
-            if any(k.startswith("live2d.") for k in applied):
-                result["live2d_state"] = {
-                    "model_state": self._config.live2d.validate().value,
-                    "model_name": self._config.live2d.model_name or "",
-                    "model_path": self._config.live2d.model_path or "",
-                    "idle_motion_group": self._config.live2d.idle_motion_group,
-                    "summary": _serialize_summary(self._config.live2d.scan()),
-                }
+                result["app_state"] = self._current_app_state()
+                if "effects" not in result:
+                    result["effects"] = build_effects_summary(list(applied.keys()))
         return result
 
     def _current_app_state(self) -> Dict[str, Any]:
@@ -263,6 +184,7 @@ class MainWindowAPI:
         snap = self._get_snapshot()
         return {
             "display_mode": self._config.display_mode,
+            "mode_settings": serialize_mode_settings(self._config),
             "bridge": snap.bridge.to_dashboard_dict(),
             "tray_enabled": self._config.tray_enabled,
             "integrations": {
@@ -448,6 +370,13 @@ class MainWindowAPI:
         from apps.shell.chat_window import open_chat_window
         ok = open_chat_window(self._runtime)
         return {"ok": ok}
+
+    def open_mode_settings(self, mode_id: str) -> Dict[str, Any]:
+        """打开指定模式的独立设置窗口。"""
+        from apps.shell.settings import open_mode_settings_window
+
+        ok = open_mode_settings_window(config=self._config, mode_id=mode_id)
+        return {"ok": ok, "mode_id": mode_id}
 
     def quit_app(self) -> Dict[str, Any]:
         """执行退出前清理；主窗口由前端随后关闭。"""

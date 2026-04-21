@@ -1,364 +1,356 @@
-"""设置页 HTML 生成器
+"""模式设置窗口。
 
-为 live2d 等模式提供独立设置窗口，与主窗口内嵌设置面板保持相同信息结构。
+该窗口只负责单一模式的设置，不再混合所有模式字段。
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from apps.shell.mode_catalog import get_mode_descriptor
+from apps.shell.mode_settings import apply_settings_changes, serialize_mode_window_data
 
 if TYPE_CHECKING:
     from apps.shell.config import AppConfig
 
 logger = logging.getLogger(__name__)
 
+
+class ModeSettingsAPI:
+    """单模式设置窗口 API。"""
+
+    def __init__(self, config: "AppConfig", mode_id: str) -> None:
+        self._config = config
+        self._mode_id = mode_id
+
+    def get_mode_settings(self) -> dict[str, Any]:
+        return serialize_mode_window_data(self._config, self._mode_id)
+
+    def update_settings(self, changes: dict[str, Any]) -> dict[str, Any]:
+        result = apply_settings_changes(self._config, changes)
+        if result.get("ok"):
+            result["settings"] = serialize_mode_window_data(self._config, self._mode_id)
+        return result
+
+
 _SETTINGS_HTML = """<!DOCTYPE html>
 <html lang="zh">
 <head>
 <meta charset="UTF-8">
-<title>Hermes-Yachiyo — 设置</title>
+<title>Hermes-Yachiyo — 模式设置</title>
 <style>
-* {{ box-sizing: border-box; margin: 0; padding: 0; }}
-body {{
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
     font-family: -apple-system, "Helvetica Neue", "PingFang SC", sans-serif;
-    background: #1a1a2e; color: #e0e0e0;
-    padding: 20px; font-size: 14px; line-height: 1.5;
-}}
-h2 {{ color: #6495ed; font-size: 1.1em; margin-bottom: 16px; }}
-.section {{
-    background: #2d2d54; border-radius: 8px;
-    padding: 14px 16px; margin-bottom: 14px;
-}}
-.section h4 {{ color: #6495ed; font-size: 0.9em; margin-bottom: 10px; }}
-.row {{
-    display: flex; justify-content: space-between;
-    align-items: center; padding: 5px 0;
-    border-bottom: 1px solid #3a3a6a; font-size: 0.88em;
-}}
-.row:last-child {{ border-bottom: none; }}
-.label {{ color: #999; flex: 0 0 140px; }}
-.value {{ color: #e0e0e0; text-align: right; }}
-.value.ok {{ color: #90ee90; }}
-.value.warn {{ color: #ffd700; }}
-.value.dim {{ color: #666; font-style: italic; }}
-.badge {{
-    display: inline-block; background: #1a1a3e;
-    border: 1px solid #6495ed33; color: #9988cc;
-    padding: 1px 8px; border-radius: 10px; font-size: 0.8em;
-}}
-.s-input {{
-    background: #1a1a3e; color: #e0e0e0; border: 1px solid #4a4a7a;
-    border-radius: 4px; padding: 3px 6px; font-size: 0.85em;
-    flex: 1; min-width: 0; text-align: right;
-}}
-.s-input:focus {{ outline: none; border-color: #6495ed; }}
-.s-toggle {{ position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }}
-.s-toggle input {{ opacity: 0; width: 0; height: 0; }}
-.slider {{
-    position: absolute; cursor: pointer; inset: 0;
-    background: #444; border-radius: 20px; transition: .2s;
-}}
-.slider:before {{
-    content: ""; position: absolute; height: 14px; width: 14px;
-    left: 3px; bottom: 3px; background: white;
-    border-radius: 50%; transition: .2s;
-}}
-input:checked + .slider {{ background: #6495ed; }}
-input:checked + .slider:before {{ transform: translateX(16px); }}
-.save-hint {{ font-size: 0.82em; margin-top: 8px; color: #90ee90; min-height: 1.2em; }}
-.save-hint.err {{ color: #ff6b6b; }}
-.effect-hints {{
-    margin-top: 6px; padding: 6px 10px; border-radius: 6px;
-    font-size: 0.82em; line-height: 1.5;
-    background: #151528; border: 1px solid #3a3a5a;
-    display: none;
-}}
-.effect-hints.visible {{ display: block; }}
-.effect-hint-row {{ display: flex; align-items: center; gap: 5px; }}
-.effect-hint-immediate {{ color: #90ee90; }}
-.effect-hint-mode {{ color: #ffd700; }}
-.effect-hint-bridge {{ color: #ffa07a; }}
-.effect-hint-app {{ color: #ff8c8c; }}
+    background: #161628; color: #e6e6f2;
+    padding: 18px; line-height: 1.5;
+}
+h2 { color: #86a9ff; font-size: 1.15em; margin-bottom: 6px; }
+.desc { color: #8f93b5; font-size: 0.86em; margin-bottom: 14px; }
+.section {
+    background: #21213a;
+    border: 1px solid #333758;
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+}
+.section h3 { color: #86a9ff; font-size: 0.95em; margin-bottom: 10px; }
+.summary {
+    background: #18182c;
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: #afb4d8;
+    font-size: 0.84em;
+    margin-bottom: 10px;
+}
+.row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid #2e3250;
+}
+.row:last-child { border-bottom: none; }
+.label { color: #9ca3c8; font-size: 0.9em; }
+.value { color: #e6e6f2; font-size: 0.86em; }
+.value.ok { color: #8fe3a3; }
+.value.warn { color: #ffd36a; }
+.input, .select {
+    min-width: 130px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid #44496c;
+    background: #141427;
+    color: #eef1ff;
+    font-size: 0.84em;
+}
+.toggle {
+    width: 40px;
+    height: 20px;
+    position: relative;
+    display: inline-block;
+}
+.toggle input { opacity: 0; width: 0; height: 0; }
+.slider {
+    position: absolute;
+    inset: 0;
+    background: #54597b;
+    border-radius: 999px;
+    transition: .2s;
+}
+.slider:before {
+    content: "";
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    left: 3px;
+    bottom: 3px;
+    background: #fff;
+    border-radius: 50%;
+    transition: .2s;
+}
+input:checked + .slider { background: #5e89ff; }
+input:checked + .slider:before { transform: translateX(20px); }
+.hint {
+    min-height: 1.2em;
+    font-size: 0.82em;
+    color: #8fe3a3;
+}
+.hint.error { color: #ff9f9f; }
+.badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #161a2d;
+    border: 1px solid #394067;
+    color: #a9b1e6;
+    font-size: 0.78em;
+}
 </style>
 </head>
 <body>
-<h2>⚙️ 应用设置</h2>
-
-<div class="section">
-    <h4>显示模式</h4>
-    <div class="row"><span class="label">当前模式</span>
-        <span class="value">{display_mode}</span></div>
-</div>
-
-<div class="section">
-    <h4>Live2D 模式配置 <span class="badge">骨架</span></h4>
-    <div class="row"><span class="label">配置状态</span>
-        <span class="value {model_state_class}" id="sw-l2d-state">{model_state_label}</span></div>
-    <div class="row"><span class="label">模型名称</span>
-        <input class="s-input" id="sw-model-name" value="{model_name_val}" placeholder="hiyori"
-               onchange="saveLive2D('model_name', this.value)"></div>
-    <div class="row"><span class="label">模型路径</span>
-        <input class="s-input" id="sw-model-path" value="{model_path_val}" placeholder="/path/to/model"
-               style="font-size:0.78em;" onchange="saveLive2D('model_path', this.value)"></div>
-    <div class="row"><span class="label">检测到 .model3.json</span>
-        <span class="value {summary_json_class}" id="sw-summary-json" style="font-size:0.82em;">{summary_model3_json}</span></div>
-    <div class="row"><span class="label">检测到 .moc3</span>
-        <span class="value {summary_moc3_class}" id="sw-summary-moc3" style="font-size:0.82em;">{summary_moc3}</span></div>
-    <div class="row"><span class="label">文件位置</span>
-        <span class="value" id="sw-summary-loc" style="font-size:0.82em;">{summary_file_loc}</span></div>
-    <div class="row"><span class="label">渲染器入口候选</span>
-        <span class="value {summary_entry_class}" id="sw-summary-entry" style="font-size:0.75em;word-break:break-all;">{summary_renderer_entry}</span></div>
-    <div class="row"><span class="label">待机动作组</span>
-        <input class="s-input" id="sw-idle-group" value="{idle_motion_group}" placeholder="Idle"
-               onchange="saveLive2D('idle_motion_group', this.value)"></div>
-    <div class="row"><span class="label">表情系统</span>
-        <label class="s-toggle"><input type="checkbox" id="sw-expressions" {expr_checked}
-               onchange="saveLive2D('enable_expressions', this.checked)"><span class="slider"></span></label></div>
-    <div class="row"><span class="label">物理模拟</span>
-        <label class="s-toggle"><input type="checkbox" id="sw-physics" {phys_checked}
-               onchange="saveLive2D('enable_physics', this.checked)"><span class="slider"></span></label></div>
-    <div class="row"><span class="label">窗口置顶</span>
-        <label class="s-toggle"><input type="checkbox" id="sw-on-top" {on_top_checked}
-               onchange="saveLive2D('window_on_top', this.checked)"><span class="slider"></span></label></div>
-    <div class="row" style="border-top:1px solid #4a3a4a; margin-top:6px; padding-top:8px;">
-        <span class="label" style="color:#888;font-size:0.82em;">接入状态</span>
-        <span class="value dim">渲染器未实现 · 等待 live2d_renderer.py</span>
+    <h2 id="mode-title">模式设置</h2>
+    <div class="desc" id="mode-desc">读取中…</div>
+    <div class="section">
+        <h3>模式概览</h3>
+        <div class="summary" id="mode-summary">读取中…</div>
+        <div class="row">
+            <span class="label">模式</span>
+            <span class="value" id="mode-name">—</span>
+        </div>
+        <div class="row" id="live2d-state-row" style="display:none;">
+            <span class="label">模型状态</span>
+            <span class="value" id="live2d-state">—</span>
+        </div>
+        <div class="row" id="live2d-entry-row" style="display:none;">
+            <span class="label">渲染入口预留</span>
+            <span class="value" id="live2d-entry" style="font-size:0.78em;word-break:break-all;">—</span>
+        </div>
     </div>
-    <div class="save-hint" id="sw-hint"></div>
-    <div class="effect-hints" id="sw-effects"></div>
-</div>
 
-<div class="section">
-    <h4>Bridge / 内部通信</h4>
-    <div class="row"><span class="label">运行状态</span>
-        <span class="value {bridge_state_class}">{bridge_state_label}</span></div>
-    <div class="row"><span class="label">启用</span>
-        <span class="value {bridge_class}">{bridge_enabled}</span></div>
-    <div class="row"><span class="label">地址</span>
-        <span class="value" style="font-size:0.85em;">{bridge_addr}</span></div>
-</div>
-
-<div class="section">
-    <h4>AstrBot / QQ 集成</h4>
-    <div class="row"><span class="label">接入状态</span>
-        <span class="value {astrbot_class}">{astrbot_label}</span></div>
-    <div class="row"><span class="label" style="font-size:0.78em;color:#777;">说明</span>
-        <span class="value" style="font-size:0.78em;color:#888;">{astrbot_desc}</span></div>
-    <div class="row" style="border-top:1px solid #4a3a4a;margin-top:4px;padding-top:6px;">
-        <span class="label" style="color:#666;font-size:0.78em;">依赖关系</span>
-        <span class="value" style="color:#666;font-size:0.75em;">AstrBot 通过 QQ 远程调用 Yachiyo，依赖 Bridge 运行</span>
+    <div class="section">
+        <h3>设置项</h3>
+        <div id="mode-form"></div>
+        <div class="hint" id="save-hint"></div>
     </div>
-</div>
 
 <script>
-const _STATE_LABELS = {{
-    'not_configured':  ['⚪ 未配置', ''],
-    'path_invalid':    ['❌ 路径不存在', 'warn'],
-    'path_not_live2d': ['⚠️ 目录无模型文件（缺少 .moc3 / .model3.json）', 'warn'],
-    'path_valid':      ['✅ 模型目录就绪 · 渲染器待实现', 'ok'],
-    'loaded':          ['✅ 已加载', 'ok'],
-}};
+let currentMode = '';
+let currentSettings = null;
 
-function updateLive2DState(state) {{
-    if (!state) return;
-    // 配置状态标签
-    const stEl = document.getElementById('sw-l2d-state');
-    if (stEl) {{
-        const [label, cls] = _STATE_LABELS[state.model_state] || [state.model_state, ''];
-        stEl.textContent = label;
-        stEl.className = 'value' + (cls ? ' ' + cls : '');
-    }}
-    // 摘要只读字段
-    const s = state.summary || {{}};
-    const jsonEl  = document.getElementById('sw-summary-json');
-    const moc3El  = document.getElementById('sw-summary-moc3');
-    const locEl   = document.getElementById('sw-summary-loc');
-    const entryEl = document.getElementById('sw-summary-entry');
-    if (!s.available) {{
-        if (jsonEl)  {{ jsonEl.textContent = '—';  jsonEl.className = 'value dim'; }}
-        if (moc3El)  {{ moc3El.textContent = '—';  moc3El.className = 'value dim'; }}
-        if (locEl)   {{ locEl.textContent  = '—'; }}
-        if (entryEl) {{ entryEl.textContent = '—'; entryEl.className = 'value dim'; }}
+function num(v, fallback) {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function boolRow(key, label, checked) {
+    return '<div class="row"><span class="label">' + label + '</span>'
+        + '<label class="toggle"><input type="checkbox" '
+        + (checked ? 'checked ' : '')
+        + 'onchange="saveField(\\'' + key + '\\', this.checked)"><span class="slider"></span></label></div>';
+}
+
+function inputRow(key, label, value, type='text', step='') {
+    const stepAttr = step ? ' step="' + step + '"' : '';
+    return '<div class="row"><span class="label">' + label + '</span>'
+        + '<input class="input" type="' + type + '" value="' + escapeHtml(String(value ?? '')) + '"' + stepAttr
+        + ' onchange="saveInput(\\'' + key + '\\', this)"></div>';
+}
+
+function selectRow(key, label, value, options) {
+    const opts = options.map(function(opt) {
+        const selected = opt.value === value ? ' selected' : '';
+        return '<option value="' + escapeHtml(opt.value) + '"' + selected + '>' + escapeHtml(opt.label) + '</option>';
+    }).join('');
+    return '<div class="row"><span class="label">' + label + '</span>'
+        + '<select class="select" onchange="saveField(\\'' + key + '\\', this.value)">' + opts + '</select></div>';
+}
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function renderLive2DInfo(cfg) {
+    const stateRow = document.getElementById('live2d-state-row');
+    const entryRow = document.getElementById('live2d-entry-row');
+    if (currentMode !== 'live2d') {
+        stateRow.style.display = 'none';
+        entryRow.style.display = 'none';
         return;
-    }}
-    if (jsonEl) {{
-        jsonEl.textContent = s.model3_json || '—';
-        jsonEl.className = 'value' + (s.model3_json ? ' ok' : ' dim');
-        jsonEl.style.fontSize = '0.82em';
-    }}
-    if (moc3El) {{
-        let moc3Text = s.moc3_file || '—';
-        if (s.extra_moc3_count > 0) moc3Text += ' (+' + s.extra_moc3_count + ')';
-        moc3El.textContent = moc3Text;
-        moc3El.className = 'value' + (s.moc3_file ? ' ok' : ' dim');
-        moc3El.style.fontSize = '0.82em';
-    }}
-    if (locEl) {{
-        locEl.textContent = s.found_in_subdir ? ('子目录: ' + s.subdir_name) : '根目录';
-        locEl.style.fontSize = '0.82em';
-    }}
-    if (entryEl) {{
-        entryEl.textContent = s.renderer_entry || '—';
-        entryEl.className = 'value' + (s.renderer_entry ? ' ok' : ' dim');
-        entryEl.style.fontSize = '0.75em';
-    }}
-}}
+    }
+    stateRow.style.display = 'flex';
+    entryRow.style.display = 'flex';
+    const labels = {
+        not_configured: ['⚪ 未配置', ''],
+        path_invalid: ['❌ 路径不存在', 'warn'],
+        path_not_live2d: ['⚠️ 目录无模型文件', 'warn'],
+        path_valid: ['✅ 模型目录就绪 · 渲染器待实现', 'ok'],
+        loaded: ['✅ 已加载', 'ok'],
+    };
+    const info = labels[cfg.model_state] || [cfg.model_state || '—', ''];
+    const stateEl = document.getElementById('live2d-state');
+    stateEl.textContent = info[0];
+    stateEl.className = 'value' + (info[1] ? ' ' + info[1] : '');
+    document.getElementById('live2d-entry').textContent = (cfg.summary && cfg.summary.renderer_entry) || '—';
+}
 
-function showEffectHints(effects) {{
-    const box = document.getElementById('sw-effects');
-    if (!box || !effects || !effects.effects) {{ if (box) box.classList.remove('visible'); return; }}
-    const iconMap = {{
-        'immediate': ['✓', 'effect-hint-immediate'],
-        'requires_mode_restart': ['🔄', 'effect-hint-mode'],
-        'requires_bridge_restart': ['🔌', 'effect-hint-bridge'],
-        'requires_app_restart': ['⚡', 'effect-hint-app'],
-    }};
+function renderForm(mode, cfg) {
+    const form = document.getElementById('mode-form');
     let html = '';
-    for (const e of effects.effects) {{
-        const [icon, cls] = iconMap[e.effect] || ['•', ''];
-        html += '<div class="effect-hint-row ' + cls + '"><span>' + icon + '</span><span>' + e.message + '</span></div>';
-    }}
-    box.innerHTML = html;
-    box.classList.add('visible');
-    setTimeout(function() {{ box.classList.remove('visible'); }}, 5000);
-}}
 
-async function saveLive2D(field, value) {{
-    const hint = document.getElementById('sw-hint');
-    try {{
-        if (!window.pywebview || !window.pywebview.api) {{
-            hint.textContent = '⚠️ pywebview API 未就绪';
-            hint.className = 'save-hint err';
-            return;
-        }}
-        const changes = {{}};
-        changes['live2d.' + field] = value;
-        const res = await window.pywebview.api.update_settings(changes);
-        if (res.ok) {{
-            hint.textContent = '✓ 已保存';
-            hint.className = 'save-hint';
-            if (res.live2d_state) updateLive2DState(res.live2d_state);
-            showEffectHints(res.effects);
-        }} else {{
-            hint.textContent = '✗ ' + (res.error || (res.errors && res.errors.join('; ')) || '保存失败');
-            hint.className = 'save-hint err';
-        }}
-    }} catch(e) {{
-        hint.textContent = '✗ 调用失败';
-        hint.className = 'save-hint err';
-    }}
-    setTimeout(function() {{ hint.textContent = ''; hint.className = 'save-hint'; }}, 3000);
-}}
+    if (mode === 'window') {
+        html += inputRow('window_mode.width', '窗口宽度', cfg.width, 'number');
+        html += inputRow('window_mode.height', '窗口高度', cfg.height, 'number');
+        html += inputRow('window_mode.recent_sessions_limit', '最近会话条数', cfg.recent_sessions_limit, 'number');
+        html += inputRow('window_mode.recent_messages_limit', '最近消息条数', cfg.recent_messages_limit, 'number');
+        html += boolRow('window_mode.open_chat_on_start', '启动即打开聊天窗口', cfg.open_chat_on_start);
+        html += boolRow('window_mode.show_runtime_panel', '显示运行状态卡', cfg.show_runtime_panel);
+        html += boolRow('window_mode.show_mode_overview', '显示模式概览', cfg.show_mode_overview);
+    } else if (mode === 'bubble') {
+        html += inputRow('bubble_mode.width', '气泡宽度', cfg.width, 'number');
+        html += inputRow('bubble_mode.height', '气泡高度', cfg.height, 'number');
+        html += inputRow('bubble_mode.position_x', '位置 X', cfg.position_x, 'number');
+        html += inputRow('bubble_mode.position_y', '位置 Y', cfg.position_y, 'number');
+        html += boolRow('bubble_mode.always_on_top', '窗口置顶', cfg.always_on_top);
+        html += boolRow('bubble_mode.edge_snap', '靠边吸附', cfg.edge_snap);
+        html += boolRow('bubble_mode.expanded_on_start', '启动默认展开', cfg.expanded_on_start);
+        html += selectRow('bubble_mode.expand_trigger', '展开方式', cfg.expand_trigger, [
+            { value: 'click', label: '点击切换' },
+            { value: 'hover', label: '悬停展开（占位）' },
+        ]);
+        html += selectRow('bubble_mode.default_display', '默认展示内容', cfg.default_display, [
+            { value: 'icon', label: '仅图标' },
+            { value: 'summary', label: '摘要' },
+            { value: 'recent_reply', label: '最近回复' },
+        ]);
+        html += inputRow('bubble_mode.summary_count', '摘要条数', cfg.summary_count, 'number');
+        html += boolRow('bubble_mode.show_unread_dot', '显示未读点', cfg.show_unread_dot);
+        html += boolRow('bubble_mode.auto_hide', '自动隐藏', cfg.auto_hide);
+        html += inputRow('bubble_mode.opacity', '透明度', cfg.opacity, 'number', '0.01');
+    } else if (mode === 'live2d') {
+        html += inputRow('live2d_mode.model_name', '模型名称', cfg.model_name);
+        html += inputRow('live2d_mode.model_path', '模型路径', cfg.model_path);
+        html += inputRow('live2d_mode.width', '窗口宽度', cfg.width, 'number');
+        html += inputRow('live2d_mode.height', '窗口高度', cfg.height, 'number');
+        html += inputRow('live2d_mode.position_x', '位置 X', cfg.position_x, 'number');
+        html += inputRow('live2d_mode.position_y', '位置 Y', cfg.position_y, 'number');
+        html += boolRow('live2d_mode.window_on_top', '窗口置顶', cfg.window_on_top);
+        html += boolRow('live2d_mode.show_reply_bubble', '显示回复气泡', cfg.show_reply_bubble);
+        html += selectRow('live2d_mode.default_open_behavior', '默认打开行为', cfg.default_open_behavior, [
+            { value: 'stage', label: '角色舞台' },
+            { value: 'reply_bubble', label: '回复气泡' },
+            { value: 'chat_input', label: '输入入口' },
+        ]);
+        html += selectRow('live2d_mode.click_action', '点击行为', cfg.click_action, [
+            { value: 'open_chat', label: '打开聊天窗口' },
+            { value: 'focus_stage', label: '聚焦角色舞台' },
+            { value: 'toggle_reply', label: '切换回复气泡' },
+        ]);
+        html += boolRow('live2d_mode.auto_open_chat_window', '自动打开聊天窗口', cfg.auto_open_chat_window);
+        html += boolRow('live2d_mode.enable_quick_input', '启用最小输入入口', cfg.enable_quick_input);
+        html += inputRow('live2d_mode.idle_motion_group', '待机动作组', cfg.idle_motion_group);
+        html += boolRow('live2d_mode.enable_expressions', '启用表情系统', cfg.enable_expressions);
+        html += boolRow('live2d_mode.enable_physics', '启用物理模拟', cfg.enable_physics);
+    }
+
+    form.innerHTML = html;
+    renderLive2DInfo(cfg);
+}
+
+function saveInput(key, input) {
+    const value = input.type === 'number' && input.step === '0.01'
+        ? num(input.value, 0)
+        : (input.type === 'number' ? parseInt(input.value || '0', 10) : input.value);
+    saveField(key, value);
+}
+
+async function saveField(key, value) {
+    const hint = document.getElementById('save-hint');
+    try {
+        if (!window.pywebview || !window.pywebview.api) throw new Error('pywebview API 未就绪');
+        const payload = {};
+        payload[key] = value;
+        const result = await window.pywebview.api.update_settings(payload);
+        if (!result.ok) throw new Error(result.error || (result.errors || []).join('; ') || '保存失败');
+        if (result.settings) renderSettings(result.settings);
+        hint.textContent = '✓ 已保存';
+        hint.className = 'hint';
+    } catch (error) {
+        hint.textContent = '✗ ' + error.message;
+        hint.className = 'hint error';
+    }
+    setTimeout(function() {
+        hint.textContent = '';
+        hint.className = 'hint';
+    }, 3000);
+}
+
+function renderSettings(payload) {
+    currentMode = payload.mode.id;
+    currentSettings = payload.settings.config;
+    document.getElementById('mode-title').textContent = payload.mode.settings_title;
+    document.getElementById('mode-desc').textContent = payload.mode.settings_description;
+    document.getElementById('mode-summary').textContent = payload.settings.summary;
+    document.getElementById('mode-name').textContent = payload.mode.icon + ' ' + payload.mode.name;
+    renderForm(payload.mode.id, payload.settings.config);
+}
+
+async function bootstrap() {
+    if (!window.pywebview || !window.pywebview.api) return;
+    const payload = await window.pywebview.api.get_mode_settings();
+    renderSettings(payload);
+}
+
+document.addEventListener('DOMContentLoaded', function() { setTimeout(bootstrap, 200); });
+window.addEventListener('pywebviewready', bootstrap);
 </script>
 </body>
 </html>
 """
 
 
-def build_settings_html(config: "AppConfig") -> str:
-    """生成设置页 HTML，供独立设置窗口使用。
+def open_mode_settings_window(config: "AppConfig", mode_id: str) -> bool:
+    """打开单个模式的设置窗口。"""
+    try:
+        import webview  # type: ignore[import]
+    except ImportError:
+        logger.warning("pywebview 未安装，无法打开模式设置窗口")
+        return False
 
-    Args:
-        config: 当前应用配置
-
-    Returns:
-        完整 HTML 字符串
-    """
-    l2d = config.live2d
-    model_state = l2d.validate()
-    summary = l2d.scan()
-
-    _MODEL_STATE_LABELS = {
-        "not_configured":  ("⚪ 未配置", ""),
-        "path_invalid":    ("❌ 路径不存在", "warn"),
-        "path_not_live2d": ("⚠️ 目录无模型文件（缺少 .moc3 / .model3.json）", "warn"),
-        "path_valid":      ("✅ 模型目录就绪 · 渲染器待实现", "ok"),
-        "loaded":          ("✅ 已加载", "ok"),
-    }
-    state_label, state_class = _MODEL_STATE_LABELS.get(model_state.value, (model_state.value, ""))
-
-    # 摘要字段格式化
-    if summary and not summary.is_empty():
-        s_json     = summary.model3_json or "—"
-        s_json_cls = "ok" if summary.model3_json else "dim"
-        s_moc3     = summary.moc3_file or "—"
-        if summary.extra_moc3_count > 0:
-            s_moc3 += f" (+{summary.extra_moc3_count})"
-        s_moc3_cls = "ok" if summary.moc3_file else "dim"
-        s_loc      = f"子目录: {summary.subdir_name}" if summary.found_in_subdir else "根目录"
-        s_entry    = summary.renderer_entry or "—"
-        s_entry_cls = "ok" if summary.renderer_entry else "dim"
-    else:
-        s_json, s_json_cls = "—", "dim"
-        s_moc3, s_moc3_cls = "—", "dim"
-        s_loc = "—"
-        s_entry, s_entry_cls = "—", "dim"
-
-    return _SETTINGS_HTML.format(
-        display_mode=config.display_mode,
-        # Live2D 配置状态（只读）
-        model_state_label=state_label,
-        model_state_class=state_class,
-        # 输入控件初始值
-        model_name_val=l2d.model_name or "",
-        model_path_val=l2d.model_path or "",
-        idle_motion_group=l2d.idle_motion_group or "Idle",
-        expr_checked="checked" if l2d.enable_expressions else "",
-        phys_checked="checked" if l2d.enable_physics else "",
-        on_top_checked="checked" if l2d.window_on_top else "",
-        # 摘要（只读）
-        summary_model3_json=s_json,
-        summary_json_class=s_json_cls,
-        summary_moc3=s_moc3,
-        summary_moc3_class=s_moc3_cls,
-        summary_file_loc=s_loc,
-        summary_renderer_entry=s_entry,
-        summary_entry_class=s_entry_cls,
-        # Bridge（只读）
-        bridge_enabled="✅ 已启用" if config.bridge_enabled else "⛔ 已禁用",
-        bridge_class="ok" if config.bridge_enabled else "",
-        bridge_addr=f"http://{config.bridge_host}:{config.bridge_port}",
-        bridge_state_label=_bridge_state_label(config),
-        bridge_state_class=_bridge_state_class(config),
-        # AstrBot（只读）
-        astrbot_label=_astrbot_label(config),
-        astrbot_class=_astrbot_class(config),
-        astrbot_desc=_astrbot_desc(config),
+    descriptor = get_mode_descriptor(mode_id)
+    webview.create_window(
+        title=f"Hermes-Yachiyo — {descriptor.settings_title}",
+        html=_SETTINGS_HTML,
+        width=520,
+        height=620,
+        resizable=True,
+        js_api=ModeSettingsAPI(config, descriptor.id),
     )
-
-
-def _bridge_state_label(config: "AppConfig") -> str:
-    from apps.bridge.server import get_bridge_state
-    if not config.bridge_enabled:
-        return "⛔ 已禁用"
-    s = get_bridge_state()
-    return {"running": "✅ 运行中", "failed": "❌ 异常退出"}.get(s, "⏳ 启动中")
-
-
-def _bridge_state_class(config: "AppConfig") -> str:
-    from apps.bridge.server import get_bridge_state
-    if not config.bridge_enabled:
-        return ""
-    s = get_bridge_state()
-    return {"running": "ok", "failed": "warn"}.get(s, "")
-
-
-def _astrbot_label(config: "AppConfig") -> str:
-    from apps.bridge.server import get_bridge_state
-    if not config.bridge_enabled:
-        return "⚪ 未配置"
-    s = get_bridge_state()
-    if s != "running":
-        return "⏳ 已配置但未连接"
-    return "⚪ 未配置"
-
-
-def _astrbot_class(config: "AppConfig") -> str:
-    return ""
-
-
-def _astrbot_desc(config: "AppConfig") -> str:
-    if not config.bridge_enabled:
-        return "Bridge 未启用，AstrBot 无法连接"
-    return "需在 AstrBot 中安装并配置 Hermes-Yachiyo 插件"
+    return True
