@@ -83,7 +83,7 @@ def check_hermes_command(hermes_path: str = "hermes") -> Tuple[bool, str | None]
         return False, f"检查 hermes 命令时出错: {str(e)}"
 
 
-def get_hermes_version() -> HermesVersionInfo | None:
+def get_hermes_version(hermes_path: str = "hermes") -> HermesVersionInfo | None:
     """获取 Hermes Agent 版本信息
 
     ``hermes --version`` 第一行格式为：
@@ -92,7 +92,7 @@ def get_hermes_version() -> HermesVersionInfo | None:
     """
     try:
         result = subprocess.run(
-            ["hermes", "--version"],
+            [hermes_path, "--version"],
             capture_output=True,
             text=True,
             timeout=10
@@ -157,7 +157,7 @@ def _parse_version_parts(version: str) -> tuple[int, ...] | None:
     return parts + (0,) * (target_len - len(parts))
 
 
-def check_hermes_setup() -> Tuple[bool, str]:
+def check_hermes_setup(hermes_path: str = "hermes") -> Tuple[bool, str]:
     """检查 Hermes Agent 是否已完成 setup（交互式配置）。
 
     检测策略（按优先级）：
@@ -171,7 +171,7 @@ def check_hermes_setup() -> Tuple[bool, str]:
     # 策略 1: hermes status 退出码
     try:
         result = subprocess.run(
-            ["hermes", "status"],
+            [hermes_path, "status"],
             capture_output=True, text=True, timeout=10,
         )
         if result.returncode == 0:
@@ -256,7 +256,7 @@ def check_yachiyo_workspace() -> Tuple[bool, str]:
         return False, f"工作空间检查失败: {e}"
 
 
-def check_hermes_basic_readiness() -> Tuple[bool, str]:
+def check_hermes_basic_readiness(hermes_path: str = "hermes") -> Tuple[bool, str]:
     """检查 Hermes Agent 基本可用性
     
     只检查 Hermes 本身是否安装且可用，不涉及 Yachiyo 特定配置。
@@ -266,7 +266,7 @@ def check_hermes_basic_readiness() -> Tuple[bool, str]:
     """
     try:
         # 1. 检查命令可用性（已包含版本检查）
-        command_exists, error_message = check_hermes_command()
+        command_exists, error_message = check_hermes_command(hermes_path)
         if not command_exists:
             return False, error_message or "Hermes 命令不可用"
         
@@ -274,7 +274,7 @@ def check_hermes_basic_readiness() -> Tuple[bool, str]:
         # 这里不检查复杂配置，只确保 Hermes 基本可用
         try:
             result = subprocess.run(
-                ["hermes", "--version"], 
+                [hermes_path, "--version"],
                 capture_output=True, 
                 text=True, 
                 timeout=5,
@@ -308,6 +308,7 @@ def get_hermes_home() -> str:
 
 def check_hermes_doctor_readiness(
     timeout: float = 5.0,
+    hermes_path: str = "hermes",
 ) -> Tuple[HermesReadinessLevel, list[str], int]:
     """通过 ``hermes doctor`` 检测 Hermes 能力就绪程度。
 
@@ -321,7 +322,7 @@ def check_hermes_doctor_readiness(
     """
     try:
         result = subprocess.run(
-            ["hermes", "doctor"],
+            [hermes_path, "doctor"],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -395,7 +396,11 @@ def check_hermes_installation() -> HermesInstallInfo:
         return install_info
     
     # 2. Hermes Agent 安装检查
-    command_exists, error_message = check_hermes_command()
+    hermes_path, _needs_env_refresh = locate_hermes_binary()
+    if hermes_path is None:
+        hermes_path = "hermes"
+
+    command_exists, error_message = check_hermes_command(hermes_path)
     install_info.command_exists = command_exists
     
     if not command_exists:
@@ -410,7 +415,7 @@ def check_hermes_installation() -> HermesInstallInfo:
         return install_info
     
     # 3. Hermes Agent 版本兼容性检查
-    version_info = get_hermes_version()
+    version_info = get_hermes_version(hermes_path)
     install_info.version_info = version_info
     
     if not version_info or not version_info.version:
@@ -434,7 +439,7 @@ def check_hermes_installation() -> HermesInstallInfo:
     # 4. Hermes setup（交互式配置）检查
     # 上面的版本读取已经执行并解析过 `hermes --version`，这里不再重复调用
     # check_hermes_basic_readiness()，避免正常启动时多跑两次子进程。
-    setup_done, setup_error = check_hermes_setup()
+    setup_done, setup_error = check_hermes_setup(hermes_path)
     if not setup_done:
         # 检测 setup 进程是否正在运行
         if is_hermes_setup_running():
@@ -472,7 +477,9 @@ def check_hermes_installation() -> HermesInstallInfo:
         return install_info
     
     # 6. 一切就绪 — 检测能力等级
-    readiness_level, limited_tools, issues_count = check_hermes_doctor_readiness()
+    readiness_level, limited_tools, issues_count = check_hermes_doctor_readiness(
+        hermes_path=hermes_path,
+    )
     install_info.readiness_level = readiness_level
     install_info.limited_tools = limited_tools
     install_info.doctor_issues_count = issues_count
