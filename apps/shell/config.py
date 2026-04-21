@@ -161,8 +161,8 @@ class WindowModeConfig:
 class BubbleModeConfig:
     """Bubble 模式配置。"""
 
-    width: int = 340
-    height: int = 420
+    width: int = 320
+    height: int = 380
     position_x: int = 24
     position_y: int = 24
     always_on_top: bool = True

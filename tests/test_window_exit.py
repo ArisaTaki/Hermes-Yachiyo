@@ -1,6 +1,7 @@
 """Main window exit behavior tests."""
 
 from apps.shell import chat_window, window as window_mod
+from apps.shell.modes.bubble import BubbleWindowAPI
 from apps.shell.window import _STATUS_HTML
 
 
@@ -91,6 +92,18 @@ def test_request_app_exit_prepares_exit_without_destroying_current_window(monkey
     assert closed_chat == [True]
     assert main.destroyed is True
     assert aux.destroyed is True
+
+
+def test_bubble_close_requests_full_app_exit(monkeypatch):
+    requested = []
+    api = BubbleWindowAPI(runtime=object(), config=object())
+
+    monkeypatch.setattr(window_mod, "request_app_exit", lambda: requested.append(True))
+
+    result = api.close_bubble()
+
+    assert result == {"ok": True}
+    assert requested == [True]
 
 
 def test_quit_button_uses_in_page_dialog_and_api_exit():

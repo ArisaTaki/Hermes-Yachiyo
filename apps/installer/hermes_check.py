@@ -306,7 +306,9 @@ def get_hermes_home() -> str:
     return default_hermes_home
 
 
-def check_hermes_doctor_readiness() -> Tuple[HermesReadinessLevel, list[str], int]:
+def check_hermes_doctor_readiness(
+    timeout: float = 5.0,
+) -> Tuple[HermesReadinessLevel, list[str], int]:
     """通过 ``hermes doctor`` 检测 Hermes 能力就绪程度。
 
     解析策略：
@@ -322,7 +324,7 @@ def check_hermes_doctor_readiness() -> Tuple[HermesReadinessLevel, list[str], in
             ["hermes", "doctor"],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=timeout,
         )
         output = result.stdout + result.stderr
 
@@ -356,7 +358,7 @@ def check_hermes_doctor_readiness() -> Tuple[HermesReadinessLevel, list[str], in
         # hermes 命令不存在（理论上不应到达此处，安装检测已先行）
         return HermesReadinessLevel.UNKNOWN, [], 0
     except subprocess.TimeoutExpired:
-        logger.debug("hermes doctor 超时，跳过就绪分级")
+        logger.debug("hermes doctor 超时（%.1fs），跳过就绪分级", timeout)
         return HermesReadinessLevel.UNKNOWN, [], 0
     except Exception as exc:
         logger.debug("hermes doctor 检测失败，跳过就绪分级: %s", exc)
@@ -429,18 +431,9 @@ def check_hermes_installation() -> HermesInstallInfo:
         ]
         return install_info
     
-    # 4. Hermes Agent 基本可用性验证
-    hermes_ready, hermes_error = check_hermes_basic_readiness()
-    if not hermes_ready:
-        install_info.status = HermesInstallStatus.INCOMPATIBLE_VERSION
-        install_info.error_message = f"Hermes Agent 不可用: {hermes_error}"
-        install_info.suggestions = [
-            "请检查 Hermes Agent 安装和配置",
-            "尝试重新安装或更新 Hermes Agent"
-        ]
-        return install_info
-    
-    # 5. Hermes setup（交互式配置）检查
+    # 4. Hermes setup（交互式配置）检查
+    # 上面的版本读取已经执行并解析过 `hermes --version`，这里不再重复调用
+    # check_hermes_basic_readiness()，避免正常启动时多跑两次子进程。
     setup_done, setup_error = check_hermes_setup()
     if not setup_done:
         # 检测 setup 进程是否正在运行
@@ -463,7 +456,7 @@ def check_hermes_installation() -> HermesInstallInfo:
         ]
         return install_info
 
-    # 6. Yachiyo 工作空间初始化检查
+    # 5. Yachiyo 工作空间初始化检查
     hermes_home = get_hermes_home()
     install_info.hermes_home = hermes_home
     
@@ -478,7 +471,7 @@ def check_hermes_installation() -> HermesInstallInfo:
         ]
         return install_info
     
-    # 7. 一切就绪 — 检测能力等级
+    # 6. 一切就绪 — 检测能力等级
     readiness_level, limited_tools, issues_count = check_hermes_doctor_readiness()
     install_info.readiness_level = readiness_level
     install_info.limited_tools = limited_tools

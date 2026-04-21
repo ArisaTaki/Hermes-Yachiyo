@@ -2,7 +2,10 @@
 
 import inspect
 
-from apps.installer.hermes_check import is_version_compatible
+from apps.installer.hermes_check import (
+    check_hermes_doctor_readiness,
+    is_version_compatible,
+)
 from apps.installer.hermes_install import (
     HERMES_INSTALL_TIMEOUT_SECONDS,
     run_hermes_install,
@@ -26,3 +29,9 @@ def test_hermes_install_timeout_allows_slow_setup_phase():
 
     assert HERMES_INSTALL_TIMEOUT_SECONDS == 900.0
     assert timeout_param.default == HERMES_INSTALL_TIMEOUT_SECONDS
+
+
+def test_hermes_doctor_readiness_keeps_startup_bounded():
+    timeout_param = inspect.signature(check_hermes_doctor_readiness).parameters["timeout"]
+
+    assert timeout_param.default == 5.0

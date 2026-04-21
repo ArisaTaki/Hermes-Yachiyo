@@ -69,7 +69,10 @@ def resolve_startup_mode(install_info: "HermesInstallInfo") -> StartupMode:
 
 # ── 各模式启动函数 ─────────────────────────────────────────────────────────────
 
-def run_normal_mode(config: "AppConfig") -> None:
+def run_normal_mode(
+    config: "AppConfig",
+    install_info: "HermesInstallInfo | None" = None,
+) -> None:
     """正常模式：启动 Core Runtime + Bridge + 主界面窗口。
 
     启动流程：
@@ -96,7 +99,7 @@ def run_normal_mode(config: "AppConfig") -> None:
 
     # ② Core Runtime
     runtime = HermesRuntime(config)
-    runtime.start()
+    runtime.start(install_info=install_info)
     set_runtime(runtime)
 
     # ③ Bridge
@@ -191,7 +194,7 @@ def launch(config: "AppConfig") -> None:
             "启动决策: startup_mode=%s, display_mode=%s",
             mode, display_mode,
         )
-        run_normal_mode(config)
+        run_normal_mode(config, install_info=install_info)
     else:
         logger.info("启动决策: startup_mode=%s", mode)
         run_installer_mode(config, install_info)

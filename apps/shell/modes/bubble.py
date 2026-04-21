@@ -29,22 +29,21 @@ _BUBBLE_HTML = """
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: -apple-system, "Helvetica Neue", "PingFang SC", sans-serif;
-            background: rgba(18, 20, 34, 0.96);
-            color: #eef2ff;
-            padding: 10px;
+            background: rgba(12, 14, 18, 0.96);
+            color: #f4f7fb;
+            padding: 8px;
             height: 100vh;
             display: flex;
             flex-direction: column;
-            gap: 8px;
         }
         .shell {
             flex: 1;
             display: flex;
             flex-direction: column;
             min-height: 0;
-            border-radius: 14px;
-            border: 1px solid rgba(118, 140, 255, 0.18);
-            background: linear-gradient(180deg, rgba(30,32,52,0.96) 0%, rgba(20,22,38,0.96) 100%);
+            border-radius: 8px;
+            border: 1px solid rgba(157, 172, 191, 0.2);
+            background: rgba(20, 24, 30, 0.98);
             overflow: hidden;
         }
         .header {
@@ -52,9 +51,10 @@ _BUBBLE_HTML = """
             align-items: center;
             justify-content: space-between;
             gap: 8px;
-            padding: 10px 12px;
-            border-bottom: 1px solid rgba(255,255,255,0.06);
-            cursor: pointer;
+            min-height: 42px;
+            padding: 8px 10px 8px 12px;
+            border-bottom: 1px solid rgba(157, 172, 191, 0.14);
+            background: rgba(24, 29, 36, 0.98);
         }
         .identity {
             display: flex;
@@ -63,13 +63,16 @@ _BUBBLE_HTML = """
             min-width: 0;
         }
         .avatar {
-            width: 32px;
-            height: 32px;
+            width: 34px;
+            height: 34px;
             border-radius: 50%;
             display: grid;
             place-items: center;
-            background: #364173;
-            font-size: 1rem;
+            background: radial-gradient(circle at 30% 25%, #ffffff 0, #d9f2e6 18%, #52b788 62%, #27745d 100%);
+            color: #0b231b;
+            font-weight: 800;
+            font-size: 0.9rem;
+            box-shadow: 0 0 16px rgba(82, 183, 136, 0.28);
         }
         .title-wrap {
             min-width: 0;
@@ -82,12 +85,12 @@ _BUBBLE_HTML = """
             gap: 6px;
         }
         .subtitle {
-            color: #9ca5d4;
+            color: #9fa9b8;
             font-size: 0.74rem;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            max-width: 180px;
+            max-width: 150px;
         }
         .dot {
             width: 8px;
@@ -111,21 +114,38 @@ _BUBBLE_HTML = """
             display: inline-flex;
             align-items: center;
             gap: 4px;
-            padding: 3px 8px;
-            border-radius: 999px;
+            padding: 3px 7px;
+            border-radius: 8px;
             font-size: 0.72rem;
-            background: #2a2d44;
-            color: #c0c7eb;
+            background: rgba(255,255,255,0.06);
+            color: #cbd5e1;
         }
         .status-chip.processing { color: #ffd36a; }
         .status-chip.failed { color: #ff9f9f; }
-        .status-chip.ready { color: #8fe3a3; }
-        .toggle-btn {
-            background: transparent;
-            border: none;
-            color: #c8d0ff;
-            font-size: 1rem;
+        .status-chip.ready { color: #9ee6b1; }
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .icon-btn {
+            width: 26px;
+            height: 26px;
+            border-radius: 8px;
+            border: 1px solid rgba(157, 172, 191, 0.18);
+            background: rgba(255,255,255,0.04);
+            color: #d8dee9;
             cursor: pointer;
+            font-size: 0.78rem;
+        }
+        .icon-btn:hover {
+            background: rgba(255,255,255,0.1);
+        }
+        .icon-btn.danger:hover {
+            color: #fff;
+            border-color: rgba(255, 113, 113, 0.6);
+            background: rgba(255, 113, 113, 0.24);
         }
         .body {
             flex: 1;
@@ -133,45 +153,55 @@ _BUBBLE_HTML = """
             display: flex;
             flex-direction: column;
             gap: 8px;
-            padding: 10px 12px 12px;
+            padding: 10px;
         }
         .body.collapsed {
             display: none;
         }
         .preview {
-            background: rgba(10, 12, 22, 0.65);
-            border-radius: 12px;
+            background: rgba(9, 12, 16, 0.72);
+            border-radius: 8px;
             padding: 10px;
             flex: 1;
             min-height: 0;
             overflow-y: auto;
         }
-        .reply-highlight {
-            padding: 8px 10px;
-            border-radius: 10px;
-            background: rgba(84, 111, 224, 0.14);
-            border-left: 3px solid #7692ff;
-            margin-bottom: 8px;
-            font-size: 0.8rem;
-            color: #d7defc;
-        }
         .summary-list {
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 8px;
         }
         .summary-item {
+            max-width: 92%;
             padding: 8px 10px;
-            border-radius: 10px;
+            border-radius: 8px;
             font-size: 0.8rem;
             line-height: 1.45;
-            color: #d6dbf5;
+            color: #e8eef7;
+            overflow-wrap: anywhere;
         }
-        .summary-item.user { background: rgba(84, 111, 224, 0.16); }
-        .summary-item.assistant { background: rgba(56, 112, 84, 0.18); }
-        .summary-item.system { background: rgba(58, 58, 78, 0.7); color: #adb3d1; }
+        .summary-item.user {
+            align-self: flex-end;
+            background: #325f88;
+        }
+        .summary-item.assistant {
+            align-self: flex-start;
+            background: #24443a;
+            border: 1px solid rgba(105, 178, 146, 0.22);
+        }
+        .summary-item.system {
+            align-self: center;
+            background: rgba(68, 77, 90, 0.55);
+            color: #c1c8d2;
+        }
         .summary-item.processing { color: #ffd36a; }
         .summary-item.failed { color: #ffaaaa; }
+        .msg-role {
+            display: block;
+            margin-bottom: 2px;
+            color: rgba(255,255,255,0.58);
+            font-size: 0.7rem;
+        }
         .thinking { display: inline-flex; align-items: center; gap: 2px; }
         .thinking .dot {
             animation: thinking-dot 1.2s ease-in-out infinite;
@@ -213,48 +243,54 @@ _BUBBLE_HTML = """
             flex: 1;
             min-width: 0;
             padding: 8px 10px;
-            border-radius: 10px;
-            border: 1px solid rgba(118, 140, 255, 0.2);
-            background: rgba(12, 14, 24, 0.8);
-            color: #eef2ff;
+            border-radius: 8px;
+            border: 1px solid rgba(157, 172, 191, 0.22);
+            background: rgba(9, 12, 16, 0.86);
+            color: #f4f7fb;
         }
-        .input:focus { outline: none; border-color: #7692ff; }
+        .input:focus { outline: none; border-color: #52b788; }
         .btn-row {
-            display: flex;
-            gap: 8px;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
         }
         .btn {
-            flex: 1;
-            border: 1px solid rgba(118, 140, 255, 0.22);
-            background: #20243b;
-            color: #e6ebff;
-            border-radius: 10px;
-            padding: 8px 10px;
+            min-width: 0;
+            border: 1px solid rgba(157, 172, 191, 0.18);
+            background: rgba(255,255,255,0.05);
+            color: #e8eef7;
+            border-radius: 8px;
+            padding: 7px 6px;
             font-size: 0.78rem;
             cursor: pointer;
+            white-space: nowrap;
         }
         .btn.primary {
-            background: #3d518f;
-            border-color: #5e7cff;
+            background: #325f88;
+            border-color: #4f8cbe;
+        }
+        .btn.danger {
+            color: #ffb8b8;
         }
     </style>
 </head>
 <body>
     <div class="shell">
-        <div class="header" onclick="toggleExpanded()">
+        <div class="header">
             <div class="identity">
-                <div class="avatar">💬</div>
+                <div class="avatar">Y</div>
                 <div class="title-wrap">
                     <div class="title">
-                        <span>Bubble Mode</span>
+                        <span>Yachiyo</span>
                         <span class="dot" id="unread-dot"></span>
                     </div>
                     <div class="subtitle" id="bubble-subtitle">轻量常驻聊天模式</div>
                 </div>
             </div>
-            <div style="display:flex;align-items:center;gap:8px;">
+            <div class="header-actions">
                 <span class="status-chip" id="status-chip">读取中…</span>
-                <button class="toggle-btn" id="toggle-btn" type="button">▾</button>
+                <button class="icon-btn" id="toggle-btn" type="button" title="折叠" onclick="toggleExpanded()">▾</button>
+                <button class="icon-btn danger" type="button" title="退出" onclick="closeBubble()">×</button>
             </div>
         </div>
 
@@ -269,10 +305,10 @@ _BUBBLE_HTML = """
             </div>
 
             <div class="btn-row">
-                <button class="btn primary" type="button" onclick="openChat()">完整对话</button>
-                <button class="btn" type="button" onclick="openMain()">主窗口</button>
+                <button class="btn primary" type="button" onclick="openChat()">对话</button>
+                <button class="btn" type="button" onclick="openMain()">主窗</button>
                 <button class="btn" type="button" onclick="openSettings()">设置</button>
-                <button class="btn" type="button" onclick="closeBubble()">关闭</button>
+                <button class="btn danger" type="button" onclick="closeBubble()">退出</button>
             </div>
         </div>
     </div>
@@ -361,16 +397,14 @@ function renderBubble(view) {
     }
 
     let html = '';
-    if (chat.latest_reply && bubble.default_display !== 'icon') {
-        html += '<div class="reply-highlight">' + escapeHtml(chat.latest_reply) + '</div>';
-    }
     html += '<div class="summary-list">';
     for (const msg of chat.messages) {
         const cls = 'summary-item ' + msg.role + ' ' + (msg.status || '');
         const content = msg.status === 'processing' && msg.role === 'assistant' && !msg.content
             ? renderThinking()
             : escapeHtml(msg.content);
-        html += '<div class="' + cls + '">' + content + '</div>';
+        const roleLabel = msg.role === 'user' ? '你' : (msg.role === 'assistant' ? 'Yachiyo' : '系统');
+        html += '<div class="' + cls + '"><span class="msg-role">' + roleLabel + '</span>' + content + '</div>';
     }
     html += '</div>';
     if (chat.recent_sessions && chat.recent_sessions.length > 0) {
@@ -508,12 +542,15 @@ class BubbleWindowAPI:
 
         return {"ok": open_mode_settings_window(self._config, "bubble")}
 
-    def close_bubble(self) -> None:
+    def close_bubble(self) -> Dict[str, Any]:
         try:
-            if self._bubble_window is not None:
-                self._bubble_window.destroy()
+            from apps.shell.window import request_app_exit
+
+            request_app_exit()
+            return {"ok": True}
         except Exception as exc:
-            logger.error("关闭 Bubble 窗口失败: %s", exc)
+            logger.error("退出 Bubble 模式失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
 
 
 def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
@@ -534,6 +571,12 @@ def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
             js_api=api,
         )
         api._bubble_window = win
+        try:
+            from apps.shell.window import bind_app_window_exit
+
+            bind_app_window_exit(win, label="Bubble 窗口")
+        except Exception as exc:
+            logger.warning("绑定 Bubble 退出事件失败: %s", exc)
         webview.start(debug=False)
     except ImportError:
         logger.warning("pywebview 未安装，Bubble 模式无法展示")

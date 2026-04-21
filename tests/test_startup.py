@@ -1,7 +1,11 @@
 """Startup 决策层测试"""
 
-from apps.shell.startup import StartupMode, resolve_startup_mode
-from packages.protocol.enums import HermesInstallStatus
+import importlib
+
+from apps.shell.config import AppConfig
+from apps.shell.startup import StartupMode, resolve_startup_mode, run_normal_mode
+from packages.protocol.enums import HermesInstallStatus, Platform
+from packages.protocol.install import HermesInstallInfo
 
 
 class _FakeInstallInfo:
@@ -41,3 +45,43 @@ class TestResolveStartupMode:
     def test_setup_in_progress_to_installer(self):
         info = _FakeInstallInfo(HermesInstallStatus.SETUP_IN_PROGRESS)
         assert resolve_startup_mode(info) == StartupMode.INSTALLER
+
+
+def test_run_normal_mode_reuses_startup_install_info(monkeypatch):
+    install_info = HermesInstallInfo(
+        status=HermesInstallStatus.READY,
+        platform=Platform.MACOS,
+        command_exists=True,
+    )
+    started_with = []
+    stopped = []
+    runtime_instances = []
+
+    class FakeRuntime:
+        def __init__(self, config):
+            self.config = config
+            runtime_instances.append(self)
+
+        def start(self, install_info=None):
+            started_with.append(install_info)
+
+        def stop(self):
+            stopped.append(True)
+
+    config = AppConfig()
+    config.bridge_enabled = False
+    config.tray_enabled = False
+
+    bridge_deps = importlib.import_module("apps.bridge.deps")
+    shell_modes = importlib.import_module("apps.shell.modes")
+
+    monkeypatch.setattr("apps.core.runtime.HermesRuntime", FakeRuntime)
+    monkeypatch.setattr(bridge_deps, "set_runtime", lambda runtime: None, raising=False)
+    monkeypatch.setattr(shell_modes, "resolve_display_mode", lambda config: "bubble")
+    monkeypatch.setattr(shell_modes, "launch_mode", lambda runtime, config: None)
+
+    run_normal_mode(config, install_info=install_info)
+
+    assert len(runtime_instances) == 1
+    assert started_with == [install_info]
+    assert stopped == [True]

@@ -1484,8 +1484,8 @@ def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
     webview.start(debug=False)
 
 
-def _bind_main_window_exit(main_window: object):
-    """主窗口关闭时同步关闭附属窗口。
+def bind_app_window_exit(app_window: object, *, label: str = "窗口"):
+    """应用主入口窗口关闭时同步关闭附属窗口。
 
     不在 pywebview closing 回调里弹确认框，避免 macOS WebView 关闭事件重入卡死。
     显式退出确认由页面内的 quitApp() 完成。
@@ -1498,12 +1498,17 @@ def _bind_main_window_exit(main_window: object):
             return True
 
         closing = True
-        logger.info("主窗口关闭，正在关闭附属窗口")
-        _close_auxiliary_windows(main_window)
+        logger.info("%s关闭，正在关闭附属窗口", label)
+        _close_auxiliary_windows(app_window)
         return True
 
-    main_window.events.closing += _on_closing
+    app_window.events.closing += _on_closing
     return _on_closing
+
+
+def _bind_main_window_exit(main_window: object):
+    """主窗口关闭时同步关闭附属窗口。"""
+    return bind_app_window_exit(main_window, label="主窗口")
 
 
 def request_app_exit() -> None:

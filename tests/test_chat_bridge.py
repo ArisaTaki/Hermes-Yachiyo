@@ -294,7 +294,7 @@ def test_bubble_html_keeps_idle_polling_for_cross_mode_updates():
     assert "startIdlePolling();" in _BUBBLE_HTML
     assert "window.addEventListener('pywebviewready', bootstrap);" in _BUBBLE_HTML
     assert "openSettings()" in _BUBBLE_HTML
-    assert "Bubble Mode" in _BUBBLE_HTML
+    assert "Yachiyo" in _BUBBLE_HTML
     assert "let expandedInitialized = false;" in _BUBBLE_HTML
 
 
