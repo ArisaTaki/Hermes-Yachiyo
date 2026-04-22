@@ -309,16 +309,21 @@ def test_bubble_html_keeps_idle_polling_for_cross_mode_updates():
 
 
 def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
+    assert "{{RUNTIME_ENV_SHIM}}" in _LIVE2D_HTML
     assert "const IDLE_POLL_INTERVAL_MS = 5000;" in _LIVE2D_HTML
     assert "function startIdlePolling()" in _LIVE2D_HTML
     assert "function startActivePolling()" in _LIVE2D_HTML
     assert "startIdlePolling();" in _LIVE2D_HTML
     assert "window.addEventListener('pywebviewready', bootstrap);" in _LIVE2D_HTML
+    assert "window.addEventListener('error', function(event)" in _LIVE2D_HTML
+    assert "window.addEventListener('unhandledrejection', function(event)" in _LIVE2D_HTML
     assert "openSettings()" in _LIVE2D_HTML
-    assert "PIXI.live2d.Live2DModel" in _LIVE2D_HTML
     assert "live2d-canvas" in _LIVE2D_HTML
     assert "live2d-fallback-preview" in _LIVE2D_HTML
     assert "ensureLive2DRenderer" in _LIVE2D_HTML
+    assert "report_client_event" in _LIVE2D_HTML
+    assert "formatRendererDiagnostics" in _LIVE2D_HTML
+    assert "getLive2DModelCtor" in _LIVE2D_HTML
     assert "hair-back" not in _LIVE2D_HTML
     assert "toggle_chat" in _LIVE2D_HTML
     assert "--live2d-scale" in _LIVE2D_HTML
@@ -358,12 +363,45 @@ def test_live2d_preview_is_embedded_as_data_uri():
     assert 'src="data:image/' in html
 
 
-def test_live2d_html_includes_renderer_cdns():
+def test_live2d_html_includes_renderer_cdns(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        _live2d_mod,
+        "_get_live2d_runtime_cache_dir",
+        lambda: tmp_path / "empty-live2d-web-cache",
+    )
+    _live2d_mod._LIVE2D_RUNTIME_DEPENDENCY_STATE.update(
+        {"primed": False, "ready": False, "error": ""}
+    )
     html = _render_live2d_html(AppConfig())
 
     assert "cdn.jsdelivr.net/npm/pixi.js@6" in html
     assert "cdn.jsdelivr.net/npm/pixi-live2d-display@0.5.0-beta" in html
     assert "cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js" in html
+
+
+def test_live2d_html_prefers_cached_runtime_scripts(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "live2d-web-cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    pixi = cache_dir / "pixi.min.js"
+    cubism = cache_dir / "live2dcubismcore.min.js"
+    display = cache_dir / "pixi-live2d-display-cubism4.min.js"
+    pixi.write_text("window.PIXI = {};", encoding="utf-8")
+    cubism.write_text("window.Live2DCubismCore = {};", encoding="utf-8")
+    display.write_text("window.PIXI = window.PIXI || {};", encoding="utf-8")
+
+    monkeypatch.setattr(_live2d_mod, "_get_live2d_runtime_cache_dir", lambda: cache_dir)
+    _live2d_mod._LIVE2D_RUNTIME_DEPENDENCY_STATE.update(
+        {"primed": False, "ready": False, "error": ""}
+    )
+
+    html = _render_live2d_html(AppConfig())
+
+    assert "process.env.NODE_ENV = 'production'" in html
+    assert "window.PIXI = {};" in html
+    assert "window.Live2DCubismCore = {};" in html
+    assert "cdn.jsdelivr.net/npm/pixi.js@6" not in html
+    assert "cdn.jsdelivr.net/npm/pixi-live2d-display@0.5.0-beta" not in html
+    assert "cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js" not in html
 
 
 def test_live2d_view_exposes_renderer_payload(tmp_path, monkeypatch):
@@ -376,6 +414,9 @@ def test_live2d_view_exposes_renderer_payload(tmp_path, monkeypatch):
     (model_dir / "yachiyo.moc3").write_text("stub", encoding="utf-8")
     config.live2d_mode.model_path = str(model_dir)
     try:
+        _live2d_mod._LIVE2D_RUNTIME_DEPENDENCY_STATE.update(
+            {"primed": False, "ready": False, "error": ""}
+        )
         monkeypatch.setattr(
             _live2d_mod,
             "_get_bridge_state",
@@ -397,11 +438,65 @@ def test_live2d_view_exposes_renderer_payload(tmp_path, monkeypatch):
         store.close()
 
 
+def test_live2d_view_reports_dependency_prepare_failure(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    config = AppConfig(display_mode="live2d")
+    model_dir = tmp_path / "models" / "yachiyo"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "yachiyo.model3.json").write_text("{}", encoding="utf-8")
+    (model_dir / "yachiyo.moc3").write_text("stub", encoding="utf-8")
+    config.live2d_mode.model_path = str(model_dir)
+    try:
+        monkeypatch.setattr(_live2d_mod, "_get_bridge_state", lambda: "running")
+        monkeypatch.setattr(
+            _live2d_mod,
+            "_get_bridge_running_config",
+            lambda _config: {"host": "127.0.0.1", "port": 8420},
+        )
+        monkeypatch.setattr(_live2d_mod, "_runtime_dependency_files_ready", lambda: False)
+        _live2d_mod._LIVE2D_RUNTIME_DEPENDENCY_STATE.update(
+            {"primed": True, "ready": False, "error": "network blocked"}
+        )
+
+        view = Live2DWindowAPI(runtime, config).get_live2d_view()
+        renderer = view["live2d"]["renderer"]
+
+        assert renderer["enabled"] is False
+        assert "network blocked" in renderer["reason"]
+    finally:
+        store.close()
+
+
+def test_live2d_api_accepts_client_events(tmp_path, caplog):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    api = Live2DWindowAPI(runtime, AppConfig(display_mode="live2d"))
+    try:
+        with caplog.at_level("ERROR"):
+            result = api.report_client_event(
+                "error",
+                "renderer.model_load_failed",
+                "TypeError: Cannot read properties of undefined (reading 'from')",
+            )
+
+        assert result == {"ok": True}
+        assert api._last_client_event["event"] == "renderer.model_load_failed"
+        assert "Cannot read properties of undefined" in caplog.text
+    finally:
+        store.close()
+
+
 def test_live2d_view_reports_missing_resource_guidance(tmp_path):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _RuntimeStub(store)
     config = AppConfig(display_mode="live2d")
     try:
+        _live2d_mod._LIVE2D_RUNTIME_DEPENDENCY_STATE.update(
+            {"primed": False, "ready": False, "error": ""}
+        )
+        original_resolve = config.live2d_mode.resolve_model_path
+        config.live2d_mode.resolve_model_path = lambda: None  # type: ignore[method-assign]
         view = Live2DWindowAPI(runtime, config).get_live2d_view()
 
         resource = view["live2d"]["resource"]
@@ -409,6 +504,7 @@ def test_live2d_view_reports_missing_resource_guidance(tmp_path):
         assert "GitHub Releases" in resource["help_text"]
         assert resource["default_assets_root_display"].endswith(".hermes/yachiyo/assets/live2d")
     finally:
+        config.live2d_mode.resolve_model_path = original_resolve  # type: ignore[method-assign]
         store.close()
 
 

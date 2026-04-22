@@ -18,14 +18,30 @@ import pytest
 
 def _ensure_bridge_mocks() -> None:
     """为 apps.bridge.server 及其依赖注入最小 mock 模块。"""
+    class _MockMiddlewareEntry:
+        def __init__(self, cls, **options):
+            self.cls = cls
+            self.options = options
+
+    class _MockFastAPI:
+        def __init__(self, **kw):
+            self.routes = []
+            self.user_middleware = []
+
+        def include_router(self, r):
+            return None
+
+        def add_middleware(self, cls, **options):
+            self.user_middleware.append(_MockMiddlewareEntry(cls, **options))
+
     mocks_needed = {
         "uvicorn": {"Config": type("Config", (), {"__init__": lambda s, *a, **kw: None}),
                     "Server": type("Server", (), {"__init__": lambda s, *a: None,
                                                    "run": lambda s: None,
                                                    "should_exit": False})},
-        "fastapi": {"FastAPI": type("FastAPI", (), {"include_router": lambda s, r: None,
-                                                     "__init__": lambda s, **kw: None}),
+        "fastapi": {"FastAPI": _MockFastAPI,
                     "APIRouter": type("APIRouter", (), {"__init__": lambda s, **kw: None})},
+        "fastapi.middleware.cors": {"CORSMiddleware": type("CORSMiddleware", (), {})},
     }
     route_modules = [
         "apps.bridge.routes",

@@ -13,9 +13,15 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict
 from urllib.parse import quote
+from urllib.request import Request, urlopen
 
 from apps.installer.workspace_init import get_workspace_status
-from apps.shell.assets import data_uri, find_live2d_preview_path, project_display_path
+from apps.shell.assets import (
+    data_uri,
+    find_live2d_preview_path,
+    get_yachiyo_workspace_dir,
+    project_display_path,
+)
 from apps.shell.chat_bridge import ChatBridge
 from apps.shell.mode_settings import _serialize_summary
 
@@ -30,6 +36,133 @@ _LIVE2D_CUBISM_CORE_CDN = "https://cubism.live2d.com/sdk-web/cubismcore/live2dcu
 _PIXI_LIVE2D_DISPLAY_CDN = (
     "https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.5.0-beta/dist/cubism4.min.js"
 )
+_LIVE2D_RUNTIME_DEPENDENCY_STATE: dict[str, object] = {
+    "primed": False,
+    "ready": False,
+    "error": "",
+}
+
+_LIVE2D_RUNTIME_ENV_SHIM = """
+<script>
+(function() {
+    var scope = typeof globalThis !== 'undefined' ? globalThis : window;
+    scope.process = scope.process || {};
+    scope.process.env = scope.process.env || {};
+    if (!scope.process.env.NODE_ENV) {
+        scope.process.env.NODE_ENV = 'production';
+    }
+})();
+</script>
+""".strip()
+
+
+def _compact_client_detail(value: object, *, limit: int = 360) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) > limit:
+        return f"{text[: limit - 1]}…"
+    return text
+
+
+def _get_live2d_runtime_cache_dir() -> Path:
+    return get_yachiyo_workspace_dir() / "cache" / "live2d-web"
+
+
+def _get_live2d_runtime_dependency_specs() -> dict[str, tuple[str, Path]]:
+    cache_dir = _get_live2d_runtime_cache_dir()
+    return {
+        "pixi_js": (_PIXI_JS_CDN, cache_dir / "pixi.min.js"),
+        "live2d_cubism_core": (
+            _LIVE2D_CUBISM_CORE_CDN,
+            cache_dir / "live2dcubismcore.min.js",
+        ),
+        "pixi_live2d_display": (
+            _PIXI_LIVE2D_DISPLAY_CDN,
+            cache_dir / "pixi-live2d-display-cubism4.min.js",
+        ),
+    }
+
+
+def _runtime_dependency_files_ready() -> bool:
+    specs = _get_live2d_runtime_dependency_specs()
+    return all(path.exists() and path.is_file() and path.stat().st_size > 0 for _, path in specs.values())
+
+
+def _download_live2d_runtime_dependency(url: str, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    request = Request(url, headers={"User-Agent": "Hermes-Yachiyo/0.1"})
+    with urlopen(request, timeout=20) as response:
+        payload = response.read()
+    if not payload:
+        raise RuntimeError(f"下载 {target.name} 时收到空响应")
+
+    temp_path = target.with_name(f".{target.name}.tmp")
+    temp_path.write_bytes(payload)
+    temp_path.replace(target)
+
+
+def _prime_live2d_runtime_dependencies(force: bool = False) -> tuple[bool, str]:
+    if not force and _LIVE2D_RUNTIME_DEPENDENCY_STATE.get("primed"):
+        return bool(_LIVE2D_RUNTIME_DEPENDENCY_STATE.get("ready")), str(
+            _LIVE2D_RUNTIME_DEPENDENCY_STATE.get("error") or ""
+        )
+
+    specs = _get_live2d_runtime_dependency_specs()
+    error = ""
+    ready = True
+    try:
+        for url, path in specs.values():
+            if not force and path.exists() and path.stat().st_size > 0:
+                continue
+            _download_live2d_runtime_dependency(url, path)
+        ready = _runtime_dependency_files_ready()
+    except Exception as exc:
+        ready = False
+        error = f"{exc}"
+        logger.warning("准备 Live2D 渲染依赖失败: %s", exc)
+
+    _LIVE2D_RUNTIME_DEPENDENCY_STATE["primed"] = True
+    _LIVE2D_RUNTIME_DEPENDENCY_STATE["ready"] = ready
+    _LIVE2D_RUNTIME_DEPENDENCY_STATE["error"] = error
+    return ready, error
+
+
+def _get_live2d_runtime_dependency_state() -> tuple[bool, bool, str]:
+    primed = bool(_LIVE2D_RUNTIME_DEPENDENCY_STATE.get("primed"))
+    ready = bool(_LIVE2D_RUNTIME_DEPENDENCY_STATE.get("ready"))
+    error = str(_LIVE2D_RUNTIME_DEPENDENCY_STATE.get("error") or "")
+    if ready:
+        return primed, True, ""
+    if _runtime_dependency_files_ready():
+        _LIVE2D_RUNTIME_DEPENDENCY_STATE["ready"] = True
+        _LIVE2D_RUNTIME_DEPENDENCY_STATE["error"] = ""
+        return primed, True, ""
+    return primed, False, error
+
+
+def _read_live2d_runtime_script_tag(path: Path) -> str:
+    script_body = path.read_text(encoding="utf-8", errors="ignore")
+    script_body = script_body.replace("</script", "<\\/script")
+    return f"<script>\n{script_body}\n</script>"
+
+
+def _build_live2d_runtime_script_tags() -> dict[str, str]:
+    tags = {
+        "pixi_js": f'<script src="{_PIXI_JS_CDN}"></script>',
+        "live2d_cubism_core": f'<script src="{_LIVE2D_CUBISM_CORE_CDN}"></script>',
+        "pixi_live2d_display": f'<script src="{_PIXI_LIVE2D_DISPLAY_CDN}"></script>',
+    }
+    cached_all = True
+    for key, (_source_url, path) in _get_live2d_runtime_dependency_specs().items():
+        if path.exists() and path.is_file() and path.stat().st_size > 0:
+            tags[key] = _read_live2d_runtime_script_tag(path)
+        else:
+            cached_all = False
+
+    if cached_all:
+        logger.info("Live2D 渲染脚本使用本地缓存内联加载")
+    else:
+        logger.info("Live2D 渲染脚本存在缺口，回退到外部脚本地址")
+    return tags
 
 _LIVE2D_HTML = r"""
 <!DOCTYPE html>
@@ -37,9 +170,10 @@ _LIVE2D_HTML = r"""
 <head>
     <meta charset="UTF-8">
     <title>Hermes-Yachiyo Live2D</title>
-    <script src="{{PIXI_JS_CDN}}"></script>
-    <script src="{{LIVE2D_CUBISM_CORE_CDN}}"></script>
-    <script src="{{PIXI_LIVE2D_DISPLAY_CDN}}"></script>
+    {{RUNTIME_ENV_SHIM}}
+    {{PIXI_JS_TAG}}
+    {{LIVE2D_CUBISM_CORE_TAG}}
+    {{PIXI_LIVE2D_DISPLAY_TAG}}
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         html, body {
@@ -125,6 +259,7 @@ _LIVE2D_HTML = r"""
             font-size: 12px;
             line-height: 1.35;
             text-align: center;
+            white-space: pre-wrap;
             pointer-events: none;
             z-index: 8;
         }
@@ -250,6 +385,7 @@ _LIVE2D_HTML = r"""
     let live2dModelUrl = '';
     let live2dScale = 1;
     let rendererLoadToken = 0;
+    let lastReportedRendererEvent = '';
 
     function getCanvas() { return document.getElementById('live2d-canvas'); }
     function getCharacter() { return document.getElementById('character'); }
@@ -298,13 +434,82 @@ _LIVE2D_HTML = r"""
         document.getElementById('live2d-fallback-preview').classList.add('hidden');
     }
 
+    function compactDetail(detail, limit) {
+        const max = Number(limit || 220);
+        const text = String(detail || '').replace(/\s+/g, ' ').trim();
+        if (text.length > max) return text.slice(0, max - 1) + '…';
+        return text;
+    }
+
+    function formatErrorDetail(error) {
+        if (!error) return '';
+        if (typeof error === 'string') return error;
+        if (error.stack) return String(error.stack);
+        if (error.message) return String(error.message);
+        try {
+            return JSON.stringify(error);
+        } catch (jsonError) {
+            return String(error);
+        }
+    }
+
+    async function reportClientEvent(level, event, detail) {
+        try {
+            if (!window.pywebview || !window.pywebview.api || !window.pywebview.api.report_client_event) return;
+            await window.pywebview.api.report_client_event(
+                String(level || 'info'),
+                String(event || 'client.event'),
+                compactDetail(detail || '', 360),
+            );
+        } catch (error) {}
+    }
+
+    function getRendererDiagnostics() {
+        const live2dNamespace = window.PIXI && window.PIXI.live2d;
+        const live2dModelCtor = getLive2DModelCtor();
+        return {
+            hasPixi: !!window.PIXI,
+            hasPixiApplication: !!(window.PIXI && window.PIXI.Application),
+            hasPixiLive2D: !!live2dNamespace,
+            hasLive2DModel: !!live2dModelCtor,
+            hasCubismCore: !!window.Live2DCubismCore,
+        };
+    }
+
+    function getLive2DModelCtor() {
+        const live2dNamespace = window.PIXI && window.PIXI.live2d;
+        if (!live2dNamespace) return null;
+        return (
+            live2dNamespace.Live2DModel
+            || (live2dNamespace.default && live2dNamespace.default.Live2DModel)
+            || (window.PIXI && window.PIXI.Live2DModel)
+            || window.Live2DModel
+            || null
+        );
+    }
+
+    function formatRendererDiagnostics() {
+        const diagnostics = getRendererDiagnostics();
+        return Object.entries(diagnostics)
+            .map(function(entry) { return entry[0] + '=' + (entry[1] ? '1' : '0'); })
+            .join(' ');
+    }
+
+    function reportRendererEvent(level, event, detail) {
+        const payload = String(event || '') + '|' + compactDetail(detail || '', 360);
+        if (payload === lastReportedRendererEvent) return;
+        lastReportedRendererEvent = payload;
+        reportClientEvent(level, event, detail);
+    }
+
     function rendererAvailable() {
+        const diagnostics = getRendererDiagnostics();
         return !!(
-            window.PIXI
-            && window.PIXI.Application
-            && window.PIXI.live2d
-            && window.PIXI.live2d.Live2DModel
-            && window.Live2DCubismCore
+            diagnostics.hasPixi
+            && diagnostics.hasPixiApplication
+            && diagnostics.hasPixiLive2D
+            && diagnostics.hasLive2DModel
+            && diagnostics.hasCubismCore
         );
     }
 
@@ -365,6 +570,7 @@ _LIVE2D_HTML = r"""
             hideLoading();
             showFallback();
             if (renderer.reason) showError(renderer.reason);
+            reportRendererEvent('info', 'renderer.disabled', renderer.reason || 'renderer disabled');
             return;
         }
 
@@ -372,19 +578,26 @@ _LIVE2D_HTML = r"""
             destroyLive2DRenderer();
             hideLoading();
             showFallback();
-            showError('Live2D 渲染依赖未加载，已回退到静态预览');
+            const detail = formatRendererDiagnostics();
+            showError('Live2D 渲染依赖未加载，已回退到静态预览\n' + detail);
+            reportRendererEvent('warning', 'renderer.dependencies_missing', detail);
             return;
         }
 
         hideError();
         setLoading('Live2D 模型加载中…');
         const currentToken = ++rendererLoadToken;
+        reportRendererEvent('info', 'renderer.loading_model', 'model_url=' + renderer.model_url);
 
         try {
             if (!live2dModel || live2dModelUrl !== renderer.model_url) {
                 destroyLive2DRenderer();
                 const app = ensurePixiApp();
-                const model = await window.PIXI.live2d.Live2DModel.from(renderer.model_url, {
+                const Live2DModelCtor = getLive2DModelCtor();
+                if (!Live2DModelCtor || typeof Live2DModelCtor.from !== 'function') {
+                    throw new Error('Live2DModel.from 不可用');
+                }
+                const model = await Live2DModelCtor.from(renderer.model_url, {
                     autoInteract: false,
                 });
                 if (currentToken !== rendererLoadToken) {
@@ -399,10 +612,17 @@ _LIVE2D_HTML = r"""
             fitLive2DModel();
             hideFallback();
             hideError();
+            reportRendererEvent('info', 'renderer.model_loaded', 'model_url=' + renderer.model_url);
         } catch (error) {
             destroyLive2DRenderer();
             showFallback();
-            showError('Live2D 模型加载失败，已回退到静态预览');
+            const detail = compactDetail(formatErrorDetail(error), 240) || 'unknown error';
+            showError('Live2D 模型加载失败，已回退到静态预览\n' + detail);
+            reportRendererEvent(
+                'error',
+                'renderer.model_load_failed',
+                'model_url=' + renderer.model_url + ' error=' + detail,
+            );
         } finally {
             hideLoading();
         }
@@ -590,9 +810,26 @@ _LIVE2D_HTML = r"""
     function bootstrap() {
         if (bootstrapped) return;
         bootstrapped = true;
+        reportRendererEvent('info', 'bootstrap', formatRendererDiagnostics());
         refreshLive2D();
         startIdlePolling();
     }
+
+    window.addEventListener('error', function(event) {
+        const location = [event.filename || '', event.lineno || 0, event.colno || 0]
+            .filter(Boolean)
+            .join(':');
+        const detail = compactDetail([
+            event.message || 'window error',
+            location,
+            formatErrorDetail(event.error),
+        ].filter(Boolean).join(' | '), 360);
+        reportClientEvent('error', 'window.error', detail);
+    });
+    window.addEventListener('unhandledrejection', function(event) {
+        const detail = compactDetail(formatErrorDetail(event.reason), 360) || 'promise rejected';
+        reportClientEvent('error', 'window.unhandledrejection', detail);
+    });
 
     document.addEventListener('pointerdown', function(event) {
         if (!event.target.closest('#context-menu') && !event.target.closest('#stage')) hideMenu();
@@ -674,12 +911,14 @@ def _resolve_live2d_preview_uri(config: "AppConfig") -> str:
 
 
 def _render_live2d_html(config: "AppConfig") -> str:
+    runtime_tags = _build_live2d_runtime_script_tags()
     return (
         _LIVE2D_HTML
         .replace("{{PREVIEW_URL}}", _resolve_live2d_preview_uri(config))
-        .replace("{{PIXI_JS_CDN}}", _PIXI_JS_CDN)
-        .replace("{{LIVE2D_CUBISM_CORE_CDN}}", _LIVE2D_CUBISM_CORE_CDN)
-        .replace("{{PIXI_LIVE2D_DISPLAY_CDN}}", _PIXI_LIVE2D_DISPLAY_CDN)
+        .replace("{{RUNTIME_ENV_SHIM}}", _LIVE2D_RUNTIME_ENV_SHIM)
+        .replace("{{PIXI_JS_TAG}}", runtime_tags["pixi_js"])
+        .replace("{{LIVE2D_CUBISM_CORE_TAG}}", runtime_tags["live2d_cubism_core"])
+        .replace("{{PIXI_LIVE2D_DISPLAY_TAG}}", runtime_tags["pixi_live2d_display"])
     )
 
 
@@ -691,6 +930,7 @@ class Live2DWindowAPI:
         self._config = config
         self._chat_bridge = ChatBridge(runtime)
         self._live2d_window: Any = None
+        self._last_client_event: dict[str, str] = {}
 
     def get_live2d_view(self) -> Dict[str, Any]:
         live2d = self._config.live2d_mode
@@ -708,14 +948,18 @@ class Live2DWindowAPI:
         }
         preview_path = _resolve_live2d_preview_path(self._config)
         model_url = _build_live2d_model_url(self._config)
+        deps_primed, deps_ready, deps_error = _get_live2d_runtime_dependency_state()
         renderer_enabled = (
             bool(model_url)
             and bridge_state == "running"
             and self._config.bridge_enabled
             and resource.state.value in {"path_valid", "loaded"}
+            and (not deps_primed or deps_ready)
         )
         if resource.state.value not in {"path_valid", "loaded"}:
             renderer_reason = resource.help_text or resource.status_label
+        elif deps_primed and not deps_ready:
+            renderer_reason = f"Live2D 渲染依赖准备失败：{deps_error or '请稍后重试'}"
         elif bridge_state != "running":
             renderer_reason = "Bridge 未运行，暂时无法加载 Live2D 模型"
         elif not model_url:
@@ -809,6 +1053,28 @@ class Live2DWindowAPI:
 
         return {"ok": open_mode_settings_window(self._config, "live2d")}
 
+    def report_client_event(self, level: str = "info", event: str = "client.event", detail: str = "") -> Dict[str, Any]:
+        normalized_level = str(level or "info").lower()
+        normalized_event = _compact_client_detail(event, limit=80) or "client.event"
+        normalized_detail = _compact_client_detail(detail, limit=360)
+        self._last_client_event = {
+            "level": normalized_level,
+            "event": normalized_event,
+            "detail": normalized_detail,
+        }
+
+        message = f"Live2D 前端事件: {normalized_event}"
+        if normalized_detail:
+            message = f"{message} | {normalized_detail}"
+
+        if normalized_level in {"error", "critical"}:
+            logger.error(message)
+        elif normalized_level == "warning":
+            logger.warning(message)
+        else:
+            logger.info(message)
+        return {"ok": True}
+
     def focus_window(self) -> Dict[str, Any]:
         try:
             if self._live2d_window is not None:
@@ -845,6 +1111,7 @@ def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
         import webview  # type: ignore[import]
 
         live2d = config.live2d_mode
+        _prime_live2d_runtime_dependencies()
         api = Live2DWindowAPI(runtime, config)
         win = webview.create_window(
             title="Hermes-Yachiyo Live2D",

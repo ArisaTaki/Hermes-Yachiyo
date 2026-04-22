@@ -13,19 +13,36 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from typing import Any
+
+_FastAPIClass: Any
+_CORSMiddlewareClass: Any
 
 try:
     import uvicorn
     from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+
+    _FastAPIClass = FastAPI
+    _CORSMiddlewareClass = CORSMiddleware
 except ModuleNotFoundError:
     uvicorn = None  # type: ignore[assignment]
 
-    class FastAPI:  # type: ignore[override]
+    class _FastAPIStub:
         def __init__(self, *args, **kwargs) -> None:
-            self.routes = []
+            self.routes: list[Any] = []
 
         def include_router(self, *args, **kwargs) -> None:
             return None
+
+        def add_middleware(self, *args, **kwargs) -> None:
+            return None
+
+    class _CORSMiddlewareStub:
+        pass
+
+    _FastAPIClass = _FastAPIStub
+    _CORSMiddlewareClass = _CORSMiddlewareStub
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +50,22 @@ _FASTAPI_AVAILABLE = uvicorn is not None
 _routes_registered = False
 
 
-app = FastAPI(
+app = _FastAPIClass(
     title="Hermes-Yachiyo Bridge",
     description="内部通信 API，非产品本体",
     version="0.1.0",
 )
+
+if _FASTAPI_AVAILABLE:
+    # pywebview / WKWebView 在 about:blank 页面对本地 bridge 发起 XHR 时，Origin 常为 null。
+    # 这里只放行 null 与回环地址，避免把本地高权限 bridge 暴露给任意网页读取。
+    app.add_middleware(
+        _CORSMiddlewareClass,
+        allow_origins=["null"],
+        allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$",
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 def _register_routes() -> None:
