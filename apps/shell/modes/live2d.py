@@ -192,10 +192,25 @@ _LIVE2D_HTML = r"""
             0%, 100% { transform: translateY(0) scale(var(--live2d-scale, 1)); }
             50% { transform: translateY(-8px) scale(var(--live2d-scale, 1)); }
         }
-        @keyframes unread-pulse {
-            0% { box-shadow: 0 0 0 0 rgba(255, 100, 100, 0.72); }
-            70% { box-shadow: 0 0 0 13px rgba(255, 100, 100, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(255, 100, 100, 0); }
+        @keyframes live2d-message-glow {
+            0%, 100% {
+                filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.24))
+                    drop-shadow(0 0 0 rgba(255, 214, 132, 0));
+            }
+            50% {
+                filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.24))
+                    drop-shadow(0 0 18px rgba(255, 214, 132, 0.62));
+            }
+        }
+        @keyframes live2d-processing-glow {
+            0%, 100% {
+                filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.24))
+                    drop-shadow(0 0 6px rgba(124, 214, 255, 0.24));
+            }
+            50% {
+                filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.24))
+                    drop-shadow(0 0 20px rgba(124, 214, 255, 0.58));
+            }
         }
         @keyframes thinking-dot {
             0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
@@ -220,6 +235,16 @@ _LIVE2D_HTML = r"""
             display: flex;
             align-items: flex-end;
             justify-content: center;
+        }
+        .character.has-message {
+            animation: live2d-idle 4s ease-in-out infinite, live2d-message-glow 1.8s ease-in-out infinite;
+        }
+        .character.processing {
+            animation: live2d-idle 4s ease-in-out infinite, live2d-processing-glow 1.45s ease-in-out infinite;
+        }
+        .character.failed {
+            filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.24))
+                drop-shadow(0 0 14px rgba(255, 130, 130, 0.46));
         }
         .live2d-canvas,
         .live2d-preview-fallback {
@@ -315,28 +340,6 @@ _LIVE2D_HTML = r"""
         .live2d-resource-hint.hidden {
             display: none;
         }
-        .status-dot {
-            position: absolute;
-            right: 38px;
-            top: 90px;
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            border: 2px solid rgba(20, 20, 20, 0.76);
-            background: #71e28c;
-            z-index: 10;
-            display: none;
-        }
-        .status-dot.visible { display: block; }
-        .status-dot.processing {
-            background: #ffd166;
-            animation: unread-pulse 1.45s infinite;
-        }
-        .status-dot.failed,
-        .status-dot.attention {
-            background: #ff6b6b;
-            animation: unread-pulse 1.6s infinite;
-        }
         .context-menu {
             position: fixed;
             right: 12px;
@@ -373,6 +376,7 @@ _LIVE2D_HTML = r"""
          onpointerdown="trackLauncherPointerDown(event)"
          onpointermove="trackLauncherPointerMove(event)"
          onpointerup="trackLauncherPointerUp(event)"
+         onpointerenter="focusLauncherWindow()"
          onclick="toggleChat(event)" oncontextmenu="showMenu(event)">
         <div class="character" id="character" aria-label="Yachiyo Live2D 角色舞台">
             <canvas class="live2d-canvas" id="live2d-canvas"></canvas>
@@ -389,7 +393,6 @@ _LIVE2D_HTML = r"""
             </div>
             <div class="live2d-loading hidden" id="live2d-loading">Live2D 加载中…</div>
             <div class="live2d-error hidden" id="live2d-error"></div>
-            <span class="status-dot" id="status-dot" aria-hidden="true"></span>
         </div>
     </div>
 
@@ -418,6 +421,7 @@ _LIVE2D_HTML = r"""
     let lastReportedRendererEvent = '';
     let currentResourceHintKey = '';
     let dismissedResourceHintKey = '';
+    let lastHitRegionPayload = '';
 
     function getCanvas() { return document.getElementById('live2d-canvas'); }
     function getCharacter() { return document.getElementById('character'); }
@@ -481,10 +485,94 @@ _LIVE2D_HTML = r"""
 
     function showFallback() {
         document.getElementById('live2d-fallback-preview').classList.remove('hidden');
+        setTimeout(reportFallbackHitRegion, 0);
     }
 
     function hideFallback() {
         document.getElementById('live2d-fallback-preview').classList.add('hidden');
+    }
+
+    function setContextMenuOpen(isOpen) {
+        try {
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.set_context_menu_open) {
+                window.pywebview.api.set_context_menu_open(!!isOpen);
+            }
+        } catch (error) {}
+    }
+
+    function normalizedRegionFromRect(rect, kind) {
+        const viewportWidth = Math.max(window.innerWidth || 1, 1);
+        const viewportHeight = Math.max(window.innerHeight || 1, 1);
+        const left = Math.max(0, Math.min(viewportWidth, rect.left));
+        const top = Math.max(0, Math.min(viewportHeight, rect.top));
+        const right = Math.max(left, Math.min(viewportWidth, rect.right));
+        const bottom = Math.max(top, Math.min(viewportHeight, rect.bottom));
+        return {
+            kind: kind || 'ellipse',
+            x: left / viewportWidth,
+            y: top / viewportHeight,
+            width: (right - left) / viewportWidth,
+            height: (bottom - top) / viewportHeight,
+        };
+    }
+
+    function containedImageRect(image) {
+        const rect = image.getBoundingClientRect();
+        const naturalWidth = Number(image.naturalWidth || rect.width || 1);
+        const naturalHeight = Number(image.naturalHeight || rect.height || 1);
+        const scale = Math.min(rect.width / naturalWidth, rect.height / naturalHeight);
+        const width = naturalWidth * scale;
+        const height = naturalHeight * scale;
+        return {
+            left: rect.left + (rect.width - width) / 2,
+            top: rect.top + (rect.height - height) / 2,
+            right: rect.left + (rect.width + width) / 2,
+            bottom: rect.top + (rect.height + height) / 2,
+        };
+    }
+
+    function sendHitRegion(region) {
+        if (!region || region.width <= 0 || region.height <= 0) return;
+        const payload = JSON.stringify(region);
+        if (payload === lastHitRegionPayload) return;
+        lastHitRegionPayload = payload;
+        try {
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.update_hit_region) {
+                window.pywebview.api.update_hit_region(region);
+            }
+        } catch (error) {}
+    }
+
+    function reportFallbackHitRegion() {
+        const fallback = document.getElementById('live2d-fallback-preview');
+        if (!fallback || fallback.classList.contains('hidden')) return;
+        sendHitRegion(normalizedRegionFromRect(containedImageRect(fallback), 'live2d'));
+    }
+
+    function reportLive2DModelHitRegion() {
+        if (!live2dModel || !live2dApp) {
+            reportFallbackHitRegion();
+            return;
+        }
+        try {
+            const bounds = live2dModel.getBounds();
+            const canvasRect = getCanvas().getBoundingClientRect();
+            const renderer = live2dApp.renderer || {};
+            const resolution = Number(renderer.resolution || 1);
+            const renderWidth = Math.max((renderer.width || canvasRect.width) / resolution, 1);
+            const renderHeight = Math.max((renderer.height || canvasRect.height) / resolution, 1);
+            const scaleX = canvasRect.width / renderWidth;
+            const scaleY = canvasRect.height / renderHeight;
+            const rect = {
+                left: canvasRect.left + bounds.x * scaleX,
+                top: canvasRect.top + bounds.y * scaleY,
+                right: canvasRect.left + (bounds.x + bounds.width) * scaleX,
+                bottom: canvasRect.top + (bounds.y + bounds.height) * scaleY,
+            };
+            sendHitRegion(normalizedRegionFromRect(rect, 'live2d'));
+        } catch (error) {
+            reportFallbackHitRegion();
+        }
     }
 
     function compactDetail(detail, limit) {
@@ -611,6 +699,7 @@ _LIVE2D_HTML = r"""
         live2dModel.scale.set(finalScale);
         live2dModel.x = width / 2;
         live2dModel.y = height - 6;
+        reportLive2DModelHitRegion();
     }
 
     async function ensureLive2DRenderer(view) {
@@ -697,7 +786,10 @@ _LIVE2D_HTML = r"""
     }
 
     function hideMenu() {
-        document.getElementById('context-menu').classList.remove('visible');
+        const menu = document.getElementById('context-menu');
+        const wasVisible = menu.classList.contains('visible');
+        menu.classList.remove('visible');
+        if (wasVisible) setContextMenuOpen(false);
     }
 
     function isMenuVisible() {
@@ -775,6 +867,7 @@ _LIVE2D_HTML = r"""
         focusLauncherWindow();
         const menu = document.getElementById('context-menu');
         menu.classList.add('visible');
+        setContextMenuOpen(true);
         positionMenu(event);
         const firstItem = menu.querySelector('.menu-btn');
         if (firstItem) setTimeout(function() {
@@ -791,17 +884,26 @@ _LIVE2D_HTML = r"""
         const scale = Math.max(0.4, Math.min(2.0, Number(live2d.scale || 1)));
         live2dScale = scale;
         character.style.setProperty('--live2d-scale', String(scale));
-        const dot = document.getElementById('status-dot');
         let status = 'ready';
         if (chat.is_processing) status = 'processing';
         else if (chat.messages && chat.messages.some(function(m) { return m.status === 'failed'; })) status = 'failed';
 
         const hasAttention = !!chat.latest_reply && !chat.is_processing;
-        dot.className = 'status-dot visible ' + status + (hasAttention ? ' attention' : '');
-        dot.style.display = (hasAttention || chat.is_processing || status === 'failed') ? 'block' : 'none';
+        const characterClasses = ['character'];
+        if (chat.is_processing) characterClasses.push('processing');
+        else if (status === 'failed') characterClasses.push('failed');
+        else if (hasAttention) characterClasses.push('has-message');
+        character.className = characterClasses.join(' ');
 
+        const messageHint = chat.is_processing
+            ? '，正在回复'
+            : hasAttention
+                ? '，有新消息'
+                : status === 'failed'
+                    ? '，消息发送失败'
+                    : '';
         document.getElementById('stage').title =
-            ((resource.status_label || 'Yachiyo Live2D') + '，点击展开对话');
+            ((resource.status_label || 'Yachiyo Live2D') + messageHint + '，点击展开对话');
 
         renderResourceHint(resource);
 
@@ -900,7 +1002,10 @@ _LIVE2D_HTML = r"""
         if (event.key === 'Escape') hideMenu();
     });
     window.addEventListener('blur', hideMenu);
-    window.addEventListener('resize', fitLive2DModel);
+    window.addEventListener('resize', function() {
+        fitLive2DModel();
+        reportFallbackHitRegion();
+    });
     document.addEventListener('DOMContentLoaded', function() { setTimeout(bootstrap, 300); });
     window.addEventListener('pywebviewready', bootstrap);
     </script>
@@ -975,6 +1080,11 @@ def _render_live2d_html(config: "AppConfig") -> str:
     )
 
 
+def _clamp_float(value: object, lower: float, upper: float) -> float:
+    number = float(value)
+    return max(lower, min(upper, number))
+
+
 class Live2DWindowAPI:
     """Live2D 模式 WebView API。"""
 
@@ -984,6 +1094,8 @@ class Live2DWindowAPI:
         self._chat_bridge = ChatBridge(runtime)
         self._live2d_window: Any = None
         self._last_client_event: dict[str, str] = {}
+        self._context_menu_open = False
+        self._hit_region: dict[str, object] | None = None
 
     def get_live2d_view(self) -> Dict[str, Any]:
         live2d = self._config.live2d_mode
@@ -1106,6 +1218,41 @@ class Live2DWindowAPI:
 
         return {"ok": open_mode_settings_window(self._config, "live2d")}
 
+    def set_context_menu_open(self, is_open: bool) -> Dict[str, Any]:
+        self._context_menu_open = bool(is_open)
+        return {"ok": True}
+
+    def update_hit_region(self, region: dict[str, Any]) -> Dict[str, Any]:
+        try:
+            kind = str(region.get("kind") or "ellipse")
+            if kind not in {"ellipse", "live2d", "model", "rect"}:
+                kind = "live2d"
+            width = _clamp_float(region.get("width"), 0.0, 1.0)
+            height = _clamp_float(region.get("height"), 0.0, 1.0)
+            if width <= 0 or height <= 0:
+                return {"ok": False, "error": "empty hit region"}
+            self._hit_region = {
+                "kind": kind,
+                "x": _clamp_float(region.get("x"), 0.0, 1.0),
+                "y": _clamp_float(region.get("y"), 0.0, 1.0),
+                "width": width,
+                "height": height,
+            }
+            return {"ok": True}
+        except Exception as exc:
+            logger.debug("更新 Live2D 命中区域失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def is_pointer_interactive(self, width: float, height: float, x: float, y: float) -> bool:
+        if self._context_menu_open:
+            return True
+        try:
+            from apps.shell.native_window import live2d_visual_hit_test
+
+            return live2d_visual_hit_test(width, height, x, y, self._hit_region)
+        except Exception:
+            return True
+
     def report_client_event(self, level: str = "info", event: str = "client.event", detail: str = "") -> Dict[str, Any]:
         normalized_level = str(level or "info").lower()
         normalized_event = _compact_client_detail(event, limit=80) or "client.event"
@@ -1196,6 +1343,12 @@ def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
                 title="Hermes-Yachiyo Live2D",
                 always_on_top=live2d.window_on_top,
                 show_on_all_spaces=live2d.show_on_all_spaces,
+            )
+            from apps.shell.native_window import schedule_macos_pointer_passthrough
+
+            schedule_macos_pointer_passthrough(
+                title="Hermes-Yachiyo Live2D",
+                hit_test=api.is_pointer_interactive,
             )
         except Exception as exc:
             logger.debug("调度 macOS Live2D 窗口行为失败: %s", exc)

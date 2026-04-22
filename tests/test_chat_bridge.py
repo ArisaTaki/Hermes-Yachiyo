@@ -343,6 +343,11 @@ def test_launcher_modes_do_not_embed_inline_chat_inputs():
         assert "shouldIgnoreLauncherClick(event)" in html
         assert "positionMenu(event)" in html
         assert "window.pywebview.api.focus_window" in html
+        assert "set_context_menu_open" in html
+    assert "update_hit_region" in _LIVE2D_HTML
+    assert "reportLive2DModelHitRegion" in _LIVE2D_HTML
+    assert "status-dot" not in _LIVE2D_HTML
+    assert "live2d-message-glow" in _LIVE2D_HTML
 
 
 def test_launcher_html_avoids_invalid_alpha_hex_background():

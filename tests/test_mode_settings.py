@@ -40,6 +40,7 @@ class _DialogWindowStub:
     def __init__(self, selection: tuple[str, ...] | None) -> None:
         self.selection = selection
         self.show_calls = 0
+        self.closed = False
         self.events = _WindowEventsStub()
 
     def create_file_dialog(self, *_args, **_kwargs):
@@ -67,9 +68,12 @@ class _WebviewModuleStub:
     def __init__(self) -> None:
         self.create_calls = 0
         self.last_window: _DialogWindowStub | None = None
+        self.on_create = None
 
     def create_window(self, **_kwargs):
         self.create_calls += 1
+        if self.on_create is not None:
+            self.on_create()
         self.last_window = _DialogWindowStub(None)
         return self.last_window
 
@@ -343,6 +347,7 @@ def test_open_mode_settings_window_reuses_existing_mode_window(monkeypatch):
     webview_stub = _WebviewModuleStub()
     monkeypatch.setitem(sys.modules, "webview", webview_stub)
     monkeypatch.setattr(settings_mod, "_settings_windows", {})
+    monkeypatch.setattr(settings_mod, "_settings_windows_creating", set())
 
     config = AppConfig(display_mode="live2d")
 
@@ -357,6 +362,7 @@ def test_open_mode_settings_window_recreates_after_close(monkeypatch):
     webview_stub = _WebviewModuleStub()
     monkeypatch.setitem(sys.modules, "webview", webview_stub)
     monkeypatch.setattr(settings_mod, "_settings_windows", {})
+    monkeypatch.setattr(settings_mod, "_settings_windows_creating", set())
 
     config = AppConfig(display_mode="live2d")
 
@@ -364,6 +370,45 @@ def test_open_mode_settings_window_recreates_after_close(monkeypatch):
     assert webview_stub.last_window is not None
     assert webview_stub.last_window.events.closed.handler is not None
     webview_stub.last_window.events.closed.handler()
+
+    assert open_mode_settings_window(config, "live2d") is True
+    assert webview_stub.create_calls == 2
+
+
+def test_open_mode_settings_window_does_not_reenter_while_creating(monkeypatch):
+    webview_stub = _WebviewModuleStub()
+    monkeypatch.setitem(sys.modules, "webview", webview_stub)
+    monkeypatch.setattr(settings_mod, "_settings_windows", {})
+    monkeypatch.setattr(settings_mod, "_settings_windows_creating", set())
+
+    config = AppConfig(display_mode="live2d")
+    reentered = False
+
+    def _reenter() -> None:
+        nonlocal reentered
+        if reentered:
+            return
+        reentered = True
+        assert open_mode_settings_window(config, "live2d") is True
+
+    webview_stub.on_create = _reenter
+
+    assert open_mode_settings_window(config, "live2d") is True
+    assert reentered is True
+    assert webview_stub.create_calls == 1
+
+
+def test_open_mode_settings_window_ignores_stale_closed_window(monkeypatch):
+    webview_stub = _WebviewModuleStub()
+    monkeypatch.setitem(sys.modules, "webview", webview_stub)
+    monkeypatch.setattr(settings_mod, "_settings_windows", {})
+    monkeypatch.setattr(settings_mod, "_settings_windows_creating", set())
+
+    config = AppConfig(display_mode="live2d")
+
+    assert open_mode_settings_window(config, "live2d") is True
+    assert webview_stub.last_window is not None
+    webview_stub.last_window.closed = True
 
     assert open_mode_settings_window(config, "live2d") is True
     assert webview_stub.create_calls == 2

@@ -31,10 +31,30 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _settings_windows: dict[str, Any] = {}
+_settings_windows_creating: set[str] = set()
 _settings_window_lock = threading.RLock()
 
 
+def _event_is_set(event: Any) -> bool:
+    is_set = getattr(event, "is_set", None)
+    if callable(is_set):
+        try:
+            return bool(is_set())
+        except Exception:
+            return False
+    return False
+
+
+def _is_window_probably_closed(window: Any) -> bool:
+    if bool(getattr(window, "closed", False)) or bool(getattr(window, "destroyed", False)):
+        return True
+    closed_event = getattr(getattr(window, "events", None), "closed", None)
+    return _event_is_set(closed_event)
+
+
 def _focus_window_instance(window: Any, *, title: str) -> bool:
+    if _is_window_probably_closed(window):
+        return False
     try:
         for method_name in ("restore", "show", "bring_to_front", "focus"):
             method = getattr(window, method_name, None)
@@ -781,17 +801,33 @@ def open_mode_settings_window(config: "AppConfig", mode_id: str) -> bool:
             if _focus_window_instance(existing, title=window_title):
                 return True
             _settings_windows.pop(descriptor.id, None)
+        if descriptor.id in _settings_windows_creating:
+            try:
+                from apps.shell.native_window import focus_macos_window
+
+                focus_macos_window(title=window_title)
+            except Exception:
+                pass
+            return True
+        _settings_windows_creating.add(descriptor.id)
 
     api = ModeSettingsAPI(config, descriptor.id)
-    window = webview.create_window(
-        title=window_title,
-        html=_SETTINGS_HTML,
-        width=520,
-        height=620,
-        resizable=True,
-        js_api=api,
-    )
+    try:
+        window = webview.create_window(
+            title=window_title,
+            html=_SETTINGS_HTML,
+            width=520,
+            height=620,
+            resizable=True,
+            js_api=api,
+        )
+    except Exception:
+        with _settings_window_lock:
+            _settings_windows_creating.discard(descriptor.id)
+        raise
+
     with _settings_window_lock:
+        _settings_windows_creating.discard(descriptor.id)
         _settings_windows[descriptor.id] = window
     api.bind_window(window)
 
@@ -799,6 +835,7 @@ def open_mode_settings_window(config: "AppConfig", mode_id: str) -> bool:
     if closed_event is not None:
         def _on_closed() -> None:
             with _settings_window_lock:
+                _settings_windows_creating.discard(descriptor.id)
                 if _settings_windows.get(descriptor.id) is window:
                     _settings_windows.pop(descriptor.id, None)
 

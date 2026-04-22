@@ -180,6 +180,7 @@ _BUBBLE_HTML = r"""
             onpointerdown="trackLauncherPointerDown(event)"
             onpointermove="trackLauncherPointerMove(event)"
             onpointerup="trackLauncherPointerUp(event)"
+            onpointerenter="focusLauncherWindow()"
             onclick="toggleChat(event)" oncontextmenu="showMenu(event)">
         <span class="portrait" aria-hidden="true"><span class="mouth"></span></span>
         <span class="status-dot empty" id="status-dot" aria-hidden="true"></span>
@@ -224,7 +225,10 @@ function stopPolling() {
 }
 
 function hideMenu() {
-    document.getElementById('context-menu').classList.remove('visible');
+    const menu = document.getElementById('context-menu');
+    const wasVisible = menu.classList.contains('visible');
+    menu.classList.remove('visible');
+    if (wasVisible) setContextMenuOpen(false);
 }
 
 function isMenuVisible() {
@@ -282,6 +286,14 @@ async function focusLauncherWindow() {
     } catch (error) {}
 }
 
+function setContextMenuOpen(isOpen) {
+    try {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.set_context_menu_open) {
+            window.pywebview.api.set_context_menu_open(!!isOpen);
+        }
+    } catch (error) {}
+}
+
 function positionMenu(event) {
     const menu = document.getElementById('context-menu');
     const margin = 4;
@@ -302,6 +314,7 @@ function showMenu(event) {
     focusLauncherWindow();
     const menu = document.getElementById('context-menu');
     menu.classList.add('visible');
+    setContextMenuOpen(true);
     positionMenu(event);
     const firstItem = menu.querySelector('.menu-btn');
     if (firstItem) setTimeout(function() {
@@ -432,6 +445,7 @@ class BubbleWindowAPI:
         self._last_proactive_task_id: str | None = None
         self._proactive_attention_task_id: str | None = None
         self._proactive_acknowledged_task_id: str | None = None
+        self._context_menu_open = False
 
     def get_bubble_view(self) -> Dict[str, Any]:
         bubble = self._config.bubble_mode
@@ -631,6 +645,20 @@ class BubbleWindowAPI:
 
         return {"ok": open_mode_settings_window(self._config, "bubble")}
 
+    def set_context_menu_open(self, is_open: bool) -> Dict[str, Any]:
+        self._context_menu_open = bool(is_open)
+        return {"ok": True}
+
+    def is_pointer_interactive(self, width: float, height: float, x: float, y: float) -> bool:
+        if self._context_menu_open:
+            return True
+        try:
+            from apps.shell.native_window import bubble_visual_hit_test
+
+            return bubble_visual_hit_test(width, height, x, y)
+        except Exception:
+            return True
+
     def focus_window(self) -> Dict[str, Any]:
         try:
             if self._bubble_window is not None:
@@ -703,6 +731,14 @@ def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
                 title="Hermes-Yachiyo Bubble",
                 always_on_top=bubble.always_on_top,
                 show_on_all_spaces=False,
+            )
+            from apps.shell.native_window import schedule_macos_pointer_passthrough
+
+            schedule_macos_pointer_passthrough(
+                title="Hermes-Yachiyo Bubble",
+                hit_test=api.is_pointer_interactive,
+                interval_seconds=0.02,
+                focus_on_hover=True,
             )
         except Exception as exc:
             logger.debug("调度 macOS Bubble 窗口行为失败: %s", exc)
