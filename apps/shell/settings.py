@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import webbrowser
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -28,6 +29,27 @@ if TYPE_CHECKING:
     from apps.shell.config import AppConfig
 
 logger = logging.getLogger(__name__)
+
+_settings_windows: dict[str, Any] = {}
+_settings_window_lock = threading.RLock()
+
+
+def _focus_window_instance(window: Any, *, title: str) -> bool:
+    try:
+        for method_name in ("restore", "show", "bring_to_front", "focus"):
+            method = getattr(window, method_name, None)
+            if callable(method):
+                method()
+        try:
+            from apps.shell.native_window import focus_macos_window
+
+            focus_macos_window(title=title)
+        except Exception:
+            pass
+        return True
+    except Exception as exc:
+        logger.debug("聚焦模式设置窗口失败: %s", exc)
+        return False
 
 
 def _find_importable_live2d_dir(root: Path) -> Path | None:
@@ -193,6 +215,7 @@ class ModeSettingsAPI:
     def choose_live2d_model_path(self) -> dict[str, Any]:
         self._ensure_live2d_mode()
         try:
+            folder_dialog: Any
             try:
                 import webview  # type: ignore[import]
 
@@ -219,6 +242,7 @@ class ModeSettingsAPI:
     def import_live2d_archive(self) -> dict[str, Any]:
         self._ensure_live2d_mode()
         try:
+            open_dialog: Any
             try:
                 import webview  # type: ignore[import]
 
@@ -369,6 +393,27 @@ input:checked + .slider:before { transform: translateX(20px); }
     justify-content: flex-end;
     gap: 8px;
 }
+.range-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    min-width: 238px;
+}
+.range {
+    width: 136px;
+    accent-color: #86a9ff;
+}
+.range-value {
+    min-width: 52px;
+    text-align: right;
+    color: #a9b1e6;
+    font-size: 0.8em;
+}
+.range-number {
+    width: 74px;
+    min-width: 74px;
+}
 .action-btn {
     border: 1px solid #4b5685;
     background: #1a2242;
@@ -475,10 +520,44 @@ function inputRow(key, label, value, type='text', step='') {
         + ' onchange="saveInput(\\'' + key + '\\', this)"></div>';
 }
 
+function domId(key) {
+    return String(key).replace(/[^a-zA-Z0-9_-]+/g, '-');
+}
+
+function scaleRow(key, label, value, min='0.40', max='2.00', step='0.01') {
+    const id = domId(key);
+    const current = num(value, 1).toFixed(2);
+    return '<div class="row"><span class="label">' + label + '</span>'
+        + '<div class="range-wrap">'
+        + '<input class="range" id="' + id + '-range" type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + current + '"'
+        + ' oninput="syncScaleValue(\\'' + id + '\\', this.value)"'
+        + ' onchange="saveScaleField(\\'' + key + '\\', \\'' + id + '\\', this.value)">'
+        + '<span class="range-value" id="' + id + '-value">' + current + 'x</span>'
+        + '<input class="input range-number" id="' + id + '-number" type="number" min="' + min + '" max="' + max + '" step="' + step + '" value="' + current + '"'
+        + ' oninput="syncScaleValue(\\'' + id + '\\', this.value)"'
+        + ' onchange="saveScaleField(\\'' + key + '\\', \\'' + id + '\\', this.value)">'
+        + '</div></div>';
+}
+
 function valueRow(label, value) {
     return '<div class="row"><span class="label">' + label + '</span>'
         + '<span class="value" style="font-size:0.78em;word-break:break-all;">'
         + escapeHtml(String(value || '—')) + '</span></div>';
+}
+
+function syncScaleValue(id, value) {
+    const normalized = num(value, 1).toFixed(2);
+    const range = document.getElementById(id + '-range');
+    const number = document.getElementById(id + '-number');
+    const text = document.getElementById(id + '-value');
+    if (range) range.value = normalized;
+    if (number) number.value = normalized;
+    if (text) text.textContent = normalized + 'x';
+}
+
+async function saveScaleField(key, id, value) {
+    syncScaleValue(id, value);
+    await saveField(key, num(value, 1));
 }
 
 function actionButton(label, handler, kind='') {
@@ -573,6 +652,7 @@ function renderForm(mode, cfg) {
             + actionButton('打开导入目录', 'openLive2DAssetsDir', 'secondary')
             + actionButton('打开 Releases', 'openLive2DReleases', 'secondary')
         );
+        html += scaleRow('live2d_mode.scale', '角色缩放', cfg.scale, '0.40', '2.00', '0.01');
         html += inputRow('live2d_mode.model_name', '模型名称', cfg.model_name);
         html += valueRow('当前配置路径', cfg.model_path_display || cfg.model_path || '未填写');
         html += valueRow('当前生效路径', cfg.effective_model_path_display || '未检测到资源');
@@ -581,7 +661,6 @@ function renderForm(mode, cfg) {
         html += inputRow('live2d_mode.height', '窗口高度', cfg.height, 'number');
         html += inputRow('live2d_mode.position_x', '位置 X', cfg.position_x, 'number');
         html += inputRow('live2d_mode.position_y', '位置 Y', cfg.position_y, 'number');
-        html += inputRow('live2d_mode.scale', '角色缩放', cfg.scale, 'number', '0.01');
         html += boolRow('live2d_mode.window_on_top', '窗口置顶', cfg.window_on_top);
         html += boolRow('live2d_mode.show_on_all_spaces', 'macOS 所有桌面可见', cfg.show_on_all_spaces);
         html += boolRow('live2d_mode.auto_open_chat_window', '自动打开聊天窗口', cfg.auto_open_chat_window);
@@ -694,14 +773,34 @@ def open_mode_settings_window(config: "AppConfig", mode_id: str) -> bool:
         return False
 
     descriptor = get_mode_descriptor(mode_id)
+    window_title = f"Hermes-Yachiyo — {descriptor.settings_title}"
+
+    with _settings_window_lock:
+        existing = _settings_windows.get(descriptor.id)
+        if existing is not None:
+            if _focus_window_instance(existing, title=window_title):
+                return True
+            _settings_windows.pop(descriptor.id, None)
+
     api = ModeSettingsAPI(config, descriptor.id)
     window = webview.create_window(
-        title=f"Hermes-Yachiyo — {descriptor.settings_title}",
+        title=window_title,
         html=_SETTINGS_HTML,
         width=520,
         height=620,
         resizable=True,
         js_api=api,
     )
+    with _settings_window_lock:
+        _settings_windows[descriptor.id] = window
     api.bind_window(window)
+
+    closed_event = getattr(getattr(window, "events", None), "closed", None)
+    if closed_event is not None:
+        def _on_closed() -> None:
+            with _settings_window_lock:
+                if _settings_windows.get(descriptor.id) is window:
+                    _settings_windows.pop(descriptor.id, None)
+
+        closed_event += _on_closed
     return True

@@ -277,11 +277,32 @@ _LIVE2D_HTML = r"""
             border-radius: 12px;
             font-size: 12px;
             line-height: 1.45;
-            text-align: center;
+            text-align: left;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
             z-index: 9;
-            pointer-events: none;
+            pointer-events: auto;
             background: rgba(20, 24, 31, 0.72);
             color: #edf2f7;
+        }
+        .live2d-resource-hint-text {
+            flex: 1;
+        }
+        .live2d-resource-hint-close {
+            border: 0;
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+            font-size: 14px;
+            line-height: 1;
+            padding: 0;
+            opacity: 0.82;
+        }
+        .live2d-resource-hint-close:hover,
+        .live2d-resource-hint-close:focus {
+            opacity: 1;
+            outline: none;
         }
         .live2d-resource-hint.warn {
             background: rgba(108, 64, 18, 0.86);
@@ -356,7 +377,16 @@ _LIVE2D_HTML = r"""
         <div class="character" id="character" aria-label="Yachiyo Live2D 角色舞台">
             <canvas class="live2d-canvas" id="live2d-canvas"></canvas>
             <img class="live2d-preview-fallback hidden" id="live2d-fallback-preview" src="{{PREVIEW_URL}}" alt="">
-            <div class="live2d-resource-hint hidden" id="live2d-resource-hint"></div>
+            <div class="live2d-resource-hint hidden" id="live2d-resource-hint">
+                <span class="live2d-resource-hint-text" id="live2d-resource-hint-text"></span>
+                <button
+                    class="live2d-resource-hint-close"
+                    id="live2d-resource-hint-close"
+                    type="button"
+                    onclick="dismissResourceHint(event)"
+                    aria-label="关闭资源提示"
+                >×</button>
+            </div>
             <div class="live2d-loading hidden" id="live2d-loading">Live2D 加载中…</div>
             <div class="live2d-error hidden" id="live2d-error"></div>
             <span class="status-dot" id="status-dot" aria-hidden="true"></span>
@@ -386,6 +416,8 @@ _LIVE2D_HTML = r"""
     let live2dScale = 1;
     let rendererLoadToken = 0;
     let lastReportedRendererEvent = '';
+    let currentResourceHintKey = '';
+    let dismissedResourceHintKey = '';
 
     function getCanvas() { return document.getElementById('live2d-canvas'); }
     function getCharacter() { return document.getElementById('character'); }
@@ -412,9 +444,11 @@ _LIVE2D_HTML = r"""
 
     function renderResourceHint(resource) {
         const node = document.getElementById('live2d-resource-hint');
+        const textNode = document.getElementById('live2d-resource-hint-text');
         if (!resource) {
+            currentResourceHintKey = '';
             node.className = 'live2d-resource-hint hidden';
-            node.textContent = '';
+            textNode.textContent = '';
             return;
         }
 
@@ -422,8 +456,27 @@ _LIVE2D_HTML = r"""
         const tone = (state === 'path_valid' || state === 'loaded') ? 'ok' : 'warn';
         const lines = [resource.status_label || ''];
         if (resource.help_text) lines.push(resource.help_text);
-        node.textContent = lines.filter(Boolean).join(' ');
+        currentResourceHintKey = [
+            resource.state || '',
+            resource.status_label || '',
+            resource.help_text || '',
+            resource.effective_model_path || '',
+        ].join('|');
+        textNode.textContent = lines.filter(Boolean).join(' ');
+        if (dismissedResourceHintKey && dismissedResourceHintKey === currentResourceHintKey) {
+            node.className = 'live2d-resource-hint hidden';
+            return;
+        }
         node.className = 'live2d-resource-hint ' + tone;
+    }
+
+    function dismissResourceHint(event) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        dismissedResourceHintKey = currentResourceHintKey || '__dismissed__';
+        document.getElementById('live2d-resource-hint').classList.add('hidden');
     }
 
     function showFallback() {

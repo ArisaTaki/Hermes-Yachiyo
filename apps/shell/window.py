@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 try:
     import webview
@@ -35,6 +35,8 @@ _force_exit_timer: threading.Timer | None = None
 _exit_timer_lock = threading.Lock()
 _restart_timer: threading.Timer | None = None
 _restart_timer_lock = threading.Lock()
+_main_window: object | None = None
+_main_window_lock = threading.RLock()
 
 # 正常状态页 HTML
 _STATUS_HTML = """
@@ -1490,9 +1492,17 @@ def open_main_window(
     bind_exit: bool = False,
 ) -> bool:
     """在当前 webview 会话中打开主控台窗口。"""
+    global _main_window
+
     if not _HAS_WEBVIEW:
         logger.warning("pywebview 未安装，无法打开主控台窗口")
         return False
+
+    with _main_window_lock:
+        if _main_window is not None:
+            if _focus_existing_window(_main_window, title="Hermes-Yachiyo Control Center"):
+                return True
+            _main_window = None
 
     from apps.shell.main_api import MainWindowAPI
     api = MainWindowAPI(runtime, config)
@@ -1500,16 +1510,29 @@ def open_main_window(
     html = _STATUS_HTML.replace("{{HOST}}", config.bridge_host).replace("{{PORT}}", str(config.bridge_port))
     window_config = config.window_mode
 
-    window = webview.create_window(
-        title="Hermes-Yachiyo Control Center",
-        html=html,
-        width=window_config.width,
-        height=window_config.height,
-        resizable=True,
-        js_api=api,
-    )
+    with _main_window_lock:
+        window = webview.create_window(
+            title="Hermes-Yachiyo Control Center",
+            html=html,
+            width=window_config.width,
+            height=window_config.height,
+            resizable=True,
+            js_api=api,
+        )
+        _main_window = window
+
     if bind_exit:
         _bind_main_window_exit(window)
+
+    closed_event = getattr(getattr(window, "events", None), "closed", None)
+    if closed_event is not None:
+        def _on_closed() -> None:
+            global _main_window
+            with _main_window_lock:
+                if _main_window is window:
+                    _main_window = None
+
+        closed_event += _on_closed
     return True
 
 
@@ -1533,7 +1556,7 @@ def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
     webview.start(debug=False)
 
 
-def bind_app_window_exit(app_window: object, *, label: str = "窗口"):
+def bind_app_window_exit(app_window: Any, *, label: str = "窗口"):
     """应用主入口窗口关闭时同步关闭附属窗口。
 
     不在 pywebview closing 回调里弹确认框，避免 macOS WebView 关闭事件重入卡死。
@@ -1558,6 +1581,24 @@ def bind_app_window_exit(app_window: object, *, label: str = "窗口"):
 def _bind_main_window_exit(main_window: object):
     """主窗口关闭时同步关闭附属窗口。"""
     return bind_app_window_exit(main_window, label="主窗口")
+
+
+def _focus_existing_window(app_window: object, *, title: str) -> bool:
+    try:
+        for method_name in ("restore", "show", "bring_to_front", "focus"):
+            method = getattr(app_window, method_name, None)
+            if callable(method):
+                method()
+        try:
+            from apps.shell.native_window import focus_macos_window
+
+            focus_macos_window(title=title)
+        except Exception:
+            pass
+        return True
+    except Exception as exc:
+        logger.debug("聚焦窗口失败: %s", exc)
+        return False
 
 
 def request_app_exit() -> None:
@@ -1625,6 +1666,11 @@ def _force_app_exit() -> None:
 
 def _destroy_all_windows_for_exit() -> None:
     """关闭聊天窗口及所有 pywebview 窗口。"""
+    global _main_window
+
+    with _main_window_lock:
+        _main_window = None
+
     _close_auxiliary_windows(main_window=None)
 
     webview_module = globals().get("webview")
@@ -1749,8 +1795,9 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
     # 安装/配置步骤
     install_steps = ""
     if "actions" in guidance:
-        steps_html = []
-        for i, action in enumerate(guidance["actions"], 1):
+        actions: list[str] = guidance["actions"]
+        steps_html: list[str] = []
+        for _i, action in enumerate(actions, 1):
             if action.startswith("  "):
                 # 缩进的命令或说明
                 steps_html.append(f'<div class="code-block">{action.strip()}</div>')

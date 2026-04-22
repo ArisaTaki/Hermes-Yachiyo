@@ -1,5 +1,6 @@
 """Main window exit behavior tests."""
 
+import apps.shell.main_api as main_api_mod
 from apps.shell import chat_window, window as window_mod
 from apps.shell.modes.bubble import BubbleWindowAPI
 from apps.shell.window import _STATUS_HTML
@@ -17,15 +18,20 @@ class FakeEvent:
 class FakeEvents:
     def __init__(self):
         self.closing = FakeEvent()
+        self.closed = FakeEvent()
 
 
 class FakeWindow:
     def __init__(self):
         self.destroyed = False
+        self.shown = 0
         self.events = FakeEvents()
 
     def destroy(self):
         self.destroyed = True
+
+    def show(self):
+        self.shown += 1
 
 
 class FakeWebview:
@@ -34,7 +40,7 @@ class FakeWebview:
 
 
 class FakeTimer:
-    instances = []
+    instances: list["FakeTimer"] = []
 
     def __init__(self, interval, callback):
         self.interval = interval
@@ -174,3 +180,59 @@ def test_close_chat_window_destroys_existing_window(monkeypatch):
     assert chat_window.close_chat_window() is True
     assert win.destroyed is True
     assert chat_window._chat_window is None
+
+
+def test_open_main_window_reuses_existing_window(monkeypatch):
+    created = []
+
+    class FakeWebviewModule:
+        def create_window(self, **_kwargs):
+            window = FakeWindow()
+            created.append(window)
+            return window
+
+    monkeypatch.setattr(window_mod, "_HAS_WEBVIEW", True)
+    monkeypatch.setattr(window_mod, "webview", FakeWebviewModule(), raising=False)
+    monkeypatch.setattr(window_mod, "_main_window", None)
+    monkeypatch.setattr(main_api_mod, "MainWindowAPI", lambda *_args, **_kwargs: object())
+
+    runtime = object()
+    config = type("Config", (), {
+        "bridge_host": "127.0.0.1",
+        "bridge_port": 8420,
+        "window_mode": type("WindowMode", (), {"width": 960, "height": 720})(),
+    })()
+
+    assert window_mod.open_main_window(runtime, config) is True
+    assert window_mod.open_main_window(runtime, config) is True
+    assert len(created) == 1
+    assert created[0].shown == 1
+
+
+def test_open_main_window_recreates_after_close(monkeypatch):
+    created = []
+
+    class FakeWebviewModule:
+        def create_window(self, **_kwargs):
+            window = FakeWindow()
+            created.append(window)
+            return window
+
+    monkeypatch.setattr(window_mod, "_HAS_WEBVIEW", True)
+    monkeypatch.setattr(window_mod, "webview", FakeWebviewModule(), raising=False)
+    monkeypatch.setattr(window_mod, "_main_window", None)
+    monkeypatch.setattr(main_api_mod, "MainWindowAPI", lambda *_args, **_kwargs: object())
+
+    runtime = object()
+    config = type("Config", (), {
+        "bridge_host": "127.0.0.1",
+        "bridge_port": 8420,
+        "window_mode": type("WindowMode", (), {"width": 960, "height": 720})(),
+    })()
+
+    assert window_mod.open_main_window(runtime, config) is True
+    assert created[0].events.closed.handler is not None
+    created[0].events.closed.handler()
+
+    assert window_mod.open_main_window(runtime, config) is True
+    assert len(created) == 2

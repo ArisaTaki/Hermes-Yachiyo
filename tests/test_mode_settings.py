@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import sys
+import types
 import zipfile
 from pathlib import Path
 
 import apps.shell.config as config_mod
+import apps.shell.settings as settings_mod
 from apps.shell.assets import (
     DEFAULT_BUBBLE_AVATAR_PATH,
     LEGACY_BUNDLED_LIVE2D_MODEL_DIR,
@@ -18,7 +21,7 @@ from apps.shell.mode_settings import (
     serialize_mode_settings,
     serialize_mode_window_data,
 )
-from apps.shell.settings import ModeSettingsAPI, _SETTINGS_HTML, _import_live2d_archive
+from apps.shell.settings import ModeSettingsAPI, _SETTINGS_HTML, _import_live2d_archive, open_mode_settings_window
 
 
 def _create_live2d_model_dir(root: Path, model_name: str = "demo") -> Path:
@@ -36,9 +39,39 @@ def _patch_no_live2d_assets(monkeypatch, tmp_path: Path) -> None:
 class _DialogWindowStub:
     def __init__(self, selection: tuple[str, ...] | None) -> None:
         self.selection = selection
+        self.show_calls = 0
+        self.events = _WindowEventsStub()
 
     def create_file_dialog(self, *_args, **_kwargs):
         return self.selection
+
+    def show(self):
+        self.show_calls += 1
+
+
+class _EventHookStub:
+    def __init__(self) -> None:
+        self.handler = None
+
+    def __iadd__(self, handler):
+        self.handler = handler
+        return self
+
+
+class _WindowEventsStub:
+    def __init__(self) -> None:
+        self.closed = _EventHookStub()
+
+
+class _WebviewModuleStub:
+    def __init__(self) -> None:
+        self.create_calls = 0
+        self.last_window: _DialogWindowStub | None = None
+
+    def create_window(self, **_kwargs):
+        self.create_calls += 1
+        self.last_window = _DialogWindowStub(None)
+        return self.last_window
 
 
 def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
@@ -171,6 +204,8 @@ def test_mode_settings_window_does_not_render_common_settings():
     assert "Common" not in _SETTINGS_HTML
     assert "display_mode" not in _SETTINGS_HTML
     assert "bridge_host" not in _SETTINGS_HTML
+    assert "function scaleRow" in _SETTINGS_HTML
+    assert 'type="range"' in _SETTINGS_HTML
     assert "选择模型目录" in _SETTINGS_HTML
     assert "导入资源包 ZIP" in _SETTINGS_HTML
     assert "打开导入目录" in _SETTINGS_HTML
@@ -302,3 +337,33 @@ def test_import_live2d_archive_extracts_model_dir(tmp_path):
     assert imported_path.exists()
     assert imported_path.name == "yachiyo"
     assert (imported_path / "yachiyo.model3.json").exists()
+
+
+def test_open_mode_settings_window_reuses_existing_mode_window(monkeypatch):
+    webview_stub = _WebviewModuleStub()
+    monkeypatch.setitem(sys.modules, "webview", webview_stub)
+    monkeypatch.setattr(settings_mod, "_settings_windows", {})
+
+    config = AppConfig(display_mode="live2d")
+
+    assert open_mode_settings_window(config, "live2d") is True
+    assert open_mode_settings_window(config, "live2d") is True
+    assert webview_stub.create_calls == 1
+    assert webview_stub.last_window is not None
+    assert webview_stub.last_window.show_calls == 1
+
+
+def test_open_mode_settings_window_recreates_after_close(monkeypatch):
+    webview_stub = _WebviewModuleStub()
+    monkeypatch.setitem(sys.modules, "webview", webview_stub)
+    monkeypatch.setattr(settings_mod, "_settings_windows", {})
+
+    config = AppConfig(display_mode="live2d")
+
+    assert open_mode_settings_window(config, "live2d") is True
+    assert webview_stub.last_window is not None
+    assert webview_stub.last_window.events.closed.handler is not None
+    webview_stub.last_window.events.closed.handler()
+
+    assert open_mode_settings_window(config, "live2d") is True
+    assert webview_stub.create_calls == 2

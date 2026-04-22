@@ -321,6 +321,8 @@ def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
     assert "live2d-canvas" in _LIVE2D_HTML
     assert "live2d-fallback-preview" in _LIVE2D_HTML
     assert "ensureLive2DRenderer" in _LIVE2D_HTML
+    assert "dismissResourceHint(event)" in _LIVE2D_HTML
+    assert "live2d-resource-hint-close" in _LIVE2D_HTML
     assert "report_client_event" in _LIVE2D_HTML
     assert "formatRendererDiagnostics" in _LIVE2D_HTML
     assert "getLive2DModelCtor" in _LIVE2D_HTML
