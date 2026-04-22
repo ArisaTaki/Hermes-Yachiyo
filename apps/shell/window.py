@@ -28,8 +28,10 @@ from packages.protocol.enums import HermesInstallStatus
 logger = logging.getLogger(__name__)
 
 _EXIT_DELAY_SECONDS = 0.1
+_EXIT_FORCE_DELAY_SECONDS = 0.7
 _RESTART_DELAY_SECONDS = 0.8
 _exit_timer: threading.Timer | None = None
+_force_exit_timer: threading.Timer | None = None
 _exit_timer_lock = threading.Lock()
 _restart_timer: threading.Timer | None = None
 _restart_timer_lock = threading.Lock()
@@ -395,19 +397,20 @@ _STATUS_HTML = """
             <div class="row"><span class="label">版本</span><span class="value" id="hermes-version">—</span></div>
             <div class="row"><span class="label">平台</span><span class="value" id="hermes-platform">—</span></div>
             <div class="row" id="hermes-limited-row" style="display:none;"><span class="label" style="font-size:0.82em;color:#cc8844;">受限工具</span><span class="value warn" id="hermes-limited" style="font-size:0.8em;">—</span></div>
-            <!-- 补全能力入口：仅在 basic_ready 时显示 -->
+            <div class="row" id="hermes-doctor-row" style="display:none;"><span class="label" style="font-size:0.82em;color:#cc8844;">诊断提示</span><span class="value warn" id="hermes-doctor" style="font-size:0.8em;">—</span></div>
+            <!-- 补全能力入口：doctor 发现问题或受限工具时显示 -->
             <div id="hermes-enhance-row" style="display:none;margin-top:10px;">
                 <button onclick="toggleHermesEnhancePanel()" id="hermes-enhance-btn"
                     style="width:100%;padding:6px 0;background:#2a3a5a;border:1px solid #4a6a9a;
                            border-radius:5px;color:#9ab4d8;font-size:0.84em;cursor:pointer;">
-                    🔧 补全 Hermes 能力
+                    🔧 检测 / 补全 Hermes 能力
                 </button>
             </div>
             <!-- inline 操作面板 -->
             <div id="hermes-enhance-panel" style="display:none;margin-top:8px;padding:10px;
-                 background:#1a2a3a;border-radius:6px;border-left:3px solid #cc8844;">
+                background:#1a2a3a;border-radius:6px;border-left:3px solid #cc8844;">
                 <div style="color:#cc8844;font-size:0.82em;margin-bottom:8px;">
-                    当前处于<b>基础可用</b>状态，部分高级工具（如消息平台、图像生成等）尚未配置。
+                    当前检测到部分工具或配置仍受限，可能影响消息平台、图像生成、搜索等能力。
                     完成以下操作可解锁更多能力：
                 </div>
                 <div style="display:flex;flex-direction:column;gap:6px;">
@@ -479,7 +482,7 @@ _STATUS_HTML = """
             <div class="action-btn" id="action-settings" onclick="toggleSettings()">
                 <span class="icon">⚙️</span>
                 <span class="name">应用设置</span>
-                <span class="desc">Common</span>
+                <span class="desc">全局配置</span>
             </div>
         </div>
     </div>
@@ -529,15 +532,16 @@ _STATUS_HTML = """
             <div class="settings-row"><span class="label">安装状态</span><span class="value" id="s-hermes-status">—</span></div>
             <div class="settings-row"><span class="label">能力就绪</span><span class="value" id="s-hermes-readiness">—</span></div>
             <div class="settings-row" id="s-hermes-limited-row" style="display:none;"><span class="label" style="color:#cc8844;">受限工具</span><span class="value warn" id="s-hermes-limited" style="font-size:0.8em;">—</span></div>
+            <div class="settings-row" id="s-hermes-doctor-row" style="display:none;"><span class="label" style="color:#cc8844;">诊断提示</span><span class="value warn" id="s-hermes-doctor" style="font-size:0.8em;">—</span></div>
             <div class="settings-row"><span class="label">版本</span><span class="value" id="s-hermes-version">—</span></div>
             <div class="settings-row"><span class="label">平台</span><span class="value" id="s-hermes-platform">—</span></div>
             <div class="settings-row"><span class="label">命令可用</span><span class="value" id="s-hermes-cmd">—</span></div>
             <div class="settings-row"><span class="label">Hermes Home</span><span class="value" id="s-hermes-home" style="font-size:0.8em;">—</span></div>
-            <!-- 补全能力操作区（basic_ready 时显示）-->
+            <!-- 补全能力操作区：非完整就绪或 doctor 有诊断时显示 -->
             <div id="s-hermes-enhance-section" style="display:none;margin-top:12px;padding:10px;
                  background:#1a2a3a;border-radius:6px;border-left:3px solid #cc8844;">
                 <div style="color:#cc8844;font-size:0.82em;margin-bottom:8px;">
-                    <b>基础可用 · 部分工具受限。</b>
+                    <b>检测到部分工具或配置仍受限。</b>
                     完成以下配置可解锁更多 Hermes 能力：
                 </div>
                 <div style="display:flex;flex-direction:column;gap:6px;">
@@ -652,6 +656,7 @@ _STATUS_HTML = """
 
     <script>
     let settingsOpen = false;
+    let hermesAutoRecheckStarted = false;
 
     function escapeHtml(value) {
         const div = document.createElement('div');
@@ -746,13 +751,81 @@ _STATUS_HTML = """
 
     // ── Hermes 能力补全操作 ────────────────────────────────────────────────────
 
+    function getHermesLimitedTools(hermes) {
+        return (hermes && hermes.limited_tools) || [];
+    }
+
+    function getHermesIssueCount(hermes) {
+        return Number((hermes && hermes.doctor_issues_count) || 0);
+    }
+
+    function hasHermesDiagnostics(hermes) {
+        return getHermesLimitedTools(hermes).length > 0 || getHermesIssueCount(hermes) > 0;
+    }
+
+    function isHermesReadinessUnknown(hermes) {
+        return hermes && (!hermes.readiness_level || hermes.readiness_level === 'unknown');
+    }
+
+    function formatHermesDiagnostics(hermes) {
+        const tools = getHermesLimitedTools(hermes);
+        const issueCount = getHermesIssueCount(hermes);
+        const parts = [];
+        if (tools.length > 0) parts.push(tools.length + ' 个工具受限：' + tools.join('、'));
+        if (issueCount > 0) parts.push('doctor 报告 ' + issueCount + ' 个 issue');
+        return parts.length > 0 ? parts.join('；') : '未发现额外工具限制';
+    }
+
+    function shouldShowHermesEnhance(hermes) {
+        if (!hermes) return false;
+        if (hermes.readiness_level === 'full_ready' && !hasHermesDiagnostics(hermes)) return false;
+        return !!hermes.ready || hermes.readiness_level === 'basic_ready' || hasHermesDiagnostics(hermes);
+    }
+
+    function maybeAutoRecheckHermes(hermes) {
+        if (!hermes || !hermes.ready || !isHermesReadinessUnknown(hermes) || hermesAutoRecheckStarted) return;
+        hermesAutoRecheckStarted = true;
+        setTimeout(function() { recheckHermes(); }, 120);
+    }
+
+    function renderHermesLimited(rowId, valueId, hermes, includeIssueHint) {
+        const row = document.getElementById(rowId);
+        const value = document.getElementById(valueId);
+        if (!row || !value) return;
+        const tools = getHermesLimitedTools(hermes);
+        if (tools.length > 0) {
+            row.style.display = 'flex';
+            const issueHint = includeIssueHint && getHermesIssueCount(hermes) > 0
+                ? ' — 运行 hermes setup 可补全'
+                : '';
+            value.textContent = tools.join('、') + issueHint;
+        } else {
+            row.style.display = 'none';
+        }
+    }
+
+    function renderHermesDiagnostics(rowId, valueId, hermes) {
+        const row = document.getElementById(rowId);
+        const value = document.getElementById(valueId);
+        if (!row || !value) return;
+        if (hasHermesDiagnostics(hermes)) {
+            row.style.display = 'flex';
+            value.textContent = formatHermesDiagnostics(hermes);
+        } else if (hermes && hermes.ready && isHermesReadinessUnknown(hermes)) {
+            row.style.display = 'flex';
+            value.textContent = '能力诊断尚未运行，正在重新检测；也可展开补全入口手动运行 hermes doctor';
+        } else {
+            row.style.display = 'none';
+        }
+    }
+
     function toggleHermesEnhancePanel() {
         const panel = document.getElementById('hermes-enhance-panel');
         const btn = document.getElementById('hermes-enhance-btn');
         if (!panel) return;
         const visible = panel.style.display !== 'none';
         panel.style.display = visible ? 'none' : 'block';
-        if (btn) btn.textContent = visible ? '🔧 补全 Hermes 能力' : '🔼 收起';
+        if (btn) btn.textContent = visible ? '🔧 检测 / 补全 Hermes 能力' : '🔼 收起';
     }
 
     async function openHermesCmd(cmd) {
@@ -794,23 +867,27 @@ _STATUS_HTML = """
             // 刷新仪表盘（直接用返回的最新数据）
             const rl = data.hermes ? data.hermes.readiness_level : 'unknown';
             const hs = document.getElementById('hermes-status');
+            const hermes = data.hermes || {};
             if (hs) {
                 if (rl === 'full_ready') { hs.textContent = '✅ 完整就绪'; hs.className = 'value ok'; }
                 else if (rl === 'basic_ready') { hs.textContent = '⚠️ 基础可用 · 部分工具受限'; hs.className = 'value warn'; }
-                else { hs.textContent = data.hermes.ready ? '✅ 已就绪' : '⚠️ ' + (data.hermes.status || ''); hs.className = data.hermes.ready ? 'value ok' : 'value warn'; }
+                else { hs.textContent = hermes.ready ? '✅ 已就绪' : '⚠️ ' + (hermes.status || ''); hs.className = hermes.ready ? 'value ok' : 'value warn'; }
             }
+            renderHermesLimited('hermes-limited-row', 'hermes-limited', hermes, false);
+            renderHermesDiagnostics('hermes-doctor-row', 'hermes-doctor', hermes);
+            renderHermesLimited('s-hermes-limited-row', 's-hermes-limited', hermes, true);
+            renderHermesDiagnostics('s-hermes-doctor-row', 's-hermes-doctor', hermes);
             const enhRow = document.getElementById('hermes-enhance-row');
-            if (enhRow) enhRow.style.display = (rl === 'basic_ready') ? 'block' : 'none';
+            if (enhRow) enhRow.style.display = shouldShowHermesEnhance(hermes) ? 'block' : 'none';
             const sEnhSec = document.getElementById('s-hermes-enhance-section');
-            if (sEnhSec) sEnhSec.style.display = (rl === 'basic_ready') ? 'block' : 'none';
+            if (sEnhSec) sEnhSec.style.display = shouldShowHermesEnhance(hermes) ? 'block' : 'none';
             if (rl === 'full_ready') {
                 setStatus('<span style="color:#90ee90">✅ Hermes 已完整就绪！受限工具已补全。</span>');
                 // 补全后隐藏操作面板
                 const panel = document.getElementById('hermes-enhance-panel');
                 if (panel) panel.style.display = 'none';
-            } else if (rl === 'basic_ready') {
-                const tools = (data.hermes && data.hermes.limited_tools) || [];
-                setStatus('<span style="color:#ffd700">⚠️ 仍有受限工具：' + tools.join('、') + '。可继续运行 hermes setup 完善配置。</span>');
+            } else if (shouldShowHermesEnhance(hermes)) {
+                setStatus('<span style="color:#ffd700">⚠️ ' + formatHermesDiagnostics(hermes) + '。可继续运行 hermes setup 或 hermes doctor 完善配置。</span>');
             } else {
                 setStatus('<span style="color:#9ab4d8">重检完成。当前状态：' + (rl || '未知') + '</span>');
             }
@@ -848,26 +925,16 @@ _STATUS_HTML = """
                 rlEl.textContent = rlLabels[srl] || (d.hermes.ready ? '✅ 已就绪' : '—');
                 rlEl.className = 'value' + (srl === 'full_ready' ? ' ok' : srl === 'basic_ready' ? ' warn' : '');
             }
-            // 受限工具行
-            const sLimRow = document.getElementById('s-hermes-limited-row');
-            const sLimEl = document.getElementById('s-hermes-limited');
-            if (sLimRow && sLimEl) {
-                const limited = d.hermes.limited_tools || [];
-                if (limited.length > 0) {
-                    sLimRow.style.display = 'flex';
-                    const issueHint = d.hermes.doctor_issues_count > 0 ? ' — 运行 hermes setup 可补全' : '';
-                    sLimEl.textContent = limited.join('、') + issueHint;
-                } else {
-                    sLimRow.style.display = 'none';
-                }
-            }
+            renderHermesLimited('s-hermes-limited-row', 's-hermes-limited', d.hermes, true);
+            renderHermesDiagnostics('s-hermes-doctor-row', 's-hermes-doctor', d.hermes);
             document.getElementById('s-hermes-version').textContent = d.hermes.version || '未知';
             document.getElementById('s-hermes-platform').textContent = d.hermes.platform;
             document.getElementById('s-hermes-cmd').textContent = d.hermes.command_exists ? '✅ 是' : '❌ 否';
             document.getElementById('s-hermes-home').textContent = d.hermes.hermes_home || '~/.hermes (默认)';
-            // 设置页补全能力区：仅 basic_ready 时显示
+            // 设置页补全能力区：doctor 发现问题或受限工具时显示
             const sEnhSec = document.getElementById('s-hermes-enhance-section');
-            if (sEnhSec) sEnhSec.style.display = (srl === 'basic_ready') ? 'block' : 'none';
+            if (sEnhSec) sEnhSec.style.display = shouldShowHermesEnhance(d.hermes) ? 'block' : 'none';
+            maybeAutoRecheckHermes(d.hermes);
 
             // Workspace
             const wsEl = document.getElementById('s-ws-status');
@@ -1154,21 +1221,12 @@ _STATUS_HTML = """
             }
             document.getElementById('hermes-version').textContent = data.hermes.version || '未知';
             document.getElementById('hermes-platform').textContent = data.hermes.platform;
-            // 受限工具行
-            const limRow = document.getElementById('hermes-limited-row');
-            const limEl = document.getElementById('hermes-limited');
-            if (limRow && limEl) {
-                const tools = data.hermes.limited_tools || [];
-                if (tools.length > 0) {
-                    limRow.style.display = 'flex';
-                    limEl.textContent = tools.join('、');
-                } else {
-                    limRow.style.display = 'none';
-                }
-            }
-            // 补全能力入口：仅 basic_ready 时显示
+            renderHermesLimited('hermes-limited-row', 'hermes-limited', data.hermes, false);
+            renderHermesDiagnostics('hermes-doctor-row', 'hermes-doctor', data.hermes);
+            // 补全能力入口：doctor 发现问题或受限工具时显示
             const enhRow = document.getElementById('hermes-enhance-row');
-            if (enhRow) enhRow.style.display = (rl === 'basic_ready') ? 'block' : 'none';
+            if (enhRow) enhRow.style.display = shouldShowHermesEnhance(data.hermes) ? 'block' : 'none';
+            maybeAutoRecheckHermes(data.hermes);
 
             // Workspace
             const ws = document.getElementById('ws-status');
@@ -1506,15 +1564,19 @@ def request_app_exit() -> None:
     """由页面内退出按钮触发的完整退出流程。
 
     实际窗口销毁延迟到 API 回调返回后执行，避免 macOS WebView 卡在等待
-    JavaScript promise 返回的状态。
+    JavaScript promise 返回的状态。若 pywebview 销毁阻塞，短延迟后直接退出进程，
+    避免留下白屏窗口。
     """
-    global _exit_timer
+    global _exit_timer, _force_exit_timer
     with _exit_timer_lock:
         if _exit_timer is not None and _exit_timer.is_alive():
             return
         _exit_timer = threading.Timer(_EXIT_DELAY_SECONDS, _destroy_all_windows_for_exit)
         _exit_timer.daemon = True
         _exit_timer.start()
+        _force_exit_timer = threading.Timer(_EXIT_FORCE_DELAY_SECONDS, _force_app_exit)
+        _force_exit_timer.daemon = True
+        _force_exit_timer.start()
 
 
 def request_app_restart() -> None:
@@ -1546,6 +1608,19 @@ def _restart_process() -> None:
         logger.warning("自动重启失败，请手动重启应用: %s", exc)
     finally:
         os._exit(0)
+
+
+def _process_exit(code: int = 0) -> None:
+    """立即结束当前进程。封装为函数以便测试替换。"""
+    import os
+
+    os._exit(code)
+
+
+def _force_app_exit() -> None:
+    """兜底退出，防止 pywebview 窗口销毁在平台侧卡住。"""
+    logger.info("强制退出 Hermes-Yachiyo")
+    _process_exit(0)
 
 
 def _destroy_all_windows_for_exit() -> None:

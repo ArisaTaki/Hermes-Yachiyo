@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from apps.shell.assets import is_project_asset, project_display_path
 from apps.shell.config import (
     AppConfig,
     BubbleModeConfig,
@@ -31,6 +32,21 @@ def _serialize_summary(summary: ModelSummary | None) -> dict[str, Any]:
         "primary_model3_json_abs": summary.primary_model3_json_abs,
         "primary_moc3_abs": summary.primary_moc3_abs,
         "renderer_entry": summary.renderer_entry,
+        "primary_model3_json_display": (
+            project_display_path(summary.primary_model3_json_abs)
+            if summary.primary_model3_json_abs
+            else ""
+        ),
+        "primary_moc3_display": (
+            project_display_path(summary.primary_moc3_abs)
+            if summary.primary_moc3_abs
+            else ""
+        ),
+        "renderer_entry_display": (
+            project_display_path(summary.renderer_entry)
+            if summary.renderer_entry
+            else ""
+        ),
     }
 
 _TOP_LEVEL_FIELDS: dict[str, type] = {
@@ -56,6 +72,10 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "auto_hide": bool,
         "opacity": float,
         "summary_count": int,
+        "avatar_path": str,
+        "proactive_enabled": bool,
+        "proactive_desktop_watch_enabled": bool,
+        "proactive_interval_seconds": int,
     },
     "live2d_mode": {
         "model_name": str,
@@ -109,6 +129,8 @@ def _validate_field(key: str, value: Any) -> str | None:
         return "recent_messages_limit 须在 1-10 之间"
     if key.endswith(".summary_count") and not (1 <= value <= 3):
         return "summary_count 须在 1-3 之间"
+    if key.endswith(".proactive_interval_seconds") and not (60 <= value <= 3600):
+        return "proactive_interval_seconds 须在 60-3600 秒之间"
     if key.endswith(".opacity") and not (0.2 <= value <= 1.0):
         return "opacity 须在 0.2-1.0 之间"
     if key.endswith(".scale") and not (0.4 <= value <= 2.0):
@@ -133,7 +155,11 @@ def serialize_bubble_mode(config: AppConfig) -> dict[str, Any]:
     return {
         "id": "bubble",
         "title": get_mode_descriptor("bubble").settings_title,
-        "summary": f"{mode.width}×{mode.height} · {mode.default_display} · 摘要 {mode.summary_count} 条",
+        "summary": (
+            f"{mode.width}×{mode.height} · {mode.default_display} · "
+            f"摘要 {mode.summary_count} 条 · "
+            f"主动 {'开启' if mode.proactive_enabled else '关闭'}"
+        ),
         "config": {
             "width": mode.width,
             "height": mode.height,
@@ -148,27 +174,52 @@ def serialize_bubble_mode(config: AppConfig) -> dict[str, Any]:
             "auto_hide": mode.auto_hide,
             "opacity": mode.opacity,
             "summary_count": mode.summary_count,
+            "avatar_path": mode.avatar_path,
+            "avatar_path_display": project_display_path(mode.avatar_path),
+            "avatar_is_project_asset": is_project_asset(mode.avatar_path),
+            "proactive_enabled": mode.proactive_enabled,
+            "proactive_desktop_watch_enabled": mode.proactive_desktop_watch_enabled,
+            "proactive_interval_seconds": mode.proactive_interval_seconds,
         },
     }
 
 
 def serialize_live2d_mode(config: AppConfig) -> dict[str, Any]:
     mode = config.live2d_mode
-    model_state = mode.validate()
-    summary = mode.scan()
+    resource = mode.resource_info()
+    summary = resource.summary
+    if resource.state.value == "not_configured":
+        summary_text = (
+            f"未导入资源 · 从 Releases 下载并解压到 {resource.default_assets_root_display}"
+        )
+    elif resource.state.value == "path_invalid":
+        summary_text = "模型路径不存在 · 请检查 Live2D 设置"
+    elif resource.state.value == "path_not_live2d":
+        summary_text = "目录不是有效的 Live2D 模型 · 需要 .moc3 / .model3.json"
+    else:
+        summary_text = (
+            f"{resource.display_name} · {resource.source_label} · 资源已就绪"
+        )
     return {
         "id": "live2d",
         "title": get_mode_descriptor("live2d").settings_title,
-        "summary": (
-            f"{mode.width}×{mode.height} · "
-            f"缩放 {mode.scale:.2f} · "
-            f"{mode.model_name or '未配置模型'} · "
-            f"{'置顶' if mode.window_on_top else '普通窗口'}"
-        ),
+        "summary": summary_text,
         "config": {
-            "model_state": model_state.value,
+            "model_state": resource.state.value,
             "model_name": mode.model_name or "",
+            "display_name": resource.display_name,
             "model_path": mode.model_path or "",
+            "model_path_display": resource.configured_path_display,
+            "model_is_project_asset": is_project_asset(mode.model_path) if mode.model_path else False,
+            "effective_model_path": resource.effective_model_path,
+            "effective_model_path_display": resource.effective_model_path_display,
+            "source": resource.source,
+            "source_label": resource.source_label,
+            "status_label": resource.status_label,
+            "help_text": resource.help_text,
+            "default_assets_root": resource.default_assets_root,
+            "default_assets_root_display": resource.default_assets_root_display,
+            "releases_url": resource.releases_url,
             "width": mode.width,
             "height": mode.height,
             "position_x": mode.position_x,
@@ -184,6 +235,21 @@ def serialize_live2d_mode(config: AppConfig) -> dict[str, Any]:
             "idle_motion_group": mode.idle_motion_group,
             "enable_expressions": mode.enable_expressions,
             "enable_physics": mode.enable_physics,
+            "resource": {
+                "state": resource.state.value,
+                "source": resource.source,
+                "source_label": resource.source_label,
+                "display_name": resource.display_name,
+                "configured_path": resource.configured_path,
+                "configured_path_display": resource.configured_path_display,
+                "effective_model_path": resource.effective_model_path,
+                "effective_model_path_display": resource.effective_model_path_display,
+                "default_assets_root": resource.default_assets_root,
+                "default_assets_root_display": resource.default_assets_root_display,
+                "releases_url": resource.releases_url,
+                "status_label": resource.status_label,
+                "help_text": resource.help_text,
+            },
             "summary": _serialize_summary(summary),
         },
     }
@@ -200,7 +266,6 @@ def serialize_mode_window_data(config: AppConfig, mode_id: str) -> dict[str, Any
     descriptor = get_mode_descriptor(mode_id)
     payload = serialize_mode_settings(config)[descriptor.id]
     return {
-        "common": serialize_common_settings(config),
         "mode": descriptor.to_dict(),
         "settings": payload,
     }
@@ -210,17 +275,6 @@ def build_display_settings(config: AppConfig) -> dict[str, Any]:
     return {
         "current_mode": config.display_mode,
         "available_modes": list_mode_options(),
-    }
-
-
-def serialize_common_settings(config: AppConfig) -> dict[str, Any]:
-    return {
-        "display_mode": config.display_mode,
-        "available_modes": list_mode_options(),
-        "bridge_enabled": config.bridge_enabled,
-        "bridge_host": config.bridge_host,
-        "bridge_port": config.bridge_port,
-        "tray_enabled": config.tray_enabled,
     }
 
 

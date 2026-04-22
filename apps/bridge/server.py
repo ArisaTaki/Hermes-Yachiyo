@@ -14,12 +14,23 @@ import logging
 import threading
 import time
 
-import uvicorn
-from fastapi import FastAPI
+try:
+    import uvicorn
+    from fastapi import FastAPI
+except ModuleNotFoundError:
+    uvicorn = None  # type: ignore[assignment]
 
-from apps.bridge.routes import hermes, screen, status, system, tasks
+    class FastAPI:  # type: ignore[override]
+        def __init__(self, *args, **kwargs) -> None:
+            self.routes = []
+
+        def include_router(self, *args, **kwargs) -> None:
+            return None
 
 logger = logging.getLogger(__name__)
+
+_FASTAPI_AVAILABLE = uvicorn is not None
+_routes_registered = False
 
 
 app = FastAPI(
@@ -28,11 +39,26 @@ app = FastAPI(
     version="0.1.0",
 )
 
-app.include_router(status.router)
-app.include_router(tasks.router)
-app.include_router(screen.router)
-app.include_router(system.router)
-app.include_router(hermes.router)
+
+def _register_routes() -> None:
+    global _routes_registered
+    if not _FASTAPI_AVAILABLE or _routes_registered:
+        return
+
+    import apps.bridge.routes.hermes as hermes
+    import apps.bridge.routes.live2d as live2d
+    import apps.bridge.routes.screen as screen
+    import apps.bridge.routes.status as status
+    import apps.bridge.routes.system as system
+    import apps.bridge.routes.tasks as tasks
+
+    app.include_router(status.router)
+    app.include_router(tasks.router)
+    app.include_router(screen.router)
+    app.include_router(system.router)
+    app.include_router(live2d.router)
+    app.include_router(hermes.router)
+    _routes_registered = True
 
 _server: uvicorn.Server | None = None
 _bridge_thread: threading.Thread | None = None
@@ -57,6 +83,10 @@ def get_running_config() -> dict[str, object]:
 def start_bridge(host: str = "127.0.0.1", port: int = 8420) -> None:
     """启动 Bridge API（阻塞，应在后台线程调用）"""
     global _server, _state, _running_host, _running_port
+    if uvicorn is None:
+        _state = "failed"
+        raise RuntimeError("Bridge 依赖未安装：缺少 fastapi/uvicorn")
+    _register_routes()
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     _server = uvicorn.Server(config)
     _state = "running"

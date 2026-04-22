@@ -57,6 +57,7 @@ def apply_macos_window_behavior(
             NSApp,
             NSFloatingWindowLevel,
             NSNormalWindowLevel,
+            NSColor,
         )
     except Exception as exc:
         logger.debug("PyObjC/AppKit 不可用，跳过 macOS 窗口层级设置: %s", exc)
@@ -85,6 +86,8 @@ def apply_macos_window_behavior(
         level = NSFloatingWindowLevel if always_on_top else NSNormalWindowLevel
         target.setLevel_(level)
         target.setHidesOnDeactivate_(False)
+        target.setOpaque_(False)
+        target.setBackgroundColor_(NSColor.clearColor())
 
         behavior = int(target.collectionBehavior())
         can_join_spaces = _collection_behavior_constant(
@@ -113,6 +116,37 @@ def apply_macos_window_behavior(
     except Exception as exc:
         logger.debug("应用 macOS 窗口行为失败: %s", exc)
         return False
+
+
+def focus_macos_window(*, title: str) -> bool:
+    """按标题聚焦 macOS NSWindow，用于右键菜单立即接收键鼠焦点。"""
+    if platform.system() != "Darwin":
+        return False
+
+    try:
+        from AppKit import NSApp  # type: ignore[import-untyped]
+    except Exception as exc:
+        logger.debug("PyObjC/AppKit 不可用，跳过 macOS 窗口聚焦: %s", exc)
+        return False
+
+    try:
+        windows = list(NSApp.windows() or [])
+    except Exception as exc:
+        logger.debug("无法枚举 NSApp.windows(): %s", exc)
+        return False
+
+    for ns_window in windows:
+        try:
+            if str(ns_window.title()) != title:
+                continue
+            ns_window.makeKeyAndOrderFront_(None)
+            NSApp.activateIgnoringOtherApps_(True)
+            logger.debug("已聚焦 macOS 窗口: title=%s", title)
+            return True
+        except Exception as exc:
+            logger.debug("聚焦 macOS 窗口失败: %s", exc)
+            return False
+    return False
 
 
 def _collection_behavior_constant(name: str, *, fallback: int) -> int:

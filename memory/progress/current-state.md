@@ -248,7 +248,8 @@
   - 主设置中切换 `display_mode` 保存后自动调度应用重启
   - `display_mode` 生效策略从“重启显示模式”升级为“重启应用”
 - ✅ `apps/shell/settings.py`
-  - 独立设置窗口改为 `Common + 当前模式设置`，不再只显示单模式字段
+  - 当时独立设置窗口改为 `Common + 当前模式设置`，不再只显示单模式字段
+  - 后续 Milestone 58 已再次收敛：Common / 全局设置只放在 Control Center，模式窗口只展示对应模式专属设置
 
 ### 当前交互确认
 
@@ -283,6 +284,35 @@
 - **Live2D**：角色桌面入口，点击展开 / 收起 Chat Window
 - **Control Center**：按需打开的主控台，不参与 display mode 切换
 - **Chat Window**：统一完整对话窗口，Bubble / Live2D / Control Center 共用同一 `ChatSession`
+
+### Milestone 58 — Launcher 菜单、设置归属与退出兜底
+
+- ✅ Bubble / Live2D 右键菜单
+  - 右键打开设置菜单后，点击 launcher 外部、按 Esc、窗口失焦都会关闭菜单
+  - 菜单打开时再次左键点击 launcher 只关闭菜单，不误触发 Chat Window 展开
+  - 右键菜单按点击点定位，并 best-effort 聚焦原生窗口 / 菜单首项
+  - 拖动 launcher 超过阈值后吞掉随后的 click，避免拖动结束误展开对话框
+- ✅ `apps/shell/settings.py` / `apps/shell/mode_settings.py`
+  - 模式设置窗口不再返回或渲染 Common / display / bridge 全局配置
+  - Bubble 设置窗口只展示 Bubble 专属项，Live2D 设置窗口只展示 Live2D 专属项
+  - 全局应用设置继续由 Control Center 承担
+- ✅ `apps/shell/window.py`
+  - Control Center 的 Hermes 诊断同时展示受限工具列表和 doctor issue 数
+  - doctor 发现问题或受限工具时显示补全能力入口，不再只依赖 `basic_ready`
+  - Hermes 已就绪但 readiness 仍未知时，显示检测 / 补全入口并自动触发一次重检
+  - 退出应用增加强制退出兜底，避免 pywebview 销毁卡住后留下白屏窗口
+- ✅ `apps/installer/hermes_check.py`
+  - `hermes doctor` 的 Tool Availability 解析支持 warning / failure 行
+  - 工具名支持 `image_gen`、`agent-browser` 等包含 `_` / `-` / `.` 的名称
+- ✅ `apps/shell/assets/`
+  - 新增项目内默认头像 `avatars/yachiyo-default.jpg`
+  - 新增默认 Live2D 模型目录 `live2d/yachiyo`
+  - `AppConfig` 默认 Live2D 模型指向该内置模型，旧空配置读取时自动补默认路径
+- ✅ Bubble 主动对话设置
+  - 新增主动对话总开关、定期桌面观察开关和观察间隔设置
+  - Bubble 红色呼吸灯只用于主动观察结果，不再因普通 assistant 回复点亮
+  - 定期桌面观察会检查 Hermes 执行器 / vision 工具能力，不满足时给出阻塞提示
+  - 能力满足时按间隔创建低风险桌面观察任务，用户打开 Chat Window 后确认并清除红点
 
 ### Milestone 6 — 显示模式切换骨架
 
@@ -1872,3 +1902,55 @@ Window          → ChatAPI    → ChatSession → ChatStore (SQLite)
 所有模式共享同一个 `runtime.chat_session` 单例，任一入口发送的消息对其他入口即时可见。
 
 **测试结果**：222 passed（+19 新增，0 回归）
+
+### Milestone 59 — Live2D 资源包解耦（Release 下载 + 本地导入路径 + UI 提示）
+
+- ✅ apps/shell/assets.py
+  - 区分程序内轻量资源与用户本地 Live2D 资源目录
+  - 新增 `get_hermes_home_dir()` / `get_yachiyo_workspace_dir()` / `get_user_live2d_assets_dir()`
+  - 默认 Live2D 自动发现目录改为 `~/.hermes/yachiyo/assets/live2d/`
+  - 新增 `LIVE2D_RELEASES_URL`
+  - 预览兜底改为 bubble 头像，不再依赖仓库内的大型 Live2D 贴图
+- ✅ apps/shell/config.py
+  - 新增 `Live2DResourceInfo`
+  - `Live2DModeConfig` 支持“显式路径优先 + 用户目录自动发现”
+  - 空 `model_path` 不再表示错误，而是表示走默认自动发现逻辑
+  - 兼容清理旧的仓库内默认 Live2D 路径配置
+- ✅ apps/shell/mode_settings.py
+  - Live2D 模式摘要改为产品化资源状态文案
+  - 暴露 `resource.source` / `status_label` / `help_text` / `effective_model_path` / `releases_url`
+- ✅ apps/shell/settings.py
+  - Live2D 设置页新增：资源来源、当前生效路径、默认导入目录、Releases 地址、状态提示
+  - 区分“当前配置路径”与“当前生效路径”
+- ✅ apps/shell/modes/live2d.py
+  - Live2D 模式根据 `resource_info()` 展示资源提示
+  - 缺少资源时明确提示去 Releases 下载，但模式本身不崩溃
+  - 资源路径解析统一走“生效路径”而不是原始配置字符串
+- ✅ apps/bridge/routes/live2d.py
+  - bridge 读取 Live2D 模型资源时统一走 resolved path
+- ✅ 文档同步
+  - README 增补 Releases 下载、默认导入目录、未导入资源时的行为
+  - 新增 `docs/live2d-assets.md`
+  - `docs/knowledge-base.md` / `docs/implementation-plan.md` 增补资源包解耦约束
+  - `apps/shell/assets/live2d/README.md` 改为占位说明
+  - `.gitignore` 增补 Live2D 大型资源忽略规则
+
+### 当前读取规则
+
+1. 若 `live2d_mode.model_path` 有值，优先使用用户手动填写路径。
+2. 若 `live2d_mode.model_path` 为空，自动扫描 `~/.hermes/yachiyo/assets/live2d/`。
+3. 只有检测到 `.moc3` 或 `.model3.json` 的目录才视为有效模型目录。
+4. 资源缺失或路径无效时，设置页和 Live2D 模式给出明确提示，但应用与模式都继续可用。
+
+### 手工测试基线
+
+- 未导入资源：设置页与 Live2D 模式都应提示去 Releases 下载资源，应用不崩溃。
+- 导入到默认目录：不填写模型路径时，设置页应显示已自动检测到模型资源。
+- 填写自定义路径：应优先使用用户配置路径，错误路径要给出明确错误提示。
+
+**测试结果**：
+
+- `tests/test_mode_settings.py`
+- `tests/test_main_api_modes.py`
+- `tests/test_chat_bridge.py`
+- 合计：44 passed

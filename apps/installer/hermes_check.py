@@ -313,7 +313,7 @@ def check_hermes_doctor_readiness(
     """通过 ``hermes doctor`` 检测 Hermes 能力就绪程度。
 
     解析策略：
-    - 扫描 ``◆ Tool Availability`` 节的 ``⚠`` 行，提取受限工具名
+    - 扫描 ``◆ Tool Availability`` 节的警告/失败行，提取受限工具名
     - 解析末尾摘要 ``Found N issue(s)`` 获取 issue 计数
     - 若解析失败（超时/命令不存在），静默返回 ``UNKNOWN``，不阻塞启动
 
@@ -344,9 +344,9 @@ def check_hermes_doctor_readiness(
             if in_tools_section and stripped.startswith("◆"):
                 in_tools_section = False
                 continue
-            if in_tools_section and "⚠" in line:
-                # 格式: "  ⚠ toolname (reason)"
-                nm = re.match(r'\s*⚠\s+(\w+)', line)
+            if in_tools_section and any(marker in line for marker in ("⚠", "✗", "❌")):
+                # 格式: "  ⚠ toolname (reason)"，工具名可能包含 - / _ / .
+                nm = re.match(r"\s*(?:⚠|✗|❌)\s+([A-Za-z0-9_.-]+)", line)
                 if nm:
                     limited_tools.append(nm.group(1))
 

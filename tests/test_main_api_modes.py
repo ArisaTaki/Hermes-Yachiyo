@@ -127,9 +127,15 @@ def test_settings_data_exposes_mode_settings_summaries(tmp_path, monkeypatch):
         monkeypatch.setattr("apps.shell.main_api.get_workspace_status", lambda: {"initialized": True, "workspace_path": "/tmp/ws", "created_at": "now", "dirs": {}})
         monkeypatch.setattr("apps.shell.main_api.get_integration_snapshot", lambda config, boot: _fake_snapshot())
 
+        model_dir = tmp_path / "models" / "hiyori"
+        model_dir.mkdir(parents=True, exist_ok=True)
+        (model_dir / "hiyori.model3.json").write_text("{}", encoding="utf-8")
+        (model_dir / "hiyori.moc3").write_text("stub", encoding="utf-8")
+
         config = AppConfig()
         config.bubble_mode.summary_count = 2
         config.live2d_mode.model_name = "hiyori"
+        config.live2d_mode.model_path = str(model_dir)
 
         api = MainWindowAPI(runtime, config)
         data = api.get_settings_data()

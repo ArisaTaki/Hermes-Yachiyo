@@ -76,13 +76,17 @@ def test_request_app_exit_prepares_exit_without_destroying_current_window(monkey
     monkeypatch.setattr(window_mod, "webview", FakeWebview([main, aux]), raising=False)
     monkeypatch.setattr(window_mod.threading, "Timer", FakeTimer)
     monkeypatch.setattr(window_mod, "_exit_timer", None)
+    monkeypatch.setattr(window_mod, "_force_exit_timer", None)
 
     window_mod.request_app_exit()
 
-    assert len(FakeTimer.instances) == 1
+    assert len(FakeTimer.instances) == 2
     assert FakeTimer.instances[0].interval == window_mod._EXIT_DELAY_SECONDS
     assert FakeTimer.instances[0].started is True
     assert FakeTimer.instances[0].daemon is True
+    assert FakeTimer.instances[1].interval == window_mod._EXIT_FORCE_DELAY_SECONDS
+    assert FakeTimer.instances[1].started is True
+    assert FakeTimer.instances[1].daemon is True
     assert closed_chat == []
     assert main.destroyed is False
     assert aux.destroyed is False
@@ -92,6 +96,21 @@ def test_request_app_exit_prepares_exit_without_destroying_current_window(monkey
     assert closed_chat == [True]
     assert main.destroyed is True
     assert aux.destroyed is True
+
+
+def test_request_app_exit_force_timer_exits_process(monkeypatch):
+    FakeTimer.instances = []
+    exits = []
+
+    monkeypatch.setattr(window_mod.threading, "Timer", FakeTimer)
+    monkeypatch.setattr(window_mod, "_exit_timer", None)
+    monkeypatch.setattr(window_mod, "_force_exit_timer", None)
+    monkeypatch.setattr(window_mod, "_process_exit", lambda code=0: exits.append(code))
+
+    window_mod.request_app_exit()
+    FakeTimer.instances[1].callback()
+
+    assert exits == [0]
 
 
 def test_request_app_restart_is_delayed(monkeypatch):
@@ -134,6 +153,16 @@ def test_control_center_html_keeps_chat_window_as_external_full_session():
     assert "openModeSettings('bubble')" in _STATUS_HTML
     assert "窗口模式" not in _STATUS_HTML
     assert "id=\"msg-input\"" not in _STATUS_HTML
+
+
+def test_control_center_html_exposes_hermes_diagnostics():
+    assert "id=\"hermes-doctor-row\"" in _STATUS_HTML
+    assert "id=\"s-hermes-doctor-row\"" in _STATUS_HTML
+    assert "formatHermesDiagnostics" in _STATUS_HTML
+    assert "shouldShowHermesEnhance" in _STATUS_HTML
+    assert "maybeAutoRecheckHermes" in _STATUS_HTML
+    assert "能力诊断尚未运行" in _STATUS_HTML
+    assert "检测 / 补全 Hermes 能力" in _STATUS_HTML
 
 
 def test_close_chat_window_destroys_existing_window(monkeypatch):

@@ -4,8 +4,10 @@ from apps.core.chat_session import ChatSession
 from apps.core.chat_store import ChatStore
 from apps.core.state import AppState
 from apps.shell.chat_bridge import ChatBridge, _truncate
-from apps.shell.modes.bubble import _BUBBLE_HTML
-from apps.shell.modes.live2d import _LIVE2D_HTML
+from apps.shell.config import AppConfig
+from apps.shell.modes.bubble import BubbleWindowAPI, _BUBBLE_HTML, _render_bubble_html
+import apps.shell.modes.live2d as _live2d_mod
+from apps.shell.modes.live2d import Live2DWindowAPI, _LIVE2D_HTML, _render_live2d_html
 from packages.protocol.enums import TaskStatus
 
 
@@ -17,10 +19,17 @@ class _RuntimeStub:
         self.chat_session.attach_store(store, load_existing=False)
         self.task_runner = None
         self.cancelled_runner_tasks: list[str] = []
+        self.task_runner = None
 
     def cancel_task_runner_task(self, task_id: str) -> bool:
         self.cancelled_runner_tasks.append(task_id)
         return True
+
+    def is_hermes_ready(self) -> bool:
+        return True
+
+    def get_status(self):
+        return {"hermes": {"limited_tools": []}}
 
 
 def _make_bridge(tmp_path):
@@ -306,7 +315,11 @@ def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
     assert "startIdlePolling();" in _LIVE2D_HTML
     assert "window.addEventListener('pywebviewready', bootstrap);" in _LIVE2D_HTML
     assert "openSettings()" in _LIVE2D_HTML
-    assert "renderer 预留" in _LIVE2D_HTML
+    assert "PIXI.live2d.Live2DModel" in _LIVE2D_HTML
+    assert "live2d-canvas" in _LIVE2D_HTML
+    assert "live2d-fallback-preview" in _LIVE2D_HTML
+    assert "ensureLive2DRenderer" in _LIVE2D_HTML
+    assert "hair-back" not in _LIVE2D_HTML
     assert "toggle_chat" in _LIVE2D_HTML
     assert "--live2d-scale" in _LIVE2D_HTML
 
@@ -315,4 +328,125 @@ def test_launcher_modes_do_not_embed_inline_chat_inputs():
     for html in (_BUBBLE_HTML, _LIVE2D_HTML):
         assert "send_quick_message" not in html
         assert "msg-input" not in html
-        assert "toggleChat()" in html
+        assert "toggleChat(event)" in html
+        assert "window.addEventListener('blur', hideMenu);" in html
+        assert "event.key === 'Escape'" in html
+        assert "CLICK_DRAG_THRESHOLD_PX" in html
+        assert "trackLauncherPointerDown(event)" in html
+        assert "shouldIgnoreLauncherClick(event)" in html
+        assert "positionMenu(event)" in html
+        assert "window.pywebview.api.focus_window" in html
+
+
+def test_launcher_html_avoids_invalid_alpha_hex_background():
+    for html in (_BUBBLE_HTML, _LIVE2D_HTML):
+        assert "#00000000" not in html
+
+
+def test_bubble_avatar_is_embedded_as_data_uri():
+    html = _render_bubble_html(AppConfig())
+
+    assert "{{AVATAR_URL}}" not in html
+    assert "background-image: url(\"data:image/" in html
+
+
+def test_live2d_preview_is_embedded_as_data_uri():
+    html = _render_live2d_html(AppConfig())
+
+    assert "{{PREVIEW_URL}}" not in html
+    assert '<img class="live2d-preview-fallback hidden"' in html
+    assert 'src="data:image/' in html
+
+
+def test_live2d_html_includes_renderer_cdns():
+    html = _render_live2d_html(AppConfig())
+
+    assert "cdn.jsdelivr.net/npm/pixi.js@6" in html
+    assert "cdn.jsdelivr.net/npm/pixi-live2d-display@0.5.0-beta" in html
+    assert "cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js" in html
+
+
+def test_live2d_view_exposes_renderer_payload(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    config = AppConfig(display_mode="live2d")
+    model_dir = tmp_path / "models" / "yachiyo"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "yachiyo.model3.json").write_text("{}", encoding="utf-8")
+    (model_dir / "yachiyo.moc3").write_text("stub", encoding="utf-8")
+    config.live2d_mode.model_path = str(model_dir)
+    try:
+        monkeypatch.setattr(
+            _live2d_mod,
+            "_get_bridge_state",
+            lambda: "running",
+        )
+        monkeypatch.setattr(
+            _live2d_mod,
+            "_get_bridge_running_config",
+            lambda _config: {"host": "127.0.0.1", "port": 8420},
+        )
+
+        view = Live2DWindowAPI(runtime, config).get_live2d_view()
+        renderer = view["live2d"]["renderer"]
+
+        assert renderer["enabled"] is True
+        assert renderer["model_url"].startswith("http://127.0.0.1:8420/live2d/assets/")
+        assert renderer["model_url"].endswith(".model3.json")
+    finally:
+        store.close()
+
+
+def test_live2d_view_reports_missing_resource_guidance(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    config = AppConfig(display_mode="live2d")
+    try:
+        view = Live2DWindowAPI(runtime, config).get_live2d_view()
+
+        resource = view["live2d"]["resource"]
+        assert resource["state"] == "not_configured"
+        assert "GitHub Releases" in resource["help_text"]
+        assert resource["default_assets_root_display"].endswith(".hermes/yachiyo/assets/live2d")
+    finally:
+        store.close()
+
+
+def test_bubble_launcher_avoids_heavy_frame_and_blur():
+    assert "drop-shadow" not in _BUBBLE_HTML
+    assert "background: radial-gradient" not in _BUBBLE_HTML
+    assert "#151515" not in _BUBBLE_HTML
+    assert "backdrop-filter: none;" in _BUBBLE_HTML
+    assert "-webkit-appearance: none;" in _BUBBLE_HTML
+    assert "box-shadow: none;" in _BUBBLE_HTML
+
+
+def test_bubble_red_attention_is_reserved_for_proactive_messages(tmp_path):
+    _, runtime, store = _make_bridge(tmp_path)
+    try:
+        runtime.chat_session.add_assistant_message("普通对话回复")
+        api = BubbleWindowAPI(runtime, AppConfig())
+
+        view = api.get_bubble_view()
+
+        assert view["bubble"]["has_attention"] is False
+        assert view["proactive"]["status"] == "disabled"
+    finally:
+        store.close()
+
+
+def test_bubble_proactive_desktop_watch_reports_executor_blocker(tmp_path):
+    _, runtime, store = _make_bridge(tmp_path)
+    try:
+        config = AppConfig()
+        config.bubble_mode.proactive_enabled = True
+        config.bubble_mode.proactive_desktop_watch_enabled = True
+        api = BubbleWindowAPI(runtime, config)
+
+        view = api.get_bubble_view()
+
+        assert view["bubble"]["has_attention"] is False
+        assert view["proactive"]["status"] == "blocked"
+        assert "任务执行器" in view["proactive"]["error"]
+    finally:
+        store.close()

@@ -22,6 +22,11 @@ class TestGetEffect:
         assert etype == EffectType.IMMEDIATE
         assert "缩放" in msg
 
+    def test_live2d_model_path_requires_mode_restart(self):
+        etype, msg = get_effect("live2d_mode.model_path")
+        assert etype == EffectType.REQUIRES_MODE_RESTART
+        assert "重新加载资源" in msg
+
     def test_app_restart_field(self):
         etype, msg = get_effect("tray_enabled")
         assert etype == EffectType.REQUIRES_APP_RESTART

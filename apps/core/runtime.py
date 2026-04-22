@@ -54,6 +54,10 @@ class HermesRuntime:
         return self._state
 
     @property
+    def config(self) -> "AppConfig":
+        return self._config
+
+    @property
     def chat_session(self) -> ChatSession:
         return self._chat_session
 

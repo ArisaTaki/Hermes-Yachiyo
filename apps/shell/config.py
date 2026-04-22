@@ -9,6 +9,16 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal
 
+from apps.shell.assets import (
+    DEFAULT_BUBBLE_AVATAR_PATH,
+    DEFAULT_LIVE2D_MODEL_DIR,
+    LEGACY_BUNDLED_LIVE2D_MODEL_DIR,
+    LIVE2D_RELEASES_URL,
+    find_default_live2d_model_dir,
+    get_user_live2d_assets_dir,
+    project_display_path,
+)
+
 logger = logging.getLogger(__name__)
 
 _CONFIG_DIR = Path.home() / ".hermes-yachiyo"
@@ -98,6 +108,33 @@ class ModelSummary:
         return self.primary_model3_json_abs or self.primary_moc3_abs
 
 
+@dataclass
+class Live2DResourceInfo:
+    """Live2D 资源解析结果，供设置页 / 模式壳 / 主控台统一消费。"""
+
+    state: ModelState
+    source: str
+    source_label: str
+    display_name: str
+    configured_path: str = ""
+    configured_path_display: str = ""
+    effective_model_path: str = ""
+    effective_model_path_display: str = ""
+    default_assets_root: str = ""
+    default_assets_root_display: str = ""
+    releases_url: str = LIVE2D_RELEASES_URL
+    status_label: str = ""
+    help_text: str = ""
+    summary: ModelSummary | None = None
+
+
+def _resolve_scanned_model_dir(root: Path, summary: ModelSummary | None) -> Path:
+    """Return the actual model directory that contains model files."""
+    if summary and summary.found_in_subdir and summary.subdir_name:
+        return (root / summary.subdir_name).resolve()
+    return root.resolve()
+
+
 def scan_live2d_model_dir(path: Path) -> ModelSummary:
     """扫描 Live2D 模型目录，返回最小文件摘要。
 
@@ -175,6 +212,10 @@ class BubbleModeConfig:
     auto_hide: bool = False
     opacity: float = 0.92
     summary_count: int = 3
+    avatar_path: str = str(DEFAULT_BUBBLE_AVATAR_PATH)
+    proactive_enabled: bool = False
+    proactive_desktop_watch_enabled: bool = False
+    proactive_interval_seconds: int = 300
 
 
 @dataclass
@@ -184,8 +225,8 @@ class Live2DModeConfig:
     当前阶段仍是角色聊天壳，保留未来 renderer / moc3 / 动作系统的接入位。
     """
 
-    model_name: str = ""              # 角色模型名（如 "hiyori"），空字符串表示未配置
-    model_path: str = ""              # 模型目录路径（含 .moc3 文件），空字符串表示未配置
+    model_name: str = ""  # 角色模型名，空字符串表示使用自动检测名称
+    model_path: str = ""  # 显式模型目录路径；为空时自动在用户目录查找
     width: int = 420
     height: int = 680
     position_x: int = 48
@@ -202,9 +243,130 @@ class Live2DModeConfig:
     enable_expressions: bool = False  # 是否启用表情系统（等待渲染器支持）
     enable_physics: bool = False      # 是否启用物理模拟（等待渲染器支持）
 
+    def has_explicit_model_path(self) -> bool:
+        """用户是否显式填写了模型路径。"""
+        return bool((self.model_path or "").strip())
+
+    def resolve_model_path(self) -> Path | None:
+        """返回当前实际要使用的模型目录。
+
+        优先级：
+          1. 用户显式填写的 model_path
+          2. 用户目录 ~/.hermes/yachiyo/assets/live2d/ 下自动发现的有效模型
+        """
+        if self.has_explicit_model_path():
+            return Path(self.model_path).expanduser()
+        return find_default_live2d_model_dir(check_live2d_model_dir, get_user_live2d_assets_dir())
+
+    def get_display_name(self, summary: "ModelSummary | None" = None, resolved_path: Path | None = None) -> str:
+        """返回 UI 展示用模型名。"""
+        if (self.model_name or "").strip():
+            return self.model_name.strip()
+        if summary and summary.found_in_subdir and summary.subdir_name:
+            return summary.subdir_name
+        if resolved_path is not None and resolved_path.name not in {"", "live2d"}:
+            return resolved_path.name
+        if summary and summary.model3_json:
+            return summary.model3_json.removesuffix(".model3.json")
+        return "Live2D 角色"
+
+    def resource_info(self) -> "Live2DResourceInfo":
+        """构建统一资源状态信息。"""
+        assets_root = get_user_live2d_assets_dir().expanduser().resolve()
+        configured_path = (self.model_path or "").strip()
+        configured_display = project_display_path(configured_path) if configured_path else ""
+
+        if configured_path:
+            root = Path(configured_path).expanduser()
+            if not root.exists() or not root.is_dir():
+                return Live2DResourceInfo(
+                    state=ModelState.PATH_INVALID,
+                    source="configured",
+                    source_label="用户配置路径",
+                    display_name=self.get_display_name(),
+                    configured_path=configured_path,
+                    configured_path_display=configured_display,
+                    default_assets_root=str(assets_root),
+                    default_assets_root_display=project_display_path(assets_root),
+                    status_label="未找到当前配置的 Live2D 模型目录",
+                    help_text=(
+                        f"请检查设置中的模型路径，或清空后改用默认导入目录 “{project_display_path(assets_root)}”。"
+                        "资源包可从 GitHub Releases 下载。"
+                    ),
+                )
+
+            summary = scan_live2d_model_dir(root)
+            effective_dir = _resolve_scanned_model_dir(root, summary)
+            if summary.is_empty():
+                return Live2DResourceInfo(
+                    state=ModelState.PATH_NOT_LIVE2D,
+                    source="configured",
+                    source_label="用户配置路径",
+                    display_name=self.get_display_name(summary, effective_dir),
+                    configured_path=configured_path,
+                    configured_path_display=configured_display,
+                    effective_model_path=str(root.resolve()),
+                    effective_model_path_display=project_display_path(root),
+                    default_assets_root=str(assets_root),
+                    default_assets_root_display=project_display_path(assets_root),
+                    status_label="当前目录不是有效的 Live2D 模型目录",
+                    help_text=(
+                        "目录内至少需要 .moc3 或 .model3.json 文件。"
+                        "请确认资源包解压层级正确，或重新从 GitHub Releases 下载。"
+                    ),
+                )
+
+            return Live2DResourceInfo(
+                state=ModelState.PATH_VALID,
+                source="configured",
+                source_label="用户配置路径",
+                display_name=self.get_display_name(summary, effective_dir),
+                configured_path=configured_path,
+                configured_path_display=configured_display,
+                effective_model_path=str(effective_dir),
+                effective_model_path_display=project_display_path(effective_dir),
+                default_assets_root=str(assets_root),
+                default_assets_root_display=project_display_path(assets_root),
+                status_label="已检测到有效的 Live2D 模型资源",
+                help_text="当前使用你在设置中指定的模型路径。",
+                summary=summary,
+            )
+
+        resolved_path = self.resolve_model_path()
+        if resolved_path is None:
+            return Live2DResourceInfo(
+                state=ModelState.NOT_CONFIGURED,
+                source="missing",
+                source_label="未导入资源",
+                display_name=self.get_display_name(),
+                default_assets_root=str(assets_root),
+                default_assets_root_display=project_display_path(assets_root),
+                status_label="未检测到有效的 Live2D 模型资源",
+                help_text=(
+                    f"请从 GitHub Releases 下载 Live2D 资源包，并解压到 “{project_display_path(assets_root)}”。"
+                    "如果你已把模型放在其他位置，也可以在设置中手动填写模型路径。"
+                ),
+            )
+
+        summary = scan_live2d_model_dir(resolved_path)
+        effective_dir = _resolve_scanned_model_dir(resolved_path, summary)
+        return Live2DResourceInfo(
+            state=ModelState.PATH_VALID,
+            source="auto_discovered",
+            source_label="用户目录自动发现",
+            display_name=self.get_display_name(summary, effective_dir),
+            effective_model_path=str(effective_dir),
+            effective_model_path_display=project_display_path(effective_dir),
+            default_assets_root=str(assets_root),
+            default_assets_root_display=project_display_path(assets_root),
+            status_label="已在默认导入目录中检测到 Live2D 模型资源",
+            help_text="当前未填写模型路径，程序正在使用默认用户目录中自动发现的资源。",
+            summary=summary,
+        )
+
     def is_model_configured(self) -> bool:
-        """是否已填写了模型名和路径（不检查路径是否存在）。"""
-        return bool(self.model_name and self.model_path)
+        """当前是否已有可用模型资源（显式路径或自动发现）。"""
+        return self.resource_info().state in {ModelState.PATH_VALID, ModelState.LOADED}
 
     def validate(self) -> "ModelState":
         """校验当前配置，返回对应状态。
@@ -215,23 +377,11 @@ class Live2DModeConfig:
           3. 是否含模型文件    → PATH_NOT_LIVE2D
           4. 渲染器是否可用    → PATH_VALID（渲染器实现后由其返回 LOADED）
         """
-        if not self.is_model_configured():
-            return ModelState.NOT_CONFIGURED
-        p = Path(self.model_path).expanduser()
-        if not p.exists() or not p.is_dir():
-            return ModelState.PATH_INVALID
-        if not check_live2d_model_dir(p):
-            return ModelState.PATH_NOT_LIVE2D
-        return ModelState.PATH_VALID
+        return self.resource_info().state
 
     def scan(self) -> "ModelSummary | None":
         """扫描模型目录，返回摘要。目录不存在或未配置则返回 None。"""
-        if not self.is_model_configured():
-            return None
-        p = Path(self.model_path).expanduser()
-        if not p.exists() or not p.is_dir():
-            return None
-        return scan_live2d_model_dir(p)
+        return self.resource_info().summary
 
 
 @dataclass
@@ -262,7 +412,7 @@ class AppConfig:
 def _load_nested_dataclass(
     data: dict[str, Any],
     key: str,
-    cls: type,
+    cls: type[Any],
     legacy_key: str | None = None,
 ) -> Any:
     """从配置字典中加载嵌套 dataclass，兼容旧字段名。"""
@@ -306,10 +456,28 @@ def load_config() -> AppConfig:
             config.window_mode = window_mode
             config.bubble_mode = bubble_mode
             config.live2d_mode = live2d_mode
+            _apply_default_resource_paths(config)
             return config
         except Exception:
             logger.warning("配置文件读取失败，使用默认配置")
-    return AppConfig()
+    config = AppConfig()
+    _apply_default_resource_paths(config)
+    return config
+
+
+def _apply_default_resource_paths(config: AppConfig) -> None:
+    """Normalize legacy bundled defaults and fill lightweight defaults."""
+    if not config.bubble_mode.avatar_path:
+        config.bubble_mode.avatar_path = str(DEFAULT_BUBBLE_AVATAR_PATH)
+    legacy_paths = {
+        str(LEGACY_BUNDLED_LIVE2D_MODEL_DIR),
+        str(LEGACY_BUNDLED_LIVE2D_MODEL_DIR.resolve()) if LEGACY_BUNDLED_LIVE2D_MODEL_DIR.exists() else str(LEGACY_BUNDLED_LIVE2D_MODEL_DIR),
+        str(DEFAULT_LIVE2D_MODEL_DIR),
+    }
+    if (config.live2d_mode.model_path or "").strip() in legacy_paths:
+        config.live2d_mode.model_path = ""
+    if config.live2d_mode.model_name == "八千代辉夜姬" and not config.live2d_mode.model_path:
+        config.live2d_mode.model_name = ""
 
 
 def save_config(config: AppConfig) -> None:

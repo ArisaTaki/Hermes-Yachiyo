@@ -21,7 +21,7 @@
 - 🖥️ **桌面优先** — 本地运行的桌面应用，系统托盘常驻，无需部署服务器
 - 🔄 **三种显示模式** — 窗口模式 / 气泡悬浮模式 / Live2D 角色模式
 - 🤖 **智能任务系统** — 可插拔执行策略，支持模拟执行与 Hermes CLI 真实执行
-- 🎨 **Live2D 就绪** — 完整的模型配置、目录扫描、校验体系，等待渲染器接入
+- 🎨 **Live2D 资源包解耦** — 模型资源包通过 GitHub Releases 下载，导入本地用户目录后自动检测
 - ⚙️ **完整设置系统** — 即时生效 / 需重启分级提示，保存即反馈
 - 🔌 **QQ 桥接** — 通过 AstrBot 插件远程控制（`/y` 命令族）
 - 🏗️ **严格分层** — Shell / Core / Bridge / Locald / Protocol 职责清晰
@@ -108,16 +108,16 @@ python -m apps.shell.app
 
 | 配置项 | 默认值 | 生效策略 |
 |--------|--------|---------|
-| `display_mode` | `window` | 需重启模式 |
+| `display_mode` | `bubble` | 需重启模式 |
 | `bridge_enabled` | `true` | 需重启 Bridge |
 | `bridge_host` | `127.0.0.1` | 需重启 Bridge |
 | `bridge_port` | `8420` | 需重启 Bridge |
 | `tray_enabled` | `true` | 需重启应用 |
-| `live2d.model_name` | — | 即时生效 |
-| `live2d.model_path` | — | 即时生效 |
-| `live2d.enable_expressions` | `false` | 即时生效 |
-| `live2d.enable_physics` | `false` | 即时生效 |
-| `live2d.window_on_top` | `false` | 需重启模式 |
+| `live2d_mode.model_name` | 自动检测 | 即时生效 |
+| `live2d_mode.model_path` | 空（自动在用户目录查找） | 即时生效 |
+| `live2d_mode.enable_expressions` | `false` | 即时生效 |
+| `live2d_mode.enable_physics` | `false` | 即时生效 |
+| `live2d_mode.window_on_top` | `true` | 需重启模式 |
 
 保存设置后，界面会即时显示每项配置的生效状态提示。
 
@@ -160,15 +160,57 @@ curl http://127.0.0.1:8420/tasks -X POST \
 
 插件只做路由桥接，不实现本地逻辑。错误提示已覆盖连接失败、超时、服务未就绪等场景。
 
-## 🎨 Live2D 支持
+## 🎨 Live2D 资源包
 
-当前阶段提供完整的配置与校验框架，尚未接入渲染 SDK：
+Hermes-Yachiyo 不再把大型 Live2D 二进制资源作为主仓库默认依赖。
 
-- **五级状态校验**：未配置 → 路径无效 → 非模型目录 → 路径有效 → 已加载
-- **目录自动扫描**：检测 `.moc3` / `.model3.json` 文件（支持 Cubism 3/4）
-- **模型摘要提取**：主候选文件、来源目录、渲染器入口
-- **设置页可编辑**：模型名称、路径、空闲动作组、表情/物理开关
-- **即时刷新**：保存后立即重新校验并更新显示
+### 下载位置
+
+Live2D 资源包请从 GitHub Releases 下载：
+
+- 发布页：<https://github.com/ArisaTaki/Hermes-Yachiyo/releases>
+
+### 默认导入目录
+
+将资源包解压到本机用户目录：
+
+```text
+~/.hermes/yachiyo/assets/live2d/
+```
+
+如果你在设置页里手动填写了模型路径，程序会优先使用手动路径；如果没有填写，程序会默认在上面的用户目录中自动查找可用模型。设置页也支持直接“选择模型目录”或“导入资源包 ZIP”，不需要手动去拼完整路径。
+
+### 推荐目录结构
+
+```text
+~/.hermes/yachiyo/assets/live2d/
+└── yachiyo/
+  ├── yachiyo.model3.json
+  ├── yachiyo.moc3
+  ├── yachiyo.physics3.json
+  └── textures/
+    ├── texture_00.png
+    └── texture_01.png
+```
+
+只要目录中能检测到 `.moc3` 或 `.model3.json`，Hermes-Yachiyo 就会把它识别为有效的 Live2D 模型目录。
+
+### 在设置里启用
+
+1. 打开 Control Center。
+2. 打开 “Live2D 设置”。
+3. 如果你已经下载了 Releases 资源包，可以直接点击“导入资源包 ZIP”。
+4. 如果模型已经在本地某个目录里，可以点击“选择模型目录”。
+5. 如果你已经把资源包解压到默认目录，也可以保持“模型路径”为空，让程序自动检测。
+
+### 未导入资源时会发生什么
+
+- 应用仍然可以正常启动。
+- Live2D 模式仍然可以作为角色聊天壳 / 桌面入口存在。
+- 设置页会提示你去 Releases 下载资源包，并显示默认导入目录。
+- Live2D 模式会明确提示“未检测到有效 Live2D 模型资源”，但不会导致整个模式崩溃。
+
+更多说明见 [docs/live2d-assets.md](docs/live2d-assets.md)。
 
 ## 🔗 Bridge API
 

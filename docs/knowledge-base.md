@@ -48,6 +48,13 @@ All four surfaces must use the same chat/session/task runtime and must not fork 
 
 Mode settings should stay grouped by mode instead of growing a single mixed settings object.
 
+## Live2D asset packaging
+
+- Large Live2D binaries are optional asset packs, not required source-tree assets.
+- Default import location is `~/.hermes/yachiyo/assets/live2d/`.
+- Program code assets under `apps/shell/assets/` should stay lightweight: avatar, fallback preview, placeholder docs.
+- Live2D mode must remain usable as a shell even when no model asset pack has been imported yet.
+
 ## Hermes-Yachiyo responsibilities
 
 - local app runtime

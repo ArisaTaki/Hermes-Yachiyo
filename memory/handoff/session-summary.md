@@ -1,161 +1,91 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 57: Control Center + 双显示模式
+## 本轮完成内容 — Milestone 59: Live2D 资源包解耦
 
 ### 核心结果
 
-Hermes-Yachiyo 现在不再把主控台作为显示模式，而是：
+Hermes-Yachiyo 已完成 Live2D 大型资源与主仓库代码的运行时解耦。
 
-- **Control Center**：按需打开的总控台 / 仪表盘 / 诊断入口
-- **Bubble Mode**：轻量常驻聊天模式
-- **Live2D Mode**：角色聊天壳
-- **Chat Window**：Bubble / Live2D / Control Center 共享的完整会话空间
-
-四者围绕同一套聊天内核运行，没有分叉出独立聊天状态。
+- Live2D 模型资源不再默认依赖源码树内的大型二进制文件。
+- 默认读取位置改为用户目录 `~/.hermes/yachiyo/assets/live2d/`。
+- 资源包下载入口统一指向 GitHub Releases。
+- 即使未导入 Live2D 资源，应用和 Live2D 模式也不会崩溃。
 
 ### 本轮主要变更
 
-#### 1. 模式配置层重构
+#### 1. 资源路径策略改造
+
+- `apps/shell/assets.py`
+  - 区分程序资源与用户导入的 Live2D 资源目录
+  - 新增用户目录与默认导入目录辅助函数
+  - 新增 Releases 地址常量
+  - 默认预览兜底不再依赖仓库内大模型贴图
 
 - `apps/shell/config.py`
-  - 保留主控台窗口配置 `WindowModeConfig`
-  - 新增 `BubbleModeConfig`
-  - 新增 `Live2DModeConfig`
-  - `AppConfig` 改为通用配置 + 按模式配置的结构
-  - `display_mode` 收敛为 `bubble | live2d`，旧 `window` 配置迁移到 `bubble`
-  - 兼容旧 `live2d` 配置块读取
+  - 新增 `Live2DResourceInfo`
+  - `Live2DModeConfig` 改为“显式模型路径优先，否则自动扫描用户目录”
+  - 自动清理旧的仓库内默认 Live2D 路径配置
+
+#### 2. 产品化资源状态提示
 
 - `apps/shell/mode_settings.py`
-  - 集中模式设置读写、校验、序列化
-  - 模式设置只暴露 `bubble_mode.*` / `live2d_mode.*`
-  - 兼容旧 `live2d.*` 更新键
+  - Live2D 模式摘要改为资源状态文案
+  - 输出资源来源、默认导入目录、Releases 链接、当前生效路径
 
 - `apps/shell/settings.py`
-  - 改为 `Common + 当前模式设置`
-  - 只显示 Bubble / Live2D 的模式设置，不再展示 Window 模式
-
-#### 2. 模式壳职责重构
-
-- `apps/shell/window.py`
-  - 原主窗口改为 `Hermes-Yachiyo Control Center`
-  - 保留状态、诊断、最近消息概览、最近会话概览、打开 Chat Window 入口
-  - 新增 `open_main_window(runtime, config)`，供 Bubble / Live2D 打开 Control Center
-
-- `apps/shell/modes/bubble.py`
-  - 重写为真正 Bubble 模式
-  - 支持展开/收起
-  - 支持最近 1~3 条摘要显示
-  - 支持快捷输入并继续当前会话
-  - 支持 processing / failed / ready 状态展示
-  - 支持打开 Chat Window / Control Center / Bubble 设置
+  - Live2D 设置页新增资源来源、当前生效路径、默认导入目录、下载地址、帮助提示
 
 - `apps/shell/modes/live2d.py`
-  - 重写为角色聊天壳
-  - 角色舞台 + 回复泡泡 + 最近摘要
-  - 支持最小输入入口
-  - 支持打开 Chat Window / Control Center / Live2D 设置
-  - 保留 renderer 接入位，但本轮不做真实渲染
+  - Live2D 模式页面新增资源提示区
+  - 未导入资源时明确提示用户去 Releases 下载
+  - 保持模式壳可用，不因资源缺失直接失败
 
-#### 3. 共享聊天概览层增强
+#### 3. bridge 与文档同步
 
-- `apps/shell/chat_bridge.py`
-  - 新增 `get_recent_sessions()`
-  - 新增 `get_conversation_overview()`
-  - Control Center / Bubble / Live2D 统一通过它读取当前会话摘要和最近会话
+- `apps/bridge/routes/live2d.py`
+  - 读取模型资源时统一走 resolved effective path
 
-- `apps/shell/main_api.py`
-  - `get_dashboard_data()` 新增 `chat` + `modes`
-  - `get_settings_data()` 改为返回 `mode_settings`
-  - `update_settings()` 改为委托 `mode_settings.apply_settings_changes()`
-  - 新增 `open_mode_settings(mode_id)`
+- 文档
+  - `README.md`：补充 Releases 下载、默认导入路径、未导入资源时的行为
+  - `docs/live2d-assets.md`：新增独立用户说明文档
+  - `docs/knowledge-base.md` / `docs/implementation-plan.md`：补充资源包解耦约束
+  - `apps/shell/assets/live2d/README.md`：改为占位说明
+  - `.gitignore`：补充 Live2D 大型资源忽略规则
 
-### 当前产品职责关系
-
-#### Control Center
-
-- 用途：总控台、仪表盘、诊断入口、设置入口
-- 展示：Hermes / workspace / bridge / integration / task 状态、最近消息、最近会话
-- 入口：Bubble / Live2D 右键菜单、主控台打开 API
-- 不做：完整聊天消息区
-
-#### Chat Window
-
-- 用途：完整会话空间
-- 展示：完整消息流、历史会话切换、会话清空/删除
-- 关系：Bubble / Live2D / Control Center 都可打开它，它不是产品唯一入口
-
-#### Bubble Mode
-
-- 用途：轻量桌面聊天模式
-- 已具备：
-  - 展开/收起
-  - 最近摘要
-  - 快捷输入
-  - 当前会话续聊
-  - 状态标签
-  - 打开完整聊天窗口
-  - 打开 Bubble 设置
-
-#### Live2D Mode
-
-- 用途：角色聊天壳
-- 已具备：
-  - 角色舞台壳
-  - 最近回复泡泡
-  - 最近摘要
-  - 最小输入入口
-  - 当前会话状态感知
-  - 打开完整聊天窗口
-  - 打开 Live2D 设置
-- 未做：
-  - 真正 renderer / moc3 渲染
-  - 动作 / 表情 / 口型驱动
-
-### 统一聊天来源确认
-
-仍然保持唯一来源：
+### 当前读取规则
 
 ```text
-Control Center / Bubble / Live2D / Chat Window
-        ↓
-      ChatBridge / ChatAPI
-        ↓
-      ChatSession
-        ↓
-      ChatStore (SQLite)
+1. live2d_mode.model_path 有值 → 优先使用用户配置路径
+2. live2d_mode.model_path 为空 → 自动扫描 ~/.hermes/yachiyo/assets/live2d/
+3. 检测到 .moc3 或 .model3.json → 判定为有效模型目录
+4. 未检测到有效资源 → 设置页 / Live2D 模式提示下载，但应用继续运行
 ```
-
-没有新增任何独立消息状态容器。
 
 ### 测试覆盖
 
 - `tests/test_mode_settings.py`
-  - 模式配置模型分离
-  - Bubble 配置读写
-  - 旧 `live2d.*` 兼容更新
-  - 新旧配置块加载/保存
+  - 默认空路径 + 自动发现逻辑
+  - 旧仓库内默认路径迁移清理
+  - 缺失资源 / 有效资源 / 自定义路径摘要输出
 
 - `tests/test_main_api_modes.py`
-  - Control Center 仪表盘包含 chat overview + modes
-  - 设置数据返回 `mode_settings`
+  - 设置数据中的模式摘要与 Live2D 资源状态
 
 - `tests/test_chat_bridge.py`
-  - 新增 conversation overview 覆盖
-  - Bubble / Live2D HTML 仍保留统一轮询契约
+  - Live2D 视图中的 renderer payload
+  - 未导入资源时的提示文案
 
-- `tests/test_window_exit.py`
-  - 验证 Control Center 仍通过 Chat Window 承载完整会话
+结果：44 passed
 
 ### 手工验证建议
 
-1. 启动默认 `display_mode=bubble`，确认只出现圆形 launcher。
-2. 从 Bubble 右键打开 Control Center，确认总控信息和最近消息/会话概览正常。
-3. 在 Control Center 打开 Chat Window，确认完整消息流仍正常。
-4. 切到 Live2D Mode，观察角色 launcher、缩放、跨 Spaces 配置和 Chat Window 展开行为。
-5. 分别打开 Bubble / Live2D 设置，确认 `Common + 当前模式设置` 能保存并在切换模式时重启应用。
+1. 保持 `~/.hermes/yachiyo/assets/live2d/` 为空，启动应用并切到 Live2D 模式，确认有下载提示且不崩溃。
+2. 把资源包解压到默认目录，保持模型路径为空，确认设置页显示已自动检测到资源。
+3. 手动填写一个错误路径，确认状态变为路径错误而不是静默失败。
+4. 手动填写一个有效自定义路径，确认状态切换为用户配置路径。
 
 ### 后续最合理的方向
 
-1. 把 Bubble / Live2D 的窗口位置恢复、吸附和更细粒度未读态做成真正原生行为。
-2. 为 Live2D 模式接入 renderer 占位实现（先 canvas / mock renderer，再接 moc3）。
-3. 继续补 UI 层自动化或更细的 shell service 测试。
+1. 把 Release 资源包制作流程和版本命名规则整理成发布 SOP。
+2. 在安装器或首次启动流程中补一个“打开默认导入目录 / 打开 Releases 页面”的快捷入口。
+3. 在确认资源解耦稳定后，再继续推进真正的 Live2D renderer 能力，而不是把资源和渲染问题混在一起处理。

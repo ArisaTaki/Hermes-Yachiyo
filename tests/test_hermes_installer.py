@@ -40,6 +40,39 @@ def test_hermes_doctor_readiness_keeps_startup_bounded():
     assert timeout_param.default == 5.0
 
 
+def test_hermes_doctor_readiness_parses_limited_tools(monkeypatch):
+    class Result:
+        stdout = """
+◆ Tool Availability
+  ✓ terminal
+  ⚠ browser (system dependency not met)
+  ❌ image_gen (system dependency not met)
+  ✗ agent-browser (missing binary)
+
+────────────────────────────────────────────────────────────
+  Found 3 issue(s) to address:
+"""
+        stderr = ""
+
+    calls = []
+
+    def fake_run(args, capture_output, text, timeout):
+        calls.append((args, capture_output, text, timeout))
+        return Result()
+
+    monkeypatch.setattr("apps.installer.hermes_check.subprocess.run", fake_run)
+
+    readiness, tools, issues = check_hermes_doctor_readiness(
+        timeout=1.5,
+        hermes_path="/tmp/hermes",
+    )
+
+    assert readiness == HermesReadinessLevel.BASIC_READY
+    assert tools == ["browser", "image_gen", "agent-browser"]
+    assert issues == 3
+    assert calls == [(["/tmp/hermes", "doctor"], True, True, 1.5)]
+
+
 def test_install_check_uses_located_hermes_binary(monkeypatch):
     hermes_path = "/Users/test/.local/bin/hermes"
     calls = []
