@@ -1,5 +1,8 @@
 """Main window exit behavior tests."""
 
+import sys
+import types
+
 import apps.shell.main_api as main_api_mod
 from apps.shell import chat_window, window as window_mod
 from apps.shell.modes.bubble import BubbleWindowAPI
@@ -131,6 +134,37 @@ def test_request_app_restart_is_delayed(monkeypatch):
     assert FakeTimer.instances[0].interval == window_mod._RESTART_DELAY_SECONDS
     assert FakeTimer.instances[0].started is True
     assert FakeTimer.instances[0].daemon is True
+
+
+def test_restart_process_exits_only_after_successful_spawn(monkeypatch):
+    spawned = []
+    exits = []
+
+    def fake_popen(argv, close_fds, start_new_session):
+        spawned.append((argv, close_fds, start_new_session))
+        return object()
+
+    monkeypatch.setitem(sys.modules, "subprocess", types.SimpleNamespace(Popen=fake_popen))
+    monkeypatch.setattr(window_mod, "_process_exit", lambda code=0: exits.append(code))
+
+    window_mod._restart_process()
+
+    assert spawned
+    assert exits == [0]
+
+
+def test_restart_process_keeps_app_alive_when_spawn_fails(monkeypatch):
+    exits = []
+
+    def fake_popen(*_args, **_kwargs):
+        raise OSError("spawn failed")
+
+    monkeypatch.setitem(sys.modules, "subprocess", types.SimpleNamespace(Popen=fake_popen))
+    monkeypatch.setattr(window_mod, "_process_exit", lambda code=0: exits.append(code))
+
+    window_mod._restart_process()
+
+    assert exits == []
 
 
 def test_bubble_close_requests_full_app_exit(monkeypatch):

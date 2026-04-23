@@ -108,13 +108,13 @@ python -m apps.shell.app
 
 | 配置项 | 默认值 | 生效策略 |
 |--------|--------|---------|
-| `display_mode` | `bubble` | 需重启模式 |
+| `display_mode` | `bubble` | 需重启应用 |
 | `bridge_enabled` | `true` | 需重启 Bridge |
 | `bridge_host` | `127.0.0.1` | 需重启 Bridge |
 | `bridge_port` | `8420` | 需重启 Bridge |
 | `tray_enabled` | `true` | 需重启应用 |
 | `live2d_mode.model_name` | 自动检测 | 即时生效 |
-| `live2d_mode.model_path` | 空（自动在用户目录查找） | 即时生效 |
+| `live2d_mode.model_path` | 空（自动在用户目录查找） | 需重启模式 |
 | `live2d_mode.enable_expressions` | `false` | 即时生效 |
 | `live2d_mode.enable_physics` | `false` | 即时生效 |
 | `live2d_mode.window_on_top` | `true` | 需重启模式 |

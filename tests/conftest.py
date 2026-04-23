@@ -8,6 +8,7 @@ from __future__ import annotations
 import sys
 import types
 from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,6 +23,35 @@ def _ensure_bridge_mocks() -> None:
         def __init__(self, cls, **options):
             self.cls = cls
             self.options = options
+
+    class _MockHTTPException(Exception):
+        def __init__(self, status_code: int, detail=None):
+            super().__init__(detail)
+            self.status_code = status_code
+            self.detail = detail
+
+    class _MockResponse:
+        def __init__(self, content=None, media_type=None, headers=None):
+            self.content = content
+            self.media_type = media_type
+            self.headers = headers or {}
+
+    class _MockFileResponse(_MockResponse):
+        def __init__(self, path, media_type=None, headers=None):
+            super().__init__(content=path, media_type=media_type, headers=headers)
+            self.path = path
+
+    class _MockAPIRouter:
+        def __init__(self, **_kw):
+            pass
+
+        def _decorator(self, *_args, **_kwargs):
+            def wrap(func):
+                return func
+
+            return wrap
+
+        get = post = options = _decorator
 
     class _MockFastAPI:
         def __init__(self, **kw):
@@ -40,8 +70,11 @@ def _ensure_bridge_mocks() -> None:
                                                    "run": lambda s: None,
                                                    "should_exit": False})},
         "fastapi": {"FastAPI": _MockFastAPI,
-                    "APIRouter": type("APIRouter", (), {"__init__": lambda s, **kw: None})},
+                    "APIRouter": _MockAPIRouter,
+                    "HTTPException": _MockHTTPException,
+                    "Request": type("Request", (), {})},
         "fastapi.middleware.cors": {"CORSMiddleware": type("CORSMiddleware", (), {})},
+        "fastapi.responses": {"FileResponse": _MockFileResponse, "Response": _MockResponse},
     }
     route_modules = [
         "apps.bridge.routes",
@@ -67,12 +100,15 @@ def _ensure_bridge_mocks() -> None:
             mod = types.ModuleType(name)
             mod.router = MagicMock()  # type: ignore[attr-defined]
             if name == "apps.bridge.routes":
-                mod.__path__ = []  # type: ignore[attr-defined]
+                mod.__path__ = [  # type: ignore[attr-defined]
+                    str(Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes")
+                ]
             sys.modules[name] = mod
 
     for name in dep_modules:
         if name not in sys.modules:
             mod = types.ModuleType(name)
+            mod.get_runtime = lambda: None  # type: ignore[attr-defined]
             sys.modules[name] = mod
 
 

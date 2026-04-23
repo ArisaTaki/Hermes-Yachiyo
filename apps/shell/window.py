@@ -1633,7 +1633,6 @@ def request_app_restart() -> None:
 
 def _restart_process() -> None:
     """启动新进程并退出当前进程。"""
-    import os
     import subprocess
     import sys
 
@@ -1645,10 +1644,9 @@ def _restart_process() -> None:
             start_new_session=True,
         )
         logger.info("新进程已启动（%s %s）", sys.executable, sys.argv)
+        _process_exit(0)
     except Exception as exc:
         logger.warning("自动重启失败，请手动重启应用: %s", exc)
-    finally:
-        os._exit(0)
 
 
 def _process_exit(code: int = 0) -> None:

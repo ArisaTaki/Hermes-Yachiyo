@@ -15,6 +15,7 @@ from apps.shell.config import (
 )
 from apps.shell.effect_policy import build_effects_summary
 from apps.shell.mode_catalog import get_mode_descriptor, list_mode_options
+from apps.shell.modes.bubble import _MAX_LAUNCHER_SIZE, _MIN_LAUNCHER_SIZE
 
 logger = logging.getLogger(__name__)
 
@@ -119,8 +120,8 @@ def _validate_field(key: str, value: Any) -> str | None:
     if key == "bridge_port" and not (1024 <= value <= 65535):
         return "bridge_port 须在 1024-65535 之间"
     if key.startswith("bubble_mode.") and (key.endswith(".width") or key.endswith(".height")):
-        if not (80 <= value <= 180):
-            return f"{key} 须在 80-180 之间"
+        if not (_MIN_LAUNCHER_SIZE <= value <= _MAX_LAUNCHER_SIZE):
+            return f"{key} 须在 {_MIN_LAUNCHER_SIZE}-{_MAX_LAUNCHER_SIZE} 之间"
     elif key.endswith(".width") or key.endswith(".height"):
         if value < 240:
             return f"{key} 不能小于 240"

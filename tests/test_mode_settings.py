@@ -155,6 +155,18 @@ def test_apply_settings_changes_rejects_invalid_single_field(tmp_path, monkeypat
     assert "summary_count" in result["error"]
 
 
+def test_apply_settings_changes_rejects_out_of_range_bubble_size(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    config = AppConfig()
+
+    result = apply_settings_changes(config, {"bubble_mode.width": 80})
+
+    assert result["ok"] is False
+    assert config.bubble_mode.width != 80
+    assert "96-128" in result["error"]
+
+
 def test_apply_settings_changes_supports_legacy_live2d_prefix(tmp_path, monkeypatch):
     monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
     monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")

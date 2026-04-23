@@ -19,7 +19,6 @@ class _RuntimeStub:
         self.chat_session.attach_store(store, load_existing=False)
         self.task_runner = None
         self.cancelled_runner_tasks: list[str] = []
-        self.task_runner = None
 
     def cancel_task_runner_task(self, task_id: str) -> bool:
         self.cancelled_runner_tasks.append(task_id)
@@ -445,13 +444,14 @@ def test_live2d_view_exposes_renderer_payload(tmp_path, monkeypatch):
             "_get_bridge_running_config",
             lambda _config: {"host": "127.0.0.1", "port": 8420},
         )
+        monkeypatch.setattr("apps.bridge.server.get_live2d_asset_token", lambda: "token-123")
 
         view = Live2DWindowAPI(runtime, config).get_live2d_view()
         renderer = view["live2d"]["renderer"]
 
         assert renderer["enabled"] is True
         assert renderer["model_url"].startswith("http://127.0.0.1:8420/live2d/assets/")
-        assert renderer["model_url"].endswith(".model3.json")
+        assert ".model3.json?token=token-123" in renderer["model_url"]
         assert renderer["mouse_follow_enabled"] is True
     finally:
         store.close()

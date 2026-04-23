@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import secrets
 import threading
 import time
 from typing import Any
@@ -57,11 +58,10 @@ app = _FastAPIClass(
 )
 
 if _FASTAPI_AVAILABLE:
-    # pywebview / WKWebView 在 about:blank 页面对本地 bridge 发起 XHR 时，Origin 常为 null。
-    # 这里只放行 null 与回环地址，避免把本地高权限 bridge 暴露给任意网页读取。
+    # 仅放行回环地址；null-origin 的 Live2D 资源请求在专用路由里做 token 校验后单独处理。
     app.add_middleware(
         _CORSMiddlewareClass,
-        allow_origins=["null"],
+        allow_origins=[],
         allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$",
         allow_methods=["*"],
         allow_headers=["*"],
@@ -96,6 +96,7 @@ _state: str = "not_started"
 # 当前实际使用的 host/port
 _running_host: str = ""
 _running_port: int = 0
+_live2d_asset_token: str = secrets.token_urlsafe(24)
 
 
 def get_bridge_state() -> str:
@@ -108,12 +109,25 @@ def get_running_config() -> dict[str, object]:
     return {"host": _running_host, "port": _running_port}
 
 
+def get_live2d_asset_token() -> str:
+    """返回当前进程内的 Live2D 资源访问令牌。"""
+    return _live2d_asset_token
+
+
+def regenerate_live2d_asset_token() -> str:
+    """为 Live2D 资源路由生成新的进程内访问令牌。"""
+    global _live2d_asset_token
+    _live2d_asset_token = secrets.token_urlsafe(24)
+    return _live2d_asset_token
+
+
 def start_bridge(host: str = "127.0.0.1", port: int = 8420) -> None:
     """启动 Bridge API（阻塞，应在后台线程调用）"""
     global _server, _state, _running_host, _running_port
     if uvicorn is None:
         _state = "failed"
         raise RuntimeError("Bridge 依赖未安装：缺少 fastapi/uvicorn")
+    regenerate_live2d_asset_token()
     _register_routes()
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     _server = uvicorn.Server(config)

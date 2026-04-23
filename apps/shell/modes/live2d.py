@@ -13,7 +13,7 @@ import logging
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from apps.installer.workspace_init import get_workspace_status
@@ -1372,7 +1372,14 @@ def _build_live2d_model_url(config: "AppConfig") -> str:
     runtime_config = _get_bridge_running_config(config)
     host = runtime_config.get("host") or config.bridge_host
     port = runtime_config.get("port") or config.bridge_port
-    return f"http://{host}:{port}/live2d/assets/{quote(rel_path, safe='/')}"
+    try:
+        from apps.bridge.server import get_live2d_asset_token
+
+        token = get_live2d_asset_token()
+    except Exception:
+        token = ""
+    suffix = f"?{urlencode({'token': token})}" if token else ""
+    return f"http://{host}:{port}/live2d/assets/{quote(rel_path, safe='/')}{suffix}"
 
 
 def _resolve_live2d_preview_uri(config: "AppConfig") -> str:
