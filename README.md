@@ -160,55 +160,104 @@ curl http://127.0.0.1:8420/tasks -X POST \
 
 插件只做路由桥接，不实现本地逻辑。错误提示已覆盖连接失败、超时、服务未就绪等场景。
 
-## 🎨 Live2D 资源包
+## 🎨 桌面资源包（Bubble / Live2D）
 
-Hermes-Yachiyo 不再把大型 Live2D 二进制资源作为主仓库默认依赖。
+Hermes-Yachiyo 将运行代码和大体积角色资源分开管理：
 
-### 下载位置
+- **Bubble 头像资源**：体积小，可作为独立 Release 资源包下载，也保留一个默认头像随主仓库发布。
+- **Live2D 模型资源**：体积较大，不直接提交到主仓库；请从单独的 L2D Release 下载后导入到用户目录。
 
-Live2D 资源包请从 GitHub Releases 下载：
+### GitHub Releases
 
-- 发布页：<https://github.com/ArisaTaki/Hermes-Yachiyo/releases>
+资源包按用途拆分为两个 Release / Tag：
 
-### 默认导入目录
+| 资源类型 | Release / Tag | 用途 |
+|---|---|---|
+| Bubble 头像 | `bubble-assets-20260423` | 气泡模式头像、备用头像素材 |
+| Live2D 模型 | `l2d-assets-20260423` / `live2d-assets-20260423` | Live2D Cubism 模型、纹理、表情、物理配置 |
 
-将资源包解压到本机用户目录：
+发布页：<https://github.com/ArisaTaki/Hermes-Yachiyo/releases>
+
+### 推荐用户目录结构
+
+```text
+~/.hermes/yachiyo/assets/
+├── bubble/
+│   └── avatars/
+│       └── yachiyo-default.jpg
+└── live2d/
+    └── yachiyo/
+        ├── 八千代辉夜姬.model3.json
+        ├── 八千代辉夜姬.moc3
+        ├── 八千代辉夜姬.physics3.json
+        └── 八千代辉夜姬.8192/
+            ├── texture_00.png
+            └── texture_01.png
+```
+
+### 从 Release ZIP 导入
+
+下载资源包后，可用下面命令导入。
+
+#### Bubble 头像
+
+```bash
+mkdir -p ~/.hermes/yachiyo/assets/bubble
+unzip hermes-yachiyo-bubble-avatar-20260423.zip -d ~/.hermes/yachiyo/assets/bubble/
+```
+
+如果你只是从本地开发仓库复制默认头像：
+
+```bash
+mkdir -p ~/.hermes/yachiyo/assets/bubble/avatars
+cp apps/shell/assets/avatars/yachiyo-default.jpg \
+  ~/.hermes/yachiyo/assets/bubble/avatars/yachiyo-default.jpg
+```
+
+Bubble 模式默认会使用主仓库内置头像；如果你希望改用用户目录头像，可在设置页把 `bubble_mode.avatar_path` 指向：
+
+```text
+~/.hermes/yachiyo/assets/bubble/avatars/yachiyo-default.jpg
+```
+
+#### Live2D 模型
+
+```bash
+mkdir -p ~/.hermes/yachiyo/assets/live2d
+unzip hermes-yachiyo-live2d-yachiyo-20260423.zip -d ~/.hermes/yachiyo/assets/live2d/
+```
+
+如果你已经在本地开发仓库中有未提交的 Live2D 资源，也可以直接复制：
+
+```bash
+mkdir -p ~/.hermes/yachiyo/assets/live2d
+cp -R apps/shell/assets/live2d/yachiyo \
+  ~/.hermes/yachiyo/assets/live2d/
+```
+
+### Live2D 自动检测和手动路径
+
+默认情况下，`live2d_mode.model_path` 为空，Hermes-Yachiyo 会自动扫描：
 
 ```text
 ~/.hermes/yachiyo/assets/live2d/
 ```
 
-如果你在设置页里手动填写了模型路径，程序会优先使用手动路径；如果没有填写，程序会默认在上面的用户目录中自动查找可用模型。设置页也支持直接“选择模型目录”或“导入资源包 ZIP”，不需要手动去拼完整路径。
+只要该目录或其一级子目录中存在 `.model3.json` 或 `.moc3`，就会被识别为有效 Live2D 模型。
 
-### 推荐目录结构
+你也可以在 Control Center → “Live2D 设置”中：
 
-```text
-~/.hermes/yachiyo/assets/live2d/
-└── yachiyo/
-  ├── yachiyo.model3.json
-  ├── yachiyo.moc3
-  ├── yachiyo.physics3.json
-  └── textures/
-    ├── texture_00.png
-    └── texture_01.png
-```
-
-只要目录中能检测到 `.moc3` 或 `.model3.json`，Hermes-Yachiyo 就会把它识别为有效的 Live2D 模型目录。
-
-### 在设置里启用
-
-1. 打开 Control Center。
-2. 打开 “Live2D 设置”。
-3. 如果你已经下载了 Releases 资源包，可以直接点击“导入资源包 ZIP”。
-4. 如果模型已经在本地某个目录里，可以点击“选择模型目录”。
-5. 如果你已经把资源包解压到默认目录，也可以保持“模型路径”为空，让程序自动检测。
+1. 点击“导入资源包 ZIP”；或
+2. 点击“选择模型目录”；或
+3. 手动填写 `live2d_mode.model_path`。
 
 ### 未导入资源时会发生什么
 
 - 应用仍然可以正常启动。
+- Bubble / Chat Window / Control Center 不受影响。
 - Live2D 模式仍然可以作为角色聊天壳 / 桌面入口存在。
-- 设置页会提示你去 Releases 下载资源包，并显示默认导入目录。
-- Live2D 模式会明确提示“未检测到有效 Live2D 模型资源”，但不会导致整个模式崩溃。
+- 设置页会提示你从 Releases 下载资源包，并显示默认导入目录。
+- Live2D 模式会明确提示“未检测到有效 Live2D 模型资源”，不会导致整个模式崩溃。
 
 更多说明见 [docs/live2d-assets.md](docs/live2d-assets.md)。
 
