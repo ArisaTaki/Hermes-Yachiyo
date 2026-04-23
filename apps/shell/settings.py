@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import shutil
 import subprocess
@@ -197,6 +198,18 @@ class ModeSettingsAPI:
                     result["restart_error"] = str(exc)
         return result
 
+    def preview_settings(self, changes: dict[str, Any]) -> dict[str, Any]:
+        try:
+            preview_config = copy.deepcopy(self._config)
+            result = apply_settings_changes(preview_config, changes, persist=False)
+            if not result.get("ok"):
+                return result
+            result["preview"] = serialize_mode_window_data(preview_config, self._mode_id)
+            return result
+        except Exception as exc:
+            logger.error("预览设置变更失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     def _ensure_live2d_mode(self) -> None:
         if self._mode_id != "live2d":
             raise RuntimeError("当前窗口不是 Live2D 设置页")
@@ -220,15 +233,13 @@ class ModeSettingsAPI:
             return None
         return Path(selected[0]).expanduser()
 
-    def _apply_live2d_model_path(self, model_path: Path, message: str) -> dict[str, Any]:
-        result = apply_settings_changes(
-            self._config,
-            {"live2d_mode.model_path": str(model_path.expanduser().resolve())},
-        )
+    def _prepare_live2d_model_path(self, model_path: Path, message: str) -> dict[str, Any]:
+        resolved_path = str(model_path.expanduser().resolve())
+        result = self.preview_settings({"live2d_mode.model_path": resolved_path})
         if not result.get("ok"):
             return result
-        result["settings"] = serialize_mode_window_data(self._config, self._mode_id)
         result["message"] = message
+        result["draft_changes"] = {"live2d_mode.model_path": resolved_path}
         result["model_path_display"] = project_display_path(model_path)
         return result
 
@@ -254,7 +265,7 @@ class ModeSettingsAPI:
             if model_dir is None:
                 return {"ok": False, "error": "所选目录内未检测到有效的 Live2D 模型资源"}
 
-            return self._apply_live2d_model_path(model_dir, "已更新 Live2D 模型路径")
+            return self._prepare_live2d_model_path(model_dir, "已选择 Live2D 模型路径，等待应用")
         except Exception as exc:
             logger.error("选择 Live2D 模型目录失败: %s", exc)
             return {"ok": False, "error": str(exc)}
@@ -279,7 +290,7 @@ class ModeSettingsAPI:
                 return {"ok": False, "cancelled": True, "error": "已取消选择"}
 
             imported_path = _import_live2d_archive(selected)
-            return self._apply_live2d_model_path(imported_path, "已导入 Live2D 资源包")
+            return self._prepare_live2d_model_path(imported_path, "已导入 Live2D 资源包，等待应用")
         except Exception as exc:
             logger.error("导入 Live2D 资源包失败: %s", exc)
             return {"ok": False, "error": str(exc)}
@@ -393,6 +404,7 @@ h2 { color: #86a9ff; font-size: 1.15em; margin-bottom: 6px; }
 input:checked + .slider { background: #5e89ff; }
 input:checked + .slider:before { transform: translateX(20px); }
 .hint {
+    margin-top: 10px;
     min-height: 1.2em;
     font-size: 0.82em;
     color: #8fe3a3;
@@ -455,6 +467,35 @@ input:checked + .slider:before { transform: translateX(20px); }
 .action-btn.secondary:focus {
     background: #1e2140;
 }
+.action-btn.primary {
+    background: #3657cc;
+    border-color: #5f7fff;
+}
+.action-btn.primary:hover,
+.action-btn.primary:focus {
+    background: #4468ea;
+}
+.action-btn:disabled {
+    cursor: default;
+    opacity: 0.46;
+    background: #15182b;
+    border-color: #333758;
+}
+.footer-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 8px;
+}
+.draft-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #a9b1e6;
+    font-size: 0.8em;
+}
 .note {
     margin-top: 10px;
     padding: 10px 12px;
@@ -515,29 +556,145 @@ input:checked + .slider:before { transform: translateX(20px); }
         <h3 id="part-title">设置项</h3>
         <div id="mode-form"></div>
         <div class="hint" id="save-hint"></div>
+        <div class="footer-actions">
+            <div class="draft-status">
+                <span class="badge" id="draft-badge" style="display:none;"></span>
+                <span id="draft-text">当前没有未保存的修改。</span>
+            </div>
+            <div class="action-group">
+                <button class="action-btn secondary" id="draft-reset" type="button" onclick="resetDraft()" disabled>重置草稿</button>
+                <button class="action-btn primary" id="draft-apply" type="button" onclick="applyDraft()" disabled>应用修改</button>
+            </div>
+        </div>
     </div>
 
 <script>
 let currentMode = '';
 let currentSettings = null;
+let currentModeMeta = null;
+let currentSummary = '';
+let draftChanges = {};
+let draftPreviewConfig = null;
+let draftPreviewSummary = '';
 
 function num(v, fallback) {
     const n = parseFloat(v);
     return Number.isFinite(n) ? n : fallback;
 }
 
+function fieldName(key) {
+    const parts = String(key || '').split('.');
+    return parts[parts.length - 1] || '';
+}
+
+function cloneValue(value) {
+    return JSON.parse(JSON.stringify(value));
+}
+
+function sameValue(left, right) {
+    if (typeof left === 'number' || typeof right === 'number') {
+        return Number(left) === Number(right);
+    }
+    return left === right;
+}
+
+function hasDraftChanges() {
+    return Object.keys(draftChanges).length > 0;
+}
+
+function workingSummary() {
+    return draftPreviewSummary || currentSummary || '—';
+}
+
+function baseWorkingSettings() {
+    if (draftPreviewConfig) return cloneValue(draftPreviewConfig);
+    if (currentSettings) return cloneValue(currentSettings);
+    return {};
+}
+
+function updateSyntheticDisplayFields(cfg, key, value) {
+    const name = fieldName(key);
+    if (name === 'model_path') cfg.model_path_display = String(value || '');
+    if (name === 'avatar_path') cfg.avatar_path_display = String(value || '');
+}
+
+function workingSettings() {
+    const cfg = baseWorkingSettings();
+    Object.entries(draftChanges).forEach(function(entry) {
+        const key = entry[0];
+        const value = entry[1];
+        cfg[fieldName(key)] = value;
+        updateSyntheticDisplayFields(cfg, key, value);
+    });
+    return cfg;
+}
+
+function setDraftField(key, value) {
+    const name = fieldName(key);
+    const savedValue = currentSettings ? currentSettings[name] : undefined;
+    if (sameValue(savedValue, value)) delete draftChanges[key];
+    else draftChanges[key] = value;
+    if (!hasDraftChanges()) {
+        draftPreviewConfig = null;
+        draftPreviewSummary = '';
+    }
+    updateDraftState();
+}
+
+function clearDraftState() {
+    draftChanges = {};
+    draftPreviewConfig = null;
+    draftPreviewSummary = '';
+}
+
+function showHint(message, isError) {
+    const hint = document.getElementById('save-hint');
+    if (!message) {
+        hint.textContent = '';
+        hint.className = 'hint';
+        return;
+    }
+    hint.textContent = message;
+    hint.className = isError ? 'hint error' : 'hint';
+    setTimeout(function() {
+        if (hint.textContent === message) {
+            hint.textContent = '';
+            hint.className = 'hint';
+        }
+    }, 3200);
+}
+
+function updateDraftState() {
+    const count = Object.keys(draftChanges).length;
+    const badge = document.getElementById('draft-badge');
+    const text = document.getElementById('draft-text');
+    const resetBtn = document.getElementById('draft-reset');
+    const applyBtn = document.getElementById('draft-apply');
+    if (count > 0) {
+        badge.style.display = 'inline-block';
+        badge.textContent = count + ' 项待应用';
+        text.textContent = '当前表单是草稿，点击“应用修改”后才会写入配置。';
+    } else {
+        badge.style.display = 'none';
+        badge.textContent = '';
+        text.textContent = '当前没有未保存的修改。';
+    }
+    resetBtn.disabled = count === 0;
+    applyBtn.disabled = count === 0;
+}
+
 function boolRow(key, label, checked) {
     return '<div class="row"><span class="label">' + label + '</span>'
         + '<label class="toggle"><input type="checkbox" '
         + (checked ? 'checked ' : '')
-        + 'onchange="saveField(\\'' + key + '\\', this.checked)"><span class="slider"></span></label></div>';
+        + 'onchange="updateDraftField(\\'' + key + '\\', this.checked)"><span class="slider"></span></label></div>';
 }
 
 function inputRow(key, label, value, type='text', step='') {
     const stepAttr = step ? ' step="' + step + '"' : '';
     return '<div class="row"><span class="label">' + label + '</span>'
         + '<input class="input" type="' + type + '" value="' + escapeHtml(String(value ?? '')) + '"' + stepAttr
-        + ' onchange="saveInput(\\'' + key + '\\', this)"></div>';
+        + ' oninput="updateInputDraft(\\'' + key + '\\', this)"></div>';
 }
 
 function domId(key) {
@@ -550,12 +707,10 @@ function scaleRow(key, label, value, min='0.40', max='2.00', step='0.01') {
     return '<div class="row"><span class="label">' + label + '</span>'
         + '<div class="range-wrap">'
         + '<input class="range" id="' + id + '-range" type="range" min="' + min + '" max="' + max + '" step="' + step + '" value="' + current + '"'
-        + ' oninput="syncScaleValue(\\'' + id + '\\', this.value)"'
-        + ' onchange="saveScaleField(\\'' + key + '\\', \\'' + id + '\\', this.value)">'
+        + ' oninput="updateScaleDraft(\\'' + key + '\\', \\'' + id + '\\', this.value)">'
         + '<span class="range-value" id="' + id + '-value">' + current + 'x</span>'
         + '<input class="input range-number" id="' + id + '-number" type="number" min="' + min + '" max="' + max + '" step="' + step + '" value="' + current + '"'
-        + ' oninput="syncScaleValue(\\'' + id + '\\', this.value)"'
-        + ' onchange="saveScaleField(\\'' + key + '\\', \\'' + id + '\\', this.value)">'
+        + ' oninput="updateScaleDraft(\\'' + key + '\\', \\'' + id + '\\', this.value)">'
         + '</div></div>';
 }
 
@@ -575,9 +730,9 @@ function syncScaleValue(id, value) {
     if (text) text.textContent = normalized + 'x';
 }
 
-async function saveScaleField(key, id, value) {
+function updateScaleDraft(key, id, value) {
     syncScaleValue(id, value);
-    await saveField(key, num(value, 1));
+    setDraftField(key, num(value, 1));
 }
 
 function actionButton(label, handler, kind='') {
@@ -684,6 +839,7 @@ function renderForm(mode, cfg) {
         html += boolRow('live2d_mode.window_on_top', '窗口置顶', cfg.window_on_top);
         html += boolRow('live2d_mode.show_on_all_spaces', 'macOS 所有桌面可见', cfg.show_on_all_spaces);
         html += boolRow('live2d_mode.auto_open_chat_window', '自动打开聊天窗口', cfg.auto_open_chat_window);
+        html += boolRow('live2d_mode.mouse_follow_enabled', '鼠标跟随', cfg.mouse_follow_enabled);
         html += inputRow('live2d_mode.idle_motion_group', '待机动作组', cfg.idle_motion_group);
         html += boolRow('live2d_mode.enable_expressions', '启用表情系统', cfg.enable_expressions);
         html += boolRow('live2d_mode.enable_physics', '启用物理模拟', cfg.enable_physics);
@@ -694,7 +850,6 @@ function renderForm(mode, cfg) {
 }
 
 async function runModeAction(methodName, successText) {
-    const hint = document.getElementById('save-hint');
     try {
         if (!window.pywebview || !window.pywebview.api) throw new Error('pywebview API 未就绪');
         const action = window.pywebview.api[methodName];
@@ -702,21 +857,24 @@ async function runModeAction(methodName, successText) {
         const result = await action();
         if (result && result.cancelled) return;
         if (!result || !result.ok) throw new Error((result && result.error) || '操作失败');
-        if (result.settings) renderSettings(result.settings);
-        hint.textContent = result.message || successText || '✓ 已完成';
-        hint.className = 'hint';
+        if (result.preview && result.preview.settings) {
+            draftPreviewConfig = cloneValue(result.preview.settings.config);
+            draftPreviewSummary = result.preview.settings.summary || '';
+        }
+        if (result.draft_changes) {
+            Object.entries(result.draft_changes).forEach(function(entry) {
+                setDraftField(entry[0], entry[1]);
+            });
+        }
+        renderAll();
+        showHint(result.message || successText || '✓ 已完成', false);
     } catch (error) {
-        hint.textContent = '✗ ' + error.message;
-        hint.className = 'hint error';
+        showHint('✗ ' + error.message, true);
     }
-    setTimeout(function() {
-        hint.textContent = '';
-        hint.className = 'hint';
-    }, 3000);
 }
 
 function chooseLive2DModelPath() {
-    return runModeAction('choose_live2d_model_path', '✓ 已更新模型路径');
+    return runModeAction('choose_live2d_model_path', '✓ 已选择模型路径');
 }
 
 function importLive2DArchive() {
@@ -731,43 +889,62 @@ function openLive2DReleases() {
     return runModeAction('open_live2d_releases', '✓ 已打开 Releases 页面');
 }
 
-function saveInput(key, input) {
+function updateDraftField(key, value) {
+    setDraftField(key, value);
+}
+
+function updateInputDraft(key, input) {
     const value = input.type === 'number' && input.step === '0.01'
         ? num(input.value, 0)
         : (input.type === 'number' ? parseInt(input.value || '0', 10) : input.value);
-    saveField(key, value);
+    setDraftField(key, value);
 }
 
-async function saveField(key, value) {
-    const hint = document.getElementById('save-hint');
+async function applyDraft() {
+    if (!hasDraftChanges()) return;
     try {
         if (!window.pywebview || !window.pywebview.api) throw new Error('pywebview API 未就绪');
-        const payload = {};
-        payload[key] = value;
-        const result = await window.pywebview.api.update_settings(payload);
+        const result = await window.pywebview.api.update_settings(draftChanges);
         if (!result.ok) throw new Error(result.error || (result.errors || []).join('; ') || '保存失败');
         if (result.settings) renderSettings(result.settings);
-        hint.textContent = result.restart_scheduled ? '✓ 已保存，正在重启应用…' : '✓ 已保存';
-        hint.className = 'hint';
+        let message = '✓ 已应用修改';
+        if (result.restart_scheduled) message = '✓ 已保存，正在重启应用…';
+        else if (result.effects && result.effects.hint) message = '✓ 已保存，' + result.effects.hint;
+        showHint(message, false);
     } catch (error) {
-        hint.textContent = '✗ ' + error.message;
-        hint.className = 'hint error';
+        showHint('✗ ' + error.message, true);
     }
-    setTimeout(function() {
-        hint.textContent = '';
-        hint.className = 'hint';
-    }, 3000);
+}
+
+function resetDraft() {
+    if (!hasDraftChanges()) return;
+    clearDraftState();
+    renderAll();
+    showHint('✓ 已丢弃未保存的修改', false);
+}
+
+function renderChrome() {
+    if (!currentModeMeta) return;
+    document.getElementById('mode-title').textContent = currentModeMeta.settings_title;
+    document.getElementById('mode-desc').textContent = currentModeMeta.settings_description;
+    document.getElementById('mode-summary').textContent = workingSummary();
+    document.getElementById('mode-name').textContent = currentModeMeta.icon + ' ' + currentModeMeta.name;
+    document.getElementById('part-title').textContent = '设置项';
+}
+
+function renderAll() {
+    renderChrome();
+    renderForm(currentMode, workingSettings());
+    updateDraftState();
 }
 
 function renderSettings(payload) {
     currentMode = payload.mode.id;
-    currentSettings = payload.settings.config;
-    document.getElementById('mode-title').textContent = payload.mode.settings_title;
-    document.getElementById('mode-desc').textContent = payload.mode.settings_description;
-    document.getElementById('mode-summary').textContent = payload.settings.summary;
-    document.getElementById('mode-name').textContent = payload.mode.icon + ' ' + payload.mode.name;
-    document.getElementById('part-title').textContent = '设置项';
-    renderForm(payload.mode.id, payload.settings.config);
+    currentModeMeta = payload.mode;
+    currentSummary = payload.settings.summary;
+    currentSettings = cloneValue(payload.settings.config);
+    clearDraftState();
+    renderAll();
 }
 
 async function bootstrap() {

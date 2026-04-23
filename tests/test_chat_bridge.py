@@ -306,6 +306,7 @@ def test_bubble_html_keeps_idle_polling_for_cross_mode_updates():
     assert "Yachiyo" in _BUBBLE_HTML
     assert "bubble-launcher" in _BUBBLE_HTML
     assert "toggle_chat" in _BUBBLE_HTML
+    assert "set_dragging" in _BUBBLE_HTML
 
 
 def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
@@ -324,11 +325,21 @@ def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
     assert "dismissResourceHint(event)" in _LIVE2D_HTML
     assert "live2d-resource-hint-close" in _LIVE2D_HTML
     assert "report_client_event" in _LIVE2D_HTML
+    assert "set_dragging" in _LIVE2D_HTML
     assert "formatRendererDiagnostics" in _LIVE2D_HTML
     assert "getLive2DModelCtor" in _LIVE2D_HTML
     assert "hair-back" not in _LIVE2D_HTML
     assert "toggle_chat" in _LIVE2D_HTML
-    assert "--live2d-scale" in _LIVE2D_HTML
+    assert "--live2d-preview-scale" in _LIVE2D_HTML
+    assert "alpha_mask" in _LIVE2D_HTML
+    assert "updateLive2DFocus(event, false)" in _LIVE2D_HTML
+    assert "mouse_follow_enabled" in _LIVE2D_HTML
+    assert "cursor: default;" in _LIVE2D_HTML
+    assert "get_pointer_state" in _LIVE2D_HTML
+    assert "startGlobalPointerPolling" in _LIVE2D_HTML
+    assert "update_ui_regions" in _LIVE2D_HTML
+    assert "reportUIRegions()" in _LIVE2D_HTML
+    assert "@keyframes live2d-idle" not in _LIVE2D_HTML
 
 
 def test_launcher_modes_do_not_embed_inline_chat_inputs():
@@ -441,6 +452,7 @@ def test_live2d_view_exposes_renderer_payload(tmp_path, monkeypatch):
         assert renderer["enabled"] is True
         assert renderer["model_url"].startswith("http://127.0.0.1:8420/live2d/assets/")
         assert renderer["model_url"].endswith(".model3.json")
+        assert renderer["mouse_follow_enabled"] is True
     finally:
         store.close()
 
@@ -490,6 +502,69 @@ def test_live2d_api_accepts_client_events(tmp_path, caplog):
         assert result == {"ok": True}
         assert api._last_client_event["event"] == "renderer.model_load_failed"
         assert "Cannot read properties of undefined" in caplog.text
+    finally:
+        store.close()
+
+
+def test_live2d_api_keeps_pointer_interactive_while_dragging(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    api = Live2DWindowAPI(runtime, AppConfig(display_mode="live2d"))
+    try:
+        api.update_hit_region({"kind": "live2d", "x": 0.3, "y": 0.2, "width": 0.4, "height": 0.6})
+        assert api.is_pointer_interactive(400, 600, 8, 8) is False
+
+        api.set_dragging(True)
+        assert api.is_pointer_interactive(400, 600, 8, 8) is True
+
+        api.set_dragging(False)
+        assert api.is_pointer_interactive(400, 600, 8, 8) is False
+    finally:
+        store.close()
+
+
+def test_live2d_api_keeps_ui_regions_clickable(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    api = Live2DWindowAPI(runtime, AppConfig(display_mode="live2d"))
+    try:
+        api.update_hit_region({"kind": "alpha_mask", "x": 0.3, "y": 0.3, "width": 0.2, "height": 0.3, "cols": 2, "rows": 2, "mask": "1111"})
+        api.update_ui_regions([{"kind": "rect", "x": 0.6, "y": 0.08, "width": 0.08, "height": 0.08}])
+
+        assert api.is_pointer_interactive(420, 680, 270, 70) is True
+        assert api.is_pointer_interactive(420, 680, 24, 24) is False
+    finally:
+        store.close()
+
+
+def test_live2d_api_exposes_cached_global_pointer_state(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    api = Live2DWindowAPI(runtime, AppConfig(display_mode="live2d"))
+    try:
+        api.observe_pointer(420, 680, 128.4, 256.8, True)
+        state = api.get_pointer_state()
+
+        assert state["ok"] is True
+        assert state["x"] == 128.4
+        assert state["y"] == 256.8
+        assert state["inside"] is True
+    finally:
+        store.close()
+
+
+def test_bubble_api_keeps_pointer_interactive_while_dragging(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    api = BubbleWindowAPI(runtime, AppConfig())
+    try:
+        assert api.is_pointer_interactive(112, 112, 0, 0) is False
+
+        api.set_dragging(True)
+        assert api.is_pointer_interactive(112, 112, 0, 0) is True
+
+        api.set_dragging(False)
+        assert api.is_pointer_interactive(112, 112, 0, 0) is False
     finally:
         store.close()
 

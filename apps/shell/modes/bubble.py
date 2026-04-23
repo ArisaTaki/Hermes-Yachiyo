@@ -202,6 +202,7 @@ let pollingIntervalMs = null;
 let toggling = false;
 let launcherPointerStart = null;
 let launcherClickSuppressed = false;
+let launcherDragging = false;
 
 function setPollingInterval(intervalMs) {
     if (polling && pollingIntervalMs === intervalMs) return;
@@ -253,10 +254,12 @@ function trackLauncherPointerDown(event) {
     if (event.button === 2) {
         launcherPointerStart = null;
         launcherClickSuppressed = false;
+        setDraggingState(false);
         return;
     }
     launcherPointerStart = pointerPoint(event);
     launcherClickSuppressed = false;
+    setDraggingState(true);
 }
 
 function trackLauncherPointerMove(event) {
@@ -265,12 +268,14 @@ function trackLauncherPointerMove(event) {
 
 function trackLauncherPointerUp(event) {
     if (launcherPointerMoved(event)) launcherClickSuppressed = true;
+    setDraggingState(false);
 }
 
 function shouldIgnoreLauncherClick(event) {
     const ignore = launcherClickSuppressed || launcherPointerMoved(event);
     launcherPointerStart = null;
     launcherClickSuppressed = false;
+    setDraggingState(false);
     if (ignore && event) {
         event.preventDefault();
         event.stopPropagation();
@@ -290,6 +295,17 @@ function setContextMenuOpen(isOpen) {
     try {
         if (window.pywebview && window.pywebview.api && window.pywebview.api.set_context_menu_open) {
             window.pywebview.api.set_context_menu_open(!!isOpen);
+        }
+    } catch (error) {}
+}
+
+function setDraggingState(isDragging) {
+    const normalized = !!isDragging;
+    if (launcherDragging === normalized) return;
+    launcherDragging = normalized;
+    try {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.set_dragging) {
+            window.pywebview.api.set_dragging(normalized);
         }
     } catch (error) {}
 }
@@ -413,7 +429,17 @@ document.addEventListener('contextmenu', function(event) {
 document.addEventListener('keydown', function(event) {
     if (event.key === 'Escape') hideMenu();
 });
+document.addEventListener('pointercancel', function() {
+    launcherPointerStart = null;
+    launcherClickSuppressed = false;
+    setDraggingState(false);
+}, true);
 window.addEventListener('blur', hideMenu);
+window.addEventListener('blur', function() {
+    launcherPointerStart = null;
+    launcherClickSuppressed = false;
+    setDraggingState(false);
+});
 document.addEventListener('DOMContentLoaded', function() { setTimeout(bootstrap, 300); });
 window.addEventListener('pywebviewready', bootstrap);
 </script>
@@ -440,12 +466,13 @@ class BubbleWindowAPI:
         self._runtime = runtime
         self._config = config
         self._chat_bridge = ChatBridge(runtime)
-        self._bubble_window = None
+        self._bubble_window: Any = None
         self._last_proactive_check_at = 0.0
         self._last_proactive_task_id: str | None = None
         self._proactive_attention_task_id: str | None = None
         self._proactive_acknowledged_task_id: str | None = None
         self._context_menu_open = False
+        self._pointer_dragging = False
 
     def get_bubble_view(self) -> Dict[str, Any]:
         bubble = self._config.bubble_mode
@@ -649,8 +676,12 @@ class BubbleWindowAPI:
         self._context_menu_open = bool(is_open)
         return {"ok": True}
 
+    def set_dragging(self, is_dragging: bool) -> Dict[str, Any]:
+        self._pointer_dragging = bool(is_dragging)
+        return {"ok": True}
+
     def is_pointer_interactive(self, width: float, height: float, x: float, y: float) -> bool:
-        if self._context_menu_open:
+        if self._context_menu_open or self._pointer_dragging:
             return True
         try:
             from apps.shell.native_window import bubble_visual_hit_test
@@ -737,7 +768,8 @@ def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
             schedule_macos_pointer_passthrough(
                 title="Hermes-Yachiyo Bubble",
                 hit_test=api.is_pointer_interactive,
-                interval_seconds=0.02,
+                delay_seconds=0.12,
+                interval_seconds=0.016,
                 focus_on_hover=True,
             )
         except Exception as exc:

@@ -92,6 +92,7 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "click_action": str,
         "auto_open_chat_window": bool,
         "enable_quick_input": bool,
+        "mouse_follow_enabled": bool,
         "idle_motion_group": str,
         "enable_expressions": bool,
         "enable_physics": bool,
@@ -232,6 +233,7 @@ def serialize_live2d_mode(config: AppConfig) -> dict[str, Any]:
             "click_action": mode.click_action,
             "auto_open_chat_window": mode.auto_open_chat_window,
             "enable_quick_input": mode.enable_quick_input,
+            "mouse_follow_enabled": mode.mouse_follow_enabled,
             "idle_motion_group": mode.idle_motion_group,
             "enable_expressions": mode.enable_expressions,
             "enable_physics": mode.enable_physics,
@@ -278,7 +280,12 @@ def build_display_settings(config: AppConfig) -> dict[str, Any]:
     }
 
 
-def apply_settings_changes(config: AppConfig, changes: dict[str, Any]) -> dict[str, Any]:
+def apply_settings_changes(
+    config: AppConfig,
+    changes: dict[str, Any],
+    *,
+    persist: bool = True,
+) -> dict[str, Any]:
     """统一处理顶层设置与 mode config 设置。"""
     if not isinstance(changes, dict):
         return {"ok": False, "error": "参数格式错误"}
@@ -326,7 +333,7 @@ def apply_settings_changes(config: AppConfig, changes: dict[str, Any]) -> dict[s
         setattr(config, key, value)
         applied[key] = value
 
-    if applied:
+    if applied and persist:
         try:
             save_config(config)
         except Exception as exc:

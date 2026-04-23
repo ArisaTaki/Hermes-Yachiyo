@@ -25,6 +25,22 @@ def test_live2d_visual_hit_test_prefers_reported_ellipse_region():
     assert live2d_visual_hit_test(400, 600, 60, 300, region) is False
 
 
+def test_live2d_visual_hit_test_uses_alpha_mask_region():
+    region = {
+        "kind": "alpha_mask",
+        "x": 0.25,
+        "y": 0.25,
+        "width": 0.5,
+        "height": 0.5,
+        "cols": 4,
+        "rows": 4,
+        "mask": "0110011001100110",
+    }
+
+    assert live2d_visual_hit_test(400, 600, 170, 210, region) is True
+    assert live2d_visual_hit_test(400, 600, 110, 210, region) is False
+
+
 def test_live2d_visual_hit_test_keeps_capsule_fallback_when_region_is_too_narrow():
     region = {"kind": "ellipse", "x": 0.45, "y": 0.45, "width": 0.1, "height": 0.1}
 

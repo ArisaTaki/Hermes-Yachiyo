@@ -91,6 +91,7 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.live2d_mode.show_on_all_spaces is True
     assert config.live2d_mode.model_name == ""
     assert config.live2d_mode.model_path == ""
+    assert config.live2d_mode.mouse_follow_enabled is True
     assert config.live2d_mode.validate() == ModelState.NOT_CONFIGURED
     assert config.live2d is config.live2d_mode
 
@@ -165,6 +166,7 @@ def test_apply_settings_changes_supports_legacy_live2d_prefix(tmp_path, monkeypa
             "live2d.model_name": "hiyori",
             "live2d.window_on_top": False,
             "live2d.scale": 1.25,
+            "live2d.mouse_follow_enabled": False,
         },
     )
 
@@ -172,6 +174,7 @@ def test_apply_settings_changes_supports_legacy_live2d_prefix(tmp_path, monkeypa
     assert config.live2d_mode.model_name == "hiyori"
     assert config.live2d_mode.window_on_top is False
     assert config.live2d_mode.scale == 1.25
+    assert config.live2d_mode.mouse_follow_enabled is False
 
 
 def test_serialize_mode_settings_returns_separate_sections(monkeypatch, tmp_path):
@@ -201,6 +204,7 @@ def test_serialize_mode_window_data_returns_mode_part_only(monkeypatch, tmp_path
     assert "common" not in payload
     assert payload["mode"]["id"] == "live2d"
     assert payload["settings"]["config"]["scale"] == 1.2
+    assert payload["settings"]["config"]["mouse_follow_enabled"] is True
     assert payload["settings"]["config"]["show_on_all_spaces"] is True
 
 
@@ -209,12 +213,16 @@ def test_mode_settings_window_does_not_render_common_settings():
     assert "display_mode" not in _SETTINGS_HTML
     assert "bridge_host" not in _SETTINGS_HTML
     assert "function scaleRow" in _SETTINGS_HTML
+    assert "应用修改" in _SETTINGS_HTML
+    assert "重置草稿" in _SETTINGS_HTML
+    assert "updateDraftField" in _SETTINGS_HTML
     assert 'type="range"' in _SETTINGS_HTML
     assert "选择模型目录" in _SETTINGS_HTML
     assert "导入资源包 ZIP" in _SETTINGS_HTML
     assert "打开导入目录" in _SETTINGS_HTML
     assert "当前配置路径" in _SETTINGS_HTML
     assert "当前生效路径" in _SETTINGS_HTML
+    assert "鼠标跟随" in _SETTINGS_HTML
     assert "默认导入目录" in _SETTINGS_HTML
     assert "资源下载" in _SETTINGS_HTML
     assert "当前头像资源" in _SETTINGS_HTML
@@ -300,6 +308,7 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     config.live2d_mode.model_name = "hiyori"
     config.live2d_mode.scale = 1.4
     config.live2d_mode.show_on_all_spaces = False
+    config.live2d_mode.mouse_follow_enabled = False
 
     save_config(config)
     data = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
@@ -309,6 +318,7 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     assert data["live2d_mode"]["model_name"] == "hiyori"
     assert data["live2d_mode"]["scale"] == 1.4
     assert data["live2d_mode"]["show_on_all_spaces"] is False
+    assert data["live2d_mode"]["mouse_follow_enabled"] is False
 
 
 def test_mode_settings_api_can_choose_live2d_model_path(tmp_path, monkeypatch):
@@ -323,8 +333,9 @@ def test_mode_settings_api_can_choose_live2d_model_path(tmp_path, monkeypatch):
     result = api.choose_live2d_model_path()
 
     assert result["ok"] is True
-    assert config.live2d_mode.model_path == str(model_dir)
-    assert result["settings"]["settings"]["config"]["model_path"] == str(model_dir)
+    assert config.live2d_mode.model_path == ""
+    assert result["draft_changes"]["live2d_mode.model_path"] == str(model_dir)
+    assert result["preview"]["settings"]["config"]["model_path"] == str(model_dir)
 
 
 def test_import_live2d_archive_extracts_model_dir(tmp_path):

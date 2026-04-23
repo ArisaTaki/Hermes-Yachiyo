@@ -239,6 +239,7 @@ class Live2DModeConfig:
     click_action: Live2DClickActionValue = "open_chat"
     auto_open_chat_window: bool = False
     enable_quick_input: bool = True
+    mouse_follow_enabled: bool = True
     idle_motion_group: str = "Idle"   # 待机动作组名（Live2D Cubism 约定）
     enable_expressions: bool = False  # 是否启用表情系统（等待渲染器支持）
     enable_physics: bool = False      # 是否启用物理模拟（等待渲染器支持）

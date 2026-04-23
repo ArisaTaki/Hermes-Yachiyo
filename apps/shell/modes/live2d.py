@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict
 from urllib.parse import quote
@@ -188,10 +189,6 @@ _LIVE2D_HTML = r"""
             display: grid;
             place-items: center;
         }
-        @keyframes live2d-idle {
-            0%, 100% { transform: translateY(0) scale(var(--live2d-scale, 1)); }
-            50% { transform: translateY(-8px) scale(var(--live2d-scale, 1)); }
-        }
         @keyframes live2d-message-glow {
             0%, 100% {
                 filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.24))
@@ -223,7 +220,7 @@ _LIVE2D_HTML = r"""
             display: flex;
             align-items: flex-end;
             justify-content: center;
-            cursor: pointer;
+            cursor: default;
         }
         .character {
             position: relative;
@@ -231,16 +228,15 @@ _LIVE2D_HTML = r"""
             height: min(92vh, 620px);
             transform-origin: center bottom;
             filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.24));
-            animation: live2d-idle 4s ease-in-out infinite;
             display: flex;
             align-items: flex-end;
             justify-content: center;
         }
         .character.has-message {
-            animation: live2d-idle 4s ease-in-out infinite, live2d-message-glow 1.8s ease-in-out infinite;
+            animation: live2d-message-glow 1.8s ease-in-out infinite;
         }
         .character.processing {
-            animation: live2d-idle 4s ease-in-out infinite, live2d-processing-glow 1.45s ease-in-out infinite;
+            animation: live2d-processing-glow 1.45s ease-in-out infinite;
         }
         .character.failed {
             filter: drop-shadow(0 14px 18px rgba(0, 0, 0, 0.24))
@@ -263,6 +259,8 @@ _LIVE2D_HTML = r"""
             inset: auto 0 0 0;
             max-height: 100%;
             object-fit: contain;
+            transform: scale(var(--live2d-preview-scale, 1));
+            transform-origin: center bottom;
         }
         .live2d-preview-fallback.hidden,
         .live2d-loading.hidden,
@@ -376,6 +374,7 @@ _LIVE2D_HTML = r"""
          onpointerdown="trackLauncherPointerDown(event)"
          onpointermove="trackLauncherPointerMove(event)"
          onpointerup="trackLauncherPointerUp(event)"
+         onpointerleave="handleStagePointerLeave(event)"
          onpointerenter="focusLauncherWindow()"
          onclick="toggleChat(event)" oncontextmenu="showMenu(event)">
         <div class="character" id="character" aria-label="Yachiyo Live2D 角色舞台">
@@ -406,9 +405,11 @@ _LIVE2D_HTML = r"""
     <script>
     const ACTIVE_POLL_INTERVAL_MS = 1200;
     const IDLE_POLL_INTERVAL_MS = 5000;
+    const GLOBAL_POINTER_SYNC_INTERVAL_MS = 40;
     const CLICK_DRAG_THRESHOLD_PX = 6;
     let polling = null;
     let pollingIntervalMs = null;
+    let globalPointerPolling = null;
     let toggling = false;
     let bootstrapped = false;
     let launcherPointerStart = null;
@@ -422,6 +423,18 @@ _LIVE2D_HTML = r"""
     let currentResourceHintKey = '';
     let dismissedResourceHintKey = '';
     let lastHitRegionPayload = '';
+    let lastUIRegionsPayload = '';
+    let currentHitRegion = null;
+    let currentUIRegions = [];
+    let launcherDragging = false;
+    let live2dMouseFollowEnabled = true;
+    let lastPointerLocalX = 0;
+    let lastPointerLocalY = 0;
+    let lastPointerInsideWindow = false;
+    const HIT_MASK_MIN_COLS = 32;
+    const HIT_MASK_MAX_COLS = 72;
+    const HIT_MASK_MIN_ROWS = 44;
+    const HIT_MASK_MAX_ROWS = 120;
 
     function getCanvas() { return document.getElementById('live2d-canvas'); }
     function getCharacter() { return document.getElementById('character'); }
@@ -481,6 +494,7 @@ _LIVE2D_HTML = r"""
         }
         dismissedResourceHintKey = currentResourceHintKey || '__dismissed__';
         document.getElementById('live2d-resource-hint').classList.add('hidden');
+        reportUIRegions();
     }
 
     function showFallback() {
@@ -496,6 +510,17 @@ _LIVE2D_HTML = r"""
         try {
             if (window.pywebview && window.pywebview.api && window.pywebview.api.set_context_menu_open) {
                 window.pywebview.api.set_context_menu_open(!!isOpen);
+            }
+        } catch (error) {}
+    }
+
+    function setDraggingState(isDragging) {
+        const normalized = !!isDragging;
+        if (launcherDragging === normalized) return;
+        launcherDragging = normalized;
+        try {
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.set_dragging) {
+                window.pywebview.api.set_dragging(normalized);
             }
         } catch (error) {}
     }
@@ -516,6 +541,17 @@ _LIVE2D_HTML = r"""
         };
     }
 
+    function alphaMaskGridSize(rect) {
+        const width = Math.max(1, rect.right - rect.left);
+        const height = Math.max(1, rect.bottom - rect.top);
+        const cols = Math.max(HIT_MASK_MIN_COLS, Math.min(HIT_MASK_MAX_COLS, Math.round(width / 8)));
+        const rows = Math.max(
+            HIT_MASK_MIN_ROWS,
+            Math.min(HIT_MASK_MAX_ROWS, Math.round((height / Math.max(width, 1)) * cols)),
+        );
+        return {cols, rows};
+    }
+
     function containedImageRect(image) {
         const rect = image.getBoundingClientRect();
         const naturalWidth = Number(image.naturalWidth || rect.width || 1);
@@ -531,8 +567,102 @@ _LIVE2D_HTML = r"""
         };
     }
 
+    function trimMaskRegion(maskBits, cols, rows, rect) {
+        let minCol = cols;
+        let minRow = rows;
+        let maxCol = -1;
+        let maxRow = -1;
+        for (let row = 0; row < rows; row += 1) {
+            for (let col = 0; col < cols; col += 1) {
+                if (maskBits[(row * cols) + col] !== '1') continue;
+                if (col < minCol) minCol = col;
+                if (row < minRow) minRow = row;
+                if (col > maxCol) maxCol = col;
+                if (row > maxRow) maxRow = row;
+            }
+        }
+        if (maxCol < minCol || maxRow < minRow) return null;
+
+        const cellWidth = (rect.right - rect.left) / cols;
+        const cellHeight = (rect.bottom - rect.top) / rows;
+        let trimmedMask = '';
+        for (let row = minRow; row <= maxRow; row += 1) {
+            for (let col = minCol; col <= maxCol; col += 1) {
+                trimmedMask += maskBits[(row * cols) + col];
+            }
+        }
+        return {
+            kind: 'alpha_mask',
+            x: (rect.left + (minCol * cellWidth)) / Math.max(window.innerWidth || 1, 1),
+            y: (rect.top + (minRow * cellHeight)) / Math.max(window.innerHeight || 1, 1),
+            width: ((maxCol - minCol + 1) * cellWidth) / Math.max(window.innerWidth || 1, 1),
+            height: ((maxRow - minRow + 1) * cellHeight) / Math.max(window.innerHeight || 1, 1),
+            cols: maxCol - minCol + 1,
+            rows: maxRow - minRow + 1,
+            mask: trimmedMask,
+        };
+    }
+
+    function buildAlphaMaskRegion(drawToMask) {
+        try {
+            const {rect, draw} = drawToMask();
+            const width = Math.max(1, rect.right - rect.left);
+            const height = Math.max(1, rect.bottom - rect.top);
+            if (width <= 1 || height <= 1) return null;
+            const {cols, rows} = alphaMaskGridSize(rect);
+            const canvas = document.createElement('canvas');
+            canvas.width = cols;
+            canvas.height = rows;
+            const ctx = canvas.getContext('2d', {willReadFrequently: true});
+            if (!ctx) return null;
+            ctx.clearRect(0, 0, cols, rows);
+            draw(ctx, cols, rows);
+            const imageData = ctx.getImageData(0, 0, cols, rows).data;
+            const bits = new Array(cols * rows).fill('0');
+            for (let row = 0; row < rows; row += 1) {
+                for (let col = 0; col < cols; col += 1) {
+                    const alpha = imageData[((row * cols) + col) * 4 + 3];
+                    if (alpha >= 48) bits[(row * cols) + col] = '1';
+                }
+            }
+            return trimMaskRegion(bits, cols, rows, rect);
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function clampRectToViewport(rect) {
+        const viewportWidth = Math.max(window.innerWidth || 1, 1);
+        const viewportHeight = Math.max(window.innerHeight || 1, 1);
+        const left = Math.max(0, Math.min(viewportWidth, rect.left));
+        const top = Math.max(0, Math.min(viewportHeight, rect.top));
+        const right = Math.max(left, Math.min(viewportWidth, rect.right));
+        const bottom = Math.max(top, Math.min(viewportHeight, rect.bottom));
+        return {left, top, right, bottom};
+    }
+
+    function getLive2DModelViewportRect() {
+        if (!live2dModel) return null;
+        try {
+            const bounds = live2dModel.getBounds();
+            if (!bounds || !Number.isFinite(bounds.x) || !Number.isFinite(bounds.y)) return null;
+            const characterRect = getCharacter().getBoundingClientRect();
+            const rect = clampRectToViewport({
+                left: characterRect.left + bounds.x,
+                top: characterRect.top + bounds.y,
+                right: characterRect.left + bounds.x + bounds.width,
+                bottom: characterRect.top + bounds.y + bounds.height,
+            });
+            if (rect.right - rect.left <= 1 || rect.bottom - rect.top <= 1) return null;
+            return rect;
+        } catch (error) {
+            return null;
+        }
+    }
+
     function sendHitRegion(region) {
         if (!region || region.width <= 0 || region.height <= 0) return;
+        currentHitRegion = region;
         const payload = JSON.stringify(region);
         if (payload === lastHitRegionPayload) return;
         lastHitRegionPayload = payload;
@@ -543,10 +673,85 @@ _LIVE2D_HTML = r"""
         } catch (error) {}
     }
 
+    function sendUIRegions(regions) {
+        const normalized = Array.isArray(regions) ? regions.filter(function(region) {
+            return region && region.width > 0 && region.height > 0;
+        }) : [];
+        currentUIRegions = normalized;
+        const payload = JSON.stringify(normalized);
+        if (payload === lastUIRegionsPayload) return;
+        lastUIRegionsPayload = payload;
+        try {
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.update_ui_regions) {
+                window.pywebview.api.update_ui_regions(normalized);
+            }
+        } catch (error) {}
+    }
+
+    function hitRegionContainsLocalPoint(region, localX, localY) {
+        if (!region) return false;
+        const viewportWidth = Math.max(window.innerWidth || 1, 1);
+        const viewportHeight = Math.max(window.innerHeight || 1, 1);
+        const left = Number(region.x || 0) * viewportWidth;
+        const top = Number(region.y || 0) * viewportHeight;
+        const width = Number(region.width || 0) * viewportWidth;
+        const height = Number(region.height || 0) * viewportHeight;
+        if (width <= 0 || height <= 0) return false;
+        if (localX < left || localX > left + width || localY < top || localY > top + height) return false;
+
+        if (region.kind === 'alpha_mask') {
+            const cols = Math.max(1, Number(region.cols || 0));
+            const rows = Math.max(1, Number(region.rows || 0));
+            const mask = String(region.mask || '');
+            if (mask.length < cols * rows) return false;
+            const relX = (localX - left) / width;
+            const relY = (localY - top) / height;
+            const col = Math.min(cols - 1, Math.max(0, Math.floor(relX * cols)));
+            const row = Math.min(rows - 1, Math.max(0, Math.floor(relY * rows)));
+            return mask[(row * cols) + col] === '1';
+        }
+
+        const centerX = left + (width / 2);
+        const centerY = top + (height / 2);
+        const radiusX = width / 2;
+        const radiusY = height / 2;
+        if (region.kind === 'rect') return true;
+        if (radiusX <= 0 || radiusY <= 0) return false;
+        const u = (localX - centerX) / radiusX;
+        const v = (localY - centerY) / radiusY;
+        return (u * u) + (v * v) <= 1;
+    }
+
+    function elementRegion(element, kind) {
+        if (!element) return null;
+        const rect = element.getBoundingClientRect();
+        if (rect.width <= 1 || rect.height <= 1) return null;
+        return normalizedRegionFromRect(rect, kind || 'rect');
+    }
+
+    function reportUIRegions() {
+        const closeButton = document.getElementById('live2d-resource-hint-close');
+        const regions = [];
+        const closeRegion = elementRegion(closeButton, 'rect');
+        if (closeRegion) regions.push(closeRegion);
+        sendUIRegions(regions);
+    }
+
     function reportFallbackHitRegion() {
         const fallback = document.getElementById('live2d-fallback-preview');
         if (!fallback || fallback.classList.contains('hidden')) return;
-        sendHitRegion(normalizedRegionFromRect(containedImageRect(fallback), 'live2d'));
+        const imageRect = containedImageRect(fallback);
+        const region = buildAlphaMaskRegion(function() {
+            return {
+                rect: imageRect,
+                draw: function(ctx, cols, rows) {
+                    const naturalWidth = Number(fallback.naturalWidth || cols || 1);
+                    const naturalHeight = Number(fallback.naturalHeight || rows || 1);
+                    ctx.drawImage(fallback, 0, 0, naturalWidth, naturalHeight, 0, 0, cols, rows);
+                },
+            };
+        });
+        sendHitRegion(region || normalizedRegionFromRect(imageRect, 'live2d'));
     }
 
     function reportLive2DModelHitRegion() {
@@ -554,25 +759,77 @@ _LIVE2D_HTML = r"""
             reportFallbackHitRegion();
             return;
         }
-        try {
-            const bounds = live2dModel.getBounds();
-            const canvasRect = getCanvas().getBoundingClientRect();
-            const renderer = live2dApp.renderer || {};
-            const resolution = Number(renderer.resolution || 1);
-            const renderWidth = Math.max((renderer.width || canvasRect.width) / resolution, 1);
-            const renderHeight = Math.max((renderer.height || canvasRect.height) / resolution, 1);
-            const scaleX = canvasRect.width / renderWidth;
-            const scaleY = canvasRect.height / renderHeight;
-            const rect = {
-                left: canvasRect.left + bounds.x * scaleX,
-                top: canvasRect.top + bounds.y * scaleY,
-                right: canvasRect.left + (bounds.x + bounds.width) * scaleX,
-                bottom: canvasRect.top + (bounds.y + bounds.height) * scaleY,
+        const liveCanvas = getCanvas();
+        const canvasRect = liveCanvas.getBoundingClientRect();
+        const modelRect = getLive2DModelViewportRect() || canvasRect;
+        const sourceLeft = Math.max(0, ((modelRect.left - canvasRect.left) / Math.max(canvasRect.width || 1, 1)) * liveCanvas.width);
+        const sourceTop = Math.max(0, ((modelRect.top - canvasRect.top) / Math.max(canvasRect.height || 1, 1)) * liveCanvas.height);
+        const sourceWidth = Math.max(1, ((modelRect.right - modelRect.left) / Math.max(canvasRect.width || 1, 1)) * liveCanvas.width);
+        const sourceHeight = Math.max(1, ((modelRect.bottom - modelRect.top) / Math.max(canvasRect.height || 1, 1)) * liveCanvas.height);
+        const region = buildAlphaMaskRegion(function() {
+            return {
+                rect: modelRect,
+                draw: function(ctx, cols, rows) {
+                    ctx.drawImage(
+                        liveCanvas,
+                        sourceLeft,
+                        sourceTop,
+                        Math.min(sourceWidth, Math.max(1, liveCanvas.width - sourceLeft)),
+                        Math.min(sourceHeight, Math.max(1, liveCanvas.height - sourceTop)),
+                        0,
+                        0,
+                        cols,
+                        rows,
+                    );
+                },
             };
-            sendHitRegion(normalizedRegionFromRect(rect, 'live2d'));
-        } catch (error) {
-            reportFallbackHitRegion();
+        });
+        if (region) sendHitRegion(region);
+        else reportFallbackHitRegion();
+    }
+
+    function stageCenterPoint() {
+        const rect = document.getElementById('stage').getBoundingClientRect();
+        return {
+            x: rect.width / 2,
+            y: rect.height * 0.44,
+        };
+    }
+
+    function focusLive2DAtLocal(localX, localY, immediate) {
+        if (!live2dMouseFollowEnabled || !live2dModel || typeof live2dModel.focus !== 'function') return;
+        try {
+            live2dModel.focus(localX, localY, !!immediate);
+        } catch (error) {}
+    }
+
+    function updateLive2DFocus(event, immediate) {
+        if (!event) {
+            const point = stageCenterPoint();
+            focusLive2DAtLocal(point.x, point.y, immediate);
+            return;
         }
+        focusLive2DAtLocal(event.clientX, event.clientY, immediate);
+    }
+
+    function resetLive2DFocus() {
+        updateLive2DFocus(null, true);
+    }
+
+    function handleGlobalPointer(localX, localY, insideWindow) {
+        lastPointerLocalX = Number(localX || 0);
+        lastPointerLocalY = Number(localY || 0);
+        lastPointerInsideWindow = !!insideWindow;
+        focusLive2DAtLocal(lastPointerLocalX, lastPointerLocalY, false);
+    }
+
+    function handleStagePointerLeave(event) {
+        if (event) {
+            launcherPointerStart = null;
+            launcherClickSuppressed = false;
+            setDraggingState(false);
+        }
+        if (!live2dMouseFollowEnabled) resetLive2DFocus();
     }
 
     function compactDetail(detail, limit) {
@@ -699,7 +956,7 @@ _LIVE2D_HTML = r"""
         live2dModel.scale.set(finalScale);
         live2dModel.x = width / 2;
         live2dModel.y = height - 6;
-        reportLive2DModelHitRegion();
+        window.requestAnimationFrame(reportLive2DModelHitRegion);
     }
 
     async function ensureLive2DRenderer(view) {
@@ -723,6 +980,14 @@ _LIVE2D_HTML = r"""
             const detail = formatRendererDiagnostics();
             showError('Live2D 渲染依赖未加载，已回退到静态预览\n' + detail);
             reportRendererEvent('warning', 'renderer.dependencies_missing', detail);
+            return;
+        }
+
+        if (live2dModel && live2dModelUrl === renderer.model_url) {
+            fitLive2DModel();
+            hideFallback();
+            hideError();
+            hideLoading();
             return;
         }
 
@@ -814,24 +1079,29 @@ _LIVE2D_HTML = r"""
         if (event.button === 2) {
             launcherPointerStart = null;
             launcherClickSuppressed = false;
+            setDraggingState(false);
             return;
         }
         launcherPointerStart = pointerPoint(event);
         launcherClickSuppressed = false;
+        setDraggingState(true);
     }
 
     function trackLauncherPointerMove(event) {
         if (launcherPointerMoved(event)) launcherClickSuppressed = true;
+        updateLive2DFocus(event, false);
     }
 
     function trackLauncherPointerUp(event) {
         if (launcherPointerMoved(event)) launcherClickSuppressed = true;
+        setDraggingState(false);
     }
 
     function shouldIgnoreLauncherClick(event) {
         const ignore = launcherClickSuppressed || launcherPointerMoved(event);
         launcherPointerStart = null;
         launcherClickSuppressed = false;
+        setDraggingState(false);
         if (ignore && event) {
             event.preventDefault();
             event.stopPropagation();
@@ -883,7 +1153,12 @@ _LIVE2D_HTML = r"""
         const character = document.getElementById('character');
         const scale = Math.max(0.4, Math.min(2.0, Number(live2d.scale || 1)));
         live2dScale = scale;
-        character.style.setProperty('--live2d-scale', String(scale));
+        live2dMouseFollowEnabled = !!(
+            live2d.mouse_follow_enabled
+            ?? (live2d.renderer && live2d.renderer.mouse_follow_enabled)
+            ?? true
+        );
+        character.style.setProperty('--live2d-preview-scale', String(scale));
         let status = 'ready';
         if (chat.is_processing) status = 'processing';
         else if (chat.messages && chat.messages.some(function(m) { return m.status === 'failed'; })) status = 'failed';
@@ -906,8 +1181,10 @@ _LIVE2D_HTML = r"""
             ((resource.status_label || 'Yachiyo Live2D') + messageHint + '，点击展开对话');
 
         renderResourceHint(resource);
+        reportUIRegions();
 
         ensureLive2DRenderer(view);
+        if (!live2dMouseFollowEnabled) resetLive2DFocus();
 
         if (chat.is_processing) startActivePolling();
         else startIdlePolling();
@@ -920,6 +1197,27 @@ _LIVE2D_HTML = r"""
             if (!view.ok) return;
             renderLive2D(view);
         } catch (error) {}
+    }
+
+    async function refreshGlobalPointer() {
+        try {
+            if (!window.pywebview || !window.pywebview.api || !window.pywebview.api.get_pointer_state) return;
+            const state = await window.pywebview.api.get_pointer_state();
+            if (!state || !state.ok) return;
+            handleGlobalPointer(state.x, state.y, state.inside);
+        } catch (error) {}
+    }
+
+    function startGlobalPointerPolling() {
+        if (globalPointerPolling) return;
+        globalPointerPolling = setInterval(refreshGlobalPointer, GLOBAL_POINTER_SYNC_INTERVAL_MS);
+        refreshGlobalPointer();
+    }
+
+    function stopGlobalPointerPolling() {
+        if (!globalPointerPolling) return;
+        clearInterval(globalPointerPolling);
+        globalPointerPolling = null;
     }
 
     async function toggleChat(event) {
@@ -967,6 +1265,7 @@ _LIVE2D_HTML = r"""
         bootstrapped = true;
         reportRendererEvent('info', 'bootstrap', formatRendererDiagnostics());
         refreshLive2D();
+        startGlobalPointerPolling();
         startIdlePolling();
     }
 
@@ -1001,10 +1300,22 @@ _LIVE2D_HTML = r"""
     document.addEventListener('keydown', function(event) {
         if (event.key === 'Escape') hideMenu();
     });
+    document.addEventListener('pointercancel', function() {
+        launcherPointerStart = null;
+        launcherClickSuppressed = false;
+        setDraggingState(false);
+    }, true);
     window.addEventListener('blur', hideMenu);
+    window.addEventListener('blur', function() {
+        launcherPointerStart = null;
+        launcherClickSuppressed = false;
+        setDraggingState(false);
+    });
+    window.addEventListener('beforeunload', stopGlobalPointerPolling);
     window.addEventListener('resize', function() {
         fitLive2DModel();
         reportFallbackHitRegion();
+        reportUIRegions();
     });
     document.addEventListener('DOMContentLoaded', function() { setTimeout(bootstrap, 300); });
     window.addEventListener('pywebviewready', bootstrap);
@@ -1080,7 +1391,7 @@ def _render_live2d_html(config: "AppConfig") -> str:
     )
 
 
-def _clamp_float(value: object, lower: float, upper: float) -> float:
+def _clamp_float(value: Any, lower: float, upper: float) -> float:
     number = float(value)
     return max(lower, min(upper, number))
 
@@ -1095,7 +1406,10 @@ class Live2DWindowAPI:
         self._live2d_window: Any = None
         self._last_client_event: dict[str, str] = {}
         self._context_menu_open = False
+        self._pointer_dragging = False
         self._hit_region: dict[str, object] | None = None
+        self._ui_regions: list[dict[str, object]] = []
+        self._last_pointer_state: dict[str, object] = {"x": 0.0, "y": 0.0, "inside": False, "updated_at": 0.0}
 
     def get_live2d_view(self) -> Dict[str, Any]:
         live2d = self._config.live2d_mode
@@ -1158,6 +1472,7 @@ class Live2DWindowAPI:
                 "show_on_all_spaces": live2d.show_on_all_spaces,
                 "show_reply_bubble": live2d.show_reply_bubble,
                 "enable_quick_input": live2d.enable_quick_input,
+                "mouse_follow_enabled": live2d.mouse_follow_enabled,
                 "preview_url": data_uri(preview_path),
                 "click_action": "open_chat",
                 "default_open_behavior": live2d.default_open_behavior,
@@ -1184,6 +1499,7 @@ class Live2DWindowAPI:
                     "model_url": model_url,
                     "reason": renderer_reason,
                     "scale": live2d.scale,
+                    "mouse_follow_enabled": live2d.mouse_follow_enabled,
                     "idle_motion_group": live2d.idle_motion_group,
                     "enable_expressions": live2d.enable_expressions,
                     "enable_physics": live2d.enable_physics,
@@ -1222,32 +1538,76 @@ class Live2DWindowAPI:
         self._context_menu_open = bool(is_open)
         return {"ok": True}
 
+    def set_dragging(self, is_dragging: bool) -> Dict[str, Any]:
+        self._pointer_dragging = bool(is_dragging)
+        return {"ok": True}
+
     def update_hit_region(self, region: dict[str, Any]) -> Dict[str, Any]:
         try:
             kind = str(region.get("kind") or "ellipse")
-            if kind not in {"ellipse", "live2d", "model", "rect"}:
-                kind = "live2d"
+            if kind not in {"alpha_mask", "ellipse", "live2d", "model", "rect"}:
+                kind = "alpha_mask"
             width = _clamp_float(region.get("width"), 0.0, 1.0)
             height = _clamp_float(region.get("height"), 0.0, 1.0)
             if width <= 0 or height <= 0:
                 return {"ok": False, "error": "empty hit region"}
-            self._hit_region = {
+            sanitized: dict[str, object] = {
                 "kind": kind,
                 "x": _clamp_float(region.get("x"), 0.0, 1.0),
                 "y": _clamp_float(region.get("y"), 0.0, 1.0),
                 "width": width,
                 "height": height,
             }
+            if kind == "alpha_mask":
+                cols = max(1, min(128, int(region.get("cols", 0))))
+                rows = max(1, min(160, int(region.get("rows", 0))))
+                mask = str(region.get("mask") or "")
+                if len(mask) < cols * rows:
+                    return {"ok": False, "error": "invalid alpha mask"}
+                sanitized["cols"] = cols
+                sanitized["rows"] = rows
+                sanitized["mask"] = mask[: cols * rows]
+            self._hit_region = sanitized
             return {"ok": True}
         except Exception as exc:
             logger.debug("更新 Live2D 命中区域失败: %s", exc)
             return {"ok": False, "error": str(exc)}
 
+    def update_ui_regions(self, regions: list[dict[str, Any]]) -> Dict[str, Any]:
+        try:
+            sanitized_regions: list[dict[str, object]] = []
+            for region in regions or []:
+                kind = str(region.get("kind") or "rect")
+                if kind not in {"alpha_mask", "ellipse", "live2d", "model", "rect"}:
+                    kind = "rect"
+                width = _clamp_float(region.get("width"), 0.0, 1.0)
+                height = _clamp_float(region.get("height"), 0.0, 1.0)
+                if width <= 0 or height <= 0:
+                    continue
+                sanitized_regions.append(
+                    {
+                        "kind": kind,
+                        "x": _clamp_float(region.get("x"), 0.0, 1.0),
+                        "y": _clamp_float(region.get("y"), 0.0, 1.0),
+                        "width": width,
+                        "height": height,
+                    }
+                )
+            self._ui_regions = sanitized_regions
+            return {"ok": True}
+        except Exception as exc:
+            logger.debug("更新 Live2D UI 命中区域失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     def is_pointer_interactive(self, width: float, height: float, x: float, y: float) -> bool:
-        if self._context_menu_open:
+        if self._context_menu_open or self._pointer_dragging:
             return True
         try:
-            from apps.shell.native_window import live2d_visual_hit_test
+            from apps.shell.native_window import _region_hit_test, live2d_visual_hit_test
+
+            for region in self._ui_regions:
+                if _region_hit_test(width, height, x, y, region):
+                    return True
 
             return live2d_visual_hit_test(width, height, x, y, self._hit_region)
         except Exception:
@@ -1272,7 +1632,7 @@ class Live2DWindowAPI:
         elif normalized_level == "warning":
             logger.warning(message)
         else:
-            logger.info(message)
+            logger.debug(message)
         return {"ok": True}
 
     def focus_window(self) -> Dict[str, Any]:
@@ -1292,6 +1652,19 @@ class Live2DWindowAPI:
         except Exception as exc:
             logger.debug("聚焦 Live2D 窗口失败: %s", exc)
             return {"ok": False, "error": str(exc)}
+
+    def observe_pointer(self, width: float, height: float, x: float, y: float, inside: bool) -> None:
+        self._last_pointer_state = {
+            "x": round(float(x), 2),
+            "y": round(float(y), 2),
+            "inside": bool(inside),
+            "updated_at": round(time.monotonic(), 4),
+        }
+
+    def get_pointer_state(self) -> Dict[str, Any]:
+        state = dict(self._last_pointer_state)
+        state["ok"] = True
+        return state
 
     def close_live2d(self) -> Dict[str, Any]:
         try:
@@ -1349,6 +1722,10 @@ def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
             schedule_macos_pointer_passthrough(
                 title="Hermes-Yachiyo Live2D",
                 hit_test=api.is_pointer_interactive,
+                pointer_observer=api.observe_pointer,
+                delay_seconds=0.12,
+                interval_seconds=0.016,
+                focus_on_hover=False,
             )
         except Exception as exc:
             logger.debug("调度 macOS Live2D 窗口行为失败: %s", exc)
