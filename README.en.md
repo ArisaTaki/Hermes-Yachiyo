@@ -108,16 +108,16 @@ Config file located at `~/.hermes-yachiyo/config.json`, editable via the setting
 
 | Setting | Default | Effect Policy |
 |---------|---------|--------------|
-| `display_mode` | `window` | Requires mode restart |
+| `display_mode` | `bubble` | Requires app restart |
 | `bridge_enabled` | `true` | Requires Bridge restart |
 | `bridge_host` | `127.0.0.1` | Requires Bridge restart |
 | `bridge_port` | `8420` | Requires Bridge restart |
 | `tray_enabled` | `true` | Requires app restart |
-| `live2d.model_name` | — | Immediate |
-| `live2d.model_path` | — | Immediate |
-| `live2d.enable_expressions` | `false` | Immediate |
-| `live2d.enable_physics` | `false` | Immediate |
-| `live2d.window_on_top` | `false` | Requires mode restart |
+| `live2d_mode.model_name` | Auto-detect | Immediate |
+| `live2d_mode.model_path` | Empty (auto-scan user assets dir) | Requires mode restart |
+| `live2d_mode.enable_expressions` | `false` | Immediate |
+| `live2d_mode.enable_physics` | `false` | Immediate |
+| `live2d_mode.window_on_top` | `true` | Requires mode restart |
 
 After saving, the UI instantly shows effect status hints for each setting.
 

@@ -4,8 +4,10 @@ from apps.core.chat_session import ChatSession
 from apps.core.chat_store import ChatStore
 from apps.core.state import AppState
 from apps.shell.chat_bridge import ChatBridge, _truncate
-from apps.shell.modes.bubble import _BUBBLE_HTML
-from apps.shell.modes.live2d import _LIVE2D_HTML
+from apps.shell.config import AppConfig
+from apps.shell.modes.bubble import BubbleWindowAPI, _BUBBLE_HTML, _render_bubble_html
+import apps.shell.modes.live2d as _live2d_mod
+from apps.shell.modes.live2d import Live2DWindowAPI, _LIVE2D_HTML, _render_live2d_html
 from packages.protocol.enums import TaskStatus
 
 
@@ -21,6 +23,12 @@ class _RuntimeStub:
     def cancel_task_runner_task(self, task_id: str) -> bool:
         self.cancelled_runner_tasks.append(task_id)
         return True
+
+    def is_hermes_ready(self) -> bool:
+        return True
+
+    def get_status(self):
+        return {"hermes": {"limited_tools": []}}
 
 
 def _make_bridge(tmp_path):
@@ -254,6 +262,21 @@ def test_modes_do_not_create_independent_sessions(tmp_path):
         store.close()
 
 
+def test_conversation_overview_includes_recent_sessions(tmp_path):
+    bridge, runtime, store = _make_bridge(tmp_path)
+    try:
+        bridge.send_quick_message("overview")
+
+        overview = bridge.get_conversation_overview(summary_count=2, session_limit=3)
+
+        assert overview["ok"] is True
+        assert overview["messages"]
+        assert overview["recent_sessions"]
+        assert overview["recent_sessions"][0]["is_current"] is True
+    finally:
+        store.close()
+
+
 # ── 失败状态 ──────────────────────────────────────────────────────────────────
 
 def test_failed_task_in_summary(tmp_path):
@@ -278,20 +301,330 @@ def test_bubble_html_keeps_idle_polling_for_cross_mode_updates():
     assert "function startActivePolling()" in _BUBBLE_HTML
     assert "startIdlePolling();" in _BUBBLE_HTML
     assert "window.addEventListener('pywebviewready', bootstrap);" in _BUBBLE_HTML
+    assert "openSettings()" in _BUBBLE_HTML
+    assert "Yachiyo" in _BUBBLE_HTML
+    assert "bubble-launcher" in _BUBBLE_HTML
+    assert "toggle_chat" in _BUBBLE_HTML
+    assert "set_dragging" in _BUBBLE_HTML
 
 
 def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
+    assert "{{RUNTIME_ENV_SHIM}}" in _LIVE2D_HTML
     assert "const IDLE_POLL_INTERVAL_MS = 5000;" in _LIVE2D_HTML
     assert "function startIdlePolling()" in _LIVE2D_HTML
     assert "function startActivePolling()" in _LIVE2D_HTML
     assert "startIdlePolling();" in _LIVE2D_HTML
     assert "window.addEventListener('pywebviewready', bootstrap);" in _LIVE2D_HTML
+    assert "window.addEventListener('error', function(event)" in _LIVE2D_HTML
+    assert "window.addEventListener('unhandledrejection', function(event)" in _LIVE2D_HTML
+    assert "openSettings()" in _LIVE2D_HTML
+    assert "live2d-canvas" in _LIVE2D_HTML
+    assert "live2d-fallback-preview" in _LIVE2D_HTML
+    assert "ensureLive2DRenderer" in _LIVE2D_HTML
+    assert "dismissResourceHint(event)" in _LIVE2D_HTML
+    assert "live2d-resource-hint-close" in _LIVE2D_HTML
+    assert "report_client_event" in _LIVE2D_HTML
+    assert "set_dragging" in _LIVE2D_HTML
+    assert "formatRendererDiagnostics" in _LIVE2D_HTML
+    assert "getLive2DModelCtor" in _LIVE2D_HTML
+    assert "hair-back" not in _LIVE2D_HTML
+    assert "toggle_chat" in _LIVE2D_HTML
+    assert "--live2d-preview-scale" in _LIVE2D_HTML
+    assert "alpha_mask" in _LIVE2D_HTML
+    assert "updateLive2DFocus(event, false)" in _LIVE2D_HTML
+    assert "mouse_follow_enabled" in _LIVE2D_HTML
+    assert "cursor: default;" in _LIVE2D_HTML
+    assert "get_pointer_state" in _LIVE2D_HTML
+    assert "startGlobalPointerPolling" in _LIVE2D_HTML
+    assert "update_ui_regions" in _LIVE2D_HTML
+    assert "reportUIRegions()" in _LIVE2D_HTML
+    assert "@keyframes live2d-idle" not in _LIVE2D_HTML
 
 
-def test_thinking_dots_use_real_elements_not_content_animation():
+def test_launcher_modes_do_not_embed_inline_chat_inputs():
     for html in (_BUBBLE_HTML, _LIVE2D_HTML):
-        assert "@keyframes thinking-dot" in html
-        assert "@keyframes thinking-dots" not in html
-        assert "content: '.'" not in html
-        assert '<span class="dot" aria-hidden="true">.</span>' in html
-        assert '<span class="label">正在思考</span>' not in html
+        assert "send_quick_message" not in html
+        assert "msg-input" not in html
+        assert "toggleChat(event)" in html
+        assert "window.addEventListener('blur', hideMenu);" in html
+        assert "event.key === 'Escape'" in html
+        assert "CLICK_DRAG_THRESHOLD_PX" in html
+        assert "trackLauncherPointerDown(event)" in html
+        assert "shouldIgnoreLauncherClick(event)" in html
+        assert "positionMenu(event)" in html
+        assert "window.pywebview.api.focus_window" in html
+        assert "set_context_menu_open" in html
+    assert "update_hit_region" in _LIVE2D_HTML
+    assert "reportLive2DModelHitRegion" in _LIVE2D_HTML
+    assert "status-dot" not in _LIVE2D_HTML
+    assert "live2d-message-glow" in _LIVE2D_HTML
+
+
+def test_launcher_html_avoids_invalid_alpha_hex_background():
+    for html in (_BUBBLE_HTML, _LIVE2D_HTML):
+        assert "#00000000" not in html
+
+
+def test_bubble_avatar_is_embedded_as_data_uri():
+    html = _render_bubble_html(AppConfig())
+
+    assert "{{AVATAR_URL}}" not in html
+    assert "background-image: url(\"data:image/" in html
+
+
+def test_live2d_preview_is_embedded_as_data_uri():
+    html = _render_live2d_html(AppConfig())
+
+    assert "{{PREVIEW_URL}}" not in html
+    assert '<img class="live2d-preview-fallback hidden"' in html
+    assert 'src="data:image/' in html
+
+
+def test_live2d_html_includes_renderer_cdns(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        _live2d_mod,
+        "_get_live2d_runtime_cache_dir",
+        lambda: tmp_path / "empty-live2d-web-cache",
+    )
+    _live2d_mod._LIVE2D_RUNTIME_DEPENDENCY_STATE.update(
+        {"primed": False, "ready": False, "error": ""}
+    )
+    html = _render_live2d_html(AppConfig())
+
+    assert "cdn.jsdelivr.net/npm/pixi.js@6" in html
+    assert "cdn.jsdelivr.net/npm/pixi-live2d-display@0.5.0-beta" in html
+    assert "cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js" in html
+
+
+def test_live2d_html_prefers_cached_runtime_scripts(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "live2d-web-cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    pixi = cache_dir / "pixi.min.js"
+    cubism = cache_dir / "live2dcubismcore.min.js"
+    display = cache_dir / "pixi-live2d-display-cubism4.min.js"
+    pixi.write_text("window.PIXI = {};", encoding="utf-8")
+    cubism.write_text("window.Live2DCubismCore = {};", encoding="utf-8")
+    display.write_text("window.PIXI = window.PIXI || {};", encoding="utf-8")
+
+    monkeypatch.setattr(_live2d_mod, "_get_live2d_runtime_cache_dir", lambda: cache_dir)
+    _live2d_mod._LIVE2D_RUNTIME_DEPENDENCY_STATE.update(
+        {"primed": False, "ready": False, "error": ""}
+    )
+
+    html = _render_live2d_html(AppConfig())
+
+    assert "process.env.NODE_ENV = 'production'" in html
+    assert "window.PIXI = {};" in html
+    assert "window.Live2DCubismCore = {};" in html
+    assert "cdn.jsdelivr.net/npm/pixi.js@6" not in html
+    assert "cdn.jsdelivr.net/npm/pixi-live2d-display@0.5.0-beta" not in html
+    assert "cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js" not in html
+
+
+def test_live2d_view_exposes_renderer_payload(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    config = AppConfig(display_mode="live2d")
+    model_dir = tmp_path / "models" / "yachiyo"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "yachiyo.model3.json").write_text("{}", encoding="utf-8")
+    (model_dir / "yachiyo.moc3").write_text("stub", encoding="utf-8")
+    config.live2d_mode.model_path = str(model_dir)
+    try:
+        _live2d_mod._LIVE2D_RUNTIME_DEPENDENCY_STATE.update(
+            {"primed": False, "ready": False, "error": ""}
+        )
+        monkeypatch.setattr(
+            _live2d_mod,
+            "_get_bridge_state",
+            lambda: "running",
+        )
+        monkeypatch.setattr(
+            _live2d_mod,
+            "_get_bridge_running_config",
+            lambda _config: {"host": "127.0.0.1", "port": 8420},
+        )
+        monkeypatch.setattr("apps.bridge.server.get_live2d_asset_token", lambda: "token-123")
+
+        view = Live2DWindowAPI(runtime, config).get_live2d_view()
+        renderer = view["live2d"]["renderer"]
+
+        assert renderer["enabled"] is True
+        assert renderer["model_url"].startswith("http://127.0.0.1:8420/live2d/assets/")
+        assert ".model3.json?token=token-123" in renderer["model_url"]
+        assert renderer["mouse_follow_enabled"] is True
+    finally:
+        store.close()
+
+
+def test_live2d_view_reports_dependency_prepare_failure(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    config = AppConfig(display_mode="live2d")
+    model_dir = tmp_path / "models" / "yachiyo"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    (model_dir / "yachiyo.model3.json").write_text("{}", encoding="utf-8")
+    (model_dir / "yachiyo.moc3").write_text("stub", encoding="utf-8")
+    config.live2d_mode.model_path = str(model_dir)
+    try:
+        monkeypatch.setattr(_live2d_mod, "_get_bridge_state", lambda: "running")
+        monkeypatch.setattr(
+            _live2d_mod,
+            "_get_bridge_running_config",
+            lambda _config: {"host": "127.0.0.1", "port": 8420},
+        )
+        monkeypatch.setattr(_live2d_mod, "_runtime_dependency_files_ready", lambda: False)
+        _live2d_mod._LIVE2D_RUNTIME_DEPENDENCY_STATE.update(
+            {"primed": True, "ready": False, "error": "network blocked"}
+        )
+
+        view = Live2DWindowAPI(runtime, config).get_live2d_view()
+        renderer = view["live2d"]["renderer"]
+
+        assert renderer["enabled"] is False
+        assert "network blocked" in renderer["reason"]
+    finally:
+        store.close()
+
+
+def test_live2d_api_accepts_client_events(tmp_path, caplog):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    api = Live2DWindowAPI(runtime, AppConfig(display_mode="live2d"))
+    try:
+        with caplog.at_level("ERROR"):
+            result = api.report_client_event(
+                "error",
+                "renderer.model_load_failed",
+                "TypeError: Cannot read properties of undefined (reading 'from')",
+            )
+
+        assert result == {"ok": True}
+        assert api._last_client_event["event"] == "renderer.model_load_failed"
+        assert "Cannot read properties of undefined" in caplog.text
+    finally:
+        store.close()
+
+
+def test_live2d_api_keeps_pointer_interactive_while_dragging(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    api = Live2DWindowAPI(runtime, AppConfig(display_mode="live2d"))
+    try:
+        api.update_hit_region({"kind": "live2d", "x": 0.3, "y": 0.2, "width": 0.4, "height": 0.6})
+        assert api.is_pointer_interactive(400, 600, 8, 8) is False
+
+        api.set_dragging(True)
+        assert api.is_pointer_interactive(400, 600, 8, 8) is True
+
+        api.set_dragging(False)
+        assert api.is_pointer_interactive(400, 600, 8, 8) is False
+    finally:
+        store.close()
+
+
+def test_live2d_api_keeps_ui_regions_clickable(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    api = Live2DWindowAPI(runtime, AppConfig(display_mode="live2d"))
+    try:
+        api.update_hit_region({"kind": "alpha_mask", "x": 0.3, "y": 0.3, "width": 0.2, "height": 0.3, "cols": 2, "rows": 2, "mask": "1111"})
+        api.update_ui_regions([{"kind": "rect", "x": 0.6, "y": 0.08, "width": 0.08, "height": 0.08}])
+
+        assert api.is_pointer_interactive(420, 680, 270, 70) is True
+        assert api.is_pointer_interactive(420, 680, 24, 24) is False
+    finally:
+        store.close()
+
+
+def test_live2d_api_exposes_cached_global_pointer_state(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    api = Live2DWindowAPI(runtime, AppConfig(display_mode="live2d"))
+    try:
+        api.observe_pointer(420, 680, 128.4, 256.8, True)
+        state = api.get_pointer_state()
+
+        assert state["ok"] is True
+        assert state["x"] == 128.4
+        assert state["y"] == 256.8
+        assert state["inside"] is True
+    finally:
+        store.close()
+
+
+def test_bubble_api_keeps_pointer_interactive_while_dragging(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    api = BubbleWindowAPI(runtime, AppConfig())
+    try:
+        assert api.is_pointer_interactive(112, 112, 0, 0) is False
+
+        api.set_dragging(True)
+        assert api.is_pointer_interactive(112, 112, 0, 0) is True
+
+        api.set_dragging(False)
+        assert api.is_pointer_interactive(112, 112, 0, 0) is False
+    finally:
+        store.close()
+
+
+def test_live2d_view_reports_missing_resource_guidance(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    config = AppConfig(display_mode="live2d")
+    try:
+        _live2d_mod._LIVE2D_RUNTIME_DEPENDENCY_STATE.update(
+            {"primed": False, "ready": False, "error": ""}
+        )
+        original_resolve = config.live2d_mode.resolve_model_path
+        config.live2d_mode.resolve_model_path = lambda: None  # type: ignore[method-assign]
+        view = Live2DWindowAPI(runtime, config).get_live2d_view()
+
+        resource = view["live2d"]["resource"]
+        assert resource["state"] == "not_configured"
+        assert "GitHub Releases" in resource["help_text"]
+        assert resource["default_assets_root_display"].endswith(".hermes/yachiyo/assets/live2d")
+    finally:
+        config.live2d_mode.resolve_model_path = original_resolve  # type: ignore[method-assign]
+        store.close()
+
+
+def test_bubble_launcher_avoids_heavy_frame_and_blur():
+    assert "drop-shadow" not in _BUBBLE_HTML
+    assert "background: radial-gradient" not in _BUBBLE_HTML
+    assert "#151515" not in _BUBBLE_HTML
+    assert "backdrop-filter: none;" in _BUBBLE_HTML
+    assert "-webkit-appearance: none;" in _BUBBLE_HTML
+    assert "box-shadow: none;" in _BUBBLE_HTML
+
+
+def test_bubble_red_attention_is_reserved_for_proactive_messages(tmp_path):
+    _, runtime, store = _make_bridge(tmp_path)
+    try:
+        runtime.chat_session.add_assistant_message("普通对话回复")
+        api = BubbleWindowAPI(runtime, AppConfig())
+
+        view = api.get_bubble_view()
+
+        assert view["bubble"]["has_attention"] is False
+        assert view["proactive"]["status"] == "disabled"
+    finally:
+        store.close()
+
+
+def test_bubble_proactive_desktop_watch_reports_executor_blocker(tmp_path):
+    _, runtime, store = _make_bridge(tmp_path)
+    try:
+        config = AppConfig()
+        config.bubble_mode.proactive_enabled = True
+        config.bubble_mode.proactive_desktop_watch_enabled = True
+        api = BubbleWindowAPI(runtime, config)
+
+        view = api.get_bubble_view()
+
+        assert view["bubble"]["has_attention"] is False
+        assert view["proactive"]["status"] == "blocked"
+        assert "任务执行器" in view["proactive"]["error"]
+    finally:
+        store.close()

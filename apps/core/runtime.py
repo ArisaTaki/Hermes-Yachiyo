@@ -54,6 +54,10 @@ class HermesRuntime:
         return self._state
 
     @property
+    def config(self) -> "AppConfig":
+        return self._config
+
+    @property
     def chat_session(self) -> ChatSession:
         return self._chat_session
 
@@ -77,7 +81,7 @@ class HermesRuntime:
         """任务调度器（启动后才有）"""
         return self._task_runner
 
-    def start(self) -> None:
+    def start(self, install_info: HermesInstallInfo | None = None) -> None:
         """启动运行时"""
         if self._running:
             return
@@ -85,7 +89,7 @@ class HermesRuntime:
         logger.info("正在启动 Hermes Runtime...")
 
         # 1. 检测 Hermes Agent 安装状态
-        self._hermes_install_info = check_hermes_installation()
+        self._hermes_install_info = install_info or check_hermes_installation()
         logger.info(
             "Hermes 安装检测完成: status=%s, platform=%s",
             self._hermes_install_info.status,

@@ -29,6 +29,32 @@ When launched locally, Hermes-Yachiyo should eventually support:
 - local runtime execution
 - optional remote access through AstrBot bridge
 
+## Three-mode product shape
+
+Hermes-Yachiyo now treats the desktop product as three parallel shell modes instead of one main window plus attached utilities:
+
+- **Window Mode**: control center, dashboard, mode switch entry, settings entry, recent session/message overview
+- **Bubble Mode**: lightweight always-available floating chat shell with short input and recent reply summary
+- **Live2D Mode**: character chat shell with recent reply bubble and future renderer integration slot
+- **Chat Window**: shared full conversation space that all three modes can open
+
+All four surfaces must use the same chat/session/task runtime and must not fork independent assistant state.
+
+## Shell layering
+
+- **shared core layer**: `apps/core` owns `ChatSession`, `ChatStore`, `TaskRunner`, `Executor`, Hermes runtime state
+- **mode shell layer**: `apps/shell/modes/window.py`, `bubble.py`, `live2d.py`
+- **mode settings layer**: `WindowModeConfig`, `BubbleModeConfig`, `Live2DModeConfig` under `apps/shell/config.py`, with shared update/serialization in `apps/shell/mode_settings.py`
+
+Mode settings should stay grouped by mode instead of growing a single mixed settings object.
+
+## Live2D asset packaging
+
+- Large Live2D binaries are optional asset packs, not required source-tree assets.
+- Default import location is `~/.hermes/yachiyo/assets/live2d/`.
+- Program code assets under `apps/shell/assets/` should stay lightweight: avatar, fallback preview, placeholder docs.
+- Live2D mode must remain usable as a shell even when no model asset pack has been imported yet.
+
 ## Hermes-Yachiyo responsibilities
 
 - local app runtime

@@ -21,3 +21,21 @@ Thumbs.db
 
 # Config (用户本地配置)
 .hermes-yachiyo/
+
+# Live2D 大型资源包（源码树内只保留轻量占位说明）
+apps/shell/assets/live2d/**/*.json
+apps/shell/assets/live2d/**/*.moc3
+apps/shell/assets/live2d/**/*.model3.json
+apps/shell/assets/live2d/**/*.physics3.json
+apps/shell/assets/live2d/**/*.cdi3.json
+apps/shell/assets/live2d/**/*.exp3.json
+apps/shell/assets/live2d/**/*.vtube.json
+apps/shell/assets/live2d/**/*.xyplugin.json
+apps/shell/assets/live2d/**/texture_*.png
+apps/shell/assets/live2d/**/*.png
+apps/shell/assets/live2d/**/*.jpg
+apps/shell/assets/live2d/**/*.jpeg
+!apps/shell/assets/live2d/README.md
+!apps/shell/assets/live2d/**/README.md
+!apps/shell/assets/live2d/.gitkeep
+!apps/shell/assets/live2d/**/.gitkeep

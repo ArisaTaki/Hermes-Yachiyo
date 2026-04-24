@@ -1,4 +1,4 @@
-"""主窗口管理
+"""主控台与安装窗口管理
 
 MVP 实现：使用 pywebview 展示本地状态页或安装引导页。
 这只是桌面壳原型方案，后续允许迁移到更完整的桌面壳技术。
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 try:
     import webview
@@ -28,8 +28,15 @@ from packages.protocol.enums import HermesInstallStatus
 logger = logging.getLogger(__name__)
 
 _EXIT_DELAY_SECONDS = 0.1
+_EXIT_FORCE_DELAY_SECONDS = 0.7
+_RESTART_DELAY_SECONDS = 0.8
 _exit_timer: threading.Timer | None = None
+_force_exit_timer: threading.Timer | None = None
 _exit_timer_lock = threading.Lock()
+_restart_timer: threading.Timer | None = None
+_restart_timer_lock = threading.Lock()
+_main_window: object | None = None
+_main_window_lock = threading.RLock()
 
 # 正常状态页 HTML
 _STATUS_HTML = """
@@ -76,15 +83,15 @@ _STATUS_HTML = """
         .card .row .value { color: #e0e0e0; }
         .card .row .value.ok { color: #90ee90; }
         .card .row .value.warn { color: #ffd700; }
-        .modes {
+        .control-actions {
             background: #2d2d54;
             border-radius: 8px;
             padding: 16px;
             margin-bottom: 20px;
         }
-        .modes h3 { color: #6495ed; font-size: 0.95em; margin-bottom: 12px; }
-        .mode-list { display: flex; gap: 12px; }
-        .mode-btn {
+        .control-actions h3 { color: #6495ed; font-size: 0.95em; margin-bottom: 12px; }
+        .action-list { display: flex; gap: 12px; }
+        .action-btn {
             flex: 1;
             background: #3a3a6a;
             border: 1px solid #555;
@@ -95,12 +102,12 @@ _STATUS_HTML = """
             text-align: center;
             transition: border-color 0.2s;
         }
-        .mode-btn:hover { border-color: #6495ed; color: #fff; }
-        .mode-btn.active { border-color: #6495ed; color: #fff; background: #4a4a8a; }
-        .mode-btn .icon { font-size: 1.4em; display: block; margin-bottom: 4px; }
-        .mode-btn .name { font-size: 0.85em; }
-        .mode-btn .desc { font-size: 0.75em; color: #888; margin-top: 2px; }
-        /* 聊天面板样式 */
+        .action-btn:hover { border-color: #6495ed; color: #fff; }
+        .action-btn.active { border-color: #6495ed; color: #fff; background: #4a4a8a; }
+        .action-btn .icon { font-size: 1.4em; display: block; margin-bottom: 4px; }
+        .action-btn .name { font-size: 0.85em; }
+        .action-btn .desc { font-size: 0.75em; color: #888; margin-top: 2px; }
+        /* 会话中心面板样式 */
         .chat-panel {
             background: #2d2d54;
             border-radius: 8px;
@@ -108,6 +115,96 @@ _STATUS_HTML = """
             margin-bottom: 20px;
         }
         .chat-panel h3 { color: #6495ed; font-size: 0.95em; margin-bottom: 0; }
+        .chat-panel .status-line {
+            font-size: 0.8em;
+            color: #a5aed4;
+        }
+        .recent-messages {
+            margin-top: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .recent-msg {
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 0.84em;
+            line-height: 1.5;
+            background: #242447;
+            color: #d8def6;
+        }
+        .recent-msg.user { border-left: 3px solid #6495ed; }
+        .recent-msg.assistant { border-left: 3px solid #90ee90; }
+        .recent-msg.system { border-left: 3px solid #888; color: #b2b2c4; }
+        .recent-msg.processing { color: #ffd700; }
+        .recent-msg.failed { color: #ffaaaa; }
+        .recent-sessions {
+            margin-top: 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .session-pill {
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.76em;
+            color: #c8cff3;
+            background: #242447;
+        }
+        .session-pill.current {
+            border: 1px solid #6495ed;
+            color: #ffffff;
+        }
+        .empty-state {
+            color: #777;
+            text-align: center;
+            font-size: 0.82em;
+            padding: 16px 8px;
+        }
+        .mode-settings-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 8px;
+        }
+        .mode-settings-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: #242447;
+        }
+        .mode-settings-item .meta {
+            min-width: 0;
+            flex: 1;
+        }
+        .mode-settings-item .meta .title {
+            color: #eef2ff;
+            font-size: 0.86em;
+            margin-bottom: 4px;
+        }
+        .mode-settings-item .meta .desc {
+            color: #9ba3cf;
+            font-size: 0.78em;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .mode-settings-open {
+            background: #3a4f92;
+            border: 1px solid #6495ed;
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.82em;
+        }
         .chat-send-btn {
             background: #4a6a9a;
             border: none;
@@ -302,19 +399,20 @@ _STATUS_HTML = """
             <div class="row"><span class="label">版本</span><span class="value" id="hermes-version">—</span></div>
             <div class="row"><span class="label">平台</span><span class="value" id="hermes-platform">—</span></div>
             <div class="row" id="hermes-limited-row" style="display:none;"><span class="label" style="font-size:0.82em;color:#cc8844;">受限工具</span><span class="value warn" id="hermes-limited" style="font-size:0.8em;">—</span></div>
-            <!-- 补全能力入口：仅在 basic_ready 时显示 -->
+            <div class="row" id="hermes-doctor-row" style="display:none;"><span class="label" style="font-size:0.82em;color:#cc8844;">诊断提示</span><span class="value warn" id="hermes-doctor" style="font-size:0.8em;">—</span></div>
+            <!-- 补全能力入口：doctor 发现问题或受限工具时显示 -->
             <div id="hermes-enhance-row" style="display:none;margin-top:10px;">
                 <button onclick="toggleHermesEnhancePanel()" id="hermes-enhance-btn"
                     style="width:100%;padding:6px 0;background:#2a3a5a;border:1px solid #4a6a9a;
                            border-radius:5px;color:#9ab4d8;font-size:0.84em;cursor:pointer;">
-                    🔧 补全 Hermes 能力
+                    🔧 检测 / 补全 Hermes 能力
                 </button>
             </div>
             <!-- inline 操作面板 -->
             <div id="hermes-enhance-panel" style="display:none;margin-top:8px;padding:10px;
-                 background:#1a2a3a;border-radius:6px;border-left:3px solid #cc8844;">
+                background:#1a2a3a;border-radius:6px;border-left:3px solid #cc8844;">
                 <div style="color:#cc8844;font-size:0.82em;margin-bottom:8px;">
-                    当前处于<b>基础可用</b>状态，部分高级工具（如消息平台、图像生成等）尚未配置。
+                    当前检测到部分工具或配置仍受限，可能影响消息平台、图像生成、搜索等能力。
                     完成以下操作可解锁更多能力：
                 </div>
                 <div style="display:flex;flex-direction:column;gap:6px;">
@@ -365,41 +463,46 @@ _STATUS_HTML = """
         </div>
     </div>
 
-    <div class="modes">
-        <h3>显示模式</h3>
-        <div class="mode-list">
-            <div class="mode-btn active" id="mode-window">
-                <span class="icon">🖥️</span>
-                <span class="name">窗口模式</span>
-                <span class="desc">标准窗口</span>
-            </div>
-            <div class="mode-btn" id="mode-bubble">
+    <div class="control-actions">
+        <h3>主控台</h3>
+        <div class="action-list">
+            <div class="action-btn" onclick="openChat()">
                 <span class="icon">💬</span>
-                <span class="name">气泡模式</span>
-                <span class="desc">即将推出</span>
+                <span class="name">打开对话</span>
+                <span class="desc">Chat Window</span>
             </div>
-            <div class="mode-btn" id="mode-live2d">
+            <div class="action-btn" id="action-bubble" onclick="openModeSettings('bubble')">
+                <span class="icon">💬</span>
+                <span class="name">Bubble 设置</span>
+                <span class="desc">悬浮入口</span>
+            </div>
+            <div class="action-btn" id="action-live2d" onclick="openModeSettings('live2d')">
                 <span class="icon">🎭</span>
-                <span class="name">Live2D</span>
-                <span class="desc">即将推出</span>
+                <span class="name">Live2D 设置</span>
+                <span class="desc">角色入口</span>
             </div>
-            <div class="mode-btn" id="mode-settings" onclick="toggleSettings()">
+            <div class="action-btn" id="action-settings" onclick="toggleSettings()">
                 <span class="icon">⚙️</span>
-                <span class="name">设置</span>
-                <span class="desc">应用配置</span>
+                <span class="name">应用设置</span>
+                <span class="desc">全局配置</span>
             </div>
         </div>
     </div>
 
-    <!-- 聊天入口 -->
+    <!-- 会话中心 -->
     <div class="chat-panel" id="chat-panel">
         <div style="display:flex;align-items:center;justify-content:space-between;">
-            <h3>💬 对话</h3>
+            <h3>💬 会话中心</h3>
             <span class="executor" id="chat-executor" style="font-size:0.8em;">—</span>
         </div>
-        <div style="margin-top:10px;">
+        <div class="status-line" id="chat-status" style="margin-top:8px;">正在读取当前会话状态…</div>
+        <div id="chat-summary-list" class="recent-messages">
+            <div class="empty-state">暂无消息。打开聊天窗口开始完整对话。</div>
+        </div>
+        <div id="chat-session-list" class="recent-sessions"></div>
+        <div style="margin-top:12px;">
             <button class="chat-send-btn" onclick="openChat()" style="width:100%;padding:14px;font-size:1em;">
-                打开聊天窗口
+                打开 Chat Window
             </button>
         </div>
         <div style="margin-top:10px;text-align:right;">
@@ -431,15 +534,16 @@ _STATUS_HTML = """
             <div class="settings-row"><span class="label">安装状态</span><span class="value" id="s-hermes-status">—</span></div>
             <div class="settings-row"><span class="label">能力就绪</span><span class="value" id="s-hermes-readiness">—</span></div>
             <div class="settings-row" id="s-hermes-limited-row" style="display:none;"><span class="label" style="color:#cc8844;">受限工具</span><span class="value warn" id="s-hermes-limited" style="font-size:0.8em;">—</span></div>
+            <div class="settings-row" id="s-hermes-doctor-row" style="display:none;"><span class="label" style="color:#cc8844;">诊断提示</span><span class="value warn" id="s-hermes-doctor" style="font-size:0.8em;">—</span></div>
             <div class="settings-row"><span class="label">版本</span><span class="value" id="s-hermes-version">—</span></div>
             <div class="settings-row"><span class="label">平台</span><span class="value" id="s-hermes-platform">—</span></div>
             <div class="settings-row"><span class="label">命令可用</span><span class="value" id="s-hermes-cmd">—</span></div>
             <div class="settings-row"><span class="label">Hermes Home</span><span class="value" id="s-hermes-home" style="font-size:0.8em;">—</span></div>
-            <!-- 补全能力操作区（basic_ready 时显示）-->
+            <!-- 补全能力操作区：非完整就绪或 doctor 有诊断时显示 -->
             <div id="s-hermes-enhance-section" style="display:none;margin-top:12px;padding:10px;
                  background:#1a2a3a;border-radius:6px;border-left:3px solid #cc8844;">
                 <div style="color:#cc8844;font-size:0.82em;margin-bottom:8px;">
-                    <b>基础可用 · 部分工具受限。</b>
+                    <b>检测到部分工具或配置仍受限。</b>
                     完成以下配置可解锁更多 Hermes 能力：
                 </div>
                 <div style="display:flex;flex-direction:column;gap:6px;">
@@ -474,42 +578,30 @@ _STATUS_HTML = """
             <h4>显示模式</h4>
             <div class="settings-row"><span class="label">当前模式</span>
                 <select class="s-select" id="s-display-mode" onchange="onSettingChange('display_mode', this.value)">
-                    <option value="window">窗口模式</option>
-                    <option value="bubble" disabled>气泡模式（即将推出）</option>
-                    <option value="live2d" disabled>Live2D 模式（即将推出）</option>
+                    <option value="bubble">气泡模式</option>
+                    <option value="live2d">Live2D 模式</option>
                 </select>
             </div>
             <div id="s-display-modes" class="settings-modes"></div>
         </div>
 
         <div class="settings-section">
-            <h4>Live2D 模式配置 <span style="background:#1a1a3e;border:1px solid #6495ed33;color:#9988cc;font-size:0.75em;padding:1px 7px;border-radius:10px;margin-left:6px;">骨架</span></h4>
-            <div class="settings-row"><span class="label">配置状态</span><span class="value" id="s-l2d-state">—</span></div>
-            <div class="settings-row"><span class="label">模型名称</span>
-                <input class="s-input" id="s-l2d-model-name" placeholder="hiyori" onchange="onSettingChange('live2d.model_name', this.value)">
-            </div>
-            <div class="settings-row"><span class="label">模型路径</span>
-                <input class="s-input" id="s-l2d-model-path" placeholder="/path/to/model" style="font-size:0.78em;" onchange="onSettingChange('live2d.model_path', this.value)">
-            </div>
-            <div class="settings-row"><span class="label">检测到 .model3.json</span><span class="value" id="s-l2d-model3-json" style="font-size:0.82em;">—</span></div>
-            <div class="settings-row"><span class="label">检测到 .moc3</span><span class="value" id="s-l2d-moc3" style="font-size:0.82em;">—</span></div>
-            <div class="settings-row"><span class="label">文件位置</span><span class="value" id="s-l2d-file-loc" style="font-size:0.82em;">—</span></div>
-            <div class="settings-row"><span class="label">渲染器入口候选</span><span class="value" id="s-l2d-renderer-entry" style="font-size:0.75em;word-break:break-all;">—</span></div>
-            <div class="settings-row"><span class="label">待机动作组</span>
-                <input class="s-input" id="s-l2d-idle-group" placeholder="Idle" onchange="onSettingChange('live2d.idle_motion_group', this.value)">
-            </div>
-            <div class="settings-row"><span class="label">表情系统</span>
-                <label class="s-toggle"><input type="checkbox" id="s-l2d-expressions" onchange="onSettingChange('live2d.enable_expressions', this.checked)"><span class="slider"></span></label>
-            </div>
-            <div class="settings-row"><span class="label">物理模拟</span>
-                <label class="s-toggle"><input type="checkbox" id="s-l2d-physics" onchange="onSettingChange('live2d.enable_physics', this.checked)"><span class="slider"></span></label>
-            </div>
-            <div class="settings-row"><span class="label">窗口置顶</span>
-                <label class="s-toggle"><input type="checkbox" id="s-l2d-on-top" onchange="onSettingChange('live2d.window_on_top', this.checked)"><span class="slider"></span></label>
-            </div>
-            <div class="settings-row" style="border-top:1px solid #3a3a5a;margin-top:4px;padding-top:6px;">
-                <span class="label" style="color:#666;font-size:0.82em;">接入状态</span>
-                <span class="value" style="color:#666;font-size:0.82em;font-style:italic;">渲染器未实现</span>
+            <h4>模式设置</h4>
+            <div class="mode-settings-list">
+                <div class="mode-settings-item">
+                    <div class="meta">
+                        <div class="title">💬 Bubble Mode</div>
+                        <div class="desc" id="s-bubble-summary">读取中…</div>
+                    </div>
+                    <button class="mode-settings-open" onclick="openModeSettings('bubble')">打开</button>
+                </div>
+                <div class="mode-settings-item">
+                    <div class="meta">
+                        <div class="title">🎭 Live2D Mode</div>
+                        <div class="desc" id="s-live2d-summary">读取中…</div>
+                    </div>
+                    <button class="mode-settings-open" onclick="openModeSettings('live2d')">打开</button>
+                </div>
             </div>
         </div>
 
@@ -566,17 +658,23 @@ _STATUS_HTML = """
 
     <script>
     let settingsOpen = false;
+    let hermesAutoRecheckStarted = false;
+
+    function escapeHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = value || '';
+        return div.innerHTML;
+    }
 
     function toggleSettings() {
         settingsOpen = !settingsOpen;
         document.getElementById('settings-panel').style.display = settingsOpen ? 'block' : 'none';
         // 隐藏/显示仪表盘区域
         document.querySelector('.cards').style.display = settingsOpen ? 'none' : 'grid';
-        document.querySelector('.modes').style.display = settingsOpen ? 'none' : 'block';
+        document.querySelector('.control-actions').style.display = settingsOpen ? 'none' : 'block';
         document.getElementById('chat-panel').style.display = settingsOpen ? 'none' : 'block';
         // 高亮设置按钮
-        document.getElementById('mode-settings').classList.toggle('active', settingsOpen);
-        document.getElementById('mode-window').classList.toggle('active', !settingsOpen);
+        document.getElementById('action-settings').classList.toggle('active', settingsOpen);
         if (settingsOpen) refreshSettings();
     }
 
@@ -588,6 +686,15 @@ _STATUS_HTML = """
             await window.pywebview.api.open_chat();
         } catch(e) {
             console.error('openChat error:', e);
+        }
+    }
+
+    async function openModeSettings(modeId) {
+        try {
+            if (!window.pywebview || !window.pywebview.api) throw new Error('WebView API 不可用');
+            await window.pywebview.api.open_mode_settings(modeId);
+        } catch(e) {
+            console.error('openModeSettings error:', e);
         }
     }
 
@@ -646,13 +753,81 @@ _STATUS_HTML = """
 
     // ── Hermes 能力补全操作 ────────────────────────────────────────────────────
 
+    function getHermesLimitedTools(hermes) {
+        return (hermes && hermes.limited_tools) || [];
+    }
+
+    function getHermesIssueCount(hermes) {
+        return Number((hermes && hermes.doctor_issues_count) || 0);
+    }
+
+    function hasHermesDiagnostics(hermes) {
+        return getHermesLimitedTools(hermes).length > 0 || getHermesIssueCount(hermes) > 0;
+    }
+
+    function isHermesReadinessUnknown(hermes) {
+        return hermes && (!hermes.readiness_level || hermes.readiness_level === 'unknown');
+    }
+
+    function formatHermesDiagnostics(hermes) {
+        const tools = getHermesLimitedTools(hermes);
+        const issueCount = getHermesIssueCount(hermes);
+        const parts = [];
+        if (tools.length > 0) parts.push(tools.length + ' 个工具受限：' + tools.join('、'));
+        if (issueCount > 0) parts.push('doctor 报告 ' + issueCount + ' 个 issue');
+        return parts.length > 0 ? parts.join('；') : '未发现额外工具限制';
+    }
+
+    function shouldShowHermesEnhance(hermes) {
+        if (!hermes) return false;
+        if (hermes.readiness_level === 'full_ready' && !hasHermesDiagnostics(hermes)) return false;
+        return !!hermes.ready || hermes.readiness_level === 'basic_ready' || hasHermesDiagnostics(hermes);
+    }
+
+    function maybeAutoRecheckHermes(hermes) {
+        if (!hermes || !hermes.ready || !isHermesReadinessUnknown(hermes) || hermesAutoRecheckStarted) return;
+        hermesAutoRecheckStarted = true;
+        setTimeout(function() { recheckHermes(); }, 120);
+    }
+
+    function renderHermesLimited(rowId, valueId, hermes, includeIssueHint) {
+        const row = document.getElementById(rowId);
+        const value = document.getElementById(valueId);
+        if (!row || !value) return;
+        const tools = getHermesLimitedTools(hermes);
+        if (tools.length > 0) {
+            row.style.display = 'flex';
+            const issueHint = includeIssueHint && getHermesIssueCount(hermes) > 0
+                ? ' — 运行 hermes setup 可补全'
+                : '';
+            value.textContent = tools.join('、') + issueHint;
+        } else {
+            row.style.display = 'none';
+        }
+    }
+
+    function renderHermesDiagnostics(rowId, valueId, hermes) {
+        const row = document.getElementById(rowId);
+        const value = document.getElementById(valueId);
+        if (!row || !value) return;
+        if (hasHermesDiagnostics(hermes)) {
+            row.style.display = 'flex';
+            value.textContent = formatHermesDiagnostics(hermes);
+        } else if (hermes && hermes.ready && isHermesReadinessUnknown(hermes)) {
+            row.style.display = 'flex';
+            value.textContent = '能力诊断尚未运行，正在重新检测；也可展开补全入口手动运行 hermes doctor';
+        } else {
+            row.style.display = 'none';
+        }
+    }
+
     function toggleHermesEnhancePanel() {
         const panel = document.getElementById('hermes-enhance-panel');
         const btn = document.getElementById('hermes-enhance-btn');
         if (!panel) return;
         const visible = panel.style.display !== 'none';
         panel.style.display = visible ? 'none' : 'block';
-        if (btn) btn.textContent = visible ? '🔧 补全 Hermes 能力' : '🔼 收起';
+        if (btn) btn.textContent = visible ? '🔧 检测 / 补全 Hermes 能力' : '🔼 收起';
     }
 
     async function openHermesCmd(cmd) {
@@ -694,23 +869,27 @@ _STATUS_HTML = """
             // 刷新仪表盘（直接用返回的最新数据）
             const rl = data.hermes ? data.hermes.readiness_level : 'unknown';
             const hs = document.getElementById('hermes-status');
+            const hermes = data.hermes || {};
             if (hs) {
                 if (rl === 'full_ready') { hs.textContent = '✅ 完整就绪'; hs.className = 'value ok'; }
                 else if (rl === 'basic_ready') { hs.textContent = '⚠️ 基础可用 · 部分工具受限'; hs.className = 'value warn'; }
-                else { hs.textContent = data.hermes.ready ? '✅ 已就绪' : '⚠️ ' + (data.hermes.status || ''); hs.className = data.hermes.ready ? 'value ok' : 'value warn'; }
+                else { hs.textContent = hermes.ready ? '✅ 已就绪' : '⚠️ ' + (hermes.status || ''); hs.className = hermes.ready ? 'value ok' : 'value warn'; }
             }
+            renderHermesLimited('hermes-limited-row', 'hermes-limited', hermes, false);
+            renderHermesDiagnostics('hermes-doctor-row', 'hermes-doctor', hermes);
+            renderHermesLimited('s-hermes-limited-row', 's-hermes-limited', hermes, true);
+            renderHermesDiagnostics('s-hermes-doctor-row', 's-hermes-doctor', hermes);
             const enhRow = document.getElementById('hermes-enhance-row');
-            if (enhRow) enhRow.style.display = (rl === 'basic_ready') ? 'block' : 'none';
+            if (enhRow) enhRow.style.display = shouldShowHermesEnhance(hermes) ? 'block' : 'none';
             const sEnhSec = document.getElementById('s-hermes-enhance-section');
-            if (sEnhSec) sEnhSec.style.display = (rl === 'basic_ready') ? 'block' : 'none';
+            if (sEnhSec) sEnhSec.style.display = shouldShowHermesEnhance(hermes) ? 'block' : 'none';
             if (rl === 'full_ready') {
                 setStatus('<span style="color:#90ee90">✅ Hermes 已完整就绪！受限工具已补全。</span>');
                 // 补全后隐藏操作面板
                 const panel = document.getElementById('hermes-enhance-panel');
                 if (panel) panel.style.display = 'none';
-            } else if (rl === 'basic_ready') {
-                const tools = (data.hermes && data.hermes.limited_tools) || [];
-                setStatus('<span style="color:#ffd700">⚠️ 仍有受限工具：' + tools.join('、') + '。可继续运行 hermes setup 完善配置。</span>');
+            } else if (shouldShowHermesEnhance(hermes)) {
+                setStatus('<span style="color:#ffd700">⚠️ ' + formatHermesDiagnostics(hermes) + '。可继续运行 hermes setup 或 hermes doctor 完善配置。</span>');
             } else {
                 setStatus('<span style="color:#9ab4d8">重检完成。当前状态：' + (rl || '未知') + '</span>');
             }
@@ -748,26 +927,16 @@ _STATUS_HTML = """
                 rlEl.textContent = rlLabels[srl] || (d.hermes.ready ? '✅ 已就绪' : '—');
                 rlEl.className = 'value' + (srl === 'full_ready' ? ' ok' : srl === 'basic_ready' ? ' warn' : '');
             }
-            // 受限工具行
-            const sLimRow = document.getElementById('s-hermes-limited-row');
-            const sLimEl = document.getElementById('s-hermes-limited');
-            if (sLimRow && sLimEl) {
-                const limited = d.hermes.limited_tools || [];
-                if (limited.length > 0) {
-                    sLimRow.style.display = 'flex';
-                    const issueHint = d.hermes.doctor_issues_count > 0 ? ' — 运行 hermes setup 可补全' : '';
-                    sLimEl.textContent = limited.join('、') + issueHint;
-                } else {
-                    sLimRow.style.display = 'none';
-                }
-            }
+            renderHermesLimited('s-hermes-limited-row', 's-hermes-limited', d.hermes, true);
+            renderHermesDiagnostics('s-hermes-doctor-row', 's-hermes-doctor', d.hermes);
             document.getElementById('s-hermes-version').textContent = d.hermes.version || '未知';
             document.getElementById('s-hermes-platform').textContent = d.hermes.platform;
             document.getElementById('s-hermes-cmd').textContent = d.hermes.command_exists ? '✅ 是' : '❌ 否';
             document.getElementById('s-hermes-home').textContent = d.hermes.hermes_home || '~/.hermes (默认)';
-            // 设置页补全能力区：仅 basic_ready 时显示
+            // 设置页补全能力区：doctor 发现问题或受限工具时显示
             const sEnhSec = document.getElementById('s-hermes-enhance-section');
-            if (sEnhSec) sEnhSec.style.display = (srl === 'basic_ready') ? 'block' : 'none';
+            if (sEnhSec) sEnhSec.style.display = shouldShowHermesEnhance(d.hermes) ? 'block' : 'none';
+            maybeAutoRecheckHermes(d.hermes);
 
             // Workspace
             const wsEl = document.getElementById('s-ws-status');
@@ -780,48 +949,15 @@ _STATUS_HTML = """
             document.getElementById('s-display-mode').value = d.display.current_mode;
             const modesDiv = document.getElementById('s-display-modes');
             modesDiv.innerHTML = d.display.available_modes.map(function(m) {
-                const tag = m.available ? '<span class="tag ok">可用</span>' : '<span class="tag">即将推出</span>';
+                const tag = m.available ? '<span class="tag ok">可用</span>' : '<span class="tag">不可用</span>';
                 const active = m.id === d.display.current_mode ? ' <span class="tag active-tag">当前</span>' : '';
-                return '<div class="settings-mode-item">' + m.name + ' ' + tag + active + '</div>';
+                return '<div class="settings-mode-item">' + m.icon + ' ' + m.name + ' ' + tag + active + '</div>';
             }).join('');
 
-            // Live2D 配置
-            if (d.live2d) {
-                const l2d = d.live2d;
-                const stateEl = document.getElementById('s-l2d-state');
-                const stateMap = {
-                    'not_configured':  {text: '⚪ 未配置', cls: ''},
-                    'path_invalid':    {text: '❌ 路径不存在', cls: 'warn'},
-                    'path_not_live2d': {text: '⚠️ 目录无模型文件', cls: 'warn'},
-                    'path_valid':      {text: '✅ 模型目录就绪 · 渲染器待实现', cls: 'ok'},
-                    'loaded':          {text: '✅ 已加载', cls: 'ok'},
-                };
-                const stInfo = stateMap[l2d.model_state] || {text: l2d.model_state, cls: ''};
-                stateEl.textContent = stInfo.text;
-                stateEl.className = 'value' + (stInfo.cls ? ' ' + stInfo.cls : '');
-                // 填充输入控件（避免用户正在输入时被覆盖：只在非 focus 时更新）
-                const nameEl = document.getElementById('s-l2d-model-name');
-                if (document.activeElement !== nameEl) nameEl.value = l2d.model_name || '';
-                const pathEl = document.getElementById('s-l2d-model-path');
-                if (document.activeElement !== pathEl) pathEl.value = l2d.model_path || '';
-                const idleEl = document.getElementById('s-l2d-idle-group');
-                if (document.activeElement !== idleEl) idleEl.value = l2d.idle_motion_group || 'Idle';
-                document.getElementById('s-l2d-expressions').checked = !!l2d.enable_expressions;
-                document.getElementById('s-l2d-physics').checked = !!l2d.enable_physics;
-                document.getElementById('s-l2d-on-top').checked = l2d.window_on_top !== false;
-                // 摘要信息（只读）
-                const s = l2d.summary || {};
-                document.getElementById('s-l2d-model3-json').textContent = s.model3_json || '—';
-                document.getElementById('s-l2d-model3-json').className = 'value' + (s.model3_json ? ' ok' : ' dim');
-                document.getElementById('s-l2d-moc3').textContent =
-                    s.moc3_file ? s.moc3_file + (s.extra_moc3_count > 0 ? ' (+' + s.extra_moc3_count + ')' : '') : '—';
-                document.getElementById('s-l2d-moc3').className = 'value' + (s.moc3_file ? ' ok' : ' dim');
-                document.getElementById('s-l2d-file-loc').textContent =
-                    !s.available ? '—' :
-                    (s.found_in_subdir ? '子目录: ' + (s.subdir_name || '?') : '根目录');
-                const entryEl = document.getElementById('s-l2d-renderer-entry');
-                entryEl.textContent = s.renderer_entry || '—';
-                entryEl.className = 'value' + (s.renderer_entry ? ' ok' : ' dim');
+            // Mode settings summary
+            if (d.mode_settings) {
+                document.getElementById('s-bubble-summary').textContent = d.mode_settings.bubble.summary;
+                document.getElementById('s-live2d-summary').textContent = d.mode_settings.live2d.summary;
             }
 
             // Bridge
@@ -896,6 +1032,12 @@ _STATUS_HTML = """
         // 设置面板：显示模式下拉
         const modeEl = document.getElementById('s-display-mode');
         if (modeEl) modeEl.value = state.display_mode;
+        if (state.mode_settings) {
+            const bubbleSummary = document.getElementById('s-bubble-summary');
+            const live2dSummary = document.getElementById('s-live2d-summary');
+            if (bubbleSummary) bubbleSummary.textContent = state.mode_settings.bubble.summary;
+            if (live2dSummary) live2dSummary.textContent = state.mode_settings.live2d.summary;
+        }
         // 设置面板：Bridge
         if (state.bridge) {
             const bridgeStateLabels = {
@@ -1008,11 +1150,11 @@ _STATUS_HTML = """
             changes[key] = value;
             const res = await window.pywebview.api.update_settings(changes);
             if (res.ok) {
-                hint.textContent = '✓ 已保存';
+                hint.textContent = res.restart_scheduled ? '✓ 已保存，正在重启应用…' : '✓ 已保存';
                 hint.className = 'save-hint ok';
                 if (res.app_state) {
                     applyAppState(res.app_state);
-                    if (key === 'display_mode' || key.startsWith('live2d.')) {
+                    if (key === 'display_mode' && !res.restart_scheduled) {
                         refreshSettings();
                     }
                 } else {
@@ -1081,21 +1223,12 @@ _STATUS_HTML = """
             }
             document.getElementById('hermes-version').textContent = data.hermes.version || '未知';
             document.getElementById('hermes-platform').textContent = data.hermes.platform;
-            // 受限工具行
-            const limRow = document.getElementById('hermes-limited-row');
-            const limEl = document.getElementById('hermes-limited');
-            if (limRow && limEl) {
-                const tools = data.hermes.limited_tools || [];
-                if (tools.length > 0) {
-                    limRow.style.display = 'flex';
-                    limEl.textContent = tools.join('、');
-                } else {
-                    limRow.style.display = 'none';
-                }
-            }
-            // 补全能力入口：仅 basic_ready 时显示
+            renderHermesLimited('hermes-limited-row', 'hermes-limited', data.hermes, false);
+            renderHermesDiagnostics('hermes-doctor-row', 'hermes-doctor', data.hermes);
+            // 补全能力入口：doctor 发现问题或受限工具时显示
             const enhRow = document.getElementById('hermes-enhance-row');
-            if (enhRow) enhRow.style.display = (rl === 'basic_ready') ? 'block' : 'none';
+            if (enhRow) enhRow.style.display = shouldShowHermesEnhance(data.hermes) ? 'block' : 'none';
+            maybeAutoRecheckHermes(data.hermes);
 
             // Workspace
             const ws = document.getElementById('ws-status');
@@ -1132,6 +1265,41 @@ _STATUS_HTML = """
             document.getElementById('task-pending').textContent = data.tasks.pending || 0;
             document.getElementById('task-running').textContent = data.tasks.running || 0;
             document.getElementById('task-completed').textContent = data.tasks.completed || 0;
+
+            // Display modes
+            const currentMode = (data.modes && data.modes.current) || 'bubble';
+            ['bubble', 'live2d'].forEach(function(modeId) {
+                const el = document.getElementById('action-' + modeId);
+                if (el) el.classList.toggle('active', currentMode === modeId && !settingsOpen);
+            });
+
+            // Chat overview
+            const chat = data.chat || {};
+            const statusEl = document.getElementById('chat-status');
+            if (statusEl) {
+                statusEl.textContent = chat.status_label
+                    ? ('当前会话：' + chat.status_label)
+                    : '当前会话状态未知';
+            }
+            const summaryList = document.getElementById('chat-summary-list');
+            if (summaryList) {
+                if (chat.empty || !chat.messages || chat.messages.length === 0) {
+                    summaryList.innerHTML = '<div class="empty-state">暂无消息。打开聊天窗口开始完整对话。</div>';
+                } else {
+                    summaryList.innerHTML = chat.messages.map(function(msg) {
+                        const statusClass = msg.status ? ' ' + msg.status : '';
+                        return '<div class="recent-msg ' + msg.role + statusClass + '">' + escapeHtml(msg.content || '…') + '</div>';
+                    }).join('');
+                }
+            }
+            const sessionList = document.getElementById('chat-session-list');
+            if (sessionList) {
+                const sessions = chat.recent_sessions || [];
+                sessionList.innerHTML = sessions.map(function(session) {
+                    const current = session.is_current ? ' current' : '';
+                    return '<span class="session-pill' + current + '">' + escapeHtml(session.title) + '</span>';
+                }).join('');
+            }
 
             // Integrations
             const abData = data.integrations.astrbot || {};
@@ -1317,8 +1485,59 @@ _INSTALLER_HTML = """
 """
 
 
+def open_main_window(
+    runtime: "HermesRuntime",
+    config: "AppConfig",
+    *,
+    bind_exit: bool = False,
+) -> bool:
+    """在当前 webview 会话中打开主控台窗口。"""
+    global _main_window
+
+    if not _HAS_WEBVIEW:
+        logger.warning("pywebview 未安装，无法打开主控台窗口")
+        return False
+
+    with _main_window_lock:
+        if _main_window is not None:
+            if _focus_existing_window(_main_window, title="Hermes-Yachiyo Control Center"):
+                return True
+            _main_window = None
+
+    from apps.shell.main_api import MainWindowAPI
+    api = MainWindowAPI(runtime, config)
+
+    html = _STATUS_HTML.replace("{{HOST}}", config.bridge_host).replace("{{PORT}}", str(config.bridge_port))
+    window_config = config.window_mode
+
+    with _main_window_lock:
+        window = webview.create_window(
+            title="Hermes-Yachiyo Control Center",
+            html=html,
+            width=window_config.width,
+            height=window_config.height,
+            resizable=True,
+            js_api=api,
+        )
+        _main_window = window
+
+    if bind_exit:
+        _bind_main_window_exit(window)
+
+    closed_event = getattr(getattr(window, "events", None), "closed", None)
+    if closed_event is not None:
+        def _on_closed() -> None:
+            global _main_window
+            with _main_window_lock:
+                if _main_window is window:
+                    _main_window = None
+
+        closed_event += _on_closed
+    return True
+
+
 def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
-    """创建并显示主窗口（阻塞主线程）- 正常模式"""
+    """创建并显示主控台窗口（阻塞主线程）。"""
     if not _HAS_WEBVIEW:
         logger.warning("pywebview 未安装，以无窗口模式运行")
         _print_console_dashboard(runtime, config)
@@ -1326,25 +1545,19 @@ def create_main_window(runtime: "HermesRuntime", config: "AppConfig") -> None:
         threading.Event().wait()
         return
 
-    from apps.shell.main_api import MainWindowAPI
-    api = MainWindowAPI(runtime, config)
+    open_main_window(runtime, config, bind_exit=True)
+    if config.window_mode.open_chat_on_start:
+        try:
+            from apps.shell.chat_window import open_chat_window
 
-    html = _STATUS_HTML.replace("{{HOST}}", config.bridge_host).replace("{{PORT}}", str(config.bridge_port))
-
-    window = webview.create_window(
-        title="Hermes-Yachiyo",
-        html=html,
-        width=560,
-        height=520,
-        resizable=True,
-        js_api=api,
-    )
-    _bind_main_window_exit(window)
+            open_chat_window(runtime)
+        except Exception as exc:
+            logger.warning("启动时打开 Chat Window 失败: %s", exc)
     webview.start(debug=False)
 
 
-def _bind_main_window_exit(main_window: object):
-    """主窗口关闭时同步关闭附属窗口。
+def bind_app_window_exit(app_window: Any, *, label: str = "窗口"):
+    """应用主入口窗口关闭时同步关闭附属窗口。
 
     不在 pywebview closing 回调里弹确认框，避免 macOS WebView 关闭事件重入卡死。
     显式退出确认由页面内的 quitApp() 完成。
@@ -1357,31 +1570,105 @@ def _bind_main_window_exit(main_window: object):
             return True
 
         closing = True
-        logger.info("主窗口关闭，正在关闭附属窗口")
-        _close_auxiliary_windows(main_window)
+        logger.info("%s关闭，正在关闭附属窗口", label)
+        _close_auxiliary_windows(app_window)
         return True
 
-    main_window.events.closing += _on_closing
+    app_window.events.closing += _on_closing
     return _on_closing
+
+
+def _bind_main_window_exit(main_window: object):
+    """主窗口关闭时同步关闭附属窗口。"""
+    return bind_app_window_exit(main_window, label="主窗口")
+
+
+def _focus_existing_window(app_window: object, *, title: str) -> bool:
+    try:
+        for method_name in ("restore", "show", "bring_to_front", "focus"):
+            method = getattr(app_window, method_name, None)
+            if callable(method):
+                method()
+        try:
+            from apps.shell.native_window import focus_macos_window
+
+            focus_macos_window(title=title)
+        except Exception:
+            pass
+        return True
+    except Exception as exc:
+        logger.debug("聚焦窗口失败: %s", exc)
+        return False
 
 
 def request_app_exit() -> None:
     """由页面内退出按钮触发的完整退出流程。
 
     实际窗口销毁延迟到 API 回调返回后执行，避免 macOS WebView 卡在等待
-    JavaScript promise 返回的状态。
+    JavaScript promise 返回的状态。若 pywebview 销毁阻塞，短延迟后直接退出进程，
+    避免留下白屏窗口。
     """
-    global _exit_timer
+    global _exit_timer, _force_exit_timer
     with _exit_timer_lock:
         if _exit_timer is not None and _exit_timer.is_alive():
             return
         _exit_timer = threading.Timer(_EXIT_DELAY_SECONDS, _destroy_all_windows_for_exit)
         _exit_timer.daemon = True
         _exit_timer.start()
+        _force_exit_timer = threading.Timer(_EXIT_FORCE_DELAY_SECONDS, _force_app_exit)
+        _force_exit_timer.daemon = True
+        _force_exit_timer.start()
+
+
+def request_app_restart() -> None:
+    """延迟重启应用，确保 WebView API 调用可以先正常返回。"""
+    global _restart_timer
+    with _restart_timer_lock:
+        if _restart_timer is not None and _restart_timer.is_alive():
+            return
+        _restart_timer = threading.Timer(_RESTART_DELAY_SECONDS, _restart_process)
+        _restart_timer.daemon = True
+        _restart_timer.start()
+
+
+def _restart_process() -> None:
+    """启动新进程并退出当前进程。"""
+    import subprocess
+    import sys
+
+    logger.info("正在重启 Hermes-Yachiyo 以应用显示模式变更")
+    try:
+        subprocess.Popen(
+            [sys.executable] + sys.argv,
+            close_fds=True,
+            start_new_session=True,
+        )
+        logger.info("新进程已启动（%s %s）", sys.executable, sys.argv)
+        _process_exit(0)
+    except Exception as exc:
+        logger.warning("自动重启失败，请手动重启应用: %s", exc)
+
+
+def _process_exit(code: int = 0) -> None:
+    """立即结束当前进程。封装为函数以便测试替换。"""
+    import os
+
+    os._exit(code)
+
+
+def _force_app_exit() -> None:
+    """兜底退出，防止 pywebview 窗口销毁在平台侧卡住。"""
+    logger.info("强制退出 Hermes-Yachiyo")
+    _process_exit(0)
 
 
 def _destroy_all_windows_for_exit() -> None:
     """关闭聊天窗口及所有 pywebview 窗口。"""
+    global _main_window
+
+    with _main_window_lock:
+        _main_window = None
+
     _close_auxiliary_windows(main_window=None)
 
     webview_module = globals().get("webview")
@@ -1506,8 +1793,9 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
     # 安装/配置步骤
     install_steps = ""
     if "actions" in guidance:
-        steps_html = []
-        for i, action in enumerate(guidance["actions"], 1):
+        actions: list[str] = guidance["actions"]
+        steps_html: list[str] = []
+        for _i, action in enumerate(actions, 1):
             if action.startswith("  "):
                 # 缩进的命令或说明
                 steps_html.append(f'<div class="code-block">{action.strip()}</div>')

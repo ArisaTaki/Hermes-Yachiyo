@@ -1,6 +1,6 @@
 """聊天 WebView API
 
-为主窗口（及后续 bubble/live2d）提供统一的聊天消息接口。
+为 Chat Window、Control Center、Bubble、Live2D 提供统一的聊天消息接口。
 通过 ChatSession 管理消息状态，通过 AppState 创建任务。
 
 职责：

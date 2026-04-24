@@ -11,28 +11,82 @@
 from __future__ import annotations
 
 import logging
+import secrets
 import threading
 import time
+from typing import Any
 
-import uvicorn
-from fastapi import FastAPI
+_FastAPIClass: Any
+_CORSMiddlewareClass: Any
 
-from apps.bridge.routes import hermes, screen, status, system, tasks
+try:
+    import uvicorn
+    from fastapi import FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+
+    _FastAPIClass = FastAPI
+    _CORSMiddlewareClass = CORSMiddleware
+except ModuleNotFoundError:
+    uvicorn = None  # type: ignore[assignment]
+
+    class _FastAPIStub:
+        def __init__(self, *args, **kwargs) -> None:
+            self.routes: list[Any] = []
+
+        def include_router(self, *args, **kwargs) -> None:
+            return None
+
+        def add_middleware(self, *args, **kwargs) -> None:
+            return None
+
+    class _CORSMiddlewareStub:
+        pass
+
+    _FastAPIClass = _FastAPIStub
+    _CORSMiddlewareClass = _CORSMiddlewareStub
 
 logger = logging.getLogger(__name__)
 
+_FASTAPI_AVAILABLE = uvicorn is not None
+_routes_registered = False
 
-app = FastAPI(
+
+app = _FastAPIClass(
     title="Hermes-Yachiyo Bridge",
     description="内部通信 API，非产品本体",
     version="0.1.0",
 )
 
-app.include_router(status.router)
-app.include_router(tasks.router)
-app.include_router(screen.router)
-app.include_router(system.router)
-app.include_router(hermes.router)
+if _FASTAPI_AVAILABLE:
+    # 仅放行回环地址；null-origin 的 Live2D 资源请求在专用路由里做 token 校验后单独处理。
+    app.add_middleware(
+        _CORSMiddlewareClass,
+        allow_origins=[],
+        allow_origin_regex=r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$",
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+def _register_routes() -> None:
+    global _routes_registered
+    if not _FASTAPI_AVAILABLE or _routes_registered:
+        return
+
+    import apps.bridge.routes.hermes as hermes
+    import apps.bridge.routes.live2d as live2d
+    import apps.bridge.routes.screen as screen
+    import apps.bridge.routes.status as status
+    import apps.bridge.routes.system as system
+    import apps.bridge.routes.tasks as tasks
+
+    app.include_router(status.router)
+    app.include_router(tasks.router)
+    app.include_router(screen.router)
+    app.include_router(system.router)
+    app.include_router(live2d.router)
+    app.include_router(hermes.router)
+    _routes_registered = True
 
 _server: uvicorn.Server | None = None
 _bridge_thread: threading.Thread | None = None
@@ -42,6 +96,7 @@ _state: str = "not_started"
 # 当前实际使用的 host/port
 _running_host: str = ""
 _running_port: int = 0
+_live2d_asset_token: str = secrets.token_urlsafe(24)
 
 
 def get_bridge_state() -> str:
@@ -54,9 +109,26 @@ def get_running_config() -> dict[str, object]:
     return {"host": _running_host, "port": _running_port}
 
 
+def get_live2d_asset_token() -> str:
+    """返回当前进程内的 Live2D 资源访问令牌。"""
+    return _live2d_asset_token
+
+
+def regenerate_live2d_asset_token() -> str:
+    """为 Live2D 资源路由生成新的进程内访问令牌。"""
+    global _live2d_asset_token
+    _live2d_asset_token = secrets.token_urlsafe(24)
+    return _live2d_asset_token
+
+
 def start_bridge(host: str = "127.0.0.1", port: int = 8420) -> None:
     """启动 Bridge API（阻塞，应在后台线程调用）"""
     global _server, _state, _running_host, _running_port
+    if uvicorn is None:
+        _state = "failed"
+        raise RuntimeError("Bridge 依赖未安装：缺少 fastapi/uvicorn")
+    regenerate_live2d_asset_token()
+    _register_routes()
     config = uvicorn.Config(app, host=host, port=port, log_level="info")
     _server = uvicorn.Server(config)
     _state = "running"
