@@ -1958,8 +1958,8 @@ Window          → ChatAPI    → ChatSession → ChatStore (SQLite)
 ### Milestone 60 — Live2D assistant settings / Bubble 设置闭环 / AstrBot intent bridge
 
 - ✅ 设置生效闭环
-  - Bubble 运行视图实际消费 `show_unread_dot` / `opacity` / `default_display` / `expand_trigger` / `auto_hide`
-  - Bubble `hover` 模式悬停打开 Chat Window，`click` 模式保持点击打开
+  - Bubble 运行视图实际消费 `show_unread_dot` / `opacity` / `default_display` / `auto_hide`，`expand_trigger` 保留为兼容字段
+  - Bubble 聊天窗口最终策略已在 Milestone 61 收敛为 click-only；旧 `hover` 配置会被规整为 `click`
   - Bubble `edge_snap` 尚未真实吸边，设置页已标记为待实现/禁用，避免误导用户
   - Live2D `click_action` 不再硬编码为 `open_chat`，视图返回并执行配置值
   - Live2D 支持 `open_chat` / `toggle_reply` / `focus_stage`
@@ -1995,3 +1995,32 @@ Window          → ChatAPI    → ChatSession → ChatStore (SQLite)
 
 - 验收集：`tests/test_mode_settings.py tests/test_chat_bridge.py tests/test_native_window.py tests/test_astrbot_handlers.py tests/test_proactive.py tests/test_assistant_intent_route.py` → 106 passed
 - 完整套件：`python -m pytest` → 304 passed
+
+### Milestone 61 — Chat auto-open 修复 / Bubble 设置认知澄清 / Assistant profile 基础
+
+- ✅ Bubble / Live2D 聊天窗口打开策略收敛
+  - Bubble 移除 `pointerenter` / hover 打开 Chat Window 逻辑，运行视图固定返回 `expand_trigger=click`
+  - 旧配置中的 `bubble_mode.expand_trigger=hover` 在加载时统一规整为 `click`
+  - Bubble / Live2D 均不再通过 hover 或 pointerenter 聚焦入口打开/切换 Chat Window；聊天窗口只允许点击触发
+  - Live2D `default_open_behavior` 只控制回复泡泡/快捷输入初始表现，不打开 Chat Window
+  - `live2d_mode.auto_open_chat_window` 保留为“启动时打开”偏好，并标记为需重启当前模式后生效
+- ✅ Bubble 设置生效认知
+  - Bubble 尺寸范围扩展为 `80-192`
+  - launcher CSS 与 native hit-test 改为随窗口尺寸缩放，不再被固定 `108px` 视觉尺寸误导
+  - 设置页移除 hover 展开选项，明确显示“点击打开聊天（固定）”
+  - Bubble 尺寸、位置、置顶、头像字段明确标注“需重启当前模式”
+  - 设置页新增“应用并重启应用 / 重启应用”入口，作为当前模式重启能力未拆出前的安全兜底
+  - `edge_snap` 继续保持禁用/待实现，不伪装为已生效功能
+- ✅ Chat Window 单例一致性
+  - `open_chat_window()` / `is_chat_window_open()` / `close_chat_window()` 增加 closed/destroyed/event 状态清理
+  - stale singleton 不再导致关闭后状态误判；关闭事件会清理 `_chat_window`
+- ✅ AstrBot 记忆/人设共享基础
+  - canonical 人设仍是桌面端 `assistant.persona_prompt`
+  - 新增 Bridge `GET /assistant/profile` 与 `PATCH /assistant/profile`，用于读取/更新共享人设
+  - profile 响应声明 prompt 注入顺序：`persona` → `relevant_memory` → `current_session` → `request`
+  - 记忆同步保持本地端设计占位：不默认同步 QQ 原始聊天文本，后续只接收显式摘要/事实并由 Hermes-Yachiyo 管理注入
+
+**测试结果**：
+
+- 验收集：`tests/test_mode_settings.py tests/test_chat_bridge.py tests/test_native_window.py tests/test_astrbot_handlers.py tests/test_executor.py tests/test_proactive.py tests/test_assistant_intent_route.py tests/test_assistant_profile_route.py tests/test_chat_window_singleton.py` → 161 passed
+- 完整套件：`python -m pytest` → 320 passed

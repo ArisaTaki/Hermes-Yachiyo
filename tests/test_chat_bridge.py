@@ -306,6 +306,10 @@ def test_bubble_html_keeps_idle_polling_for_cross_mode_updates():
     assert "bubble-launcher" in _BUBBLE_HTML
     assert "toggle_chat" in _BUBBLE_HTML
     assert "set_dragging" in _BUBBLE_HTML
+    assert "onpointerenter" not in _BUBBLE_HTML
+    assert "hoverOpening" not in _BUBBLE_HTML
+    assert "getExpandTrigger" not in _BUBBLE_HTML
+    assert "getExpandTrigger() !== 'click'" not in _BUBBLE_HTML
 
 
 def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
@@ -339,6 +343,7 @@ def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
     assert "update_ui_regions" in _LIVE2D_HTML
     assert "reportUIRegions()" in _LIVE2D_HTML
     assert "@keyframes live2d-idle" not in _LIVE2D_HTML
+    assert 'onpointerenter="focusLauncherWindow()"' not in _LIVE2D_HTML
 
 
 def test_launcher_modes_do_not_embed_inline_chat_inputs():
@@ -638,7 +643,7 @@ def test_bubble_view_consumes_runtime_display_settings(tmp_path):
         assert view["bubble"]["show_unread_dot"] is False
         assert view["bubble"]["default_display"] == "recent_reply"
         assert view["bubble"]["opacity"] == 0.66
-        assert view["bubble"]["expand_trigger"] == "hover"
+        assert view["bubble"]["expand_trigger"] == "click"
         assert view["bubble"]["auto_hide"] is True
     finally:
         store.close()

@@ -28,7 +28,7 @@ _CONFIG_FILE = _CONFIG_DIR / "config.json"
 # 主控台不再是 display mode；旧配置中的 "window" 会迁移到 "bubble"。
 DisplayModeValue = Literal["bubble", "live2d"]
 BubbleDisplayValue = Literal["icon", "summary", "recent_reply"]
-BubbleExpandTriggerValue = Literal["click", "hover"]
+BubbleExpandTriggerValue = Literal["click"]
 Live2DClickActionValue = Literal["focus_stage", "open_chat", "toggle_reply"]
 Live2DDefaultOpenValue = Literal["stage", "reply_bubble", "chat_input"]
 TTSProviderValue = Literal["none", "http", "command"]
@@ -207,6 +207,7 @@ class BubbleModeConfig:
     always_on_top: bool = True
     edge_snap: bool = True
     expanded_on_start: bool = True
+    # 兼容旧配置字段；hover 已废弃，加载时会统一规整为 click。
     expand_trigger: BubbleExpandTriggerValue = "click"
     default_display: BubbleDisplayValue = "summary"
     show_unread_dot: bool = True
@@ -483,7 +484,7 @@ def _normalize_config_values(config: AppConfig) -> None:
     """规整配置文件中的枚举和范围值，避免旧配置/手改配置导致运行期异常。"""
     config.bubble_mode.expand_trigger = cast(BubbleExpandTriggerValue, _normalize_literal(
         config.bubble_mode.expand_trigger,
-        {"click", "hover"},
+        {"click"},
         "click",
     ))
     config.bubble_mode.default_display = cast(BubbleDisplayValue, _normalize_literal(

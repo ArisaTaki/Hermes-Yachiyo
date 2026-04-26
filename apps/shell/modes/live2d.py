@@ -437,7 +437,6 @@ _LIVE2D_HTML = r"""
          onpointermove="trackLauncherPointerMove(event)"
          onpointerup="trackLauncherPointerUp(event)"
          onpointerleave="handleStagePointerLeave(event)"
-         onpointerenter="focusLauncherWindow()"
          onclick="handleStageClick(event)" oncontextmenu="showMenu(event)">
         <div class="character" id="character" aria-label="Yachiyo Live2D 角色舞台">
             <canvas class="live2d-canvas" id="live2d-canvas"></canvas>

@@ -1,6 +1,67 @@
 # Session Summary
 
-## 本轮完成内容 — Milestone 60: Live2D assistant settings and AstrBot intent bridge
+## 本轮完成内容 — Milestone 61: Chat auto-open behavior and Bubble settings clarity
+
+### 核心结果
+
+本轮修复了 Bubble / Live2D 聊天窗口误弹出风险：两种桌面入口都不再允许 hover 打开或切换 Chat Window，聊天窗口只能由点击入口触发。
+
+同时澄清了 Bubble 设置的生效认知，扩大尺寸范围并修复视觉尺寸不随配置变化的问题；为后续 AstrBot 记忆/人设共享新增了最小 profile API，并明确不默认同步 QQ 原始聊天文本。
+
+### 主要变更
+
+#### 1. Bubble / Live2D click-only 聊天入口
+
+- Bubble 移除 `pointerenter` / hover 打开逻辑；运行视图固定返回 `expand_trigger=click`。
+- 旧配置 `bubble_mode.expand_trigger=hover` 会在加载时规整为 `click`，设置 API 也会拒绝新的 hover 写入。
+- Bubble 与 Live2D 均移除 hover 聚焦入口，避免 hover/focus 间接触发用户误解。
+- Live2D `default_open_behavior` 只控制回复泡泡/快捷输入，不打开 Chat Window。
+- `live2d_mode.auto_open_chat_window` 保留为启动时行为，并标记为需重启当前模式后生效。
+
+#### 2. Bubble 设置认知与尺寸逻辑
+
+- Bubble 尺寸范围扩展为 `80-192`。
+- launcher CSS 与原生命中测试随窗口尺寸缩放，不再固定在 `108px` 视觉大小。
+- 设置页移除 hover 选项，显示“点击打开聊天（固定）”。
+- 尺寸、位置、置顶、头像字段明确标注“需重启当前模式”。
+- 新增“应用并重启应用 / 重启应用”入口作为当前模式重启未拆出前的兜底。
+- `edge_snap` 仍保持禁用/待实现。
+
+#### 3. Chat Window 单例清理
+
+- `open_chat_window()` 会忽略 stale closed/destroyed window 并重新创建。
+- `is_chat_window_open()` 会清理已关闭/销毁的单例引用。
+- `close_chat_window()` 对已关闭窗口保持 no-op，不再误判状态。
+
+#### 4. Assistant profile / 记忆共享设计基础
+
+- 新增 `GET /assistant/profile` 与 `PATCH /assistant/profile`。
+- canonical 人设仍是桌面端 `assistant.persona_prompt`。
+- profile 响应声明 prompt 注入顺序：`persona` → `relevant_memory` → `current_session` → `request`。
+- 记忆事实同步暂不实现原始 QQ 聊天自动同步；后续只接收显式摘要/事实，由 Hermes-Yachiyo 本地端存储、筛选和注入。
+
+### 测试覆盖
+
+- `tests/test_mode_settings.py`：hover 拒绝/旧配置规整、Bubble 尺寸范围、设置页重启文案。
+- `tests/test_chat_bridge.py`：Bubble/Live2D 前端不再包含 hover 打开入口，Bubble view 固定 click。
+- `tests/test_native_window.py`：Bubble 圆形命中测试随 `80-192` 窗口缩放。
+- `tests/test_chat_window_singleton.py`：关闭、stale window、复用与重建。
+- `tests/test_assistant_profile_route.py`：profile 读取/更新共享人设。
+
+### 验证结果
+
+- 验收测试集：161 passed
+- 完整测试：320 passed
+
+### 后续建议
+
+1. 在真实 pywebview/macOS 窗口中手工验证 hover/focus/刷新都不会打开 Chat Window。
+2. 手工验证 Bubble 尺寸 `80-192`、头像/位置/置顶重启后生效。
+3. 继续设计本地 memory facts 存储与 AstrBot 显式摘要上传协议。
+
+---
+
+## 上轮完成内容 — Milestone 60: Live2D assistant settings and AstrBot intent bridge
 
 ### 核心结果
 
@@ -16,7 +77,7 @@
   - `show_unread_dot` 控制状态点显隐。
   - `opacity` 影响 launcher 透明度。
   - `default_display` 区分 `icon` / `summary` / `recent_reply`。
-  - `expand_trigger` 支持 `click` / `hover`。
+  - `expand_trigger` 曾支持 `click` / `hover`；当前 Milestone 61 已废弃 hover 并统一为 click。
   - `auto_hide` 在空闲时降低 launcher 可见度。
   - `edge_snap` 暂未实现真实吸边，设置页已标记为待实现/禁用。
 - Live2D

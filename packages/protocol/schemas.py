@@ -111,3 +111,22 @@ class AssistantIntentResponse(BaseModel):
     action: str
     task_id: str | None = None
     message: str
+
+
+class AssistantProfilePatchRequest(BaseModel):
+    """PATCH /assistant/profile 请求。"""
+
+    persona_prompt: str | None = Field(default=None, max_length=4000)
+
+
+class AssistantProfileResponse(BaseModel):
+    """GET/PATCH /assistant/profile 响应。"""
+
+    ok: bool = True
+    persona_prompt: str = ""
+    memory_enabled: bool = False
+    memory_scope: str = "local_only"
+    prompt_order: list[str] = Field(
+        default_factory=lambda: ["persona", "relevant_memory", "current_session", "request"]
+    )
+    message: str = ""

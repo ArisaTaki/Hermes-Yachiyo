@@ -198,6 +198,24 @@ class ModeSettingsAPI:
                     result["restart_error"] = str(exc)
         return result
 
+    def apply_settings_and_restart(self, changes: dict[str, Any]) -> dict[str, Any]:
+        result = self.update_settings(changes or {})
+        if not result.get("ok"):
+            return result
+        try:
+            from apps.shell.window import request_app_restart
+
+            request_app_restart()
+            result["restart_scheduled"] = True
+            result["restart_reason"] = "manual_apply_restart"
+        except Exception as exc:
+            logger.error("手动应用设置后重启失败: %s", exc)
+            result["restart_scheduled"] = False
+            result["restart_error"] = str(exc)
+            result["ok"] = False
+            result["error"] = str(exc)
+        return result
+
     def preview_settings(self, changes: dict[str, Any]) -> dict[str, Any]:
         try:
             preview_config = copy.deepcopy(self._config)
@@ -574,6 +592,7 @@ input:checked + .slider:before { transform: translateX(20px); }
             </div>
             <div class="action-group">
                 <button class="action-btn secondary" id="draft-reset" type="button" onclick="resetDraft()" disabled>重置草稿</button>
+                <button class="action-btn secondary" id="draft-apply-restart" type="button" onclick="applyDraftAndRestart()">应用并重启应用</button>
                 <button class="action-btn primary" id="draft-apply" type="button" onclick="applyDraft()" disabled>应用修改</button>
             </div>
         </div>
@@ -694,17 +713,21 @@ function updateDraftState() {
     const text = document.getElementById('draft-text');
     const resetBtn = document.getElementById('draft-reset');
     const applyBtn = document.getElementById('draft-apply');
+    const restartBtn = document.getElementById('draft-apply-restart');
     if (count > 0) {
         badge.style.display = 'inline-block';
         badge.textContent = count + ' 项待应用';
         text.textContent = '当前表单是草稿，点击“应用修改”后才会写入配置。';
+        restartBtn.textContent = '应用并重启应用';
     } else {
         badge.style.display = 'none';
         badge.textContent = '';
         text.textContent = '当前没有未保存的修改。';
+        restartBtn.textContent = '重启应用';
     }
     resetBtn.disabled = count === 0;
     applyBtn.disabled = count === 0;
+    restartBtn.disabled = false;
 }
 
 function boolRow(key, label, checked) {
@@ -860,17 +883,15 @@ function renderForm(mode, cfg) {
     let html = '';
 
     if (mode === 'bubble') {
-        html += inputRow('bubble_mode.width', '气泡宽度', cfg.width, 'number');
-        html += inputRow('bubble_mode.height', '气泡高度', cfg.height, 'number');
-        html += inputRow('bubble_mode.position_x', '位置 X', cfg.position_x, 'number');
-        html += inputRow('bubble_mode.position_y', '位置 Y', cfg.position_y, 'number');
+        html += noteRow('Bubble 聊天窗口固定为点击打开；悬停不会打开或切换聊天窗口。尺寸、位置、置顶和头像保存后需重启当前模式（可用下方“应用并重启应用”）。', 'warn');
+        html += inputRow('bubble_mode.width', '气泡宽度（80-192，需重启当前模式）', cfg.width, 'number');
+        html += inputRow('bubble_mode.height', '气泡高度（80-192，需重启当前模式）', cfg.height, 'number');
+        html += inputRow('bubble_mode.position_x', '位置 X（需重启当前模式）', cfg.position_x, 'number');
+        html += inputRow('bubble_mode.position_y', '位置 Y（需重启当前模式）', cfg.position_y, 'number');
         html += boolRow('bubble_mode.always_on_top', '窗口置顶（需重启当前模式）', cfg.always_on_top);
         html += disabledBoolRow('靠边吸附', cfg.edge_snap, '待实现，暂不生效');
         html += boolRow('bubble_mode.expanded_on_start', '启动后展开提示', cfg.expanded_on_start);
-        html += selectRow('bubble_mode.expand_trigger', '展开触发', cfg.expand_trigger, [
-            ['click', '点击打开聊天'],
-            ['hover', '悬停打开聊天'],
-        ]);
+        html += valueRow('展开触发', '点击打开聊天（固定）');
         html += selectRow('bubble_mode.default_display', '默认展示', cfg.default_display, [
             ['icon', '仅头像图标'],
             ['summary', '状态摘要'],
@@ -881,7 +902,7 @@ function renderForm(mode, cfg) {
         html += boolRow('bubble_mode.auto_hide', '空闲自动淡出', cfg.auto_hide);
         html += inputRow('bubble_mode.opacity', '透明度', cfg.opacity, 'number', '0.01');
         html += valueRow('当前头像资源', cfg.avatar_path_display || cfg.avatar_path);
-        html += inputRow('bubble_mode.avatar_path', '头像路径', cfg.avatar_path);
+        html += inputRow('bubble_mode.avatar_path', '头像路径（需重启当前模式）', cfg.avatar_path);
         html += boolRow('bubble_mode.proactive_enabled', '主动对话', cfg.proactive_enabled);
         html += boolRow('bubble_mode.proactive_desktop_watch_enabled', '定期桌面观察', cfg.proactive_desktop_watch_enabled);
         html += inputRow('bubble_mode.proactive_interval_seconds', '观察间隔秒', cfg.proactive_interval_seconds, 'number');
@@ -905,7 +926,7 @@ function renderForm(mode, cfg) {
         html += boolRow('live2d_mode.window_on_top', '窗口置顶（需重启当前模式）', cfg.window_on_top);
         html += boolRow('live2d_mode.show_on_all_spaces', 'macOS 所有桌面可见（需重启当前模式）', cfg.show_on_all_spaces);
         html += boolRow('live2d_mode.show_reply_bubble', '显示回复气泡', cfg.show_reply_bubble);
-        html += selectRow('live2d_mode.default_open_behavior', '启动初始表现', cfg.default_open_behavior, [
+        html += selectRow('live2d_mode.default_open_behavior', '启动初始表现（不打开聊天窗口）', cfg.default_open_behavior, [
             ['stage', '仅角色舞台'],
             ['reply_bubble', '显示回复气泡'],
             ['chat_input', '显示快捷输入'],
@@ -916,7 +937,7 @@ function renderForm(mode, cfg) {
             ['focus_stage', '仅聚焦角色窗口'],
         ]);
         html += boolRow('live2d_mode.enable_quick_input', '显示快捷输入入口', cfg.enable_quick_input);
-        html += boolRow('live2d_mode.auto_open_chat_window', '自动打开聊天窗口', cfg.auto_open_chat_window);
+        html += boolRow('live2d_mode.auto_open_chat_window', '启动时打开聊天窗口（需重启当前模式）', cfg.auto_open_chat_window);
         html += boolRow('live2d_mode.mouse_follow_enabled', '鼠标跟随', cfg.mouse_follow_enabled);
         html += inputRow('live2d_mode.idle_motion_group', '待机动作组', cfg.idle_motion_group);
         html += boolRow('live2d_mode.enable_expressions', '启用表情系统', cfg.enable_expressions);
@@ -935,6 +956,7 @@ function renderForm(mode, cfg) {
         html += inputRow('tts.command', 'TTS 本地命令', cfg.tts_command || '');
         html += inputRow('tts.voice', 'TTS 音色', cfg.tts_voice || '');
         html += inputRow('tts.timeout_seconds', 'TTS 超时秒', cfg.tts_timeout_seconds, 'number');
+        html += noteRow('Live2D 启动初始表现只控制回复气泡/快捷输入，不会打开聊天窗口；只有点击角色且“点击角色行为”为打开/切换聊天窗口时才会打开聊天。', 'warn');
         html += noteRow('TTS 默认关闭；none 或配置缺失时不会调用外部服务，失败也不会影响聊天。', 'warn');
     }
 
@@ -1004,6 +1026,18 @@ async function applyDraft() {
         if (result.restart_scheduled) message = '✓ 已保存，正在重启应用…';
         else if (result.effects && result.effects.hint) message = '✓ 已保存，' + result.effects.hint;
         showHint(message, false);
+    } catch (error) {
+        showHint('✗ ' + error.message, true);
+    }
+}
+
+async function applyDraftAndRestart() {
+    try {
+        if (!window.pywebview || !window.pywebview.api) throw new Error('pywebview API 未就绪');
+        const result = await window.pywebview.api.apply_settings_and_restart(draftChanges);
+        if (!result.ok) throw new Error(result.error || (result.errors || []).join('; ') || '重启失败');
+        if (result.settings) renderSettings(result.settings);
+        showHint('✓ 已保存，正在重启应用…', false);
     } catch (error) {
         showHint('✗ ' + error.message, true);
     }

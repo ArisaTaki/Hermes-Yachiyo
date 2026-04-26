@@ -29,6 +29,36 @@ _chat_window: Any = None  # webview.Window | None
 _chat_window_lock = threading.RLock()
 
 
+def _event_is_set(event: Any) -> bool:
+    is_set = getattr(event, "is_set", None)
+    if callable(is_set):
+        try:
+            return bool(is_set())
+        except Exception:
+            return False
+    return False
+
+
+def _is_window_probably_closed(window: Any) -> bool:
+    if bool(getattr(window, "closed", False)) or bool(getattr(window, "destroyed", False)):
+        return True
+    closed_event = getattr(getattr(window, "events", None), "closed", None)
+    return _event_is_set(closed_event)
+
+
+def _focus_chat_window_instance(window: Any) -> bool:
+    if _is_window_probably_closed(window):
+        return False
+    try:
+        window.show()
+        window.on_top = True
+        window.on_top = False
+        return True
+    except Exception as exc:
+        logger.debug("聚焦聊天窗口失败: %s", exc)
+        return False
+
+
 class ChatWindowAPI:
     """聊天窗口专用 API（供 JS 调用）"""
 
@@ -127,13 +157,9 @@ def open_chat_window(runtime: "HermesRuntime") -> bool:
     with _chat_window_lock:
         # 如果窗口已存在且未关闭，聚焦
         if _chat_window is not None:
-            try:
-                _chat_window.show()
-                _chat_window.on_top = True
-                _chat_window.on_top = False
+            if _focus_chat_window_instance(_chat_window):
                 return True
-            except Exception:
-                _chat_window = None
+            _chat_window = None
 
         api = ChatWindowAPI(runtime)
         _chat_window = webview.create_window(
@@ -151,15 +177,24 @@ def open_chat_window(runtime: "HermesRuntime") -> bool:
             with _chat_window_lock:
                 _chat_window = None
 
-        _chat_window.events.closed += _on_closed
+        closed_event = getattr(getattr(_chat_window, "events", None), "closed", None)
+        if closed_event is not None:
+            closed_event += _on_closed
         logger.info("聊天窗口已创建")
         return True
 
 
 def is_chat_window_open() -> bool:
     """返回独立聊天窗口当前是否存在。"""
+    global _chat_window
+
     with _chat_window_lock:
-        return _chat_window is not None
+        if _chat_window is None:
+            return False
+        if _is_window_probably_closed(_chat_window):
+            _chat_window = None
+            return False
+        return True
 
 
 def toggle_chat_window(runtime: "HermesRuntime") -> bool:
@@ -188,6 +223,9 @@ def close_chat_window() -> bool:
         if window is None:
             return False
         _chat_window = None
+
+    if _is_window_probably_closed(window):
+        return False
 
     try:
         window.destroy()

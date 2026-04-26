@@ -157,8 +157,8 @@ def _validate_field(key: str, value: Any) -> str | None:
         return "opacity 须在 0.2-1.0 之间"
     if key.endswith(".scale") and not (0.4 <= value <= 2.0):
         return "scale 须在 0.4-2.0 之间"
-    if key.endswith(".expand_trigger") and value not in {"click", "hover"}:
-        return "expand_trigger 仅支持 click / hover"
+    if key.endswith(".expand_trigger") and value != "click":
+        return "Bubble 展开触发仅支持 click；hover 已废弃"
     if key.endswith(".default_display") and value not in {"icon", "summary", "recent_reply"}:
         return "default_display 仅支持 icon / summary / recent_reply"
     if key.endswith(".default_open_behavior") and value not in {"stage", "reply_bubble", "chat_input"}:
@@ -224,7 +224,7 @@ def serialize_bubble_mode(config: AppConfig) -> dict[str, Any]:
             "always_on_top": mode.always_on_top,
             "edge_snap": mode.edge_snap,
             "expanded_on_start": mode.expanded_on_start,
-            "expand_trigger": mode.expand_trigger,
+            "expand_trigger": "click",
             "default_display": mode.default_display,
             "show_unread_dot": mode.show_unread_dot,
             "auto_hide": mode.auto_hide,

@@ -232,7 +232,7 @@ def bubble_visual_hit_test(width: float, height: float, x: float, y: float) -> b
     """Return whether a point is inside the visible circular Bubble launcher."""
     if width <= 0 or height <= 0:
         return False
-    diameter = min(width * 0.84, height * 0.84, 108.0)
+    diameter = max(0.0, min(width, height) - 8.0)
     radius = (diameter / 2.0) + 3.0
     center_x = width / 2.0
     center_y = height / 2.0

@@ -5,9 +5,18 @@ from apps.shell.native_window import bubble_visual_hit_test, live2d_visual_hit_t
 
 def test_bubble_visual_hit_test_uses_circle_not_square():
     assert bubble_visual_hit_test(112, 112, 56, 56) is True
-    assert bubble_visual_hit_test(112, 112, 10, 56) is True
+    assert bubble_visual_hit_test(112, 112, 4, 56) is True
     assert bubble_visual_hit_test(112, 112, 0, 0) is False
     assert bubble_visual_hit_test(112, 112, 111, 111) is False
+
+
+def test_bubble_visual_hit_test_scales_with_window_size():
+    assert bubble_visual_hit_test(80, 80, 40, 40) is True
+    assert bubble_visual_hit_test(80, 80, 4, 40) is True
+    assert bubble_visual_hit_test(80, 80, 0, 0) is False
+    assert bubble_visual_hit_test(192, 192, 96, 96) is True
+    assert bubble_visual_hit_test(192, 192, 4, 96) is True
+    assert bubble_visual_hit_test(192, 192, 0, 0) is False
 
 
 def test_live2d_visual_hit_test_uses_capsule_fallback():

@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_MIN_LAUNCHER_SIZE = 96
-_MAX_LAUNCHER_SIZE = 128
+_MIN_LAUNCHER_SIZE = 80
+_MAX_LAUNCHER_SIZE = 192
 _DEFAULT_LAUNCHER_SIZE = 112
 
 _BUBBLE_HTML = r"""
@@ -60,8 +60,12 @@ _BUBBLE_HTML = r"""
         }
         .bubble-launcher {
             position: relative;
-            width: min(84vw, 108px);
-            height: min(84vw, 108px);
+            width: calc(100vw - 8px);
+            height: calc(100vh - 8px);
+            max-width: 100%;
+            max-height: 100%;
+            min-width: 0;
+            min-height: 0;
             padding: 3px;
             border: 2px solid rgba(236, 177, 39, 0.9);
             border-radius: 50%;
@@ -201,7 +205,6 @@ _BUBBLE_HTML = r"""
             onpointerdown="trackLauncherPointerDown(event)"
             onpointermove="trackLauncherPointerMove(event)"
             onpointerup="trackLauncherPointerUp(event)"
-            onpointerenter="handleLauncherPointerEnter(event)"
             onclick="toggleChat(event)" oncontextmenu="showMenu(event)">
         <span class="portrait" aria-hidden="true"><span class="mouth"></span></span>
         <span class="status-dot empty" id="status-dot" aria-hidden="true"></span>
@@ -226,7 +229,6 @@ let launcherPointerStart = null;
 let launcherClickSuppressed = false;
 let launcherDragging = false;
 let currentBubbleView = null;
-let hoverOpening = false;
 
 function setPollingInterval(intervalMs) {
     if (polling && pollingIntervalMs === intervalMs) return;
@@ -313,24 +315,6 @@ async function focusLauncherWindow() {
             await window.pywebview.api.focus_window();
         }
     } catch (error) {}
-}
-
-function getExpandTrigger() {
-    const bubble = currentBubbleView && currentBubbleView.bubble ? currentBubbleView.bubble : {};
-    return bubble.expand_trigger || 'click';
-}
-
-async function handleLauncherPointerEnter(event) {
-    await focusLauncherWindow();
-    if (getExpandTrigger() !== 'hover') return;
-    if (hoverOpening || launcherDragging || isMenuVisible()) return;
-    hoverOpening = true;
-    try {
-        await openChat();
-        await refreshBubble();
-    } finally {
-        hoverOpening = false;
-    }
 }
 
 function setContextMenuOpen(isOpen) {
@@ -444,10 +428,6 @@ async function refreshBubble() {
 
 async function toggleChat(event) {
     if (shouldIgnoreLauncherClick(event)) return;
-    if (getExpandTrigger() !== 'click') {
-        if (event) event.preventDefault();
-        return;
-    }
     if (isMenuVisible()) {
         hideMenu();
         if (event) event.stopPropagation();
@@ -579,7 +559,7 @@ class BubbleWindowAPI:
             "proactive": proactive,
             "bubble": {
                 "default_display": bubble.default_display,
-                "expand_trigger": bubble.expand_trigger,
+                "expand_trigger": "click",
                 "show_unread_dot": bubble.show_unread_dot,
                 "auto_hide": bubble.auto_hide,
                 "opacity": bubble.opacity,
@@ -724,7 +704,7 @@ def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
                 hit_test=api.is_pointer_interactive,
                 delay_seconds=0.12,
                 interval_seconds=0.016,
-                focus_on_hover=True,
+                focus_on_hover=False,
             )
         except Exception as exc:
             logger.debug("调度 macOS Bubble 窗口行为失败: %s", exc)

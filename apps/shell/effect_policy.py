@@ -56,7 +56,7 @@ _FIELD_POLICIES: dict[str, tuple[EffectType, str]] = {
     "bubble_mode.expanded_on_start":    (EffectType.IMMEDIATE,
                                          "Bubble 默认展开行为已更新"),
     "bubble_mode.expand_trigger":       (EffectType.IMMEDIATE,
-                                         "Bubble 展开方式已更新"),
+                                         "Bubble 聊天窗口固定为点击打开；hover 已废弃"),
     "bubble_mode.default_display":      (EffectType.IMMEDIATE,
                                          "Bubble 默认展示内容已更新"),
     "bubble_mode.show_unread_dot":      (EffectType.IMMEDIATE,
@@ -133,8 +133,8 @@ _FIELD_POLICIES: dict[str, tuple[EffectType, str]] = {
                                           "Live2D 默认打开行为已更新"),
     "live2d_mode.click_action":       (EffectType.IMMEDIATE,
                                        "Live2D 点击行为已更新"),
-    "live2d_mode.auto_open_chat_window": (EffectType.IMMEDIATE,
-                                          "Live2D 自动打开聊天窗口偏好已更新"),
+    "live2d_mode.auto_open_chat_window": (EffectType.REQUIRES_MODE_RESTART,
+                                          "Live2D 启动时打开聊天窗口的偏好已保存，需重启当前模式后生效"),
     "live2d_mode.enable_quick_input": (EffectType.IMMEDIATE,
                                        "Live2D 最小输入入口偏好已更新"),
     "live2d_mode.mouse_follow_enabled": (EffectType.IMMEDIATE,
@@ -208,7 +208,7 @@ def _build_hint(types_seen: set[EffectType]) -> str:
     if EffectType.REQUIRES_BRIDGE_RESTART in types_seen:
         parts.append("重启 Bridge")
     if EffectType.REQUIRES_MODE_RESTART in types_seen:
-        parts.append("重启显示模式")
+        parts.append("重启当前模式")
 
     if not parts:
         return "已即时生效"

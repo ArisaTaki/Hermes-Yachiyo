@@ -179,11 +179,36 @@ def test_apply_settings_changes_rejects_out_of_range_bubble_size(tmp_path, monke
     monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
     config = AppConfig()
 
-    result = apply_settings_changes(config, {"bubble_mode.width": 80})
+    result = apply_settings_changes(config, {"bubble_mode.width": 72})
 
     assert result["ok"] is False
-    assert config.bubble_mode.width != 80
-    assert "96-128" in result["error"]
+    assert config.bubble_mode.width != 72
+    assert "80-192" in result["error"]
+
+
+def test_apply_settings_changes_accepts_expanded_bubble_size_range(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    config = AppConfig()
+
+    result = apply_settings_changes(config, {"bubble_mode.width": 192, "bubble_mode.height": 80})
+
+    assert result["ok"] is True
+    assert config.bubble_mode.width == 192
+    assert config.bubble_mode.height == 80
+    assert result["effects"]["has_restart_mode"] is True
+
+
+def test_apply_settings_changes_rejects_legacy_bubble_hover_trigger(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    config = AppConfig()
+
+    result = apply_settings_changes(config, {"bubble_mode.expand_trigger": "hover"})
+
+    assert result["ok"] is False
+    assert config.bubble_mode.expand_trigger == "click"
+    assert "hover 已废弃" in result["error"]
 
 
 def test_apply_settings_changes_rejects_invalid_new_fields(tmp_path, monkeypatch):
@@ -227,6 +252,19 @@ def test_apply_settings_changes_supports_legacy_live2d_prefix(tmp_path, monkeypa
     assert config.live2d_mode.window_on_top is False
     assert config.live2d_mode.scale == 1.25
     assert config.live2d_mode.mouse_follow_enabled is False
+
+
+def test_live2d_auto_open_chat_window_is_startup_only_effect(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    config = AppConfig()
+
+    result = apply_settings_changes(config, {"live2d_mode.auto_open_chat_window": True})
+
+    assert result["ok"] is True
+    assert config.live2d_mode.auto_open_chat_window is True
+    assert result["effects"]["has_restart_mode"] is True
+    assert "重启当前模式" in result["effects"]["hint"]
 
 
 def test_serialize_mode_settings_returns_separate_sections(monkeypatch, tmp_path):
@@ -287,8 +325,14 @@ def test_mode_settings_window_does_not_render_common_settings():
     assert "TTS Provider" in _SETTINGS_HTML
     assert "待实现，暂不生效" in _SETTINGS_HTML
     assert "窗口置顶（需重启当前模式）" in _SETTINGS_HTML
+    assert "气泡宽度（80-192，需重启当前模式）" in _SETTINGS_HTML
+    assert "点击打开聊天（固定）" in _SETTINGS_HTML
+    assert "应用并重启应用" in _SETTINGS_HTML
+    assert "启动时打开聊天窗口（需重启当前模式）" in _SETTINGS_HTML
+    assert "启动初始表现（不打开聊天窗口）" in _SETTINGS_HTML
     assert "点击角色行为" in _SETTINGS_HTML
     assert "显示快捷输入入口" in _SETTINGS_HTML
+    assert "悬停打开聊天" not in _SETTINGS_HTML
     assert "GitHub Releases" not in _SETTINGS_HTML  # URL 运行时填充
 
 
@@ -366,6 +410,21 @@ def test_load_config_clears_legacy_bundled_live2d_path(tmp_path, monkeypatch):
     assert config.tts.enabled is True
     assert config.tts.provider == "none"
     assert config.tts.timeout_seconds == 20
+
+
+def test_load_config_normalizes_legacy_bubble_hover_to_click(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    _patch_no_live2d_assets(monkeypatch, tmp_path)
+    config_mod._CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    config_mod._CONFIG_FILE.write_text(
+        json.dumps({"bubble_mode": {"expand_trigger": "hover"}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    config = load_config()
+
+    assert config.bubble_mode.expand_trigger == "click"
 
 
 def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):

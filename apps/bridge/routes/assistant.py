@@ -6,18 +6,59 @@ from fastapi import APIRouter
 
 from apps.bridge.deps import get_runtime
 from packages.protocol.enums import RiskLevel, TaskType
-from packages.protocol.schemas import AssistantIntentRequest, AssistantIntentResponse
+from packages.protocol.schemas import (
+    AssistantIntentRequest,
+    AssistantIntentResponse,
+    AssistantProfilePatchRequest,
+    AssistantProfileResponse,
+)
 
 router = APIRouter(tags=["Assistant"])
 
 _STATUS_KEYWORDS = {"状态", "status", "运行状态", "是否就绪"}
 _SCREEN_KEYWORDS = {"截图", "屏幕", "screen", "screenshot"}
 _WINDOW_KEYWORDS = {"活动窗口", "当前窗口", "窗口", "window"}
+_PROMPT_ORDER = ["persona", "relevant_memory", "current_session", "request"]
+
+
+def _assistant_config():
+    config = get_runtime().config
+    return config, config.assistant
+
+
+def _build_profile_response(*, message: str = "") -> AssistantProfileResponse:
+    _config, assistant = _assistant_config()
+    return AssistantProfileResponse(
+        ok=True,
+        persona_prompt=assistant.persona_prompt,
+        memory_enabled=False,
+        memory_scope="local_only",
+        prompt_order=list(_PROMPT_ORDER),
+        message=message,
+    )
 
 
 def _contains_any(text: str, keywords: set[str]) -> bool:
     normalized = text.lower()
     return any(keyword.lower() in normalized for keyword in keywords)
+
+
+@router.get("/assistant/profile", response_model=AssistantProfileResponse)
+def get_assistant_profile() -> AssistantProfileResponse:
+    """返回桌面端共享助手资料。AstrBot 只读取/转发，不另建人格。"""
+    return _build_profile_response()
+
+
+@router.patch("/assistant/profile", response_model=AssistantProfileResponse)
+def patch_assistant_profile(req: AssistantProfilePatchRequest) -> AssistantProfileResponse:
+    """更新共享人设 Prompt；记忆事实同步保留为后续本地端能力。"""
+    config, assistant = _assistant_config()
+    if req.persona_prompt is not None:
+        assistant.persona_prompt = str(req.persona_prompt)
+        from apps.shell.config import save_config
+
+        save_config(config)
+    return _build_profile_response(message="助手资料已更新")
 
 
 def _format_status() -> str:
