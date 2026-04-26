@@ -31,6 +31,7 @@ class ProactiveDesktopService:
         self._last_task_id: str | None = None
         self._attention_task_id: str | None = None
         self._acknowledged_task_id: str | None = None
+        self._reported_failed_task_id: str | None = None
 
     @property
     def last_task_id(self) -> str | None:
@@ -105,6 +106,13 @@ class ProactiveDesktopService:
                     "message": "有新的主动观察结果" if has_attention else "主动观察结果已查看",
                 }
             if task.status == TaskStatus.FAILED:
+                if (
+                    self._reported_failed_task_id == task.task_id
+                    and now - self._last_check_at >= interval
+                ):
+                    task_id = self._schedule_desktop_watch_task()
+                    return self._scheduled_state(task_id)
+                self._reported_failed_task_id = task.task_id
                 return {
                     "enabled": True,
                     "desktop_watch_enabled": True,
@@ -188,5 +196,6 @@ class ProactiveDesktopService:
                 logger.debug("主动桌面观察消息关联任务失败", exc_info=True)
         self._last_task_id = task.task_id
         self._attention_task_id = None
+        self._reported_failed_task_id = None
         self._last_check_at = time.monotonic()
         return task.task_id

@@ -1765,7 +1765,7 @@ class Live2DWindowAPI:
     def _maybe_trigger_tts(self, chat: Dict[str, Any]) -> Dict[str, Any]:
         if not self._config.tts.enabled or self._config.tts.provider == "none":
             return self._tts.get_status()
-        latest_reply = str(chat.get("latest_reply") or "").strip()
+        latest_reply = str(chat.get("latest_reply_full") or chat.get("latest_reply") or "").strip()
         if not latest_reply:
             return self._tts.get_status()
         if latest_reply == self._last_tts_reply:

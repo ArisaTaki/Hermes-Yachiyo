@@ -75,3 +75,10 @@
 - harden Chat Window singleton cleanup for closed/destroyed stale windows
 - add Bridge `GET/PATCH /assistant/profile` for shared persona profile; keep `assistant.persona_prompt` canonical
 - define future memory-sharing boundary: no default raw QQ chat sync, inject prompt as persona → relevant memory → current session → request
+
+## Milestone 62
+
+- fix PR #4 proactive desktop watch review: expose failed state first, then retry after the configured interval
+- add `latest_reply_full` to the launcher chat overview so UI can keep truncated summaries while Live2D TTS speaks full replies
+- restore Bubble status dot visibility classes for attention / processing / failed states, while keeping idle / empty / ready hidden
+- add focused regression tests for proactive retry, Live2D full-text TTS, and Bubble dot class logic

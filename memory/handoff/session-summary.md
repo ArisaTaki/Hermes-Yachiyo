@@ -1,5 +1,51 @@
 # Session Summary
 
+## 本轮完成内容 — Milestone 62: PR #4 review fixes
+
+### 核心结果
+
+本轮按 PR #4 的 3 条 Copilot inline review comment 做最小修复：主动桌面观察 failed 状态不再永久卡死，Live2D TTS 不再朗读截断摘要，Bubble 状态点恢复 `visible` class 逻辑。
+
+### 主要变更
+
+#### 1. 主动桌面观察 failed 重试
+
+- failed 后优先返回错误状态，保留用户可见的失败原因。
+- 到达配置间隔后自动重新创建低风险截图任务。
+- 未到间隔时不会重复创建任务，避免失败态循环刷任务。
+
+#### 2. Live2D TTS 使用完整文本
+
+- `ChatBridge` 增加 `latest_reply_full`，保留完整 assistant 回复。
+- `latest_reply` 继续作为 UI 摘要截断字段。
+- Live2D `_maybe_trigger_tts()` 优先使用 `latest_reply_full`，fallback 到 `latest_reply`。
+
+#### 3. Bubble 状态点 visible 逻辑
+
+- 未读/主动提醒输出 `visible attention`。
+- 处理中输出 `visible processing`。
+- 失败输出 `visible failed`。
+- idle / empty / ready 且无未读时继续隐藏；`show_unread_dot=false` 继续抑制可见点。
+
+### 测试覆盖
+
+- `tests/test_proactive.py`：failed 间隔前返回错误、间隔后重试。
+- `tests/test_chat_bridge.py`：完整最新回复字段与 Bubble 状态点 class 逻辑。
+- `tests/test_tts.py`：Live2D TTS 使用完整长回复。
+
+### 验证结果
+
+- `python -m pytest tests/test_proactive.py tests/test_chat_bridge.py tests/test_tts.py tests/test_mode_settings.py tests/test_native_window.py`
+- 结果：87 passed
+
+### 后续建议
+
+1. 在真实桌面窗口中手工验证 Bubble 未读/处理/失败状态点视觉表现。
+2. 使用真实 HTTP/command TTS provider 验证长回复朗读完整文本。
+3. 在真实 Hermes 执行环境中验证主动观察 failed 后的间隔重试。
+
+---
+
 ## 本轮完成内容 — Milestone 61: Chat auto-open behavior and Bubble settings clarity
 
 ### 核心结果

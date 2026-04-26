@@ -2024,3 +2024,26 @@ Window          → ChatAPI    → ChatSession → ChatStore (SQLite)
 
 - 验收集：`tests/test_mode_settings.py tests/test_chat_bridge.py tests/test_native_window.py tests/test_astrbot_handlers.py tests/test_executor.py tests/test_proactive.py tests/test_assistant_intent_route.py tests/test_assistant_profile_route.py tests/test_chat_window_singleton.py` → 161 passed
 - 完整套件：`python -m pytest` → 320 passed
+
+### Milestone 62 — PR #4 review 修复：主动观察重试 / Live2D TTS 全量回复 / Bubble 状态点
+
+- ✅ 主动桌面观察失败态重试
+  - `ProactiveDesktopService.get_state()` 在 failed 后会先暴露错误状态
+  - 到达 `proactive_interval_seconds` 后自动重新安排低风险 `TaskType.SCREENSHOT` 任务
+  - 未到间隔时不会重复创建任务，避免错误态刷屏
+- ✅ Live2D TTS 使用完整回复
+  - `ChatBridge.get_recent_summary()` / `get_conversation_overview()` 新增 `latest_reply_full`
+  - UI 继续使用截断后的 `latest_reply`，TTS 优先朗读 `latest_reply_full`
+  - `_maybe_trigger_tts()` 的去重基于完整文本，避免长回复只播摘要
+- ✅ Bubble 状态点可见性恢复
+  - `renderBubble()` 明确输出 `visible attention` / `visible processing` / `visible failed`
+  - idle / empty / ready 且无未读时继续隐藏状态点
+  - `show_unread_dot=false` 会抑制可见状态点
+- ✅ 测试覆盖
+  - `tests/test_proactive.py`：failed 间隔前暴露错误、间隔后重试
+  - `tests/test_chat_bridge.py`：`latest_reply_full` 保留完整内容、Bubble dot class 逻辑
+  - `tests/test_tts.py`：Live2D TTS 朗读完整长回复
+
+**测试结果**：
+
+- PR review 验收集：`python -m pytest tests/test_proactive.py tests/test_chat_bridge.py tests/test_tts.py tests/test_mode_settings.py tests/test_native_window.py` → 87 passed

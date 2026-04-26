@@ -157,6 +157,25 @@ def test_summary_truncates_long_content(tmp_path):
         store.close()
 
 
+def test_conversation_overview_keeps_full_latest_reply_for_tts(tmp_path):
+    bridge, runtime, store = _make_bridge(tmp_path)
+    try:
+        long_reply = "长回复" + "A" * 200
+        result = bridge.send_quick_message("需要一段长回复")
+        runtime.state.update_task_status(result["task_id"], TaskStatus.RUNNING)
+        runtime.state.update_task_status(result["task_id"], TaskStatus.COMPLETED, result=long_reply)
+
+        summary = bridge.get_recent_summary(3)
+        overview = bridge.get_conversation_overview(summary_count=3, session_limit=3)
+
+        assert summary["latest_reply_full"] == long_reply
+        assert overview["latest_reply_full"] == long_reply
+        assert overview["latest_reply"] == _truncate(long_reply)
+        assert overview["latest_reply"] != overview["latest_reply_full"]
+    finally:
+        store.close()
+
+
 def test_summary_count_zero_returns_no_messages(tmp_path):
     bridge, runtime, store = _make_bridge(tmp_path)
     try:
@@ -316,6 +335,17 @@ def test_bubble_html_keeps_idle_polling_for_cross_mode_updates():
     assert "hoverOpening" not in _BUBBLE_HTML
     assert "getExpandTrigger" not in _BUBBLE_HTML
     assert "getExpandTrigger() !== 'click'" not in _BUBBLE_HTML
+
+
+def test_bubble_status_dot_visible_states_are_explicit():
+    assert "const hasUnread = showDot && !!bubble.has_attention;" in _BUBBLE_HTML
+    assert "if (hasUnread)" in _BUBBLE_HTML
+    assert "dotClass += ' visible attention';" in _BUBBLE_HTML
+    assert "status === 'processing'" in _BUBBLE_HTML
+    assert "dotClass += ' visible processing';" in _BUBBLE_HTML
+    assert "status === 'failed'" in _BUBBLE_HTML
+    assert "dotClass += ' visible failed';" in _BUBBLE_HTML
+    assert "dotClass += ' ' + status;" in _BUBBLE_HTML
 
 
 def test_bubble_context_menu_uses_separate_window_html():

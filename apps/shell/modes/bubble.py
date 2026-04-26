@@ -353,11 +353,19 @@ function renderBubble(view) {
     const status = bubble.latest_status || 'empty';
     let dotClass = 'status-dot';
     const showDot = bubble.show_unread_dot !== false;
-    dotClass += ' ' + status;
-    dot.className = dotClass;
     const displayMode = bubble.default_display || 'summary';
     const statusLabel = normalizedStatusLabel(chat);
     const hasUnread = showDot && !!bubble.has_attention;
+    if (hasUnread) {
+        dotClass += ' visible attention';
+    } else if (showDot && status === 'processing') {
+        dotClass += ' visible processing';
+    } else if (showDot && status === 'failed') {
+        dotClass += ' visible failed';
+    } else {
+        dotClass += ' ' + status;
+    }
+    dot.className = dotClass;
     const summaryText = '';
     summaryNode.textContent = summaryText;
     summaryNode.classList.toggle('hidden', true);
