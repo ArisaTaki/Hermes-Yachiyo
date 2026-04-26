@@ -56,7 +56,7 @@ def _register_plugin_package():
     sys.modules["astrbot_plugin.handlers"] = h_mod
     h_spec.loader.exec_module(h_mod)
 
-    for h_name in ("utils", "status", "tasks", "do", "check", "cancel",
+    for h_name in ("utils", "status", "tasks", "do", "ask", "check", "cancel",
                     "screen", "window", "codex"):
         h_path = os.path.join(handlers_dir, f"{h_name}.py")
         if os.path.exists(h_path):
@@ -115,6 +115,12 @@ class TestACL:
         assert "无权限" in result
 
     @pytest.mark.asyncio
+    async def test_unauthorized_ask_rejected(self):
+        cfg = PluginConfig(allowed_senders=["123456"])
+        result = await on_y_command("/y ask 现在屏幕是什么", sender_id="999", config=cfg)
+        assert "无权限" in result
+
+    @pytest.mark.asyncio
     async def test_authorized_allowed(self):
         cfg = PluginConfig(allowed_senders=["123456"])
         with patch(
@@ -140,6 +146,7 @@ class TestHelpAndUnknown:
         result = await on_y_command("/y help")
         assert "命令列表" in result
         assert "/y status" in result
+        assert "/y ask" in result
 
     @pytest.mark.asyncio
     async def test_empty_sub(self):
@@ -200,6 +207,46 @@ class TestDoHandler:
     @pytest.mark.asyncio
     async def test_empty_description(self, config):
         from astrbot_plugin.handlers.do import handle
+        result = await handle("", config)
+        assert "用法" in result
+
+
+class TestAskHandler:
+    @pytest.mark.asyncio
+    async def test_assistant_intent_creates_task(self, config):
+        mock_data = {
+            "ok": True,
+            "action": "create_low_risk_task",
+            "task_id": "ask12345abc",
+            "message": "已创建低风险 Hermes 任务",
+        }
+        with patch("astrbot_plugin.handlers.ask.HermesClient") as MockClient:
+            MockClient.return_value.assistant_intent = AsyncMock(return_value=mock_data)
+            from astrbot_plugin.handlers.ask import handle
+            result = await handle("帮我看看桌面", config)
+
+        assert "Yachiyo" in result
+        assert "create_low_risk_task" in result
+        assert "ask12345" in result
+        assert "/y check" in result
+
+    @pytest.mark.asyncio
+    async def test_chat_alias_routes_to_ask_handler(self, config):
+        mock_data = {"ok": True, "action": "status", "message": "Hermes 已就绪"}
+        with patch("astrbot_plugin.handlers.ask.HermesClient") as MockClient:
+            MockClient.return_value.assistant_intent = AsyncMock(return_value=mock_data)
+            result = await on_y_command("/y chat 状态", sender_id="user-1", config=config)
+
+        assert "Hermes 已就绪" in result
+        MockClient.return_value.assistant_intent.assert_awaited_once_with(
+            "状态",
+            source="astrbot",
+            sender_id="user-1",
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty_text(self, config):
+        from astrbot_plugin.handlers.ask import handle
         result = await handle("", config)
         assert "用法" in result
 

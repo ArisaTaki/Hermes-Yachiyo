@@ -160,6 +160,14 @@ def _humanize_bridge_error(message: str) -> str:
     return message
 
 
+def format_persona_description(description: str, persona_prompt: str = "") -> str:
+    """按共享助手人设包装用户请求，空人设保持原始描述。"""
+    persona = (persona_prompt or "").strip()
+    if not persona:
+        return description
+    return f"[人设设定]\n{persona}\n\n[用户请求]\n{description}"
+
+
 def _clean_hermes_line(line: str, strip_stream_padding: bool = False) -> Optional[str]:
     """过滤 Hermes CLI 的 Rich 边框和摘要行，保留真实回复文本。"""
     raw = _ANSI_RE.sub("", line).rstrip()
@@ -695,10 +703,12 @@ class HermesExecutor(ExecutionStrategy):
         self,
         fallback_to_simulated: bool = False,
         chat_session: Optional["ChatSession"] = None,
+        persona_prompt_getter: Optional[Callable[[], str]] = None,
     ) -> None:
         self._fallback = fallback_to_simulated
         self._sim = SimulatedExecutor()
         self._chat_session = chat_session
+        self._persona_prompt_getter = persona_prompt_getter
 
     def set_chat_session(self, chat_session: Optional["ChatSession"]) -> None:
         """更新后续任务使用的聊天会话引用。"""
@@ -730,7 +740,13 @@ class HermesExecutor(ExecutionStrategy):
         失败 → 抛出 HermesCallError
         """
         # 获取当前 hermes session id 用于 --resume
-        description = task.description
+        persona_prompt = ""
+        if self._persona_prompt_getter is not None:
+            try:
+                persona_prompt = self._persona_prompt_getter()
+            except Exception:
+                logger.debug("读取助手人设 Prompt 失败", exc_info=True)
+        description = format_persona_description(task.description, persona_prompt)
         chat_session = self._chat_session
         hermes_sid = None
         if chat_session is not None:
@@ -791,7 +807,10 @@ def select_executor(runtime: "HermesRuntime | None" = None) -> ExecutionStrategy
     if runtime is not None and runtime.is_hermes_ready():
         if probe_hermes_available():
             logger.info("select_executor: 选用 HermesExecutor（hermes chat -q）")
-            return HermesExecutor(chat_session=runtime.chat_session)
+            return HermesExecutor(
+                chat_session=runtime.chat_session,
+                persona_prompt_getter=lambda: runtime.config.assistant.persona_prompt,
+            )
         logger.info(
             "select_executor: Hermes 报告就绪但命令不可用，回退 SimulatedExecutor"
         )

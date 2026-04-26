@@ -54,3 +54,13 @@
 - prefer `~/.hermes/yachiyo/assets/live2d/` for default model discovery
 - keep Live2D mode usable without imported resources
 - add user-facing prompts in settings / Live2D mode / control center summaries
+
+## Milestone 60
+
+- close the Bubble / Live2D settings runtime loop so saved options are consumed by launcher views
+- add shared assistant persona prompt configuration and wrap Hermes task descriptions before execution
+- add optional TTS abstraction with `none` / `http` / `command` providers, disabled by default
+- extract proactive desktop watching into a shared shell service for Bubble and Live2D
+- add Bridge `POST /assistant/intent` as the low-risk natural language entry for AstrBot
+- add AstrBot `/y ask` and `/y chat` commands while keeping existing `/y` command family compatible
+- keep AstrBot as a thin QQ bridge; do not move local runtime or machine control into the plugin

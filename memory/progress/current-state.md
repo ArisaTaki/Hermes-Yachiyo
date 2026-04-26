@@ -1954,3 +1954,44 @@ Window          → ChatAPI    → ChatSession → ChatStore (SQLite)
 - `tests/test_main_api_modes.py`
 - `tests/test_chat_bridge.py`
 - 合计：44 passed
+
+### Milestone 60 — Live2D assistant settings / Bubble 设置闭环 / AstrBot intent bridge
+
+- ✅ 设置生效闭环
+  - Bubble 运行视图实际消费 `show_unread_dot` / `opacity` / `default_display` / `expand_trigger` / `auto_hide`
+  - Bubble `hover` 模式悬停打开 Chat Window，`click` 模式保持点击打开
+  - Bubble `edge_snap` 尚未真实吸边，设置页已标记为待实现/禁用，避免误导用户
+  - Live2D `click_action` 不再硬编码为 `open_chat`，视图返回并执行配置值
+  - Live2D 支持 `open_chat` / `toggle_reply` / `focus_stage`
+  - Live2D `show_reply_bubble`、`enable_quick_input`、`default_open_behavior` 已被运行视图消费
+  - `window_on_top` / `show_on_all_spaces` 设置页明确提示需重启当前模式生效
+- ✅ 共享助手与 TTS 配置
+  - 新增共享 `assistant.persona_prompt`，不绑定到 Live2D 私有配置
+  - 新增 `tts.enabled` / `provider` / `endpoint` / `command` / `voice` / `timeout_seconds`
+  - 设置加载、保存、序列化、校验、设置页表单、effect policy 已同步
+  - Hermes 调用前按 `[人设设定] ... [用户请求] ...` 包装任务描述；空 prompt 保持原行为
+  - 新增 `apps/shell/tts.py`，默认关闭；支持 `none` / `http` / `command`，失败不阻塞聊天
+- ✅ Bubble + Live2D 主动桌面观察
+  - 新增 `apps/shell/proactive.py` 的 `ProactiveDesktopService`
+  - Bubble / Live2D 共享主动观察状态机与 blocker 检查
+  - 检查 Hermes ready、TaskRunner、`HermesExecutor`、vision 限制
+  - 满足条件时创建 `TaskType.SCREENSHOT` / `RiskLevel.LOW` 任务
+  - 维护 last task、ack、attention 状态；Live2D 视图返回 proactive 状态并触发视觉提示
+- ✅ Bridge / AstrBot 低风险自然语言入口
+  - 新增 `POST /assistant/intent`
+  - 响应状态、截图、活动窗口摘要；其他自然语言请求只创建低风险 Hermes 任务
+  - AstrBot 新增 `/y ask <内容>` 与 `/y chat <内容>`，调用 Bridge intent 端点
+  - 保留 `/y status/tasks/screen/window/do/check/cancel/codex` 命令族兼容
+  - AstrBot 仍只做 QQ bridge，不直接执行本机控制，不成为第二 runtime
+- ✅ 测试覆盖
+  - 更新 `tests/test_mode_settings.py`：新增字段默认值、序列化、保存和非法值拒绝
+  - 更新 `tests/test_chat_bridge.py`：Bubble / Live2D 运行视图消费配置
+  - 新增 `tests/test_proactive.py`：disabled、Hermes 未就绪、vision 受限、成功创建低风险截图任务
+  - 新增 `tests/test_tts.py`：disabled、missing config、command/http validation
+  - 新增 `tests/test_assistant_intent_route.py`：Bridge assistant intent 路由
+  - 更新 `tests/test_astrbot_handlers.py`：`/y ask` / `/y chat` 与权限校验
+
+**测试结果**：
+
+- 验收集：`tests/test_mode_settings.py tests/test_chat_bridge.py tests/test_native_window.py tests/test_astrbot_handlers.py tests/test_proactive.py tests/test_assistant_intent_route.py` → 106 passed
+- 完整套件：`python -m pytest` → 304 passed

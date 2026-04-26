@@ -376,6 +376,17 @@ h2 { color: #86a9ff; font-size: 1.15em; margin-bottom: 6px; }
     color: #eef1ff;
     font-size: 0.84em;
 }
+.textarea {
+    width: 260px;
+    min-height: 88px;
+    resize: vertical;
+    line-height: 1.45;
+}
+.select:disabled,
+.input:disabled {
+    opacity: 0.56;
+    cursor: not-allowed;
+}
 .toggle {
     width: 40px;
     height: 20px;
@@ -587,6 +598,19 @@ function fieldName(key) {
     return parts[parts.length - 1] || '';
 }
 
+function configValueName(key) {
+    const mapping = {
+        'assistant.persona_prompt': 'assistant_persona_prompt',
+        'tts.enabled': 'tts_enabled',
+        'tts.provider': 'tts_provider',
+        'tts.endpoint': 'tts_endpoint',
+        'tts.command': 'tts_command',
+        'tts.voice': 'tts_voice',
+        'tts.timeout_seconds': 'tts_timeout_seconds',
+    };
+    return mapping[key] || fieldName(key);
+}
+
 function cloneValue(value) {
     return JSON.parse(JSON.stringify(value));
 }
@@ -623,14 +647,14 @@ function workingSettings() {
     Object.entries(draftChanges).forEach(function(entry) {
         const key = entry[0];
         const value = entry[1];
-        cfg[fieldName(key)] = value;
+        cfg[configValueName(key)] = value;
         updateSyntheticDisplayFields(cfg, key, value);
     });
     return cfg;
 }
 
 function setDraftField(key, value) {
-    const name = fieldName(key);
+    const name = configValueName(key);
     const savedValue = currentSettings ? currentSettings[name] : undefined;
     if (sameValue(savedValue, value)) delete draftChanges[key];
     else draftChanges[key] = value;
@@ -695,6 +719,36 @@ function inputRow(key, label, value, type='text', step='') {
     return '<div class="row"><span class="label">' + label + '</span>'
         + '<input class="input" type="' + type + '" value="' + escapeHtml(String(value ?? '')) + '"' + stepAttr
         + ' oninput="updateInputDraft(\\'' + key + '\\', this)"></div>';
+}
+
+function textareaRow(key, label, value) {
+    return '<div class="row"><span class="label">' + label + '</span>'
+        + '<textarea class="input textarea" oninput="updateDraftField(\\'' + key + '\\', this.value)">'
+        + escapeHtml(String(value ?? '')) + '</textarea></div>';
+}
+
+function selectRow(key, label, value, options) {
+    const opts = options.map(function(item) {
+        const selected = item[0] === value ? ' selected' : '';
+        return '<option value="' + escapeHtml(item[0]) + '"' + selected + '>'
+            + escapeHtml(item[1]) + '</option>';
+    }).join('');
+    return '<div class="row"><span class="label">' + label + '</span>'
+        + '<select class="select" onchange="updateDraftField(\\'' + key + '\\', this.value)">'
+        + opts + '</select></div>';
+}
+
+function disabledBoolRow(label, checked, reason) {
+    return '<div class="row"><span class="label">' + label + '</span>'
+        + '<span class="value"><label class="toggle"><input type="checkbox" disabled '
+        + (checked ? 'checked ' : '')
+        + '><span class="slider"></span></label> '
+        + '<span class="badge">' + escapeHtml(reason || '待实现') + '</span></span></div>';
+}
+
+function noteRow(message, tone='') {
+    const cls = tone ? 'note ' + tone : 'note';
+    return '<div class="' + cls + '">' + escapeHtml(message) + '</div>';
 }
 
 function domId(key) {
@@ -810,16 +864,28 @@ function renderForm(mode, cfg) {
         html += inputRow('bubble_mode.height', '气泡高度', cfg.height, 'number');
         html += inputRow('bubble_mode.position_x', '位置 X', cfg.position_x, 'number');
         html += inputRow('bubble_mode.position_y', '位置 Y', cfg.position_y, 'number');
-        html += boolRow('bubble_mode.always_on_top', '窗口置顶', cfg.always_on_top);
-        html += boolRow('bubble_mode.edge_snap', '靠边吸附', cfg.edge_snap);
+        html += boolRow('bubble_mode.always_on_top', '窗口置顶（需重启当前模式）', cfg.always_on_top);
+        html += disabledBoolRow('靠边吸附', cfg.edge_snap, '待实现，暂不生效');
+        html += boolRow('bubble_mode.expanded_on_start', '启动后展开提示', cfg.expanded_on_start);
+        html += selectRow('bubble_mode.expand_trigger', '展开触发', cfg.expand_trigger, [
+            ['click', '点击打开聊天'],
+            ['hover', '悬停打开聊天'],
+        ]);
+        html += selectRow('bubble_mode.default_display', '默认展示', cfg.default_display, [
+            ['icon', '仅头像图标'],
+            ['summary', '状态摘要'],
+            ['recent_reply', '最近回复'],
+        ]);
         html += inputRow('bubble_mode.summary_count', '状态摘要条数', cfg.summary_count, 'number');
         html += boolRow('bubble_mode.show_unread_dot', '显示未读点', cfg.show_unread_dot);
+        html += boolRow('bubble_mode.auto_hide', '空闲自动淡出', cfg.auto_hide);
         html += inputRow('bubble_mode.opacity', '透明度', cfg.opacity, 'number', '0.01');
         html += valueRow('当前头像资源', cfg.avatar_path_display || cfg.avatar_path);
         html += inputRow('bubble_mode.avatar_path', '头像路径', cfg.avatar_path);
         html += boolRow('bubble_mode.proactive_enabled', '主动对话', cfg.proactive_enabled);
         html += boolRow('bubble_mode.proactive_desktop_watch_enabled', '定期桌面观察', cfg.proactive_desktop_watch_enabled);
         html += inputRow('bubble_mode.proactive_interval_seconds', '观察间隔秒', cfg.proactive_interval_seconds, 'number');
+        html += textareaRow('assistant.persona_prompt', '助手人设 Prompt', cfg.assistant_persona_prompt || '');
     } else if (mode === 'live2d') {
         html += actionRow('资源操作',
             actionButton('选择模型目录', 'chooseLive2DModelPath')
@@ -836,13 +902,40 @@ function renderForm(mode, cfg) {
         html += inputRow('live2d_mode.height', '窗口高度', cfg.height, 'number');
         html += inputRow('live2d_mode.position_x', '位置 X', cfg.position_x, 'number');
         html += inputRow('live2d_mode.position_y', '位置 Y', cfg.position_y, 'number');
-        html += boolRow('live2d_mode.window_on_top', '窗口置顶', cfg.window_on_top);
-        html += boolRow('live2d_mode.show_on_all_spaces', 'macOS 所有桌面可见', cfg.show_on_all_spaces);
+        html += boolRow('live2d_mode.window_on_top', '窗口置顶（需重启当前模式）', cfg.window_on_top);
+        html += boolRow('live2d_mode.show_on_all_spaces', 'macOS 所有桌面可见（需重启当前模式）', cfg.show_on_all_spaces);
+        html += boolRow('live2d_mode.show_reply_bubble', '显示回复气泡', cfg.show_reply_bubble);
+        html += selectRow('live2d_mode.default_open_behavior', '启动初始表现', cfg.default_open_behavior, [
+            ['stage', '仅角色舞台'],
+            ['reply_bubble', '显示回复气泡'],
+            ['chat_input', '显示快捷输入'],
+        ]);
+        html += selectRow('live2d_mode.click_action', '点击角色行为', cfg.click_action, [
+            ['open_chat', '打开/切换聊天窗口'],
+            ['toggle_reply', '切换回复气泡'],
+            ['focus_stage', '仅聚焦角色窗口'],
+        ]);
+        html += boolRow('live2d_mode.enable_quick_input', '显示快捷输入入口', cfg.enable_quick_input);
         html += boolRow('live2d_mode.auto_open_chat_window', '自动打开聊天窗口', cfg.auto_open_chat_window);
         html += boolRow('live2d_mode.mouse_follow_enabled', '鼠标跟随', cfg.mouse_follow_enabled);
         html += inputRow('live2d_mode.idle_motion_group', '待机动作组', cfg.idle_motion_group);
         html += boolRow('live2d_mode.enable_expressions', '启用表情系统', cfg.enable_expressions);
         html += boolRow('live2d_mode.enable_physics', '启用物理模拟', cfg.enable_physics);
+        html += boolRow('live2d_mode.proactive_enabled', '主动对话', cfg.proactive_enabled);
+        html += boolRow('live2d_mode.proactive_desktop_watch_enabled', '定期桌面观察', cfg.proactive_desktop_watch_enabled);
+        html += inputRow('live2d_mode.proactive_interval_seconds', '观察间隔秒', cfg.proactive_interval_seconds, 'number');
+        html += textareaRow('assistant.persona_prompt', '助手人设 Prompt', cfg.assistant_persona_prompt || '');
+        html += boolRow('tts.enabled', '启用 Live2D TTS', cfg.tts_enabled);
+        html += selectRow('tts.provider', 'TTS Provider', cfg.tts_provider, [
+            ['none', 'none（关闭）'],
+            ['http', 'http POST'],
+            ['command', '本地命令'],
+        ]);
+        html += inputRow('tts.endpoint', 'TTS HTTP Endpoint', cfg.tts_endpoint || '');
+        html += inputRow('tts.command', 'TTS 本地命令', cfg.tts_command || '');
+        html += inputRow('tts.voice', 'TTS 音色', cfg.tts_voice || '');
+        html += inputRow('tts.timeout_seconds', 'TTS 超时秒', cfg.tts_timeout_seconds, 'number');
+        html += noteRow('TTS 默认关闭；none 或配置缺失时不会调用外部服务，失败也不会影响聊天。', 'warn');
     }
 
     form.innerHTML = html;

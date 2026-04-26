@@ -342,10 +342,11 @@ def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
 
 
 def test_launcher_modes_do_not_embed_inline_chat_inputs():
+    assert "send_quick_message" not in _BUBBLE_HTML
+    assert "msg-input" not in _BUBBLE_HTML
+    assert "toggleChat(event)" in _BUBBLE_HTML
     for html in (_BUBBLE_HTML, _LIVE2D_HTML):
-        assert "send_quick_message" not in html
         assert "msg-input" not in html
-        assert "toggleChat(event)" in html
         assert "window.addEventListener('blur', hideMenu);" in html
         assert "event.key === 'Escape'" in html
         assert "CLICK_DRAG_THRESHOLD_PX" in html
@@ -354,6 +355,10 @@ def test_launcher_modes_do_not_embed_inline_chat_inputs():
         assert "positionMenu(event)" in html
         assert "window.pywebview.api.focus_window" in html
         assert "set_context_menu_open" in html
+    assert "handleStageClick(event)" in _LIVE2D_HTML
+    assert "send_quick_message" in _LIVE2D_HTML
+    assert "quick-input" in _LIVE2D_HTML
+    assert "reply-bubble" in _LIVE2D_HTML
     assert "update_hit_region" in _LIVE2D_HTML
     assert "reportLive2DModelHitRegion" in _LIVE2D_HTML
     assert "status-dot" not in _LIVE2D_HTML
@@ -453,6 +458,10 @@ def test_live2d_view_exposes_renderer_payload(tmp_path, monkeypatch):
         assert renderer["model_url"].startswith("http://127.0.0.1:8420/live2d/assets/")
         assert ".model3.json?token=token-123" in renderer["model_url"]
         assert renderer["mouse_follow_enabled"] is True
+        assert view["live2d"]["click_action"] == "open_chat"
+        assert view["live2d"]["show_reply_bubble"] is True
+        assert view["live2d"]["enable_quick_input"] is True
+        assert view["live2d"]["default_open_behavior"] == "reply_bubble"
     finally:
         store.close()
 
@@ -609,6 +618,49 @@ def test_bubble_red_attention_is_reserved_for_proactive_messages(tmp_path):
 
         assert view["bubble"]["has_attention"] is False
         assert view["proactive"]["status"] == "disabled"
+    finally:
+        store.close()
+
+
+def test_bubble_view_consumes_runtime_display_settings(tmp_path):
+    _, runtime, store = _make_bridge(tmp_path)
+    try:
+        config = AppConfig()
+        config.bubble_mode.show_unread_dot = False
+        config.bubble_mode.default_display = "recent_reply"
+        config.bubble_mode.opacity = 0.66
+        config.bubble_mode.expand_trigger = "hover"
+        config.bubble_mode.auto_hide = True
+        api = BubbleWindowAPI(runtime, config)
+
+        view = api.get_bubble_view()
+
+        assert view["bubble"]["show_unread_dot"] is False
+        assert view["bubble"]["default_display"] == "recent_reply"
+        assert view["bubble"]["opacity"] == 0.66
+        assert view["bubble"]["expand_trigger"] == "hover"
+        assert view["bubble"]["auto_hide"] is True
+    finally:
+        store.close()
+
+
+def test_live2d_view_consumes_interaction_settings(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    config = AppConfig(display_mode="live2d")
+    config.live2d_mode.click_action = "toggle_reply"
+    config.live2d_mode.show_reply_bubble = False
+    config.live2d_mode.enable_quick_input = False
+    config.live2d_mode.default_open_behavior = "chat_input"
+    try:
+        view = Live2DWindowAPI(runtime, config).get_live2d_view()
+
+        assert view["live2d"]["click_action"] == "toggle_reply"
+        assert view["live2d"]["show_reply_bubble"] is False
+        assert view["live2d"]["enable_quick_input"] is False
+        assert view["live2d"]["default_open_behavior"] == "chat_input"
+        assert view["proactive"]["status"] == "disabled"
+        assert view["tts"]["enabled"] is False
     finally:
         store.close()
 

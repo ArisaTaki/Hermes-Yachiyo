@@ -73,6 +73,7 @@ def _register_routes() -> None:
     if not _FASTAPI_AVAILABLE or _routes_registered:
         return
 
+    import apps.bridge.routes.assistant as assistant
     import apps.bridge.routes.hermes as hermes
     import apps.bridge.routes.live2d as live2d
     import apps.bridge.routes.screen as screen
@@ -85,6 +86,7 @@ def _register_routes() -> None:
     app.include_router(screen.router)
     app.include_router(system.router)
     app.include_router(live2d.router)
+    app.include_router(assistant.router)
     app.include_router(hermes.router)
     _routes_registered = True
 

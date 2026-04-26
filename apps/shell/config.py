@@ -7,7 +7,7 @@ import logging
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from apps.shell.assets import (
     DEFAULT_BUBBLE_AVATAR_PATH,
@@ -31,6 +31,7 @@ BubbleDisplayValue = Literal["icon", "summary", "recent_reply"]
 BubbleExpandTriggerValue = Literal["click", "hover"]
 Live2DClickActionValue = Literal["focus_stage", "open_chat", "toggle_reply"]
 Live2DDefaultOpenValue = Literal["stage", "reply_bubble", "chat_input"]
+TTSProviderValue = Literal["none", "http", "command"]
 
 
 class ModelState(StrEnum):
@@ -219,6 +220,25 @@ class BubbleModeConfig:
 
 
 @dataclass
+class AssistantConfig:
+    """共享助手配置。"""
+
+    persona_prompt: str = ""
+
+
+@dataclass
+class TTSConfig:
+    """可选 TTS 配置。默认关闭，未配置时不影响聊天。"""
+
+    enabled: bool = False
+    provider: TTSProviderValue = "none"
+    endpoint: str = ""
+    command: str = ""
+    voice: str = ""
+    timeout_seconds: int = 20
+
+
+@dataclass
 class Live2DModeConfig:
     """Live2D 模式配置骨架。
 
@@ -243,6 +263,9 @@ class Live2DModeConfig:
     idle_motion_group: str = "Idle"   # 待机动作组名（Live2D Cubism 约定）
     enable_expressions: bool = False  # 是否启用表情系统（等待渲染器支持）
     enable_physics: bool = False      # 是否启用物理模拟（等待渲染器支持）
+    proactive_enabled: bool = False
+    proactive_desktop_watch_enabled: bool = False
+    proactive_interval_seconds: int = 300
 
     def has_explicit_model_path(self) -> bool:
         """用户是否显式填写了模型路径。"""
@@ -399,6 +422,8 @@ class AppConfig:
     window_mode: WindowModeConfig = field(default_factory=WindowModeConfig)
     bubble_mode: BubbleModeConfig = field(default_factory=BubbleModeConfig)
     live2d_mode: Live2DModeConfig = field(default_factory=Live2DModeConfig)
+    assistant: AssistantConfig = field(default_factory=AssistantConfig)
+    tts: TTSConfig = field(default_factory=TTSConfig)
 
     @property
     def live2d(self) -> Live2DModeConfig:
@@ -430,6 +455,74 @@ def _load_nested_dataclass(
     return cls(**valid)
 
 
+def _normalize_literal(value: Any, allowed: set[str], default: str) -> str:
+    return value if isinstance(value, str) and value in allowed else default
+
+
+def _normalize_int_range(value: Any, lower: int, upper: int, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return number if lower <= number <= upper else default
+
+
+def _normalize_float_range(value: Any, lower: float, upper: float, default: float) -> float:
+    if isinstance(value, bool):
+        return default
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return number if lower <= number <= upper else default
+
+
+def _normalize_config_values(config: AppConfig) -> None:
+    """规整配置文件中的枚举和范围值，避免旧配置/手改配置导致运行期异常。"""
+    config.bubble_mode.expand_trigger = cast(BubbleExpandTriggerValue, _normalize_literal(
+        config.bubble_mode.expand_trigger,
+        {"click", "hover"},
+        "click",
+    ))
+    config.bubble_mode.default_display = cast(BubbleDisplayValue, _normalize_literal(
+        config.bubble_mode.default_display,
+        {"icon", "summary", "recent_reply"},
+        "summary",
+    ))
+    config.bubble_mode.opacity = _normalize_float_range(config.bubble_mode.opacity, 0.2, 1.0, 0.92)
+    config.bubble_mode.proactive_interval_seconds = _normalize_int_range(
+        config.bubble_mode.proactive_interval_seconds,
+        60,
+        3600,
+        300,
+    )
+    config.live2d_mode.default_open_behavior = cast(Live2DDefaultOpenValue, _normalize_literal(
+        config.live2d_mode.default_open_behavior,
+        {"stage", "reply_bubble", "chat_input"},
+        "reply_bubble",
+    ))
+    config.live2d_mode.click_action = cast(Live2DClickActionValue, _normalize_literal(
+        config.live2d_mode.click_action,
+        {"focus_stage", "open_chat", "toggle_reply"},
+        "open_chat",
+    ))
+    config.live2d_mode.scale = _normalize_float_range(config.live2d_mode.scale, 0.4, 2.0, 1.0)
+    config.live2d_mode.proactive_interval_seconds = _normalize_int_range(
+        config.live2d_mode.proactive_interval_seconds,
+        60,
+        3600,
+        300,
+    )
+    config.assistant.persona_prompt = str(config.assistant.persona_prompt or "")
+    config.tts.provider = cast(TTSProviderValue, _normalize_literal(config.tts.provider, {"none", "http", "command"}, "none"))
+    config.tts.timeout_seconds = _normalize_int_range(config.tts.timeout_seconds, 1, 120, 20)
+    config.tts.endpoint = str(config.tts.endpoint or "")
+    config.tts.command = str(config.tts.command or "")
+    config.tts.voice = str(config.tts.voice or "")
+
+
 def normalize_display_mode(value: Any) -> DisplayModeValue:
     """规范化 display mode，兼容旧版 window 配置。"""
     if value == "live2d":
@@ -449,6 +542,8 @@ def load_config() -> AppConfig:
             live2d_mode = _load_nested_dataclass(
                 data, "live2d_mode", Live2DModeConfig, legacy_key="live2d"
             )
+            assistant = _load_nested_dataclass(data, "assistant", AssistantConfig)
+            tts = _load_nested_dataclass(data, "tts", TTSConfig)
             if "display_mode" in data:
                 data["display_mode"] = normalize_display_mode(data.get("display_mode"))
             config = AppConfig(
@@ -457,12 +552,16 @@ def load_config() -> AppConfig:
             config.window_mode = window_mode
             config.bubble_mode = bubble_mode
             config.live2d_mode = live2d_mode
+            config.assistant = assistant
+            config.tts = tts
             _apply_default_resource_paths(config)
+            _normalize_config_values(config)
             return config
         except Exception:
             logger.warning("配置文件读取失败，使用默认配置")
     config = AppConfig()
     _apply_default_resource_paths(config)
+    _normalize_config_values(config)
     return config
 
 

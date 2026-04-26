@@ -10,13 +10,13 @@ Bubble 是桌面常驻 launcher，不承载完整聊天 UI：
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Dict
 
 from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri
 from apps.shell.chat_bridge import ChatBridge
-from packages.protocol.enums import RiskLevel, TaskStatus, TaskType
+from apps.shell.proactive import ProactiveDesktopService
 
 if TYPE_CHECKING:
     from apps.core.runtime import HermesRuntime
@@ -81,6 +81,9 @@ _BUBBLE_HTML = r"""
             transform: scale(1.02);
             border-color: rgba(249, 199, 78, 0.95);
         }
+        .bubble-launcher.auto-hidden {
+            transform: scale(0.96);
+        }
         .bubble-launcher:active {
             transform: scale(0.98);
         }
@@ -144,6 +147,24 @@ _BUBBLE_HTML = r"""
             background: #ff6b6b;
             animation: unread-pulse 1.6s infinite;
         }
+        .bubble-summary {
+            position: absolute;
+            left: 50%;
+            bottom: -2px;
+            max-width: 120px;
+            transform: translateX(-50%);
+            padding: 2px 7px;
+            border-radius: 999px;
+            background: rgba(20, 24, 31, 0.74);
+            color: #fff6d6;
+            font-size: 10px;
+            line-height: 1.25;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            pointer-events: none;
+        }
+        .bubble-summary.hidden { display: none; }
         .context-menu {
             position: fixed;
             right: 8px;
@@ -180,10 +201,11 @@ _BUBBLE_HTML = r"""
             onpointerdown="trackLauncherPointerDown(event)"
             onpointermove="trackLauncherPointerMove(event)"
             onpointerup="trackLauncherPointerUp(event)"
-            onpointerenter="focusLauncherWindow()"
+            onpointerenter="handleLauncherPointerEnter(event)"
             onclick="toggleChat(event)" oncontextmenu="showMenu(event)">
         <span class="portrait" aria-hidden="true"><span class="mouth"></span></span>
         <span class="status-dot empty" id="status-dot" aria-hidden="true"></span>
+        <span class="bubble-summary hidden" id="bubble-summary" aria-hidden="true"></span>
     </button>
 
     <div class="context-menu" id="context-menu">
@@ -203,6 +225,8 @@ let toggling = false;
 let launcherPointerStart = null;
 let launcherClickSuppressed = false;
 let launcherDragging = false;
+let currentBubbleView = null;
+let hoverOpening = false;
 
 function setPollingInterval(intervalMs) {
     if (polling && pollingIntervalMs === intervalMs) return;
@@ -291,6 +315,24 @@ async function focusLauncherWindow() {
     } catch (error) {}
 }
 
+function getExpandTrigger() {
+    const bubble = currentBubbleView && currentBubbleView.bubble ? currentBubbleView.bubble : {};
+    return bubble.expand_trigger || 'click';
+}
+
+async function handleLauncherPointerEnter(event) {
+    await focusLauncherWindow();
+    if (getExpandTrigger() !== 'hover') return;
+    if (hoverOpening || launcherDragging || isMenuVisible()) return;
+    hoverOpening = true;
+    try {
+        await openChat();
+        await refreshBubble();
+    } finally {
+        hoverOpening = false;
+    }
+}
+
 function setContextMenuOpen(isOpen) {
     try {
         if (window.pywebview && window.pywebview.api && window.pywebview.api.set_context_menu_open) {
@@ -340,21 +382,52 @@ function showMenu(event) {
 }
 
 function renderBubble(view) {
+    currentBubbleView = view;
     const bubble = view.bubble || {};
     const chat = view.chat || {};
     const proactive = view.proactive || {};
+    const launcher = document.getElementById('bubble-launcher');
+    const summaryNode = document.getElementById('bubble-summary');
     const dot = document.getElementById('status-dot');
     const status = bubble.latest_status || 'empty';
     let dotClass = 'status-dot';
-    if (bubble.has_attention) dotClass += ' visible attention';
-    else if (status === 'processing' || status === 'failed') dotClass += ' visible ' + status;
+    const showDot = bubble.show_unread_dot !== false;
+    if (showDot && bubble.has_attention) dotClass += ' visible attention';
+    else if (showDot && (status === 'processing' || status === 'failed')) dotClass += ' visible ' + status;
     else dotClass += ' ' + status;
     dot.className = dotClass;
-    const titleParts = [chat.status_label ? ('Yachiyo - ' + chat.status_label) : 'Yachiyo - 点击展开对话'];
+    const displayMode = bubble.default_display || 'summary';
+    const latestMessage = (chat.messages || []).length
+        ? chat.messages[chat.messages.length - 1].content
+        : '';
+    const summaryText = displayMode === 'recent_reply'
+        ? (chat.latest_reply || latestMessage || chat.status_label || '')
+        : displayMode === 'summary'
+            ? (chat.status_label || latestMessage || bubble.subtitle || '')
+            : '';
+    summaryNode.textContent = summaryText;
+    summaryNode.classList.toggle('hidden', displayMode === 'icon' || !summaryText);
+    const titleParts = [
+        displayMode === 'icon'
+            ? 'Yachiyo - 头像图标'
+            : ('Yachiyo - ' + (summaryText || chat.status_label || '点击展开对话')),
+    ];
     if (proactive.error) titleParts.push('主动对话：' + proactive.error);
     else if (proactive.has_attention) titleParts.push('主动对话：有新的观察结果');
     else if (proactive.enabled && proactive.message) titleParts.push('主动对话：' + proactive.message);
-    document.getElementById('bubble-launcher').title = titleParts.join('\n');
+    launcher.title = titleParts.join('\n');
+    launcher.setAttribute(
+        'aria-label',
+        (displayMode === 'icon' ? 'Yachiyo Bubble' : ('Yachiyo Bubble - ' + (summaryText || chat.status_label || '')))
+    );
+    const configuredOpacity = Math.max(0.2, Math.min(1, Number(bubble.opacity || 0.92)));
+    const isIdle = !!bubble.auto_hide
+        && !chat.is_processing
+        && !bubble.has_attention
+        && !proactive.has_attention
+        && !isMenuVisible();
+    launcher.style.opacity = String(isIdle ? Math.max(0.24, configuredOpacity * 0.52) : configuredOpacity);
+    launcher.classList.toggle('auto-hidden', isIdle);
 
     if (chat.is_processing) startActivePolling();
     else startIdlePolling();
@@ -371,6 +444,10 @@ async function refreshBubble() {
 
 async function toggleChat(event) {
     if (shouldIgnoreLauncherClick(event)) return;
+    if (getExpandTrigger() !== 'click') {
+        if (event) event.preventDefault();
+        return;
+    }
     if (isMenuVisible()) {
         hideMenu();
         if (event) event.stopPropagation();
@@ -466,11 +543,17 @@ class BubbleWindowAPI:
         self._runtime = runtime
         self._config = config
         self._chat_bridge = ChatBridge(runtime)
+        proactive_config = getattr(
+            config,
+            "bubble_mode",
+            SimpleNamespace(
+                proactive_enabled=False,
+                proactive_desktop_watch_enabled=False,
+                proactive_interval_seconds=300,
+            ),
+        )
+        self._proactive = ProactiveDesktopService(runtime, proactive_config)
         self._bubble_window: Any = None
-        self._last_proactive_check_at = 0.0
-        self._last_proactive_task_id: str | None = None
-        self._proactive_attention_task_id: str | None = None
-        self._proactive_acknowledged_task_id: str | None = None
         self._context_menu_open = False
         self._pointer_dragging = False
 
@@ -496,7 +579,10 @@ class BubbleWindowAPI:
             "proactive": proactive,
             "bubble": {
                 "default_display": bubble.default_display,
+                "expand_trigger": bubble.expand_trigger,
                 "show_unread_dot": bubble.show_unread_dot,
+                "auto_hide": bubble.auto_hide,
+                "opacity": bubble.opacity,
                 "has_attention": has_proactive_attention,
                 "latest_status": latest_status,
                 "subtitle": (
@@ -508,142 +594,10 @@ class BubbleWindowAPI:
         }
 
     def _get_proactive_state(self) -> Dict[str, Any]:
-        bubble = self._config.bubble_mode
-        if not bubble.proactive_enabled:
-            return {
-                "enabled": False,
-                "desktop_watch_enabled": bubble.proactive_desktop_watch_enabled,
-                "status": "disabled",
-                "has_attention": False,
-                "message": "主动对话已关闭",
-            }
-
-        if not bubble.proactive_desktop_watch_enabled:
-            return {
-                "enabled": True,
-                "desktop_watch_enabled": False,
-                "status": "idle",
-                "has_attention": False,
-                "message": "主动对话已开启，桌面观察未开启",
-            }
-
-        blocker = self._desktop_watch_blocker()
-        if blocker:
-            return {
-                "enabled": True,
-                "desktop_watch_enabled": True,
-                "status": "blocked",
-                "has_attention": False,
-                "error": blocker,
-            }
-
-        now = time.monotonic()
-        interval = max(60, int(bubble.proactive_interval_seconds or 300))
-        task = self._current_proactive_task()
-        if task is not None:
-            if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
-                return {
-                    "enabled": True,
-                    "desktop_watch_enabled": True,
-                    "status": task.status.value,
-                    "has_attention": False,
-                    "task_id": task.task_id,
-                    "message": "正在进行主动桌面观察",
-                }
-            if task.status == TaskStatus.COMPLETED:
-                has_attention = self._proactive_acknowledged_task_id != task.task_id
-                if has_attention:
-                    self._proactive_attention_task_id = task.task_id
-                elif now - self._last_proactive_check_at >= interval:
-                    task_id = self._schedule_desktop_watch_task()
-                    return {
-                        "enabled": True,
-                        "desktop_watch_enabled": True,
-                        "status": "scheduled",
-                        "has_attention": False,
-                        "task_id": task_id,
-                        "message": "已安排主动桌面观察",
-                    }
-                return {
-                    "enabled": True,
-                    "desktop_watch_enabled": True,
-                    "status": "completed",
-                    "has_attention": has_attention,
-                    "task_id": task.task_id,
-                    "message": "有新的主动观察结果" if has_attention else "主动观察结果已查看",
-                }
-            if task.status == TaskStatus.FAILED:
-                return {
-                    "enabled": True,
-                    "desktop_watch_enabled": True,
-                    "status": "failed",
-                    "has_attention": False,
-                    "task_id": task.task_id,
-                    "error": task.error or "主动桌面观察失败",
-                }
-
-        if now - self._last_proactive_check_at >= interval:
-            task_id = self._schedule_desktop_watch_task()
-            return {
-                "enabled": True,
-                "desktop_watch_enabled": True,
-                "status": "scheduled",
-                "has_attention": False,
-                "task_id": task_id,
-                "message": "已安排主动桌面观察",
-            }
-
-        return {
-            "enabled": True,
-            "desktop_watch_enabled": True,
-            "status": "waiting",
-            "has_attention": False,
-            "next_check_seconds": int(interval - (now - self._last_proactive_check_at)),
-        }
-
-    def _current_proactive_task(self):
-        if not self._last_proactive_task_id:
-            return None
-        return self._runtime.state.get_task(self._last_proactive_task_id)
-
-    def _desktop_watch_blocker(self) -> str | None:
-        if not self._runtime.is_hermes_ready():
-            return "主动桌面观察需要 Hermes Agent 就绪"
-
-        runner = self._runtime.task_runner
-        if runner is None:
-            return "任务执行器尚未启动，暂时无法进行主动桌面观察"
-        if runner.executor.name != "HermesExecutor":
-            return "主动桌面观察需要 Hermes 执行器；当前执行器不支持读取桌面截图"
-
-        hermes_info = self._runtime.get_status().get("hermes", {})
-        limited_tools = set(hermes_info.get("limited_tools") or [])
-        if "vision" in limited_tools:
-            return "Hermes vision 工具受限，当前模型/配置无法读取截图；请在主控台运行 hermes setup 或 hermes doctor"
-        return None
-
-    def _schedule_desktop_watch_task(self) -> str:
-        prompt = (
-            "主动桌面观察：请查看用户当前桌面状态。必要时调用可用的屏幕截图/视觉工具，"
-            "用简短中文判断是否有需要提醒用户的事项；如果当前模型或工具无法读取截图，"
-            "请明确说明缺少的多模态/vision 能力。"
-        )
-        message_id = self._runtime.chat_session.add_user_message(prompt)
-        task = self._runtime.state.create_task(
-            prompt,
-            task_type=TaskType.SCREENSHOT,
-            risk_level=RiskLevel.LOW,
-        )
-        self._runtime.chat_session.link_message_to_task(message_id, task.task_id)
-        self._last_proactive_task_id = task.task_id
-        self._proactive_attention_task_id = None
-        self._last_proactive_check_at = time.monotonic()
-        return task.task_id
+        return self._proactive.get_state()
 
     def _clear_proactive_attention(self) -> None:
-        if self._proactive_attention_task_id:
-            self._proactive_acknowledged_task_id = self._proactive_attention_task_id
-        self._proactive_attention_task_id = None
+        self._proactive.acknowledge()
 
     def send_quick_message(self, text: str) -> Dict[str, Any]:
         return self._chat_bridge.send_quick_message(text)

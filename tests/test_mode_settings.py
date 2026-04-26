@@ -92,8 +92,16 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.live2d_mode.model_name == ""
     assert config.live2d_mode.model_path == ""
     assert config.live2d_mode.mouse_follow_enabled is True
+    assert config.live2d_mode.proactive_enabled is False
     assert config.live2d_mode.validate() == ModelState.NOT_CONFIGURED
     assert config.live2d is config.live2d_mode
+    assert config.assistant.persona_prompt == ""
+    assert config.tts.enabled is False
+    assert config.tts.provider == "none"
+    assert config.tts.endpoint == ""
+    assert config.tts.command == ""
+    assert config.tts.voice == ""
+    assert config.tts.timeout_seconds == 20
 
 
 def test_live2d_auto_discovers_user_assets(monkeypatch, tmp_path):
@@ -129,6 +137,11 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
             "bubble_mode.proactive_enabled": True,
             "bubble_mode.proactive_desktop_watch_enabled": True,
             "bubble_mode.proactive_interval_seconds": 120,
+            "assistant.persona_prompt": "你是八千代。",
+            "tts.provider": "command",
+            "tts.command": "say {text}",
+            "tts.voice": "kyoko",
+            "tts.timeout_seconds": 10,
         },
     )
 
@@ -139,7 +152,13 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     assert config.bubble_mode.proactive_enabled is True
     assert config.bubble_mode.proactive_desktop_watch_enabled is True
     assert config.bubble_mode.proactive_interval_seconds == 120
+    assert config.assistant.persona_prompt == "你是八千代。"
+    assert config.tts.provider == "command"
+    assert config.tts.command == "say {text}"
+    assert config.tts.voice == "kyoko"
+    assert config.tts.timeout_seconds == 10
     assert result["mode_settings"]["bubble"]["config"]["summary_count"] == 2
+    assert result["mode_settings"]["bubble"]["config"]["assistant"]["persona_prompt"] == "你是八千代。"
 
 
 def test_apply_settings_changes_rejects_invalid_single_field(tmp_path, monkeypatch):
@@ -165,6 +184,27 @@ def test_apply_settings_changes_rejects_out_of_range_bubble_size(tmp_path, monke
     assert result["ok"] is False
     assert config.bubble_mode.width != 80
     assert "96-128" in result["error"]
+
+
+def test_apply_settings_changes_rejects_invalid_new_fields(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    config = AppConfig()
+
+    result = apply_settings_changes(
+        config,
+        {
+            "tts.provider": "bad",
+            "tts.timeout_seconds": 999,
+            "live2d_mode.proactive_interval_seconds": 10,
+        },
+    )
+
+    assert result["ok"] is False
+    assert config.tts.provider == "none"
+    assert config.tts.timeout_seconds == 20
+    assert config.live2d_mode.proactive_interval_seconds == 300
+    assert "tts.provider" in result["error"]
 
 
 def test_apply_settings_changes_supports_legacy_live2d_prefix(tmp_path, monkeypatch):
@@ -204,6 +244,9 @@ def test_serialize_mode_settings_returns_separate_sections(monkeypatch, tmp_path
     assert payload["live2d"]["config"]["model_path_display"] == ""
     assert payload["live2d"]["config"]["resource"]["releases_url"] == LIVE2D_RELEASES_URL
     assert payload["live2d"]["config"]["resource"]["state"] == "not_configured"
+    assert payload["bubble"]["config"]["assistant"]["persona_prompt"] == ""
+    assert payload["live2d"]["config"]["tts"]["provider"] == "none"
+    assert payload["live2d"]["config"]["tts_timeout_seconds"] == 20
 
 
 def test_serialize_mode_window_data_returns_mode_part_only(monkeypatch, tmp_path):
@@ -218,6 +261,8 @@ def test_serialize_mode_window_data_returns_mode_part_only(monkeypatch, tmp_path
     assert payload["settings"]["config"]["scale"] == 1.2
     assert payload["settings"]["config"]["mouse_follow_enabled"] is True
     assert payload["settings"]["config"]["show_on_all_spaces"] is True
+    assert payload["settings"]["config"]["show_reply_bubble"] is True
+    assert payload["settings"]["config"]["enable_quick_input"] is True
 
 
 def test_mode_settings_window_does_not_render_common_settings():
@@ -238,6 +283,12 @@ def test_mode_settings_window_does_not_render_common_settings():
     assert "默认导入目录" in _SETTINGS_HTML
     assert "资源下载" in _SETTINGS_HTML
     assert "当前头像资源" in _SETTINGS_HTML
+    assert "助手人设 Prompt" in _SETTINGS_HTML
+    assert "TTS Provider" in _SETTINGS_HTML
+    assert "待实现，暂不生效" in _SETTINGS_HTML
+    assert "窗口置顶（需重启当前模式）" in _SETTINGS_HTML
+    assert "点击角色行为" in _SETTINGS_HTML
+    assert "显示快捷输入入口" in _SETTINGS_HTML
     assert "GitHub Releases" not in _SETTINGS_HTML  # URL 运行时填充
 
 
@@ -298,7 +349,9 @@ def test_load_config_clears_legacy_bundled_live2d_path(tmp_path, monkeypatch):
                 "live2d_mode": {
                     "model_name": "八千代辉夜姬",
                     "model_path": str(LEGACY_BUNDLED_LIVE2D_MODEL_DIR),
-                }
+                },
+                "assistant": {"persona_prompt": "  八千代  "},
+                "tts": {"enabled": True, "provider": "bad", "timeout_seconds": 999},
             },
             ensure_ascii=False,
         ),
@@ -309,6 +362,10 @@ def test_load_config_clears_legacy_bundled_live2d_path(tmp_path, monkeypatch):
 
     assert config.live2d_mode.model_name == ""
     assert config.live2d_mode.model_path == ""
+    assert config.assistant.persona_prompt == "  八千代  "
+    assert config.tts.enabled is True
+    assert config.tts.provider == "none"
+    assert config.tts.timeout_seconds == 20
 
 
 def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
@@ -321,6 +378,10 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     config.live2d_mode.scale = 1.4
     config.live2d_mode.show_on_all_spaces = False
     config.live2d_mode.mouse_follow_enabled = False
+    config.assistant.persona_prompt = "你是八千代。"
+    config.tts.enabled = True
+    config.tts.provider = "http"
+    config.tts.endpoint = "http://127.0.0.1:9000/tts"
 
     save_config(config)
     data = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
@@ -331,6 +392,10 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     assert data["live2d_mode"]["scale"] == 1.4
     assert data["live2d_mode"]["show_on_all_spaces"] is False
     assert data["live2d_mode"]["mouse_follow_enabled"] is False
+    assert data["assistant"]["persona_prompt"] == "你是八千代。"
+    assert data["tts"]["enabled"] is True
+    assert data["tts"]["provider"] == "http"
+    assert data["tts"]["endpoint"] == "http://127.0.0.1:9000/tts"
 
 
 def test_mode_settings_api_can_choose_live2d_model_path(tmp_path, monkeypatch):

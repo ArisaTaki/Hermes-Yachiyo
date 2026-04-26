@@ -8,9 +8,11 @@ from typing import Any
 from apps.shell.assets import is_project_asset, project_display_path
 from apps.shell.config import (
     AppConfig,
+    AssistantConfig,
     BubbleModeConfig,
     Live2DModeConfig,
     ModelSummary,
+    TTSConfig,
     save_config,
 )
 from apps.shell.effect_policy import build_effects_summary
@@ -97,6 +99,20 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "idle_motion_group": str,
         "enable_expressions": bool,
         "enable_physics": bool,
+        "proactive_enabled": bool,
+        "proactive_desktop_watch_enabled": bool,
+        "proactive_interval_seconds": int,
+    },
+    "assistant": {
+        "persona_prompt": str,
+    },
+    "tts": {
+        "enabled": bool,
+        "provider": str,
+        "endpoint": str,
+        "command": str,
+        "voice": str,
+        "timeout_seconds": int,
     },
 }
 
@@ -133,6 +149,10 @@ def _validate_field(key: str, value: Any) -> str | None:
         return "summary_count 须在 1-3 之间"
     if key.endswith(".proactive_interval_seconds") and not (60 <= value <= 3600):
         return "proactive_interval_seconds 须在 60-3600 秒之间"
+    if key == "tts.provider" and value not in {"none", "http", "command"}:
+        return "tts.provider 仅支持 none / http / command"
+    if key == "tts.timeout_seconds" and not (1 <= value <= 120):
+        return "tts.timeout_seconds 须在 1-120 秒之间"
     if key.endswith(".opacity") and not (0.2 <= value <= 1.0):
         return "opacity 须在 0.2-1.0 之间"
     if key.endswith(".scale") and not (0.4 <= value <= 2.0):
@@ -148,8 +168,42 @@ def _validate_field(key: str, value: Any) -> str | None:
     return None
 
 
-def _mode_object(config: AppConfig, mode_key: str) -> BubbleModeConfig | Live2DModeConfig:
+def _mode_object(
+    config: AppConfig,
+    mode_key: str,
+) -> BubbleModeConfig | Live2DModeConfig | AssistantConfig | TTSConfig:
     return getattr(config, mode_key)
+
+
+def _serialize_assistant(config: AppConfig) -> dict[str, Any]:
+    return {
+        "persona_prompt": config.assistant.persona_prompt,
+    }
+
+
+def _serialize_tts(config: AppConfig) -> dict[str, Any]:
+    return {
+        "enabled": config.tts.enabled,
+        "provider": config.tts.provider,
+        "endpoint": config.tts.endpoint,
+        "command": config.tts.command,
+        "voice": config.tts.voice,
+        "timeout_seconds": config.tts.timeout_seconds,
+    }
+
+
+def _shared_settings_fields(config: AppConfig) -> dict[str, Any]:
+    return {
+        "assistant": _serialize_assistant(config),
+        "tts": _serialize_tts(config),
+        "assistant_persona_prompt": config.assistant.persona_prompt,
+        "tts_enabled": config.tts.enabled,
+        "tts_provider": config.tts.provider,
+        "tts_endpoint": config.tts.endpoint,
+        "tts_command": config.tts.command,
+        "tts_voice": config.tts.voice,
+        "tts_timeout_seconds": config.tts.timeout_seconds,
+    }
 
 
 def serialize_bubble_mode(config: AppConfig) -> dict[str, Any]:
@@ -182,6 +236,7 @@ def serialize_bubble_mode(config: AppConfig) -> dict[str, Any]:
             "proactive_enabled": mode.proactive_enabled,
             "proactive_desktop_watch_enabled": mode.proactive_desktop_watch_enabled,
             "proactive_interval_seconds": mode.proactive_interval_seconds,
+            **_shared_settings_fields(config),
         },
     }
 
@@ -238,6 +293,10 @@ def serialize_live2d_mode(config: AppConfig) -> dict[str, Any]:
             "idle_motion_group": mode.idle_motion_group,
             "enable_expressions": mode.enable_expressions,
             "enable_physics": mode.enable_physics,
+            "proactive_enabled": mode.proactive_enabled,
+            "proactive_desktop_watch_enabled": mode.proactive_desktop_watch_enabled,
+            "proactive_interval_seconds": mode.proactive_interval_seconds,
+            **_shared_settings_fields(config),
             "resource": {
                 "state": resource.state.value,
                 "source": resource.source,

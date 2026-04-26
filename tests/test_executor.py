@@ -17,6 +17,7 @@ from apps.core.executor import (
     _parse_hermes_output,
     _parse_hermes_title,
     _resolve_hermes_python,
+    format_persona_description,
 )
 import apps.core.executor as executor_mod
 import apps.core.hermes_stream_bridge as bridge_mod
@@ -119,6 +120,17 @@ class TestHermesExecutor:
         executor.set_chat_session(session)  # type: ignore[arg-type]
 
         assert executor._chat_session is session
+
+    def test_format_persona_description_keeps_empty_prompt_compatible(self):
+        assert format_persona_description("原请求", "") == "原请求"
+
+    def test_format_persona_description_wraps_prompt(self):
+        wrapped = format_persona_description("帮我总结", "你是八千代。")
+
+        assert "[人设设定]" in wrapped
+        assert "你是八千代。" in wrapped
+        assert "[用户请求]" in wrapped
+        assert wrapped.endswith("帮我总结")
 
 
 class TestParseHermesOutput:

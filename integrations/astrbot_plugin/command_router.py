@@ -1,7 +1,7 @@
 """命令路由：将 /y <sub> <args> 分发到对应 handler。
 
 路由规则：
-  /y status tasks screen window do  → Hermes-Yachiyo Bridge
+    /y status tasks screen window do ask/chat  → Hermes-Yachiyo Bridge
   /y codex                          → Hapi（Codex 执行后端）
 """
 
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 # ── 路由表 ────────────────────────────────────────────
 
-HERMES_COMMANDS: frozenset[str] = frozenset({"status", "tasks", "screen", "window", "do", "check", "cancel"})
+HERMES_COMMANDS: frozenset[str] = frozenset({"status", "tasks", "screen", "window", "do", "check", "cancel", "ask", "chat"})
 HAPI_COMMANDS: frozenset[str] = frozenset({"codex"})
 ALL_COMMANDS: frozenset[str] = HERMES_COMMANDS | HAPI_COMMANDS
 
@@ -24,6 +24,8 @@ HELP_TEXT = (
     "  /y status           — 查看 Hermes Agent 运行状态\n"
     "  /y tasks            — 查看任务列表\n"
     "  /y do <任务>        — 创建新任务\n"
+    "  /y ask <内容>       — 低风险自然语言入口\n"
+    "  /y chat <内容>      — 同 /y ask\n"
     "  /y check <任务ID>   — 查询任务详情\n"
     "  /y cancel <任务ID>  — 取消任务\n"
     "  /y screen           — 获取当前屏幕截图\n"
@@ -33,7 +35,7 @@ HELP_TEXT = (
 )
 
 
-async def route(command: str, args: str, config: PluginConfig) -> str:
+async def route(command: str, args: str, config: PluginConfig, sender_id: str = "") -> str:
     """将命令分发到对应 handler，返回格式化响应文本。
 
     Args:
@@ -54,7 +56,7 @@ async def route(command: str, args: str, config: PluginConfig) -> str:
     from .handlers import dispatch
 
     try:
-        return await dispatch(command, args, config)
+        return await dispatch(command, args, config, sender_id=sender_id)
     except Exception as exc:
         logger.exception("命令执行失败: /y %s", command)
         from .handlers.utils import fmt_error

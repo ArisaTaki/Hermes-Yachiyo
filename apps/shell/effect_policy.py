@@ -75,6 +75,21 @@ _FIELD_POLICIES: dict[str, tuple[EffectType, str]] = {
                                                     "定期桌面观察开关已更新"),
     "bubble_mode.proactive_interval_seconds": (EffectType.IMMEDIATE,
                                                "主动观察间隔已更新"),
+    # 共享助手/TTS 设置
+    "assistant.persona_prompt": (EffectType.IMMEDIATE,
+                                  "助手人设 Prompt 已即时用于后续 Hermes 调用"),
+    "tts.enabled":              (EffectType.IMMEDIATE,
+                                  "TTS 开关已更新"),
+    "tts.provider":             (EffectType.IMMEDIATE,
+                                  "TTS Provider 已更新"),
+    "tts.endpoint":             (EffectType.IMMEDIATE,
+                                  "TTS HTTP Endpoint 已更新"),
+    "tts.command":              (EffectType.IMMEDIATE,
+                                  "TTS 本地命令已更新"),
+    "tts.voice":                (EffectType.IMMEDIATE,
+                                  "TTS 音色已更新"),
+    "tts.timeout_seconds":      (EffectType.IMMEDIATE,
+                                  "TTS 超时时间已更新"),
     # Live2D 嵌套字段（兼容旧 live2d.* 与新 live2d_mode.*）
     "live2d.model_name":         (EffectType.IMMEDIATE,
                                   "模型名称已更新"),
@@ -130,6 +145,12 @@ _FIELD_POLICIES: dict[str, tuple[EffectType, str]] = {
                                        "表情系统设置已更新"),
     "live2d_mode.enable_physics":     (EffectType.IMMEDIATE,
                                        "物理模拟设置已更新"),
+    "live2d_mode.proactive_enabled":    (EffectType.IMMEDIATE,
+                                         "Live2D 主动对话开关已更新"),
+    "live2d_mode.proactive_desktop_watch_enabled": (EffectType.IMMEDIATE,
+                                                    "Live2D 定期桌面观察开关已更新"),
+    "live2d_mode.proactive_interval_seconds": (EffectType.IMMEDIATE,
+                                               "Live2D 主动观察间隔已更新"),
 }
 
 
