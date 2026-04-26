@@ -10,12 +10,14 @@ Bubble 是桌面常驻 launcher，不承载完整聊天 UI：
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Dict
 
 from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri
 from apps.shell.chat_bridge import ChatBridge
+from apps.shell.launcher_notifications import LauncherNotificationTracker
 from apps.shell.proactive import ProactiveDesktopService
 
 if TYPE_CHECKING:
@@ -58,6 +60,16 @@ _BUBBLE_HTML = r"""
             0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
             40% { opacity: 1; transform: translateY(-1px); }
         }
+        @keyframes bubble-unread-breathe {
+            0%, 100% {
+                border-color: rgba(236, 177, 39, 0.9);
+                box-shadow: 0 0 0 0 rgba(249, 199, 78, 0.26);
+            }
+            50% {
+                border-color: rgba(255, 219, 112, 1);
+                box-shadow: 0 0 0 10px rgba(249, 199, 78, 0.12);
+            }
+        }
         .bubble-launcher {
             position: relative;
             width: calc(100vw - 8px);
@@ -87,6 +99,9 @@ _BUBBLE_HTML = r"""
         }
         .bubble-launcher.auto-hidden {
             transform: scale(0.96);
+        }
+        .bubble-launcher.has-unread {
+            animation: bubble-unread-breathe 1.9s ease-in-out infinite;
         }
         .bubble-launcher:active {
             transform: scale(0.98);
@@ -169,34 +184,6 @@ _BUBBLE_HTML = r"""
             pointer-events: none;
         }
         .bubble-summary.hidden { display: none; }
-        .context-menu {
-            position: fixed;
-            right: 8px;
-            bottom: 8px;
-            min-width: 116px;
-            padding: 6px;
-            border-radius: 8px;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            background: rgba(22, 24, 29, 0.96);
-            box-shadow: 0 16px 32px rgba(0, 0, 0, 0.36);
-            display: none;
-            z-index: 4;
-        }
-        .context-menu.visible { display: block; }
-        .menu-btn {
-            width: 100%;
-            border: 0;
-            background: transparent;
-            color: #eef2f7;
-            text-align: left;
-            padding: 7px 8px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 12px;
-        }
-        .menu-btn:hover,
-        .menu-btn:focus { background: rgba(255, 255, 255, 0.1); outline: none; }
-        .menu-btn.danger { color: #ffb5b5; }
     </style>
 </head>
 <body>
@@ -211,13 +198,6 @@ _BUBBLE_HTML = r"""
         <span class="bubble-summary hidden" id="bubble-summary" aria-hidden="true"></span>
     </button>
 
-    <div class="context-menu" id="context-menu">
-        <button class="menu-btn" type="button" onclick="openChat()">打开对话</button>
-        <button class="menu-btn" type="button" onclick="openMain()">主控台</button>
-        <button class="menu-btn" type="button" onclick="openSettings()">设置</button>
-        <button class="menu-btn danger" type="button" onclick="closeBubble()">退出</button>
-    </div>
-
 <script>
 const ACTIVE_POLL_INTERVAL_MS = 1200;
 const IDLE_POLL_INTERVAL_MS = 5000;
@@ -229,6 +209,7 @@ let launcherPointerStart = null;
 let launcherClickSuppressed = false;
 let launcherDragging = false;
 let currentBubbleView = null;
+let contextMenuOpen = false;
 
 function setPollingInterval(intervalMs) {
     if (polling && pollingIntervalMs === intervalMs) return;
@@ -251,16 +232,25 @@ function stopPolling() {
     pollingIntervalMs = null;
 }
 
-function hideMenu() {
-    const menu = document.getElementById('context-menu');
-    const wasVisible = menu.classList.contains('visible');
-    menu.classList.remove('visible');
-    if (wasVisible) setContextMenuOpen(false);
+async function hideMenu() {
+    if (!contextMenuOpen) return;
+    contextMenuOpen = false;
+    try {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.close_context_menu) {
+            await window.pywebview.api.close_context_menu();
+        }
+    } catch (error) {}
 }
 
 function isMenuVisible() {
-    return document.getElementById('context-menu').classList.contains('visible');
+    return contextMenuOpen;
 }
+
+function markContextMenuClosed() {
+    contextMenuOpen = false;
+}
+
+window.__bubbleContextMenuClosed = markContextMenuClosed;
 
 function pointerPoint(event) {
     return {
@@ -317,14 +307,6 @@ async function focusLauncherWindow() {
     } catch (error) {}
 }
 
-function setContextMenuOpen(isOpen) {
-    try {
-        if (window.pywebview && window.pywebview.api && window.pywebview.api.set_context_menu_open) {
-            window.pywebview.api.set_context_menu_open(!!isOpen);
-        }
-    } catch (error) {}
-}
-
 function setDraggingState(isDragging) {
     const normalized = !!isDragging;
     if (launcherDragging === normalized) return;
@@ -336,33 +318,28 @@ function setDraggingState(isDragging) {
     } catch (error) {}
 }
 
-function positionMenu(event) {
-    const menu = document.getElementById('context-menu');
-    const margin = 4;
-    menu.style.right = 'auto';
-    menu.style.bottom = 'auto';
-    menu.style.left = Math.max(margin, event.clientX + margin) + 'px';
-    menu.style.top = Math.max(margin, event.clientY + margin) + 'px';
-    const rect = menu.getBoundingClientRect();
-    const x = Math.max(margin, Math.min(event.clientX + margin, window.innerWidth - rect.width - margin));
-    const y = Math.max(margin, Math.min(event.clientY + margin, window.innerHeight - rect.height - margin));
-    menu.style.left = x + 'px';
-    menu.style.top = y + 'px';
-}
-
-function showMenu(event) {
+async function showMenu(event) {
     event.preventDefault();
     event.stopPropagation();
-    focusLauncherWindow();
-    const menu = document.getElementById('context-menu');
-    menu.classList.add('visible');
-    setContextMenuOpen(true);
-    positionMenu(event);
-    const firstItem = menu.querySelector('.menu-btn');
-    if (firstItem) setTimeout(function() {
-        try { firstItem.focus({preventScroll: true}); }
-        catch (error) { firstItem.focus(); }
-    }, 0);
+    if (launcherDragging) return;
+    contextMenuOpen = true;
+    try {
+        if (!window.pywebview || !window.pywebview.api || !window.pywebview.api.open_context_menu) {
+            contextMenuOpen = false;
+            return;
+        }
+        const point = pointerPoint(event);
+        const result = await window.pywebview.api.open_context_menu(point.x, point.y);
+        if (!result || !result.ok) contextMenuOpen = false;
+    } catch (error) {
+        contextMenuOpen = false;
+    }
+}
+
+function normalizedStatusLabel(chat) {
+    const label = String((chat && chat.status_label) || '').trim();
+    if (!label || label === '就绪' || label === '暂无对话') return '';
+    return label;
 }
 
 function renderBubble(view) {
@@ -376,25 +353,19 @@ function renderBubble(view) {
     const status = bubble.latest_status || 'empty';
     let dotClass = 'status-dot';
     const showDot = bubble.show_unread_dot !== false;
-    if (showDot && bubble.has_attention) dotClass += ' visible attention';
-    else if (showDot && (status === 'processing' || status === 'failed')) dotClass += ' visible ' + status;
-    else dotClass += ' ' + status;
+    dotClass += ' ' + status;
     dot.className = dotClass;
     const displayMode = bubble.default_display || 'summary';
-    const latestMessage = (chat.messages || []).length
-        ? chat.messages[chat.messages.length - 1].content
-        : '';
-    const summaryText = displayMode === 'recent_reply'
-        ? (chat.latest_reply || latestMessage || chat.status_label || '')
-        : displayMode === 'summary'
-            ? (chat.status_label || latestMessage || bubble.subtitle || '')
-            : '';
+    const statusLabel = normalizedStatusLabel(chat);
+    const hasUnread = showDot && !!bubble.has_attention;
+    const summaryText = '';
     summaryNode.textContent = summaryText;
-    summaryNode.classList.toggle('hidden', displayMode === 'icon' || !summaryText);
+    summaryNode.classList.toggle('hidden', true);
+    launcher.classList.toggle('has-unread', hasUnread);
     const titleParts = [
         displayMode === 'icon'
             ? 'Yachiyo - 头像图标'
-            : ('Yachiyo - ' + (summaryText || chat.status_label || '点击展开对话')),
+            : ('Yachiyo - ' + (hasUnread ? '有新消息，点击查看' : (statusLabel || '点击展开对话'))),
     ];
     if (proactive.error) titleParts.push('主动对话：' + proactive.error);
     else if (proactive.has_attention) titleParts.push('主动对话：有新的观察结果');
@@ -402,7 +373,7 @@ function renderBubble(view) {
     launcher.title = titleParts.join('\n');
     launcher.setAttribute(
         'aria-label',
-        (displayMode === 'icon' ? 'Yachiyo Bubble' : ('Yachiyo Bubble - ' + (summaryText || chat.status_label || '')))
+        (displayMode === 'icon' ? 'Yachiyo Bubble' : ('Yachiyo Bubble - ' + (hasUnread ? '有新消息' : (statusLabel || ''))))
     );
     const configuredOpacity = Math.max(0.2, Math.min(1, Number(bubble.opacity || 0.92)));
     const isIdle = !!bubble.auto_hide
@@ -472,10 +443,10 @@ function bootstrap() {
 }
 
 document.addEventListener('pointerdown', function(event) {
-    if (!event.target.closest('#context-menu') && !event.target.closest('#bubble-launcher')) hideMenu();
+    if (!event.target.closest('#bubble-launcher')) hideMenu();
 }, true);
 document.addEventListener('click', function(event) {
-    if (!event.target.closest('#context-menu') && !event.target.closest('#bubble-launcher')) hideMenu();
+    if (!event.target.closest('#bubble-launcher')) hideMenu();
 });
 document.addEventListener('contextmenu', function(event) {
     if (!event.target.closest('#bubble-launcher')) {
@@ -491,7 +462,6 @@ document.addEventListener('pointercancel', function() {
     launcherClickSuppressed = false;
     setDraggingState(false);
 }, true);
-window.addEventListener('blur', hideMenu);
 window.addEventListener('blur', function() {
     launcherPointerStart = null;
     launcherClickSuppressed = false;
@@ -503,6 +473,136 @@ window.addEventListener('pywebviewready', bootstrap);
 </body>
 </html>
 """
+
+_BUBBLE_MENU_WIDTH = 156
+_BUBBLE_MENU_HEIGHT = 176
+
+_BUBBLE_MENU_HTML = r"""
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>Hermes-Yachiyo Bubble Menu</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: rgba(0, 0, 0, 0) !important;
+            font-family: -apple-system, "Helvetica Neue", "PingFang SC", sans-serif;
+            user-select: none;
+        }
+        body {
+            display: flex;
+            align-items: flex-start;
+            justify-content: flex-start;
+            padding: 6px;
+        }
+        .menu-panel {
+            width: 144px;
+            padding: 7px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            background: rgba(22, 24, 29, 0.98);
+            box-shadow: 0 18px 38px rgba(0, 0, 0, 0.38);
+        }
+        .menu-btn {
+            width: 100%;
+            border: 0;
+            background: transparent;
+            color: #eef2f7;
+            text-align: left;
+            padding: 9px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        .menu-btn:hover,
+        .menu-btn:focus {
+            background: rgba(255, 255, 255, 0.11);
+            outline: none;
+        }
+        .menu-btn.danger { color: #ffb5b5; }
+    </style>
+</head>
+<body>
+    <div class="menu-panel" role="menu" aria-label="Bubble 菜单">
+        <button class="menu-btn" type="button" onclick="invokeAction('open_chat')">打开对话</button>
+        <button class="menu-btn" type="button" onclick="invokeAction('open_main_window')">主控台</button>
+        <button class="menu-btn" type="button" onclick="invokeAction('open_settings')">设置</button>
+        <button class="menu-btn danger" type="button" onclick="invokeAction('close_bubble')">退出</button>
+    </div>
+<script>
+let closing = false;
+
+async function closeMenu() {
+    if (closing) return;
+    closing = true;
+    try {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.close_menu) {
+            await window.pywebview.api.close_menu();
+        }
+    } catch (error) {}
+}
+
+async function invokeAction(actionName) {
+    if (closing) return;
+    closing = true;
+    try {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api[actionName]) {
+            await window.pywebview.api[actionName]();
+        }
+    } catch (error) {
+        try {
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.close_menu) {
+                await window.pywebview.api.close_menu();
+            }
+        } catch (_error) {}
+    }
+}
+
+function bootstrapMenu() {
+    const first = document.querySelector('.menu-btn');
+    if (!first) return;
+    setTimeout(function() {
+        try { first.focus({preventScroll: true}); }
+        catch (error) { first.focus(); }
+    }, 0);
+}
+
+document.addEventListener('contextmenu', function(event) { event.preventDefault(); });
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') closeMenu();
+});
+window.addEventListener('blur', function() {
+    setTimeout(closeMenu, 80);
+});
+document.addEventListener('DOMContentLoaded', bootstrapMenu);
+window.addEventListener('pywebviewready', bootstrapMenu);
+</script>
+</body>
+</html>
+"""
+
+
+def _event_is_set(event: Any) -> bool:
+    is_set = getattr(event, "is_set", None)
+    if callable(is_set):
+        try:
+            return bool(is_set())
+        except Exception:
+            return False
+    return False
+
+
+def _is_window_probably_closed(window: Any) -> bool:
+    if bool(getattr(window, "closed", False)) or bool(getattr(window, "destroyed", False)):
+        return True
+    closed_event = getattr(getattr(window, "events", None), "closed", None)
+    return _event_is_set(closed_event)
 
 
 def _resolve_avatar_uri(config: "AppConfig") -> str:
@@ -516,6 +616,40 @@ def _render_bubble_html(config: "AppConfig") -> str:
     return _BUBBLE_HTML.replace("{{AVATAR_URL}}", _resolve_avatar_uri(config))
 
 
+class BubbleContextMenuAPI:
+    """独立 Bubble 右键菜单窗口 API。"""
+
+    def __init__(self, parent: "BubbleWindowAPI") -> None:
+        self._parent = parent
+        self._menu_window: Any = None
+
+    def bind_window(self, window: Any) -> None:
+        self._menu_window = window
+
+    def _run_parent_action(self, action_name: str) -> Dict[str, Any]:
+        try:
+            action = getattr(self._parent, action_name)
+            result = action()
+            return result if isinstance(result, dict) else {"ok": bool(result)}
+        finally:
+            self._parent._destroy_context_menu_window(self._menu_window)
+
+    def close_menu(self) -> Dict[str, Any]:
+        return {"ok": self._parent._destroy_context_menu_window(self._menu_window)}
+
+    def open_chat(self) -> Dict[str, Any]:
+        return self._run_parent_action("open_chat")
+
+    def open_main_window(self) -> Dict[str, Any]:
+        return self._run_parent_action("open_main_window")
+
+    def open_settings(self) -> Dict[str, Any]:
+        return self._run_parent_action("open_settings")
+
+    def close_bubble(self) -> Dict[str, Any]:
+        return self._run_parent_action("close_bubble")
+
+
 class BubbleWindowAPI:
     """Bubble 模式 WebView API。"""
 
@@ -523,6 +657,7 @@ class BubbleWindowAPI:
         self._runtime = runtime
         self._config = config
         self._chat_bridge = ChatBridge(runtime)
+        self._notification = LauncherNotificationTracker()
         proactive_config = getattr(
             config,
             "bubble_mode",
@@ -534,6 +669,8 @@ class BubbleWindowAPI:
         )
         self._proactive = ProactiveDesktopService(runtime, proactive_config)
         self._bubble_window: Any = None
+        self._context_menu_window: Any = None
+        self._context_menu_lock = threading.RLock()
         self._context_menu_open = False
         self._pointer_dragging = False
 
@@ -553,17 +690,19 @@ class BubbleWindowAPI:
 
         proactive = self._get_proactive_state()
         has_proactive_attention = bool(proactive.get("has_attention"))
+        notification = self._notification.update(chat, external_attention=has_proactive_attention)
         return {
             "ok": True,
             "chat": chat,
             "proactive": proactive,
+            "notification": notification,
             "bubble": {
                 "default_display": bubble.default_display,
                 "expand_trigger": "click",
                 "show_unread_dot": bubble.show_unread_dot,
                 "auto_hide": bubble.auto_hide,
                 "opacity": bubble.opacity,
-                "has_attention": has_proactive_attention,
+                "has_attention": bool(notification.get("has_unread")),
                 "latest_status": latest_status,
                 "subtitle": (
                     "从当前会话继续对话"
@@ -578,6 +717,7 @@ class BubbleWindowAPI:
 
     def _clear_proactive_attention(self) -> None:
         self._proactive.acknowledge()
+        self._notification.acknowledge()
 
     def send_quick_message(self, text: str) -> Dict[str, Any]:
         return self._chat_bridge.send_quick_message(text)
@@ -605,6 +745,105 @@ class BubbleWindowAPI:
         from apps.shell.settings import open_mode_settings_window
 
         return {"ok": open_mode_settings_window(self._config, "bubble")}
+
+    def _notify_context_menu_closed(self) -> None:
+        try:
+            if self._bubble_window is not None and not _is_window_probably_closed(self._bubble_window):
+                evaluate_js = getattr(self._bubble_window, "evaluate_js", None)
+                if callable(evaluate_js):
+                    evaluate_js("window.__bubbleContextMenuClosed && window.__bubbleContextMenuClosed();")
+        except Exception:
+            pass
+
+    def _destroy_context_menu_window(self, window: Any | None = None, *, notify: bool = True) -> bool:
+        with self._context_menu_lock:
+            target = window or self._context_menu_window
+            if target is None:
+                self._context_menu_open = False
+                if notify:
+                    self._notify_context_menu_closed()
+                return False
+            if window is not None and self._context_menu_window is not None and self._context_menu_window is not window:
+                return False
+            self._context_menu_window = None
+            self._context_menu_open = False
+
+        destroyed = False
+        try:
+            if not _is_window_probably_closed(target):
+                destroy = getattr(target, "destroy", None)
+                if callable(destroy):
+                    destroy()
+                    destroyed = True
+        except Exception as exc:
+            logger.debug("关闭 Bubble 菜单窗口失败: %s", exc)
+        if notify:
+            self._notify_context_menu_closed()
+        return True if destroyed else not _is_window_probably_closed(target)
+
+    def close_context_menu(self) -> Dict[str, Any]:
+        return {"ok": self._destroy_context_menu_window()}
+
+    def open_context_menu(self, screen_x: float = 0, screen_y: float = 0) -> Dict[str, Any]:
+        try:
+            import webview  # type: ignore[import]
+        except ImportError:
+            self._context_menu_open = False
+            return {"ok": False, "error": "pywebview 未安装，无法打开 Bubble 菜单"}
+
+        self._destroy_context_menu_window(notify=False)
+        menu_api = BubbleContextMenuAPI(self)
+        try:
+            x = max(0, int(screen_x or 0))
+            y = max(0, int(screen_y or 0))
+            window = webview.create_window(
+                title="Hermes-Yachiyo Bubble Menu",
+                html=_BUBBLE_MENU_HTML,
+                width=_BUBBLE_MENU_WIDTH,
+                height=_BUBBLE_MENU_HEIGHT,
+                x=x,
+                y=y,
+                resizable=False,
+                on_top=True,
+                js_api=menu_api,
+                frameless=True,
+                transparent=True,
+                easy_drag=False,
+                text_select=False,
+            )
+        except Exception as exc:
+            self._context_menu_open = False
+            logger.debug("创建 Bubble 菜单窗口失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+        menu_api.bind_window(window)
+        with self._context_menu_lock:
+            self._context_menu_window = window
+            self._context_menu_open = True
+
+        closed_event = getattr(getattr(window, "events", None), "closed", None)
+        if closed_event is not None:
+            def _on_closed() -> None:
+                with self._context_menu_lock:
+                    if self._context_menu_window is window:
+                        self._context_menu_window = None
+                    self._context_menu_open = False
+                self._notify_context_menu_closed()
+
+            closed_event += _on_closed
+
+        try:
+            from apps.shell.native_window import schedule_macos_window_behavior
+
+            schedule_macos_window_behavior(
+                title="Hermes-Yachiyo Bubble Menu",
+                always_on_top=True,
+                show_on_all_spaces=False,
+                delay_seconds=0.05,
+            )
+        except Exception:
+            pass
+        return {"ok": True, "open": True}
 
     def set_context_menu_open(self, is_open: bool) -> Dict[str, Any]:
         self._context_menu_open = bool(is_open)

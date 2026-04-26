@@ -24,6 +24,7 @@ from apps.shell.assets import (
     project_display_path,
 )
 from apps.shell.chat_bridge import ChatBridge
+from apps.shell.launcher_notifications import LauncherNotificationTracker
 from apps.shell.mode_settings import _serialize_summary
 from apps.shell.proactive import ProactiveDesktopService
 from apps.shell.tts import TTSService
@@ -1244,15 +1245,18 @@ _LIVE2D_HTML = r"""
         reportUIRegions();
     }
 
-    function updateReplyBubble(live2d, chat, proactive) {
+    function updateReplyBubble(live2d, chat, proactive, notification, forceLatest) {
         const node = document.getElementById('reply-bubble');
         const textNode = document.getElementById('reply-bubble-text');
         const proactiveAttention = proactive && proactive.has_attention;
+        const hasUnread = notification && notification.has_unread;
         const text = proactiveAttention
             ? (proactive.message || '有新的主动桌面观察结果')
             : chat.is_processing
                 ? '正在思考回复…'
-                : (latestAssistantText(chat) || '');
+                : (hasUnread || forceLatest)
+                    ? (latestAssistantText(chat) || '')
+                    : '';
         if (text && text !== lastReplyBubbleText) {
             lastReplyBubbleText = text;
             replyBubbleManuallyHidden = false;
@@ -1303,11 +1307,14 @@ _LIVE2D_HTML = r"""
                 (currentLive2DView && currentLive2DView.live2d) || {},
                 (currentLive2DView && currentLive2DView.chat) || {},
                 (currentLive2DView && currentLive2DView.proactive) || {},
+                (currentLive2DView && currentLive2DView.notification) || {},
+                true,
             );
         } else {
             setReplyBubbleVisible(false, '');
         }
         acknowledgeProactive();
+        acknowledgeNotification();
     }
 
     function handleQuickInputKey(event) {
@@ -1336,11 +1343,20 @@ _LIVE2D_HTML = r"""
         } catch (error) {}
     }
 
+    async function acknowledgeNotification() {
+        try {
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.acknowledge_notification) {
+                await window.pywebview.api.acknowledge_notification();
+            }
+        } catch (error) {}
+    }
+
     function renderLive2D(view) {
         currentLive2DView = view;
         const live2d = view.live2d || {};
         const chat = view.chat || {};
         const proactive = view.proactive || {};
+        const notification = view.notification || {};
         const resource = live2d.resource || {};
         const character = document.getElementById('character');
         const scale = Math.max(0.4, Math.min(2.0, Number(live2d.scale || 1)));
@@ -1351,14 +1367,11 @@ _LIVE2D_HTML = r"""
             ?? true
         );
         character.style.setProperty('--live2d-preview-scale', String(scale));
-        let status = 'ready';
-        if (chat.is_processing) status = 'processing';
-        else if (chat.messages && chat.messages.some(function(m) { return m.status === 'failed'; })) status = 'failed';
-
-        const hasAttention = (!!chat.latest_reply && !chat.is_processing) || !!proactive.has_attention;
+        const hasAttention = !!notification.has_unread;
+        const unreadStatus = notification.latest_message ? notification.latest_message.status : '';
         const characterClasses = ['character'];
         if (chat.is_processing) characterClasses.push('processing');
-        else if (status === 'failed') characterClasses.push('failed');
+        else if (hasAttention && unreadStatus === 'failed') characterClasses.push('failed');
         else if (hasAttention) characterClasses.push('has-message');
         character.className = characterClasses.join(' ');
 
@@ -1368,14 +1381,12 @@ _LIVE2D_HTML = r"""
             ? '，正在回复'
             : hasAttention
                 ? '，有新消息'
-                : status === 'failed'
-                    ? '，消息发送失败'
-                    : '';
+                : '';
         document.getElementById('stage').title =
             ((resource.status_label || 'Yachiyo Live2D') + messageHint + '，点击行为：' + (live2d.click_action || 'open_chat'));
 
         renderResourceHint(resource);
-        updateReplyBubble(live2d, chat, proactive);
+        updateReplyBubble(live2d, chat, proactive, notification, false);
         applyDefaultOpenBehavior(live2d);
         reportUIRegions();
 
@@ -1628,6 +1639,7 @@ class Live2DWindowAPI:
         self._runtime = runtime
         self._config = config
         self._chat_bridge = ChatBridge(runtime)
+        self._notification = LauncherNotificationTracker()
         self._proactive = ProactiveDesktopService(runtime, config.live2d_mode)
         self._tts = TTSService(config.tts)
         self._last_tts_reply = ""
@@ -1644,6 +1656,10 @@ class Live2DWindowAPI:
         resource = live2d.resource_info()
         chat = self._chat_bridge.get_conversation_overview(summary_count=3, session_limit=3)
         proactive = self._proactive.get_state()
+        notification = self._notification.update(
+            chat,
+            external_attention=bool(proactive.get("has_attention")),
+        )
         tts_status = self._maybe_trigger_tts(chat)
         runner = self._runtime.task_runner
         executor_label = "执行器不可用"
@@ -1740,6 +1756,7 @@ class Live2DWindowAPI:
                 },
             },
             "proactive": proactive,
+            "notification": notification,
             "tts": tts_status,
             "bridge_label": bridge_label_map.get(bridge_state, "Bridge 启动中"),
             "executor_label": executor_label,
@@ -1765,6 +1782,7 @@ class Live2DWindowAPI:
         from apps.shell.chat_window import is_chat_window_open, toggle_chat_window
 
         self._proactive.acknowledge()
+        self._notification.acknowledge()
         was_open = is_chat_window_open()
         open_after_toggle = toggle_chat_window(self._runtime)
         return {"ok": was_open or open_after_toggle, "open": open_after_toggle}
@@ -1773,10 +1791,15 @@ class Live2DWindowAPI:
         from apps.shell.chat_window import open_chat_window
 
         self._proactive.acknowledge()
+        self._notification.acknowledge()
         return {"ok": open_chat_window(self._runtime)}
 
     def acknowledge_proactive(self) -> Dict[str, Any]:
         self._proactive.acknowledge()
+        return {"ok": True}
+
+    def acknowledge_notification(self) -> Dict[str, Any]:
+        self._notification.acknowledge()
         return {"ok": True}
 
     def open_main_window(self) -> Dict[str, Any]:

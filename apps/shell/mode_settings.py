@@ -35,6 +35,8 @@ def _serialize_summary(summary: ModelSummary | None) -> dict[str, Any]:
         "primary_model3_json_abs": summary.primary_model3_json_abs,
         "primary_moc3_abs": summary.primary_moc3_abs,
         "renderer_entry": summary.renderer_entry,
+        "expressions": summary.expressions,
+        "motion_groups": summary.motion_groups,
         "primary_model3_json_display": (
             project_display_path(summary.primary_model3_json_abs)
             if summary.primary_model3_json_abs

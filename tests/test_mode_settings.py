@@ -123,6 +123,44 @@ def test_live2d_auto_discovers_user_assets(monkeypatch, tmp_path):
     assert resource.default_assets_root_display.endswith("user-assets/live2d")
 
 
+def test_live2d_model_summary_reads_expression_and_motion_metadata(monkeypatch, tmp_path):
+    user_root = tmp_path / "user-assets" / "live2d"
+    model_dir = _create_live2d_model_dir(user_root / "yachiyo")
+    (model_dir / "demo.model3.json").write_text(
+        json.dumps(
+            {
+                "FileReferences": {
+                    "Expressions": [
+                        {"Name": "Happy", "File": "expressions/happy.exp3.json"},
+                    ],
+                    "Motions": {
+                        "Idle": [
+                            {"File": "motions/idle.motion3.json"},
+                            {"File": "motions/idle2.motion3.json", "Sound": "sounds/idle.wav"},
+                        ],
+                        "TapBody": [{"File": "motions/tap.motion3.json"}],
+                    },
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config_mod, "get_user_live2d_assets_dir", lambda: user_root)
+    monkeypatch.setattr(config_mod, "find_default_live2d_model_dir", lambda *_args, **_kwargs: model_dir)
+
+    config = AppConfig()
+    payload = serialize_mode_window_data(config, "live2d")
+    summary = payload["settings"]["config"]["summary"]
+
+    assert summary["expressions"] == [
+        {"name": "Happy", "file": "expressions/happy.exp3.json"}
+    ]
+    assert len(summary["motion_groups"]["Idle"]) == 2
+    assert summary["motion_groups"]["Idle"][1]["has_sound"] is True
+    assert summary["motion_groups"]["TapBody"][0]["display_name"] == "tap.motion3"
+
+
 def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
     monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
@@ -327,9 +365,13 @@ def test_mode_settings_window_does_not_render_common_settings():
     assert "窗口置顶（需重启当前模式）" in _SETTINGS_HTML
     assert "气泡宽度（80-192，需重启当前模式）" in _SETTINGS_HTML
     assert "点击打开聊天（固定）" in _SETTINGS_HTML
+    assert "新消息呼吸灯" in _SETTINGS_HTML
     assert "应用并重启应用" in _SETTINGS_HTML
     assert "启动时打开聊天窗口（需重启当前模式）" in _SETTINGS_HTML
     assert "启动初始表现（不打开聊天窗口）" in _SETTINGS_HTML
+    assert "模型可用表情" in _SETTINGS_HTML
+    assert "模型可用动作" in _SETTINGS_HTML
+    assert "TODO：Live2D 新消息提醒" in _SETTINGS_HTML
     assert "点击角色行为" in _SETTINGS_HTML
     assert "显示快捷输入入口" in _SETTINGS_HTML
     assert "悬停打开聊天" not in _SETTINGS_HTML

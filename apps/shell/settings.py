@@ -797,6 +797,24 @@ function valueRow(label, value) {
         + escapeHtml(String(value || '—')) + '</span></div>';
 }
 
+function live2dExpressionSummary(summary) {
+    const expressions = (summary && summary.expressions) || [];
+    if (!expressions.length) return '当前模型未声明可选表情';
+    return expressions.map(function(item) {
+        return item.name || item.file || '未命名表情';
+    }).join(' / ');
+}
+
+function live2dMotionSummary(summary) {
+    const groups = (summary && summary.motion_groups) || {};
+    const parts = Object.entries(groups).map(function(entry) {
+        const items = entry[1] || [];
+        return entry[0] + ' × ' + items.length;
+    });
+    if (!parts.length) return '当前模型未声明可选动作';
+    return parts.join(' / ');
+}
+
 function syncScaleValue(id, value) {
     const normalized = num(value, 1).toFixed(2);
     const range = document.getElementById(id + '-range');
@@ -898,7 +916,7 @@ function renderForm(mode, cfg) {
             ['recent_reply', '最近回复'],
         ]);
         html += inputRow('bubble_mode.summary_count', '状态摘要条数', cfg.summary_count, 'number');
-        html += boolRow('bubble_mode.show_unread_dot', '显示未读点', cfg.show_unread_dot);
+        html += boolRow('bubble_mode.show_unread_dot', '新消息呼吸灯', cfg.show_unread_dot);
         html += boolRow('bubble_mode.auto_hide', '空闲自动淡出', cfg.auto_hide);
         html += inputRow('bubble_mode.opacity', '透明度', cfg.opacity, 'number', '0.01');
         html += valueRow('当前头像资源', cfg.avatar_path_display || cfg.avatar_path);
@@ -918,6 +936,8 @@ function renderForm(mode, cfg) {
         html += inputRow('live2d_mode.model_name', '模型名称', cfg.model_name);
         html += valueRow('当前配置路径', cfg.model_path_display || cfg.model_path || '未填写');
         html += valueRow('当前生效路径', cfg.effective_model_path_display || '未检测到资源');
+        html += valueRow('模型可用表情', live2dExpressionSummary(cfg.summary));
+        html += valueRow('模型可用动作', live2dMotionSummary(cfg.summary));
         html += inputRow('live2d_mode.model_path', '模型路径', cfg.model_path);
         html += inputRow('live2d_mode.width', '窗口宽度', cfg.width, 'number');
         html += inputRow('live2d_mode.height', '窗口高度', cfg.height, 'number');
@@ -956,6 +976,7 @@ function renderForm(mode, cfg) {
         html += inputRow('tts.command', 'TTS 本地命令', cfg.tts_command || '');
         html += inputRow('tts.voice', 'TTS 音色', cfg.tts_voice || '');
         html += inputRow('tts.timeout_seconds', 'TTS 超时秒', cfg.tts_timeout_seconds, 'number');
+        html += noteRow('TODO：Live2D 新消息提醒后续可从上方模型表情/动作中选择并播放一次；当前不会因历史回复常驻发光。', 'warn');
         html += noteRow('Live2D 启动初始表现只控制回复气泡/快捷输入，不会打开聊天窗口；只有点击角色且“点击角色行为”为打开/切换聊天窗口时才会打开聊天。', 'warn');
         html += noteRow('TTS 默认关闭；none 或配置缺失时不会调用外部服务，失败也不会影响聊天。', 'warn');
     }

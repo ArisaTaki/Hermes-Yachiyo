@@ -1,11 +1,13 @@
 """ChatBridge 测试 — 统一摘要层与三模式共享验证"""
 
+import sys
+
 from apps.core.chat_session import ChatSession
 from apps.core.chat_store import ChatStore
 from apps.core.state import AppState
 from apps.shell.chat_bridge import ChatBridge, _truncate
 from apps.shell.config import AppConfig
-from apps.shell.modes.bubble import BubbleWindowAPI, _BUBBLE_HTML, _render_bubble_html
+from apps.shell.modes.bubble import BubbleWindowAPI, _BUBBLE_HTML, _BUBBLE_MENU_HTML, _render_bubble_html
 import apps.shell.modes.live2d as _live2d_mod
 from apps.shell.modes.live2d import Live2DWindowAPI, _LIVE2D_HTML, _render_live2d_html
 from packages.protocol.enums import TaskStatus
@@ -306,10 +308,78 @@ def test_bubble_html_keeps_idle_polling_for_cross_mode_updates():
     assert "bubble-launcher" in _BUBBLE_HTML
     assert "toggle_chat" in _BUBBLE_HTML
     assert "set_dragging" in _BUBBLE_HTML
+    assert "open_context_menu" in _BUBBLE_HTML
+    assert "close_context_menu" in _BUBBLE_HTML
+    assert "normalizedStatusLabel" in _BUBBLE_HTML
+    assert "label === '就绪'" in _BUBBLE_HTML
     assert "onpointerenter" not in _BUBBLE_HTML
     assert "hoverOpening" not in _BUBBLE_HTML
     assert "getExpandTrigger" not in _BUBBLE_HTML
     assert "getExpandTrigger() !== 'click'" not in _BUBBLE_HTML
+
+
+def test_bubble_context_menu_uses_separate_window_html():
+    assert "context-menu" not in _BUBBLE_HTML
+    assert "positionMenu(event)" not in _BUBBLE_HTML
+    assert "打开对话" in _BUBBLE_MENU_HTML
+    assert "主控台" in _BUBBLE_MENU_HTML
+    assert "invokeAction('open_chat')" in _BUBBLE_MENU_HTML
+    assert "window.addEventListener('blur'" in _BUBBLE_MENU_HTML
+
+
+def test_bubble_context_menu_api_creates_separate_window(tmp_path, monkeypatch):
+    class _EventHook:
+        def __init__(self):
+            self.handler = None
+
+        def __iadd__(self, handler):
+            self.handler = handler
+            return self
+
+    class _Events:
+        def __init__(self):
+            self.closed = _EventHook()
+
+    class _Window:
+        def __init__(self):
+            self.events = _Events()
+            self.destroyed = False
+            self.destroy_calls = 0
+
+        def destroy(self):
+            self.destroyed = True
+            self.destroy_calls += 1
+
+    class _Webview:
+        def __init__(self):
+            self.calls = []
+            self.window = _Window()
+
+        def create_window(self, **kwargs):
+            self.calls.append(kwargs)
+            return self.window
+
+    webview = _Webview()
+    monkeypatch.setitem(sys.modules, "webview", webview)
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    api = BubbleWindowAPI(runtime, AppConfig())
+    try:
+        result = api.open_context_menu(120, 80)
+
+        assert result == {"ok": True, "open": True}
+        assert webview.calls[0]["title"] == "Hermes-Yachiyo Bubble Menu"
+        assert webview.calls[0]["width"] > 112
+        assert webview.calls[0]["height"] > 112
+        assert webview.calls[0]["x"] == 120
+        assert webview.calls[0]["y"] == 80
+        assert api._context_menu_open is True
+
+        assert api.close_context_menu()["ok"] is True
+        assert webview.window.destroy_calls == 1
+        assert api._context_menu_open is False
+    finally:
+        store.close()
 
 
 def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
@@ -344,13 +414,20 @@ def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
     assert "reportUIRegions()" in _LIVE2D_HTML
     assert "@keyframes live2d-idle" not in _LIVE2D_HTML
     assert 'onpointerenter="focusLauncherWindow()"' not in _LIVE2D_HTML
+    assert "notification.has_unread" in _LIVE2D_HTML
+    assert "!!chat.latest_reply && !chat.is_processing" not in _LIVE2D_HTML
 
 
 def test_launcher_modes_do_not_embed_inline_chat_inputs():
     assert "send_quick_message" not in _BUBBLE_HTML
     assert "msg-input" not in _BUBBLE_HTML
     assert "toggleChat(event)" in _BUBBLE_HTML
-    for html in (_BUBBLE_HTML, _LIVE2D_HTML):
+    assert "event.key === 'Escape'" in _BUBBLE_HTML
+    assert "CLICK_DRAG_THRESHOLD_PX" in _BUBBLE_HTML
+    assert "trackLauncherPointerDown(event)" in _BUBBLE_HTML
+    assert "shouldIgnoreLauncherClick(event)" in _BUBBLE_HTML
+    assert "window.pywebview.api.focus_window" in _BUBBLE_HTML
+    for html in (_LIVE2D_HTML,):
         assert "msg-input" not in html
         assert "window.addEventListener('blur', hideMenu);" in html
         assert "event.key === 'Escape'" in html
@@ -649,6 +726,29 @@ def test_bubble_view_consumes_runtime_display_settings(tmp_path):
         store.close()
 
 
+def test_bubble_view_marks_only_new_assistant_reply_as_unread(tmp_path):
+    _, runtime, store = _make_bridge(tmp_path)
+    try:
+        runtime.chat_session.add_assistant_message("历史回复")
+        api = BubbleWindowAPI(runtime, AppConfig())
+
+        initial = api.get_bubble_view()
+        runtime.chat_session.add_assistant_message("新回复")
+        updated = api.get_bubble_view()
+
+        assert initial["notification"]["has_unread"] is False
+        assert initial["bubble"]["has_attention"] is False
+        assert updated["notification"]["has_unread"] is True
+        assert updated["bubble"]["has_attention"] is True
+
+        api._clear_proactive_attention()
+        acknowledged = api.get_bubble_view()
+        assert acknowledged["notification"]["has_unread"] is False
+        assert acknowledged["bubble"]["has_attention"] is False
+    finally:
+        store.close()
+
+
 def test_live2d_view_consumes_interaction_settings(tmp_path):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _RuntimeStub(store)
@@ -665,6 +765,7 @@ def test_live2d_view_consumes_interaction_settings(tmp_path):
         assert view["live2d"]["enable_quick_input"] is False
         assert view["live2d"]["default_open_behavior"] == "chat_input"
         assert view["proactive"]["status"] == "disabled"
+        assert view["notification"]["has_unread"] is False
         assert view["tts"]["enabled"] is False
     finally:
         store.close()

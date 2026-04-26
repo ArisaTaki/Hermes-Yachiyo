@@ -98,6 +98,8 @@ class ModelSummary:
     # 主候选绝对路径 — 供未来 Live2DRenderer 直接消费
     primary_model3_json_abs: str = ""  # .model3.json 的绝对路径，渲染器首选入口
     primary_moc3_abs: str = ""         # .moc3 的绝对路径，model3.json 引用的兜底
+    expressions: list[dict[str, str]] = field(default_factory=list)
+    motion_groups: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     def is_empty(self) -> bool:
         """摘要是否为空（未找到任何特征文件）。"""
@@ -136,6 +138,60 @@ def _resolve_scanned_model_dir(root: Path, summary: ModelSummary | None) -> Path
     return root.resolve()
 
 
+def _read_live2d_manifest_metadata(model3_path: Path) -> tuple[list[dict[str, str]], dict[str, list[dict[str, Any]]]]:
+    """读取 model3.json 中声明的表情和动作列表，失败时返回空集合。"""
+    try:
+        data = json.loads(model3_path.read_text(encoding="utf-8"))
+    except Exception:
+        return [], {}
+    if not isinstance(data, dict):
+        return [], {}
+    refs = data.get("FileReferences")
+    if not isinstance(refs, dict):
+        return [], {}
+
+    expressions: list[dict[str, str]] = []
+    raw_expressions = refs.get("Expressions")
+    if isinstance(raw_expressions, list):
+        for index, item in enumerate(raw_expressions):
+            if not isinstance(item, dict):
+                continue
+            file_path = str(item.get("File") or "").strip()
+            name = str(item.get("Name") or "").strip() or Path(file_path).stem or f"expression-{index + 1}"
+            expressions.append({"name": name, "file": file_path})
+
+    motion_groups: dict[str, list[dict[str, Any]]] = {}
+    raw_motions = refs.get("Motions")
+    if isinstance(raw_motions, dict):
+        for group, items in raw_motions.items():
+            if not isinstance(items, list):
+                continue
+            group_name = str(group or "").strip() or "default"
+            motions: list[dict[str, Any]] = []
+            for index, item in enumerate(items):
+                if not isinstance(item, dict):
+                    continue
+                file_path = str(item.get("File") or "").strip()
+                motions.append({
+                    "group": group_name,
+                    "index": index,
+                    "file": file_path,
+                    "display_name": Path(file_path).stem or f"{group_name}-{index + 1}",
+                    "has_sound": bool(item.get("Sound")),
+                })
+            if motions:
+                motion_groups[group_name] = motions
+    return expressions, motion_groups
+
+
+def _attach_live2d_manifest_metadata(summary: ModelSummary) -> None:
+    if not summary.primary_model3_json_abs:
+        return
+    expressions, motion_groups = _read_live2d_manifest_metadata(Path(summary.primary_model3_json_abs))
+    summary.expressions = expressions
+    summary.motion_groups = motion_groups
+
+
 def scan_live2d_model_dir(path: Path) -> ModelSummary:
     """扫描 Live2D 模型目录，返回最小文件摘要。
 
@@ -158,6 +214,7 @@ def scan_live2d_model_dir(path: Path) -> ModelSummary:
         if root_json:
             summary.model3_json = root_json[0].name
             summary.primary_model3_json_abs = str(root_json[0].resolve())
+            _attach_live2d_manifest_metadata(summary)
         return summary
 
     # 根目录无特征文件，扫描一级子目录
@@ -174,6 +231,7 @@ def scan_live2d_model_dir(path: Path) -> ModelSummary:
             if sub_json:
                 summary.model3_json = sub_json[0].name
                 summary.primary_model3_json_abs = str(sub_json[0].resolve())
+                _attach_live2d_manifest_metadata(summary)
             return summary  # 取第一个有内容的子目录即止
 
     return summary  # 空摘要
