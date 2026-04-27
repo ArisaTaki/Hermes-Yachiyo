@@ -39,6 +39,52 @@ def test_chat_window_scroll_following_respects_user_position():
     assert "if (container && shouldAutoScroll(container)) scrollToBottom(container)" in _CHAT_HTML
 
 
+def test_chat_window_messages_are_selectable_and_copyable():
+    assert "user-select: text" in _CHAT_HTML
+    assert "-webkit-user-select: text" in _CHAT_HTML
+    assert "const messageContentById = new Map()" in _CHAT_HTML
+    assert "function copyMessage(id)" in _CHAT_HTML
+    assert "function copyIconSvg()" in _CHAT_HTML
+    assert "function checkIconSvg()" in _CHAT_HTML
+    assert "setCopyFeedback(id)" in _CHAT_HTML
+    assert "data-copy-message-id" in _CHAT_HTML
+    assert "function bindMessageActions()" in _CHAT_HTML
+    assert "container.addEventListener('pointerdown', stopButtonSelection);" in _CHAT_HTML
+    assert "button.getAttribute('data-copy-message-id')" in _CHAT_HTML
+    assert "onclick=\"copyMessage" not in _CHAT_HTML
+    assert "window.pywebview.api.copy_text(text)" in _CHAT_HTML
+    assert "navigator.clipboard.writeText(text)" in _CHAT_HTML
+    assert "document.execCommand('copy')" in _CHAT_HTML
+    assert "const title = copied ? '已复制' : '复制内容';" in _CHAT_HTML
+
+
+def test_chat_window_reedit_control_removed():
+    assert "function editMessage" not in _CHAT_HTML
+    assert "重新编辑" not in _CHAT_HTML
+    assert "重编" not in _CHAT_HTML
+
+
+def test_chat_window_api_copy_text_uses_clipboard_backend(monkeypatch):
+    copied: list[str] = []
+
+    monkeypatch.setattr(
+        "apps.shell.chat_window._copy_text_to_clipboard",
+        lambda text: copied.append(text),
+    )
+
+    result = ChatWindowAPI(_RuntimeStub(ChatSession())).copy_text("hello")
+
+    assert result == {"ok": True}
+    assert copied == ["hello"]
+
+
+def test_chat_window_api_copy_text_rejects_empty_text():
+    result = ChatWindowAPI(_RuntimeStub(ChatSession())).copy_text("")
+
+    assert result["ok"] is False
+    assert "没有可复制内容" in result["error"]
+
+
 def test_list_sessions_includes_current_empty_session(tmp_path, monkeypatch):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     try:

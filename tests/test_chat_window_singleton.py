@@ -34,13 +34,25 @@ class _WindowStub:
     def __init__(self) -> None:
         self.closed = False
         self.destroyed = False
+        self.restore_calls = 0
         self.show_calls = 0
+        self.bring_to_front_calls = 0
+        self.focus_calls = 0
         self.destroy_calls = 0
         self.on_top = False
         self.events = _EventsStub()
 
+    def restore(self) -> None:
+        self.restore_calls += 1
+
     def show(self) -> None:
         self.show_calls += 1
+
+    def bring_to_front(self) -> None:
+        self.bring_to_front_calls += 1
+
+    def focus(self) -> None:
+        self.focus_calls += 1
 
     def destroy(self) -> None:
         self.destroy_calls += 1
@@ -98,10 +110,26 @@ def test_chat_window_reuses_live_window_and_clears_on_closed_event(monkeypatch):
     assert chat_window.open_chat_window(runtime) is True
     assert chat_window.open_chat_window(runtime) is True
     assert webview.create_calls == 1
+    assert webview.windows[0].restore_calls == 1
     assert webview.windows[0].show_calls == 1
+    assert webview.windows[0].bring_to_front_calls == 1
+    assert webview.windows[0].focus_calls == 1
 
     webview.windows[0].events.closed.fire()
     assert chat_window.is_chat_window_open() is False
+
+
+def test_chat_window_focus_failure_does_not_create_blank_duplicate(monkeypatch):
+    webview = _patch_webview(monkeypatch)
+    runtime = _RuntimeStub()
+
+    assert chat_window.open_chat_window(runtime) is True
+    first = webview.windows[0]
+    first.focus = lambda: (_ for _ in ()).throw(RuntimeError("not ready"))
+
+    assert chat_window.open_chat_window(runtime) is True
+    assert webview.create_calls == 1
+    assert chat_window.is_chat_window_open() is True
 
 
 def test_toggle_after_close_does_not_reopen_until_click(monkeypatch):

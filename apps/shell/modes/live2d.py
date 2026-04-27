@@ -1779,13 +1779,12 @@ class Live2DWindowAPI:
         return self._chat_bridge.send_quick_message(text)
 
     def toggle_chat(self) -> Dict[str, Any]:
-        from apps.shell.chat_window import is_chat_window_open, toggle_chat_window
+        from apps.shell.chat_window import open_chat_window
 
         self._proactive.acknowledge()
         self._notification.acknowledge()
-        was_open = is_chat_window_open()
-        open_after_toggle = toggle_chat_window(self._runtime)
-        return {"ok": was_open or open_after_toggle, "open": open_after_toggle}
+        opened = open_chat_window(self._runtime)
+        return {"ok": opened, "open": opened}
 
     def open_chat(self) -> Dict[str, Any]:
         from apps.shell.chat_window import open_chat_window

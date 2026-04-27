@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 _MIN_LAUNCHER_SIZE = 80
 _MAX_LAUNCHER_SIZE = 192
 _DEFAULT_LAUNCHER_SIZE = 112
+_BUBBLE_SCREEN_MARGIN = 24
 
 _BUBBLE_HTML = r"""
 <!DOCTYPE html>
@@ -51,10 +52,20 @@ _BUBBLE_HTML = r"""
             place-items: center;
             background-color: rgba(0, 0, 0, 0) !important;
         }
-        @keyframes unread-pulse {
-            0% { box-shadow: 0 0 0 0 rgba(255, 100, 100, 0.72); }
-            70% { box-shadow: 0 0 0 12px rgba(255, 100, 100, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(255, 100, 100, 0); }
+        @keyframes status-pulse-yellow {
+            0% { box-shadow: 0 0 0 0 rgba(255, 209, 102, 0.72); }
+            70% { box-shadow: 0 0 0 12px rgba(255, 209, 102, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 209, 102, 0); }
+        }
+        @keyframes status-pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(113, 226, 140, 0.72); }
+            70% { box-shadow: 0 0 0 12px rgba(113, 226, 140, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(113, 226, 140, 0); }
+        }
+        @keyframes status-pulse-red {
+            0% { box-shadow: 0 0 0 0 rgba(255, 104, 104, 0.72); }
+            70% { box-shadow: 0 0 0 12px rgba(255, 104, 104, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(255, 104, 104, 0); }
         }
         @keyframes thinking-dot {
             0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
@@ -158,13 +169,20 @@ _BUBBLE_HTML = r"""
         .status-dot.visible { display: block; }
         .status-dot.processing {
             background: #ffd166;
-            animation: unread-pulse 1.45s infinite;
+            animation: status-pulse-yellow 1.45s infinite;
         }
-        .status-dot.failed { background: #ff6868; }
+        .status-dot.completed {
+            background: #71e28c;
+            animation: status-pulse-green 1.6s infinite;
+        }
+        .status-dot.failed {
+            background: #ff6868;
+            animation: status-pulse-red 1.6s infinite;
+        }
         .status-dot.empty { background: #7f8b9b; }
         .status-dot.attention {
             background: #ff6b6b;
-            animation: unread-pulse 1.6s infinite;
+            animation: status-pulse-red 1.6s infinite;
         }
         .bubble-summary {
             position: absolute;
@@ -283,8 +301,10 @@ function trackLauncherPointerMove(event) {
 }
 
 function trackLauncherPointerUp(event) {
-    if (launcherPointerMoved(event)) launcherClickSuppressed = true;
+    const moved = launcherPointerMoved(event);
+    if (moved) launcherClickSuppressed = true;
     setDraggingState(false);
+    if (moved) snapLauncherToEdge(event);
 }
 
 function shouldIgnoreLauncherClick(event) {
@@ -336,6 +356,20 @@ async function showMenu(event) {
     }
 }
 
+async function snapLauncherToEdge(event) {
+    try {
+        if (!event || !window.pywebview || !window.pywebview.api || !window.pywebview.api.snap_to_edge) return;
+        await window.pywebview.api.snap_to_edge(
+            Number(event.screenX || 0),
+            Number(event.screenY || 0),
+            Number(event.clientX || 0),
+            Number(event.clientY || 0),
+            Number(window.innerWidth || 0),
+            Number(window.innerHeight || 0)
+        );
+    } catch (error) {}
+}
+
 function normalizedStatusLabel(chat) {
     const label = String((chat && chat.status_label) || '').trim();
     if (!label || label === '就绪' || label === '暂无对话') return '';
@@ -352,16 +386,19 @@ function renderBubble(view) {
     const dot = document.getElementById('status-dot');
     const status = bubble.latest_status || 'empty';
     let dotClass = 'status-dot';
-    const showDot = bubble.show_unread_dot !== false;
+    const showDot = bubble.show_unread_dot !== false && !bubble.suppress_status_dot;
     const displayMode = bubble.default_display || 'summary';
     const statusLabel = normalizedStatusLabel(chat);
     const hasUnread = showDot && !!bubble.has_attention;
+    const notification = view.notification || {};
+    const unreadMessage = notification.latest_message || {};
+    const unreadStatus = String(unreadMessage.status || '');
     if (hasUnread) {
-        dotClass += ' visible attention';
+        if (unreadStatus === 'failed') dotClass += ' visible failed';
+        else if (unreadStatus === 'completed') dotClass += ' visible completed';
+        else dotClass += ' visible attention';
     } else if (showDot && status === 'processing') {
         dotClass += ' visible processing';
-    } else if (showDot && status === 'failed') {
-        dotClass += ' visible failed';
     } else {
         dotClass += ' ' + status;
     }
@@ -688,17 +725,25 @@ class BubbleWindowAPI:
             summary_count=bubble.summary_count,
             session_limit=3,
         )
+        proactive = self._get_proactive_state()
+        has_proactive_attention = bool(proactive.get("has_attention"))
+        chat_window_open = _is_chat_window_open_for_notification()
+        notification = self._notification.update(
+            chat,
+            external_attention=has_proactive_attention and not chat_window_open,
+        )
+        if chat_window_open:
+            self._notification.acknowledge(chat)
+            notification = self._notification.update(chat, external_attention=False)
         latest_status = "ready"
         if chat.get("empty"):
             latest_status = "empty"
         elif chat.get("is_processing"):
             latest_status = "processing"
-        elif any(item.get("status") == "failed" for item in chat.get("messages", [])):
-            latest_status = "failed"
-
-        proactive = self._get_proactive_state()
-        has_proactive_attention = bool(proactive.get("has_attention"))
-        notification = self._notification.update(chat, external_attention=has_proactive_attention)
+        elif notification.get("has_unread"):
+            latest_message = notification.get("latest_message")
+            if isinstance(latest_message, dict):
+                latest_status = str(latest_message.get("status") or "ready")
         return {
             "ok": True,
             "chat": chat,
@@ -710,8 +755,9 @@ class BubbleWindowAPI:
                 "show_unread_dot": bubble.show_unread_dot,
                 "auto_hide": bubble.auto_hide,
                 "opacity": bubble.opacity,
-                "has_attention": bool(notification.get("has_unread")),
+                "has_attention": bool(notification.get("has_unread")) and not chat_window_open,
                 "latest_status": latest_status,
+                "suppress_status_dot": chat_window_open,
                 "subtitle": (
                     "从当前会话继续对话"
                     if not chat.get("empty")
@@ -725,18 +771,26 @@ class BubbleWindowAPI:
 
     def _clear_proactive_attention(self) -> None:
         self._proactive.acknowledge()
-        self._notification.acknowledge()
+        try:
+            bubble = self._config.bubble_mode
+            chat = self._chat_bridge.get_conversation_overview(
+                summary_count=bubble.summary_count,
+                session_limit=3,
+            )
+        except Exception:
+            logger.debug("读取 Bubble 当前会话用于确认通知失败", exc_info=True)
+            chat = None
+        self._notification.acknowledge(chat)
 
     def send_quick_message(self, text: str) -> Dict[str, Any]:
         return self._chat_bridge.send_quick_message(text)
 
     def toggle_chat(self) -> Dict[str, Any]:
-        from apps.shell.chat_window import is_chat_window_open, toggle_chat_window
+        from apps.shell.chat_window import open_chat_window
 
         self._clear_proactive_attention()
-        was_open = is_chat_window_open()
-        open_after_toggle = toggle_chat_window(self._runtime)
-        return {"ok": was_open or open_after_toggle, "open": open_after_toggle}
+        opened = open_chat_window(self._runtime)
+        return {"ok": opened, "open": opened}
 
     def open_chat(self) -> Dict[str, Any]:
         from apps.shell.chat_window import open_chat_window
@@ -861,6 +915,35 @@ class BubbleWindowAPI:
         self._pointer_dragging = bool(is_dragging)
         return {"ok": True}
 
+    def snap_to_edge(
+        self,
+        screen_x: float,
+        screen_y: float,
+        client_x: float,
+        client_y: float,
+        width: float,
+        height: float,
+    ) -> Dict[str, Any]:
+        if not self._config.bubble_mode.edge_snap:
+            return {"ok": True, "snapped": False, "reason": "disabled"}
+        if self._bubble_window is None or _is_window_probably_closed(self._bubble_window):
+            return {"ok": False, "snapped": False, "error": "Bubble 窗口不可用"}
+
+        launcher_size = _resolve_launcher_size(self._config.bubble_mode.width, self._config.bubble_mode.height)
+        window_width = int(width) if width and width > 0 else launcher_size
+        window_height = int(height) if height and height > 0 else launcher_size
+        current_x = float(screen_x) - float(client_x)
+        current_y = float(screen_y) - float(client_y)
+        target_x, target_y = _snap_bubble_position(
+            current_x,
+            current_y,
+            window_width,
+            window_height,
+        )
+        if _move_window(self._bubble_window, target_x, target_y):
+            return {"ok": True, "snapped": True, "x": target_x, "y": target_y}
+        return {"ok": False, "snapped": False, "error": "当前窗口后端不支持移动窗口"}
+
     def is_pointer_interactive(self, width: float, height: float, x: float, y: float) -> bool:
         if self._context_menu_open or self._pointer_dragging:
             return True
@@ -905,6 +988,100 @@ def _resolve_launcher_size(width: int, height: int) -> int:
     return max(_MIN_LAUNCHER_SIZE, min(_MAX_LAUNCHER_SIZE, int(raw)))
 
 
+def _clamp(value: float, lower: float, upper: float) -> float:
+    if upper < lower:
+        return lower
+    return max(lower, min(upper, value))
+
+
+def _screen_work_area() -> dict[str, int]:
+    try:
+        from apps.shell.native_window import get_primary_screen_work_area
+
+        return get_primary_screen_work_area()
+    except Exception:
+        return {"x": 0, "y": 0, "width": 1440, "height": 900}
+
+
+def _resolve_launcher_position(
+    config: "AppConfig",
+    launcher_size: int,
+    work_area: dict[str, int] | None = None,
+) -> tuple[int, int]:
+    bubble = config.bubble_mode
+    area = work_area or _screen_work_area()
+    origin_x = int(area.get("x", 0))
+    origin_y = int(area.get("y", 0))
+    screen_width = max(launcher_size, int(area.get("width", 0) or 0))
+    screen_height = max(launcher_size, int(area.get("height", 0) or 0))
+    x_percent = _clamp(float(bubble.position_x_percent), 0.0, 1.0)
+    y_percent = _clamp(float(bubble.position_y_percent), 0.0, 1.0)
+    usable_width = max(0, screen_width - launcher_size - (_BUBBLE_SCREEN_MARGIN * 2))
+    usable_height = max(0, screen_height - launcher_size - (_BUBBLE_SCREEN_MARGIN * 2))
+    x = origin_x + _BUBBLE_SCREEN_MARGIN + round(usable_width * x_percent)
+    y = origin_y + _BUBBLE_SCREEN_MARGIN + round(usable_height * y_percent)
+    return int(x), int(y)
+
+
+def _snap_bubble_position(
+    current_x: float,
+    current_y: float,
+    width: int,
+    height: int,
+    work_area: dict[str, int] | None = None,
+) -> tuple[int, int]:
+    area = work_area or _screen_work_area()
+    origin_x = int(area.get("x", 0))
+    origin_y = int(area.get("y", 0))
+    screen_width = max(width, int(area.get("width", 0) or 0))
+    screen_height = max(height, int(area.get("height", 0) or 0))
+    left = origin_x + _BUBBLE_SCREEN_MARGIN
+    right = origin_x + screen_width - width - _BUBBLE_SCREEN_MARGIN
+    top = origin_y + _BUBBLE_SCREEN_MARGIN
+    bottom = origin_y + screen_height - height - _BUBBLE_SCREEN_MARGIN
+    clamped_x = _clamp(current_x, left, right)
+    clamped_y = _clamp(current_y, top, bottom)
+    distances = {
+        "left": abs(clamped_x - left),
+        "right": abs(clamped_x - right),
+        "top": abs(clamped_y - top),
+        "bottom": abs(clamped_y - bottom),
+    }
+    edge = min(distances, key=lambda name: distances[name])
+    if edge == "left":
+        clamped_x = left
+    elif edge == "right":
+        clamped_x = right
+    elif edge == "top":
+        clamped_y = top
+    else:
+        clamped_y = bottom
+    return int(round(clamped_x)), int(round(clamped_y))
+
+
+def _move_window(window: Any, x: int, y: int) -> bool:
+    for method_name in ("move", "move_to"):
+        method = getattr(window, method_name, None)
+        if callable(method):
+            try:
+                method(int(x), int(y))
+                return True
+            except Exception as exc:
+                logger.debug("移动 Bubble 窗口失败: %s", exc)
+                return False
+    return False
+
+
+def _is_chat_window_open_for_notification() -> bool:
+    try:
+        from apps.shell.chat_window import is_chat_window_open
+
+        return is_chat_window_open()
+    except Exception:
+        logger.debug("读取 Chat Window 打开状态失败", exc_info=True)
+        return False
+
+
 def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
     """运行 Bubble 模式（阻塞主线程）。"""
     logger.info("启动 Bubble 模式")
@@ -913,14 +1090,15 @@ def run(runtime: "HermesRuntime", config: "AppConfig") -> None:
 
         bubble = config.bubble_mode
         launcher_size = _resolve_launcher_size(bubble.width, bubble.height)
+        position_x, position_y = _resolve_launcher_position(config, launcher_size)
         api = BubbleWindowAPI(runtime, config)
         win = webview.create_window(
             title="Hermes-Yachiyo Bubble",
             html=_render_bubble_html(config),
             width=launcher_size,
             height=launcher_size,
-            x=bubble.position_x,
-            y=bubble.position_y,
+            x=position_x,
+            y=position_y,
             resizable=False,
             on_top=bubble.always_on_top,
             js_api=api,

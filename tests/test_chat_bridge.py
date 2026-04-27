@@ -7,7 +7,14 @@ from apps.core.chat_store import ChatStore
 from apps.core.state import AppState
 from apps.shell.chat_bridge import ChatBridge, _truncate
 from apps.shell.config import AppConfig
-from apps.shell.modes.bubble import BubbleWindowAPI, _BUBBLE_HTML, _BUBBLE_MENU_HTML, _render_bubble_html
+from apps.shell.modes.bubble import (
+    BubbleWindowAPI,
+    _BUBBLE_HTML,
+    _BUBBLE_MENU_HTML,
+    _render_bubble_html,
+    _resolve_launcher_position,
+    _snap_bubble_position,
+)
 import apps.shell.modes.live2d as _live2d_mod
 from apps.shell.modes.live2d import Live2DWindowAPI, _LIVE2D_HTML, _render_live2d_html
 from packages.protocol.enums import TaskStatus
@@ -327,6 +334,7 @@ def test_bubble_html_keeps_idle_polling_for_cross_mode_updates():
     assert "bubble-launcher" in _BUBBLE_HTML
     assert "toggle_chat" in _BUBBLE_HTML
     assert "set_dragging" in _BUBBLE_HTML
+    assert "snap_to_edge" in _BUBBLE_HTML
     assert "open_context_menu" in _BUBBLE_HTML
     assert "close_context_menu" in _BUBBLE_HTML
     assert "normalizedStatusLabel" in _BUBBLE_HTML
@@ -338,13 +346,15 @@ def test_bubble_html_keeps_idle_polling_for_cross_mode_updates():
 
 
 def test_bubble_status_dot_visible_states_are_explicit():
+    assert "const showDot = bubble.show_unread_dot !== false && !bubble.suppress_status_dot;" in _BUBBLE_HTML
     assert "const hasUnread = showDot && !!bubble.has_attention;" in _BUBBLE_HTML
+    assert "const unreadStatus = String(unreadMessage.status || '');" in _BUBBLE_HTML
     assert "if (hasUnread)" in _BUBBLE_HTML
     assert "dotClass += ' visible attention';" in _BUBBLE_HTML
+    assert "dotClass += ' visible completed';" in _BUBBLE_HTML
+    assert "dotClass += ' visible failed';" in _BUBBLE_HTML
     assert "status === 'processing'" in _BUBBLE_HTML
     assert "dotClass += ' visible processing';" in _BUBBLE_HTML
-    assert "status === 'failed'" in _BUBBLE_HTML
-    assert "dotClass += ' visible failed';" in _BUBBLE_HTML
     assert "dotClass += ' ' + status;" in _BUBBLE_HTML
 
 
@@ -408,6 +418,98 @@ def test_bubble_context_menu_api_creates_separate_window(tmp_path, monkeypatch):
         assert api.close_context_menu()["ok"] is True
         assert webview.window.destroy_calls == 1
         assert api._context_menu_open is False
+    finally:
+        store.close()
+
+
+def test_bubble_launcher_click_focuses_existing_chat_window(tmp_path, monkeypatch):
+    _, runtime, store = _make_bridge(tmp_path)
+    calls: list[object] = []
+    monkeypatch.setattr(
+        "apps.shell.chat_window.open_chat_window",
+        lambda passed_runtime: calls.append(passed_runtime) or True,
+    )
+    try:
+        result = BubbleWindowAPI(runtime, AppConfig()).toggle_chat()
+
+        assert result == {"ok": True, "open": True}
+        assert calls == [runtime]
+    finally:
+        store.close()
+
+
+def test_live2d_launcher_click_focuses_existing_chat_window(tmp_path, monkeypatch):
+    _, runtime, store = _make_bridge(tmp_path)
+    calls: list[object] = []
+    monkeypatch.setattr(
+        "apps.shell.chat_window.open_chat_window",
+        lambda passed_runtime: calls.append(passed_runtime) or True,
+    )
+    try:
+        result = Live2DWindowAPI(runtime, AppConfig(display_mode="live2d")).toggle_chat()
+
+        assert result == {"ok": True, "open": True}
+        assert calls == [runtime]
+    finally:
+        store.close()
+
+
+def test_bubble_default_position_uses_bottom_right_percent():
+    config = AppConfig()
+
+    x, y = _resolve_launcher_position(
+        config,
+        112,
+        {"x": 0, "y": 0, "width": 1000, "height": 800},
+    )
+
+    assert (x, y) == (864, 664)
+
+
+def test_bubble_snap_position_targets_nearest_screen_edge():
+    assert _snap_bubble_position(
+        760,
+        260,
+        112,
+        112,
+        {"x": 0, "y": 0, "width": 1000, "height": 800},
+    ) == (864, 260)
+    assert _snap_bubble_position(
+        320,
+        40,
+        112,
+        112,
+        {"x": 0, "y": 0, "width": 1000, "height": 800},
+    ) == (320, 24)
+
+
+def test_bubble_snap_api_moves_window_when_enabled(tmp_path, monkeypatch):
+    class _Window:
+        closed = False
+
+        def __init__(self):
+            self.moves = []
+
+        def move(self, x, y):
+            self.moves.append((x, y))
+
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    config = AppConfig()
+    api = BubbleWindowAPI(runtime, config)
+    window = _Window()
+    api._bubble_window = window
+    try:
+        monkeypatch.setattr(
+            "apps.shell.modes.bubble._screen_work_area",
+            lambda: {"x": 0, "y": 0, "width": 1000, "height": 800},
+        )
+
+        result = api.snap_to_edge(850, 320, 20, 30, 112, 112)
+
+        assert result["ok"] is True
+        assert result["snapped"] is True
+        assert window.moves == [(864, 290)]
     finally:
         store.close()
 
@@ -775,6 +877,102 @@ def test_bubble_view_marks_only_new_assistant_reply_as_unread(tmp_path):
         acknowledged = api.get_bubble_view()
         assert acknowledged["notification"]["has_unread"] is False
         assert acknowledged["bubble"]["has_attention"] is False
+    finally:
+        store.close()
+
+
+def test_bubble_acknowledged_failed_result_hides_status_dot(tmp_path):
+    _, runtime, store = _make_bridge(tmp_path)
+    try:
+        runtime.chat_session.add_assistant_message("历史失败", error="boom")
+        api = BubbleWindowAPI(runtime, AppConfig())
+
+        initial = api.get_bubble_view()
+        runtime.chat_session.add_assistant_message("新的失败", error="again")
+        failed = api.get_bubble_view()
+
+        assert initial["bubble"]["latest_status"] == "ready"
+        assert initial["bubble"]["has_attention"] is False
+        assert failed["bubble"]["latest_status"] == "failed"
+        assert failed["bubble"]["has_attention"] is True
+
+        api._clear_proactive_attention()
+        acknowledged = api.get_bubble_view()
+
+        assert acknowledged["notification"]["has_unread"] is False
+        assert acknowledged["bubble"]["has_attention"] is False
+        assert acknowledged["bubble"]["latest_status"] == "ready"
+    finally:
+        store.close()
+
+
+def test_bubble_hides_status_dot_when_chat_window_open(tmp_path, monkeypatch):
+    _, runtime, store = _make_bridge(tmp_path)
+    try:
+        runtime.chat_session.add_assistant_message("历史回复")
+        api = BubbleWindowAPI(runtime, AppConfig())
+        api.get_bubble_view()
+
+        runtime.chat_session.add_assistant_message("新回复")
+        monkeypatch.setattr(
+            "apps.shell.modes.bubble._is_chat_window_open_for_notification",
+            lambda: True,
+        )
+
+        view = api.get_bubble_view()
+
+        assert view["notification"]["has_unread"] is False
+        assert view["bubble"]["has_attention"] is False
+        assert view["bubble"]["suppress_status_dot"] is True
+        assert view["bubble"]["latest_status"] == "ready"
+
+        monkeypatch.setattr(
+            "apps.shell.modes.bubble._is_chat_window_open_for_notification",
+            lambda: False,
+        )
+        closed_view = api.get_bubble_view()
+
+        assert closed_view["notification"]["has_unread"] is False
+        assert closed_view["bubble"]["has_attention"] is False
+    finally:
+        store.close()
+
+
+def test_bubble_processing_survives_attention_acknowledgement(tmp_path):
+    _, runtime, store = _make_bridge(tmp_path)
+    try:
+        api = BubbleWindowAPI(runtime, AppConfig())
+        sent = api.send_quick_message("慢任务")
+        runtime.state.update_task_status(sent["task_id"], TaskStatus.RUNNING)
+
+        processing = api.get_bubble_view()
+        api._clear_proactive_attention()
+        acknowledged = api.get_bubble_view()
+
+        assert processing["bubble"]["latest_status"] == "processing"
+        assert processing["bubble"]["has_attention"] is False
+        assert acknowledged["bubble"]["latest_status"] == "processing"
+        assert acknowledged["bubble"]["has_attention"] is False
+    finally:
+        store.close()
+
+
+def test_bubble_processing_dot_is_suppressed_when_chat_window_open(tmp_path, monkeypatch):
+    _, runtime, store = _make_bridge(tmp_path)
+    try:
+        api = BubbleWindowAPI(runtime, AppConfig())
+        sent = api.send_quick_message("慢任务")
+        runtime.state.update_task_status(sent["task_id"], TaskStatus.RUNNING)
+        monkeypatch.setattr(
+            "apps.shell.modes.bubble._is_chat_window_open_for_notification",
+            lambda: True,
+        )
+
+        view = api.get_bubble_view()
+
+        assert view["bubble"]["latest_status"] == "processing"
+        assert view["bubble"]["has_attention"] is False
+        assert view["bubble"]["suppress_status_dot"] is True
     finally:
         store.close()
 

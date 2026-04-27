@@ -7,6 +7,9 @@ Bubble / Live2D 两种桌面入口统一通过此窗口进入聊天。
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
+import sys
 import threading
 from typing import TYPE_CHECKING, Any, Dict
 
@@ -49,14 +52,25 @@ def _is_window_probably_closed(window: Any) -> bool:
 def _focus_chat_window_instance(window: Any) -> bool:
     if _is_window_probably_closed(window):
         return False
+    for method_name in ("restore", "show", "bring_to_front", "focus"):
+        method = getattr(window, method_name, None)
+        if callable(method):
+            try:
+                method()
+            except Exception as exc:
+                logger.debug("调用聊天窗口 %s 失败: %s", method_name, exc)
     try:
-        window.show()
         window.on_top = True
         window.on_top = False
-        return True
     except Exception as exc:
-        logger.debug("聚焦聊天窗口失败: %s", exc)
-        return False
+        logger.debug("切换聊天窗口置顶状态失败: %s", exc)
+    try:
+        from apps.shell.native_window import focus_macos_window
+
+        focus_macos_window(title="Yachiyo - 对话")
+    except Exception as exc:
+        logger.debug("原生聚焦聊天窗口失败: %s", exc)
+    return True
 
 
 class ChatWindowAPI:
@@ -74,6 +88,18 @@ class ChatWindowAPI:
 
     def get_session_info(self) -> Dict[str, Any]:
         return self._chat_api.get_session_info()
+
+    def copy_text(self, text: str) -> Dict[str, Any]:
+        """复制文本到系统剪贴板。"""
+        value = "" if text is None else str(text)
+        if not value:
+            return {"ok": False, "error": "没有可复制内容"}
+        try:
+            _copy_text_to_clipboard(value)
+            return {"ok": True}
+        except Exception as exc:
+            logger.debug("复制到系统剪贴板失败: %s", exc)
+            return {"ok": False, "error": "复制失败"}
 
     def clear_session(self) -> Dict[str, Any]:
         return self._chat_api.clear_session()
@@ -140,6 +166,29 @@ class ChatWindowAPI:
         except Exception as exc:
             logger.error("切换会话失败: %s", exc)
             return {"ok": False, "error": str(exc)}
+
+
+def _copy_text_to_clipboard(text: str) -> None:
+    if sys.platform == "darwin":
+        subprocess.run(["pbcopy"], input=text, text=True, check=True)
+        return
+    if sys.platform == "win32":
+        subprocess.run(["clip"], input=text, text=True, check=True)
+        return
+    for command in (("wl-copy",), ("xclip", "-selection", "clipboard"), ("xsel", "--clipboard", "--input")):
+        if shutil.which(command[0]):
+            subprocess.run(list(command), input=text, text=True, check=True)
+            return
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        root.clipboard_clear()
+        root.clipboard_append(text)
+        root.update()
+    finally:
+        root.destroy()
 
 
 def open_chat_window(runtime: "HermesRuntime") -> bool:
@@ -278,6 +327,8 @@ _CHAT_HTML = r"""
             display: flex;
             flex-direction: column;
             gap: 10px;
+            user-select: text;
+            -webkit-user-select: text;
         }
         .msg {
             padding: 10px 12px;
@@ -287,6 +338,8 @@ _CHAT_HTML = r"""
             max-width: 88%;
             word-break: break-word;
             white-space: normal;
+            user-select: text;
+            -webkit-user-select: text;
         }
         .msg.user {
             background: #3a4a7a;
@@ -309,7 +362,61 @@ _CHAT_HTML = r"""
         .msg .role {
             font-size: 0.72em;
             color: #888;
+        }
+        .msg-header {
+            align-items: center;
+            display: flex;
+            gap: 10px;
+            justify-content: space-between;
             margin-bottom: 3px;
+        }
+        .message-actions {
+            display: inline-flex;
+            flex-shrink: 0;
+            gap: 4px;
+            position: relative;
+            z-index: 2;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        .message-action {
+            align-items: center;
+            appearance: none;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            color: #aeb8c8;
+            cursor: pointer;
+            display: inline-grid;
+            font-size: 0.72em;
+            height: 24px;
+            justify-content: center;
+            line-height: 1.3;
+            padding: 0;
+            pointer-events: auto;
+            width: 28px;
+        }
+        .message-action:hover {
+            background: rgba(100, 149, 237, 0.18);
+            border-color: rgba(156, 188, 255, 0.38);
+            color: #d8e3ff;
+        }
+        .message-action.copied {
+            background: rgba(144, 238, 144, 0.12);
+            border-color: rgba(144, 238, 144, 0.4);
+            color: #90ee90;
+        }
+        .message-action svg {
+            display: block;
+            height: 15px;
+            pointer-events: none;
+            width: 15px;
+        }
+        .msg .content,
+        .markdown,
+        .markdown * {
+            user-select: text;
+            -webkit-user-select: text;
         }
         .msg .content { white-space: normal; }
         .markdown p { margin: 0 0 0.75em; }
@@ -492,11 +599,14 @@ const POLL_INTERVAL_MS = 500;
 const TYPE_BASE_CHARS_PER_SECOND = 85;
 const TYPE_MAX_CHARS_PER_SECOND = 360;
 const SCROLL_BOTTOM_THRESHOLD = 12;
+const COPY_FEEDBACK_MS = 1500;
 let typewriterFrame = null;
 let typewriterLastTs = 0;
 let stickToBottom = true;
 let lastMessageScrollTop = 0;
 const messageRenderState = new Map();
+const messageContentById = new Map();
+const copiedMessageUntilById = new Map();
 
 async function sendMessage() {
     if (sending) return;
@@ -560,6 +670,7 @@ function renderMessages(msgs) {
     const visibleIds = new Set();
     for (const m of msgs) {
         visibleIds.add(m.id);
+        messageContentById.set(m.id, String(m.content || ''));
         const label = m.role === 'user' ? '你' : (m.role === 'assistant' ? 'Yachiyo' : '系统');
         const isProcessing = m.status === 'processing';
         const sc = m.status === 'failed' ? 'error' : (isProcessing ? 'processing' : (m.status === 'pending' ? 'pending' : ''));
@@ -578,12 +689,20 @@ function renderMessages(msgs) {
         }
 
         html += '<div class="msg ' + m.role + ' ' + sc + '">';
+        html += '<div class="msg-header">';
         html += '<div class="role">' + label + suffix + '</div>';
+        html += '<div class="message-actions">';
+        html += renderCopyButton(m.id);
+        html += '</div>';
+        html += '</div>';
         html += '<div class="content markdown" data-message-id="' + escapeHtml(m.id) + '">' + displayContent + '</div>';
         html += '</div>';
     }
     for (const id of Array.from(messageRenderState.keys())) {
         if (!visibleIds.has(id)) messageRenderState.delete(id);
+    }
+    for (const id of Array.from(messageContentById.keys())) {
+        if (!visibleIds.has(id)) messageContentById.delete(id);
     }
     container.innerHTML = html;
     if (shouldScroll) {
@@ -746,6 +865,93 @@ function sanitizeMarkdownUrl(url) {
     return '';
 }
 
+function copyIconSvg() {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+}
+
+function checkIconSvg() {
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg>';
+}
+
+function isCopyFeedbackActive(id) {
+    const until = copiedMessageUntilById.get(id) || 0;
+    if (until <= Date.now()) {
+        copiedMessageUntilById.delete(id);
+        return false;
+    }
+    return true;
+}
+
+function renderCopyButton(id) {
+    const copied = isCopyFeedbackActive(id);
+    const className = copied ? 'message-action copied' : 'message-action';
+    const title = copied ? '已复制' : '复制内容';
+    return '<button type="button" class="' + className + '" data-copy-message-id="' + escapeHtml(id) + '" title="' + title + '" aria-label="' + title + '">' + (copied ? checkIconSvg() : copyIconSvg()) + '</button>';
+}
+
+function setCopyFeedback(id) {
+    copiedMessageUntilById.set(id, Date.now() + COPY_FEEDBACK_MS);
+    updateCopyButtonIcon(id, true);
+    setTimeout(function() {
+        if (!isCopyFeedbackActive(id)) updateCopyButtonIcon(id, false);
+    }, COPY_FEEDBACK_MS + 40);
+}
+
+function updateCopyButtonIcon(id, copied) {
+    const button = document.querySelector('[data-copy-message-id="' + cssEscape(id) + '"]');
+    if (!button) return;
+    button.classList.toggle('copied', copied);
+    button.title = copied ? '已复制' : '复制内容';
+    button.setAttribute('aria-label', button.title);
+    button.innerHTML = copied ? checkIconSvg() : copyIconSvg();
+}
+
+async function copyMessage(id) {
+    const text = messageContentById.get(id) || '';
+    if (!text) {
+        setStatus('没有可复制内容');
+        return;
+    }
+    try {
+        await writeClipboard(text);
+        setCopyFeedback(id);
+        setStatus('已复制');
+    } catch(e) {
+        setStatus('❌ 复制失败');
+    }
+}
+
+async function writeClipboard(text) {
+    if (window.pywebview && window.pywebview.api && window.pywebview.api.copy_text) {
+        try {
+            const r = await window.pywebview.api.copy_text(text);
+            if (r && r.ok) return;
+        } catch(e) {}
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return;
+        } catch(e) {}
+    }
+    fallbackCopyText(text);
+}
+
+function fallbackCopyText(text) {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.left = '-9999px';
+    area.style.top = '0';
+    document.body.appendChild(area);
+    area.focus();
+    area.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(area);
+    if (!ok) throw new Error('copy failed');
+}
+
 function renderAssistantContent(m) {
     if (!m.content) {
         if (!messageRenderState.has(m.id)) {
@@ -844,6 +1050,35 @@ function bindMessageScroll() {
         }
         lastMessageScrollTop = currentTop;
     }, { passive: true });
+}
+
+function bindMessageActions() {
+    const container = document.getElementById('messages');
+    if (!container) return;
+
+    function findCopyButton(event) {
+        const target = event.target;
+        if (!target || !target.closest) return null;
+        const button = target.closest('[data-copy-message-id]');
+        return button && container.contains(button) ? button : null;
+    }
+
+    function stopButtonSelection(event) {
+        const button = findCopyButton(event);
+        if (!button) return;
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    container.addEventListener('pointerdown', stopButtonSelection);
+    container.addEventListener('mousedown', stopButtonSelection);
+    container.addEventListener('click', function(event) {
+        const button = findCopyButton(event);
+        if (!button) return;
+        event.preventDefault();
+        event.stopPropagation();
+        copyMessage(button.getAttribute('data-copy-message-id') || '');
+    });
 }
 
 function setStatus(t) {
@@ -953,6 +1188,7 @@ async function switchSession(sessionId) {
 document.addEventListener('DOMContentLoaded', function() {
     setTimeout(function() {
         bindMessageScroll();
+        bindMessageActions();
         loadExecutor();
         loadSessions();
         refreshMessages();
