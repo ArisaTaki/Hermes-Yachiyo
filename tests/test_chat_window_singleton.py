@@ -59,6 +59,22 @@ class _WindowStub:
         self.destroyed = True
 
 
+class _RaisingEventHookStub(_EventHookStub):
+    def __iadd__(self, _handler):
+        raise RuntimeError("bind failed")
+
+
+class _RaisingEventsStub(_EventsStub):
+    def __init__(self) -> None:
+        self.closed = _RaisingEventHookStub()
+
+
+class _WindowWithRaisingClosedEvent(_WindowStub):
+    def __init__(self) -> None:
+        super().__init__()
+        self.events = _RaisingEventsStub()
+
+
 class _WebviewStub:
     def __init__(self) -> None:
         self.create_calls = 0
@@ -133,6 +149,7 @@ def test_chat_window_reuses_live_window_and_clears_on_closed_event(monkeypatch):
 def test_chat_window_focus_failure_does_not_create_blank_duplicate(monkeypatch):
     webview = _patch_webview(monkeypatch)
     runtime = _RuntimeStub()
+    monkeypatch.setattr(chat_window, "_focus_native_chat_window", lambda _window: False)
 
     assert chat_window.open_chat_window(runtime) is True
     first = webview.windows[0]
@@ -141,6 +158,36 @@ def test_chat_window_focus_failure_does_not_create_blank_duplicate(monkeypatch):
     assert chat_window.open_chat_window(runtime) is True
     assert webview.create_calls == 1
     assert chat_window.is_chat_window_open() is True
+
+
+def test_chat_window_native_focus_failure_uses_show_focus_fallback(monkeypatch):
+    webview = _patch_webview(monkeypatch)
+    runtime = _RuntimeStub()
+
+    assert chat_window.open_chat_window(runtime) is True
+    first = webview.windows[0]
+    monkeypatch.setattr(chat_window, "_focus_native_chat_window", lambda _window: False)
+
+    assert chat_window.open_chat_window(runtime) is True
+    assert webview.create_calls == 1
+    assert first.show_calls == 1
+    assert first.focus_calls == 1
+
+
+def test_chat_window_recreates_when_native_and_fallback_focus_fail(monkeypatch):
+    webview = _patch_webview(monkeypatch)
+    runtime = _RuntimeStub()
+
+    assert chat_window.open_chat_window(runtime) is True
+    first = webview.windows[0]
+    monkeypatch.setattr(chat_window, "_focus_native_chat_window", lambda _window: False)
+    first.show = lambda: (_ for _ in ()).throw(RuntimeError("show failed"))
+    first.focus = lambda: (_ for _ in ()).throw(RuntimeError("focus failed"))
+
+    assert chat_window._focus_chat_window_instance(first) is False
+    assert chat_window.open_chat_window(runtime) is True
+    assert webview.create_calls == 2
+    assert chat_window._chat_window is webview.windows[1]
 
 
 def test_chat_window_does_not_reenter_creation(monkeypatch):
@@ -216,3 +263,38 @@ def test_close_stale_window_is_noop(monkeypatch):
     assert chat_window.close_chat_window() is False
     assert stale.destroy_calls == 0
     assert chat_window.is_chat_window_open() is False
+
+
+def test_open_chat_window_returns_false_when_create_window_raises(monkeypatch):
+    webview = _patch_webview(monkeypatch)
+    runtime = _RuntimeStub()
+
+    def _raise_create(**_kwargs):
+        webview.create_calls += 1
+        raise RuntimeError("create failed")
+
+    webview.create_window = _raise_create
+
+    assert chat_window.open_chat_window(runtime) is False
+    assert webview.create_calls == 1
+    assert chat_window._chat_window is None
+    assert chat_window._chat_window_creating is False
+
+
+def test_open_chat_window_returns_false_and_cleans_singleton_when_closed_bind_raises(monkeypatch):
+    webview = _patch_webview(monkeypatch)
+    runtime = _RuntimeStub()
+    created = _WindowWithRaisingClosedEvent()
+
+    def _create_window(**_kwargs):
+        webview.create_calls += 1
+        webview.windows.append(created)
+        return created
+
+    webview.create_window = _create_window
+
+    assert chat_window.open_chat_window(runtime) is False
+    assert webview.create_calls == 1
+    assert created.destroy_calls == 1
+    assert chat_window._chat_window is None
+    assert chat_window._chat_window_creating is False

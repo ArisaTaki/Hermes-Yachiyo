@@ -1080,10 +1080,8 @@ _STATUS_HTML = """
             bsEl.textContent = bridgeStateLabels[d.bridge.state] || d.bridge.state;
             bsEl.className = 'value' + (d.bridge.state === 'running' ? ' ok' : d.bridge.state === 'failed' ? ' warn' : '');
             document.getElementById('s-bridge-enabled').checked = d.bridge.enabled;
-            const bhEl = document.getElementById('s-bridge-host');
-            if (bhEl && document.activeElement !== bhEl && !hasPendingCommonSetting('bridge_host')) bhEl.value = d.bridge.host;
-            const bpEl = document.getElementById('s-bridge-port');
-            if (bpEl && document.activeElement !== bpEl && !hasPendingCommonSetting('bridge_port')) bpEl.value = d.bridge.port;
+            setControlValue('s-bridge-host', 'bridge_host', d.bridge.host || '');
+            setControlValue('s-bridge-port', 'bridge_port', d.bridge.port);
             document.getElementById('s-bridge-url').textContent = d.bridge.url;
             // 运行地址 vs 保存地址
             const bootRow = document.getElementById('s-bridge-boot-row');
@@ -1163,10 +1161,8 @@ _STATUS_HTML = """
             }
             const beEl = document.getElementById('s-bridge-enabled');
             if (beEl) beEl.checked = state.bridge.enabled;
-            const bhEl = document.getElementById('s-bridge-host');
-            if (bhEl && document.activeElement !== bhEl && !hasPendingCommonSetting('bridge_host')) bhEl.value = state.bridge.host;
-            const bpEl = document.getElementById('s-bridge-port');
-            if (bpEl && document.activeElement !== bpEl && !hasPendingCommonSetting('bridge_port')) bpEl.value = state.bridge.port;
+            setControlValue('s-bridge-host', 'bridge_host', state.bridge.host || '');
+            setControlValue('s-bridge-port', 'bridge_port', state.bridge.port);
             const buEl = document.getElementById('s-bridge-url');
             if (buEl) buEl.textContent = state.bridge.url;
             // 运行地址 vs 保存地址

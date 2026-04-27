@@ -204,6 +204,10 @@ def test_control_center_html_keeps_chat_window_as_external_full_session():
     assert "onDeferredSettingInput('assistant.persona_prompt'" in _STATUS_HTML
     assert "onDeferredSettingInput('bridge_host'" in _STATUS_HTML
     assert "onDeferredSettingInput('bridge_port'" in _STATUS_HTML
+    assert "setControlValue('s-bridge-host', 'bridge_host', d.bridge.host || '');" in _STATUS_HTML
+    assert "setControlValue('s-bridge-port', 'bridge_port', d.bridge.port);" in _STATUS_HTML
+    assert "setControlValue('s-bridge-host', 'bridge_host', state.bridge.host || '');" in _STATUS_HTML
+    assert "setControlValue('s-bridge-port', 'bridge_port', state.bridge.port);" in _STATUS_HTML
     assert "onSettingChange('display_mode'" in _STATUS_HTML
     assert "窗口模式" not in _STATUS_HTML
     assert "id=\"msg-input\"" not in _STATUS_HTML

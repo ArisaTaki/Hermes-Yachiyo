@@ -550,6 +550,16 @@ def test_live2d_html_keeps_idle_polling_for_cross_mode_updates():
     assert "!!chat.latest_reply && !chat.is_processing" not in _LIVE2D_HTML
 
 
+def test_live2d_default_open_behavior_reapplies_only_when_value_changes():
+    assert "defaultOpenBehaviorApplied" not in _LIVE2D_HTML
+    assert "let lastAppliedDefaultOpenBehavior = null;" in _LIVE2D_HTML
+    assert "if (behavior === lastAppliedDefaultOpenBehavior) return;" in _LIVE2D_HTML
+    assert "lastAppliedDefaultOpenBehavior = behavior;" in _LIVE2D_HTML
+    assert _LIVE2D_HTML.index("applyDefaultOpenBehavior(live2d);") < _LIVE2D_HTML.index(
+        "updateReplyBubble(live2d, chat, proactive, notification, false);"
+    )
+
+
 def test_launcher_modes_do_not_embed_inline_chat_inputs():
     assert "send_quick_message" not in _BUBBLE_HTML
     assert "msg-input" not in _BUBBLE_HTML

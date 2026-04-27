@@ -499,7 +499,7 @@ _LIVE2D_HTML = r"""
     let currentLive2DView = null;
     let replyBubbleManuallyHidden = false;
     let lastReplyBubbleText = '';
-    let defaultOpenBehaviorApplied = false;
+    let lastAppliedDefaultOpenBehavior = null;
     let live2dMouseFollowEnabled = true;
     let lastPointerLocalX = 0;
     let lastPointerLocalY = 0;
@@ -1280,9 +1280,9 @@ _LIVE2D_HTML = r"""
     }
 
     function applyDefaultOpenBehavior(live2d) {
-        if (defaultOpenBehaviorApplied) return;
-        defaultOpenBehaviorApplied = true;
         const behavior = live2d.default_open_behavior || 'reply_bubble';
+        if (behavior === lastAppliedDefaultOpenBehavior) return;
+        lastAppliedDefaultOpenBehavior = behavior;
         if (behavior === 'chat_input') {
             replyBubbleManuallyHidden = true;
             setReplyBubbleVisible(false, '');
@@ -1386,8 +1386,8 @@ _LIVE2D_HTML = r"""
             ((resource.status_label || 'Yachiyo Live2D') + messageHint + '，点击行为：' + (live2d.click_action || 'open_chat'));
 
         renderResourceHint(resource);
-        updateReplyBubble(live2d, chat, proactive, notification, false);
         applyDefaultOpenBehavior(live2d);
+        updateReplyBubble(live2d, chat, proactive, notification, false);
         reportUIRegions();
 
         ensureLive2DRenderer(view);

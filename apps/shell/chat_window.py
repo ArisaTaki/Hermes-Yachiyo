@@ -56,16 +56,16 @@ def _focus_chat_window_instance(window: Any) -> bool:
         return False
     if _focus_native_chat_window(window):
         return True
-    if sys.platform == "darwin":
-        return True
+    focused = False
     for method_name in ("show", "focus"):
         method = getattr(window, method_name, None)
         if callable(method):
             try:
                 method()
+                focused = True
             except Exception as exc:
                 logger.debug("调用聊天窗口 %s 失败: %s", method_name, exc)
-    return True
+    return focused
 
 
 def _focus_native_chat_window(window: Any) -> bool:
@@ -222,6 +222,7 @@ def open_chat_window(runtime: "HermesRuntime") -> bool:
 
         api = ChatWindowAPI(runtime)
         _chat_window_creating = True
+        window = None
         try:
             window = webview.create_window(
                 title=_CHAT_WINDOW_TITLE,
@@ -233,18 +234,27 @@ def open_chat_window(runtime: "HermesRuntime") -> bool:
                 on_top=False,
             )
             _chat_window = window
+
+            def _on_closed():
+                global _chat_window
+                with _chat_window_lock:
+                    if _chat_window is window:
+                        _chat_window = None
+
+            closed_event = getattr(getattr(window, "events", None), "closed", None)
+            if closed_event is not None:
+                closed_event += _on_closed
+        except Exception as exc:
+            logger.error("创建聊天窗口失败: %s", exc)
+            if window is not None:
+                try:
+                    window.destroy()
+                except Exception as destroy_exc:
+                    logger.debug("清理未托管聊天窗口失败: %s", destroy_exc)
+            _chat_window = None
+            return False
         finally:
             _chat_window_creating = False
-
-        def _on_closed():
-            global _chat_window
-            with _chat_window_lock:
-                if _chat_window is window:
-                    _chat_window = None
-
-        closed_event = getattr(getattr(window, "events", None), "closed", None)
-        if closed_event is not None:
-            closed_event += _on_closed
         logger.info("聊天窗口已创建")
         return True
 
