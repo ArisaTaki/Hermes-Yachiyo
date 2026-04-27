@@ -260,6 +260,8 @@ class BubbleModeConfig:
 
     width: int = 112
     height: int = 112
+    position_x_percent: float = 1.0
+    position_y_percent: float = 1.0
     position_x: int = 24
     position_y: int = 24
     always_on_top: bool = True
@@ -283,6 +285,7 @@ class AssistantConfig:
     """共享助手配置。"""
 
     persona_prompt: str = ""
+    user_address: str = ""
 
 
 @dataclass
@@ -550,6 +553,18 @@ def _normalize_config_values(config: AppConfig) -> None:
         {"icon", "summary", "recent_reply"},
         "summary",
     ))
+    config.bubble_mode.position_x_percent = _normalize_float_range(
+        config.bubble_mode.position_x_percent,
+        0.0,
+        1.0,
+        1.0,
+    )
+    config.bubble_mode.position_y_percent = _normalize_float_range(
+        config.bubble_mode.position_y_percent,
+        0.0,
+        1.0,
+        1.0,
+    )
     config.bubble_mode.opacity = _normalize_float_range(config.bubble_mode.opacity, 0.2, 1.0, 0.92)
     config.bubble_mode.proactive_interval_seconds = _normalize_int_range(
         config.bubble_mode.proactive_interval_seconds,
@@ -575,6 +590,7 @@ def _normalize_config_values(config: AppConfig) -> None:
         300,
     )
     config.assistant.persona_prompt = str(config.assistant.persona_prompt or "")
+    config.assistant.user_address = str(config.assistant.user_address or "")
     config.tts.provider = cast(TTSProviderValue, _normalize_literal(config.tts.provider, {"none", "http", "command"}, "none"))
     config.tts.timeout_seconds = _normalize_int_range(config.tts.timeout_seconds, 1, 120, 20)
     config.tts.endpoint = str(config.tts.endpoint or "")

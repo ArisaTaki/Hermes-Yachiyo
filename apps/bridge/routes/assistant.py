@@ -18,7 +18,7 @@ router = APIRouter(tags=["Assistant"])
 _STATUS_KEYWORDS = {"状态", "status", "运行状态", "是否就绪"}
 _SCREEN_KEYWORDS = {"截图", "屏幕", "screen", "screenshot"}
 _WINDOW_KEYWORDS = {"活动窗口", "当前窗口", "窗口", "window"}
-_PROMPT_ORDER = ["persona", "relevant_memory", "current_session", "request"]
+_PROMPT_ORDER = ["persona", "user_address", "relevant_memory", "current_session", "request"]
 
 
 def _assistant_config():
@@ -31,6 +31,7 @@ def _build_profile_response(*, message: str = "") -> AssistantProfileResponse:
     return AssistantProfileResponse(
         ok=True,
         persona_prompt=assistant.persona_prompt,
+        user_address=assistant.user_address,
         memory_enabled=False,
         memory_scope="local_only",
         prompt_order=list(_PROMPT_ORDER),
@@ -51,10 +52,16 @@ def get_assistant_profile() -> AssistantProfileResponse:
 
 @router.patch("/assistant/profile", response_model=AssistantProfileResponse)
 def patch_assistant_profile(req: AssistantProfilePatchRequest) -> AssistantProfileResponse:
-    """更新共享人设 Prompt；记忆事实同步保留为后续本地端能力。"""
+    """更新共享助手资料；记忆事实同步保留为后续本地端能力。"""
     config, assistant = _assistant_config()
+    changed = False
     if req.persona_prompt is not None:
         assistant.persona_prompt = str(req.persona_prompt)
+        changed = True
+    if req.user_address is not None:
+        assistant.user_address = str(req.user_address)
+        changed = True
+    if changed:
         from apps.shell.config import save_config
 
         save_config(config)

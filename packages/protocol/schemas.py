@@ -117,6 +117,7 @@ class AssistantProfilePatchRequest(BaseModel):
     """PATCH /assistant/profile 请求。"""
 
     persona_prompt: str | None = Field(default=None, max_length=4000)
+    user_address: str | None = Field(default=None, max_length=80)
 
 
 class AssistantProfileResponse(BaseModel):
@@ -124,9 +125,16 @@ class AssistantProfileResponse(BaseModel):
 
     ok: bool = True
     persona_prompt: str = ""
+    user_address: str = ""
     memory_enabled: bool = False
     memory_scope: str = "local_only"
     prompt_order: list[str] = Field(
-        default_factory=lambda: ["persona", "relevant_memory", "current_session", "request"]
+        default_factory=lambda: [
+            "persona",
+            "user_address",
+            "relevant_memory",
+            "current_session",
+            "request",
+        ]
     )
     message: str = ""
