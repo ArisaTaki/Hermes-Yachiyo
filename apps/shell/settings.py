@@ -619,7 +619,6 @@ function fieldName(key) {
 
 function configValueName(key) {
     const mapping = {
-        'assistant.persona_prompt': 'assistant_persona_prompt',
         'tts.enabled': 'tts_enabled',
         'tts.provider': 'tts_provider',
         'tts.endpoint': 'tts_endpoint',
@@ -744,6 +743,15 @@ function inputRow(key, label, value, type='text', step='') {
         + ' oninput="updateInputDraft(\\'' + key + '\\', this)"></div>';
 }
 
+function percentRow(key, label, value) {
+    const current = Math.round(num(value, 0) * 100);
+    return '<div class="row"><span class="label">' + label + '</span>'
+    + '<span class="value" style="display:flex;align-items:center;gap:6px;">'
+    + '<input class="input" type="number" min="0" max="100" step="1" value="' + current + '"'
+    + ' oninput="updatePercentDraft(\\'' + key + '\\', this.value)">'
+    + '<span style="color:#888;">%</span></span></div>';
+}
+
 function textareaRow(key, label, value) {
     return '<div class="row"><span class="label">' + label + '</span>'
         + '<textarea class="input textarea" oninput="updateDraftField(\\'' + key + '\\', this.value)">'
@@ -830,6 +838,11 @@ function updateScaleDraft(key, id, value) {
     setDraftField(key, num(value, 1));
 }
 
+function updatePercentDraft(key, value) {
+    const percent = Math.max(0, Math.min(100, num(value, 0)));
+    setDraftField(key, percent / 100);
+}
+
 function actionButton(label, handler, kind='') {
     const kindClass = kind ? ' ' + kind : '';
     return '<button class="action-btn' + kindClass + '" type="button" onclick="' + handler + '()">'
@@ -901,13 +914,14 @@ function renderForm(mode, cfg) {
     let html = '';
 
     if (mode === 'bubble') {
-        html += noteRow('Bubble 聊天窗口固定为点击打开；悬停不会打开或切换聊天窗口。尺寸、位置、置顶和头像保存后需重启当前模式（可用下方“应用并重启应用”）。', 'warn');
+        html += noteRow('Bubble 聊天窗口固定为点击打开；悬停不会打开或切换聊天窗口。尺寸、默认位置、置顶和头像保存后需重启当前模式（可用下方“应用并重启应用”）。', 'warn');
         html += inputRow('bubble_mode.width', '气泡宽度（80-192，需重启当前模式）', cfg.width, 'number');
         html += inputRow('bubble_mode.height', '气泡高度（80-192，需重启当前模式）', cfg.height, 'number');
-        html += inputRow('bubble_mode.position_x', '位置 X（需重启当前模式）', cfg.position_x, 'number');
-        html += inputRow('bubble_mode.position_y', '位置 Y（需重启当前模式）', cfg.position_y, 'number');
+        html += noteRow('默认位置设置使用屏幕百分比：0% 表示左/上边，100% 表示右/下边。默认 100% / 100%，即右下角。', '');
+        html += percentRow('bubble_mode.position_x_percent', '默认位置 X（0-100%，需重启当前模式）', cfg.position_x_percent);
+        html += percentRow('bubble_mode.position_y_percent', '默认位置 Y（0-100%，需重启当前模式）', cfg.position_y_percent);
         html += boolRow('bubble_mode.always_on_top', '窗口置顶（需重启当前模式）', cfg.always_on_top);
-        html += disabledBoolRow('靠边吸附', cfg.edge_snap, '待实现，暂不生效');
+        html += boolRow('bubble_mode.edge_snap', '靠边吸附（拖动结束后吸附最近屏幕边缘）', cfg.edge_snap);
         html += boolRow('bubble_mode.expanded_on_start', '启动后展开提示', cfg.expanded_on_start);
         html += valueRow('展开触发', '点击打开聊天（固定）');
         html += selectRow('bubble_mode.default_display', '默认展示', cfg.default_display, [
@@ -924,7 +938,6 @@ function renderForm(mode, cfg) {
         html += boolRow('bubble_mode.proactive_enabled', '主动对话', cfg.proactive_enabled);
         html += boolRow('bubble_mode.proactive_desktop_watch_enabled', '定期桌面观察', cfg.proactive_desktop_watch_enabled);
         html += inputRow('bubble_mode.proactive_interval_seconds', '观察间隔秒', cfg.proactive_interval_seconds, 'number');
-        html += textareaRow('assistant.persona_prompt', '助手人设 Prompt', cfg.assistant_persona_prompt || '');
     } else if (mode === 'live2d') {
         html += actionRow('资源操作',
             actionButton('选择模型目录', 'chooseLive2DModelPath')
@@ -965,7 +978,6 @@ function renderForm(mode, cfg) {
         html += boolRow('live2d_mode.proactive_enabled', '主动对话', cfg.proactive_enabled);
         html += boolRow('live2d_mode.proactive_desktop_watch_enabled', '定期桌面观察', cfg.proactive_desktop_watch_enabled);
         html += inputRow('live2d_mode.proactive_interval_seconds', '观察间隔秒', cfg.proactive_interval_seconds, 'number');
-        html += textareaRow('assistant.persona_prompt', '助手人设 Prompt', cfg.assistant_persona_prompt || '');
         html += boolRow('tts.enabled', '启用 Live2D TTS', cfg.tts_enabled);
         html += selectRow('tts.provider', 'TTS Provider', cfg.tts_provider, [
             ['none', 'none（关闭）'],

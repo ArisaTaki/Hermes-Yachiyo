@@ -85,6 +85,9 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.window_mode.width > 0
     assert config.bubble_mode.summary_count == 3
     assert config.bubble_mode.avatar_path == str(DEFAULT_BUBBLE_AVATAR_PATH)
+    assert config.bubble_mode.position_x_percent == 1.0
+    assert config.bubble_mode.position_y_percent == 1.0
+    assert config.bubble_mode.edge_snap is True
     assert config.bubble_mode.proactive_enabled is False
     assert config.live2d_mode.idle_motion_group == "Idle"
     assert config.live2d_mode.scale == 1.0
@@ -96,6 +99,7 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.live2d_mode.validate() == ModelState.NOT_CONFIGURED
     assert config.live2d is config.live2d_mode
     assert config.assistant.persona_prompt == ""
+    assert config.assistant.user_address == ""
     assert config.tts.enabled is False
     assert config.tts.provider == "none"
     assert config.tts.endpoint == ""
@@ -171,11 +175,15 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
         {
             "bubble_mode.summary_count": 2,
             "bubble_mode.default_display": "recent_reply",
+            "bubble_mode.position_x_percent": 0.75,
+            "bubble_mode.position_y_percent": 1.0,
             "bubble_mode.opacity": 0.8,
+            "bubble_mode.edge_snap": False,
             "bubble_mode.proactive_enabled": True,
             "bubble_mode.proactive_desktop_watch_enabled": True,
             "bubble_mode.proactive_interval_seconds": 120,
             "assistant.persona_prompt": "你是八千代。",
+            "assistant.user_address": "老师",
             "tts.provider": "command",
             "tts.command": "say {text}",
             "tts.voice": "kyoko",
@@ -186,17 +194,22 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     assert result["ok"] is True
     assert config.bubble_mode.summary_count == 2
     assert config.bubble_mode.default_display == "recent_reply"
+    assert config.bubble_mode.position_x_percent == 0.75
+    assert config.bubble_mode.position_y_percent == 1.0
     assert config.bubble_mode.opacity == 0.8
+    assert config.bubble_mode.edge_snap is False
     assert config.bubble_mode.proactive_enabled is True
     assert config.bubble_mode.proactive_desktop_watch_enabled is True
     assert config.bubble_mode.proactive_interval_seconds == 120
     assert config.assistant.persona_prompt == "你是八千代。"
+    assert config.assistant.user_address == "老师"
     assert config.tts.provider == "command"
     assert config.tts.command == "say {text}"
     assert config.tts.voice == "kyoko"
     assert config.tts.timeout_seconds == 10
     assert result["mode_settings"]["bubble"]["config"]["summary_count"] == 2
-    assert result["mode_settings"]["bubble"]["config"]["assistant"]["persona_prompt"] == "你是八千代。"
+    assert result["mode_settings"]["bubble"]["config"]["position_x_percent"] == 0.75
+    assert "assistant" not in result["mode_settings"]["bubble"]["config"]
 
 
 def test_apply_settings_changes_rejects_invalid_single_field(tmp_path, monkeypatch):
@@ -235,6 +248,18 @@ def test_apply_settings_changes_accepts_expanded_bubble_size_range(tmp_path, mon
     assert config.bubble_mode.width == 192
     assert config.bubble_mode.height == 80
     assert result["effects"]["has_restart_mode"] is True
+
+
+def test_apply_settings_changes_rejects_invalid_bubble_percent_position(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    config = AppConfig()
+
+    result = apply_settings_changes(config, {"bubble_mode.position_x_percent": 1.2})
+
+    assert result["ok"] is False
+    assert config.bubble_mode.position_x_percent == 1.0
+    assert "0-100%" in result["error"]
 
 
 def test_apply_settings_changes_rejects_legacy_bubble_hover_trigger(tmp_path, monkeypatch):
@@ -317,10 +342,13 @@ def test_serialize_mode_settings_returns_separate_sections(monkeypatch, tmp_path
     assert payload["bubble"]["config"]["avatar_path_display"].startswith(
         "apps/shell/assets/avatars/"
     )
+    assert payload["bubble"]["config"]["position_x_percent"] == 1.0
+    assert payload["bubble"]["config"]["position_y_percent"] == 1.0
     assert payload["live2d"]["config"]["model_path_display"] == ""
     assert payload["live2d"]["config"]["resource"]["releases_url"] == LIVE2D_RELEASES_URL
     assert payload["live2d"]["config"]["resource"]["state"] == "not_configured"
-    assert payload["bubble"]["config"]["assistant"]["persona_prompt"] == ""
+    assert "assistant" not in payload["bubble"]["config"]
+    assert "assistant" not in payload["live2d"]["config"]
     assert payload["live2d"]["config"]["tts"]["provider"] == "none"
     assert payload["live2d"]["config"]["tts_timeout_seconds"] == 20
 
@@ -359,11 +387,15 @@ def test_mode_settings_window_does_not_render_common_settings():
     assert "默认导入目录" in _SETTINGS_HTML
     assert "资源下载" in _SETTINGS_HTML
     assert "当前头像资源" in _SETTINGS_HTML
-    assert "助手人设 Prompt" in _SETTINGS_HTML
+    assert "助手人设 Prompt" not in _SETTINGS_HTML
     assert "TTS Provider" in _SETTINGS_HTML
-    assert "待实现，暂不生效" in _SETTINGS_HTML
+    assert "待实现，暂不生效" not in _SETTINGS_HTML
     assert "窗口置顶（需重启当前模式）" in _SETTINGS_HTML
     assert "气泡宽度（80-192，需重启当前模式）" in _SETTINGS_HTML
+    assert "默认位置设置使用屏幕百分比" in _SETTINGS_HTML
+    assert "默认位置 X（0-100%，需重启当前模式）" in _SETTINGS_HTML
+    assert "默认位置 Y（0-100%，需重启当前模式）" in _SETTINGS_HTML
+    assert "靠边吸附（拖动结束后吸附最近屏幕边缘）" in _SETTINGS_HTML
     assert "点击打开聊天（固定）" in _SETTINGS_HTML
     assert "新消息呼吸灯" in _SETTINGS_HTML
     assert "应用并重启应用" in _SETTINGS_HTML
@@ -436,7 +468,7 @@ def test_load_config_clears_legacy_bundled_live2d_path(tmp_path, monkeypatch):
                     "model_name": "八千代辉夜姬",
                     "model_path": str(LEGACY_BUNDLED_LIVE2D_MODEL_DIR),
                 },
-                "assistant": {"persona_prompt": "  八千代  "},
+                "assistant": {"persona_prompt": "  八千代  ", "user_address": "老师"},
                 "tts": {"enabled": True, "provider": "bad", "timeout_seconds": 999},
             },
             ensure_ascii=False,
@@ -449,6 +481,7 @@ def test_load_config_clears_legacy_bundled_live2d_path(tmp_path, monkeypatch):
     assert config.live2d_mode.model_name == ""
     assert config.live2d_mode.model_path == ""
     assert config.assistant.persona_prompt == "  八千代  "
+    assert config.assistant.user_address == "老师"
     assert config.tts.enabled is True
     assert config.tts.provider == "none"
     assert config.tts.timeout_seconds == 20
@@ -480,6 +513,7 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     config.live2d_mode.show_on_all_spaces = False
     config.live2d_mode.mouse_follow_enabled = False
     config.assistant.persona_prompt = "你是八千代。"
+    config.assistant.user_address = "老师"
     config.tts.enabled = True
     config.tts.provider = "http"
     config.tts.endpoint = "http://127.0.0.1:9000/tts"
@@ -494,6 +528,7 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     assert data["live2d_mode"]["show_on_all_spaces"] is False
     assert data["live2d_mode"]["mouse_follow_enabled"] is False
     assert data["assistant"]["persona_prompt"] == "你是八千代。"
+    assert data["assistant"]["user_address"] == "老师"
     assert data["tts"]["enabled"] is True
     assert data["tts"]["provider"] == "http"
     assert data["tts"]["endpoint"] == "http://127.0.0.1:9000/tts"

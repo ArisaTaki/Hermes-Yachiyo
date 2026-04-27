@@ -342,6 +342,13 @@ _STATUS_HTML = """
             width: 160px; outline: none;
         }
         .s-input:focus { border-color: #6495ed; }
+        .s-textarea {
+            background: #3a3a6a; color: #e0e0e0; border: 1px solid #555;
+            border-radius: 4px; padding: 6px 8px; font-size: 0.85em;
+            width: 100%; min-height: 86px; resize: vertical; outline: none;
+            font-family: inherit; line-height: 1.5;
+        }
+        .s-textarea:focus { border-color: #6495ed; }
         .s-toggle {
             position: relative; display: inline-block; width: 38px; height: 20px;
             cursor: pointer;
@@ -364,6 +371,18 @@ _STATUS_HTML = """
         }
         .save-hint.ok { color: #90ee90; }
         .save-hint.err { color: #ff6b6b; }
+        .settings-apply-row {
+            display: flex; align-items: center; justify-content: flex-end;
+            gap: 10px; margin-top: 8px; padding-top: 8px;
+            border-top: 1px solid #3a3a5a;
+        }
+        .settings-apply-row .pending-label { font-size: 0.78em; color: #888; }
+        .settings-apply-row .pending-label.dirty { color: #ffd700; }
+        .settings-apply-btn {
+            background: #4a90d9; color: #fff; border: none; border-radius: 4px;
+            padding: 5px 14px; cursor: pointer; font-size: 0.85em;
+        }
+        .settings-apply-btn:disabled { opacity: 0.45; cursor: default; }
         .effect-hints {
             margin-top: 8px; padding: 8px 10px; border-radius: 6px;
             font-size: 0.82em; line-height: 1.6;
@@ -586,6 +605,21 @@ _STATUS_HTML = """
         </div>
 
         <div class="settings-section">
+            <h4>助手</h4>
+            <div class="settings-row"><span class="label">希望我怎么称呼你</span>
+                <input class="s-input" id="s-assistant-user-address" value="" placeholder="例如：主人 / 老板 / 小林" oninput="onDeferredSettingInput('assistant.user_address', this.value)">
+            </div>
+            <div class="settings-row" style="display:block;">
+                <div class="label" style="margin-bottom:6px;">助手人设 Prompt</div>
+                <textarea class="s-textarea" id="s-assistant-persona" placeholder="例如：你是八千代，语气温和、行动谨慎。" oninput="onDeferredSettingInput('assistant.persona_prompt', this.value)"></textarea>
+            </div>
+            <div class="settings-row" style="border-top:1px solid #3a3a5a;margin-top:6px;padding-top:6px;">
+                <span class="label" style="font-size:0.78em;color:#777;">作用范围</span>
+                <span class="value" style="font-size:0.76em;color:#888;">对 Bubble、Live2D、Chat Window 和 AstrBot 桥接后的 Hermes 调用生效</span>
+            </div>
+        </div>
+
+        <div class="settings-section">
             <h4>模式设置</h4>
             <div class="mode-settings-list">
                 <div class="mode-settings-item">
@@ -612,10 +646,10 @@ _STATUS_HTML = """
                 <label class="s-toggle"><input type="checkbox" id="s-bridge-enabled" onchange="onSettingChange('bridge_enabled', this.checked)"><span class="slider"></span></label>
             </div>
             <div class="settings-row"><span class="label">地址</span>
-                <input class="s-input" id="s-bridge-host" value="" placeholder="127.0.0.1" onchange="onSettingChange('bridge_host', this.value)">
+                <input class="s-input" id="s-bridge-host" value="" placeholder="127.0.0.1" oninput="onDeferredSettingInput('bridge_host', this.value)">
             </div>
             <div class="settings-row"><span class="label">端口</span>
-                <input class="s-input" id="s-bridge-port" type="number" min="1024" max="65535" value="" onchange="onSettingChange('bridge_port', parseInt(this.value))">
+                <input class="s-input" id="s-bridge-port" type="number" min="1024" max="65535" value="" oninput="onDeferredSettingInput('bridge_port', this.value)">
             </div>
             <div class="settings-row"><span class="label">保存地址</span><span class="value" id="s-bridge-url">—</span></div>
             <div class="settings-row" id="s-bridge-boot-row" style="display:none;"><span class="label" style="color:#888;font-size:0.82em;">运行地址</span><span class="value" id="s-bridge-boot-url" style="font-size:0.82em;color:#888;">—</span></div>
@@ -648,6 +682,10 @@ _STATUS_HTML = """
             </div>
             <div class="settings-row"><span class="label">启动最小化</span><span class="value" id="s-app-minimized">—</span></div>
         </div>
+        <div class="settings-apply-row" id="common-settings-apply-row">
+            <span class="pending-label" id="common-settings-pending-label">无待确认修改</span>
+            <button class="settings-apply-btn" id="common-settings-apply-btn" onclick="applyPendingCommonSettings()" disabled>应用共通设置修改</button>
+        </div>
         <div class="save-hint" id="save-hint"></div>
         <div class="effect-hints" id="effect-hints"></div>
     </div>
@@ -659,6 +697,76 @@ _STATUS_HTML = """
     <script>
     let settingsOpen = false;
     let hermesAutoRecheckStarted = false;
+    const pendingCommonSettings = {};
+    const committedCommonSettings = {};
+    const commonSettingLabels = {
+        'assistant.user_address': '用户称呼',
+        'assistant.persona_prompt': '助手人设 Prompt',
+        'bridge_host': 'Bridge 地址',
+        'bridge_port': 'Bridge 端口',
+    };
+
+    function hasPendingCommonSetting(key) {
+        return Object.prototype.hasOwnProperty.call(pendingCommonSettings, key);
+    }
+
+    function padDatePart(value) {
+        return String(value).padStart(2, '0');
+    }
+
+    function formatReadableDateTime(value) {
+        if (!value) return '—';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return date.getFullYear() + '-' + padDatePart(date.getMonth() + 1) + '-' + padDatePart(date.getDate())
+            + ' ' + padDatePart(date.getHours()) + ':' + padDatePart(date.getMinutes()) + ':' + padDatePart(date.getSeconds());
+    }
+
+    function updateCommonSettingsApplyState() {
+        const keys = Object.keys(pendingCommonSettings);
+        const btn = document.getElementById('common-settings-apply-btn');
+        const label = document.getElementById('common-settings-pending-label');
+        if (btn) btn.disabled = keys.length === 0;
+        if (label) {
+            label.classList.toggle('dirty', keys.length > 0);
+            label.textContent = keys.length > 0
+                ? '待确认：' + keys.map(function(key) { return commonSettingLabels[key] || key; }).join('、')
+                : '无待确认修改';
+        }
+    }
+
+    function setControlValue(id, key, value) {
+        committedCommonSettings[key] = normalizedDeferredSettingValue(key, value);
+        const el = document.getElementById(id);
+        if (!el || document.activeElement === el || hasPendingCommonSetting(key)) return;
+        el.value = value || '';
+    }
+
+    function isCommittedCommonSettingValue(key, value) {
+        return normalizedDeferredSettingValue(key, value) === committedCommonSettings[key];
+    }
+
+    function onDeferredSettingInput(key, value) {
+        if (isCommittedCommonSettingValue(key, value)) {
+            delete pendingCommonSettings[key];
+        } else {
+            pendingCommonSettings[key] = value;
+        }
+        updateCommonSettingsApplyState();
+        const hint = document.getElementById('save-hint');
+        if (hint) {
+            hint.textContent = Object.keys(pendingCommonSettings).length > 0 ? '有未确认的共通设置修改' : '已恢复为当前设置值';
+            hint.className = 'save-hint';
+        }
+    }
+
+    function normalizedDeferredSettingValue(key, value) {
+        if (key === 'bridge_port') {
+            const parsed = Number.parseInt(value, 10);
+            return Number.isFinite(parsed) ? parsed : value;
+        }
+        return value;
+    }
 
     function escapeHtml(value) {
         const div = document.createElement('div');
@@ -943,7 +1051,7 @@ _STATUS_HTML = """
             wsEl.textContent = d.workspace.initialized ? '✅ 已初始化' : '⚠️ 未初始化';
             wsEl.className = 'value ' + (d.workspace.initialized ? 'ok' : 'warn');
             document.getElementById('s-ws-path').textContent = d.workspace.path || '—';
-            document.getElementById('s-ws-created').textContent = d.workspace.created_at || '—';
+            document.getElementById('s-ws-created').textContent = formatReadableDateTime(d.workspace.created_at);
 
             // Display
             document.getElementById('s-display-mode').value = d.display.current_mode;
@@ -960,6 +1068,9 @@ _STATUS_HTML = """
                 document.getElementById('s-live2d-summary').textContent = d.mode_settings.live2d.summary;
             }
 
+            setControlValue('s-assistant-persona', 'assistant.persona_prompt', (d.assistant && d.assistant.persona_prompt) || '');
+            setControlValue('s-assistant-user-address', 'assistant.user_address', (d.assistant && d.assistant.user_address) || '');
+
             // Bridge
             const bridgeStateLabels = {
                 'disabled': '⛔ 已禁用', 'enabled_not_started': '⏳ 启动中',
@@ -970,9 +1081,9 @@ _STATUS_HTML = """
             bsEl.className = 'value' + (d.bridge.state === 'running' ? ' ok' : d.bridge.state === 'failed' ? ' warn' : '');
             document.getElementById('s-bridge-enabled').checked = d.bridge.enabled;
             const bhEl = document.getElementById('s-bridge-host');
-            if (document.activeElement !== bhEl) bhEl.value = d.bridge.host;
+            if (bhEl && document.activeElement !== bhEl && !hasPendingCommonSetting('bridge_host')) bhEl.value = d.bridge.host;
             const bpEl = document.getElementById('s-bridge-port');
-            if (document.activeElement !== bpEl) bpEl.value = d.bridge.port;
+            if (bpEl && document.activeElement !== bpEl && !hasPendingCommonSetting('bridge_port')) bpEl.value = d.bridge.port;
             document.getElementById('s-bridge-url').textContent = d.bridge.url;
             // 运行地址 vs 保存地址
             const bootRow = document.getElementById('s-bridge-boot-row');
@@ -1053,9 +1164,9 @@ _STATUS_HTML = """
             const beEl = document.getElementById('s-bridge-enabled');
             if (beEl) beEl.checked = state.bridge.enabled;
             const bhEl = document.getElementById('s-bridge-host');
-            if (bhEl && document.activeElement !== bhEl) bhEl.value = state.bridge.host;
+            if (bhEl && document.activeElement !== bhEl && !hasPendingCommonSetting('bridge_host')) bhEl.value = state.bridge.host;
             const bpEl = document.getElementById('s-bridge-port');
-            if (bpEl && document.activeElement !== bpEl) bpEl.value = state.bridge.port;
+            if (bpEl && document.activeElement !== bpEl && !hasPendingCommonSetting('bridge_port')) bpEl.value = state.bridge.port;
             const buEl = document.getElementById('s-bridge-url');
             if (buEl) buEl.textContent = state.bridge.url;
             // 运行地址 vs 保存地址
@@ -1084,6 +1195,10 @@ _STATUS_HTML = """
         // 设置面板：托盘
         const trayEl = document.getElementById('s-tray-enabled');
         if (trayEl) trayEl.checked = !!state.tray_enabled;
+        if (state.assistant) {
+            setControlValue('s-assistant-persona', 'assistant.persona_prompt', state.assistant.persona_prompt || '');
+            setControlValue('s-assistant-user-address', 'assistant.user_address', state.assistant.user_address || '');
+        }
 
         // 仪表盘：Bridge 状态卡
         if (state.bridge) {
@@ -1173,6 +1288,39 @@ _STATUS_HTML = """
         setTimeout(function(){ hint.textContent = ''; hint.className = 'save-hint'; }, 3000);
     }
 
+    async function applyPendingCommonSettings() {
+        const hint = document.getElementById('save-hint');
+        const keys = Object.keys(pendingCommonSettings);
+        if (keys.length === 0) return;
+        try {
+            if (!window.pywebview || !window.pywebview.api) return;
+            const changes = {};
+            keys.forEach(function(key) {
+                changes[key] = normalizedDeferredSettingValue(key, pendingCommonSettings[key]);
+            });
+            const res = await window.pywebview.api.update_settings(changes);
+            if (res.ok) {
+                const appliedKeys = Object.keys(res.applied || {});
+                appliedKeys.forEach(function(key) { delete pendingCommonSettings[key]; });
+                updateCommonSettingsApplyState();
+                const hasErrors = Array.isArray(res.errors) && res.errors.length > 0;
+                hint.textContent = hasErrors ? '△ 部分已保存：' + res.errors.join('；') : '✓ 已保存';
+                hint.className = hasErrors ? 'save-hint err' : 'save-hint ok';
+                if (res.app_state) applyAppState(res.app_state);
+                else refreshSettings();
+                showEffectHints(res.effects);
+            } else {
+                const errMsg = res.error || (Array.isArray(res.errors) ? res.errors.join('; ') : '保存失败');
+                hint.textContent = '✗ ' + errMsg;
+                hint.className = 'save-hint err';
+            }
+        } catch(e) {
+            hint.textContent = '✗ 保存失败';
+            hint.className = 'save-hint err';
+        }
+        setTimeout(function(){ hint.textContent = ''; hint.className = 'save-hint'; }, 3000);
+    }
+
     async function restartBridge() {
         const btn = document.getElementById('bridge-restart-btn');
         const msg = document.getElementById('bridge-restart-msg');
@@ -1240,7 +1388,7 @@ _STATUS_HTML = """
                 ws.className = 'value warn';
             }
             document.getElementById('ws-path').textContent = data.workspace.path || '—';
-            document.getElementById('ws-created').textContent = data.workspace.created_at || '—';
+            document.getElementById('ws-created').textContent = formatReadableDateTime(data.workspace.created_at);
 
             // App
             const uptime = data.app.uptime_seconds;

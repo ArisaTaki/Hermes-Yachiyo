@@ -191,8 +191,30 @@ def test_control_center_html_keeps_chat_window_as_external_full_session():
     assert "打开 Chat Window" in _STATUS_HTML
     assert "id=\"chat-summary-list\"" in _STATUS_HTML
     assert "openModeSettings('bubble')" in _STATUS_HTML
+    assert "id=\"s-assistant-user-address\"" in _STATUS_HTML
+    assert "assistant.user_address" in _STATUS_HTML
+    assert "id=\"s-assistant-persona\"" in _STATUS_HTML
+    assert "assistant.persona_prompt" in _STATUS_HTML
+    assert "id=\"common-settings-apply-btn\"" in _STATUS_HTML
+    assert "applyPendingCommonSettings()" in _STATUS_HTML
+    assert "const committedCommonSettings = {}" in _STATUS_HTML
+    assert "function isCommittedCommonSettingValue(key, value)" in _STATUS_HTML
+    assert "delete pendingCommonSettings[key];" in _STATUS_HTML
+    assert "onDeferredSettingInput('assistant.user_address'" in _STATUS_HTML
+    assert "onDeferredSettingInput('assistant.persona_prompt'" in _STATUS_HTML
+    assert "onDeferredSettingInput('bridge_host'" in _STATUS_HTML
+    assert "onDeferredSettingInput('bridge_port'" in _STATUS_HTML
+    assert "onSettingChange('display_mode'" in _STATUS_HTML
     assert "窗口模式" not in _STATUS_HTML
     assert "id=\"msg-input\"" not in _STATUS_HTML
+
+
+def test_control_center_formats_workspace_created_time_for_display():
+    assert "function formatReadableDateTime(value)" in _STATUS_HTML
+    assert "formatReadableDateTime(d.workspace.created_at)" in _STATUS_HTML
+    assert "formatReadableDateTime(data.workspace.created_at)" in _STATUS_HTML
+    assert "d.workspace.created_at || '—'" not in _STATUS_HTML
+    assert "data.workspace.created_at || '—'" not in _STATUS_HTML
 
 
 def test_control_center_html_exposes_hermes_diagnostics():

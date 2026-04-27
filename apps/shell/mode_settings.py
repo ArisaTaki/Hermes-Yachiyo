@@ -66,6 +66,8 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
     "bubble_mode": {
         "width": int,
         "height": int,
+        "position_x_percent": float,
+        "position_y_percent": float,
         "position_x": int,
         "position_y": int,
         "always_on_top": bool,
@@ -107,6 +109,7 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
     },
     "assistant": {
         "persona_prompt": str,
+        "user_address": str,
     },
     "tts": {
         "enabled": bool,
@@ -140,6 +143,9 @@ def _validate_field(key: str, value: Any) -> str | None:
     if key.startswith("bubble_mode.") and (key.endswith(".width") or key.endswith(".height")):
         if not (_MIN_LAUNCHER_SIZE <= value <= _MAX_LAUNCHER_SIZE):
             return f"{key} 须在 {_MIN_LAUNCHER_SIZE}-{_MAX_LAUNCHER_SIZE} 之间"
+    elif key in {"bubble_mode.position_x_percent", "bubble_mode.position_y_percent"}:
+        if not (0.0 <= value <= 1.0):
+            return f"{key} 须在 0-100% 之间"
     elif key.endswith(".width") or key.endswith(".height"):
         if value < 240:
             return f"{key} 不能小于 240"
@@ -177,12 +183,6 @@ def _mode_object(
     return getattr(config, mode_key)
 
 
-def _serialize_assistant(config: AppConfig) -> dict[str, Any]:
-    return {
-        "persona_prompt": config.assistant.persona_prompt,
-    }
-
-
 def _serialize_tts(config: AppConfig) -> dict[str, Any]:
     return {
         "enabled": config.tts.enabled,
@@ -196,9 +196,7 @@ def _serialize_tts(config: AppConfig) -> dict[str, Any]:
 
 def _shared_settings_fields(config: AppConfig) -> dict[str, Any]:
     return {
-        "assistant": _serialize_assistant(config),
         "tts": _serialize_tts(config),
-        "assistant_persona_prompt": config.assistant.persona_prompt,
         "tts_enabled": config.tts.enabled,
         "tts_provider": config.tts.provider,
         "tts_endpoint": config.tts.endpoint,
@@ -221,6 +219,8 @@ def serialize_bubble_mode(config: AppConfig) -> dict[str, Any]:
         "config": {
             "width": mode.width,
             "height": mode.height,
+            "position_x_percent": mode.position_x_percent,
+            "position_y_percent": mode.position_y_percent,
             "position_x": mode.position_x,
             "position_y": mode.position_y,
             "always_on_top": mode.always_on_top,

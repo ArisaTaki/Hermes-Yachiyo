@@ -148,6 +148,10 @@ class MainWindowAPI:
                     **build_display_settings(self._config),
                 },
                 "mode_settings": serialize_mode_settings(self._config),
+                "assistant": {
+                    "persona_prompt": self._config.assistant.persona_prompt,
+                    "user_address": self._config.assistant.user_address,
+                },
                 "bridge": snap.bridge.to_dict(),
                 "integrations": {
                     "astrbot": snap.astrbot.to_dict(),
@@ -200,6 +204,10 @@ class MainWindowAPI:
         return {
             "display_mode": self._config.display_mode,
             "mode_settings": serialize_mode_settings(self._config),
+            "assistant": {
+                "persona_prompt": self._config.assistant.persona_prompt,
+                "user_address": self._config.assistant.user_address,
+            },
             "bridge": snap.bridge.to_dashboard_dict(),
             "tray_enabled": self._config.tray_enabled,
             "integrations": {
