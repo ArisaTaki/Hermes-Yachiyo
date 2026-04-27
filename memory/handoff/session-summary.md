@@ -66,6 +66,30 @@
 
 ---
 
+## 追加修复 — Milestone 65: Chat Window singleton race isolation
+
+### 核心结果
+
+用户在真实 macOS 桌面环境中复现：已有 Chat Window 时再次点击 Bubble/Live2D，仍可能弹出第二个白屏 `Yachiyo - 对话`。判断为 pywebview 窗口置前方法或创建/关闭事件时序导致的单例竞态。
+
+### 主要变更
+
+- 已存在 Chat Window 的置前路径在 macOS 上改为原生 `focus_macos_window(title="Yachiyo - 对话")`，不再调用 pywebview 的 `restore/show/bring_to_front/focus` 组合。
+- 新增 `_chat_window_creating`，窗口创建中再次调用 `open_chat_window()` 会直接返回，不会 reentrant 创建第二个窗口。
+- `closed` 事件回调增加 window 身份检查，只清理自己对应的 `_chat_window`，避免旧窗口延迟事件误清当前窗口引用。
+
+### 测试覆盖
+
+- `tests/test_chat_window_singleton.py` 覆盖：原生聚焦不调用 pywebview show/focus、focus 失败不新建、创建中不重入、旧 closed 事件不清当前窗口。
+
+### 验证结果
+
+- `python -m pytest tests/test_chat_window_singleton.py tests/test_chat_bridge.py` → 59 passed。
+- `python -m pytest` → 362 passed。
+- VS Code diagnostics：相关文件无错误。
+
+---
+
 ## 本轮完成内容 — Milestone 62: PR #4 review fixes
 
 ### 核心结果

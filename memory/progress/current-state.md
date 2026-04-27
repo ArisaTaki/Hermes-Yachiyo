@@ -35,6 +35,14 @@
 - ✅ 全量测试：`python -m pytest` → 360 passed。
 - ✅ 相关 diagnostics：Chat Window、Control Center、Bubble/Live2D 入口和测试文件无 VS Code 错误。
 
+### Milestone 65 — Chat Window 单例竞态隔离
+
+- ✅ Chat Window 已存在时，macOS 置前改为只走原生标题聚焦，不再调用 pywebview 的 `restore/show/bring_to_front/focus` 组合，避免这些方法在初始化期或跨入口调用时触发空白副本。
+- ✅ 新增 `_chat_window_creating` 防重入保护；创建窗口期间再次点击 Bubble/Live2D 会直接返回并尝试原生聚焦，不会嵌套创建第二个窗口。
+- ✅ `events.closed` 回调改为只清理自己对应的 window，旧窗口延迟触发 closed 事件时不会误把当前活窗口单例置空。
+- ✅ 回归测试覆盖原生聚焦路径、创建中重入、旧 closed 事件不清当前窗口。
+- ✅ 全量测试：`python -m pytest` → 362 passed。
+
 ### Milestone 0 — 仓库骨架（desktop-first）
 
 - ✅ pyproject.toml（桌面应用依赖：pywebview, pystray, Pillow, fastapi, uvicorn）

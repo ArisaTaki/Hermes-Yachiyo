@@ -63,9 +63,12 @@ class _WebviewStub:
     def __init__(self) -> None:
         self.create_calls = 0
         self.windows: list[_WindowStub] = []
+        self.on_create = None
 
     def create_window(self, **_kwargs):
         self.create_calls += 1
+        if self.on_create is not None:
+            self.on_create()
         window = _WindowStub()
         self.windows.append(window)
         return window
@@ -86,6 +89,7 @@ def _patch_webview(monkeypatch) -> _WebviewStub:
     monkeypatch.setattr(chat_window, "_HAS_WEBVIEW", True)
     monkeypatch.setattr(chat_window, "webview", webview, raising=False)
     monkeypatch.setattr(chat_window, "_chat_window", None)
+    monkeypatch.setattr(chat_window, "_chat_window_creating", False)
     return webview
 
 
@@ -106,14 +110,21 @@ def test_chat_window_recreates_after_closed_flag(monkeypatch):
 def test_chat_window_reuses_live_window_and_clears_on_closed_event(monkeypatch):
     webview = _patch_webview(monkeypatch)
     runtime = _RuntimeStub()
+    native_focus_calls = []
 
     assert chat_window.open_chat_window(runtime) is True
+    monkeypatch.setattr(
+        chat_window,
+        "_focus_native_chat_window",
+        lambda: native_focus_calls.append(True) or True,
+    )
     assert chat_window.open_chat_window(runtime) is True
     assert webview.create_calls == 1
-    assert webview.windows[0].restore_calls == 1
-    assert webview.windows[0].show_calls == 1
-    assert webview.windows[0].bring_to_front_calls == 1
-    assert webview.windows[0].focus_calls == 1
+    assert native_focus_calls == [True]
+    assert webview.windows[0].restore_calls == 0
+    assert webview.windows[0].show_calls == 0
+    assert webview.windows[0].bring_to_front_calls == 0
+    assert webview.windows[0].focus_calls == 0
 
     webview.windows[0].events.closed.fire()
     assert chat_window.is_chat_window_open() is False
@@ -129,6 +140,40 @@ def test_chat_window_focus_failure_does_not_create_blank_duplicate(monkeypatch):
 
     assert chat_window.open_chat_window(runtime) is True
     assert webview.create_calls == 1
+    assert chat_window.is_chat_window_open() is True
+
+
+def test_chat_window_does_not_reenter_creation(monkeypatch):
+    webview = _patch_webview(monkeypatch)
+    runtime = _RuntimeStub()
+    monkeypatch.setattr(chat_window, "_focus_native_chat_window", lambda: False)
+
+    def _reenter() -> None:
+        assert chat_window.open_chat_window(runtime) is True
+
+    webview.on_create = _reenter
+
+    assert chat_window.open_chat_window(runtime) is True
+    assert webview.create_calls == 1
+    assert chat_window.is_chat_window_open() is True
+
+
+def test_stale_closed_event_does_not_clear_current_window(monkeypatch):
+    webview = _patch_webview(monkeypatch)
+    runtime = _RuntimeStub()
+    monkeypatch.setattr(chat_window, "_focus_native_chat_window", lambda: False)
+
+    assert chat_window.open_chat_window(runtime) is True
+    first = webview.windows[0]
+    first.closed = True
+
+    assert chat_window.open_chat_window(runtime) is True
+    assert webview.create_calls == 2
+    second = webview.windows[1]
+
+    first.events.closed.fire()
+
+    assert chat_window._chat_window is second
     assert chat_window.is_chat_window_open() is True
 
 

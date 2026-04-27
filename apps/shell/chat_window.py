@@ -28,7 +28,9 @@ logger = logging.getLogger(__name__)
 
 # ── 聊天窗口单例管理 ──────────────────────────────────────────────────────────
 
+_CHAT_WINDOW_TITLE = "Yachiyo - 对话"
 _chat_window: Any = None  # webview.Window | None
+_chat_window_creating = False
 _chat_window_lock = threading.RLock()
 
 
@@ -52,25 +54,28 @@ def _is_window_probably_closed(window: Any) -> bool:
 def _focus_chat_window_instance(window: Any) -> bool:
     if _is_window_probably_closed(window):
         return False
-    for method_name in ("restore", "show", "bring_to_front", "focus"):
+    if _focus_native_chat_window():
+        return True
+    if sys.platform == "darwin":
+        return True
+    for method_name in ("show", "focus"):
         method = getattr(window, method_name, None)
         if callable(method):
             try:
                 method()
             except Exception as exc:
                 logger.debug("调用聊天窗口 %s 失败: %s", method_name, exc)
-    try:
-        window.on_top = True
-        window.on_top = False
-    except Exception as exc:
-        logger.debug("切换聊天窗口置顶状态失败: %s", exc)
+    return True
+
+
+def _focus_native_chat_window() -> bool:
     try:
         from apps.shell.native_window import focus_macos_window
 
-        focus_macos_window(title="Yachiyo - 对话")
+        return bool(focus_macos_window(title=_CHAT_WINDOW_TITLE))
     except Exception as exc:
         logger.debug("原生聚焦聊天窗口失败: %s", exc)
-    return True
+        return False
 
 
 class ChatWindowAPI:
@@ -197,36 +202,49 @@ def open_chat_window(runtime: "HermesRuntime") -> bool:
     在 webview.start() 已运行的情况下创建新窗口。
     返回是否成功打开。
     """
-    global _chat_window
+    global _chat_window, _chat_window_creating
 
     if not _HAS_WEBVIEW:
         logger.warning("pywebview 未安装，无法打开聊天窗口")
         return False
 
     with _chat_window_lock:
+        if _chat_window_creating:
+            _focus_native_chat_window()
+            return True
+
         # 如果窗口已存在且未关闭，聚焦
         if _chat_window is not None:
             if _focus_chat_window_instance(_chat_window):
                 return True
             _chat_window = None
 
+        if _focus_native_chat_window():
+            return True
+
         api = ChatWindowAPI(runtime)
-        _chat_window = webview.create_window(
-            title="Yachiyo - 对话",
-            html=_CHAT_HTML,
-            width=420,
-            height=600,
-            resizable=True,
-            js_api=api,
-            on_top=False,
-        )
+        _chat_window_creating = True
+        try:
+            window = webview.create_window(
+                title=_CHAT_WINDOW_TITLE,
+                html=_CHAT_HTML,
+                width=420,
+                height=600,
+                resizable=True,
+                js_api=api,
+                on_top=False,
+            )
+            _chat_window = window
+        finally:
+            _chat_window_creating = False
 
         def _on_closed():
             global _chat_window
             with _chat_window_lock:
-                _chat_window = None
+                if _chat_window is window:
+                    _chat_window = None
 
-        closed_event = getattr(getattr(_chat_window, "events", None), "closed", None)
+        closed_event = getattr(getattr(window, "events", None), "closed", None)
         if closed_event is not None:
             closed_event += _on_closed
         logger.info("聊天窗口已创建")
