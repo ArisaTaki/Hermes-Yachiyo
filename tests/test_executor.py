@@ -12,11 +12,16 @@ from apps.core.executor import (
     SimulatedExecutor,
     _HERMES_CMD,
     _HERMES_FLAGS,
+    _DEFAULT_EXEC_TIMEOUT,
     _humanize_bridge_error,
+    _format_exec_timeout,
+    format_environment_context,
     _parse_bridge_event,
     _parse_hermes_output,
     _parse_hermes_title,
+    _read_exec_timeout,
     _resolve_hermes_python,
+    format_persona_description,
 )
 import apps.core.executor as executor_mod
 import apps.core.hermes_stream_bridge as bridge_mod
@@ -90,6 +95,26 @@ class TestHermesInvokeResult:
         assert r.to_task_error() == "未知错误"
 
 
+class TestHermesExecutionTimeout:
+    def test_default_timeout_allows_agent_work(self, monkeypatch):
+        monkeypatch.delenv("HERMES_YACHIYO_EXEC_TIMEOUT_SECONDS", raising=False)
+
+        assert _DEFAULT_EXEC_TIMEOUT == 30 * 60.0
+        assert _read_exec_timeout() == _DEFAULT_EXEC_TIMEOUT
+        assert _format_exec_timeout(_DEFAULT_EXEC_TIMEOUT) == "30min"
+
+    def test_exec_timeout_env_override(self, monkeypatch):
+        monkeypatch.setenv("HERMES_YACHIYO_EXEC_TIMEOUT_SECONDS", "120")
+
+        assert _read_exec_timeout() == 120.0
+        assert _format_exec_timeout(120.0) == "2min"
+
+    def test_invalid_exec_timeout_uses_default(self, monkeypatch):
+        monkeypatch.setenv("HERMES_YACHIYO_EXEC_TIMEOUT_SECONDS", "bad")
+
+        assert _read_exec_timeout() == _DEFAULT_EXEC_TIMEOUT
+
+
 class TestSimulatedExecutor:
     @pytest.mark.asyncio
     async def test_run_returns_result(self):
@@ -119,6 +144,81 @@ class TestHermesExecutor:
         executor.set_chat_session(session)  # type: ignore[arg-type]
 
         assert executor._chat_session is session
+
+    def test_format_persona_description_keeps_empty_prompt_compatible(self):
+        assert format_persona_description("原请求", "") == "原请求"
+        assert format_persona_description("原请求", "", "") == "原请求"
+
+    def test_format_persona_description_wraps_prompt(self):
+        wrapped = format_persona_description("帮我总结", "你是八千代。")
+
+        assert "[人设设定]" in wrapped
+        assert "你是八千代。" in wrapped
+        assert "[用户请求]" in wrapped
+        assert wrapped.endswith("帮我总结")
+
+    def test_format_persona_description_wraps_user_address(self):
+        wrapped = format_persona_description("帮我总结", user_address="老师")
+
+        assert "[用户称呼]" in wrapped
+        assert "请称呼用户为：老师" in wrapped
+        assert "[用户请求]" in wrapped
+        assert wrapped.endswith("帮我总结")
+
+    def test_format_persona_description_wraps_persona_and_user_address(self):
+        wrapped = format_persona_description("帮我总结", "你是八千代。", "老师")
+
+        assert wrapped.index("[人设设定]") < wrapped.index("[用户称呼]")
+        assert wrapped.index("[用户称呼]") < wrapped.index("[用户请求]")
+        assert "你是八千代。" in wrapped
+        assert "请称呼用户为：老师" in wrapped
+
+    def test_format_environment_context_includes_local_time_period(self):
+        local_tz = datetime.now().astimezone().tzinfo
+        now = datetime(2026, 4, 27, 15, 20, tzinfo=local_tz)
+
+        context = format_environment_context(now)
+
+        assert "[当前环境]" in context
+        assert "当前本地时间：2026-04-27 15:20:00" in context
+        assert "UTC" in context
+        assert "星期一" in context
+        assert "下午" in context
+
+    def test_format_persona_description_places_environment_first(self):
+        wrapped = format_persona_description(
+            "帮我总结",
+            "你是八千代。",
+            "老师",
+            "[当前环境]\n当前本地时间：2026-04-27 15:20:00（UTC+09:00，星期一，下午）",
+        )
+
+        assert wrapped.index("[当前环境]") < wrapped.index("[人设设定]")
+        assert wrapped.index("[人设设定]") < wrapped.index("[用户称呼]")
+        assert wrapped.index("[用户称呼]") < wrapped.index("[用户请求]")
+
+    @pytest.mark.asyncio
+    async def test_call_hermes_injects_user_address(self, monkeypatch):
+        captured: dict[str, str] = {}
+
+        async def fake_invoke(description, **_kwargs):
+            captured["description"] = description
+            return HermesInvokeResult(success=True, stdout="ok")
+
+        monkeypatch.setattr(executor_mod, "invoke_hermes_cli", fake_invoke)
+        executor = HermesExecutor(
+            persona_prompt_getter=lambda: "你是八千代。",
+            user_address_getter=lambda: "老师",
+        )
+
+        result = await executor._call_hermes(_make_task("帮我总结"))
+
+        assert result == "ok"
+        assert "[当前环境]" in captured["description"]
+        assert "当前本地时间" in captured["description"]
+        assert "[人设设定]\n你是八千代。" in captured["description"]
+        assert "[用户称呼]\n请称呼用户为：老师" in captured["description"]
+        assert captured["description"].endswith("帮我总结")
 
 
 class TestParseHermesOutput:

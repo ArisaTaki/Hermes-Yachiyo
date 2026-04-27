@@ -19,19 +19,21 @@
 ## ✨ 特性
 
 - 🖥️ **桌面优先** — 本地运行的桌面应用，系统托盘常驻，无需部署服务器
-- 🔄 **三种显示模式** — 窗口模式 / 气泡悬浮模式 / Live2D 角色模式
+- 🔄 **两种桌面显示模式** — Bubble 气泡悬浮模式 / Live2D 角色模式，主控台负责状态与全局设置
 - 🤖 **智能任务系统** — 可插拔执行策略，支持模拟执行与 Hermes CLI 真实执行
 - 🎨 **Live2D 资源包解耦** — 模型资源包通过 GitHub Releases 下载，导入本地用户目录后自动检测
 - ⚙️ **完整设置系统** — 即时生效 / 需重启分级提示，保存即反馈
 - 🔌 **QQ 桥接** — 通过 AstrBot 插件远程控制（`/y` 命令族）
 - 🏗️ **严格分层** — Shell / Core / Bridge / Locald / Protocol 职责清晰
 
-## 📸 显示模式
+## 📸 桌面入口
 
-| 窗口模式 | 气泡模式 | Live2D 模式 |
+| Control Center | Bubble 模式 | Live2D 模式 |
 |:---:|:---:|:---:|
-| 560×520 完整仪表盘 | 320×280 悬浮状态 | 380×560 角色骨架 |
-| 任务统计 · 设置面板 | 自动刷新 · 一键展开 | 动作占位 · 配置入口 |
+| 主控台 / 设置中心 | 桌面气泡 Launcher | 桌面角色 Launcher |
+| Hermes 状态 · 工作区 · 集成状态 · 全局设置 | 头像悬浮 · 呼吸灯 · 点击打开 Chat Window | 模型舞台 · 回复气泡 · 快捷输入 · 动作/表情预留 |
+
+Control Center 不是独立显示模式；它始终作为主设置与状态入口存在。真正决定桌面常驻形态的是 `display_mode`，当前支持 `bubble` 和 `live2d`。
 
 ## 🏛️ 架构
 
@@ -41,7 +43,7 @@
 │                                                │
 │  ┌── App Shell (apps/shell) ────────────────┐  │
 │  │  启动入口 · 系统托盘 · 窗口管理            │  │
-│  │  显示模式: window / bubble / live2d       │  │
+│  │  显示模式: bubble / live2d                │  │
 │  │  设置系统 · 生效策略 · 集成状态            │  │
 │  └───────────────────────────────────────────┘  │
 │                      │                         │
@@ -106,20 +108,81 @@ python -m apps.shell.app
 
 配置文件位于 `~/.hermes-yachiyo/config.json`，可通过设置界面可视化编辑。
 
-| 配置项 | 默认值 | 生效策略 |
-|--------|--------|---------|
-| `display_mode` | `bubble` | 需重启应用 |
-| `bridge_enabled` | `true` | 需重启 Bridge |
-| `bridge_host` | `127.0.0.1` | 需重启 Bridge |
-| `bridge_port` | `8420` | 需重启 Bridge |
-| `tray_enabled` | `true` | 需重启应用 |
-| `live2d_mode.model_name` | 自动检测 | 即时生效 |
-| `live2d_mode.model_path` | 空（自动在用户目录查找） | 需重启模式 |
-| `live2d_mode.enable_expressions` | `false` | 即时生效 |
-| `live2d_mode.enable_physics` | `false` | 即时生效 |
-| `live2d_mode.window_on_top` | `true` | 需重启模式 |
+设置分为主设置和模式设置。主设置负责全局行为；Bubble / Live2D 设置只负责对应桌面形态。主设置里的文本、数字和大段文本字段会先暂存，需要点击“应用共通设置修改”后保存；显示模式切换和开关类设置仍会即时保存。保存设置后，界面会即时显示每项配置的生效状态提示：即时生效、需重启当前模式、需重启 Bridge、或需重启应用。
 
-保存设置后，界面会即时显示每项配置的生效状态提示。
+### 主设置
+
+| 功能 | 配置项 | 说明 | 生效策略 |
+|------|--------|------|---------|
+| Hermes Agent | 安装检测 / 工作区初始化 | 显示 Hermes 安装、doctor 诊断、工作区状态，并提供安装或补全能力入口。Hermes 是 Agent 本体，Yachiyo 只负责桌面壳、状态与桥接。 | 诊断即时刷新 |
+| 显示模式 | `display_mode` | 选择桌面常驻形态：`bubble` 为气泡 Launcher，`live2d` 为角色 Launcher。主控台不属于显示模式。 | 需重启应用 |
+| 用户称呼 | `assistant.user_address` | 配置希望助手如何称呼用户，会随人设一起注入 Hermes 调用上下文，并对 Bubble、Live2D、Chat Window 和 AstrBot 桥接请求生效。 | 点击确认后即时生效 |
+| 助手人设 Prompt | `assistant.persona_prompt` | 全局人格与语气设定，会随 Bubble、Live2D、Chat Window 和 AstrBot 桥接请求一起进入 Hermes 调用上下文。该项放在主设置里，避免同一个助手在不同模式下出现多份人设配置。 | 点击确认后即时生效 |
+| Bridge 开关 | `bridge_enabled` | 启用或关闭本地 FastAPI Bridge。Bridge 只供 UI 与 AstrBot 插件调用，不是产品主体。 | 需重启 Bridge |
+| Bridge 地址 | `bridge_host` / `bridge_port` | 控制本地 Bridge 监听地址。默认 `127.0.0.1:8420`，不对外网开放。 | 点击确认后需重启 Bridge |
+| 集成状态 | AstrBot / Hapi | 展示 QQ 桥接和 Hapi/Codex 后端的可用性。AstrBot 只做薄桥接，Hapi 仍是外部 Codex 执行后端。 | 状态即时刷新 |
+| 系统托盘 | `tray_enabled` | 控制是否常驻系统托盘，便于重新打开主控台或退出应用。 | 需重启应用 |
+
+### Bubble 模式设置
+
+Bubble 是轻量桌面 Launcher，不承载完整聊天 UI。点击气泡会打开统一 Chat Window；聊天窗口关闭后，后台任务不会因此取消，Bubble 会继续用呼吸灯提示 Hermes 的处理状态。
+
+| 功能 | 配置项 | 说明 | 生效策略 |
+|------|--------|------|---------|
+| 气泡尺寸 | `bubble_mode.width` / `bubble_mode.height` | 控制 Launcher 窗口尺寸，范围 80-192。实际气泡使用宽高中的较小值，保持圆形。 | 需重启当前模式 |
+| 默认位置设置 | `bubble_mode.position_x_percent` / `bubble_mode.position_y_percent` | 使用屏幕百分比定位默认启动位置。`0%` 表示左/上边，`100%` 表示右/下边；默认 `100% / 100%`，即右下角。百分比定位可以适配不同显示器尺寸。旧的 `position_x` / `position_y` 像素字段保留用于兼容已有配置，但新设置页使用百分比。 | 需重启当前模式 |
+| 窗口置顶 | `bubble_mode.always_on_top` | 让 Bubble 常驻在普通窗口之上，适合把它当作桌面入口。 | 需重启当前模式 |
+| 靠边吸附 | `bubble_mode.edge_snap` | 开启后拖动 Bubble 并松开鼠标，会自动吸附到最近的屏幕边缘，并保留当前纵向或横向位置。关闭后拖动位置由窗口系统保持。 | 即时生效 |
+| 头像资源 | `bubble_mode.avatar_path` | 指定气泡头像图片。为空或路径不可用时使用内置默认头像；可指向用户目录中的 Release 头像资源。 | 需重启当前模式 |
+| 默认展示 | `bubble_mode.default_display` | 控制气泡标题和状态文案的默认含义：`icon` 更接近纯头像入口，`summary` 显示会话摘要语义，`recent_reply` 偏向最近回复语义。当前 Bubble 本体不展开聊天内容，完整内容仍在 Chat Window 中查看。 | 即时生效 |
+| 新消息呼吸灯 | `bubble_mode.show_unread_dot` | 控制是否显示状态点。黄色表示 Hermes 正在处理；绿色表示有未读成功结果；红色表示有未读失败结果；点击打开并确认结果后，绿色或红色会消失。处理中关闭 Chat Window 时，黄色会继续保留，直到后台任务完成或失败。 | 即时生效 |
+| 自动淡出 | `bubble_mode.auto_hide` | 空闲、无未读、无主动观察结果时降低气泡透明度，减少桌面干扰。 | 即时生效 |
+| 透明度 | `bubble_mode.opacity` | 控制 Bubble 正常状态透明度，范围 0.2-1.0。自动淡出会在该基础上再降低。 | 即时生效 |
+| 点击打开聊天 | `bubble_mode.expand_trigger` | 固定为点击打开 Chat Window。旧的 hover 触发已废弃，避免鼠标经过时误打开对话。 | 固定行为 |
+| 最近会话数量 | `bubble_mode.recent_sessions_limit` | 控制 Bubble 摘要层读取多少个最近会话，用于判断当前状态和通知。 | 即时生效 |
+| 最近消息数量 | `bubble_mode.recent_messages_limit` | 控制摘要层读取当前会话中多少条消息。 | 即时生效 |
+| 摘要条数 | `bubble_mode.summary_count` | 控制 Bubble 获取会话摘要时最多取几条消息，范围 1-3。 | 即时生效 |
+| 主动对话 | `bubble_mode.proactive_enabled` | 允许 Bubble 侧主动桌面观察服务产生提醒。默认关闭，避免未授权的后台行为。 | 即时生效 |
+| 定期桌面观察 | `bubble_mode.proactive_desktop_watch_enabled` | 开启后会按间隔读取桌面上下文。该能力属于本地观察，默认关闭。 | 即时生效 |
+| 观察间隔秒 | `bubble_mode.proactive_interval_seconds` | 主动桌面观察的间隔，范围 60-3600 秒。 | 即时生效 |
+
+### Live2D 模式设置
+
+Live2D 是角色桌面 Launcher。模型资源可为空；资源未导入时仍会显示可操作的桌面入口和设置提示，不会阻塞 Bubble、Chat Window 或 Control Center。
+
+| 功能 | 配置项 | 说明 | 生效策略 |
+|------|--------|------|---------|
+| 资源操作 | 选择模型目录 / 导入资源包 ZIP / 打开导入目录 / 打开 Releases | 选择本地模型目录会校验 `.model3.json` 或 `.moc3`；导入 ZIP 会解压到用户资源目录；打开导入目录用于手动管理资源；打开 Releases 用于下载官方资源包。 | 选择或导入后需应用修改 |
+| 角色缩放 | `live2d_mode.scale` | 控制角色渲染缩放，范围 0.40-2.00。用于适配不同模型尺寸和屏幕密度。 | 即时生效 |
+| 模型名称 | `live2d_mode.model_name` | 给当前模型设置展示名称；为空时尝试从目录名或资源元数据推断。 | 即时生效 |
+| 模型路径 | `live2d_mode.model_path` | 指向 Live2D 模型目录。为空时自动扫描 `~/.hermes/yachiyo/assets/live2d/` 及一级子目录。 | 需重启当前模式 |
+| 资源状态 | 当前配置路径 / 当前生效路径 / 模型可用表情 / 模型可用动作 | 设置页会展示配置路径、实际检测到的模型路径、可用表情和动作组，帮助确认资源包是否完整。 | 信息即时刷新 |
+| 窗口尺寸 | `live2d_mode.width` / `live2d_mode.height` | 控制 Live2D 舞台窗口大小。该窗口负责承载模型、回复气泡和快捷输入入口。 | 需重启当前模式 |
+| 窗口位置 | `live2d_mode.position_x` / `live2d_mode.position_y` | 控制 Live2D 舞台启动位置，当前为像素坐标。 | 需重启当前模式 |
+| 窗口置顶 | `live2d_mode.window_on_top` | 让角色窗口保持在普通窗口之上。 | 需重启当前模式 |
+| macOS 所有桌面可见 | `live2d_mode.show_on_all_spaces` | 在 macOS 上让角色跨 Space 可见，适合长期桌面陪伴。 | 需重启当前模式 |
+| 显示回复气泡 | `live2d_mode.show_reply_bubble` | 控制角色旁边是否显示最近回复气泡。关闭后可只保留角色与快捷输入。 | 即时生效 |
+| 启动初始表现 | `live2d_mode.default_open_behavior` | `stage` 仅显示角色舞台；`reply_bubble` 启动时显示回复气泡；`chat_input` 启动时显示快捷输入。该设置不会自动打开 Chat Window。 | 即时生效 |
+| 点击角色行为 | `live2d_mode.click_action` | `open_chat` 打开或切换 Chat Window；`toggle_reply` 切换回复气泡；`focus_stage` 仅聚焦角色窗口。 | 即时生效 |
+| 显示快捷输入入口 | `live2d_mode.enable_quick_input` | 在角色窗口中显示轻量输入入口，适合快速发一句话；完整上下文仍在 Chat Window 中查看。 | 即时生效 |
+| 启动时打开聊天窗口 | `live2d_mode.auto_open_chat_window` | 应用启动进入 Live2D 模式时自动打开 Chat Window。默认关闭，避免打断桌面。 | 需重启当前模式 |
+| 鼠标跟随 | `live2d_mode.mouse_follow_enabled` | 启用后角色会根据全局鼠标位置更新注视方向；关闭后保持默认朝向。 | 即时生效 |
+| 待机动作组 | `live2d_mode.idle_motion_group` | 指定模型中用于待机的 motion group，默认 `Idle`。模型没有对应动作时会静默跳过。 | 即时生效 |
+| 表情系统 | `live2d_mode.enable_expressions` | 允许后续根据模型可用表情触发表情切换。当前作为能力开关保留。 | 即时生效 |
+| 物理模拟 | `live2d_mode.enable_physics` | 启用模型物理配置，例如头发、衣物等物理效果。模型缺少物理文件时不会阻塞启动。 | 即时生效 |
+| 主动对话 | `live2d_mode.proactive_enabled` | 允许 Live2D 侧主动观察服务产生提醒。默认关闭。 | 即时生效 |
+| 定期桌面观察 | `live2d_mode.proactive_desktop_watch_enabled` | 开启后按间隔读取桌面上下文。该能力默认关闭。 | 即时生效 |
+| 观察间隔秒 | `live2d_mode.proactive_interval_seconds` | 主动桌面观察的间隔，范围 60-3600 秒。 | 即时生效 |
+| Live2D TTS | `tts.enabled` | 控制是否为 Live2D 回复播放语音。TTS 默认关闭，失败不会影响聊天。 | 即时生效 |
+| TTS Provider | `tts.provider` | `none` 表示关闭；`http` 使用 HTTP POST；`command` 调用本地命令。 | 即时生效 |
+| TTS HTTP Endpoint | `tts.endpoint` | 当 provider 为 `http` 时使用的接口地址。 | 即时生效 |
+| TTS 本地命令 | `tts.command` | 当 provider 为 `command` 时执行的命令模板，可按实现约定传入文本。 | 即时生效 |
+| TTS 音色 | `tts.voice` | 传给 TTS 后端的音色名。具体可用值取决于外部 TTS 服务或命令。 | 即时生效 |
+| TTS 超时秒 | `tts.timeout_seconds` | 限制 TTS 调用等待时间，避免外部服务卡住桌面交互。 | 即时生效 |
+
+### 记忆规划
+
+当前对话记录通过 SQLite 保存在本地 `chat.db` 中，它是原始会话存档，不等于长期可召回记忆。长期记忆、项目/目的记忆、共享偏好和检索注入链路见 [docs/memory-architecture.md](docs/memory-architecture.md)。
 
 ## 🤖 任务系统
 
@@ -348,7 +411,7 @@ integrations/
     command_router.py   # 命令路由
     api_client.py       # HTTP 客户端
     handlers/           # 各命令 handler
-tests/                # 测试套件（105 tests）
+tests/                # 测试套件（pytest）
 ```
 
 ## 🔧 开发指南

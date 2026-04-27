@@ -54,3 +54,37 @@
 - prefer `~/.hermes/yachiyo/assets/live2d/` for default model discovery
 - keep Live2D mode usable without imported resources
 - add user-facing prompts in settings / Live2D mode / control center summaries
+
+## Milestone 60
+
+- close the Bubble / Live2D settings runtime loop so saved options are consumed by launcher views
+- add shared assistant persona prompt configuration and wrap Hermes task descriptions before execution
+- add optional TTS abstraction with `none` / `http` / `command` providers, disabled by default
+- extract proactive desktop watching into a shared shell service for Bubble and Live2D
+- add Bridge `POST /assistant/intent` as the low-risk natural language entry for AstrBot
+- add AstrBot `/y ask` and `/y chat` commands while keeping existing `/y` command family compatible
+- keep AstrBot as a thin QQ bridge; do not move local runtime or machine control into the plugin
+
+## Milestone 61
+
+- make Bubble and Live2D chat entry click-only; hover/pointerenter/focus must not open or toggle Chat Window
+- normalize legacy `bubble_mode.expand_trigger=hover` to `click` and reject new hover writes from settings API
+- clarify settings effect semantics: Bubble size/position/top/avatar and Live2D startup auto-open require current-mode restart
+- expand Bubble launcher size range to `80-192` and make visual size / native hit-test scale with the configured window size
+- add a settings-page “apply and restart app” fallback until a true mode-only restart primitive exists
+- harden Chat Window singleton cleanup for closed/destroyed stale windows
+- add Bridge `GET/PATCH /assistant/profile` for shared assistant profile; keep `assistant.persona_prompt` and `assistant.user_address` canonical
+- define future memory-sharing boundary: no default raw QQ chat sync, inject prompt as persona → user address → relevant memory → current session → request
+
+## Milestone 62
+
+- fix PR #4 proactive desktop watch review: expose failed state first, then retry after the configured interval
+- add `latest_reply_full` to the launcher chat overview so UI can keep truncated summaries while Live2D TTS speaks full replies
+- restore Bubble status dot visibility classes for attention / processing / failed states, while keeping idle / empty / ready hidden
+- add focused regression tests for proactive retry, Live2D full-text TTS, and Bubble dot class logic
+
+## Milestone 63
+
+- add a shared settings apply button for text/number common settings while keeping mode switches and toggles immediate
+- suppress Bubble status light while the shared Chat Window is open, and acknowledge visible chat results so they do not become unread after closing
+- design a local-first memory chain on top of SQLite chat history: shared memory, project/purpose memory, current-session summary, and retrieval-time prompt injection

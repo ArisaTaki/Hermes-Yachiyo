@@ -37,6 +37,7 @@ class HermesClient:
       POST /tasks               → create_task()
       GET  /screen/current      → get_screen()
       GET  /system/active-window → get_active_window()
+    POST /assistant/intent    → assistant_intent()
     """
 
     def __init__(self, config: PluginConfig) -> None:
@@ -87,6 +88,25 @@ class HermesClient:
     async def get_active_window(self) -> Dict[str, Any]:
         """GET /system/active-window"""
         return await self._get("/system/active-window")
+
+    async def assistant_intent(
+        self,
+        text: str,
+        *,
+        source: str = "astrbot",
+        sender_id: str = "",
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """POST /assistant/intent — 低风险自然语言入口。"""
+        return await self._post(
+            "/assistant/intent",
+            {
+                "text": text,
+                "source": source,
+                "sender_id": sender_id,
+                "dry_run": dry_run,
+            },
+        )
 
 
 class HapiClient:

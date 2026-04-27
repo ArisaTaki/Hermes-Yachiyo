@@ -48,6 +48,39 @@ def _normalize_count(count: int) -> int:
         return 0
 
 
+def _latest_notifiable_assistant_message(messages: list[dict[str, Any]]) -> dict[str, Any]:
+    """返回最近一条可触发桌面新消息提醒的 assistant 结果。"""
+    for message in reversed(messages):
+        if message.get("role") != "assistant":
+            continue
+        content = str(message.get("content") or "").strip()
+        status = str(message.get("status") or "")
+        if not content or status not in {"completed", "failed"}:
+            continue
+        marker = str(
+            message.get("id")
+            or message.get("message_id")
+            or message.get("task_id")
+            or f"{status}:{content[:96]}"
+        )
+        return {
+            "marker": marker,
+            "id": str(message.get("id") or message.get("message_id") or ""),
+            "task_id": str(message.get("task_id") or ""),
+            "status": status,
+            "content": _truncate(content),
+        }
+    return {}
+
+
+def _latest_assistant_reply_content(messages: list[dict[str, Any]]) -> str:
+    """返回最近一条 assistant 回复的完整内容，不做摘要截断。"""
+    for message in reversed(messages):
+        if message.get("role") == "assistant":
+            return str(message.get("content") or "")
+    return ""
+
+
 class ChatBridge:
     """轻量级聊天摘要桥接，供 bubble/live2d 使用。
 
@@ -88,6 +121,8 @@ class ChatBridge:
 
             all_msgs = result["messages"]
             recent = all_msgs[-count:] if count and all_msgs else []
+            latest_notifiable = _latest_notifiable_assistant_message(all_msgs)
+            latest_reply_full = _latest_assistant_reply_content(all_msgs)
 
             is_processing = result.get("is_processing", False)
             empty = len(all_msgs) == 0
@@ -105,12 +140,16 @@ class ChatBridge:
                 "is_processing": is_processing,
                 "empty": empty,
                 "status_label": status_label,
+                "latest_notifiable_message": latest_notifiable,
+                "latest_reply_full": latest_reply_full,
                 "messages": [
                     {
+                        "id": m.get("id", ""),
                         "role": m["role"],
                         "content": _truncate(m["content"]),
                         "status": m["status"],
                         "task_id": m.get("task_id"),
+                        "created_at": m.get("created_at", ""),
                     }
                     for m in recent
                 ],
@@ -204,6 +243,7 @@ class ChatBridge:
         summary = self.get_recent_summary(summary_count)
         sessions = self.get_recent_sessions(session_limit)
         latest_reply = ""
+        latest_reply_full = str(summary.get("latest_reply_full") or "")
         if summary.get("ok"):
             for message in reversed(summary.get("messages", [])):
                 if message["role"] == "assistant":
@@ -217,6 +257,8 @@ class ChatBridge:
             "empty": summary.get("empty", True),
             "status_label": summary.get("status_label", "错误"),
             "messages": summary.get("messages", []),
+            "latest_notifiable_message": summary.get("latest_notifiable_message", {}),
             "latest_reply": latest_reply,
+            "latest_reply_full": latest_reply_full,
             "recent_sessions": sessions.get("sessions", []),
         }

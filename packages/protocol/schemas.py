@@ -90,3 +90,51 @@ class ActiveWindowResponse(BaseModel):
     app_name: str
     pid: int | None = None
     queried_at: datetime
+
+
+# ── Assistant intent ───────────────────────────────────
+
+
+class AssistantIntentRequest(BaseModel):
+    """POST /assistant/intent 请求。"""
+
+    text: str = Field(..., min_length=1, max_length=1000)
+    source: str = "astrbot"
+    sender_id: str = ""
+    dry_run: bool = False
+
+
+class AssistantIntentResponse(BaseModel):
+    """POST /assistant/intent 响应。"""
+
+    ok: bool
+    action: str
+    task_id: str | None = None
+    message: str
+
+
+class AssistantProfilePatchRequest(BaseModel):
+    """PATCH /assistant/profile 请求。"""
+
+    persona_prompt: str | None = Field(default=None, max_length=4000)
+    user_address: str | None = Field(default=None, max_length=80)
+
+
+class AssistantProfileResponse(BaseModel):
+    """GET/PATCH /assistant/profile 响应。"""
+
+    ok: bool = True
+    persona_prompt: str = ""
+    user_address: str = ""
+    memory_enabled: bool = False
+    memory_scope: str = "local_only"
+    prompt_order: list[str] = Field(
+        default_factory=lambda: [
+            "persona",
+            "user_address",
+            "relevant_memory",
+            "current_session",
+            "request",
+        ]
+    )
+    message: str = ""

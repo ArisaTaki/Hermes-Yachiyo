@@ -23,6 +23,43 @@ _pointer_passthrough_lock = threading.RLock()
 _pointer_passthrough_stops: dict[str, threading.Event] = {}
 
 
+def get_primary_screen_work_area() -> dict[str, int]:
+    """Return a best-effort primary screen work area in top-left coordinates."""
+    if platform.system() == "Darwin":
+        try:
+            from AppKit import NSScreen  # type: ignore[import-untyped]
+
+            screen = NSScreen.mainScreen()
+            frame = screen.frame()
+            visible = screen.visibleFrame()
+            screen_height = float(frame.size.height)
+            return {
+                "x": int(round(float(visible.origin.x))),
+                "y": int(round(screen_height - float(visible.origin.y) - float(visible.size.height))),
+                "width": int(round(float(visible.size.width))),
+                "height": int(round(float(visible.size.height))),
+            }
+        except Exception as exc:
+            logger.debug("读取 macOS 屏幕工作区失败，使用兜底尺寸: %s", exc)
+
+    try:
+        import tkinter as tk
+
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            width = int(root.winfo_screenwidth())
+            height = int(root.winfo_screenheight())
+        finally:
+            root.destroy()
+        if width > 0 and height > 0:
+            return {"x": 0, "y": 0, "width": width, "height": height}
+    except Exception as exc:
+        logger.debug("读取屏幕尺寸失败，使用兜底尺寸: %s", exc)
+
+    return {"x": 0, "y": 0, "width": 1440, "height": 900}
+
+
 def _dispatch_to_main_queue(fn: Callable[[], None]) -> None:
     """Schedule ``fn`` on the macOS main queue via GCD."""
     import ctypes
@@ -228,11 +265,41 @@ def focus_macos_window(*, title: str) -> bool:
         return False
 
 
+def focus_macos_webview_window(window: object) -> bool:
+    """精确聚焦某个 pywebview Window 对应的 macOS NSWindow。"""
+    if platform.system() != "Darwin":
+        return False
+    ns_window = getattr(window, "native", None)
+    if ns_window is None:
+        return False
+
+    def _focus() -> bool:
+        try:
+            from AppKit import NSApp  # type: ignore[import-untyped]
+        except Exception as exc:
+            logger.debug("PyObjC/AppKit 不可用，跳过 macOS 精确窗口聚焦: %s", exc)
+            return False
+        try:
+            ns_window.makeKeyAndOrderFront_(None)
+            NSApp.activateIgnoringOtherApps_(True)
+            logger.debug("已精确聚焦 macOS 窗口: uid=%s", getattr(window, "uid", ""))
+            return True
+        except Exception as exc:
+            logger.debug("精确聚焦 macOS 窗口失败: %s", exc)
+            return False
+
+    try:
+        return bool(_run_on_macos_main_thread(_focus))
+    except Exception as exc:
+        logger.debug("调度 macOS 精确窗口聚焦到主线程失败: %s", exc)
+        return False
+
+
 def bubble_visual_hit_test(width: float, height: float, x: float, y: float) -> bool:
     """Return whether a point is inside the visible circular Bubble launcher."""
     if width <= 0 or height <= 0:
         return False
-    diameter = min(width * 0.84, height * 0.84, 108.0)
+    diameter = max(0.0, min(width, height) - 8.0)
     radius = (diameter / 2.0) + 3.0
     center_x = width / 2.0
     center_y = height / 2.0
@@ -469,10 +536,14 @@ def _region_hit_test(
 
     try:
         kind = str(region.get("kind") or "ellipse")
-        left = float(region.get("x", 0.0)) * width
-        top = float(region.get("y", 0.0)) * height
-        region_width = float(region.get("width", 0.0)) * width
-        region_height = float(region.get("height", 0.0)) * height
+        raw_left: Any = region.get("x", 0.0)
+        raw_top: Any = region.get("y", 0.0)
+        raw_width: Any = region.get("width", 0.0)
+        raw_height: Any = region.get("height", 0.0)
+        left = float(raw_left) * width
+        top = float(raw_top) * height
+        region_width = float(raw_width) * width
+        region_height = float(raw_height) * height
     except (TypeError, ValueError):
         return None
 
@@ -527,8 +598,10 @@ def _alpha_mask_hit_test(
     region: dict[str, object],
 ) -> bool | None:
     try:
-        cols = int(region.get("cols", 0))
-        rows = int(region.get("rows", 0))
+        raw_cols: Any = region.get("cols", 0)
+        raw_rows: Any = region.get("rows", 0)
+        cols = int(raw_cols)
+        rows = int(raw_rows)
         mask = str(region.get("mask") or "")
     except (TypeError, ValueError):
         return None

@@ -107,7 +107,10 @@ def test_dashboard_data_includes_chat_overview_and_modes(tmp_path, monkeypatch):
     runtime.chat_session.add_user_message("来自 control center")
     try:
         monkeypatch.setattr("apps.shell.main_api.get_workspace_status", lambda: {"initialized": True, "workspace_path": "/tmp/ws", "created_at": "now"})
-        monkeypatch.setattr("apps.shell.main_api.get_integration_snapshot", lambda config, boot: _fake_snapshot())
+        monkeypatch.setattr(
+            "apps.shell.main_api.get_integration_snapshot",
+            lambda config, boot: _fake_snapshot(),
+        )
 
         api = MainWindowAPI(runtime, AppConfig())
         data = api.get_dashboard_data()
@@ -125,7 +128,10 @@ def test_settings_data_exposes_mode_settings_summaries(tmp_path, monkeypatch):
     runtime = _RuntimeStub(store)
     try:
         monkeypatch.setattr("apps.shell.main_api.get_workspace_status", lambda: {"initialized": True, "workspace_path": "/tmp/ws", "created_at": "now", "dirs": {}})
-        monkeypatch.setattr("apps.shell.main_api.get_integration_snapshot", lambda config, boot: _fake_snapshot())
+        monkeypatch.setattr(
+            "apps.shell.main_api.get_integration_snapshot",
+            lambda config, boot: _fake_snapshot(),
+        )
 
         model_dir = tmp_path / "models" / "hiyori"
         model_dir.mkdir(parents=True, exist_ok=True)
@@ -134,6 +140,8 @@ def test_settings_data_exposes_mode_settings_summaries(tmp_path, monkeypatch):
 
         config = AppConfig()
         config.bubble_mode.summary_count = 2
+        config.assistant.persona_prompt = "你是八千代。"
+        config.assistant.user_address = "老师"
         config.live2d_mode.model_name = "hiyori"
         config.live2d_mode.model_path = str(model_dir)
 
@@ -141,6 +149,8 @@ def test_settings_data_exposes_mode_settings_summaries(tmp_path, monkeypatch):
         data = api.get_settings_data()
 
         assert set(data["mode_settings"]) == {"bubble", "live2d"}
+        assert data["assistant"]["persona_prompt"] == "你是八千代。"
+        assert data["assistant"]["user_address"] == "老师"
         assert "摘要 2 条" in data["mode_settings"]["bubble"]["summary"]
         assert "hiyori" in data["mode_settings"]["live2d"]["summary"]
     finally:
@@ -154,7 +164,10 @@ def test_display_mode_change_schedules_app_restart(tmp_path, monkeypatch):
     try:
         monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
         monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
-        monkeypatch.setattr("apps.shell.main_api.get_integration_snapshot", lambda config, boot: _fake_snapshot())
+        monkeypatch.setattr(
+            "apps.shell.main_api.get_integration_snapshot",
+            lambda config, boot: _fake_snapshot(),
+        )
         monkeypatch.setattr("apps.shell.window.request_app_restart", lambda: restarted.append(True))
 
         config = AppConfig(display_mode="bubble")
@@ -166,5 +179,46 @@ def test_display_mode_change_schedules_app_restart(tmp_path, monkeypatch):
         assert result["restart_reason"] == "display_mode_changed"
         assert restarted == [True]
         assert config.display_mode == "live2d"
+    finally:
+        store.close()
+
+
+def test_assistant_persona_prompt_updates_from_main_settings(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    try:
+        monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+        monkeypatch.setattr(
+            "apps.shell.main_api.get_integration_snapshot",
+            lambda config, boot: _fake_snapshot(),
+        )
+
+        config = AppConfig()
+        api = MainWindowAPI(runtime, config)
+        result = api.update_settings({"assistant.persona_prompt": "你是八千代。"})
+
+        assert result["ok"] is True
+        assert result["app_state"]["assistant"]["persona_prompt"] == "你是八千代。"
+        assert config.assistant.persona_prompt == "你是八千代。"
+    finally:
+        store.close()
+
+
+def test_assistant_user_address_updates_from_main_settings(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    try:
+        monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+        monkeypatch.setattr("apps.shell.main_api.get_integration_snapshot", lambda config, boot: _fake_snapshot())
+
+        config = AppConfig()
+        api = MainWindowAPI(runtime, config)
+        result = api.update_settings({"assistant.user_address": "老师"})
+
+        assert result["ok"] is True
+        assert result["app_state"]["assistant"]["user_address"] == "老师"
+        assert config.assistant.user_address == "老师"
     finally:
         store.close()

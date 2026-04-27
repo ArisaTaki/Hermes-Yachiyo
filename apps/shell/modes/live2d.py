@@ -24,7 +24,10 @@ from apps.shell.assets import (
     project_display_path,
 )
 from apps.shell.chat_bridge import ChatBridge
+from apps.shell.launcher_notifications import LauncherNotificationTracker
 from apps.shell.mode_settings import _serialize_summary
+from apps.shell.proactive import ProactiveDesktopService
+from apps.shell.tts import TTSService
 
 if TYPE_CHECKING:
     from apps.core.runtime import HermesRuntime
@@ -338,6 +341,66 @@ _LIVE2D_HTML = r"""
         .live2d-resource-hint.hidden {
             display: none;
         }
+        .reply-bubble {
+            position: absolute;
+            left: 50%;
+            top: 24px;
+            transform: translateX(-50%);
+            width: min(88%, 300px);
+            padding: 10px 12px;
+            border-radius: 16px 16px 16px 6px;
+            background: rgba(20, 24, 31, 0.78);
+            color: #fff7df;
+            font-size: 12px;
+            line-height: 1.45;
+            box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
+            z-index: 14;
+            pointer-events: auto;
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+        }
+        .reply-bubble.proactive {
+            background: rgba(79, 42, 24, 0.84);
+            color: #ffe7c2;
+        }
+        .reply-bubble.hidden,
+        .quick-input.hidden {
+            display: none;
+        }
+        .quick-input {
+            position: absolute;
+            left: 50%;
+            bottom: 18px;
+            transform: translateX(-50%);
+            width: min(88%, 306px);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px;
+            border-radius: 999px;
+            background: rgba(20, 24, 31, 0.82);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            z-index: 15;
+            pointer-events: auto;
+        }
+        .quick-input input {
+            min-width: 0;
+            flex: 1;
+            border: 0;
+            background: transparent;
+            color: #fff7df;
+            outline: none;
+            font-size: 12px;
+        }
+        .quick-input button {
+            border: 0;
+            border-radius: 999px;
+            padding: 5px 9px;
+            background: rgba(134, 169, 255, 0.88);
+            color: #101326;
+            cursor: pointer;
+            font-size: 12px;
+        }
         .context-menu {
             position: fixed;
             right: 12px;
@@ -375,8 +438,7 @@ _LIVE2D_HTML = r"""
          onpointermove="trackLauncherPointerMove(event)"
          onpointerup="trackLauncherPointerUp(event)"
          onpointerleave="handleStagePointerLeave(event)"
-         onpointerenter="focusLauncherWindow()"
-         onclick="toggleChat(event)" oncontextmenu="showMenu(event)">
+         onclick="handleStageClick(event)" oncontextmenu="showMenu(event)">
         <div class="character" id="character" aria-label="Yachiyo Live2D 角色舞台">
             <canvas class="live2d-canvas" id="live2d-canvas"></canvas>
             <img class="live2d-preview-fallback hidden" id="live2d-fallback-preview" src="{{PREVIEW_URL}}" alt="">
@@ -392,6 +454,13 @@ _LIVE2D_HTML = r"""
             </div>
             <div class="live2d-loading hidden" id="live2d-loading">Live2D 加载中…</div>
             <div class="live2d-error hidden" id="live2d-error"></div>
+        </div>
+        <div class="reply-bubble hidden" id="reply-bubble" onclick="event.stopPropagation()">
+            <span id="reply-bubble-text"></span>
+        </div>
+        <div class="quick-input hidden" id="quick-input" onclick="event.stopPropagation()">
+            <input id="quick-input-text" type="text" placeholder="和八千代说点什么…" onkeydown="handleQuickInputKey(event)">
+            <button type="button" onclick="sendQuickInput(event)">发送</button>
         </div>
     </div>
 
@@ -427,6 +496,10 @@ _LIVE2D_HTML = r"""
     let currentHitRegion = null;
     let currentUIRegions = [];
     let launcherDragging = false;
+    let currentLive2DView = null;
+    let replyBubbleManuallyHidden = false;
+    let lastReplyBubbleText = '';
+    let lastAppliedDefaultOpenBehavior = null;
     let live2dMouseFollowEnabled = true;
     let lastPointerLocalX = 0;
     let lastPointerLocalY = 0;
@@ -731,9 +804,19 @@ _LIVE2D_HTML = r"""
 
     function reportUIRegions() {
         const closeButton = document.getElementById('live2d-resource-hint-close');
+        const replyBubble = document.getElementById('reply-bubble');
+        const quickInput = document.getElementById('quick-input');
         const regions = [];
         const closeRegion = elementRegion(closeButton, 'rect');
         if (closeRegion) regions.push(closeRegion);
+        if (replyBubble && !replyBubble.classList.contains('hidden')) {
+            const replyRegion = elementRegion(replyBubble, 'rect');
+            if (replyRegion) regions.push(replyRegion);
+        }
+        if (quickInput && !quickInput.classList.contains('hidden')) {
+            const inputRegion = elementRegion(quickInput, 'rect');
+            if (inputRegion) regions.push(inputRegion);
+        }
         sendUIRegions(regions);
     }
 
@@ -1146,9 +1229,134 @@ _LIVE2D_HTML = r"""
         }, 0);
     }
 
+    function latestAssistantText(chat) {
+        if (chat.latest_reply) return chat.latest_reply;
+        const messages = chat.messages || [];
+        for (let i = messages.length - 1; i >= 0; i -= 1) {
+            if (messages[i].role === 'assistant' && messages[i].content) return messages[i].content;
+        }
+        return '';
+    }
+
+    function setReplyBubbleVisible(visible, extraClass) {
+        const node = document.getElementById('reply-bubble');
+        node.classList.toggle('hidden', !visible);
+        node.classList.toggle('proactive', extraClass === 'proactive');
+        reportUIRegions();
+    }
+
+    function updateReplyBubble(live2d, chat, proactive, notification, forceLatest) {
+        const node = document.getElementById('reply-bubble');
+        const textNode = document.getElementById('reply-bubble-text');
+        const proactiveAttention = proactive && proactive.has_attention;
+        const hasUnread = notification && notification.has_unread;
+        const text = proactiveAttention
+            ? (proactive.message || '有新的主动桌面观察结果')
+            : chat.is_processing
+                ? '正在思考回复…'
+                : (hasUnread || forceLatest)
+                    ? (latestAssistantText(chat) || '')
+                    : '';
+        if (text && text !== lastReplyBubbleText) {
+            lastReplyBubbleText = text;
+            replyBubbleManuallyHidden = false;
+        }
+        textNode.textContent = text || '';
+        const visible = !!live2d.show_reply_bubble && !!text && !replyBubbleManuallyHidden;
+        setReplyBubbleVisible(visible, proactiveAttention ? 'proactive' : '');
+        return node;
+    }
+
+    function setQuickInputVisible(visible) {
+        const live2d = currentLive2DView && currentLive2DView.live2d ? currentLive2DView.live2d : {};
+        const node = document.getElementById('quick-input');
+        const normalized = !!visible && live2d.enable_quick_input !== false;
+        node.classList.toggle('hidden', !normalized);
+        if (normalized) {
+            const input = document.getElementById('quick-input-text');
+            setTimeout(function() { try { input.focus({preventScroll: true}); } catch (error) { input.focus(); } }, 0);
+        }
+        reportUIRegions();
+    }
+
+    function applyDefaultOpenBehavior(live2d) {
+        const behavior = live2d.default_open_behavior || 'reply_bubble';
+        if (behavior === lastAppliedDefaultOpenBehavior) return;
+        lastAppliedDefaultOpenBehavior = behavior;
+        if (behavior === 'chat_input') {
+            replyBubbleManuallyHidden = true;
+            setReplyBubbleVisible(false, '');
+            setQuickInputVisible(true);
+        } else if (behavior === 'stage') {
+            replyBubbleManuallyHidden = true;
+            setReplyBubbleVisible(false, '');
+            setQuickInputVisible(false);
+        } else {
+            replyBubbleManuallyHidden = false;
+            setQuickInputVisible(false);
+        }
+    }
+
+    function toggleReplyBubble() {
+        const node = document.getElementById('reply-bubble');
+        const currentlyVisible = !node.classList.contains('hidden');
+        replyBubbleManuallyHidden = currentlyVisible;
+        if (!currentlyVisible) {
+            replyBubbleManuallyHidden = false;
+            updateReplyBubble(
+                (currentLive2DView && currentLive2DView.live2d) || {},
+                (currentLive2DView && currentLive2DView.chat) || {},
+                (currentLive2DView && currentLive2DView.proactive) || {},
+                (currentLive2DView && currentLive2DView.notification) || {},
+                true,
+            );
+        } else {
+            setReplyBubbleVisible(false, '');
+        }
+        acknowledgeProactive();
+        acknowledgeNotification();
+    }
+
+    function handleQuickInputKey(event) {
+        if (event.key === 'Enter') sendQuickInput(event);
+        if (event.key === 'Escape') setQuickInputVisible(false);
+    }
+
+    async function sendQuickInput(event) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        const input = document.getElementById('quick-input-text');
+        const text = input.value.trim();
+        if (!text || !window.pywebview || !window.pywebview.api) return;
+        const result = await window.pywebview.api.send_quick_message(text);
+        if (result && result.ok) input.value = '';
+        await refreshLive2D();
+    }
+
+    async function acknowledgeProactive() {
+        try {
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.acknowledge_proactive) {
+                await window.pywebview.api.acknowledge_proactive();
+            }
+        } catch (error) {}
+    }
+
+    async function acknowledgeNotification() {
+        try {
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.acknowledge_notification) {
+                await window.pywebview.api.acknowledge_notification();
+            }
+        } catch (error) {}
+    }
+
     function renderLive2D(view) {
+        currentLive2DView = view;
         const live2d = view.live2d || {};
         const chat = view.chat || {};
+        const proactive = view.proactive || {};
+        const notification = view.notification || {};
         const resource = live2d.resource || {};
         const character = document.getElementById('character');
         const scale = Math.max(0.4, Math.min(2.0, Number(live2d.scale || 1)));
@@ -1159,28 +1367,27 @@ _LIVE2D_HTML = r"""
             ?? true
         );
         character.style.setProperty('--live2d-preview-scale', String(scale));
-        let status = 'ready';
-        if (chat.is_processing) status = 'processing';
-        else if (chat.messages && chat.messages.some(function(m) { return m.status === 'failed'; })) status = 'failed';
-
-        const hasAttention = !!chat.latest_reply && !chat.is_processing;
+        const hasAttention = !!notification.has_unread;
+        const unreadStatus = notification.latest_message ? notification.latest_message.status : '';
         const characterClasses = ['character'];
         if (chat.is_processing) characterClasses.push('processing');
-        else if (status === 'failed') characterClasses.push('failed');
+        else if (hasAttention && unreadStatus === 'failed') characterClasses.push('failed');
         else if (hasAttention) characterClasses.push('has-message');
         character.className = characterClasses.join(' ');
 
-        const messageHint = chat.is_processing
+        const messageHint = proactive.has_attention
+            ? '，有新的桌面观察结果'
+            : chat.is_processing
             ? '，正在回复'
             : hasAttention
                 ? '，有新消息'
-                : status === 'failed'
-                    ? '，消息发送失败'
-                    : '';
+                : '';
         document.getElementById('stage').title =
-            ((resource.status_label || 'Yachiyo Live2D') + messageHint + '，点击展开对话');
+            ((resource.status_label || 'Yachiyo Live2D') + messageHint + '，点击行为：' + (live2d.click_action || 'open_chat'));
 
         renderResourceHint(resource);
+        applyDefaultOpenBehavior(live2d);
+        updateReplyBubble(live2d, chat, proactive, notification, false);
         reportUIRegions();
 
         ensureLive2DRenderer(view);
@@ -1238,6 +1445,28 @@ _LIVE2D_HTML = r"""
         } finally {
             toggling = false;
         }
+    }
+
+    async function handleStageClick(event) {
+        const live2d = currentLive2DView && currentLive2DView.live2d ? currentLive2DView.live2d : {};
+        const action = live2d.click_action || 'open_chat';
+        if (action === 'toggle_reply') {
+            if (shouldIgnoreLauncherClick(event)) return;
+            if (isMenuVisible()) {
+                hideMenu();
+                if (event) event.stopPropagation();
+                return;
+            }
+            toggleReplyBubble();
+            return;
+        }
+        if (action === 'focus_stage') {
+            if (shouldIgnoreLauncherClick(event)) return;
+            hideMenu();
+            await focusLauncherWindow();
+            return;
+        }
+        await toggleChat(event);
     }
 
     async function openChat() {
@@ -1410,6 +1639,10 @@ class Live2DWindowAPI:
         self._runtime = runtime
         self._config = config
         self._chat_bridge = ChatBridge(runtime)
+        self._notification = LauncherNotificationTracker()
+        self._proactive = ProactiveDesktopService(runtime, config.live2d_mode)
+        self._tts = TTSService(config.tts)
+        self._last_tts_reply = ""
         self._live2d_window: Any = None
         self._last_client_event: dict[str, str] = {}
         self._context_menu_open = False
@@ -1422,6 +1655,12 @@ class Live2DWindowAPI:
         live2d = self._config.live2d_mode
         resource = live2d.resource_info()
         chat = self._chat_bridge.get_conversation_overview(summary_count=3, session_limit=3)
+        proactive = self._proactive.get_state()
+        notification = self._notification.update(
+            chat,
+            external_attention=bool(proactive.get("has_attention")),
+        )
+        tts_status = self._maybe_trigger_tts(chat)
         runner = self._runtime.task_runner
         executor_label = "执行器不可用"
         if runner is not None:
@@ -1480,9 +1719,13 @@ class Live2DWindowAPI:
                 "show_reply_bubble": live2d.show_reply_bubble,
                 "enable_quick_input": live2d.enable_quick_input,
                 "mouse_follow_enabled": live2d.mouse_follow_enabled,
+                "proactive_enabled": live2d.proactive_enabled,
+                "proactive_desktop_watch_enabled": live2d.proactive_desktop_watch_enabled,
+                "proactive_interval_seconds": live2d.proactive_interval_seconds,
                 "preview_url": data_uri(preview_path),
-                "click_action": "open_chat",
+                "click_action": live2d.click_action,
                 "default_open_behavior": live2d.default_open_behavior,
+                "tts": tts_status,
                 "status_label": resource.status_label,
                 "help_text": resource.help_text,
                 "summary": _serialize_summary(resource.summary),
@@ -1512,24 +1755,51 @@ class Live2DWindowAPI:
                     "enable_physics": live2d.enable_physics,
                 },
             },
+            "proactive": proactive,
+            "notification": notification,
+            "tts": tts_status,
             "bridge_label": bridge_label_map.get(bridge_state, "Bridge 启动中"),
             "executor_label": executor_label,
         }
+
+    def _maybe_trigger_tts(self, chat: Dict[str, Any]) -> Dict[str, Any]:
+        if not self._config.tts.enabled or self._config.tts.provider == "none":
+            return self._tts.get_status()
+        latest_reply = str(chat.get("latest_reply_full") or chat.get("latest_reply") or "").strip()
+        if not latest_reply:
+            return self._tts.get_status()
+        if latest_reply == self._last_tts_reply:
+            return self._tts.get_status()
+        status = self._tts.speak_async(latest_reply)
+        if status.get("scheduled"):
+            self._last_tts_reply = latest_reply
+        return status
 
     def send_quick_message(self, text: str) -> Dict[str, Any]:
         return self._chat_bridge.send_quick_message(text)
 
     def toggle_chat(self) -> Dict[str, Any]:
-        from apps.shell.chat_window import is_chat_window_open, toggle_chat_window
+        from apps.shell.chat_window import open_chat_window
 
-        was_open = is_chat_window_open()
-        open_after_toggle = toggle_chat_window(self._runtime)
-        return {"ok": was_open or open_after_toggle, "open": open_after_toggle}
+        self._proactive.acknowledge()
+        self._notification.acknowledge()
+        opened = open_chat_window(self._runtime)
+        return {"ok": opened, "open": opened}
 
     def open_chat(self) -> Dict[str, Any]:
         from apps.shell.chat_window import open_chat_window
 
+        self._proactive.acknowledge()
+        self._notification.acknowledge()
         return {"ok": open_chat_window(self._runtime)}
+
+    def acknowledge_proactive(self) -> Dict[str, Any]:
+        self._proactive.acknowledge()
+        return {"ok": True}
+
+    def acknowledge_notification(self) -> Dict[str, Any]:
+        self._notification.acknowledge()
+        return {"ok": True}
 
     def open_main_window(self) -> Dict[str, Any]:
         from apps.shell.window import open_main_window

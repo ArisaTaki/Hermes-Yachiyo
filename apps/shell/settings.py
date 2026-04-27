@@ -198,6 +198,24 @@ class ModeSettingsAPI:
                     result["restart_error"] = str(exc)
         return result
 
+    def apply_settings_and_restart(self, changes: dict[str, Any]) -> dict[str, Any]:
+        result = self.update_settings(changes or {})
+        if not result.get("ok"):
+            return result
+        try:
+            from apps.shell.window import request_app_restart
+
+            request_app_restart()
+            result["restart_scheduled"] = True
+            result["restart_reason"] = "manual_apply_restart"
+        except Exception as exc:
+            logger.error("手动应用设置后重启失败: %s", exc)
+            result["restart_scheduled"] = False
+            result["restart_error"] = str(exc)
+            result["ok"] = False
+            result["error"] = str(exc)
+        return result
+
     def preview_settings(self, changes: dict[str, Any]) -> dict[str, Any]:
         try:
             preview_config = copy.deepcopy(self._config)
@@ -375,6 +393,17 @@ h2 { color: #86a9ff; font-size: 1.15em; margin-bottom: 6px; }
     background: #141427;
     color: #eef1ff;
     font-size: 0.84em;
+}
+.textarea {
+    width: 260px;
+    min-height: 88px;
+    resize: vertical;
+    line-height: 1.45;
+}
+.select:disabled,
+.input:disabled {
+    opacity: 0.56;
+    cursor: not-allowed;
 }
 .toggle {
     width: 40px;
@@ -563,6 +592,7 @@ input:checked + .slider:before { transform: translateX(20px); }
             </div>
             <div class="action-group">
                 <button class="action-btn secondary" id="draft-reset" type="button" onclick="resetDraft()" disabled>重置草稿</button>
+                <button class="action-btn secondary" id="draft-apply-restart" type="button" onclick="applyDraftAndRestart()">应用并重启应用</button>
                 <button class="action-btn primary" id="draft-apply" type="button" onclick="applyDraft()" disabled>应用修改</button>
             </div>
         </div>
@@ -585,6 +615,18 @@ function num(v, fallback) {
 function fieldName(key) {
     const parts = String(key || '').split('.');
     return parts[parts.length - 1] || '';
+}
+
+function configValueName(key) {
+    const mapping = {
+        'tts.enabled': 'tts_enabled',
+        'tts.provider': 'tts_provider',
+        'tts.endpoint': 'tts_endpoint',
+        'tts.command': 'tts_command',
+        'tts.voice': 'tts_voice',
+        'tts.timeout_seconds': 'tts_timeout_seconds',
+    };
+    return mapping[key] || fieldName(key);
 }
 
 function cloneValue(value) {
@@ -623,14 +665,14 @@ function workingSettings() {
     Object.entries(draftChanges).forEach(function(entry) {
         const key = entry[0];
         const value = entry[1];
-        cfg[fieldName(key)] = value;
+        cfg[configValueName(key)] = value;
         updateSyntheticDisplayFields(cfg, key, value);
     });
     return cfg;
 }
 
 function setDraftField(key, value) {
-    const name = fieldName(key);
+    const name = configValueName(key);
     const savedValue = currentSettings ? currentSettings[name] : undefined;
     if (sameValue(savedValue, value)) delete draftChanges[key];
     else draftChanges[key] = value;
@@ -670,17 +712,21 @@ function updateDraftState() {
     const text = document.getElementById('draft-text');
     const resetBtn = document.getElementById('draft-reset');
     const applyBtn = document.getElementById('draft-apply');
+    const restartBtn = document.getElementById('draft-apply-restart');
     if (count > 0) {
         badge.style.display = 'inline-block';
         badge.textContent = count + ' 项待应用';
         text.textContent = '当前表单是草稿，点击“应用修改”后才会写入配置。';
+        restartBtn.textContent = '应用并重启应用';
     } else {
         badge.style.display = 'none';
         badge.textContent = '';
         text.textContent = '当前没有未保存的修改。';
+        restartBtn.textContent = '重启应用';
     }
     resetBtn.disabled = count === 0;
     applyBtn.disabled = count === 0;
+    restartBtn.disabled = false;
 }
 
 function boolRow(key, label, checked) {
@@ -695,6 +741,45 @@ function inputRow(key, label, value, type='text', step='') {
     return '<div class="row"><span class="label">' + label + '</span>'
         + '<input class="input" type="' + type + '" value="' + escapeHtml(String(value ?? '')) + '"' + stepAttr
         + ' oninput="updateInputDraft(\\'' + key + '\\', this)"></div>';
+}
+
+function percentRow(key, label, value) {
+    const current = Math.round(num(value, 0) * 100);
+    return '<div class="row"><span class="label">' + label + '</span>'
+    + '<span class="value" style="display:flex;align-items:center;gap:6px;">'
+    + '<input class="input" type="number" min="0" max="100" step="1" value="' + current + '"'
+    + ' oninput="updatePercentDraft(\\'' + key + '\\', this.value)">'
+    + '<span style="color:#888;">%</span></span></div>';
+}
+
+function textareaRow(key, label, value) {
+    return '<div class="row"><span class="label">' + label + '</span>'
+        + '<textarea class="input textarea" oninput="updateDraftField(\\'' + key + '\\', this.value)">'
+        + escapeHtml(String(value ?? '')) + '</textarea></div>';
+}
+
+function selectRow(key, label, value, options) {
+    const opts = options.map(function(item) {
+        const selected = item[0] === value ? ' selected' : '';
+        return '<option value="' + escapeHtml(item[0]) + '"' + selected + '>'
+            + escapeHtml(item[1]) + '</option>';
+    }).join('');
+    return '<div class="row"><span class="label">' + label + '</span>'
+        + '<select class="select" onchange="updateDraftField(\\'' + key + '\\', this.value)">'
+        + opts + '</select></div>';
+}
+
+function disabledBoolRow(label, checked, reason) {
+    return '<div class="row"><span class="label">' + label + '</span>'
+        + '<span class="value"><label class="toggle"><input type="checkbox" disabled '
+        + (checked ? 'checked ' : '')
+        + '><span class="slider"></span></label> '
+        + '<span class="badge">' + escapeHtml(reason || '待实现') + '</span></span></div>';
+}
+
+function noteRow(message, tone='') {
+    const cls = tone ? 'note ' + tone : 'note';
+    return '<div class="' + cls + '">' + escapeHtml(message) + '</div>';
 }
 
 function domId(key) {
@@ -720,6 +805,24 @@ function valueRow(label, value) {
         + escapeHtml(String(value || '—')) + '</span></div>';
 }
 
+function live2dExpressionSummary(summary) {
+    const expressions = (summary && summary.expressions) || [];
+    if (!expressions.length) return '当前模型未声明可选表情';
+    return expressions.map(function(item) {
+        return item.name || item.file || '未命名表情';
+    }).join(' / ');
+}
+
+function live2dMotionSummary(summary) {
+    const groups = (summary && summary.motion_groups) || {};
+    const parts = Object.entries(groups).map(function(entry) {
+        const items = entry[1] || [];
+        return entry[0] + ' × ' + items.length;
+    });
+    if (!parts.length) return '当前模型未声明可选动作';
+    return parts.join(' / ');
+}
+
 function syncScaleValue(id, value) {
     const normalized = num(value, 1).toFixed(2);
     const range = document.getElementById(id + '-range');
@@ -733,6 +836,11 @@ function syncScaleValue(id, value) {
 function updateScaleDraft(key, id, value) {
     syncScaleValue(id, value);
     setDraftField(key, num(value, 1));
+}
+
+function updatePercentDraft(key, value) {
+    const percent = Math.max(0, Math.min(100, num(value, 0)));
+    setDraftField(key, percent / 100);
 }
 
 function actionButton(label, handler, kind='') {
@@ -806,17 +914,27 @@ function renderForm(mode, cfg) {
     let html = '';
 
     if (mode === 'bubble') {
-        html += inputRow('bubble_mode.width', '气泡宽度', cfg.width, 'number');
-        html += inputRow('bubble_mode.height', '气泡高度', cfg.height, 'number');
-        html += inputRow('bubble_mode.position_x', '位置 X', cfg.position_x, 'number');
-        html += inputRow('bubble_mode.position_y', '位置 Y', cfg.position_y, 'number');
-        html += boolRow('bubble_mode.always_on_top', '窗口置顶', cfg.always_on_top);
-        html += boolRow('bubble_mode.edge_snap', '靠边吸附', cfg.edge_snap);
+        html += noteRow('Bubble 聊天窗口固定为点击打开；悬停不会打开或切换聊天窗口。尺寸、默认位置、置顶和头像保存后需重启当前模式（可用下方“应用并重启应用”）。', 'warn');
+        html += inputRow('bubble_mode.width', '气泡宽度（80-192，需重启当前模式）', cfg.width, 'number');
+        html += inputRow('bubble_mode.height', '气泡高度（80-192，需重启当前模式）', cfg.height, 'number');
+        html += noteRow('默认位置设置使用屏幕百分比：0% 表示左/上边，100% 表示右/下边。默认 100% / 100%，即右下角。', '');
+        html += percentRow('bubble_mode.position_x_percent', '默认位置 X（0-100%，需重启当前模式）', cfg.position_x_percent);
+        html += percentRow('bubble_mode.position_y_percent', '默认位置 Y（0-100%，需重启当前模式）', cfg.position_y_percent);
+        html += boolRow('bubble_mode.always_on_top', '窗口置顶（需重启当前模式）', cfg.always_on_top);
+        html += boolRow('bubble_mode.edge_snap', '靠边吸附（拖动结束后吸附最近屏幕边缘）', cfg.edge_snap);
+        html += boolRow('bubble_mode.expanded_on_start', '启动后展开提示', cfg.expanded_on_start);
+        html += valueRow('展开触发', '点击打开聊天（固定）');
+        html += selectRow('bubble_mode.default_display', '默认展示', cfg.default_display, [
+            ['icon', '仅头像图标'],
+            ['summary', '状态摘要'],
+            ['recent_reply', '最近回复'],
+        ]);
         html += inputRow('bubble_mode.summary_count', '状态摘要条数', cfg.summary_count, 'number');
-        html += boolRow('bubble_mode.show_unread_dot', '显示未读点', cfg.show_unread_dot);
+        html += boolRow('bubble_mode.show_unread_dot', '新消息呼吸灯', cfg.show_unread_dot);
+        html += boolRow('bubble_mode.auto_hide', '空闲自动淡出', cfg.auto_hide);
         html += inputRow('bubble_mode.opacity', '透明度', cfg.opacity, 'number', '0.01');
         html += valueRow('当前头像资源', cfg.avatar_path_display || cfg.avatar_path);
-        html += inputRow('bubble_mode.avatar_path', '头像路径', cfg.avatar_path);
+        html += inputRow('bubble_mode.avatar_path', '头像路径（需重启当前模式）', cfg.avatar_path);
         html += boolRow('bubble_mode.proactive_enabled', '主动对话', cfg.proactive_enabled);
         html += boolRow('bubble_mode.proactive_desktop_watch_enabled', '定期桌面观察', cfg.proactive_desktop_watch_enabled);
         html += inputRow('bubble_mode.proactive_interval_seconds', '观察间隔秒', cfg.proactive_interval_seconds, 'number');
@@ -831,18 +949,48 @@ function renderForm(mode, cfg) {
         html += inputRow('live2d_mode.model_name', '模型名称', cfg.model_name);
         html += valueRow('当前配置路径', cfg.model_path_display || cfg.model_path || '未填写');
         html += valueRow('当前生效路径', cfg.effective_model_path_display || '未检测到资源');
+        html += valueRow('模型可用表情', live2dExpressionSummary(cfg.summary));
+        html += valueRow('模型可用动作', live2dMotionSummary(cfg.summary));
         html += inputRow('live2d_mode.model_path', '模型路径', cfg.model_path);
         html += inputRow('live2d_mode.width', '窗口宽度', cfg.width, 'number');
         html += inputRow('live2d_mode.height', '窗口高度', cfg.height, 'number');
         html += inputRow('live2d_mode.position_x', '位置 X', cfg.position_x, 'number');
         html += inputRow('live2d_mode.position_y', '位置 Y', cfg.position_y, 'number');
-        html += boolRow('live2d_mode.window_on_top', '窗口置顶', cfg.window_on_top);
-        html += boolRow('live2d_mode.show_on_all_spaces', 'macOS 所有桌面可见', cfg.show_on_all_spaces);
-        html += boolRow('live2d_mode.auto_open_chat_window', '自动打开聊天窗口', cfg.auto_open_chat_window);
+        html += boolRow('live2d_mode.window_on_top', '窗口置顶（需重启当前模式）', cfg.window_on_top);
+        html += boolRow('live2d_mode.show_on_all_spaces', 'macOS 所有桌面可见（需重启当前模式）', cfg.show_on_all_spaces);
+        html += boolRow('live2d_mode.show_reply_bubble', '显示回复气泡', cfg.show_reply_bubble);
+        html += selectRow('live2d_mode.default_open_behavior', '启动初始表现（不打开聊天窗口）', cfg.default_open_behavior, [
+            ['stage', '仅角色舞台'],
+            ['reply_bubble', '显示回复气泡'],
+            ['chat_input', '显示快捷输入'],
+        ]);
+        html += selectRow('live2d_mode.click_action', '点击角色行为', cfg.click_action, [
+            ['open_chat', '打开/切换聊天窗口'],
+            ['toggle_reply', '切换回复气泡'],
+            ['focus_stage', '仅聚焦角色窗口'],
+        ]);
+        html += boolRow('live2d_mode.enable_quick_input', '显示快捷输入入口', cfg.enable_quick_input);
+        html += boolRow('live2d_mode.auto_open_chat_window', '启动时打开聊天窗口（需重启当前模式）', cfg.auto_open_chat_window);
         html += boolRow('live2d_mode.mouse_follow_enabled', '鼠标跟随', cfg.mouse_follow_enabled);
         html += inputRow('live2d_mode.idle_motion_group', '待机动作组', cfg.idle_motion_group);
         html += boolRow('live2d_mode.enable_expressions', '启用表情系统', cfg.enable_expressions);
         html += boolRow('live2d_mode.enable_physics', '启用物理模拟', cfg.enable_physics);
+        html += boolRow('live2d_mode.proactive_enabled', '主动对话', cfg.proactive_enabled);
+        html += boolRow('live2d_mode.proactive_desktop_watch_enabled', '定期桌面观察', cfg.proactive_desktop_watch_enabled);
+        html += inputRow('live2d_mode.proactive_interval_seconds', '观察间隔秒', cfg.proactive_interval_seconds, 'number');
+        html += boolRow('tts.enabled', '启用 Live2D TTS', cfg.tts_enabled);
+        html += selectRow('tts.provider', 'TTS Provider', cfg.tts_provider, [
+            ['none', 'none（关闭）'],
+            ['http', 'http POST'],
+            ['command', '本地命令'],
+        ]);
+        html += inputRow('tts.endpoint', 'TTS HTTP Endpoint', cfg.tts_endpoint || '');
+        html += inputRow('tts.command', 'TTS 本地命令', cfg.tts_command || '');
+        html += inputRow('tts.voice', 'TTS 音色', cfg.tts_voice || '');
+        html += inputRow('tts.timeout_seconds', 'TTS 超时秒', cfg.tts_timeout_seconds, 'number');
+        html += noteRow('TODO：Live2D 新消息提醒后续可从上方模型表情/动作中选择并播放一次；当前不会因历史回复常驻发光。', 'warn');
+        html += noteRow('Live2D 启动初始表现只控制回复气泡/快捷输入，不会打开聊天窗口；只有点击角色且“点击角色行为”为打开/切换聊天窗口时才会打开聊天。', 'warn');
+        html += noteRow('TTS 默认关闭；none 或配置缺失时不会调用外部服务，失败也不会影响聊天。', 'warn');
     }
 
     form.innerHTML = html;
@@ -911,6 +1059,18 @@ async function applyDraft() {
         if (result.restart_scheduled) message = '✓ 已保存，正在重启应用…';
         else if (result.effects && result.effects.hint) message = '✓ 已保存，' + result.effects.hint;
         showHint(message, false);
+    } catch (error) {
+        showHint('✗ ' + error.message, true);
+    }
+}
+
+async function applyDraftAndRestart() {
+    try {
+        if (!window.pywebview || !window.pywebview.api) throw new Error('pywebview API 未就绪');
+        const result = await window.pywebview.api.apply_settings_and_restart(draftChanges);
+        if (!result.ok) throw new Error(result.error || (result.errors || []).join('; ') || '重启失败');
+        if (result.settings) renderSettings(result.settings);
+        showHint('✓ 已保存，正在重启应用…', false);
     } catch (error) {
         showHint('✗ ' + error.message, true);
     }

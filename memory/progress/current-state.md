@@ -2,6 +2,60 @@
 
 ## 已完成
 
+### Milestone 63/64 — 下午桌面交互、设置与记忆规划收敛
+
+- ✅ Hermes 执行体验
+  - 默认执行超时从 60 秒提升为 30 分钟，并支持 `HERMES_YACHIYO_EXEC_TIMEOUT_SECONDS` 覆盖。
+  - Hermes CLI / streaming bridge 增加首事件、首 token、完成、进程结束和超时耗时日志，用于诊断冷启动与响应延迟。
+  - 每轮 Hermes 请求注入当前本地时间、星期和时段，避免下午仍按早晨语境回应。
+  - 助手 prompt 包装顺序扩展为环境上下文 → 人设 → 用户称呼 → 用户请求。
+- ✅ 共享助手资料与主设置
+  - 新增 `assistant.user_address`，Bridge `GET/PATCH /assistant/profile`、协议 schema、配置加载保存和 Hermes 调用链已贯通。
+  - 助手人设 Prompt 与用户称呼从模式设置收敛到 Control Center 主设置，避免 Bubble / Live2D 出现多份人设。
+  - Control Center 的文本/数字/大段文本共通设置改为待确认保存，点击“应用共通设置修改”后统一提交。
+  - 共通设置 dirty 判断改为与当前已提交值比较；用户改动后再改回原值会自动清除 pending。
+  - 工作空间创建时间在 Control Center 和设置页中改为本地可读格式。
+- ✅ Bubble / Live2D 桌面入口体验
+  - Bubble 默认位置使用屏幕百分比定位，默认右下角；设置页暴露 0-100% 输入。
+  - Bubble 靠边吸附正式实现，拖动释放后吸附最近屏幕边缘。
+  - Bubble 呼吸灯语义调整：处理中为黄色，未读成功为绿色，未读失败为红色；Chat Window 打开时抑制状态点并确认可见结果。
+  - Bubble / Live2D 点击聊天入口时改为打开或置前 Chat Window，不再因窗口已存在而关闭。
+- ✅ Chat Window 交互
+  - 消息文本可选择复制，消息右上角提供传统复制图标。
+  - 复制成功后图标短暂变为对勾，复制链路优先走 pywebview 后端系统剪贴板，再回退浏览器剪贴板和 textarea。
+  - 移除“重新编辑/重编”入口，避免当前历史链与 Hermes resume 语义不完整时产生误导。
+  - Chat Window 已存在时使用 restore/show/bring_to_front/focus + macOS native focus 置前。
+  - 若 WebView 初始化期 focus/show 某一步失败，不再把单例判坏并新建第二个白屏窗口；只有明确关闭/销毁才重建。
+- ✅ 记忆架构文档
+  - 新增 `docs/memory-architecture.md`，明确 SQLite 聊天记录只是原始会话存档，不等同长期记忆。
+  - 记忆设计优先复用 Hermes 原生记忆；Yachiyo 作为本地桌面侧控制层，负责授权、项目归类、UI 管理、Bridge 边界和 prompt 注入策略。
+
+### 当前验证结果
+
+- ✅ 全量测试：`python -m pytest` → 365 passed。
+- ✅ 相关 diagnostics：Chat Window、Control Center、Bubble/Live2D 入口和测试文件无 VS Code 错误。
+
+### Milestone 65 — Chat Window 单例竞态隔离
+
+- ✅ Chat Window 已存在时，macOS 置前改为只走原生标题聚焦，不再调用 pywebview 的 `restore/show/bring_to_front/focus` 组合，避免这些方法在初始化期或跨入口调用时触发空白副本。
+- ✅ 新增 `_chat_window_creating` 防重入保护；创建窗口期间再次点击 Bubble/Live2D 会直接返回并尝试原生聚焦，不会嵌套创建第二个窗口。
+- ✅ `events.closed` 回调改为只清理自己对应的 window，旧窗口延迟触发 closed 事件时不会误把当前活窗口单例置空。
+- ✅ 回归测试覆盖原生聚焦路径、创建中重入、旧 closed 事件不清当前窗口。
+- ✅ 全量测试：`python -m pytest` → 362 passed。
+- ✅ 追加修复：当 Python `_chat_window` 单例为空时，即使 macOS 原生层还能枚举到同标题残留窗口，也不再直接 native focus 返回成功；必须重新创建 pywebview HTML 窗口，避免重复打开/关闭后聚焦到白屏残留壳。
+- ✅ 追加验证：`python -m pytest` → 363 passed。
+
+### Milestone 66 — Chat Window 精确原生聚焦
+
+- ✅ 确认 pywebview `Window` 在 macOS Cocoa 后端会把真实 `NSWindow` 写入 `window.native`，可用于精确聚焦。
+- ✅ 新增 `focus_macos_webview_window(window)`，直接聚焦该 pywebview Window 对应的 native NSWindow。
+- ✅ Chat Window 已存在时不再按标题 `Yachiyo - 对话` 聚焦，避免同标题白屏残留壳被误置前。
+- ✅ `_chat_window_creating` 重入期间如果已有 window 引用，也走精确单例聚焦。
+- ✅ 回归测试覆盖精确 native handle 聚焦和缺少 native handle 时不误判成功。
+- ✅ 相关测试：`python -m pytest tests/test_chat_window_singleton.py tests/test_chat_bridge.py tests/test_native_window.py` → 69 passed。
+- ✅ 全量测试：`python -m pytest` → 365 passed。
+- ✅ 相关 diagnostics：Chat Window、native window helper 和测试文件无 VS Code 错误。
+
 ### Milestone 0 — 仓库骨架（desktop-first）
 
 - ✅ pyproject.toml（桌面应用依赖：pywebview, pystray, Pillow, fastapi, uvicorn）
@@ -1954,3 +2008,96 @@ Window          → ChatAPI    → ChatSession → ChatStore (SQLite)
 - `tests/test_main_api_modes.py`
 - `tests/test_chat_bridge.py`
 - 合计：44 passed
+
+### Milestone 60 — Live2D assistant settings / Bubble 设置闭环 / AstrBot intent bridge
+
+- ✅ 设置生效闭环
+  - Bubble 运行视图实际消费 `show_unread_dot` / `opacity` / `default_display` / `auto_hide`，`expand_trigger` 保留为兼容字段
+  - Bubble 聊天窗口最终策略已在 Milestone 61 收敛为 click-only；旧 `hover` 配置会被规整为 `click`
+  - Bubble `edge_snap` 尚未真实吸边，设置页已标记为待实现/禁用，避免误导用户
+  - Live2D `click_action` 不再硬编码为 `open_chat`，视图返回并执行配置值
+  - Live2D 支持 `open_chat` / `toggle_reply` / `focus_stage`
+  - Live2D `show_reply_bubble`、`enable_quick_input`、`default_open_behavior` 已被运行视图消费
+  - `window_on_top` / `show_on_all_spaces` 设置页明确提示需重启当前模式生效
+- ✅ 共享助手与 TTS 配置
+  - 新增共享 `assistant.persona_prompt`，不绑定到 Live2D 私有配置
+  - 新增 `tts.enabled` / `provider` / `endpoint` / `command` / `voice` / `timeout_seconds`
+  - 设置加载、保存、序列化、校验、设置页表单、effect policy 已同步
+  - Hermes 调用前按 `[人设设定] ... [用户请求] ...` 包装任务描述；空 prompt 保持原行为
+  - 新增 `apps/shell/tts.py`，默认关闭；支持 `none` / `http` / `command`，失败不阻塞聊天
+- ✅ Bubble + Live2D 主动桌面观察
+  - 新增 `apps/shell/proactive.py` 的 `ProactiveDesktopService`
+  - Bubble / Live2D 共享主动观察状态机与 blocker 检查
+  - 检查 Hermes ready、TaskRunner、`HermesExecutor`、vision 限制
+  - 满足条件时创建 `TaskType.SCREENSHOT` / `RiskLevel.LOW` 任务
+  - 维护 last task、ack、attention 状态；Live2D 视图返回 proactive 状态并触发视觉提示
+- ✅ Bridge / AstrBot 低风险自然语言入口
+  - 新增 `POST /assistant/intent`
+  - 响应状态、截图、活动窗口摘要；其他自然语言请求只创建低风险 Hermes 任务
+  - AstrBot 新增 `/y ask <内容>` 与 `/y chat <内容>`，调用 Bridge intent 端点
+  - 保留 `/y status/tasks/screen/window/do/check/cancel/codex` 命令族兼容
+  - AstrBot 仍只做 QQ bridge，不直接执行本机控制，不成为第二 runtime
+- ✅ 测试覆盖
+  - 更新 `tests/test_mode_settings.py`：新增字段默认值、序列化、保存和非法值拒绝
+  - 更新 `tests/test_chat_bridge.py`：Bubble / Live2D 运行视图消费配置
+  - 新增 `tests/test_proactive.py`：disabled、Hermes 未就绪、vision 受限、成功创建低风险截图任务
+  - 新增 `tests/test_tts.py`：disabled、missing config、command/http validation
+  - 新增 `tests/test_assistant_intent_route.py`：Bridge assistant intent 路由
+  - 更新 `tests/test_astrbot_handlers.py`：`/y ask` / `/y chat` 与权限校验
+
+**测试结果**：
+
+- 验收集：`tests/test_mode_settings.py tests/test_chat_bridge.py tests/test_native_window.py tests/test_astrbot_handlers.py tests/test_proactive.py tests/test_assistant_intent_route.py` → 106 passed
+- 完整套件：`python -m pytest` → 304 passed
+
+### Milestone 61 — Chat auto-open 修复 / Bubble 设置认知澄清 / Assistant profile 基础
+
+- ✅ Bubble / Live2D 聊天窗口打开策略收敛
+  - Bubble 移除 `pointerenter` / hover 打开 Chat Window 逻辑，运行视图固定返回 `expand_trigger=click`
+  - 旧配置中的 `bubble_mode.expand_trigger=hover` 在加载时统一规整为 `click`
+  - Bubble / Live2D 均不再通过 hover 或 pointerenter 聚焦入口打开/切换 Chat Window；聊天窗口只允许点击触发
+  - Live2D `default_open_behavior` 只控制回复泡泡/快捷输入初始表现，不打开 Chat Window
+  - `live2d_mode.auto_open_chat_window` 保留为“启动时打开”偏好，并标记为需重启当前模式后生效
+- ✅ Bubble 设置生效认知
+  - Bubble 尺寸范围扩展为 `80-192`
+  - launcher CSS 与 native hit-test 改为随窗口尺寸缩放，不再被固定 `108px` 视觉尺寸误导
+  - 设置页移除 hover 展开选项，明确显示“点击打开聊天（固定）”
+  - Bubble 尺寸、位置、置顶、头像字段明确标注“需重启当前模式”
+  - 设置页新增“应用并重启应用 / 重启应用”入口，作为当前模式重启能力未拆出前的安全兜底
+  - `edge_snap` 继续保持禁用/待实现，不伪装为已生效功能
+- ✅ Chat Window 单例一致性
+  - `open_chat_window()` / `is_chat_window_open()` / `close_chat_window()` 增加 closed/destroyed/event 状态清理
+  - stale singleton 不再导致关闭后状态误判；关闭事件会清理 `_chat_window`
+- ✅ AstrBot 记忆/人设共享基础
+  - canonical 人设仍是桌面端 `assistant.persona_prompt`
+  - 新增 Bridge `GET /assistant/profile` 与 `PATCH /assistant/profile`，用于读取/更新共享人设
+  - profile 响应声明 prompt 注入顺序：`persona` → `relevant_memory` → `current_session` → `request`
+  - 记忆同步保持本地端设计占位：不默认同步 QQ 原始聊天文本，后续只接收显式摘要/事实并由 Hermes-Yachiyo 管理注入
+
+**测试结果**：
+
+- 验收集：`tests/test_mode_settings.py tests/test_chat_bridge.py tests/test_native_window.py tests/test_astrbot_handlers.py tests/test_executor.py tests/test_proactive.py tests/test_assistant_intent_route.py tests/test_assistant_profile_route.py tests/test_chat_window_singleton.py` → 161 passed
+- 完整套件：`python -m pytest` → 320 passed
+
+### Milestone 62 — PR #4 review 修复：主动观察重试 / Live2D TTS 全量回复 / Bubble 状态点
+
+- ✅ 主动桌面观察失败态重试
+  - `ProactiveDesktopService.get_state()` 在 failed 后会先暴露错误状态
+  - 到达 `proactive_interval_seconds` 后自动重新安排低风险 `TaskType.SCREENSHOT` 任务
+  - 未到间隔时不会重复创建任务，避免错误态刷屏
+- ✅ Live2D TTS 使用完整回复
+  - `ChatBridge.get_recent_summary()` / `get_conversation_overview()` 新增 `latest_reply_full`
+  - UI 继续使用截断后的 `latest_reply`，TTS 优先朗读 `latest_reply_full`
+  - `_maybe_trigger_tts()` 的去重基于完整文本，避免长回复只播摘要
+- ✅ Bubble 状态点可见性恢复
+  - `renderBubble()` 明确输出 `visible attention` / `visible processing` / `visible failed`
+  - idle / empty / ready 且无未读时继续隐藏状态点
+  - `show_unread_dot=false` 会抑制可见状态点
+- ✅ 测试覆盖
+  - `tests/test_proactive.py`：failed 间隔前暴露错误、间隔后重试
+  - `tests/test_chat_bridge.py`：`latest_reply_full` 保留完整内容、Bubble dot class 逻辑
+  - `tests/test_tts.py`：Live2D TTS 朗读完整长回复
+
+**测试结果**：
+
+- PR review 验收集：`python -m pytest tests/test_proactive.py tests/test_chat_bridge.py tests/test_tts.py tests/test_mode_settings.py tests/test_native_window.py` → 87 passed

@@ -60,5 +60,5 @@ async def on_y_command(
         return "❌ 无权限使用 Yachiyo 命令"
 
     sub, args = parse_y_command(text)
-    return await route(sub, args, cfg)
+    return await route(sub, args, cfg, sender_id=sender_id)
 

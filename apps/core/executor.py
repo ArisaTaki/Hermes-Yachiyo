@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+from datetime import datetime
 import json
 import logging
 import os
@@ -98,10 +99,54 @@ class HermesInvokeResult:
 _HERMES_CMD: list[str] = ["hermes", "chat", "-q"]
 _HERMES_FLAGS: list[str] = ["-Q", "--source", "tool"]
 
-_EXEC_TIMEOUT: float = 60.0   # hermes chat -q 执行超时（秒）
+_EXEC_TIMEOUT_ENV = "HERMES_YACHIYO_EXEC_TIMEOUT_SECONDS"
+_DEFAULT_EXEC_TIMEOUT: float = 30 * 60.0
 _PROBE_TIMEOUT: float = 5.0   # hermes --version 探测超时（秒）
 _STREAM_UPDATE_INTERVAL: float = 0.05
 _BRIDGE_SCRIPT = Path(__file__).with_name("hermes_stream_bridge.py")
+
+
+def _read_exec_timeout() -> float:
+    raw_value = os.getenv(_EXEC_TIMEOUT_ENV, "").strip()
+    if not raw_value:
+        return _DEFAULT_EXEC_TIMEOUT
+    try:
+        timeout = float(raw_value)
+    except ValueError:
+        logger.warning(
+            "%s=%r 不是有效数字，使用默认 Hermes 执行超时 %.0fs",
+            _EXEC_TIMEOUT_ENV,
+            raw_value,
+            _DEFAULT_EXEC_TIMEOUT,
+        )
+        return _DEFAULT_EXEC_TIMEOUT
+    if timeout <= 0:
+        logger.warning(
+            "%s=%r 必须大于 0，使用默认 Hermes 执行超时 %.0fs",
+            _EXEC_TIMEOUT_ENV,
+            raw_value,
+            _DEFAULT_EXEC_TIMEOUT,
+        )
+        return _DEFAULT_EXEC_TIMEOUT
+    return timeout
+
+
+def _format_exec_timeout(timeout: float) -> str:
+    if timeout >= 60 and timeout % 60 == 0:
+        return f"{int(timeout // 60)}min"
+    return f"{timeout:.0f}s"
+
+
+_EXEC_TIMEOUT: float = _read_exec_timeout()  # hermes chat -q 执行超时（秒）
+_WEEKDAY_NAMES = (
+    "星期一",
+    "星期二",
+    "星期三",
+    "星期四",
+    "星期五",
+    "星期六",
+    "星期日",
+)
 
 # 从 hermes 输出中解析 session id。quiet 模式输出 session_id，非 quiet 模式输出 Session。
 _SESSION_ID_RE = re.compile(
@@ -158,6 +203,58 @@ def _humanize_bridge_error(message: str) -> str:
         if message.startswith(pattern):
             return f"{friendly}（{message}）"
     return message
+
+
+def format_persona_description(
+    description: str,
+    persona_prompt: str = "",
+    user_address: str = "",
+    environment_context: str = "",
+) -> str:
+    """按共享助手资料包装用户请求，资料为空时保持原始描述。"""
+    persona = (persona_prompt or "").strip()
+    address = (user_address or "").strip()
+    environment = (environment_context or "").strip()
+    if not environment and not persona and not address:
+        return description
+    parts: list[str] = []
+    if environment:
+        parts.append(environment)
+    if persona:
+        parts.append(f"[人设设定]\n{persona}")
+    if address:
+        parts.append(f"[用户称呼]\n请称呼用户为：{address}")
+    parts.append(f"[用户请求]\n{description}")
+    return "\n\n".join(parts)
+
+
+def _describe_day_period(hour: int) -> str:
+    if 5 <= hour < 9:
+        return "早上"
+    if 9 <= hour < 12:
+        return "上午"
+    if 12 <= hour < 14:
+        return "中午"
+    if 14 <= hour < 18:
+        return "下午"
+    if 18 <= hour < 23:
+        return "晚上"
+    return "深夜"
+
+
+def format_environment_context(now: Optional[datetime] = None) -> str:
+    """生成每轮对话的本地环境上下文。"""
+    current = now.astimezone() if now is not None else datetime.now().astimezone()
+    offset = current.strftime("%z")
+    timezone_label = f"UTC{offset[:3]}:{offset[3:]}" if offset else "本地时区"
+    weekday = _WEEKDAY_NAMES[current.weekday()]
+    period = _describe_day_period(current.hour)
+    return (
+        "[当前环境]\n"
+        f"当前本地时间：{current.strftime('%Y-%m-%d %H:%M:%S')}"
+        f"（{timezone_label}，{weekday}，{period}）\n"
+        "请结合当前时间、日期与时段理解问候、计划和相对时间表达。"
+    )
 
 
 def _clean_hermes_line(line: str, strip_stream_padding: bool = False) -> Optional[str]:
@@ -344,6 +441,9 @@ async def _consume_stream_bridge(
     hermes_session_id: Optional[str] = None
     hermes_title: Optional[str] = None
     failed = False
+    started_at = time.monotonic()
+    first_event_logged = False
+    first_delta_logged = False
 
     try:
         while True:
@@ -355,10 +455,23 @@ async def _consume_stream_bridge(
                 continue
 
             event_type = event.get("type")
+            if not first_event_logged and event_type is not None:
+                logger.info(
+                    "[Hermes bridge] 首个事件: type=%s, elapsed=%.2fs",
+                    event_type,
+                    time.monotonic() - started_at,
+                )
+                first_event_logged = True
             if event_type == "delta":
                 delta = event.get("delta")
                 if not isinstance(delta, str) or not delta:
                     continue
+                if not first_delta_logged:
+                    logger.info(
+                        "[Hermes bridge] 首个输出片段: elapsed=%.2fs",
+                        time.monotonic() - started_at,
+                    )
+                    first_delta_logged = True
                 parts.append(delta)
                 content = "".join(parts)
                 now = time.monotonic()
@@ -374,6 +487,12 @@ async def _consume_stream_bridge(
                 title = event.get("title")
                 hermes_title = title if isinstance(title, str) and title else hermes_title
                 failed = bool(event.get("failed"))
+                logger.info(
+                    "[Hermes bridge] 完成事件: elapsed=%.2fs, response_len=%d, failed=%s",
+                    time.monotonic() - started_at,
+                    len(final_response),
+                    failed,
+                )
             elif event_type == "error":
                 raw_message = event.get("message")
                 raw_message = raw_message if isinstance(raw_message, str) else "Hermes streaming bridge 调用失败"
@@ -397,6 +516,14 @@ async def _consume_stream_bridge(
     content = _dedupe_repeated_paragraphs(content)
     if content and content != last_emitted:
         _emit_stream_update(on_update, content)
+
+    logger.info(
+        "[Hermes bridge] 进程结束: exit=%s, elapsed=%.2fs, stdout_len=%d, stderr_len=%d",
+        rc,
+        time.monotonic() - started_at,
+        len(content),
+        len(stderr),
+    )
 
     if rc != 0 or failed:
         return HermesInvokeResult(
@@ -425,6 +552,7 @@ async def _invoke_hermes_stream_bridge(
     on_update: Callable[[str], None],
 ) -> HermesInvokeResult:
     """通过 Hermes agent callback 层获取真实 token 流，避免 CLI 终端 UI 噪声。"""
+    started_at = time.monotonic()
     hermes_python = _resolve_hermes_python()
     if not hermes_python:
         return HermesInvokeResult(
@@ -465,6 +593,12 @@ async def _invoke_hermes_stream_bridge(
             error_message=f"启动 Hermes streaming bridge 失败: {exc}",
         )
 
+    logger.info(
+        "[Hermes bridge] 进程已启动: elapsed=%.2fs, resume=%s",
+        time.monotonic() - started_at,
+        bool(hermes_session_id),
+    )
+
     try:
         return await asyncio.wait_for(
             _consume_stream_bridge(proc, payload, on_update),
@@ -475,10 +609,14 @@ async def _invoke_hermes_stream_bridge(
         raise
     except asyncio.TimeoutError:
         await _terminate_process(proc)
+        logger.warning(
+            "[Hermes bridge] 执行超时: elapsed=%.2fs",
+            time.monotonic() - started_at,
+        )
         return HermesInvokeResult(
             success=False,
             returncode=-1,
-            error_message=f"Hermes 执行超时（{_EXEC_TIMEOUT:.0f}s），进程已终止",
+            error_message=f"Hermes 执行超时（{_format_exec_timeout(_EXEC_TIMEOUT)}），进程已终止",
         )
 
 
@@ -522,11 +660,17 @@ async def invoke_hermes_cli(
     Returns:
         HermesInvokeResult（不抛出异常，失败信息写入 result.error_message）
     """
+    started_at = time.monotonic()
     if on_update is not None:
         stream_result = await _invoke_hermes_stream_bridge(
             description,
             hermes_session_id,
             on_update,
+        )
+        logger.info(
+            "[Hermes] streaming bridge 返回: success=%s, elapsed=%.2fs",
+            stream_result.success,
+            time.monotonic() - started_at,
         )
         if stream_result.success or not _should_fallback_from_stream_bridge(stream_result):
             return stream_result
@@ -578,10 +722,14 @@ async def invoke_hermes_cli(
         raise
     except asyncio.TimeoutError:
         await _terminate_process(proc)
+        logger.warning(
+            "[Hermes CLI] 执行超时: elapsed=%.2fs",
+            time.monotonic() - started_at,
+        )
         return HermesInvokeResult(
             success=False,
             returncode=-1,
-            error_message=f"Hermes 执行超时（{_EXEC_TIMEOUT:.0f}s），进程已终止",
+            error_message=f"Hermes 执行超时（{_format_exec_timeout(_EXEC_TIMEOUT)}），进程已终止",
         )
 
     rc = proc.returncode if proc.returncode is not None else -1
@@ -604,6 +752,13 @@ async def invoke_hermes_cli(
     # ④ 解析回复内容和 session_id
     content, parsed_session_id = _parse_hermes_output(stdout)
     parsed_title = _parse_hermes_title(stdout)
+    logger.info(
+        "[Hermes CLI] 执行完成: exit=%s, elapsed=%.2fs, stdout_len=%d, stderr_len=%d",
+        rc,
+        time.monotonic() - started_at,
+        len(stdout),
+        len(stderr),
+    )
 
     return HermesInvokeResult(
         success=True,
@@ -695,10 +850,14 @@ class HermesExecutor(ExecutionStrategy):
         self,
         fallback_to_simulated: bool = False,
         chat_session: Optional["ChatSession"] = None,
+        persona_prompt_getter: Optional[Callable[[], str]] = None,
+        user_address_getter: Optional[Callable[[], str]] = None,
     ) -> None:
         self._fallback = fallback_to_simulated
         self._sim = SimulatedExecutor()
         self._chat_session = chat_session
+        self._persona_prompt_getter = persona_prompt_getter
+        self._user_address_getter = user_address_getter
 
     def set_chat_session(self, chat_session: Optional["ChatSession"]) -> None:
         """更新后续任务使用的聊天会话引用。"""
@@ -730,7 +889,24 @@ class HermesExecutor(ExecutionStrategy):
         失败 → 抛出 HermesCallError
         """
         # 获取当前 hermes session id 用于 --resume
-        description = task.description
+        persona_prompt = ""
+        if self._persona_prompt_getter is not None:
+            try:
+                persona_prompt = self._persona_prompt_getter()
+            except Exception:
+                logger.debug("读取助手人设 Prompt 失败", exc_info=True)
+        user_address = ""
+        if self._user_address_getter is not None:
+            try:
+                user_address = self._user_address_getter()
+            except Exception:
+                logger.debug("读取用户称呼失败", exc_info=True)
+        description = format_persona_description(
+            task.description,
+            persona_prompt,
+            user_address,
+            format_environment_context(),
+        )
         chat_session = self._chat_session
         hermes_sid = None
         if chat_session is not None:
@@ -747,16 +923,19 @@ class HermesExecutor(ExecutionStrategy):
                 status=MessageStatus.PROCESSING,
             )
 
+        started_at = time.monotonic()
         invoke_result = await invoke_hermes_cli(
             description,
             hermes_session_id=hermes_sid,
             on_update=on_update if chat_session is not None else None,
         )
+        elapsed = time.monotonic() - started_at
 
         if invoke_result.success:
             logger.debug(
-                "[Hermes] 调用成功: returncode=%d, stdout_len=%d, session=%s",
+                "[Hermes] 调用成功: returncode=%d, elapsed=%.2fs, stdout_len=%d, session=%s",
                 invoke_result.returncode,
+                elapsed,
                 len(invoke_result.stdout),
                 invoke_result.hermes_session_id,
             )
@@ -769,8 +948,9 @@ class HermesExecutor(ExecutionStrategy):
 
         # 失败：结构化日志 + 结构化异常
         logger.warning(
-            "[Hermes] 调用失败: returncode=%d | %s",
+            "[Hermes] 调用失败: returncode=%d, elapsed=%.2fs | %s",
             invoke_result.returncode,
+            elapsed,
             invoke_result.error_message,
         )
         raise HermesCallError(
@@ -791,7 +971,11 @@ def select_executor(runtime: "HermesRuntime | None" = None) -> ExecutionStrategy
     if runtime is not None and runtime.is_hermes_ready():
         if probe_hermes_available():
             logger.info("select_executor: 选用 HermesExecutor（hermes chat -q）")
-            return HermesExecutor(chat_session=runtime.chat_session)
+            return HermesExecutor(
+                chat_session=runtime.chat_session,
+                persona_prompt_getter=lambda: runtime.config.assistant.persona_prompt,
+                user_address_getter=lambda: runtime.config.assistant.user_address,
+            )
         logger.info(
             "select_executor: Hermes 报告就绪但命令不可用，回退 SimulatedExecutor"
         )
