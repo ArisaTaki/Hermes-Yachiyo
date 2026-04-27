@@ -73,8 +73,8 @@
 - expand Bubble launcher size range to `80-192` and make visual size / native hit-test scale with the configured window size
 - add a settings-page “apply and restart app” fallback until a true mode-only restart primitive exists
 - harden Chat Window singleton cleanup for closed/destroyed stale windows
-- add Bridge `GET/PATCH /assistant/profile` for shared persona profile; keep `assistant.persona_prompt` canonical
-- define future memory-sharing boundary: no default raw QQ chat sync, inject prompt as persona → relevant memory → current session → request
+- add Bridge `GET/PATCH /assistant/profile` for shared assistant profile; keep `assistant.persona_prompt` and `assistant.user_address` canonical
+- define future memory-sharing boundary: no default raw QQ chat sync, inject prompt as persona → user address → relevant memory → current session → request
 
 ## Milestone 62
 
@@ -82,3 +82,9 @@
 - add `latest_reply_full` to the launcher chat overview so UI can keep truncated summaries while Live2D TTS speaks full replies
 - restore Bubble status dot visibility classes for attention / processing / failed states, while keeping idle / empty / ready hidden
 - add focused regression tests for proactive retry, Live2D full-text TTS, and Bubble dot class logic
+
+## Milestone 63
+
+- add a shared settings apply button for text/number common settings while keeping mode switches and toggles immediate
+- suppress Bubble status light while the shared Chat Window is open, and acknowledge visible chat results so they do not become unread after closing
+- design a local-first memory chain on top of SQLite chat history: shared memory, project/purpose memory, current-session summary, and retrieval-time prompt injection

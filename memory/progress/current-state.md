@@ -2,6 +2,39 @@
 
 ## 已完成
 
+### Milestone 63/64 — 下午桌面交互、设置与记忆规划收敛
+
+- ✅ Hermes 执行体验
+  - 默认执行超时从 60 秒提升为 30 分钟，并支持 `HERMES_YACHIYO_EXEC_TIMEOUT_SECONDS` 覆盖。
+  - Hermes CLI / streaming bridge 增加首事件、首 token、完成、进程结束和超时耗时日志，用于诊断冷启动与响应延迟。
+  - 每轮 Hermes 请求注入当前本地时间、星期和时段，避免下午仍按早晨语境回应。
+  - 助手 prompt 包装顺序扩展为环境上下文 → 人设 → 用户称呼 → 用户请求。
+- ✅ 共享助手资料与主设置
+  - 新增 `assistant.user_address`，Bridge `GET/PATCH /assistant/profile`、协议 schema、配置加载保存和 Hermes 调用链已贯通。
+  - 助手人设 Prompt 与用户称呼从模式设置收敛到 Control Center 主设置，避免 Bubble / Live2D 出现多份人设。
+  - Control Center 的文本/数字/大段文本共通设置改为待确认保存，点击“应用共通设置修改”后统一提交。
+  - 共通设置 dirty 判断改为与当前已提交值比较；用户改动后再改回原值会自动清除 pending。
+  - 工作空间创建时间在 Control Center 和设置页中改为本地可读格式。
+- ✅ Bubble / Live2D 桌面入口体验
+  - Bubble 默认位置使用屏幕百分比定位，默认右下角；设置页暴露 0-100% 输入。
+  - Bubble 靠边吸附正式实现，拖动释放后吸附最近屏幕边缘。
+  - Bubble 呼吸灯语义调整：处理中为黄色，未读成功为绿色，未读失败为红色；Chat Window 打开时抑制状态点并确认可见结果。
+  - Bubble / Live2D 点击聊天入口时改为打开或置前 Chat Window，不再因窗口已存在而关闭。
+- ✅ Chat Window 交互
+  - 消息文本可选择复制，消息右上角提供传统复制图标。
+  - 复制成功后图标短暂变为对勾，复制链路优先走 pywebview 后端系统剪贴板，再回退浏览器剪贴板和 textarea。
+  - 移除“重新编辑/重编”入口，避免当前历史链与 Hermes resume 语义不完整时产生误导。
+  - Chat Window 已存在时使用 restore/show/bring_to_front/focus + macOS native focus 置前。
+  - 若 WebView 初始化期 focus/show 某一步失败，不再把单例判坏并新建第二个白屏窗口；只有明确关闭/销毁才重建。
+- ✅ 记忆架构文档
+  - 新增 `docs/memory-architecture.md`，明确 SQLite 聊天记录只是原始会话存档，不等同长期记忆。
+  - 记忆设计优先复用 Hermes 原生记忆；Yachiyo 作为本地桌面侧控制层，负责授权、项目归类、UI 管理、Bridge 边界和 prompt 注入策略。
+
+### 当前验证结果
+
+- ✅ 全量测试：`python -m pytest` → 360 passed。
+- ✅ 相关 diagnostics：Chat Window、Control Center、Bubble/Live2D 入口和测试文件无 VS Code 错误。
+
 ### Milestone 0 — 仓库骨架（desktop-first）
 
 - ✅ pyproject.toml（桌面应用依赖：pywebview, pystray, Pillow, fastapi, uvicorn）

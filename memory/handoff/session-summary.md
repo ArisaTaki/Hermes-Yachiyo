@@ -1,5 +1,71 @@
 # Session Summary
 
+## 本轮完成内容 — Milestone 63/64: Desktop UX, shared settings, runtime context, memory design
+
+### 核心结果
+
+本轮围绕真实桌面使用体验做了一轮收敛：Hermes 长任务不再被 60 秒截断，模型调用获得当前本地时间和用户称呼上下文；Control Center 成为共通设置主入口；Bubble/Live2D 的 Chat Window 入口改为打开或置前；Chat Window 支持可选中文本和图标复制；并补齐本地记忆架构文档。
+
+### 主要变更
+
+#### 1. Hermes 执行与上下文
+
+- 默认 Hermes 执行超时提升到 30 分钟，并支持 `HERMES_YACHIYO_EXEC_TIMEOUT_SECONDS`。
+- streaming bridge / CLI 记录首事件、首输出、完成、进程结束和超时耗时。
+- 每轮请求注入当前本地时间、星期、时段，减少相对时间和问候误解。
+- prompt 包装加入用户称呼，顺序为环境上下文 → 人设 → 用户称呼 → 用户请求。
+
+#### 2. 共享助手资料与设置确认
+
+- 新增 `assistant.user_address`，从配置、Bridge profile、协议 schema、MainWindowAPI 到 Hermes 调用链贯通。
+- 助手人设 Prompt 与用户称呼收敛到 Control Center 主设置。
+- 共通文本/数字/大段文本设置改为待确认保存，显示“应用共通设置修改”。
+- dirty 判断基于当前已提交值，改动后改回原值会自动清除 pending。
+- 工作空间创建时间在主控台和设置页显示为本地可读格式。
+
+#### 3. Bubble / Live2D launcher 行为
+
+- Bubble 默认位置改为屏幕百分比，默认右下角。
+- Bubble 靠边吸附正式实现，拖动释放后吸附最近边缘。
+- Bubble 呼吸灯语义：黄色处理中，绿色未读成功，红色未读失败；Chat Window 打开时抑制状态点并确认可见结果。
+- Bubble / Live2D 点击聊天入口时只打开或置前 Chat Window，不再关闭已存在窗口。
+
+#### 4. Chat Window 交互
+
+- 消息文本可选择，消息右上角提供复制图标。
+- 复制成功后图标短暂变为对勾，后端剪贴板失败时回退浏览器剪贴板和 textarea。
+- 移除“重新编辑/重编”入口。
+- 既有 Chat Window 聚焦路径增强，并修复初始化期 focus 失败导致第二个白屏窗口的问题。
+
+#### 5. 记忆架构与文档
+
+- 新增 `docs/memory-architecture.md`。
+- 明确 SQLite 聊天记录只是原始会话存档；长期记忆优先复用 Hermes 原生能力。
+- Yachiyo 侧定位为本地控制层：授权、项目/目的归类、可视化管理、Bridge 边界和检索注入。
+- README 更新为当前桌面入口与设置体系说明。
+
+### 测试覆盖
+
+- `tests/test_executor.py`：执行超时、环境上下文、用户称呼 prompt 注入。
+- `tests/test_assistant_profile_route.py`：assistant profile 读写用户称呼。
+- `tests/test_mode_settings.py`：Bubble 百分比位置、edge snap 设置、共通设置不在模式窗口渲染。
+- `tests/test_chat_bridge.py`：Bubble 状态点语义、Chat Window 打开时抑制状态点、Bubble/Live2D 点击置前。
+- `tests/test_chat_window.py` / `tests/test_chat_window_singleton.py`：复制按钮、移除重编、单例置前和白屏重复窗口回归。
+- `tests/test_window_exit.py`：Control Center 共通设置按钮、dirty 回退、创建时间格式化。
+
+### 验证结果
+
+- 完整测试：`python -m pytest` → 360 passed。
+- VS Code diagnostics：本轮修改相关文件无错误。
+
+### 后续建议
+
+1. 在真实 pywebview/macOS 桌面环境中手工验证 Bubble/Live2D 重复点击、Chat Window 复制、创建时间格式和设置 dirty 回退。
+2. 用真实 Hermes 冷启动/续接请求验证耗时日志和 30 分钟超时策略。
+3. 调研 Hermes 原生记忆能力，决定 `HermesMemoryAdapter` 的第一版接口。
+
+---
+
 ## 本轮完成内容 — Milestone 62: PR #4 review fixes
 
 ### 核心结果
