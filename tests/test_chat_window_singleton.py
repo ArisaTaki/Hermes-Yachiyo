@@ -158,6 +158,23 @@ def test_chat_window_does_not_reenter_creation(monkeypatch):
     assert chat_window.is_chat_window_open() is True
 
 
+def test_chat_window_creates_when_singleton_empty_even_if_native_title_exists(monkeypatch):
+    webview = _patch_webview(monkeypatch)
+    runtime = _RuntimeStub()
+    native_focus_calls = []
+    monkeypatch.setattr(
+        chat_window,
+        "_focus_native_chat_window",
+        lambda: native_focus_calls.append(True) or True,
+    )
+
+    assert chat_window.open_chat_window(runtime) is True
+
+    assert webview.create_calls == 1
+    assert native_focus_calls == []
+    assert chat_window.is_chat_window_open() is True
+
+
 def test_stale_closed_event_does_not_clear_current_window(monkeypatch):
     webview = _patch_webview(monkeypatch)
     runtime = _RuntimeStub()

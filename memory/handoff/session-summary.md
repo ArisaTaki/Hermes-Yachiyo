@@ -77,6 +77,7 @@
 - 已存在 Chat Window 的置前路径在 macOS 上改为原生 `focus_macos_window(title="Yachiyo - 对话")`，不再调用 pywebview 的 `restore/show/bring_to_front/focus` 组合。
 - 新增 `_chat_window_creating`，窗口创建中再次调用 `open_chat_window()` 会直接返回，不会 reentrant 创建第二个窗口。
 - `closed` 事件回调增加 window 身份检查，只清理自己对应的 `_chat_window`，避免旧窗口延迟事件误清当前窗口引用。
+- 追加修复：当 `_chat_window` 为空时，不再因为原生层能找到同标题窗口就返回成功；这种窗口可能是重复关闭后的白屏残留壳，必须重新创建 pywebview HTML 窗口。
 
 ### 测试覆盖
 
@@ -86,6 +87,7 @@
 
 - `python -m pytest tests/test_chat_window_singleton.py tests/test_chat_bridge.py` → 59 passed。
 - `python -m pytest` → 362 passed。
+- 追加修复后：`python -m pytest tests/test_chat_window_singleton.py tests/test_chat_bridge.py` → 60 passed；`python -m pytest` → 363 passed。
 - VS Code diagnostics：相关文件无错误。
 
 ---

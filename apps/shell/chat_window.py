@@ -219,9 +219,6 @@ def open_chat_window(runtime: "HermesRuntime") -> bool:
                 return True
             _chat_window = None
 
-        if _focus_native_chat_window():
-            return True
-
         api = ChatWindowAPI(runtime)
         _chat_window_creating = True
         try:

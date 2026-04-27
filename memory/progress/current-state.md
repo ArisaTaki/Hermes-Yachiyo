@@ -42,6 +42,8 @@
 - ✅ `events.closed` 回调改为只清理自己对应的 window，旧窗口延迟触发 closed 事件时不会误把当前活窗口单例置空。
 - ✅ 回归测试覆盖原生聚焦路径、创建中重入、旧 closed 事件不清当前窗口。
 - ✅ 全量测试：`python -m pytest` → 362 passed。
+- ✅ 追加修复：当 Python `_chat_window` 单例为空时，即使 macOS 原生层还能枚举到同标题残留窗口，也不再直接 native focus 返回成功；必须重新创建 pywebview HTML 窗口，避免重复打开/关闭后聚焦到白屏残留壳。
+- ✅ 追加验证：`python -m pytest` → 363 passed。
 
 ### Milestone 0 — 仓库骨架（desktop-first）
 
