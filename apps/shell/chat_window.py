@@ -54,7 +54,7 @@ def _is_window_probably_closed(window: Any) -> bool:
 def _focus_chat_window_instance(window: Any) -> bool:
     if _is_window_probably_closed(window):
         return False
-    if _focus_native_chat_window():
+    if _focus_native_chat_window(window):
         return True
     if sys.platform == "darwin":
         return True
@@ -68,11 +68,11 @@ def _focus_chat_window_instance(window: Any) -> bool:
     return True
 
 
-def _focus_native_chat_window() -> bool:
+def _focus_native_chat_window(window: Any) -> bool:
     try:
-        from apps.shell.native_window import focus_macos_window
+        from apps.shell.native_window import focus_macos_webview_window
 
-        return bool(focus_macos_window(title=_CHAT_WINDOW_TITLE))
+        return bool(focus_macos_webview_window(window))
     except Exception as exc:
         logger.debug("原生聚焦聊天窗口失败: %s", exc)
         return False
@@ -210,7 +210,8 @@ def open_chat_window(runtime: "HermesRuntime") -> bool:
 
     with _chat_window_lock:
         if _chat_window_creating:
-            _focus_native_chat_window()
+            if _chat_window is not None:
+                _focus_chat_window_instance(_chat_window)
             return True
 
         # 如果窗口已存在且未关闭，聚焦

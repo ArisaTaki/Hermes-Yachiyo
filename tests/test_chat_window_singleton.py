@@ -116,11 +116,11 @@ def test_chat_window_reuses_live_window_and_clears_on_closed_event(monkeypatch):
     monkeypatch.setattr(
         chat_window,
         "_focus_native_chat_window",
-        lambda: native_focus_calls.append(True) or True,
+        lambda window: native_focus_calls.append(window) or True,
     )
     assert chat_window.open_chat_window(runtime) is True
     assert webview.create_calls == 1
-    assert native_focus_calls == [True]
+    assert native_focus_calls == [webview.windows[0]]
     assert webview.windows[0].restore_calls == 0
     assert webview.windows[0].show_calls == 0
     assert webview.windows[0].bring_to_front_calls == 0
@@ -146,7 +146,7 @@ def test_chat_window_focus_failure_does_not_create_blank_duplicate(monkeypatch):
 def test_chat_window_does_not_reenter_creation(monkeypatch):
     webview = _patch_webview(monkeypatch)
     runtime = _RuntimeStub()
-    monkeypatch.setattr(chat_window, "_focus_native_chat_window", lambda: False)
+    monkeypatch.setattr(chat_window, "_focus_native_chat_window", lambda _window: False)
 
     def _reenter() -> None:
         assert chat_window.open_chat_window(runtime) is True
@@ -165,7 +165,7 @@ def test_chat_window_creates_when_singleton_empty_even_if_native_title_exists(mo
     monkeypatch.setattr(
         chat_window,
         "_focus_native_chat_window",
-        lambda: native_focus_calls.append(True) or True,
+        lambda window: native_focus_calls.append(window) or True,
     )
 
     assert chat_window.open_chat_window(runtime) is True
@@ -178,7 +178,7 @@ def test_chat_window_creates_when_singleton_empty_even_if_native_title_exists(mo
 def test_stale_closed_event_does_not_clear_current_window(monkeypatch):
     webview = _patch_webview(monkeypatch)
     runtime = _RuntimeStub()
-    monkeypatch.setattr(chat_window, "_focus_native_chat_window", lambda: False)
+    monkeypatch.setattr(chat_window, "_focus_native_chat_window", lambda _window: False)
 
     assert chat_window.open_chat_window(runtime) is True
     first = webview.windows[0]

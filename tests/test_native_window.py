@@ -1,6 +1,39 @@
-"""Native window hit-test helpers."""
+"""Native window helpers."""
 
-from apps.shell.native_window import bubble_visual_hit_test, live2d_visual_hit_test
+from types import SimpleNamespace
+
+from apps.shell import native_window
+from apps.shell.native_window import (
+    bubble_visual_hit_test,
+    focus_macos_webview_window,
+    live2d_visual_hit_test,
+)
+
+
+def test_focus_macos_webview_window_uses_exact_native_handle(monkeypatch):
+    calls = []
+
+    class _NativeWindow:
+        def makeKeyAndOrderFront_(self, value):
+            calls.append(("front", value))
+
+    class _NSApp:
+        @staticmethod
+        def activateIgnoringOtherApps_(value):
+            calls.append(("activate", value))
+
+    monkeypatch.setattr(native_window.platform, "system", lambda: "Darwin")
+    monkeypatch.setitem(__import__("sys").modules, "AppKit", SimpleNamespace(NSApp=_NSApp))
+    monkeypatch.setattr(native_window, "_run_on_macos_main_thread", lambda fn, **_kwargs: fn())
+
+    assert focus_macos_webview_window(SimpleNamespace(uid="chat-1", native=_NativeWindow())) is True
+    assert calls == [("front", None), ("activate", True)]
+
+
+def test_focus_macos_webview_window_requires_native_handle(monkeypatch):
+    monkeypatch.setattr(native_window.platform, "system", lambda: "Darwin")
+
+    assert focus_macos_webview_window(SimpleNamespace(uid="chat-1", native=None)) is False
 
 
 def test_bubble_visual_hit_test_uses_circle_not_square():

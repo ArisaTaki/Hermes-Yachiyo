@@ -265,6 +265,36 @@ def focus_macos_window(*, title: str) -> bool:
         return False
 
 
+def focus_macos_webview_window(window: object) -> bool:
+    """精确聚焦某个 pywebview Window 对应的 macOS NSWindow。"""
+    if platform.system() != "Darwin":
+        return False
+    ns_window = getattr(window, "native", None)
+    if ns_window is None:
+        return False
+
+    def _focus() -> bool:
+        try:
+            from AppKit import NSApp  # type: ignore[import-untyped]
+        except Exception as exc:
+            logger.debug("PyObjC/AppKit 不可用，跳过 macOS 精确窗口聚焦: %s", exc)
+            return False
+        try:
+            ns_window.makeKeyAndOrderFront_(None)
+            NSApp.activateIgnoringOtherApps_(True)
+            logger.debug("已精确聚焦 macOS 窗口: uid=%s", getattr(window, "uid", ""))
+            return True
+        except Exception as exc:
+            logger.debug("精确聚焦 macOS 窗口失败: %s", exc)
+            return False
+
+    try:
+        return bool(_run_on_macos_main_thread(_focus))
+    except Exception as exc:
+        logger.debug("调度 macOS 精确窗口聚焦到主线程失败: %s", exc)
+        return False
+
+
 def bubble_visual_hit_test(width: float, height: float, x: float, y: float) -> bool:
     """Return whether a point is inside the visible circular Bubble launcher."""
     if width <= 0 or height <= 0:

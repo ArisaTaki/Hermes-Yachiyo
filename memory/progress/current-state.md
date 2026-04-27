@@ -32,7 +32,7 @@
 
 ### 当前验证结果
 
-- ✅ 全量测试：`python -m pytest` → 360 passed。
+- ✅ 全量测试：`python -m pytest` → 365 passed。
 - ✅ 相关 diagnostics：Chat Window、Control Center、Bubble/Live2D 入口和测试文件无 VS Code 错误。
 
 ### Milestone 65 — Chat Window 单例竞态隔离
@@ -44,6 +44,17 @@
 - ✅ 全量测试：`python -m pytest` → 362 passed。
 - ✅ 追加修复：当 Python `_chat_window` 单例为空时，即使 macOS 原生层还能枚举到同标题残留窗口，也不再直接 native focus 返回成功；必须重新创建 pywebview HTML 窗口，避免重复打开/关闭后聚焦到白屏残留壳。
 - ✅ 追加验证：`python -m pytest` → 363 passed。
+
+### Milestone 66 — Chat Window 精确原生聚焦
+
+- ✅ 确认 pywebview `Window` 在 macOS Cocoa 后端会把真实 `NSWindow` 写入 `window.native`，可用于精确聚焦。
+- ✅ 新增 `focus_macos_webview_window(window)`，直接聚焦该 pywebview Window 对应的 native NSWindow。
+- ✅ Chat Window 已存在时不再按标题 `Yachiyo - 对话` 聚焦，避免同标题白屏残留壳被误置前。
+- ✅ `_chat_window_creating` 重入期间如果已有 window 引用，也走精确单例聚焦。
+- ✅ 回归测试覆盖精确 native handle 聚焦和缺少 native handle 时不误判成功。
+- ✅ 相关测试：`python -m pytest tests/test_chat_window_singleton.py tests/test_chat_bridge.py tests/test_native_window.py` → 69 passed。
+- ✅ 全量测试：`python -m pytest` → 365 passed。
+- ✅ 相关 diagnostics：Chat Window、native window helper 和测试文件无 VS Code 错误。
 
 ### Milestone 0 — 仓库骨架（desktop-first）
 

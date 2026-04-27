@@ -92,6 +92,32 @@
 
 ---
 
+## 追加修复 — Milestone 66: Chat Window exact native focus
+
+### 核心结果
+
+继续排查真实 macOS 桌面环境中的第二个白屏 `Yachiyo - 对话`。进一步确认 pywebview Cocoa 后端会把当前窗口的真实 `NSWindow` 写入 `window.native`；原先按标题聚焦会在存在同标题白屏残留壳时误把残留窗口置前。
+
+### 主要变更
+
+- 新增 `focus_macos_webview_window(window)`，通过 pywebview Window 的 `.native` 直接聚焦对应 NSWindow。
+- Chat Window 已存在时改为聚焦 `_chat_window` 绑定的 exact native handle，不再调用按标题查找的 `focus_macos_window(title=...)`。
+- 创建中重入时如果已有 `_chat_window` 引用，也只聚焦该单例窗口。
+- 保留标题聚焦 helper 给其它确实只知道标题的场景使用，但 Chat Window 不再依赖它。
+
+### 测试覆盖
+
+- `tests/test_native_window.py` 覆盖 exact native handle 聚焦和缺少 handle 时返回失败。
+- `tests/test_chat_window_singleton.py` 覆盖 Chat Window 复用时向 native focus 传入现有 window，而不是标题。
+
+### 验证结果
+
+- `python -m pytest tests/test_chat_window_singleton.py tests/test_chat_bridge.py tests/test_native_window.py` → 69 passed。
+- `python -m pytest` → 365 passed。
+- VS Code diagnostics：相关文件无错误。
+
+---
+
 ## 本轮完成内容 — Milestone 62: PR #4 review fixes
 
 ### 核心结果
