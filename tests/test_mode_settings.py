@@ -98,8 +98,12 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.live2d_mode.proactive_enabled is False
     assert config.live2d_mode.validate() == ModelState.NOT_CONFIGURED
     assert config.live2d is config.live2d_mode
-    assert config.assistant.persona_prompt == ""
-    assert config.assistant.user_address == ""
+    assert config.assistant.persona_prompt == config_mod.DEFAULT_ASSISTANT_PERSONA_PROMPT
+    assert config.assistant.user_address == config_mod.DEFAULT_ASSISTANT_USER_ADDRESS
+    assert "<Role>Hermes-Yachiyo Agent</Role>" in config.assistant.persona_prompt
+    assert "月见八千代" in config.assistant.persona_prompt
+    assert "括号动作示例" in config.assistant.persona_prompt
+    assert config.assistant.user_address == "彩叶"
     assert config.tts.enabled is False
     assert config.tts.provider == "none"
     assert config.tts.endpoint == ""
