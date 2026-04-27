@@ -231,6 +231,35 @@ def test_control_center_html_exposes_hermes_diagnostics():
     assert "检测 / 补全 Hermes 能力" in _STATUS_HTML
 
 
+def test_control_center_html_exposes_uninstall_flow():
+    assert "id=\"s-uninstall-scope\"" in _STATUS_HTML
+    assert "value=\"yachiyo_only\"" in _STATUS_HTML
+    assert "value=\"include_hermes\"" in _STATUS_HTML
+    assert "id=\"s-uninstall-keep-config\"" in _STATUS_HTML
+    assert "id=\"s-uninstall-preview\"" in _STATUS_HTML
+    assert "id=\"uninstall-dialog\"" in _STATUS_HTML
+    assert "get_uninstall_preview" in _STATUS_HTML
+    assert "run_uninstall" in _STATUS_HTML
+    assert "UNINSTALL" in _STATUS_HTML
+
+
+def test_installer_html_exposes_config_snapshot_import():
+    from apps.shell.window import _generate_installer_html
+    from packages.protocol.enums import HermesInstallStatus, Platform
+    from packages.protocol.install import HermesInstallInfo
+
+    html = _generate_installer_html(
+        HermesInstallInfo(
+            status=HermesInstallStatus.INSTALLED_NOT_INITIALIZED,
+            platform=Platform.MACOS,
+        )
+    )
+
+    assert "导入卸载前配置" in html
+    assert "get_config_snapshot_status" in html
+    assert "import_config_snapshot" in html
+
+
 def test_close_chat_window_destroys_existing_window(monkeypatch):
     win = FakeWindow()
 

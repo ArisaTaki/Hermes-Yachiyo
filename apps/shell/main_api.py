@@ -48,7 +48,7 @@ def _serialize_summary(summary: Optional[ModelSummary]) -> Dict[str, Any]:
 
 class MainWindowAPI:
     """Control Center 主控台 API。"""
-    
+
     def __init__(self, runtime: "HermesRuntime", config: "AppConfig") -> None:
         self._runtime = runtime
         self._config = config
@@ -69,7 +69,7 @@ class MainWindowAPI:
     def _get_snapshot(self):
         """获取集成服务统一快照。"""
         return get_integration_snapshot(self._config, self._bridge_boot_config)
-    
+
     def get_dashboard_data(self) -> Dict[str, Any]:
         """获取仪表盘数据"""
         try:
@@ -78,7 +78,7 @@ class MainWindowAPI:
             snap = self._get_snapshot()
 
             hermes_info = status.get("hermes", {})
-            
+
             return {
                 "app": {
                     "version": status.get("version", "0.1.0"),
@@ -409,4 +409,50 @@ class MainWindowAPI:
             return {"ok": True}
         except Exception as exc:
             logger.error("退出应用失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def get_uninstall_preview(
+        self,
+        scope: str = "yachiyo_only",
+        keep_config: bool = True,
+    ) -> Dict[str, Any]:
+        """生成卸载预览，不修改文件系统。"""
+        try:
+            from apps.installer.uninstall import build_uninstall_plan
+
+            plan = build_uninstall_plan(scope, keep_config_snapshot=bool(keep_config))
+            return {"ok": True, "plan": plan.to_dict()}
+        except Exception as exc:
+            logger.error("生成卸载预览失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def run_uninstall(
+        self,
+        scope: str = "yachiyo_only",
+        keep_config: bool = True,
+        confirm_text: str = "",
+    ) -> Dict[str, Any]:
+        """执行 Hermes-Yachiyo 卸载，并在成功后安排应用退出。"""
+        try:
+            from apps.installer.uninstall import execute_uninstall
+
+            result = execute_uninstall(
+                scope,
+                keep_config_snapshot=bool(keep_config),
+                confirm_text=confirm_text,
+            )
+            payload = result.to_dict()
+            if result.ok:
+                try:
+                    from apps.shell.window import request_app_exit
+
+                    request_app_exit()
+                    payload["exit_scheduled"] = True
+                except Exception as exc:
+                    logger.error("卸载后退出应用失败: %s", exc)
+                    payload["exit_scheduled"] = False
+                    payload["exit_error"] = str(exc)
+            return payload
+        except Exception as exc:
+            logger.error("执行卸载失败: %s", exc)
             return {"ok": False, "error": str(exc)}

@@ -263,6 +263,90 @@ _STATUS_HTML = """
             min-height: 1.2em;
             margin-bottom: 10px;
         }
+        .danger-section {
+            border: 1px solid #6b3d49;
+            background: #302532;
+        }
+        .danger-section h4 {
+            color: #ffb1bd;
+            border-bottom-color: #5d3b48;
+        }
+        .danger-copy {
+            color: #d8bdc6;
+            font-size: 0.82em;
+            line-height: 1.5;
+            margin-bottom: 10px;
+        }
+        .uninstall-preview {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border-radius: 6px;
+            background: #1c1720;
+            border: 1px solid #4a3340;
+            font-size: 0.8em;
+            color: #d9c7ce;
+        }
+        .uninstall-target {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 5px 0;
+            border-bottom: 1px solid #3e2a35;
+        }
+        .uninstall-target:last-child { border-bottom: none; }
+        .uninstall-target .path {
+            color: #a997a0;
+            word-break: break-all;
+            text-align: right;
+        }
+        .uninstall-target .state { color: #ffb1bd; white-space: nowrap; }
+        .uninstall-target .state.skip { color: #ffd29a; }
+        .uninstall-target .state.missing { color: #777; }
+        .uninstall-warning {
+            margin-top: 8px;
+            color: #ffd29a;
+            line-height: 1.5;
+        }
+        .uninstall-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .uninstall-secondary-btn {
+            background: #332b38;
+            border: 1px solid #655167;
+            color: #eadce5;
+            border-radius: 4px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 0.84em;
+        }
+        .uninstall-danger-btn {
+            background: #5a2632;
+            border: 1px solid #c86778;
+            color: #ffd9df;
+            border-radius: 4px;
+            padding: 6px 14px;
+            cursor: pointer;
+            font-size: 0.84em;
+        }
+        .uninstall-danger-btn:disabled,
+        .uninstall-secondary-btn:disabled {
+            cursor: wait;
+            opacity: 0.6;
+        }
+        .uninstall-confirm-input {
+            width: 100%;
+            margin: 8px 0 10px;
+            background: #181828;
+            color: #fff;
+            border: 1px solid #604253;
+            border-radius: 4px;
+            padding: 7px 9px;
+            outline: none;
+        }
+        .uninstall-confirm-input:focus { border-color: #d36b7f; }
         .executor { color: #6a9a6a; }
         .footer {
             text-align: center;
@@ -541,6 +625,20 @@ _STATUS_HTML = """
         </div>
     </div>
 
+    <div class="exit-dialog-backdrop" id="uninstall-dialog" role="dialog" aria-modal="true">
+        <div class="exit-dialog">
+            <h3>卸载 Hermes-Yachiyo？</h3>
+                 <p id="uninstall-dialog-summary">将删除所选范围内的本地资料。此操作不可撤销。</p>
+                 <input class="uninstall-confirm-input" id="uninstall-confirm-input"
+                     placeholder="输入 UNINSTALL 确认">
+            <div class="exit-dialog-error" id="uninstall-dialog-error"></div>
+            <div class="exit-dialog-actions">
+                <button class="exit-cancel-btn" onclick="hideUninstallDialog()">取消</button>
+                <button class="exit-confirm-btn" id="uninstall-confirm-btn" onclick="confirmUninstall()">确认卸载</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 设置面板（默认隐藏） -->
     <div id="settings-panel" style="display:none;">
         <div class="settings-header">
@@ -682,6 +780,44 @@ _STATUS_HTML = """
             </div>
             <div class="settings-row"><span class="label">启动最小化</span><span class="value" id="s-app-minimized">—</span></div>
         </div>
+
+        <div class="settings-section danger-section">
+            <h4>卸载</h4>
+            <div class="danger-copy">
+                卸载会删除本机上的 Hermes-Yachiyo 配置、工作空间、聊天数据库、缓存和导入资源。
+                如选择同时卸载 Hermes Agent，会额外删除当前用户目录下可识别的
+                Hermes Home 与安全路径内的 Hermes 命令。
+            </div>
+            <div class="settings-row"><span class="label">卸载范围</span>
+                <select class="s-select" id="s-uninstall-scope"
+                    onchange="onUninstallOptionChange()">
+                    <option value="yachiyo_only">仅卸载 Hermes-Yachiyo</option>
+                    <option value="include_hermes">也卸载 Hermes Agent 架构</option>
+                </select>
+            </div>
+            <div class="settings-row"><span class="label">记录配置快照</span>
+                <label class="s-toggle">
+                    <input type="checkbox" id="s-uninstall-keep-config" checked
+                        onchange="onUninstallOptionChange()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="settings-row"
+                 style="border-top:1px solid #4a3340;margin-top:4px;padding-top:6px;">
+                <span class="label" style="font-size:0.78em;color:#a98d96;">快照说明</span>
+                <span class="value" style="font-size:0.76em;color:#c9aeb8;">
+                    只保留配置与初始化信息，不包含聊天数据库和大型资源包
+                </span>
+            </div>
+            <div class="uninstall-preview" id="s-uninstall-preview">正在生成卸载清单…</div>
+            <div class="uninstall-actions">
+                <button class="uninstall-secondary-btn" id="s-uninstall-refresh-btn"
+                    onclick="refreshUninstallPreview()">刷新清单</button>
+                <button class="uninstall-danger-btn" id="s-uninstall-open-btn"
+                    onclick="showUninstallDialog()">卸载…</button>
+            </div>
+            <div class="save-hint" id="s-uninstall-status"></div>
+        </div>
         <div class="settings-apply-row" id="common-settings-apply-row">
             <span class="pending-label" id="common-settings-pending-label">无待确认修改</span>
             <button class="settings-apply-btn" id="common-settings-apply-btn" onclick="applyPendingCommonSettings()" disabled>应用共通设置修改</button>
@@ -705,6 +841,8 @@ _STATUS_HTML = """
         'bridge_host': 'Bridge 地址',
         'bridge_port': 'Bridge 端口',
     };
+    let uninstallPreviewPlan = null;
+    const uninstallConfirmPhrase = 'UNINSTALL';
 
     function hasPendingCommonSetting(key) {
         return Object.prototype.hasOwnProperty.call(pendingCommonSettings, key);
@@ -772,6 +910,162 @@ _STATUS_HTML = """
         const div = document.createElement('div');
         div.textContent = value || '';
         return div.innerHTML;
+    }
+
+    function getUninstallOptions() {
+        const scopeEl = document.getElementById('s-uninstall-scope');
+        const keepEl = document.getElementById('s-uninstall-keep-config');
+        return {
+            scope: scopeEl ? scopeEl.value : 'yachiyo_only',
+            keepConfig: keepEl ? keepEl.checked : true,
+        };
+    }
+
+    function setUninstallStatus(message, isError) {
+        const el = document.getElementById('s-uninstall-status');
+        if (!el) return;
+        el.textContent = message || '';
+        el.className = isError ? 'save-hint err' : 'save-hint ok';
+    }
+
+    function renderUninstallPreview(plan) {
+        const box = document.getElementById('s-uninstall-preview');
+        if (!box) return;
+        if (!plan) {
+            box.textContent = '卸载清单不可用。';
+            return;
+        }
+        const targets = plan.targets || [];
+        let html = '<div style="margin-bottom:6px;color:#f1d7df;">将处理 ' + plan.existing_count
+            + ' 个已存在目标，其中 ' + plan.removable_count + ' 个可自动删除。</div>';
+        html += targets.map(function(target) {
+            let state = '将删除';
+            let stateClass = 'state';
+            if (!target.exists) { state = '不存在'; stateClass = 'state missing'; }
+            else if (!target.removable) { state = '跳过'; stateClass = 'state skip'; }
+            const reason = target.reason
+                ? '<div style="color:#a997a0;margin-top:2px;">'
+                    + escapeHtml(target.reason) + '</div>'
+                : '';
+            return '<div class="uninstall-target"><div><span class="' + stateClass + '">'
+                + state + '</span> ' + escapeHtml(target.label) + reason
+                + '</div><div class="path">'
+                + escapeHtml(target.display_path || target.path) + '</div></div>';
+        }).join('');
+        if (plan.backup && plan.backup.enabled) {
+            html += '<div class="uninstall-warning">配置快照目录：'
+                + escapeHtml(plan.backup.backup_root_display || plan.backup.backup_root)
+                + '</div>';
+        }
+        if (plan.warnings && plan.warnings.length > 0) {
+            html += '<div class="uninstall-warning">'
+                + plan.warnings.map(escapeHtml).join('<br>') + '</div>';
+        }
+        box.innerHTML = html;
+    }
+
+    async function refreshUninstallPreview() {
+        const box = document.getElementById('s-uninstall-preview');
+        const refreshBtn = document.getElementById('s-uninstall-refresh-btn');
+        const openBtn = document.getElementById('s-uninstall-open-btn');
+        const opts = getUninstallOptions();
+        if (box) box.textContent = '正在生成卸载清单…';
+        if (refreshBtn) refreshBtn.disabled = true;
+        try {
+            if (!window.pywebview || !window.pywebview.api) {
+                throw new Error('WebView API 不可用');
+            }
+            const result = await window.pywebview.api.get_uninstall_preview(
+                opts.scope, opts.keepConfig
+            );
+            if (!result || !result.ok) {
+                throw new Error((result && result.error) || '生成卸载清单失败');
+            }
+            uninstallPreviewPlan = result.plan;
+            renderUninstallPreview(uninstallPreviewPlan);
+            if (openBtn) openBtn.disabled = false;
+            setUninstallStatus('', false);
+        } catch(e) {
+            uninstallPreviewPlan = null;
+            if (box) box.textContent = e.message || '生成卸载清单失败';
+            if (openBtn) openBtn.disabled = true;
+            setUninstallStatus(e.message || '生成卸载清单失败', true);
+        }
+        if (refreshBtn) refreshBtn.disabled = false;
+    }
+
+    function onUninstallOptionChange() {
+        uninstallPreviewPlan = null;
+        refreshUninstallPreview();
+    }
+
+    async function showUninstallDialog() {
+        if (!uninstallPreviewPlan) await refreshUninstallPreview();
+        if (!uninstallPreviewPlan) return;
+        const dialog = document.getElementById('uninstall-dialog');
+        const input = document.getElementById('uninstall-confirm-input');
+        const err = document.getElementById('uninstall-dialog-error');
+        const btn = document.getElementById('uninstall-confirm-btn');
+        const summary = document.getElementById('uninstall-dialog-summary');
+        const opts = getUninstallOptions();
+        if (summary) {
+            const scopeText = opts.scope === 'include_hermes'
+                ? '也会尝试卸载当前用户目录下的 Hermes Agent 架构。'
+                : '只会卸载 Hermes-Yachiyo 相关资料。';
+            summary.textContent = scopeText + ' 请输入 ' + uninstallConfirmPhrase + ' 确认。';
+        }
+        if (input) input.value = '';
+        if (err) err.textContent = '';
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '确认卸载';
+        }
+        if (dialog) dialog.classList.add('visible');
+        if (input) setTimeout(function() { input.focus(); }, 40);
+    }
+
+    function hideUninstallDialog() {
+        const dialog = document.getElementById('uninstall-dialog');
+        if (dialog) dialog.classList.remove('visible');
+    }
+
+    async function confirmUninstall() {
+        const opts = getUninstallOptions();
+        const input = document.getElementById('uninstall-confirm-input');
+        const btn = document.getElementById('uninstall-confirm-btn');
+        const err = document.getElementById('uninstall-dialog-error');
+        const confirmText = input ? input.value : '';
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '正在卸载…';
+        }
+        if (err) err.textContent = '';
+        try {
+            if (!window.pywebview || !window.pywebview.api) {
+                throw new Error('WebView API 不可用');
+            }
+            const result = await window.pywebview.api.run_uninstall(
+                opts.scope, opts.keepConfig, confirmText
+            );
+            if (!result || !result.ok) {
+                const errors = result && result.errors && result.errors.length > 0
+                    ? result.errors.join('；')
+                    : '';
+                throw new Error(errors || (result && result.error) || '卸载失败');
+            }
+            const backupText = result.backup_path_display
+                ? '配置快照已保存到：' + result.backup_path_display + '。'
+                : '';
+            setUninstallStatus('卸载完成。' + backupText + ' 应用正在退出…', false);
+            if (err) err.textContent = '';
+        } catch(e) {
+            if (err) err.textContent = e.message || '卸载失败';
+            setUninstallStatus(e.message || '卸载失败', true);
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '确认卸载';
+            }
+        }
     }
 
     function toggleSettings() {
@@ -1132,6 +1426,7 @@ _STATUS_HTML = """
             document.getElementById('s-app-loglevel').textContent = d.app.log_level;
             document.getElementById('s-tray-enabled').checked = d.app.tray_enabled;
             document.getElementById('s-app-minimized').textContent = d.app.start_minimized ? '是' : '否';
+            refreshUninstallPreview();
         } catch(e) {}
     }
 
@@ -1607,6 +1902,8 @@ _INSTALLER_HTML = """
             {install_steps}
         </div>
 
+        {snapshot_import_section}
+
         {init_section}
 
         {suggestions_section}
@@ -1950,7 +2247,91 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                 # 普通步骤
                 steps_html.append(f'<div class="step">{action}</div>')
         install_steps = "\n".join(steps_html)
-    
+
+    snapshot_import_section = ""
+    if install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED:
+        snapshot_import_section = """
+        <div class="init-section">
+            <h3>导入卸载前配置</h3>
+            <p>
+                如果上次卸载时勾选了「记录配置快照」，可以先导入最近的配置快照，
+                再进入主界面。
+            </p>
+            <div id="snapshot-import-status" style="margin-top:10px;color:#aaa;">
+                正在查找配置快照...
+            </div>
+            <div style="display:flex; gap:12px; margin-top:12px; flex-wrap:wrap;">
+                <button class="init-button" id="snapshot-import-btn"
+                        onclick="importConfigSnapshot()" disabled style="margin:0;">
+                    导入最近配置快照
+                </button>
+                <button class="init-button" onclick="refreshConfigSnapshotStatus()"
+                        style="margin:0; background:#3a3a6a; border:1px solid #6495ed;">
+                    刷新快照
+                </button>
+            </div>
+            <div id="snapshot-import-result" style="margin-top:10px;"></div>
+        </div>
+        <script>
+        async function refreshConfigSnapshotStatus() {
+            const status = document.getElementById('snapshot-import-status');
+            const btn = document.getElementById('snapshot-import-btn');
+            if (status) status.textContent = '正在查找配置快照...';
+            if (btn) btn.disabled = true;
+            try {
+                if (!window.pywebview || !window.pywebview.api) {
+                    throw new Error('WebView API 不可用');
+                }
+                const result = await window.pywebview.api.get_config_snapshot_status();
+                if (!result.success) throw new Error(result.error || '读取配置快照失败');
+                if (result.has_snapshot && result.latest) {
+                    const created = result.latest.created_at || '未知时间';
+                    status.innerHTML = '检测到最近快照：' + result.latest.display_path
+                        + '<br><span style="color:#888;font-size:0.88em;">创建时间：'
+                        + created + '</span>';
+                    if (btn) btn.disabled = false;
+                } else {
+                    status.innerHTML = '未检测到可导入的配置快照。默认目录：'
+                        + result.backup_root_display;
+                }
+            } catch (err) {
+                if (status) status.innerHTML = '<span style="color:#ff6b6b">'
+                    + err.message + '</span>';
+                if (btn) btn.disabled = true;
+            }
+        }
+
+        async function importConfigSnapshot() {
+            const btn = document.getElementById('snapshot-import-btn');
+            const resultBox = document.getElementById('snapshot-import-result');
+            if (btn) { btn.disabled = true; btn.textContent = '正在导入...'; }
+            if (resultBox) resultBox.innerHTML = '';
+            try {
+                if (!window.pywebview || !window.pywebview.api) {
+                    throw new Error('WebView API 不可用');
+                }
+                const result = await window.pywebview.api.import_config_snapshot();
+                if (!result.ok) {
+                    const errors = result.errors && result.errors.length > 0
+                        ? result.errors.join('；')
+                        : '导入失败';
+                    throw new Error(errors);
+                }
+                const restoredCount = result.restored ? result.restored.length : 0;
+                resultBox.innerHTML = '<span style="color:#90ee90">已导入 '
+                    + restoredCount + ' 项配置，正在重启应用...</span>';
+                setTimeout(() => window.pywebview.api.restart_app(), 1200);
+            } catch (err) {
+                if (resultBox) resultBox.innerHTML = '<span style="color:#ff6b6b">'
+                    + err.message + '</span>';
+                if (btn) { btn.disabled = false; btn.textContent = '导入最近配置快照'; }
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', refreshConfigSnapshotStatus);
+        </script>
+        """
+
     # 安装按钮区域（NOT_INSTALLED 状态）
     install_section = ""
     if install_info.status == HermesInstallStatus.NOT_INSTALLED:
@@ -2490,6 +2871,7 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
         .replace("{main_title}", main_title)
         .replace("{steps_title}", steps_title)
         .replace("{install_steps}", install_steps)
+        .replace("{snapshot_import_section}", snapshot_import_section)
         .replace("{init_section}", init_section + install_section)
         .replace("{suggestions_section}", suggestions_section)
     )

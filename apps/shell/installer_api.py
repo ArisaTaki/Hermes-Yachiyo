@@ -32,6 +32,27 @@ class InstallerWebViewAPI:
             logger.error("初始化过程异常: %s", exc)
             return {"success": False, "error": f"初始化异常: {exc}", "created_items": []}
 
+    def get_config_snapshot_status(self) -> Dict[str, Any]:
+        """获取可导入的卸载配置快照状态。"""
+        try:
+            from apps.installer.uninstall import get_config_snapshot_status
+
+            return {"success": True, **get_config_snapshot_status()}
+        except Exception as exc:
+            logger.error("读取配置快照状态失败: %s", exc)
+            return {"success": False, "error": str(exc), "has_snapshot": False}
+
+    def import_config_snapshot(self) -> Dict[str, Any]:
+        """导入最近一次卸载时保存的配置快照。"""
+        try:
+            from apps.installer.uninstall import import_config_snapshot
+
+            result = import_config_snapshot()
+            return result.to_dict()
+        except Exception as exc:
+            logger.error("导入配置快照失败: %s", exc)
+            return {"ok": False, "errors": [str(exc)]}
+
     def install_hermes(self) -> Dict[str, Any]:
         """触发 Hermes Agent 安装。
 
