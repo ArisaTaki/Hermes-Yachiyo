@@ -391,6 +391,25 @@ def test_import_backup_rejects_zip_total_uncompressed_size_limit(tmp_path, monke
         import_backup(archive_path)
 
 
+def test_import_backup_rejects_duplicate_zip_entries(tmp_path, monkeypatch):
+    home, _hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+    archive_path = home / "hermes-yachiyo-backup-20260428-101531.zip"
+    manifest = {
+        "schema_version": backup_mod.BACKUP_SCHEMA_VERSION,
+        "kind": "hermes-yachiyo-backup",
+        "format": "zip",
+        "created_at": "2026-04-28T00:00:00+00:00",
+        "entries": [{"id": "app_config", "label": "Hermes-Yachiyo 应用配置"}],
+    }
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(manifest))
+        archive.writestr("app-config/config.json", b'{"a":1}')
+        archive.writestr("app-config/config.json", b'{"a":2}')
+
+    with pytest.raises(ValueError, match="重复条目"):
+        import_backup(archive_path)
+
+
 def test_import_backup_skips_workspace_restore_outside_home(tmp_path, monkeypatch):
     home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
@@ -683,6 +702,23 @@ def test_main_window_api_open_backup_location_allows_only_managed_backups(tmp_pa
     rejected = api.open_backup_location(str(external_backup))
     assert rejected["ok"] is False
     assert len(calls) == call_count
+
+
+def test_resolve_managed_backup_path_rejects_noncanonical_name_in_backup_root(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text("{}", encoding="utf-8")
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+
+    backup_root = home / "Hermes-Yachiyo-backups"
+    backup_root.mkdir(parents=True)
+    fake_backup = backup_root / "hermes-yachiyo-backup-manual.zip"
+    fake_backup.write_text("manual", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="名称不符合预期"):
+        backup_mod.resolve_managed_backup_path(fake_backup)
 
 
 def test_main_window_api_open_backup_location_supports_windows(tmp_path, monkeypatch):

@@ -549,7 +549,7 @@ def resolve_managed_backup_path(
     path = Path(backup_path).expanduser().resolve()
     if path.parent != root:
         raise ValueError("只能管理默认备份目录中的备份文件")
-    if not path.name.startswith(BACKUP_FILE_PREFIX) or path.suffix != ".zip":
+    if _BACKUP_ARCHIVE_NAME_RE.fullmatch(path.name) is None:
         raise ValueError("备份文件名称不符合预期")
     if not path.is_file():
         raise ValueError("备份文件不存在")
@@ -594,6 +594,7 @@ def _replace_path(source: Path, target: Path) -> bool:
 def _extract_zip_safely(archive_path: Path, target_dir: Path) -> None:
     with zipfile.ZipFile(archive_path, "r") as archive:
         total_uncompressed_size = 0
+        seen_member_paths: set[PurePosixPath] = set()
         for member in archive.infolist():
             member_name = member.filename.replace("\\", "/")
             if re.match(r"^[A-Za-z]:", member_name) or member_name.startswith("//"):
@@ -601,6 +602,9 @@ def _extract_zip_safely(archive_path: Path, target_dir: Path) -> None:
             member_path = PurePosixPath(member_name)
             if member_path.is_absolute() or ".." in member_path.parts:
                 raise ValueError("备份文件包含不安全路径")
+            if member_path in seen_member_paths:
+                raise ValueError("备份文件包含重复条目")
+            seen_member_paths.add(member_path)
             if member.file_size > MAX_BACKUP_IMPORT_ENTRY_BYTES:
                 raise ValueError("备份文件包含过大的单个条目")
             total_uncompressed_size += member.file_size
