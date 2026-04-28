@@ -313,6 +313,7 @@ def test_open_main_window_reuses_existing_window(monkeypatch):
     monkeypatch.setattr(window_mod, "_HAS_WEBVIEW", True)
     monkeypatch.setattr(window_mod, "webview", FakeWebviewModule(), raising=False)
     monkeypatch.setattr(window_mod, "_main_window", None)
+    monkeypatch.setattr(window_mod, "_main_window_creating", False)
     monkeypatch.setattr(main_api_mod, "MainWindowAPI", lambda *_args, **_kwargs: object())
 
     runtime = object()
@@ -328,6 +329,80 @@ def test_open_main_window_reuses_existing_window(monkeypatch):
     assert created[0].shown == 1
 
 
+def test_open_main_window_does_not_reenter_while_creating(monkeypatch):
+    created = []
+    runtime = object()
+    config = type("Config", (), {
+        "bridge_host": "127.0.0.1",
+        "bridge_port": 8420,
+        "window_mode": type("WindowMode", (), {"width": 960, "height": 720})(),
+    })()
+
+    class FakeWebviewModule:
+        def __init__(self):
+            self.reentered = False
+
+        def create_window(self, **_kwargs):
+            if not self.reentered:
+                self.reentered = True
+                assert window_mod.open_main_window(runtime, config) is True
+            window = FakeWindow()
+            created.append(window)
+            return window
+
+    webview_stub = FakeWebviewModule()
+    monkeypatch.setattr(window_mod, "_HAS_WEBVIEW", True)
+    monkeypatch.setattr(window_mod, "webview", webview_stub, raising=False)
+    monkeypatch.setattr(window_mod, "_main_window", None)
+    monkeypatch.setattr(window_mod, "_main_window_creating", False)
+    monkeypatch.setattr(window_mod, "_focus_macos_window_by_title", lambda _title: False)
+    monkeypatch.setattr(main_api_mod, "MainWindowAPI", lambda *_args, **_kwargs: object())
+
+    assert window_mod.open_main_window(runtime, config) is True
+    assert webview_stub.reentered is True
+    assert len(created) == 1
+
+
+def test_open_main_window_focus_fallback_failure_does_not_duplicate(monkeypatch):
+    created = []
+
+    class FocusFallbackWindow(FakeWindow):
+        def __init__(self):
+            super().__init__()
+            self.focused = 0
+
+        def show(self):
+            raise RuntimeError("show failed")
+
+        def focus(self):
+            self.focused += 1
+
+    class FakeWebviewModule:
+        def create_window(self, **_kwargs):
+            window = FocusFallbackWindow()
+            created.append(window)
+            return window
+
+    monkeypatch.setattr(window_mod, "_HAS_WEBVIEW", True)
+    monkeypatch.setattr(window_mod, "webview", FakeWebviewModule(), raising=False)
+    monkeypatch.setattr(window_mod, "_main_window", None)
+    monkeypatch.setattr(window_mod, "_main_window_creating", False)
+    monkeypatch.setattr(window_mod, "_focus_macos_window_by_title", lambda _title: False)
+    monkeypatch.setattr(main_api_mod, "MainWindowAPI", lambda *_args, **_kwargs: object())
+
+    runtime = object()
+    config = type("Config", (), {
+        "bridge_host": "127.0.0.1",
+        "bridge_port": 8420,
+        "window_mode": type("WindowMode", (), {"width": 960, "height": 720})(),
+    })()
+
+    assert window_mod.open_main_window(runtime, config) is True
+    assert window_mod.open_main_window(runtime, config) is True
+    assert len(created) == 1
+    assert created[0].focused == 1
+
+
 def test_open_main_window_recreates_after_close(monkeypatch):
     created = []
 
@@ -340,6 +415,7 @@ def test_open_main_window_recreates_after_close(monkeypatch):
     monkeypatch.setattr(window_mod, "_HAS_WEBVIEW", True)
     monkeypatch.setattr(window_mod, "webview", FakeWebviewModule(), raising=False)
     monkeypatch.setattr(window_mod, "_main_window", None)
+    monkeypatch.setattr(window_mod, "_main_window_creating", False)
     monkeypatch.setattr(main_api_mod, "MainWindowAPI", lambda *_args, **_kwargs: object())
 
     runtime = object()

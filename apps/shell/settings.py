@@ -56,20 +56,28 @@ def _is_window_probably_closed(window: Any) -> bool:
 def _focus_window_instance(window: Any, *, title: str) -> bool:
     if _is_window_probably_closed(window):
         return False
-    try:
-        for method_name in ("restore", "show", "bring_to_front", "focus"):
-            method = getattr(window, method_name, None)
-            if callable(method):
-                method()
-        try:
-            from apps.shell.native_window import focus_macos_window
-
-            focus_macos_window(title=title)
-        except Exception:
-            pass
+    if _focus_macos_window_by_title(title):
         return True
+
+    focused = False
+    for method_name in ("restore", "show", "bring_to_front", "focus"):
+        method = getattr(window, method_name, None)
+        if callable(method):
+            try:
+                method()
+                focused = True
+            except Exception as exc:
+                logger.debug("调用模式设置窗口 %s 失败: %s", method_name, exc)
+    return focused
+
+
+def _focus_macos_window_by_title(title: str) -> bool:
+    try:
+        from apps.shell.native_window import focus_macos_window
+
+        return bool(focus_macos_window(title=title))
     except Exception as exc:
-        logger.debug("聚焦模式设置窗口失败: %s", exc)
+        logger.debug("原生聚焦模式设置窗口失败: %s", exc)
         return False
 
 
@@ -1139,16 +1147,12 @@ def open_mode_settings_window(config: "AppConfig", mode_id: str) -> bool:
                 return True
             _settings_windows.pop(descriptor.id, None)
         if descriptor.id in _settings_windows_creating:
-            try:
-                from apps.shell.native_window import focus_macos_window
-
-                focus_macos_window(title=window_title)
-            except Exception:
-                pass
+            _focus_macos_window_by_title(window_title)
             return True
         _settings_windows_creating.add(descriptor.id)
 
     api = ModeSettingsAPI(config, descriptor.id)
+    window = None
     try:
         window = webview.create_window(
             title=window_title,
@@ -1158,23 +1162,33 @@ def open_mode_settings_window(config: "AppConfig", mode_id: str) -> bool:
             resizable=True,
             js_api=api,
         )
-    except Exception:
+        api.bind_window(window)
+
+        closed_event = getattr(getattr(window, "events", None), "closed", None)
+        if closed_event is not None:
+            def _on_closed() -> None:
+                with _settings_window_lock:
+                    _settings_windows_creating.discard(descriptor.id)
+                    if _settings_windows.get(descriptor.id) is window:
+                        _settings_windows.pop(descriptor.id, None)
+
+            closed_event += _on_closed
+
+        with _settings_window_lock:
+            _settings_windows[descriptor.id] = window
+    except Exception as exc:
+        logger.error("创建模式设置窗口失败: %s", exc)
+        if window is not None:
+            try:
+                window.destroy()
+            except Exception as destroy_exc:
+                logger.debug("清理未托管模式设置窗口失败: %s", destroy_exc)
+        with _settings_window_lock:
+            if _settings_windows.get(descriptor.id) is window:
+                _settings_windows.pop(descriptor.id, None)
+        return False
+    finally:
         with _settings_window_lock:
             _settings_windows_creating.discard(descriptor.id)
-        raise
 
-    with _settings_window_lock:
-        _settings_windows_creating.discard(descriptor.id)
-        _settings_windows[descriptor.id] = window
-    api.bind_window(window)
-
-    closed_event = getattr(getattr(window, "events", None), "closed", None)
-    if closed_event is not None:
-        def _on_closed() -> None:
-            with _settings_window_lock:
-                _settings_windows_creating.discard(descriptor.id)
-                if _settings_windows.get(descriptor.id) is window:
-                    _settings_windows.pop(descriptor.id, None)
-
-        closed_event += _on_closed
     return True

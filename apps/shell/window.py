@@ -36,7 +36,25 @@ _exit_timer_lock = threading.Lock()
 _restart_timer: threading.Timer | None = None
 _restart_timer_lock = threading.Lock()
 _main_window: object | None = None
+_main_window_creating = False
 _main_window_lock = threading.RLock()
+
+
+def _event_is_set(event: Any) -> bool:
+    is_set = getattr(event, "is_set", None)
+    if callable(is_set):
+        try:
+            return bool(is_set())
+        except Exception:
+            return False
+    return False
+
+
+def _is_window_probably_closed(window: object) -> bool:
+    if bool(getattr(window, "closed", False)) or bool(getattr(window, "destroyed", False)):
+        return True
+    closed_event = getattr(getattr(window, "events", None), "closed", None)
+    return _event_is_set(closed_event)
 
 # 正常状态页 HTML
 _STATUS_HTML = """
@@ -2215,47 +2233,76 @@ def open_main_window(
     bind_exit: bool = False,
 ) -> bool:
     """在当前 webview 会话中打开主控台窗口。"""
-    global _main_window
+    global _main_window, _main_window_creating
 
     if not _HAS_WEBVIEW:
         logger.warning("pywebview 未安装，无法打开主控台窗口")
         return False
 
+    title = "Hermes-Yachiyo Control Center"
+
     with _main_window_lock:
+        if _main_window_creating:
+            if _main_window is not None:
+                _focus_existing_window(_main_window, title=title)
+            else:
+                _focus_macos_window_by_title(title)
+            return True
+
         if _main_window is not None:
-            if _focus_existing_window(_main_window, title="Hermes-Yachiyo Control Center"):
+            if _focus_existing_window(_main_window, title=title):
                 return True
             _main_window = None
+        _main_window_creating = True
 
-    from apps.shell.main_api import MainWindowAPI
-    api = MainWindowAPI(runtime, config)
+    window = None
+    try:
+        from apps.shell.main_api import MainWindowAPI
+        api = MainWindowAPI(runtime, config)
 
-    html = _STATUS_HTML.replace("{{HOST}}", config.bridge_host).replace("{{PORT}}", str(config.bridge_port))
-    window_config = config.window_mode
+        html = _STATUS_HTML.replace("{{HOST}}", config.bridge_host).replace("{{PORT}}", str(config.bridge_port))
+        window_config = config.window_mode
 
-    with _main_window_lock:
         window = webview.create_window(
-            title="Hermes-Yachiyo Control Center",
+            title=title,
             html=html,
             width=window_config.width,
             height=window_config.height,
             resizable=True,
             js_api=api,
         )
-        _main_window = window
 
-    if bind_exit:
-        _bind_main_window_exit(window)
+        with _main_window_lock:
+            _main_window = window
 
-    closed_event = getattr(getattr(window, "events", None), "closed", None)
-    if closed_event is not None:
-        def _on_closed() -> None:
-            global _main_window
-            with _main_window_lock:
-                if _main_window is window:
-                    _main_window = None
+        if bind_exit:
+            _bind_main_window_exit(window)
 
-        closed_event += _on_closed
+        closed_event = getattr(getattr(window, "events", None), "closed", None)
+        if closed_event is not None:
+            def _on_closed() -> None:
+                global _main_window, _main_window_creating
+                with _main_window_lock:
+                    _main_window_creating = False
+                    if _main_window is window:
+                        _main_window = None
+
+            closed_event += _on_closed
+    except Exception as exc:
+        logger.error("创建主控台窗口失败: %s", exc)
+        if window is not None:
+            try:
+                window.destroy()
+            except Exception as destroy_exc:
+                logger.debug("清理未托管主控台窗口失败: %s", destroy_exc)
+        with _main_window_lock:
+            if _main_window is window:
+                _main_window = None
+        return False
+    finally:
+        with _main_window_lock:
+            _main_window_creating = False
+
     return True
 
 
@@ -2307,20 +2354,30 @@ def _bind_main_window_exit(main_window: object):
 
 
 def _focus_existing_window(app_window: object, *, title: str) -> bool:
-    try:
-        for method_name in ("restore", "show", "bring_to_front", "focus"):
-            method = getattr(app_window, method_name, None)
-            if callable(method):
-                method()
-        try:
-            from apps.shell.native_window import focus_macos_window
-
-            focus_macos_window(title=title)
-        except Exception:
-            pass
+    if _is_window_probably_closed(app_window):
+        return False
+    if _focus_macos_window_by_title(title):
         return True
+
+    focused = False
+    for method_name in ("restore", "show", "bring_to_front", "focus"):
+        method = getattr(app_window, method_name, None)
+        if callable(method):
+            try:
+                method()
+                focused = True
+            except Exception as exc:
+                logger.debug("调用窗口 %s 失败: %s", method_name, exc)
+    return focused
+
+
+def _focus_macos_window_by_title(title: str) -> bool:
+    try:
+        from apps.shell.native_window import focus_macos_window
+
+        return bool(focus_macos_window(title=title))
     except Exception as exc:
-        logger.debug("聚焦窗口失败: %s", exc)
+        logger.debug("原生聚焦窗口失败: %s", exc)
         return False
 
 
@@ -2387,10 +2444,11 @@ def _force_app_exit() -> None:
 
 def _destroy_all_windows_for_exit() -> None:
     """关闭聊天窗口及所有 pywebview 窗口。"""
-    global _main_window
+    global _main_window, _main_window_creating
 
     with _main_window_lock:
         _main_window = None
+        _main_window_creating = False
 
     _close_auxiliary_windows(main_window=None)
 

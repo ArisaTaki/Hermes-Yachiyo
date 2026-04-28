@@ -7,6 +7,7 @@ import sys
 import types
 import zipfile
 from pathlib import Path
+from typing import Any
 
 import apps.shell.config as config_mod
 import apps.shell.settings as settings_mod
@@ -40,14 +41,24 @@ class _DialogWindowStub:
     def __init__(self, selection: tuple[str, ...] | None) -> None:
         self.selection = selection
         self.show_calls = 0
+        self.focus_calls = 0
         self.closed = False
-        self.events = _WindowEventsStub()
+        self.destroyed = False
+        self.destroy_calls = 0
+        self.events: Any = _WindowEventsStub()
 
     def create_file_dialog(self, *_args, **_kwargs):
         return self.selection
 
     def show(self):
         self.show_calls += 1
+
+    def focus(self):
+        self.focus_calls += 1
+
+    def destroy(self):
+        self.destroyed = True
+        self.destroy_calls += 1
 
 
 class _EventHookStub:
@@ -62,6 +73,22 @@ class _EventHookStub:
 class _WindowEventsStub:
     def __init__(self) -> None:
         self.closed = _EventHookStub()
+
+
+class _RaisingEventHookStub(_EventHookStub):
+    def __iadd__(self, _handler):
+        raise RuntimeError("bind failed")
+
+
+class _RaisingWindowEventsStub:
+    def __init__(self) -> None:
+        self.closed = _RaisingEventHookStub()
+
+
+class _DialogWindowWithRaisingClosedEvent(_DialogWindowStub):
+    def __init__(self, selection: tuple[str, ...] | None) -> None:
+        super().__init__(selection)
+        self.events = _RaisingWindowEventsStub()
 
 
 class _WebviewModuleStub:
@@ -586,6 +613,24 @@ def test_open_mode_settings_window_reuses_existing_mode_window(monkeypatch):
     assert webview_stub.last_window.show_calls == 1
 
 
+def test_open_mode_settings_window_focus_fallback_failure_does_not_duplicate(monkeypatch):
+    webview_stub = _WebviewModuleStub()
+    monkeypatch.setitem(sys.modules, "webview", webview_stub)
+    monkeypatch.setattr(settings_mod, "_settings_windows", {})
+    monkeypatch.setattr(settings_mod, "_settings_windows_creating", set())
+    monkeypatch.setattr(settings_mod, "_focus_macos_window_by_title", lambda _title: False)
+
+    config = AppConfig(display_mode="live2d")
+
+    assert open_mode_settings_window(config, "live2d") is True
+    assert webview_stub.last_window is not None
+    webview_stub.last_window.show = lambda: (_ for _ in ()).throw(RuntimeError("show failed"))
+
+    assert open_mode_settings_window(config, "live2d") is True
+    assert webview_stub.create_calls == 1
+    assert webview_stub.last_window.focus_calls == 1
+
+
 def test_open_mode_settings_window_recreates_after_close(monkeypatch):
     webview_stub = _WebviewModuleStub()
     monkeypatch.setitem(sys.modules, "webview", webview_stub)
@@ -624,6 +669,29 @@ def test_open_mode_settings_window_does_not_reenter_while_creating(monkeypatch):
     assert open_mode_settings_window(config, "live2d") is True
     assert reentered is True
     assert webview_stub.create_calls == 1
+
+
+def test_open_mode_settings_window_returns_false_and_cleans_when_closed_bind_raises(monkeypatch):
+    webview_stub = _WebviewModuleStub()
+    created = _DialogWindowWithRaisingClosedEvent(None)
+
+    def _create_window(**_kwargs):
+        webview_stub.create_calls += 1
+        webview_stub.last_window = created
+        return created
+
+    webview_stub.create_window = _create_window
+    monkeypatch.setitem(sys.modules, "webview", webview_stub)
+    monkeypatch.setattr(settings_mod, "_settings_windows", {})
+    monkeypatch.setattr(settings_mod, "_settings_windows_creating", set())
+
+    config = AppConfig(display_mode="live2d")
+
+    assert open_mode_settings_window(config, "live2d") is False
+    assert webview_stub.create_calls == 1
+    assert created.destroy_calls == 1
+    assert settings_mod._settings_windows == {}
+    assert settings_mod._settings_windows_creating == set()
 
 
 def test_open_mode_settings_window_ignores_stale_closed_window(monkeypatch):
