@@ -187,9 +187,11 @@ def _unique_backup_archive(root: Path) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     base = root / f"{BACKUP_FILE_PREFIX}{timestamp}.zip"
     existing_orders = [
-        _filename_order(path)
+        order
         for path in root.glob(f"{BACKUP_FILE_PREFIX}{timestamp}*.zip")
         if path.is_file()
+        for order in [_filename_order(path)]
+        if order > 0
     ]
     if not existing_orders and not base.exists():
         return base
@@ -408,6 +410,8 @@ def _included_ids(path: Path, data: dict[str, Any]) -> list[str]:
 
 def _backup_info(path: Path) -> BackupInfo:
     resolved = path.expanduser().resolve()
+    size_bytes = _backup_size(resolved)
+    size_display = _format_bytes(size_bytes)
     try:
         data = _read_backup_manifest(resolved)
         included = _included_ids(resolved, data)
@@ -421,15 +425,15 @@ def _backup_info(path: Path) -> BackupInfo:
             schema_version=int(data.get("schema_version") or 0),
             format=str(data.get("format") or ""),
             included=included,
-            size_bytes=_backup_size(resolved),
-            size_display=_format_bytes(_backup_size(resolved)),
+            size_bytes=size_bytes,
+            size_display=size_display,
         )
     except Exception as exc:
         return BackupInfo(
             path=str(resolved),
             display_path=_display_path(resolved),
-            size_bytes=_backup_size(resolved),
-            size_display=_format_bytes(_backup_size(resolved)),
+            size_bytes=size_bytes,
+            size_display=size_display,
             valid=False,
             error=str(exc),
         )

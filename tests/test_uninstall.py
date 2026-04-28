@@ -249,6 +249,24 @@ def test_unique_backup_archive_uses_dash_two_for_same_second(tmp_path, monkeypat
     assert candidate.name == "hermes-yachiyo-backup-20260428-101531-2.zip"
 
 
+def test_unique_backup_archive_ignores_invalid_same_second_matches(tmp_path, monkeypatch):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 4, 28, 10, 15, 31, tzinfo=tz)
+
+    monkeypatch.setattr(backup_mod, "datetime", FixedDateTime)
+    backup_root = tmp_path / "backups"
+    backup_root.mkdir()
+    invalid = backup_root / "hermes-yachiyo-backup-20260428-101531-draft.zip"
+    invalid.write_text("invalid", encoding="utf-8")
+
+    candidate = backup_mod._unique_backup_archive(backup_root)
+
+    assert candidate.name == "hermes-yachiyo-backup-20260428-101531.zip"
+    assert not candidate.name.endswith("-1.zip")
+
+
 def test_create_backup_can_overwrite_latest_backup(tmp_path, monkeypatch):
     home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
