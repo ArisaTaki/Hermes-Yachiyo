@@ -2748,7 +2748,24 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
             }
         }
 
-        document.addEventListener('DOMContentLoaded', refreshBackupImportStatus);
+        let backupImportStatusInitialized = false;
+
+        function initBackupImportStatus() {
+            if (backupImportStatusInitialized) return;
+            if (window.pywebview && window.pywebview.api) {
+                backupImportStatusInitialized = true;
+                refreshBackupImportStatus();
+                return;
+            }
+            window.addEventListener('pywebviewready', function handlePywebviewReady() {
+                if (backupImportStatusInitialized) return;
+                if (!(window.pywebview && window.pywebview.api)) return;
+                backupImportStatusInitialized = true;
+                refreshBackupImportStatus();
+            }, { once: true });
+        }
+
+        document.addEventListener('DOMContentLoaded', initBackupImportStatus);
         </script>
         """
 

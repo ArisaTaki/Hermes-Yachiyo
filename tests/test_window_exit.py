@@ -300,7 +300,7 @@ def test_installer_html_exposes_backup_import():
     assert "import_backup" in html
     section_start = html.index("function setBackupImportStatus")
     section_end = html.index(
-        "document.addEventListener('DOMContentLoaded', refreshBackupImportStatus);"
+        "document.addEventListener('DOMContentLoaded', initBackupImportStatus);"
     )
     backup_import_js = html[section_start:section_end]
     assert "textContent" in backup_import_js
@@ -308,6 +308,8 @@ def test_installer_html_exposes_backup_import():
     assert "innerHTML" not in backup_import_js
     assert "result.latest.display_path" in backup_import_js
     assert "result.backup_root_display" in backup_import_js
+    assert "function initBackupImportStatus()" in html
+    assert "window.addEventListener('pywebviewready'" in html
     assert "get_config_snapshot_status" not in html
     assert "import_config_snapshot" not in html
 

@@ -6,6 +6,7 @@
 """
 
 import logging
+import os
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from apps.installer.workspace_init import get_workspace_status
@@ -568,6 +569,13 @@ class MainWindowAPI:
                 command = ["open", "-R", str(target)] if target.is_file() else ["open", str(target)]
             elif system == "Linux":
                 command = ["xdg-open", str(target.parent if target.is_file() else target)]
+            elif system == "Windows":
+                if target.is_file():
+                    command = ["explorer.exe", "/select,", str(target)]
+                    subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    os.startfile(str(target))  # type: ignore[attr-defined]
+                return {"ok": True}
             else:
                 return {"ok": False, "error": f"当前平台不支持自动打开位置: {system}"}
             subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

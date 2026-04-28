@@ -685,6 +685,36 @@ def test_main_window_api_open_backup_location_allows_only_managed_backups(tmp_pa
     assert len(calls) == call_count
 
 
+def test_main_window_api_open_backup_location_supports_windows(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text("{}", encoding="utf-8")
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+
+    calls = []
+    startfile_calls = []
+
+    def fake_popen(command, stdout=None, stderr=None):
+        calls.append(command)
+        return SimpleNamespace()
+
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+    monkeypatch.setattr("os.startfile", lambda path: startfile_calls.append(path), raising=False)
+
+    api = MainWindowAPI(SimpleNamespace(), AppConfig())
+    root_result = api.open_backup_location("")
+    assert root_result["ok"] is True
+    assert startfile_calls == [str(home / "Hermes-Yachiyo-backups")]
+
+    backup = create_backup()
+    backup_result = api.open_backup_location(backup.path)
+    assert backup_result["ok"] is True
+    assert calls[-1] == ["explorer.exe", "/select,", backup.path]
+
+
 def test_installer_api_exposes_backup_status_and_import(tmp_path, monkeypatch):
     home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)

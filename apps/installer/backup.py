@@ -595,7 +595,10 @@ def _extract_zip_safely(archive_path: Path, target_dir: Path) -> None:
     with zipfile.ZipFile(archive_path, "r") as archive:
         total_uncompressed_size = 0
         for member in archive.infolist():
-            member_path = PurePosixPath(member.filename)
+            member_name = member.filename.replace("\\", "/")
+            if re.match(r"^[A-Za-z]:", member_name) or member_name.startswith("//"):
+                raise ValueError("备份文件包含不安全路径")
+            member_path = PurePosixPath(member_name)
             if member_path.is_absolute() or ".." in member_path.parts:
                 raise ValueError("备份文件包含不安全路径")
             if member.file_size > MAX_BACKUP_IMPORT_ENTRY_BYTES:
