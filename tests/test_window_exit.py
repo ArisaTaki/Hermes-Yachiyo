@@ -4,7 +4,8 @@ import sys
 import types
 
 import apps.shell.main_api as main_api_mod
-from apps.shell import chat_window, window as window_mod
+from apps.shell import chat_window
+from apps.shell import window as window_mod
 from apps.shell.modes.bubble import BubbleWindowAPI
 from apps.shell.window import _STATUS_HTML
 
@@ -206,7 +207,10 @@ def test_control_center_html_keeps_chat_window_as_external_full_session():
     assert "onDeferredSettingInput('bridge_port'" in _STATUS_HTML
     assert "setControlValue('s-bridge-host', 'bridge_host', d.bridge.host || '');" in _STATUS_HTML
     assert "setControlValue('s-bridge-port', 'bridge_port', d.bridge.port);" in _STATUS_HTML
-    assert "setControlValue('s-bridge-host', 'bridge_host', state.bridge.host || '');" in _STATUS_HTML
+    assert (
+        "setControlValue('s-bridge-host', 'bridge_host', state.bridge.host || '');"
+        in _STATUS_HTML
+    )
     assert "setControlValue('s-bridge-port', 'bridge_port', state.bridge.port);" in _STATUS_HTML
     assert "onSettingChange('display_mode'" in _STATUS_HTML
     assert "窗口模式" not in _STATUS_HTML
@@ -272,6 +276,16 @@ def test_installer_html_exposes_backup_import():
     assert "导入备份" in html
     assert "get_backup_status" in html
     assert "import_backup" in html
+    section_start = html.index("function setBackupImportStatus")
+    section_end = html.index(
+        "document.addEventListener('DOMContentLoaded', refreshBackupImportStatus);"
+    )
+    backup_import_js = html[section_start:section_end]
+    assert "textContent" in backup_import_js
+    assert "appendChild(document.createTextNode" in backup_import_js
+    assert "innerHTML" not in backup_import_js
+    assert "result.latest.display_path" in backup_import_js
+    assert "result.backup_root_display" in backup_import_js
     assert "get_config_snapshot_status" not in html
     assert "import_config_snapshot" not in html
 

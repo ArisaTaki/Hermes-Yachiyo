@@ -128,6 +128,44 @@ def test_create_backup_is_available_without_uninstall(tmp_path, monkeypatch):
     assert "yachiyo-workspace/chat.db" in names
 
 
+def test_create_backup_skips_top_level_and_nested_symlinks(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    real_config_dir = home / "real-config"
+    real_config_dir.mkdir(parents=True)
+    (real_config_dir / "config.json").write_text('{"from":"symlink"}', encoding="utf-8")
+    config_dir.symlink_to(real_config_dir, target_is_directory=True)
+
+    outside_dir = tmp_path / "outside"
+    outside_dir.mkdir()
+    outside_file = outside_dir / "secret.txt"
+    outside_file.write_text("secret", encoding="utf-8")
+    (outside_dir / "nested-secret.txt").write_text("nested", encoding="utf-8")
+
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / "linked-secret.txt").symlink_to(outside_file)
+    (workspace / "linked-dir").symlink_to(outside_dir, target_is_directory=True)
+    (workspace / "normal.txt").write_text("normal", encoding="utf-8")
+
+    backup = create_backup(backup_root=home / "backups")
+
+    with zipfile.ZipFile(backup.path) as archive:
+        names = set(archive.namelist())
+        payload = b"\n".join(
+            archive.read(name)
+            for name in names
+            if not name.endswith("/") and name != "manifest.json"
+        )
+
+    assert "app-config/config.json" not in names
+    assert "yachiyo-workspace/linked-secret.txt" not in names
+    assert not any(name.startswith("yachiyo-workspace/linked-dir") for name in names)
+    assert "yachiyo-workspace/normal.txt" in names
+    assert b"secret" not in payload
+    assert b"nested" not in payload
+
+
 def test_create_backup_cleans_up_old_backups_by_count(tmp_path, monkeypatch):
     home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
@@ -201,6 +239,65 @@ def test_import_backup_restores_config_and_workspace(tmp_path, monkeypatch):
     assert (workspace / "configs" / "yachiyo.json").exists()
     assert (workspace / "chat.db").exists()
     assert import_result.restored
+
+
+def test_import_backup_skips_workspace_restore_outside_home(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text('{"display_mode":"live2d"}', encoding="utf-8")
+
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / "state.json").write_text('{"safe":true}', encoding="utf-8")
+
+    backup = create_backup(backup_root=home / "backups")
+    outside_hermes_home = tmp_path / "outside-hermes"
+    monkeypatch.setenv("HERMES_HOME", str(outside_hermes_home))
+
+    result = import_backup(backup.path)
+
+    assert result.ok is True
+    assert not (outside_hermes_home / "yachiyo").exists()
+    assert any("不在当前用户目录" in item["reason"] for item in result.skipped)
+
+
+def test_yachiyo_workspace_outside_home_is_not_removable(tmp_path, monkeypatch):
+    home, _hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+    outside_hermes_home = tmp_path / "outside-hermes"
+    workspace = outside_hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("HERMES_HOME", str(outside_hermes_home))
+
+    plan = build_uninstall_plan(
+        UninstallScope.YACHIYO_ONLY,
+        keep_config_snapshot=False,
+        backup_root=home / "backups",
+    )
+
+    target = next(item for item in plan.targets if item.id == "yachiyo_workspace")
+    assert target.exists is True
+    assert target.removable is False
+    assert "不在当前用户目录" in target.reason
+
+
+def test_yachiyo_workspace_without_marker_is_not_removable(tmp_path, monkeypatch):
+    home, hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / "state.json").write_text("{}", encoding="utf-8")
+
+    plan = build_uninstall_plan(
+        UninstallScope.YACHIYO_ONLY,
+        keep_config_snapshot=False,
+        backup_root=home / "backups",
+    )
+
+    target = next(item for item in plan.targets if item.id == "yachiyo_workspace")
+    assert target.exists is True
+    assert target.removable is False
+    assert "初始化标识" in target.reason
 
 
 def test_execute_requires_confirm_phrase(tmp_path, monkeypatch):
@@ -333,6 +430,41 @@ def test_main_window_api_restores_backup(tmp_path, monkeypatch):
     assert result["restart_scheduled"] is True
     assert restart_calls == [True]
     assert (config_dir / "config.json").read_text(encoding="utf-8") == '{"display_mode":"live2d"}'
+
+
+def test_main_window_api_open_backup_location_allows_only_managed_backups(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text("{}", encoding="utf-8")
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+
+    calls = []
+
+    def fake_popen(command, stdout=None, stderr=None):
+        calls.append(command)
+        return SimpleNamespace()
+
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
+    monkeypatch.setattr("subprocess.Popen", fake_popen)
+
+    api = MainWindowAPI(SimpleNamespace(), AppConfig())
+    root_result = api.open_backup_location("")
+    assert root_result["ok"] is True
+    assert calls[-1] == ["open", str(home / "Hermes-Yachiyo-backups")]
+
+    backup = create_backup()
+    backup_result = api.open_backup_location(backup.path)
+    assert backup_result["ok"] is True
+    assert calls[-1] == ["open", "-R", backup.path]
+
+    external_backup = home / "hermes-yachiyo-backup-external.zip"
+    external_backup.write_text("not managed", encoding="utf-8")
+    call_count = len(calls)
+    rejected = api.open_backup_location(str(external_backup))
+    assert rejected["ok"] is False
+    assert len(calls) == call_count
 
 
 def test_installer_api_exposes_backup_status_and_import(tmp_path, monkeypatch):

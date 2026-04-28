@@ -127,14 +127,32 @@ def _is_safe_app_config_dir(path: Path) -> tuple[bool, str]:
     return True, ""
 
 
+def _has_yachiyo_workspace_marker(path: Path) -> bool:
+    init_marker = path / ".yachiyo_init"
+    if init_marker.is_file() and not init_marker.is_symlink():
+        return True
+    config_marker = path / "configs" / "yachiyo.json"
+    return (
+        config_marker.is_file()
+        and not config_marker.is_symlink()
+        and not config_marker.parent.is_symlink()
+    )
+
+
 def _is_safe_yachiyo_workspace(path: Path) -> tuple[bool, str]:
-    resolved = path.expanduser().resolve()
+    original = path.expanduser()
+    resolved = original.resolve()
     if _is_protected_path(resolved):
         return False, "受保护路径，已跳过"
     if resolved.name != "yachiyo":
         return False, "工作空间目录名称不符合预期，已跳过"
-    if resolved.parent == Path.home().expanduser().resolve():
+    home = Path.home().expanduser().resolve()
+    if not _is_relative_to(resolved, home):
+        return False, "工作空间不在当前用户目录下，已跳过"
+    if resolved.parent == home:
         return False, "工作空间不能直接指向用户主目录下的通用目录，已跳过"
+    if _path_exists(original) and not _has_yachiyo_workspace_marker(resolved):
+        return False, "工作空间缺少 Yachiyo 初始化标识，已跳过"
     return True, ""
 
 
@@ -189,6 +207,9 @@ def _copy_sqlite_database(source: Path, target: Path) -> None:
 def _copy_file(source: str, target: str) -> str:
     source_path = Path(source)
     target_path = Path(target)
+    if source_path.is_symlink():
+        logger.warning("跳过符号链接备份项: %s", source_path)
+        return target
     if source_path.name == "chat.db":
         _copy_sqlite_database(source_path, target_path)
     else:
@@ -198,11 +219,23 @@ def _copy_file(source: str, target: str) -> str:
 
 
 def _copy_ignore(_directory: str, names: list[str]) -> set[str]:
-    return {name for name in names if name in {"chat.db-wal", "chat.db-shm"}}
+    ignored = {name for name in names if name in {"chat.db-wal", "chat.db-shm"}}
+    directory = Path(_directory)
+    for name in names:
+        if name in ignored:
+            continue
+        path = directory / name
+        if path.is_symlink():
+            logger.warning("跳过符号链接备份项: %s", path)
+            ignored.add(name)
+    return ignored
 
 
 def _copy_path(source: Path, target: Path) -> bool:
     if not _path_exists(source):
+        return False
+    if source.is_symlink():
+        logger.warning("跳过符号链接备份源: %s", source)
         return False
     target.parent.mkdir(parents=True, exist_ok=True)
     if source.is_dir() and not source.is_symlink():
@@ -215,6 +248,9 @@ def _copy_path(source: Path, target: Path) -> bool:
 def _write_zip_from_dir(source_dir: Path, archive_path: Path) -> None:
     with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(source_dir.rglob("*")):
+            if path.is_symlink():
+                logger.warning("跳过符号链接压缩项: %s", path)
+                continue
             relative = path.relative_to(source_dir).as_posix()
             if path.is_dir():
                 archive.write(path, relative + "/")
@@ -493,11 +529,12 @@ def cleanup_old_backups(
     return deleted
 
 
-def _resolve_managed_backup_path(
+def resolve_managed_backup_path(
     backup_path: str | Path,
     *,
     backup_root: str | Path | None = None,
 ) -> Path:
+    """解析并校验默认备份目录内的托管备份 ZIP 文件。"""
     root = default_backup_root(backup_root).expanduser().resolve()
     path = Path(backup_path).expanduser().resolve()
     if path.parent != root:
@@ -509,13 +546,21 @@ def _resolve_managed_backup_path(
     return path
 
 
+def _resolve_managed_backup_path(
+    backup_path: str | Path,
+    *,
+    backup_root: str | Path | None = None,
+) -> Path:
+    return resolve_managed_backup_path(backup_path, backup_root=backup_root)
+
+
 def delete_backup(
     backup_path: str | Path,
     *,
     backup_root: str | Path | None = None,
 ) -> BackupInfo:
     """删除指定备份。"""
-    path = _resolve_managed_backup_path(backup_path, backup_root=backup_root)
+    path = resolve_managed_backup_path(backup_path, backup_root=backup_root)
     info = _backup_info(path)
     path.unlink()
     return info
@@ -619,7 +664,12 @@ def import_backup(
         workspace_source = snapshot_dir / "yachiyo-workspace"
         workspace_target = _yachiyo_workspace_dir()
         workspace_safe, workspace_reason = _is_safe_yachiyo_workspace(workspace_target)
-        if workspace_source.exists() and workspace_safe:
+        if workspace_source.exists() and not _has_yachiyo_workspace_marker(workspace_source):
+            skipped.append({
+                "label": "Hermes-Yachiyo 工作空间",
+                "reason": "备份中的工作空间缺少初始化标识",
+            })
+        elif workspace_source.exists() and workspace_safe:
             try:
                 _replace_path(workspace_source, workspace_target)
                 restored.append({

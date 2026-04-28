@@ -2555,6 +2555,29 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
             <div id="backup-import-result" style="margin-top:10px;"></div>
         </div>
         <script>
+        function setBackupImportStatus(message, detail, isError) {
+            const status = document.getElementById('backup-import-status');
+            if (!status) return;
+            status.textContent = '';
+            status.style.color = isError ? '#ff6b6b' : '#aaa';
+            status.appendChild(document.createTextNode(message || ''));
+            if (detail) {
+                status.appendChild(document.createElement('br'));
+                const detailEl = document.createElement('span');
+                detailEl.style.color = '#888';
+                detailEl.style.fontSize = '0.88em';
+                detailEl.textContent = detail;
+                status.appendChild(detailEl);
+            }
+        }
+
+        function setBackupImportResult(message, isError) {
+            const resultBox = document.getElementById('backup-import-result');
+            if (!resultBox) return;
+            resultBox.textContent = message || '';
+            resultBox.style.color = isError ? '#ff6b6b' : '#90ee90';
+        }
+
         async function refreshBackupImportStatus() {
             const status = document.getElementById('backup-import-status');
             const btn = document.getElementById('backup-import-btn');
@@ -2568,17 +2591,21 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                 if (!result.success) throw new Error(result.error || '读取备份失败');
                 if (result.has_backup && result.latest) {
                     const created = result.latest.created_at || '未知时间';
-                    status.innerHTML = '检测到最近备份：' + result.latest.display_path
-                        + '<br><span style="color:#888;font-size:0.88em;">创建时间：'
-                        + created + '</span>';
+                    setBackupImportStatus(
+                        '检测到最近备份：' + (result.latest.display_path || ''),
+                        '创建时间：' + created,
+                        false
+                    );
                     if (btn) btn.disabled = false;
                 } else {
-                    status.innerHTML = '未检测到可导入备份。默认目录：'
-                        + result.backup_root_display;
+                    setBackupImportStatus(
+                        '未检测到可导入备份。',
+                        '默认目录：' + (result.backup_root_display || ''),
+                        false
+                    );
                 }
             } catch (err) {
-                if (status) status.innerHTML = '<span style="color:#ff6b6b">'
-                    + err.message + '</span>';
+                setBackupImportStatus(err.message || '读取备份失败', '', true);
                 if (btn) btn.disabled = true;
             }
         }
@@ -2587,7 +2614,7 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
             const btn = document.getElementById('backup-import-btn');
             const resultBox = document.getElementById('backup-import-result');
             if (btn) { btn.disabled = true; btn.textContent = '正在导入...'; }
-            if (resultBox) resultBox.innerHTML = '';
+            if (resultBox) resultBox.textContent = '';
             try {
                 if (!window.pywebview || !window.pywebview.api) {
                     throw new Error('WebView API 不可用');
@@ -2600,12 +2627,13 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                     throw new Error(errors);
                 }
                 const restoredCount = result.restored ? result.restored.length : 0;
-                resultBox.innerHTML = '<span style="color:#90ee90">已导入 '
-                    + restoredCount + ' 项备份资料，正在重启应用...</span>';
+                setBackupImportResult(
+                    '已导入 ' + restoredCount + ' 项备份资料，正在重启应用...',
+                    false
+                );
                 setTimeout(() => window.pywebview.api.restart_app(), 1200);
             } catch (err) {
-                if (resultBox) resultBox.innerHTML = '<span style="color:#ff6b6b">'
-                    + err.message + '</span>';
+                setBackupImportResult(err.message || '导入失败', true);
                 if (btn) { btn.disabled = false; btn.textContent = '导入最近备份'; }
             }
         }

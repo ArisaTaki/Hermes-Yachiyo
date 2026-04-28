@@ -554,14 +554,15 @@ class MainWindowAPI:
         """在系统文件管理器中打开备份位置。"""
         import platform
         import subprocess
-        from pathlib import Path
 
         try:
-            from apps.installer.backup import default_backup_root
+            from apps.installer.backup import default_backup_root, resolve_managed_backup_path
 
-            target = Path(backup_path).expanduser() if backup_path else default_backup_root()
-            if not target.exists():
-                target = target.parent if backup_path else target
+            if backup_path:
+                target = resolve_managed_backup_path(backup_path)
+            else:
+                target = default_backup_root().expanduser()
+                target.mkdir(parents=True, exist_ok=True)
             system = platform.system()
             if system == "Darwin":
                 command = ["open", "-R", str(target)] if target.is_file() else ["open", str(target)]

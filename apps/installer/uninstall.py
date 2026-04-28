@@ -177,14 +177,7 @@ def _is_safe_app_config_dir(path: Path) -> tuple[bool, str]:
 
 
 def _is_safe_yachiyo_workspace(path: Path) -> tuple[bool, str]:
-    resolved = path.expanduser().resolve()
-    if _is_protected_path(resolved):
-        return False, "受保护路径，已跳过"
-    if resolved.name != "yachiyo":
-        return False, "工作空间目录名称不符合预期，已跳过"
-    if resolved.parent == Path.home().expanduser().resolve():
-        return False, "工作空间不能直接指向用户主目录下的通用目录，已跳过"
-    return True, ""
+    return backup_mod._is_safe_yachiyo_workspace(path)
 
 
 def _looks_like_hermes_home(path: Path) -> bool:
