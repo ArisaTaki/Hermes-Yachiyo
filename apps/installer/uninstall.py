@@ -177,7 +177,7 @@ def _is_safe_app_config_dir(path: Path) -> tuple[bool, str]:
 
 
 def _is_safe_yachiyo_workspace(path: Path) -> tuple[bool, str]:
-    return backup_mod._is_safe_yachiyo_workspace(path)
+    return backup_mod.is_safe_yachiyo_workspace(path)
 
 
 def _looks_like_hermes_home(path: Path) -> bool:

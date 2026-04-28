@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -25,6 +26,9 @@ BACKUP_FILE_PREFIX = "hermes-yachiyo-backup-"
 BACKUP_SCHEMA_VERSION = 2
 MANIFEST_NAME = "manifest.json"
 DEFAULT_RETENTION_COUNT = 10
+_BACKUP_ARCHIVE_NAME_RE = re.compile(
+    rf"^{re.escape(BACKUP_FILE_PREFIX)}\d{{8}}-\d{{6}}(?:-(\d+))?\.zip$"
+)
 
 
 @dataclass(frozen=True)
@@ -139,7 +143,8 @@ def _has_yachiyo_workspace_marker(path: Path) -> bool:
     )
 
 
-def _is_safe_yachiyo_workspace(path: Path) -> tuple[bool, str]:
+def is_safe_yachiyo_workspace(path: Path) -> tuple[bool, str]:
+    """判断目标路径是否可作为 Yachiyo 工作空间安全删除或替换。"""
     original = path.expanduser()
     resolved = original.resolve()
     if _is_protected_path(resolved):
@@ -154,6 +159,10 @@ def _is_safe_yachiyo_workspace(path: Path) -> tuple[bool, str]:
     if _path_exists(original) and not _has_yachiyo_workspace_marker(resolved):
         return False, "工作空间缺少 Yachiyo 初始化标识，已跳过"
     return True, ""
+
+
+def _is_safe_yachiyo_workspace(path: Path) -> tuple[bool, str]:
+    return is_safe_yachiyo_workspace(path)
 
 
 def _app_config_dir() -> Path:
@@ -313,7 +322,6 @@ def create_backup(
             "source_hermes_home": str(_hermes_home_dir()),
             "source_yachiyo_workspace": str(_yachiyo_workspace_dir()),
             "entries": copied,
-            "copied": copied,
             "note": (
                 "此备份包含 Hermes-Yachiyo 应用配置与 Yachiyo 工作空间，"
                 "包括聊天数据库、项目资料、缓存、日志与导入资源。"
@@ -449,14 +457,11 @@ def _format_bytes(size_bytes: int) -> str:
 
 
 def _filename_order(path: Path) -> int:
-    stem = path.stem
-    if not stem.startswith(BACKUP_FILE_PREFIX):
+    match = _BACKUP_ARCHIVE_NAME_RE.fullmatch(path.name)
+    if match is None:
         return 0
-    suffix = stem.removeprefix(BACKUP_FILE_PREFIX)
-    parts = suffix.rsplit("-", 1)
-    if len(parts) == 2 and parts[1].isdigit():
-        return int(parts[1])
-    return 1
+    suffix = match.group(1)
+    return int(suffix) if suffix else 1
 
 
 def find_backups(backup_root: str | Path | None = None) -> list[BackupInfo]:
@@ -663,7 +668,7 @@ def import_backup(
 
         workspace_source = snapshot_dir / "yachiyo-workspace"
         workspace_target = _yachiyo_workspace_dir()
-        workspace_safe, workspace_reason = _is_safe_yachiyo_workspace(workspace_target)
+        workspace_safe, workspace_reason = is_safe_yachiyo_workspace(workspace_target)
         if workspace_source.exists() and not _has_yachiyo_workspace_marker(workspace_source):
             skipped.append({
                 "label": "Hermes-Yachiyo 工作空间",

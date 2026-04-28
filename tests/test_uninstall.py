@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import apps.shell.config as config_mod
 import apps.shell.window as window_mod
+from apps.installer import backup as backup_mod
 from apps.installer import uninstall as uninstall_mod
 from apps.installer.backup import create_backup, get_backup_status, import_backup
 from apps.installer.uninstall import (
@@ -94,8 +97,11 @@ def test_execute_yachiyo_only_creates_backup_and_removes_targets(tmp_path, monke
     assert result.backup_path == str(backup.resolve())
     with zipfile.ZipFile(backup) as archive:
         names = set(archive.namelist())
+        manifest = json.loads(archive.read("manifest.json").decode("utf-8"))
 
     assert "manifest.json" in names
+    assert "entries" in manifest
+    assert "copied" not in manifest
     assert "app-config/config.json" in names
     assert "yachiyo-workspace/configs/yachiyo.json" in names
     assert "yachiyo-workspace/templates/default.json" in names
@@ -185,6 +191,39 @@ def test_create_backup_cleans_up_old_backups_by_count(tmp_path, monkeypatch):
     assert len(remaining) == 2
     assert not Path(created_paths[0]).exists()
     assert not Path(created_paths[1]).exists()
+
+
+def test_backup_filename_order_parses_only_extra_numeric_suffix(tmp_path):
+    assert (
+        backup_mod._filename_order(
+            tmp_path / "hermes-yachiyo-backup-20260428-101531.zip"
+        )
+        == 1
+    )
+    assert (
+        backup_mod._filename_order(
+            tmp_path / "hermes-yachiyo-backup-20260428-101531-2.zip"
+        )
+        == 2
+    )
+    assert backup_mod._filename_order(tmp_path / "hermes-yachiyo-backup-20260428.zip") == 0
+
+
+def test_unique_backup_archive_uses_dash_two_for_same_second(tmp_path, monkeypatch):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 4, 28, 10, 15, 31, tzinfo=tz)
+
+    monkeypatch.setattr(backup_mod, "datetime", FixedDateTime)
+    backup_root = tmp_path / "backups"
+    backup_root.mkdir()
+    base = backup_root / "hermes-yachiyo-backup-20260428-101531.zip"
+    base.write_text("base", encoding="utf-8")
+
+    candidate = backup_mod._unique_backup_archive(backup_root)
+
+    assert candidate.name == "hermes-yachiyo-backup-20260428-101531-2.zip"
 
 
 def test_create_backup_can_overwrite_latest_backup(tmp_path, monkeypatch):
@@ -298,6 +337,21 @@ def test_yachiyo_workspace_without_marker_is_not_removable(tmp_path, monkeypatch
     assert target.exists is True
     assert target.removable is False
     assert "初始化标识" in target.reason
+
+
+def test_public_yachiyo_workspace_safety_helper_preserves_strict_rules(tmp_path, monkeypatch):
+    _home, hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+
+    safe, reason = backup_mod.is_safe_yachiyo_workspace(workspace)
+    assert safe is False
+    assert "初始化标识" in reason
+
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    safe, reason = backup_mod.is_safe_yachiyo_workspace(workspace)
+    assert safe is True
+    assert reason == ""
 
 
 def test_execute_requires_confirm_phrase(tmp_path, monkeypatch):
