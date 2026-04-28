@@ -673,7 +673,7 @@ _STATUS_HTML = """
             <h3>卸载 Hermes-Yachiyo？</h3>
                  <p id="uninstall-dialog-summary">将删除所选范围内的本地资料。此操作不可撤销。</p>
                  <input class="uninstall-confirm-input" id="uninstall-confirm-input"
-                     placeholder="输入 UNINSTALL 确认">
+                     placeholder="输入确认短语">
             <div class="exit-dialog-error" id="uninstall-dialog-error"></div>
             <div class="exit-dialog-actions">
                 <button class="exit-cancel-btn" onclick="hideUninstallDialog()">取消</button>
@@ -930,7 +930,19 @@ _STATUS_HTML = """
     let uninstallPreviewPlan = null;
     let backupManagerOpen = false;
     let backupStatusCache = null;
-    const uninstallConfirmPhrase = 'UNINSTALL';
+    let uninstallConfirmPhrase = '';
+
+    function getUninstallConfirmPhraseFromPlan(plan) {
+        if (!plan || typeof plan.confirm_phrase !== 'string') return 'UNINSTALL';
+        const phrase = plan.confirm_phrase.trim();
+        return phrase || 'UNINSTALL';
+    }
+
+    function syncUninstallConfirmPhrase(plan) {
+        uninstallConfirmPhrase = getUninstallConfirmPhraseFromPlan(plan);
+        const input = document.getElementById('uninstall-confirm-input');
+        if (input) input.placeholder = '输入 ' + uninstallConfirmPhrase + ' 确认';
+    }
 
     function hasPendingCommonSetting(key) {
         return Object.prototype.hasOwnProperty.call(pendingCommonSettings, key);
@@ -1257,9 +1269,11 @@ _STATUS_HTML = """
         const box = document.getElementById('s-uninstall-preview');
         if (!box) return;
         if (!plan) {
+            syncUninstallConfirmPhrase(null);
             box.textContent = '卸载清单不可用。';
             return;
         }
+        syncUninstallConfirmPhrase(plan);
         const targets = plan.targets || [];
         let html = '<div style="margin-bottom:6px;color:#f1d7df;">将处理 ' + plan.existing_count
             + ' 个已存在目标，其中 ' + plan.removable_count + ' 个可自动删除。</div>';
@@ -1312,6 +1326,7 @@ _STATUS_HTML = """
             setUninstallStatus('', false);
         } catch(e) {
             uninstallPreviewPlan = null;
+            syncUninstallConfirmPhrase(null);
             if (box) box.textContent = e.message || '生成卸载清单失败';
             if (openBtn) openBtn.disabled = true;
             setUninstallStatus(e.message || '生成卸载清单失败', true);
@@ -1333,6 +1348,7 @@ _STATUS_HTML = """
         const btn = document.getElementById('uninstall-confirm-btn');
         const summary = document.getElementById('uninstall-dialog-summary');
         const opts = getUninstallOptions();
+        syncUninstallConfirmPhrase(uninstallPreviewPlan);
         if (summary) {
             const scopeText = opts.scope === 'include_hermes'
                 ? '也会尝试卸载当前用户目录下的 Hermes Agent 架构。'
@@ -1360,12 +1376,16 @@ _STATUS_HTML = """
         const btn = document.getElementById('uninstall-confirm-btn');
         const err = document.getElementById('uninstall-dialog-error');
         const confirmText = input ? input.value : '';
+        syncUninstallConfirmPhrase(uninstallPreviewPlan);
         if (btn) {
             btn.disabled = true;
             btn.textContent = '正在卸载…';
         }
         if (err) err.textContent = '';
         try {
+            if (confirmText !== uninstallConfirmPhrase) {
+                throw new Error('请输入确认短语 ' + uninstallConfirmPhrase);
+            }
             if (!window.pywebview || !window.pywebview.api) {
                 throw new Error('WebView API 不可用');
             }

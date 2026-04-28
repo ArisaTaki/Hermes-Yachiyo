@@ -273,6 +273,16 @@ def test_control_center_backup_manager_uses_dataset_path_attributes():
     assert "data-backup-path=\"" not in backup_manager_js
 
 
+def test_control_center_uninstall_confirm_phrase_comes_from_preview_plan():
+    assert "const uninstallConfirmPhrase = 'UNINSTALL';" not in _STATUS_HTML
+    assert "let uninstallConfirmPhrase = ''" in _STATUS_HTML
+    assert "function getUninstallConfirmPhraseFromPlan(plan)" in _STATUS_HTML
+    assert "plan.confirm_phrase" in _STATUS_HTML
+    assert "syncUninstallConfirmPhrase(uninstallPreviewPlan);" in _STATUS_HTML
+    assert "input.placeholder = '输入 ' + uninstallConfirmPhrase + ' 确认';" in _STATUS_HTML
+    assert "confirmText !== uninstallConfirmPhrase" in _STATUS_HTML
+
+
 def test_installer_html_exposes_backup_import():
     from apps.shell.window import _generate_installer_html
     from packages.protocol.enums import HermesInstallStatus, Platform
