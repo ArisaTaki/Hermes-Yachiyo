@@ -1021,22 +1021,54 @@ _STATUS_HTML = """
         const items = backups || [];
         const total = backupStatusCache ? (backupStatusCache.total_size_display || '0 B') : '0 B';
         summary.textContent = '共 ' + items.length + ' 份备份，占用 ' + total;
+        list.innerHTML = '';
         if (items.length === 0) {
-            list.innerHTML = '<div class="empty-state">暂无可管理备份</div>';
+            const empty = document.createElement('div');
+            empty.className = 'empty-state';
+            empty.textContent = '暂无可管理备份';
+            list.appendChild(empty);
             return;
         }
-        list.innerHTML = items.map(function(item) {
-            const path = escapeHtml(item.path || '');
+        items.forEach(function(item) {
             const meta = formatReadableDateTime(item.created_at) + ' · ' + (item.size_display || '未知大小');
-            const invalid = item.valid ? '' : '<div class="meta" style="color:#ffaaaa;">' + escapeHtml(item.error || '备份无效') + '</div>';
-            return '<div class="backup-item"><div><div class="name">'
-                + escapeHtml(backupFileName(item.path)) + '</div><div class="meta">'
-                + escapeHtml(meta) + '</div>' + invalid + '</div><div class="actions">'
-                + '<button class="uninstall-secondary-btn" data-backup-action="restore" data-backup-path="' + path + '">恢复此版本</button>'
-                + '<button class="uninstall-secondary-btn" data-backup-action="open" data-backup-path="' + path + '">打开位置</button>'
-                + '<button class="uninstall-secondary-btn" data-backup-action="delete" data-backup-path="' + path + '">删除</button>'
-                + '</div></div>';
-        }).join('');
+
+            const row = document.createElement('div');
+            row.className = 'backup-item';
+            const info = document.createElement('div');
+            const name = document.createElement('div');
+            name.className = 'name';
+            name.textContent = backupFileName(item.path);
+            const metaEl = document.createElement('div');
+            metaEl.className = 'meta';
+            metaEl.textContent = meta;
+            info.appendChild(name);
+            info.appendChild(metaEl);
+            if (!item.valid) {
+                const invalid = document.createElement('div');
+                invalid.className = 'meta';
+                invalid.style.color = '#ffaaaa';
+                invalid.textContent = item.error || '备份无效';
+                info.appendChild(invalid);
+            }
+
+            const actions = document.createElement('div');
+            actions.className = 'actions';
+            [
+                ['restore', '恢复此版本'],
+                ['open', '打开位置'],
+                ['delete', '删除'],
+            ].forEach(function(config) {
+                const button = document.createElement('button');
+                button.className = 'uninstall-secondary-btn';
+                button.dataset.backupAction = config[0];
+                button.dataset.backupPath = item.path || '';
+                button.textContent = config[1];
+                actions.appendChild(button);
+            });
+            row.appendChild(info);
+            row.appendChild(actions);
+            list.appendChild(row);
+        });
         bindBackupManagerActions();
     }
 

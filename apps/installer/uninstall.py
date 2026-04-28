@@ -138,48 +138,6 @@ def _is_relative_to(path: Path, root: Path) -> bool:
         return False
 
 
-def _protected_paths() -> set[Path]:
-    home = Path.home().expanduser().resolve()
-    candidates = {
-        Path("/"),
-        home,
-        home.parent,
-        Path("/Applications"),
-        Path("/Library"),
-        Path("/System"),
-        Path("/bin"),
-        Path("/etc"),
-        Path("/opt"),
-        Path("/sbin"),
-        Path("/usr"),
-        Path("/var"),
-    }
-    return {path.resolve() for path in candidates if path.exists()}
-
-
-def _is_protected_path(path: Path) -> bool:
-    try:
-        resolved = path.expanduser().resolve()
-    except Exception:
-        return True
-    return resolved in _protected_paths()
-
-
-def _is_safe_app_config_dir(path: Path) -> tuple[bool, str]:
-    resolved = path.expanduser().resolve()
-    if _is_protected_path(resolved):
-        return False, "受保护路径，已跳过"
-    if resolved.name != ".hermes-yachiyo":
-        return False, "配置目录名称不符合预期，已跳过"
-    if not _is_relative_to(resolved, Path.home().expanduser()):
-        return False, "配置目录不在当前用户目录下，已跳过"
-    return True, ""
-
-
-def _is_safe_yachiyo_workspace(path: Path) -> tuple[bool, str]:
-    return backup_mod.is_safe_yachiyo_workspace(path)
-
-
 def _looks_like_hermes_home(path: Path) -> bool:
     if path.name in {".hermes", "hermes"}:
         return True
@@ -195,7 +153,7 @@ def _looks_like_hermes_home(path: Path) -> bool:
 
 def _is_safe_hermes_home(path: Path) -> tuple[bool, str]:
     resolved = path.expanduser().resolve()
-    if _is_protected_path(resolved):
+    if backup_mod.is_protected_path(resolved):
         return False, "受保护路径，已跳过"
     if not _is_relative_to(resolved, Path.home().expanduser()):
         return False, "Hermes Home 不在当前用户目录下，已跳过"
@@ -210,7 +168,7 @@ def _is_safe_hermes_binary(path: Path) -> tuple[bool, str]:
         return False, "可执行文件名称不符合预期，已跳过"
     if not _is_relative_to(resolved, Path.home().expanduser()):
         return False, "Hermes 命令位于系统或共享路径，第一版不自动删除"
-    if _is_protected_path(resolved.parent):
+    if backup_mod.is_protected_path(resolved.parent):
         return False, "Hermes 命令位于受保护路径，已跳过"
     return True, ""
 
@@ -297,7 +255,7 @@ def build_uninstall_plan(
             label="Hermes-Yachiyo 应用配置",
             path=app_config,
             kind="directory",
-            safe_check=_is_safe_app_config_dir,
+            safe_check=backup_mod.is_safe_app_config_dir,
         )
     ]
 
@@ -308,7 +266,7 @@ def build_uninstall_plan(
                 label="Hermes-Yachiyo 工作空间",
                 path=yachiyo_workspace,
                 kind="directory",
-                safe_check=_is_safe_yachiyo_workspace,
+                safe_check=backup_mod.is_safe_yachiyo_workspace,
             )
         )
     else:

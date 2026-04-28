@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -193,6 +194,28 @@ def test_create_backup_cleans_up_old_backups_by_count(tmp_path, monkeypatch):
     assert not Path(created_paths[1]).exists()
 
 
+def test_cleanup_old_backups_counts_invalid_managed_backups(tmp_path):
+    backup_root = tmp_path / "backups"
+    backup_root.mkdir()
+    names = [
+        "hermes-yachiyo-backup-20260428-101500.zip",
+        "hermes-yachiyo-backup-20260428-101501.zip",
+        "hermes-yachiyo-backup-20260428-101502.zip",
+    ]
+    for index, name in enumerate(names):
+        path = backup_root / name
+        path.write_bytes(b"not a zip")
+        timestamp = 1_900_000_000 + index
+        os.utime(path, (timestamp, timestamp))
+
+    deleted = backup_mod.cleanup_old_backups(backup_root=backup_root, keep_count=2)
+
+    remaining = sorted(path.name for path in backup_root.glob("*.zip"))
+    assert remaining == names[1:]
+    assert [Path(item.path).name for item in deleted] == [names[0]]
+    assert deleted[0].valid is False
+
+
 def test_backup_filename_order_parses_only_extra_numeric_suffix(tmp_path):
     assert (
         backup_mod._filename_order(
@@ -339,8 +362,22 @@ def test_yachiyo_workspace_without_marker_is_not_removable(tmp_path, monkeypatch
     assert "初始化标识" in target.reason
 
 
-def test_public_yachiyo_workspace_safety_helper_preserves_strict_rules(tmp_path, monkeypatch):
-    _home, hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+def test_public_path_safety_helpers_preserve_strict_rules(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    assert backup_mod.protected_paths()
+    assert backup_mod.is_protected_path(home) is True
+
+    config_dir.mkdir(parents=True)
+    safe, reason = backup_mod.is_safe_app_config_dir(config_dir)
+    assert safe is True
+    assert reason == ""
+
+    wrong_config = home / "not-hermes-yachiyo"
+    wrong_config.mkdir()
+    safe, reason = backup_mod.is_safe_app_config_dir(wrong_config)
+    assert safe is False
+    assert "配置目录名称" in reason
+
     workspace = hermes_home / "yachiyo"
     workspace.mkdir(parents=True)
 
@@ -352,6 +389,45 @@ def test_public_yachiyo_workspace_safety_helper_preserves_strict_rules(tmp_path,
     safe, reason = backup_mod.is_safe_yachiyo_workspace(workspace)
     assert safe is True
     assert reason == ""
+
+
+def test_backup_import_and_uninstall_use_public_path_safety_helpers(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text("{}", encoding="utf-8")
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    backup = create_backup(backup_root=home / "backups")
+
+    calls: list[str] = []
+    original_app_config = backup_mod.is_safe_app_config_dir
+    original_workspace = backup_mod.is_safe_yachiyo_workspace
+
+    def track_app_config(path):
+        calls.append("app_config")
+        return original_app_config(path)
+
+    def track_workspace(path):
+        calls.append("workspace")
+        return original_workspace(path)
+
+    monkeypatch.setattr(backup_mod, "is_safe_app_config_dir", track_app_config)
+    monkeypatch.setattr(backup_mod, "is_safe_yachiyo_workspace", track_workspace)
+
+    import_result = import_backup(backup.path)
+    assert import_result.ok is True
+
+    plan = build_uninstall_plan(
+        UninstallScope.YACHIYO_ONLY,
+        keep_config_snapshot=False,
+        backup_root=home / "backups",
+    )
+
+    assert any(target.id == "app_config_dir" and target.removable for target in plan.targets)
+    assert any(target.id == "yachiyo_workspace" and target.removable for target in plan.targets)
+    assert calls.count("app_config") >= 2
+    assert calls.count("workspace") >= 2
 
 
 def test_execute_requires_confirm_phrase(tmp_path, monkeypatch):

@@ -261,6 +261,18 @@ def test_control_center_html_exposes_uninstall_flow():
     assert "UNINSTALL" in _STATUS_HTML
 
 
+def test_control_center_backup_manager_uses_dataset_path_attributes():
+    section_start = _STATUS_HTML.index("function renderBackupManager")
+    section_end = _STATUS_HTML.index("function bindBackupManagerActions")
+    backup_manager_js = _STATUS_HTML[section_start:section_end]
+
+    assert "button.dataset.backupAction" in backup_manager_js
+    assert "button.dataset.backupPath" in backup_manager_js
+    assert "document.createElement('button')" in backup_manager_js
+    assert "data-backup-path=\"' + path + '\"" not in backup_manager_js
+    assert "data-backup-path=\"" not in backup_manager_js
+
+
 def test_installer_html_exposes_backup_import():
     from apps.shell.window import _generate_installer_html
     from packages.protocol.enums import HermesInstallStatus, Platform

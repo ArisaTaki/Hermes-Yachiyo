@@ -93,7 +93,8 @@ def _is_relative_to(path: Path, root: Path) -> bool:
         return False
 
 
-def _protected_paths() -> set[Path]:
+def protected_paths() -> set[Path]:
+    """返回不允许备份恢复流程删除或替换的受保护路径集合。"""
     home = Path.home().expanduser().resolve()
     candidates = {
         Path("/"),
@@ -112,17 +113,19 @@ def _protected_paths() -> set[Path]:
     return {path.resolve() for path in candidates if path.exists()}
 
 
-def _is_protected_path(path: Path) -> bool:
+def is_protected_path(path: Path) -> bool:
+    """判断路径是否命中受保护路径。"""
     try:
         resolved = path.expanduser().resolve()
     except Exception:
         return True
-    return resolved in _protected_paths()
+    return resolved in protected_paths()
 
 
-def _is_safe_app_config_dir(path: Path) -> tuple[bool, str]:
+def is_safe_app_config_dir(path: Path) -> tuple[bool, str]:
+    """判断目标路径是否可作为 Hermes-Yachiyo 应用配置目录安全删除或替换。"""
     resolved = path.expanduser().resolve()
-    if _is_protected_path(resolved):
+    if is_protected_path(resolved):
         return False, "受保护路径，已跳过"
     if resolved.name != ".hermes-yachiyo":
         return False, "配置目录名称不符合预期，已跳过"
@@ -147,7 +150,7 @@ def is_safe_yachiyo_workspace(path: Path) -> tuple[bool, str]:
     """判断目标路径是否可作为 Yachiyo 工作空间安全删除或替换。"""
     original = path.expanduser()
     resolved = original.resolve()
-    if _is_protected_path(resolved):
+    if is_protected_path(resolved):
         return False, "受保护路径，已跳过"
     if resolved.name != "yachiyo":
         return False, "工作空间目录名称不符合预期，已跳过"
@@ -159,10 +162,6 @@ def is_safe_yachiyo_workspace(path: Path) -> tuple[bool, str]:
     if _path_exists(original) and not _has_yachiyo_workspace_marker(resolved):
         return False, "工作空间缺少 Yachiyo 初始化标识，已跳过"
     return True, ""
-
-
-def _is_safe_yachiyo_workspace(path: Path) -> tuple[bool, str]:
-    return is_safe_yachiyo_workspace(path)
 
 
 def _app_config_dir() -> Path:
@@ -524,9 +523,9 @@ def cleanup_old_backups(
     backup_root: str | Path | None = None,
     keep_count: int = DEFAULT_RETENTION_COUNT,
 ) -> list[BackupInfo]:
-    """删除超过保留数量的旧备份，返回被删除的备份信息。"""
+    """删除超过保留数量的旧托管备份，返回被删除的备份信息。"""
     keep_count = max(1, int(keep_count))
-    backups = [item for item in find_backups(backup_root) if item.valid]
+    backups = find_backups(backup_root)
     deleted: list[BackupInfo] = []
     for backup in backups[keep_count:]:
         delete_backup(backup.path, backup_root=backup_root)
@@ -651,7 +650,7 @@ def import_backup(
 
         app_config_source = snapshot_dir / "app-config"
         app_config_target = _app_config_dir()
-        app_config_safe, app_config_reason = _is_safe_app_config_dir(app_config_target)
+        app_config_safe, app_config_reason = is_safe_app_config_dir(app_config_target)
         if app_config_source.exists() and app_config_safe:
             try:
                 _replace_path(app_config_source, app_config_target)
