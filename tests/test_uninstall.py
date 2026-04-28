@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import apps.shell.config as config_mod
 import apps.shell.window as window_mod
 from apps.installer import backup as backup_mod
@@ -16,8 +18,10 @@ from apps.installer import uninstall as uninstall_mod
 from apps.installer.backup import create_backup, get_backup_status, import_backup
 from apps.installer.uninstall import (
     UNINSTALL_CONFIRM_PHRASE,
+    BackupPlan,
     UninstallScope,
     build_uninstall_plan,
+    create_uninstall_backup,
     execute_uninstall,
 )
 from apps.shell.config import AppConfig
@@ -37,6 +41,20 @@ def _prepare_home(tmp_path, monkeypatch):
     monkeypatch.setattr(config_mod, "_CONFIG_FILE", config_dir / "config.json")
 
     return home, hermes_home, config_dir
+
+
+def _write_importable_backup_archive(archive_path: Path, files: dict[str, bytes]) -> None:
+    manifest = {
+        "schema_version": backup_mod.BACKUP_SCHEMA_VERSION,
+        "kind": "hermes-yachiyo-backup",
+        "format": "zip",
+        "created_at": "2026-04-28T00:00:00+00:00",
+        "entries": [{"id": "app_config", "label": "Hermes-Yachiyo 应用配置"}],
+    }
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(manifest))
+        for name, payload in files.items():
+            archive.writestr(name, payload)
 
 
 def test_yachiyo_only_plan_includes_config_and_workspace(tmp_path, monkeypatch):
@@ -59,6 +77,7 @@ def test_yachiyo_only_plan_includes_config_and_workspace(tmp_path, monkeypatch):
     assert plan.backup.enabled is True
     assert plan.to_dict()["existing_count"] == 2
     assert plan.to_dict()["removable_count"] == 2
+    assert BackupPlan.__doc__ == "卸载前备份计划。"
 
 
 def test_execute_yachiyo_only_creates_backup_and_removes_targets(tmp_path, monkeypatch):
@@ -110,6 +129,29 @@ def test_execute_yachiyo_only_creates_backup_and_removes_targets(tmp_path, monke
     assert "yachiyo-workspace/logs/app.log" in names
     assert "yachiyo-workspace/assets/live2d/model.model3.json" in names
     assert "yachiyo-workspace/chat.db" in names
+
+
+def test_create_uninstall_backup_uses_plan_backup_root_by_default(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text("{}", encoding="utf-8")
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+
+    backup_root = home / "planned-backups"
+    override_root = home / "override-backups"
+    plan = build_uninstall_plan(
+        UninstallScope.YACHIYO_ONLY,
+        keep_config_snapshot=True,
+        backup_root=backup_root,
+    )
+
+    planned_backup = create_uninstall_backup(plan)
+    override_backup = create_uninstall_backup(plan, backup_root=override_root)
+
+    assert planned_backup.parent == backup_root.resolve()
+    assert override_backup.parent == override_root.resolve()
 
 
 def test_create_backup_is_available_without_uninstall(tmp_path, monkeypatch):
@@ -319,6 +361,34 @@ def test_import_backup_restores_config_and_workspace(tmp_path, monkeypatch):
     assert (workspace / "configs" / "yachiyo.json").exists()
     assert (workspace / "chat.db").exists()
     assert import_result.restored
+
+
+def test_import_backup_rejects_zip_entry_over_size_limit(tmp_path, monkeypatch):
+    home, _hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+    archive_path = home / "hermes-yachiyo-backup-20260428-101531.zip"
+    _write_importable_backup_archive(archive_path, {"app-config/config.json": b"x" * 300})
+    monkeypatch.setattr(backup_mod, "MAX_BACKUP_IMPORT_ENTRY_BYTES", 256)
+    monkeypatch.setattr(backup_mod, "MAX_BACKUP_IMPORT_TOTAL_BYTES", 1024)
+
+    with pytest.raises(ValueError, match="单个条目"):
+        import_backup(archive_path)
+
+
+def test_import_backup_rejects_zip_total_uncompressed_size_limit(tmp_path, monkeypatch):
+    home, _hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+    archive_path = home / "hermes-yachiyo-backup-20260428-101531.zip"
+    _write_importable_backup_archive(
+        archive_path,
+        {
+            "app-config/config.json": b"x" * 80,
+            "app-config/extra.json": b"y" * 80,
+        },
+    )
+    monkeypatch.setattr(backup_mod, "MAX_BACKUP_IMPORT_ENTRY_BYTES", 1024)
+    monkeypatch.setattr(backup_mod, "MAX_BACKUP_IMPORT_TOTAL_BYTES", 300)
+
+    with pytest.raises(ValueError, match="解压后体积"):
+        import_backup(archive_path)
 
 
 def test_import_backup_skips_workspace_restore_outside_home(tmp_path, monkeypatch):

@@ -47,7 +47,7 @@ class UninstallTarget:
 
 @dataclass(frozen=True)
 class BackupPlan:
-    """配置快照计划。"""
+    """卸载前备份计划。"""
 
     enabled: bool
     backup_root: str
@@ -325,8 +325,11 @@ def create_uninstall_backup(
     backup_root: str | Path | None = None,
 ) -> Path:
     """创建卸载前备份。"""
+    effective_backup_root: str | Path | None = (
+        backup_root if backup_root is not None else plan.backup.backup_root
+    )
     backup = backup_mod.create_backup(
-        backup_root=backup_root,
+        backup_root=effective_backup_root,
         source_context=f"uninstall:{plan.scope.value}",
     )
     return Path(backup.path)

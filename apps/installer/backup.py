@@ -26,6 +26,8 @@ BACKUP_FILE_PREFIX = "hermes-yachiyo-backup-"
 BACKUP_SCHEMA_VERSION = 2
 MANIFEST_NAME = "manifest.json"
 DEFAULT_RETENTION_COUNT = 10
+MAX_BACKUP_IMPORT_ENTRY_BYTES = 512 * 1024 * 1024
+MAX_BACKUP_IMPORT_TOTAL_BYTES = 2 * 1024 * 1024 * 1024
 _BACKUP_ARCHIVE_NAME_RE = re.compile(
     rf"^{re.escape(BACKUP_FILE_PREFIX)}\d{{8}}-\d{{6}}(?:-(\d+))?\.zip$"
 )
@@ -591,10 +593,16 @@ def _replace_path(source: Path, target: Path) -> bool:
 
 def _extract_zip_safely(archive_path: Path, target_dir: Path) -> None:
     with zipfile.ZipFile(archive_path, "r") as archive:
+        total_uncompressed_size = 0
         for member in archive.infolist():
             member_path = PurePosixPath(member.filename)
             if member_path.is_absolute() or ".." in member_path.parts:
                 raise ValueError("备份文件包含不安全路径")
+            if member.file_size > MAX_BACKUP_IMPORT_ENTRY_BYTES:
+                raise ValueError("备份文件包含过大的单个条目")
+            total_uncompressed_size += member.file_size
+            if total_uncompressed_size > MAX_BACKUP_IMPORT_TOTAL_BYTES:
+                raise ValueError("备份文件解压后体积超过限制")
             output_path = target_dir.joinpath(*member_path.parts)
             if member.is_dir():
                 output_path.mkdir(parents=True, exist_ok=True)
