@@ -9,6 +9,7 @@ from apps.shell.assets import is_project_asset, project_display_path
 from apps.shell.config import (
     AppConfig,
     AssistantConfig,
+    BackupConfig,
     BubbleModeConfig,
     Live2DModeConfig,
     ModelSummary,
@@ -119,6 +120,10 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "voice": str,
         "timeout_seconds": int,
     },
+    "backup": {
+        "auto_cleanup_enabled": bool,
+        "retention_count": int,
+    },
 }
 
 _MODE_KEY_ALIASES = {
@@ -161,6 +166,8 @@ def _validate_field(key: str, value: Any) -> str | None:
         return "tts.provider 仅支持 none / http / command"
     if key == "tts.timeout_seconds" and not (1 <= value <= 120):
         return "tts.timeout_seconds 须在 1-120 秒之间"
+    if key == "backup.retention_count" and not (1 <= value <= 100):
+        return "备份保留份数须在 1-100 之间"
     if key.endswith(".opacity") and not (0.2 <= value <= 1.0):
         return "opacity 须在 0.2-1.0 之间"
     if key.endswith(".scale") and not (0.4 <= value <= 2.0):
@@ -179,7 +186,7 @@ def _validate_field(key: str, value: Any) -> str | None:
 def _mode_object(
     config: AppConfig,
     mode_key: str,
-) -> BubbleModeConfig | Live2DModeConfig | AssistantConfig | TTSConfig:
+) -> BubbleModeConfig | Live2DModeConfig | AssistantConfig | TTSConfig | BackupConfig:
     return getattr(config, mode_key)
 
 

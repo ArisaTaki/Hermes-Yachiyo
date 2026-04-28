@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 from apps.installer.workspace_init import get_workspace_status
 from apps.shell.chat_api import ChatAPI
 from apps.shell.chat_bridge import ChatBridge
-from apps.shell.config import ModelSummary
+from apps.shell.config import ModelSummary, save_config
 from apps.shell.effect_policy import build_effects_summary
 from apps.shell.integration_status import get_integration_snapshot
 from apps.shell.mode_catalog import list_mode_options
@@ -162,6 +162,10 @@ class MainWindowAPI:
                     "log_level": self._config.log_level,
                     "start_minimized": self._config.start_minimized,
                     "tray_enabled": self._config.tray_enabled,
+                },
+                "backup": {
+                    "auto_cleanup_enabled": self._config.backup.auto_cleanup_enabled,
+                    "retention_count": self._config.backup.retention_count,
                 },
             }
         except Exception as e:
@@ -455,4 +459,118 @@ class MainWindowAPI:
             return payload
         except Exception as exc:
             logger.error("执行卸载失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def get_backup_status(self) -> Dict[str, Any]:
+        """获取 Hermes-Yachiyo 备份状态。"""
+        try:
+            from apps.installer.backup import get_backup_status
+
+            return {"ok": True, **get_backup_status()}
+        except Exception as exc:
+            logger.error("读取备份状态失败: %s", exc)
+            return {"ok": False, "error": str(exc), "has_backup": False}
+
+    def create_backup(self, overwrite_latest: bool = False) -> Dict[str, Any]:
+        """主动生成 Hermes-Yachiyo 本地资料备份。"""
+        try:
+            from apps.installer.backup import create_backup, get_backup_status
+
+            backup = create_backup(
+                source_context="manual_overwrite" if overwrite_latest else "manual",
+                auto_cleanup=self._config.backup.auto_cleanup_enabled,
+                retention_count=self._config.backup.retention_count,
+                overwrite_latest=bool(overwrite_latest),
+            )
+            return {
+                "ok": True,
+                "backup": backup.to_dict(),
+                "backup_path": backup.path,
+                "backup_path_display": backup.display_path,
+                "status": get_backup_status(),
+            }
+        except Exception as exc:
+            logger.error("创建备份失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def update_backup_settings(
+        self,
+        auto_cleanup_enabled: bool = True,
+        retention_count: int = 10,
+    ) -> Dict[str, Any]:
+        """更新备份保留策略。"""
+        try:
+            count = int(retention_count)
+            if count < 1 or count > 100:
+                return {"ok": False, "error": "保留份数须在 1-100 之间"}
+            self._config.backup.auto_cleanup_enabled = bool(auto_cleanup_enabled)
+            self._config.backup.retention_count = count
+            save_config(self._config)
+            return {
+                "ok": True,
+                "backup": {
+                    "auto_cleanup_enabled": self._config.backup.auto_cleanup_enabled,
+                    "retention_count": self._config.backup.retention_count,
+                },
+            }
+        except Exception as exc:
+            logger.error("保存备份设置失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def restore_backup(self, backup_path: str = "") -> Dict[str, Any]:
+        """恢复最近或指定版本备份，并安排应用重启。"""
+        try:
+            from apps.installer.backup import import_backup
+
+            result = import_backup(backup_path or None)
+            payload = result.to_dict()
+            if result.ok:
+                try:
+                    from apps.shell.window import request_app_restart
+
+                    request_app_restart()
+                    payload["restart_scheduled"] = True
+                except Exception as exc:
+                    logger.error("恢复备份后重启失败: %s", exc)
+                    payload["restart_scheduled"] = False
+                    payload["restart_error"] = str(exc)
+            return payload
+        except Exception as exc:
+            logger.error("恢复备份失败: %s", exc)
+            return {"ok": False, "errors": [str(exc)]}
+
+    def delete_backup(self, backup_path: str) -> Dict[str, Any]:
+        """删除指定备份。"""
+        try:
+            from apps.installer.backup import delete_backup, get_backup_status
+
+            deleted = delete_backup(backup_path)
+            return {"ok": True, "deleted": deleted.to_dict(), "status": get_backup_status()}
+        except Exception as exc:
+            logger.error("删除备份失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def open_backup_location(self, backup_path: str = "") -> Dict[str, Any]:
+        """在系统文件管理器中打开备份位置。"""
+        import platform
+        import subprocess
+        from pathlib import Path
+
+        try:
+            from apps.installer.backup import default_backup_root
+
+            target = Path(backup_path).expanduser() if backup_path else default_backup_root()
+            if not target.exists():
+                target = target.parent if backup_path else target
+            system = platform.system()
+            if system == "Darwin":
+                command = ["open", "-R", str(target)] if target.is_file() else ["open", str(target)]
+            elif system == "Linux":
+                command = ["xdg-open", str(target.parent if target.is_file() else target)]
+            else:
+                return {"ok": False, "error": f"当前平台不支持自动打开位置: {system}"}
+            subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return {"ok": True}
+        except Exception as exc:
+            logger.error("打开备份位置失败: %s", exc)
             return {"ok": False, "error": str(exc)}

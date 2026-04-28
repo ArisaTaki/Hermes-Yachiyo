@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import zipfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import apps.shell.config as config_mod
+import apps.shell.window as window_mod
 from apps.installer import uninstall as uninstall_mod
+from apps.installer.backup import create_backup, get_backup_status, import_backup
 from apps.installer.uninstall import (
     UNINSTALL_CONFIRM_PHRASE,
     UninstallScope,
     build_uninstall_plan,
     execute_uninstall,
-    get_config_snapshot_status,
-    import_config_snapshot,
 )
 from apps.shell.config import AppConfig
 from apps.shell.installer_api import InstallerWebViewAPI
@@ -55,7 +57,7 @@ def test_yachiyo_only_plan_includes_config_and_workspace(tmp_path, monkeypatch):
     assert plan.to_dict()["removable_count"] == 2
 
 
-def test_execute_yachiyo_only_keeps_config_snapshot_and_removes_targets(tmp_path, monkeypatch):
+def test_execute_yachiyo_only_creates_backup_and_removes_targets(tmp_path, monkeypatch):
     home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text('{"display_mode":"bubble"}', encoding="utf-8")
@@ -65,6 +67,12 @@ def test_execute_yachiyo_only_keeps_config_snapshot_and_removes_targets(tmp_path
     (workspace / "configs" / "yachiyo.json").write_text("{}", encoding="utf-8")
     (workspace / "templates").mkdir()
     (workspace / "templates" / "default.json").write_text("{}", encoding="utf-8")
+    (workspace / "cache").mkdir()
+    (workspace / "cache" / "state.json").write_text("{}", encoding="utf-8")
+    (workspace / "logs").mkdir()
+    (workspace / "logs" / "app.log").write_text("log", encoding="utf-8")
+    (workspace / "assets" / "live2d").mkdir(parents=True)
+    (workspace / "assets" / "live2d" / "model.model3.json").write_text("{}", encoding="utf-8")
     (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
     (workspace / "chat.db").write_text("chat", encoding="utf-8")
 
@@ -80,17 +88,89 @@ def test_execute_yachiyo_only_keeps_config_snapshot_and_removes_targets(tmp_path
     assert not workspace.exists()
 
     backup_path = home / "backups"
-    snapshots = list(backup_path.iterdir())
-    assert len(snapshots) == 1
-    snapshot = snapshots[0]
-    assert (snapshot / "manifest.json").exists()
-    assert (snapshot / "app-config" / "config.json").exists()
-    assert (snapshot / "yachiyo-workspace" / "configs" / "yachiyo.json").exists()
-    assert (snapshot / "yachiyo-workspace" / "templates" / "default.json").exists()
-    assert not (snapshot / "yachiyo-workspace" / "chat.db").exists()
+    backups = list(backup_path.glob("*.zip"))
+    assert len(backups) == 1
+    backup = backups[0]
+    assert result.backup_path == str(backup.resolve())
+    with zipfile.ZipFile(backup) as archive:
+        names = set(archive.namelist())
+
+    assert "manifest.json" in names
+    assert "app-config/config.json" in names
+    assert "yachiyo-workspace/configs/yachiyo.json" in names
+    assert "yachiyo-workspace/templates/default.json" in names
+    assert "yachiyo-workspace/cache/state.json" in names
+    assert "yachiyo-workspace/logs/app.log" in names
+    assert "yachiyo-workspace/assets/live2d/model.model3.json" in names
+    assert "yachiyo-workspace/chat.db" in names
 
 
-def test_import_config_snapshot_restores_config_and_workspace(tmp_path, monkeypatch):
+def test_create_backup_is_available_without_uninstall(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text('{"display_mode":"bubble"}', encoding="utf-8")
+
+    workspace = hermes_home / "yachiyo"
+    (workspace / "projects").mkdir(parents=True)
+    (workspace / "projects" / "demo.json").write_text("{}", encoding="utf-8")
+    (workspace / "chat.db").write_text("chat", encoding="utf-8")
+
+    backup = create_backup(backup_root=home / "backups")
+
+    assert backup.valid is True
+    assert backup.format == "zip"
+    assert config_dir.exists()
+    assert workspace.exists()
+    with zipfile.ZipFile(backup.path) as archive:
+        names = set(archive.namelist())
+    assert "app-config/config.json" in names
+    assert "yachiyo-workspace/projects/demo.json" in names
+    assert "yachiyo-workspace/chat.db" in names
+
+
+def test_create_backup_cleans_up_old_backups_by_count(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text("{}", encoding="utf-8")
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+
+    backup_root = home / "backups"
+    created_paths = []
+    for index in range(4):
+        (workspace / "counter.txt").write_text(str(index), encoding="utf-8")
+        backup = create_backup(backup_root=backup_root, retention_count=2)
+        created_paths.append(backup.path)
+
+    remaining = sorted(path.name for path in backup_root.glob("*.zip"))
+    assert len(remaining) == 2
+    assert not Path(created_paths[0]).exists()
+    assert not Path(created_paths[1]).exists()
+
+
+def test_create_backup_can_overwrite_latest_backup(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text("{}", encoding="utf-8")
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+
+    backup_root = home / "backups"
+    first = create_backup(backup_root=backup_root, auto_cleanup=False)
+    second = create_backup(
+        backup_root=backup_root,
+        auto_cleanup=False,
+        overwrite_latest=True,
+    )
+
+    assert not Path(first.path).exists()
+    assert Path(second.path).exists()
+    assert len(list(backup_root.glob("*.zip"))) == 1
+
+
+def test_import_backup_restores_config_and_workspace(tmp_path, monkeypatch):
     home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text('{"display_mode":"live2d"}', encoding="utf-8")
@@ -99,6 +179,7 @@ def test_import_config_snapshot_restores_config_and_workspace(tmp_path, monkeypa
     (workspace / "configs").mkdir(parents=True)
     (workspace / "configs" / "yachiyo.json").write_text("{}", encoding="utf-8")
     (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    (workspace / "chat.db").write_text("chat", encoding="utf-8")
 
     backup_root = home / "backups"
     uninstall_result = execute_uninstall(
@@ -109,15 +190,16 @@ def test_import_config_snapshot_restores_config_and_workspace(tmp_path, monkeypa
     )
     assert uninstall_result.ok is True
 
-    status = get_config_snapshot_status(backup_root)
-    assert status["has_snapshot"] is True
+    status = get_backup_status(backup_root)
+    assert status["has_backup"] is True
 
-    import_result = import_config_snapshot(backup_root=backup_root)
+    import_result = import_backup(backup_root=backup_root)
 
     assert import_result.ok is True
     assert (config_dir / "config.json").read_text(encoding="utf-8") == '{"display_mode":"live2d"}'
     assert (workspace / ".yachiyo_init").exists()
     assert (workspace / "configs" / "yachiyo.json").exists()
+    assert (workspace / "chat.db").exists()
     assert import_result.restored
 
 
@@ -193,7 +275,7 @@ def test_main_window_api_exposes_uninstall_preview(monkeypatch):
     assert calls == [("yachiyo_only", True)]
 
 
-def test_installer_api_exposes_config_snapshot_status(tmp_path, monkeypatch):
+def test_main_window_api_creates_backup_without_uninstall(tmp_path, monkeypatch):
     home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
     (config_dir / "config.json").write_text("{}", encoding="utf-8")
@@ -201,16 +283,76 @@ def test_installer_api_exposes_config_snapshot_status(tmp_path, monkeypatch):
     workspace.mkdir(parents=True)
     (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
 
-    result = execute_uninstall(
-        UninstallScope.YACHIYO_ONLY,
-        keep_config_snapshot=True,
-        confirm_text=UNINSTALL_CONFIRM_PHRASE,
-        backup_root=home / "Hermes-Yachiyo-uninstall-backups",
-    )
-    assert result.ok is True
+    api = MainWindowAPI(SimpleNamespace(), AppConfig())
+    result = api.create_backup()
 
-    status = InstallerWebViewAPI().get_config_snapshot_status()
+    assert result["ok"] is True
+    assert result["backup_path"].endswith(".zip")
+    assert (home / "Hermes-Yachiyo-backups").exists()
+    assert config_dir.exists()
+    assert workspace.exists()
+
+
+def test_main_window_api_overwrites_and_deletes_backup(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text("{}", encoding="utf-8")
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+
+    api = MainWindowAPI(SimpleNamespace(), AppConfig())
+    first = api.create_backup()
+    second = api.create_backup(True)
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert len(list((home / "Hermes-Yachiyo-backups").glob("*.zip"))) == 1
+
+    deleted = api.delete_backup(second["backup_path"])
+    assert deleted["ok"] is True
+    assert deleted["status"]["has_backup"] is False
+
+
+def test_main_window_api_restores_backup(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text('{"display_mode":"live2d"}', encoding="utf-8")
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+
+    backup = create_backup()
+    (config_dir / "config.json").write_text('{"display_mode":"bubble"}', encoding="utf-8")
+    restart_calls = []
+    monkeypatch.setattr(window_mod, "request_app_restart", lambda: restart_calls.append(True))
+
+    api = MainWindowAPI(SimpleNamespace(), AppConfig())
+    result = api.restore_backup(backup.path)
+
+    assert result["ok"] is True
+    assert result["restart_scheduled"] is True
+    assert restart_calls == [True]
+    assert (config_dir / "config.json").read_text(encoding="utf-8") == '{"display_mode":"live2d"}'
+
+
+def test_installer_api_exposes_backup_status_and_import(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text('{"display_mode":"live2d"}', encoding="utf-8")
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+
+    backup = create_backup()
+    (config_dir / "config.json").unlink()
+
+    api = InstallerWebViewAPI()
+    status = api.get_backup_status()
 
     assert status["success"] is True
-    assert status["has_snapshot"] is True
-    assert status["latest"]["path"] == result.backup_path
+    assert status["has_backup"] is True
+    assert status["latest"]["path"] == backup.path
+
+    result = api.import_backup()
+    assert result["ok"] is True
+    assert (config_dir / "config.json").read_text(encoding="utf-8") == '{"display_mode":"live2d"}'

@@ -232,6 +232,20 @@ def test_control_center_html_exposes_hermes_diagnostics():
 
 
 def test_control_center_html_exposes_uninstall_flow():
+    assert "id=\"s-backup-create-btn\"" in _STATUS_HTML
+    assert "id=\"s-backup-auto-cleanup\"" in _STATUS_HTML
+    assert "id=\"s-backup-retention-count\"" in _STATUS_HTML
+    assert "id=\"s-backup-restore-btn\"" in _STATUS_HTML
+    assert "id=\"s-backup-manage-btn\"" in _STATUS_HTML
+    assert "id=\"s-backup-overwrite-btn\"" in _STATUS_HTML
+    assert "id=\"s-backup-manager\"" in _STATUS_HTML
+    assert "id=\"s-backup-manager-list\"" in _STATUS_HTML
+    assert "get_backup_status" in _STATUS_HTML
+    assert "create_backup" in _STATUS_HTML
+    assert "update_backup_settings" in _STATUS_HTML
+    assert "restore_backup" in _STATUS_HTML
+    assert "delete_backup" in _STATUS_HTML
+    assert "open_backup_location" in _STATUS_HTML
     assert "id=\"s-uninstall-scope\"" in _STATUS_HTML
     assert "value=\"yachiyo_only\"" in _STATUS_HTML
     assert "value=\"include_hermes\"" in _STATUS_HTML
@@ -243,7 +257,7 @@ def test_control_center_html_exposes_uninstall_flow():
     assert "UNINSTALL" in _STATUS_HTML
 
 
-def test_installer_html_exposes_config_snapshot_import():
+def test_installer_html_exposes_backup_import():
     from apps.shell.window import _generate_installer_html
     from packages.protocol.enums import HermesInstallStatus, Platform
     from packages.protocol.install import HermesInstallInfo
@@ -255,9 +269,11 @@ def test_installer_html_exposes_config_snapshot_import():
         )
     )
 
-    assert "导入卸载前配置" in html
-    assert "get_config_snapshot_status" in html
-    assert "import_config_snapshot" in html
+    assert "导入备份" in html
+    assert "get_backup_status" in html
+    assert "import_backup" in html
+    assert "get_config_snapshot_status" not in html
+    assert "import_config_snapshot" not in html
 
 
 def test_close_chat_window_destroys_existing_window(monkeypatch):

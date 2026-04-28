@@ -2,6 +2,22 @@
 
 ## 已完成
 
+### Milestone 67 — 备份与卸载解耦、备份管理 UI
+
+- ✅ 新增独立备份模块 `apps/installer/backup.py`，备份不再只能从卸载流程触发。
+- ✅ 备份格式确定为新版 `Hermes-Yachiyo-backups/hermes-yachiyo-backup-*.zip`，内含 `manifest.json`；由于功能未正式发布，不保留旧 `Hermes-Yachiyo-uninstall-backups/hermes-yachiyo-config-*` 目录快照兼容。
+- ✅ 备份内容从最小配置快照扩展为 Hermes-Yachiyo 应用配置与完整 Yachiyo 工作空间，包括聊天数据库、项目资料、缓存、日志、模板和用户导入资源。
+- ✅ 默认手动备份创建新的时间戳 ZIP；同一秒连续生成时使用递增后缀，不复用刚被自动清理删除的旧文件名。
+- ✅ 新增备份设置：默认开启“自动清理旧备份”，保留最近 10 份，可在设置页调整 1-100 份。
+- ✅ 主设置页新增“备份”区，可随时主动生成备份、恢复最近备份、管理备份；管理列表提供“删除 / 打开位置 / 恢复此版本”。
+- ✅ 高级操作提供“覆盖最近一次备份”：先成功生成新备份，再删除原最近备份，避免失败时丢失唯一备份。
+- ✅ 主窗口 API 新增 `restore_backup`、`delete_backup`、`open_backup_location`、`update_backup_settings`，安装初始化引导改用正式 `get_backup_status` / `import_backup` API。
+- ✅ 卸载流程只在用户勾选时调用独立备份服务；备份失败会取消卸载，避免无备份继续删除。
+- ✅ 安装初始化引导可导入最近 ZIP 备份。
+- ✅ 相关测试：`python -m pytest tests/test_uninstall.py tests/test_window_exit.py` → 29 passed。
+- ✅ 全量测试：`python -m pytest` → 385 passed。
+- ✅ 相关 diagnostics：备份、卸载、主窗口 API、安装引导和窗口测试文件无 VS Code 错误。
+
 ### Milestone 63/64 — 下午桌面交互、设置与记忆规划收敛
 
 - ✅ Hermes 执行体验

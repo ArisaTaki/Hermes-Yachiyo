@@ -307,6 +307,31 @@ _STATUS_HTML = """
             color: #ffd29a;
             line-height: 1.5;
         }
+        .backup-manager {
+            display: none;
+            margin-top: 10px;
+            border: 1px solid #41416d;
+            border-radius: 6px;
+            background: #232343;
+            padding: 10px;
+        }
+        .backup-manager.visible { display: block; }
+        .backup-item {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 8px;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #36365f;
+        }
+        .backup-item:last-child { border-bottom: none; }
+        .backup-item .name {
+            color: #eef2ff;
+            font-size: 0.82em;
+            overflow-wrap: anywhere;
+        }
+        .backup-item .meta { color: #9ba3cf; font-size: 0.74em; }
+        .backup-item .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
         .uninstall-actions {
             display: flex;
             justify-content: flex-end;
@@ -781,6 +806,49 @@ _STATUS_HTML = """
             <div class="settings-row"><span class="label">启动最小化</span><span class="value" id="s-app-minimized">—</span></div>
         </div>
 
+        <div class="settings-section">
+            <h4>备份</h4>
+            <div class="settings-row"><span class="label">备份内容</span>
+                <span class="value" style="font-size:0.76em;color:#aaa;">
+                    配置、工作空间、聊天数据库、缓存、日志和导入资源
+                </span>
+            </div>
+            <div class="settings-row"><span class="label">自动清理旧备份</span>
+                <label class="s-toggle">
+                    <input type="checkbox" id="s-backup-auto-cleanup"
+                        onchange="onBackupSettingsChange()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="settings-row"><span class="label">保留最近</span>
+                <span class="value">
+                    <input class="s-input" id="s-backup-retention-count" type="number"
+                        min="1" max="100" step="1" style="width:72px;"
+                        onchange="onBackupSettingsChange()"> 份
+                </span>
+            </div>
+            <div class="settings-row"><span class="label">最近备份</span><span class="value" id="s-backup-latest">—</span></div>
+            <div class="uninstall-actions">
+                <button class="uninstall-secondary-btn" id="s-backup-create-btn"
+                    onclick="createBackupNow()">立即生成备份</button>
+                <button class="uninstall-secondary-btn" id="s-backup-restore-btn"
+                    onclick="restoreLatestBackup()">恢复备份</button>
+                <button class="uninstall-secondary-btn" id="s-backup-manage-btn"
+                    onclick="toggleBackupManager()">管理备份</button>
+            </div>
+            <div class="uninstall-actions">
+                <button class="uninstall-secondary-btn" id="s-backup-overwrite-btn"
+                    onclick="createBackupNow(true)">覆盖最近一次备份</button>
+                <button class="uninstall-secondary-btn" id="s-backup-open-root-btn"
+                    onclick="openBackupLocation('')">打开备份目录</button>
+            </div>
+            <div class="backup-manager" id="s-backup-manager">
+                <div id="s-backup-manager-summary" style="color:#aeb7e8;font-size:0.78em;margin-bottom:8px;">—</div>
+                <div id="s-backup-manager-list"></div>
+            </div>
+            <div class="save-hint" id="s-backup-status"></div>
+        </div>
+
         <div class="settings-section danger-section">
             <h4>卸载</h4>
             <div class="danger-copy">
@@ -795,7 +863,7 @@ _STATUS_HTML = """
                     <option value="include_hermes">也卸载 Hermes Agent 架构</option>
                 </select>
             </div>
-            <div class="settings-row"><span class="label">记录配置快照</span>
+            <div class="settings-row"><span class="label">卸载前生成备份</span>
                 <label class="s-toggle">
                     <input type="checkbox" id="s-uninstall-keep-config" checked
                         onchange="onUninstallOptionChange()">
@@ -804,9 +872,9 @@ _STATUS_HTML = """
             </div>
             <div class="settings-row"
                  style="border-top:1px solid #4a3340;margin-top:4px;padding-top:6px;">
-                <span class="label" style="font-size:0.78em;color:#a98d96;">快照说明</span>
+                <span class="label" style="font-size:0.78em;color:#a98d96;">备份说明</span>
                 <span class="value" style="font-size:0.76em;color:#c9aeb8;">
-                    只保留配置与初始化信息，不包含聊天数据库和大型资源包
+                    勾选后会先生成完整 ZIP 备份；取消勾选则只执行卸载
                 </span>
             </div>
             <div class="uninstall-preview" id="s-uninstall-preview">正在生成卸载清单…</div>
@@ -842,6 +910,8 @@ _STATUS_HTML = """
         'bridge_port': 'Bridge 端口',
     };
     let uninstallPreviewPlan = null;
+    let backupManagerOpen = false;
+    let backupStatusCache = null;
     const uninstallConfirmPhrase = 'UNINSTALL';
 
     function hasPendingCommonSetting(key) {
@@ -912,6 +982,211 @@ _STATUS_HTML = """
         return div.innerHTML;
     }
 
+    function setBackupStatus(message, isError) {
+        const el = document.getElementById('s-backup-status');
+        if (!el) return;
+        el.textContent = message || '';
+        el.className = isError ? 'save-hint err' : 'save-hint ok';
+    }
+
+    function backupFileName(path) {
+        return (path || '').split(/[\\/]/).pop() || path || '备份文件';
+    }
+
+    function renderBackupManager(backups) {
+        const manager = document.getElementById('s-backup-manager');
+        const summary = document.getElementById('s-backup-manager-summary');
+        const list = document.getElementById('s-backup-manager-list');
+        if (!manager || !summary || !list) return;
+        manager.classList.toggle('visible', backupManagerOpen);
+        if (!backupManagerOpen) return;
+        const items = backups || [];
+        const total = backupStatusCache ? (backupStatusCache.total_size_display || '0 B') : '0 B';
+        summary.textContent = '共 ' + items.length + ' 份备份，占用 ' + total;
+        if (items.length === 0) {
+            list.innerHTML = '<div class="empty-state">暂无可管理备份</div>';
+            return;
+        }
+        list.innerHTML = items.map(function(item) {
+            const path = escapeHtml(item.path || '');
+            const meta = formatReadableDateTime(item.created_at) + ' · ' + (item.size_display || '未知大小');
+            const invalid = item.valid ? '' : '<div class="meta" style="color:#ffaaaa;">' + escapeHtml(item.error || '备份无效') + '</div>';
+            return '<div class="backup-item"><div><div class="name">'
+                + escapeHtml(backupFileName(item.path)) + '</div><div class="meta">'
+                + escapeHtml(meta) + '</div>' + invalid + '</div><div class="actions">'
+                + '<button class="uninstall-secondary-btn" data-backup-action="restore" data-backup-path="' + path + '">恢复此版本</button>'
+                + '<button class="uninstall-secondary-btn" data-backup-action="open" data-backup-path="' + path + '">打开位置</button>'
+                + '<button class="uninstall-secondary-btn" data-backup-action="delete" data-backup-path="' + path + '">删除</button>'
+                + '</div></div>';
+        }).join('');
+        bindBackupManagerActions();
+    }
+
+    function bindBackupManagerActions() {
+        document.querySelectorAll('[data-backup-action]').forEach(function(btn) {
+            btn.onclick = function() {
+                const action = btn.getAttribute('data-backup-action');
+                const path = btn.getAttribute('data-backup-path') || '';
+                if (action === 'restore') restoreBackupVersion(path);
+                else if (action === 'open') openBackupLocation(path);
+                else if (action === 'delete') deleteBackupVersion(path);
+            };
+        });
+    }
+
+    function renderBackupStatus(result) {
+        backupStatusCache = result;
+        const latestEl = document.getElementById('s-backup-latest');
+        if (latestEl) {
+            if (result.has_backup && result.latest) {
+                latestEl.textContent = backupFileName(result.latest.path)
+                    + ' · ' + formatReadableDateTime(result.latest.created_at)
+                    + ' · ' + (result.latest.size_display || '未知大小');
+            } else {
+                latestEl.textContent = '未检测到备份';
+            }
+        }
+        renderBackupManager(result.backups || []);
+    }
+
+    async function refreshBackupStatus() {
+        const manageBtn = document.getElementById('s-backup-manage-btn');
+        if (manageBtn) manageBtn.disabled = true;
+        try {
+            if (!window.pywebview || !window.pywebview.api) {
+                throw new Error('WebView API 不可用');
+            }
+            const result = await window.pywebview.api.get_backup_status();
+            if (!result || !result.ok) {
+                throw new Error((result && result.error) || '读取备份状态失败');
+            }
+            renderBackupStatus(result);
+            setBackupStatus('', false);
+        } catch(e) {
+            const latestEl = document.getElementById('s-backup-latest');
+            if (latestEl) latestEl.textContent = '读取失败';
+            setBackupStatus(e.message || '读取备份状态失败', true);
+        }
+        if (manageBtn) manageBtn.disabled = false;
+    }
+
+    async function createBackupNow(overwriteLatest) {
+        const btn = overwriteLatest
+            ? document.getElementById('s-backup-overwrite-btn')
+            : document.getElementById('s-backup-create-btn');
+        if (overwriteLatest && !confirm('将生成新备份并替换最近一次备份，继续吗？')) return;
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = '正在生成…';
+        }
+        setBackupStatus('正在生成备份…', false);
+        try {
+            if (!window.pywebview || !window.pywebview.api) {
+                throw new Error('WebView API 不可用');
+            }
+            const result = await window.pywebview.api.create_backup(!!overwriteLatest);
+            if (!result || !result.ok) {
+                throw new Error((result && result.error) || '生成备份失败');
+            }
+            setBackupStatus('备份已保存到：' + (result.backup_path_display || result.backup_path), false);
+            if (result.status) renderBackupStatus(result.status);
+            else await refreshBackupStatus();
+        } catch(e) {
+            setBackupStatus(e.message || '生成备份失败', true);
+        }
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = overwriteLatest ? '覆盖最近一次备份' : '立即生成备份';
+        }
+    }
+
+    async function onBackupSettingsChange() {
+        const autoEl = document.getElementById('s-backup-auto-cleanup');
+        const countEl = document.getElementById('s-backup-retention-count');
+        const count = countEl ? Number.parseInt(countEl.value, 10) : 10;
+        try {
+            if (!window.pywebview || !window.pywebview.api) {
+                throw new Error('WebView API 不可用');
+            }
+            const result = await window.pywebview.api.update_backup_settings(
+                autoEl ? autoEl.checked : true,
+                Number.isFinite(count) ? count : 10
+            );
+            if (!result || !result.ok) {
+                throw new Error((result && result.error) || '保存备份设置失败');
+            }
+            setBackupStatus('备份设置已保存', false);
+        } catch(e) {
+            setBackupStatus(e.message || '保存备份设置失败', true);
+        }
+    }
+
+    function toggleBackupManager() {
+        backupManagerOpen = !backupManagerOpen;
+        const btn = document.getElementById('s-backup-manage-btn');
+        if (btn) btn.textContent = backupManagerOpen ? '收起管理' : '管理备份';
+        if (backupStatusCache) renderBackupStatus(backupStatusCache);
+        refreshBackupStatus();
+    }
+
+    async function restoreLatestBackup() {
+        if (!confirm('将恢复最近一次备份并重启应用，继续吗？')) return;
+        await restoreBackupVersion('');
+    }
+
+    async function restoreBackupVersion(path) {
+        if (path && !confirm('将恢复选中的备份版本并重启应用，继续吗？')) return;
+        setBackupStatus('正在恢复备份…', false);
+        try {
+            if (!window.pywebview || !window.pywebview.api) {
+                throw new Error('WebView API 不可用');
+            }
+            const result = await window.pywebview.api.restore_backup(path || '');
+            if (!result || !result.ok) {
+                const errors = result && result.errors && result.errors.length > 0
+                    ? result.errors.join('；')
+                    : '';
+                throw new Error(errors || '恢复备份失败');
+            }
+            const restoredCount = result.restored ? result.restored.length : 0;
+            setBackupStatus('已恢复 ' + restoredCount + ' 项备份资料，应用正在重启…', false);
+        } catch(e) {
+            setBackupStatus(e.message || '恢复备份失败', true);
+        }
+    }
+
+    async function deleteBackupVersion(path) {
+        if (!path || !confirm('确定删除这个备份吗？')) return;
+        try {
+            if (!window.pywebview || !window.pywebview.api) {
+                throw new Error('WebView API 不可用');
+            }
+            const result = await window.pywebview.api.delete_backup(path);
+            if (!result || !result.ok) {
+                throw new Error((result && result.error) || '删除备份失败');
+            }
+            setBackupStatus('备份已删除', false);
+            if (result.status) renderBackupStatus(result.status);
+            else await refreshBackupStatus();
+        } catch(e) {
+            setBackupStatus(e.message || '删除备份失败', true);
+        }
+    }
+
+    async function openBackupLocation(path) {
+        try {
+            if (!window.pywebview || !window.pywebview.api) {
+                throw new Error('WebView API 不可用');
+            }
+            const result = await window.pywebview.api.open_backup_location(path || '');
+            if (!result || !result.ok) {
+                throw new Error((result && result.error) || '打开位置失败');
+            }
+        } catch(e) {
+            setBackupStatus(e.message || '打开位置失败', true);
+        }
+    }
+
     function getUninstallOptions() {
         const scopeEl = document.getElementById('s-uninstall-scope');
         const keepEl = document.getElementById('s-uninstall-keep-config');
@@ -953,7 +1228,7 @@ _STATUS_HTML = """
                 + escapeHtml(target.display_path || target.path) + '</div></div>';
         }).join('');
         if (plan.backup && plan.backup.enabled) {
-            html += '<div class="uninstall-warning">配置快照目录：'
+            html += '<div class="uninstall-warning">卸载前备份目录：'
                 + escapeHtml(plan.backup.backup_root_display || plan.backup.backup_root)
                 + '</div>';
         }
@@ -1054,7 +1329,7 @@ _STATUS_HTML = """
                 throw new Error(errors || (result && result.error) || '卸载失败');
             }
             const backupText = result.backup_path_display
-                ? '配置快照已保存到：' + result.backup_path_display + '。'
+                ? '备份已保存到：' + result.backup_path_display + '。'
                 : '';
             setUninstallStatus('卸载完成。' + backupText + ' 应用正在退出…', false);
             if (err) err.textContent = '';
@@ -1426,6 +1701,13 @@ _STATUS_HTML = """
             document.getElementById('s-app-loglevel').textContent = d.app.log_level;
             document.getElementById('s-tray-enabled').checked = d.app.tray_enabled;
             document.getElementById('s-app-minimized').textContent = d.app.start_minimized ? '是' : '否';
+            if (d.backup) {
+                const autoCleanupEl = document.getElementById('s-backup-auto-cleanup');
+                const retentionEl = document.getElementById('s-backup-retention-count');
+                if (autoCleanupEl) autoCleanupEl.checked = !!d.backup.auto_cleanup_enabled;
+                if (retentionEl) retentionEl.value = d.backup.retention_count || 10;
+            }
+            refreshBackupStatus();
             refreshUninstallPreview();
         } catch(e) {}
     }
@@ -1902,7 +2184,7 @@ _INSTALLER_HTML = """
             {install_steps}
         </div>
 
-        {snapshot_import_section}
+        {backup_import_section}
 
         {init_section}
 
@@ -2248,50 +2530,50 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                 steps_html.append(f'<div class="step">{action}</div>')
         install_steps = "\n".join(steps_html)
 
-    snapshot_import_section = ""
+    backup_import_section = ""
     if install_info.status == HermesInstallStatus.INSTALLED_NOT_INITIALIZED:
-        snapshot_import_section = """
+        backup_import_section = """
         <div class="init-section">
-            <h3>导入卸载前配置</h3>
+            <h3>导入备份</h3>
             <p>
-                如果上次卸载时勾选了「记录配置快照」，可以先导入最近的配置快照，
+                如果之前生成过 Hermes-Yachiyo 备份，可以先导入最近备份，
                 再进入主界面。
             </p>
-            <div id="snapshot-import-status" style="margin-top:10px;color:#aaa;">
-                正在查找配置快照...
+            <div id="backup-import-status" style="margin-top:10px;color:#aaa;">
+                正在查找备份...
             </div>
             <div style="display:flex; gap:12px; margin-top:12px; flex-wrap:wrap;">
-                <button class="init-button" id="snapshot-import-btn"
-                        onclick="importConfigSnapshot()" disabled style="margin:0;">
-                    导入最近配置快照
+                <button class="init-button" id="backup-import-btn"
+                        onclick="importBackup()" disabled style="margin:0;">
+                    导入最近备份
                 </button>
-                <button class="init-button" onclick="refreshConfigSnapshotStatus()"
+                <button class="init-button" onclick="refreshBackupImportStatus()"
                         style="margin:0; background:#3a3a6a; border:1px solid #6495ed;">
-                    刷新快照
+                    刷新备份
                 </button>
             </div>
-            <div id="snapshot-import-result" style="margin-top:10px;"></div>
+            <div id="backup-import-result" style="margin-top:10px;"></div>
         </div>
         <script>
-        async function refreshConfigSnapshotStatus() {
-            const status = document.getElementById('snapshot-import-status');
-            const btn = document.getElementById('snapshot-import-btn');
-            if (status) status.textContent = '正在查找配置快照...';
+        async function refreshBackupImportStatus() {
+            const status = document.getElementById('backup-import-status');
+            const btn = document.getElementById('backup-import-btn');
+            if (status) status.textContent = '正在查找备份...';
             if (btn) btn.disabled = true;
             try {
                 if (!window.pywebview || !window.pywebview.api) {
                     throw new Error('WebView API 不可用');
                 }
-                const result = await window.pywebview.api.get_config_snapshot_status();
-                if (!result.success) throw new Error(result.error || '读取配置快照失败');
-                if (result.has_snapshot && result.latest) {
+                const result = await window.pywebview.api.get_backup_status();
+                if (!result.success) throw new Error(result.error || '读取备份失败');
+                if (result.has_backup && result.latest) {
                     const created = result.latest.created_at || '未知时间';
-                    status.innerHTML = '检测到最近快照：' + result.latest.display_path
+                    status.innerHTML = '检测到最近备份：' + result.latest.display_path
                         + '<br><span style="color:#888;font-size:0.88em;">创建时间：'
                         + created + '</span>';
                     if (btn) btn.disabled = false;
                 } else {
-                    status.innerHTML = '未检测到可导入的配置快照。默认目录：'
+                    status.innerHTML = '未检测到可导入备份。默认目录：'
                         + result.backup_root_display;
                 }
             } catch (err) {
@@ -2301,16 +2583,16 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
             }
         }
 
-        async function importConfigSnapshot() {
-            const btn = document.getElementById('snapshot-import-btn');
-            const resultBox = document.getElementById('snapshot-import-result');
+        async function importBackup() {
+            const btn = document.getElementById('backup-import-btn');
+            const resultBox = document.getElementById('backup-import-result');
             if (btn) { btn.disabled = true; btn.textContent = '正在导入...'; }
             if (resultBox) resultBox.innerHTML = '';
             try {
                 if (!window.pywebview || !window.pywebview.api) {
                     throw new Error('WebView API 不可用');
                 }
-                const result = await window.pywebview.api.import_config_snapshot();
+                const result = await window.pywebview.api.import_backup();
                 if (!result.ok) {
                     const errors = result.errors && result.errors.length > 0
                         ? result.errors.join('；')
@@ -2319,16 +2601,16 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
                 }
                 const restoredCount = result.restored ? result.restored.length : 0;
                 resultBox.innerHTML = '<span style="color:#90ee90">已导入 '
-                    + restoredCount + ' 项配置，正在重启应用...</span>';
+                    + restoredCount + ' 项备份资料，正在重启应用...</span>';
                 setTimeout(() => window.pywebview.api.restart_app(), 1200);
             } catch (err) {
                 if (resultBox) resultBox.innerHTML = '<span style="color:#ff6b6b">'
                     + err.message + '</span>';
-                if (btn) { btn.disabled = false; btn.textContent = '导入最近配置快照'; }
+                if (btn) { btn.disabled = false; btn.textContent = '导入最近备份'; }
             }
         }
 
-        document.addEventListener('DOMContentLoaded', refreshConfigSnapshotStatus);
+        document.addEventListener('DOMContentLoaded', refreshBackupImportStatus);
         </script>
         """
 
@@ -2871,7 +3153,7 @@ def _generate_installer_html(install_info: "HermesInstallInfo") -> str:
         .replace("{main_title}", main_title)
         .replace("{steps_title}", steps_title)
         .replace("{install_steps}", install_steps)
-        .replace("{snapshot_import_section}", snapshot_import_section)
+        .replace("{backup_import_section}", backup_import_section)
         .replace("{init_section}", init_section + install_section)
         .replace("{suggestions_section}", suggestions_section)
     )

@@ -567,6 +567,14 @@ class TTSConfig:
 
 
 @dataclass
+class BackupConfig:
+    """本地资料备份策略。"""
+
+    auto_cleanup_enabled: bool = True
+    retention_count: int = 10
+
+
+@dataclass
 class Live2DModeConfig:
     """Live2D 模式配置骨架。
 
@@ -752,6 +760,7 @@ class AppConfig:
     live2d_mode: Live2DModeConfig = field(default_factory=Live2DModeConfig)
     assistant: AssistantConfig = field(default_factory=AssistantConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
+    backup: BackupConfig = field(default_factory=BackupConfig)
 
     @property
     def live2d(self) -> Live2DModeConfig:
@@ -862,6 +871,13 @@ def _normalize_config_values(config: AppConfig) -> None:
     config.tts.endpoint = str(config.tts.endpoint or "")
     config.tts.command = str(config.tts.command or "")
     config.tts.voice = str(config.tts.voice or "")
+    config.backup.auto_cleanup_enabled = bool(config.backup.auto_cleanup_enabled)
+    config.backup.retention_count = _normalize_int_range(
+        config.backup.retention_count,
+        1,
+        100,
+        10,
+    )
 
 
 def normalize_display_mode(value: Any) -> DisplayModeValue:
@@ -885,6 +901,7 @@ def load_config() -> AppConfig:
             )
             assistant = _load_nested_dataclass(data, "assistant", AssistantConfig)
             tts = _load_nested_dataclass(data, "tts", TTSConfig)
+            backup = _load_nested_dataclass(data, "backup", BackupConfig)
             if "display_mode" in data:
                 data["display_mode"] = normalize_display_mode(data.get("display_mode"))
             config = AppConfig(
@@ -895,6 +912,7 @@ def load_config() -> AppConfig:
             config.live2d_mode = live2d_mode
             config.assistant = assistant
             config.tts = tts
+            config.backup = backup
             _apply_default_resource_paths(config)
             _normalize_config_values(config)
             return config
