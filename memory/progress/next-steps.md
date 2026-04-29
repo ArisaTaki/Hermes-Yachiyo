@@ -7,7 +7,7 @@
 5. 继续对照旧 pywebview Chat Window 做 React 体验补全：当前已恢复单例窗口、轮询流式/typewriter/Markdown/复制/会话切换、外链打开策略、基础快捷键和处理中取消入口；后续补更完整的错误边界和消息操作细节。
 6. 继续补齐 Electron 下的 Bubble / Live2D 表现态能力：当前已迁移真实状态、未读、最近回复、右键菜单、Bubble 旧头像气泡/状态点/auto-hide/拖拽点击阈值、Live2D 预览 fallback/资源提示/默认打开行为/快捷输入、第一版 Pixi/Cubism 模型加载、Bubble 靠边吸附、位置/尺寸持久化、表现态导航保护、TTS 触发、全局鼠标跟随、基础动作/表情触发、主窗口尺寸/start_minimized/open_chat_on_start 和 Electron 原生托盘；Live2D 透明穿透先降为实验开关，默认以可点击/可右键/可操作优先。下一步用真实 Live2D 资源做手工验证，并继续补更深的 per-model 动作/表情调优。
 7. 新增 macOS App 打包路径：React 只是 renderer，产品运行态必须是 Electron `.app`；下一步应增加无新依赖的本地 `.app` 打包脚本或明确引入 electron-builder/electron-forge，确保用户可以直接启动 Hermes-Yachiyo.app，而不是长期依赖终端 dev server。
-8. 制定旧 pywebview shell 退休清单：确认哪些测试、能力和窗口行为已由 Electron/Bridge 覆盖，再逐步删除 legacy 入口。
+8. TODO：制定旧 pywebview shell 退休清单。等 Electron 前端稳定覆盖聊天、主控台、设置、Bubble、Live2D、安装引导、备份/卸载和打包启动链路后，直接删除所有 pywebview UI 代码与 legacy 入口，只保留 Electron + Bridge 路径。
 9. 手工验证备份/卸载：在设置页主动生成 ZIP 备份；确认备份内有 `manifest.json`、应用配置、完整 `yachiyo-workspace`、`chat.db`、缓存/日志/导入资源；验证备份生成期间目录内不会出现正式命名的半成品 ZIP，默认自动清理保留最近 10 份、覆盖最近一次备份、恢复最近备份、管理备份中的删除/打开位置/恢复此版本、损坏/超限 ZIP 导入会失败且不留下部分输出文件、卸载确认短语首尾空白容错、空 `.hermes`/`hermes` 目录会跳过，以及卸载前生成备份和安装引导导入最近备份。
 10. 手工验证主动桌面观察：关闭状态、Hermes 未就绪 blocker、vision 受限 blocker、成功创建低风险截图任务、ack 清除提示、失败间隔后重试。
 11. 手工验证 TTS：默认关闭无感、`http` endpoint 调用、`command` 本地命令调用、错误配置不影响聊天。

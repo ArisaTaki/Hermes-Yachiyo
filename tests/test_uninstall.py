@@ -314,6 +314,53 @@ def test_cleanup_old_backups_counts_invalid_managed_backups(tmp_path):
     assert deleted[0].valid is False
 
 
+def test_cleanup_old_backups_skips_unmanageable_delete_errors(tmp_path, monkeypatch):
+    backup_root = tmp_path / "backups"
+    backup_root.mkdir()
+    names = [
+        "hermes-yachiyo-backup-20260428-101500.zip",
+        "hermes-yachiyo-backup-20260428-101501.zip",
+        "hermes-yachiyo-backup-20260428-101502.zip",
+    ]
+    for index, name in enumerate(names):
+        path = backup_root / name
+        path.write_bytes(b"not a zip")
+        timestamp = 1_900_000_000 + index
+        os.utime(path, (timestamp, timestamp))
+
+    calls = []
+    original_delete = backup_mod.delete_backup
+
+    def flaky_delete(path, *, backup_root=None):
+        calls.append(Path(path).name)
+        if Path(path).name == names[0]:
+            raise ValueError("not managed")
+        return original_delete(path, backup_root=backup_root)
+
+    monkeypatch.setattr(backup_mod, "delete_backup", flaky_delete)
+
+    deleted = backup_mod.cleanup_old_backups(backup_root=backup_root, keep_count=1)
+
+    assert calls == [names[1], names[0]]
+    assert [Path(item.path).name for item in deleted] == [names[1]]
+    assert (backup_root / names[0]).exists()
+    assert not (backup_root / names[1]).exists()
+    assert (backup_root / names[2]).exists()
+
+
+def test_find_backups_ignores_noncanonical_prefixed_zip_names(tmp_path):
+    backup_root = tmp_path / "backups"
+    backup_root.mkdir()
+    canonical = backup_root / "hermes-yachiyo-backup-20260428-101500.zip"
+    noncanonical = backup_root / "hermes-yachiyo-backup-20260428-101500-draft.zip"
+    canonical.write_bytes(b"not a zip")
+    noncanonical.write_bytes(b"not a zip")
+
+    backups = backup_mod.find_backups(backup_root)
+
+    assert [Path(item.path).name for item in backups] == [canonical.name]
+
+
 def test_backup_filename_order_parses_only_extra_numeric_suffix(tmp_path):
     assert (
         backup_mod._filename_order(
@@ -550,6 +597,59 @@ def test_import_backup_rejects_duplicate_zip_entries(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="重复条目"):
         import_backup(archive_path)
+
+
+def test_import_backup_skips_file_app_config_source(tmp_path, monkeypatch):
+    home, _hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text('{"display_mode":"bubble"}', encoding="utf-8")
+    archive_path = home / "hermes-yachiyo-backup-20260428-101531.zip"
+    manifest = {
+        "schema_version": backup_mod.BACKUP_SCHEMA_VERSION,
+        "kind": "hermes-yachiyo-backup",
+        "format": "zip",
+        "created_at": "2026-04-28T00:00:00+00:00",
+        "entries": [{"id": "app_config", "label": "Hermes-Yachiyo 应用配置"}],
+    }
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(manifest))
+        archive.writestr("app-config", b"not a directory")
+
+    result = import_backup(archive_path)
+
+    assert result.ok is True
+    assert config_dir.is_dir()
+    assert (
+        (config_dir / "config.json").read_text(encoding="utf-8")
+        == '{"display_mode":"bubble"}'
+    )
+    assert any("应用配置不是目录" in item["reason"] for item in result.skipped)
+
+
+def test_import_backup_skips_file_workspace_source(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    archive_path = home / "hermes-yachiyo-backup-20260428-101531.zip"
+    manifest = {
+        "schema_version": backup_mod.BACKUP_SCHEMA_VERSION,
+        "kind": "hermes-yachiyo-backup",
+        "format": "zip",
+        "created_at": "2026-04-28T00:00:00+00:00",
+        "entries": [{"id": "yachiyo_workspace", "label": "Yachiyo 工作空间"}],
+    }
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr("manifest.json", json.dumps(manifest))
+        archive.writestr("yachiyo-workspace", b"not a directory")
+
+    result = import_backup(archive_path)
+
+    assert result.ok is True
+    assert workspace.is_dir()
+    assert (workspace / ".yachiyo_init").exists()
+    assert any("工作空间不是目录" in item["reason"] for item in result.skipped)
 
 
 def test_replace_path_rolls_back_when_move_to_target_fails(tmp_path, monkeypatch):

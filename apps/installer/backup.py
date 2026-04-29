@@ -490,7 +490,11 @@ def _backup_info(path: Path) -> BackupInfo:
 
 
 def _looks_like_backup(path: Path) -> bool:
-    return path.is_file() and path.name.startswith(BACKUP_FILE_PREFIX) and path.suffix == ".zip"
+    return path.is_file() and _BACKUP_ARCHIVE_NAME_RE.fullmatch(path.name) is not None
+
+
+def _is_restore_source_dir(path: Path) -> bool:
+    return path.is_dir() and not path.is_symlink()
 
 
 def _backup_size(path: Path) -> int:
@@ -582,7 +586,11 @@ def cleanup_old_backups(
     backups = find_backups(backup_root)
     deleted: list[BackupInfo] = []
     for backup in backups[keep_count:]:
-        delete_backup(backup.path, backup_root=backup_root)
+        try:
+            delete_backup(backup.path, backup_root=backup_root)
+        except ValueError as exc:
+            logger.warning("跳过不可管理的备份文件 %s: %s", backup.path, exc)
+            continue
         deleted.append(backup)
     return deleted
 
@@ -771,7 +779,14 @@ def import_backup(
         app_config_source = snapshot_dir / "app-config"
         app_config_target = _app_config_dir()
         app_config_safe, app_config_reason = is_safe_app_config_dir(app_config_target)
-        if app_config_source.exists() and app_config_safe:
+        if not app_config_source.exists():
+            skipped.append({"label": "Hermes-Yachiyo 应用配置", "reason": "备份中不存在"})
+        elif not _is_restore_source_dir(app_config_source):
+            skipped.append({
+                "label": "Hermes-Yachiyo 应用配置",
+                "reason": "备份中的应用配置不是目录",
+            })
+        elif app_config_safe:
             try:
                 _replace_path(app_config_source, app_config_target)
                 restored.append({
@@ -780,20 +795,25 @@ def import_backup(
                 })
             except Exception as exc:
                 errors.append(f"应用配置导入失败：{exc}")
-        elif app_config_source.exists():
-            skipped.append({"label": "Hermes-Yachiyo 应用配置", "reason": app_config_reason})
         else:
-            skipped.append({"label": "Hermes-Yachiyo 应用配置", "reason": "备份中不存在"})
+            skipped.append({"label": "Hermes-Yachiyo 应用配置", "reason": app_config_reason})
 
         workspace_source = snapshot_dir / "yachiyo-workspace"
         workspace_target = _yachiyo_workspace_dir()
         workspace_safe, workspace_reason = is_safe_yachiyo_workspace(workspace_target)
-        if workspace_source.exists() and not _has_yachiyo_workspace_marker(workspace_source):
+        if not workspace_source.exists():
+            skipped.append({"label": "Hermes-Yachiyo 工作空间", "reason": "备份中不存在"})
+        elif not _is_restore_source_dir(workspace_source):
+            skipped.append({
+                "label": "Hermes-Yachiyo 工作空间",
+                "reason": "备份中的工作空间不是目录",
+            })
+        elif not _has_yachiyo_workspace_marker(workspace_source):
             skipped.append({
                 "label": "Hermes-Yachiyo 工作空间",
                 "reason": "备份中的工作空间缺少初始化标识",
             })
-        elif workspace_source.exists() and workspace_safe:
+        elif workspace_safe:
             try:
                 _replace_path(workspace_source, workspace_target)
                 restored.append({
@@ -802,10 +822,8 @@ def import_backup(
                 })
             except Exception as exc:
                 errors.append(f"Yachiyo 工作空间导入失败：{exc}")
-        elif workspace_source.exists():
-            skipped.append({"label": "Hermes-Yachiyo 工作空间", "reason": workspace_reason})
         else:
-            skipped.append({"label": "Hermes-Yachiyo 工作空间", "reason": "备份中不存在"})
+            skipped.append({"label": "Hermes-Yachiyo 工作空间", "reason": workspace_reason})
 
     return BackupImportResult(
         ok=not errors,

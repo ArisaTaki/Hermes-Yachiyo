@@ -1,6 +1,9 @@
 """Hermes 安装检测与安装器配置测试。"""
 
 import inspect
+from types import SimpleNamespace
+
+import pytest
 
 from apps.installer.hermes_check import (
     check_hermes_installation,
@@ -15,6 +18,32 @@ from apps.installer.hermes_install import (
 )
 from packages.protocol.enums import HermesInstallStatus, HermesReadinessLevel, Platform
 from packages.protocol.install import HermesVersionInfo
+
+
+class _FakeInstallStdout:
+    def __init__(self, lines: list[bytes]):
+        self._lines = lines
+
+    async def readline(self) -> bytes:
+        if not self._lines:
+            return b""
+        return self._lines.pop(0)
+
+
+class _FakeInstallProcess:
+    def __init__(self, returncode: int, lines: list[bytes]):
+        self.stdout = _FakeInstallStdout(lines)
+        self.returncode = returncode
+        self.killed = False
+
+    async def wait(self) -> int:
+        return self.returncode
+
+    def kill(self) -> None:
+        self.killed = True
+
+    async def communicate(self):
+        return b"", b""
 
 
 def test_hermes_version_uses_numeric_segments():
@@ -56,6 +85,84 @@ def test_hermes_install_cleans_ansi_without_dropping_text():
     line = "\x1b[32mInstalling Hermes\x1b[0m\r"
 
     assert clean_terminal_line(line) == "Installing Hermes"
+
+
+@pytest.mark.asyncio
+async def test_run_install_keeps_sanitized_ansi_error_output(monkeypatch):
+    process = _FakeInstallProcess(
+        1,
+        [
+            b"\x1b[31mERROR: Package installation failed.\x1b[0m\n",
+            b"plain context line\n",
+        ],
+    )
+    seen_lines = []
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        return process
+
+    monkeypatch.setattr(
+        "apps.installer.hermes_check.detect_platform",
+        lambda: Platform.MACOS,
+    )
+    monkeypatch.setattr(
+        "apps.installer.hermes_check.locate_hermes_binary",
+        lambda: (None, False),
+    )
+    monkeypatch.setattr(
+        "apps.installer.hermes_install.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+
+    result = await run_hermes_install(on_output=seen_lines.append, timeout=1.0)
+
+    assert result.success is False
+    assert "ERROR: Package installation failed." in result.stdout
+    assert "plain context line" in result.stdout
+    assert "\x1b[" not in result.stdout
+    assert "ERROR: Package installation failed." in seen_lines
+    assert "错误详情" in result.message
+
+
+@pytest.mark.asyncio
+async def test_run_install_accepts_located_hermes_after_script_failure(monkeypatch):
+    hermes_path = "/Users/test/.local/bin/hermes"
+    process = _FakeInstallProcess(
+        1,
+        [b"everything's installed!\n"],
+    )
+    version_calls = []
+
+    async def fake_create_subprocess_exec(*args, **kwargs):
+        return process
+
+    def fake_run(args, capture_output, text, timeout):
+        version_calls.append((args, capture_output, text, timeout))
+        return SimpleNamespace(returncode=0, stdout="hermes 0.10.0\n", stderr="")
+
+    monkeypatch.setattr(
+        "apps.installer.hermes_check.detect_platform",
+        lambda: Platform.MACOS,
+    )
+    monkeypatch.setattr(
+        "apps.installer.hermes_check.locate_hermes_binary",
+        lambda: (hermes_path, True),
+    )
+    monkeypatch.setattr(
+        "apps.installer.hermes_install.asyncio.create_subprocess_exec",
+        fake_create_subprocess_exec,
+    )
+    monkeypatch.setattr(
+        "apps.installer.hermes_install.subprocess.run",
+        fake_run,
+    )
+
+    result = await run_hermes_install(timeout=1.0)
+
+    assert result.success is True
+    assert result.returncode == 0
+    assert "已修复当前应用 PATH" in result.message
+    assert version_calls == [([hermes_path, "--version"], True, True, 10)]
 
 
 def test_hermes_doctor_readiness_keeps_startup_bounded():
