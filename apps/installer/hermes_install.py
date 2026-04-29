@@ -5,7 +5,7 @@
 """
 
 import logging
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from packages.protocol.enums import HermesInstallStatus, Platform
 from packages.protocol.install import HermesInstallInfo
@@ -17,7 +17,7 @@ class HermesInstallGuide:
     """Hermes Agent 安装引导"""
 
     @staticmethod
-    def get_install_instructions(install_info: HermesInstallInfo) -> Dict[str, any]:
+    def get_install_instructions(install_info: HermesInstallInfo) -> Dict[str, Any]:
         """根据检测结果提供安装指导
         
         Args:
@@ -80,7 +80,7 @@ class HermesInstallGuide:
             }
 
     @staticmethod
-    def _get_wsl2_instructions() -> Dict[str, any]:
+    def _get_wsl2_instructions() -> Dict[str, Any]:
         """WSL2 安装指导"""
         return {
             "status": "wsl2_required", 
@@ -100,7 +100,7 @@ class HermesInstallGuide:
         }
 
     @staticmethod
-    def _get_unsupported_platform_instructions(platform: Platform) -> Dict[str, any]:
+    def _get_unsupported_platform_instructions(platform: Platform) -> Dict[str, Any]:
         """不支持平台的指导"""
         return {
             "status": "unsupported",
@@ -112,9 +112,9 @@ class HermesInstallGuide:
         }
 
     @staticmethod
-    def _get_install_instructions_for_platform(platform: Platform) -> Dict[str, any]:
+    def _get_install_instructions_for_platform(platform: Platform) -> Dict[str, Any]:
         """不同平台的 Hermes Agent 安装指导"""
-        base_info = {
+        base_info: Dict[str, Any] = {
             "status": "install_required",
             "message": "需要安装 Hermes Agent"
         }
@@ -158,7 +158,7 @@ class HermesInstallGuide:
         return base_info
 
     @staticmethod
-    def _get_upgrade_instructions(install_info: HermesInstallInfo) -> Dict[str, any]:
+    def _get_upgrade_instructions(install_info: HermesInstallInfo) -> Dict[str, Any]:
         """版本升级指导"""
         current_version = "未知"
         if install_info.version_info and install_info.version_info.version:
@@ -177,7 +177,7 @@ class HermesInstallGuide:
         }
 
     @staticmethod
-    def _get_workspace_init_instructions(install_info: HermesInstallInfo) -> Dict[str, any]:
+    def _get_workspace_init_instructions(install_info: HermesInstallInfo) -> Dict[str, Any]:
         """Yachiyo 工作空间初始化指导 - Hermes 已安装，需要初始化 Yachiyo 工作空间"""
         hermes_home = install_info.hermes_home or "~/.hermes"
         yachiyo_workspace = f"{hermes_home}/yachiyo"
@@ -237,6 +237,7 @@ def get_platform_specific_suggestions(platform: Platform) -> List[str]:
 
 import asyncio
 import dataclasses
+import re
 import subprocess
 import sys
 
@@ -245,6 +246,14 @@ HERMES_INSTALL_SCRIPT_URL = (
     "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
 )
 HERMES_INSTALL_TIMEOUT_SECONDS = 900.0
+_ANSI_CONTROL_RE = re.compile(
+    r"(?:\x1B\[[0-?]*[ -/]*[@-~]|\x1B\][^\x07]*(?:\x07|\x1B\\)|\x1B[()][A-Za-z0-9])"
+)
+
+
+def _strip_ansi_control_sequences(line: str) -> str:
+    """移除终端控制序列，保留安装脚本的可读错误文本。"""
+    return _ANSI_CONTROL_RE.sub("", line).replace("\r", "")
 
 
 @dataclasses.dataclass
@@ -282,7 +291,7 @@ async def run_hermes_install(
         InstallResult（成功或失败均返回，不抛出）
     """
     from packages.protocol.enums import Platform
-    from apps.installer.hermes_check import detect_platform
+    from apps.installer.hermes_check import detect_platform, locate_hermes_binary
 
     platform = detect_platform()
 
@@ -336,7 +345,8 @@ async def run_hermes_install(
                 line_bytes = await proc.stdout.readline()
                 if not line_bytes:
                     break
-                line = line_bytes.decode(errors="replace").rstrip()
+                raw_line = line_bytes.decode(errors="replace").rstrip()
+                line = _strip_ansi_control_sequences(raw_line)
 
                 # 检测 hermes setup 的关键特征文字（而非泛化的 ANSI/TUI 字符）
                 # 这些是 setup wizard 独有的文字，installer banner 不会触发
@@ -369,10 +379,8 @@ async def run_hermes_install(
                         except Exception:
                             pass
 
-                # 过滤带 ANSI 转义码的行（TUI 渲染残留），但仍保留普通文本
-                has_ansi = "\x1b[" in line or "\x1b(" in line
-                if has_ansi:
-                    continue  # 跳过 ANSI 行，不写入日志
+                if not line:
+                    continue
 
                 stdout_lines.append(line)
                 if on_output is not None:
@@ -401,24 +409,31 @@ async def run_hermes_install(
         # 安装脚本非零退出时，先检查 hermes 命令是否已经可用。
         # 常见原因：官方安装脚本末尾自动调用 hermes setup，
         # 由于我们关闭了 stdin（DEVNULL），hermes setup 立即退出导致脚本返回非零，
-        # 但 hermes 二进制本身已安装成功。
+        # 或当前 GUI 进程 PATH 尚未刷新，但 hermes 二进制本身已安装成功。
         try:
-            import subprocess as _subprocess
-            _check = _subprocess.run(
-                ["hermes", "--version"],
+            hermes_path, needs_env_refresh = locate_hermes_binary()
+            if hermes_path is None:
+                raise FileNotFoundError("hermes executable not found after install")
+
+            _check = subprocess.run(
+                [hermes_path, "--version"],
                 capture_output=True,
                 text=True,
                 timeout=10,
             )
             if _check.returncode == 0:
                 logger.info(
-                    "安装脚本返回 exit=%d，但 hermes 命令已可用 (%s)，视为安装成功",
+                    "安装脚本返回 exit=%d，但 hermes 已可用 (%s, %s)，视为安装成功",
                     rc,
+                    hermes_path,
                     _check.stdout.strip().splitlines()[0] if _check.stdout.strip() else "unknown version",
                 )
+                message = "Hermes Agent 安装完成（需要完成 hermes setup 配置）"
+                if needs_env_refresh:
+                    message = "Hermes Agent 安装完成（已修复当前应用 PATH，需要完成 hermes setup 配置）"
                 return InstallResult(
                     success=True,
-                    message="Hermes Agent 安装完成（需要完成 hermes setup 配置）",
+                    message=message,
                     stdout=combined_output,
                     returncode=0,
                 )
@@ -427,7 +442,7 @@ async def run_hermes_install(
 
         return InstallResult(
             success=False,
-            message=f"安装脚本执行失败（exit={rc}）",
+            message=f"安装脚本执行失败（exit={rc}），请查看上方安装日志中的错误详情",
             stdout=combined_output,
             returncode=rc,
         )

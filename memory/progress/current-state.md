@@ -2,6 +2,18 @@
 
 ## 已完成
 
+### Milestone 73 — 一键安装错误捕获 hotfix
+
+- ✅ `run_hermes_install()` 不再丢弃带 ANSI 颜色控制序列的安装脚本输出；会清洗控制码并保留可读错误文本，避免 UI 只显示 `exit=1` 而隐藏真正失败原因。
+- ✅ 安装脚本非零退出后，兜底检测改为复用 `locate_hermes_binary()`，可识别 Hermes 已落盘但当前 GUI 进程 PATH 尚未刷新的场景。
+- ✅ 通过备用路径找到 Hermes 且 `hermes --version` 成功时，将结果视为安装成功，并提示当前应用 PATH 已修复、仍需完成 `hermes setup`。
+- ✅ 安装脚本真实失败时，失败文案提示用户查看上方安装日志中的错误详情。
+- ✅ 修复 `apps/installer/hermes_install.py` 中已有 `Dict[str, any]` 类型标注问题，相关文件 diagnostics 清零。
+- ✅ 新增回归测试覆盖 ANSI 错误日志保留、`exit=1` 后通过备用路径识别已安装 Hermes。
+- ✅ 相关测试：`python -m pytest tests/test_hermes_installer.py` → 8 passed。
+- ✅ 全量测试：`python -m pytest` → 425 passed，1 warning（已有重复 ZIP entry 警告）。
+- ✅ `git diff --check` → passed。
+
 ### Milestone 72 — 备份清理与导入源安全收敛
 
 - ✅ `find_backups()` 只纳入严格匹配托管命名规则的 `hermes-yachiyo-backup-YYYYMMDD-HHMMSS[-N].zip`，不再把 `*-draft.zip` / `*-external.zip` 等前缀相似文件纳入管理列表。

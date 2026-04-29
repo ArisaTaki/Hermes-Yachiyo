@@ -1,5 +1,33 @@
 # Session Summary
 
+## Hotfix — Milestone 73: One-click install error capture
+
+### 核心结果
+
+本轮修复一键安装在官方脚本返回 `exit=1` 时错误信息不足、且 Hermes 已安装但 GUI PATH 未刷新时误报失败的问题。
+
+### 主要变更
+
+- `apps/installer/hermes_install.py`：新增 ANSI 控制序列清洗逻辑，保留安装脚本彩色错误行中的可读文本。
+- `run_hermes_install()`：非零退出后的兜底检测改为 `locate_hermes_binary()` + 指定路径 `hermes --version`，覆盖 `~/.local/bin/hermes` 等 PATH 未刷新场景。
+- 若备用路径检测确认 Hermes 可用，返回安装成功并提示当前应用 PATH 已修复、还需完成 `hermes setup`。
+- 真失败时的错误文案提示查看上方安装日志详情。
+- 同文件中已有 `Dict[str, any]` 类型标注修为 `Dict[str, Any]`，并给动态更新的 `base_info` 补局部类型，消除 Pylance 诊断。
+
+### 测试覆盖
+
+- `tests/test_hermes_installer.py`：新增异步安装进程 fake，覆盖 ANSI 错误行清洗后进入 stdout / 回调。
+- `tests/test_hermes_installer.py`：覆盖安装脚本 `exit=1` 但 `locate_hermes_binary()` 找到 Hermes 且版本检测成功时按安装成功处理。
+
+### 验证结果
+
+- `python -m pytest tests/test_hermes_installer.py` → 8 passed。
+- `python -m pytest` → 425 passed，1 warning（既有重复 ZIP entry 警告）。
+- `git diff --check` → passed。
+- 相关文件 VS Code diagnostics → no errors。
+
+---
+
 ## 追加修复 — Milestone 72: Backup cleanup and restore source hardening
 
 ### 核心结果
