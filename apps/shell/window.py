@@ -244,6 +244,17 @@ _STATUS_HTML = """
             font-size: 0.86em;
         }
         .app-exit-btn:hover { border-color: #dd6b7a; color: #ffb1bd; background: #2d242e; }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
         .exit-dialog-backdrop {
             position: fixed;
             inset: 0;
@@ -656,10 +667,11 @@ _STATUS_HTML = """
         </div>
     </div>
 
-    <div class="exit-dialog-backdrop" id="exit-dialog" role="dialog" aria-modal="true">
+    <div class="exit-dialog-backdrop" id="exit-dialog" role="dialog" aria-modal="true"
+         aria-labelledby="exit-dialog-title" aria-describedby="exit-dialog-description">
         <div class="exit-dialog">
-            <h3>退出 Hermes-Yachiyo？</h3>
-            <p>退出会关闭主界面、对话窗口并停止后台服务。是否继续？</p>
+            <h3 id="exit-dialog-title">退出 Hermes-Yachiyo？</h3>
+            <p id="exit-dialog-description">退出会关闭主界面、对话窗口并停止后台服务。是否继续？</p>
             <div class="exit-dialog-error" id="exit-dialog-error"></div>
             <div class="exit-dialog-actions">
                 <button class="exit-cancel-btn" onclick="hideExitDialog()">取消</button>
@@ -668,12 +680,14 @@ _STATUS_HTML = """
         </div>
     </div>
 
-    <div class="exit-dialog-backdrop" id="uninstall-dialog" role="dialog" aria-modal="true">
+    <div class="exit-dialog-backdrop" id="uninstall-dialog" role="dialog" aria-modal="true"
+         aria-labelledby="uninstall-dialog-title" aria-describedby="uninstall-dialog-summary">
         <div class="exit-dialog">
-            <h3>卸载 Hermes-Yachiyo？</h3>
+            <h3 id="uninstall-dialog-title">卸载 Hermes-Yachiyo？</h3>
                  <p id="uninstall-dialog-summary">将删除所选范围内的本地资料。此操作不可撤销。</p>
+                 <label for="uninstall-confirm-input" class="sr-only">卸载确认短语</label>
                  <input class="uninstall-confirm-input" id="uninstall-confirm-input"
-                     placeholder="输入确认短语">
+                     placeholder="输入确认短语" aria-label="卸载确认短语">
             <div class="exit-dialog-error" id="uninstall-dialog-error"></div>
             <div class="exit-dialog-actions">
                 <button class="exit-cancel-btn" onclick="hideUninstallDialog()">取消</button>

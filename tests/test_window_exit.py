@@ -256,6 +256,12 @@ def test_control_center_html_exposes_uninstall_flow():
     assert "id=\"s-uninstall-keep-config\"" in _STATUS_HTML
     assert "id=\"s-uninstall-preview\"" in _STATUS_HTML
     assert "id=\"uninstall-dialog\"" in _STATUS_HTML
+    assert "aria-labelledby=\"uninstall-dialog-title\"" in _STATUS_HTML
+    assert "aria-describedby=\"uninstall-dialog-summary\"" in _STATUS_HTML
+    assert "aria-labelledby=\"exit-dialog-title\"" in _STATUS_HTML
+    assert "aria-describedby=\"exit-dialog-description\"" in _STATUS_HTML
+    assert "aria-label=\"卸载确认短语\"" in _STATUS_HTML
+    assert "<label for=\"uninstall-confirm-input\" class=\"sr-only\">" in _STATUS_HTML
     assert "get_uninstall_preview" in _STATUS_HTML
     assert "run_uninstall" in _STATUS_HTML
     assert "UNINSTALL" in _STATUS_HTML

@@ -8,6 +8,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import uuid
 import zipfile
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
@@ -126,12 +127,21 @@ def is_protected_path(path: Path) -> bool:
 
 def is_safe_app_config_dir(path: Path) -> tuple[bool, str]:
     """判断目标路径是否可作为 Hermes-Yachiyo 应用配置目录安全删除或替换。"""
-    resolved = path.expanduser().resolve()
+    original = path.expanduser()
+    if original.name != ".hermes-yachiyo":
+        return False, "配置目录名称不符合预期，已跳过"
+
+    home = Path.home().expanduser().resolve()
+    if not _is_relative_to(original.parent, home):
+        return False, "配置目录不在当前用户目录下，已跳过"
+
+    if original.is_symlink():
+        return True, ""
+
+    resolved = original.resolve()
     if is_protected_path(resolved):
         return False, "受保护路径，已跳过"
-    if resolved.name != ".hermes-yachiyo":
-        return False, "配置目录名称不符合预期，已跳过"
-    if not _is_relative_to(resolved, Path.home().expanduser()):
+    if not _is_relative_to(resolved, home):
         return False, "配置目录不在当前用户目录下，已跳过"
     return True, ""
 
@@ -151,16 +161,23 @@ def _has_yachiyo_workspace_marker(path: Path) -> bool:
 def is_safe_yachiyo_workspace(path: Path) -> tuple[bool, str]:
     """判断目标路径是否可作为 Yachiyo 工作空间安全删除或替换。"""
     original = path.expanduser()
+    if original.name != "yachiyo":
+        return False, "工作空间目录名称不符合预期，已跳过"
+
+    home = Path.home().expanduser().resolve()
+    if not _is_relative_to(original.parent, home):
+        return False, "工作空间不在当前用户目录下，已跳过"
+    if original.parent.resolve() == home:
+        return False, "工作空间不能直接指向用户主目录下的通用目录，已跳过"
+
+    if original.is_symlink():
+        return True, ""
+
     resolved = original.resolve()
     if is_protected_path(resolved):
         return False, "受保护路径，已跳过"
-    if resolved.name != "yachiyo":
-        return False, "工作空间目录名称不符合预期，已跳过"
-    home = Path.home().expanduser().resolve()
     if not _is_relative_to(resolved, home):
         return False, "工作空间不在当前用户目录下，已跳过"
-    if resolved.parent == home:
-        return False, "工作空间不能直接指向用户主目录下的通用目录，已跳过"
     if _path_exists(original) and not _has_yachiyo_workspace_marker(resolved):
         return False, "工作空间缺少 Yachiyo 初始化标识，已跳过"
     return True, ""
@@ -586,7 +603,7 @@ def _replace_path(source: Path, target: Path) -> bool:
             return False
 
         if _path_exists(target):
-            rollback_path = target_parent / f".{target.name}.rollback-{next(tempfile._get_candidate_names())}"
+            rollback_path = target_parent / f".{target.name}.rollback-{uuid.uuid4().hex}"
             shutil.move(str(target), str(rollback_path))
 
         try:

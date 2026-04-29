@@ -78,6 +78,7 @@ def test_yachiyo_only_plan_includes_config_and_workspace(tmp_path, monkeypatch):
     assert plan.to_dict()["existing_count"] == 2
     assert plan.to_dict()["removable_count"] == 2
     assert BackupPlan.__doc__ == "卸载前资料备份计划。"
+    assert "tempfile._get_candidate_names" not in Path(backup_mod.__file__).read_text(encoding="utf-8")
 
 
 def test_execute_yachiyo_only_creates_backup_and_removes_targets(tmp_path, monkeypatch):
@@ -520,6 +521,28 @@ def test_public_path_safety_helpers_preserve_strict_rules(tmp_path, monkeypatch)
     assert "初始化标识" in reason
 
     (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    safe, reason = backup_mod.is_safe_yachiyo_workspace(workspace)
+    assert safe is True
+    assert reason == ""
+
+
+def test_public_path_safety_helpers_allow_symlink_paths_under_home(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+
+    real_config_dir = home / "real-config"
+    real_config_dir.mkdir(parents=True)
+    config_dir.symlink_to(real_config_dir, target_is_directory=True)
+
+    workspace_target = tmp_path / "workspace-target"
+    workspace_target.mkdir(parents=True)
+    workspace = hermes_home / "yachiyo"
+    workspace.parent.mkdir(parents=True, exist_ok=True)
+    workspace.symlink_to(workspace_target, target_is_directory=True)
+
+    safe, reason = backup_mod.is_safe_app_config_dir(config_dir)
+    assert safe is True
+    assert reason == ""
+
     safe, reason = backup_mod.is_safe_yachiyo_workspace(workspace)
     assert safe is True
     assert reason == ""
