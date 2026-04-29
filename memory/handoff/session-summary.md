@@ -1,5 +1,31 @@
 # Session Summary
 
+## 追加修复 — Milestone 72: Backup cleanup and restore source hardening
+
+### 核心结果
+
+本轮处理 4 条 PR review：备份发现只接受严格托管命名；自动清理遇到不可管理文件时跳过而不中断；导入恢复 `app-config` 与 `yachiyo-workspace` 前强制校验备份源必须是非 symlink 目录。
+
+### 主要变更
+
+- `apps/installer/backup.py`：`_looks_like_backup()` 改为使用 `_BACKUP_ARCHIVE_NAME_RE.fullmatch()`。
+- `cleanup_old_backups()`：捕获 `delete_backup()` 的 `ValueError`，记录 warning 后继续清理后续条目。
+- `import_backup()`：新增 `_is_restore_source_dir()`，恢复应用配置和工作空间前都先确认源路径是目录且不是 symlink。
+- 非目录恢复源会进入 `skipped` 并给出明确原因，不再调用 `_replace_path()`。
+
+### 测试覆盖
+
+- `tests/test_uninstall.py`：清理旧备份时跳过不可管理删除错误。
+- `tests/test_uninstall.py`：`find_backups()` 忽略前缀相似但非规范命名的 ZIP。
+- `tests/test_uninstall.py`：备份中的 `app-config` / `yachiyo-workspace` 若是文件，不会替换目标目录。
+
+### 验证结果
+
+- `python -m pytest tests/test_uninstall.py` → 45 passed。
+- `python -m pytest` → 423 passed。
+
+---
+
 ## 追加修复 — Milestone 71: Protected path cache
 
 ### 核心结果
