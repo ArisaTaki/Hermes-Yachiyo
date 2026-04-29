@@ -2,6 +2,16 @@
 
 ## 已完成
 
+### Milestone 69 — 备份 ZIP 原子写入与失败清理
+
+- ✅ `create_backup()` 不再直接写最终托管 ZIP；先写入同目录隐藏临时文件，压缩完成后再 `replace()` 到正式 `hermes-yachiyo-backup-*.zip`。
+- ✅ 备份创建后会校验 `BackupInfo.valid`，无效 ZIP 会转为异常并清理已发布目标文件。
+- ✅ 异常路径会清理临时 ZIP；若正式 ZIP 已发布但后续清理/覆盖逻辑失败，也会删除目标文件，避免管理列表看到半成品或失败产物。
+- ✅ `overwrite_latest` 保持“新备份成功后才删除旧最近备份”的语义，并在自动清理之后按需删除旧最近备份。
+- ✅ 新增回归测试覆盖 ZIP 写入失败清理临时文件、后续 cleanup 失败清理已发布目标文件。
+- ✅ 相关测试：`python -m pytest tests/test_uninstall.py` → 38 passed。
+- ✅ 全量测试：`python -m pytest` → 416 passed。
+
 ### Milestone 68 — 备份/卸载 PR review 收敛
 
 - ✅ 卸载确认短语比较在前端与执行端都做首尾空白规整，用户复制/输入多余空格不会误失败，错误提示仍显示规范确认短语。

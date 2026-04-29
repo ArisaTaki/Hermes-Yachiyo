@@ -242,6 +242,55 @@ def test_create_backup_cleans_up_old_backups_by_count(tmp_path, monkeypatch):
     assert not Path(created_paths[1]).exists()
 
 
+def test_create_backup_cleans_partial_temp_archive_when_zip_write_fails(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text("{}", encoding="utf-8")
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+
+    backup_root = home / "backups"
+    temp_archives = []
+
+    def fail_zip_write(_source_dir, archive_path):
+        temp_archives.append(archive_path)
+        archive_path.write_bytes(b"partial zip")
+        raise RuntimeError("zip failed")
+
+    monkeypatch.setattr(backup_mod, "_write_zip_from_dir", fail_zip_write)
+
+    with pytest.raises(RuntimeError, match="zip failed"):
+        create_backup(backup_root=backup_root)
+
+    assert temp_archives
+    assert all(not path.exists() for path in temp_archives)
+    assert list(backup_root.glob("*.zip")) == []
+    assert backup_mod.find_backups(backup_root) == []
+
+
+def test_create_backup_removes_published_archive_when_cleanup_fails(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.json").write_text("{}", encoding="utf-8")
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+
+    backup_root = home / "backups"
+
+    def fail_cleanup(*, backup_root=None, keep_count=10):
+        raise RuntimeError("cleanup failed")
+
+    monkeypatch.setattr(backup_mod, "cleanup_old_backups", fail_cleanup)
+
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        create_backup(backup_root=backup_root)
+
+    assert list(backup_root.glob("*.zip")) == []
+    assert backup_mod.find_backups(backup_root) == []
+
+
 def test_cleanup_old_backups_counts_invalid_managed_backups(tmp_path):
     backup_root = tmp_path / "backups"
     backup_root.mkdir()

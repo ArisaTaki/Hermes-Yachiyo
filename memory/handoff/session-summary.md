@@ -1,5 +1,30 @@
 # Session Summary
 
+## 追加修复 — Milestone 69: Backup ZIP atomic publish
+
+### 核心结果
+
+本轮处理新的 PR review：`create_backup()` 不再直接写最终托管 ZIP，避免压缩失败或后续逻辑异常时在备份目录留下半成品/损坏但看起来像正式备份的文件。
+
+### 主要变更
+
+- `apps/installer/backup.py`：新增 `_remove_file_if_exists()`，用于异常路径清理临时备份文件。
+- `create_backup()`：先写同目录隐藏临时 ZIP，再 `replace()` 到最终 `hermes-yachiyo-backup-*.zip`。
+- `create_backup()`：发布后校验 `BackupInfo.valid`；若校验、自动清理或覆盖旧备份逻辑失败，会移除临时文件和已发布目标文件。
+- `overwrite_latest`：保持新备份成功后才删除旧最近备份，并在自动清理之后按需删除旧最近备份，避免清理失败时提前丢旧备份。
+
+### 测试覆盖
+
+- `tests/test_uninstall.py`：模拟 ZIP 写入失败，确认临时文件和正式 ZIP 都不会残留。
+- `tests/test_uninstall.py`：模拟后续 cleanup 失败，确认已发布正式 ZIP 会被清理且 `find_backups()` 为空。
+
+### 验证结果
+
+- `python -m pytest tests/test_uninstall.py` → 38 passed。
+- `python -m pytest` → 416 passed。
+
+---
+
 ## 追加修复 — Milestone 68: Backup/uninstall PR review fixes
 
 ### 核心结果

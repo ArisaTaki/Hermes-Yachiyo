@@ -287,6 +287,14 @@ def _write_zip_from_dir(source_dir: Path, archive_path: Path) -> None:
                 archive.write(path, relative)
 
 
+def _remove_file_if_exists(path: Path) -> None:
+    try:
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+    except Exception:
+        logger.warning("清理临时备份文件失败: %s", path, exc_info=True)
+
+
 def create_backup(
     *,
     backup_root: str | Path | None = None,
@@ -300,6 +308,8 @@ def create_backup(
     root.mkdir(parents=True, exist_ok=True)
     previous_latest = find_latest_backup(root) if overwrite_latest else None
     archive_path = _unique_backup_archive(root)
+    temp_archive_path = root / f".{archive_path.name}.{uuid.uuid4().hex}.tmp"
+    archive_published = False
     staging_root = Path(tempfile.mkdtemp(prefix=".hermes-yachiyo-backup-", dir=str(root)))
     staging_dir = staging_root / "payload"
     staging_dir.mkdir(parents=True, exist_ok=False)
@@ -347,14 +357,28 @@ def create_backup(
             json.dumps(manifest, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        _write_zip_from_dir(staging_dir, archive_path)
+        _write_zip_from_dir(staging_dir, temp_archive_path)
+        temp_archive_path.replace(archive_path)
+        archive_published = True
         backup = _backup_info(archive_path)
-        if previous_latest and previous_latest.path != backup.path:
-            delete_backup(previous_latest.path, backup_root=root)
+        if not backup.valid:
+            raise ValueError(f"创建的备份文件无效：{backup.error}")
         if auto_cleanup:
             cleanup_old_backups(backup_root=root, keep_count=retention_count)
+        if (
+            previous_latest
+            and previous_latest.path != backup.path
+            and Path(previous_latest.path).exists()
+        ):
+            delete_backup(previous_latest.path, backup_root=root)
         return backup
+    except Exception:
+        _remove_file_if_exists(temp_archive_path)
+        if archive_published:
+            _remove_file_if_exists(archive_path)
+        raise
     finally:
+        _remove_file_if_exists(temp_archive_path)
         shutil.rmtree(staging_root, ignore_errors=True)
 
 
