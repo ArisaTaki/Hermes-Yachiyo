@@ -152,6 +152,9 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         def clear_session(self):
             return {"ok": True}
 
+        def cancel_current_tasks(self):
+            return {"ok": True, "cancelled_tasks": 1}
+
         def delete_current_session(self):
             return {"ok": True, "deleted": True}
 
@@ -173,6 +176,7 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
     }
     assert await ui.get_chat_session() == {"session_id": "session-1"}
     assert await ui.clear_chat_session() == {"ok": True}
+    assert await ui.cancel_chat_session_tasks() == {"ok": True, "cancelled_tasks": 1}
     assert await ui.delete_chat_session() == {"ok": True, "deleted": True}
     assert await ui.list_chat_sessions(limit=3) == {"sessions": [], "limit": 3}
     assert await ui.load_chat_session(ui.LoadChatSessionRequest(session_id="s2")) == {
@@ -183,6 +187,75 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         "executor": "HermesExecutor",
         "available": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_installer_routes_use_legacy_installer_api(monkeypatch):
+    calls = []
+
+    class FakeInstallerAPI:
+        def install_hermes(self):
+            calls.append("install")
+            return {"started": True}
+
+        def get_install_progress(self):
+            calls.append("progress")
+            return {"running": False, "success": True}
+
+        def initialize_workspace(self):
+            calls.append("init")
+            return {"success": True, "created_items": ["configs"]}
+
+        def get_backup_status(self):
+            calls.append("backup_status")
+            return {"success": True, "has_backup": True}
+
+        def import_backup(self):
+            calls.append("backup_import")
+            return {"ok": True, "restored": ["config"]}
+
+        def open_hermes_setup_terminal(self):
+            calls.append("setup_terminal")
+            return {"success": True, "already_running": False}
+
+        def check_setup_process(self):
+            calls.append("setup_process")
+            return {"running": False}
+
+        def recheck_status(self):
+            calls.append("recheck")
+            return {"ready": True, "status": "ready"}
+
+    runtime = SimpleNamespace(
+        refresh_hermes_installation=lambda: calls.append("runtime_refresh"),
+        refresh_task_runner_executor=lambda: {"updated": True},
+    )
+    monkeypatch.setattr(ui, "InstallerWebViewAPI", FakeInstallerAPI)
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+
+    assert await ui.start_hermes_install() == {"started": True}
+    assert await ui.get_hermes_install_progress() == {"running": False, "success": True}
+    assert await ui.initialize_workspace() == {"success": True, "created_items": ["configs"]}
+    assert await ui.get_installer_backup_status() == {"success": True, "has_backup": True}
+    assert await ui.import_installer_backup() == {"ok": True, "restored": ["config"]}
+    assert await ui.open_installer_setup_terminal() == {"success": True, "already_running": False}
+    assert await ui.get_installer_setup_process() == {"running": False}
+    assert await ui.recheck_installer_status() == {
+        "ready": True,
+        "status": "ready",
+        "executor_refresh": {"updated": True},
+    }
+    assert calls == [
+        "install",
+        "progress",
+        "init",
+        "backup_status",
+        "backup_import",
+        "setup_terminal",
+        "setup_process",
+        "recheck",
+        "runtime_refresh",
+    ]
 
 
 @pytest.mark.asyncio

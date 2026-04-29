@@ -41,7 +41,7 @@ def _serialize_summary(summary: Optional[ModelSummary]) -> Dict[str, Any]:
         "found_in_subdir": summary.found_in_subdir,
         "subdir_name": summary.subdir_name,
         "extra_moc3_count": summary.extra_moc3_count,
-        # 主候选绝对路径 — 供未来 Live2DRenderer 消费
+        # 主候选绝对路径 — 供 Electron Live2D renderer 消费
         "primary_model3_json_abs": summary.primary_model3_json_abs,
         "primary_moc3_abs": summary.primary_moc3_abs,
         "renderer_entry": summary.renderer_entry,  # 推荐入口（model3.json 优先）
@@ -165,6 +165,15 @@ class MainWindowAPI:
                     "start_minimized": self._config.start_minimized,
                     "tray_enabled": self._config.tray_enabled,
                 },
+                "window_mode": {
+                    "width": self._config.window_mode.width,
+                    "height": self._config.window_mode.height,
+                    "recent_sessions_limit": self._config.window_mode.recent_sessions_limit,
+                    "recent_messages_limit": self._config.window_mode.recent_messages_limit,
+                    "open_chat_on_start": self._config.window_mode.open_chat_on_start,
+                    "show_runtime_panel": self._config.window_mode.show_runtime_panel,
+                    "show_mode_overview": self._config.window_mode.show_mode_overview,
+                },
                 "backup": {
                     "auto_cleanup_enabled": self._config.backup.auto_cleanup_enabled,
                     "retention_count": self._config.backup.retention_count,
@@ -189,16 +198,8 @@ class MainWindowAPI:
                     "display_mode" in applied
                     and applied["display_mode"] != previous_display_mode
                 ):
-                    try:
-                        from apps.shell.window import request_app_restart
-
-                        request_app_restart()
-                        result["restart_scheduled"] = True
-                        result["restart_reason"] = "display_mode_changed"
-                    except Exception as exc:
-                        logger.error("显示模式变更后自动重启失败: %s", exc)
-                        result["restart_scheduled"] = False
-                        result["restart_error"] = str(exc)
+                    result["mode_switch_scheduled"] = True
+                    result["target_display_mode"] = applied["display_mode"]
         return result
 
     def _current_app_state(self) -> Dict[str, Any]:

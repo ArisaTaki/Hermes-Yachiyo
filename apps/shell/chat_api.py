@@ -323,6 +323,23 @@ class ChatAPI:
             logger.error("清空会话失败: %s", exc)
             return {"ok": False, "error": str(exc)}
 
+    def cancel_current_tasks(self) -> Dict[str, Any]:
+        """取消当前会话中仍在等待/执行的任务，但保留会话历史。"""
+        try:
+            self._sync_task_status_to_messages()
+            cancelled_count = self._cancel_active_session_tasks()
+            messages = self.get_messages()
+            return {
+                "ok": True,
+                "cancelled_tasks": cancelled_count,
+                "session_id": self._session.session_id,
+                "messages": messages.get("messages", []),
+                "is_processing": messages.get("is_processing", False),
+            }
+        except Exception as exc:
+            logger.error("取消当前会话任务失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     def delete_current_session(self) -> Dict[str, Any]:
         """删除当前会话，并切换到剩余最近会话或新建空会话。"""
         try:

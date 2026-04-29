@@ -5,8 +5,10 @@ import {
   dialog,
   ipcMain,
   Menu,
+  nativeImage,
   screen,
   shell,
+  Tray,
   type IpcMainInvokeEvent,
   type OpenDialogOptions,
   type Rectangle,
@@ -23,7 +25,8 @@ const BRIDGE_SETTINGS_RETRIES = 40;
 const BRIDGE_SETTINGS_RETRY_MS = 250;
 const BUBBLE_SCREEN_MARGIN = 24;
 const POSITION_SAVE_DEBOUNCE_MS = 260;
-const LIVE2D_POINTER_PASSTHROUGH_ENABLED = process.env.HERMES_YACHIYO_LIVE2D_POINTER_PASSTHROUGH === '1';
+const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
+const MAX_LAUNCHER_SHAPE_RECTS = 10000;
 
 type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'bubble' | 'bubble-menu' | 'live2d';
 type ModeId = 'bubble' | 'live2d';
@@ -33,18 +36,47 @@ type ModeSettings = {
 };
 
 type UiSettings = {
+  app?: {
+    start_minimized?: boolean;
+    tray_enabled?: boolean;
+  };
   display?: { current_mode?: string };
   mode_settings?: Record<string, ModeSettings>;
+  window_mode?: {
+    width?: number;
+    height?: number;
+    open_chat_on_start?: boolean;
+  };
+};
+
+type InstallInfoPayload = {
+  hermes_ready?: boolean;
+  install_info?: {
+    status?: string;
+  } | null;
 };
 
 let backendProcess: ChildProcessWithoutNullStreams | null = null;
 let mainWindow: BrowserWindow | null = null;
 let chatWindow: BrowserWindow | null = null;
 let modeWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
 let activeMode: ModeId | null = null;
 let activeModeConfig: Record<string, unknown> = {};
+let activeModeConfigSignature = '';
 let positionSaveTimer: NodeJS.Timeout | null = null;
 let modeWindowIgnoringMouse = false;
+let modeWindowShapeApplied = false;
+let modeWindowTopSuppressed = false;
+let lastInstallReady: boolean | null = null;
+let lastUiSettings: UiSettings | null = null;
+
+type MainWindowOptions = {
+  respectStartMinimized?: boolean;
+  focusOnReady?: boolean;
+};
+
+showMacDockIcon();
 
 function projectRoot(): string {
   return path.resolve(__dirname, '..', '..', '..');
@@ -95,39 +127,119 @@ function routeHash(params: Record<string, string> = {}): string {
   return `#/${encodeURIComponent(view)}`;
 }
 
-function createMainWindow(params: Record<string, string> = {}): void {
+function mainWindowBounds(settings: UiSettings | null = lastUiSettings): { width: number; height: number } {
+  const windowMode = settings?.window_mode || {};
+  return {
+    width: Math.round(clamp(numberFromConfig(windowMode.width, 1120), 860, 1920)),
+    height: Math.round(clamp(numberFromConfig(windowMode.height, 760), 580, 1400)),
+  };
+}
+
+function createMainWindow(
+  params: Record<string, string> = {},
+  settings: UiSettings | null = lastUiSettings,
+  options: MainWindowOptions = {},
+): void {
+  if (settings) lastUiSettings = settings;
+  const bounds = mainWindowBounds(settings);
+  const startHidden = Boolean(options.respectStartMinimized && settings?.app?.start_minimized);
+  const focusOnReady = options.focusOnReady !== false;
   mainWindow = new BrowserWindow({
     title: 'Hermes-Yachiyo',
-    width: 1120,
-    height: 760,
+    ...bounds,
     minWidth: 860,
     minHeight: 580,
+    show: false,
     backgroundColor: '#0e1117',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
 
+  mainWindow.once('ready-to-show', () => {
+    if (!mainWindow || mainWindow.isDestroyed() || startHidden) return;
+    showMacDockIcon();
+    suppressModeWindowForMainWindow();
+    mainWindow.show();
+    if (focusOnReady) mainWindow.focus();
+  });
   mainWindow.loadURL(rendererUrl({ view: 'main', ...params }));
+  mainWindow.on('focus', suppressModeWindowForMainWindow);
+  mainWindow.on('blur', restoreModeWindowTopPreference);
+  mainWindow.on('minimize', restoreModeWindowTopPreference);
+  mainWindow.on('hide', restoreModeWindowTopPreference);
   mainWindow.on('closed', () => {
     mainWindow = null;
+    restoreModeWindowTopPreference();
   });
 }
 
-function showMainWindow(params: Record<string, string> = {}): void {
+function showMainWindow(params: Record<string, string> = {}, settings: UiSettings | null = lastUiSettings): void {
   if (normalizeView(params.view) === 'chat') {
     showChatWindow(params);
     return;
   }
   if (!mainWindow) {
-    createMainWindow(params);
+    createMainWindow(params, settings);
     return;
   }
   mainWindow.loadURL(rendererUrl({ view: 'main', ...params }));
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  showMacDockIcon();
+  suppressModeWindowForMainWindow();
   mainWindow.show();
+  mainWindow.moveTop();
   mainWindow.focus();
+}
+
+function showMainWindowFromAppActivation(): void {
+  const params = lastInstallReady === false ? { view: 'installer' } : { view: 'main' };
+  showMainWindow(params, lastUiSettings);
+  setTimeout(() => showMainWindow(params, lastUiSettings), 90);
+}
+
+function trayIcon() {
+  const iconPath = path.resolve(projectRoot(), 'apps', 'shell', 'assets', 'avatars', 'yachiyo-default.jpg');
+  const image = nativeImage.createFromPath(iconPath);
+  if (image.isEmpty()) return image;
+  const size = process.platform === 'darwin' ? 18 : 20;
+  return image.resize({ width: size, height: size });
+}
+
+function trayMenu(): Menu {
+  return Menu.buildFromTemplate([
+    { label: '主控台', click: () => showMainWindow({ view: 'main' }) },
+    { label: '打开对话', click: () => showChatWindow() },
+    { label: '打开表现态', click: () => void openConfiguredDesktopMode(undefined, lastUiSettings) },
+    { label: '应用设置', click: () => showMainWindow({ view: 'settings' }) },
+    { type: 'separator' },
+    { label: '退出 Hermes-Yachiyo', click: () => app.quit() },
+  ]);
+}
+
+function configureTray(settings: UiSettings | null = lastUiSettings): void {
+  const enabled = settings?.app?.tray_enabled !== false;
+  if (!enabled) {
+    if (tray && !tray.isDestroyed()) tray.destroy();
+    tray = null;
+    return;
+  }
+  if (!tray || tray.isDestroyed()) {
+    tray = new Tray(trayIcon());
+    tray.setToolTip('Hermes-Yachiyo');
+    tray.on('click', () => showMainWindow({ view: 'main' }));
+  }
+  tray.setContextMenu(trayMenu());
+}
+
+function showMacDockIcon(): void {
+  if (process.platform !== 'darwin') return;
+  try {
+    app.setActivationPolicy('regular');
+    app.dock?.show();
+  } catch {}
 }
 
 function routeForWindow(targetWindow: BrowserWindow | null): { view: AppView; params: Record<string, string> } | null {
@@ -161,7 +273,7 @@ function createChatWindow(params: Record<string, string> = {}): void {
     minHeight: 560,
     backgroundColor: '#121622',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -170,6 +282,9 @@ function createChatWindow(params: Record<string, string> = {}): void {
   chatWindow.loadURL(rendererUrl({ ...params, view: 'chat' }));
   chatWindow.on('closed', () => {
     chatWindow = null;
+  });
+  chatWindow.once('ready-to-show', () => {
+    showMacDockIcon();
   });
 }
 
@@ -184,6 +299,7 @@ function showChatWindow(params: Record<string, string> = {}): void {
   if (route?.view !== 'chat') {
     chatWindow.loadURL(rendererUrl({ ...params, view: 'chat' }));
   }
+  showMacDockIcon();
   chatWindow.show();
   chatWindow.focus();
 }
@@ -354,8 +470,48 @@ function desktopModeBounds(mode: ModeId, config: Record<string, unknown>) {
   return { width, height, x, y };
 }
 
+function modeConfigSignature(config: Record<string, unknown>): string {
+  return JSON.stringify(Object.entries(config).sort(([first], [second]) => first.localeCompare(second)));
+}
+
+function configuredModeWindowAlwaysOnTop(mode: ModeId | null = activeMode, config: Record<string, unknown> = activeModeConfig): boolean {
+  if (!mode) return false;
+  return mode === 'live2d'
+    ? booleanFromConfig(config.window_on_top, true)
+    : booleanFromConfig(config.always_on_top, true);
+}
+
+function applyModeWindowTopPreference(): void {
+  if (!modeWindow || modeWindow.isDestroyed() || !activeMode) return;
+  modeWindow.setAlwaysOnTop(!modeWindowTopSuppressed && configuredModeWindowAlwaysOnTop(), 'floating');
+}
+
+function suppressModeWindowForMainWindow(): void {
+  if (!modeWindow || modeWindow.isDestroyed()) return;
+  modeWindowTopSuppressed = true;
+  applyModeWindowTopPreference();
+}
+
+function restoreModeWindowTopPreference(): void {
+  if (!modeWindowTopSuppressed) return;
+  modeWindowTopSuppressed = false;
+  applyModeWindowTopPreference();
+}
+
 function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> = {}): void {
   if (modeWindow && !modeWindow.isDestroyed() && activeMode === mode) {
+    const nextSignature = modeConfigSignature(config);
+    activeModeConfig = config;
+    if (nextSignature !== activeModeConfigSignature) {
+      activeModeConfigSignature = nextSignature;
+      const bounds = desktopModeBounds(mode, config);
+      modeWindow.setBounds(bounds, false);
+      applyModeWindowTopPreference();
+      if (mode === 'live2d') {
+        modeWindow.setVisibleOnAllWorkspaces(booleanFromConfig(config.show_on_all_spaces, true), { visibleOnFullScreen: true });
+      }
+      modeWindow.loadURL(rendererUrl({ view: mode }));
+    }
     const route = routeForWindow(modeWindow);
     if (route?.view !== mode && !(mode === 'bubble' && route?.view === 'bubble-menu')) {
       modeWindow.loadURL(rendererUrl({ view: mode }));
@@ -364,17 +520,30 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     modeWindow.focus();
     return;
   }
-  if (modeWindow && !modeWindow.isDestroyed()) modeWindow.close();
+  if (modeWindow && !modeWindow.isDestroyed()) {
+    const previousModeWindow = modeWindow;
+    modeWindow = null;
+    activeMode = null;
+    activeModeConfig = {};
+    activeModeConfigSignature = '';
+    modeWindowIgnoringMouse = false;
+    modeWindowShapeApplied = false;
+    modeWindowTopSuppressed = false;
+    previousModeWindow.close();
+  }
 
   activeMode = mode;
   activeModeConfig = config;
+  activeModeConfigSignature = modeConfigSignature(config);
   modeWindowIgnoringMouse = false;
+  modeWindowShapeApplied = false;
+  modeWindowTopSuppressed = false;
   const bounds = desktopModeBounds(mode, config);
   const alwaysOnTop = mode === 'live2d'
     ? booleanFromConfig(config.window_on_top, true)
     : booleanFromConfig(config.always_on_top, true);
 
-  modeWindow = new BrowserWindow({
+  const createdModeWindow = new BrowserWindow({
     title: mode === 'live2d' ? 'Hermes-Yachiyo Live2D' : 'Hermes-Yachiyo Bubble',
     ...bounds,
     frame: false,
@@ -383,39 +552,45 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     movable: true,
     skipTaskbar: true,
     alwaysOnTop,
-    hasShadow: mode === 'live2d',
+    hasShadow: false,
     backgroundColor: '#00000000',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+  modeWindow = createdModeWindow;
 
   if (mode === 'live2d' && booleanFromConfig(config.show_on_all_spaces, true)) {
-    modeWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    createdModeWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   }
-  modeWindow.setAlwaysOnTop(alwaysOnTop, 'floating');
-  modeWindow.loadURL(rendererUrl({ view: mode }));
-  modeWindow.webContents.on('will-navigate', (event, targetUrl) => {
+  applyModeWindowTopPreference();
+  createdModeWindow.loadURL(rendererUrl({ view: mode }));
+  createdModeWindow.webContents.on('will-navigate', (event, targetUrl) => {
     if (redirectDesktopModeNavigation(targetUrl, mode)) event.preventDefault();
   });
-  modeWindow.webContents.setWindowOpenHandler(({ url }) => {
+  createdModeWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (redirectDesktopModeNavigation(url, mode)) return { action: 'deny' };
     return { action: 'allow' };
   });
   if (mode === 'live2d' && LIVE2D_POINTER_PASSTHROUGH_ENABLED) {
     setTimeout(() => setModeWindowPointerInteractive('live2d', false), 260);
   }
-  modeWindow.on('move', () => scheduleModeWindowPositionSave(mode, config));
-  modeWindow.on('resize', () => scheduleModeWindowPositionSave(mode, config));
-  modeWindow.on('closed', () => {
+  createdModeWindow.on('focus', restoreModeWindowTopPreference);
+  createdModeWindow.on('move', () => scheduleModeWindowPositionSave(mode, config));
+  createdModeWindow.on('resize', () => scheduleModeWindowPositionSave(mode, config));
+  createdModeWindow.on('closed', () => {
+    if (modeWindow !== createdModeWindow) return;
     if (positionSaveTimer) {
       clearTimeout(positionSaveTimer);
       positionSaveTimer = null;
     }
     modeWindowIgnoringMouse = false;
+    modeWindowShapeApplied = false;
+    modeWindowTopSuppressed = false;
     activeModeConfig = {};
+    activeModeConfigSignature = '';
     modeWindow = null;
     activeMode = null;
   });
@@ -429,6 +604,92 @@ function setModeWindowPointerInteractive(mode: ModeId, interactive: boolean): bo
   modeWindow.setIgnoreMouseEvents(shouldIgnore, { forward: true });
   modeWindowIgnoringMouse = shouldIgnore;
   return true;
+}
+
+function setModeWindowHitRegions(mode: ModeId, rawRegions: unknown): boolean {
+  if (!modeWindow || modeWindow.isDestroyed() || activeMode !== mode) return false;
+  const bounds = modeWindow.getBounds();
+  const shapePayload = normalizeLauncherShapePayload(rawRegions, bounds);
+  const shapeRects = normalizeLauncherShapeRects(shapePayload.regions, bounds, shapePayload.scaleX, shapePayload.scaleY);
+  if (!shapeRects.length) return false;
+  try {
+    modeWindow.setShape(shapeRects);
+    modeWindowShapeApplied = true;
+    if (modeWindowIgnoringMouse) {
+      modeWindow.setIgnoreMouseEvents(false);
+      modeWindowIgnoringMouse = false;
+    }
+    return true;
+  } catch (error) {
+    modeWindowShapeApplied = false;
+    console.warn('[desktop] setShape failed; falling back to pointer passthrough polling.', error);
+    return false;
+  }
+}
+
+function normalizeLauncherShapePayload(rawPayload: unknown, bounds: Rectangle): { regions: unknown; scaleX: number; scaleY: number } {
+  if (Array.isArray(rawPayload)) return { regions: rawPayload, scaleX: 1, scaleY: 1 };
+  if (!rawPayload || typeof rawPayload !== 'object') return { regions: [], scaleX: 1, scaleY: 1 };
+  const payload = rawPayload as Record<string, unknown>;
+  const viewport = payload.viewport && typeof payload.viewport === 'object'
+    ? payload.viewport as Record<string, unknown>
+    : {};
+  const viewportWidth = safeShapeNumber(viewport.width);
+  const viewportHeight = safeShapeNumber(viewport.height);
+  return {
+    regions: payload.regions,
+    scaleX: viewportWidth && viewportWidth > 0 ? bounds.width / viewportWidth : 1,
+    scaleY: viewportHeight && viewportHeight > 0 ? bounds.height / viewportHeight : 1,
+  };
+}
+
+function normalizeLauncherShapeRects(
+  rawRegions: unknown,
+  bounds: Rectangle,
+  scaleX: number,
+  scaleY: number,
+): Rectangle[] {
+  if (!Array.isArray(rawRegions)) return [];
+  return rawRegions
+    .slice(0, MAX_LAUNCHER_SHAPE_RECTS)
+    .map((region) => normalizeLauncherShapeRect(region, bounds, scaleX, scaleY))
+    .filter((region): region is Rectangle => Boolean(region));
+}
+
+function normalizeLauncherShapeRect(
+  rawRegion: unknown,
+  bounds: Rectangle,
+  scaleX: number,
+  scaleY: number,
+): Rectangle | null {
+  if (!rawRegion || typeof rawRegion !== 'object') return null;
+  const region = rawRegion as Record<string, unknown>;
+  const rawLeft = safeShapeNumber(region.x);
+  const rawTop = safeShapeNumber(region.y);
+  const rawWidth = safeShapeNumber(region.width);
+  const rawHeight = safeShapeNumber(region.height);
+  const left = rawLeft === null ? null : rawLeft * scaleX;
+  const top = rawTop === null ? null : rawTop * scaleY;
+  const width = rawWidth === null ? null : rawWidth * scaleX;
+  const height = rawHeight === null ? null : rawHeight * scaleY;
+  if (left === null || top === null || width === null || height === null) return null;
+  if (width <= 0 || height <= 0) return null;
+
+  const x1 = clamp(Math.round(left), 0, bounds.width);
+  const y1 = clamp(Math.round(top), 0, bounds.height);
+  const x2 = clamp(Math.round(left + width), 0, bounds.width);
+  const y2 = clamp(Math.round(top + height), 0, bounds.height);
+  if (x2 <= x1 || y2 <= y1) return null;
+  return {
+    x: x1,
+    y: y1,
+    width: x2 - x1,
+    height: y2 - y1,
+  };
+}
+
+function safeShapeNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function safeDelta(value: unknown): number {
@@ -447,6 +708,26 @@ function moveLauncherWindow(event: IpcMainInvokeEvent, rawDeltaX: unknown, rawDe
   return true;
 }
 
+function launcherPointerState(mode: unknown): { ok: boolean; x: number; y: number; width: number; height: number; inside: boolean; updated_at: number } {
+  const modeId = normalizeMode(mode);
+  if (!modeWindow || modeWindow.isDestroyed() || activeMode !== modeId) {
+    return { ok: false, x: 0, y: 0, width: 0, height: 0, inside: false, updated_at: Date.now() / 1000 };
+  }
+  const point = screen.getCursorScreenPoint();
+  const bounds = modeWindow.getBounds();
+  const x = point.x - bounds.x;
+  const y = point.y - bounds.y;
+  return {
+    ok: true,
+    x,
+    y,
+    width: bounds.width,
+    height: bounds.height,
+    inside: x >= 0 && y >= 0 && x <= bounds.width && y <= bounds.height,
+    updated_at: Date.now() / 1000,
+  };
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
@@ -457,6 +738,12 @@ async function fetchUiSettings(): Promise<UiSettings> {
   const response = await fetch(`${BRIDGE_URL}/ui/settings`);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return (await response.json()) as UiSettings;
+}
+
+async function fetchInstallInfo(): Promise<InstallInfoPayload> {
+  const response = await fetch(`${BRIDGE_URL}/hermes/install-info`);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return (await response.json()) as InstallInfoPayload;
 }
 
 async function waitForUiSettings(): Promise<UiSettings | null> {
@@ -470,8 +757,24 @@ async function waitForUiSettings(): Promise<UiSettings | null> {
   return null;
 }
 
-async function openConfiguredDesktopMode(preferredMode?: ModeId): Promise<void> {
-  const settings = await waitForUiSettings();
+async function waitForInstallInfo(): Promise<InstallInfoPayload | null> {
+  for (let attempt = 0; attempt < BRIDGE_SETTINGS_RETRIES; attempt += 1) {
+    try {
+      return await fetchInstallInfo();
+    } catch {
+      await delay(BRIDGE_SETTINGS_RETRY_MS);
+    }
+  }
+  return null;
+}
+
+function installReady(payload: InstallInfoPayload | null): boolean {
+  return Boolean(payload?.hermes_ready || payload?.install_info?.status === 'ready');
+}
+
+async function openConfiguredDesktopMode(preferredMode?: ModeId, settingsOverride?: UiSettings | null): Promise<void> {
+  const settings = settingsOverride || await waitForUiSettings();
+  if (settings) lastUiSettings = settings;
   const mode = preferredMode || normalizeMode(settings?.display?.current_mode);
   const config = settings?.mode_settings?.[mode]?.config || {};
   createDesktopModeWindow(mode, config);
@@ -491,6 +794,10 @@ async function showOpenDialogForSender(
 
 ipcMain.handle('hermes:getBridgeUrl', () => BRIDGE_URL);
 ipcMain.handle('hermes:quit', () => {
+  app.quit();
+});
+ipcMain.handle('hermes:restartApp', () => {
+  app.relaunch();
   app.quit();
 });
 ipcMain.handle('hermes:copyText', (_event, value: unknown) => {
@@ -526,6 +833,12 @@ ipcMain.handle('hermes:openView', (_event, view: unknown, params: unknown) => {
 });
 ipcMain.handle('hermes:openDesktopMode', (_event, mode: unknown) => openConfiguredDesktopMode(normalizeMode(mode)));
 ipcMain.handle('hermes:moveLauncherWindow', moveLauncherWindow);
+ipcMain.handle('hermes:getLauncherPointerState', (_event, mode: unknown) => launcherPointerState(mode));
+ipcMain.handle('hermes:setLauncherHitRegions', (event, mode: unknown, regions: unknown) => {
+  const targetWindow = BrowserWindow.fromWebContents(event.sender);
+  if (!targetWindow || targetWindow !== modeWindow) return false;
+  return setModeWindowHitRegions(normalizeMode(mode), regions);
+});
 ipcMain.handle('hermes:setLauncherPointerInteractive', (event, mode: unknown, interactive: unknown) => {
   const targetWindow = BrowserWindow.fromWebContents(event.sender);
   if (!targetWindow || targetWindow !== modeWindow) return false;
@@ -553,13 +866,24 @@ ipcMain.handle('hermes:openLauncherMenu', (event, mode: unknown) => {
 });
 
 app.whenReady().then(() => {
+  showMacDockIcon();
   startBackend();
-  createMainWindow();
-  void openConfiguredDesktopMode();
+	  void (async () => {
+	    const installInfo = await waitForInstallInfo();
+	    lastInstallReady = installReady(installInfo);
+	    if (!lastInstallReady) {
+	      createMainWindow({ view: 'installer' });
+	      return;
+	    }
+	    const settings = await waitForUiSettings();
+	    if (settings) lastUiSettings = settings;
+	    configureTray(settings);
+	    createMainWindow({}, settings, { respectStartMinimized: true, focusOnReady: false });
+	    await openConfiguredDesktopMode(undefined, settings);
+	    if (settings?.window_mode?.open_chat_on_start) showChatWindow();
+	  })();
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
-  });
+	  app.on('activate', showMainWindowFromAppActivation);
 });
 
 app.on('before-quit', stopBackend);

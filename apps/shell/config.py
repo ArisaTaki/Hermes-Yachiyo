@@ -308,15 +308,15 @@ class ModelState(StrEnum):
         NOT_CONFIGURED  → 填写 model_name + model_path
         PATH_INVALID    → 创建或修正目录
         PATH_NOT_LIVE2D → 在目录内放入 .moc3 / .model3.json 文件
-        PATH_VALID      → live2d_renderer.py 实现后自动升级
-        LOADED          （未来，由 Live2DRenderer 设置）
+        PATH_VALID      → renderer 可尝试加载模型
+        LOADED          → renderer 已确认加载模型
     """
 
     NOT_CONFIGURED  = "not_configured"   # model_name 或 model_path 为空
     PATH_INVALID    = "path_invalid"     # 路径已填写但目录不存在
     PATH_NOT_LIVE2D = "path_not_live2d"  # 目录存在但不含 Live2D 模型文件
-    PATH_VALID      = "path_valid"       # 目录含模型文件，渲染器尚未实现
-    LOADED          = "loaded"           # 渲染器已加载模型（未来）
+    PATH_VALID      = "path_valid"       # 目录含模型文件，renderer 可尝试加载
+    LOADED          = "loaded"           # renderer 已加载模型
 
 
 # Live2D Cubism 模型目录的特征文件（glob 模式）
@@ -348,9 +348,9 @@ class ModelSummary:
     """从模型目录扫描得到的最小摘要信息。
 
     仅做文件名级别的静态扫描，不加载任何数据。
-    供设置页和状态条展示用，真正解析由未来 Live2DRenderer 负责。
+    供设置页、状态条和 Electron Live2D renderer 入口解析使用。
 
-    主候选字段（primary_*_abs）是未来 Live2DRenderer 的入口输入：
+    主候选字段（primary_*_abs）是 Live2D renderer 的入口输入：
       - Live2DRenderer 通常以 .model3.json 为唯一入口
       - .moc3 路径由 model3.json 内部引用，此处仅作冗余提示
     """
@@ -361,7 +361,7 @@ class ModelSummary:
     subdir_name: str = ""          # 子目录名（found_in_subdir=True 时）
     extra_moc3_count: int = 0      # 额外 .moc3 数量（多模型目录提示）
 
-    # 主候选绝对路径 — 供未来 Live2DRenderer 直接消费
+    # 主候选绝对路径 — 供 Live2D renderer 直接消费
     primary_model3_json_abs: str = ""  # .model3.json 的绝对路径，渲染器首选入口
     primary_moc3_abs: str = ""         # .moc3 的绝对路径，model3.json 引用的兜底
     expressions: list[dict[str, str]] = field(default_factory=list)
@@ -578,7 +578,7 @@ class BackupConfig:
 class Live2DModeConfig:
     """Live2D 模式配置骨架。
 
-    当前阶段仍是角色聊天壳，保留未来 renderer / moc3 / 动作系统的接入位。
+    Electron 前端会根据这些配置加载模型、控制窗口行为，并在资源不可用时回退到静态预览。
     """
 
     model_name: str = ""  # 角色模型名，空字符串表示使用自动检测名称

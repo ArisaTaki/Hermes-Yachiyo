@@ -50,7 +50,7 @@ _MODE_CATALOG: dict[str, ModeDescriptor] = {
         id="live2d",
         name="Live2D 模式",
         icon="🎭",
-        description="角色聊天壳，保留未来 Live2D renderer 接入位",
+        description="角色聊天壳，支持 Live2D 模型加载、回复气泡、快捷输入和预览回退",
         settings_title="Live2D 设置",
         settings_description="控制角色窗口、模型路径、角色交互行为与聊天壳偏好。",
     ),

@@ -7,6 +7,7 @@ import {
   chooseLive2DModelDirectory,
   hasDesktopFilePicker,
   openExternalUrl,
+  openDesktopMode,
   openPath,
 } from '../lib/bridge';
 import { currentParam, navigateTo } from '../lib/view';
@@ -38,7 +39,14 @@ type SettingsUpdateResult = {
   ok?: boolean;
   error?: string;
   errors?: string[];
-  effects?: { hint?: string };
+  effects?: {
+    hint?: string;
+    has_restart_mode?: boolean;
+    has_restart_bridge?: boolean;
+    has_restart_app?: boolean;
+  };
+  mode_switch_scheduled?: boolean;
+  target_display_mode?: string;
   restart_scheduled?: boolean;
 };
 type Live2DResourceActionResult = SettingsUpdateResult & {
@@ -202,7 +210,12 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
       setPayload(data);
       setForm(formFromModeSettings(data, specs));
       const hint = result.effects?.hint ? `，${result.effects.hint}` : '';
-      setStatus(result.restart_scheduled ? '已保存，正在重启应用…' : `已保存${hint}`);
+      if (result.effects?.has_restart_mode) {
+        await openDesktopMode(mode);
+        setStatus(`已保存，并已重新打开 ${modeLabel(mode)} 表现态`);
+      } else {
+        setStatus(result.restart_scheduled ? '已保存，正在重启应用…' : `已保存${hint}`);
+      }
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '保存失败');
     } finally {
@@ -645,12 +658,22 @@ function GeneralSettingsView() {
     setStatus('保存中…');
     setSaving(true);
     try {
-      const result = await apiPost<{ ok?: boolean; error?: string; errors?: string[] }>('/ui/settings', { changes: nextChanges });
+      const result = await apiPost<SettingsUpdateResult>('/ui/settings', { changes: nextChanges });
       if (result.ok === false) throw new Error(result.error || result.errors?.join('；') || '保存失败');
       const data = await apiGet<GeneralSettingsPayload>('/ui/settings');
       setPayload(data);
       setForm(formFromGeneralSettings(data));
-      setStatus('已保存');
+      if (result.mode_switch_scheduled || typeof nextChanges.display_mode === 'string') {
+        const targetMode = String(result.target_display_mode || nextChanges.display_mode || data.display?.current_mode || 'bubble');
+        await openDesktopMode(targetMode);
+        setStatus(`已保存，表现态已切换到 ${modeLabel(targetMode)}`);
+      } else if (result.effects?.has_restart_bridge) {
+        setStatus('已保存；Bridge 配置需要点击“应用配置并重启 Bridge”后生效');
+      } else if (result.effects?.has_restart_app) {
+        setStatus(`已保存，${result.effects.hint || '部分配置将在下次启动后生效'}`);
+      } else {
+        setStatus(result.effects?.hint ? `已保存，${result.effects.hint}` : '已保存');
+      }
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '保存失败');
     } finally {
@@ -1082,6 +1105,10 @@ function listValue(items?: string[]): string {
   return items?.length ? items.join('、') : '—';
 }
 
+function modeLabel(mode: string) {
+  return mode === 'live2d' ? 'Live2D' : 'Bubble';
+}
+
 function workspaceDirs(dirs?: Record<string, string>): string {
   if (!dirs) return '—';
   const parts = Object.entries(dirs).filter(([, value]) => Boolean(value));
@@ -1473,4 +1500,3 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
     ],
   },
 ];
-

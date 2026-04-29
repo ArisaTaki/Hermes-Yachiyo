@@ -157,10 +157,9 @@ def test_settings_data_exposes_mode_settings_summaries(tmp_path, monkeypatch):
         store.close()
 
 
-def test_display_mode_change_schedules_app_restart(tmp_path, monkeypatch):
+def test_display_mode_change_schedules_mode_switch(tmp_path, monkeypatch):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _RuntimeStub(store)
-    restarted = []
     try:
         monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
         monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
@@ -168,16 +167,16 @@ def test_display_mode_change_schedules_app_restart(tmp_path, monkeypatch):
             "apps.shell.main_api.get_integration_snapshot",
             lambda config, boot: _fake_snapshot(),
         )
-        monkeypatch.setattr("apps.shell.window.request_app_restart", lambda: restarted.append(True))
 
         config = AppConfig(display_mode="bubble")
         api = MainWindowAPI(runtime, config)
         result = api.update_settings({"display_mode": "live2d"})
 
         assert result["ok"] is True
-        assert result["restart_scheduled"] is True
-        assert result["restart_reason"] == "display_mode_changed"
-        assert restarted == [True]
+        assert result["mode_switch_scheduled"] is True
+        assert result["target_display_mode"] == "live2d"
+        assert result["effects"]["has_restart_mode"] is True
+        assert result["effects"]["has_restart_app"] is False
         assert config.display_mode == "live2d"
     finally:
         store.close()

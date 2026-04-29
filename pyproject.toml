@@ -20,7 +20,7 @@ dev = [
 [project.scripts]
 hermes-yachiyo = "apps.desktop_launcher:main"
 hermes-yachiyo-backend = "apps.desktop_backend.app:main"
-hermes-yachiyo-legacy-pywebview = "apps.shell.app:main"
+hermes-yachiyo-legacy-pywebview = "apps.shell.app:legacy_main"
 
 [tool.ruff]
 target-version = "py311"

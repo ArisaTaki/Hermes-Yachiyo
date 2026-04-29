@@ -19,14 +19,18 @@ from apps.shell.chat_bridge import ChatBridge
 from apps.shell.launcher_notifications import LauncherNotificationTracker
 from apps.shell.live2d_resources import import_live2d_archive_draft
 from apps.shell.live2d_resources import prepare_live2d_model_path_draft
+from apps.shell.installer_api import InstallerWebViewAPI
 from apps.shell.main_api import MainWindowAPI
 from apps.shell.mode_settings import apply_settings_changes
 from apps.shell.mode_settings import serialize_mode_window_data
 from apps.shell.proactive import ProactiveDesktopService
+from apps.shell.tts import TTSService
 
 router = APIRouter(prefix="/ui", tags=["UI"])
 _launcher_notifications: dict[str, LauncherNotificationTracker] = {}
 _launcher_proactive_services: dict[tuple[str, int], ProactiveDesktopService] = {}
+_launcher_tts_services: dict[int, TTSService] = {}
+_launcher_last_tts_reply: dict[int, str] = {}
 
 
 class SendChatMessageRequest(BaseModel):
@@ -169,6 +173,53 @@ async def run_uninstall(request: UninstallRunRequest) -> dict[str, Any]:
     )
 
 
+@router.post("/installer/install")
+async def start_hermes_install() -> dict[str, Any]:
+    return InstallerWebViewAPI().install_hermes()
+
+
+@router.get("/installer/install/progress")
+async def get_hermes_install_progress() -> dict[str, Any]:
+    return InstallerWebViewAPI().get_install_progress()
+
+
+@router.post("/installer/workspace/initialize")
+async def initialize_workspace() -> dict[str, Any]:
+    return InstallerWebViewAPI().initialize_workspace()
+
+
+@router.get("/installer/backup/status")
+async def get_installer_backup_status() -> dict[str, Any]:
+    return InstallerWebViewAPI().get_backup_status()
+
+
+@router.post("/installer/backup/import")
+async def import_installer_backup() -> dict[str, Any]:
+    return InstallerWebViewAPI().import_backup()
+
+
+@router.post("/installer/hermes/setup-terminal")
+async def open_installer_setup_terminal() -> dict[str, Any]:
+    return InstallerWebViewAPI().open_hermes_setup_terminal()
+
+
+@router.get("/installer/hermes/setup-process")
+async def get_installer_setup_process() -> dict[str, Any]:
+    return InstallerWebViewAPI().check_setup_process()
+
+
+@router.post("/installer/status/recheck")
+async def recheck_installer_status() -> dict[str, Any]:
+    runtime = get_runtime()
+    result = InstallerWebViewAPI().recheck_status()
+    try:
+        runtime.refresh_hermes_installation()
+        result["executor_refresh"] = runtime.refresh_task_runner_executor()
+    except Exception as exc:
+        result["refresh_error"] = str(exc)
+    return result
+
+
 @router.post("/live2d/model-path/prepare")
 async def prepare_live2d_model_path(request: Live2DResourcePathRequest) -> dict[str, Any]:
     runtime = get_runtime()
@@ -199,6 +250,11 @@ async def get_chat_session() -> dict[str, Any]:
 @router.post("/chat/session/clear")
 async def clear_chat_session() -> dict[str, Any]:
     return ChatAPI(get_runtime()).clear_session()
+
+
+@router.post("/chat/session/cancel")
+async def cancel_chat_session_tasks() -> dict[str, Any]:
+    return ChatAPI(get_runtime()).cancel_current_tasks()
 
 
 @router.post("/chat/session/delete")
@@ -337,6 +393,8 @@ def _live2d_renderer_payload(app_config: Any, resource: dict[str, Any]) -> dict[
     else:
         reason = ""
     live2d = app_config.live2d_mode
+    resource_info = getattr(live2d, "resource_info", None)
+    summary = getattr(resource_info(), "summary", None) if callable(resource_info) else None
     return {
         "enabled": enabled,
         "model_url": model_url,
@@ -346,7 +404,29 @@ def _live2d_renderer_payload(app_config: Any, resource: dict[str, Any]) -> dict[
         "idle_motion_group": getattr(live2d, "idle_motion_group", "Idle"),
         "enable_expressions": getattr(live2d, "enable_expressions", False),
         "enable_physics": getattr(live2d, "enable_physics", False),
+        "expressions": getattr(summary, "expressions", []) if summary else [],
+        "motion_groups": getattr(summary, "motion_groups", {}) if summary else {},
     }
+
+
+def _maybe_trigger_live2d_tts(runtime: Any, chat: dict[str, Any]) -> dict[str, Any]:
+    config = runtime.config
+    tts_config = getattr(config, "tts", None)
+    if tts_config is None:
+        return {"enabled": False, "provider": "none", "ok": True, "message": "TTS 未启用"}
+    key = id(runtime)
+    service = _launcher_tts_services.setdefault(key, TTSService(tts_config))
+    if not getattr(tts_config, "enabled", False) or getattr(tts_config, "provider", "none") == "none":
+        return service.get_status()
+    latest_reply = str(chat.get("latest_reply_full") or chat.get("latest_reply") or "").strip()
+    if not latest_reply:
+        return service.get_status()
+    if latest_reply == _launcher_last_tts_reply.get(key, ""):
+        return service.get_status()
+    status = service.speak_async(latest_reply)
+    if status.get("scheduled"):
+        _launcher_last_tts_reply[key] = latest_reply
+    return status
 
 
 @router.get("/launcher")
@@ -354,6 +434,7 @@ async def get_launcher_view(mode: str = "bubble") -> dict[str, Any]:
     runtime = get_runtime()
     mode_id = "live2d" if mode == "live2d" else "bubble"
     bridge = ChatBridge(runtime)
+    tts_status: dict[str, Any] = {}
     if mode_id == "live2d":
         live2d_config = runtime.config.live2d_mode
         summary_count = 3
@@ -385,6 +466,8 @@ async def get_launcher_view(mode: str = "bubble") -> dict[str, Any]:
         }
 
     chat = bridge.get_conversation_overview(summary_count=summary_count, session_limit=3)
+    if mode_id == "live2d":
+        tts_status = _maybe_trigger_live2d_tts(runtime, chat)
     tracker = _launcher_notifications.setdefault(mode_id, LauncherNotificationTracker())
     notification = tracker.update(chat, external_attention=bool(proactive.get("has_attention")))
     latest_status = "ready"
@@ -403,6 +486,7 @@ async def get_launcher_view(mode: str = "bubble") -> dict[str, Any]:
         "chat": chat,
         "proactive": proactive,
         "notification": notification,
+        "tts": tts_status,
         "launcher": {
             **launcher_config,
             "has_attention": bool(notification.get("has_unread")),

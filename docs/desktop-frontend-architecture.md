@@ -35,7 +35,8 @@ silently moving Electron and Vite to different URLs.
 
 - `apps/frontend/electron/main.ts`: Electron main process and Python backend
   process manager.
-- `apps/frontend/electron/preload.ts`: narrow IPC surface exposed to renderer.
+- `apps/frontend/electron/preload.cts`: CommonJS preload that exposes the narrow
+  IPC surface to renderer.
 - `apps/frontend/src/lib/bridge.ts`: typed fetch helpers for local HTTP Bridge.
 - `apps/frontend/src/lib/view.ts`: hash-route helpers shared by renderer views.
 - `apps/frontend/src/views/`: React screens for dashboard, chat, installer,
@@ -100,6 +101,12 @@ This preserves the old pywebview behavior where clicking Bubble or Live2D opens
 the shared chat surface instead of rendering a full app page inside a tiny
 transparent window.
 
+The Electron main process also mirrors the remaining legacy shell startup
+contracts: the main window reads `window_mode.width` / `height`, honors
+`app.start_minimized` at launch, optionally opens the Chat Window through
+`window_mode.open_chat_on_start`, and creates an Electron-native tray menu when
+`app.tray_enabled` is enabled.
+
 The UI Bridge exposes legacy settings operations through HTTP routes rather than
 duplicating business logic in React. Dashboard/settings renderer actions that
 restart Bridge, recheck Hermes, open Hermes terminal commands, create/restore
@@ -132,8 +139,11 @@ clickable and context-menu friendly first. The Live2D stage, character, resource
 hint, reply bubble, and quick input are explicitly marked as Electron `no-drag`
 regions so normal clicks are not swallowed by the transparent drag window. Set
 `HERMES_YACHIYO_LIVE2D_POINTER_PASSTHROUGH=1` to test the alpha-mask passthrough
-path. The remaining Live2D parity work is real-model manual validation, global
-mouse-follow behavior, and motion/expression detail.
+path. Electron now supplies global cursor position to the renderer for
+window-outside mouse-follow, and the React launcher uses model manifest metadata
+to trigger idle motion and first available expression on new replies. The
+remaining Live2D parity work is real-model manual validation across multiple
+resource packages and deeper per-model motion/expression tuning.
 
 Launcher context menus are Electron-native and exposed through the narrow
 preload IPC surface. Renderer code should request the menu; it should not build

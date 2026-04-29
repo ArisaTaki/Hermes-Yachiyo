@@ -1,6 +1,6 @@
-import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { FormEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from 'react';
 
-import { apiGet, apiPost, copyText, openAppView } from '../lib/bridge';
+import { apiGet, apiPost, copyText, openAppView, openExternalUrl } from '../lib/bridge';
 
 type ChatMessage = {
   id?: string;
@@ -58,6 +58,7 @@ export function ChatView() {
   const [copiedMessageId, setCopiedMessageId] = useState('');
   const [, setRenderTick] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const renderStateRef = useRef<Map<string, RenderState>>(new Map());
   const animationFrameRef = useRef<number | null>(null);
   const typewriterLastTsRef = useRef(0);
@@ -123,6 +124,22 @@ export function ChatView() {
       if (animationFrameRef.current !== null) window.cancelAnimationFrame(animationFrameRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        void clearSession();
+      } else if ((event.metaKey || event.ctrlKey) && event.key === '.') {
+        event.preventDefault();
+        void cancelProcessing();
+      } else if (event.key === 'Escape') {
+        inputRef.current?.focus();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
 
   function startTypewriter() {
     if (animationFrameRef.current !== null) return;
@@ -201,6 +218,20 @@ export function ChatView() {
     }
   }
 
+  async function cancelProcessing() {
+    if (!isProcessing) return;
+    try {
+      const result = await apiPost<MessagesPayload & { cancelled_tasks?: number }>('/ui/chat/session/cancel');
+      if (result.ok === false) throw new Error(result.error || '取消失败');
+      setMessages(result.messages || []);
+      setIsProcessing(Boolean(result.is_processing));
+      setStatus(result.cancelled_tasks ? `已取消 ${result.cancelled_tasks} 个任务` : '没有可取消任务');
+      await loadSessions();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '取消失败');
+    }
+  }
+
   async function deleteSession() {
     if (!window.confirm('删除此对话？此操作不可恢复。')) return;
     try {
@@ -245,6 +276,13 @@ export function ChatView() {
     }
   }
 
+  function handleMessageListClick(event: ReactMouseEvent<HTMLDivElement>) {
+    const anchor = (event.target instanceof Element ? event.target.closest('a[href]') : null) as HTMLAnchorElement | null;
+    if (!anchor) return;
+    event.preventDefault();
+    void openExternalUrl(anchor.href);
+  }
+
   return (
     <main className="app-shell chat-shell refined-chat-shell">
       <header className="chat-topbar">
@@ -268,12 +306,13 @@ export function ChatView() {
           </select>
           <span className="executor-badge">{executorLabel(executor)}</span>
           <button type="button" className="ghost-button" onClick={() => void openAppView('main')}>主控台</button>
+          <button type="button" className="ghost-button" onClick={() => void cancelProcessing()} disabled={!isProcessing}>停止</button>
           <button type="button" className="ghost-button" onClick={() => void clearSession()}>新对话</button>
           <button type="button" className="ghost-button danger-action" onClick={() => void deleteSession()} disabled={!sessions?.sessions?.length}>删除</button>
         </div>
       </header>
 
-      <section className="chat-list refined-chat-list" ref={listRef} onScroll={handleScroll}>
+      <section className="chat-list refined-chat-list" ref={listRef} onClick={handleMessageListClick} onScroll={handleScroll}>
         {messages.length === 0 ? <div className="empty-state">发送消息开始对话</div> : null}
         {messages.map((message, index) => (
           <MessageBubble
@@ -288,6 +327,7 @@ export function ChatView() {
 
       <form className="composer refined-composer" onSubmit={submit}>
         <input
+          ref={inputRef}
           value={input}
           onChange={(event) => setInput(event.target.value)}
           placeholder="输入消息..."

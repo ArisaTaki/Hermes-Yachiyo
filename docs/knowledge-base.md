@@ -24,7 +24,7 @@ When launched locally, Hermes-Yachiyo should eventually support:
 - tray or window entry
 - configurable display mode
 - bubble mode
-- Live2D mode or reserved support for it
+- Live2D mode with renderer-backed model loading when assets are available
 - settings page or WebUI
 - local runtime execution
 - optional remote access through AstrBot bridge
@@ -35,7 +35,7 @@ Hermes-Yachiyo now treats the desktop product as three parallel shell modes inst
 
 - **Window Mode**: control center, dashboard, mode switch entry, settings entry, recent session/message overview
 - **Bubble Mode**: lightweight always-available floating chat shell with short input and recent reply summary
-- **Live2D Mode**: character chat shell with recent reply bubble and future renderer integration slot
+- **Live2D Mode**: character chat shell with recent reply bubble, quick input, renderer-backed model loading, and preview fallback
 - **Chat Window**: shared full conversation space that all three modes can open
 
 All four surfaces must use the same chat/session/task runtime and must not fork independent assistant state.

@@ -1,6 +1,19 @@
 import { currentView, routePath, type AppView } from './view';
 
 export type ApiRecord = Record<string, unknown>;
+export type LauncherHitRegionRect = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+export type LauncherHitRegionPayload = {
+  regions: LauncherHitRegionRect[];
+  viewport: {
+    width: number;
+    height: number;
+  };
+};
 
 declare global {
   interface Window {
@@ -9,6 +22,7 @@ declare global {
       chooseLive2DModelDirectory?: () => Promise<string | null>;
       copyText?: (text: string) => Promise<void>;
       getBridgeUrl: () => Promise<string>;
+      getLauncherPointerState?: (mode: string) => Promise<{ ok?: boolean; x?: number; y?: number; width?: number; height?: number; inside?: boolean; updated_at?: number }>;
       moveLauncherWindow?: (deltaX: number, deltaY: number) => Promise<boolean>;
       openDesktopMode?: (mode?: string) => Promise<void>;
       openExternalUrl?: (url: string) => Promise<void>;
@@ -16,6 +30,8 @@ declare global {
       openPath?: (path: string) => Promise<void>;
       openView?: (view: string, params?: Record<string, string>) => Promise<void>;
       quit: () => Promise<void>;
+      restartApp?: () => Promise<void>;
+      setLauncherHitRegions?: (mode: string, payload: LauncherHitRegionPayload) => Promise<boolean>;
       setLauncherPointerInteractive?: (mode: string, interactive: boolean) => Promise<boolean>;
     };
   }
@@ -74,9 +90,10 @@ export async function openAppView(
   }
   const targetUrl = appViewUrl(view, params);
   if (isLauncherView()) {
-    const opened = window.open(targetUrl, '_blank', 'noopener,noreferrer');
-    if (opened) return;
-    console.warn(`无法从表现态窗口打开 ${targetUrl}`);
+    const opened = window.open(targetUrl, '_blank');
+    if (!opened && !navigator.userAgent.includes('Electron')) {
+      location.assign(targetUrl);
+    }
     return;
   }
   location.assign(targetUrl);
@@ -114,6 +131,15 @@ export async function moveLauncherWindow(deltaX: number, deltaY: number): Promis
   if (window.hermesDesktop?.moveLauncherWindow) {
     await window.hermesDesktop.moveLauncherWindow(deltaX, deltaY);
   }
+}
+
+export async function getLauncherPointerState(
+  mode: string,
+): Promise<{ ok?: boolean; x?: number; y?: number; width?: number; height?: number; inside?: boolean; updated_at?: number }> {
+  if (window.hermesDesktop?.getLauncherPointerState) {
+    return window.hermesDesktop.getLauncherPointerState(mode);
+  }
+  return { ok: false, inside: false, x: 0, y: 0 };
 }
 
 export async function chooseLive2DModelDirectory(): Promise<string | null> {
@@ -158,6 +184,22 @@ export async function setLauncherPointerInteractive(
   }
 }
 
+export async function setLauncherHitRegions(
+  mode: string,
+  regions: LauncherHitRegionRect[],
+): Promise<boolean> {
+  if (window.hermesDesktop?.setLauncherHitRegions) {
+    return window.hermesDesktop.setLauncherHitRegions(mode, {
+      regions,
+      viewport: {
+        width: Math.max(window.innerWidth || 1, 1),
+        height: Math.max(window.innerHeight || 1, 1),
+      },
+    });
+  }
+  return false;
+}
+
 export async function copyText(text: string): Promise<void> {
   if (window.hermesDesktop?.copyText) {
     await window.hermesDesktop.copyText(text);
@@ -186,6 +228,14 @@ export async function quitApp(): Promise<void> {
     return;
   }
   window.close();
+}
+
+export async function restartApp(): Promise<void> {
+  if (window.hermesDesktop?.restartApp) {
+    await window.hermesDesktop.restartApp();
+    return;
+  }
+  window.location.reload();
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {

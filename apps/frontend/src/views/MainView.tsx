@@ -9,18 +9,16 @@ type StatusRecord = {
   blockers?: string[];
 };
 
-type ChatMessage = {
-  role?: string;
-  content?: string;
-  status?: string;
-  created_at?: string;
-};
-
 type ChatSession = {
   session_id?: string;
   title?: string;
   message_count?: number;
   is_current?: boolean;
+  summary?: string;
+  latest_role?: string;
+  latest_status?: string;
+  updated_at?: string;
+  created_at?: string;
 };
 
 type DashboardData = {
@@ -43,7 +41,6 @@ type DashboardData = {
     status_label?: string;
     is_processing?: boolean;
     empty?: boolean;
-    messages?: ChatMessage[];
     recent_sessions?: ChatSession[];
     executor?: string;
     session_id?: string;
@@ -175,10 +172,9 @@ export function MainView() {
         <article className="panel chat-overview-panel">
           <div className="section-heading-row">
             <h2>会话中心</h2>
-            <span>{data?.chat?.status_label || '读取中'}</span>
+            <span>{conversationCountLabel(data?.chat?.recent_sessions, data?.chat?.status_label)}</span>
           </div>
-          <RecentMessages messages={data?.chat?.messages || []} empty={Boolean(data?.chat?.empty)} />
-          <RecentSessions sessions={data?.chat?.recent_sessions || []} />
+          <ConversationList sessions={data?.chat?.recent_sessions || []} />
           <button type="button" className="wide-action" onClick={() => void openAppView('chat')}>打开完整对话窗口</button>
         </article>
 
@@ -257,38 +253,48 @@ function IntegrationBlock({ title, item }: { title: string; item?: StatusRecord 
   );
 }
 
-function RecentMessages({ messages, empty }: { messages: ChatMessage[]; empty: boolean }) {
-  if (empty || messages.length === 0) return <div className="empty-state inline-empty">暂无消息。打开聊天窗口开始完整对话。</div>;
+function ConversationList({ sessions }: { sessions: ChatSession[] }) {
+  if (!sessions.length) {
+    return <div className="empty-state inline-empty">暂无对话。打开聊天窗口开始完整对话。</div>;
+  }
   return (
-    <div className="recent-message-list">
-      {messages.map((message, index) => (
-        <div className="recent-message" key={`${message.created_at || index}-${message.role || 'message'}`}>
-          <span>{roleLabel(message.role)} · {message.status || '—'}</span>
-          <p>{message.content || '—'}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function RecentSessions({ sessions }: { sessions: ChatSession[] }) {
-  if (!sessions.length) return null;
-  return (
-    <div className="recent-session-list">
+    <div className="conversation-list">
       {sessions.map((session) => (
-        <div className={session.is_current ? 'recent-session current' : 'recent-session'} key={session.session_id || session.title}>
-          <span>{session.title || '新对话'}</span>
-          <small>{session.message_count ?? 0} 条消息</small>
-        </div>
+        <button
+          className={session.is_current ? 'conversation-card current' : 'conversation-card'}
+          key={session.session_id || session.title}
+          type="button"
+          onClick={() => void openAppView('chat')}
+        >
+          <span className="conversation-main-row">
+            <strong>{session.title || '新对话'}</strong>
+            {session.is_current ? <span className="conversation-pill">当前</span> : null}
+          </span>
+          <span className="conversation-summary">{session.summary || '暂无摘要'}</span>
+          <span className="conversation-meta">
+            <span>{session.message_count ?? 0} 条消息</span>
+            <span>{formatConversationStatus(session)}</span>
+          </span>
+        </button>
       ))}
     </div>
   );
 }
 
-function roleLabel(role?: string) {
-  if (role === 'assistant') return 'Yachiyo';
-  if (role === 'user') return '用户';
-  return role || '系统';
+function conversationCountLabel(sessions?: ChatSession[], fallback?: string) {
+  if (!sessions) return fallback || '读取中';
+  if (!sessions.length) return fallback || '暂无对话';
+  return `${sessions.length} 个对话`;
+}
+
+function formatConversationStatus(session: ChatSession) {
+  const status = session.latest_status;
+  if (status === 'pending') return '等待中';
+  if (status === 'processing') return '处理中';
+  if (status === 'failed') return '失败';
+  const time = formatShortDateTime(session.updated_at || session.created_at);
+  if (time !== '—') return time;
+  return status || '就绪';
 }
 
 function listOrDash(items?: string[]): string {
@@ -300,6 +306,13 @@ function formatDateTime(value?: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
+}
+
+function formatShortDateTime(value?: string) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 function formatUptime(seconds?: number) {

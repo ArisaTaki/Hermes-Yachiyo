@@ -305,6 +305,36 @@ def test_conversation_overview_includes_recent_sessions(tmp_path):
         store.close()
 
 
+def test_conversation_overview_session_summary_combines_prompt_and_reply(tmp_path):
+    bridge, runtime, store = _make_bridge(tmp_path)
+    try:
+        greeting = bridge.send_quick_message("早")
+        runtime.state.update_task_status(greeting["task_id"], TaskStatus.RUNNING)
+        runtime.state.update_task_status(greeting["task_id"], TaskStatus.COMPLETED, result="早上好。")
+
+        result = bridge.send_quick_message("我想看 AI 数据中心那条新闻的详细信息")
+        runtime.state.update_task_status(result["task_id"], TaskStatus.RUNNING)
+        runtime.state.update_task_status(
+            result["task_id"],
+            TaskStatus.COMPLETED,
+            result="这条新闻主要讲数据中心扩建、芯片采购和电力约束。",
+        )
+
+        overview = bridge.get_conversation_overview(summary_count=2, session_limit=3)
+        session = overview["recent_sessions"][0]
+
+        assert session["summary"].startswith("用户：")
+        assert "AI 数据中心" in session["summary"]
+        assert "用户：早；" not in session["summary"]
+        assert "回复：" in session["summary"]
+        assert "电力约束" in session["summary"]
+        assert session["latest_role"] == "assistant"
+        assert session["latest_status"] == "completed"
+        assert session["updated_at"]
+    finally:
+        store.close()
+
+
 # ── 失败状态 ──────────────────────────────────────────────────────────────────
 
 def test_failed_task_in_summary(tmp_path):
