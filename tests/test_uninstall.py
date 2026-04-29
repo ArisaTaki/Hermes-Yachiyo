@@ -77,7 +77,7 @@ def test_yachiyo_only_plan_includes_config_and_workspace(tmp_path, monkeypatch):
     assert plan.backup.enabled is True
     assert plan.to_dict()["existing_count"] == 2
     assert plan.to_dict()["removable_count"] == 2
-    assert BackupPlan.__doc__ == "卸载前备份计划。"
+    assert BackupPlan.__doc__ == "卸载前资料备份计划。"
 
 
 def test_execute_yachiyo_only_creates_backup_and_removes_targets(tmp_path, monkeypatch):
@@ -122,6 +122,10 @@ def test_execute_yachiyo_only_creates_backup_and_removes_targets(tmp_path, monke
     assert "manifest.json" in names
     assert "entries" in manifest
     assert "copied" not in manifest
+    assert "source_app_config_dir" not in manifest
+    assert "source_hermes_home" not in manifest
+    assert "source_yachiyo_workspace" not in manifest
+    assert all("source" not in entry for entry in manifest["entries"])
     assert "app-config/config.json" in names
     assert "yachiyo-workspace/configs/yachiyo.json" in names
     assert "yachiyo-workspace/templates/default.json" in names
@@ -408,6 +412,29 @@ def test_import_backup_rejects_duplicate_zip_entries(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="重复条目"):
         import_backup(archive_path)
+
+
+def test_replace_path_rolls_back_when_move_to_target_fails(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.write_text("new", encoding="utf-8")
+    target = tmp_path / "target"
+    target.write_text("old", encoding="utf-8")
+
+    real_move = backup_mod.shutil.move
+    call_count = {"count": 0}
+
+    def flaky_move(src, dst):
+        call_count["count"] += 1
+        if call_count["count"] == 2:
+            raise OSError("simulated move failure")
+        return real_move(src, dst)
+
+    monkeypatch.setattr(backup_mod.shutil, "move", flaky_move)
+
+    with pytest.raises(OSError, match="simulated move failure"):
+        backup_mod._replace_path(source, target)
+
+    assert target.read_text(encoding="utf-8") == "old"
 
 
 def test_import_backup_skips_workspace_restore_outside_home(tmp_path, monkeypatch):

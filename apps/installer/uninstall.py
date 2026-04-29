@@ -18,7 +18,6 @@ from apps.shell.assets import project_display_path
 logger = logging.getLogger(__name__)
 
 UNINSTALL_CONFIRM_PHRASE = "UNINSTALL"
-BACKUP_DIR_NAME = backup_mod.BACKUP_DIR_NAME
 
 
 class UninstallScope(StrEnum):
@@ -47,7 +46,7 @@ class UninstallTarget:
 
 @dataclass(frozen=True)
 class BackupPlan:
-    """卸载前备份计划。"""
+    """卸载前资料备份计划。"""
 
     enabled: bool
     backup_root: str

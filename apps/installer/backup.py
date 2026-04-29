@@ -308,7 +308,6 @@ def create_backup(
                 copied.append({
                     "id": source_id,
                     "label": label,
-                    "source": str(source_path),
                     "target": target_name,
                 })
 
@@ -321,9 +320,6 @@ def create_backup(
             "format": "zip",
             "created_at": datetime.now(timezone.utc).isoformat(),
             "scope": source_context,
-            "source_app_config_dir": str(_app_config_dir()),
-            "source_hermes_home": str(_hermes_home_dir()),
-            "source_yachiyo_workspace": str(_yachiyo_workspace_dir()),
             "entries": copied,
             "note": (
                 "此备份包含 Hermes-Yachiyo 应用配置与 Yachiyo 工作空间，"
@@ -556,14 +552,6 @@ def resolve_managed_backup_path(
     return path
 
 
-def _resolve_managed_backup_path(
-    backup_path: str | Path,
-    *,
-    backup_root: str | Path | None = None,
-) -> Path:
-    return resolve_managed_backup_path(backup_path, backup_root=backup_root)
-
-
 def delete_backup(
     backup_path: str | Path,
     *,
@@ -586,9 +574,36 @@ def _remove_path(path: Path) -> None:
 def _replace_path(source: Path, target: Path) -> bool:
     if not _path_exists(source):
         return False
-    if _path_exists(target):
-        _remove_path(target)
-    return _copy_path(source, target)
+    target_parent = target.parent
+    target_parent.mkdir(parents=True, exist_ok=True)
+
+    staging_root = Path(tempfile.mkdtemp(prefix=f".{target.name}.staging-", dir=str(target_parent)))
+    staged_target = staging_root / target.name
+    rollback_path: Path | None = None
+
+    try:
+        if not _copy_path(source, staged_target):
+            return False
+
+        if _path_exists(target):
+            rollback_path = target_parent / f".{target.name}.rollback-{next(tempfile._get_candidate_names())}"
+            shutil.move(str(target), str(rollback_path))
+
+        try:
+            shutil.move(str(staged_target), str(target))
+        except Exception:
+            if _path_exists(target):
+                _remove_path(target)
+            if rollback_path is not None and _path_exists(rollback_path):
+                shutil.move(str(rollback_path), str(target))
+            raise
+
+        if rollback_path is not None and _path_exists(rollback_path):
+            _remove_path(rollback_path)
+        return True
+    finally:
+        if _path_exists(staging_root):
+            _remove_path(staging_root)
 
 
 def _extract_zip_safely(archive_path: Path, target_dir: Path) -> None:
