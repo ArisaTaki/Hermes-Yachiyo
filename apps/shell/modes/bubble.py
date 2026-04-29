@@ -15,7 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Dict
 
-from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri
+from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri, inject_css
 from apps.shell.chat_bridge import ChatBridge
 from apps.shell.launcher_notifications import LauncherNotificationTracker
 from apps.shell.proactive import ProactiveDesktopService
@@ -202,51 +202,6 @@ _BUBBLE_HTML = r"""
             pointer-events: none;
         }
         .bubble-summary.hidden { display: none; }
-    
-        /* -------------- ELEGANT BUBBLE OVERRIDE -------------- */
-        .bubble-bg {
-            background: rgba(26, 30, 41, 0.85) !important;
-            backdrop-filter: blur(16px) !important;
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.12) !important;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
-            transition: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-        }
-        .bubble-container:hover .bubble-bg {
-            background: rgba(30, 35, 48, 0.95) !important;
-            border-color: rgba(96, 165, 250, 0.3) !important;
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45), inset 0 0 0 1px rgba(96, 165, 250, 0.2) !important;
-            transform: scale(1.02);
-        }
-        
-        .bubble-avatar {
-            filter: drop-shadow(0 2px 8px rgba(0,0,0,0.4)) !important;
-            transition: transform 0.3s ease;
-        }
-        .bubble-container:hover .bubble-avatar {
-            transform: scale(1.05) translateY(-2px);
-        }
-
-        .bubble-summary {
-            background: rgba(26, 30, 41, 0.9) !important;
-            backdrop-filter: blur(16px) !important;
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.12) !important;
-            color: #E2E8F0 !important;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3) !important;
-            font-family: "SF Pro Text", -apple-system, sans-serif !important;
-            border-radius: 12px !important;
-            padding: 10px 14px !important;
-        }
-        .bubble-summary h4 {
-            color: #60A5FA !important;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-            padding-bottom: 6px !important;
-            margin-bottom: 6px !important;
-            font-weight: 500 !important;
-        }
-        .bubble-summary ul { margin: 0; padding-left: 16px; color: #94A3B8; }
-        .bubble-summary li { margin-bottom: 4px; }
 
     </style>
 </head>
@@ -565,6 +520,8 @@ window.addEventListener('pywebviewready', bootstrap);
 </html>
 """
 
+_BUBBLE_HTML = inject_css(_BUBBLE_HTML, "styles/bubble.css")
+
 _BUBBLE_MENU_WIDTH = 156
 _BUBBLE_MENU_HEIGHT = 176
 
@@ -617,31 +574,6 @@ _BUBBLE_MENU_HTML = r"""
             outline: none;
         }
         .menu-btn.danger { color: #ffb5b5; }
-    
-        /* -------------- ELEGANT BUBBLE MENU -------------- */
-        body { font-family: "SF Pro Text", -apple-system, sans-serif !important; }
-        .menu-container {
-            background: rgba(22, 26, 35, 0.6) !important;
-            backdrop-filter: blur(20px) !important;
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1) !important;
-            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
-            border-radius: 12px !important;
-            color: #E2E8F0 !important;
-        }
-        .menu-item {
-            color: #E2E8F0 !important;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
-            transition: background 0.15s ease !important;
-            padding: 12px 14px !important;
-        }
-        .menu-item:hover {
-            background: rgba(96, 165, 250, 0.15) !important;
-        }
-        .menu-item.danger { color: #F87171 !important; }
-        .menu-item.danger:hover { background: rgba(248, 113, 113, 0.15) !important; }
-        .menu-container.show { opacity: 1 !important; transform: scale(1) translateY(0) !important; }
-        .menu-container { opacity: 0; transform: scale(0.95) translateY(5px); transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important; }
 
     </style>
 </head>
@@ -703,6 +635,8 @@ window.addEventListener('pywebviewready', bootstrapMenu);
 </body>
 </html>
 """
+
+_BUBBLE_MENU_HTML = inject_css(_BUBBLE_MENU_HTML, "styles/bubble-menu.css")
 
 
 def _event_is_set(event: Any) -> bool:

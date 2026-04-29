@@ -34,5 +34,8 @@ where = ["."]
 include = ["apps*", "packages*", "integrations*"]
 exclude = ["memory*", "tests*", "docs*"]
 
+[tool.setuptools.package-data]
+"apps.shell.ui" = ["styles/*.css"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

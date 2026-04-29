@@ -1,0 +1,53 @@
+/* Bubble launcher visual skin. Keep this lightweight and transparent. */
+:root {
+    --hy-bubble-surface: rgba(24, 27, 34, 0.9);
+    --hy-bubble-border: rgba(255, 255, 255, 0.12);
+    --hy-bubble-blue: #76a9fa;
+    --hy-bubble-green: #55c49f;
+    --hy-bubble-text: #e7edf5;
+    --hy-bubble-muted: #9aa6b5;
+}
+
+.bubble-launcher {
+    border-color: var(--hy-bubble-border) !important;
+    background: var(--hy-bubble-surface) !important;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.26) !important;
+}
+
+.bubble-launcher:hover {
+    border-color: rgba(118, 169, 250, 0.36) !important;
+    background: rgba(28, 32, 41, 0.95) !important;
+    transform: translateY(-1px);
+}
+
+.portrait {
+    background-color: rgba(255, 255, 255, 0.04) !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.status-dot.ready,
+.status-dot.completed {
+    background: var(--hy-bubble-green) !important;
+}
+
+.status-dot.processing,
+.status-dot.attention {
+    background: var(--hy-bubble-blue) !important;
+}
+
+.bubble-summary {
+    background: rgba(20, 23, 31, 0.94) !important;
+    border: 1px solid var(--hy-bubble-border) !important;
+    border-radius: 8px !important;
+    color: var(--hy-bubble-text) !important;
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.28) !important;
+}
+
+.bubble-summary h4 {
+    color: var(--hy-bubble-blue) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.bubble-summary ul {
+    color: var(--hy-bubble-muted) !important;
+}
