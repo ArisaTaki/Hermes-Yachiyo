@@ -13,6 +13,7 @@ import zipfile
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
 
@@ -97,9 +98,8 @@ def _is_relative_to(path: Path, root: Path) -> bool:
         return False
 
 
-def protected_paths() -> set[Path]:
-    """返回不允许备份恢复流程删除或替换的受保护路径集合。"""
-    home = Path.home().expanduser().resolve()
+@lru_cache(maxsize=16)
+def _protected_paths_for_home(home: Path) -> frozenset[Path]:
     candidates = {
         Path("/"),
         home,
@@ -114,7 +114,18 @@ def protected_paths() -> set[Path]:
         Path("/usr"),
         Path("/var"),
     }
-    return {path.resolve() for path in candidates if path.exists()}
+    return frozenset(path.resolve() for path in candidates if path.exists())
+
+
+def _current_protected_paths() -> frozenset[Path]:
+    home = Path.home().expanduser().resolve()
+    return _protected_paths_for_home(home)
+
+
+def protected_paths() -> set[Path]:
+    """返回不允许备份恢复流程删除或替换的受保护路径集合。"""
+    return set(_current_protected_paths())
+    return set(_protected_paths_for_home(home))
 
 
 def is_protected_path(path: Path) -> bool:
@@ -123,7 +134,7 @@ def is_protected_path(path: Path) -> bool:
         resolved = path.expanduser().resolve()
     except Exception:
         return True
-    return resolved in protected_paths()
+    return resolved in _current_protected_paths()
 
 
 def is_safe_app_config_dir(path: Path) -> tuple[bool, str]:

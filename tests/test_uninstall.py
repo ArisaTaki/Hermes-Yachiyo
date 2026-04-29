@@ -663,6 +663,31 @@ def test_public_path_safety_helpers_preserve_strict_rules(tmp_path, monkeypatch)
     assert reason == ""
 
 
+def test_protected_paths_cache_is_scoped_by_home(tmp_path, monkeypatch):
+    backup_mod._protected_paths_for_home.cache_clear()
+
+    home_one = tmp_path / "home-one"
+    home_two = tmp_path / "home-two"
+    home_one.mkdir()
+    home_two.mkdir()
+
+    monkeypatch.setenv("HOME", str(home_one))
+    first = backup_mod.protected_paths()
+    second = backup_mod.protected_paths()
+    first_cache_info = backup_mod._protected_paths_for_home.cache_info()
+
+    monkeypatch.setenv("HOME", str(home_two))
+    third = backup_mod.protected_paths()
+    second_cache_info = backup_mod._protected_paths_for_home.cache_info()
+
+    assert first == second
+    assert home_one.resolve() in first
+    assert home_two.resolve() in third
+    assert home_one.resolve() not in third
+    assert first_cache_info.hits >= 1
+    assert second_cache_info.misses == first_cache_info.misses + 1
+
+
 def test_public_path_safety_helpers_allow_symlink_paths_under_home(tmp_path, monkeypatch):
     home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
 

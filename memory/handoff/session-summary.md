@@ -1,5 +1,29 @@
 # Session Summary
 
+## 追加修复 — Milestone 71: Protected path cache
+
+### 核心结果
+
+本轮处理新的 PR review：`is_protected_path()` 不再每次触发 `protected_paths()` 重新计算受保护路径集合，减少备份导入/卸载安全检查中的重复 `Path.exists()` / `resolve()` 开销。
+
+### 主要变更
+
+- `apps/installer/backup.py`：新增 `_protected_paths_for_home()`，使用 `functools.lru_cache(maxsize=16)` 按解析后的 home path 缓存受保护路径集合。
+- `protected_paths()`：保留原有 public API，返回缓存集合的 set 副本。
+- `is_protected_path()`：直接查询当前 home 对应的缓存 `frozenset`。
+- 缓存按 home 分区，避免测试或运行时 `HOME` 变化导致旧保护集合被误复用。
+
+### 测试覆盖
+
+- `tests/test_uninstall.py`：新增 `test_protected_paths_cache_is_scoped_by_home`，验证重复调用命中缓存，切换 HOME 后产生新的缓存 miss，并且不同 home 的保护集合互不污染。
+
+### 验证结果
+
+- `python -m pytest tests/test_uninstall.py` → 41 passed。
+- `python -m pytest` → 419 passed。
+
+---
+
 ## 追加修复 — Milestone 70: Bounded ZIP extraction writes
 
 ### 核心结果

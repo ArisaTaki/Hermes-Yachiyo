@@ -2,6 +2,15 @@
 
 ## 已完成
 
+### Milestone 71 — 受保护路径集合缓存
+
+- ✅ `protected_paths()` 改为复用按当前 home 路径缓存的受保护路径集合，避免备份导入/卸载安全检查中反复执行多组 `exists()` / `resolve()`。
+- ✅ `is_protected_path()` 直接查询缓存的 `frozenset`，不再为每次判断重新构造受保护路径集合。
+- ✅ 缓存按解析后的 home path 分区，避免测试或运行时 `HOME` 变化时复用旧 home 的保护集合。
+- ✅ 新增回归测试覆盖重复调用命中缓存、切换 HOME 后重新计算并隔离缓存结果。
+- ✅ 相关测试：`python -m pytest tests/test_uninstall.py` → 41 passed。
+- ✅ 全量测试：`python -m pytest` → 419 passed。
+
 ### Milestone 70 — 备份 ZIP 解压实际写入限流
 
 - ✅ `_extract_zip_safely()` 不再只依赖 `ZipInfo.file_size` 头部声明；解压成员改为分块读写，并按实际写入字节数校验单条目和总解压体积限制。
