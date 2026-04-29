@@ -52,7 +52,9 @@ class HermesCallError(RuntimeError):
         if self.returncode != -1:
             parts.append(f"exit={self.returncode}")
         if self.stderr:
-            parts.append(f"stderr: {self.stderr[:120]}")
+            stderr_detail = _compact_error_detail(self.stderr, max_chars=120)
+            if stderr_detail and stderr_detail not in str(self):
+                parts.append(f"stderr: {stderr_detail}")
         return " | ".join(parts)
 
 
@@ -104,6 +106,8 @@ _DEFAULT_EXEC_TIMEOUT: float = 30 * 60.0
 _PROBE_TIMEOUT: float = 5.0   # hermes --version 探测超时（秒）
 _STREAM_UPDATE_INTERVAL: float = 0.05
 _BRIDGE_SCRIPT = Path(__file__).with_name("hermes_stream_bridge.py")
+_ERROR_DETAIL_MAX_CHARS = 500
+_ERROR_DETAIL_MAX_LINES = 12
 
 
 def _read_exec_timeout() -> float:
@@ -202,6 +206,38 @@ def _humanize_bridge_error(message: str) -> str:
     for pattern, friendly in _BRIDGE_RAW_EXCEPTION_TO_FRIENDLY.items():
         if message.startswith(pattern):
             return f"{friendly}（{message}）"
+    return message
+
+
+def _compact_error_detail(text: str, *, max_chars: int = _ERROR_DETAIL_MAX_CHARS) -> str:
+    """压缩错误细节，保留末尾最有诊断价值的内容。"""
+    cleaned = _ANSI_RE.sub("", text or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.rstrip() for line in cleaned.split("\n") if line.strip()]
+    if not lines:
+        return ""
+    detail = "\n".join(lines[-_ERROR_DETAIL_MAX_LINES:])
+    if len(detail) > max_chars:
+        detail = "..." + detail[-max_chars:]
+    return detail
+
+
+def _bridge_failure_message(
+    error_message: str,
+    *,
+    returncode: int,
+    stderr: str,
+) -> str:
+    """为 bridge 进程级失败补充 stderr 摘要。"""
+    message = error_message.strip()
+    if not message:
+        if returncode not in (-1, 0):
+            message = f"Hermes streaming bridge 执行失败（exit={returncode}）"
+        else:
+            message = "Hermes streaming bridge 执行失败"
+
+    stderr_detail = _compact_error_detail(stderr)
+    if stderr_detail and "Hermes streaming bridge 执行失败" in message:
+        return f"{message}\n{stderr_detail}"
     return message
 
 
@@ -441,6 +477,7 @@ async def _consume_stream_bridge(
     hermes_session_id: Optional[str] = None
     hermes_title: Optional[str] = None
     failed = False
+    saw_done_event = False
     started_at = time.monotonic()
     first_event_logged = False
     first_delta_logged = False
@@ -480,6 +517,7 @@ async def _consume_stream_bridge(
                     last_emitted = content
                     last_emit_at = now
             elif event_type == "done":
+                saw_done_event = True
                 response = event.get("response")
                 final_response = response if isinstance(response, str) else ""
                 sid = event.get("session_id")
@@ -517,6 +555,14 @@ async def _consume_stream_bridge(
     if content and content != last_emitted:
         _emit_stream_update(on_update, content)
 
+    if failed and saw_done_event and not error_message:
+        response_detail = _compact_error_detail(content)
+        error_message = (
+            f"Hermes 对话执行失败：{response_detail}"
+            if response_detail
+            else "Hermes 对话执行失败"
+        )
+
     logger.info(
         "[Hermes bridge] 进程结束: exit=%s, elapsed=%.2fs, stdout_len=%d, stderr_len=%d",
         rc,
@@ -531,7 +577,11 @@ async def _consume_stream_bridge(
             stdout=content,
             stderr=stderr,
             returncode=rc,
-            error_message=error_message or f"Hermes streaming bridge 执行失败（exit={rc}）",
+            error_message=_bridge_failure_message(
+                error_message,
+                returncode=rc,
+                stderr=stderr,
+            ),
             hermes_session_id=hermes_session_id,
             hermes_title=hermes_title,
         )
@@ -628,8 +678,7 @@ def _should_fallback_from_stream_bridge(result: HermesInvokeResult) -> bool:
     if any(marker in detail for marker in _STREAM_BRIDGE_FALLBACK_MARKERS):
         return True
     return (
-        not result.stdout
-        and result.returncode not in (-1, 0)
+        result.returncode not in (-1, 0)
         and "Hermes streaming bridge 执行失败" in detail
     )
 

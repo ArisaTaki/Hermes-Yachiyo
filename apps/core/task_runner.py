@@ -162,17 +162,19 @@ class TaskRunner:
             logger.debug("任务状态跳过 (%s): %s", task_id, exc)
 
         except Exception as exc:
-            logger.exception("任务执行失败: %s", task_id)
-            # 若是 HermesCallError，使用结构化错误字符串
+            # 若是 HermesCallError，使用结构化错误字符串，且不输出应用 traceback。
+            # Hermes 退出码错误属于外部 agent 调用失败，不是 TaskRunner 自身崩溃。
             try:
                 from apps.core.executor import HermesCallError
-                error_str = (
-                    exc.to_error_string()
-                    if isinstance(exc, HermesCallError)
-                    else f"{type(exc).__name__}: {exc}"
-                )
+                if isinstance(exc, HermesCallError):
+                    error_str = exc.to_error_string()
+                    logger.warning("任务执行失败: %s | %s", task_id, error_str)
+                else:
+                    error_str = f"{type(exc).__name__}: {exc}"
+                    logger.exception("任务执行失败: %s", task_id)
             except ImportError:
                 error_str = f"{type(exc).__name__}: {exc}"
+                logger.exception("任务执行失败: %s", task_id)
             try:
                 self._state.update_task_status(
                     task_id,
