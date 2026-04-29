@@ -80,6 +80,7 @@ def _register_routes() -> None:
     import apps.bridge.routes.status as status
     import apps.bridge.routes.system as system
     import apps.bridge.routes.tasks as tasks
+    import apps.bridge.routes.ui as ui
 
     app.include_router(status.router)
     app.include_router(tasks.router)
@@ -88,6 +89,7 @@ def _register_routes() -> None:
     app.include_router(live2d.router)
     app.include_router(assistant.router)
     app.include_router(hermes.router)
+    app.include_router(ui.router)
     _routes_registered = True
 
 _server: uvicorn.Server | None = None

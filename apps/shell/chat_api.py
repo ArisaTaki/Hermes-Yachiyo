@@ -252,6 +252,61 @@ class ChatAPI:
             "pending_message_id": self._session.get_pending_message_id(),
         }
 
+    def get_executor_info(self) -> Dict[str, Any]:
+        runner = self._runtime.task_runner
+        if runner is None:
+            return {"executor": "none", "available": False}
+        return {"executor": runner.executor.name, "available": True}
+
+    def list_sessions(self, limit: int = 20) -> Dict[str, Any]:
+        """列出最近会话，包含当前空白会话。"""
+        from apps.core.chat_store import get_chat_store
+
+        store = get_chat_store()
+        current_session = self._runtime.chat_session
+        current_session_id = current_session.session_id
+        sessions = store.list_sessions(limit=limit)
+        session_items = [
+            {
+                "session_id": session.session_id,
+                "title": session.title,
+                "created_at": session.created_at,
+                "message_count": session.message_count,
+            }
+            for session in sessions
+        ]
+        if not any(item["session_id"] == current_session_id for item in session_items):
+            stored_current = store.get_session(current_session_id)
+            session_items.insert(
+                0,
+                {
+                    "session_id": current_session_id,
+                    "title": (stored_current.title if stored_current else "") or "新对话",
+                    "created_at": stored_current.created_at if stored_current else "",
+                    "message_count": stored_current.message_count if stored_current else 0,
+                },
+            )
+        return {
+            "ok": True,
+            "current_session_id": current_session_id,
+            "sessions": session_items,
+        }
+
+    def load_session(self, session_id: str) -> Dict[str, Any]:
+        """切换到指定历史会话。"""
+        if not session_id:
+            return {"ok": False, "error": "session_id 不能为空"}
+        try:
+            self._runtime.switch_session(session_id)
+            return {
+                "ok": True,
+                "session_id": session_id,
+                "message_count": self._runtime.chat_session.message_count(),
+            }
+        except Exception as exc:
+            logger.error("切换会话失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     def clear_session(self) -> Dict[str, Any]:
         """清空会话"""
         try:

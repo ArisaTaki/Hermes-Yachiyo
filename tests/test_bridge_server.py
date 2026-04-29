@@ -78,3 +78,55 @@ def test_render_live2d_manifest_keeps_json_structure(tmp_path):
 
     assert decoded["FileReferences"]["Moc"].endswith("model.moc3?token=token-xyz")
     assert decoded["FileReferences"]["Textures"][0].endswith("tex.png?token=token-xyz")
+
+
+def test_live2d_runtime_script_sources_prefer_cache(tmp_path, monkeypatch):
+    cached_script = tmp_path / "pixi.min.js"
+    cached_script.write_text("window.PIXI = {};", encoding="utf-8")
+    missing_script = tmp_path / "cubism.js"
+
+    monkeypatch.setattr(
+        live2d_route.live2d_mode,
+        "_get_live2d_runtime_dependency_specs",
+        lambda: {
+            "pixi_js": ("https://example.test/pixi.js", cached_script),
+            "live2d_cubism_core": ("https://example.test/core.js", missing_script),
+        },
+    )
+
+    scripts = live2d_route._live2d_runtime_script_sources()
+
+    assert scripts == [
+        {"id": "pixi_js", "source": "cache", "url": "/live2d/runtime/pixi_js"},
+        {
+            "id": "live2d_cubism_core",
+            "source": "cdn",
+            "url": "https://example.test/core.js",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_live2d_runtime_primes_dependencies(tmp_path, monkeypatch):
+    cached_script = tmp_path / "pixi.min.js"
+    cached_script.write_text("window.PIXI = {};", encoding="utf-8")
+    calls = []
+
+    monkeypatch.setattr(
+        live2d_route.live2d_mode,
+        "_get_live2d_runtime_dependency_specs",
+        lambda: {"pixi_js": ("https://example.test/pixi.js", cached_script)},
+    )
+    monkeypatch.setattr(
+        live2d_route.live2d_mode,
+        "_prime_live2d_runtime_dependencies",
+        lambda: calls.append("prime") or (True, ""),
+    )
+
+    payload = await live2d_route.get_live2d_runtime()
+
+    assert calls == ["prime"]
+    assert payload["ready"] is True
+    assert payload["scripts"] == [
+        {"id": "pixi_js", "source": "cache", "url": "/live2d/runtime/pixi_js"}
+    ]

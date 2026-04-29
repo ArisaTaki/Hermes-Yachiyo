@@ -1,33 +1,22 @@
 # UI Resource Architecture
 
-Hermes-Yachiyo remains a desktop-first local application. The UI runs inside
-pywebview windows, while Python owns runtime orchestration, native window
-management, settings persistence, and local APIs.
+This document records the legacy pywebview resource split. The active frontend
+architecture is now documented in `docs/desktop-frontend-architecture.md`.
 
-## Current Boundary
+## Legacy Boundary
 
-- Python modules create pywebview windows and expose `js_api` objects.
-- UI presentation assets live under `apps/shell/ui/`.
-- CSS is loaded through `apps.shell.assets.inject_css()` and injected into the
-  existing HTML constants at import time.
+- The old `apps/shell/` path creates pywebview windows and exposes `js_api`
+  objects.
+- Legacy presentation assets live under `apps/shell/ui/` and are injected with
+  `apps.shell.assets.inject_css()`.
 - Existing exported HTML constants such as `_CHAT_HTML`, `_SETTINGS_HTML`,
-  `_BUBBLE_HTML`, and `_LIVE2D_HTML` are kept for compatibility with tests and
-  current window creation code.
-- `pyproject.toml` includes `apps.shell.ui` package data so bundled CSS is
-  available in editable installs and packaged wheels.
+  `_BUBBLE_HTML`, and `_LIVE2D_HTML` are retained only for compatibility while
+  the Electron frontend takes over.
 
-## Recommended Next Phase
+## Migration Direction
 
-Move full HTML/JS pages into `apps/shell/ui/templates/` one window at a time:
-
-1. Keep the existing Python constant names as compatibility aliases.
-2. Load template text from `apps/shell/ui/templates/*.html`.
-3. Keep runtime substitutions explicit, for example `{{HOST}}`, `{{PORT}}`,
-   `{{AVATAR_URL}}`, and Live2D runtime script placeholders.
-4. Keep pywebview `js_api` methods in Python; do not move runtime logic into
-   browser-side code.
-5. Update tests to assert rendered templates rather than Python inline strings
-   once the compatibility layer is stable.
-
-This gives the project a front-end/back-end style boundary without turning the
-desktop app into a backend-first service.
+- Do not add new first-class UI surfaces to pywebview.
+- New desktop UI work belongs in `apps/frontend/`.
+- New Python-facing UI data belongs behind HTTP routes in `apps/bridge/routes/`.
+- Keep `apps/shell/` as a legacy compatibility layer until its behavior has
+  been replaced or deliberately retired.
