@@ -429,6 +429,37 @@ _LIVE2D_HTML = r"""
         .menu-btn:hover,
         .menu-btn:focus { background: rgba(255, 255, 255, 0.1); outline: none; }
         .menu-btn.danger { color: #ffb5b5; }
+    
+        /* -------------- ELEGANT LIVE2D OVERRIDE -------------- */
+        body { font-family: "SF Pro Text", -apple-system, sans-serif !important; }
+        .live2d-stage {
+            background: transparent !important;
+            filter: drop-shadow(0 10px 40px rgba(0, 0, 0, 0.4));
+        }
+        
+        .controls {
+            background: rgba(22, 26, 35, 0.7) !important;
+            backdrop-filter: blur(20px) !important;
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+            border-radius: 16px !important;
+        }
+        .controls:hover { opacity: 1 !important; transform: scale(1) translateY(0) !important; }
+        
+        .btn {
+            background: rgba(255, 255, 255, 0.05) !important;
+            color: #E2E8F0 !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            border-radius: 10px !important;
+            transition: all 0.2s ease !important;
+        }
+        .btn:hover { background: rgba(96, 165, 250, 0.2) !important; border-color: rgba(96, 165, 250, 0.4) !important; color: #60A5FA !important; }
+        .btn.danger { color: #F87171 !important; }
+        .btn.danger:hover { background: rgba(248, 113, 113, 0.15) !important; border-color: rgba(248, 113, 113, 0.3) !important; }
+        
+        .subtitle { color: #94A3B8 !important; }
+
     </style>
 </head>
 <body>

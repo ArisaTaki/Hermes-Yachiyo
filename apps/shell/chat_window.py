@@ -596,6 +596,188 @@ _CHAT_HTML = r"""
             max-width: 140px;
         }
         .session-select:focus { border-color: #6495ed; outline: none; }
+    
+        
+        /* -------------- ELEGANT THEME OVERRIDE -------------- */
+        :root {
+            --bg-main: #0B0E14;
+            --bg-surface: rgba(22, 26, 35, 0.6);
+            --bg-card: rgba(28, 33, 43, 0.85);
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --border-focus: rgba(130, 160, 255, 0.4);
+            --text-primary: #E2E8F0;
+            --text-muted: #94A3B8;
+            --accent-blue: #60A5FA;
+            --accent-blue-hover: #3B82F6;
+            --success-green: #34D399;
+            --warning-yellow: #FBBF24;
+            --danger-red: #F87171;
+            --font-stack: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            --shadow-soft: 0 8px 32px rgba(0, 0, 0, 0.3);
+            --shadow-inner: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        }
+
+        body {
+            background: var(--bg-main) !important;
+            background-image: radial-gradient(circle at top right, rgba(96, 165, 250, 0.08), transparent 40%),
+                              radial-gradient(circle at bottom left, rgba(52, 211, 153, 0.03), transparent 40%) !important;
+            color: var(--text-primary) !important;
+            font-family: var(--font-stack) !important;
+            backdrop-filter: blur(20px);
+            letter-spacing: 0.2px;
+        }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+
+        /* Typography */
+        h1, h2, h3, h4 { color: var(--text-primary) !important; font-weight: 500 !important; letter-spacing: 0.3px; }
+        .desc, .subtitle { color: var(--text-muted) !important; }
+
+        /* Control Center & Cards */
+        .header { border-bottom: 1px solid var(--border-subtle) !important; }
+        .header h1 { color: var(--text-primary) !important; text-shadow: 0 2px 10px rgba(96, 165, 250, 0.2) !important; }
+        .header .run-badge {
+            background: rgba(52, 211, 153, 0.15) !important;
+            color: var(--success-green) !important;
+            border: 1px solid rgba(52, 211, 153, 0.3) !important;
+            box-shadow: none !important;
+            font-weight: 500 !important;
+        }
+
+        .card, .section {
+            background: var(--bg-card) !important;
+            border: 1px solid var(--border-subtle) !important;
+            box-shadow: var(--shadow-soft), var(--shadow-inner) !important;
+            border-radius: 12px !important;
+            backdrop-filter: blur(12px) !important;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .card:hover, .section:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+        }
+        .card h3, .section h3 { border-bottom: 1px solid var(--border-subtle) !important; padding-bottom: 8px; margin-bottom: 12px; color: var(--text-primary) !important; }
+
+        /* Forms & Inputs */
+        .input, .select, input[type="text"], input[type="number"], select {
+            background: rgba(0, 0, 0, 0.25) !important;
+            border: 1px solid var(--border-subtle) !important;
+            border-radius: 8px !important;
+            color: var(--text-primary) !important;
+            padding: 8px 12px !important;
+            font-family: var(--font-stack) !important;
+            outline: none !important;
+            transition: all 0.2s ease;
+        }
+        .input:focus, .select:focus, input[type="text"]:focus, select:focus {
+            border-color: var(--border-focus) !important;
+            background: rgba(0, 0, 0, 0.4) !important;
+            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.15) !important;
+        }
+
+        .btn, button, .btn-primary {
+            background: var(--bg-surface) !important;
+            color: var(--text-primary) !important;
+            border: 1px solid var(--border-subtle) !important;
+            border-radius: 8px !important;
+            padding: 6px 14px;
+            font-weight: 500 !important;
+            cursor: pointer;
+            transition: all 0.2s ease !important;
+            box-shadow: var(--shadow-inner) !important;
+        }
+        .btn:hover, button:hover, .btn-primary:hover {
+            background: rgba(255, 255, 255, 0.1) !important;
+            border-color: rgba(255, 255, 255, 0.2) !important;
+        }
+        .btn.primary, .btn-primary {
+            background: var(--accent-blue) !important;
+            color: #fff !important;
+            border-color: rgba(255, 255, 255, 0.2) !important;
+        }
+        .btn.primary:hover, .btn-primary:hover { background: var(--accent-blue-hover) !important; }
+
+        /* Rows & Summary Elements */
+        .row { border-bottom: 1px solid var(--border-subtle) !important; padding: 10px 0 !important; }
+        .row .label { color: var(--text-muted) !important; }
+        .row .value { color: var(--text-primary) !important; font-family: "SF Mono", "Menlo", monospace; font-size: 0.9em; }
+        .summary { background: rgba(0, 0, 0, 0.2) !important; border: 1px solid var(--border-subtle) !important; color: var(--text-muted) !important; border-radius: 8px !important; }
+
+        /* Values */
+        .value.ok, span[style*="color:#90ee90"], b[style*="color:#6495ed"], span[style*="color:#ffd700"] { color: var(--success-green) !important; }
+        .value.warn { color: var(--warning-yellow) !important; }
+        span[style*="color:#ff6b6b"], span[style*="color:#ff4444"] { color: var(--danger-red) !important; }
+        span[style*="color:#6495ed"] { color: var(--accent-blue) !important; }
+
+        /* ---------------- Chat Window Specifics ---------------- */
+        .message {
+            animation: fade-in-up 0.3s ease-out;
+            border-radius: 12px !important;
+            border: 1px solid transparent !important;
+            backdrop-filter: blur(8px) !important;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05) !important;
+        }
+        @keyframes fade-in-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+        .message.user {
+            background: rgba(96, 165, 250, 0.1) !important;
+            border-color: rgba(96, 165, 250, 0.2) !important;
+        }
+        .message.assistant {
+            background: var(--bg-card) !important;
+            border-color: var(--border-subtle) !important;
+        }
+        .message.system {
+            background: transparent !important;
+            border: none !important;
+            box-shadow: none !important;
+            text-align: center;
+            color: var(--text-muted) !important;
+            font-size: 0.85em;
+        }
+        .sender-name { font-weight: 500 !important; font-family: var(--font-stack) !important; }
+        .user .sender-name { color: var(--accent-blue) !important; }
+        .assistant .sender-name { color: var(--success-green) !important; }
+
+        .input-area {
+            background: rgba(11, 14, 20, 0.85) !important;
+            backdrop-filter: blur(20px) !important;
+            -webkit-backdrop-filter: blur(20px);
+            border-top: 1px solid var(--border-subtle) !important;
+            padding: 16px !important;
+        }
+        .input-box {
+            background: rgba(0, 0, 0, 0.3) !important;
+            border: 1px solid var(--border-subtle) !important;
+            border-radius: 12px !important;
+            color: var(--text-primary) !important;
+            transition: all 0.2s ease;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.1) !important;
+        }
+        .input-box:focus {
+            background: rgba(0, 0, 0, 0.5) !important;
+            border-color: var(--border-focus) !important;
+            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1) !important;
+        }
+        .send-btn {
+            background: var(--bg-surface) !important;
+            border: 1px solid var(--border-subtle) !important;
+            color: var(--text-primary) !important;
+            border-radius: 10px !important;
+        }
+        .send-btn:hover { background: var(--accent-blue) !important; color: #fff !important; border-color: var(--accent-blue) !important; }
+
+        /* Empty state */
+        .empty-state { opacity: 0.8 !important; color: var(--text-muted) !important; font-weight: 300; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; }
+        .empty-icon { font-size: 3em; margin-bottom: 12px; font-weight: 300; background: linear-gradient(135deg, var(--accent-blue), var(--success-green)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+        /* Installer container */
+        .container { max-width: 600px !important; margin: 40px auto !important; }
+
     </style>
 </head>
 <body>
