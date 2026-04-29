@@ -9,16 +9,22 @@ import {
   screen,
   shell,
   Tray,
+  type WebContents,
   type IpcMainInvokeEvent,
   type OpenDialogOptions,
   type Rectangle,
 } from 'electron';
+import * as nodePty from 'node-pty';
+import type { IPty } from 'node-pty';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 const FRONTEND_DEV_URL = process.env.HERMES_YACHIYO_FRONTEND_DEV_URL || 'http://127.0.0.1:5174';
 const BRIDGE_URL = process.env.HERMES_YACHIYO_BRIDGE_URL || 'http://127.0.0.1:8420';
 const BRIDGE_SETTINGS_RETRIES = 40;
@@ -30,6 +36,7 @@ const MAX_LAUNCHER_SHAPE_RECTS = 10000;
 
 type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'bubble' | 'bubble-menu' | 'live2d';
 type ModeId = 'bubble' | 'live2d';
+type InstallerTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup';
 
 type ModeSettings = {
   config?: Record<string, unknown>;
@@ -70,6 +77,12 @@ let modeWindowShapeApplied = false;
 let modeWindowTopSuppressed = false;
 let lastInstallReady: boolean | null = null;
 let lastUiSettings: UiSettings | null = null;
+const terminalSessions = new Map<string, {
+  ownerId: number;
+  pty: IPty;
+  sender: WebContents;
+  task: InstallerTerminalTask;
+}>();
 
 type MainWindowOptions = {
   respectStartMinimized?: boolean;
@@ -82,21 +95,86 @@ function projectRoot(): string {
   return path.resolve(__dirname, '..', '..', '..');
 }
 
+function macOSPrerequisiteCommand(): string {
+  return [
+    'echo "Hermes-Yachiyo macOS 基础工具检查"',
+    'if ! xcode-select -p >/dev/null 2>&1; then echo "将打开 Xcode Command Line Tools 安装器"; xcode-select --install || true; else echo "Xcode Command Line Tools 已安装"; fi',
+    'if ! command -v brew >/dev/null 2>&1; then echo "正在安装 Homebrew"; /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; fi',
+    'if [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi',
+    'if [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"; fi',
+    'if command -v brew >/dev/null 2>&1; then brew update && brew install git curl; else echo "未检测到 brew，请根据终端提示完成 Homebrew 安装后重新运行"; fi',
+    'echo "基础工具准备完成。请回到 Hermes-Yachiyo 点击重新检测或安装 Hermes Agent。"',
+  ].join('\n');
+}
+
+function hermesInstallCommand(): string {
+  return [
+    'echo "Hermes Agent 安装开始"',
+    'set -o pipefail',
+    'curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash',
+    'hermes_install_exit_code=$?',
+    'printf "\\nHermes Agent 安装命令已结束，退出码：%s\\n" "$hermes_install_exit_code"',
+    'exit "$hermes_install_exit_code"',
+  ].join('\n');
+}
+
+function terminalTaskCommand(task: InstallerTerminalTask): { title: string; command: string } {
+  if (task === 'mac-prerequisites') {
+    return { title: '准备 macOS 基础工具', command: macOSPrerequisiteCommand() };
+  }
+  if (task === 'install-hermes') {
+    return { title: '安装 Hermes Agent', command: hermesInstallCommand() };
+  }
+  return { title: '配置 Hermes Agent', command: 'hermes setup' };
+}
+
+function ensureNodePtySpawnHelperExecutable(): void {
+  if (process.platform !== 'darwin' && process.platform !== 'linux') return;
+  try {
+    const entryPath = require.resolve('node-pty');
+    const packageRoot = path.resolve(path.dirname(entryPath), '..');
+    const helperCandidates = [
+      path.join(packageRoot, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper'),
+      path.join(packageRoot.replace('app.asar', 'app.asar.unpacked'), 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper'),
+    ];
+    for (const helperPath of helperCandidates) {
+      if (!fs.existsSync(helperPath)) continue;
+      const mode = fs.statSync(helperPath).mode;
+      if ((mode & 0o111) === 0) fs.chmodSync(helperPath, mode | 0o755);
+    }
+  } catch (error) {
+    console.warn('[terminal] failed to prepare node-pty spawn-helper:', error);
+  }
+}
+
+function packagedBackendPath(): string | null {
+  if (!app.isPackaged) return null;
+  const binaryName = process.platform === 'win32' ? 'hermes-yachiyo-backend.exe' : 'hermes-yachiyo-backend';
+  return path.join(process.resourcesPath, 'backend', binaryName);
+}
+
 function startBackend(): void {
   if (process.env.HERMES_YACHIYO_SKIP_BACKEND === '1') return;
   if (backendProcess) return;
 
-  const python = process.env.HERMES_YACHIYO_PYTHON || 'python3';
-  backendProcess = spawn(python, ['-m', 'apps.desktop_backend.app'], {
-    cwd: projectRoot(),
+  const backendBinary = packagedBackendPath();
+  const command = backendBinary || process.env.HERMES_YACHIYO_PYTHON || 'python3';
+  const args = backendBinary ? [] : ['-m', 'apps.desktop_backend.app'];
+  backendProcess = spawn(command, args, {
+    cwd: backendBinary ? process.resourcesPath : projectRoot(),
     env: {
       ...process.env,
       PYTHONPATH: projectRoot(),
+      HERMES_YACHIYO_DESKTOP_BACKEND: '1',
     },
   });
 
   backendProcess.stdout.on('data', (chunk) => process.stdout.write(`[backend] ${chunk}`));
   backendProcess.stderr.on('data', (chunk) => process.stderr.write(`[backend] ${chunk}`));
+  backendProcess.on('error', (error) => {
+    console.error(`[backend] failed to start: ${error.message}`);
+    backendProcess = null;
+  });
   backendProcess.on('exit', (code, signal) => {
     console.log(`[backend] exited code=${code ?? 'null'} signal=${signal ?? 'null'}`);
     backendProcess = null;
@@ -792,6 +870,117 @@ async function showOpenDialogForSender(
   return result.filePaths[0] || null;
 }
 
+function normalizeTerminalTask(value: unknown): InstallerTerminalTask | null {
+  return value === 'mac-prerequisites' || value === 'install-hermes' || value === 'hermes-setup'
+    ? value
+    : null;
+}
+
+function safeTerminalSize(value: unknown, fallback: number, min: number, max: number): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.round(clamp(value, min, max))
+    : fallback;
+}
+
+function terminalShell(): { file: string; argsPrefix: string[] } {
+  if (process.platform === 'win32') {
+    return { file: process.env.ComSpec || 'cmd.exe', argsPrefix: ['/d', '/s', '/c'] };
+  }
+  return { file: process.env.SHELL || '/bin/zsh', argsPrefix: ['-lc'] };
+}
+
+function terminalSessionId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function activeTerminalForOwner(ownerId: number): string | null {
+  for (const [id, session] of terminalSessions.entries()) {
+    if (session.ownerId === ownerId) return id;
+  }
+  return null;
+}
+
+function terminalPayload(id: string, payload: Record<string, unknown>): Record<string, unknown> {
+  return { id, ...payload };
+}
+
+function cleanupTerminalSession(id: string): void {
+  const session = terminalSessions.get(id);
+  if (!session) return;
+  terminalSessions.delete(id);
+  try {
+    session.pty.kill();
+  } catch {}
+}
+
+function cleanupTerminalsForOwner(ownerId: number): void {
+  for (const [id, session] of terminalSessions.entries()) {
+    if (session.ownerId === ownerId) cleanupTerminalSession(id);
+  }
+}
+
+function cleanupAllTerminalSessions(): void {
+  for (const id of Array.from(terminalSessions.keys())) cleanupTerminalSession(id);
+}
+
+function startInstallerTerminal(
+  event: IpcMainInvokeEvent,
+  rawTask: unknown,
+  rawCols: unknown,
+  rawRows: unknown,
+): { success: boolean; id?: string; task?: InstallerTerminalTask; title?: string; error?: string } {
+  const targetWindow = BrowserWindow.fromWebContents(event.sender);
+  if (!targetWindow || targetWindow !== mainWindow) {
+    return { success: false, error: '内置终端只能从主控台安装器启动' };
+  }
+  const task = normalizeTerminalTask(rawTask);
+  if (!task) return { success: false, error: '不支持的终端任务' };
+  if (task === 'mac-prerequisites' && process.platform !== 'darwin') {
+    return { success: false, error: 'macOS 基础工具准备仅支持 macOS' };
+  }
+  const existingId = activeTerminalForOwner(event.sender.id);
+  if (existingId) return { success: false, error: '已有终端任务正在运行，请先完成或停止当前任务' };
+
+  const { title, command } = terminalTaskCommand(task);
+  const shellInfo = terminalShell();
+  const cols = safeTerminalSize(rawCols, 100, 40, 240);
+  const rows = safeTerminalSize(rawRows, 28, 10, 80);
+  const id = terminalSessionId();
+  ensureNodePtySpawnHelperExecutable();
+  let pty: IPty;
+  try {
+    pty = nodePty.spawn(shellInfo.file, [...shellInfo.argsPrefix, command], {
+      cols,
+      rows,
+      cwd: app.getPath('home'),
+      env: {
+        ...process.env,
+        TERM: 'xterm-256color',
+        COLORTERM: 'truecolor',
+      },
+      name: 'xterm-256color',
+    });
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : '内置终端启动失败' };
+  }
+  const session = { ownerId: event.sender.id, pty, sender: event.sender, task };
+  terminalSessions.set(id, session);
+
+  pty.onData((data) => {
+    if (!event.sender.isDestroyed()) {
+      event.sender.send('hermes:terminalData', terminalPayload(id, { data }));
+    }
+  });
+  pty.onExit(({ exitCode, signal }) => {
+    terminalSessions.delete(id);
+    if (!event.sender.isDestroyed()) {
+      event.sender.send('hermes:terminalExit', terminalPayload(id, { exitCode, signal, task }));
+    }
+  });
+  event.sender.once('destroyed', () => cleanupTerminalsForOwner(event.sender.id));
+  return { success: true, id, task, title };
+}
+
 ipcMain.handle('hermes:getBridgeUrl', () => BRIDGE_URL);
 ipcMain.handle('hermes:quit', () => {
   app.quit();
@@ -834,6 +1023,28 @@ ipcMain.handle('hermes:openView', (_event, view: unknown, params: unknown) => {
 ipcMain.handle('hermes:openDesktopMode', (_event, mode: unknown) => openConfiguredDesktopMode(normalizeMode(mode)));
 ipcMain.handle('hermes:moveLauncherWindow', moveLauncherWindow);
 ipcMain.handle('hermes:getLauncherPointerState', (_event, mode: unknown) => launcherPointerState(mode));
+ipcMain.handle('hermes:terminalStart', startInstallerTerminal);
+ipcMain.handle('hermes:terminalWrite', (_event, rawId: unknown, rawData: unknown) => {
+  const id = typeof rawId === 'string' ? rawId : '';
+  const session = terminalSessions.get(id);
+  if (!session || session.sender.id !== _event.sender.id) return false;
+  session.pty.write(typeof rawData === 'string' ? rawData : '');
+  return true;
+});
+ipcMain.handle('hermes:terminalResize', (_event, rawId: unknown, rawCols: unknown, rawRows: unknown) => {
+  const id = typeof rawId === 'string' ? rawId : '';
+  const session = terminalSessions.get(id);
+  if (!session || session.sender.id !== _event.sender.id) return false;
+  session.pty.resize(safeTerminalSize(rawCols, session.pty.cols, 40, 240), safeTerminalSize(rawRows, session.pty.rows, 10, 80));
+  return true;
+});
+ipcMain.handle('hermes:terminalKill', (_event, rawId: unknown) => {
+  const id = typeof rawId === 'string' ? rawId : '';
+  const session = terminalSessions.get(id);
+  if (!session || session.sender.id !== _event.sender.id) return false;
+  cleanupTerminalSession(id);
+  return true;
+});
 ipcMain.handle('hermes:setLauncherHitRegions', (event, mode: unknown, regions: unknown) => {
   const targetWindow = BrowserWindow.fromWebContents(event.sender);
   if (!targetWindow || targetWindow !== modeWindow) return false;
@@ -886,7 +1097,10 @@ app.whenReady().then(() => {
 	  app.on('activate', showMainWindowFromAppActivation);
 });
 
-app.on('before-quit', stopBackend);
+app.on('before-quit', () => {
+  cleanupAllTerminalSessions();
+  stopBackend();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

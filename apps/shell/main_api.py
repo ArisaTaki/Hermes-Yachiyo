@@ -30,6 +30,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _is_desktop_backend() -> bool:
+    return os.environ.get("HERMES_YACHIYO_DESKTOP_BACKEND") == "1"
+
+
 def _serialize_summary(summary: Optional[ModelSummary]) -> Dict[str, Any]:
     """将 ModelSummary 转为 JSON 安全字典，None 时返回空摘要。"""
     if summary is None:
@@ -275,7 +279,7 @@ class MainWindowAPI:
     def open_terminal_command(self, cmd: str) -> Dict[str, Any]:
         """在系统终端中执行指定命令（交互式，需要用户参与）。
 
-        macOS：通过 osascript 在 Terminal.app 新窗口中运行。
+        macOS：通过临时 .command 文件在 Terminal.app 新窗口中运行。
         Linux：按优先级尝试 gnome-terminal / xfce4-terminal / xterm。
 
         Args:
@@ -284,55 +288,14 @@ class MainWindowAPI:
         Returns:
             {"success": bool, "error": str | None}
         """
-        import platform as _platform
-        import subprocess
-
-        system = _platform.system()
-        logger.info("open_terminal_command: system=%s cmd=%r", system, cmd)
+        logger.info("open_terminal_command: cmd=%r", cmd)
 
         try:
-            if system == "Darwin":
-                # Terminal.app AppleScript：不使用 "make new document"（会报错 -2710）
-                # 直接 do script "cmd" 会在新窗口中执行
-                script = (
-                    'tell application "Terminal"\n'
-                    "    activate\n"
-                    f'    do script "{cmd}"\n'
-                    "end tell"
-                )
-                subprocess.Popen(
-                    ["osascript", "-e", script],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            elif system == "Linux":
-                for terminal_cmd in [
-                    ["gnome-terminal", "--", "bash", "-c", cmd],
-                    ["xfce4-terminal", "-e", cmd],
-                    ["konsole", "-e", cmd],
-                    ["x-terminal-emulator", "-e", cmd],
-                    ["xterm", "-e", cmd],
-                ]:
-                    try:
-                        subprocess.Popen(
-                            terminal_cmd,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                        )
-                        break
-                    except FileNotFoundError:
-                        continue
-                else:
-                    return {
-                        "success": False,
-                        "error": "未找到可用的终端模拟器，请手动打开终端",
-                    }
-            else:
-                return {
-                    "success": False,
-                    "error": f"当前平台（{system}）不支持自动打开终端，请手动运行：{cmd}",
-                }
+            from apps.shell.terminal import open_terminal_command
 
+            success, error = open_terminal_command(cmd)
+            if not success:
+                return {"success": False, "error": error}
             logger.info("已在系统终端中启动命令: %r", cmd)
             return {"success": True, "error": None}
 
@@ -450,6 +413,10 @@ class MainWindowAPI:
             )
             payload = result.to_dict()
             if result.ok:
+                if _is_desktop_backend():
+                    payload["exit_scheduled"] = False
+                    payload["desktop_quit_required"] = True
+                    return payload
                 try:
                     from apps.shell.window import request_app_exit
 

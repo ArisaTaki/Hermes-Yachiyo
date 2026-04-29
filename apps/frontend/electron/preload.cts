@@ -1,5 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
+type TerminalDataPayload = { id: string; data: string };
+type TerminalExitPayload = { id: string; exitCode: number; signal?: number; task?: string };
+
 contextBridge.exposeInMainWorld('hermesDesktop', {
   chooseLive2DArchive: () => ipcRenderer.invoke('hermes:chooseLive2DArchive') as Promise<string | null>,
   chooseLive2DModelDirectory: () => ipcRenderer.invoke('hermes:chooseLive2DModelDirectory') as Promise<string | null>,
@@ -16,4 +19,18 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   restartApp: () => ipcRenderer.invoke('hermes:restartApp') as Promise<void>,
   setLauncherHitRegions: (mode: string, payload: unknown) => ipcRenderer.invoke('hermes:setLauncherHitRegions', mode, payload) as Promise<boolean>,
   setLauncherPointerInteractive: (mode: string, interactive: boolean) => ipcRenderer.invoke('hermes:setLauncherPointerInteractive', mode, interactive) as Promise<boolean>,
+  terminalKill: (id: string) => ipcRenderer.invoke('hermes:terminalKill', id) as Promise<boolean>,
+  terminalResize: (id: string, cols: number, rows: number) => ipcRenderer.invoke('hermes:terminalResize', id, cols, rows) as Promise<boolean>,
+  terminalStart: (task: string, cols: number, rows: number) => ipcRenderer.invoke('hermes:terminalStart', task, cols, rows) as Promise<{ success?: boolean; id?: string; task?: string; title?: string; error?: string }>,
+  terminalWrite: (id: string, data: string) => ipcRenderer.invoke('hermes:terminalWrite', id, data) as Promise<boolean>,
+  onTerminalData: (callback: (payload: TerminalDataPayload) => void) => {
+    const listener = (_event: unknown, payload: TerminalDataPayload) => callback(payload);
+    ipcRenderer.on('hermes:terminalData', listener);
+    return () => ipcRenderer.removeListener('hermes:terminalData', listener);
+  },
+  onTerminalExit: (callback: (payload: TerminalExitPayload) => void) => {
+    const listener = (_event: unknown, payload: TerminalExitPayload) => callback(payload);
+    ipcRenderer.on('hermes:terminalExit', listener);
+    return () => ipcRenderer.removeListener('hermes:terminalExit', listener);
+  },
 });

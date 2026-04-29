@@ -7,11 +7,13 @@ import asyncio
 import logging
 import os
 import threading
+import time
 from typing import Any, Dict
 
 from apps.installer.workspace_init import initialize_yachiyo_workspace
 
 logger = logging.getLogger(__name__)
+INSTALL_LOG_MAX_LINES = 4000
 
 
 class InstallerWebViewAPI:
@@ -62,24 +64,32 @@ class InstallerWebViewAPI:
         Returns:
             {"started": bool, "error": str | None}
         """
+        _normalize_install_state()
         if _install_state["running"]:
             return {"started": False, "error": "安装已在进行中"}
 
         _install_state["running"] = True
         _install_state["lines"] = []
+        _install_state["line_count"] = 0
+        _install_state["truncated"] = False
         _install_state["result"] = None
         _install_state["setup_triggered"] = False
         _install_state["setup_terminal_opened"] = False
+        _install_state["started_at"] = time.time()
+        _install_state["finished_at"] = None
+        _install_state["last_line_at"] = time.time()
+        _install_state["thread"] = None
 
         def _run():
             from apps.installer.hermes_install import run_hermes_install
 
             def _on_line(line: str) -> None:
+                _install_state["last_line_at"] = time.time()
                 # 检测特殊标记：安装脚本触发了 hermes setup
                 if line == "__SETUP_TRIGGERED__":
                     _install_state["setup_triggered"] = True
                     return  # 不加入 lines，只设置标志
-                _install_state["lines"].append(line)
+                _append_install_line(line)
 
             loop = asyncio.new_event_loop()
             try:
@@ -98,6 +108,7 @@ class InstallerWebViewAPI:
 
             _install_state["result"] = result
             _install_state["running"] = False
+            _install_state["finished_at"] = time.time()
             logger.info(
                 "Hermes 安装完成: success=%s, message=%s",
                 result.success,
@@ -105,6 +116,7 @@ class InstallerWebViewAPI:
             )
 
         t = threading.Thread(target=_run, daemon=True, name="hermes-installer")
+        _install_state["thread"] = t
         t.start()
         logger.info("Hermes 安装线程已启动")
         return {"started": True, "error": None}
@@ -115,19 +127,27 @@ class InstallerWebViewAPI:
         Returns:
             {
                 "running": bool,
-                "lines": List[str],       # 安装输出行（最近 50 行）
+                "lines": List[str],       # 安装输出行（保留较长窗口）
                 "success": bool | None,   # None 表示仍在进行中
                 "message": str,
                 "setup_triggered": bool,  # True 表示检测到 setup TUI，需打开终端
             }
         """
+        _normalize_install_state()
         result = _install_state.get("result")
+        lines = list(_install_state["lines"])
         return {
             "running": _install_state["running"],
-            "lines": list(_install_state["lines"])[-50:],
+            "lines": lines,
+            "line_count": _install_state.get("line_count", len(lines)),
+            "truncated": bool(_install_state.get("truncated", False)),
+            "omitted_count": max(0, int(_install_state.get("line_count", len(lines))) - len(lines)),
             "success": result.success if result is not None else None,
             "message": result.message if result is not None else "",
             "setup_triggered": _install_state.get("setup_triggered", False),
+            "started_at": _install_state.get("started_at"),
+            "finished_at": _install_state.get("finished_at"),
+            "last_line_at": _install_state.get("last_line_at"),
         }
 
     def recheck_status(self) -> Dict[str, Any]:
@@ -214,19 +234,11 @@ class InstallerWebViewAPI:
 
         try:
             if system == "Darwin":
-                # macOS: 用 osascript 在 Terminal.app 新窗口中运行 hermes setup
-                # 直接 do script "cmd" 会在新窗口中执行（不使用 "make new document"，会报错 -2710）
-                script = (
-                    'tell application "Terminal"\n'
-                    "    activate\n"
-                    '    do script "hermes setup"\n'
-                    "end tell"
-                )
-                subprocess.Popen(
-                    ["osascript", "-e", script],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
+                from apps.shell.terminal import open_terminal_command
+
+                success, error = open_terminal_command("hermes setup")
+                if not success:
+                    return {"success": False, "error": error, "already_running": False}
             elif system == "Linux":
                 # Linux: 按优先级尝试常见终端模拟器
                 for terminal_cmd in [
@@ -280,7 +292,40 @@ class InstallerWebViewAPI:
 _install_state: Dict[str, Any] = {
     "running": False,
     "lines": [],
+    "line_count": 0,
+    "truncated": False,
     "result": None,
     "setup_triggered": False,  # True 表示检测到 hermes setup TUI，需打开终端
     "setup_terminal_opened": False,  # True 表示已自动打开过终端
+    "started_at": None,
+    "finished_at": None,
+    "last_line_at": None,
+    "thread": None,
 }
+
+
+def _append_install_line(line: str) -> None:
+    _install_state["line_count"] = int(_install_state.get("line_count", 0)) + 1
+    _install_state["lines"].append(line)
+    if len(_install_state["lines"]) > INSTALL_LOG_MAX_LINES:
+        del _install_state["lines"][: len(_install_state["lines"]) - INSTALL_LOG_MAX_LINES]
+        _install_state["truncated"] = True
+
+
+def _normalize_install_state() -> None:
+    """防止安装线程异常退出后 UI 一直停留在 running 状态。"""
+    if not _install_state.get("running"):
+        return
+    thread = _install_state.get("thread")
+    if thread is None or getattr(thread, "is_alive", lambda: False)():
+        return
+    if _install_state.get("result") is None:
+        from apps.installer.hermes_install import InstallResult
+
+        _install_state["result"] = InstallResult(
+            success=False,
+            message="安装线程已结束但未返回结果，请查看日志后重试",
+            returncode=-1,
+        )
+    _install_state["running"] = False
+    _install_state["finished_at"] = time.time()

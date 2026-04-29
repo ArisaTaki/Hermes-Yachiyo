@@ -2,6 +2,39 @@
 
 ## 已完成
 
+### Milestone 73 — 一键安装错误捕获 hotfix
+
+- ✅ `run_hermes_install()` 不再丢弃带 ANSI 颜色控制序列的安装脚本输出；会清洗控制码并保留可读错误文本，避免 UI 只显示 `exit=1` 而隐藏真正失败原因。
+- ✅ 安装脚本非零退出后，兜底检测改为复用 `locate_hermes_binary()`，可识别 Hermes 已落盘但当前 GUI 进程 PATH 尚未刷新的场景。
+- ✅ 通过备用路径找到 Hermes 且 `hermes --version` 成功时，将结果视为安装成功，并提示当前应用 PATH 已修复、仍需完成 `hermes setup`。
+- ✅ 安装脚本真实失败时，失败文案提示用户查看上方安装日志中的错误详情。
+- ✅ 修复 `apps/installer/hermes_install.py` 中已有 `Dict[str, any]` 类型标注问题，相关文件 diagnostics 清零。
+- ✅ 新增回归测试覆盖 ANSI 错误日志保留、`exit=1` 后通过备用路径识别已安装 Hermes。
+- ✅ 相关测试：`python -m pytest tests/test_hermes_installer.py` → 8 passed。
+- ✅ 全量测试：`python -m pytest` → 425 passed，1 warning（已有重复 ZIP entry 警告）。
+- ✅ `git diff --check` → passed。
+
+### Milestone 72 — 备份清理与导入源安全收敛
+
+- ✅ `find_backups()` 只纳入严格匹配托管命名规则的 `hermes-yachiyo-backup-YYYYMMDD-HHMMSS[-N].zip`，不再把 `*-draft.zip` / `*-external.zip` 等前缀相似文件纳入管理列表。
+- ✅ `cleanup_old_backups()` 删除旧备份时若遇到 `ValueError`，会记录 warning 并跳过该文件，避免自动清理导致 `create_backup(auto_cleanup=True)` 中断。
+- ✅ `import_backup()` 恢复 `app-config` 前强制确认备份源是非 symlink 目录；若备份里是文件或非目录形态，会跳过并给出原因，不会替换目标配置目录。
+- ✅ `import_backup()` 恢复 `yachiyo-workspace` 前同样强制确认备份源是非 symlink 目录，再检查初始化标识和目标安全性，避免文件替换目标工作空间目录。
+- ✅ 新增回归测试覆盖不可管理删除错误跳过、非规范命名 ZIP 不进入 `find_backups()`、文件形态 app-config/workspace 源不会被恢复。
+- ✅ 相关测试：`python -m pytest tests/test_uninstall.py` → 45 passed。
+- ✅ 全量测试：`python -m pytest` → 423 passed。
+
+### Milestone 71 — 受保护路径集合缓存
+
+- ✅ `protected_paths()` 改为复用按当前 home 路径缓存的受保护路径集合，避免备份导入/卸载安全检查中反复执行多组 `exists()` / `resolve()`。
+- ✅ `is_protected_path()` 直接查询缓存的 `frozenset`，不再为每次判断重新构造受保护路径集合。
+- ✅ 移除 `protected_paths()` 中不可达且引用未定义 `home` 的旧 return，避免静态检查与后续维护误判。
+
+### Milestone 70 — 备份 ZIP 解压实际写入限流
+
+- ✅ `_extract_zip_safely()` 不再只依赖 `ZipInfo.file_size` 头部声明；解压成员改为分块读写，并按实际写入字节数校验单条目和总解压体积限制。
+- ✅ 解压过程中一旦实际写入量超出单条目或总量限制，会中止并删除当前部分输出文件，避免恶意 ZIP 通过虚假 header 触发磁盘填充风险。
+
 ### Milestone 72 — Electron 固定前端与 Python Headless 后端
 
 - ✅ 固定桌面壳改为 Electron + React/Vite/TypeScript，前端工作区落在 `apps/frontend/`，不再通过 pywebview 承载新 UI。
@@ -56,14 +89,3 @@
 - ✅ Replaced the rigid, high-contrast Tsukuyomi cyberpunk design with an elegant macOS-inspired "Glassmorphism" deep dark theme (`--bg-main: #0B0E14`).
 - ✅ Implemented radial lighting, smooth transition animations, and subpixel-antialiased typography using `SF Pro Text` / system fonts.
 - ✅ Successfully restored broken mode setting configurations (like bubble size and opacity configurations mapping in `settings.py`) by isolating CSS block injection instead of full string replacement.
-
-### Milestone 71 — 受保护路径集合缓存
-
-- ✅ `protected_paths()` 改为复用按当前 home 路径缓存的受保护路径集合，避免备份导入/卸载安全检查中反复执行多组 `exists()` / `resolve()`。
-- ✅ `is_protected_path()` 直接查询缓存的 `frozenset`，不再为每次判断重新构造受保护路径集合。
-- ✅ 移除 `protected_paths()` 中不可达且引用未定义 `home` 的旧 return，避免静态检查与后续维护误判。
-
-### Milestone 70 — 备份 ZIP 解压实际写入限流
-
-- ✅ `_extract_zip_safely()` 不再只依赖 `ZipInfo.file_size` 头部声明；解压成员改为分块读写，并按实际写入字节数校验单条目和总解压体积限制。
-- ✅ 解压过程中一旦实际写入量超出单条目或总量限制，会中止并删除当前部分输出文件，避免恶意 ZIP 通过虚假 header 触发磁盘填充风险。

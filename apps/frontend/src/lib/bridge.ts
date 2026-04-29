@@ -14,6 +14,16 @@ export type LauncherHitRegionPayload = {
     height: number;
   };
 };
+export type DesktopTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup';
+export type DesktopTerminalStartResult = {
+  success?: boolean;
+  id?: string;
+  task?: DesktopTerminalTask;
+  title?: string;
+  error?: string;
+};
+export type DesktopTerminalDataPayload = { id: string; data: string };
+export type DesktopTerminalExitPayload = { id: string; exitCode: number; signal?: number; task?: DesktopTerminalTask };
 
 declare global {
   interface Window {
@@ -33,6 +43,12 @@ declare global {
       restartApp?: () => Promise<void>;
       setLauncherHitRegions?: (mode: string, payload: LauncherHitRegionPayload) => Promise<boolean>;
       setLauncherPointerInteractive?: (mode: string, interactive: boolean) => Promise<boolean>;
+      terminalKill?: (id: string) => Promise<boolean>;
+      terminalResize?: (id: string, cols: number, rows: number) => Promise<boolean>;
+      terminalStart?: (task: string, cols: number, rows: number) => Promise<DesktopTerminalStartResult>;
+      terminalWrite?: (id: string, data: string) => Promise<boolean>;
+      onTerminalData?: (callback: (payload: DesktopTerminalDataPayload) => void) => () => void;
+      onTerminalExit?: (callback: (payload: DesktopTerminalExitPayload) => void) => () => void;
     };
   }
 }
@@ -236,6 +252,49 @@ export async function restartApp(): Promise<void> {
     return;
   }
   window.location.reload();
+}
+
+export function hasEmbeddedTerminal(): boolean {
+  return Boolean(
+    window.hermesDesktop?.terminalStart
+    && window.hermesDesktop?.terminalWrite
+    && window.hermesDesktop?.terminalResize
+    && window.hermesDesktop?.terminalKill
+    && window.hermesDesktop?.onTerminalData
+    && window.hermesDesktop?.onTerminalExit,
+  );
+}
+
+export async function startDesktopTerminal(
+  task: DesktopTerminalTask,
+  cols: number,
+  rows: number,
+): Promise<DesktopTerminalStartResult> {
+  if (!window.hermesDesktop?.terminalStart) throw new Error('当前环境不支持内置终端');
+  return window.hermesDesktop.terminalStart(task, cols, rows);
+}
+
+export async function writeDesktopTerminal(id: string, data: string): Promise<void> {
+  if (!window.hermesDesktop?.terminalWrite) return;
+  await window.hermesDesktop.terminalWrite(id, data);
+}
+
+export async function resizeDesktopTerminal(id: string, cols: number, rows: number): Promise<void> {
+  if (!window.hermesDesktop?.terminalResize) return;
+  await window.hermesDesktop.terminalResize(id, cols, rows);
+}
+
+export async function killDesktopTerminal(id: string): Promise<void> {
+  if (!window.hermesDesktop?.terminalKill) return;
+  await window.hermesDesktop.terminalKill(id);
+}
+
+export function onDesktopTerminalData(callback: (payload: DesktopTerminalDataPayload) => void): () => void {
+  return window.hermesDesktop?.onTerminalData?.(callback) || (() => {});
+}
+
+export function onDesktopTerminalExit(callback: (payload: DesktopTerminalExitPayload) => void): () => void {
+  return window.hermesDesktop?.onTerminalExit?.(callback) || (() => {});
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {

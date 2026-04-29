@@ -9,7 +9,9 @@ from apps.installer.hermes_check import (
 )
 from apps.installer.hermes_install import (
     HERMES_INSTALL_TIMEOUT_SECONDS,
+    clean_terminal_line,
     run_hermes_install,
+    summarize_install_failure,
 )
 from packages.protocol.enums import HermesInstallStatus, HermesReadinessLevel, Platform
 from packages.protocol.install import HermesVersionInfo
@@ -32,6 +34,28 @@ def test_hermes_install_timeout_allows_slow_setup_phase():
 
     assert HERMES_INSTALL_TIMEOUT_SECONDS == 900.0
     assert timeout_param.default == HERMES_INSTALL_TIMEOUT_SECONDS
+
+
+def test_hermes_install_summarizes_git_clone_disconnect():
+    output = """
+Cloning into '/Users/test/.hermes/hermes-agent'...
+error: RPC failed; curl 18 transfer closed with outstanding read data remaining
+fetch-pack: unexpected disconnect while reading sideband packet
+fatal: early EOF
+fatal: fetch-pack: invalid index-pack output
+"""
+
+    message = summarize_install_failure(output, 128)
+
+    assert "GitHub" in message
+    assert "网络" in message
+    assert "Releases" in message
+
+
+def test_hermes_install_cleans_ansi_without_dropping_text():
+    line = "\x1b[32mInstalling Hermes\x1b[0m\r"
+
+    assert clean_terminal_line(line) == "Installing Hermes"
 
 
 def test_hermes_doctor_readiness_keeps_startup_bounded():

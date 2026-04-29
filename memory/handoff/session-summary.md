@@ -1,5 +1,30 @@
 # Session Summary
 
+## 追加修复 — Milestone 71: Protected path cache
+
+### 核心结果
+
+本轮处理新的 PR review：`is_protected_path()` 不再每次触发 `protected_paths()` 重新计算受保护路径集合，减少备份导入/卸载安全检查中的重复 `Path.exists()` / `resolve()` 开销。
+
+### 主要变更
+
+- `apps/installer/backup.py`：新增 `_protected_paths_for_home()`，使用 `functools.lru_cache(maxsize=16)` 按解析后的 home path 缓存受保护路径集合。
+- `protected_paths()`：保留原有 public API，返回缓存集合的 set 副本。
+- `is_protected_path()`：直接查询当前 home 对应的缓存 `frozenset`。
+- 缓存按 home 分区，避免测试或运行时 `HOME` 变化导致旧保护集合被误复用。
+- 移除 `protected_paths()` 中不可达且引用未定义 `home` 的旧 return，并补充防回退断言。
+
+### 测试覆盖
+
+- `tests/test_uninstall.py`：新增 `test_protected_paths_cache_is_scoped_by_home`，验证重复调用命中缓存，切换 HOME 后产生新的缓存 miss，并且不同 home 的保护集合互不污染。
+
+### 验证结果
+
+- `python -m pytest tests/test_uninstall.py` → 41 passed。
+- `python -m pytest` → 419 passed。
+
+---
+
 ## 本轮完成内容 — Milestone 72: Electron fixed frontend split
 
 ### 核心结果
@@ -61,31 +86,6 @@
 - React 主控台和通用设置页已按旧 pywebview 内容补全：主控台恢复 Hermes、Workspace、Runtime/Bridge、Tasks、Integrations、会话摘要和模式入口；通用设置恢复 Hermes 诊断、Workspace、显示模式、助手资料、Bridge 状态/漂移/重启、集成状态、应用、备份和卸载区。
 - UI Bridge 已补旧 MainWindowAPI 操作路由：Hermes terminal/recheck、Bridge restart、backup status/create/restore/delete/open-location、uninstall preview/run，React 不复制业务逻辑。
 - 验证：最新 `npm --prefix apps/frontend run build` 通过；浏览器实机检查通用/Bubble/Live2D 设置页真实数据填充、待保存计数、非法数值提示与恢复同步状态通过；新增资源入口后再次构建通过；无桌面 IPC 场景下验证资源区内联路径输入和 Bubble 新窗口 fallback 通过；Electron 运行态短启动验证确认 Vite + Electron 进程能拉起；最新 `/Users/cxldefontaine/个人项目/Hermes-Yachiyo/.venv/bin/python -m pytest tests/test_desktop_launcher.py tests/test_ui_bridge_routes.py` → 19 passed；相关 VS Code diagnostics 无错误。此前同类验证包括 18 passed、45 passed、48 passed、119 passed。
-
----
-
-## 追加修复 — Milestone 71: Protected path cache
-
-### 核心结果
-
-本轮处理新的 PR review：`is_protected_path()` 不再每次触发 `protected_paths()` 重新计算受保护路径集合，减少备份导入/卸载安全检查中的重复 `Path.exists()` / `resolve()` 开销。
-
-### 主要变更
-
-- `apps/installer/backup.py`：新增 `_protected_paths_for_home()`，使用 `functools.lru_cache(maxsize=16)` 按解析后的 home path 缓存受保护路径集合。
-- `protected_paths()`：保留原有 public API，返回缓存集合的 set 副本。
-- `is_protected_path()`：直接查询当前 home 对应的缓存 `frozenset`。
-- 缓存按 home 分区，避免测试或运行时 `HOME` 变化导致旧保护集合被误复用。
-- 移除 `protected_paths()` 中不可达且引用未定义 `home` 的旧 return，并补充防回退断言。
-
-### 测试覆盖
-
-- `tests/test_uninstall.py`：新增 `test_protected_paths_cache_is_scoped_by_home`，验证重复调用命中缓存，切换 HOME 后产生新的缓存 miss，并且不同 home 的保护集合互不污染。
-
-### 验证结果
-
-- `python -m pytest tests/test_uninstall.py` → 41 passed。
-- `python -m pytest` → 419 passed。
 
 ---
 

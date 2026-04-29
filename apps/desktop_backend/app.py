@@ -7,6 +7,7 @@ create desktop windows; Electron owns all UI surfaces.
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import sys
 
@@ -21,6 +22,7 @@ def _setup_logging() -> None:
 
 def main() -> None:
     _setup_logging()
+    os.environ["HERMES_YACHIYO_DESKTOP_BACKEND"] = "1"
 
     from apps.bridge.deps import set_runtime
     from apps.bridge.server import start_bridge, stop_bridge

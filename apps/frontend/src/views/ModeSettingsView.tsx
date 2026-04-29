@@ -9,6 +9,7 @@ import {
   openExternalUrl,
   openDesktopMode,
   openPath,
+  quitApp,
 } from '../lib/bridge';
 import { currentParam, navigateTo } from '../lib/view';
 
@@ -562,12 +563,15 @@ function GeneralSettingsView() {
   const [uninstallKeepConfig, setUninstallKeepConfig] = useState(true);
   const [uninstallPreview, setUninstallPreview] = useState<UninstallPlan | null>(null);
   const [uninstallConfirmText, setUninstallConfirmText] = useState('');
+  const [uninstallRunning, setUninstallRunning] = useState(false);
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
   const changes = useMemo(() => buildGeneralSettingsChanges(payload, form), [payload, form]);
   const pendingCount = useMemo(() => countGeneralSettingsPendingChanges(payload, form), [payload, form]);
   const hasChanges = pendingCount > 0;
+  const uninstallConfirmPhrase = uninstallPreview?.confirm_phrase || 'UNINSTALL';
+  const uninstallConfirmValid = uninstallConfirmText.trim() === uninstallConfirmPhrase;
 
   useEffect(() => {
     let disposed = false;
@@ -745,19 +749,34 @@ function GeneralSettingsView() {
   }
 
   async function runUninstall() {
-    const phrase = uninstallPreview?.confirm_phrase || 'UNINSTALL';
-    if (uninstallConfirmText.trim() !== phrase) {
-      setStatus(`请输入确认短语 ${phrase}`);
+    if (uninstallRunning) return;
+    if (!uninstallConfirmValid) {
+      setStatus(`请输入确认短语 ${uninstallConfirmPhrase}`);
       return;
     }
     if (!window.confirm('卸载会删除所选本机资料，此操作不可撤销。确认继续吗？')) return;
-    const result = await apiPost<{ ok?: boolean; error?: string; errors?: string[] }>('/ui/uninstall/run', {
-      scope: uninstallScope,
-      keep_config: uninstallKeepConfig,
-      confirm_text: uninstallConfirmText,
-    });
-    if (result.ok === false) throw new Error(result.error || result.errors?.join('；') || '卸载失败');
-    setStatus('卸载已执行，应用将按需要退出');
+    setUninstallRunning(true);
+    setStatus('正在卸载…');
+    try {
+      const result = await apiPost<{ ok?: boolean; error?: string; errors?: string[]; backup_path_display?: string; desktop_quit_required?: boolean; exit_scheduled?: boolean }>('/ui/uninstall/run', {
+        scope: uninstallScope,
+        keep_config: uninstallKeepConfig,
+        confirm_text: uninstallConfirmText,
+      });
+      if (result.ok === false) throw new Error(result.error || result.errors?.join('；') || '卸载失败');
+      const backupText = result.backup_path_display ? `备份已保存到 ${result.backup_path_display}。` : '';
+      setStatus(`卸载已执行。${backupText} 应用正在退出…`);
+      if (result.desktop_quit_required || result.exit_scheduled) {
+        window.setTimeout(() => {
+          void quitApp();
+        }, 250);
+        return;
+      }
+      setUninstallRunning(false);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '卸载失败');
+      setUninstallRunning(false);
+    }
   }
 
   async function refreshUninstallPreview() {
@@ -1059,16 +1078,17 @@ function GeneralSettingsView() {
           {uninstallPreview?.warnings?.length ? <p className="warn-text">{uninstallPreview.warnings.join('；')}</p> : null}
         </div>
         <div className="settings-field uninstall-confirm-field">
-          <label htmlFor="uninstall-confirm-text">输入 {uninstallPreview?.confirm_phrase || 'UNINSTALL'} 确认</label>
+          <label htmlFor="uninstall-confirm-text">输入 {uninstallConfirmPhrase} 确认</label>
           <input
             id="uninstall-confirm-text"
             value={uninstallConfirmText}
+            disabled={uninstallRunning}
             onChange={(event) => setUninstallConfirmText(event.target.value)}
           />
         </div>
         <div className="settings-action-strip">
-          <button type="button" onClick={() => void refreshUninstallPreview()}>刷新清单</button>
-          <button type="button" className="danger-action" onClick={() => void runUninstall()}>卸载…</button>
+          <button type="button" disabled={uninstallRunning} onClick={() => void refreshUninstallPreview()}>刷新清单</button>
+          <button type="button" className="danger-action" disabled={uninstallRunning || !uninstallConfirmValid} onClick={() => void runUninstall()}>{uninstallRunning ? '正在卸载' : '卸载'}</button>
         </div>
       </section>
     </main>

@@ -112,6 +112,13 @@ duplicating business logic in React. Dashboard/settings renderer actions that
 restart Bridge, recheck Hermes, open Hermes terminal commands, create/restore
 backups, or preview/run uninstall delegate to `MainWindowAPI` via `/ui/*`.
 
+The installer view uses an embedded terminal for guided macOS prerequisites,
+Hermes Agent installation, and `hermes setup`. React renders the terminal with
+xterm.js, while Electron owns the actual PTY through `node-pty` and exposes only
+predefined installer tasks through preload IPC. The older native-terminal Bridge
+routes remain as a fallback for browser/dev environments that do not expose the
+Electron terminal IPC.
+
 ## Launcher Modes
 
 Electron creates transparent BrowserWindows for Bubble and Live2D. Their React
@@ -178,3 +185,33 @@ Backend-only development can use:
 ```bash
 hermes-yachiyo-backend
 ```
+
+## Packaging Direction
+
+Packaging should treat the user's machine as clean: the released desktop app
+must not depend on a globally installed Python, Node.js, or editable checkout.
+The macOS target should be the first supported package, then Windows and Linux
+can follow the same split with platform-specific launch wrappers.
+
+The intended macOS packaging path is:
+
+1. Build the React renderer with Node 20.19+.
+2. Build the Python project as an installable wheel from the repository root.
+3. Create a clean build virtualenv with `uv`, install the wheel plus locked
+   runtime dependencies into that environment, and run backend smoke tests from
+   that venv.
+4. Freeze `apps.desktop_backend.app` into a self-contained backend executable
+   under the Electron app's `Resources` directory. PyInstaller is the pragmatic
+   first option; keeping a bundled venv is an acceptable fallback if hidden
+   imports or native dependencies make freezing too brittle.
+5. Package Electron with the compiled renderer, preload/main scripts, and the
+   backend executable. In packaged mode, Electron should spawn the bundled
+   backend path; in development it should keep spawning
+   `python -m apps.desktop_backend.app`.
+6. Unpack native Electron dependencies for runtime use, especially
+   `node-pty` and its `prebuilds/*/spawn-helper` binary. The main process
+   defensively restores the helper executable bit in development, but the
+   packaged app should still mark native modules as unpacked from asar.
+
+This keeps Python dependency resolution out of end-user startup, while still
+letting development use the local editable virtualenv.

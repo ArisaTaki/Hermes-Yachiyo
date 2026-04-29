@@ -23,6 +23,28 @@ body.desktop-mode-body #root {
 }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+button.primary-action {
+  border-color: rgba(120, 166, 247, 0.42);
+  background: rgba(120, 166, 247, 0.16);
+  color: #dce8ff;
+}
+button.primary-action:not(:disabled):hover {
+  border-color: rgba(120, 166, 247, 0.68);
+  background: rgba(120, 166, 247, 0.23);
+}
+button.attention-action {
+  border-color: rgba(249, 199, 78, 0.58);
+  background: rgba(249, 199, 78, 0.18);
+  color: #ffe5ad;
+}
+button.attention-action:not(:disabled):hover {
+  border-color: rgba(249, 199, 78, 0.82);
+  background: rgba(249, 199, 78, 0.26);
+}
 
 .app-shell {
   min-height: 100%;
@@ -510,6 +532,91 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
   display: grid;
   gap: 8px;
 }
+.installer-step-banner {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.035);
+}
+.installer-step-banner.active {
+  border-color: rgba(120, 166, 247, 0.36);
+  background: rgba(120, 166, 247, 0.1);
+}
+.installer-step-banner.attention {
+  border-color: rgba(249, 199, 78, 0.48);
+  background: rgba(249, 199, 78, 0.13);
+}
+.installer-step-banner.success {
+  border-color: rgba(86, 197, 157, 0.42);
+  background: rgba(86, 197, 157, 0.11);
+}
+.installer-step-banner.danger {
+  border-color: rgba(239, 119, 127, 0.44);
+  background: rgba(239, 119, 127, 0.12);
+}
+.installer-step-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.installer-step-banner.active .installer-step-dot {
+  background: var(--accent);
+  box-shadow: 0 0 0 5px rgba(120, 166, 247, 0.13);
+}
+.installer-step-banner.attention .installer-step-dot {
+  background: #f9c74e;
+  box-shadow: 0 0 0 5px rgba(249, 199, 78, 0.14);
+}
+.installer-step-banner.success .installer-step-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 5px rgba(86, 197, 157, 0.13);
+}
+.installer-step-banner.danger .installer-step-dot {
+  background: var(--danger);
+  box-shadow: 0 0 0 5px rgba(239, 119, 127, 0.13);
+}
+.installer-step-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.installer-step-copy strong {
+  font-size: 15px;
+}
+.installer-step-copy span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.process-badge {
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  color: var(--muted);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 12px;
+  min-height: 24px;
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+.process-badge.active {
+  border-color: rgba(120, 166, 247, 0.42);
+  background: rgba(120, 166, 247, 0.13);
+  color: #cfe0ff;
+}
+.process-badge.attention {
+  border-color: rgba(249, 199, 78, 0.52);
+  background: rgba(249, 199, 78, 0.14);
+  color: #ffe5ad;
+}
 .installer-guidance-list p {
   margin: 0;
   color: var(--text);
@@ -529,6 +636,112 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
 }
 .installer-log {
   max-height: 260px;
+}
+.installer-log-truncated {
+  margin-bottom: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 10px;
+}
+.installer-log-notice {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 10px;
+  border: 1px solid rgba(249, 199, 78, 0.35);
+  border-radius: 8px;
+  background: rgba(249, 199, 78, 0.1);
+  color: #ffe5ad;
+  padding: 10px 12px;
+}
+.installer-log-notice.danger {
+  border-color: rgba(239, 119, 127, 0.42);
+  background: rgba(239, 119, 127, 0.11);
+  color: #ffb9bf;
+}
+.installer-log-notice strong {
+  font-size: 13px;
+}
+.installer-log-notice span {
+  font-size: 12px;
+  line-height: 1.5;
+}
+.embedded-terminal-panel {
+  margin-top: 4px;
+}
+.terminal-heading-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+.terminal-heading-actions button {
+  min-height: 28px;
+  padding: 4px 9px;
+}
+.terminal-status {
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 3px 9px;
+}
+.terminal-status.starting,
+.terminal-status.running {
+  border-color: rgba(120, 166, 247, 0.42);
+  background: rgba(120, 166, 247, 0.12);
+  color: #cfe0ff;
+}
+.terminal-status.exited {
+  border-color: rgba(86, 197, 157, 0.38);
+  background: rgba(86, 197, 157, 0.1);
+  color: #bdeedb;
+}
+.terminal-status.error {
+  border-color: rgba(239, 119, 127, 0.44);
+  background: rgba(239, 119, 127, 0.12);
+  color: #ffb9bf;
+}
+.embedded-terminal-hint {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 10px;
+}
+.embedded-terminal-shell {
+  position: relative;
+  height: 360px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: #070b12;
+}
+.embedded-terminal {
+  box-sizing: border-box;
+  height: 100%;
+  padding: 10px 12px;
+  width: 100%;
+}
+.embedded-terminal .xterm,
+.embedded-terminal .xterm-screen,
+.embedded-terminal .xterm-viewport {
+  height: 100%;
+}
+.embedded-terminal .xterm-viewport {
+  background: transparent !important;
+}
+.embedded-terminal-placeholder {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 13px;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  pointer-events: none;
+  position: absolute;
+  text-align: center;
 }
 .backup-manager {
   display: grid;

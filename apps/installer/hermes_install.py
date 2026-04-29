@@ -122,10 +122,18 @@ class HermesInstallGuide:
         if platform == Platform.MACOS:
             base_info.update({
                 "actions": [
-                    "方式1 - 使用官方安装脚本 (推荐):",
+                    "第 1 步 - 准备 macOS 基础工具（第一次使用推荐先做）:",
+                    "  xcode-select --install",
+                    "  /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"",
+                    "  brew update",
+                    "  brew install git curl",
+                    "",
+                    "第 2 步 - 使用官方安装脚本安装 Hermes Agent:",
                     "  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
                     "",
-                    "方式2 - 下载二进制文件:",
+                    "如果已经安装过 Homebrew、git 和 curl，可以直接从第 2 步开始。",
+                    "",
+                    "备选方式 - 下载二进制文件:",
                     "  访问 https://github.com/NousResearch/hermes-agent/releases",
                     "  下载 macOS 版本并添加到 PATH"
                 ],
@@ -237,6 +245,7 @@ def get_platform_specific_suggestions(platform: Platform) -> List[str]:
 
 import asyncio
 import dataclasses
+import re
 import subprocess
 import sys
 
@@ -245,6 +254,7 @@ HERMES_INSTALL_SCRIPT_URL = (
     "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh"
 )
 HERMES_INSTALL_TIMEOUT_SECONDS = 900.0
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\([A-Za-z]")
 
 
 @dataclasses.dataclass
@@ -264,6 +274,32 @@ class InstallResult:
         if self.stderr:
             parts.append(f"stderr: {self.stderr[:200]}")
         return " | ".join(parts) if parts else "安装失败"
+
+
+def summarize_install_failure(output: str, returncode: int) -> str:
+    """Return a user-facing summary for common installer failures."""
+    normalized = output.lower()
+    git_network_markers = (
+        "rpc failed",
+        "early eof",
+        "fetch-pack",
+        "invalid index-pack",
+        "unexpected disconnect",
+        "transfer closed with outstanding read data",
+    )
+    if any(marker in normalized for marker in git_network_markers):
+        return (
+            "从 GitHub 克隆 Hermes Agent 时网络传输中断。"
+            "请检查网络或代理后重试；也可以改用 Releases 二进制安装。"
+        )
+    if "could not resolve host" in normalized or "failed to connect" in normalized:
+        return "无法连接 GitHub 或安装脚本源，请检查网络、代理或 DNS 后重试。"
+    return f"安装脚本执行失败（exit={returncode}）"
+
+
+def clean_terminal_line(line: str) -> str:
+    """Remove terminal control sequences while keeping readable output."""
+    return ANSI_ESCAPE_RE.sub("", line).replace("\r", "").rstrip()
 
 
 async def run_hermes_install(
@@ -336,7 +372,8 @@ async def run_hermes_install(
                 line_bytes = await proc.stdout.readline()
                 if not line_bytes:
                     break
-                line = line_bytes.decode(errors="replace").rstrip()
+                raw_line = line_bytes.decode(errors="replace").rstrip("\n")
+                line = clean_terminal_line(raw_line)
 
                 # 检测 hermes setup 的关键特征文字（而非泛化的 ANSI/TUI 字符）
                 # 这些是 setup wizard 独有的文字，installer banner 不会触发
@@ -369,11 +406,8 @@ async def run_hermes_install(
                         except Exception:
                             pass
 
-                # 过滤带 ANSI 转义码的行（TUI 渲染残留），但仍保留普通文本
-                has_ansi = "\x1b[" in line or "\x1b(" in line
-                if has_ansi:
-                    continue  # 跳过 ANSI 行，不写入日志
-
+                if not line:
+                    continue
                 stdout_lines.append(line)
                 if on_output is not None:
                     try:
@@ -427,7 +461,7 @@ async def run_hermes_install(
 
         return InstallResult(
             success=False,
-            message=f"安装脚本执行失败（exit={rc}）",
+            message=summarize_install_failure(combined_output, rc),
             stdout=combined_output,
             returncode=rc,
         )
