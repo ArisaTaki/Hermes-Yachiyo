@@ -2,6 +2,71 @@
 
 ## 已完成
 
+### Milestone 72 — 备份清理与导入源安全收敛
+
+- ✅ `find_backups()` 只纳入严格匹配托管命名规则的 `hermes-yachiyo-backup-YYYYMMDD-HHMMSS[-N].zip`，不再把 `*-draft.zip` / `*-external.zip` 等前缀相似文件纳入管理列表。
+- ✅ `cleanup_old_backups()` 删除旧备份时若遇到 `ValueError`，会记录 warning 并跳过该文件，避免自动清理导致 `create_backup(auto_cleanup=True)` 中断。
+- ✅ `import_backup()` 恢复 `app-config` 前强制确认备份源是非 symlink 目录；若备份里是文件或非目录形态，会跳过并给出原因，不会替换目标配置目录。
+- ✅ `import_backup()` 恢复 `yachiyo-workspace` 前同样强制确认备份源是非 symlink 目录，再检查初始化标识和目标安全性，避免文件替换目标工作空间目录。
+- ✅ 新增回归测试覆盖不可管理删除错误跳过、非规范命名 ZIP 不进入 `find_backups()`、文件形态 app-config/workspace 源不会被恢复。
+- ✅ 相关测试：`python -m pytest tests/test_uninstall.py` → 45 passed。
+- ✅ 全量测试：`python -m pytest` → 423 passed。
+
+### Milestone 71 — 受保护路径集合缓存
+
+- ✅ `protected_paths()` 改为复用按当前 home 路径缓存的受保护路径集合，避免备份导入/卸载安全检查中反复执行多组 `exists()` / `resolve()`。
+- ✅ `is_protected_path()` 直接查询缓存的 `frozenset`，不再为每次判断重新构造受保护路径集合。
+- ✅ 移除 `protected_paths()` 中不可达且引用未定义 `home` 的旧 return，避免静态检查与后续维护误判。
+- ✅ 缓存按解析后的 home path 分区，避免测试或运行时 `HOME` 变化时复用旧 home 的保护集合。
+- ✅ 新增回归测试覆盖重复调用命中缓存、切换 HOME 后重新计算并隔离缓存结果。
+- ✅ 相关测试：`python -m pytest tests/test_uninstall.py` → 41 passed。
+- ✅ 全量测试：`python -m pytest` → 419 passed。
+
+### Milestone 70 — 备份 ZIP 解压实际写入限流
+
+- ✅ `_extract_zip_safely()` 不再只依赖 `ZipInfo.file_size` 头部声明；解压成员改为分块读写，并按实际写入字节数校验单条目和总解压体积限制。
+- ✅ 解压过程中一旦实际写入量超出单条目或总量限制，会中止并删除当前部分输出文件，避免恶意 ZIP 通过虚假 header 触发磁盘填充风险。
+- ✅ 保留原有路径穿越、重复条目和 header 声明大小的快速校验，新增实际流量计数作为第二道保护。
+- ✅ 新增回归测试覆盖实际写入单条目超限清理、实际写入总量超限清理。
+- ✅ 相关测试：`python -m pytest tests/test_uninstall.py` → 40 passed。
+- ✅ 全量测试：`python -m pytest` → 418 passed。
+
+### Milestone 69 — 备份 ZIP 原子写入与失败清理
+
+- ✅ `create_backup()` 不再直接写最终托管 ZIP；先写入同目录隐藏临时文件，压缩完成后再 `replace()` 到正式 `hermes-yachiyo-backup-*.zip`。
+- ✅ 备份创建后会校验 `BackupInfo.valid`，无效 ZIP 会转为异常并清理已发布目标文件。
+- ✅ 异常路径会清理临时 ZIP；若正式 ZIP 已发布但后续清理/覆盖逻辑失败，也会删除目标文件，避免管理列表看到半成品或失败产物。
+- ✅ `overwrite_latest` 保持“新备份成功后才删除旧最近备份”的语义，并在自动清理之后按需删除旧最近备份。
+- ✅ 新增回归测试覆盖 ZIP 写入失败清理临时文件、后续 cleanup 失败清理已发布目标文件。
+- ✅ 相关测试：`python -m pytest tests/test_uninstall.py` → 38 passed。
+- ✅ 全量测试：`python -m pytest` → 416 passed。
+
+### Milestone 68 — 备份/卸载 PR review 收敛
+
+- ✅ 卸载确认短语比较在前端与执行端都做首尾空白规整，用户复制/输入多余空格不会误失败，错误提示仍显示规范确认短语。
+- ✅ `MainWindowAPI.update_backup_settings` 改为复用 `apply_settings_changes` 的备份字段校验与持久化路径，避免备份保留份数校验在多个位置漂移；无效保留份数不会部分写入自动清理开关。
+- ✅ `INCLUDE_HERMES` 卸载不再仅凭目录名 `.hermes` / `hermes` 判定可删除，必须命中 `bin/hermes`、`config.yaml`、`config.yml`、`config.json` 或 `yachiyo` 等明确 marker。
+- ✅ 新增回归测试覆盖确认短语空白容错、空 `.hermes` 目录不可删、备份设置复用统一更新入口与无效值不部分保存。
+- ✅ 相关测试：`python -m pytest tests/test_uninstall.py tests/test_window_exit.py tests/test_mode_settings.py tests/test_main_api_modes.py` → 89 passed。
+- ✅ 全量测试：`python -m pytest` → 414 passed。
+- ⚠️ Ruff 未验证：当前虚拟环境未安装 `ruff` 模块；VS Code diagnostics 无相关错误。
+
+### Milestone 67 — 备份与卸载解耦、备份管理 UI
+
+- ✅ 新增独立备份模块 `apps/installer/backup.py`，备份不再只能从卸载流程触发。
+- ✅ 备份格式确定为新版 `Hermes-Yachiyo-backups/hermes-yachiyo-backup-*.zip`，内含 `manifest.json`；由于功能未正式发布，不保留旧 `Hermes-Yachiyo-uninstall-backups/hermes-yachiyo-config-*` 目录快照兼容。
+- ✅ 备份内容从最小配置快照扩展为 Hermes-Yachiyo 应用配置与完整 Yachiyo 工作空间，包括聊天数据库、项目资料、缓存、日志、模板和用户导入资源。
+- ✅ 默认手动备份创建新的时间戳 ZIP；同一秒连续生成时使用递增后缀，不复用刚被自动清理删除的旧文件名。
+- ✅ 新增备份设置：默认开启“自动清理旧备份”，保留最近 10 份，可在设置页调整 1-100 份。
+- ✅ 主设置页新增“备份”区，可随时主动生成备份、恢复最近备份、管理备份；管理列表提供“删除 / 打开位置 / 恢复此版本”。
+- ✅ 高级操作提供“覆盖最近一次备份”：先成功生成新备份，再删除原最近备份，避免失败时丢失唯一备份。
+- ✅ 主窗口 API 新增 `restore_backup`、`delete_backup`、`open_backup_location`、`update_backup_settings`，安装初始化引导改用正式 `get_backup_status` / `import_backup` API。
+- ✅ 卸载流程只在用户勾选时调用独立备份服务；备份失败会取消卸载，避免无备份继续删除。
+- ✅ 安装初始化引导可导入最近 ZIP 备份。
+- ✅ 相关测试：`python -m pytest tests/test_uninstall.py tests/test_window_exit.py` → 29 passed。
+- ✅ 全量测试：`python -m pytest` → 385 passed。
+- ✅ 相关 diagnostics：备份、卸载、主窗口 API、安装引导和窗口测试文件无 VS Code 错误。
+
 ### Milestone 63/64 — 下午桌面交互、设置与记忆规划收敛
 
 - ✅ Hermes 执行体验

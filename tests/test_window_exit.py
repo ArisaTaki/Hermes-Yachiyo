@@ -4,7 +4,8 @@ import sys
 import types
 
 import apps.shell.main_api as main_api_mod
-from apps.shell import chat_window, window as window_mod
+from apps.shell import chat_window
+from apps.shell import window as window_mod
 from apps.shell.modes.bubble import BubbleWindowAPI
 from apps.shell.window import _STATUS_HTML
 
@@ -206,7 +207,10 @@ def test_control_center_html_keeps_chat_window_as_external_full_session():
     assert "onDeferredSettingInput('bridge_port'" in _STATUS_HTML
     assert "setControlValue('s-bridge-host', 'bridge_host', d.bridge.host || '');" in _STATUS_HTML
     assert "setControlValue('s-bridge-port', 'bridge_port', d.bridge.port);" in _STATUS_HTML
-    assert "setControlValue('s-bridge-host', 'bridge_host', state.bridge.host || '');" in _STATUS_HTML
+    assert (
+        "setControlValue('s-bridge-host', 'bridge_host', state.bridge.host || '');"
+        in _STATUS_HTML
+    )
     assert "setControlValue('s-bridge-port', 'bridge_port', state.bridge.port);" in _STATUS_HTML
     assert "onSettingChange('display_mode'" in _STATUS_HTML
     assert "窗口模式" not in _STATUS_HTML
@@ -229,6 +233,93 @@ def test_control_center_html_exposes_hermes_diagnostics():
     assert "maybeAutoRecheckHermes" in _STATUS_HTML
     assert "能力诊断尚未运行" in _STATUS_HTML
     assert "检测 / 补全 Hermes 能力" in _STATUS_HTML
+
+
+def test_control_center_html_exposes_uninstall_flow():
+    assert "id=\"s-backup-create-btn\"" in _STATUS_HTML
+    assert "id=\"s-backup-auto-cleanup\"" in _STATUS_HTML
+    assert "id=\"s-backup-retention-count\"" in _STATUS_HTML
+    assert "id=\"s-backup-restore-btn\"" in _STATUS_HTML
+    assert "id=\"s-backup-manage-btn\"" in _STATUS_HTML
+    assert "id=\"s-backup-overwrite-btn\"" in _STATUS_HTML
+    assert "id=\"s-backup-manager\"" in _STATUS_HTML
+    assert "id=\"s-backup-manager-list\"" in _STATUS_HTML
+    assert "get_backup_status" in _STATUS_HTML
+    assert "create_backup" in _STATUS_HTML
+    assert "update_backup_settings" in _STATUS_HTML
+    assert "restore_backup" in _STATUS_HTML
+    assert "delete_backup" in _STATUS_HTML
+    assert "open_backup_location" in _STATUS_HTML
+    assert "id=\"s-uninstall-scope\"" in _STATUS_HTML
+    assert "value=\"yachiyo_only\"" in _STATUS_HTML
+    assert "value=\"include_hermes\"" in _STATUS_HTML
+    assert "id=\"s-uninstall-keep-config\"" in _STATUS_HTML
+    assert "id=\"s-uninstall-preview\"" in _STATUS_HTML
+    assert "id=\"uninstall-dialog\"" in _STATUS_HTML
+    assert "aria-labelledby=\"uninstall-dialog-title\"" in _STATUS_HTML
+    assert "aria-describedby=\"uninstall-dialog-summary\"" in _STATUS_HTML
+    assert "aria-labelledby=\"exit-dialog-title\"" in _STATUS_HTML
+    assert "aria-describedby=\"exit-dialog-description\"" in _STATUS_HTML
+    assert "aria-label=\"卸载确认短语\"" in _STATUS_HTML
+    assert "<label for=\"uninstall-confirm-input\" class=\"sr-only\">" in _STATUS_HTML
+    assert "get_uninstall_preview" in _STATUS_HTML
+    assert "run_uninstall" in _STATUS_HTML
+    assert "UNINSTALL" in _STATUS_HTML
+
+
+def test_control_center_backup_manager_uses_dataset_path_attributes():
+    section_start = _STATUS_HTML.index("function renderBackupManager")
+    section_end = _STATUS_HTML.index("function bindBackupManagerActions")
+    backup_manager_js = _STATUS_HTML[section_start:section_end]
+
+    assert "button.dataset.backupAction" in backup_manager_js
+    assert "button.dataset.backupPath" in backup_manager_js
+    assert "document.createElement('button')" in backup_manager_js
+    assert "data-backup-path=\"' + path + '\"" not in backup_manager_js
+    assert "data-backup-path=\"" not in backup_manager_js
+
+
+def test_control_center_uninstall_confirm_phrase_comes_from_preview_plan():
+    assert "const uninstallConfirmPhrase = 'UNINSTALL';" not in _STATUS_HTML
+    assert "let uninstallConfirmPhrase = ''" in _STATUS_HTML
+    assert "function getUninstallConfirmPhraseFromPlan(plan)" in _STATUS_HTML
+    assert "plan.confirm_phrase" in _STATUS_HTML
+    assert "syncUninstallConfirmPhrase(uninstallPreviewPlan);" in _STATUS_HTML
+    assert "input.placeholder = '输入 ' + uninstallConfirmPhrase + ' 确认';" in _STATUS_HTML
+    assert "function normalizeUninstallConfirmText(value)" in _STATUS_HTML
+    assert "const confirmText = normalizeUninstallConfirmText(input ? input.value : '');" in _STATUS_HTML
+    assert "confirmText !== expectedConfirmPhrase" in _STATUS_HTML
+
+
+def test_installer_html_exposes_backup_import():
+    from apps.shell.window import _generate_installer_html
+    from packages.protocol.enums import HermesInstallStatus, Platform
+    from packages.protocol.install import HermesInstallInfo
+
+    html = _generate_installer_html(
+        HermesInstallInfo(
+            status=HermesInstallStatus.INSTALLED_NOT_INITIALIZED,
+            platform=Platform.MACOS,
+        )
+    )
+
+    assert "导入备份" in html
+    assert "get_backup_status" in html
+    assert "import_backup" in html
+    section_start = html.index("function setBackupImportStatus")
+    section_end = html.index(
+        "document.addEventListener('DOMContentLoaded', initBackupImportStatus);"
+    )
+    backup_import_js = html[section_start:section_end]
+    assert "textContent" in backup_import_js
+    assert "appendChild(document.createTextNode" in backup_import_js
+    assert "innerHTML" not in backup_import_js
+    assert "result.latest.display_path" in backup_import_js
+    assert "result.backup_root_display" in backup_import_js
+    assert "function initBackupImportStatus()" in html
+    assert "window.addEventListener('pywebviewready'" in html
+    assert "get_config_snapshot_status" not in html
+    assert "import_config_snapshot" not in html
 
 
 def test_close_chat_window_destroys_existing_window(monkeypatch):
@@ -254,6 +345,7 @@ def test_open_main_window_reuses_existing_window(monkeypatch):
     monkeypatch.setattr(window_mod, "_HAS_WEBVIEW", True)
     monkeypatch.setattr(window_mod, "webview", FakeWebviewModule(), raising=False)
     monkeypatch.setattr(window_mod, "_main_window", None)
+    monkeypatch.setattr(window_mod, "_main_window_creating", False)
     monkeypatch.setattr(main_api_mod, "MainWindowAPI", lambda *_args, **_kwargs: object())
 
     runtime = object()
@@ -269,6 +361,80 @@ def test_open_main_window_reuses_existing_window(monkeypatch):
     assert created[0].shown == 1
 
 
+def test_open_main_window_does_not_reenter_while_creating(monkeypatch):
+    created = []
+    runtime = object()
+    config = type("Config", (), {
+        "bridge_host": "127.0.0.1",
+        "bridge_port": 8420,
+        "window_mode": type("WindowMode", (), {"width": 960, "height": 720})(),
+    })()
+
+    class FakeWebviewModule:
+        def __init__(self):
+            self.reentered = False
+
+        def create_window(self, **_kwargs):
+            if not self.reentered:
+                self.reentered = True
+                assert window_mod.open_main_window(runtime, config) is True
+            window = FakeWindow()
+            created.append(window)
+            return window
+
+    webview_stub = FakeWebviewModule()
+    monkeypatch.setattr(window_mod, "_HAS_WEBVIEW", True)
+    monkeypatch.setattr(window_mod, "webview", webview_stub, raising=False)
+    monkeypatch.setattr(window_mod, "_main_window", None)
+    monkeypatch.setattr(window_mod, "_main_window_creating", False)
+    monkeypatch.setattr(window_mod, "_focus_macos_window_by_title", lambda _title: False)
+    monkeypatch.setattr(main_api_mod, "MainWindowAPI", lambda *_args, **_kwargs: object())
+
+    assert window_mod.open_main_window(runtime, config) is True
+    assert webview_stub.reentered is True
+    assert len(created) == 1
+
+
+def test_open_main_window_focus_fallback_failure_does_not_duplicate(monkeypatch):
+    created = []
+
+    class FocusFallbackWindow(FakeWindow):
+        def __init__(self):
+            super().__init__()
+            self.focused = 0
+
+        def show(self):
+            raise RuntimeError("show failed")
+
+        def focus(self):
+            self.focused += 1
+
+    class FakeWebviewModule:
+        def create_window(self, **_kwargs):
+            window = FocusFallbackWindow()
+            created.append(window)
+            return window
+
+    monkeypatch.setattr(window_mod, "_HAS_WEBVIEW", True)
+    monkeypatch.setattr(window_mod, "webview", FakeWebviewModule(), raising=False)
+    monkeypatch.setattr(window_mod, "_main_window", None)
+    monkeypatch.setattr(window_mod, "_main_window_creating", False)
+    monkeypatch.setattr(window_mod, "_focus_macos_window_by_title", lambda _title: False)
+    monkeypatch.setattr(main_api_mod, "MainWindowAPI", lambda *_args, **_kwargs: object())
+
+    runtime = object()
+    config = type("Config", (), {
+        "bridge_host": "127.0.0.1",
+        "bridge_port": 8420,
+        "window_mode": type("WindowMode", (), {"width": 960, "height": 720})(),
+    })()
+
+    assert window_mod.open_main_window(runtime, config) is True
+    assert window_mod.open_main_window(runtime, config) is True
+    assert len(created) == 1
+    assert created[0].focused == 1
+
+
 def test_open_main_window_recreates_after_close(monkeypatch):
     created = []
 
@@ -281,6 +447,7 @@ def test_open_main_window_recreates_after_close(monkeypatch):
     monkeypatch.setattr(window_mod, "_HAS_WEBVIEW", True)
     monkeypatch.setattr(window_mod, "webview", FakeWebviewModule(), raising=False)
     monkeypatch.setattr(window_mod, "_main_window", None)
+    monkeypatch.setattr(window_mod, "_main_window_creating", False)
     monkeypatch.setattr(main_api_mod, "MainWindowAPI", lambda *_args, **_kwargs: object())
 
     runtime = object()

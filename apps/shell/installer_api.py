@@ -32,6 +32,27 @@ class InstallerWebViewAPI:
             logger.error("初始化过程异常: %s", exc)
             return {"success": False, "error": f"初始化异常: {exc}", "created_items": []}
 
+    def get_backup_status(self) -> Dict[str, Any]:
+        """获取可导入的 Hermes-Yachiyo 备份状态。"""
+        try:
+            from apps.installer.backup import get_backup_status
+
+            return {"success": True, **get_backup_status()}
+        except Exception as exc:
+            logger.error("读取备份状态失败: %s", exc)
+            return {"success": False, "error": str(exc), "has_backup": False}
+
+    def import_backup(self) -> Dict[str, Any]:
+        """导入最近一次保存的 Hermes-Yachiyo 备份。"""
+        try:
+            from apps.installer.backup import import_backup
+
+            result = import_backup()
+            return result.to_dict()
+        except Exception as exc:
+            logger.error("导入备份失败: %s", exc)
+            return {"ok": False, "errors": [str(exc)]}
+
     def install_hermes(self) -> Dict[str, Any]:
         """触发 Hermes Agent 安装。
 

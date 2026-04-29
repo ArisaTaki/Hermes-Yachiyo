@@ -6,6 +6,8 @@
 """
 
 import logging
+import os
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from apps.installer.workspace_init import get_workspace_status
@@ -48,7 +50,7 @@ def _serialize_summary(summary: Optional[ModelSummary]) -> Dict[str, Any]:
 
 class MainWindowAPI:
     """Control Center 主控台 API。"""
-    
+
     def __init__(self, runtime: "HermesRuntime", config: "AppConfig") -> None:
         self._runtime = runtime
         self._config = config
@@ -69,7 +71,7 @@ class MainWindowAPI:
     def _get_snapshot(self):
         """获取集成服务统一快照。"""
         return get_integration_snapshot(self._config, self._bridge_boot_config)
-    
+
     def get_dashboard_data(self) -> Dict[str, Any]:
         """获取仪表盘数据"""
         try:
@@ -78,7 +80,7 @@ class MainWindowAPI:
             snap = self._get_snapshot()
 
             hermes_info = status.get("hermes", {})
-            
+
             return {
                 "app": {
                     "version": status.get("version", "0.1.0"),
@@ -162,6 +164,10 @@ class MainWindowAPI:
                     "log_level": self._config.log_level,
                     "start_minimized": self._config.start_minimized,
                     "tray_enabled": self._config.tray_enabled,
+                },
+                "backup": {
+                    "auto_cleanup_enabled": self._config.backup.auto_cleanup_enabled,
+                    "retention_count": self._config.backup.retention_count,
                 },
             }
         except Exception as e:
@@ -409,4 +415,188 @@ class MainWindowAPI:
             return {"ok": True}
         except Exception as exc:
             logger.error("退出应用失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def get_uninstall_preview(
+        self,
+        scope: str = "yachiyo_only",
+        keep_config: bool = True,
+    ) -> Dict[str, Any]:
+        """生成卸载预览，不修改文件系统。"""
+        try:
+            from apps.installer.uninstall import build_uninstall_plan
+
+            plan = build_uninstall_plan(scope, keep_config_snapshot=bool(keep_config))
+            return {"ok": True, "plan": plan.to_dict()}
+        except Exception as exc:
+            logger.error("生成卸载预览失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def run_uninstall(
+        self,
+        scope: str = "yachiyo_only",
+        keep_config: bool = True,
+        confirm_text: str = "",
+    ) -> Dict[str, Any]:
+        """执行 Hermes-Yachiyo 卸载，并在成功后安排应用退出。"""
+        try:
+            from apps.installer.uninstall import execute_uninstall
+
+            result = execute_uninstall(
+                scope,
+                keep_config_snapshot=bool(keep_config),
+                confirm_text=confirm_text,
+            )
+            payload = result.to_dict()
+            if result.ok:
+                try:
+                    from apps.shell.window import request_app_exit
+
+                    request_app_exit()
+                    payload["exit_scheduled"] = True
+                except Exception as exc:
+                    logger.error("卸载后退出应用失败: %s", exc)
+                    payload["exit_scheduled"] = False
+                    payload["exit_error"] = str(exc)
+            return payload
+        except Exception as exc:
+            logger.error("执行卸载失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def get_backup_status(self) -> Dict[str, Any]:
+        """获取 Hermes-Yachiyo 备份状态。"""
+        try:
+            from apps.installer.backup import get_backup_status
+
+            return {"ok": True, **get_backup_status()}
+        except Exception as exc:
+            logger.error("读取备份状态失败: %s", exc)
+            return {"ok": False, "error": str(exc), "has_backup": False}
+
+    def create_backup(self, overwrite_latest: bool = False) -> Dict[str, Any]:
+        """主动生成 Hermes-Yachiyo 本地资料备份。"""
+        try:
+            from apps.installer.backup import create_backup, get_backup_status
+
+            backup = create_backup(
+                source_context="manual_overwrite" if overwrite_latest else "manual",
+                auto_cleanup=self._config.backup.auto_cleanup_enabled,
+                retention_count=self._config.backup.retention_count,
+                overwrite_latest=bool(overwrite_latest),
+            )
+            return {
+                "ok": True,
+                "backup": backup.to_dict(),
+                "backup_path": backup.path,
+                "backup_path_display": backup.display_path,
+                "status": get_backup_status(),
+            }
+        except Exception as exc:
+            logger.error("创建备份失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def update_backup_settings(
+        self,
+        auto_cleanup_enabled: bool = True,
+        retention_count: int = 10,
+    ) -> Dict[str, Any]:
+        """更新备份保留策略。"""
+        try:
+            changes = {
+                "backup.auto_cleanup_enabled": bool(auto_cleanup_enabled),
+                "backup.retention_count": retention_count,
+            }
+            validation = apply_settings_changes(
+                deepcopy(self._config),
+                changes,
+                persist=False,
+            )
+            if not validation.get("ok") or validation.get("errors"):
+                return {
+                    "ok": False,
+                    "error": validation.get("error")
+                    or "；".join(validation.get("errors", [])),
+                    "errors": validation.get("errors", []),
+                }
+
+            result = apply_settings_changes(self._config, changes)
+            if not result.get("ok"):
+                return result
+            return {
+                "ok": True,
+                "backup": {
+                    "auto_cleanup_enabled": self._config.backup.auto_cleanup_enabled,
+                    "retention_count": self._config.backup.retention_count,
+                },
+                "applied": result.get("applied", {}),
+                "effects": result.get("effects", {}),
+            }
+        except Exception as exc:
+            logger.error("保存备份设置失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def restore_backup(self, backup_path: str = "") -> Dict[str, Any]:
+        """恢复最近或指定版本备份，并安排应用重启。"""
+        try:
+            from apps.installer.backup import import_backup
+
+            result = import_backup(backup_path or None)
+            payload = result.to_dict()
+            if result.ok:
+                try:
+                    from apps.shell.window import request_app_restart
+
+                    request_app_restart()
+                    payload["restart_scheduled"] = True
+                except Exception as exc:
+                    logger.error("恢复备份后重启失败: %s", exc)
+                    payload["restart_scheduled"] = False
+                    payload["restart_error"] = str(exc)
+            return payload
+        except Exception as exc:
+            logger.error("恢复备份失败: %s", exc)
+            return {"ok": False, "errors": [str(exc)]}
+
+    def delete_backup(self, backup_path: str) -> Dict[str, Any]:
+        """删除指定备份。"""
+        try:
+            from apps.installer.backup import delete_backup, get_backup_status
+
+            deleted = delete_backup(backup_path)
+            return {"ok": True, "deleted": deleted.to_dict(), "status": get_backup_status()}
+        except Exception as exc:
+            logger.error("删除备份失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def open_backup_location(self, backup_path: str = "") -> Dict[str, Any]:
+        """在系统文件管理器中打开备份位置。"""
+        import platform
+        import subprocess
+
+        try:
+            from apps.installer.backup import default_backup_root, resolve_managed_backup_path
+
+            if backup_path:
+                target = resolve_managed_backup_path(backup_path)
+            else:
+                target = default_backup_root().expanduser()
+                target.mkdir(parents=True, exist_ok=True)
+            system = platform.system()
+            if system == "Darwin":
+                command = ["open", "-R", str(target)] if target.is_file() else ["open", str(target)]
+            elif system == "Linux":
+                command = ["xdg-open", str(target.parent if target.is_file() else target)]
+            elif system == "Windows":
+                if target.is_file():
+                    command = ["explorer.exe", "/select,", str(target)]
+                    subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    os.startfile(str(target))  # type: ignore[attr-defined]
+                return {"ok": True}
+            else:
+                return {"ok": False, "error": f"当前平台不支持自动打开位置: {system}"}
+            subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return {"ok": True}
+        except Exception as exc:
+            logger.error("打开备份位置失败: %s", exc)
             return {"ok": False, "error": str(exc)}
