@@ -2,6 +2,15 @@
 
 ## 已完成
 
+### Milestone 70 — 备份 ZIP 解压实际写入限流
+
+- ✅ `_extract_zip_safely()` 不再只依赖 `ZipInfo.file_size` 头部声明；解压成员改为分块读写，并按实际写入字节数校验单条目和总解压体积限制。
+- ✅ 解压过程中一旦实际写入量超出单条目或总量限制，会中止并删除当前部分输出文件，避免恶意 ZIP 通过虚假 header 触发磁盘填充风险。
+- ✅ 保留原有路径穿越、重复条目和 header 声明大小的快速校验，新增实际流量计数作为第二道保护。
+- ✅ 新增回归测试覆盖实际写入单条目超限清理、实际写入总量超限清理。
+- ✅ 相关测试：`python -m pytest tests/test_uninstall.py` → 40 passed。
+- ✅ 全量测试：`python -m pytest` → 418 passed。
+
 ### Milestone 69 — 备份 ZIP 原子写入与失败清理
 
 - ✅ `create_backup()` 不再直接写最终托管 ZIP；先写入同目录隐藏临时文件，压缩完成后再 `replace()` 到正式 `hermes-yachiyo-backup-*.zip`。

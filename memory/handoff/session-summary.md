@@ -1,5 +1,30 @@
 # Session Summary
 
+## 追加修复 — Milestone 70: Bounded ZIP extraction writes
+
+### 核心结果
+
+本轮处理新的 PR review：`_extract_zip_safely()` 不再只依赖 `ZipInfo.file_size` 头部声明，而是在实际解压写入时分块计数，防止恶意 ZIP 通过虚假 header 绕过单条目/总解压体积限制。
+
+### 主要变更
+
+- `apps/installer/backup.py`：新增 `_ZIP_COPY_CHUNK_BYTES` 与 `_copy_zip_member_bounded()`。
+- 解压成员文件时按块读取；每个 chunk 写入前检查实际单条目大小和实际总写入大小。
+- 超限或复制异常时删除当前正在写入的部分输出文件。
+- 保留原有 header 声明大小、路径穿越、重复条目检查作为快速失败路径。
+
+### 测试覆盖
+
+- `tests/test_uninstall.py`：模拟 ZIP header 声明很小但实际流更大，确认单条目实际写入超限会失败并清理输出文件。
+- `tests/test_uninstall.py`：模拟多个条目实际累计写入超限，确认当前条目不会留下部分文件。
+
+### 验证结果
+
+- `python -m pytest tests/test_uninstall.py` → 40 passed。
+- `python -m pytest` → 418 passed。
+
+---
+
 ## 追加修复 — Milestone 69: Backup ZIP atomic publish
 
 ### 核心结果

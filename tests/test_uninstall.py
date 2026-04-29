@@ -6,6 +6,7 @@ import json
 import os
 import zipfile
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -444,6 +445,92 @@ def test_import_backup_rejects_zip_total_uncompressed_size_limit(tmp_path, monke
 
     with pytest.raises(ValueError, match="解压后体积"):
         import_backup(archive_path)
+
+
+def test_extract_zip_safely_limits_actual_written_entry_bytes(tmp_path, monkeypatch):
+    class FakeMember:
+        filename = "app-config/config.json"
+        file_size = 1
+
+        def is_dir(self):
+            return False
+
+    class FakeArchive:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def infolist(self):
+            return [FakeMember()]
+
+        def open(self, _member, _mode="r"):
+            return BytesIO(b"x" * 12)
+
+    monkeypatch.setattr(
+        backup_mod.zipfile,
+        "ZipFile",
+        lambda *_args, **_kwargs: FakeArchive(),
+    )
+    monkeypatch.setattr(backup_mod, "MAX_BACKUP_IMPORT_ENTRY_BYTES", 8)
+    monkeypatch.setattr(backup_mod, "MAX_BACKUP_IMPORT_TOTAL_BYTES", 1024)
+    monkeypatch.setattr(backup_mod, "_ZIP_COPY_CHUNK_BYTES", 4)
+
+    target_dir = tmp_path / "payload"
+    target_dir.mkdir()
+
+    with pytest.raises(ValueError, match="单个条目"):
+        backup_mod._extract_zip_safely(tmp_path / "fake.zip", target_dir)
+
+    assert not (target_dir / "app-config" / "config.json").exists()
+
+
+def test_extract_zip_safely_limits_actual_written_total_bytes(tmp_path, monkeypatch):
+    class FakeMember:
+        file_size = 1
+
+        def __init__(self, filename: str) -> None:
+            self.filename = filename
+
+        def is_dir(self):
+            return False
+
+    members = [
+        FakeMember("app-config/one.json"),
+        FakeMember("app-config/two.json"),
+    ]
+
+    class FakeArchive:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def infolist(self):
+            return members
+
+        def open(self, _member, _mode="r"):
+            return BytesIO(b"x" * 4)
+
+    monkeypatch.setattr(
+        backup_mod.zipfile,
+        "ZipFile",
+        lambda *_args, **_kwargs: FakeArchive(),
+    )
+    monkeypatch.setattr(backup_mod, "MAX_BACKUP_IMPORT_ENTRY_BYTES", 1024)
+    monkeypatch.setattr(backup_mod, "MAX_BACKUP_IMPORT_TOTAL_BYTES", 6)
+    monkeypatch.setattr(backup_mod, "_ZIP_COPY_CHUNK_BYTES", 4)
+
+    target_dir = tmp_path / "payload"
+    target_dir.mkdir()
+
+    with pytest.raises(ValueError, match="解压后体积"):
+        backup_mod._extract_zip_safely(tmp_path / "fake.zip", target_dir)
+
+    assert (target_dir / "app-config" / "one.json").read_bytes() == b"x" * 4
+    assert not (target_dir / "app-config" / "two.json").exists()
 
 
 def test_import_backup_rejects_duplicate_zip_entries(tmp_path, monkeypatch):

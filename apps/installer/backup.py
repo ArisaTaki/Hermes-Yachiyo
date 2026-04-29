@@ -29,6 +29,7 @@ MANIFEST_NAME = "manifest.json"
 DEFAULT_RETENTION_COUNT = 10
 MAX_BACKUP_IMPORT_ENTRY_BYTES = 512 * 1024 * 1024
 MAX_BACKUP_IMPORT_TOTAL_BYTES = 2 * 1024 * 1024 * 1024
+_ZIP_COPY_CHUNK_BYTES = 1024 * 1024
 _BACKUP_ARCHIVE_NAME_RE = re.compile(
     rf"^{re.escape(BACKUP_FILE_PREFIX)}\d{{8}}-\d{{6}}(?:-(\d+))?\.zip$"
 )
@@ -612,6 +613,36 @@ def _remove_path(path: Path) -> None:
         path.unlink()
 
 
+def _copy_zip_member_bounded(
+    source_file: Any,
+    output_path: Path,
+    total_bytes_written: int,
+) -> int:
+    entry_bytes_written = 0
+    try:
+        with output_path.open("wb") as target_file:
+            while True:
+                chunk = source_file.read(_ZIP_COPY_CHUNK_BYTES)
+                if not chunk:
+                    break
+
+                next_entry_size = entry_bytes_written + len(chunk)
+                if next_entry_size > MAX_BACKUP_IMPORT_ENTRY_BYTES:
+                    raise ValueError("备份文件包含过大的单个条目")
+
+                next_total_size = total_bytes_written + len(chunk)
+                if next_total_size > MAX_BACKUP_IMPORT_TOTAL_BYTES:
+                    raise ValueError("备份文件解压后体积超过限制")
+
+                target_file.write(chunk)
+                entry_bytes_written = next_entry_size
+                total_bytes_written = next_total_size
+    except Exception:
+        _remove_file_if_exists(output_path)
+        raise
+    return total_bytes_written
+
+
 def _replace_path(source: Path, target: Path) -> bool:
     if not _path_exists(source):
         return False
@@ -650,6 +681,7 @@ def _replace_path(source: Path, target: Path) -> bool:
 def _extract_zip_safely(archive_path: Path, target_dir: Path) -> None:
     with zipfile.ZipFile(archive_path, "r") as archive:
         total_uncompressed_size = 0
+        total_bytes_written = 0
         seen_member_paths: set[PurePosixPath] = set()
         for member in archive.infolist():
             member_name = member.filename.replace("\\", "/")
@@ -672,8 +704,11 @@ def _extract_zip_safely(archive_path: Path, target_dir: Path) -> None:
                 continue
             output_path.parent.mkdir(parents=True, exist_ok=True)
             with archive.open(member, "r") as source_file:
-                with output_path.open("wb") as target_file:
-                    shutil.copyfileobj(source_file, target_file)
+                total_bytes_written = _copy_zip_member_bounded(
+                    source_file,
+                    output_path,
+                    total_bytes_written,
+                )
 
 
 @contextmanager
