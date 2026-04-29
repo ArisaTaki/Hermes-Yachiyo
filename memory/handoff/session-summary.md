@@ -12,6 +12,7 @@
 - `protected_paths()`：保留原有 public API，返回缓存集合的 set 副本。
 - `is_protected_path()`：直接查询当前 home 对应的缓存 `frozenset`。
 - 缓存按 home 分区，避免测试或运行时 `HOME` 变化导致旧保护集合被误复用。
+- 移除 `protected_paths()` 中不可达且引用未定义 `home` 的旧 return，并补充防回退断言。
 
 ### 测试覆盖
 

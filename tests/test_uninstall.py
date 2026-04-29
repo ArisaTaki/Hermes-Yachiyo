@@ -686,6 +686,9 @@ def test_protected_paths_cache_is_scoped_by_home(tmp_path, monkeypatch):
     assert home_one.resolve() not in third
     assert first_cache_info.hits >= 1
     assert second_cache_info.misses == first_cache_info.misses + 1
+    assert "return set(_protected_paths_for_home(home))" not in Path(
+        backup_mod.__file__
+    ).read_text(encoding="utf-8")
 
 
 def test_public_path_safety_helpers_allow_symlink_paths_under_home(tmp_path, monkeypatch):

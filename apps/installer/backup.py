@@ -125,7 +125,6 @@ def _current_protected_paths() -> frozenset[Path]:
 def protected_paths() -> set[Path]:
     """返回不允许备份恢复流程删除或替换的受保护路径集合。"""
     return set(_current_protected_paths())
-    return set(_protected_paths_for_home(home))
 
 
 def is_protected_path(path: Path) -> bool:
