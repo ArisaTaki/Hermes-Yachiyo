@@ -2,6 +2,16 @@
 
 ## 已完成
 
+### Milestone 68 — 备份/卸载 PR review 收敛
+
+- ✅ 卸载确认短语比较在前端与执行端都做首尾空白规整，用户复制/输入多余空格不会误失败，错误提示仍显示规范确认短语。
+- ✅ `MainWindowAPI.update_backup_settings` 改为复用 `apply_settings_changes` 的备份字段校验与持久化路径，避免备份保留份数校验在多个位置漂移；无效保留份数不会部分写入自动清理开关。
+- ✅ `INCLUDE_HERMES` 卸载不再仅凭目录名 `.hermes` / `hermes` 判定可删除，必须命中 `bin/hermes`、`config.yaml`、`config.yml`、`config.json` 或 `yachiyo` 等明确 marker。
+- ✅ 新增回归测试覆盖确认短语空白容错、空 `.hermes` 目录不可删、备份设置复用统一更新入口与无效值不部分保存。
+- ✅ 相关测试：`python -m pytest tests/test_uninstall.py tests/test_window_exit.py tests/test_mode_settings.py tests/test_main_api_modes.py` → 89 passed。
+- ✅ 全量测试：`python -m pytest` → 414 passed。
+- ⚠️ Ruff 未验证：当前虚拟环境未安装 `ruff` 模块；VS Code diagnostics 无相关错误。
+
 ### Milestone 67 — 备份与卸载解耦、备份管理 UI
 
 - ✅ 新增独立备份模块 `apps/installer/backup.py`，备份不再只能从卸载流程触发。

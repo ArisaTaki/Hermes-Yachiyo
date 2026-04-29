@@ -138,8 +138,6 @@ def _is_relative_to(path: Path, root: Path) -> bool:
 
 
 def _looks_like_hermes_home(path: Path) -> bool:
-    if path.name in {".hermes", "hermes"}:
-        return True
     markers = (
         "bin/hermes",
         "config.yaml",
@@ -148,6 +146,10 @@ def _looks_like_hermes_home(path: Path) -> bool:
         "yachiyo",
     )
     return any((path / marker).exists() for marker in markers)
+
+
+def _normalize_confirm_text(value: Any) -> str:
+    return str(value or "").strip()
 
 
 def _is_safe_hermes_home(path: Path) -> tuple[bool, str]:
@@ -354,7 +356,9 @@ def execute_uninstall(
         keep_config_snapshot=keep_config_snapshot,
         backup_root=backup_root,
     )
-    if confirm_text != UNINSTALL_CONFIRM_PHRASE:
+    if _normalize_confirm_text(confirm_text) != _normalize_confirm_text(
+        UNINSTALL_CONFIRM_PHRASE
+    ):
         return UninstallResult(
             ok=False,
             plan=plan,

@@ -7,12 +7,13 @@
 
 import logging
 import os
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from apps.installer.workspace_init import get_workspace_status
 from apps.shell.chat_api import ChatAPI
 from apps.shell.chat_bridge import ChatBridge
-from apps.shell.config import ModelSummary, save_config
+from apps.shell.config import ModelSummary
 from apps.shell.effect_policy import build_effects_summary
 from apps.shell.integration_status import get_integration_snapshot
 from apps.shell.mode_catalog import list_mode_options
@@ -501,18 +502,34 @@ class MainWindowAPI:
     ) -> Dict[str, Any]:
         """更新备份保留策略。"""
         try:
-            count = int(retention_count)
-            if count < 1 or count > 100:
-                return {"ok": False, "error": "保留份数须在 1-100 之间"}
-            self._config.backup.auto_cleanup_enabled = bool(auto_cleanup_enabled)
-            self._config.backup.retention_count = count
-            save_config(self._config)
+            changes = {
+                "backup.auto_cleanup_enabled": bool(auto_cleanup_enabled),
+                "backup.retention_count": retention_count,
+            }
+            validation = apply_settings_changes(
+                deepcopy(self._config),
+                changes,
+                persist=False,
+            )
+            if not validation.get("ok") or validation.get("errors"):
+                return {
+                    "ok": False,
+                    "error": validation.get("error")
+                    or "；".join(validation.get("errors", [])),
+                    "errors": validation.get("errors", []),
+                }
+
+            result = apply_settings_changes(self._config, changes)
+            if not result.get("ok"):
+                return result
             return {
                 "ok": True,
                 "backup": {
                     "auto_cleanup_enabled": self._config.backup.auto_cleanup_enabled,
                     "retention_count": self._config.backup.retention_count,
                 },
+                "applied": result.get("applied", {}),
+                "effects": result.get("effects", {}),
             }
         except Exception as exc:
             logger.error("保存备份设置失败: %s", exc)

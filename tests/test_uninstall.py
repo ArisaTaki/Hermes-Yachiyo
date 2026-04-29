@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 import apps.shell.config as config_mod
+import apps.shell.main_api as main_api_mod
 import apps.shell.window as window_mod
 from apps.installer import backup as backup_mod
 from apps.installer import uninstall as uninstall_mod
@@ -605,6 +606,41 @@ def test_execute_requires_confirm_phrase(tmp_path, monkeypatch):
     assert UNINSTALL_CONFIRM_PHRASE in result.errors[0]
 
 
+def test_execute_accepts_confirm_phrase_with_outer_whitespace(tmp_path, monkeypatch):
+    _home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+
+    result = execute_uninstall(
+        UninstallScope.YACHIYO_ONLY,
+        keep_config_snapshot=False,
+        confirm_text=f"  {UNINSTALL_CONFIRM_PHRASE}\n",
+    )
+
+    assert result.ok is True
+    assert not config_dir.exists()
+    assert not workspace.exists()
+
+
+def test_include_hermes_named_home_without_markers_is_not_removable(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    hermes_home.mkdir(parents=True)
+
+    plan = build_uninstall_plan(
+        UninstallScope.INCLUDE_HERMES,
+        keep_config_snapshot=False,
+        backup_root=home / "backups",
+    )
+
+    target = next(item for item in plan.targets if item.id == "hermes_home")
+    assert target.exists is True
+    assert target.removable is False
+    assert "不像 Hermes Home" in target.reason
+
+
 def test_include_hermes_removes_hermes_home_and_safe_user_binary(tmp_path, monkeypatch):
     home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)
@@ -675,6 +711,47 @@ def test_main_window_api_creates_backup_without_uninstall(tmp_path, monkeypatch)
     assert (home / "Hermes-Yachiyo-backups").exists()
     assert config_dir.exists()
     assert workspace.exists()
+
+
+def test_main_window_api_update_backup_settings_uses_common_settings_path(tmp_path, monkeypatch):
+    _home, _hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+    config = AppConfig()
+    calls = []
+    original_apply = main_api_mod.apply_settings_changes
+
+    def track_apply(config_obj, changes, *, persist=True):
+        calls.append((changes.copy(), persist))
+        return original_apply(config_obj, changes, persist=persist)
+
+    monkeypatch.setattr(main_api_mod, "apply_settings_changes", track_apply)
+
+    api = MainWindowAPI(SimpleNamespace(), config)
+    result = api.update_backup_settings(False, 3)
+
+    assert result["ok"] is True
+    assert result["backup"] == {"auto_cleanup_enabled": False, "retention_count": 3}
+    assert calls == [
+        ({"backup.auto_cleanup_enabled": False, "backup.retention_count": 3}, False),
+        ({"backup.auto_cleanup_enabled": False, "backup.retention_count": 3}, True),
+    ]
+
+
+def test_main_window_api_update_backup_settings_rejects_invalid_count_without_partial_save(
+    tmp_path,
+    monkeypatch,
+):
+    _home, _hermes_home, _config_dir = _prepare_home(tmp_path, monkeypatch)
+    config = AppConfig()
+    config.backup.auto_cleanup_enabled = True
+    config.backup.retention_count = 5
+
+    api = MainWindowAPI(SimpleNamespace(), config)
+    result = api.update_backup_settings(False, 101)
+
+    assert result["ok"] is False
+    assert "1-100" in result["error"]
+    assert config.backup.auto_cleanup_enabled is True
+    assert config.backup.retention_count == 5
 
 
 def test_main_window_api_overwrites_and_deletes_backup(tmp_path, monkeypatch):

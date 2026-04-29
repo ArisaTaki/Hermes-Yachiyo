@@ -286,7 +286,9 @@ def test_control_center_uninstall_confirm_phrase_comes_from_preview_plan():
     assert "plan.confirm_phrase" in _STATUS_HTML
     assert "syncUninstallConfirmPhrase(uninstallPreviewPlan);" in _STATUS_HTML
     assert "input.placeholder = '输入 ' + uninstallConfirmPhrase + ' 确认';" in _STATUS_HTML
-    assert "confirmText !== uninstallConfirmPhrase" in _STATUS_HTML
+    assert "function normalizeUninstallConfirmText(value)" in _STATUS_HTML
+    assert "const confirmText = normalizeUninstallConfirmText(input ? input.value : '');" in _STATUS_HTML
+    assert "confirmText !== expectedConfirmPhrase" in _STATUS_HTML
 
 
 def test_installer_html_exposes_backup_import():

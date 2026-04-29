@@ -958,6 +958,10 @@ _STATUS_HTML = """
         if (input) input.placeholder = '输入 ' + uninstallConfirmPhrase + ' 确认';
     }
 
+    function normalizeUninstallConfirmText(value) {
+        return (value || '').trim();
+    }
+
     function hasPendingCommonSetting(key) {
         return Object.prototype.hasOwnProperty.call(pendingCommonSettings, key);
     }
@@ -1389,16 +1393,17 @@ _STATUS_HTML = """
         const input = document.getElementById('uninstall-confirm-input');
         const btn = document.getElementById('uninstall-confirm-btn');
         const err = document.getElementById('uninstall-dialog-error');
-        const confirmText = input ? input.value : '';
+        const confirmText = normalizeUninstallConfirmText(input ? input.value : '');
         syncUninstallConfirmPhrase(uninstallPreviewPlan);
+        const expectedConfirmPhrase = normalizeUninstallConfirmText(uninstallConfirmPhrase) || 'UNINSTALL';
         if (btn) {
             btn.disabled = true;
             btn.textContent = '正在卸载…';
         }
         if (err) err.textContent = '';
         try {
-            if (confirmText !== uninstallConfirmPhrase) {
-                throw new Error('请输入确认短语 ' + uninstallConfirmPhrase);
+            if (confirmText !== expectedConfirmPhrase) {
+                throw new Error('请输入确认短语 ' + expectedConfirmPhrase);
             }
             if (!window.pywebview || !window.pywebview.api) {
                 throw new Error('WebView API 不可用');

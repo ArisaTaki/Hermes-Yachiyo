@@ -1,5 +1,30 @@
 # Session Summary
 
+## 追加修复 — Milestone 68: Backup/uninstall PR review fixes
+
+### 核心结果
+
+本轮处理当前分支 PR 的 3 条 review：卸载确认输入增加首尾空白容错；备份设置持久化复用统一 settings 更新入口；`include_hermes` 卸载收紧 Hermes Home 判定，避免仅凭目录名删除误配置的 `.hermes` / `hermes` 目录。
+
+### 主要变更
+
+- `apps/shell/window.py`：确认短语比较前 trim 输入和预期短语，并把规范化后的短语传给卸载 API。
+- `apps/installer/uninstall.py`：执行端同样规范化确认短语；Hermes Home 必须命中 `bin/hermes`、`config.yaml`、`config.yml`、`config.json` 或 `yachiyo` marker。
+- `apps/shell/main_api.py`：`update_backup_settings` 通过 `apply_settings_changes` 校验/保存备份字段，先在配置副本上校验，避免无效保留份数导致部分保存。
+
+### 测试覆盖
+
+- `tests/test_uninstall.py`：确认短语空白容错、空 Hermes Home 目录不可删、备份设置复用统一更新入口、无效保留份数不部分保存。
+- `tests/test_window_exit.py`：Control Center HTML 中确认短语规范化逻辑。
+
+### 验证结果
+
+- `python -m pytest tests/test_uninstall.py tests/test_window_exit.py tests/test_mode_settings.py tests/test_main_api_modes.py` → 89 passed。
+- `python -m pytest` → 414 passed。
+- `python -m ruff check ...` 未执行成功：当前 venv 未安装 `ruff` 模块。
+
+---
+
 ## 本轮完成内容 — Milestone 63/64: Desktop UX, shared settings, runtime context, memory design
 
 ### 核心结果
