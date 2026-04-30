@@ -38,6 +38,25 @@ type HermesConnectionTestResult = {
   elapsed_seconds?: number;
   returncode?: number;
   command?: string;
+  connection_validation?: HermesConnectionValidation;
+};
+
+type HermesConnectionValidation = {
+  verified?: boolean;
+  success?: boolean;
+  provider?: string;
+  model?: string;
+  base_url?: string;
+  api_key_name?: string;
+  message?: string;
+  error?: string;
+  reason?: string;
+  tested_at?: string;
+  verified_at?: string;
+  last_tested_at?: string;
+  previous_provider?: string;
+  previous_model?: string;
+  elapsed_seconds?: number;
 };
 
 type HermesVisualConfig = {
@@ -58,6 +77,7 @@ type HermesVisualConfig = {
     configured?: boolean;
     display?: string;
   };
+  connection_validation?: HermesConnectionValidation;
 };
 
 type HermesProviderOption = {
@@ -80,6 +100,8 @@ type HermesConfigForm = {
   base_url: string;
   api_key: string;
 };
+
+type HermesProviderDraft = Pick<HermesConfigForm, 'model' | 'base_url'>;
 
 type DashboardData = {
   app?: { uptime_seconds?: number; version?: string; running?: boolean };
@@ -122,6 +144,7 @@ export function MainView() {
   const configFormDirtyRef = useRef(false);
   const hermesConfigLoadedRef = useRef(false);
   const hermesConfigLoadingRef = useRef(false);
+  const providerDraftsRef = useRef<Record<string, HermesProviderDraft>>({});
   const mountedRef = useRef(false);
 
   useEffect(() => {
@@ -181,6 +204,7 @@ export function MainView() {
       if (mountedRef.current) {
         setHermesConfig(result);
         if (options.forceFormSync || !configFormDirtyRef.current) {
+          syncProviderDraftFromConfig(result);
           setConfigForm(formFromHermesConfig(result));
         }
       }
@@ -193,19 +217,47 @@ export function MainView() {
     }
   }
 
+  function rememberProviderDraft(provider: string, draft: HermesConfigForm) {
+    const key = provider.trim();
+    if (!key) return;
+    providerDraftsRef.current[key] = {
+      model: draft.model,
+      base_url: draft.base_url,
+    };
+  }
+
+  function syncProviderDraftFromConfig(config: HermesVisualConfig | null) {
+    const form = formFromHermesConfig(config);
+    if (!form.provider) return;
+    rememberProviderDraft(form.provider, form);
+  }
+
+  function formForProvider(provider: string, current: HermesConfigForm): HermesConfigForm {
+    const option = providerOptionById(hermesConfig, provider);
+    const cached = providerDraftsRef.current[provider.trim()];
+    const saved = hermesConfig?.model?.provider === provider ? hermesConfig.model : null;
+    return {
+      ...current,
+      provider,
+      model: cached?.model || saved?.default || option?.default_model || option?.models?.[0] || '',
+      base_url: cached?.base_url ?? saved?.base_url ?? option?.base_url ?? current.base_url,
+      api_key: '',
+    };
+  }
+
   function updateHermesConfigField(field: keyof HermesConfigForm, value: string) {
     configFormDirtyRef.current = true;
     if (field === 'provider') {
-      const option = providerOptionById(hermesConfig, value);
-      setConfigForm((current) => ({
-        ...current,
-        provider: value,
-        model: option?.default_model || option?.models?.[0] || current.model,
-        base_url: option?.base_url ?? current.base_url,
-        api_key: '',
-      }));
+      setConfigForm((current) => {
+        rememberProviderDraft(current.provider, current);
+        return formForProvider(value, current);
+      });
     } else {
-      setConfigForm((current) => ({ ...current, [field]: value }));
+      setConfigForm((current) => {
+        const next = { ...current, [field]: value };
+        if (field === 'model' || field === 'base_url') rememberProviderDraft(next.provider, next);
+        return next;
+      });
     }
     if (actionStatus && /不能为空|配置已保存|连接测试/.test(actionStatus)) setActionStatus('');
   }
@@ -230,6 +282,7 @@ export function MainView() {
       if (result.configuration) {
         configFormDirtyRef.current = false;
         hermesConfigLoadedRef.current = hasLoadedHermesConfig(result.configuration);
+        syncProviderDraftFromConfig(result.configuration);
         setHermesConfig(result.configuration);
         setConfigForm(formFromHermesConfig(result.configuration));
       } else {
@@ -260,6 +313,10 @@ export function MainView() {
     }
   }
 
+  async function openHermesDiagnostic(command: string) {
+    await openAppView('diagnostics', { command });
+  }
+
   async function testHermesConnection() {
     const action = 'connection-test';
     if (!beginHermesAction(action)) return;
@@ -268,6 +325,11 @@ export function MainView() {
     try {
       const result = await apiPost<HermesConnectionTestResult>('/ui/hermes/connection-test');
       setHermesTestResult(result);
+      if (result.connection_validation) {
+        setHermesConfig((current) => (
+          current ? { ...current, connection_validation: result.connection_validation } : current
+        ));
+      }
       setActionStatus(result.success ? result.message || 'Hermes 连接测试通过' : result.error || 'Hermes 连接测试失败');
       await refreshDashboardData();
     } catch (err) {
@@ -294,15 +356,17 @@ export function MainView() {
     }
   }
 
+  const currentMode = data?.modes?.current || 'bubble';
   return (
     <main className="app-shell dashboard-shell">
-      <header className="topbar">
+      <header className="topbar dashboard-topbar">
         <div>
           <h1>Hermes-Yachiyo</h1>
-          <p>桌面优先本地个人 Agent</p>
+          <p>{data?.hermes?.ready ? 'Hermes 已就绪，桌面 Agent 可以使用' : '完成 Hermes 配置后开始使用桌面 Agent'}</p>
         </div>
         <div className="topbar-actions">
-          <button type="button" onClick={() => void openAppView('chat')}>打开对话</button>
+          <button className="primary-action" type="button" onClick={() => void openAppView('chat')}>打开对话</button>
+          <button type="button" onClick={() => openDesktopMode(currentMode)}>打开表现态</button>
           <button className="ghost-button" type="button" onClick={quitApp}>退出</button>
         </div>
       </header>
@@ -310,115 +374,108 @@ export function MainView() {
       {error ? <div className="notice danger">{error}</div> : null}
       {actionStatus ? <div className={statusNoticeClass(actionStatus)}>{actionStatus}</div> : null}
 
-      <section className="metric-grid dashboard-metrics">
-        <Metric title="Hermes Agent" value={data?.hermes?.status || '读取中'} detail={hermesDetail(data)} />
-        <Metric title="Workspace" value={data?.workspace?.initialized ? '已初始化' : '未初始化'} detail={data?.workspace?.path || '—'} />
-        <Metric title="Runtime" value={formatUptime(data?.app?.uptime_seconds)} detail={data?.app?.version || '—'} />
-        <Metric title="Bridge" value={bridgeState(data)} detail={data?.bridge?.url || '—'} />
-        <Metric title="Tasks" value={`${data?.tasks?.running ?? 0} 运行中`} detail={`${data?.tasks?.pending ?? 0} 等待 / ${data?.tasks?.completed ?? 0} 完成`} />
-        <Metric title="Integrations" value={data?.integrations?.astrbot?.label || data?.integrations?.astrbot?.status || '—'} detail={data?.integrations?.hapi?.label || data?.integrations?.hapi?.status || '—'} />
+      <section className="dashboard-status-strip" aria-label="状态概览">
+        <StatusTile label="Hermes" value={data?.hermes?.status || '读取中'} detail={hermesDetail(data)} active={Boolean(data?.hermes?.ready)} />
+        <StatusTile label="Workspace" value={data?.workspace?.initialized ? '已初始化' : '未初始化'} detail={data?.workspace?.path || '—'} active={Boolean(data?.workspace?.initialized)} />
+        <StatusTile label="Bridge" value={bridgeState(data)} detail={data?.bridge?.url || '—'} active={bridgeState(data) === 'running'} />
+        <StatusTile label="任务" value={`${data?.tasks?.running ?? 0} 运行中`} detail={`${data?.tasks?.pending ?? 0} 等待 / ${data?.tasks?.completed ?? 0} 完成`} active={!data?.tasks?.running} />
       </section>
 
-      <section className="dashboard-layout">
-        <article className="panel dashboard-card wide">
-          <div className="section-heading-row">
-            <h2>Hermes 配置中心</h2>
-            <StatusPill active={Boolean(data?.hermes?.ready)} label={data?.hermes?.ready ? '能力就绪' : '待检查'} />
-          </div>
-          <HermesConfigCenter
-            hermes={data?.hermes}
-            config={hermesConfig}
-            form={configForm}
-            busyAction={busyAction}
-            testResult={hermesTestResult}
-            onConfigChange={updateHermesConfigField}
-            onOpenCommand={openHermesCommand}
-            onRecheck={recheckHermes}
-            onSaveConfig={saveHermesConfig}
-            onTestConnection={testHermesConnection}
-          />
-        </article>
-
-        <article className="panel dashboard-card">
-          <div className="section-heading-row">
-            <h2>Yachiyo 工作空间</h2>
-            <StatusPill active={Boolean(data?.workspace?.initialized)} label={data?.workspace?.initialized ? '已初始化' : '未初始化'} />
-          </div>
-          <InfoList rows={[
-            ['路径', data?.workspace?.path],
-            ['创建时间', formatDateTime(data?.workspace?.created_at)],
-          ]} />
-        </article>
-
-        <article className="panel dashboard-card">
-          <div className="section-heading-row">
-            <h2>运行信息</h2>
-            <StatusPill active={Boolean(data?.app?.running)} label={data?.app?.running ? '运行中' : '未运行'} />
-          </div>
-          <InfoList rows={[
-            ['运行时间', formatUptime(data?.app?.uptime_seconds)],
-            ['版本', data?.app?.version],
-            ['Bridge', bridgeState(data)],
-            ['Bridge 地址', data?.bridge?.url],
-            ['配置漂移', data?.bridge?.config_dirty ? listOrDash(data?.bridge?.drift_details) : '无'],
-          ]} />
-        </article>
-
-        <article className="panel dashboard-card">
-          <div className="section-heading-row">
-            <h2>任务统计</h2>
-          </div>
-          <InfoList rows={[
-            ['等待中', String(data?.tasks?.pending ?? 0)],
-            ['运行中', String(data?.tasks?.running ?? 0)],
-            ['已完成', String(data?.tasks?.completed ?? 0)],
-          ]} />
-        </article>
-
-        <article className="panel dashboard-card wide">
-          <div className="section-heading-row">
-            <h2>集成服务</h2>
-          </div>
-          <IntegrationBlock title="AstrBot / QQ" item={data?.integrations?.astrbot} />
-          <IntegrationBlock title="Hapi / Codex" item={data?.integrations?.hapi} />
-        </article>
+      <section className="control-hub" aria-label="常用入口">
+        <ControlHubButton
+          title="对话"
+          detail={data?.chat?.status_label || conversationCountLabel(data?.chat?.recent_sessions)}
+          action="打开对话窗口"
+          primary
+          onClick={() => void openAppView('chat')}
+        />
+        <ControlHubGroup
+          title="桌面表现"
+          detail={`当前：${modeName(data)}`}
+          primaryAction="打开角色"
+          secondaryAction="配置表现态"
+          onPrimary={() => openDesktopMode(currentMode)}
+          onSecondary={() => void openAppView('settings', { mode: currentMode })}
+        />
+        <ControlHubButton
+          title="应用维护"
+          detail="Bridge、备份、卸载和应用选项"
+          action="打开应用设置"
+          onClick={() => void openAppView('settings')}
+        />
       </section>
 
-      <section className="panel action-panel">
-        <h2>主控台</h2>
-        <div className="action-row control-action-row">
-          <button type="button" onClick={() => openDesktopMode(data?.modes?.current)}>打开表现态</button>
-          <button type="button" onClick={() => void openAppView('chat')}>打开 Chat Window</button>
-          <button type="button" onClick={() => void openAppView('settings')}>应用设置</button>
-          <button type="button" onClick={() => void openAppView('settings', { mode: 'bubble' })}>Bubble 设置</button>
-          <button type="button" onClick={() => void openAppView('settings', { mode: 'live2d' })}>Live2D 设置</button>
+      <section className="dashboard-workbench">
+        <div className="dashboard-main-column">
+          <article className="panel dashboard-card" id="hermes-config">
+            <div className="section-heading-row">
+              <div>
+                <h2>Hermes 配置中心</h2>
+                <p className="section-caption">Provider、模型、Base URL、API Key 和连接测试集中在这里。</p>
+              </div>
+              <StatusPill active={Boolean(data?.hermes?.ready)} label={data?.hermes?.ready ? '基础就绪' : '待检查'} />
+            </div>
+            <HermesConfigCenter
+              hermes={data?.hermes}
+              config={hermesConfig}
+              form={configForm}
+              busyAction={busyAction}
+              testResult={hermesTestResult}
+              onConfigChange={updateHermesConfigField}
+              onOpenDiagnostic={openHermesDiagnostic}
+              onOpenCommand={openHermesCommand}
+              onRecheck={recheckHermes}
+              onSaveConfig={saveHermesConfig}
+              onTestConnection={testHermesConnection}
+            />
+          </article>
+
+          <article className="panel chat-overview-panel" id="conversation-center">
+            <div className="section-heading-row">
+              <div>
+                <h2>会话中心</h2>
+                <p className="section-caption">最近对话和摘要；完整收发消息请进入对话窗口。</p>
+              </div>
+              <span>{conversationCountLabel(data?.chat?.recent_sessions, data?.chat?.status_label)}</span>
+            </div>
+            <ConversationList sessions={data?.chat?.recent_sessions || []} />
+            <button type="button" className="wide-action" onClick={() => void openAppView('chat')}>打开完整对话窗口</button>
+          </article>
         </div>
-      </section>
 
-      <section className="dashboard-bottom-grid">
-        <article className="panel chat-overview-panel">
-          <div className="section-heading-row">
-            <h2>会话中心</h2>
-            <span>{conversationCountLabel(data?.chat?.recent_sessions, data?.chat?.status_label)}</span>
-          </div>
-          <ConversationList sessions={data?.chat?.recent_sessions || []} />
-          <button type="button" className="wide-action" onClick={() => void openAppView('chat')}>打开完整对话窗口</button>
-        </article>
+        <aside className="dashboard-side-column" aria-label="系统信息">
+          <article className="panel dashboard-card">
+            <div className="section-heading-row">
+              <h2>运行状态</h2>
+              <StatusPill active={Boolean(data?.app?.running)} label={data?.app?.running ? '运行中' : '未运行'} />
+            </div>
+            <InfoList rows={[
+              ['运行时间', formatUptime(data?.app?.uptime_seconds)],
+              ['Yachiyo 版本', data?.app?.version],
+              ['Bridge', bridgeState(data)],
+              ['配置漂移', data?.bridge?.config_dirty ? listOrDash(data?.bridge?.drift_details) : '无'],
+            ]} />
+          </article>
 
-        <article className="panel mode-overview-panel">
-          <div className="section-heading-row">
-            <h2>模式设置</h2>
-            <span>当前：{modeName(data)}</span>
-          </div>
-          <div className="mode-summary-list">
-            {(data?.modes?.items || []).map((mode) => (
-              <button type="button" key={mode.id} onClick={() => void openAppView('settings', { mode: mode.id })}>
-                <strong>{mode.name || mode.label || mode.id}</strong>
-                <span>{mode.description || (mode.id === data?.modes?.current ? '当前模式' : '可切换表现态')}</span>
-              </button>
-            ))}
-          </div>
-        </article>
+          <article className="panel dashboard-card">
+            <div className="section-heading-row">
+              <h2>工作空间</h2>
+              <StatusPill active={Boolean(data?.workspace?.initialized)} label={data?.workspace?.initialized ? '已初始化' : '未初始化'} />
+            </div>
+            <InfoList rows={[
+              ['路径', data?.workspace?.path],
+              ['创建时间', formatDateTime(data?.workspace?.created_at)],
+            ]} />
+          </article>
+
+          <article className="panel dashboard-card">
+            <div className="section-heading-row">
+              <h2>集成服务</h2>
+            </div>
+            <IntegrationBlock title="AstrBot / QQ" item={data?.integrations?.astrbot} />
+            <IntegrationBlock title="Hapi / Codex" item={data?.integrations?.hapi} />
+          </article>
+        </aside>
       </section>
     </main>
   );
@@ -476,6 +533,102 @@ function providerOptionLabel(option: HermesProviderOption): string {
   return `${option.label || option.id} (${option.id}) · ${source || status}`;
 }
 
+function hermesInstallStatusLabel(status?: string): string {
+  if (status === 'ready') return '已安装并初始化';
+  if (status === 'installed_needs_setup') return '已安装，待 setup';
+  if (status === 'setup_in_progress') return 'setup 进行中';
+  if (status === 'installed_not_initialized') return '待初始化 Yachiyo 工作空间';
+  if (status === 'not_installed') return '未安装';
+  if (status === 'incompatible_version') return '版本不兼容';
+  if (status === 'install_failed') return '安装失败';
+  return status || '未知';
+}
+
+function hermesReadinessLevelLabel(level?: string): string {
+  if (level === 'full_ready') return '完整就绪';
+  if (level === 'basic_ready') return '基础可用，部分能力受限';
+  if (level === 'unknown') return '未完成 Doctor 分级';
+  return level || '未检测';
+}
+
+function hermesConfigNotice(
+  hermes: DashboardData['hermes'] | undefined,
+  apiKeyLabel: string,
+  apiKeyConfigured: boolean,
+  testResult: HermesConnectionTestResult | null,
+  validation: HermesConnectionValidation | undefined,
+): { kind: 'warn' | 'danger'; title: string; detail: string } | null {
+  if (!hermes?.command_exists) {
+    return {
+      kind: 'danger',
+      title: '未找到 hermes 命令',
+      detail: '请先安装 Hermes Agent，或确认当前应用进程能读取到 hermes 所在 PATH。',
+    };
+  }
+  if (!hermes.ready) {
+    return {
+      kind: 'warn',
+      title: '基础环境尚未完成',
+      detail: '需要完成 Hermes setup 和 Yachiyo 工作空间初始化后，桌面 Agent 才能正常运行。',
+    };
+  }
+  if (apiKeyLabel && !apiKeyConfigured) {
+    return {
+      kind: 'danger',
+      title: '当前 Provider 缺少 API Key',
+      detail: `请在上方填写 ${apiKeyLabel} 并保存，或切换到已配置凭据的 Provider。`,
+    };
+  }
+  if (testResult && !testResult.success) {
+    return {
+      kind: 'danger',
+      title: '模型连接测试失败',
+      detail: testResult.error || '请检查 Provider、模型、Base URL 和 API Key。',
+    };
+  }
+  if (testResult?.success) return null;
+  return hermesConnectionNotice(validation);
+}
+
+function hermesConnectionNotice(
+  validation: HermesConnectionValidation | undefined,
+): { kind: 'warn' | 'danger'; title: string; detail: string } | null {
+  if (validation?.verified) return null;
+  if (validation?.reason === 'config_changed') {
+    return {
+      kind: 'warn',
+      title: '模型配置变更后尚未重新验证',
+      detail: '检测到 provider、模型、Base URL 或配置文件已变化，请重新测试模型连接。',
+    };
+  }
+  if (validation?.tested_at && !validation.verified) {
+    return {
+      kind: 'danger',
+      title: '上次模型连接测试失败',
+      detail: validation.error || '请检查 Provider、模型、Base URL 和 API Key 后重新测试。',
+    };
+  }
+  return {
+    kind: 'warn',
+    title: '模型连接尚未验证',
+    detail: '基础状态 ready 只代表 Hermes 命令、setup 和 Yachiyo 工作空间通过检查；API Key 是否能调用模型需要点击“测试模型连接”。',
+  };
+}
+
+function hermesConnectionStatusLabel(
+  testResult: HermesConnectionTestResult | null,
+  validation: HermesConnectionValidation | undefined,
+): string {
+  if (testResult) return testResult.success ? '本次已验证' : '本次失败';
+  if (validation?.verified) {
+    const testedAt = formatShortDateTime(validation.verified_at || validation.tested_at);
+    return testedAt === '—' ? '已验证' : `已验证 · ${testedAt}`;
+  }
+  if (validation?.reason === 'config_changed') return '配置变更后未验证';
+  if (validation?.tested_at && !validation.verified) return '上次失败';
+  return '未验证';
+}
+
 function statusNoticeClass(message: string) {
   return /失败|错误|无法|不支持|超时/.test(message) ? 'notice danger' : 'notice';
 }
@@ -492,13 +645,72 @@ function modeName(data: DashboardData | null): string {
   return item?.name || item?.label || current || '—';
 }
 
-function Metric({ title, value, detail }: { title: string; value: string; detail: string }) {
+function StatusTile({
+  label,
+  value,
+  detail,
+  active,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  active: boolean;
+}) {
   return (
-    <article className="panel metric-card">
-      <span>{title}</span>
+    <article className={active ? 'status-tile active' : 'status-tile'}>
+      <span>{label}</span>
       <strong>{value}</strong>
       <small>{detail}</small>
     </article>
+  );
+}
+
+function ControlHubButton({
+  title,
+  detail,
+  action,
+  primary,
+  onClick,
+}: {
+  title: string;
+  detail: string;
+  action: string;
+  primary?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button className={primary ? 'control-hub-card primary' : 'control-hub-card'} type="button" onClick={onClick}>
+      <span>{title}</span>
+      <strong>{action}</strong>
+      <small>{detail}</small>
+    </button>
+  );
+}
+
+function ControlHubGroup({
+  title,
+  detail,
+  primaryAction,
+  secondaryAction,
+  onPrimary,
+  onSecondary,
+}: {
+  title: string;
+  detail: string;
+  primaryAction: string;
+  secondaryAction: string;
+  onPrimary: () => void;
+  onSecondary: () => void;
+}) {
+  return (
+    <div className="control-hub-card grouped">
+      <span>{title}</span>
+      <strong>{detail}</strong>
+      <div className="control-hub-actions">
+        <button type="button" className="primary-action" onClick={onPrimary}>{primaryAction}</button>
+        <button type="button" onClick={onSecondary}>{secondaryAction}</button>
+      </div>
+    </div>
   );
 }
 
@@ -539,6 +751,7 @@ function HermesConfigCenter({
   busyAction,
   testResult,
   onConfigChange,
+  onOpenDiagnostic,
   onOpenCommand,
   onRecheck,
   onSaveConfig,
@@ -550,31 +763,62 @@ function HermesConfigCenter({
   busyAction: string;
   testResult: HermesConnectionTestResult | null;
   onConfigChange: (field: keyof HermesConfigForm, value: string) => void;
+  onOpenDiagnostic: (command: string) => Promise<void>;
   onOpenCommand: (command: string) => Promise<void>;
   onRecheck: () => Promise<void>;
   onSaveConfig: () => Promise<void>;
   onTestConnection: () => Promise<void>;
 }) {
-  const actions = hermes?.configuration_actions || [];
+  const diagnosticActions = (hermes?.configuration_actions || []).filter((action) => (
+    action.id === 'config-check'
+    || action.id === 'doctor'
+    || action.id === 'auth-list'
+  ));
   const busy = Boolean(busyAction);
   const providerOptions = config?.provider_options || [];
   const selectedProvider = providerOptionById(config, form.provider);
   const modelOptions = modelSelectOptions(form.model, selectedProvider?.models || []);
   const apiKeyLabel = selectedProvider?.api_key_name || config?.api_key?.name || '';
   const apiKeyConfigured = selectedProvider?.api_key_configured ?? config?.api_key?.configured;
+  const connectionValidation = config?.connection_validation;
+  const configNotice = hermesConfigNotice(
+    hermes,
+    apiKeyLabel,
+    Boolean(apiKeyConfigured),
+    testResult,
+    connectionValidation,
+  );
+  const limitedTools = hermes?.limited_tools || [];
   return (
     <div className="hermes-config-center dashboard-hermes-center">
       <InfoList rows={[
-        ['安装状态', hermes?.status],
-        ['能力就绪', hermes?.ready ? '是' : '否'],
-        ['就绪等级', hermes?.readiness_level],
-        ['版本', hermes?.version],
+        ['安装/初始化', hermesInstallStatusLabel(hermes?.status)],
+        ['基础状态', hermes?.ready ? 'Hermes 与 Yachiyo 已就绪' : '未完成'],
+        ['模型连接', hermesConnectionStatusLabel(testResult, connectionValidation)],
+        ['Doctor 等级', hermesReadinessLevelLabel(hermes?.readiness_level)],
+        ['Hermes Agent 版本', hermes?.version],
         ['平台', hermes?.platform],
-        ['命令可用', hermes?.command_exists ? '是' : '否'],
+        ['hermes 命令', hermes?.command_exists ? '可执行' : '未找到'],
         ['Hermes Home', hermes?.hermes_home],
-        ['受限工具', listOrDash(hermes?.limited_tools)],
+        ['Doctor 受限工具', listOrDash(hermes?.limited_tools)],
         ['诊断提示', hermes?.doctor_issues_count ? `${hermes.doctor_issues_count} 项` : '无'],
       ]} />
+      {configNotice ? (
+        <div className={`hermes-config-alert ${configNotice.kind}`}>
+          <strong>{configNotice.title}</strong>
+          <span>{configNotice.detail}</span>
+        </div>
+      ) : null}
+      <DoctorRepairPanel
+        tools={limitedTools}
+        issuesCount={hermes?.doctor_issues_count || 0}
+        busy={busy}
+        busyAction={busyAction}
+        commandExists={Boolean(hermes?.command_exists)}
+        onOpenDiagnostic={onOpenDiagnostic}
+        onOpenCommand={onOpenCommand}
+        onRecheck={onRecheck}
+      />
       <form
         className="hermes-visual-config"
         onSubmit={(event) => {
@@ -675,27 +919,139 @@ function HermesConfigCenter({
         </button>
       </div>
       {testResult ? <HermesConnectionResult result={testResult} /> : null}
-      <div className="hermes-command-grid">
-        {actions.map((action) => {
-          const command = action.command || '';
-          const commandBusy = busyAction === `terminal:${command}`;
-          return (
-            <button
-              type="button"
-              className="hermes-command-button"
-              disabled={busy || !command || !hermes?.command_exists}
-              key={action.id || command}
-              onClick={() => command ? void onOpenCommand(command) : undefined}
-            >
-              <span>{action.label || command}</span>
-              <small>{commandBusy ? '正在打开终端...' : command}</small>
-              {action.description ? <em>{action.description}</em> : null}
-            </button>
-          );
-        })}
-      </div>
+      {diagnosticActions.length ? (
+        <div className="hermes-diagnostic-actions">
+          <div className="hermes-subsection-title">
+            <strong>诊断工具</strong>
+            <span>在诊断页显示结果，不会修改上方表单</span>
+          </div>
+          <div className="hermes-command-grid">
+            {diagnosticActions.map((action) => {
+              const command = action.command || '';
+              const commandBusy = busyAction === `terminal:${command}`;
+              return (
+                <button
+                  type="button"
+                  className="hermes-command-button"
+                  disabled={busy || !command || !hermes?.command_exists}
+                  key={action.id || command}
+                  onClick={() => command ? void onOpenDiagnostic(command) : undefined}
+                >
+                  <span>{action.label || command}</span>
+                  <small>{commandBusy ? '正在打开终端...' : command}</small>
+                  {action.description ? <em>{action.description}</em> : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function DoctorRepairPanel({
+  tools,
+  issuesCount,
+  busy,
+  busyAction,
+  commandExists,
+  onOpenDiagnostic,
+  onOpenCommand,
+  onRecheck,
+}: {
+  tools: string[];
+  issuesCount: number;
+  busy: boolean;
+  busyAction: string;
+  commandExists: boolean;
+  onOpenDiagnostic: (command: string) => Promise<void>;
+  onOpenCommand: (command: string) => Promise<void>;
+  onRecheck: () => Promise<void>;
+}) {
+  const setupBusy = busyAction === 'terminal:hermes setup';
+  return (
+    <section className="doctor-repair-panel" aria-label="Doctor 受限工具修复">
+      <div className="hermes-subsection-title">
+        <strong>Doctor 工具检查</strong>
+        <span>{tools.length ? `${tools.length} 个工具受限` : issuesCount ? `${issuesCount} 项诊断提示` : '随时可运行'}</span>
+      </div>
+      <p className="doctor-repair-note">
+        {tools.length
+          ? '这些项目来自 Hermes Doctor。它们通常不会阻止基础对话，但会影响联网、浏览器、图片生成或外部服务集成。'
+          : '当前没有受限工具记录。需要排查扩展能力时，可以运行 Doctor 获取完整诊断结果。'}
+      </p>
+      <div className="doctor-repair-actions">
+        <button
+          type="button"
+          className="primary-action"
+          disabled={busy || !commandExists}
+          onClick={() => void onOpenDiagnostic('hermes doctor')}
+        >
+          运行 Doctor
+        </button>
+        <button
+          type="button"
+          disabled={busy || !commandExists}
+          onClick={() => void onOpenCommand('hermes setup')}
+        >
+          {setupBusy ? '正在打开...' : '重新配置工具'}
+        </button>
+        <button
+          type="button"
+          className={busyAction === 'recheck' ? 'attention-action' : undefined}
+          disabled={busy}
+          onClick={() => void onRecheck()}
+        >
+          {busyAction === 'recheck' ? '检测中...' : '修复后重新检测'}
+        </button>
+      </div>
+      {tools.length ? (
+        <div className="doctor-tool-grid">
+          {tools.map((tool) => {
+            const advice = doctorToolAdvice(tool);
+            return (
+              <article className="doctor-tool-card" key={tool}>
+                <div>
+                  <strong>{tool}</strong>
+                  <span>{advice.category}</span>
+                </div>
+                <p>{advice.detail}</p>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="doctor-repair-note">Doctor 结果页会显示完整输出，并在命令完成后刷新主控台状态。</p>
+      )}
+    </section>
+  );
+}
+
+function doctorToolAdvice(tool: string): { category: string; detail: string } {
+  const normalized = tool.toLowerCase();
+  if (['browser-cdp', 'web'].includes(normalized)) {
+    return {
+      category: '浏览与联网',
+      detail: '需要 Hermes 的浏览器或联网工具配置可用；运行 Doctor 可看到缺失依赖或授权方式。',
+    };
+  }
+  if (['discord', 'discord_admin', 'messaging', 'spotify', 'homeassistant'].includes(normalized)) {
+    return {
+      category: '外部服务',
+      detail: '需要在 Hermes setup 中填写对应服务的 token、webhook 或服务地址；不使用该服务可以暂时忽略。',
+    };
+  }
+  if (['image_gen', 'moa', 'rl', 'hermes-yuanbao'].includes(normalized)) {
+    return {
+      category: '扩展能力',
+      detail: '通常依赖额外 provider、密钥或实验功能开关；重新配置工具后再执行 Doctor 验证。',
+    };
+  }
+  return {
+    category: 'Hermes 工具',
+    detail: '需要查看 Doctor 输出确认具体缺失项；配置完成后点击重新检测刷新状态。',
+  };
 }
 
 function HermesConnectionResult({ result }: { result: HermesConnectionTestResult }) {

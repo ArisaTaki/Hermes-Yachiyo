@@ -10,6 +10,7 @@ import {
   openDesktopMode,
   openPath,
   quitApp,
+  restartDesktopBridge,
 } from '../lib/bridge';
 import { currentParam, navigateTo } from '../lib/view';
 
@@ -566,6 +567,7 @@ function GeneralSettingsView() {
   const [uninstallRunning, setUninstallRunning] = useState(false);
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
+  const [bridgeRestarting, setBridgeRestarting] = useState(false);
 
   const changes = useMemo(() => buildGeneralSettingsChanges(payload, form), [payload, form]);
   const pendingCount = useMemo(() => countGeneralSettingsPendingChanges(payload, form), [payload, form]);
@@ -698,11 +700,44 @@ function GeneralSettingsView() {
   }
 
   async function restartBridge() {
-    setStatus('正在重启 Bridge…');
-    const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/bridge/restart');
-    if (result.ok === false) throw new Error(result.error || 'Bridge 重启失败');
-    await refreshGeneralSettings();
-    setStatus('Bridge 已按当前配置重启');
+    if (bridgeRestarting) return;
+    if (saving) {
+      setStatus('正在保存设置，请稍后再重启 Bridge');
+      return;
+    }
+    if (hasChanges) {
+      setStatus('请先保存更改，再重启 Bridge');
+      return;
+    }
+    const bridgePort = Number(form.bridge_port);
+    if (!Number.isInteger(bridgePort)) {
+      setStatus('Bridge 端口必须是整数');
+      return;
+    }
+    if (!form.bridge_host.trim()) {
+      setStatus('Bridge Host 不能为空');
+      return;
+    }
+
+    setBridgeRestarting(true);
+    setStatus('正在重启 Bridge，界面会短暂断开…');
+    try {
+      const targetBridgeUrl = `http://${form.bridge_host.trim()}:${bridgePort}`;
+      const desktopResult = await restartDesktopBridge(targetBridgeUrl);
+      if (!desktopResult.success) {
+        const result = await apiPost<{ ok?: boolean; error?: string; desktop_restart_backend_required?: boolean }>('/ui/bridge/restart');
+        if (result.ok === false) throw new Error(result.error || 'Bridge 重启失败');
+        if (result.desktop_restart_backend_required) {
+          throw new Error(result.error || desktopResult.error || '当前环境无法自动重启 Bridge，请重启 Hermes-Yachiyo');
+        }
+      }
+      await refreshGeneralSettings();
+      setStatus('Bridge 已按当前配置重启');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'Bridge 重启失败');
+    } finally {
+      setBridgeRestarting(false);
+    }
   }
 
   async function createBackup(overwriteLatest = false) {
@@ -976,7 +1011,9 @@ function GeneralSettingsView() {
             ['配置漂移', payload?.bridge?.config_dirty ? listValue(payload.bridge.drift_details) : '无'],
           ]} />
           <div className="settings-action-strip">
-            <button type="button" onClick={() => void restartBridge()}>应用配置并重启 Bridge</button>
+            <button type="button" disabled={bridgeRestarting || saving} onClick={() => void restartBridge()}>
+              {bridgeRestarting ? '重启中…' : '应用配置并重启 Bridge'}
+            </button>
           </div>
         </article>
 

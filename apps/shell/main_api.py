@@ -5,18 +5,22 @@
 集成 ChatAPI 提供聊天功能。
 """
 
+import ast
+import hashlib
+import json
 import logging
 import os
 import re
 import subprocess
 import threading
 import time
-import ast
 from copy import deepcopy
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+import apps.shell.config as shell_config
 from apps.installer.hermes_check import locate_hermes_binary
 from apps.installer.workspace_init import get_workspace_status
 from apps.shell.chat_api import ChatAPI
@@ -42,6 +46,8 @@ _HERMES_CONNECTION_TEST_PROMPT = (
     "Reply with exactly: OK"
 )
 _HERMES_CONFIG_TIMEOUT = 20.0
+_HERMES_CONNECTION_CACHE_SCHEMA = 1
+_HERMES_CONNECTION_CACHE_FILE = "hermes_connection.json"
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _SECRET_REDACTIONS = (
     re.compile(r"(?i)(api[_-]?key|token|secret|password)(\s*[:=]\s*)([^\s,;]+)"),
@@ -62,7 +68,12 @@ _HERMES_PROVIDER_PRESETS: tuple[dict[str, Any], ...] = (
         "base_url": "https://openrouter.ai/api/v1",
         "api_key_names": ("OPENROUTER_API_KEY", "OPENAI_API_KEY"),
         "base_url_env": "OPENROUTER_BASE_URL",
-        "models": ("anthropic/claude-sonnet-4.6", "openai/gpt-5.4", "google/gemini-3-pro-preview", "deepseek/deepseek-chat"),
+        "models": (
+            "anthropic/claude-sonnet-4.6",
+            "openai/gpt-5.4",
+            "google/gemini-3-pro-preview",
+            "deepseek/deepseek-chat",
+        ),
     },
     {
         "id": "anthropic",
@@ -150,10 +161,6 @@ _TERMINAL_COMMAND_LOCK = threading.Lock()
 _LAST_TERMINAL_COMMAND_AT = 0.0
 
 
-def _is_desktop_backend() -> bool:
-    return os.environ.get("HERMES_YACHIYO_DESKTOP_BACKEND") == "1"
-
-
 def _serialize_summary(summary: Optional[ModelSummary]) -> Dict[str, Any]:
     """将 ModelSummary 转为 JSON 安全字典，None 时返回空摘要。"""
     if summary is None:
@@ -196,11 +203,149 @@ def _compact_command_output(text: str, limit: int = 900) -> str:
     return detail
 
 
+def _sanitize_command_output(text: str, limit: int = 30000) -> str:
+    if isinstance(text, bytes):
+        text = text.decode(errors="replace")
+    elif not isinstance(text, str):
+        text = str(text or "")
+    cleaned = _ANSI_RE.sub("", text or "").replace("\r\n", "\n").replace("\r", "\n")
+    for pattern in _SECRET_REDACTIONS:
+        cleaned = pattern.sub(
+            lambda match: (
+                f"{match.group(1)}{match.group(2)}[redacted]"
+                if len(match.groups()) >= 3
+                else "[redacted]"
+            ),
+            cleaned,
+        )
+    cleaned = cleaned.rstrip()
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[:limit] + "\n\n[output truncated]"
+
+
 def _public_command(argv: list[str]) -> str:
     if "-z" not in argv:
         return " ".join(argv)
     index = argv.index("-z")
     return " ".join(argv[: index + 1] + ["<connectivity-check>"] + argv[index + 2:])
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _connection_cache_path() -> Path:
+    return Path(shell_config._CONFIG_DIR) / _HERMES_CONNECTION_CACHE_FILE
+
+
+def _file_fingerprint(path: Path) -> dict[str, Any]:
+    try:
+        stat = path.stat()
+    except OSError:
+        return {"path": str(path), "exists": False}
+    return {
+        "path": str(path),
+        "exists": True,
+        "mtime_ns": stat.st_mtime_ns,
+        "size": stat.st_size,
+    }
+
+
+def _connection_fingerprint_payload(configuration: dict[str, Any]) -> dict[str, Any]:
+    model = configuration.get("model") if isinstance(configuration.get("model"), dict) else {}
+    api_key = configuration.get("api_key") if isinstance(configuration.get("api_key"), dict) else {}
+    config_path = Path(str(configuration.get("config_path") or "")).expanduser()
+    env_path = Path(str(configuration.get("env_path") or "")).expanduser()
+    return {
+        "provider": str(model.get("provider") or ""),
+        "model": str(model.get("default") or ""),
+        "base_url": str(model.get("base_url") or ""),
+        "api_key_name": str(api_key.get("name") or ""),
+        "api_key_configured": bool(api_key.get("configured")),
+        "config_file": _file_fingerprint(config_path),
+        "env_file": _file_fingerprint(env_path),
+    }
+
+
+def _connection_fingerprint(configuration: dict[str, Any]) -> str:
+    payload = _connection_fingerprint_payload(configuration)
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _load_connection_validation(configuration: dict[str, Any]) -> dict[str, Any]:
+    cache_path = _connection_cache_path()
+    fingerprint = _connection_fingerprint(configuration)
+    base = {
+        "verified": False,
+        "success": False,
+        "fingerprint": fingerprint,
+        "cache_path": str(cache_path),
+    }
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return base
+    if not isinstance(data, dict) or data.get("schema_version") != _HERMES_CONNECTION_CACHE_SCHEMA:
+        return base
+    if data.get("fingerprint") != fingerprint:
+        return {
+            **base,
+            "reason": "config_changed",
+            "previous_provider": data.get("provider"),
+            "previous_model": data.get("model"),
+            "last_tested_at": data.get("tested_at") or data.get("verified_at"),
+        }
+    return {
+        **base,
+        "verified": bool(data.get("verified")),
+        "success": bool(data.get("verified")),
+        "provider": data.get("provider"),
+        "model": data.get("model"),
+        "base_url": data.get("base_url"),
+        "api_key_name": data.get("api_key_name"),
+        "message": data.get("message"),
+        "error": data.get("error"),
+        "tested_at": data.get("tested_at"),
+        "verified_at": data.get("verified_at"),
+        "elapsed_seconds": data.get("elapsed_seconds"),
+    }
+
+
+def _store_connection_validation(
+    configuration: dict[str, Any],
+    *,
+    success: bool,
+    message: str = "",
+    error: str = "",
+    elapsed_seconds: float | None = None,
+) -> dict[str, Any]:
+    model = configuration.get("model") if isinstance(configuration.get("model"), dict) else {}
+    api_key = configuration.get("api_key") if isinstance(configuration.get("api_key"), dict) else {}
+    now = _utc_now_iso()
+    record: dict[str, Any] = {
+        "schema_version": _HERMES_CONNECTION_CACHE_SCHEMA,
+        "fingerprint": _connection_fingerprint(configuration),
+        "verified": success,
+        "provider": str(model.get("provider") or ""),
+        "model": str(model.get("default") or ""),
+        "base_url": str(model.get("base_url") or ""),
+        "api_key_name": str(api_key.get("name") or ""),
+        "message": message if success else "",
+        "error": "" if success else error,
+        "tested_at": now,
+        "elapsed_seconds": elapsed_seconds,
+    }
+    if success:
+        record["verified_at"] = now
+    path = _connection_cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("写入 Hermes 连接验证缓存失败: %s", exc)
+    return _load_connection_validation(configuration)
 
 
 def _hermes_command_catalog() -> list[dict[str, str]]:
@@ -246,6 +391,22 @@ def _hermes_command_catalog() -> list[dict[str, str]]:
 
 def _allowed_terminal_commands() -> set[str]:
     return {item["command"] for item in _hermes_command_catalog()}
+
+
+def _diagnostic_command_catalog() -> list[dict[str, str]]:
+    return [
+        item
+        for item in _hermes_command_catalog()
+        if item.get("id") in {"config-check", "doctor", "auth-list"}
+    ]
+
+
+def _diagnostic_command_by_command(command: str) -> dict[str, str] | None:
+    normalized = " ".join((command or "").strip().split())
+    return next(
+        (item for item in _diagnostic_command_catalog() if item["command"] == normalized),
+        None,
+    )
 
 
 def _is_macos_prerequisite_command(cmd: str) -> bool:
@@ -359,10 +520,17 @@ def _load_installed_hermes_provider_models() -> dict[str, list[str]]:
             value_node = None
             if (
                 isinstance(node, ast.Assign)
-                and any(isinstance(target, ast.Name) and target.id == "_PROVIDER_MODELS" for target in node.targets)
+                and any(
+                    isinstance(target, ast.Name) and target.id == "_PROVIDER_MODELS"
+                    for target in node.targets
+                )
             ):
                 value_node = node.value
-            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "_PROVIDER_MODELS":
+            elif (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == "_PROVIDER_MODELS"
+            ):
                 value_node = node.value
             if not isinstance(value_node, ast.Dict):
                 continue
@@ -451,7 +619,10 @@ def _provider_options(
         api_key_names = tuple(str(item) for item in preset.get("api_key_names", ()) if item)
         models = _preset_models(provider_id, preset)
         configured_key = next((name for name in api_key_names if env_values.get(name)), "")
-        configured = bool(configured_key) or str(preset.get("auth_type") or "") != "api_key" and not api_key_names
+        configured = (
+            bool(configured_key)
+            or str(preset.get("auth_type") or "") != "api_key" and not api_key_names
+        )
         base_url = env_values.get(base_url_env) if base_url_env else ""
         base_url = override.get("base_url") or base_url or str(preset.get("base_url") or "")
         default_model = override.get("model") or override.get("default") or (
@@ -728,14 +899,18 @@ class MainWindowAPI:
     def restart_bridge(self) -> Dict[str, Any]:
         """重启 Bridge 并用当前已保存的配置重新对齐。
 
+        Electron 前端本身也依赖这个 HTTP 服务通信，所以桌面后端模式下不能
+        在处理 ``/ui/bridge/restart`` 请求时直接停止 uvicorn。实际重启由
+        Electron 主进程完成；这里仅返回明确的桌面壳动作要求，避免请求把
+        自己所在的服务停掉后导致前端永久断联。
+
         操作流程：
           1. 检查 bridge_enabled
-          2. 调用 server.restart_bridge() 停止旧实例 + 启动新线程
-          3. 刷新 _bridge_boot_config（重新对齐）
-          4. 返回最新 app_state 供前端刷新
+          2. Electron 模式：返回 desktop_restart_backend_required
+          3. 非 Electron 模式：调用 server.restart_bridge() 停止旧实例 + 启动新线程
+          4. 刷新 _bridge_boot_config（重新对齐）
+          5. 返回最新 app_state 供前端刷新
         """
-        from apps.bridge.server import restart_bridge as _restart
-
         if not self._config.bridge_enabled:
             return {
                 "ok": False,
@@ -745,6 +920,17 @@ class MainWindowAPI:
 
         host = self._config.bridge_host
         port = self._config.bridge_port
+        if os.getenv("HERMES_YACHIYO_DESKTOP_BACKEND") == "1":
+            return {
+                "ok": True,
+                "pending": True,
+                "desktop_restart_backend_required": True,
+                "message": "Bridge 重启需要由 Electron 桌面壳执行",
+                "bridge_url": f"http://{host}:{port}",
+                "app_state": self._current_app_state(),
+            }
+
+        from apps.bridge.server import restart_bridge as _restart
 
         try:
             result = _restart(host=host, port=port)
@@ -824,6 +1010,95 @@ class MainWindowAPI:
             logger.error("open_terminal_command 失败: %s", exc)
             return {"success": False, "error": str(exc)}
 
+    def run_hermes_diagnostic_command(self, cmd: str) -> Dict[str, Any]:
+        """Run a safe Hermes diagnostic command and return redacted output for UI display."""
+        action = _diagnostic_command_by_command(cmd)
+        if action is None:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "不支持的 Hermes 诊断命令",
+                "unsupported": True,
+            }
+
+        hermes_path, needs_env_refresh = locate_hermes_binary()
+        if hermes_path is None:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "hermes 命令未找到，请先安装 Hermes Agent",
+                "command": action["command"],
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        argv = [hermes_path, *action["command"].split()[1:]]
+        started_at = time.monotonic()
+        try:
+            result = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=60.0,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = _sanitize_command_output(str(exc.stdout or ""))
+            stderr = _sanitize_command_output(str(exc.stderr or ""))
+            return {
+                "ok": False,
+                "success": False,
+                "error": f"{action['label']} 超时",
+                "action_id": action.get("id"),
+                "label": action.get("label"),
+                "command": action["command"],
+                "stdout": stdout,
+                "stderr": stderr,
+                "output": "\n".join(part for part in (stdout, stderr) if part),
+                "elapsed_seconds": round(time.monotonic() - started_at, 2),
+                "needs_env_refresh": needs_env_refresh,
+            }
+        except FileNotFoundError:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "hermes 命令未找到，请先安装 Hermes Agent",
+                "command": action["command"],
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        elapsed = round(time.monotonic() - started_at, 2)
+        stdout = _sanitize_command_output(result.stdout)
+        stderr = _sanitize_command_output(result.stderr)
+        output = "\n".join(part for part in (stdout, stderr) if part)
+        payload: Dict[str, Any] = {
+            "ok": result.returncode == 0,
+            "success": result.returncode == 0,
+            "action_id": action.get("id"),
+            "label": action.get("label"),
+            "description": action.get("description"),
+            "command": action["command"],
+            "returncode": result.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "output": output,
+            "elapsed_seconds": elapsed,
+            "needs_env_refresh": needs_env_refresh,
+        }
+        if result.returncode == 0:
+            payload["message"] = f"{action['label']} 完成"
+        else:
+            payload["error"] = f"{action['label']} 失败（exit={result.returncode}）"
+
+        if action.get("id") == "doctor":
+            try:
+                self._runtime.refresh_hermes_installation()
+                payload["dashboard"] = self.get_dashboard_data()
+            except Exception as exc:
+                logger.warning("诊断后刷新 Hermes 状态失败: %s", exc)
+                payload["refresh_error"] = str(exc)
+
+        return payload
+
     def test_hermes_connection(self) -> Dict[str, Any]:
         """用一次轻量 Hermes oneshot 调用验证当前 provider/API Key 是否可用。
 
@@ -870,7 +1145,7 @@ class MainWindowAPI:
         stdout = _compact_command_output(result.stdout)
         stderr = _compact_command_output(result.stderr)
         if result.returncode == 0 and stdout:
-            return {
+            payload = {
                 "ok": True,
                 "success": True,
                 "message": "Hermes provider/API Key 连接测试通过",
@@ -879,6 +1154,8 @@ class MainWindowAPI:
                 "elapsed_seconds": elapsed,
                 "needs_env_refresh": needs_env_refresh,
             }
+            payload["connection_validation"] = self._record_connection_validation(payload)
+            return payload
 
         detail = stderr or stdout
         error = (
@@ -886,7 +1163,7 @@ class MainWindowAPI:
             if detail
             else f"Hermes 模型连接测试失败（exit={result.returncode}）"
         )
-        return {
+        payload = {
             "ok": False,
             "success": False,
             "error": error,
@@ -897,6 +1174,22 @@ class MainWindowAPI:
             "elapsed_seconds": elapsed,
             "needs_env_refresh": needs_env_refresh,
         }
+        payload["connection_validation"] = self._record_connection_validation(payload)
+        return payload
+
+    def _record_connection_validation(self, result: dict[str, Any]) -> dict[str, Any]:
+        try:
+            configuration = self.get_hermes_configuration()
+        except Exception as exc:
+            logger.warning("读取 Hermes 配置以记录连接验证状态失败: %s", exc)
+            return {"verified": False, "success": False, "error": str(exc)}
+        return _store_connection_validation(
+            configuration,
+            success=bool(result.get("success")),
+            message=str(result.get("message") or ""),
+            error=str(result.get("error") or ""),
+            elapsed_seconds=result.get("elapsed_seconds"),
+        )
 
     def get_hermes_configuration(self) -> Dict[str, Any]:
         """读取 Hermes provider/model 配置摘要。不会返回密钥明文。"""
@@ -919,9 +1212,11 @@ class MainWindowAPI:
             (option for option in provider_options if option.get("id") == provider),
             provider_options[0] if provider_options else {},
         )
-        api_key_name = str(selected_provider.get("api_key_name") or _provider_api_key_name(provider))
+        api_key_name = str(
+            selected_provider.get("api_key_name") or _provider_api_key_name(provider)
+        )
         api_key_configured = bool(selected_provider.get("api_key_configured"))
-        return {
+        configuration = {
             "ok": True,
             "command_exists": command_exists,
             "needs_env_refresh": needs_env_refresh,
@@ -939,6 +1234,8 @@ class MainWindowAPI:
                 "display": "已配置" if api_key_configured else "未配置",
             },
         }
+        configuration["connection_validation"] = _load_connection_validation(configuration)
+        return configuration
 
     def update_hermes_configuration(self, changes: Dict[str, Any]) -> Dict[str, Any]:
         """用 Hermes CLI 写入 provider/model/API Key 配置。"""
@@ -1051,27 +1348,25 @@ class MainWindowAPI:
         }
 
     def open_chat(self) -> Dict[str, Any]:
-        """打开独立聊天窗口"""
-        from apps.shell.chat_window import open_chat_window
-        ok = open_chat_window(self._runtime)
-        return {"ok": ok}
+        """Electron opens chat windows through IPC; HTTP callers get an instruction."""
+        return {
+            "ok": False,
+            "desktop_action_required": "open_chat",
+            "message": "React/Electron 前端通过桌面 IPC 打开聊天窗口",
+        }
 
     def open_mode_settings(self, mode_id: str) -> Dict[str, Any]:
-        """打开指定模式的独立设置窗口。"""
-        from apps.shell.settings import open_mode_settings_window
-
-        ok = open_mode_settings_window(config=self._config, mode_id=mode_id)
-        return {"ok": ok, "mode_id": mode_id}
+        """Electron opens settings windows through IPC; HTTP callers get an instruction."""
+        return {
+            "ok": False,
+            "mode_id": mode_id,
+            "desktop_action_required": "open_mode_settings",
+            "message": "React/Electron 前端通过桌面 IPC 打开模式设置",
+        }
 
     def quit_app(self) -> Dict[str, Any]:
-        """执行退出前清理；主窗口由前端随后关闭。"""
-        try:
-            from apps.shell.window import request_app_exit
-            request_app_exit()
-            return {"ok": True}
-        except Exception as exc:
-            logger.error("退出应用失败: %s", exc)
-            return {"ok": False, "error": str(exc)}
+        """Electron owns the process quit request."""
+        return {"ok": True, "desktop_quit_required": True}
 
     def get_uninstall_preview(
         self,
@@ -1105,19 +1400,8 @@ class MainWindowAPI:
             )
             payload = result.to_dict()
             if result.ok:
-                if _is_desktop_backend():
-                    payload["exit_scheduled"] = False
-                    payload["desktop_quit_required"] = True
-                    return payload
-                try:
-                    from apps.shell.window import request_app_exit
-
-                    request_app_exit()
-                    payload["exit_scheduled"] = True
-                except Exception as exc:
-                    logger.error("卸载后退出应用失败: %s", exc)
-                    payload["exit_scheduled"] = False
-                    payload["exit_error"] = str(exc)
+                payload["exit_scheduled"] = False
+                payload["desktop_quit_required"] = True
             return payload
         except Exception as exc:
             logger.error("执行卸载失败: %s", exc)
@@ -1203,15 +1487,8 @@ class MainWindowAPI:
             result = import_backup(backup_path or None)
             payload = result.to_dict()
             if result.ok:
-                try:
-                    from apps.shell.window import request_app_restart
-
-                    request_app_restart()
-                    payload["restart_scheduled"] = True
-                except Exception as exc:
-                    logger.error("恢复备份后重启失败: %s", exc)
-                    payload["restart_scheduled"] = False
-                    payload["restart_error"] = str(exc)
+                payload["restart_scheduled"] = False
+                payload["desktop_restart_required"] = True
             return payload
         except Exception as exc:
             logger.error("恢复备份失败: %s", exc)

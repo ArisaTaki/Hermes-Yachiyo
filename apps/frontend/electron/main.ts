@@ -26,7 +26,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const FRONTEND_DEV_URL = process.env.HERMES_YACHIYO_FRONTEND_DEV_URL || 'http://127.0.0.1:5174';
-const BRIDGE_URL = process.env.HERMES_YACHIYO_BRIDGE_URL || 'http://127.0.0.1:8420';
+let bridgeUrl = process.env.HERMES_YACHIYO_BRIDGE_URL || 'http://127.0.0.1:8420';
 const BRIDGE_SETTINGS_RETRIES = 40;
 const BRIDGE_SETTINGS_RETRY_MS = 250;
 const BUBBLE_SCREEN_MARGIN = 24;
@@ -34,7 +34,7 @@ const POSITION_SAVE_DEBOUNCE_MS = 260;
 const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
 const MAX_LAUNCHER_SHAPE_RECTS = 10000;
 
-type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'bubble' | 'bubble-menu' | 'live2d';
+type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'bubble' | 'bubble-menu' | 'live2d';
 type ModeId = 'bubble' | 'live2d';
 type InstallerTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup';
 
@@ -77,6 +77,7 @@ let modeWindowShapeApplied = false;
 let modeWindowTopSuppressed = false;
 let lastInstallReady: boolean | null = null;
 let lastUiSettings: UiSettings | null = null;
+let backendRestartPromise: Promise<{ success: boolean; bridgeUrl?: string; error?: string }> | null = null;
 const terminalSessions = new Map<string, {
   ownerId: number;
   pty: IPty;
@@ -89,10 +90,41 @@ type MainWindowOptions = {
   focusOnReady?: boolean;
 };
 
+app.setName('Hermes-Yachiyo');
 showMacDockIcon();
 
 function projectRoot(): string {
   return path.resolve(__dirname, '..', '..', '..');
+}
+
+function rootAssetPath(...segments: string[]): string | null {
+  const roots = app.isPackaged
+    ? [process.resourcesPath, projectRoot()]
+    : [projectRoot()];
+  for (const root of roots) {
+    const candidate = path.join(root, ...segments);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function appIconPath(kind: 'dock' | 'tray' | 'window' = 'window'): string | undefined {
+  const preferred = ['icon.png', 'icon.icns'];
+  for (const name of preferred) {
+    const candidate = rootAssetPath('assets', name);
+    if (candidate) return candidate;
+  }
+  return rootAssetPath('apps', 'shell', 'assets', 'avatars', 'yachiyo-default.jpg') || undefined;
+}
+
+function appIconImage(
+  kind: 'dock' | 'tray' | 'window' = 'window',
+  size?: number,
+): ReturnType<typeof nativeImage.createEmpty> {
+  const iconPath = appIconPath(kind);
+  const image = iconPath ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty();
+  if (!size || image.isEmpty()) return image;
+  return image.resize({ width: size, height: size });
 }
 
 function macOSPrerequisiteCommand(): string {
@@ -166,6 +198,7 @@ function startBackend(): void {
       ...process.env,
       PYTHONPATH: projectRoot(),
       HERMES_YACHIYO_DESKTOP_BACKEND: '1',
+      HERMES_YACHIYO_BRIDGE_URL: bridgeUrl,
     },
   });
 
@@ -187,8 +220,90 @@ function stopBackend(): void {
   backendProcess = null;
 }
 
+function terminateBackend(timeoutMs = 5000): Promise<void> {
+  const processToStop = backendProcess;
+  if (!processToStop) return Promise.resolve();
+  backendProcess = null;
+  return new Promise((resolve) => {
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      resolve();
+    };
+    processToStop.once('exit', finish);
+    processToStop.once('error', finish);
+    try {
+      processToStop.kill('SIGTERM');
+    } catch {
+      finish();
+      return;
+    }
+    setTimeout(() => {
+      if (!finished) {
+        try {
+          processToStop.kill('SIGKILL');
+        } catch {}
+        finish();
+      }
+    }, timeoutMs);
+  });
+}
+
+function normalizeBridgeUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const parsed = new URL(value.trim());
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.origin.replace(/\/$/, '');
+  } catch {
+    return null;
+  }
+}
+
+function reloadWindowWithCurrentRoute(targetWindow: BrowserWindow | null): void {
+  if (!targetWindow || targetWindow.isDestroyed()) return;
+  const route = routeForWindow(targetWindow);
+  if (!route) return;
+  targetWindow.loadURL(rendererUrl({ view: route.view, ...route.params }));
+}
+
+function reloadRendererWindows(): void {
+  reloadWindowWithCurrentRoute(mainWindow);
+  reloadWindowWithCurrentRoute(chatWindow);
+  reloadWindowWithCurrentRoute(modeWindow);
+}
+
+async function restartBackendProcess(targetBridgeUrl?: unknown): Promise<{ success: boolean; bridgeUrl?: string; error?: string }> {
+  if (backendRestartPromise) return backendRestartPromise;
+  backendRestartPromise = (async () => {
+    const nextBridgeUrl = normalizeBridgeUrl(targetBridgeUrl) || bridgeUrl;
+    const previousBridgeUrl = bridgeUrl;
+    bridgeUrl = nextBridgeUrl;
+    await terminateBackend();
+    startBackend();
+    const settings = await waitForUiSettings();
+    if (!settings) {
+      return {
+        success: false,
+        bridgeUrl,
+        error: `Bridge 重启后仍无法连接：${bridgeUrl}`,
+      };
+    }
+    lastUiSettings = settings;
+    configureTray(settings);
+    if (bridgeUrl !== previousBridgeUrl) {
+      setTimeout(reloadRendererWindows, 120);
+    }
+    return { success: true, bridgeUrl };
+  })().finally(() => {
+    backendRestartPromise = null;
+  });
+  return backendRestartPromise;
+}
+
 function rendererUrl(params: Record<string, string> = {}): string {
-  const query = new URLSearchParams({ bridge: BRIDGE_URL });
+  const query = new URLSearchParams({ bridge: bridgeUrl });
   Object.entries(params)
     .filter(([key]) => key !== 'view' && key !== 'mode')
     .forEach(([key, value]) => query.set(key, value));
@@ -229,6 +344,7 @@ function createMainWindow(
   mainWindow = new BrowserWindow({
     title: 'Hermes-Yachiyo',
     ...bounds,
+    icon: appIconPath('window'),
     minWidth: 860,
     minHeight: 580,
     show: false,
@@ -291,11 +407,8 @@ function showMainWindowFromAppActivation(): void {
 }
 
 function trayIcon() {
-  const iconPath = path.resolve(projectRoot(), 'apps', 'shell', 'assets', 'avatars', 'yachiyo-default.jpg');
-  const image = nativeImage.createFromPath(iconPath);
-  if (image.isEmpty()) return image;
   const size = process.platform === 'darwin' ? 18 : 20;
-  return image.resize({ width: size, height: size });
+  return appIconImage('tray', size);
 }
 
 function trayMenu(): Menu {
@@ -328,6 +441,8 @@ function showMacDockIcon(): void {
   if (process.platform !== 'darwin') return;
   try {
     app.setActivationPolicy('regular');
+    const icon = appIconImage('dock');
+    if (!icon.isEmpty()) app.dock?.setIcon(icon);
     app.dock?.show();
   } catch {}
 }
@@ -359,6 +474,7 @@ function createChatWindow(params: Record<string, string> = {}): void {
     title: 'Yachiyo - 对话',
     width: 520,
     height: 680,
+    icon: appIconPath('window'),
     minWidth: 420,
     minHeight: 560,
     backgroundColor: '#121622',
@@ -411,7 +527,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeView(value: unknown): AppView {
-  const views: AppView[] = ['main', 'chat', 'settings', 'installer', 'bubble', 'bubble-menu', 'live2d'];
+  const views: AppView[] = ['main', 'chat', 'settings', 'installer', 'diagnostics', 'bubble', 'bubble-menu', 'live2d'];
   return typeof value === 'string' && views.includes(value as AppView) ? (value as AppView) : 'main';
 }
 
@@ -500,7 +616,7 @@ function boundsChanged(first: Rectangle, second: Rectangle): boolean {
 async function saveLauncherPosition(mode: ModeId, bounds: Rectangle): Promise<void> {
   const workArea = workAreaForBounds(bounds);
   try {
-    const response = await fetch(`${BRIDGE_URL}/ui/launcher/position`, {
+    const response = await fetch(`${bridgeUrl}/ui/launcher/position`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -636,6 +752,7 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
   const createdModeWindow = new BrowserWindow({
     title: mode === 'live2d' ? 'Hermes-Yachiyo Live2D' : 'Hermes-Yachiyo Bubble',
     ...bounds,
+    icon: appIconPath('window'),
     frame: false,
     transparent: true,
     resizable: mode === 'live2d',
@@ -825,13 +942,13 @@ function delay(ms: number): Promise<void> {
 }
 
 async function fetchUiSettings(): Promise<UiSettings> {
-  const response = await fetch(`${BRIDGE_URL}/ui/settings`);
+  const response = await fetch(`${bridgeUrl}/ui/settings`);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return (await response.json()) as UiSettings;
 }
 
 async function fetchInstallInfo(): Promise<InstallInfoPayload> {
-  const response = await fetch(`${BRIDGE_URL}/hermes/install-info`);
+  const response = await fetch(`${bridgeUrl}/hermes/install-info`);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return (await response.json()) as InstallInfoPayload;
 }
@@ -993,13 +1110,17 @@ function startInstallerTerminal(
   return { success: true, id, task, title };
 }
 
-ipcMain.handle('hermes:getBridgeUrl', () => BRIDGE_URL);
+ipcMain.handle('hermes:getBridgeUrl', () => bridgeUrl);
 ipcMain.handle('hermes:quit', () => {
   app.quit();
 });
 ipcMain.handle('hermes:restartApp', () => {
   app.relaunch();
   app.quit();
+});
+ipcMain.handle('hermes:restartBackend', (_event, options: unknown) => {
+  const targetBridgeUrl = isRecord(options) ? options.bridgeUrl : undefined;
+  return restartBackendProcess(targetBridgeUrl);
 });
 ipcMain.handle('hermes:copyText', (_event, value: unknown) => {
   clipboard.writeText(typeof value === 'string' ? value : '');

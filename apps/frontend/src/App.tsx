@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { ChatView } from './views/ChatView';
+import { DiagnosticsView } from './views/DiagnosticsView';
 import { InstallerView } from './views/InstallerView';
 import { LauncherView } from './views/LauncherView';
 import { MainView } from './views/MainView';
@@ -27,6 +28,7 @@ export function App() {
   if (view === 'chat') return <ChatView />;
   if (view === 'settings') return <ModeSettingsView />;
   if (view === 'installer') return <InstallerView />;
+  if (view === 'diagnostics') return <DiagnosticsView />;
   if (view === 'bubble' || view === 'bubble-menu' || view === 'live2d') return <LauncherView view={view} />;
   return <MainView />;
 }

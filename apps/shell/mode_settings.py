@@ -18,7 +18,8 @@ from apps.shell.config import (
 )
 from apps.shell.effect_policy import build_effects_summary
 from apps.shell.mode_catalog import get_mode_descriptor, list_mode_options
-from apps.shell.modes.bubble import _MAX_LAUNCHER_SIZE, _MIN_LAUNCHER_SIZE
+_MIN_LAUNCHER_SIZE = 80
+_MAX_LAUNCHER_SIZE = 192
 
 logger = logging.getLogger(__name__)
 

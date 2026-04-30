@@ -4,15 +4,9 @@ from __future__ import annotations
 
 import json
 
-from apps.core.chat_session import ChatSession
-from apps.core.chat_store import ChatStore
-from apps.core.state import AppState
-from apps.shell.config import AppConfig
-from apps.shell.modes.live2d import Live2DWindowAPI
 import apps.shell.tts as tts_mod
 from apps.shell.config import TTSConfig
 from apps.shell.tts import TTSService
-from packages.protocol.enums import TaskStatus
 
 
 class _ImmediateThread:
@@ -33,32 +27,6 @@ class _FakeHTTPResponse:
 
     def read(self) -> bytes:
         return b"ok"
-
-
-class _Live2DRuntimeStub:
-    def __init__(self, store: ChatStore) -> None:
-        self.state = AppState()
-        self.chat_session = ChatSession(session_id="tts-live2d-test")
-        self.chat_session.attach_store(store, load_existing=False)
-        self.task_runner = None
-
-    def is_hermes_ready(self) -> bool:
-        return True
-
-    def get_status(self) -> dict:
-        return {"hermes": {"limited_tools": []}}
-
-
-class _RecordingTTS:
-    def __init__(self) -> None:
-        self.calls: list[str] = []
-
-    def speak_async(self, text: str) -> dict:
-        self.calls.append(text)
-        return {"ok": True, "scheduled": True, "message": "scheduled"}
-
-    def get_status(self) -> dict:
-        return {"ok": True, "scheduled": False}
 
 
 def test_tts_disabled_skips_without_side_effect(monkeypatch):
@@ -171,28 +139,3 @@ def test_tts_http_posts_text_voice_and_timeout(monkeypatch):
     assert request.get_method() == "POST"
     assert payload == {"text": "你好", "voice": "Kyoko"}
     assert timeout == 9
-
-
-def test_live2d_tts_uses_full_latest_reply(tmp_path):
-    store = ChatStore(db_path=str(tmp_path / "chat.db"))
-    runtime = _Live2DRuntimeStub(store)
-    config = AppConfig(display_mode="live2d")
-    config.tts.enabled = True
-    config.tts.provider = "command"
-    config.tts.command = "say {text}"
-    api = Live2DWindowAPI(runtime, config)
-    recorder = _RecordingTTS()
-    api._tts = recorder  # type: ignore[assignment]
-    try:
-        long_reply = "完整语音回复" + "A" * 200
-        result = api.send_quick_message("请回答很长一段")
-        runtime.state.update_task_status(result["task_id"], TaskStatus.RUNNING)
-        runtime.state.update_task_status(result["task_id"], TaskStatus.COMPLETED, result=long_reply)
-
-        view = api.get_live2d_view()
-
-        assert view["chat"]["latest_reply"] != long_reply
-        assert view["chat"]["latest_reply_full"] == long_reply
-        assert recorder.calls == [long_reply]
-    finally:
-        store.close()

@@ -78,6 +78,9 @@ async def test_settings_operation_routes_use_main_api(monkeypatch):
         def open_terminal_command(self, command):
             return {"success": True, "command": command}
 
+        def run_hermes_diagnostic_command(self, command):
+            return {"success": True, "command": command, "output": "ok"}
+
         def test_hermes_connection(self):
             return {"success": True, "message": "ok"}
 
@@ -119,6 +122,12 @@ async def test_settings_operation_routes_use_main_api(monkeypatch):
     assert await ui.open_hermes_terminal_command(ui.TerminalCommandRequest(command="hermes doctor")) == {
         "success": True,
         "command": "hermes doctor",
+    }
+    diagnostic_request = ui.TerminalCommandRequest(command="hermes doctor")
+    assert await ui.run_hermes_diagnostic_command(diagnostic_request) == {
+        "success": True,
+        "command": "hermes doctor",
+        "output": "ok",
     }
     assert await ui.test_hermes_connection() == {"success": True, "message": "ok"}
     assert await ui.get_hermes_configuration() == {"ok": True, "model": {"provider": "openai"}}

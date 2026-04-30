@@ -123,6 +123,15 @@ async def open_hermes_terminal_command(request: TerminalCommandRequest) -> dict[
     return MainWindowAPI(runtime, runtime.config).open_terminal_command(request.command)
 
 
+@router.post("/hermes/diagnostic-command")
+async def run_hermes_diagnostic_command(request: TerminalCommandRequest) -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).run_hermes_diagnostic_command,
+        request.command,
+    )
+
+
 @router.post("/hermes/connection-test")
 async def test_hermes_connection() -> dict[str, Any]:
     runtime = get_runtime()

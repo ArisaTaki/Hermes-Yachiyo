@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from apps.core.chat_session import ChatSession, get_chat_session
 from apps.core.state import AppState
+from apps.core.version import get_app_version
 from apps.installer.hermes_check import check_hermes_installation
 from packages.protocol.enums import HermesInstallStatus
 from packages.protocol.install import HermesInstallInfo
@@ -195,7 +196,7 @@ class HermesRuntime:
         """获取运行时状态摘要"""
         status = {
             "service": "hermes-yachiyo",
-            "version": "0.1.0",
+            "version": get_app_version(),
             "running": self._running,
             "uptime_seconds": self.uptime,
             "task_counts": self._state.get_task_counts(),

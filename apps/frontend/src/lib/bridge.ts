@@ -41,6 +41,7 @@ declare global {
       openView?: (view: string, params?: Record<string, string>) => Promise<void>;
       quit: () => Promise<void>;
       restartApp?: () => Promise<void>;
+      restartBackend?: (options?: { bridgeUrl?: string }) => Promise<{ success?: boolean; bridgeUrl?: string; error?: string }>;
       setLauncherHitRegions?: (mode: string, payload: LauncherHitRegionPayload) => Promise<boolean>;
       setLauncherPointerInteractive?: (mode: string, interactive: boolean) => Promise<boolean>;
       terminalKill?: (id: string) => Promise<boolean>;
@@ -126,7 +127,7 @@ function isLauncherView(): boolean {
 }
 
 function isAppView(value: string): value is AppView {
-  return ['main', 'chat', 'settings', 'installer', 'bubble', 'bubble-menu', 'live2d'].includes(value);
+  return ['main', 'chat', 'settings', 'installer', 'diagnostics', 'bubble', 'bubble-menu', 'live2d'].includes(value);
 }
 
 export async function openDesktopMode(mode?: string): Promise<void> {
@@ -252,6 +253,15 @@ export async function restartApp(): Promise<void> {
     return;
   }
   window.location.reload();
+}
+
+export async function restartDesktopBridge(bridgeUrl?: string): Promise<{ success?: boolean; bridgeUrl?: string; error?: string }> {
+  if (!window.hermesDesktop?.restartBackend) {
+    return { success: false, error: '当前环境不支持自动重启 Bridge，请重启 Hermes-Yachiyo' };
+  }
+  const result = await window.hermesDesktop.restartBackend({ bridgeUrl });
+  if (result.bridgeUrl) cachedBridgeUrl = result.bridgeUrl.replace(/\/$/, '');
+  return result;
 }
 
 export function hasEmbeddedTerminal(): boolean {
