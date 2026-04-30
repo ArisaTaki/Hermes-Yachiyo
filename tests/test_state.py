@@ -91,6 +91,20 @@ class TestAppStateUpdateStatus:
         assert result.status == TaskStatus.FAILED
         assert result.error == "boom"
 
+    def test_failed_status_log_includes_compact_error(self, app_state, caplog):
+        task = app_state.create_task("fail")
+        app_state.update_task_status(task.task_id, TaskStatus.RUNNING)
+        with caplog.at_level("INFO", logger="apps.core.state"):
+            app_state.update_task_status(
+                task.task_id,
+                TaskStatus.FAILED,
+                error="Hermes streaming bridge 执行失败\nexit=1",
+            )
+        assert (
+            f"任务状态已更新: {task.task_id} → failed | "
+            "error=Hermes streaming bridge 执行失败 exit=1"
+        ) in caplog.text
+
     def test_terminal_state_raises(self, app_state):
         task = app_state.create_task("final")
         app_state.update_task_status(task.task_id, TaskStatus.RUNNING)

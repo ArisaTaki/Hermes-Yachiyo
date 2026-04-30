@@ -218,6 +218,10 @@ function createMainWindow(
   settings: UiSettings | null = lastUiSettings,
   options: MainWindowOptions = {},
 ): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    showMainWindow(params, settings, options);
+    return;
+  }
   if (settings) lastUiSettings = settings;
   const bounds = mainWindowBounds(settings);
   const startHidden = Boolean(options.respectStartMinimized && settings?.app?.start_minimized);
@@ -248,28 +252,36 @@ function createMainWindow(
   mainWindow.on('blur', restoreModeWindowTopPreference);
   mainWindow.on('minimize', restoreModeWindowTopPreference);
   mainWindow.on('hide', restoreModeWindowTopPreference);
+  const createdWindow = mainWindow;
   mainWindow.on('closed', () => {
-    mainWindow = null;
+    if (mainWindow === createdWindow) mainWindow = null;
     restoreModeWindowTopPreference();
   });
 }
 
-function showMainWindow(params: Record<string, string> = {}, settings: UiSettings | null = lastUiSettings): void {
+function showMainWindow(
+  params: Record<string, string> = {},
+  settings: UiSettings | null = lastUiSettings,
+  options: MainWindowOptions = {},
+): void {
   if (normalizeView(params.view) === 'chat') {
     showChatWindow(params);
     return;
   }
-  if (!mainWindow) {
-    createMainWindow(params, settings);
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow(params, settings, options);
     return;
   }
+  if (settings) lastUiSettings = settings;
   mainWindow.loadURL(rendererUrl({ view: 'main', ...params }));
   if (mainWindow.isMinimized()) mainWindow.restore();
+  const startHidden = Boolean(options.respectStartMinimized && settings?.app?.start_minimized);
+  if (startHidden && !mainWindow.isVisible()) return;
   showMacDockIcon();
   suppressModeWindowForMainWindow();
   mainWindow.show();
   mainWindow.moveTop();
-  mainWindow.focus();
+  if (options.focusOnReady !== false) mainWindow.focus();
 }
 
 function showMainWindowFromAppActivation(): void {
@@ -1089,7 +1101,7 @@ app.whenReady().then(() => {
 	    const settings = await waitForUiSettings();
 	    if (settings) lastUiSettings = settings;
 	    configureTray(settings);
-	    createMainWindow({}, settings, { respectStartMinimized: true, focusOnReady: false });
+	    showMainWindow({}, settings, { respectStartMinimized: true, focusOnReady: false });
 	    await openConfiguredDesktopMode(undefined, settings);
 	    if (settings?.window_mode?.open_chat_on_start) showChatWindow();
 	  })();

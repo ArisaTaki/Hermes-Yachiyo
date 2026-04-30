@@ -69,9 +69,18 @@ export function ChatView() {
     try {
       const payload = await apiGet<MessagesPayload>('/ui/chat/messages?limit=80');
       if (payload.ok === false) throw new Error(payload.error || '读取消息失败');
-      setMessages(payload.messages || []);
-      setIsProcessing(Boolean(payload.is_processing));
-      setStatus(payload.is_processing ? '处理中...' : '就绪');
+      const nextMessages = payload.messages || [];
+      const processing = Boolean(payload.is_processing);
+      const failed = latestFailedMessage(nextMessages);
+      setMessages(nextMessages);
+      setIsProcessing(processing);
+      if (processing) {
+        setStatus('处理中...');
+      } else if (failed) {
+        setStatus(`处理失败：${compactStatusText(messageErrorText(failed))}`);
+      } else {
+        setStatus('就绪');
+      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '读取消息失败');
     }
@@ -389,6 +398,30 @@ function TypingIndicator() {
 
 function messageText(message: ChatMessage) {
   return String(message.content || message.text || '');
+}
+
+function messageErrorText(message: ChatMessage) {
+  return String(
+    message.error || message.content || message.text || '任务执行失败',
+  ).trim();
+}
+
+function latestFailedMessage(messages: ChatMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const status = messages[index]?.status;
+    if (!status) continue;
+    if (status === 'failed') return messages[index];
+    if (status === 'pending' || status === 'processing' || status === 'completed') {
+      return null;
+    }
+  }
+  return null;
+}
+
+function compactStatusText(text: string, maxLength = 96) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '任务执行失败';
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
 }
 
 function roleLabel(role: string) {

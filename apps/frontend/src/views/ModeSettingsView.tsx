@@ -697,19 +697,6 @@ function GeneralSettingsView() {
     if (message) setStatus(message);
   }
 
-  async function openHermesCommand(command: string) {
-    setStatus(`正在打开终端执行 ${command}…`);
-    const result = await apiPost<{ success?: boolean; error?: string }>('/ui/hermes/terminal-command', { command });
-    setStatus(result.success ? `已打开终端：${command}` : result.error || '打开终端失败');
-  }
-
-  async function recheckHermes() {
-    setStatus('正在重新检测 Hermes…');
-    await apiPost('/ui/hermes/recheck');
-    await refreshGeneralSettings();
-    setStatus('Hermes 状态已刷新');
-  }
-
   async function restartBridge() {
     setStatus('正在重启 Bridge…');
     const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/bridge/restart');
@@ -834,9 +821,7 @@ function GeneralSettingsView() {
             ['诊断提示', payload?.hermes?.doctor_issues_count ? `${payload.hermes.doctor_issues_count} 项` : '无'],
           ]} />
           <div className="settings-action-strip">
-            <button type="button" onClick={() => void openHermesCommand('hermes setup')}>运行 hermes setup</button>
-            <button type="button" onClick={() => void openHermesCommand('hermes doctor')}>运行 hermes doctor</button>
-            <button type="button" onClick={() => void recheckHermes()}>重新检测</button>
+            <button type="button" className="primary-action" onClick={() => navigateTo('main', {}, ['mode'])}>打开主控台配置中心</button>
           </div>
         </article>
 

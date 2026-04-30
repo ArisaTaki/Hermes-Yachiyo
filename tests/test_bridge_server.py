@@ -5,7 +5,12 @@ import json
 import pytest
 
 from apps.bridge.routes import live2d as live2d_route
-from apps.bridge.server import app, get_live2d_asset_token, regenerate_live2d_asset_token
+from apps.bridge.server import (
+    _bridge_access_log_enabled,
+    app,
+    get_live2d_asset_token,
+    regenerate_live2d_asset_token,
+)
 
 
 def test_bridge_app_enables_local_webview_cors():
@@ -28,6 +33,18 @@ def test_live2d_asset_token_can_rotate():
 
     assert second
     assert second != first
+
+
+def test_bridge_access_log_is_disabled_by_default(monkeypatch):
+    monkeypatch.delenv("HERMES_YACHIYO_BRIDGE_ACCESS_LOG", raising=False)
+
+    assert _bridge_access_log_enabled() is False
+
+
+def test_bridge_access_log_can_be_enabled_for_http_debug(monkeypatch):
+    monkeypatch.setenv("HERMES_YACHIYO_BRIDGE_ACCESS_LOG", "1")
+
+    assert _bridge_access_log_enabled() is True
 
 
 def test_rewrite_live2d_manifest_paths_appends_token():

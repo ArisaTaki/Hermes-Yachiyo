@@ -651,6 +651,78 @@ class TestConsumeStreamBridgeRobustness:
         assert "模型请求失败" in result.error_message
         assert "Hermes streaming bridge 执行失败" not in result.error_message
 
+    @pytest.mark.asyncio
+    async def test_done_failed_uses_error_field_before_empty_response(self):
+        """done.failed 的 error 字段应优先于空响应。"""
+        lines = [
+            json.dumps(
+                {
+                    "type": "done",
+                    "response": "None",
+                    "error": "provider api key missing",
+                    "failed": True,
+                }
+            ),
+        ]
+        proc = self._make_proc_from_lines(lines, returncode=1)
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            lambda _: None,
+        )
+
+        assert result.success is False
+        assert "provider api key missing" in result.error_message
+        assert "：None" not in result.error_message
+
+    @pytest.mark.asyncio
+    async def test_done_failed_without_detail_guides_configuration_check(self):
+        """Hermes 返回 failed=True 但没有错误详情时，应给出配置排查提示。"""
+        lines = [
+            json.dumps({"type": "done", "response": "None", "failed": True}),
+        ]
+        proc = self._make_proc_from_lines(lines, returncode=1)
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            lambda _: None,
+        )
+
+        assert result.success is False
+        assert "没有返回错误详情" in result.error_message
+        assert "模型/provider 配置" in result.error_message
+        assert "：None" not in result.error_message
+
+
+class TestHermesStreamBridgeResultFormatting:
+    """bridge 对 Hermes run_conversation 结果的清洗。"""
+
+    def test_detail_text_treats_none_values_as_empty(self):
+        assert bridge_mod._detail_text(None) == ""
+        assert bridge_mod._detail_text("None") == ""
+        assert bridge_mod._detail_text("null") == ""
+        assert bridge_mod._detail_text("None", drop_empty_literals=False) == "None"
+
+    def test_failure_message_prefers_explicit_error_fields(self):
+        result = {
+            "failed": True,
+            "final_response": None,
+            "error": "",
+            "message": "model route is invalid",
+        }
+
+        assert bridge_mod._failure_message_from_result(result) == "model route is invalid"
+
+    def test_failure_message_serializes_structured_details(self):
+        result = {
+            "failed": True,
+            "details": {"provider": "openai", "reason": "missing key"},
+        }
+
+        assert "missing key" in bridge_mod._failure_message_from_result(result)
+
 
 class TestBuildInitAgentKwargs:
     """_build_init_agent_kwargs 根据 _init_agent 签名动态过滤参数。"""

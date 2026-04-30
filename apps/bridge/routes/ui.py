@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -73,6 +74,13 @@ class TerminalCommandRequest(BaseModel):
     command: str
 
 
+class HermesConfigUpdateRequest(BaseModel):
+    provider: str = ""
+    model: str = ""
+    base_url: str = ""
+    api_key: str = ""
+
+
 class BackupCreateRequest(BaseModel):
     overwrite_latest: bool = False
 
@@ -113,6 +121,31 @@ async def update_settings(request: SettingsUpdateRequest) -> dict[str, Any]:
 async def open_hermes_terminal_command(request: TerminalCommandRequest) -> dict[str, Any]:
     runtime = get_runtime()
     return MainWindowAPI(runtime, runtime.config).open_terminal_command(request.command)
+
+
+@router.post("/hermes/connection-test")
+async def test_hermes_connection() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).test_hermes_connection
+    )
+
+
+@router.get("/hermes/config")
+async def get_hermes_configuration() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).get_hermes_configuration
+    )
+
+
+@router.post("/hermes/config")
+async def update_hermes_configuration(request: HermesConfigUpdateRequest) -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).update_hermes_configuration,
+        request.model_dump(),
+    )
 
 
 @router.post("/hermes/recheck")

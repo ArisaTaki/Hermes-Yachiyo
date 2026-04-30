@@ -7,9 +7,15 @@
 
 import logging
 import os
+import re
+import subprocess
+import threading
+import time
 from copy import deepcopy
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from apps.installer.hermes_check import locate_hermes_binary
 from apps.installer.workspace_init import get_workspace_status
 from apps.shell.chat_api import ChatAPI
 from apps.shell.chat_bridge import ChatBridge
@@ -28,6 +34,118 @@ if TYPE_CHECKING:
     from apps.shell.config import AppConfig
 
 logger = logging.getLogger(__name__)
+_HERMES_CONNECTION_TEST_TIMEOUT = 45.0
+_HERMES_CONNECTION_TEST_PROMPT = (
+    "This is a Hermes-Yachiyo provider connectivity check. "
+    "Reply with exactly: OK"
+)
+_HERMES_CONFIG_TIMEOUT = 20.0
+_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+_SECRET_REDACTIONS = (
+    re.compile(r"(?i)(api[_-]?key|token|secret|password)(\s*[:=]\s*)([^\s,;]+)"),
+    re.compile(r"\b(sk-[A-Za-z0-9_-]{12,})\b"),
+)
+_HERMES_PROVIDER_PRESETS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "xiaomi",
+        "label": "Xiaomi MiMo",
+        "base_url": "https://api.xiaomimimo.com/v1",
+        "api_key_names": ("XIAOMI_API_KEY",),
+        "base_url_env": "XIAOMI_BASE_URL",
+        "models": ("mimo-v2.5-pro", "mimo-v2.5", "mimo-v2-pro", "mimo-v2-omni", "mimo-v2-flash"),
+    },
+    {
+        "id": "openrouter",
+        "label": "OpenRouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "api_key_names": ("OPENROUTER_API_KEY", "OPENAI_API_KEY"),
+        "base_url_env": "OPENROUTER_BASE_URL",
+        "models": ("anthropic/claude-sonnet-4.6", "openai/gpt-5.4", "google/gemini-3-pro-preview", "deepseek/deepseek-chat"),
+    },
+    {
+        "id": "anthropic",
+        "label": "Anthropic",
+        "base_url": "https://api.anthropic.com",
+        "api_key_names": ("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"),
+        "base_url_env": "ANTHROPIC_BASE_URL",
+        "models": ("claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"),
+    },
+    {
+        "id": "gemini",
+        "label": "Google AI Studio",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta",
+        "api_key_names": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+        "base_url_env": "GEMINI_BASE_URL",
+        "models": ("gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro"),
+    },
+    {
+        "id": "deepseek",
+        "label": "DeepSeek",
+        "base_url": "https://api.deepseek.com/v1",
+        "api_key_names": ("DEEPSEEK_API_KEY",),
+        "base_url_env": "DEEPSEEK_BASE_URL",
+        "models": ("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner"),
+    },
+    {
+        "id": "xai",
+        "label": "xAI",
+        "base_url": "https://api.x.ai/v1",
+        "api_key_names": ("XAI_API_KEY",),
+        "base_url_env": "XAI_BASE_URL",
+        "models": ("grok-4.1", "grok-4.1-fast", "grok-4-fast"),
+    },
+    {
+        "id": "kimi-coding",
+        "label": "Kimi / Moonshot",
+        "base_url": "https://api.moonshot.ai/v1",
+        "api_key_names": ("KIMI_API_KEY", "KIMI_CODING_API_KEY"),
+        "base_url_env": "KIMI_BASE_URL",
+        "models": ("kimi-k2.5", "kimi-k2-thinking", "kimi-k2-turbo-preview"),
+    },
+    {
+        "id": "zai",
+        "label": "Z.AI / GLM",
+        "base_url": "https://api.z.ai/api/paas/v4",
+        "api_key_names": ("GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"),
+        "base_url_env": "GLM_BASE_URL",
+        "models": ("glm-4.6", "glm-4.5", "glm-4.5-air"),
+    },
+    {
+        "id": "huggingface",
+        "label": "Hugging Face",
+        "base_url": "https://router.huggingface.co/v1",
+        "api_key_names": ("HF_TOKEN",),
+        "base_url_env": "HF_BASE_URL",
+        "models": ("openai/gpt-oss-120b", "Qwen/Qwen3-Coder-480B-A35B-Instruct"),
+    },
+    {
+        "id": "lmstudio",
+        "label": "LM Studio",
+        "base_url": "http://127.0.0.1:1234/v1",
+        "api_key_names": ("LM_API_KEY",),
+        "base_url_env": "LM_BASE_URL",
+        "models": ("local-model",),
+    },
+    {
+        "id": "nous",
+        "label": "Nous Portal",
+        "base_url": "https://inference-api.nousresearch.com/v1",
+        "api_key_names": (),
+        "auth_type": "oauth_device_code",
+        "models": ("deepseek/deepseek-chat", "anthropic/claude-sonnet-4.6"),
+    },
+    {
+        "id": "custom",
+        "label": "Custom endpoint",
+        "base_url": "",
+        "api_key_names": ("CUSTOM_API_KEY",),
+        "models": (),
+    },
+)
+_PROVIDER_PRESET_BY_ID = {str(item["id"]): item for item in _HERMES_PROVIDER_PRESETS}
+_TERMINAL_COMMAND_THROTTLE_SECONDS = 1.2
+_TERMINAL_COMMAND_LOCK = threading.Lock()
+_LAST_TERMINAL_COMMAND_AT = 0.0
 
 
 def _is_desktop_backend() -> bool:
@@ -50,6 +168,312 @@ def _serialize_summary(summary: Optional[ModelSummary]) -> Dict[str, Any]:
         "primary_moc3_abs": summary.primary_moc3_abs,
         "renderer_entry": summary.renderer_entry,  # 推荐入口（model3.json 优先）
     }
+
+
+def _compact_command_output(text: str, limit: int = 900) -> str:
+    if isinstance(text, bytes):
+        text = text.decode(errors="replace")
+    elif not isinstance(text, str):
+        text = str(text or "")
+    cleaned = _ANSI_RE.sub("", text or "").replace("\r\n", "\n").replace("\r", "\n")
+    for pattern in _SECRET_REDACTIONS:
+        cleaned = pattern.sub(
+            lambda match: (
+                f"{match.group(1)}{match.group(2)}[redacted]"
+                if len(match.groups()) >= 3
+                else "[redacted]"
+            ),
+            cleaned,
+        )
+    lines = [line.rstrip() for line in cleaned.split("\n") if line.strip()]
+    if not lines:
+        return ""
+    detail = "\n".join(lines[-8:])
+    if len(detail) > limit:
+        return "..." + detail[-limit:]
+    return detail
+
+
+def _public_command(argv: list[str]) -> str:
+    if "-z" not in argv:
+        return " ".join(argv)
+    index = argv.index("-z")
+    return " ".join(argv[: index + 1] + ["<connectivity-check>"] + argv[index + 2:])
+
+
+def _hermes_command_catalog() -> list[dict[str, str]]:
+    return [
+        {
+            "id": "setup",
+            "label": "重新配置向导",
+            "command": "hermes setup",
+            "description": "重新选择模型、provider、API Key 与工具开关。",
+        },
+        {
+            "id": "model",
+            "label": "选择模型",
+            "command": "hermes model",
+            "description": "只调整默认 provider 与模型，不重走完整 setup。",
+        },
+        {
+            "id": "config-edit",
+            "label": "编辑配置文件",
+            "command": "hermes config edit",
+            "description": "用 Hermes 原生命令打开配置文件，适合修正 base URL 等高级项。",
+        },
+        {
+            "id": "config-check",
+            "label": "检查配置结构",
+            "command": "hermes config check",
+            "description": "检查缺失或过期配置，不会发起模型请求。",
+        },
+        {
+            "id": "doctor",
+            "label": "运行诊断",
+            "command": "hermes doctor",
+            "description": "检查 Hermes 依赖、配置和运行环境。",
+        },
+        {
+            "id": "auth-list",
+            "label": "查看凭据池",
+            "command": "hermes auth list",
+            "description": "查看 Hermes 记录的 provider 凭据状态，不在 Yachiyo 中显示密钥内容。",
+        },
+    ]
+
+
+def _allowed_terminal_commands() -> set[str]:
+    return {item["command"] for item in _hermes_command_catalog()}
+
+
+def _is_macos_prerequisite_command(cmd: str) -> bool:
+    return (
+        "Hermes-Yachiyo macOS 基础工具检查" in cmd
+        and "xcode-select --install" in cmd
+        and "brew install git curl" in cmd
+    )
+
+
+def _reset_terminal_command_gate() -> None:
+    global _LAST_TERMINAL_COMMAND_AT
+    with _TERMINAL_COMMAND_LOCK:
+        _LAST_TERMINAL_COMMAND_AT = 0.0
+
+
+def _strip_yaml_scalar(raw: str) -> str:
+    value = raw.strip()
+    if value in {"", "null", "None", "~"}:
+        return ""
+    if (value.startswith('"') and value.endswith('"')) or (
+        value.startswith("'") and value.endswith("'")
+    ):
+        return value[1:-1]
+    return value.split(" #", 1)[0].strip()
+
+
+def _read_hermes_model_config(config_path: Path) -> dict[str, str]:
+    if not config_path.exists():
+        return {"provider": "", "default": "", "base_url": ""}
+    try:
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {"provider": "", "default": "", "base_url": ""}
+
+    model: dict[str, str] = {"provider": "", "default": "", "base_url": ""}
+    in_model_block = False
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith((" ", "\t")):
+            in_model_block = line.startswith("model:")
+            if in_model_block:
+                inline = line.split(":", 1)[1].strip()
+                if inline and not inline.startswith(("{", "[")):
+                    model["default"] = _strip_yaml_scalar(inline)
+            continue
+        if not in_model_block:
+            continue
+        match = re.match(r"\s+([A-Za-z0-9_-]+):\s*(.*)$", line)
+        if not match:
+            continue
+        key, raw_value = match.groups()
+        if key in model:
+            model[key] = _strip_yaml_scalar(raw_value)
+    return model
+
+
+def _read_user_provider_overrides(config_path: Path) -> dict[str, dict[str, str]]:
+    if not config_path.exists():
+        return {}
+    try:
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+
+    providers: dict[str, dict[str, str]] = {}
+    in_providers = False
+    current_provider = ""
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith((" ", "\t")):
+            in_providers = line.startswith("providers:")
+            current_provider = ""
+            continue
+        if not in_providers:
+            continue
+        provider_match = re.match(r"\s{2}([A-Za-z0-9_.-]+):\s*$", line)
+        if provider_match:
+            current_provider = provider_match.group(1)
+            providers.setdefault(current_provider, {})
+            continue
+        field_match = re.match(r"\s{4}([A-Za-z0-9_-]+):\s*(.*)$", line)
+        if field_match and current_provider:
+            key, raw_value = field_match.groups()
+            providers[current_provider][key] = _strip_yaml_scalar(raw_value)
+    return providers
+
+
+def _read_env_values(env_path: Path) -> dict[str, str]:
+    if not env_path.exists():
+        return {}
+    values: dict[str, str] = {}
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return values
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, raw_value = stripped.split("=", 1)
+        values[key.strip()] = raw_value.strip().strip('"').strip("'")
+    return values
+
+
+def _provider_api_key_name(provider: str) -> str:
+    names = _provider_api_key_names(provider)
+    return names[0] if names else ""
+
+
+def _provider_api_key_names(provider: str) -> tuple[str, ...]:
+    normalized = provider.strip().lower()
+    if not normalized:
+        return ()
+    preset = _PROVIDER_PRESET_BY_ID.get(normalized)
+    if preset:
+        return tuple(str(item) for item in preset.get("api_key_names", ()) if item)
+    return (f"{normalized.upper().replace('-', '_')}_API_KEY",)
+
+
+def _provider_options(
+    *,
+    current_provider: str,
+    config_path: Path,
+    env_values: dict[str, str],
+) -> list[dict[str, Any]]:
+    overrides = _read_user_provider_overrides(config_path)
+    options: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for preset in _HERMES_PROVIDER_PRESETS:
+        provider_id = str(preset["id"])
+        override = overrides.get(provider_id, {})
+        base_url_env = str(preset.get("base_url_env") or "")
+        api_key_names = tuple(str(item) for item in preset.get("api_key_names", ()) if item)
+        configured_key = next((name for name in api_key_names if env_values.get(name)), "")
+        configured = bool(configured_key) or str(preset.get("auth_type") or "") != "api_key" and not api_key_names
+        base_url = env_values.get(base_url_env) if base_url_env else ""
+        base_url = override.get("base_url") or base_url or str(preset.get("base_url") or "")
+        default_model = override.get("model") or override.get("default") or (
+            str(preset.get("models", ("",))[0]) if preset.get("models") else ""
+        )
+        options.append(
+            {
+                "id": provider_id,
+                "label": str(preset.get("label") or provider_id),
+                "base_url": base_url,
+                "default_model": default_model,
+                "models": list(preset.get("models", ())),
+                "api_key_names": list(api_key_names),
+                "api_key_name": configured_key or (api_key_names[0] if api_key_names else ""),
+                "api_key_configured": configured,
+                "auth_type": str(preset.get("auth_type") or "api_key"),
+                "source": "hermes",
+                "is_current": provider_id == current_provider,
+            }
+        )
+        seen.add(provider_id)
+
+    for provider_id, override in overrides.items():
+        if provider_id in seen:
+            continue
+        api_key_names = _provider_api_key_names(provider_id)
+        configured_key = next((name for name in api_key_names if env_values.get(name)), "")
+        options.append(
+            {
+                "id": provider_id,
+                "label": override.get("name") or provider_id,
+                "base_url": override.get("base_url") or "",
+                "default_model": override.get("model") or override.get("default") or "",
+                "models": [override["model"]] if override.get("model") else [],
+                "api_key_names": list(api_key_names),
+                "api_key_name": configured_key or (api_key_names[0] if api_key_names else ""),
+                "api_key_configured": bool(configured_key),
+                "auth_type": override.get("auth_type") or "api_key",
+                "source": "user-config",
+                "is_current": provider_id == current_provider,
+            }
+        )
+
+    if current_provider and current_provider not in {option["id"] for option in options}:
+        api_key_names = _provider_api_key_names(current_provider)
+        configured_key = next((name for name in api_key_names if env_values.get(name)), "")
+        options.insert(
+            0,
+            {
+                "id": current_provider,
+                "label": current_provider,
+                "base_url": "",
+                "default_model": "",
+                "models": [],
+                "api_key_names": list(api_key_names),
+                "api_key_name": configured_key or (api_key_names[0] if api_key_names else ""),
+                "api_key_configured": bool(configured_key),
+                "auth_type": "api_key",
+                "source": "current-config",
+                "is_current": True,
+            },
+        )
+
+    return sorted(
+        options,
+        key=lambda item: (
+            not bool(item.get("is_current")),
+            not bool(item.get("api_key_configured")),
+            str(item.get("label") or item.get("id") or "").lower(),
+        ),
+    )
+
+
+def _run_config_path_command(hermes_path: str, subcommand: str) -> Path:
+    fallback_name = "config.yaml" if subcommand == "path" else ".env"
+    fallback = Path.home() / ".hermes" / fallback_name
+    try:
+        result = subprocess.run(
+            [hermes_path, "config", subcommand],
+            capture_output=True,
+            text=True,
+            timeout=_HERMES_CONFIG_TIMEOUT,
+            check=False,
+        )
+    except Exception:
+        return fallback
+    if result.returncode != 0:
+        return fallback
+    path = (result.stdout or "").strip().splitlines()
+    if not path:
+        return fallback
+    return Path(path[-1]).expanduser()
 
 
 class MainWindowAPI:
@@ -95,10 +519,13 @@ class MainWindowAPI:
                     "status": hermes_info.get("install_status", "unknown"),
                     "version": hermes_info.get("version"),
                     "platform": hermes_info.get("platform", "unknown"),
+                    "command_exists": hermes_info.get("command_exists", False),
+                    "hermes_home": hermes_info.get("hermes_home", ""),
                     "ready": self._runtime.is_hermes_ready(),
                     "readiness_level": hermes_info.get("readiness_level", "unknown"),
                     "limited_tools": hermes_info.get("limited_tools", []),
                     "doctor_issues_count": hermes_info.get("doctor_issues_count", 0),
+                    "configuration_actions": _hermes_command_catalog(),
                 },
                 "workspace": {
                     "path": workspace.get("workspace_path", ""),
@@ -143,6 +570,7 @@ class MainWindowAPI:
                     "readiness_level": hermes_info.get("readiness_level", "unknown"),
                     "limited_tools": hermes_info.get("limited_tools", []),
                     "doctor_issues_count": hermes_info.get("doctor_issues_count", 0),
+                    "configuration_actions": _hermes_command_catalog(),
                 },
                 "workspace": {
                     "path": workspace.get("workspace_path", ""),
@@ -288,20 +716,214 @@ class MainWindowAPI:
         Returns:
             {"success": bool, "error": str | None}
         """
+        global _LAST_TERMINAL_COMMAND_AT
+
+        cmd = (cmd or "").strip()
         logger.info("open_terminal_command: cmd=%r", cmd)
+        if not cmd:
+            return {"success": False, "error": "终端命令为空"}
+        if cmd not in _allowed_terminal_commands() and not _is_macos_prerequisite_command(cmd):
+            return {
+                "success": False,
+                "error": "不支持的 Hermes 终端命令",
+                "unsupported": True,
+            }
+
+        with _TERMINAL_COMMAND_LOCK:
+            now = time.monotonic()
+            if now - _LAST_TERMINAL_COMMAND_AT < _TERMINAL_COMMAND_THROTTLE_SECONDS:
+                return {
+                    "success": False,
+                    "error": "上一个 Hermes 操作还在打开中，请稍后再试",
+                    "throttled": True,
+                }
+            _LAST_TERMINAL_COMMAND_AT = now
 
         try:
             from apps.shell.terminal import open_terminal_command
 
             success, error = open_terminal_command(cmd)
             if not success:
+                _reset_terminal_command_gate()
                 return {"success": False, "error": error}
             logger.info("已在系统终端中启动命令: %r", cmd)
             return {"success": True, "error": None}
 
         except Exception as exc:
+            _reset_terminal_command_gate()
             logger.error("open_terminal_command 失败: %s", exc)
             return {"success": False, "error": str(exc)}
+
+    def test_hermes_connection(self) -> Dict[str, Any]:
+        """用一次轻量 Hermes oneshot 调用验证当前 provider/API Key 是否可用。
+
+        ``hermes doctor`` 和 ``hermes config check`` 更偏静态检查；真正的 API Key、
+        provider、base URL 是否能工作，只有发起一次模型请求才可靠。
+        """
+        hermes_path, needs_env_refresh = locate_hermes_binary()
+        if hermes_path is None:
+            hermes_path = "hermes"
+
+        argv = [hermes_path, "-z", _HERMES_CONNECTION_TEST_PROMPT]
+        started_at = time.monotonic()
+        try:
+            result = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=_HERMES_CONNECTION_TEST_TIMEOUT,
+                check=False,
+            )
+        except FileNotFoundError:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "hermes 命令未找到，请先安装 Hermes Agent",
+                "command": "hermes -z <connectivity-check>",
+                "needs_env_refresh": needs_env_refresh,
+            }
+        except subprocess.TimeoutExpired as exc:
+            detail = _compact_command_output(
+                "\n".join(part for part in (exc.stdout or "", exc.stderr or "") if part)
+            )
+            return {
+                "ok": False,
+                "success": False,
+                "error": "Hermes 模型连接测试超时，请检查网络、provider 或 base URL",
+                "detail": detail,
+                "command": _public_command(argv),
+                "elapsed_seconds": round(time.monotonic() - started_at, 2),
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        elapsed = round(time.monotonic() - started_at, 2)
+        stdout = _compact_command_output(result.stdout)
+        stderr = _compact_command_output(result.stderr)
+        if result.returncode == 0 and stdout:
+            return {
+                "ok": True,
+                "success": True,
+                "message": "Hermes provider/API Key 连接测试通过",
+                "output_preview": stdout,
+                "command": _public_command(argv),
+                "elapsed_seconds": elapsed,
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        detail = stderr or stdout
+        error = (
+            f"Hermes 模型连接测试失败：{detail}"
+            if detail
+            else f"Hermes 模型连接测试失败（exit={result.returncode}）"
+        )
+        return {
+            "ok": False,
+            "success": False,
+            "error": error,
+            "output_preview": stdout,
+            "stderr_preview": stderr,
+            "returncode": result.returncode,
+            "command": _public_command(argv),
+            "elapsed_seconds": elapsed,
+            "needs_env_refresh": needs_env_refresh,
+        }
+
+    def get_hermes_configuration(self) -> Dict[str, Any]:
+        """读取 Hermes provider/model 配置摘要。不会返回密钥明文。"""
+        hermes_path, needs_env_refresh = locate_hermes_binary()
+        command_exists = hermes_path is not None
+        if hermes_path is None:
+            hermes_path = "hermes"
+
+        config_path = _run_config_path_command(hermes_path, "path")
+        env_path = _run_config_path_command(hermes_path, "env-path")
+        model = _read_hermes_model_config(config_path)
+        provider = model.get("provider", "")
+        env_values = _read_env_values(env_path)
+        provider_options = _provider_options(
+            current_provider=provider,
+            config_path=config_path,
+            env_values=env_values,
+        )
+        selected_provider = next(
+            (option for option in provider_options if option.get("id") == provider),
+            provider_options[0] if provider_options else {},
+        )
+        api_key_name = str(selected_provider.get("api_key_name") or _provider_api_key_name(provider))
+        api_key_configured = bool(selected_provider.get("api_key_configured"))
+        return {
+            "ok": True,
+            "command_exists": command_exists,
+            "needs_env_refresh": needs_env_refresh,
+            "config_path": str(config_path),
+            "env_path": str(env_path),
+            "model": {
+                "provider": provider,
+                "default": model.get("default", ""),
+                "base_url": model.get("base_url", ""),
+            },
+            "provider_options": provider_options,
+            "api_key": {
+                "name": api_key_name,
+                "configured": api_key_configured,
+                "display": "已配置" if api_key_configured else "未配置",
+            },
+        }
+
+    def update_hermes_configuration(self, changes: Dict[str, Any]) -> Dict[str, Any]:
+        """用 Hermes CLI 写入 provider/model/API Key 配置。"""
+        provider = str(changes.get("provider") or "").strip()
+        model = str(changes.get("model") or "").strip()
+        base_url = str(changes.get("base_url") or "").strip()
+        api_key = str(changes.get("api_key") or "").strip()
+        if not provider:
+            return {"ok": False, "error": "Provider 不能为空"}
+        if not model:
+            return {"ok": False, "error": "模型名称不能为空"}
+
+        hermes_path, needs_env_refresh = locate_hermes_binary()
+        if hermes_path is None:
+            return {
+                "ok": False,
+                "error": "hermes 命令未找到，请先安装 Hermes Agent",
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        commands: list[tuple[str, str]] = [
+            ("model.provider", provider),
+            ("model.default", model),
+            ("model.base_url", base_url),
+        ]
+        api_key_name = _provider_api_key_name(provider)
+        if api_key:
+            commands.append((api_key_name, api_key))
+
+        for key, value in commands:
+            try:
+                result = subprocess.run(
+                    [hermes_path, "config", "set", key, value],
+                    capture_output=True,
+                    text=True,
+                    timeout=_HERMES_CONFIG_TIMEOUT,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired:
+                return {"ok": False, "error": f"写入 Hermes 配置超时：{key}"}
+            except Exception as exc:
+                return {"ok": False, "error": f"写入 Hermes 配置失败：{exc}"}
+            if result.returncode != 0:
+                detail = _compact_command_output(result.stderr or result.stdout)
+                return {
+                    "ok": False,
+                    "error": f"写入 Hermes 配置失败：{key}{'，' + detail if detail else ''}",
+                    "returncode": result.returncode,
+                }
+
+        return {
+            "ok": True,
+            "message": "Hermes 配置已保存",
+            "configuration": self.get_hermes_configuration(),
+        }
 
     def recheck_hermes(self) -> Dict[str, Any]:
         """重新检测 Hermes 安装 / 就绪状态，并刷新仪表盘数据。

@@ -22,6 +22,15 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _compact_log_detail(value: str | None, limit: int = 220) -> str:
+    """压缩多行错误，避免任务状态日志只有 failed 而没有诊断信息。"""
+    text = (value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    text = " ".join(part.strip() for part in text.split("\n") if part.strip())
+    if len(text) > limit:
+        return text[: limit - 3] + "..."
+    return text
+
+
 class AppState:
     """应用状态容器"""
 
@@ -116,5 +125,13 @@ class AppState:
                 task.result = result
             if error is not None:
                 task.error = error
-        logger.info("任务状态已更新: %s → %s", task_id, status.value)
+        if status == TaskStatus.FAILED and task.error:
+            logger.info(
+                "任务状态已更新: %s → %s | error=%s",
+                task_id,
+                status.value,
+                _compact_log_detail(task.error),
+            )
+        else:
+            logger.info("任务状态已更新: %s → %s", task_id, status.value)
         return task

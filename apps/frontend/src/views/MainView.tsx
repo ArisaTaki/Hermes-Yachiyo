@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import { apiGet, openAppView, openDesktopMode, quitApp } from '../lib/bridge';
+import { apiGet, apiPost, openAppView, openDesktopMode, quitApp } from '../lib/bridge';
 
 type StatusRecord = {
   status?: string;
@@ -21,16 +21,79 @@ type ChatSession = {
   created_at?: string;
 };
 
+type HermesConfigAction = {
+  id?: string;
+  label?: string;
+  command?: string;
+  description?: string;
+};
+
+type HermesConnectionTestResult = {
+  ok?: boolean;
+  success?: boolean;
+  error?: string;
+  message?: string;
+  output_preview?: string;
+  stderr_preview?: string;
+  elapsed_seconds?: number;
+  returncode?: number;
+  command?: string;
+};
+
+type HermesVisualConfig = {
+  ok?: boolean;
+  error?: string;
+  command_exists?: boolean;
+  needs_env_refresh?: boolean;
+  config_path?: string;
+  env_path?: string;
+  model?: {
+    provider?: string;
+    default?: string;
+    base_url?: string;
+  };
+  provider_options?: HermesProviderOption[];
+  api_key?: {
+    name?: string;
+    configured?: boolean;
+    display?: string;
+  };
+};
+
+type HermesProviderOption = {
+  id: string;
+  label?: string;
+  base_url?: string;
+  default_model?: string;
+  models?: string[];
+  api_key_name?: string;
+  api_key_names?: string[];
+  api_key_configured?: boolean;
+  auth_type?: string;
+  source?: string;
+  is_current?: boolean;
+};
+
+type HermesConfigForm = {
+  provider: string;
+  model: string;
+  base_url: string;
+  api_key: string;
+};
+
 type DashboardData = {
   app?: { uptime_seconds?: number; version?: string; running?: boolean };
   hermes?: {
     status?: string;
     version?: string;
     platform?: string;
+    command_exists?: boolean;
+    hermes_home?: string;
     ready?: boolean;
     readiness_level?: string;
     limited_tools?: string[];
     doctor_issues_count?: number;
+    configuration_actions?: HermesConfigAction[];
   };
   workspace?: { path?: string; initialized?: boolean; created_at?: string };
   bridge?: { state?: string; status?: string; running?: string; url?: string; config_dirty?: boolean; drift_details?: string[] };
@@ -50,6 +113,12 @@ type DashboardData = {
 export function MainView() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState('');
+  const [actionStatus, setActionStatus] = useState('');
+  const [busyAction, setBusyAction] = useState('');
+  const [hermesTestResult, setHermesTestResult] = useState<HermesConnectionTestResult | null>(null);
+  const [hermesConfig, setHermesConfig] = useState<HermesVisualConfig | null>(null);
+  const [configForm, setConfigForm] = useState<HermesConfigForm>(emptyHermesConfigForm());
+  const busyActionRef = useRef('');
 
   useEffect(() => {
     let disposed = false;
@@ -65,12 +134,144 @@ export function MainView() {
       }
     }
     refresh();
+    void loadHermesConfig();
     const timer = window.setInterval(refresh, 3000);
     return () => {
       disposed = true;
       window.clearInterval(timer);
     };
   }, []);
+
+  function beginHermesAction(action: string) {
+    if (busyActionRef.current) {
+      setActionStatus('上一个 Hermes 操作正在处理，请稍候');
+      return false;
+    }
+    busyActionRef.current = action;
+    setBusyAction(action);
+    return true;
+  }
+
+  function finishHermesAction(action: string) {
+    if (busyActionRef.current !== action) return;
+    busyActionRef.current = '';
+    setBusyAction('');
+  }
+
+  async function refreshDashboardData() {
+    const payload = await apiGet<DashboardData>('/ui/dashboard');
+    setData(payload);
+    setError('');
+    return payload;
+  }
+
+  async function loadHermesConfig() {
+    try {
+      const result = await apiGet<HermesVisualConfig>('/ui/hermes/config');
+      setHermesConfig(result);
+      setConfigForm(formFromHermesConfig(result));
+      return result;
+    } catch {
+      return null;
+    }
+  }
+
+  function updateHermesConfigField(field: keyof HermesConfigForm, value: string) {
+    if (field === 'provider') {
+      const option = providerOptionById(hermesConfig, value);
+      setConfigForm((current) => ({
+        ...current,
+        provider: value,
+        model: option?.default_model || option?.models?.[0] || current.model,
+        base_url: option?.base_url ?? current.base_url,
+        api_key: '',
+      }));
+    } else {
+      setConfigForm((current) => ({ ...current, [field]: value }));
+    }
+    if (actionStatus && /不能为空|配置已保存|连接测试/.test(actionStatus)) setActionStatus('');
+  }
+
+  async function saveHermesConfig() {
+    const action = 'config-save';
+    if (!beginHermesAction(action)) return;
+    if (!configForm.provider.trim()) {
+      setActionStatus('Provider 不能为空');
+      finishHermesAction(action);
+      return;
+    }
+    if (!configForm.model.trim()) {
+      setActionStatus('模型名称不能为空');
+      finishHermesAction(action);
+      return;
+    }
+    setActionStatus('正在保存 Hermes 配置...');
+    try {
+      const result = await apiPost<{ ok?: boolean; error?: string; message?: string; configuration?: HermesVisualConfig }>('/ui/hermes/config', configForm);
+      if (result.ok === false) throw new Error(result.error || '保存 Hermes 配置失败');
+      if (result.configuration) {
+        setHermesConfig(result.configuration);
+        setConfigForm(formFromHermesConfig(result.configuration));
+      } else {
+        await loadHermesConfig();
+      }
+      setActionStatus(result.message || 'Hermes 配置已保存');
+      await refreshDashboardData();
+    } catch (err) {
+      setActionStatus(err instanceof Error ? err.message : '保存 Hermes 配置失败');
+    } finally {
+      finishHermesAction(action);
+    }
+  }
+
+  async function openHermesCommand(command: string) {
+    const action = `terminal:${command}`;
+    if (!beginHermesAction(action)) return;
+    setActionStatus(`正在打开终端：${command}`);
+    try {
+      const result = await apiPost<{ success?: boolean; error?: string }>('/ui/hermes/terminal-command', { command });
+      if (!result.success) throw new Error(result.error || '打开终端失败');
+      setActionStatus(`已打开终端：${command}`);
+    } catch (err) {
+      setActionStatus(err instanceof Error ? err.message : '打开终端失败');
+    } finally {
+      finishHermesAction(action);
+    }
+  }
+
+  async function testHermesConnection() {
+    const action = 'connection-test';
+    if (!beginHermesAction(action)) return;
+    setHermesTestResult(null);
+    setActionStatus('正在测试 Hermes provider/API Key 连接...');
+    try {
+      const result = await apiPost<HermesConnectionTestResult>('/ui/hermes/connection-test');
+      setHermesTestResult(result);
+      setActionStatus(result.success ? result.message || 'Hermes 连接测试通过' : result.error || 'Hermes 连接测试失败');
+      await refreshDashboardData();
+    } catch (err) {
+      setActionStatus(err instanceof Error ? err.message : 'Hermes 连接测试失败');
+    } finally {
+      finishHermesAction(action);
+    }
+  }
+
+  async function recheckHermes() {
+    const action = 'recheck';
+    if (!beginHermesAction(action)) return;
+    setActionStatus('正在重新检测 Hermes 状态...');
+    try {
+      const payload = await apiPost<DashboardData>('/ui/hermes/recheck');
+      setData(payload);
+      setError('');
+      await loadHermesConfig();
+      setActionStatus('Hermes 状态已刷新');
+    } catch (err) {
+      setActionStatus(err instanceof Error ? err.message : '重新检测 Hermes 失败');
+    } finally {
+      finishHermesAction(action);
+    }
+  }
 
   return (
     <main className="app-shell dashboard-shell">
@@ -86,6 +287,7 @@ export function MainView() {
       </header>
 
       {error ? <div className="notice danger">{error}</div> : null}
+      {actionStatus ? <div className={statusNoticeClass(actionStatus)}>{actionStatus}</div> : null}
 
       <section className="metric-grid dashboard-metrics">
         <Metric title="Hermes Agent" value={data?.hermes?.status || '读取中'} detail={hermesDetail(data)} />
@@ -97,19 +299,23 @@ export function MainView() {
       </section>
 
       <section className="dashboard-layout">
-        <article className="panel dashboard-card">
+        <article className="panel dashboard-card wide">
           <div className="section-heading-row">
-            <h2>Hermes Agent</h2>
+            <h2>Hermes 配置中心</h2>
             <StatusPill active={Boolean(data?.hermes?.ready)} label={data?.hermes?.ready ? '能力就绪' : '待检查'} />
           </div>
-          <InfoList rows={[
-            ['安装状态', data?.hermes?.status],
-            ['就绪等级', data?.hermes?.readiness_level],
-            ['版本', data?.hermes?.version],
-            ['平台', data?.hermes?.platform],
-            ['受限工具', listOrDash(data?.hermes?.limited_tools)],
-            ['诊断提示', data?.hermes?.doctor_issues_count ? `${data.hermes.doctor_issues_count} 项` : '无'],
-          ]} />
+          <HermesConfigCenter
+            hermes={data?.hermes}
+            config={hermesConfig}
+            form={configForm}
+            busyAction={busyAction}
+            testResult={hermesTestResult}
+            onConfigChange={updateHermesConfigField}
+            onOpenCommand={openHermesCommand}
+            onRecheck={recheckHermes}
+            onSaveConfig={saveHermesConfig}
+            onTestConnection={testHermesConnection}
+          />
         </article>
 
         <article className="panel dashboard-card">
@@ -201,6 +407,33 @@ function bridgeState(data: DashboardData | null) {
   return data?.bridge?.state || data?.bridge?.status || data?.bridge?.running || '—';
 }
 
+function emptyHermesConfigForm(): HermesConfigForm {
+  return { provider: '', model: '', base_url: '', api_key: '' };
+}
+
+function formFromHermesConfig(config: HermesVisualConfig | null): HermesConfigForm {
+  return {
+    provider: config?.model?.provider || '',
+    model: config?.model?.default || '',
+    base_url: config?.model?.base_url || '',
+    api_key: '',
+  };
+}
+
+function providerOptionById(config: HermesVisualConfig | null, provider: string): HermesProviderOption | undefined {
+  return config?.provider_options?.find((option) => option.id === provider);
+}
+
+function providerOptionLabel(option: HermesProviderOption): string {
+  const status = option.api_key_configured ? '已配置' : option.auth_type && option.auth_type !== 'api_key' ? '外部授权' : '未配置';
+  const source = option.source === 'user-config' ? '自定义' : '';
+  return `${option.label || option.id} (${option.id}) · ${source || status}`;
+}
+
+function statusNoticeClass(message: string) {
+  return /失败|错误|无法|不支持|超时/.test(message) ? 'notice danger' : 'notice';
+}
+
 function hermesDetail(data: DashboardData | null): string {
   const version = data?.hermes?.version || '—';
   const readiness = data?.hermes?.readiness_level || (data?.hermes?.ready ? 'ready' : 'unknown');
@@ -249,6 +482,178 @@ function IntegrationBlock({ title, item }: { title: string; item?: StatusRecord 
       </div>
       {item?.description ? <p>{item.description}</p> : null}
       {item?.blockers?.length ? <p className="warn-text">{item.blockers.join('；')}</p> : null}
+    </div>
+  );
+}
+
+function HermesConfigCenter({
+  hermes,
+  config,
+  form,
+  busyAction,
+  testResult,
+  onConfigChange,
+  onOpenCommand,
+  onRecheck,
+  onSaveConfig,
+  onTestConnection,
+}: {
+  hermes?: DashboardData['hermes'];
+  config: HermesVisualConfig | null;
+  form: HermesConfigForm;
+  busyAction: string;
+  testResult: HermesConnectionTestResult | null;
+  onConfigChange: (field: keyof HermesConfigForm, value: string) => void;
+  onOpenCommand: (command: string) => Promise<void>;
+  onRecheck: () => Promise<void>;
+  onSaveConfig: () => Promise<void>;
+  onTestConnection: () => Promise<void>;
+}) {
+  const actions = hermes?.configuration_actions || [];
+  const busy = Boolean(busyAction);
+  const providerOptions = config?.provider_options || [];
+  const selectedProvider = providerOptionById(config, form.provider);
+  const modelOptions = selectedProvider?.models || [];
+  const apiKeyLabel = selectedProvider?.api_key_name || config?.api_key?.name || '';
+  const apiKeyConfigured = selectedProvider?.api_key_configured ?? config?.api_key?.configured;
+  return (
+    <div className="hermes-config-center dashboard-hermes-center">
+      <InfoList rows={[
+        ['安装状态', hermes?.status],
+        ['能力就绪', hermes?.ready ? '是' : '否'],
+        ['就绪等级', hermes?.readiness_level],
+        ['版本', hermes?.version],
+        ['平台', hermes?.platform],
+        ['命令可用', hermes?.command_exists ? '是' : '否'],
+        ['Hermes Home', hermes?.hermes_home],
+        ['受限工具', listOrDash(hermes?.limited_tools)],
+        ['诊断提示', hermes?.doctor_issues_count ? `${hermes.doctor_issues_count} 项` : '无'],
+      ]} />
+      <form
+        className="hermes-visual-config"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onSaveConfig();
+        }}
+      >
+        <div className="hermes-subsection-title">
+          <strong>模型配置向导</strong>
+          <span>{apiKeyLabel ? `${apiKeyLabel}：${apiKeyConfigured ? '已配置' : '未配置'}` : 'API Key：未检测'}</span>
+        </div>
+        <div className="hermes-config-form-grid">
+          <label className="settings-field" htmlFor="hermes-provider">
+            <span>Provider</span>
+            <select
+              id="hermes-provider"
+              value={form.provider}
+              disabled={busy}
+              onChange={(event) => onConfigChange('provider', event.target.value)}
+            >
+              {providerOptions.length ? providerOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {providerOptionLabel(option)}
+                </option>
+              )) : <option value={form.provider}>{form.provider || '读取中'}</option>}
+            </select>
+          </label>
+          <label className="settings-field" htmlFor="hermes-model">
+            <span>模型</span>
+            <input
+              id="hermes-model"
+              list="hermes-model-options"
+              value={form.model}
+              placeholder={modelOptions[0] || '输入模型名称'}
+              disabled={busy}
+              onChange={(event) => onConfigChange('model', event.target.value)}
+            />
+            {modelOptions.length ? (
+              <datalist id="hermes-model-options">
+                {modelOptions.map((model) => <option key={model} value={model} />)}
+              </datalist>
+            ) : null}
+          </label>
+          <label className="settings-field wide" htmlFor="hermes-base-url">
+            <span>Base URL</span>
+            <input
+              id="hermes-base-url"
+              value={form.base_url}
+              placeholder="https://api.openai.com/v1"
+              disabled={busy}
+              onChange={(event) => onConfigChange('base_url', event.target.value)}
+            />
+          </label>
+          <label className="settings-field wide" htmlFor="hermes-api-key">
+            <span>API Key</span>
+            <input
+              id="hermes-api-key"
+              type="password"
+              value={form.api_key}
+              placeholder={apiKeyConfigured ? '已配置，留空则不修改' : apiKeyLabel ? `输入 ${apiKeyLabel}` : '当前 provider 不需要在这里输入 API Key'}
+              disabled={busy || !apiKeyLabel}
+              onChange={(event) => onConfigChange('api_key', event.target.value)}
+            />
+          </label>
+        </div>
+        <div className="hermes-config-footer">
+          <span>{selectedProvider?.auth_type && selectedProvider.auth_type !== 'api_key' ? '该 provider 使用外部授权；如需登录请用下方高级命令。' : config?.config_path || '读取 Hermes 配置中'}</span>
+          <button
+            type="submit"
+            className="primary-action"
+            disabled={busy || !hermes?.command_exists}
+          >
+            {busyAction === 'config-save' ? '保存中...' : '保存 Hermes 配置'}
+          </button>
+        </div>
+      </form>
+      <div className="hermes-test-strip">
+        <button
+          type="button"
+          className="primary-action"
+          disabled={busy || !hermes?.command_exists}
+          onClick={() => void onTestConnection()}
+        >
+          {busyAction === 'connection-test' ? '测试中...' : '测试模型连接'}
+        </button>
+        <button
+          type="button"
+          className={busyAction === 'recheck' ? 'attention-action' : undefined}
+          disabled={busy}
+          onClick={() => void onRecheck()}
+        >
+          {busyAction === 'recheck' ? '检测中...' : '重新检测'}
+        </button>
+      </div>
+      {testResult ? <HermesConnectionResult result={testResult} /> : null}
+      <div className="hermes-command-grid">
+        {actions.map((action) => {
+          const command = action.command || '';
+          const commandBusy = busyAction === `terminal:${command}`;
+          return (
+            <button
+              type="button"
+              className="hermes-command-button"
+              disabled={busy || !command || !hermes?.command_exists}
+              key={action.id || command}
+              onClick={() => command ? void onOpenCommand(command) : undefined}
+            >
+              <span>{action.label || command}</span>
+              <small>{commandBusy ? '正在打开终端...' : command}</small>
+              {action.description ? <em>{action.description}</em> : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function HermesConnectionResult({ result }: { result: HermesConnectionTestResult }) {
+  const preview = result.output_preview || result.stderr_preview || '';
+  return (
+    <div className={`hermes-test-result ${result.success ? 'success' : 'danger'}`}>
+      <strong>{result.success ? result.message || '连接测试通过' : result.error || '连接测试失败'}</strong>
+      <span>{result.elapsed_seconds !== undefined ? `${result.elapsed_seconds}s` : result.command || '—'}</span>
+      {preview ? <pre>{preview}</pre> : null}
     </div>
   );
 }

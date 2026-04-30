@@ -240,8 +240,19 @@ button {
 button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 166, 247, 0.16); }
 .ghost-button { background: transparent; }
 
-.notice { padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; }
-.notice.danger { background: rgba(239, 119, 127, 0.14); color: var(--danger); }
+.notice {
+  border: 1px solid rgba(120, 166, 247, 0.22);
+  background: rgba(120, 166, 247, 0.1);
+  color: #dce8ff;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.notice.danger {
+  border-color: rgba(239, 119, 127, 0.28);
+  background: rgba(239, 119, 127, 0.14);
+  color: var(--danger);
+}
 
 .chat-shell {
   display: grid;
@@ -523,6 +534,105 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
   margin-top: 12px;
 }
 .settings-action-strip button { min-height: 34px; }
+.hermes-config-center {
+  display: grid;
+  gap: 12px;
+}
+.hermes-test-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.hermes-command-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.dashboard-hermes-center .hermes-command-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.hermes-visual-config {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(120, 166, 247, 0.16);
+  border-radius: 8px;
+  background: rgba(120, 166, 247, 0.055);
+  padding: 12px;
+}
+.hermes-subsection-title,
+.hermes-config-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.hermes-subsection-title strong {
+  font-size: 13px;
+}
+.hermes-subsection-title span,
+.hermes-config-footer span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.hermes-config-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.hermes-config-footer button {
+  flex: 0 0 auto;
+}
+.hermes-command-button {
+  display: grid;
+  gap: 4px;
+  min-height: 82px;
+  text-align: left;
+}
+.hermes-command-button span {
+  color: var(--text);
+  font-weight: 700;
+}
+.hermes-command-button small,
+.hermes-command-button em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.hermes-test-result {
+  display: grid;
+  gap: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.hermes-test-result.success {
+  border-color: rgba(86, 197, 157, 0.34);
+  background: rgba(86, 197, 157, 0.1);
+}
+.hermes-test-result.danger {
+  border-color: rgba(239, 119, 127, 0.34);
+  background: rgba(239, 119, 127, 0.11);
+}
+.hermes-test-result strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.hermes-test-result span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.hermes-test-result pre {
+  max-height: 116px;
+  margin: 2px 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #c9d3e3;
+  font-size: 12px;
+}
 .vertical-actions {
   align-items: stretch;
   flex-direction: column;
@@ -817,6 +927,10 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
 .settings-field.wide,
 .settings-check.wide { grid-column: 1 / -1; }
 .settings-field label {
+  color: var(--muted);
+  font-size: 12px;
+}
+.settings-field > span {
   color: var(--muted);
   font-size: 12px;
 }
@@ -1368,6 +1482,8 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
   .settings-detail-grid { grid-template-columns: 1fr; }
   .topbar { align-items: flex-start; flex-direction: column; }
   .settings-savebar { align-items: stretch; flex-direction: column; }
+  .hermes-command-grid,
+  .hermes-test-strip { grid-template-columns: 1fr; }
   .backup-item,
   .uninstall-target-react { align-items: flex-start; flex-direction: column; }
   .chat-topbar { align-items: stretch; grid-template-columns: 1fr; }
@@ -1378,4 +1494,7 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
   .executor-badge { height: 28px; }
   .chat-list { padding: 14px 12px 16px; }
   .refined-message { max-width: 94%; }
+  .dashboard-hermes-center .hermes-command-grid { grid-template-columns: 1fr; }
+  .hermes-config-form-grid { grid-template-columns: 1fr; }
+  .hermes-config-footer { align-items: stretch; flex-direction: column; }
 }

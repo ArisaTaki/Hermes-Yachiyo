@@ -78,6 +78,15 @@ async def test_settings_operation_routes_use_main_api(monkeypatch):
         def open_terminal_command(self, command):
             return {"success": True, "command": command}
 
+        def test_hermes_connection(self):
+            return {"success": True, "message": "ok"}
+
+        def get_hermes_configuration(self):
+            return {"ok": True, "model": {"provider": "openai"}}
+
+        def update_hermes_configuration(self, changes):
+            return {"ok": True, "changes": changes}
+
         def recheck_hermes(self):
             return {"hermes": {"ready": True}}
 
@@ -110,6 +119,12 @@ async def test_settings_operation_routes_use_main_api(monkeypatch):
     assert await ui.open_hermes_terminal_command(ui.TerminalCommandRequest(command="hermes doctor")) == {
         "success": True,
         "command": "hermes doctor",
+    }
+    assert await ui.test_hermes_connection() == {"success": True, "message": "ok"}
+    assert await ui.get_hermes_configuration() == {"ok": True, "model": {"provider": "openai"}}
+    assert await ui.update_hermes_configuration(ui.HermesConfigUpdateRequest(provider="openai", model="gpt-4.1")) == {
+        "ok": True,
+        "changes": {"provider": "openai", "model": "gpt-4.1", "base_url": "", "api_key": ""},
     }
     assert await ui.recheck_hermes() == {"hermes": {"ready": True}}
     assert await ui.restart_bridge() == {"ok": True, "bridge": "restarted"}
