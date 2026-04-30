@@ -11,7 +11,9 @@ import re
 import subprocess
 import threading
 import time
+import ast
 from copy import deepcopy
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -334,6 +336,73 @@ def _read_user_provider_overrides(config_path: Path) -> dict[str, dict[str, str]
     return providers
 
 
+@lru_cache(maxsize=1)
+def _load_installed_hermes_provider_models() -> dict[str, list[str]]:
+    """Best-effort read of Hermes' own static provider model catalog.
+
+    Hermes can update provider/model catalogs independently from Yachiyo.  The
+    installed source is optional here; if it is unavailable or contains dynamic
+    expressions we safely fall back to the bundled presets.
+    """
+    candidates = [
+        Path.home() / ".hermes" / "hermes-agent" / "hermes_cli" / "models.py",
+    ]
+    catalog: dict[str, list[str]] = {}
+    for path in candidates:
+        if not path.exists():
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for node in tree.body:
+            value_node = None
+            if (
+                isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "_PROVIDER_MODELS" for target in node.targets)
+            ):
+                value_node = node.value
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "_PROVIDER_MODELS":
+                value_node = node.value
+            if not isinstance(value_node, ast.Dict):
+                continue
+            for key_node, provider_models_node in zip(value_node.keys, value_node.values):
+                if key_node is None:
+                    continue
+                try:
+                    provider = ast.literal_eval(key_node)
+                except Exception:
+                    continue
+                if not isinstance(provider, str) or not isinstance(provider_models_node, ast.List):
+                    continue
+                models: list[str] = []
+                for item in provider_models_node.elts:
+                    try:
+                        value = ast.literal_eval(item)
+                    except Exception:
+                        continue
+                    if isinstance(value, str) and value:
+                        models.append(value)
+                if models:
+                    catalog[provider] = models
+        if catalog:
+            return catalog
+    return {}
+
+
+def _preset_models(provider_id: str, preset: dict[str, Any]) -> list[str]:
+    installed = _load_installed_hermes_provider_models().get(provider_id, [])
+    fallback = [str(item) for item in preset.get("models", ()) if item]
+    merged: list[str] = []
+    seen: set[str] = set()
+    for item in [*installed, *fallback]:
+        if item in seen:
+            continue
+        seen.add(item)
+        merged.append(item)
+    return merged
+
+
 def _read_env_values(env_path: Path) -> dict[str, str]:
     if not env_path.exists():
         return {}
@@ -380,12 +449,13 @@ def _provider_options(
         override = overrides.get(provider_id, {})
         base_url_env = str(preset.get("base_url_env") or "")
         api_key_names = tuple(str(item) for item in preset.get("api_key_names", ()) if item)
+        models = _preset_models(provider_id, preset)
         configured_key = next((name for name in api_key_names if env_values.get(name)), "")
         configured = bool(configured_key) or str(preset.get("auth_type") or "") != "api_key" and not api_key_names
         base_url = env_values.get(base_url_env) if base_url_env else ""
         base_url = override.get("base_url") or base_url or str(preset.get("base_url") or "")
         default_model = override.get("model") or override.get("default") or (
-            str(preset.get("models", ("",))[0]) if preset.get("models") else ""
+            models[0] if models else ""
         )
         options.append(
             {
@@ -393,7 +463,7 @@ def _provider_options(
                 "label": str(preset.get("label") or provider_id),
                 "base_url": base_url,
                 "default_model": default_model,
-                "models": list(preset.get("models", ())),
+                "models": models,
                 "api_key_names": list(api_key_names),
                 "api_key_name": configured_key or (api_key_names[0] if api_key_names else ""),
                 "api_key_configured": configured,

@@ -119,15 +119,21 @@ export function MainView() {
   const [hermesConfig, setHermesConfig] = useState<HermesVisualConfig | null>(null);
   const [configForm, setConfigForm] = useState<HermesConfigForm>(emptyHermesConfigForm());
   const busyActionRef = useRef('');
+  const configFormDirtyRef = useRef(false);
+  const hermesConfigLoadedRef = useRef(false);
+  const hermesConfigLoadingRef = useRef(false);
+  const mountedRef = useRef(false);
 
   useEffect(() => {
     let disposed = false;
+    mountedRef.current = true;
     async function refresh() {
       try {
         const payload = await apiGet<DashboardData>('/ui/dashboard');
         if (!disposed) {
           setData(payload);
           setError('');
+          if (!hermesConfigLoadedRef.current) void loadHermesConfig();
         }
       } catch (err) {
         if (!disposed) setError(err instanceof Error ? err.message : '读取主控台失败');
@@ -138,6 +144,7 @@ export function MainView() {
     const timer = window.setInterval(refresh, 3000);
     return () => {
       disposed = true;
+      mountedRef.current = false;
       window.clearInterval(timer);
     };
   }, []);
@@ -165,18 +172,29 @@ export function MainView() {
     return payload;
   }
 
-  async function loadHermesConfig() {
+  async function loadHermesConfig(options: { forceFormSync?: boolean } = {}) {
+    if (hermesConfigLoadingRef.current) return null;
+    hermesConfigLoadingRef.current = true;
     try {
       const result = await apiGet<HermesVisualConfig>('/ui/hermes/config');
-      setHermesConfig(result);
-      setConfigForm(formFromHermesConfig(result));
+      hermesConfigLoadedRef.current = hasLoadedHermesConfig(result);
+      if (mountedRef.current) {
+        setHermesConfig(result);
+        if (options.forceFormSync || !configFormDirtyRef.current) {
+          setConfigForm(formFromHermesConfig(result));
+        }
+      }
       return result;
     } catch {
+      hermesConfigLoadedRef.current = false;
       return null;
+    } finally {
+      hermesConfigLoadingRef.current = false;
     }
   }
 
   function updateHermesConfigField(field: keyof HermesConfigForm, value: string) {
+    configFormDirtyRef.current = true;
     if (field === 'provider') {
       const option = providerOptionById(hermesConfig, value);
       setConfigForm((current) => ({
@@ -210,10 +228,13 @@ export function MainView() {
       const result = await apiPost<{ ok?: boolean; error?: string; message?: string; configuration?: HermesVisualConfig }>('/ui/hermes/config', configForm);
       if (result.ok === false) throw new Error(result.error || '保存 Hermes 配置失败');
       if (result.configuration) {
+        configFormDirtyRef.current = false;
+        hermesConfigLoadedRef.current = hasLoadedHermesConfig(result.configuration);
         setHermesConfig(result.configuration);
         setConfigForm(formFromHermesConfig(result.configuration));
       } else {
-        await loadHermesConfig();
+        configFormDirtyRef.current = false;
+        await loadHermesConfig({ forceFormSync: true });
       }
       setActionStatus(result.message || 'Hermes 配置已保存');
       await refreshDashboardData();
@@ -420,8 +441,33 @@ function formFromHermesConfig(config: HermesVisualConfig | null): HermesConfigFo
   };
 }
 
+function hasLoadedHermesConfig(config: HermesVisualConfig | null): boolean {
+  return Boolean(
+    config
+    && config.ok !== false
+    && (
+      config.provider_options?.length
+      || config.model?.provider
+      || config.config_path
+      || config.env_path
+    ),
+  );
+}
+
 function providerOptionById(config: HermesVisualConfig | null, provider: string): HermesProviderOption | undefined {
   return config?.provider_options?.find((option) => option.id === provider);
+}
+
+function modelSelectOptions(currentModel: string, models: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of [currentModel, ...models]) {
+    const model = value.trim();
+    if (!model || seen.has(model)) continue;
+    seen.add(model);
+    result.push(model);
+  }
+  return result;
 }
 
 function providerOptionLabel(option: HermesProviderOption): string {
@@ -513,7 +559,7 @@ function HermesConfigCenter({
   const busy = Boolean(busyAction);
   const providerOptions = config?.provider_options || [];
   const selectedProvider = providerOptionById(config, form.provider);
-  const modelOptions = selectedProvider?.models || [];
+  const modelOptions = modelSelectOptions(form.model, selectedProvider?.models || []);
   const apiKeyLabel = selectedProvider?.api_key_name || config?.api_key?.name || '';
   const apiKeyConfigured = selectedProvider?.api_key_configured ?? config?.api_key?.configured;
   return (
@@ -558,19 +604,24 @@ function HermesConfigCenter({
           </label>
           <label className="settings-field" htmlFor="hermes-model">
             <span>模型</span>
-            <input
-              id="hermes-model"
-              list="hermes-model-options"
-              value={form.model}
-              placeholder={modelOptions[0] || '输入模型名称'}
-              disabled={busy}
-              onChange={(event) => onConfigChange('model', event.target.value)}
-            />
             {modelOptions.length ? (
-              <datalist id="hermes-model-options">
-                {modelOptions.map((model) => <option key={model} value={model} />)}
-              </datalist>
-            ) : null}
+              <select
+                id="hermes-model"
+                value={form.model}
+                disabled={busy}
+                onChange={(event) => onConfigChange('model', event.target.value)}
+              >
+                {modelOptions.map((model) => <option key={model} value={model}>{model}</option>)}
+              </select>
+            ) : (
+              <input
+                id="hermes-model"
+                value={form.model}
+                placeholder="输入模型名称"
+                disabled={busy}
+                onChange={(event) => onConfigChange('model', event.target.value)}
+              />
+            )}
           </label>
           <label className="settings-field wide" htmlFor="hermes-base-url">
             <span>Base URL</span>

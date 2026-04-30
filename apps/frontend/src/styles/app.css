@@ -96,6 +96,9 @@ button.attention-action:not(:disabled):hover {
   gap: 16px;
   margin-bottom: 16px;
 }
+.action-panel {
+  margin-bottom: 18px;
+}
 .dashboard-card.wide { grid-column: 1 / -1; }
 .compact-list { margin-top: 0; }
 .status-pill {
