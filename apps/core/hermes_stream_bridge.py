@@ -25,6 +25,15 @@ from typing import Any, Optional
 _EVENT_STDOUT = sys.stdout
 _DEBUG_ROUTE_ENV = "HERMES_YACHIYO_DEBUG_ROUTE"
 _DEBUG_ROUTE_TRUE_VALUES = {"1", "true", "yes", "on", "debug"}
+_EMPTY_DETAIL_VALUES = {"", "none", "null"}
+_FAILURE_DETAIL_KEYS = (
+    "error",
+    "error_message",
+    "message",
+    "exception",
+    "detail",
+    "details",
+)
 
 
 def _emit(event_type: str, **payload: Any) -> None:
@@ -39,6 +48,37 @@ def _read_payload() -> dict[str, Any]:
         return {}
     data = json.loads(raw)
     return data if isinstance(data, dict) else {}
+
+
+def _detail_text(value: Any, *, drop_empty_literals: bool = True) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        text = value.strip()
+    elif isinstance(value, (dict, list, tuple)):
+        try:
+            text = json.dumps(value, ensure_ascii=False)
+        except TypeError:
+            text = str(value).strip()
+    else:
+        text = str(value).strip()
+    if drop_empty_literals and text.lower() in _EMPTY_DETAIL_VALUES:
+        return ""
+    return text
+
+
+def _failure_message_from_result(result: dict[str, Any]) -> str:
+    for key in _FAILURE_DETAIL_KEYS:
+        text = _detail_text(result.get(key))
+        if text:
+            return text
+    errors = result.get("errors")
+    if isinstance(errors, list):
+        for item in errors:
+            text = _detail_text(item)
+            if text:
+                return text
+    return ""
 
 
 def _resolve_toolsets(cli_config: dict[str, Any]) -> list[str]:
@@ -256,19 +296,23 @@ def _run(payload: dict[str, Any]) -> int:
         )
 
     if isinstance(result, dict):
-        response = result.get("final_response", "")
+        response = _detail_text(result.get("final_response"), drop_empty_literals=False)
         failed = bool(result.get("failed"))
+        error = _failure_message_from_result(result) if failed else ""
     else:
-        response = str(result)
+        response = _detail_text(result)
         failed = False
+        error = ""
 
-    _emit(
-        "done",
-        response=response if isinstance(response, str) else str(response),
-        session_id=getattr(cli, "session_id", None),
-        title=_get_session_title(cli, getattr(cli, "session_id", "")),
-        failed=failed,
-    )
+    done_payload: dict[str, Any] = {
+        "response": response,
+        "session_id": getattr(cli, "session_id", None),
+        "title": _get_session_title(cli, getattr(cli, "session_id", "")),
+        "failed": failed,
+    }
+    if error:
+        done_payload["error"] = error
+    _emit("done", **done_payload)
     return 1 if failed else 0
 
 

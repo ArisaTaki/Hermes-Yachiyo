@@ -959,6 +959,47 @@ def test_main_window_api_exposes_uninstall_preview(monkeypatch):
     assert calls == [("yachiyo_only", True)]
 
 
+def test_main_window_api_uninstall_schedules_legacy_exit(monkeypatch):
+    calls = []
+    fake_result = SimpleNamespace(ok=True, to_dict=lambda: {"ok": True})
+
+    monkeypatch.delenv("HERMES_YACHIYO_DESKTOP_BACKEND", raising=False)
+    monkeypatch.setattr(
+        uninstall_mod,
+        "execute_uninstall",
+        lambda scope, keep_config_snapshot, confirm_text: fake_result,
+    )
+    monkeypatch.setattr(window_mod, "request_app_exit", lambda: calls.append(True))
+
+    api = MainWindowAPI(SimpleNamespace(), AppConfig())
+    result = api.run_uninstall("yachiyo_only", True, UNINSTALL_CONFIRM_PHRASE)
+
+    assert result["ok"] is True
+    assert result["exit_scheduled"] is True
+    assert calls == [True]
+
+
+def test_main_window_api_uninstall_defers_quit_to_electron(monkeypatch):
+    calls = []
+    fake_result = SimpleNamespace(ok=True, to_dict=lambda: {"ok": True})
+
+    monkeypatch.setenv("HERMES_YACHIYO_DESKTOP_BACKEND", "1")
+    monkeypatch.setattr(
+        uninstall_mod,
+        "execute_uninstall",
+        lambda scope, keep_config_snapshot, confirm_text: fake_result,
+    )
+    monkeypatch.setattr(window_mod, "request_app_exit", lambda: calls.append(True))
+
+    api = MainWindowAPI(SimpleNamespace(), AppConfig())
+    result = api.run_uninstall("yachiyo_only", True, UNINSTALL_CONFIRM_PHRASE)
+
+    assert result["ok"] is True
+    assert result["exit_scheduled"] is False
+    assert result["desktop_quit_required"] is True
+    assert calls == []
+
+
 def test_main_window_api_creates_backup_without_uninstall(tmp_path, monkeypatch):
     home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
     config_dir.mkdir(parents=True)

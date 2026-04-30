@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import apps.shell.config as config_mod
 from apps.core.chat_session import ChatSession
@@ -117,6 +118,12 @@ def test_dashboard_data_includes_chat_overview_and_modes(tmp_path, monkeypatch):
 
         assert data["modes"]["current"] == "bubble"
         assert {item["id"] for item in data["modes"]["items"]} == {"bubble", "live2d"}
+        assert data["hermes"]["command_exists"] is True
+        assert {item["id"] for item in data["hermes"]["configuration_actions"]} >= {
+            "setup",
+            "model",
+            "doctor",
+        }
         assert data["chat"]["messages"][0]["content"] == "来自 control center"
         assert "recent_sessions" in data["chat"]
     finally:
@@ -151,16 +158,203 @@ def test_settings_data_exposes_mode_settings_summaries(tmp_path, monkeypatch):
         assert set(data["mode_settings"]) == {"bubble", "live2d"}
         assert data["assistant"]["persona_prompt"] == "你是八千代。"
         assert data["assistant"]["user_address"] == "老师"
+        assert {item["id"] for item in data["hermes"]["configuration_actions"]} >= {
+            "setup",
+            "model",
+            "config-edit",
+            "doctor",
+        }
         assert "摘要 2 条" in data["mode_settings"]["bubble"]["summary"]
         assert "hiyori" in data["mode_settings"]["live2d"]["summary"]
     finally:
         store.close()
 
 
-def test_display_mode_change_schedules_app_restart(tmp_path, monkeypatch):
+def test_hermes_connection_test_success_uses_oneshot(tmp_path, monkeypatch):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _RuntimeStub(store)
-    restarted = []
+    calls = []
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return SimpleNamespace(returncode=0, stdout="OK\n", stderr="")
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.test_hermes_connection()
+
+        assert result["success"] is True
+        assert result["output_preview"] == "OK"
+        assert result["command"] == "/bin/hermes -z <connectivity-check>"
+        assert calls[0][0][0:2] == ["/bin/hermes", "-z"]
+        assert calls[0][1]["timeout"] == 45.0
+    finally:
+        store.close()
+
+
+def test_hermes_connection_test_failure_redacts_secret(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+        monkeypatch.setattr(
+            "apps.shell.main_api.subprocess.run",
+            lambda *_args, **_kwargs: SimpleNamespace(
+                returncode=1,
+                stdout="",
+                stderr="api_key=sk-super-secret-token failed",
+            ),
+        )
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.test_hermes_connection()
+
+        assert result["success"] is False
+        assert "sk-super-secret-token" not in result["error"]
+        assert "[redacted]" in result["error"]
+    finally:
+        store.close()
+
+
+def test_get_hermes_configuration_reads_model_and_key_status(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    config_path.write_text(
+        "model:\n"
+        "  provider: openai\n"
+        "  default: gpt-4.1\n"
+        "  base_url: https://api.openai.com/v1\n",
+        encoding="utf-8",
+    )
+    env_path.write_text("OPENAI_API_KEY=sk-test-secret\n", encoding="utf-8")
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+
+        def fake_run(argv, **_kwargs):
+            if argv[-1] == "path":
+                return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
+            if argv[-1] == "env-path":
+                return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.get_hermes_configuration()
+
+        assert result["ok"] is True
+        assert result["model"]["provider"] == "openai"
+        assert result["model"]["default"] == "gpt-4.1"
+        assert result["api_key"] == {
+            "name": "OPENAI_API_KEY",
+            "configured": True,
+            "display": "已配置",
+        }
+        openrouter = next(item for item in result["provider_options"] if item["id"] == "openrouter")
+        assert openrouter["api_key_configured"] is True
+        assert "OPENAI_API_KEY" in openrouter["api_key_names"]
+        assert "sk-test-secret" not in str(result)
+    finally:
+        store.close()
+
+
+def test_update_hermes_configuration_uses_config_set_and_redacts_errors(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    calls = []
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+
+        def fake_run(argv, **_kwargs):
+            calls.append(argv)
+            if argv[1:3] == ["config", "set"]:
+                return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            if argv[-1] == "path":
+                return SimpleNamespace(returncode=0, stdout=f"{tmp_path / 'config.yaml'}\n", stderr="")
+            if argv[-1] == "env-path":
+                return SimpleNamespace(returncode=0, stdout=f"{tmp_path / '.env'}\n", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.update_hermes_configuration(
+            {
+                "provider": "openai",
+                "model": "gpt-4.1",
+                "base_url": "https://api.openai.com/v1",
+                "api_key": "sk-test-secret",
+            }
+        )
+
+        assert result["ok"] is True
+        assert [call[3] for call in calls if call[1:3] == ["config", "set"]] == [
+            "model.provider",
+            "model.default",
+            "model.base_url",
+            "OPENAI_API_KEY",
+        ]
+        assert "sk-test-secret" not in result["message"]
+    finally:
+        store.close()
+
+
+def test_open_terminal_command_rejects_unsupported_command(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    try:
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.open_terminal_command("rm -rf /tmp/hermes-yachiyo")
+
+        assert result["success"] is False
+        assert result["unsupported"] is True
+    finally:
+        store.close()
+
+
+def test_open_terminal_command_throttles_rapid_requests(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    calls = []
+    try:
+        monkeypatch.setattr("apps.shell.main_api._LAST_TERMINAL_COMMAND_AT", 0.0)
+        monkeypatch.setattr(
+            "apps.shell.terminal.open_terminal_command",
+            lambda command: calls.append(command) or (True, None),
+        )
+
+        api = MainWindowAPI(runtime, AppConfig())
+        first = api.open_terminal_command("hermes doctor")
+        second = api.open_terminal_command("hermes setup")
+
+        assert first["success"] is True
+        assert second["success"] is False
+        assert second["throttled"] is True
+        assert calls == ["hermes doctor"]
+    finally:
+        store.close()
+
+
+def test_display_mode_change_schedules_mode_switch(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
     try:
         monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
         monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
@@ -168,16 +362,16 @@ def test_display_mode_change_schedules_app_restart(tmp_path, monkeypatch):
             "apps.shell.main_api.get_integration_snapshot",
             lambda config, boot: _fake_snapshot(),
         )
-        monkeypatch.setattr("apps.shell.window.request_app_restart", lambda: restarted.append(True))
 
         config = AppConfig(display_mode="bubble")
         api = MainWindowAPI(runtime, config)
         result = api.update_settings({"display_mode": "live2d"})
 
         assert result["ok"] is True
-        assert result["restart_scheduled"] is True
-        assert result["restart_reason"] == "display_mode_changed"
-        assert restarted == [True]
+        assert result["mode_switch_scheduled"] is True
+        assert result["target_display_mode"] == "live2d"
+        assert result["effects"]["has_restart_mode"] is True
+        assert result["effects"]["has_restart_app"] is False
         assert config.display_mode == "live2d"
     finally:
         store.close()

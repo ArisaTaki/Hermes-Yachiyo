@@ -1,10 +1,10 @@
 <div align="center">
 
-# 🌸 Hermes-Yachiyo
+# Hermes-Yachiyo
 
-**桌面优先的本地个人 Agent 应用**
+桌面优先的本地个人 Agent 应用
 
-基于 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 构建的智能桌面助手
+基于 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 构建，让 Hermes 以桌面助手、悬浮气泡或 Live2D 角色的形式常驻在本机。
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -16,232 +16,244 @@
 
 ---
 
-## ✨ 特性
+## 先看这里
 
-- 🖥️ **桌面优先** — 本地运行的桌面应用，系统托盘常驻，无需部署服务器
-- 🔄 **两种桌面显示模式** — Bubble 气泡悬浮模式 / Live2D 角色模式，主控台负责状态与全局设置
-- 🤖 **智能任务系统** — 可插拔执行策略，支持模拟执行与 Hermes CLI 真实执行
-- 🎨 **Live2D 资源包解耦** — 模型资源包通过 GitHub Releases 下载，导入本地用户目录后自动检测
-- ⚙️ **完整设置系统** — 即时生效 / 需重启分级提示，保存即反馈
-- 🔌 **QQ 桥接** — 通过 AstrBot 插件远程控制（`/y` 命令族）
-- 🏗️ **严格分层** — Shell / Core / Bridge / Locald / Protocol 职责清晰
+Hermes-Yachiyo 目前仍是源码开发形态，不是已经打包好的普通桌面安装包。
 
-## 📸 桌面入口
+这意味着：
 
-| Control Center | Bubble 模式 | Live2D 模式 |
-|:---:|:---:|:---:|
-| 主控台 / 设置中心 | 桌面气泡 Launcher | 桌面角色 Launcher |
-| Hermes 状态 · 工作区 · 集成状态 · 全局设置 | 头像悬浮 · 呼吸灯 · 点击打开 Chat Window | 模型舞台 · 回复气泡 · 快捷输入 · 动作/表情预留 |
+- `git clone` 下来运行时，需要本机安装 Python、Node.js 和 npm。
+- 启动命令 `hermes-yachiyo` 会启动 Electron + React 前端，也会拉起 Python 后端。
+- 前端依赖缺失时，启动器会自动安装 `apps/frontend/node_modules`，但不会自动安装 Node.js 本体。
+- 未来发布 `.app`、`.exe` 或 Linux 包后，普通用户不应该再需要全局 Python/Node 环境。
 
-Control Center 不是独立显示模式；它始终作为主设置与状态入口存在。真正决定桌面常驻形态的是 `display_mode`，当前支持 `bubble` 和 `live2d`。
+如果你只是想体验桌面软件，建议等 Release 包；如果你愿意从源码运行，请按下面步骤来。
 
-## 🏛️ 架构
+## 它能做什么
 
-```
-┌────────────────────────────────────────────────┐
-│             Hermes-Yachiyo 桌面应用              │
-│                                                │
-│  ┌── App Shell (apps/shell) ────────────────┐  │
-│  │  启动入口 · 系统托盘 · 窗口管理            │  │
-│  │  显示模式: bubble / live2d                │  │
-│  │  设置系统 · 生效策略 · 集成状态            │  │
-│  └───────────────────────────────────────────┘  │
-│                      │                         │
-│  ┌── Core Runtime (apps/core) ───────────────┐  │
-│  │  Hermes Agent 封装 · 任务状态管理           │  │
-│  │  TaskRunner · 执行策略 · 不暴露 HTTP       │  │
-│  └───────────────────────────────────────────┘  │
-│                      │                         │
-│  ┌── Local (apps/locald) ────────────────────┐  │
-│  │  截图 · 活动窗口 · 本地硬件能力             │  │
-│  └───────────────────────────────────────────┘  │
-│                      │                         │
-│  ┌── Bridge (apps/bridge) ───────────────────┐  │
-│  │  内部 FastAPI · 仅供 UI 和 AstrBot 调用    │  │
-│  │  可重启 · 配置漂移检测 · 状态机            │  │
-│  └───────────────────────────────────────────┘  │
-└────────────────────────────────────────────────┘
-           ↑ HTTP (本地，可选)
-  ┌────────┴───────┐        ┌───────────┐
-  │  AstrBot Plugin │  ───→  │   Hapi    │
-  │  (QQ 远程桥接)   │        │  (Codex)  │
-  └────────────────┘        └───────────┘
-```
+Hermes-Yachiyo 不是另一个聊天网页，而是一个本地桌面壳：
 
-## 🚀 快速开始
+- 主控台：查看 Hermes 状态、安装引导、会话中心和设置。
+- Chat Window：完整对话窗口。
+- Bubble 模式：桌面悬浮气泡，点击打开对话。
+- Live2D 模式：桌面角色入口，支持 Live2D 模型资源导入。
+- 本地 Bridge：只监听本机，供前端和可选 AstrBot 插件调用。
 
-### 环境要求
+Control Center 不是一种桌面形态；它是主控台。真正常驻桌面的形态目前是 `bubble` 或 `live2d`。
 
-- Python 3.11+
-- macOS / Linux / Windows (WSL2)
-- [Hermes Agent](https://github.com/NousResearch/hermes-agent)（应用内可引导安装）
+## 推荐环境
 
-### 安装与运行
+### macOS
+
+当前最推荐在 macOS 上开发和测试。
+
+需要：
+
+- Python 3.11 或更高版本
+- Node.js 20.19 或更高版本
+- npm
+- Git
+- Xcode Command Line Tools
+
+如果你不确定这些有没有装，可以先运行：
 
 ```bash
-# 克隆并安装
+python3 --version
+node --version
+npm --version
+git --version
+```
+
+### Linux
+
+源码结构已经尽量保持跨平台，但桌面能力和安装引导主要按 macOS 优先完善。Linux 需要自行准备 Python、Node.js、npm、Git 和可用的桌面环境。
+
+### Windows
+
+当前建议优先使用 WSL2 做后端开发。完整 Windows 桌面包仍属于后续目标。
+
+## macOS 从零准备
+
+如果你已经有 Python、Node.js、npm 和 Git，可以跳过本节。
+
+### 1. 安装 Xcode Command Line Tools
+
+```bash
+xcode-select --install
+```
+
+如果系统提示已经安装，可以继续下一步。
+
+### 2. 安装 Homebrew
+
+Homebrew 是 macOS 常用的命令行软件管理工具。没有安装的话，按它的官方脚本安装：
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+安装完成后，按终端最后给出的提示把 Homebrew 加到 shell 环境里。Apple Silicon Mac 通常是：
+
+```bash
+echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+eval "$(/opt/homebrew/bin/brew shellenv)"
+```
+
+Intel Mac 通常是：
+
+```bash
+echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.zprofile
+eval "$(/usr/local/bin/brew shellenv)"
+```
+
+### 3. 安装 Git 和 nvm
+
+```bash
+brew update
+brew install git nvm
+```
+
+为 nvm 创建目录并写入 shell 配置：
+
+```bash
+mkdir -p ~/.nvm
+cat <<'EOF' >> ~/.zshrc
+export NVM_DIR="$HOME/.nvm"
+[ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && \. "/opt/homebrew/opt/nvm/nvm.sh"
+[ -s "/usr/local/opt/nvm/nvm.sh" ] && \. "/usr/local/opt/nvm/nvm.sh"
+EOF
+source ~/.zshrc
+```
+
+### 4. 安装 Node.js 20.19+
+
+```bash
+nvm install 20.19.0
+nvm use 20.19.0
+node --version
+npm --version
+```
+
+看到 `v20.19.0` 或更高版本即可。
+
+## 下载和启动
+
+### 1. 克隆项目
+
+```bash
 git clone <repo-url>
 cd Hermes-Yachiyo
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-
-# 启动桌面应用
-hermes-yachiyo
-# 或
-python -m apps.shell.app
 ```
 
-### 首次启动流程
+如果你不是通过 Git 克隆，而是下载 ZIP，也可以解压后进入项目目录。
 
-应用会自动检测 Hermes Agent 状态，引导完成初始化：
-
-```
-未安装 Hermes → 安装引导界面（一键安装）
-    ↓
-已安装未初始化 → 工作区初始化向导
-    ↓
-就绪 → 进入正常模式 → 当前显示模式
-```
-
-## ⚙️ 配置系统
-
-配置文件位于 `~/.hermes-yachiyo/config.json`，可通过设置界面可视化编辑。
-
-设置分为主设置和模式设置。主设置负责全局行为；Bubble / Live2D 设置只负责对应桌面形态。主设置里的文本、数字和大段文本字段会先暂存，需要点击“应用共通设置修改”后保存；显示模式切换和开关类设置仍会即时保存。保存设置后，界面会即时显示每项配置的生效状态提示：即时生效、需重启当前模式、需重启 Bridge、或需重启应用。
-
-### 主设置
-
-| 功能 | 配置项 | 说明 | 生效策略 |
-|------|--------|------|---------|
-| Hermes Agent | 安装检测 / 工作区初始化 | 显示 Hermes 安装、doctor 诊断、工作区状态，并提供安装或补全能力入口。Hermes 是 Agent 本体，Yachiyo 只负责桌面壳、状态与桥接。 | 诊断即时刷新 |
-| 显示模式 | `display_mode` | 选择桌面常驻形态：`bubble` 为气泡 Launcher，`live2d` 为角色 Launcher。主控台不属于显示模式。 | 需重启应用 |
-| 用户称呼 | `assistant.user_address` | 配置希望助手如何称呼用户，会随人设一起注入 Hermes 调用上下文，并对 Bubble、Live2D、Chat Window 和 AstrBot 桥接请求生效。 | 点击确认后即时生效 |
-| 助手人设 Prompt | `assistant.persona_prompt` | 全局人格与语气设定，会随 Bubble、Live2D、Chat Window 和 AstrBot 桥接请求一起进入 Hermes 调用上下文。该项放在主设置里，避免同一个助手在不同模式下出现多份人设配置。 | 点击确认后即时生效 |
-| Bridge 开关 | `bridge_enabled` | 启用或关闭本地 FastAPI Bridge。Bridge 只供 UI 与 AstrBot 插件调用，不是产品主体。 | 需重启 Bridge |
-| Bridge 地址 | `bridge_host` / `bridge_port` | 控制本地 Bridge 监听地址。默认 `127.0.0.1:8420`，不对外网开放。 | 点击确认后需重启 Bridge |
-| 集成状态 | AstrBot / Hapi | 展示 QQ 桥接和 Hapi/Codex 后端的可用性。AstrBot 只做薄桥接，Hapi 仍是外部 Codex 执行后端。 | 状态即时刷新 |
-| 系统托盘 | `tray_enabled` | 控制是否常驻系统托盘，便于重新打开主控台或退出应用。 | 需重启应用 |
-
-### Bubble 模式设置
-
-Bubble 是轻量桌面 Launcher，不承载完整聊天 UI。点击气泡会打开统一 Chat Window；聊天窗口关闭后，后台任务不会因此取消，Bubble 会继续用呼吸灯提示 Hermes 的处理状态。
-
-| 功能 | 配置项 | 说明 | 生效策略 |
-|------|--------|------|---------|
-| 气泡尺寸 | `bubble_mode.width` / `bubble_mode.height` | 控制 Launcher 窗口尺寸，范围 80-192。实际气泡使用宽高中的较小值，保持圆形。 | 需重启当前模式 |
-| 默认位置设置 | `bubble_mode.position_x_percent` / `bubble_mode.position_y_percent` | 使用屏幕百分比定位默认启动位置。`0%` 表示左/上边，`100%` 表示右/下边；默认 `100% / 100%`，即右下角。百分比定位可以适配不同显示器尺寸。旧的 `position_x` / `position_y` 像素字段保留用于兼容已有配置，但新设置页使用百分比。 | 需重启当前模式 |
-| 窗口置顶 | `bubble_mode.always_on_top` | 让 Bubble 常驻在普通窗口之上，适合把它当作桌面入口。 | 需重启当前模式 |
-| 靠边吸附 | `bubble_mode.edge_snap` | 开启后拖动 Bubble 并松开鼠标，会自动吸附到最近的屏幕边缘，并保留当前纵向或横向位置。关闭后拖动位置由窗口系统保持。 | 即时生效 |
-| 头像资源 | `bubble_mode.avatar_path` | 指定气泡头像图片。为空或路径不可用时使用内置默认头像；可指向用户目录中的 Release 头像资源。 | 需重启当前模式 |
-| 默认展示 | `bubble_mode.default_display` | 控制气泡标题和状态文案的默认含义：`icon` 更接近纯头像入口，`summary` 显示会话摘要语义，`recent_reply` 偏向最近回复语义。当前 Bubble 本体不展开聊天内容，完整内容仍在 Chat Window 中查看。 | 即时生效 |
-| 新消息呼吸灯 | `bubble_mode.show_unread_dot` | 控制是否显示状态点。黄色表示 Hermes 正在处理；绿色表示有未读成功结果；红色表示有未读失败结果；点击打开并确认结果后，绿色或红色会消失。处理中关闭 Chat Window 时，黄色会继续保留，直到后台任务完成或失败。 | 即时生效 |
-| 自动淡出 | `bubble_mode.auto_hide` | 空闲、无未读、无主动观察结果时降低气泡透明度，减少桌面干扰。 | 即时生效 |
-| 透明度 | `bubble_mode.opacity` | 控制 Bubble 正常状态透明度，范围 0.2-1.0。自动淡出会在该基础上再降低。 | 即时生效 |
-| 点击打开聊天 | `bubble_mode.expand_trigger` | 固定为点击打开 Chat Window。旧的 hover 触发已废弃，避免鼠标经过时误打开对话。 | 固定行为 |
-| 最近会话数量 | `bubble_mode.recent_sessions_limit` | 控制 Bubble 摘要层读取多少个最近会话，用于判断当前状态和通知。 | 即时生效 |
-| 最近消息数量 | `bubble_mode.recent_messages_limit` | 控制摘要层读取当前会话中多少条消息。 | 即时生效 |
-| 摘要条数 | `bubble_mode.summary_count` | 控制 Bubble 获取会话摘要时最多取几条消息，范围 1-3。 | 即时生效 |
-| 主动对话 | `bubble_mode.proactive_enabled` | 允许 Bubble 侧主动桌面观察服务产生提醒。默认关闭，避免未授权的后台行为。 | 即时生效 |
-| 定期桌面观察 | `bubble_mode.proactive_desktop_watch_enabled` | 开启后会按间隔读取桌面上下文。该能力属于本地观察，默认关闭。 | 即时生效 |
-| 观察间隔秒 | `bubble_mode.proactive_interval_seconds` | 主动桌面观察的间隔，范围 60-3600 秒。 | 即时生效 |
-
-### Live2D 模式设置
-
-Live2D 是角色桌面 Launcher。模型资源可为空；资源未导入时仍会显示可操作的桌面入口和设置提示，不会阻塞 Bubble、Chat Window 或 Control Center。
-
-| 功能 | 配置项 | 说明 | 生效策略 |
-|------|--------|------|---------|
-| 资源操作 | 选择模型目录 / 导入资源包 ZIP / 打开导入目录 / 打开 Releases | 选择本地模型目录会校验 `.model3.json` 或 `.moc3`；导入 ZIP 会解压到用户资源目录；打开导入目录用于手动管理资源；打开 Releases 用于下载官方资源包。 | 选择或导入后需应用修改 |
-| 角色缩放 | `live2d_mode.scale` | 控制角色渲染缩放，范围 0.40-2.00。用于适配不同模型尺寸和屏幕密度。 | 即时生效 |
-| 模型名称 | `live2d_mode.model_name` | 给当前模型设置展示名称；为空时尝试从目录名或资源元数据推断。 | 即时生效 |
-| 模型路径 | `live2d_mode.model_path` | 指向 Live2D 模型目录。为空时自动扫描 `~/.hermes/yachiyo/assets/live2d/` 及一级子目录。 | 需重启当前模式 |
-| 资源状态 | 当前配置路径 / 当前生效路径 / 模型可用表情 / 模型可用动作 | 设置页会展示配置路径、实际检测到的模型路径、可用表情和动作组，帮助确认资源包是否完整。 | 信息即时刷新 |
-| 窗口尺寸 | `live2d_mode.width` / `live2d_mode.height` | 控制 Live2D 舞台窗口大小。该窗口负责承载模型、回复气泡和快捷输入入口。 | 需重启当前模式 |
-| 窗口位置 | `live2d_mode.position_x` / `live2d_mode.position_y` | 控制 Live2D 舞台启动位置，当前为像素坐标。 | 需重启当前模式 |
-| 窗口置顶 | `live2d_mode.window_on_top` | 让角色窗口保持在普通窗口之上。 | 需重启当前模式 |
-| macOS 所有桌面可见 | `live2d_mode.show_on_all_spaces` | 在 macOS 上让角色跨 Space 可见，适合长期桌面陪伴。 | 需重启当前模式 |
-| 显示回复气泡 | `live2d_mode.show_reply_bubble` | 控制角色旁边是否显示最近回复气泡。关闭后可只保留角色与快捷输入。 | 即时生效 |
-| 启动初始表现 | `live2d_mode.default_open_behavior` | `stage` 仅显示角色舞台；`reply_bubble` 启动时显示回复气泡；`chat_input` 启动时显示快捷输入。该设置不会自动打开 Chat Window。 | 即时生效 |
-| 点击角色行为 | `live2d_mode.click_action` | `open_chat` 打开或切换 Chat Window；`toggle_reply` 切换回复气泡；`focus_stage` 仅聚焦角色窗口。 | 即时生效 |
-| 显示快捷输入入口 | `live2d_mode.enable_quick_input` | 在角色窗口中显示轻量输入入口，适合快速发一句话；完整上下文仍在 Chat Window 中查看。 | 即时生效 |
-| 启动时打开聊天窗口 | `live2d_mode.auto_open_chat_window` | 应用启动进入 Live2D 模式时自动打开 Chat Window。默认关闭，避免打断桌面。 | 需重启当前模式 |
-| 鼠标跟随 | `live2d_mode.mouse_follow_enabled` | 启用后角色会根据全局鼠标位置更新注视方向；关闭后保持默认朝向。 | 即时生效 |
-| 待机动作组 | `live2d_mode.idle_motion_group` | 指定模型中用于待机的 motion group，默认 `Idle`。模型没有对应动作时会静默跳过。 | 即时生效 |
-| 表情系统 | `live2d_mode.enable_expressions` | 允许后续根据模型可用表情触发表情切换。当前作为能力开关保留。 | 即时生效 |
-| 物理模拟 | `live2d_mode.enable_physics` | 启用模型物理配置，例如头发、衣物等物理效果。模型缺少物理文件时不会阻塞启动。 | 即时生效 |
-| 主动对话 | `live2d_mode.proactive_enabled` | 允许 Live2D 侧主动观察服务产生提醒。默认关闭。 | 即时生效 |
-| 定期桌面观察 | `live2d_mode.proactive_desktop_watch_enabled` | 开启后按间隔读取桌面上下文。该能力默认关闭。 | 即时生效 |
-| 观察间隔秒 | `live2d_mode.proactive_interval_seconds` | 主动桌面观察的间隔，范围 60-3600 秒。 | 即时生效 |
-| Live2D TTS | `tts.enabled` | 控制是否为 Live2D 回复播放语音。TTS 默认关闭，失败不会影响聊天。 | 即时生效 |
-| TTS Provider | `tts.provider` | `none` 表示关闭；`http` 使用 HTTP POST；`command` 调用本地命令。 | 即时生效 |
-| TTS HTTP Endpoint | `tts.endpoint` | 当 provider 为 `http` 时使用的接口地址。 | 即时生效 |
-| TTS 本地命令 | `tts.command` | 当 provider 为 `command` 时执行的命令模板，可按实现约定传入文本。 | 即时生效 |
-| TTS 音色 | `tts.voice` | 传给 TTS 后端的音色名。具体可用值取决于外部 TTS 服务或命令。 | 即时生效 |
-| TTS 超时秒 | `tts.timeout_seconds` | 限制 TTS 调用等待时间，避免外部服务卡住桌面交互。 | 即时生效 |
-
-### 记忆规划
-
-当前对话记录通过 SQLite 保存在本地 `chat.db` 中，它是原始会话存档，不等于长期可召回记忆。长期记忆、项目/目的记忆、共享偏好和检索注入链路见 [docs/memory-architecture.md](docs/memory-architecture.md)。
-
-## 🤖 任务系统
-
-任务生命周期：`PENDING → RUNNING → COMPLETED / CANCELLED / FAILED`
-
-**执行策略：**
-
-- **SimulatedExecutor** — 模拟执行，用于 MVP 测试
-- **HermesExecutor** — 真实调用 `hermes chat -q <prompt> -Q --source tool`，自动检测可用性
+### 2. 创建 Python 虚拟环境
 
 ```bash
-# 通过 Bridge API
-curl http://127.0.0.1:8420/tasks -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"description": "分析当前目录结构"}'
-
-# 通过 QQ
-/y do 分析当前目录结构
-/y check abc123
-/y cancel abc123
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
 ```
 
-## 🔌 QQ 桥接（AstrBot 插件）
+### 3. 安装 Hermes-Yachiyo 源码包
 
-通过 AstrBot 插件接入 QQ，所有命令以 `/y` 开头：
+```bash
+pip install -e .
+```
 
-| 命令 | 说明 |
-|------|------|
-| `/y status` | 查看系统状态 |
-| `/y tasks` | 任务列表 |
-| `/y do <描述>` | 创建任务 |
-| `/y check <id>` | 查询任务详情 |
-| `/y cancel <id>` | 取消任务 |
-| `/y screen` | 截图信息 |
-| `/y window` | 当前活动窗口 |
-| `/y codex <描述>` | Codex 执行（Hapi，即将推出） |
-| `/y help` | 命令帮助 |
+如果要运行测试或参与开发，使用：
 
-插件只做路由桥接，不实现本地逻辑。错误提示已覆盖连接失败、超时、服务未就绪等场景。
+```bash
+pip install -e ".[dev]"
+```
 
-## 🎨 桌面资源包（Bubble / Live2D）
+### 4. 确认 Node 环境
 
-Hermes-Yachiyo 将运行代码和大体积角色资源分开管理：
+```bash
+source ~/.nvm/nvm.sh
+nvm use 20.19.0
+```
 
-- **Bubble 头像资源**：体积小，可作为独立 Release 资源包下载，也保留一个默认头像随主仓库发布。
-- **Live2D 模型资源**：体积较大，不直接提交到主仓库；请从单独的 L2D Release 下载后导入到用户目录。
+### 5. 启动桌面应用
 
-### GitHub Releases
+```bash
+hermes-yachiyo
+```
 
-资源包按用途拆分为两个 Release / Tag：
+第一次启动可能会自动安装前端依赖，耗时取决于网络。启动成功后你会看到 Electron 桌面窗口。
 
-| 资源类型 | Release / Tag | 用途 |
-|---|---|---|
-| Bubble 头像 | `bubble-assets-20260423` | 气泡模式头像、备用头像素材 |
-| Live2D 模型 | `l2d-assets-20260423` / `live2d-assets-20260423` | Live2D Cubism 模型、纹理、表情、物理配置 |
+如果只想启动 Python 后端：
 
-发布页：<https://github.com/ArisaTaki/Hermes-Yachiyo/releases>
+```bash
+hermes-yachiyo-backend
+```
 
-### 推荐用户目录结构
+旧 pywebview 入口只保留给兼容验证：
+
+```bash
+hermes-yachiyo-legacy-pywebview
+```
+
+## 第一次打开后怎么做
+
+应用会先检测 Hermes Agent 是否可用，然后按状态引导：
+
+```text
+未安装 Hermes Agent
+  -> 安装 Hermes Agent
+  -> 完成 hermes setup
+  -> 初始化 Yachiyo 工作空间
+  -> 进入主控台
+```
+
+安装页里有内置终端。你可以直接在应用里看安装输出，也可以在需要输入时直接输入。
+
+如果安装失败，先看终端输出。常见情况：
+
+- GitHub 克隆中断：通常是网络或代理问题，重新安装即可。
+- `hermes` 命令未找到：安装完成后可能需要打开新终端，或点击“重新检测”。
+- `setup` 没完成：点击“开始配置 Hermes”，在终端里完成 Hermes 的初次配置。
+
+## 日常使用入口
+
+### 主控台
+
+主控台负责状态和设置：
+
+- Hermes Agent 是否安装
+- 会话中心
+- 当前显示模式
+- Bubble / Live2D 设置
+- AstrBot / Hapi 集成状态
+- 卸载、备份和恢复入口
+
+### Chat Window
+
+完整对话在 Chat Window 里进行。Bubble 和 Live2D 都只是桌面入口，不会把完整对话塞进小窗口。
+
+### Bubble 模式
+
+Bubble 是轻量悬浮入口：
+
+- 点击气泡打开 Chat Window。
+- 呼吸灯提示处理中、新消息或失败。
+- 可在设置里调整尺寸、位置、透明度、靠边吸附和头像。
+
+### Live2D 模式
+
+Live2D 是角色桌面入口：
+
+- 点击角色可以打开对话或切换回复气泡，取决于设置。
+- 支持鼠标跟随、回复气泡、快捷输入入口。
+- 模型资源是可选的。没有模型时，应用仍然能启动并提示你导入资源。
+
+## Live2D 和头像资源
+
+为了避免仓库过大，Live2D 模型不直接放进主仓库。资源包从 GitHub Releases 下载：
+
+<https://github.com/ArisaTaki/Hermes-Yachiyo/releases>
+
+推荐目录：
 
 ```text
 ~/.hermes/yachiyo/assets/
@@ -252,197 +264,203 @@ Hermes-Yachiyo 将运行代码和大体积角色资源分开管理：
     └── yachiyo/
         ├── 八千代辉夜姬.model3.json
         ├── 八千代辉夜姬.moc3
-        ├── 八千代辉夜姬.physics3.json
         └── 八千代辉夜姬.8192/
             ├── texture_00.png
             └── texture_01.png
 ```
 
-### 从 Release ZIP 导入
+最简单的导入方式是在主控台打开“Live2D 设置”，然后点击：
 
-下载资源包后，可用下面命令导入。
+- “导入资源包 ZIP”
+- 或“选择模型目录”
 
-#### Bubble 头像
-
-```bash
-mkdir -p ~/.hermes/yachiyo/assets/bubble
-unzip hermes-yachiyo-bubble-avatar-20260423.zip -d ~/.hermes/yachiyo/assets/bubble/
-```
-
-如果你只是从本地开发仓库复制默认头像：
-
-```bash
-mkdir -p ~/.hermes/yachiyo/assets/bubble/avatars
-cp apps/shell/assets/avatars/yachiyo-default.jpg \
-  ~/.hermes/yachiyo/assets/bubble/avatars/yachiyo-default.jpg
-```
-
-Bubble 模式默认会使用主仓库内置头像；如果你希望改用用户目录头像，可在设置页把 `bubble_mode.avatar_path` 指向：
-
-```text
-~/.hermes/yachiyo/assets/bubble/avatars/yachiyo-default.jpg
-```
-
-#### Live2D 模型
+也可以手动解压：
 
 ```bash
 mkdir -p ~/.hermes/yachiyo/assets/live2d
 unzip hermes-yachiyo-live2d-yachiyo-20260423.zip -d ~/.hermes/yachiyo/assets/live2d/
 ```
 
-如果你已经在本地开发仓库中有未提交的 Live2D 资源，也可以直接复制：
+更多资源说明见 [docs/live2d-assets.md](docs/live2d-assets.md)。
+
+## 常见问题
+
+### 运行后还是旧的 pywebview 窗口
+
+当前虚拟环境里的命令入口可能还是旧版本。回到仓库根目录重新安装：
 
 ```bash
-mkdir -p ~/.hermes/yachiyo/assets/live2d
-cp -R apps/shell/assets/live2d/yachiyo \
-  ~/.hermes/yachiyo/assets/live2d/
+source .venv/bin/activate
+pip install -e .
 ```
 
-### Live2D 自动检测和手动路径
+然后重新运行：
 
-默认情况下，`live2d_mode.model_path` 为空，Hermes-Yachiyo 会自动扫描：
+```bash
+hermes-yachiyo
+```
+
+### 提示找不到 Node.js 或 npm
+
+源码运行需要 Node.js。先确认：
+
+```bash
+node --version
+npm --version
+```
+
+如果没有，请按上面的 macOS 准备步骤安装 nvm 和 Node.js 20.19+。
+
+### Vite 端口被占用
+
+开发模式默认使用 `127.0.0.1:5174`。如果这个端口被其他程序占用，关闭占用程序后重新启动。
+
+macOS 可用下面命令查看占用：
+
+```bash
+lsof -i :5174
+```
+
+### 前端依赖安装失败
+
+可以手动安装一次：
+
+```bash
+source ~/.nvm/nvm.sh
+nvm use 20.19.0
+npm --prefix apps/frontend install
+```
+
+然后重新运行：
+
+```bash
+hermes-yachiyo
+```
+
+### Hermes 安装时 GitHub clone 失败
+
+常见错误包括：
 
 ```text
-~/.hermes/yachiyo/assets/live2d/
+RPC failed
+early EOF
+fetch-pack: unexpected disconnect
+invalid index-pack output
 ```
 
-只要该目录或其一级子目录中存在 `.model3.json` 或 `.moc3`，就会被识别为有效 Live2D 模型。
+通常是网络中断、代理不稳定或 GitHub 连接问题。可以重新点击安装，或换一个网络环境后再试。
 
-你也可以在 Control Center → “Live2D 设置”中：
+### Live2D 提示未检测到模型
 
-1. 点击“导入资源包 ZIP”；或
-2. 点击“选择模型目录”；或
-3. 手动填写 `live2d_mode.model_path`。
+这不影响主控台、Bubble 或 Chat Window。你只需要在“Live2D 设置”里导入资源包 ZIP，或选择包含 `.model3.json` / `.moc3` 的模型目录。
 
-### 未导入资源时会发生什么
+### 想完全重来
 
-- 应用仍然可以正常启动。
-- Bubble / Chat Window / Control Center 不受影响。
-- Live2D 模式仍然可以作为角色聊天壳 / 桌面入口存在。
-- 设置页会提示你从 Releases 下载资源包，并显示默认导入目录。
-- Live2D 模式会明确提示“未检测到有效 Live2D 模型资源”，不会导致整个模式崩溃。
+用户配置和工作目录主要在：
 
-更多说明见 [docs/live2d-assets.md](docs/live2d-assets.md)。
+```text
+~/.hermes-yachiyo/
+~/.hermes/yachiyo/
+```
 
-## 🔗 Bridge API
+删除这些目录会清掉本地配置、资源和会话相关数据。操作前请确认已经备份。
 
-内部 FastAPI 服务，供 UI 和 AstrBot 调用：
+## QQ / AstrBot 桥接
 
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/status` | GET | 运行状态与任务统计 |
-| `/tasks` | GET | 任务列表 |
-| `/tasks` | POST | 创建任务 |
-| `/tasks/{id}` | GET | 任务详情 |
-| `/tasks/{id}/cancel` | POST | 取消任务 |
-| `/screen/current` | GET | 截图（base64） |
-| `/system/active-window` | GET | 活动窗口信息 |
-| `/hermes/install-info` | GET | Hermes 安装状态 |
+AstrBot 插件是可选能力，用于从 QQ 侧转发命令到本机 Bridge。插件只做路由桥接，不直接实现本地机器控制。
 
-Bridge 支持运行时重启、配置漂移检测、状态机管理（disabled / enabled_not_started / running / failed）。
+常用命令：
 
-## 🧪 测试
+| 命令 | 说明 |
+|------|------|
+| `/y status` | 查看状态 |
+| `/y tasks` | 查看任务 |
+| `/y do <描述>` | 创建任务 |
+| `/y check <id>` | 查看任务详情 |
+| `/y cancel <id>` | 取消任务 |
+| `/y screen` | 查看截图信息 |
+| `/y window` | 查看当前活动窗口 |
+| `/y help` | 查看帮助 |
+
+## 开发者说明
+
+### 项目结构
+
+```text
+apps/
+  frontend/           Electron + React/Vite/TypeScript 前端
+  desktop_backend/    无窗口 Python 后端入口
+  desktop_launcher.py 源码开发启动器
+  shell/              配置、安装、legacy pywebview 兼容层
+  core/               Hermes 运行时封装、任务状态、聊天状态
+  bridge/             本地 FastAPI Bridge
+  locald/             截图、活动窗口等本地能力
+  installer/          Hermes 安装检测、安装、工作区初始化
+packages/
+  protocol/           跨层数据模型
+integrations/
+  astrbot-plugin/     QQ 桥接插件
+tests/                pytest 测试
+docs/                 架构与资源文档
+```
+
+### 架构边界
+
+- React 前端只负责界面，不直接调用 Python 对象。
+- Electron 负责桌面窗口、托盘、内置终端和原生能力。
+- Python backend 负责运行时、配置、安装检测和本地 Bridge。
+- Bridge 只监听本机，供 UI 和插件调用。
+- pywebview 已经是 legacy 路径，新 UI 工作应放在 `apps/frontend/`。
+
+更详细的前端架构见 [docs/desktop-frontend-architecture.md](docs/desktop-frontend-architecture.md)。
+
+### 常用开发命令
 
 ```bash
-# 安装测试依赖
+source .venv/bin/activate
+source ~/.nvm/nvm.sh
+nvm use 20.19.0
+
+# 前端构建
+npm --prefix apps/frontend run build
+
+# 运行测试
+pytest -q
+
+# 启动应用
+hermes-yachiyo
+```
+
+### 测试
+
+```bash
 pip install -e ".[dev]"
-
-# 运行全部测试
-.venv/bin/python -m pytest tests/ -v
-
-# 测试数量以当前 pytest 收集结果为准
+pytest -q
 ```
 
-| 测试模块 | 覆盖范围 |
-|---------|---------|
-| `test_protocol` | 枚举、数据模型、请求/响应 |
-| `test_state` | 任务生命周期、终态保护 |
-| `test_executor` | 执行器模型、模拟执行 |
-| `test_chat_store` | SQLite 会话/消息 CRUD |
-| `test_chat_session` | 会话恢复、清空后持久化、孤立任务消息恢复、assistant 幂等更新 |
-| `test_chat_api` | 消息发送、任务状态同步、取消/失败闭环、清空会话取消旧任务 |
-| `test_runtime` | TaskRunner 执行器热切换 |
-| `test_effect_policy` | 设置生效策略 |
-| `test_integration_status` | Bridge/AstrBot/Hapi 状态 |
-| `test_astrbot_handlers` | 全 handler 输出与错误格式 |
-| `test_startup` | 启动决策树 |
+当前测试覆盖：
 
-## 📁 目录结构
+- 协议模型
+- 任务状态
+- 执行器
+- SQLite 会话
+- Chat API
+- 设置生效策略
+- 安装器
+- 卸载与备份
+- 启动决策
+- AstrBot handler
 
-```
-apps/
-  shell/              # 桌面应用壳
-    app.py              # 主入口
-    startup.py          # 启动决策
-    window.py           # 主窗口 (pywebview)
-    config.py           # 配置管理 + Live2D 校验
-    effect_policy.py    # 设置生效策略
-    integration_status.py  # 集成状态统一来源
-    main_api.py         # 窗口 API
-    settings.py         # 设置页构建
-    tray.py             # 系统托盘
-    modes/              # 显示模式
-      bubble.py           # 气泡悬浮模式
-      live2d.py           # Live2D 角色模式
-  core/               # 核心运行时（不暴露 HTTP）
-    runtime.py          # Hermes 运行时封装
-    state.py            # 任务状态管理
-    executor.py         # 执行策略（模拟 / Hermes CLI）
-    task_runner.py      # 任务调度轮询
-  bridge/             # 内部通信桥
-    server.py           # FastAPI 服务（可重启）
-    deps.py             # 依赖注入
-    routes/             # API 路由
-  locald/             # 本地能力适配
-    screenshot.py       # 截图（macOS）
-    active_window.py    # 活动窗口（macOS）
-  installer/          # Hermes 安装引导
-    hermes_check.py     # 安装检测
-    hermes_install.py   # 安装执行
-    workspace_init.py   # 工作区初始化
-packages/
-  protocol/           # 跨层数据定义
-    enums.py            # 枚举
-    schemas.py          # 请求/响应模型
-    install.py          # 安装模型
-integrations/
-  astrbot-plugin/     # QQ 桥接插件
-    main.py             # 入口与 ACL
-    command_router.py   # 命令路由
-    api_client.py       # HTTP 客户端
-    handlers/           # 各命令 handler
-tests/                # 测试套件（pytest）
-```
+## 发布包计划
 
-## 🔧 开发指南
+当前源码版需要开发环境。正式发布包的目标是：
 
-### 严格边界
+- macOS 优先，之后再做 Windows 和 Linux。
+- 前端预构建后随 Electron 打包。
+- Python 后端冻结为可执行文件，或随包内置干净虚拟环境。
+- 普通用户不需要全局安装 Python、Node.js 或 npm。
+- `node-pty` 等 native 依赖需要在 Electron 包中正确 unpack。
 
-| 模块 | 允许 | 禁止 |
-|------|------|------|
-| `apps/core` | 运行时、状态、执行器 | 暴露 HTTP |
-| `apps/bridge` | 内部 API、依赖注入 | 实现业务逻辑 |
-| `apps/shell` | 产品入口、UI、配置 | 直接访问 Bridge 以外的状态 |
-| `apps/locald` | 平台能力适配 | 处理业务逻辑 |
-| `astrbot-plugin` | 命令路由、格式化 | 实现本地机器控制 |
-
-### 添加新功能
-
-1. **新本地能力** → `apps/locald/` 添加适配器 → `apps/bridge/routes/` 暴露端点
-2. **新任务类型** → `packages/protocol/enums.py` 添加枚举 → `apps/core/state.py` 处理
-3. **新显示模式** → `apps/shell/modes/` 实现 → `startup.py` 集成
-
-## 📋 后续规划
-
-- [ ] Live2D Cubism SDK 渲染器接入
-- [ ] HermesExecutor 真机 CLI 联调
-- [ ] Hapi Codex 后端对接
-- [ ] 任务持久化（当前为内存存储）
-- [ ] 跨平台适配（Windows / Linux）
-- [ ] AstrBot 真实 QQ 环境联调
-- [ ] Bridge HTTPS + 认证
-- [ ] 桌面壳技术升级（替换 pywebview）
-
-## 📄 许可证
+## 许可证
 
 MIT

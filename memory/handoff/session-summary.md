@@ -79,6 +79,70 @@
 
 ---
 
+## 本轮完成内容 — Milestone 72: Electron fixed frontend split
+
+### 核心结果
+
+根据当前分支“全面重构前端和逻辑解绑”的方向，放弃 pywebview 作为新 UI 承载层，改为固定 Electron + React/Vite/TypeScript 前端，Python 作为 headless runtime/backend，通过本地 HTTP Bridge 服务 React renderer。
+
+### 主要变更
+
+- `pyproject.toml`：`hermes-yachiyo` 改为 Electron 开发启动器；新增 `hermes-yachiyo-backend`；旧入口保留为 `hermes-yachiyo-legacy-pywebview`。
+- `apps/desktop_launcher.py`：启动前端 dev 脚本，并把当前 Python 解释器传给 Electron backend 子进程。
+- `apps/desktop_backend/app.py`：启动 `HermesRuntime`，注入 Bridge runtime，运行 FastAPI Bridge，不创建窗口。
+- `apps/bridge/routes/ui.py`：新增 `/ui/dashboard`、`/ui/settings`、`/ui/chat/messages`、`/ui/chat/session`、`/ui/modes/{mode}/settings`。
+- `apps/frontend/`：新增 Electron main/preload、React renderer、HTTP bridge client、主控台/聊天/通用设置/模式设置/安装引导/launcher 视图。
+- 移除新前端中的 `window.pywebview.api` 调用；renderer 只通过 HTTP Bridge 和窄 IPC 调用后端能力。
+- 前端 dev server 固定为 `127.0.0.1:5174` 且开启 Vite strict port，避免 5173 被占用时自动漂移导致 Electron 加载错误端口。
+- `docs/desktop-frontend-architecture.md`：记录固定架构和开发命令；`docs/ui-resource-architecture.md` 改为 legacy 说明。
+
+### 验证结果
+
+- `npm --prefix apps/frontend install` 使用 Node v20.19.0 完成，生成 lockfile。
+- `hermes-yachiyo` 默认启动器现在会在前端依赖工具缺失时自动执行一次 `npm ci`，之后启动 Electron dev shell；手动 `npm install` 不再是每次运行前置条件。
+- 用户反馈运行后仍像旧 Python 窗口；已确认 venv 中 `hermes-yachiyo` console script 当时仍导入 `apps.shell.app`。执行 `pip install -e .` 后，默认命令已导入 `apps.desktop_launcher`；`hermes-yachiyo-legacy-pywebview` 保留旧入口。
+- 用户截图中主控台出现 `Failed to fetch`，但数据已成功显示；已确认这是初始 Bridge 未就绪时的 fetch 错误在成功刷新后未清除。React 主控台现会成功后清空错误，fetch 网络失败文案改为“无法连接本地 Bridge”。
+- 用户指出 Bubble/Live2D 表现态不见了；已确认 Electron 路线此前只有 LauncherView 占位。现已新增 Electron main 自动根据 `display_mode` 创建透明 Bubble/Live2D BrowserWindow，LauncherView 有第一版表现态 UI 和打开对话/设置入口；旧 pywebview 的完整表现态能力仍未全部迁移。
+- 用户指出 React 重构后旧 pywebview 的好体验丢失，尤其流式输出。已对照 `apps/shell/chat_window.py`：旧流式实际依赖 ChatSession 中的 Hermes token 回写 + 500ms 轮询 + typewriter。React ChatView 现已恢复 500ms 处理中轮询、typewriter、Markdown、复制、会话下拉、新对话/删除、executor badge；Bridge 新增 `/ui/chat/sessions`、`/ui/chat/sessions/load`、`/ui/chat/session/delete`、`/ui/chat/executor`。
+- `npm --prefix apps/frontend run build` 通过。
+- `python -m pytest tests/test_ui_bridge_routes.py tests/test_bridge_server.py tests/test_chat_api.py tests/test_mode_settings.py tests/test_runtime.py` → 57 passed。
+- VS Code diagnostics：前端 tsconfig 弃用告警已通过 `moduleResolution: "Bundler"` 处理。
+
+### 后续建议
+
+1. 手工运行 `hermes-yachiyo`，确认 Electron 窗口和 Python backend 子进程实际联动。
+2. 把 mode JSON 预览替换为真正的字段级设置控件。
+3. 设计 Electron 版 Bubble / Live2D 窗口，不再扩展 pywebview 旧实现。
+4. 制定 legacy pywebview shell 退休清单。
+
+### 追加进展
+
+- `/ui/launcher`、`/ui/launcher/ack`、`/ui/launcher/quick-message` 已加入 Electron UI Bridge，复用 `ChatBridge` 与 `LauncherNotificationTracker`，给 Bubble/Live2D 提供真实状态、未读、最近回复和快捷输入。
+- Electron preload/main 新增 `openLauncherMenu` IPC，右键表现态可打开对话、主控台、模式设置、重开表现态、关闭表现态或退出应用。
+- React `LauncherView` 已从静态占位改为轮询状态渲染：Bubble 有处理中/未读/失败状态点和自动淡出；Live2D 有回复气泡、状态点、快捷输入和状态动画。
+- `/ui/launcher/position` 已加入，Electron mode window 在移动/缩放后防抖保存位置；Bubble 按旧逻辑吸附最近屏幕边缘，Live2D 保存位置和窗口尺寸。
+- `/ui/launcher` 已补 Live2D resource 状态摘要，React stage 会区分资源就绪/缺失，为真实 renderer 接入保留数据边界。
+- 已对照旧 pywebview `apps/shell/modes/bubble.py` 恢复 Electron Bubble 头像气泡表现：头像 data URI、旧 DOM/CSS 结构、状态点、未读/处理中/失败提示、auto-hide 透明度公式、主动观察 title、6px 拖拽点击阈值。
+- 已对照旧 pywebview `apps/shell/modes/live2d.py` 恢复 Electron Live2D 第一层表现：preview fallback、资源提示条、默认打开行为、回复气泡、快捷输入和 renderer scaffold。真实 Pixi/Cubism 模型加载、鼠标跟随、透明命中区域尚未迁移。
+- 已接入 Electron Live2D 第一版真模型渲染路径：`/live2d/runtime` 返回旧 Pixi/Cubism runtime 脚本清单并优先使用本地缓存；React 加载 runtime scripts 后用 `renderer.model_url` 创建 Pixi Application 与 Live2DModel，成功时隐藏 preview，失败时回退 preview；已补窗口内鼠标跟随 focus。透明命中区域、全局鼠标同步、动作/表情细节仍未迁移。
+- 已接入 Electron Live2D 第一版透明命中区域：preload/main 暴露 `setLauncherPointerInteractive` 窄 IPC，main 用 `setIgnoreMouseEvents(..., { forward: true })` 让空白区域穿透；React 从 preview/canvas 计算 alpha mask，并把资源提示、回复气泡、快捷输入计入 UI 命中区域。仍需真实模型实机验证。
+- 手工启动基线已验证：`hermes-yachiyo` 当前 console script 导入 `apps.desktop_launcher:main`；实际启动时 Vite `127.0.0.1:5174`、Electron、Python backend 和 Bridge `127.0.0.1:8420` 均启动，renderer 请求 `/ui/dashboard` 与 `/ui/launcher?mode=bubble` 返回 200。验证结束时的 exit 130 是 Ctrl-C 中断，不是应用崩溃。
+- 启动器补强：`apps/desktop_launcher.py` 现在会预检 Node.js 20.19+，前端子进程异常时输出明确失败提示，并把 Ctrl-C/验证中断转成无 Python traceback 的退出。
+- React 通用设置页已接入真实字段级编辑：显示模式、助手称呼/人设、Bridge 启用/host/port、托盘入口会从 `/ui/settings` 填充，只提交差异字段并保存后刷新状态；浏览器实机检查确认真实数据填充、待保存计数、非法端口提示与修正后清理均正常。
+- React Bubble/Live2D 模式设置页已从 JSON 预览替换为字段级编辑表单：Bubble 覆盖旧 pywebview 模式设置中的尺寸、默认位置、置顶、吸附、头像、展示、摘要、提醒、透明度和主动观察；Live2D 覆盖模型/路径、窗口、缩放、行为、鼠标跟随、动作/表情/物理开关、主动观察和 Live2D TTS。保存走 `/ui/settings`，保存后重新读取 `/ui/modes/{mode}/settings`。
+- React Live2D 模式设置页已恢复旧 pywebview 的资源操作入口：Electron preload/main 暴露选择模型目录、选择 ZIP、打开路径、打开外部链接；Bridge 新增 `/ui/live2d/model-path/prepare` 与 `/ui/live2d/archive/import`，Python 只验证/导入并返回 `live2d_mode.model_path` 草稿，不直接保存配置。React 按钮包含 `选择模型目录`、`导入资源包 ZIP`、`打开导入目录`、`打开 Releases`，仍由用户点击 `保存更改` 才持久化。
+- 已修复用户反馈的无桌面 IPC 交互回归：没有 Electron 文件选择器时，Live2D 资源区显示内联“模型目录路径 / 资源包 ZIP 路径”输入框并按路径检查/导入；没有 `openView` IPC 时，Bubble 点击不会在 112×112 表现态窗口内跳转 ChatView，而是通过 `window.open(...view=chat)` 打开新窗口/标签。
+- 已根据用户反馈收紧运行态边界：React 只是 renderer，产品态必须通过 Electron 桌面壳运行；浏览器/Vite 只作为开发 fallback。`hermes-yachiyo` 在 5174 已有 Vite 时会复用 dev server 并直接启动 Electron，不再因 strict port 占用退出。Live2D 透明 pointer passthrough 默认关闭，改为 `HERMES_YACHIYO_LIVE2D_POINTER_PASSTHROUGH=1` 才启用，当前优先保证表现态可点击/可右键/可操作；Live2D 主要交互区已加 `-webkit-app-region: no-drag`，避免被窗口 drag 区域吞点击。
+- 已用 Downloads 中真实资源包 `hermes-yachiyo-live2d-yachiyo-20260423.zip` 做模拟导入验证：临时导入识别 1 个 `.model3.json` 和 1 个 `.moc3`，草稿预览为 `path_valid`；直接调用 `/ui/live2d/archive/import` 路由函数并将导入根目录替换为临时目录也返回成功，真实 `config.live2d_mode.model_path` 未被写入。
+- 已修复最新窗口/路由回归：Electron 新增独立 Chat Window 单例；主控台、Bubble、Live2D、右键菜单和 renderer fallback 打开对话时都走同一个 Chat BrowserWindow；Chat Window 内的“主控台”按钮会打开/置前主窗口。
+- React renderer 已切到 hash route helper：`#/`、`#/chat`、`#/settings`、`#/settings/bubble`、`#/settings/live2d`、`#/bubble`、`#/live2d` 等路由可触发 App 重新渲染，同时保留旧 `?view=` 兼容和 `bridge=` 查询参数。
+- Bubble/Live2D mode window 已加导航保护：表现态窗口只承载 launcher route，若发生 chat/settings/main 导航，Electron 会拦截并转发到 Chat 单例或主窗口，避免气泡大小窗口显示完整 ChatView。
+- React 主控台和通用设置页已按旧 pywebview 内容补全：主控台恢复 Hermes、Workspace、Runtime/Bridge、Tasks、Integrations、会话摘要和模式入口；通用设置恢复 Hermes 诊断、Workspace、显示模式、助手资料、Bridge 状态/漂移/重启、集成状态、应用、备份和卸载区。
+- UI Bridge 已补旧 MainWindowAPI 操作路由：Hermes terminal/recheck、Bridge restart、backup status/create/restore/delete/open-location、uninstall preview/run，React 不复制业务逻辑。
+- 验证：最新 `npm --prefix apps/frontend run build` 通过；浏览器实机检查通用/Bubble/Live2D 设置页真实数据填充、待保存计数、非法数值提示与恢复同步状态通过；新增资源入口后再次构建通过；无桌面 IPC 场景下验证资源区内联路径输入和 Bubble 新窗口 fallback 通过；Electron 运行态短启动验证确认 Vite + Electron 进程能拉起；最新 `/Users/cxldefontaine/个人项目/Hermes-Yachiyo/.venv/bin/python -m pytest tests/test_desktop_launcher.py tests/test_ui_bridge_routes.py` → 19 passed；相关 VS Code diagnostics 无错误。此前同类验证包括 18 passed、45 passed、48 passed、119 passed。
+
+---
+
 ## 追加修复 — Milestone 70: Bounded ZIP extraction writes
 
 ### 核心结果

@@ -21,6 +21,7 @@ from apps.shell.assets import (
     data_uri,
     find_live2d_preview_path,
     get_yachiyo_workspace_dir,
+    inject_css,
     project_display_path,
 )
 from apps.shell.chat_bridge import ChatBridge
@@ -429,6 +430,7 @@ _LIVE2D_HTML = r"""
         .menu-btn:hover,
         .menu-btn:focus { background: rgba(255, 255, 255, 0.1); outline: none; }
         .menu-btn.danger { color: #ffb5b5; }
+
     </style>
 </head>
 <body>
@@ -1552,6 +1554,8 @@ _LIVE2D_HTML = r"""
 </body>
 </html>
 """
+
+_LIVE2D_HTML = inject_css(_LIVE2D_HTML, "styles/live2d.css")
 
 
 def _resolve_live2d_preview_path(config: "AppConfig") -> Path:

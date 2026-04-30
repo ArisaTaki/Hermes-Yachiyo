@@ -14,12 +14,37 @@ from fastapi.responses import FileResponse, Response
 
 from apps.bridge.deps import get_runtime
 from apps.bridge.server import get_live2d_asset_token
+from apps.shell.modes import live2d as live2d_mode
 
 router = APIRouter(tags=["Live2D"])
 
 _LIVE2D_MANIFEST_SUFFIXES = (".model3.json", ".model.json")
 _LIVE2D_PATH_KEYS = {"Moc", "Physics", "Pose", "UserData", "DisplayInfo", "File", "Sound"}
 _LIVE2D_PATH_LIST_KEYS = {"Textures"}
+_LIVE2D_RUNTIME_CACHE_SECONDS = 86400
+
+
+def _live2d_runtime_script_sources() -> list[dict[str, str]]:
+    scripts: list[dict[str, str]] = []
+    specs = live2d_mode._get_live2d_runtime_dependency_specs()
+    for dependency_id, (source_url, cached_path) in specs.items():
+        if cached_path.exists() and cached_path.is_file() and cached_path.stat().st_size > 0:
+            scripts.append(
+                {
+                    "id": dependency_id,
+                    "source": "cache",
+                    "url": f"/live2d/runtime/{dependency_id}",
+                }
+            )
+        else:
+            scripts.append(
+                {
+                    "id": dependency_id,
+                    "source": "cdn",
+                    "url": source_url,
+                }
+            )
+    return scripts
 
 
 def _get_live2d_model_root() -> Path:
@@ -102,6 +127,32 @@ def _render_live2d_manifest(asset: Path, token: str) -> bytes:
     payload = json.loads(asset.read_text(encoding="utf-8"))
     rewritten = _rewrite_live2d_manifest_paths(payload, token)
     return json.dumps(rewritten, ensure_ascii=False).encode("utf-8")
+
+
+@router.get("/live2d/runtime")
+async def get_live2d_runtime() -> dict[str, object]:
+    ready, error = live2d_mode._prime_live2d_runtime_dependencies()
+    return {
+        "ok": True,
+        "ready": ready,
+        "error": error,
+        "scripts": _live2d_runtime_script_sources(),
+    }
+
+
+@router.get("/live2d/runtime/{dependency_id}")
+async def get_live2d_runtime_dependency(dependency_id: str) -> FileResponse:
+    specs = live2d_mode._get_live2d_runtime_dependency_specs()
+    if dependency_id not in specs:
+        raise HTTPException(status_code=404, detail="Live2D 渲染依赖不存在")
+    _source_url, cached_path = specs[dependency_id]
+    if not cached_path.exists() or not cached_path.is_file() or cached_path.stat().st_size <= 0:
+        raise HTTPException(status_code=404, detail="Live2D 渲染依赖尚未缓存")
+    return FileResponse(
+        cached_path,
+        media_type="application/javascript",
+        headers={"Cache-Control": f"public, max-age={_LIVE2D_RUNTIME_CACHE_SECONDS}"},
+    )
 
 
 @router.get("/live2d/assets/{asset_path:path}")

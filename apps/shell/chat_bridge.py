@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING, Any, Dict
 
 from apps.shell.chat_api import ChatAPI
@@ -31,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 # 摘要消息最大内容长度
 _SUMMARY_MAX_CONTENT_LEN = 80
+_SESSION_SUMMARY_MAX_CONTENT_LEN = 132
+_SESSION_SUMMARY_FRAGMENT_LEN = 58
 
 
 def _truncate(text: str, max_len: int = _SUMMARY_MAX_CONTENT_LEN) -> str:
@@ -46,6 +49,102 @@ def _normalize_count(count: int) -> int:
         return max(0, int(count))
     except (TypeError, ValueError):
         return 0
+
+
+def _message_field(message: Any, field: str) -> Any:
+    """兼容 dict 与 StoredMessage/ChatMessage 对象读取字段。"""
+    if isinstance(message, dict):
+        return message.get(field)
+    return getattr(message, field, None)
+
+
+def _clean_summary_text(text: str) -> str:
+    """将 Markdown/日志式内容压缩成适合会话卡片展示的一行摘要。"""
+    raw = str(text or "")
+    lines: list[str] = []
+    in_code_block = False
+
+    for source_line in raw.replace("\r\n", "\n").split("\n"):
+        line = source_line.strip()
+        if line.startswith("```"):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block or not line:
+            continue
+        line = re.sub(r"^\s*(?:#{1,6}|[-*+>]|\d+[.)])\s*", "", line)
+        if re.fullmatch(r"[-*_=\s]{3,}", line):
+            continue
+        line = re.sub(r"[*_`~]+", "", line)
+        lines.append(line)
+
+    value = " ".join(lines) if lines else raw
+    value = re.sub(r"\s+", " ", value).strip()
+    return value
+
+
+def _latest_message(messages: list[Any]) -> Any | None:
+    return messages[-1] if messages else None
+
+
+def _latest_content_by_role(messages: list[Any], role: str) -> str:
+    for message in reversed(messages):
+        if _message_field(message, "role") == role:
+            content = _clean_summary_text(str(_message_field(message, "content") or ""))
+            if content:
+                return content
+    return ""
+
+
+def _first_content_by_role(messages: list[Any], role: str) -> str:
+    for message in messages:
+        if _message_field(message, "role") == role:
+            content = _clean_summary_text(str(_message_field(message, "content") or ""))
+            if content:
+                return content
+    return ""
+
+
+def _session_summary(messages: list[Any]) -> str:
+    """生成会话列表摘要，避免只展示首条消息。"""
+    if not messages:
+        return "暂无消息"
+
+    latest = _latest_message(messages)
+    latest_status = str(_message_field(latest, "status") or "")
+    first_user = _first_content_by_role(messages, "user")
+    latest_user = _latest_content_by_role(messages, "user")
+    latest_assistant = _latest_content_by_role(messages, "assistant")
+    latest_system = _latest_content_by_role(messages, "system")
+
+    if latest_status in {"pending", "processing"} and latest_user:
+        return _truncate(f"处理中：{_truncate(latest_user, _SESSION_SUMMARY_FRAGMENT_LEN)}", _SESSION_SUMMARY_MAX_CONTENT_LEN)
+    if latest_status == "failed":
+        failed_content = latest_assistant or latest_user or latest_system or "任务失败"
+        return _truncate(f"失败：{_truncate(failed_content, _SESSION_SUMMARY_FRAGMENT_LEN)}", _SESSION_SUMMARY_MAX_CONTENT_LEN)
+    summary_user = latest_user or first_user
+    if summary_user and latest_assistant:
+        return _truncate(
+            f"用户：{_truncate(summary_user, _SESSION_SUMMARY_FRAGMENT_LEN)}；回复：{_truncate(latest_assistant, _SESSION_SUMMARY_FRAGMENT_LEN)}",
+            _SESSION_SUMMARY_MAX_CONTENT_LEN,
+        )
+    if latest_user:
+        return _truncate(f"等待回复：{_truncate(latest_user, _SESSION_SUMMARY_FRAGMENT_LEN)}", _SESSION_SUMMARY_MAX_CONTENT_LEN)
+    if latest_assistant:
+        return _truncate(f"回复：{_truncate(latest_assistant, _SESSION_SUMMARY_FRAGMENT_LEN)}", _SESSION_SUMMARY_MAX_CONTENT_LEN)
+    if latest_system:
+        return _truncate(f"系统：{_truncate(latest_system, _SESSION_SUMMARY_FRAGMENT_LEN)}", _SESSION_SUMMARY_MAX_CONTENT_LEN)
+    return "暂无可读内容"
+
+
+def _session_activity(messages: list[Any], fallback: str = "") -> Dict[str, str]:
+    latest = _latest_message(messages)
+    if latest is None:
+        return {"latest_role": "", "latest_status": "", "updated_at": fallback}
+    return {
+        "latest_role": str(_message_field(latest, "role") or ""),
+        "latest_status": str(_message_field(latest, "status") or ""),
+        "updated_at": str(_message_field(latest, "created_at") or fallback),
+    }
 
 
 def _latest_notifiable_assistant_message(messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -90,6 +189,14 @@ class ChatBridge:
     def __init__(self, runtime: "HermesRuntime") -> None:
         self._runtime = runtime
         self._chat_api = ChatAPI(runtime)
+
+    def _get_store(self) -> Any:
+        store = getattr(self._runtime.chat_session, "_store", None)
+        if store is not None:
+            return store
+        from apps.core.chat_store import get_chat_store
+
+        return get_chat_store()
 
     def send_quick_message(self, text: str) -> Dict[str, Any]:
         """快捷发送消息，委托 ChatAPI"""
@@ -193,31 +300,38 @@ class ChatBridge:
     def get_recent_sessions(self, limit: int = 4) -> Dict[str, Any]:
         """获取最近会话列表，供 Window/Bubble/Live2D 概览使用。"""
         try:
-            from apps.core.chat_store import get_chat_store
-
-            store = get_chat_store()
+            store = self._get_store()
             current_session_id = self._runtime.chat_session.session_id
-            sessions = store.list_sessions(limit=max(1, int(limit)))
-            items = [
-                {
-                    "session_id": item.session_id,
-                    "title": item.title or "新对话",
-                    "created_at": item.created_at,
-                    "message_count": item.message_count,
-                    "is_current": item.session_id == current_session_id,
-                }
-                for item in sessions
-            ]
+            normalized_limit = max(1, _normalize_count(limit) or 1)
+            sessions = store.list_sessions(limit=normalized_limit)
+            items = []
+            for item in sessions:
+                messages = store.load_messages(item.session_id, limit=240)
+                items.append(
+                    {
+                        "session_id": item.session_id,
+                        "title": item.title or "新对话",
+                        "created_at": item.created_at,
+                        "message_count": item.message_count,
+                        "is_current": item.session_id == current_session_id,
+                        "summary": _session_summary(messages),
+                        **_session_activity(messages, item.created_at),
+                    }
+                )
             if not any(item["session_id"] == current_session_id for item in items):
                 stored_current = store.get_session(current_session_id)
+                current_messages = store.load_messages(current_session_id, limit=240)
+                created_at = stored_current.created_at if stored_current else ""
                 items.insert(
                     0,
                     {
                         "session_id": current_session_id,
                         "title": (stored_current.title if stored_current else "") or "当前会话",
-                        "created_at": stored_current.created_at if stored_current else "",
-                        "message_count": stored_current.message_count if stored_current else 0,
+                        "created_at": created_at,
+                        "message_count": stored_current.message_count if stored_current else len(current_messages),
                         "is_current": True,
+                        "summary": _session_summary(current_messages),
+                        **_session_activity(current_messages, created_at),
                     },
                 )
             return {

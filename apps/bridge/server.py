@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import secrets
 import threading
 import time
@@ -80,6 +81,7 @@ def _register_routes() -> None:
     import apps.bridge.routes.status as status
     import apps.bridge.routes.system as system
     import apps.bridge.routes.tasks as tasks
+    import apps.bridge.routes.ui as ui
 
     app.include_router(status.router)
     app.include_router(tasks.router)
@@ -88,6 +90,7 @@ def _register_routes() -> None:
     app.include_router(live2d.router)
     app.include_router(assistant.router)
     app.include_router(hermes.router)
+    app.include_router(ui.router)
     _routes_registered = True
 
 _server: uvicorn.Server | None = None
@@ -99,6 +102,17 @@ _state: str = "not_started"
 _running_host: str = ""
 _running_port: int = 0
 _live2d_asset_token: str = secrets.token_urlsafe(24)
+_ACCESS_LOG_ENV = "HERMES_YACHIYO_BRIDGE_ACCESS_LOG"
+_ACCESS_LOG_TRUE_VALUES = {"1", "true", "yes", "on", "debug"}
+
+
+def _bridge_access_log_enabled() -> bool:
+    """是否输出 uvicorn access log。
+
+    默认关闭轮询请求日志，避免 Electron 前端通讯刷屏；排查 HTTP 层问题时可通过
+    HERMES_YACHIYO_BRIDGE_ACCESS_LOG=1 临时开启。
+    """
+    return os.getenv(_ACCESS_LOG_ENV, "").strip().lower() in _ACCESS_LOG_TRUE_VALUES
 
 
 def get_bridge_state() -> str:
@@ -131,7 +145,13 @@ def start_bridge(host: str = "127.0.0.1", port: int = 8420) -> None:
         raise RuntimeError("Bridge 依赖未安装：缺少 fastapi/uvicorn")
     regenerate_live2d_asset_token()
     _register_routes()
-    config = uvicorn.Config(app, host=host, port=port, log_level="info")
+    config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        log_level="info",
+        access_log=_bridge_access_log_enabled(),
+    )
     _server = uvicorn.Server(config)
     _state = "running"
     _running_host = host

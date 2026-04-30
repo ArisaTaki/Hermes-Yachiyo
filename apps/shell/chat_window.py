@@ -13,6 +13,7 @@ import sys
 import threading
 from typing import TYPE_CHECKING, Any, Dict
 
+from apps.shell.assets import inject_css
 from apps.shell.chat_api import ChatAPI
 
 if TYPE_CHECKING:
@@ -596,6 +597,7 @@ _CHAT_HTML = r"""
             max-width: 140px;
         }
         .session-select:focus { border-color: #6495ed; outline: none; }
+
     </style>
 </head>
 <body>
@@ -1224,3 +1226,5 @@ document.addEventListener('DOMContentLoaded', function() {
 </body>
 </html>
 """
+
+_CHAT_HTML = inject_css(_CHAT_HTML, "styles/elegant.css")

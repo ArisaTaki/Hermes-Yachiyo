@@ -20,6 +20,7 @@ from apps.shell.assets import (
     LIVE2D_RELEASES_URL,
     find_default_live2d_model_dir,
     get_user_live2d_assets_dir,
+    inject_css,
     project_display_path,
 )
 from apps.shell.config import check_live2d_model_dir, scan_live2d_model_dir
@@ -550,7 +551,8 @@ input:checked + .slider:before { transform: translateX(20px); }
     background: #153422;
     color: #d9ffe8;
 }
-</style>
+
+    </style>
 </head>
 <body>
     <h2 id="mode-title">设置</h2>
@@ -1127,6 +1129,8 @@ window.addEventListener('pywebviewready', bootstrap);
 </body>
 </html>
 """
+
+_SETTINGS_HTML = inject_css(_SETTINGS_HTML, "styles/elegant.css")
 
 
 def open_mode_settings_window(config: "AppConfig", mode_id: str) -> bool:

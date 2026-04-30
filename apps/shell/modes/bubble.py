@@ -15,7 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Dict
 
-from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri
+from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri, inject_css
 from apps.shell.chat_bridge import ChatBridge
 from apps.shell.launcher_notifications import LauncherNotificationTracker
 from apps.shell.proactive import ProactiveDesktopService
@@ -202,6 +202,7 @@ _BUBBLE_HTML = r"""
             pointer-events: none;
         }
         .bubble-summary.hidden { display: none; }
+
     </style>
 </head>
 <body>
@@ -519,6 +520,8 @@ window.addEventListener('pywebviewready', bootstrap);
 </html>
 """
 
+_BUBBLE_HTML = inject_css(_BUBBLE_HTML, "styles/bubble.css")
+
 _BUBBLE_MENU_WIDTH = 156
 _BUBBLE_MENU_HEIGHT = 176
 
@@ -571,6 +574,7 @@ _BUBBLE_MENU_HTML = r"""
             outline: none;
         }
         .menu-btn.danger { color: #ffb5b5; }
+
     </style>
 </head>
 <body>
@@ -631,6 +635,8 @@ window.addEventListener('pywebviewready', bootstrapMenu);
 </body>
 </html>
 """
+
+_BUBBLE_MENU_HTML = inject_css(_BUBBLE_MENU_HTML, "styles/bubble-menu.css")
 
 
 def _event_is_set(event: Any) -> bool:

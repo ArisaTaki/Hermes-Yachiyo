@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from apps.shell.config import AppConfig
     from packages.protocol.install import HermesInstallInfo
 
+from apps.shell.assets import inject_css
 from packages.protocol.enums import HermesInstallStatus
 
 logger = logging.getLogger(__name__)
@@ -540,6 +541,7 @@ _STATUS_HTML = """
             border: 1px solid #553322; display: none;
         }
         .bridge-dirty-hint.visible { display: block; }
+
     </style>
 </head>
 <body>
@@ -2151,6 +2153,8 @@ _STATUS_HTML = """
 </html>
 """
 
+_STATUS_HTML = inject_css(_STATUS_HTML, "styles/elegant.css")
+
 # 安装引导页 HTML
 _INSTALLER_HTML = """
 <!DOCTYPE html>
@@ -2253,6 +2257,7 @@ _INSTALLER_HTML = """
             margin: 20px 0;
             border-left: 4px solid #6495ed;
         }
+
     </style>
 </head>
 <body>
@@ -2295,6 +2300,8 @@ _INSTALLER_HTML = """
 </body>
 </html>
 """
+
+_INSTALLER_HTML = inject_css(_INSTALLER_HTML, "styles/elegant.css")
 
 
 def open_main_window(

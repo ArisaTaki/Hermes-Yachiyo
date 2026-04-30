@@ -384,6 +384,56 @@ class TestHermesStreamBridgeHelpers:
         assert result.success is False
         assert result.error_message == "Hermes runtime credentials are not available"
 
+    @pytest.mark.asyncio
+    async def test_invoke_falls_back_when_stream_bridge_process_crashes_with_partial_output(
+        self,
+        monkeypatch,
+    ):
+        async def fake_stream_bridge(description, hermes_session_id, on_update):
+            on_update("partial")
+            return HermesInvokeResult(
+                success=False,
+                stdout="partial",
+                stderr="Traceback...\nRuntimeError: bridge crashed",
+                returncode=1,
+                error_message=(
+                    "Hermes streaming bridge 执行失败（exit=1）\n"
+                    "RuntimeError: bridge crashed"
+                ),
+            )
+
+        class FakeProcess:
+            returncode = 0
+
+            async def communicate(self):
+                return (b"fallback output\nsession_id: fallback_sess\n", b"")
+
+        calls = []
+
+        async def fake_create_subprocess_exec(*cmd, **kwargs):
+            calls.append(cmd)
+            return FakeProcess()
+
+        monkeypatch.setattr(
+            executor_mod,
+            "_invoke_hermes_stream_bridge",
+            fake_stream_bridge,
+        )
+        monkeypatch.setattr(
+            executor_mod.asyncio,
+            "create_subprocess_exec",
+            fake_create_subprocess_exec,
+        )
+        updates = []
+
+        result = await executor_mod.invoke_hermes_cli("hello", on_update=updates.append)
+
+        assert result.success is True
+        assert result.output == "fallback output"
+        assert result.hermes_session_id == "fallback_sess"
+        assert len(calls) == 1
+        assert updates == ["partial"]
+
 
 class TestHumanizeBridgeError:
     """_humanize_bridge_error 把 bridge 原始异常前缀转为用户可读描述。"""
@@ -418,9 +468,16 @@ class TestHumanizeBridgeError:
 class TestConsumeStreamBridgeRobustness:
     """_consume_stream_bridge 对 provider 差异事件结构的鲁棒性测试。"""
 
-    def _make_proc_from_lines(self, lines: list[str]):
+    def _make_proc_from_lines(
+        self,
+        lines: list[str],
+        *,
+        returncode: int = 0,
+        stderr: str = "",
+    ):
         """构造一个返回指定行序列的假进程。"""
         encoded = b"\n".join(line.encode() for line in lines) + b"\n"
+        stderr_encoded = stderr.encode()
 
         class FakeStream:
             def __init__(self, data: bytes):
@@ -440,7 +497,9 @@ class TestConsumeStreamBridgeRobustness:
                 return chunk
 
             async def read(self) -> bytes:
-                return b""
+                chunk = self._data[self._pos :]
+                self._pos = len(self._data)
+                return chunk
 
         class FakeStdin:
             def write(self, data: bytes): pass
@@ -448,15 +507,15 @@ class TestConsumeStreamBridgeRobustness:
             def close(self): pass
 
         class FakeProc:
-            returncode = 0
             stdin = FakeStdin()
 
             def __init__(self, stdout_data: bytes):
+                self.returncode = returncode
                 self.stdout = FakeStream(stdout_data)
-                self.stderr = FakeStream(b"")
+                self.stderr = FakeStream(stderr_encoded)
 
             async def wait(self) -> int:
-                return 0
+                return returncode
 
         return FakeProc(encoded)
 
@@ -549,6 +608,120 @@ class TestConsumeStreamBridgeRobustness:
         )
 
         assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_process_exit_failure_uses_stderr_summary(self):
+        """bridge 无 error 事件但进程失败时，应把 stderr 摘要放进错误消息。"""
+        proc = self._make_proc_from_lines(
+            [],
+            returncode=1,
+            stderr=(
+                "Traceback (most recent call last):\n"
+                "  File \"bridge.py\", line 1, in <module>\n"
+                "RuntimeError: bridge crashed"
+            ),
+        )
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            lambda _: None,
+        )
+
+        assert result.success is False
+        assert "Hermes streaming bridge 执行失败（exit=1）" in result.error_message
+        assert "RuntimeError: bridge crashed" in result.error_message
+
+    @pytest.mark.asyncio
+    async def test_done_failed_uses_response_as_task_error(self):
+        """done.failed 是 agent 层失败，不应伪装成 bridge 进程崩溃。"""
+        lines = [
+            json.dumps({"type": "done", "response": "模型请求失败", "failed": True}),
+        ]
+        proc = self._make_proc_from_lines(lines, returncode=1)
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            lambda _: None,
+        )
+
+        assert result.success is False
+        assert "Hermes 对话执行失败" in result.error_message
+        assert "模型请求失败" in result.error_message
+        assert "Hermes streaming bridge 执行失败" not in result.error_message
+
+    @pytest.mark.asyncio
+    async def test_done_failed_uses_error_field_before_empty_response(self):
+        """done.failed 的 error 字段应优先于空响应。"""
+        lines = [
+            json.dumps(
+                {
+                    "type": "done",
+                    "response": "None",
+                    "error": "provider api key missing",
+                    "failed": True,
+                }
+            ),
+        ]
+        proc = self._make_proc_from_lines(lines, returncode=1)
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            lambda _: None,
+        )
+
+        assert result.success is False
+        assert "provider api key missing" in result.error_message
+        assert "：None" not in result.error_message
+
+    @pytest.mark.asyncio
+    async def test_done_failed_without_detail_guides_configuration_check(self):
+        """Hermes 返回 failed=True 但没有错误详情时，应给出配置排查提示。"""
+        lines = [
+            json.dumps({"type": "done", "response": "None", "failed": True}),
+        ]
+        proc = self._make_proc_from_lines(lines, returncode=1)
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            lambda _: None,
+        )
+
+        assert result.success is False
+        assert "没有返回错误详情" in result.error_message
+        assert "模型/provider 配置" in result.error_message
+        assert "：None" not in result.error_message
+
+
+class TestHermesStreamBridgeResultFormatting:
+    """bridge 对 Hermes run_conversation 结果的清洗。"""
+
+    def test_detail_text_treats_none_values_as_empty(self):
+        assert bridge_mod._detail_text(None) == ""
+        assert bridge_mod._detail_text("None") == ""
+        assert bridge_mod._detail_text("null") == ""
+        assert bridge_mod._detail_text("None", drop_empty_literals=False) == "None"
+
+    def test_failure_message_prefers_explicit_error_fields(self):
+        result = {
+            "failed": True,
+            "final_response": None,
+            "error": "",
+            "message": "model route is invalid",
+        }
+
+        assert bridge_mod._failure_message_from_result(result) == "model route is invalid"
+
+    def test_failure_message_serializes_structured_details(self):
+        result = {
+            "failed": True,
+            "details": {"provider": "openai", "reason": "missing key"},
+        }
+
+        assert "missing key" in bridge_mod._failure_message_from_result(result)
 
 
 class TestBuildInitAgentKwargs:

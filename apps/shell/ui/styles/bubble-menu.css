@@ -1,0 +1,39 @@
+/* Bubble context menu visual skin. */
+:root {
+    --hy-menu-surface: rgba(24, 27, 34, 0.96);
+    --hy-menu-border: rgba(255, 255, 255, 0.1);
+    --hy-menu-text: #e7edf5;
+    --hy-menu-blue: #76a9fa;
+    --hy-menu-red: #e56b73;
+}
+
+.menu-panel {
+    background: var(--hy-menu-surface) !important;
+    border: 1px solid var(--hy-menu-border) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.32) !important;
+}
+
+.menu-btn,
+.menu-item {
+    color: var(--hy-menu-text) !important;
+    border-radius: 6px !important;
+}
+
+.menu-btn:hover,
+.menu-item:hover {
+    background: rgba(118, 169, 250, 0.14) !important;
+    color: var(--hy-menu-blue) !important;
+}
+
+.menu-btn.danger,
+.menu-item.danger,
+.danger {
+    color: var(--hy-menu-red) !important;
+}
+
+.menu-btn.danger:hover,
+.menu-item.danger:hover,
+.danger:hover {
+    background: rgba(229, 107, 115, 0.12) !important;
+}

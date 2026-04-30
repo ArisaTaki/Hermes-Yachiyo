@@ -30,8 +30,8 @@ class EffectType(StrEnum):
 # key 格式与 update_settings() 接收的 key 格式一致
 _FIELD_POLICIES: dict[str, tuple[EffectType, str]] = {
     # 顶层字段
-    "display_mode":    (EffectType.REQUIRES_APP_RESTART,
-                        "显示模式已保存，应用将重启后进入新模式"),
+    "display_mode":    (EffectType.REQUIRES_MODE_RESTART,
+                        "显示模式已保存，表现态将切换到新模式"),
     "bridge_enabled":  (EffectType.REQUIRES_BRIDGE_RESTART,
                         "Bridge 开关变更需重启 Bridge 后生效"),
     "bridge_host":     (EffectType.REQUIRES_BRIDGE_RESTART,

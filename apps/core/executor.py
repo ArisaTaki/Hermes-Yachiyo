@@ -52,7 +52,9 @@ class HermesCallError(RuntimeError):
         if self.returncode != -1:
             parts.append(f"exit={self.returncode}")
         if self.stderr:
-            parts.append(f"stderr: {self.stderr[:120]}")
+            stderr_detail = _compact_error_detail(self.stderr, max_chars=120)
+            if stderr_detail and stderr_detail not in str(self):
+                parts.append(f"stderr: {stderr_detail}")
         return " | ".join(parts)
 
 
@@ -104,6 +106,8 @@ _DEFAULT_EXEC_TIMEOUT: float = 30 * 60.0
 _PROBE_TIMEOUT: float = 5.0   # hermes --version 探测超时（秒）
 _STREAM_UPDATE_INTERVAL: float = 0.05
 _BRIDGE_SCRIPT = Path(__file__).with_name("hermes_stream_bridge.py")
+_ERROR_DETAIL_MAX_CHARS = 500
+_ERROR_DETAIL_MAX_LINES = 12
 
 
 def _read_exec_timeout() -> float:
@@ -189,6 +193,12 @@ _BRIDGE_RAW_EXCEPTION_TO_FRIENDLY: dict[str, str] = {
     "ValueError:": "Hermes 配置值错误",
     "AssertionError:": "Hermes 断言失败",
 }
+_EMPTY_ERROR_DETAILS = {"", "none", "null"}
+_AGENT_FAILURE_WITHOUT_DETAIL = (
+    "Hermes 对话执行失败，但 Hermes Agent 没有返回错误详情。"
+    "通常是模型/provider 配置、API Key、base URL 或网络请求失败；"
+    "请运行 hermes setup 或 hermes config 检查当前模型配置。"
+)
 
 
 def _humanize_bridge_error(message: str) -> str:
@@ -202,6 +212,42 @@ def _humanize_bridge_error(message: str) -> str:
     for pattern, friendly in _BRIDGE_RAW_EXCEPTION_TO_FRIENDLY.items():
         if message.startswith(pattern):
             return f"{friendly}（{message}）"
+    return message
+
+
+def _is_empty_error_detail(value: str) -> bool:
+    return value.strip().lower() in _EMPTY_ERROR_DETAILS
+
+
+def _compact_error_detail(text: str, *, max_chars: int = _ERROR_DETAIL_MAX_CHARS) -> str:
+    """压缩错误细节，保留末尾最有诊断价值的内容。"""
+    cleaned = _ANSI_RE.sub("", text or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.rstrip() for line in cleaned.split("\n") if line.strip()]
+    if not lines:
+        return ""
+    detail = "\n".join(lines[-_ERROR_DETAIL_MAX_LINES:])
+    if len(detail) > max_chars:
+        detail = "..." + detail[-max_chars:]
+    return detail
+
+
+def _bridge_failure_message(
+    error_message: str,
+    *,
+    returncode: int,
+    stderr: str,
+) -> str:
+    """为 bridge 进程级失败补充 stderr 摘要。"""
+    message = error_message.strip()
+    if not message:
+        if returncode not in (-1, 0):
+            message = f"Hermes streaming bridge 执行失败（exit={returncode}）"
+        else:
+            message = "Hermes streaming bridge 执行失败"
+
+    stderr_detail = _compact_error_detail(stderr)
+    if stderr_detail and "Hermes streaming bridge 执行失败" in message:
+        return f"{message}\n{stderr_detail}"
     return message
 
 
@@ -441,6 +487,7 @@ async def _consume_stream_bridge(
     hermes_session_id: Optional[str] = None
     hermes_title: Optional[str] = None
     failed = False
+    saw_done_event = False
     started_at = time.monotonic()
     first_event_logged = False
     first_delta_logged = False
@@ -480,6 +527,7 @@ async def _consume_stream_bridge(
                     last_emitted = content
                     last_emit_at = now
             elif event_type == "done":
+                saw_done_event = True
                 response = event.get("response")
                 final_response = response if isinstance(response, str) else ""
                 sid = event.get("session_id")
@@ -487,6 +535,11 @@ async def _consume_stream_bridge(
                 title = event.get("title")
                 hermes_title = title if isinstance(title, str) and title else hermes_title
                 failed = bool(event.get("failed"))
+                if failed and _is_empty_error_detail(final_response):
+                    final_response = ""
+                raw_error = event.get("error") or event.get("message")
+                if failed and isinstance(raw_error, str) and not _is_empty_error_detail(raw_error):
+                    error_message = _humanize_bridge_error(raw_error.strip())
                 logger.info(
                     "[Hermes bridge] 完成事件: elapsed=%.2fs, response_len=%d, failed=%s",
                     time.monotonic() - started_at,
@@ -517,6 +570,14 @@ async def _consume_stream_bridge(
     if content and content != last_emitted:
         _emit_stream_update(on_update, content)
 
+    if failed and saw_done_event and not error_message:
+        response_detail = _compact_error_detail(content)
+        error_message = (
+            f"Hermes 对话执行失败：{response_detail}"
+            if response_detail
+            else _AGENT_FAILURE_WITHOUT_DETAIL
+        )
+
     logger.info(
         "[Hermes bridge] 进程结束: exit=%s, elapsed=%.2fs, stdout_len=%d, stderr_len=%d",
         rc,
@@ -531,7 +592,11 @@ async def _consume_stream_bridge(
             stdout=content,
             stderr=stderr,
             returncode=rc,
-            error_message=error_message or f"Hermes streaming bridge 执行失败（exit={rc}）",
+            error_message=_bridge_failure_message(
+                error_message,
+                returncode=rc,
+                stderr=stderr,
+            ),
             hermes_session_id=hermes_session_id,
             hermes_title=hermes_title,
         )
@@ -628,8 +693,7 @@ def _should_fallback_from_stream_bridge(result: HermesInvokeResult) -> bool:
     if any(marker in detail for marker in _STREAM_BRIDGE_FALLBACK_MARKERS):
         return True
     return (
-        not result.stdout
-        and result.returncode not in (-1, 0)
+        result.returncode not in (-1, 0)
         and "Hermes streaming bridge 执行失败" in detail
     )
 
