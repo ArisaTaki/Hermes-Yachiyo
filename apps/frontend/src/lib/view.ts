@@ -1,4 +1,4 @@
-export type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'bubble' | 'bubble-menu' | 'live2d';
+export type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'tools' | 'bubble' | 'bubble-menu' | 'live2d';
 
 type RouteState = {
   view: AppView;
@@ -52,7 +52,7 @@ export function routePath(view: AppView, params: Record<string, string> = {}): s
 }
 
 function isAppView(value: string): value is AppView {
-  return ['main', 'chat', 'settings', 'installer', 'diagnostics', 'bubble', 'bubble-menu', 'live2d'].includes(value);
+  return ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'bubble', 'bubble-menu', 'live2d'].includes(value);
 }
 
 function routeFromHash(hash: string): RouteState | null {

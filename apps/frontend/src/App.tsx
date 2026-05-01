@@ -6,6 +6,7 @@ import { InstallerView } from './views/InstallerView';
 import { LauncherView } from './views/LauncherView';
 import { MainView } from './views/MainView';
 import { ModeSettingsView } from './views/ModeSettingsView';
+import { ToolCenterView } from './views/ToolCenterView';
 import { ROUTE_CHANGE_EVENT, currentView } from './lib/view';
 
 export function App() {
@@ -29,6 +30,7 @@ export function App() {
   if (view === 'settings') return <ModeSettingsView />;
   if (view === 'installer') return <InstallerView />;
   if (view === 'diagnostics') return <DiagnosticsView />;
+  if (view === 'tools') return <ToolCenterView />;
   if (view === 'bubble' || view === 'bubble-menu' || view === 'live2d') return <LauncherView view={view} />;
   return <MainView />;
 }

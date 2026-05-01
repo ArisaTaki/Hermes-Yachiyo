@@ -34,7 +34,7 @@ const POSITION_SAVE_DEBOUNCE_MS = 260;
 const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
 const MAX_LAUNCHER_SHAPE_RECTS = 10000;
 
-type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'bubble' | 'bubble-menu' | 'live2d';
+type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'tools' | 'bubble' | 'bubble-menu' | 'live2d';
 type ModeId = 'bubble' | 'live2d';
 type InstallerTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup';
 
@@ -72,6 +72,7 @@ let activeMode: ModeId | null = null;
 let activeModeConfig: Record<string, unknown> = {};
 let activeModeConfigSignature = '';
 let positionSaveTimer: NodeJS.Timeout | null = null;
+let positionSaveSuppressedUntil = 0;
 let modeWindowIgnoringMouse = false;
 let modeWindowShapeApplied = false;
 let modeWindowTopSuppressed = false;
@@ -143,7 +144,12 @@ function hermesInstallCommand(): string {
   return [
     'echo "Hermes Agent 安装开始"',
     'set -o pipefail',
-    'curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash',
+    'install_script="$(mktemp -t hermes-agent-install.XXXXXX)"',
+    'trap \'rm -f "$install_script"\' EXIT',
+    'curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh -o "$install_script"',
+    'curl_exit_code=$?',
+    'if [ "$curl_exit_code" -ne 0 ]; then printf "\\nHermes Agent 安装脚本下载失败，退出码：%s\\n" "$curl_exit_code"; exit "$curl_exit_code"; fi',
+    'bash "$install_script" --skip-setup',
     'hermes_install_exit_code=$?',
     'printf "\\nHermes Agent 安装命令已结束，退出码：%s\\n" "$hermes_install_exit_code"',
     'exit "$hermes_install_exit_code"',
@@ -527,7 +533,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeView(value: unknown): AppView {
-  const views: AppView[] = ['main', 'chat', 'settings', 'installer', 'diagnostics', 'bubble', 'bubble-menu', 'live2d'];
+  const views: AppView[] = ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'bubble', 'bubble-menu', 'live2d'];
   return typeof value === 'string' && views.includes(value as AppView) ? (value as AppView) : 'main';
 }
 
@@ -577,6 +583,10 @@ function numberFromConfig(value: unknown, fallback: number): number {
 
 function booleanFromConfig(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
+}
+
+function stringFromConfig(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value : fallback;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -640,6 +650,7 @@ async function saveLauncherPosition(mode: ModeId, bounds: Rectangle): Promise<vo
 }
 
 function scheduleModeWindowPositionSave(mode: ModeId, config: Record<string, unknown>): void {
+  if (Date.now() < positionSaveSuppressedUntil) return;
   if (positionSaveTimer) clearTimeout(positionSaveTimer);
   positionSaveTimer = setTimeout(() => {
     if (!modeWindow || modeWindow.isDestroyed() || activeMode !== mode) return;
@@ -655,13 +666,36 @@ function scheduleModeWindowPositionSave(mode: ModeId, config: Record<string, unk
   }, POSITION_SAVE_DEBOUNCE_MS);
 }
 
+function suppressModeWindowPositionSave(durationMs = 900): void {
+  positionSaveSuppressedUntil = Math.max(positionSaveSuppressedUntil, Date.now() + durationMs);
+}
+
 function desktopModeBounds(mode: ModeId, config: Record<string, unknown>) {
   if (mode === 'live2d') {
+    const display = screen.getPrimaryDisplay().workArea;
+    const width = Math.round(clamp(numberFromConfig(config.width, 420), 300, 760));
+    const height = Math.round(clamp(numberFromConfig(config.height, 680), 420, 900));
+    const anchor = stringFromConfig(config.position_anchor, 'right_bottom');
+    const positionX = Math.round(numberFromConfig(config.position_x, 0));
+    const positionY = Math.round(numberFromConfig(config.position_y, 0));
+    if (anchor === 'left_bottom' || anchor === 'right_bottom') {
+      const maxX = display.x + Math.max(0, display.width - width);
+      const maxY = display.y + Math.max(0, display.height - height);
+      const anchoredX = anchor === 'right_bottom'
+        ? display.x + display.width - width - positionX
+        : display.x + positionX;
+      return {
+        width,
+        height,
+        x: Math.round(clamp(anchoredX, display.x, maxX)),
+        y: Math.round(clamp(display.y + display.height - height - positionY, display.y, maxY)),
+      };
+    }
     return {
-      width: Math.round(clamp(numberFromConfig(config.width, 420), 300, 760)),
-      height: Math.round(clamp(numberFromConfig(config.height, 680), 420, 900)),
-      x: Math.round(numberFromConfig(config.position_x, 48)),
-      y: Math.round(numberFromConfig(config.position_y, 48)),
+      width,
+      height,
+      x: positionX,
+      y: positionY,
     };
   }
 
@@ -711,6 +745,7 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     if (nextSignature !== activeModeConfigSignature) {
       activeModeConfigSignature = nextSignature;
       const bounds = desktopModeBounds(mode, config);
+      suppressModeWindowPositionSave();
       modeWindow.setBounds(bounds, false);
       applyModeWindowTopPreference();
       if (mode === 'live2d') {
@@ -744,6 +779,7 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
   modeWindowIgnoringMouse = false;
   modeWindowShapeApplied = false;
   modeWindowTopSuppressed = false;
+  suppressModeWindowPositionSave();
   const bounds = desktopModeBounds(mode, config);
   const alwaysOnTop = mode === 'live2d'
     ? booleanFromConfig(config.window_on_top, true)
@@ -796,6 +832,7 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     modeWindowIgnoringMouse = false;
     modeWindowShapeApplied = false;
     modeWindowTopSuppressed = false;
+    positionSaveSuppressedUntil = 0;
     activeModeConfig = {};
     activeModeConfigSignature = '';
     modeWindow = null;

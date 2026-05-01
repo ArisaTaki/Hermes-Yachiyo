@@ -118,7 +118,15 @@ export async function openAppView(
 
 function appViewUrl(view: string, params: Record<string, string> = {}): string {
   const route = isAppView(view) ? routePath(view, params) : routePath('main');
-  return `${window.location.pathname}${window.location.search}${route}`;
+  const query = new URLSearchParams(window.location.search);
+  Object.entries(params)
+    .filter(([key]) => key !== 'view' && key !== 'mode')
+    .forEach(([key, value]) => {
+      if (value) query.set(key, value);
+      else query.delete(key);
+    });
+  const search = query.toString();
+  return `${window.location.pathname}${search ? `?${search}` : ''}${route}`;
 }
 
 function isLauncherView(): boolean {
@@ -127,7 +135,7 @@ function isLauncherView(): boolean {
 }
 
 function isAppView(value: string): value is AppView {
-  return ['main', 'chat', 'settings', 'installer', 'diagnostics', 'bubble', 'bubble-menu', 'live2d'].includes(value);
+  return ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'bubble', 'bubble-menu', 'live2d'].includes(value);
 }
 
 export async function openDesktopMode(mode?: string): Promise<void> {
