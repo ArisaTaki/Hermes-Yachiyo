@@ -6,7 +6,7 @@ import json
 
 import apps.shell.tts as tts_mod
 from apps.shell.config import TTSConfig
-from apps.shell.tts import TTSService
+from apps.shell.tts import TTSService, prepare_tts_text
 
 
 class _ImmediateThread:
@@ -108,6 +108,46 @@ def test_tts_command_invocation_uses_text_voice_and_timeout(monkeypatch):
     assert calls[0][1]["timeout"] == 7
     assert calls[0][1]["env"]["HERMES_YACHIYO_TTS_TEXT"] == "你好"
     assert calls[0][1]["env"]["HERMES_YACHIYO_TTS_VOICE"] == "Kyoko"
+
+
+def test_tts_command_invocation_uses_shortened_notification_text(monkeypatch):
+    calls = []
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return _Result()
+
+    monkeypatch.setattr(tts_mod.threading, "Thread", _ImmediateThread)
+    monkeypatch.setattr(tts_mod.subprocess, "run", fake_run)
+    service = TTSService(
+        TTSConfig(
+            enabled=True,
+            provider="command",
+            command="say {text}",
+            max_chars=24,
+        )
+    )
+
+    result = service.speak_async("这是第一句提醒。后面是很长很长的分析内容，不应该全部朗读。")
+
+    assert result["ok"] is True
+    assert calls[0][0] == ["say", "这是第一句提醒。"]
+    assert result["spoken_text"] == "这是第一句提醒。"
+
+
+def test_prepare_tts_text_strips_code_and_limits_length():
+    text = "```python\nprint('hello')\n```\n请看这个链接：https://example.com/path 后面还有很多内容需要截断"
+
+    prepared = prepare_tts_text(text, max_chars=30)
+
+    assert "print" not in prepared
+    assert "https://" not in prepared
+    assert len(prepared) <= 30
 
 
 def test_tts_http_posts_text_voice_and_timeout(monkeypatch):

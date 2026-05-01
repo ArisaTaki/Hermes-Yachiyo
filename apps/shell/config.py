@@ -31,7 +31,13 @@ BubbleDisplayValue = Literal["icon", "summary", "recent_reply"]
 BubbleExpandTriggerValue = Literal["click"]
 Live2DClickActionValue = Literal["focus_stage", "open_chat", "toggle_reply"]
 Live2DDefaultOpenValue = Literal["stage", "reply_bubble", "chat_input"]
+Live2DPositionAnchorValue = Literal["left_bottom", "right_bottom", "custom"]
 TTSProviderValue = Literal["none", "http", "command"]
+
+DEFAULT_TTS_NOTIFICATION_PROMPT = (
+    "主动提醒只输出适合语音播报的一句中文招呼或提醒，保持八千代人设，"
+    "不要朗读长段分析、列表、代码、路径或调试信息。"
+)
 
 DEFAULT_ASSISTANT_PERSONA_PROMPT = """<Role>Hermes-Yachiyo Agent</Role>
 
@@ -564,6 +570,8 @@ class TTSConfig:
     command: str = ""
     voice: str = ""
     timeout_seconds: int = 20
+    max_chars: int = 80
+    notification_prompt: str = DEFAULT_TTS_NOTIFICATION_PROMPT
 
 
 @dataclass
@@ -585,9 +593,10 @@ class Live2DModeConfig:
     model_path: str = ""  # 显式模型目录路径；为空时自动在用户目录查找
     width: int = 420
     height: int = 680
-    position_x: int = 48
-    position_y: int = 48
-    scale: float = 1.0                 # 角色缩放（参考 Live2DRenderer 的 SetScale）
+    position_anchor: Live2DPositionAnchorValue = "right_bottom"
+    position_x: int = 0              # *_bottom 时表示水平边距；custom 时表示屏幕绝对 X
+    position_y: int = 0              # *_bottom 时表示底部边距；custom 时表示屏幕绝对 Y
+    scale: float = 0.6                # 角色缩放（参考 Live2DRenderer 的 SetScale）
     window_on_top: bool = True        # 角色窗口是否置顶
     show_on_all_spaces: bool = True    # macOS: 置顶时加入所有 Spaces / 全屏辅助层
     show_reply_bubble: bool = True
@@ -599,6 +608,10 @@ class Live2DModeConfig:
     idle_motion_group: str = "Idle"   # 待机动作组名（Live2D Cubism 约定）
     enable_expressions: bool = False  # 是否启用表情系统（等待渲染器支持）
     enable_physics: bool = False      # 是否启用物理模拟（等待渲染器支持）
+    thinking_expression: str = ""     # 处理中/思考状态使用的表情；为空则自动匹配
+    message_expression: str = ""      # 收到回复/新消息时使用的表情；为空则自动匹配
+    failed_expression: str = ""       # 失败状态使用的表情；为空则自动匹配
+    attention_expression: str = ""    # 主动提醒/未读状态使用的表情；为空则自动匹配
     proactive_enabled: bool = False
     proactive_desktop_watch_enabled: bool = False
     proactive_interval_seconds: int = 300
@@ -789,6 +802,18 @@ def _load_nested_dataclass(
         for field_name, value in nested.items()
         if field_name in cls.__dataclass_fields__
     }
+    if cls is Live2DModeConfig and "position_anchor" not in valid:
+        legacy_x = valid.get("position_x")
+        legacy_y = valid.get("position_y")
+        legacy_scale = valid.get("scale")
+        if legacy_x == 48 and legacy_y == 48:
+            valid["position_anchor"] = "right_bottom"
+            valid["position_x"] = 0
+            valid["position_y"] = 0
+            if legacy_scale == 1.0:
+                valid["scale"] = 0.6
+        elif "position_x" in valid or "position_y" in valid:
+            valid["position_anchor"] = "custom"
     return cls(**valid)
 
 
@@ -857,7 +882,37 @@ def _normalize_config_values(config: AppConfig) -> None:
         {"focus_stage", "open_chat", "toggle_reply"},
         "open_chat",
     ))
-    config.live2d_mode.scale = _normalize_float_range(config.live2d_mode.scale, 0.4, 2.0, 1.0)
+    config.live2d_mode.position_anchor = cast(Live2DPositionAnchorValue, _normalize_literal(
+        config.live2d_mode.position_anchor,
+        {"left_bottom", "right_bottom", "custom"},
+        "right_bottom",
+    ))
+    try:
+        live2d_scale_number: float | None = float(config.live2d_mode.scale)
+    except (TypeError, ValueError):
+        live2d_scale_number = None
+    if (
+        config.live2d_mode.position_anchor == "left_bottom"
+        and config.live2d_mode.position_x in {0, 24}
+        and config.live2d_mode.position_y in {0, 24}
+        and live2d_scale_number in {0.5, 0.72, 1.0}
+    ):
+        config.live2d_mode.position_anchor = "right_bottom"
+        config.live2d_mode.position_x = 0
+        config.live2d_mode.position_y = 0
+        config.live2d_mode.scale = 0.6
+    elif (
+        config.live2d_mode.position_anchor == "custom"
+        and config.live2d_mode.width == 420
+        and config.live2d_mode.height == 680
+        and config.live2d_mode.position_x in {0, 24, 48}
+        and live2d_scale_number in {0.5, 0.72, 1.0}
+    ):
+        config.live2d_mode.position_anchor = "right_bottom"
+        config.live2d_mode.position_x = 0
+        config.live2d_mode.position_y = 0
+        config.live2d_mode.scale = 0.6
+    config.live2d_mode.scale = _normalize_float_range(config.live2d_mode.scale, 0.4, 2.0, 0.6)
     config.live2d_mode.proactive_interval_seconds = _normalize_int_range(
         config.live2d_mode.proactive_interval_seconds,
         60,
@@ -871,6 +926,8 @@ def _normalize_config_values(config: AppConfig) -> None:
     config.tts.endpoint = str(config.tts.endpoint or "")
     config.tts.command = str(config.tts.command or "")
     config.tts.voice = str(config.tts.voice or "")
+    config.tts.max_chars = _normalize_int_range(config.tts.max_chars, 20, 240, 80)
+    config.tts.notification_prompt = str(config.tts.notification_prompt or DEFAULT_TTS_NOTIFICATION_PROMPT)
     config.backup.auto_cleanup_enabled = bool(config.backup.auto_cleanup_enabled)
     config.backup.retention_count = _normalize_int_range(
         config.backup.retention_count,

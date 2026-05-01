@@ -91,6 +91,7 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "model_path": str,
         "width": int,
         "height": int,
+        "position_anchor": str,
         "position_x": int,
         "position_y": int,
         "scale": float,
@@ -105,6 +106,10 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "idle_motion_group": str,
         "enable_expressions": bool,
         "enable_physics": bool,
+        "thinking_expression": str,
+        "message_expression": str,
+        "failed_expression": str,
+        "attention_expression": str,
         "proactive_enabled": bool,
         "proactive_desktop_watch_enabled": bool,
         "proactive_interval_seconds": int,
@@ -120,6 +125,8 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "command": str,
         "voice": str,
         "timeout_seconds": int,
+        "max_chars": int,
+        "notification_prompt": str,
     },
     "backup": {
         "auto_cleanup_enabled": bool,
@@ -167,6 +174,8 @@ def _validate_field(key: str, value: Any) -> str | None:
         return "tts.provider 仅支持 none / http / command"
     if key == "tts.timeout_seconds" and not (1 <= value <= 120):
         return "tts.timeout_seconds 须在 1-120 秒之间"
+    if key == "tts.max_chars" and not (20 <= value <= 240):
+        return "tts.max_chars 须在 20-240 字之间"
     if key == "backup.retention_count" and not (1 <= value <= 100):
         return "备份保留份数须在 1-100 之间"
     if key.endswith(".opacity") and not (0.2 <= value <= 1.0):
@@ -181,6 +190,8 @@ def _validate_field(key: str, value: Any) -> str | None:
         return "default_open_behavior 仅支持 stage / reply_bubble / chat_input"
     if key.endswith(".click_action") and value not in {"focus_stage", "open_chat", "toggle_reply"}:
         return "click_action 仅支持 focus_stage / open_chat / toggle_reply"
+    if key.endswith(".position_anchor") and value not in {"left_bottom", "right_bottom", "custom"}:
+        return "position_anchor 仅支持 left_bottom / right_bottom / custom"
     return None
 
 
@@ -199,6 +210,8 @@ def _serialize_tts(config: AppConfig) -> dict[str, Any]:
         "command": config.tts.command,
         "voice": config.tts.voice,
         "timeout_seconds": config.tts.timeout_seconds,
+        "max_chars": config.tts.max_chars,
+        "notification_prompt": config.tts.notification_prompt,
     }
 
 
@@ -211,6 +224,8 @@ def _shared_settings_fields(config: AppConfig) -> dict[str, Any]:
         "tts_command": config.tts.command,
         "tts_voice": config.tts.voice,
         "tts_timeout_seconds": config.tts.timeout_seconds,
+        "tts_max_chars": config.tts.max_chars,
+        "tts_notification_prompt": config.tts.notification_prompt,
     }
 
 
@@ -289,6 +304,7 @@ def serialize_live2d_mode(config: AppConfig) -> dict[str, Any]:
             "releases_url": resource.releases_url,
             "width": mode.width,
             "height": mode.height,
+            "position_anchor": mode.position_anchor,
             "position_x": mode.position_x,
             "position_y": mode.position_y,
             "scale": mode.scale,
@@ -303,6 +319,10 @@ def serialize_live2d_mode(config: AppConfig) -> dict[str, Any]:
             "idle_motion_group": mode.idle_motion_group,
             "enable_expressions": mode.enable_expressions,
             "enable_physics": mode.enable_physics,
+            "thinking_expression": mode.thinking_expression,
+            "message_expression": mode.message_expression,
+            "failed_expression": mode.failed_expression,
+            "attention_expression": mode.attention_expression,
             "proactive_enabled": mode.proactive_enabled,
             "proactive_desktop_watch_enabled": mode.proactive_desktop_watch_enabled,
             "proactive_interval_seconds": mode.proactive_interval_seconds,

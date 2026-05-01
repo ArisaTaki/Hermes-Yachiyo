@@ -6,12 +6,15 @@
 """
 
 import ast
+import base64
 import hashlib
 import json
 import logging
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from copy import deepcopy
@@ -27,6 +30,11 @@ from apps.shell.chat_api import ChatAPI
 from apps.shell.chat_bridge import ChatBridge
 from apps.shell.config import ModelSummary
 from apps.shell.effect_policy import build_effects_summary
+from apps.shell.hermes_capabilities import (
+    build_hermes_image_input_capability,
+    get_current_hermes_image_input_capability,
+    read_hermes_image_input_config,
+)
 from apps.shell.integration_status import get_integration_snapshot
 from apps.shell.mode_catalog import list_mode_options
 from apps.shell.mode_settings import (
@@ -48,6 +56,11 @@ _HERMES_CONNECTION_TEST_PROMPT = (
 _HERMES_CONFIG_TIMEOUT = 20.0
 _HERMES_CONNECTION_CACHE_SCHEMA = 1
 _HERMES_CONNECTION_CACHE_FILE = "hermes_connection.json"
+_HERMES_IMAGE_CONNECTION_TEST_TIMEOUT = 90.0
+_HERMES_IMAGE_CONNECTION_CACHE_SCHEMA = 1
+_HERMES_IMAGE_CONNECTION_CACHE_FILE = "hermes_image_connection.json"
+_HERMES_DIAGNOSTIC_CACHE_SCHEMA = 1
+_HERMES_DIAGNOSTIC_CACHE_FILE = "hermes_diagnostics.json"
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _SECRET_REDACTIONS = (
     re.compile(r"(?i)(api[_-]?key|token|secret|password)(\s*[:=]\s*)([^\s,;]+)"),
@@ -159,6 +172,9 @@ _PROVIDER_PRESET_BY_ID = {str(item["id"]): item for item in _HERMES_PROVIDER_PRE
 _TERMINAL_COMMAND_THROTTLE_SECONDS = 1.2
 _TERMINAL_COMMAND_LOCK = threading.Lock()
 _LAST_TERMINAL_COMMAND_AT = 0.0
+_VISION_TEST_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
 
 
 def _serialize_summary(summary: Optional[ModelSummary]) -> Dict[str, Any]:
@@ -231,12 +247,43 @@ def _public_command(argv: list[str]) -> str:
     return " ".join(argv[: index + 1] + ["<connectivity-check>"] + argv[index + 2:])
 
 
+def _resolve_hermes_python_from_launcher(hermes_path: str) -> str | None:
+    launcher = shutil.which(hermes_path) if hermes_path else None
+    if launcher is None:
+        launcher = hermes_path
+    try:
+        from apps.core.executor import _resolve_hermes_python
+
+        resolved = _resolve_hermes_python(launcher)
+        if resolved:
+            return resolved
+    except Exception:
+        pass
+    try:
+        with open(launcher, "r", encoding="utf-8") as fh:
+            first_line = fh.readline().strip()
+    except OSError:
+        return None
+    if not first_line.startswith("#!"):
+        return None
+    python = first_line[2:].strip().split(" ", 1)[0]
+    return python if python and Path(python).exists() else None
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def _connection_cache_path() -> Path:
     return Path(shell_config._CONFIG_DIR) / _HERMES_CONNECTION_CACHE_FILE
+
+
+def _image_connection_cache_path() -> Path:
+    return Path(shell_config._CONFIG_DIR) / _HERMES_IMAGE_CONNECTION_CACHE_FILE
+
+
+def _diagnostic_cache_path() -> Path:
+    return Path(shell_config._CONFIG_DIR) / _HERMES_DIAGNOSTIC_CACHE_FILE
 
 
 def _file_fingerprint(path: Path) -> dict[str, Any]:
@@ -346,6 +393,182 @@ def _store_connection_validation(
     except OSError as exc:
         logger.warning("写入 Hermes 连接验证缓存失败: %s", exc)
     return _load_connection_validation(configuration)
+
+
+def _load_image_connection_validation(configuration: dict[str, Any]) -> dict[str, Any]:
+    cache_path = _image_connection_cache_path()
+    fingerprint = _connection_fingerprint(configuration)
+    base = {
+        "verified": False,
+        "success": False,
+        "fingerprint": fingerprint,
+        "cache_path": str(cache_path),
+    }
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return base
+    if not isinstance(data, dict) or data.get("schema_version") != _HERMES_IMAGE_CONNECTION_CACHE_SCHEMA:
+        return base
+    if data.get("fingerprint") != fingerprint:
+        return {
+            **base,
+            "reason": "config_changed",
+            "previous_route": data.get("route"),
+            "previous_provider": data.get("provider"),
+            "previous_model": data.get("model"),
+            "last_tested_at": data.get("tested_at") or data.get("verified_at"),
+        }
+    return {
+        **base,
+        "verified": bool(data.get("verified")),
+        "success": bool(data.get("verified")),
+        "route": data.get("route"),
+        "provider": data.get("provider"),
+        "model": data.get("model"),
+        "message": data.get("message"),
+        "error": data.get("error"),
+        "tested_at": data.get("tested_at"),
+        "verified_at": data.get("verified_at"),
+        "elapsed_seconds": data.get("elapsed_seconds"),
+    }
+
+
+def _store_image_connection_validation(
+    configuration: dict[str, Any],
+    *,
+    success: bool,
+    message: str = "",
+    error: str = "",
+    elapsed_seconds: float | None = None,
+) -> dict[str, Any]:
+    image_input = configuration.get("image_input") if isinstance(configuration.get("image_input"), dict) else {}
+    now = _utc_now_iso()
+    record: dict[str, Any] = {
+        "schema_version": _HERMES_IMAGE_CONNECTION_CACHE_SCHEMA,
+        "fingerprint": _connection_fingerprint(configuration),
+        "verified": success,
+        "route": str(image_input.get("route") or ""),
+        "provider": str(image_input.get("provider") or ""),
+        "model": str(image_input.get("model") or ""),
+        "message": message if success else "",
+        "error": "" if success else error,
+        "tested_at": now,
+        "elapsed_seconds": elapsed_seconds,
+    }
+    if success:
+        record["verified_at"] = now
+    path = _image_connection_cache_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("写入 Hermes 图片链路验证缓存失败: %s", exc)
+    return _load_image_connection_validation(configuration)
+
+
+def _load_diagnostic_cache(configuration: dict[str, Any]) -> dict[str, Any]:
+    cache_path = _diagnostic_cache_path()
+    fingerprint = _connection_fingerprint(configuration)
+    base: dict[str, Any] = {
+        "schema_version": _HERMES_DIAGNOSTIC_CACHE_SCHEMA,
+        "fingerprint": fingerprint,
+        "cache_path": str(cache_path),
+        "stale": False,
+        "commands": {},
+    }
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return base
+    if not isinstance(data, dict) or data.get("schema_version") != _HERMES_DIAGNOSTIC_CACHE_SCHEMA:
+        return base
+
+    stale = data.get("fingerprint") != fingerprint
+    commands: dict[str, Any] = {}
+    raw_commands = data.get("commands")
+    if isinstance(raw_commands, dict):
+        allowed_ids = {item["id"] for item in _diagnostic_command_catalog()}
+        for command_id, value in raw_commands.items():
+            if command_id not in allowed_ids or not isinstance(value, dict):
+                continue
+            commands[command_id] = {**deepcopy(value), "stale": stale}
+
+    return {
+        **base,
+        "stale": stale,
+        "reason": "config_changed" if stale else "",
+        "previous_fingerprint": data.get("fingerprint") if stale else "",
+        "updated_at": data.get("updated_at"),
+        "commands": commands,
+    }
+
+
+def _store_diagnostic_result(
+    configuration: dict[str, Any],
+    action: dict[str, str],
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    cache_path = _diagnostic_cache_path()
+    fingerprint = _connection_fingerprint(configuration)
+    commands: dict[str, Any] = {}
+    try:
+        data = json.loads(cache_path.read_text(encoding="utf-8"))
+        if (
+            isinstance(data, dict)
+            and data.get("schema_version") == _HERMES_DIAGNOSTIC_CACHE_SCHEMA
+            and data.get("fingerprint") == fingerprint
+            and isinstance(data.get("commands"), dict)
+        ):
+            commands = deepcopy(data["commands"])
+    except (OSError, json.JSONDecodeError):
+        commands = {}
+
+    now = _utc_now_iso()
+    cached_payload = deepcopy(payload)
+    cached_payload.pop("dashboard", None)
+    cached_payload["cached_at"] = now
+    cached_payload["stale"] = False
+    commands[str(action["id"])] = cached_payload
+    record = {
+        "schema_version": _HERMES_DIAGNOSTIC_CACHE_SCHEMA,
+        "fingerprint": fingerprint,
+        "updated_at": now,
+        "commands": commands,
+    }
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("写入 Hermes 诊断缓存失败: %s", exc)
+    return _load_diagnostic_cache(configuration)
+
+
+def _parse_doctor_diagnostic_output(output: str) -> dict[str, Any]:
+    text = output or ""
+    match = re.search(r"Found\s+(\d+)\s+issue", text)
+    issues_count = int(match.group(1)) if match else 0
+    limited_tools: list[str] = []
+    in_tools_section = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if "Tool Availability" in stripped or (stripped.startswith("◆") and "Tool" in stripped):
+            in_tools_section = True
+            continue
+        if in_tools_section and stripped.startswith("◆"):
+            in_tools_section = False
+            continue
+        if not in_tools_section or not any(marker in line for marker in ("⚠", "✗", "❌")):
+            continue
+        name_match = re.match(r"\s*(?:⚠|✗|❌)\s+([A-Za-z0-9_.-]+)", line)
+        if name_match:
+            limited_tools.append(name_match.group(1))
+    readiness_level = "full_ready" if issues_count == 0 and not limited_tools else "basic_ready"
+    return {
+        "readiness_level": readiness_level,
+        "limited_tools": limited_tools,
+        "doctor_issues_count": issues_count,
+    }
 
 
 def _hermes_command_catalog() -> list[dict[str, str]]:
@@ -696,6 +919,33 @@ def _provider_options(
     )
 
 
+def _vision_configuration_summary(
+    *,
+    config_path: Path,
+    env_values: dict[str, str],
+    chat_provider: str,
+    chat_model: str,
+    chat_base_url: str,
+) -> dict[str, Any]:
+    image_config = read_hermes_image_input_config(config_path)
+    configured_provider = str(image_config.get("auxiliary_vision_provider") or "").strip()
+    provider = configured_provider if configured_provider and configured_provider != "auto" else ""
+    provider_for_key = provider or chat_provider
+    api_key_names = _provider_api_key_names(provider_for_key)
+    configured_key = next((name for name in api_key_names if env_values.get(name)), "")
+    return {
+        "configured": bool(image_config.get("auxiliary_vision_configured")),
+        "provider": provider,
+        "model": str(image_config.get("auxiliary_vision_model") or ""),
+        "base_url": str(image_config.get("auxiliary_vision_base_url") or ""),
+        "api_key_name": configured_key or (api_key_names[0] if api_key_names else ""),
+        "api_key_configured": bool(configured_key or image_config.get("auxiliary_vision_api_key_configured")),
+        "effective_provider": provider or chat_provider,
+        "effective_model": str(image_config.get("auxiliary_vision_model") or chat_model or ""),
+        "effective_base_url": str(image_config.get("auxiliary_vision_base_url") or chat_base_url or ""),
+    }
+
+
 def _run_config_path_command(hermes_path: str, subcommand: str) -> Path:
     fallback_name = "config.yaml" if subcommand == "path" else ".env"
     fallback = Path.home() / ".hermes" / fallback_name
@@ -827,6 +1077,16 @@ class MainWindowAPI:
                     "persona_prompt": self._config.assistant.persona_prompt,
                     "user_address": self._config.assistant.user_address,
                 },
+                "tts": {
+                    "enabled": self._config.tts.enabled,
+                    "provider": self._config.tts.provider,
+                    "endpoint": self._config.tts.endpoint,
+                    "command": self._config.tts.command,
+                    "voice": self._config.tts.voice,
+                    "timeout_seconds": self._config.tts.timeout_seconds,
+                    "max_chars": self._config.tts.max_chars,
+                    "notification_prompt": self._config.tts.notification_prompt,
+                },
                 "bridge": snap.bridge.to_dict(),
                 "integrations": {
                     "astrbot": snap.astrbot.to_dict(),
@@ -887,6 +1147,16 @@ class MainWindowAPI:
             "assistant": {
                 "persona_prompt": self._config.assistant.persona_prompt,
                 "user_address": self._config.assistant.user_address,
+            },
+            "tts": {
+                "enabled": self._config.tts.enabled,
+                "provider": self._config.tts.provider,
+                "endpoint": self._config.tts.endpoint,
+                "command": self._config.tts.command,
+                "voice": self._config.tts.voice,
+                "timeout_seconds": self._config.tts.timeout_seconds,
+                "max_chars": self._config.tts.max_chars,
+                "notification_prompt": self._config.tts.notification_prompt,
             },
             "bridge": snap.bridge.to_dashboard_dict(),
             "tray_enabled": self._config.tray_enabled,
@@ -1044,7 +1314,7 @@ class MainWindowAPI:
         except subprocess.TimeoutExpired as exc:
             stdout = _sanitize_command_output(str(exc.stdout or ""))
             stderr = _sanitize_command_output(str(exc.stderr or ""))
-            return {
+            payload = {
                 "ok": False,
                 "success": False,
                 "error": f"{action['label']} 超时",
@@ -1057,6 +1327,8 @@ class MainWindowAPI:
                 "elapsed_seconds": round(time.monotonic() - started_at, 2),
                 "needs_env_refresh": needs_env_refresh,
             }
+            payload["diagnostic_cache"] = self._record_diagnostic_result(action, payload)
+            return payload
         except FileNotFoundError:
             return {
                 "ok": False,
@@ -1090,6 +1362,7 @@ class MainWindowAPI:
             payload["error"] = f"{action['label']} 失败（exit={result.returncode}）"
 
         if action.get("id") == "doctor":
+            payload["doctor_summary"] = _parse_doctor_diagnostic_output(output)
             try:
                 self._runtime.refresh_hermes_installation()
                 payload["dashboard"] = self.get_dashboard_data()
@@ -1097,7 +1370,29 @@ class MainWindowAPI:
                 logger.warning("诊断后刷新 Hermes 状态失败: %s", exc)
                 payload["refresh_error"] = str(exc)
 
+        payload["diagnostic_cache"] = self._record_diagnostic_result(action, payload)
         return payload
+
+    def _record_diagnostic_result(self, action: dict[str, str], result: dict[str, Any]) -> dict[str, Any]:
+        try:
+            configuration = self.get_hermes_configuration()
+        except Exception as exc:
+            logger.warning("读取 Hermes 配置以记录诊断缓存失败: %s", exc)
+            return {"stale": False, "commands": {}, "error": str(exc)}
+        return _store_diagnostic_result(configuration, action, result)
+
+    def get_hermes_diagnostic_cache(self) -> dict[str, Any]:
+        try:
+            configuration = self.get_hermes_configuration()
+        except Exception as exc:
+            logger.warning("读取 Hermes 配置以获取诊断缓存失败: %s", exc)
+            return {
+                "schema_version": _HERMES_DIAGNOSTIC_CACHE_SCHEMA,
+                "stale": False,
+                "commands": {},
+                "error": str(exc),
+            }
+        return _load_diagnostic_cache(configuration)
 
     def test_hermes_connection(self) -> Dict[str, Any]:
         """用一次轻量 Hermes oneshot 调用验证当前 provider/API Key 是否可用。
@@ -1177,6 +1472,161 @@ class MainWindowAPI:
         payload["connection_validation"] = self._record_connection_validation(payload)
         return payload
 
+    def test_hermes_image_connection(self) -> Dict[str, Any]:
+        """验证当前图片输入链路。
+
+        文本 provider/API Key 通过不代表图片链路通过。尤其是 Xiaomi Pro 这类
+        文本模型会先走 Hermes vision 预分析，必须单独发起一次小图请求确认。
+        """
+        configuration = self.get_hermes_configuration()
+        image_input = configuration.get("image_input") if isinstance(configuration.get("image_input"), dict) else {}
+        route = str(image_input.get("route") or "").strip()
+        if configuration.get("command_exists") is False:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "hermes 命令未找到，请先安装 Hermes Agent",
+            }
+        if route == "blocked":
+            payload = {
+                "ok": False,
+                "success": False,
+                "error": str(image_input.get("reason") or "当前模型/图片模式不支持图片输入"),
+                "route": route,
+                "image_input": image_input,
+            }
+            payload["image_connection_validation"] = _store_image_connection_validation(
+                configuration,
+                success=False,
+                error=str(payload["error"]),
+            )
+            return payload
+        if route == "native" and image_input.get("supports_native_vision") is True:
+            payload = {
+                "ok": True,
+                "success": True,
+                "message": "当前模型声明支持原生图片输入，不需要额外 vision 预分析链路",
+                "route": route,
+                "image_input": image_input,
+            }
+            payload["image_connection_validation"] = _store_image_connection_validation(
+                configuration,
+                success=True,
+                message=str(payload["message"]),
+            )
+            return payload
+
+        hermes_path, needs_env_refresh = locate_hermes_binary()
+        if hermes_path is None:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "hermes 命令未找到，请先安装 Hermes Agent",
+                "needs_env_refresh": needs_env_refresh,
+            }
+        hermes_python = _resolve_hermes_python_from_launcher(hermes_path)
+        if not hermes_python:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "无法定位 Hermes Agent 的 Python 环境，无法测试图片链路",
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        repo_root = Path(__file__).resolve().parents[2]
+        script = (
+            "import sys\n"
+            "from pathlib import Path\n"
+            "repo = Path(sys.argv[1])\n"
+            "image = Path(sys.argv[2])\n"
+            "sys.path.insert(0, str(repo))\n"
+            "from apps.core.hermes_stream_bridge import _preprocess_images_with_vision\n"
+            "_preprocess_images_with_vision('Hermes-Yachiyo 图片链路自检。只要能看到这张测试图片，请简短回答 OK。', [image])\n"
+            "print('OK')\n"
+        )
+        started_at = time.monotonic()
+        with tempfile.TemporaryDirectory(prefix="yachiyo-vision-test-") as tmpdir:
+            image_path = Path(tmpdir) / "vision-test.png"
+            image_path.write_bytes(_VISION_TEST_PNG)
+            try:
+                result = subprocess.run(
+                    [hermes_python, "-c", script, str(repo_root), str(image_path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=_HERMES_IMAGE_CONNECTION_TEST_TIMEOUT,
+                    check=False,
+                )
+            except subprocess.TimeoutExpired as exc:
+                detail = _compact_command_output(
+                    "\n".join(part for part in (exc.stdout or "", exc.stderr or "") if part)
+                )
+                payload = {
+                    "ok": False,
+                    "success": False,
+                    "error": "Hermes 图片链路测试超时，请检查 vision provider、Base URL 或网络",
+                    "detail": detail,
+                    "route": route,
+                    "image_input": image_input,
+                    "elapsed_seconds": round(time.monotonic() - started_at, 2),
+                    "needs_env_refresh": needs_env_refresh,
+                }
+                payload["image_connection_validation"] = _store_image_connection_validation(
+                    configuration,
+                    success=False,
+                    error=str(payload["error"]),
+                    elapsed_seconds=payload["elapsed_seconds"],
+                )
+                return payload
+
+        elapsed = round(time.monotonic() - started_at, 2)
+        stdout = _compact_command_output(result.stdout)
+        stderr = _compact_command_output(result.stderr)
+        if result.returncode == 0:
+            payload = {
+                "ok": True,
+                "success": True,
+                "message": "Hermes 图片链路测试通过",
+                "output_preview": stdout,
+                "stderr_preview": stderr,
+                "route": route,
+                "image_input": image_input,
+                "elapsed_seconds": elapsed,
+                "needs_env_refresh": needs_env_refresh,
+            }
+            payload["image_connection_validation"] = _store_image_connection_validation(
+                configuration,
+                success=True,
+                message=str(payload["message"]),
+                elapsed_seconds=elapsed,
+            )
+            return payload
+
+        detail = stderr or stdout
+        error = (
+            f"Hermes 图片链路测试失败：{detail}"
+            if detail
+            else f"Hermes 图片链路测试失败（exit={result.returncode}）"
+        )
+        payload = {
+            "ok": False,
+            "success": False,
+            "error": error,
+            "output_preview": stdout,
+            "stderr_preview": stderr,
+            "returncode": result.returncode,
+            "route": route,
+            "image_input": image_input,
+            "elapsed_seconds": elapsed,
+            "needs_env_refresh": needs_env_refresh,
+        }
+        payload["image_connection_validation"] = _store_image_connection_validation(
+            configuration,
+            success=False,
+            error=error,
+            elapsed_seconds=elapsed,
+        )
+        return payload
+
     def _record_connection_validation(self, result: dict[str, Any]) -> dict[str, Any]:
         try:
             configuration = self.get_hermes_configuration()
@@ -1233,8 +1683,23 @@ class MainWindowAPI:
                 "configured": api_key_configured,
                 "display": "已配置" if api_key_configured else "未配置",
             },
+            "vision": _vision_configuration_summary(
+                config_path=config_path,
+                env_values=env_values,
+                chat_provider=provider,
+                chat_model=str(model.get("default") or ""),
+                chat_base_url=str(model.get("base_url") or ""),
+            ),
         }
+        configuration["image_input"] = build_hermes_image_input_capability(
+            provider=provider,
+            model=str(model.get("default") or ""),
+            config_path=config_path,
+        )
         configuration["connection_validation"] = _load_connection_validation(configuration)
+        configuration["image_connection_validation"] = _load_image_connection_validation(configuration)
+        if isinstance(configuration["image_input"], dict):
+            configuration["image_input"]["validation"] = configuration["image_connection_validation"]
         return configuration
 
     def update_hermes_configuration(self, changes: Dict[str, Any]) -> Dict[str, Any]:
@@ -1243,10 +1708,25 @@ class MainWindowAPI:
         model = str(changes.get("model") or "").strip()
         base_url = str(changes.get("base_url") or "").strip()
         api_key = str(changes.get("api_key") or "").strip()
+        image_input_mode = str(changes.get("image_input_mode") or "auto").strip().lower()
+        vision_provider = str(changes.get("vision_provider") or "").strip()
+        vision_model = str(changes.get("vision_model") or "").strip()
+        vision_base_url = str(changes.get("vision_base_url") or "").strip()
+        vision_api_key = str(changes.get("vision_api_key") or "").strip()
         if not provider:
             return {"ok": False, "error": "Provider 不能为空"}
         if not model:
             return {"ok": False, "error": "模型名称不能为空"}
+        if "image_input_mode" in changes and image_input_mode not in {"auto", "native", "text"}:
+            return {"ok": False, "error": "图片输入模式仅支持 auto / native / text"}
+        has_vision_changes = any(
+            key in changes
+            for key in ("vision_provider", "vision_model", "vision_base_url", "vision_api_key")
+        )
+        if has_vision_changes and "image_input_mode" in changes and image_input_mode == "text" and not (
+            vision_provider or provider
+        ):
+            return {"ok": False, "error": "vision 预分析需要可用的 Provider"}
 
         hermes_path, needs_env_refresh = locate_hermes_binary()
         if hermes_path is None:
@@ -1261,9 +1741,21 @@ class MainWindowAPI:
             ("model.default", model),
             ("model.base_url", base_url),
         ]
+        if "image_input_mode" in changes:
+            commands.append(("agent.image_input_mode", image_input_mode))
         api_key_name = _provider_api_key_name(provider)
         if api_key:
             commands.append((api_key_name, api_key))
+        if "vision_provider" in changes:
+            commands.append(("auxiliary.vision.provider", vision_provider))
+        if "vision_model" in changes:
+            commands.append(("auxiliary.vision.model", vision_model))
+        if "vision_base_url" in changes:
+            commands.append(("auxiliary.vision.base_url", vision_base_url))
+        if vision_api_key:
+            vision_key_name = _provider_api_key_name(vision_provider or provider)
+            if vision_key_name:
+                commands.append((vision_key_name, vision_api_key))
 
         for key, value in commands:
             try:
@@ -1339,12 +1831,14 @@ class MainWindowAPI:
 
     def get_executor_info(self) -> Dict[str, Any]:
         """获取当前执行器信息"""
+        image_input = get_current_hermes_image_input_capability()
         runner = self._runtime.task_runner
         if runner is None:
-            return {"executor": "none", "available": False}
+            return {"executor": "none", "available": False, "image_input": image_input}
         return {
             "executor": runner.executor.name,
             "available": True,
+            "image_input": image_input,
         }
 
     def open_chat(self) -> Dict[str, Any]:

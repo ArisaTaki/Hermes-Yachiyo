@@ -9,7 +9,10 @@ from urllib.parse import quote
 from urllib.parse import urlencode
 
 from fastapi import APIRouter
+from fastapi import HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from pydantic import Field
 
 from apps.bridge.deps import get_runtime
 from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH
@@ -36,6 +39,7 @@ _launcher_last_tts_reply: dict[int, str] = {}
 
 class SendChatMessageRequest(BaseModel):
     text: str
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class LauncherAckRequest(BaseModel):
@@ -79,6 +83,11 @@ class HermesConfigUpdateRequest(BaseModel):
     model: str = ""
     base_url: str = ""
     api_key: str = ""
+    image_input_mode: str | None = None
+    vision_provider: str | None = None
+    vision_model: str | None = None
+    vision_base_url: str | None = None
+    vision_api_key: str | None = None
 
 
 class BackupCreateRequest(BaseModel):
@@ -132,11 +141,27 @@ async def run_hermes_diagnostic_command(request: TerminalCommandRequest) -> dict
     )
 
 
+@router.get("/hermes/diagnostics/cache")
+async def get_hermes_diagnostic_cache() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).get_hermes_diagnostic_cache
+    )
+
+
 @router.post("/hermes/connection-test")
 async def test_hermes_connection() -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(
         MainWindowAPI(runtime, runtime.config).test_hermes_connection
+    )
+
+
+@router.post("/hermes/image-connection-test")
+async def test_hermes_image_connection() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).test_hermes_image_connection
     )
 
 
@@ -153,7 +178,7 @@ async def update_hermes_configuration(request: HermesConfigUpdateRequest) -> dic
     runtime = get_runtime()
     return await asyncio.to_thread(
         MainWindowAPI(runtime, runtime.config).update_hermes_configuration,
-        request.model_dump(),
+        request.model_dump(exclude_none=True),
     )
 
 
@@ -281,7 +306,19 @@ async def get_chat_messages(limit: int = 80) -> dict[str, Any]:
 
 @router.post("/chat/messages")
 async def send_chat_message(request: SendChatMessageRequest) -> dict[str, Any]:
-    return ChatAPI(get_runtime()).send_message(request.text)
+    return ChatAPI(get_runtime()).send_message(request.text, request.attachments)
+
+
+@router.get("/chat/attachments/{attachment_id}")
+async def get_chat_attachment(attachment_id: str) -> FileResponse:
+    attachment = ChatAPI(get_runtime()).get_attachment_file(attachment_id)
+    if not attachment.get("ok"):
+        raise HTTPException(status_code=404, detail=attachment.get("error") or "附件不存在")
+    return FileResponse(
+        attachment["path"],
+        media_type=attachment.get("mime_type") or "image/png",
+        filename=attachment.get("name") or "image",
+    )
 
 
 @router.get("/chat/session")
@@ -446,6 +483,12 @@ def _live2d_renderer_payload(app_config: Any, resource: dict[str, Any]) -> dict[
         "idle_motion_group": getattr(live2d, "idle_motion_group", "Idle"),
         "enable_expressions": getattr(live2d, "enable_expressions", False),
         "enable_physics": getattr(live2d, "enable_physics", False),
+        "expression_mappings": {
+            "thinking": getattr(live2d, "thinking_expression", ""),
+            "message": getattr(live2d, "message_expression", ""),
+            "failed": getattr(live2d, "failed_expression", ""),
+            "attention": getattr(live2d, "attention_expression", ""),
+        },
         "expressions": getattr(summary, "expressions", []) if summary else [],
         "motion_groups": getattr(summary, "motion_groups", {}) if summary else {},
     }
@@ -487,6 +530,7 @@ async def get_launcher_view(mode: str = "bubble") -> dict[str, Any]:
             "enable_quick_input": live2d_config.enable_quick_input,
             "click_action": live2d_config.click_action,
             "default_open_behavior": live2d_config.default_open_behavior,
+            "position_anchor": getattr(live2d_config, "position_anchor", "right_bottom"),
             "scale": getattr(live2d_config, "scale", 1.0),
             "mouse_follow_enabled": getattr(live2d_config, "mouse_follow_enabled", True),
             "preview_url": _live2d_preview_url(live2d_config),
@@ -564,6 +608,7 @@ async def save_launcher_position(request: LauncherPositionRequest) -> dict[str, 
     mode_id = "live2d" if request.mode == "live2d" else "bubble"
     if mode_id == "live2d":
         changes: dict[str, Any] = {
+            "live2d_mode.position_anchor": "custom",
             "live2d_mode.position_x": int(request.x),
             "live2d_mode.position_y": int(request.y),
         }

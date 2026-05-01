@@ -43,7 +43,10 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.bubble_mode.edge_snap is True
     assert config.bubble_mode.proactive_enabled is False
     assert config.live2d_mode.idle_motion_group == "Idle"
-    assert config.live2d_mode.scale == 1.0
+    assert config.live2d_mode.position_anchor == "right_bottom"
+    assert config.live2d_mode.position_x == 0
+    assert config.live2d_mode.position_y == 0
+    assert config.live2d_mode.scale == 0.6
     assert config.live2d_mode.show_on_all_spaces is True
     assert config.live2d_mode.model_name == ""
     assert config.live2d_mode.model_path == ""
@@ -63,6 +66,96 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.tts.command == ""
     assert config.tts.voice == ""
     assert config.tts.timeout_seconds == 20
+    assert config.tts.max_chars == 80
+    assert config.tts.notification_prompt == config_mod.DEFAULT_TTS_NOTIFICATION_PROMPT
+
+
+def test_legacy_live2d_default_position_migrates_to_right_bottom(monkeypatch, tmp_path):
+    _patch_no_live2d_assets(monkeypatch, tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    (tmp_path / "config.json").write_text(
+        json.dumps({"live2d_mode": {"position_x": 48, "position_y": 48, "scale": 1.0}}),
+        encoding="utf-8",
+    )
+
+    config = load_config()
+
+    assert config.live2d_mode.position_anchor == "right_bottom"
+    assert config.live2d_mode.position_x == 0
+    assert config.live2d_mode.position_y == 0
+    assert config.live2d_mode.scale == 0.6
+
+
+def test_existing_live2d_position_without_anchor_stays_custom(monkeypatch, tmp_path):
+    _patch_no_live2d_assets(monkeypatch, tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    (tmp_path / "config.json").write_text(
+        json.dumps({"live2d_mode": {"position_x": 80, "position_y": 96, "scale": 1.0}}),
+        encoding="utf-8",
+    )
+
+    config = load_config()
+
+    assert config.live2d_mode.position_anchor == "custom"
+    assert config.live2d_mode.position_x == 80
+    assert config.live2d_mode.position_y == 96
+    assert config.live2d_mode.scale == 1.0
+
+
+def test_previous_live2d_default_anchor_migrates_to_right_bottom(monkeypatch, tmp_path):
+    _patch_no_live2d_assets(monkeypatch, tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "live2d_mode": {
+                    "position_anchor": "left_bottom",
+                    "position_x": 0,
+                    "position_y": 0,
+                    "scale": 0.5,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config()
+
+    assert config.live2d_mode.position_anchor == "right_bottom"
+    assert config.live2d_mode.position_x == 0
+    assert config.live2d_mode.position_y == 0
+    assert config.live2d_mode.scale == 0.6
+
+
+def test_auto_saved_live2d_left_default_migrates_to_right_bottom(monkeypatch, tmp_path):
+    _patch_no_live2d_assets(monkeypatch, tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "live2d_mode": {
+                    "position_anchor": "custom",
+                    "position_x": 0,
+                    "position_y": 269,
+                    "scale": 0.72,
+                    "width": 420,
+                    "height": 680,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config()
+
+    assert config.live2d_mode.position_anchor == "right_bottom"
+    assert config.live2d_mode.position_x == 0
+    assert config.live2d_mode.position_y == 0
+    assert config.live2d_mode.scale == 0.6
 
 
 def test_live2d_auto_discovers_user_assets(monkeypatch, tmp_path):
@@ -145,6 +238,8 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
             "tts.command": "say {text}",
             "tts.voice": "kyoko",
             "tts.timeout_seconds": 10,
+            "tts.max_chars": 60,
+            "tts.notification_prompt": "只说一句提醒。",
         },
     )
 
@@ -164,6 +259,8 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     assert config.tts.command == "say {text}"
     assert config.tts.voice == "kyoko"
     assert config.tts.timeout_seconds == 10
+    assert config.tts.max_chars == 60
+    assert config.tts.notification_prompt == "只说一句提醒。"
     assert result["mode_settings"]["bubble"]["config"]["summary_count"] == 2
     assert result["mode_settings"]["bubble"]["config"]["position_x_percent"] == 0.75
     assert "assistant" not in result["mode_settings"]["bubble"]["config"]
@@ -241,6 +338,7 @@ def test_apply_settings_changes_rejects_invalid_new_fields(tmp_path, monkeypatch
         {
             "tts.provider": "bad",
             "tts.timeout_seconds": 999,
+            "tts.max_chars": 999,
             "live2d_mode.proactive_interval_seconds": 10,
         },
     )
@@ -248,6 +346,7 @@ def test_apply_settings_changes_rejects_invalid_new_fields(tmp_path, monkeypatch
     assert result["ok"] is False
     assert config.tts.provider == "none"
     assert config.tts.timeout_seconds == 20
+    assert config.tts.max_chars == 80
     assert config.live2d_mode.proactive_interval_seconds == 300
     assert "tts.provider" in result["error"]
 
@@ -302,6 +401,8 @@ def test_serialize_mode_settings_returns_separate_sections(monkeypatch, tmp_path
     assert payload["bubble"]["config"]["position_x_percent"] == 1.0
     assert payload["bubble"]["config"]["position_y_percent"] == 1.0
     assert payload["live2d"]["config"]["model_path_display"] == ""
+    assert payload["live2d"]["config"]["position_anchor"] == "right_bottom"
+    assert payload["live2d"]["config"]["scale"] == 0.6
     assert payload["live2d"]["config"]["resource"]["releases_url"] == LIVE2D_RELEASES_URL
     assert payload["live2d"]["config"]["resource"]["state"] == "not_configured"
     assert "assistant" not in payload["bubble"]["config"]
@@ -433,6 +534,8 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     config.tts.enabled = True
     config.tts.provider = "http"
     config.tts.endpoint = "http://127.0.0.1:9000/tts"
+    config.tts.max_chars = 66
+    config.tts.notification_prompt = "短提醒"
 
     save_config(config)
     data = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
@@ -448,3 +551,5 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     assert data["tts"]["enabled"] is True
     assert data["tts"]["provider"] == "http"
     assert data["tts"]["endpoint"] == "http://127.0.0.1:9000/tts"
+    assert data["tts"]["max_chars"] == 66
+    assert data["tts"]["notification_prompt"] == "短提醒"
