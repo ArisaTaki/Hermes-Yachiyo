@@ -1,6 +1,10 @@
 """ChatAPI 测试 — 消息发送与任务状态同步"""
 
+import base64
+import os
+import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 from apps.core.chat_session import ChatMessage, ChatSession, MessageRole, MessageStatus
 from apps.core.chat_store import ChatStore
@@ -66,6 +70,88 @@ def test_send_message_creates_task_and_links_user_message(tmp_path):
         assert user.status == MessageStatus.PENDING
         assert api.get_session_info()["is_processing"] is True
     finally:
+        store.close()
+
+
+def test_send_message_accepts_pasted_image_attachment(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    monkeypatch.setenv("HERMES_YACHIYO_BRIDGE_URL", "http://127.0.0.1:9999")
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        data_url = "data:image/png;base64," + base64.b64encode(b"fake-png").decode("ascii")
+
+        result = api.send_message(
+            "看一下这张图",
+            attachments=[{
+                "name": "screen.png",
+                "data_url": data_url,
+            }],
+        )
+
+        assert result["ok"] is True
+        assert len(result["attachments"]) == 1
+        task = runtime.state.get_task(result["task_id"])
+        assert task is not None
+        assert task.attachments[0]["kind"] == "image"
+        assert task.attachments[0]["path"].endswith(".png")
+
+        messages = api.get_messages()["messages"]
+        assert messages[0]["attachments"][0]["url"].startswith("http://127.0.0.1:9999/ui/chat/attachments/")
+        assert "path" not in messages[0]["attachments"][0]
+    finally:
+        store.close()
+
+
+def test_attachment_cache_cleanup_prunes_old_files(tmp_path, monkeypatch):
+    hermes_home = tmp_path / "hermes-home"
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setattr("apps.shell.chat_api._MAX_ATTACHMENT_CACHE_AGE_SECONDS", 1)
+    monkeypatch.setattr("apps.shell.chat_api._MAX_ATTACHMENT_CACHE_BYTES", 1024 * 1024)
+    old_dir = hermes_home / "yachiyo" / "attachments" / "deadbeef"
+    old_dir.mkdir(parents=True)
+    old_file = old_dir / "old.png"
+    old_file.write_bytes(b"old")
+    old_time = time.time() - 10
+    os.utime(old_file, (old_time, old_time))
+
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        data_url = "data:image/png;base64," + base64.b64encode(b"new-png").decode("ascii")
+
+        result = api.send_message("看一下这张图", attachments=[{"name": "screen.png", "data_url": data_url}])
+
+        assert result["ok"] is True
+        task = runtime.state.get_task(result["task_id"])
+        assert task is not None
+        new_path = Path(task.attachments[0]["path"])
+        assert new_path.exists()
+        assert not old_file.exists()
+    finally:
+        store.close()
+
+
+def test_delete_current_session_removes_attachment_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    api, runtime, store = _make_api(tmp_path)
+    runtime.chat_session = ChatSession(session_id="deadbeef")
+    runtime.chat_session.attach_store(store, load_existing=False)
+    original_get_store = _store_mod.get_chat_store
+    _store_mod.get_chat_store = lambda: store
+    try:
+        data_url = "data:image/png;base64," + base64.b64encode(b"fake-png").decode("ascii")
+        result = api.send_message("删除这张图", attachments=[{"name": "screen.png", "data_url": data_url}])
+        task = runtime.state.get_task(result["task_id"])
+        assert task is not None
+        attachment_dir = Path(task.attachments[0]["path"]).parent
+        assert attachment_dir.exists()
+
+        deleted = api.delete_current_session()
+
+        assert deleted["ok"] is True
+        assert deleted["deleted_session_id"] == "deadbeef"
+        assert not attachment_dir.exists()
+    finally:
+        _store_mod.get_chat_store = original_get_store
         store.close()
 
 
