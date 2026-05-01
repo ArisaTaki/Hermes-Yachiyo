@@ -127,7 +127,9 @@ type HermesProviderOption = {
   label?: string;
   base_url?: string;
   default_model?: string;
+  default_vision_model?: string;
   models?: string[];
+  vision_models?: string[];
   api_key_name?: string;
   api_key_names?: string[];
   api_key_configured?: boolean;
@@ -364,7 +366,7 @@ export function MainView() {
           const option = providerOptionById(hermesConfig, value);
           next = {
             ...next,
-            vision_model: option?.default_model || option?.models?.[0] || '',
+            vision_model: defaultVisionModel(option),
             vision_base_url: option?.base_url || '',
             vision_api_key: '',
           };
@@ -381,44 +383,47 @@ export function MainView() {
 
   function updateTtsField(field: keyof TtsForm, value: string | boolean | number) {
     ttsFormDirtyRef.current = true;
-    setTtsForm((current) => ({ ...current, [field]: value }));
+    setTtsForm((current) => {
+      const next = { ...current, [field]: value };
+      if (field === 'provider') {
+        next.enabled = value !== 'none';
+      }
+      return next;
+    });
     if (actionStatus && /TTS|播报/.test(actionStatus)) setActionStatus('');
   }
 
   async function saveHermesConfig() {
     const action = 'config-save';
     if (!beginHermesAction(action)) return;
-    if (!configForm.provider.trim()) {
-      setActionStatus('Provider 不能为空');
-      finishHermesAction(action);
-      return;
-    }
-    if (!configForm.model.trim()) {
-      setActionStatus('模型名称不能为空');
-      finishHermesAction(action);
-      return;
-    }
     setActionStatus('正在保存 Hermes 配置...');
     try {
-      const result = await apiPost<{ ok?: boolean; error?: string; message?: string; configuration?: HermesVisualConfig }>('/ui/hermes/config', configForm);
-      if (result.ok === false) throw new Error(result.error || '保存 Hermes 配置失败');
-      if (result.configuration) {
-        configFormDirtyRef.current = false;
-        hermesConfigLoadedRef.current = hasLoadedHermesConfig(result.configuration);
-        syncProviderDraftFromConfig(result.configuration);
-        setHermesConfig(result.configuration);
-        setConfigForm(formFromHermesConfig(result.configuration));
-      } else {
-        configFormDirtyRef.current = false;
-        await loadHermesConfig({ forceFormSync: true });
-      }
+      const result = await persistHermesConfigDraft('保存 Hermes 配置失败');
       setActionStatus(result.message || 'Hermes 配置已保存');
-      await refreshDashboardData();
     } catch (err) {
       setActionStatus(err instanceof Error ? err.message : '保存 Hermes 配置失败');
     } finally {
       finishHermesAction(action);
     }
+  }
+
+  async function persistHermesConfigDraft(errorMessage: string) {
+    if (!configForm.provider.trim()) throw new Error('Provider 不能为空');
+    if (!configForm.model.trim()) throw new Error('模型名称不能为空');
+    const result = await apiPost<{ ok?: boolean; error?: string; message?: string; configuration?: HermesVisualConfig }>('/ui/hermes/config', configForm);
+    if (result.ok === false) throw new Error(result.error || errorMessage);
+    if (result.configuration) {
+      configFormDirtyRef.current = false;
+      hermesConfigLoadedRef.current = hasLoadedHermesConfig(result.configuration);
+      syncProviderDraftFromConfig(result.configuration);
+      setHermesConfig(result.configuration);
+      setConfigForm(formFromHermesConfig(result.configuration));
+    } else {
+      configFormDirtyRef.current = false;
+      await loadHermesConfig({ forceFormSync: true });
+    }
+    await refreshDashboardData();
+    return result;
   }
 
   async function saveTtsSettings() {
@@ -428,11 +433,10 @@ export function MainView() {
     try {
       const result = await apiPost<{ ok?: boolean; error?: string; app_state?: { tts?: TtsSettings } }>('/ui/settings', {
         changes: {
-          'tts.enabled': Boolean(ttsForm.enabled),
+          'tts.enabled': ttsForm.provider !== 'none',
           'tts.provider': ttsForm.provider,
           'tts.endpoint': ttsForm.endpoint,
           'tts.command': ttsForm.command,
-          'tts.voice': ttsForm.voice,
           'tts.timeout_seconds': Number(ttsForm.timeout_seconds),
           'tts.max_chars': Number(ttsForm.max_chars),
           'tts.notification_prompt': ttsForm.notification_prompt,
@@ -481,6 +485,11 @@ export function MainView() {
     setHermesImageTestResult(null);
     setActionStatus('正在测试 Hermes 图片链路...');
     try {
+      if (configFormDirtyRef.current) {
+        setActionStatus('正在保存当前图片链路配置...');
+        await persistHermesConfigDraft('保存当前图片链路配置失败');
+        setActionStatus('配置已保存，正在测试 Hermes 图片链路...');
+      }
       const result = await apiPost<HermesImageConnectionTestResult>('/ui/hermes/image-connection-test');
       setHermesImageTestResult(result);
       if (result.image_connection_validation || result.image_input) {
@@ -683,9 +692,9 @@ function formFromHermesConfig(config: HermesVisualConfig | null): HermesConfigFo
     model: config?.model?.default || '',
     base_url: config?.model?.base_url || '',
     api_key: '',
-    image_input_mode: config?.image_input?.mode || 'auto',
+    image_input_mode: config?.image_input?.mode === 'text' ? 'text' : 'auto',
     vision_provider: config?.vision?.provider || '',
-    vision_model: config?.vision?.model || '',
+    vision_model: config?.vision?.configured ? (config?.vision?.effective_model || config?.vision?.model || '') : (config?.vision?.model || ''),
     vision_base_url: config?.vision?.base_url || '',
     vision_api_key: '',
   };
@@ -746,6 +755,16 @@ function modelSelectOptions(currentModel: string, models: string[]): string[] {
     result.push(model);
   }
   return result;
+}
+
+function buildVisionModelOptions(option: HermesProviderOption | undefined, currentModel: string): string[] {
+  const models = option?.vision_models?.length ? option.vision_models : option?.models || [];
+  const preferred = option?.default_vision_model || models[0] || '';
+  return modelSelectOptions(currentModel && currentModel !== option?.default_model ? currentModel : preferred, models);
+}
+
+function defaultVisionModel(option: HermesProviderOption | undefined): string {
+  return option?.default_vision_model || option?.vision_models?.[0] || option?.default_model || option?.models?.[0] || '';
 }
 
 function providerOptionLabel(option: HermesProviderOption): string {
@@ -865,6 +884,13 @@ function hermesImageConnectionNotice(
   }
   if (testResult?.success) return null;
   if (validation?.verified) return null;
+  if (imageInput.route === 'blocked') {
+    return {
+      kind: 'warn',
+      title: '图片输入还不能使用',
+      detail: imageInput.reason || '请切换支持图片的主模型，或在图片识别链路中选择单独图片模型。',
+    };
+  }
   if (validation?.tested_at && !validation.verified) {
     return {
       kind: 'danger',
@@ -1072,7 +1098,7 @@ function HermesConfigCenter({
   const selectedProvider = providerOptionById(config, form.provider);
   const selectedVisionProvider = providerOptionById(config, form.vision_provider);
   const modelOptions = modelSelectOptions(form.model, selectedProvider?.models || []);
-  const visionModelOptions = modelSelectOptions(form.vision_model, selectedVisionProvider?.models || []);
+  const visionModelOptions = buildVisionModelOptions(selectedVisionProvider, form.vision_model);
   const apiKeyLabel = selectedProvider?.api_key_name || config?.api_key?.name || '';
   const apiKeyConfigured = selectedProvider?.api_key_configured ?? config?.api_key?.configured;
   const visionApiKeyLabel = selectedVisionProvider?.api_key_name || config?.vision?.api_key_name || '';
@@ -1087,7 +1113,11 @@ function HermesConfigCenter({
     connectionValidation,
   );
   const imageNotice = hermesImageConnectionNotice(config?.image_input, imageTestResult, imageValidation);
-  const imageTestDisabled = busy || !hermes?.command_exists || config?.image_input?.route === 'blocked';
+  const imageInputMode = form.image_input_mode === 'text' ? 'text' : 'auto';
+  const usesSeparateVision = imageInputMode === 'text';
+  const ttsProvider = ttsForm.provider || 'none';
+  const ttsEnabled = ttsProvider !== 'none';
+  const imageTestDisabled = busy || !hermes?.command_exists;
   return (
     <div className="hermes-config-center dashboard-hermes-center">
       <InfoList rows={[
@@ -1115,6 +1145,16 @@ function HermesConfigCenter({
           <span>{imageNotice.detail}</span>
         </div>
       ) : null}
+      <div className="hermes-secondary-actions">
+        <button
+          type="button"
+          className={busyAction === 'recheck' ? 'attention-action' : undefined}
+          disabled={busy}
+          onClick={() => void onRecheck()}
+        >
+          {busyAction === 'recheck' ? '检测中...' : '重新检测'}
+        </button>
+      </div>
       <form
         className="hermes-visual-config"
         onSubmit={(event) => {
@@ -1187,14 +1227,24 @@ function HermesConfigCenter({
         </div>
         <div className="hermes-config-footer">
           <span>{selectedProvider?.auth_type && selectedProvider.auth_type !== 'api_key' ? '该 provider 使用外部授权；如需登录请用下方高级命令。' : config?.config_path || '读取 Hermes 配置中'}</span>
-          <button
-            type="submit"
-            className="primary-action"
-            disabled={busy || !hermes?.command_exists}
-          >
-            {busyAction === 'config-save' ? '保存中...' : '保存 Hermes 配置'}
-          </button>
+          <div className="hermes-form-actions">
+            <button
+              type="button"
+              disabled={busy || !hermes?.command_exists}
+              onClick={() => void onTestConnection()}
+            >
+              {busyAction === 'connection-test' ? '测试中...' : '测试模型连接'}
+            </button>
+            <button
+              type="submit"
+              className="primary-action"
+              disabled={busy || !hermes?.command_exists}
+            >
+              {busyAction === 'config-save' ? '保存中...' : '保存 Hermes 配置'}
+            </button>
+          </div>
         </div>
+        {testResult ? <HermesConnectionResult result={testResult} /> : null}
       </form>
       <div className="capability-settings-grid">
         <form
@@ -1209,88 +1259,105 @@ function HermesConfigCenter({
             <span>{config?.image_input?.label || '未检测'}</span>
           </div>
           <p className="capability-note">
-            非多模态模型会先走这里配置的 vision 链路，把图片分析成文本后再交给主模型。
+            默认直接把图片交给主模型。只有主模型不是多模态时，才需要单独设置图片识别模型。
           </p>
           <div className="hermes-config-form-grid compact">
             <label className="settings-field wide" htmlFor="hermes-image-input-mode">
               <span>图片输入模式</span>
               <select
                 id="hermes-image-input-mode"
-                value={form.image_input_mode || 'auto'}
+                value={imageInputMode}
                 disabled={busy}
                 onChange={(event) => onConfigChange('image_input_mode', event.target.value)}
               >
-                <option value="auto">自动：多模态原生发送，否则使用 vision 链路</option>
-                <option value="native">强制原生图片：只适合多模态模型</option>
-                <option value="text">vision 预分析：先识图成文本再发送</option>
+                <option value="auto">使用主模型识别图片（推荐）</option>
+                <option value="text">单独设置图片识别模型</option>
               </select>
             </label>
-            <label className="settings-field" htmlFor="hermes-vision-provider">
-              <span>Vision Provider</span>
-              <select
-                id="hermes-vision-provider"
-                value={form.vision_provider}
-                disabled={busy}
-                onChange={(event) => onConfigChange('vision_provider', event.target.value)}
-              >
-                <option value="">自动跟随主模型</option>
-                {providerOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {providerOptionLabel(option)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="settings-field" htmlFor="hermes-vision-model">
-              <span>Vision 模型</span>
-              {visionModelOptions.length ? (
-                <select
-                  id="hermes-vision-model"
-                  value={form.vision_model}
-                  disabled={busy}
-                  onChange={(event) => onConfigChange('vision_model', event.target.value)}
-                >
-                  <option value="">自动选择</option>
-                  {visionModelOptions.map((model) => <option key={model} value={model}>{model}</option>)}
-                </select>
-              ) : (
-                <input
-                  id="hermes-vision-model"
-                  value={form.vision_model}
-                  placeholder="留空则由 Hermes 自动选择"
-                  disabled={busy}
-                  onChange={(event) => onConfigChange('vision_model', event.target.value)}
-                />
-              )}
-            </label>
-            <label className="settings-field wide" htmlFor="hermes-vision-base-url">
-              <span>Vision Base URL</span>
-              <input
-                id="hermes-vision-base-url"
-                value={form.vision_base_url}
-                placeholder={config?.vision?.effective_base_url || '留空则跟随 provider 默认值'}
-                disabled={busy}
-                onChange={(event) => onConfigChange('vision_base_url', event.target.value)}
-              />
-            </label>
-            <label className="settings-field wide" htmlFor="hermes-vision-api-key">
-              <span>Vision API Key</span>
-              <input
-                id="hermes-vision-api-key"
-                type="password"
-                value={form.vision_api_key}
-                placeholder={visionApiKeyConfigured ? '已配置，留空则不修改' : visionApiKeyLabel ? `输入 ${visionApiKeyLabel}` : '留空则复用主 provider 凭据'}
-                disabled={busy || (!visionApiKeyLabel && !form.vision_provider)}
-                onChange={(event) => onConfigChange('vision_api_key', event.target.value)}
-              />
-            </label>
+            {usesSeparateVision ? (
+              <>
+                <label className="settings-field" htmlFor="hermes-vision-provider">
+                  <span>图片 Provider</span>
+                  <select
+                    id="hermes-vision-provider"
+                    value={form.vision_provider}
+                    disabled={busy}
+                    onChange={(event) => onConfigChange('vision_provider', event.target.value)}
+                  >
+                    <option value="">自动跟随主模型</option>
+                    {providerOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {providerOptionLabel(option)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="settings-field" htmlFor="hermes-vision-model">
+                  <span>图片模型</span>
+                  {visionModelOptions.length ? (
+                    <select
+                      id="hermes-vision-model"
+                      value={form.vision_model}
+                      disabled={busy}
+                      onChange={(event) => onConfigChange('vision_model', event.target.value)}
+                    >
+                      <option value="">自动选择</option>
+                      {visionModelOptions.map((model) => <option key={model} value={model}>{model}</option>)}
+                    </select>
+                  ) : (
+                    <input
+                      id="hermes-vision-model"
+                      value={form.vision_model}
+                      placeholder="留空则由 Hermes 自动选择"
+                      disabled={busy}
+                      onChange={(event) => onConfigChange('vision_model', event.target.value)}
+                    />
+                  )}
+                </label>
+                <label className="settings-field wide" htmlFor="hermes-vision-base-url">
+                  <span>图片 Base URL</span>
+                  <input
+                    id="hermes-vision-base-url"
+                    value={form.vision_base_url}
+                    placeholder={config?.vision?.effective_base_url || '留空则跟随 provider 默认值'}
+                    disabled={busy}
+                    onChange={(event) => onConfigChange('vision_base_url', event.target.value)}
+                  />
+                </label>
+                <label className="settings-field wide" htmlFor="hermes-vision-api-key">
+                  <span>图片 API Key</span>
+                  <input
+                    id="hermes-vision-api-key"
+                    type="password"
+                    value={form.vision_api_key}
+                    placeholder={visionApiKeyConfigured ? '已配置，留空则不修改' : visionApiKeyLabel ? `输入 ${visionApiKeyLabel}` : '留空则复用主 provider 凭据'}
+                    disabled={busy || (!visionApiKeyLabel && !form.vision_provider)}
+                    onChange={(event) => onConfigChange('vision_api_key', event.target.value)}
+                  />
+                </label>
+              </>
+            ) : (
+              <p className="capability-note wide-form-note">
+                当前未单独设置图片模型。聊天窗口会把图片直接交给主模型；如果主模型不支持图片，会在发送前给出提示并阻止粘贴。
+              </p>
+            )}
           </div>
           <div className="hermes-config-footer">
-            <span>{config?.vision?.configured ? '已配置独立 vision 链路' : '未单独配置时由 Hermes/Yachiyo 自动选择'}</span>
-            <button type="submit" className="primary-action" disabled={busy || !hermes?.command_exists}>
-              {busyAction === 'config-save' ? '保存中...' : '保存图片链路'}
-            </button>
+            <span>{usesSeparateVision ? '图片会先由独立模型识别，再把结果交给主模型。' : '主模型承担图片识别；不需要额外 vision 配置。'}</span>
+            <div className="hermes-form-actions">
+              <button type="submit" className="primary-action" disabled={busy || !hermes?.command_exists}>
+                {busyAction === 'config-save' ? '保存中...' : '保存图片链路'}
+              </button>
+              <button
+                type="button"
+                disabled={imageTestDisabled}
+                onClick={() => void onTestImageConnection()}
+              >
+                {busyAction === 'image-connection-test' ? '测试中...' : '测试图片链路'}
+              </button>
+            </div>
           </div>
+          {imageTestResult ? <HermesConnectionResult result={imageTestResult} /> : null}
         </form>
         <form
           className="hermes-visual-config capability-config-card"
@@ -1301,23 +1368,13 @@ function HermesConfigCenter({
         >
           <div className="hermes-subsection-title">
             <strong>TTS 播报链路</strong>
-            <span>{ttsForm.enabled && ttsForm.provider !== 'none' ? '已启用' : '未启用'}</span>
+            <span>{ttsEnabled ? '已启用' : '未启用'}</span>
           </div>
           <p className="capability-note">
             Live2D 收到新回复时只播报短提醒；主动桌面观察也会按这里的提示词生成适合语音的短句。
           </p>
           <div className="hermes-config-form-grid compact">
-            <label className="settings-field wide checkbox-field" htmlFor="tts-enabled-main">
-              <input
-                id="tts-enabled-main"
-                type="checkbox"
-                checked={ttsForm.enabled}
-                disabled={busy}
-                onChange={(event) => onTtsChange('enabled', event.target.checked)}
-              />
-              <span>启用 Live2D 自动播报</span>
-            </label>
-            <label className="settings-field" htmlFor="tts-provider-main">
+            <label className="settings-field wide" htmlFor="tts-provider-main">
               <span>TTS Provider</span>
               <select
                 id="tts-provider-main"
@@ -1330,107 +1387,82 @@ function HermesConfigCenter({
                 <option value="command">本地命令</option>
               </select>
             </label>
-            <label className="settings-field" htmlFor="tts-voice-main">
-              <span>音色</span>
-              <input
-                id="tts-voice-main"
-                value={ttsForm.voice}
-                placeholder="例如 Kyoko"
-                disabled={busy}
-                onChange={(event) => onTtsChange('voice', event.target.value)}
-              />
-            </label>
-            <label className="settings-field wide" htmlFor="tts-endpoint-main">
-              <span>HTTP Endpoint</span>
-              <input
-                id="tts-endpoint-main"
-                value={ttsForm.endpoint}
-                placeholder="http://127.0.0.1:9000/tts"
-                disabled={busy || ttsForm.provider !== 'http'}
-                onChange={(event) => onTtsChange('endpoint', event.target.value)}
-              />
-            </label>
-            <label className="settings-field wide" htmlFor="tts-command-main">
-              <span>本地命令</span>
-              <input
-                id="tts-command-main"
-                value={ttsForm.command}
-                placeholder="say --voice {voice} {text}"
-                disabled={busy || ttsForm.provider !== 'command'}
-                onChange={(event) => onTtsChange('command', event.target.value)}
-              />
-            </label>
-            <label className="settings-field" htmlFor="tts-max-chars-main">
-              <span>播报最大字数</span>
-              <input
-                id="tts-max-chars-main"
-                type="number"
-                min={20}
-                max={240}
-                value={ttsForm.max_chars}
-                disabled={busy}
-                onChange={(event) => onTtsChange('max_chars', Number(event.target.value))}
-              />
-            </label>
-            <label className="settings-field" htmlFor="tts-timeout-main">
-              <span>超时秒</span>
-              <input
-                id="tts-timeout-main"
-                type="number"
-                min={1}
-                max={120}
-                value={ttsForm.timeout_seconds}
-                disabled={busy}
-                onChange={(event) => onTtsChange('timeout_seconds', Number(event.target.value))}
-              />
-            </label>
-            <label className="settings-field wide" htmlFor="tts-prompt-main">
-              <span>主动播报提示词</span>
-              <textarea
-                id="tts-prompt-main"
-                value={ttsForm.notification_prompt}
-                rows={3}
-                disabled={busy}
-                onChange={(event) => onTtsChange('notification_prompt', event.target.value)}
-              />
-            </label>
+            {ttsProvider === 'none' ? (
+              <p className="capability-note wide-form-note">
+                关闭后不会自动播放语音。对话文本和 Live2D 表情状态不受影响。
+              </p>
+            ) : null}
+            {ttsProvider === 'http' ? (
+              <label className="settings-field wide" htmlFor="tts-endpoint-main">
+                <span>HTTP Endpoint</span>
+                <input
+                  id="tts-endpoint-main"
+                  value={ttsForm.endpoint}
+                  placeholder="http://127.0.0.1:9000/tts"
+                  disabled={busy}
+                  onChange={(event) => onTtsChange('endpoint', event.target.value)}
+                />
+              </label>
+            ) : null}
+            {ttsProvider === 'command' ? (
+              <label className="settings-field wide" htmlFor="tts-command-main">
+                <span>本地命令</span>
+                <input
+                  id="tts-command-main"
+                  value={ttsForm.command}
+                  placeholder="say {text}"
+                  disabled={busy}
+                  onChange={(event) => onTtsChange('command', event.target.value)}
+                />
+              </label>
+            ) : null}
+            {ttsEnabled ? (
+              <>
+                <label className="settings-field" htmlFor="tts-max-chars-main">
+                  <span>播报最大字数</span>
+                  <input
+                    id="tts-max-chars-main"
+                    type="number"
+                    min={20}
+                    max={240}
+                    value={ttsForm.max_chars}
+                    disabled={busy}
+                    onChange={(event) => onTtsChange('max_chars', Number(event.target.value))}
+                  />
+                </label>
+                <label className="settings-field" htmlFor="tts-timeout-main">
+                  <span>超时秒</span>
+                  <input
+                    id="tts-timeout-main"
+                    type="number"
+                    min={1}
+                    max={120}
+                    value={ttsForm.timeout_seconds}
+                    disabled={busy}
+                    onChange={(event) => onTtsChange('timeout_seconds', Number(event.target.value))}
+                  />
+                </label>
+                <label className="settings-field wide" htmlFor="tts-prompt-main">
+                  <span>主动播报提示词</span>
+                  <textarea
+                    id="tts-prompt-main"
+                    value={ttsForm.notification_prompt}
+                    rows={3}
+                    disabled={busy}
+                    onChange={(event) => onTtsChange('notification_prompt', event.target.value)}
+                  />
+                </label>
+              </>
+            ) : null}
           </div>
           <div className="hermes-config-footer">
-            <span>实际播报前仍会硬性截短，避免长回复导致播放过久。</span>
+            <span>{ttsEnabled ? '实际播报前仍会硬性截短，避免长回复导致播放过久。' : '选择 HTTP 或本地命令后再配置播报参数。'}</span>
             <button type="submit" className="primary-action" disabled={busy}>
               {busyAction === 'tts-save' ? '保存中...' : '保存 TTS 设置'}
             </button>
           </div>
         </form>
       </div>
-      <div className="hermes-test-strip">
-        <button
-          type="button"
-          className="primary-action"
-          disabled={busy || !hermes?.command_exists}
-          onClick={() => void onTestConnection()}
-        >
-          {busyAction === 'connection-test' ? '测试中...' : '测试模型连接'}
-        </button>
-        <button
-          type="button"
-          className="primary-action"
-          disabled={imageTestDisabled}
-          onClick={() => void onTestImageConnection()}
-        >
-          {busyAction === 'image-connection-test' ? '测试中...' : '测试图片链路'}
-        </button>
-        <button
-          type="button"
-          className={busyAction === 'recheck' ? 'attention-action' : undefined}
-          disabled={busy}
-          onClick={() => void onRecheck()}
-        >
-          {busyAction === 'recheck' ? '检测中...' : '重新检测'}
-        </button>
-      </div>
-      {testResult ? <HermesConnectionResult result={testResult} /> : null}
-      {imageTestResult ? <HermesConnectionResult result={imageTestResult} /> : null}
     </div>
   );
 }
