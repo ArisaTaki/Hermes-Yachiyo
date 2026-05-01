@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   openView: (view: string, params?: Record<string, string>) => ipcRenderer.invoke('hermes:openView', view, params) as Promise<void>,
   quit: () => ipcRenderer.invoke('hermes:quit') as Promise<void>,
   restartApp: () => ipcRenderer.invoke('hermes:restartApp') as Promise<void>,
+  restartBackend: (options?: { bridgeUrl?: string }) => ipcRenderer.invoke('hermes:restartBackend', options) as Promise<{ success?: boolean; bridgeUrl?: string; error?: string }>,
   setLauncherHitRegions: (mode: string, payload: unknown) => ipcRenderer.invoke('hermes:setLauncherHitRegions', mode, payload) as Promise<boolean>,
   setLauncherPointerInteractive: (mode: string, interactive: boolean) => ipcRenderer.invoke('hermes:setLauncherPointerInteractive', mode, interactive) as Promise<boolean>,
   terminalKill: (id: string) => ipcRenderer.invoke('hermes:terminalKill', id) as Promise<boolean>,

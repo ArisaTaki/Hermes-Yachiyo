@@ -8,7 +8,7 @@ tab:
 - React/Vite/TypeScript owns user-facing screens under `apps/frontend/`.
 - Python runs as a headless runtime process under `apps/desktop_backend/`.
 - FastAPI Bridge exposes local HTTP routes for the frontend and integrations.
-- pywebview is not part of the active UI path.
+- The retired pywebview shell is no longer part of the code path.
 
 ## Process Model
 
@@ -73,8 +73,8 @@ exists, so `hermes-yachiyo` uses the same fixed Node line from a normal shell.
 - `apps/desktop_backend/app.py` owns runtime startup and Bridge lifecycle.
 - `apps/bridge/routes/ui.py` provides UI-specific HTTP routes for dashboard,
   settings, chat, launcher state, and mode configuration.
-- The frontend must not call Python objects directly and must not depend on
-  `window.pywebview.api`.
+- The frontend must not call Python objects directly; renderer code talks to
+  Bridge HTTP routes and the narrow Electron preload IPC surface.
 - High-risk capabilities remain disabled by default and should stay mediated by
   Bridge/runtime policy.
 
@@ -97,18 +97,18 @@ Bubble and Live2D windows are launcher-only surfaces. Electron intercepts
 navigation and `window.open` requests from those mode windows; if a launcher
 tries to navigate to chat, settings, or dashboard, Electron redirects the target
 to the correct main/chat window and keeps the mode window on its launcher route.
-This preserves the old pywebview behavior where clicking Bubble or Live2D opens
-the shared chat surface instead of rendering a full app page inside a tiny
+This preserves the expected launcher behavior where clicking Bubble or Live2D
+opens the shared chat surface instead of rendering a full app page inside a tiny
 transparent window.
 
-The Electron main process also mirrors the remaining legacy shell startup
-contracts: the main window reads `window_mode.width` / `height`, honors
+The Electron main process owns the desktop shell contracts: the main window
+reads `window_mode.width` / `height`, honors
 `app.start_minimized` at launch, optionally opens the Chat Window through
 `window_mode.open_chat_on_start`, and creates an Electron-native tray menu when
 `app.tray_enabled` is enabled.
 
-The UI Bridge exposes legacy settings operations through HTTP routes rather than
-duplicating business logic in React. Dashboard/settings renderer actions that
+The UI Bridge exposes settings and maintenance operations through HTTP routes
+rather than duplicating business logic in React. Dashboard/settings renderer actions that
 restart Bridge, recheck Hermes, open Hermes terminal commands, create/restore
 backups, or preview/run uninstall delegate to `MainWindowAPI` via `/ui/*`.
 
@@ -129,15 +129,14 @@ route reads `/ui/launcher?mode=bubble|live2d`, acknowledges attention through
 main before the persisted percent position is written back, while Live2D stores
 absolute position and current window size. The backend reuses `ChatBridge` and
 `LauncherNotificationTracker` so unread state, processing state, and latest
-reply summaries follow the same semantics as the legacy pywebview launchers.
+reply summaries stay consistent across the launcher and chat windows.
 
-Bubble deliberately mirrors the legacy pywebview launcher contract: the backend
-resolves the avatar as a data URI, exposes status/proactive fields, and the
-renderer keeps the old avatar bubble shape, status dot classes, auto-hide
-opacity behavior, and drag-vs-click threshold. Live2D currently mirrors the
-legacy static shell: preview fallback, resource hint, default open behavior,
-reply bubble, quick input, and renderer payload are present. The React launcher
-also loads the legacy Pixi/Cubism runtime scripts through `/live2d/runtime`,
+Bubble keeps the compact avatar launcher contract: the backend resolves the
+avatar as a data URI, exposes status/proactive fields, and the renderer owns the
+avatar bubble shape, status dot classes, auto-hide opacity behavior, and
+drag-vs-click threshold. Live2D includes preview fallback, resource hint,
+default open behavior, reply bubble, quick input, and renderer payload. The
+React launcher also loads Pixi/Cubism runtime scripts through `/live2d/runtime`,
 uses the protected `renderer.model_url` to create a Pixi canvas model, and falls
 back to the preview image on dependency or model-load failure. Transparent
 pointer pass-through is mediated by a narrow Electron IPC, but it is currently
@@ -154,7 +153,7 @@ resource packages and deeper per-model motion/expression tuning.
 
 Launcher context menus are Electron-native and exposed through the narrow
 preload IPC surface. Renderer code should request the menu; it should not build
-native menu behavior with Python or pywebview APIs.
+native menu behavior with Python APIs.
 
 ## Development Commands
 
@@ -175,10 +174,9 @@ During manual validation, `hermes-yachiyo` should show Vite on
 with Ctrl-C; normal frontend child-process failures are reported with a concise
 launcher message and the detailed process logs above it.
 
-If `hermes-yachiyo` still opens the old pywebview shell after changing the
-entry point, the active virtualenv has a stale console script. Run
-`pip install -e .` from the repository root to regenerate it. The legacy shell
-is intentionally reachable only through `hermes-yachiyo-legacy-pywebview`.
+If `hermes-yachiyo` does not start the Electron shell after changing the entry
+point, the active virtualenv has a stale console script. Run `pip install -e .`
+from the repository root to regenerate it.
 
 Backend-only development can use:
 

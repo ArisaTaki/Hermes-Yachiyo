@@ -78,8 +78,17 @@ async def test_settings_operation_routes_use_main_api(monkeypatch):
         def open_terminal_command(self, command):
             return {"success": True, "command": command}
 
+        def run_hermes_diagnostic_command(self, command):
+            return {"success": True, "command": command, "output": "ok"}
+
+        def get_hermes_diagnostic_cache(self):
+            return {"commands": {"doctor": {"success": True}}}
+
         def test_hermes_connection(self):
             return {"success": True, "message": "ok"}
+
+        def test_hermes_image_connection(self):
+            return {"success": True, "message": "image ok"}
 
         def get_hermes_configuration(self):
             return {"ok": True, "model": {"provider": "openai"}}
@@ -120,7 +129,15 @@ async def test_settings_operation_routes_use_main_api(monkeypatch):
         "success": True,
         "command": "hermes doctor",
     }
+    diagnostic_request = ui.TerminalCommandRequest(command="hermes doctor")
+    assert await ui.run_hermes_diagnostic_command(diagnostic_request) == {
+        "success": True,
+        "command": "hermes doctor",
+        "output": "ok",
+    }
+    assert await ui.get_hermes_diagnostic_cache() == {"commands": {"doctor": {"success": True}}}
     assert await ui.test_hermes_connection() == {"success": True, "message": "ok"}
+    assert await ui.test_hermes_image_connection() == {"success": True, "message": "image ok"}
     assert await ui.get_hermes_configuration() == {"ok": True, "model": {"provider": "openai"}}
     assert await ui.update_hermes_configuration(ui.HermesConfigUpdateRequest(provider="openai", model="gpt-4.1")) == {
         "ok": True,
@@ -158,8 +175,8 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         def get_messages(self, limit):
             return {"messages": [], "limit": limit}
 
-        def send_message(self, text):
-            return {"ok": True, "text": text}
+        def send_message(self, text, attachments=None):
+            return {"ok": True, "text": text, "attachments": attachments or []}
 
         def get_session_info(self):
             return {"session_id": "session-1"}
@@ -188,6 +205,7 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
     assert await ui.send_chat_message(ui.SendChatMessageRequest(text="hello")) == {
         "ok": True,
         "text": "hello",
+        "attachments": [],
     }
     assert await ui.get_chat_session() == {"session_id": "session-1"}
     assert await ui.clear_chat_session() == {"ok": True}
@@ -379,7 +397,8 @@ async def test_launcher_live2d_payload_includes_preview_and_renderer(monkeypatch
     launcher = payload["launcher"]
 
     assert launcher["preview_url"].startswith("data:image/")
-    assert launcher["scale"] == 1.0
+    assert launcher["scale"] == 0.6
+    assert launcher["position_anchor"] == "right_bottom"
     assert launcher["mouse_follow_enabled"] is True
     assert launcher["resource"]["state"] == "not_configured"
     assert "GitHub Releases" in launcher["resource"]["help_text"]
@@ -446,6 +465,7 @@ async def test_launcher_position_route_persists_live2d_bounds(monkeypatch):
         (
             config,
             {
+                "live2d_mode.position_anchor": "custom",
                 "live2d_mode.position_x": 80,
                 "live2d_mode.position_y": 96,
                 "live2d_mode.width": 420,

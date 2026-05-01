@@ -3,14 +3,9 @@
 from __future__ import annotations
 
 import json
-import sys
-import types
-import zipfile
 from pathlib import Path
-from typing import Any
 
 import apps.shell.config as config_mod
-import apps.shell.settings as settings_mod
 from apps.shell.assets import (
     DEFAULT_BUBBLE_AVATAR_PATH,
     LEGACY_BUNDLED_LIVE2D_MODEL_DIR,
@@ -22,7 +17,6 @@ from apps.shell.mode_settings import (
     serialize_mode_settings,
     serialize_mode_window_data,
 )
-from apps.shell.settings import ModeSettingsAPI, _SETTINGS_HTML, _import_live2d_archive, open_mode_settings_window
 
 
 def _create_live2d_model_dir(root: Path, model_name: str = "demo") -> Path:
@@ -37,74 +31,6 @@ def _patch_no_live2d_assets(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(config_mod, "get_user_live2d_assets_dir", lambda: tmp_path / "assets" / "live2d")
 
 
-class _DialogWindowStub:
-    def __init__(self, selection: tuple[str, ...] | None) -> None:
-        self.selection = selection
-        self.show_calls = 0
-        self.focus_calls = 0
-        self.closed = False
-        self.destroyed = False
-        self.destroy_calls = 0
-        self.events: Any = _WindowEventsStub()
-
-    def create_file_dialog(self, *_args, **_kwargs):
-        return self.selection
-
-    def show(self):
-        self.show_calls += 1
-
-    def focus(self):
-        self.focus_calls += 1
-
-    def destroy(self):
-        self.destroyed = True
-        self.destroy_calls += 1
-
-
-class _EventHookStub:
-    def __init__(self) -> None:
-        self.handler = None
-
-    def __iadd__(self, handler):
-        self.handler = handler
-        return self
-
-
-class _WindowEventsStub:
-    def __init__(self) -> None:
-        self.closed = _EventHookStub()
-
-
-class _RaisingEventHookStub(_EventHookStub):
-    def __iadd__(self, _handler):
-        raise RuntimeError("bind failed")
-
-
-class _RaisingWindowEventsStub:
-    def __init__(self) -> None:
-        self.closed = _RaisingEventHookStub()
-
-
-class _DialogWindowWithRaisingClosedEvent(_DialogWindowStub):
-    def __init__(self, selection: tuple[str, ...] | None) -> None:
-        super().__init__(selection)
-        self.events = _RaisingWindowEventsStub()
-
-
-class _WebviewModuleStub:
-    def __init__(self) -> None:
-        self.create_calls = 0
-        self.last_window: _DialogWindowStub | None = None
-        self.on_create = None
-
-    def create_window(self, **_kwargs):
-        self.create_calls += 1
-        if self.on_create is not None:
-            self.on_create()
-        self.last_window = _DialogWindowStub(None)
-        return self.last_window
-
-
 def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     _patch_no_live2d_assets(monkeypatch, tmp_path)
     config = AppConfig()
@@ -117,7 +43,10 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.bubble_mode.edge_snap is True
     assert config.bubble_mode.proactive_enabled is False
     assert config.live2d_mode.idle_motion_group == "Idle"
-    assert config.live2d_mode.scale == 1.0
+    assert config.live2d_mode.position_anchor == "right_bottom"
+    assert config.live2d_mode.position_x == 0
+    assert config.live2d_mode.position_y == 0
+    assert config.live2d_mode.scale == 0.6
     assert config.live2d_mode.show_on_all_spaces is True
     assert config.live2d_mode.model_name == ""
     assert config.live2d_mode.model_path == ""
@@ -137,6 +66,96 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.tts.command == ""
     assert config.tts.voice == ""
     assert config.tts.timeout_seconds == 20
+    assert config.tts.max_chars == 80
+    assert config.tts.notification_prompt == config_mod.DEFAULT_TTS_NOTIFICATION_PROMPT
+
+
+def test_legacy_live2d_default_position_migrates_to_right_bottom(monkeypatch, tmp_path):
+    _patch_no_live2d_assets(monkeypatch, tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    (tmp_path / "config.json").write_text(
+        json.dumps({"live2d_mode": {"position_x": 48, "position_y": 48, "scale": 1.0}}),
+        encoding="utf-8",
+    )
+
+    config = load_config()
+
+    assert config.live2d_mode.position_anchor == "right_bottom"
+    assert config.live2d_mode.position_x == 0
+    assert config.live2d_mode.position_y == 0
+    assert config.live2d_mode.scale == 0.6
+
+
+def test_existing_live2d_position_without_anchor_stays_custom(monkeypatch, tmp_path):
+    _patch_no_live2d_assets(monkeypatch, tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    (tmp_path / "config.json").write_text(
+        json.dumps({"live2d_mode": {"position_x": 80, "position_y": 96, "scale": 1.0}}),
+        encoding="utf-8",
+    )
+
+    config = load_config()
+
+    assert config.live2d_mode.position_anchor == "custom"
+    assert config.live2d_mode.position_x == 80
+    assert config.live2d_mode.position_y == 96
+    assert config.live2d_mode.scale == 1.0
+
+
+def test_previous_live2d_default_anchor_migrates_to_right_bottom(monkeypatch, tmp_path):
+    _patch_no_live2d_assets(monkeypatch, tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "live2d_mode": {
+                    "position_anchor": "left_bottom",
+                    "position_x": 0,
+                    "position_y": 0,
+                    "scale": 0.5,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config()
+
+    assert config.live2d_mode.position_anchor == "right_bottom"
+    assert config.live2d_mode.position_x == 0
+    assert config.live2d_mode.position_y == 0
+    assert config.live2d_mode.scale == 0.6
+
+
+def test_auto_saved_live2d_left_default_migrates_to_right_bottom(monkeypatch, tmp_path):
+    _patch_no_live2d_assets(monkeypatch, tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "live2d_mode": {
+                    "position_anchor": "custom",
+                    "position_x": 0,
+                    "position_y": 269,
+                    "scale": 0.72,
+                    "width": 420,
+                    "height": 680,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config = load_config()
+
+    assert config.live2d_mode.position_anchor == "right_bottom"
+    assert config.live2d_mode.position_x == 0
+    assert config.live2d_mode.position_y == 0
+    assert config.live2d_mode.scale == 0.6
 
 
 def test_live2d_auto_discovers_user_assets(monkeypatch, tmp_path):
@@ -219,6 +238,8 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
             "tts.command": "say {text}",
             "tts.voice": "kyoko",
             "tts.timeout_seconds": 10,
+            "tts.max_chars": 60,
+            "tts.notification_prompt": "只说一句提醒。",
         },
     )
 
@@ -238,6 +259,8 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     assert config.tts.command == "say {text}"
     assert config.tts.voice == "kyoko"
     assert config.tts.timeout_seconds == 10
+    assert config.tts.max_chars == 60
+    assert config.tts.notification_prompt == "只说一句提醒。"
     assert result["mode_settings"]["bubble"]["config"]["summary_count"] == 2
     assert result["mode_settings"]["bubble"]["config"]["position_x_percent"] == 0.75
     assert "assistant" not in result["mode_settings"]["bubble"]["config"]
@@ -315,6 +338,7 @@ def test_apply_settings_changes_rejects_invalid_new_fields(tmp_path, monkeypatch
         {
             "tts.provider": "bad",
             "tts.timeout_seconds": 999,
+            "tts.max_chars": 999,
             "live2d_mode.proactive_interval_seconds": 10,
         },
     )
@@ -322,6 +346,7 @@ def test_apply_settings_changes_rejects_invalid_new_fields(tmp_path, monkeypatch
     assert result["ok"] is False
     assert config.tts.provider == "none"
     assert config.tts.timeout_seconds == 20
+    assert config.tts.max_chars == 80
     assert config.live2d_mode.proactive_interval_seconds == 300
     assert "tts.provider" in result["error"]
 
@@ -376,6 +401,8 @@ def test_serialize_mode_settings_returns_separate_sections(monkeypatch, tmp_path
     assert payload["bubble"]["config"]["position_x_percent"] == 1.0
     assert payload["bubble"]["config"]["position_y_percent"] == 1.0
     assert payload["live2d"]["config"]["model_path_display"] == ""
+    assert payload["live2d"]["config"]["position_anchor"] == "right_bottom"
+    assert payload["live2d"]["config"]["scale"] == 0.6
     assert payload["live2d"]["config"]["resource"]["releases_url"] == LIVE2D_RELEASES_URL
     assert payload["live2d"]["config"]["resource"]["state"] == "not_configured"
     assert "assistant" not in payload["bubble"]["config"]
@@ -398,47 +425,6 @@ def test_serialize_mode_window_data_returns_mode_part_only(monkeypatch, tmp_path
     assert payload["settings"]["config"]["show_on_all_spaces"] is True
     assert payload["settings"]["config"]["show_reply_bubble"] is True
     assert payload["settings"]["config"]["enable_quick_input"] is True
-
-
-def test_mode_settings_window_does_not_render_common_settings():
-    assert "Common" not in _SETTINGS_HTML
-    assert "display_mode" not in _SETTINGS_HTML
-    assert "bridge_host" not in _SETTINGS_HTML
-    assert "function scaleRow" in _SETTINGS_HTML
-    assert "应用修改" in _SETTINGS_HTML
-    assert "重置草稿" in _SETTINGS_HTML
-    assert "updateDraftField" in _SETTINGS_HTML
-    assert 'type="range"' in _SETTINGS_HTML
-    assert "选择模型目录" in _SETTINGS_HTML
-    assert "导入资源包 ZIP" in _SETTINGS_HTML
-    assert "打开导入目录" in _SETTINGS_HTML
-    assert "当前配置路径" in _SETTINGS_HTML
-    assert "当前生效路径" in _SETTINGS_HTML
-    assert "鼠标跟随" in _SETTINGS_HTML
-    assert "默认导入目录" in _SETTINGS_HTML
-    assert "资源下载" in _SETTINGS_HTML
-    assert "当前头像资源" in _SETTINGS_HTML
-    assert "助手人设 Prompt" not in _SETTINGS_HTML
-    assert "TTS Provider" in _SETTINGS_HTML
-    assert "待实现，暂不生效" not in _SETTINGS_HTML
-    assert "窗口置顶（需重启当前模式）" in _SETTINGS_HTML
-    assert "气泡宽度（80-192，需重启当前模式）" in _SETTINGS_HTML
-    assert "默认位置设置使用屏幕百分比" in _SETTINGS_HTML
-    assert "默认位置 X（0-100%，需重启当前模式）" in _SETTINGS_HTML
-    assert "默认位置 Y（0-100%，需重启当前模式）" in _SETTINGS_HTML
-    assert "靠边吸附（拖动结束后吸附最近屏幕边缘）" in _SETTINGS_HTML
-    assert "点击打开聊天（固定）" in _SETTINGS_HTML
-    assert "新消息呼吸灯" in _SETTINGS_HTML
-    assert "应用并重启应用" in _SETTINGS_HTML
-    assert "启动时打开聊天窗口（需重启当前模式）" in _SETTINGS_HTML
-    assert "启动初始表现（不打开聊天窗口）" in _SETTINGS_HTML
-    assert "模型可用表情" in _SETTINGS_HTML
-    assert "模型可用动作" in _SETTINGS_HTML
-    assert "TODO：Live2D 新消息提醒" in _SETTINGS_HTML
-    assert "点击角色行为" in _SETTINGS_HTML
-    assert "显示快捷输入入口" in _SETTINGS_HTML
-    assert "悬停打开聊天" not in _SETTINGS_HTML
-    assert "GitHub Releases" not in _SETTINGS_HTML  # URL 运行时填充
 
 
 def test_load_config_reads_legacy_live2d_block(tmp_path, monkeypatch):
@@ -548,6 +534,8 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     config.tts.enabled = True
     config.tts.provider = "http"
     config.tts.endpoint = "http://127.0.0.1:9000/tts"
+    config.tts.max_chars = 66
+    config.tts.notification_prompt = "短提醒"
 
     save_config(config)
     data = json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))
@@ -563,148 +551,5 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     assert data["tts"]["enabled"] is True
     assert data["tts"]["provider"] == "http"
     assert data["tts"]["endpoint"] == "http://127.0.0.1:9000/tts"
-
-
-def test_mode_settings_api_can_choose_live2d_model_path(tmp_path, monkeypatch):
-    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
-    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
-
-    model_dir = _create_live2d_model_dir(tmp_path / "picked" / "yachiyo")
-    config = AppConfig(display_mode="live2d")
-    api = ModeSettingsAPI(config, "live2d")
-    api.bind_window(_DialogWindowStub((str(model_dir),)))
-
-    result = api.choose_live2d_model_path()
-
-    assert result["ok"] is True
-    assert config.live2d_mode.model_path == ""
-    assert result["draft_changes"]["live2d_mode.model_path"] == str(model_dir)
-    assert result["preview"]["settings"]["config"]["model_path"] == str(model_dir)
-
-
-def test_import_live2d_archive_extracts_model_dir(tmp_path):
-    source_root = tmp_path / "release" / "yachiyo"
-    _create_live2d_model_dir(source_root, model_name="yachiyo")
-    archive_path = tmp_path / "yachiyo-live2d.zip"
-
-    with zipfile.ZipFile(archive_path, "w") as archive:
-        for file in source_root.rglob("*"):
-            archive.write(file, file.relative_to(source_root.parent))
-
-    imported_path = _import_live2d_archive(archive_path, assets_root=tmp_path / "imported")
-
-    assert imported_path.exists()
-    assert imported_path.name == "yachiyo"
-    assert (imported_path / "yachiyo.model3.json").exists()
-
-
-def test_open_mode_settings_window_reuses_existing_mode_window(monkeypatch):
-    webview_stub = _WebviewModuleStub()
-    monkeypatch.setitem(sys.modules, "webview", webview_stub)
-    monkeypatch.setattr(settings_mod, "_settings_windows", {})
-    monkeypatch.setattr(settings_mod, "_settings_windows_creating", set())
-
-    config = AppConfig(display_mode="live2d")
-
-    assert open_mode_settings_window(config, "live2d") is True
-    assert open_mode_settings_window(config, "live2d") is True
-    assert webview_stub.create_calls == 1
-    assert webview_stub.last_window is not None
-    assert webview_stub.last_window.show_calls == 1
-
-
-def test_open_mode_settings_window_focus_fallback_failure_does_not_duplicate(monkeypatch):
-    webview_stub = _WebviewModuleStub()
-    monkeypatch.setitem(sys.modules, "webview", webview_stub)
-    monkeypatch.setattr(settings_mod, "_settings_windows", {})
-    monkeypatch.setattr(settings_mod, "_settings_windows_creating", set())
-    monkeypatch.setattr(settings_mod, "_focus_macos_window_by_title", lambda _title: False)
-
-    config = AppConfig(display_mode="live2d")
-
-    assert open_mode_settings_window(config, "live2d") is True
-    assert webview_stub.last_window is not None
-    webview_stub.last_window.show = lambda: (_ for _ in ()).throw(RuntimeError("show failed"))
-
-    assert open_mode_settings_window(config, "live2d") is True
-    assert webview_stub.create_calls == 1
-    assert webview_stub.last_window.focus_calls == 1
-
-
-def test_open_mode_settings_window_recreates_after_close(monkeypatch):
-    webview_stub = _WebviewModuleStub()
-    monkeypatch.setitem(sys.modules, "webview", webview_stub)
-    monkeypatch.setattr(settings_mod, "_settings_windows", {})
-    monkeypatch.setattr(settings_mod, "_settings_windows_creating", set())
-
-    config = AppConfig(display_mode="live2d")
-
-    assert open_mode_settings_window(config, "live2d") is True
-    assert webview_stub.last_window is not None
-    assert webview_stub.last_window.events.closed.handler is not None
-    webview_stub.last_window.events.closed.handler()
-
-    assert open_mode_settings_window(config, "live2d") is True
-    assert webview_stub.create_calls == 2
-
-
-def test_open_mode_settings_window_does_not_reenter_while_creating(monkeypatch):
-    webview_stub = _WebviewModuleStub()
-    monkeypatch.setitem(sys.modules, "webview", webview_stub)
-    monkeypatch.setattr(settings_mod, "_settings_windows", {})
-    monkeypatch.setattr(settings_mod, "_settings_windows_creating", set())
-
-    config = AppConfig(display_mode="live2d")
-    reentered = False
-
-    def _reenter() -> None:
-        nonlocal reentered
-        if reentered:
-            return
-        reentered = True
-        assert open_mode_settings_window(config, "live2d") is True
-
-    webview_stub.on_create = _reenter
-
-    assert open_mode_settings_window(config, "live2d") is True
-    assert reentered is True
-    assert webview_stub.create_calls == 1
-
-
-def test_open_mode_settings_window_returns_false_and_cleans_when_closed_bind_raises(monkeypatch):
-    webview_stub = _WebviewModuleStub()
-    created = _DialogWindowWithRaisingClosedEvent(None)
-
-    def _create_window(**_kwargs):
-        webview_stub.create_calls += 1
-        webview_stub.last_window = created
-        return created
-
-    webview_stub.create_window = _create_window
-    monkeypatch.setitem(sys.modules, "webview", webview_stub)
-    monkeypatch.setattr(settings_mod, "_settings_windows", {})
-    monkeypatch.setattr(settings_mod, "_settings_windows_creating", set())
-
-    config = AppConfig(display_mode="live2d")
-
-    assert open_mode_settings_window(config, "live2d") is False
-    assert webview_stub.create_calls == 1
-    assert created.destroy_calls == 1
-    assert settings_mod._settings_windows == {}
-    assert settings_mod._settings_windows_creating == set()
-
-
-def test_open_mode_settings_window_ignores_stale_closed_window(monkeypatch):
-    webview_stub = _WebviewModuleStub()
-    monkeypatch.setitem(sys.modules, "webview", webview_stub)
-    monkeypatch.setattr(settings_mod, "_settings_windows", {})
-    monkeypatch.setattr(settings_mod, "_settings_windows_creating", set())
-
-    config = AppConfig(display_mode="live2d")
-
-    assert open_mode_settings_window(config, "live2d") is True
-    assert webview_stub.last_window is not None
-    webview_stub.last_window.closed = True
-
-    assert open_mode_settings_window(config, "live2d") is True
-    assert webview_stub.create_calls == 2
+    assert data["tts"]["max_chars"] == 66
+    assert data["tts"]["notification_prompt"] == "短提醒"

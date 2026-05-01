@@ -408,8 +408,8 @@ def check_hermes_installation() -> HermesInstallInfo:
         install_info.error_message = error_message
         install_info.suggestions = [
             "请安装 Hermes Agent: https://github.com/NousResearch/hermes-agent",
-            "macOS: curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
-            "Linux: curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
+            "macOS: curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup",
+            "Linux: curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup",
             "确保 hermes 命令在 PATH 环境变量中"
         ]
         return install_info
@@ -432,7 +432,7 @@ def check_hermes_installation() -> HermesInstallInfo:
         install_info.error_message = f"Hermes 版本 {version_info.version} 不兼容，需要 {HERMES_MIN_VERSION}+"
         install_info.suggestions = [
             f"请升级 Hermes Agent 到 {HERMES_MIN_VERSION}+ 版本",
-            "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash"
+            "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup"
         ]
         return install_info
     

@@ -66,6 +66,7 @@ class StoredMessage:
     task_id: Optional[str]
     error: Optional[str]
     created_at: str  # ISO 格式
+    attachments_json: str = "[]"
 
 
 class ChatStore:
@@ -105,6 +106,7 @@ class ChatStore:
                     task_id    TEXT,
                     error      TEXT,
                     created_at TEXT NOT NULL,
+                    attachments_json TEXT NOT NULL DEFAULT '[]',
                     FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_messages_session
@@ -113,6 +115,10 @@ class ChatStore:
             # 兼容旧表结构升级
             try:
                 conn.execute("ALTER TABLE chat_sessions ADD COLUMN hermes_session_id TEXT")
+            except sqlite3.OperationalError:
+                pass  # 列已存在
+            try:
+                conn.execute("ALTER TABLE chat_messages ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'")
             except sqlite3.OperationalError:
                 pass  # 列已存在
             conn.commit()
@@ -266,8 +272,8 @@ class ChatStore:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO chat_messages
-                    (message_id, session_id, role, content, status, task_id, error, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (message_id, session_id, role, content, status, task_id, error, created_at, attachments_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     msg.message_id,
@@ -278,6 +284,7 @@ class ChatStore:
                     msg.task_id,
                     msg.error,
                     msg.created_at,
+                    msg.attachments_json,
                 ),
             )
             conn.commit()
@@ -302,7 +309,7 @@ class ChatStore:
             conn = self._get_conn()
             rows = conn.execute(
                 """
-                SELECT message_id, session_id, role, content, status, task_id, error, created_at
+                SELECT message_id, session_id, role, content, status, task_id, error, created_at, attachments_json
                 FROM chat_messages
                 WHERE session_id = ?
                 ORDER BY created_at ASC
@@ -320,6 +327,7 @@ class ChatStore:
                 task_id=r["task_id"],
                 error=r["error"],
                 created_at=r["created_at"],
+                attachments_json=r["attachments_json"] or "[]",
             )
             for r in rows
         ]

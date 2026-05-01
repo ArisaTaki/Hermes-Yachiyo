@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, Response
 
 from apps.bridge.deps import get_runtime
 from apps.bridge.server import get_live2d_asset_token
-from apps.shell.modes import live2d as live2d_mode
+from apps.shell import live2d_runtime
 
 router = APIRouter(tags=["Live2D"])
 
@@ -26,7 +26,7 @@ _LIVE2D_RUNTIME_CACHE_SECONDS = 86400
 
 def _live2d_runtime_script_sources() -> list[dict[str, str]]:
     scripts: list[dict[str, str]] = []
-    specs = live2d_mode._get_live2d_runtime_dependency_specs()
+    specs = live2d_runtime.get_live2d_runtime_dependency_specs()
     for dependency_id, (source_url, cached_path) in specs.items():
         if cached_path.exists() and cached_path.is_file() and cached_path.stat().st_size > 0:
             scripts.append(
@@ -131,7 +131,7 @@ def _render_live2d_manifest(asset: Path, token: str) -> bytes:
 
 @router.get("/live2d/runtime")
 async def get_live2d_runtime() -> dict[str, object]:
-    ready, error = live2d_mode._prime_live2d_runtime_dependencies()
+    ready, error = live2d_runtime.prime_live2d_runtime_dependencies()
     return {
         "ok": True,
         "ready": ready,
@@ -142,7 +142,7 @@ async def get_live2d_runtime() -> dict[str, object]:
 
 @router.get("/live2d/runtime/{dependency_id}")
 async def get_live2d_runtime_dependency(dependency_id: str) -> FileResponse:
-    specs = live2d_mode._get_live2d_runtime_dependency_specs()
+    specs = live2d_runtime.get_live2d_runtime_dependency_specs()
     if dependency_id not in specs:
         raise HTTPException(status_code=404, detail="Live2D 渲染依赖不存在")
     _source_url, cached_path = specs[dependency_id]

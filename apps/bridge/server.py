@@ -17,6 +17,8 @@ import threading
 import time
 from typing import Any
 
+from apps.core.version import get_app_version
+
 _FastAPIClass: Any
 _CORSMiddlewareClass: Any
 
@@ -55,7 +57,7 @@ _routes_registered = False
 app = _FastAPIClass(
     title="Hermes-Yachiyo Bridge",
     description="内部通信 API，非产品本体",
-    version="0.1.0",
+    version=get_app_version(),
 )
 
 if _FASTAPI_AVAILABLE:

@@ -216,14 +216,14 @@ pip install -e ".[dev]"
 
 ```
 apps/
-  shell/              # Desktop application shell
-    app.py              # Main entry point
-    startup.py          # Startup decision logic
-    window.py           # Main window (pywebview)
+  frontend/           # Electron + React/Vite/TypeScript frontend
+  desktop_backend/    # Headless Python backend entry point
+  desktop_launcher.py # Development launcher
+  shell/              # Configuration, installer, and UI data adapters
     config.py           # Configuration management + Live2D validation
     effect_policy.py    # Settings effect policies
     integration_status.py  # Unified integration state source
-    main_api.py         # Window API
+    main_api.py         # Dashboard / maintenance API
     settings.py         # Settings page builder
     tray.py             # System tray
     modes/              # Display modes
@@ -286,7 +286,7 @@ tests/                # Test suite (105 tests)
 - [ ] Cross-platform support (Windows / Linux)
 - [ ] AstrBot real QQ environment testing
 - [ ] Bridge HTTPS + authentication
-- [ ] Desktop shell technology upgrade (replace pywebview)
+- [x] Electron + React desktop shell
 
 ## 📄 License
 

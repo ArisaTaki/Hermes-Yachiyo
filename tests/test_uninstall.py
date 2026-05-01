@@ -14,7 +14,6 @@ import pytest
 
 import apps.shell.config as config_mod
 import apps.shell.main_api as main_api_mod
-import apps.shell.window as window_mod
 from apps.installer import backup as backup_mod
 from apps.installer import uninstall as uninstall_mod
 from apps.installer.backup import create_backup, get_backup_status, import_backup
@@ -959,8 +958,7 @@ def test_main_window_api_exposes_uninstall_preview(monkeypatch):
     assert calls == [("yachiyo_only", True)]
 
 
-def test_main_window_api_uninstall_schedules_legacy_exit(monkeypatch):
-    calls = []
+def test_main_window_api_uninstall_requests_desktop_quit(monkeypatch):
     fake_result = SimpleNamespace(ok=True, to_dict=lambda: {"ok": True})
 
     monkeypatch.delenv("HERMES_YACHIYO_DESKTOP_BACKEND", raising=False)
@@ -969,18 +967,16 @@ def test_main_window_api_uninstall_schedules_legacy_exit(monkeypatch):
         "execute_uninstall",
         lambda scope, keep_config_snapshot, confirm_text: fake_result,
     )
-    monkeypatch.setattr(window_mod, "request_app_exit", lambda: calls.append(True))
 
     api = MainWindowAPI(SimpleNamespace(), AppConfig())
     result = api.run_uninstall("yachiyo_only", True, UNINSTALL_CONFIRM_PHRASE)
 
     assert result["ok"] is True
-    assert result["exit_scheduled"] is True
-    assert calls == [True]
+    assert result["exit_scheduled"] is False
+    assert result["desktop_quit_required"] is True
 
 
 def test_main_window_api_uninstall_defers_quit_to_electron(monkeypatch):
-    calls = []
     fake_result = SimpleNamespace(ok=True, to_dict=lambda: {"ok": True})
 
     monkeypatch.setenv("HERMES_YACHIYO_DESKTOP_BACKEND", "1")
@@ -989,7 +985,6 @@ def test_main_window_api_uninstall_defers_quit_to_electron(monkeypatch):
         "execute_uninstall",
         lambda scope, keep_config_snapshot, confirm_text: fake_result,
     )
-    monkeypatch.setattr(window_mod, "request_app_exit", lambda: calls.append(True))
 
     api = MainWindowAPI(SimpleNamespace(), AppConfig())
     result = api.run_uninstall("yachiyo_only", True, UNINSTALL_CONFIRM_PHRASE)
@@ -997,7 +992,6 @@ def test_main_window_api_uninstall_defers_quit_to_electron(monkeypatch):
     assert result["ok"] is True
     assert result["exit_scheduled"] is False
     assert result["desktop_quit_required"] is True
-    assert calls == []
 
 
 def test_main_window_api_creates_backup_without_uninstall(tmp_path, monkeypatch):
@@ -1089,15 +1083,12 @@ def test_main_window_api_restores_backup(tmp_path, monkeypatch):
 
     backup = create_backup()
     (config_dir / "config.json").write_text('{"display_mode":"bubble"}', encoding="utf-8")
-    restart_calls = []
-    monkeypatch.setattr(window_mod, "request_app_restart", lambda: restart_calls.append(True))
-
     api = MainWindowAPI(SimpleNamespace(), AppConfig())
     result = api.restore_backup(backup.path)
 
     assert result["ok"] is True
-    assert result["restart_scheduled"] is True
-    assert restart_calls == [True]
+    assert result["restart_scheduled"] is False
+    assert result["desktop_restart_required"] is True
     assert (config_dir / "config.json").read_text(encoding="utf-8") == '{"display_mode":"live2d"}'
 
 

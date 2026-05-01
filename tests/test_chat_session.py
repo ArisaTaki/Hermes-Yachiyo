@@ -244,6 +244,32 @@ def test_user_message_sets_session_summary_title(tmp_path):
         store.close()
 
 
+def test_chat_session_persists_user_attachments(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        session = ChatSession(session_id="s1")
+        session.attach_store(store, load_existing=False)
+        session.add_user_message(
+            "看图",
+            attachments=[{
+                "id": "a1",
+                "kind": "image",
+                "name": "screen.png",
+                "mime_type": "image/png",
+                "size": 8,
+                "path": str(tmp_path / "screen.png"),
+            }],
+        )
+
+        restored = ChatSession(session_id="s1")
+        restored.attach_store(store)
+
+        assert restored.messages[0].attachments[0]["id"] == "a1"
+        assert restored.to_dict()["messages"][0]["attachments"][0]["name"] == "screen.png"
+    finally:
+        store.close()
+
+
 def test_set_session_title_overrides_summary_title(tmp_path):
     """Hermes 自动标题可覆盖首条用户消息兜底标题。"""
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
