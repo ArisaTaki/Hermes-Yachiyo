@@ -367,6 +367,7 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
 }
 
 .chat-shell {
+  position: relative;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   min-height: 0;
@@ -375,6 +376,51 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
   padding: 0;
 }
 .refined-chat-shell { background: #111520; }
+.chat-toast {
+  position: absolute;
+  z-index: 12;
+  top: 12px;
+  right: 14px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 12px;
+  max-width: min(420px, calc(100% - 28px));
+  border: 1px solid rgba(225, 185, 92, 0.46);
+  border-radius: 8px;
+  background: rgba(46, 39, 21, 0.97);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.32);
+  color: #f1d796;
+  padding: 10px 12px;
+  animation: toast-in 180ms ease-out;
+}
+.chat-toast.danger {
+  border-color: rgba(232, 125, 132, 0.56);
+  background: rgba(55, 24, 31, 0.97);
+  color: #f2a4aa;
+}
+.chat-toast strong {
+  color: var(--text);
+  font-size: 13px;
+}
+.chat-toast span {
+  grid-column: 1 / -1;
+  color: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.chat-toast button {
+  grid-row: 1;
+  grid-column: 2;
+  width: 24px;
+  height: 24px;
+  min-width: 0;
+  padding: 0;
+  border-radius: 6px;
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .chat-topbar {
   display: grid;
   grid-template-columns: 1fr;

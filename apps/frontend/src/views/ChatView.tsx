@@ -74,6 +74,13 @@ type RenderState = {
   target: string;
 };
 
+type ChatNotice = {
+  id: number;
+  kind: 'warn' | 'danger';
+  title: string;
+  detail: string;
+};
+
 const ACTIVE_POLL_INTERVAL_MS = 500;
 const IDLE_POLL_INTERVAL_MS = 3000;
 const EXECUTOR_POLL_INTERVAL_MS = 3000;
@@ -93,6 +100,7 @@ export function ChatView() {
   const [isSending, setIsSending] = useState(false);
   const [sessions, setSessions] = useState<SessionsPayload | null>(null);
   const [executor, setExecutor] = useState<ExecutorPayload | null>(null);
+  const [notice, setNotice] = useState<ChatNotice | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState('');
   const [, setRenderTick] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -103,6 +111,7 @@ export function ChatView() {
   const typewriterLastTsRef = useRef(0);
   const stickToBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
+  const noticeTimerRef = useRef<number | null>(null);
 
   const refreshMessages = useCallback(async () => {
     try {
@@ -178,6 +187,7 @@ export function ChatView() {
   useEffect(() => {
     return () => {
       if (animationFrameRef.current !== null) window.cancelAnimationFrame(animationFrameRef.current);
+      if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
     };
   }, []);
 
@@ -243,7 +253,7 @@ export function ChatView() {
     const text = input.trim();
     if ((!text && attachments.length === 0) || isSending) return;
     if (attachments.length > 0 && !canAttachImages(executor)) {
-      setStatus(imageInputUnavailableText(executor));
+      showImageInputBlocked();
       return;
     }
     const outgoingAttachments = attachments;
@@ -277,7 +287,7 @@ export function ChatView() {
     if (files.length === 0) return;
     event.preventDefault();
     if (!canAttachImages(executor)) {
-      setStatus(imageInputUnavailableText(executor));
+      showImageInputBlocked();
       return;
     }
     await addImageFiles(files);
@@ -291,7 +301,7 @@ export function ChatView() {
 
   async function addImageFiles(files: File[]) {
     if (!canAttachImages(executor)) {
-      setStatus(imageInputUnavailableText(executor));
+      showImageInputBlocked();
       return;
     }
     const remaining = MAX_ATTACHMENTS - attachments.length;
@@ -400,8 +410,26 @@ export function ChatView() {
     void openExternalUrl(anchor.href);
   }
 
+  function showNotice(title: string, detail: string, kind: ChatNotice['kind'] = 'warn') {
+    if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+    setNotice({ id: Date.now(), kind, title, detail });
+    noticeTimerRef.current = window.setTimeout(() => setNotice(null), 5200);
+  }
+
+  function showImageInputBlocked() {
+    showNotice('当前不能发送图片', imageInputUnavailableText(executor), 'warn');
+    setStatus('图片未附加');
+  }
+
   return (
     <main className="app-shell chat-shell refined-chat-shell">
+      {notice ? (
+        <div className={`chat-toast ${notice.kind}`} role="status">
+          <strong>{notice.title}</strong>
+          <span>{notice.detail}</span>
+          <button type="button" aria-label="关闭提示" onClick={() => setNotice(null)}>×</button>
+        </div>
+      ) : null}
       <header className="chat-topbar">
         <div className="chat-title-block">
           <h1>Yachiyo</h1>
@@ -598,7 +626,8 @@ function canAttachImages(executor: ExecutorPayload | null) {
 }
 
 function imageInputUnavailableText(executor: ExecutorPayload | null) {
-  return executor?.image_input?.reason || '当前 Hermes 模型暂不支持图片输入，请在主控台切换多模态模型或配置 vision 链路';
+  return executor?.image_input?.reason
+    || '当前主模型不能直接读取图片。请在主控台切换支持图片的模型，或单独设置图片识别模型后再发送。';
 }
 
 function imageInputHelpText(executor: ExecutorPayload | null) {
