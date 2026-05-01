@@ -47,6 +47,7 @@ type LauncherPayload = {
     enable_quick_input?: boolean;
     click_action?: string;
     default_open_behavior?: string;
+    position_anchor?: string;
     preview_url?: string;
     scale?: number;
     mouse_follow_enabled?: boolean;
@@ -57,6 +58,7 @@ type LauncherPayload = {
       idle_motion_group?: string;
       enable_expressions?: boolean;
       enable_physics?: boolean;
+      expression_mappings?: Record<string, string>;
       expressions?: Array<{ name?: string; file?: string }>;
       motion_groups?: Record<string, Array<Record<string, unknown>>>;
     };
@@ -83,6 +85,12 @@ const LIVE2D_MAX_SHAPE_RECTS = 6000;
 const LIVE2D_SHAPE_MAX_COLS = 88;
 const LIVE2D_SHAPE_MAX_ROWS = 132;
 const LIVE2D_MASK_MAX_FILL_RATIO = 0.72;
+const LIVE2D_EXPRESSION_CANDIDATES: Record<string, string[]> = {
+  thinking: ['思考', 'thinking', 'think', '疑问', '困惑', '眯眯眼', 'half', 'blink'],
+  message: ['笑咪咪', '笑', 'happy', 'smile', 'joy'],
+  failed: ['眼泪', '泪珠', '泪', 'cry', 'sad', 'tear'],
+  attention: ['笑咪咪', '笑', 'happy', 'smile', 'notice'],
+};
 
 type PointerLike = {
   screenX: number;
@@ -357,6 +365,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
     targetY: 0,
   });
   const lastReactionKeyRef = useRef('');
+  const lastStatusExpressionKeyRef = useRef('');
   const [quickText, setQuickText] = useState('');
   const [replyHidden, setReplyHidden] = useState(false);
   const [quickInputVisible, setQuickInputVisible] = useState(launcher.default_open_behavior === 'chat_input');
@@ -368,23 +377,25 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   const status = launcher.latest_status || (data?.chat?.is_processing ? 'processing' : 'empty');
   const hasAttention = Boolean(data?.notification?.has_unread);
   const proactiveAttention = Boolean(data?.proactive?.has_attention);
+  const isProcessing = Boolean(data?.chat?.is_processing);
   const resource = launcher.resource;
   const renderer = launcher.renderer;
   const replyText = proactiveAttention
     ? (data?.proactive?.message || '有新的主动桌面观察结果')
-    : data?.chat?.is_processing
-      ? '正在思考回复...'
-      : hasAttention
+    : hasAttention && !isProcessing
         ? latestReply
         : '';
-  const showReply = Boolean(launcher.show_reply_bubble !== false && !replyHidden && replyText);
+  const showReply = Boolean(launcher.show_reply_bubble !== false && !replyHidden && replyText && !isProcessing);
   const stageTitle = live2dStageTitle(resource, launcher, data, hasAttention, proactiveAttention);
+  const positionAnchor = normalizeLive2DPositionAnchor(launcher.position_anchor);
   const characterClass = live2dCharacterClass(data, hasAttention, String(data?.notification?.latest_message?.status || ''));
   const hintKey = [resource?.state || '', resource?.status_label || '', resource?.help_text || '', resource?.renderer_entry || ''].join('|');
   const hintTone = resource?.state === 'path_valid' || resource?.state === 'loaded' ? 'ok' : 'warn';
   const showResourceHint = Boolean(resource && hintTone !== 'ok' && hintKey !== dismissedHintKey);
   const previewStyle = {
     '--live2d-preview-scale': String(Math.max(0.4, Math.min(2.0, Number(launcher.scale || 1)))),
+    '--live2d-object-position': live2dObjectPosition(positionAnchor),
+    '--live2d-transform-origin': live2dTransformOrigin(positionAnchor),
   } as CSSProperties;
 
   useEffect(() => {
@@ -399,6 +410,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
       character: characterRef.current,
       renderer,
       scale: launcher.scale,
+      positionAnchor,
       state: rendererStateRef.current,
       onError: (value) => {
         if (!disposed) setRendererError(value);
@@ -413,7 +425,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
     return () => {
       disposed = true;
     };
-  }, [renderer?.enabled, renderer?.model_url, renderer?.reason, launcher.scale]);
+  }, [renderer?.enabled, renderer?.model_url, renderer?.reason, launcher.scale, positionAnchor]);
 
   useEffect(() => {
     const rendererState = rendererStateRef.current;
@@ -453,7 +465,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
       timers.forEach((timer) => window.clearTimeout(timer));
       window.removeEventListener('resize', scheduleReport);
     };
-  }, [rendererReady, rendererLoading, renderer?.model_url, launcher.preview_url, launcher.scale, showReply, quickInputVisible, showResourceHint, dismissedHintKey]);
+  }, [rendererReady, rendererLoading, renderer?.model_url, launcher.preview_url, launcher.scale, positionAnchor, showReply, quickInputVisible, showResourceHint, dismissedHintKey]);
 
   useEffect(() => {
     return () => {
@@ -499,7 +511,24 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
     if (!reactionKey || reactionKey === lastReactionKeyRef.current) return;
     lastReactionKeyRef.current = reactionKey;
     playLive2DReaction(rendererStateRef.current, renderer);
-  }, [rendererReady, hasAttention, latestReply, data?.notification?.latest_message?.content, renderer?.enable_expressions, renderer?.idle_motion_group]);
+  }, [rendererReady, hasAttention, latestReply, data?.notification?.latest_message?.content, renderer?.enable_expressions, renderer?.idle_motion_group, renderer?.expression_mappings]);
+
+  useEffect(() => {
+    if (!rendererReady) return;
+    const expressionKey = live2dStatusExpressionKey({
+      hasAttention,
+      isProcessing,
+      proactiveAttention,
+      unreadStatus: String(data?.notification?.latest_message?.status || ''),
+    });
+    if (!expressionKey) {
+      lastStatusExpressionKeyRef.current = '';
+      return;
+    }
+    if (expressionKey === lastStatusExpressionKeyRef.current) return;
+    lastStatusExpressionKeyRef.current = expressionKey;
+    playLive2DStatusExpression(rendererStateRef.current, renderer, expressionKey);
+  }, [rendererReady, hasAttention, isProcessing, proactiveAttention, data?.notification?.latest_message?.status, renderer?.expressions, renderer?.expression_mappings]);
 
   function handleWindowPointerDown(event: PointerEvent<HTMLElement>) {
     pointerActivationRef.current = false;
@@ -603,7 +632,8 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
 
   return (
     <main
-      className="launcher-shell live2d-shell"
+      className={`launcher-shell live2d-shell live2d-anchor-${positionAnchor}`}
+      style={previewStyle}
       onContextMenu={(event) => handleContextMenu(event, 'live2d')}
       onPointerDown={handleWindowPointerDown}
       onPointerMove={handleWindowPointerMove}
@@ -630,7 +660,6 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
               className={`live2d-preview-fallback ${rendererReady ? 'hidden' : ''}`}
               src={launcher.preview_url}
               alt=""
-              style={previewStyle}
               onLoad={() => reportLive2DRegions({
                 canvas: canvasRef.current,
                 character: characterRef.current,
@@ -742,6 +771,24 @@ function live2dCharacterClass(data: LauncherPayload | null, hasAttention: boolea
   return classes.join(' ');
 }
 
+function normalizeLive2DPositionAnchor(value: unknown): 'left-bottom' | 'right-bottom' | 'custom' {
+  if (value === 'left_bottom') return 'left-bottom';
+  if (value === 'custom') return 'custom';
+  return 'right-bottom';
+}
+
+function live2dObjectPosition(anchor: 'left-bottom' | 'right-bottom' | 'custom') {
+  if (anchor === 'left-bottom') return 'left bottom';
+  if (anchor === 'right-bottom') return 'right bottom';
+  return 'center bottom';
+}
+
+function live2dTransformOrigin(anchor: 'left-bottom' | 'right-bottom' | 'custom') {
+  if (anchor === 'left-bottom') return 'left bottom';
+  if (anchor === 'right-bottom') return 'right bottom';
+  return 'center bottom';
+}
+
 function live2dStageTitle(
   resource: NonNullable<LauncherPayload['launcher']>['resource'],
   launcher: NonNullable<LauncherPayload['launcher']>,
@@ -759,11 +806,30 @@ function live2dStageTitle(
   return `${resource?.status_label || 'Yachiyo Live2D'}${messageHint}，点击行为：${launcher.click_action || 'open_chat'}`;
 }
 
+function live2dStatusExpressionKey({
+  hasAttention,
+  isProcessing,
+  proactiveAttention,
+  unreadStatus,
+}: {
+  hasAttention: boolean;
+  isProcessing: boolean;
+  proactiveAttention: boolean;
+  unreadStatus: string;
+}) {
+  if (isProcessing) return 'thinking';
+  if (hasAttention && unreadStatus === 'failed') return 'failed';
+  if (proactiveAttention) return 'attention';
+  if (hasAttention) return 'message';
+  return '';
+}
+
 async function ensureLive2DRenderer({
   canvas,
   character,
   renderer,
   scale,
+  positionAnchor,
   state,
   onError,
   onLoading,
@@ -773,6 +839,7 @@ async function ensureLive2DRenderer({
   character: HTMLDivElement | null;
   renderer: NonNullable<LauncherPayload['launcher']>['renderer'];
   scale?: number;
+  positionAnchor: 'left-bottom' | 'right-bottom' | 'custom';
   state: Live2DRendererState;
   onError: (value: string) => void;
   onLoading: (value: boolean) => void;
@@ -799,7 +866,7 @@ async function ensureLive2DRenderer({
     }
 
     if (state.model && state.modelUrl === renderer.model_url) {
-      fitLive2DModel(state, character, scale);
+      fitLive2DModel(state, character, scale, positionAnchor);
       onLoading(false);
       onReady(true);
       onError('');
@@ -827,7 +894,7 @@ async function ensureLive2DRenderer({
     state.modelUrl = renderer.model_url;
     state.model.interactive = false;
     app.stage.addChild(model);
-    fitLive2DModel(state, character, scale);
+    fitLive2DModel(state, character, scale, positionAnchor);
     onReady(true);
     onError('');
   } catch (error) {
@@ -961,6 +1028,7 @@ function fitLive2DModel(
   state: Live2DRendererState,
   character: HTMLDivElement,
   scale?: number,
+  positionAnchor: 'left-bottom' | 'right-bottom' | 'custom' = 'custom',
 ) {
   if (!state.model || !state.app) return;
   const width = Math.max(character.clientWidth, 1);
@@ -972,10 +1040,19 @@ function fitLive2DModel(
   if (!bounds.width || !bounds.height) return;
   const fitScale = Math.min(width / bounds.width, height / bounds.height) * 0.92;
   const finalScale = fitScale * Math.max(0.4, Math.min(2.0, Number(scale || 1)));
-  if (state.model.anchor?.set) state.model.anchor.set(0.5, 1.0);
+  const horizontalAnchor = positionAnchor === 'left-bottom'
+    ? 0
+    : positionAnchor === 'right-bottom'
+      ? 1
+      : 0.5;
+  if (state.model.anchor?.set) state.model.anchor.set(horizontalAnchor, 1.0);
   if (state.model.scale?.set) state.model.scale.set(finalScale);
-  state.model.x = width / 2;
-  state.model.y = height - 6;
+  state.model.x = positionAnchor === 'left-bottom'
+    ? 0
+    : positionAnchor === 'right-bottom'
+      ? width
+      : width / 2;
+  state.model.y = height;
 }
 
 function destroyLive2DRenderer(
@@ -1133,11 +1210,62 @@ function playLive2DReaction(
 ) {
   const group = String(renderer?.idle_motion_group || 'Idle').trim();
   if (group) playLive2DMotion(state, group, 0);
-  if (renderer?.enable_expressions) {
-    const expression = renderer.expressions?.[0];
-    const expressionName = String(expression?.name || expression?.file || '').trim();
-    if (expressionName) playLive2DExpression(state, expressionName);
+  playLive2DStatusExpression(state, renderer, 'message');
+}
+
+function playLive2DStatusExpression(
+  state: Live2DRendererState,
+  renderer: NonNullable<LauncherPayload['launcher']>['renderer'],
+  stateKey: string,
+) {
+  const expressionName = selectLive2DExpression(renderer?.expressions, stateKey, renderer?.expression_mappings);
+  if (expressionName) playLive2DExpression(state, expressionName);
+}
+
+function selectLive2DExpression(
+  expressions: NonNullable<NonNullable<LauncherPayload['launcher']>['renderer']>['expressions'],
+  stateKey: string,
+  mappings?: Record<string, string>,
+) {
+  const items = expressions || [];
+  if (!items.length) return '';
+  const configured = String(mappings?.[stateKey] || '').trim();
+  if (configured) {
+    const configuredMatch = matchLive2DExpression(items, configured);
+    return configuredMatch ? live2dExpressionIdentifier(configuredMatch) : configured;
   }
+  const candidates = LIVE2D_EXPRESSION_CANDIDATES[stateKey] || [];
+  for (const candidate of candidates) {
+    const match = matchLive2DExpression(items, candidate);
+    if (match) return String(match.name || match.file || '').trim();
+  }
+  const fallback = items[0];
+  return live2dExpressionIdentifier(fallback);
+}
+
+function live2dExpressionIdentifier(expression?: { name?: string; file?: string }) {
+  return String(expression?.name || expression?.file || '').trim();
+}
+
+function matchLive2DExpression(
+  expressions: NonNullable<NonNullable<LauncherPayload['launcher']>['renderer']>['expressions'],
+  target: string,
+) {
+  const normalizedTarget = normalizeExpressionToken(target);
+  if (!normalizedTarget) return null;
+  return (expressions || []).find((expression) => {
+    const name = String(expression?.name || '').trim();
+    const file = String(expression?.file || '').trim();
+    const haystack = `${normalizeExpressionToken(name)} ${normalizeExpressionToken(file)}`;
+    return haystack.includes(normalizedTarget);
+  }) || null;
+}
+
+function normalizeExpressionToken(value: string) {
+  return value
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/[_\-\s]+/g, '')
+    .toLowerCase();
 }
 
 function playLive2DMotion(state: Live2DRendererState, group: string, index?: number) {
@@ -1436,9 +1564,20 @@ function containedImageRect(image: HTMLImageElement): DOMRect {
   const scale = Math.min(rect.width / naturalWidth, rect.height / naturalHeight);
   const width = naturalWidth * scale;
   const height = naturalHeight * scale;
+  const objectPosition = window.getComputedStyle(image).objectPosition || 'center bottom';
+  const alignX = objectPosition.includes('left')
+    ? 0
+    : objectPosition.includes('right')
+      ? 1
+      : 0.5;
+  const alignY = objectPosition.includes('top')
+    ? 0
+    : objectPosition.includes('bottom')
+      ? 1
+      : 0.5;
   return DOMRect.fromRect({
-    x: rect.left + (rect.width - width) / 2,
-    y: rect.top + (rect.height - height) / 2,
+    x: rect.left + (rect.width - width) * alignX,
+    y: rect.top + (rect.height - height) * alignY,
     width,
     height,
   });
