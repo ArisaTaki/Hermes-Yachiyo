@@ -6,17 +6,18 @@
 """
 
 import ast
-import base64
 import hashlib
 import json
 import logging
 import os
 import re
 import shutil
+import struct
 import subprocess
 import tempfile
 import threading
 import time
+import zlib
 from copy import deepcopy
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -33,6 +34,7 @@ from apps.shell.effect_policy import build_effects_summary
 from apps.shell.hermes_capabilities import (
     build_hermes_image_input_capability,
     get_current_hermes_image_input_capability,
+    lookup_model_supports_vision,
     read_hermes_image_input_config,
 )
 from apps.shell.integration_status import get_integration_snapshot
@@ -169,12 +171,39 @@ _HERMES_PROVIDER_PRESETS: tuple[dict[str, Any], ...] = (
     },
 )
 _PROVIDER_PRESET_BY_ID = {str(item["id"]): item for item in _HERMES_PROVIDER_PRESETS}
+_PREFERRED_AUXILIARY_VISION_MODELS = {
+    "xiaomi": "mimo-v2.5-pro",
+}
 _TERMINAL_COMMAND_THROTTLE_SECONDS = 1.2
 _TERMINAL_COMMAND_LOCK = threading.Lock()
 _LAST_TERMINAL_COMMAND_AT = 0.0
-_VISION_TEST_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-)
+def _png_chunk(kind: bytes, data: bytes) -> bytes:
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+
+def _build_vision_test_png() -> bytes:
+    width = 64
+    height = 32
+    rows: list[bytes] = []
+    for y in range(height):
+        row = bytearray([0])
+        for x in range(width):
+            if x < width // 2:
+                color = (242, 82, 82) if y < height // 2 else (255, 215, 90)
+            else:
+                color = (80, 180, 130) if y < height // 2 else (90, 150, 255)
+            row.extend(color)
+        rows.append(bytes(row))
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", ihdr)
+        + _png_chunk(b"IDAT", zlib.compress(b"".join(rows), 9))
+        + _png_chunk(b"IEND", b"")
+    )
+
+
+_VISION_TEST_PNG = _build_vision_test_png()
 
 
 def _serialize_summary(summary: Optional[ModelSummary]) -> Dict[str, Any]:
@@ -794,6 +823,39 @@ def _preset_models(provider_id: str, preset: dict[str, Any]) -> list[str]:
     return merged
 
 
+def _vision_capable_models(provider_id: str, models: list[str]) -> list[str]:
+    supported = [
+        model
+        for model in models
+        if lookup_model_supports_vision(provider_id, model) is True
+    ]
+    if supported:
+        return supported
+    return models
+
+
+def _default_auxiliary_vision_model(provider_id: str, models: list[str]) -> str:
+    provider = provider_id.strip().lower()
+    preferred = _PREFERRED_AUXILIARY_VISION_MODELS.get(provider)
+    if preferred and (not models or preferred in models):
+        return preferred
+    supported = _vision_capable_models(provider, models)
+    return supported[0] if supported else ""
+
+
+def _normalize_auxiliary_vision_model(provider_id: str, model: str) -> str:
+    provider = provider_id.strip().lower()
+    model_name = model.strip()
+    models = _preset_models(provider, _PROVIDER_PRESET_BY_ID.get(provider, {}))
+    if not model_name:
+        return _default_auxiliary_vision_model(provider, models)
+    if lookup_model_supports_vision(provider, model_name) is False:
+        replacement = _default_auxiliary_vision_model(provider, models)
+        if replacement:
+            return replacement
+    return model_name
+
+
 def _read_env_values(env_path: Path) -> dict[str, str]:
     if not env_path.exists():
         return {}
@@ -851,13 +913,16 @@ def _provider_options(
         default_model = override.get("model") or override.get("default") or (
             models[0] if models else ""
         )
+        vision_models = _vision_capable_models(provider_id, models)
         options.append(
             {
                 "id": provider_id,
                 "label": str(preset.get("label") or provider_id),
                 "base_url": base_url,
                 "default_model": default_model,
+                "default_vision_model": _default_auxiliary_vision_model(provider_id, models),
                 "models": models,
+                "vision_models": vision_models,
                 "api_key_names": list(api_key_names),
                 "api_key_name": configured_key or (api_key_names[0] if api_key_names else ""),
                 "api_key_configured": configured,
@@ -873,13 +938,16 @@ def _provider_options(
             continue
         api_key_names = _provider_api_key_names(provider_id)
         configured_key = next((name for name in api_key_names if env_values.get(name)), "")
+        models = [override["model"]] if override.get("model") else []
         options.append(
             {
                 "id": provider_id,
                 "label": override.get("name") or provider_id,
                 "base_url": override.get("base_url") or "",
                 "default_model": override.get("model") or override.get("default") or "",
-                "models": [override["model"]] if override.get("model") else [],
+                "default_vision_model": _default_auxiliary_vision_model(provider_id, models),
+                "models": models,
+                "vision_models": _vision_capable_models(provider_id, models),
                 "api_key_names": list(api_key_names),
                 "api_key_name": configured_key or (api_key_names[0] if api_key_names else ""),
                 "api_key_configured": bool(configured_key),
@@ -899,7 +967,9 @@ def _provider_options(
                 "label": current_provider,
                 "base_url": "",
                 "default_model": "",
+                "default_vision_model": "",
                 "models": [],
+                "vision_models": [],
                 "api_key_names": list(api_key_names),
                 "api_key_name": configured_key or (api_key_names[0] if api_key_names else ""),
                 "api_key_configured": bool(configured_key),
@@ -931,17 +1001,23 @@ def _vision_configuration_summary(
     configured_provider = str(image_config.get("auxiliary_vision_provider") or "").strip()
     provider = configured_provider if configured_provider and configured_provider != "auto" else ""
     provider_for_key = provider or chat_provider
+    effective_provider = provider or chat_provider
+    configured_model = str(image_config.get("auxiliary_vision_model") or "")
+    effective_model = _normalize_auxiliary_vision_model(
+        effective_provider,
+        configured_model or chat_model or "",
+    )
     api_key_names = _provider_api_key_names(provider_for_key)
     configured_key = next((name for name in api_key_names if env_values.get(name)), "")
     return {
         "configured": bool(image_config.get("auxiliary_vision_configured")),
         "provider": provider,
-        "model": str(image_config.get("auxiliary_vision_model") or ""),
+        "model": configured_model,
         "base_url": str(image_config.get("auxiliary_vision_base_url") or ""),
         "api_key_name": configured_key or (api_key_names[0] if api_key_names else ""),
         "api_key_configured": bool(configured_key or image_config.get("auxiliary_vision_api_key_configured")),
-        "effective_provider": provider or chat_provider,
-        "effective_model": str(image_config.get("auxiliary_vision_model") or chat_model or ""),
+        "effective_provider": effective_provider,
+        "effective_model": effective_model,
         "effective_base_url": str(image_config.get("auxiliary_vision_base_url") or chat_base_url or ""),
     }
 
@@ -1475,8 +1551,8 @@ class MainWindowAPI:
     def test_hermes_image_connection(self) -> Dict[str, Any]:
         """验证当前图片输入链路。
 
-        文本 provider/API Key 通过不代表图片链路通过。尤其是 Xiaomi Pro 这类
-        文本模型会先走 Hermes vision 预分析，必须单独发起一次小图请求确认。
+        文本 provider/API Key 通过不代表图片输入可用。原生多模态模型可直接通过；
+        文本模型需要用户显式配置独立图片识别模型后，才会测试 vision 预分析链路。
         """
         configuration = self.get_hermes_configuration()
         image_input = configuration.get("image_input") if isinstance(configuration.get("image_input"), dict) else {}
@@ -1541,7 +1617,11 @@ class MainWindowAPI:
             "image = Path(sys.argv[2])\n"
             "sys.path.insert(0, str(repo))\n"
             "from apps.core.hermes_stream_bridge import _preprocess_images_with_vision\n"
-            "_preprocess_images_with_vision('Hermes-Yachiyo 图片链路自检。只要能看到这张测试图片，请简短回答 OK。', [image])\n"
+            "result = _preprocess_images_with_vision('Hermes-Yachiyo 图片链路自检。只要能看到这张测试图片，请简短回答 OK。', [image])\n"
+            "bad = ('看不到', '无法', '不能读取', '未能读取', '没有收到图片', '没有加载', 'cannot see', 'unable to see', 'no image')\n"
+            "lower = result.lower()\n"
+            "if any(item in lower for item in bad):\n"
+            "    raise SystemExit('图片链路返回了无法识图的结果：' + result[:500])\n"
             "print('OK')\n"
         )
         started_at = time.monotonic()
@@ -1727,6 +1807,13 @@ class MainWindowAPI:
             vision_provider or provider
         ):
             return {"ok": False, "error": "vision 预分析需要可用的 Provider"}
+        if image_input_mode == "text":
+            vision_provider_for_model = (vision_provider or provider).strip()
+            if vision_provider_for_model:
+                vision_model = _normalize_auxiliary_vision_model(
+                    vision_provider_for_model,
+                    vision_model,
+                )
 
         hermes_path, needs_env_refresh = locate_hermes_binary()
         if hermes_path is None:

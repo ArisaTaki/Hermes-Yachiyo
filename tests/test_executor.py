@@ -801,7 +801,7 @@ class TestHermesStreamBridgeImageRouting:
         assert routed[0]["text"].endswith("看图")
         assert routed[1]["type"] == "image_url"
 
-    def test_xiaomi_pro_auto_uses_vision_preprocessor(self, monkeypatch, tmp_path):
+    def test_xiaomi_pro_auto_uses_native_image_parts(self, monkeypatch, tmp_path):
         self._install_fake_image_routing(monkeypatch, {"agent": {"image_input_mode": "auto"}})
         image = tmp_path / "screen.png"
         image.write_bytes(b"png")
@@ -817,9 +817,8 @@ class TestHermesStreamBridgeImageRouting:
 
         routed = bridge_mod._route_images(FakeCli(), "看图", [image])
 
-        assert routed.startswith("vision::[Yachiyo 附件图片上下文]")
-        assert "不要调用桌面截图" in routed
-        assert "看图::1" in routed
+        assert isinstance(routed, list)
+        assert routed[1]["type"] == "image_url"
 
     def test_text_mode_uses_vision_preprocessor(self, monkeypatch, tmp_path):
         self._install_fake_image_routing(monkeypatch, {"agent": {"image_input_mode": "text"}})
@@ -839,6 +838,28 @@ class TestHermesStreamBridgeImageRouting:
 
         assert routed.startswith("vision::[Yachiyo 附件图片上下文]")
         assert "不要调用桌面截图" in routed
+        assert "看图::1" in routed
+
+    def test_text_mode_overrides_native_decision_for_text_provider(self, monkeypatch, tmp_path):
+        self._install_fake_image_routing(monkeypatch, {"agent": {"image_input_mode": "text"}})
+        import agent.image_routing as image_routing
+
+        image_routing.decide_image_input_mode = lambda *_args, **_kwargs: "native"
+        image = tmp_path / "screen.png"
+        image.write_bytes(b"png")
+        monkeypatch.setattr(
+            bridge_mod,
+            "_preprocess_images_with_vision",
+            lambda text, images: f"vision::{text}::{len(images)}",
+        )
+
+        class FakeCli:
+            provider = "deepseek"
+            model = "deepseek-chat"
+
+        routed = bridge_mod._route_images(FakeCli(), "看图", [image])
+
+        assert routed.startswith("vision::[Yachiyo 附件图片上下文]")
         assert "看图::1" in routed
 
     def test_strict_vision_preprocessor_does_not_emit_tool_retry_hint(self, monkeypatch, tmp_path):
@@ -878,7 +899,7 @@ class TestHermesStreamBridgeImageRouting:
         with pytest.raises(bridge_mod.ImagePreprocessError, match="missing key"):
             bridge_mod._preprocess_images_with_vision("请看图", [image])
 
-    def test_xiaomi_pro_vision_inherits_configured_base_url(self, monkeypatch, tmp_path):
+    def test_xiaomi_text_model_vision_fallback_inherits_configured_base_url(self, monkeypatch, tmp_path):
         image = tmp_path / "screen.png"
         image.write_bytes(b"png")
         captured = {}
@@ -889,7 +910,7 @@ class TestHermesStreamBridgeImageRouting:
         config_mod.load_config = lambda: {
             "model": {
                 "provider": "xiaomi",
-                "default": "mimo-v2.5-pro",
+                "default": "mimo-v2-pro",
                 "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
             }
         }
@@ -929,7 +950,7 @@ class TestHermesStreamBridgeImageRouting:
 
         assert result == "一张图片"
         assert captured["provider"] == "custom"
-        assert captured["model"] == "mimo-v2.5"
+        assert captured["model"] == "mimo-v2.5-pro"
         assert captured["base_url"] == "https://token-plan-cn.xiaomimimo.com/v1"
         assert captured["api_key"] == "tp-test"
 
@@ -994,6 +1015,65 @@ class TestHermesStreamBridgeImageRouting:
         assert captured["model"] == "mimo-v2.5"
         assert captured["base_url"] == "https://token-plan-cn.xiaomimimo.com/v1"
         assert captured["api_key"] == "xiaomi-vision-key"
+
+    def test_auxiliary_xiaomi_vision_config_replaces_text_model(self, monkeypatch, tmp_path):
+        image = tmp_path / "screen.png"
+        image.write_bytes(b"png")
+        captured = {}
+
+        hermes_pkg = types.ModuleType("hermes_cli")
+        hermes_pkg.__path__ = []  # type: ignore[attr-defined]
+        config_mod = types.ModuleType("hermes_cli.config")
+        config_mod.load_config = lambda: {
+            "model": {
+                "provider": "deepseek",
+                "default": "deepseek-chat",
+                "base_url": "https://api.deepseek.com/v1",
+            },
+            "auxiliary": {
+                "vision": {
+                    "provider": "xiaomi",
+                    "model": "mimo-v2-pro",
+                    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+                }
+            },
+        }
+        agent_pkg = types.ModuleType("agent")
+        agent_pkg.__path__ = []  # type: ignore[attr-defined]
+        auxiliary_mod = types.ModuleType("agent.auxiliary_client")
+        auxiliary_mod.resolve_provider_client = lambda provider, model: (
+            types.SimpleNamespace(api_key=f"{provider}-vision-key"),
+            model,
+        )
+
+        async def fake_async_call_llm(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+        auxiliary_mod.async_call_llm = fake_async_call_llm
+        auxiliary_mod.extract_content_or_reasoning = lambda _response: "辅助视觉结果"
+
+        tools_pkg = types.ModuleType("tools")
+        tools_pkg.__path__ = []  # type: ignore[attr-defined]
+        vision_mod = types.ModuleType("tools.vision_tools")
+        vision_mod._MAX_BASE64_BYTES = 20_000_000
+        vision_mod._RESIZE_TARGET_BYTES = 5_000_000
+        vision_mod._detect_image_mime_type = lambda _path: "image/png"
+        vision_mod._image_to_base64_data_url = lambda _path, mime_type: f"data:{mime_type};base64,AAAA"
+        vision_mod._resize_image_for_vision = lambda _path, mime_type: f"data:{mime_type};base64,BBBB"
+        vision_mod._is_image_size_error = lambda _exc: False
+
+        monkeypatch.setitem(sys.modules, "hermes_cli", hermes_pkg)
+        monkeypatch.setitem(sys.modules, "hermes_cli.config", config_mod)
+        monkeypatch.setitem(sys.modules, "agent", agent_pkg)
+        monkeypatch.setitem(sys.modules, "agent.auxiliary_client", auxiliary_mod)
+        monkeypatch.setitem(sys.modules, "tools", tools_pkg)
+        monkeypatch.setitem(sys.modules, "tools.vision_tools", vision_mod)
+
+        result = bridge_mod._run_vision_analysis(image, "请看图")
+
+        assert result == "辅助视觉结果"
+        assert captured["model"] == "mimo-v2.5-pro"
 
     def test_image_turn_temporarily_disables_agent_tools(self, tmp_path):
         image = tmp_path / "screen.png"

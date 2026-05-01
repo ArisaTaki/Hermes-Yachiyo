@@ -43,11 +43,16 @@ _ATTACHED_IMAGE_GUARD = (
     "除非用户明确要求你操作当前电脑或重新观察屏幕。"
 )
 _XIAOMI_NATIVE_IMAGE_MODELS = {
+    "mimo-v2.5-pro",
     "mimo-v2.5",
     "mimo-v2-omni",
 }
-_XIAOMI_VISION_TEXT_FALLBACK_MODELS = {
-    "mimo-v2.5-pro",
+_XIAOMI_TEXT_ONLY_IMAGE_MODELS = {
+    "mimo-v2-pro",
+    "mimo-v2-flash",
+}
+_PREFERRED_AUXILIARY_VISION_MODELS = {
+    "xiaomi": "mimo-v2.5-pro",
 }
 _PROVIDER_API_KEY_NAMES = {
     "xiaomi": ("XIAOMI_API_KEY",),
@@ -181,6 +186,26 @@ def _configured_image_input_mode(cfg: dict[str, Any] | None) -> str:
     return mode if mode in {"auto", "native", "text"} else "auto"
 
 
+def _lookup_model_supports_vision(provider: str, model: str) -> bool | None:
+    try:
+        from agent.models_dev import get_model_capabilities
+
+        caps = get_model_capabilities(provider, model)
+    except Exception:
+        caps = None
+    if caps is not None:
+        return bool(getattr(caps, "supports_vision", False))
+
+    provider_id = provider.strip().lower()
+    model_id = model.strip().lower()
+    if provider_id == "xiaomi":
+        if model_id in _XIAOMI_NATIVE_IMAGE_MODELS:
+            return True
+        if model_id in _XIAOMI_TEXT_ONLY_IMAGE_MODELS:
+            return False
+    return None
+
+
 def _correct_image_mode_for_provider(
     provider: str,
     model: str,
@@ -188,16 +213,18 @@ def _correct_image_mode_for_provider(
     image_mode: str,
 ) -> str:
     provider_id = provider.strip().lower()
-    model_id = model.strip().lower()
     configured_mode = _configured_image_input_mode(cfg)
-    if provider_id != "xiaomi" or configured_mode == "native":
-        return image_mode
     if configured_mode == "text":
         return "text"
-    if model_id in _XIAOMI_VISION_TEXT_FALLBACK_MODELS:
-        return "text"
-    if model_id in _XIAOMI_NATIVE_IMAGE_MODELS:
+    if configured_mode == "native":
         return "native"
+    supports_vision = _lookup_model_supports_vision(provider, model)
+    if supports_vision is True:
+        return "native"
+    if supports_vision is False:
+        return "text"
+    if provider_id != "xiaomi":
+        return image_mode
     return image_mode
 
 
@@ -275,6 +302,19 @@ def _resolve_auxiliary_provider_defaults(provider: str, model: str) -> dict[str,
     }
 
 
+def _normalize_auxiliary_vision_model(provider: str, model: str) -> str:
+    provider_id = (provider or "").strip().lower()
+    model_id = (model or "").strip()
+    if provider_id == "xiaomi":
+        normalized = model_id.lower()
+        if (
+            not normalized
+            or normalized in _XIAOMI_TEXT_ONLY_IMAGE_MODELS
+        ):
+            return _PREFERRED_AUXILIARY_VISION_MODELS["xiaomi"]
+    return model_id
+
+
 def _configured_auxiliary_vision_override() -> dict[str, str] | None:
     try:
         from hermes_cli.config import load_config
@@ -298,11 +338,12 @@ def _configured_auxiliary_vision_override() -> dict[str, str] | None:
     vision_provider = str(vision_cfg.get("provider") or "").strip().lower()
     provider = vision_provider if vision_provider and vision_provider != "auto" else chat_provider
     model = str(vision_cfg.get("model") or "").strip() or chat_model
+    model = _normalize_auxiliary_vision_model(provider, model)
     base_url = str(vision_cfg.get("base_url") or "").strip()
     api_key = str(vision_cfg.get("api_key") or "").strip()
 
     defaults = _resolve_auxiliary_provider_defaults(provider, model) if provider else {}
-    model = model or defaults.get("model", "")
+    model = _normalize_auxiliary_vision_model(provider, model or defaults.get("model", ""))
     base_url = base_url or defaults.get("base_url", "")
     if not base_url and provider == chat_provider:
         base_url = chat_base_url
@@ -328,13 +369,12 @@ def _configured_auxiliary_vision_override() -> dict[str, str] | None:
 
 
 def _configured_xiaomi_vision_override() -> dict[str, str] | None:
-    """Use the user's Xiaomi base URL for Xiaomi Pro vision fallback.
+    """Use the user's Xiaomi base URL for Xiaomi text-model vision fallback.
 
-    Hermes maps Xiaomi text models to a dedicated vision model, but its
-    resolver currently falls back to the provider default base URL.  Yachiyo's
-    setup UI lets users choose a custom Xiaomi endpoint, so the image
-    pre-analysis path must inherit that endpoint or it can 401 while text chat
-    still works.
+    Some Xiaomi text models still need a dedicated multimodal model for
+    pre-analysis.  Yachiyo's setup UI lets users choose a custom Xiaomi
+    endpoint, so that path must inherit the endpoint or it can 401 while text
+    chat still works.
     """
     try:
         from hermes_cli.config import load_config
@@ -358,19 +398,20 @@ def _configured_xiaomi_vision_override() -> dict[str, str] | None:
     provider = str(model_cfg.get("provider") or "").strip().lower()
     chat_model = str(model_cfg.get("default") or "").strip()
     base_url = str(model_cfg.get("base_url") or "").strip()
-    if provider != "xiaomi" or chat_model.lower() not in _XIAOMI_VISION_TEXT_FALLBACK_MODELS or not base_url:
+    if provider != "xiaomi" or _lookup_model_supports_vision(provider, chat_model) is True or not base_url:
         return None
+    vision_model = _PREFERRED_AUXILIARY_VISION_MODELS["xiaomi"]
     try:
         from agent.auxiliary_client import resolve_provider_client
 
-        client, _resolved = resolve_provider_client(provider, chat_model)
+        client, _resolved = resolve_provider_client(provider, vision_model)
     except Exception:
         return None
     api_key = str(getattr(client, "api_key", "") or "").strip() if client is not None else ""
     if not api_key:
         return None
     return {
-        "model": "mimo-v2.5",
+        "model": vision_model,
         "base_url": base_url.rstrip("/"),
         "api_key": api_key,
     }

@@ -17,11 +17,9 @@ _HERMES_CONFIG_TIMEOUT = 5.0
 _VALID_IMAGE_INPUT_MODES = {"auto", "native", "text"}
 
 _XIAOMI_NATIVE_IMAGE_MODELS = {
+    "mimo-v2.5-pro",
     "mimo-v2.5",
     "mimo-v2-omni",
-}
-_XIAOMI_VISION_TEXT_FALLBACK_MODELS = {
-    "mimo-v2.5-pro",
 }
 _XIAOMI_TEXT_ONLY_MODELS = {
     "mimo-v2-pro",
@@ -88,15 +86,26 @@ def build_hermes_image_input_capability(
         )
 
     if mode == "text":
+        if explicit_aux_vision:
+            return _image_input_payload(
+                provider=provider,
+                model=model,
+                mode=mode,
+                supports_vision=supports_vision,
+                route="vision_text",
+                can_attach=True,
+                requires_vision_pipeline=True,
+                reason="图片会先交给单独的图片识别模型分析，再把结果发给当前模型。",
+            )
         return _image_input_payload(
             provider=provider,
             model=model,
             mode=mode,
             supports_vision=supports_vision,
-            route="vision_text",
-            can_attach=True,
+            route="blocked",
+            can_attach=False,
             requires_vision_pipeline=True,
-            reason="图片会先交给 Hermes vision 链路分析，再把结果发给当前模型。",
+            reason="图片识别模式已设为单独模型，但还没有完成图片 Provider 或图片模型配置。",
         )
 
     if mode == "native":
@@ -118,18 +127,6 @@ def build_hermes_image_input_capability(
             ),
         )
 
-    if explicit_aux_vision:
-        return _image_input_payload(
-            provider=provider,
-            model=model,
-            mode=mode,
-            supports_vision=supports_vision,
-            route="vision_text",
-            can_attach=True,
-            requires_vision_pipeline=True,
-            reason="已检测到辅助 vision 配置，图片会先分析成文本再发送。",
-        )
-
     if supports_vision is True:
         return _image_input_payload(
             provider=provider,
@@ -142,21 +139,6 @@ def build_hermes_image_input_capability(
             reason="当前模型支持原生图片输入。",
         )
 
-    if _uses_provider_vision_text_fallback(provider, model):
-        return _image_input_payload(
-            provider=provider,
-            model=model,
-            mode=mode,
-            supports_vision=supports_vision,
-            route="vision_text",
-            can_attach=True,
-            requires_vision_pipeline=True,
-            reason=(
-                "当前 Xiaomi Pro 模型不走稳定的原生图片输入；"
-                "图片会先交给 Xiaomi vision 链路分析，再把结果发给当前模型。"
-            ),
-        )
-
     if supports_vision is False:
         return _image_input_payload(
             provider=provider,
@@ -167,7 +149,7 @@ def build_hermes_image_input_capability(
             can_attach=False,
             requires_vision_pipeline=True,
             reason=(
-                "当前模型未声明多模态能力。请切换支持图片的模型，或把图片输入设为 vision 预分析并配置辅助 vision。"
+                "当前主模型未声明图片输入能力。请切换支持图片的模型，或在图片识别链路中选择单独图片模型后再发送图片。"
             ),
         )
 
@@ -185,11 +167,6 @@ def build_hermes_image_input_capability(
 
 def _normalized_provider_model(provider: str, model: str) -> tuple[str, str]:
     return (provider or "").strip().lower(), (model or "").strip().lower()
-
-
-def _uses_provider_vision_text_fallback(provider: str, model: str) -> bool:
-    provider_id, model_id = _normalized_provider_model(provider, model)
-    return provider_id == "xiaomi" and model_id in _XIAOMI_VISION_TEXT_FALLBACK_MODELS
 
 
 def _image_input_payload(
@@ -265,14 +242,22 @@ def read_hermes_image_input_config(config_path: Path) -> dict[str, Any]:
 
 def lookup_model_supports_vision(provider: str, model: str) -> bool | None:
     provider_id_raw, model_id_raw = _normalized_provider_model(provider, model)
+    provider_id = _PROVIDER_TO_MODELS_DEV.get((provider or "").strip().lower())
+    model_id = (model or "").strip()
+    cache_result = _lookup_models_dev_supports_vision(provider_id, model_id)
+    if cache_result is not None:
+        return cache_result
+
     if provider_id_raw == "xiaomi":
         if model_id_raw in _XIAOMI_NATIVE_IMAGE_MODELS:
             return True
-        if model_id_raw in _XIAOMI_VISION_TEXT_FALLBACK_MODELS or model_id_raw in _XIAOMI_TEXT_ONLY_MODELS:
+        if model_id_raw in _XIAOMI_TEXT_ONLY_MODELS:
             return False
 
-    provider_id = _PROVIDER_TO_MODELS_DEV.get((provider or "").strip().lower())
-    model_id = (model or "").strip()
+    return None
+
+
+def _lookup_models_dev_supports_vision(provider_id: str, model_id: str) -> bool | None:
     if not provider_id or not model_id:
         return None
 

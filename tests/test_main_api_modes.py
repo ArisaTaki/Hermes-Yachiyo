@@ -566,6 +566,51 @@ def test_update_hermes_configuration_writes_vision_chain_settings(tmp_path, monk
         store.close()
 
 
+def test_update_hermes_configuration_normalizes_xiaomi_text_vision_model(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    calls = []
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+
+        def fake_run(argv, **_kwargs):
+            calls.append(argv)
+            if argv[1:3] == ["config", "set"]:
+                return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            if argv[-1] == "path":
+                return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
+            if argv[-1] == "env-path":
+                return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.update_hermes_configuration(
+            {
+                "provider": "deepseek",
+                "model": "deepseek-chat",
+                "base_url": "https://api.deepseek.com/v1",
+                "image_input_mode": "text",
+                "vision_provider": "xiaomi",
+                "vision_model": "mimo-v2-flash",
+                "vision_base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+            }
+        )
+
+        assert result["ok"] is True
+        set_calls = [call for call in calls if call[1:3] == ["config", "set"]]
+        vision_model_call = next(call for call in set_calls if call[3] == "auxiliary.vision.model")
+        assert vision_model_call[4] == "mimo-v2.5-pro"
+    finally:
+        store.close()
+
+
 def test_open_terminal_command_rejects_unsupported_command(tmp_path):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _RuntimeStub(store)
