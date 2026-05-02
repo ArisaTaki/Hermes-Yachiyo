@@ -56,6 +56,7 @@ class AppState:
         description: str,
         task_type: TaskType = TaskType.GENERAL,
         risk_level: RiskLevel = RiskLevel.LOW,
+        attachments: list[dict] | None = None,
     ) -> TaskInfo:
         with self._lock:
             now = _now()
@@ -67,6 +68,7 @@ class AppState:
                 risk_level=risk_level,
                 created_at=now,
                 updated_at=now,
+                attachments=list(attachments or []),
             )
             self._tasks[task.task_id] = task
         logger.info("任务已创建: %s", task.task_id)

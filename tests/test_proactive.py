@@ -6,7 +6,7 @@ from apps.core.chat_session import ChatSession
 from apps.core.state import AppState
 import apps.shell.proactive as proactive_mod
 from apps.shell.config import AppConfig
-from apps.shell.proactive import ProactiveDesktopService
+from apps.shell.proactive import ProactiveDesktopService, build_proactive_desktop_prompt
 from packages.protocol.enums import RiskLevel, TaskStatus, TaskType
 
 
@@ -20,6 +20,7 @@ class _RunnerStub:
 
 class _RuntimeStub:
     def __init__(self) -> None:
+        self.config = AppConfig()
         self.state = AppState()
         self.chat_session = ChatSession(session_id="proactive-test")
         self.task_runner = _RunnerStub()
@@ -77,11 +78,12 @@ def test_proactive_service_blocks_when_vision_limited():
 
 def test_proactive_service_creates_low_risk_screenshot_task():
     runtime = _RuntimeStub()
-    config = AppConfig()
-    config.live2d_mode.proactive_enabled = True
-    config.live2d_mode.proactive_desktop_watch_enabled = True
-    config.live2d_mode.proactive_interval_seconds = 60
-    service = ProactiveDesktopService(runtime, config.live2d_mode)
+    runtime.config.live2d_mode.proactive_enabled = True
+    runtime.config.live2d_mode.proactive_desktop_watch_enabled = True
+    runtime.config.live2d_mode.proactive_interval_seconds = 60
+    runtime.config.tts.max_chars = 42
+    runtime.config.tts.notification_prompt = "只说一句轻快提醒。"
+    service = ProactiveDesktopService(runtime, runtime.config.live2d_mode)
 
     state = service.get_state()
     tasks = runtime.state.list_tasks()
@@ -90,7 +92,20 @@ def test_proactive_service_creates_low_risk_screenshot_task():
     assert state["task_id"] == tasks[0].task_id
     assert tasks[0].task_type == TaskType.SCREENSHOT
     assert tasks[0].risk_level == RiskLevel.LOW
+    assert "只说一句轻快提醒" in tasks[0].description
+    assert "最多 42 个中文字符" in tasks[0].description
     assert service.last_task_id == tasks[0].task_id
+
+
+def test_build_proactive_desktop_prompt_uses_tts_notification_constraints():
+    runtime = _RuntimeStub()
+    runtime.config.tts.max_chars = 33
+    runtime.config.tts.notification_prompt = "像打招呼一样提醒。"
+
+    prompt = build_proactive_desktop_prompt(runtime)
+
+    assert "像打招呼一样提醒" in prompt
+    assert "最多 33 个中文字符" in prompt
 
 
 def test_proactive_service_reports_failed_before_retry_interval(monkeypatch):

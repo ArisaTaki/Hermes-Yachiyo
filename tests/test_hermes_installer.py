@@ -1,5 +1,6 @@
 """Hermes 安装检测与安装器配置测试。"""
 
+import asyncio
 import inspect
 from types import SimpleNamespace
 
@@ -97,8 +98,10 @@ async def test_run_install_keeps_sanitized_ansi_error_output(monkeypatch):
         ],
     )
     seen_lines = []
+    subprocess_calls = []
 
     async def fake_create_subprocess_exec(*args, **kwargs):
+        subprocess_calls.append((args, kwargs))
         return process
 
     monkeypatch.setattr(
@@ -122,6 +125,8 @@ async def test_run_install_keeps_sanitized_ansi_error_output(monkeypatch):
     assert "\x1b[" not in result.stdout
     assert "ERROR: Package installation failed." in seen_lines
     assert "错误详情" in result.message
+    assert "--skip-setup" in subprocess_calls[0][0][2]
+    assert subprocess_calls[0][1]["stdin"] is asyncio.subprocess.DEVNULL
 
 
 @pytest.mark.asyncio

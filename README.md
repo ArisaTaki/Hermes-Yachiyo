@@ -188,12 +188,6 @@ hermes-yachiyo
 hermes-yachiyo-backend
 ```
 
-旧 pywebview 入口只保留给兼容验证：
-
-```bash
-hermes-yachiyo-legacy-pywebview
-```
-
 ## 第一次打开后怎么做
 
 应用会先检测 Hermes Agent 是否可用，然后按状态引导：
@@ -285,7 +279,7 @@ unzip hermes-yachiyo-live2d-yachiyo-20260423.zip -d ~/.hermes/yachiyo/assets/liv
 
 ## 常见问题
 
-### 运行后还是旧的 pywebview 窗口
+### 运行后入口或界面不对
 
 当前虚拟环境里的命令入口可能还是旧版本。回到仓库根目录重新安装：
 
@@ -391,7 +385,7 @@ apps/
   frontend/           Electron + React/Vite/TypeScript 前端
   desktop_backend/    无窗口 Python 后端入口
   desktop_launcher.py 源码开发启动器
-  shell/              配置、安装、legacy pywebview 兼容层
+  shell/              配置、安装、桌面后端 UI 数据适配
   core/               Hermes 运行时封装、任务状态、聊天状态
   bridge/             本地 FastAPI Bridge
   locald/             截图、活动窗口等本地能力
@@ -410,7 +404,7 @@ docs/                 架构与资源文档
 - Electron 负责桌面窗口、托盘、内置终端和原生能力。
 - Python backend 负责运行时、配置、安装检测和本地 Bridge。
 - Bridge 只监听本机，供 UI 和插件调用。
-- pywebview 已经是 legacy 路径，新 UI 工作应放在 `apps/frontend/`。
+- 旧 pywebview 承载层已移除，新 UI 工作统一放在 `apps/frontend/`。
 
 更详细的前端架构见 [docs/desktop-frontend-architecture.md](docs/desktop-frontend-architecture.md)。
 

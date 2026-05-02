@@ -10,6 +10,7 @@ import {
   openDesktopMode,
   openPath,
   quitApp,
+  restartDesktopBridge,
 } from '../lib/bridge';
 import { currentParam, navigateTo } from '../lib/view';
 
@@ -21,7 +22,7 @@ type SettingsPayload = {
 type ModeConfig = Record<string, unknown>;
 type ModeFormValue = string | boolean;
 type ModeForm = Record<string, ModeFormValue>;
-type ModeFieldKind = 'text' | 'number' | 'checkbox' | 'select' | 'percent';
+type ModeFieldKind = 'text' | 'textarea' | 'number' | 'checkbox' | 'select' | 'percent';
 type ModeFieldOption = { value: string; label: string };
 type ModeFieldSpec = {
   key: string;
@@ -34,6 +35,7 @@ type ModeFieldSpec = {
   integer?: boolean;
   wide?: boolean;
   options?: ModeFieldOption[];
+  allowCustom?: boolean;
 };
 type ModeFieldSection = { title: string; note?: string; fields: ModeFieldSpec[] };
 type SettingsUpdateResult = {
@@ -161,7 +163,7 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const sections = useMemo(() => modeFieldSections(mode), [mode]);
+  const sections = useMemo(() => modeFieldSections(mode, payload), [mode, payload]);
   const specs = useMemo(() => sections.flatMap((section) => section.fields), [sections]);
   const pendingCount = useMemo(() => countModePendingChanges(payload, form, specs), [payload, form, specs]);
   const hasChanges = pendingCount > 0;
@@ -402,6 +404,7 @@ function renderModeField(
     );
   }
   if (field.kind === 'select') {
+    const options = selectOptionsWithCurrentValue(field.options || [], String(value ?? ''));
     return (
       <div className={`settings-field ${field.wide ? 'wide' : ''}`} key={field.key}>
         <label htmlFor={fieldId(field.key)}>{field.label}</label>
@@ -410,10 +413,23 @@ function renderModeField(
           value={String(value ?? '')}
           onChange={(event) => onChange(field.key, event.target.value)}
         >
-          {(field.options || []).map((option) => (
+          {options.map((option) => (
             <option key={option.value} value={option.value}>{option.label}</option>
           ))}
         </select>
+      </div>
+    );
+  }
+  if (field.kind === 'textarea') {
+    return (
+      <div className={`settings-field ${field.wide ? 'wide' : ''}`} key={field.key}>
+        <label htmlFor={fieldId(field.key)}>{field.label}</label>
+        <textarea
+          id={fieldId(field.key)}
+          rows={4}
+          value={String(value ?? '')}
+          onChange={(event) => onChange(field.key, event.target.value)}
+        />
       </div>
     );
   }
@@ -566,6 +582,7 @@ function GeneralSettingsView() {
   const [uninstallRunning, setUninstallRunning] = useState(false);
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
+  const [bridgeRestarting, setBridgeRestarting] = useState(false);
 
   const changes = useMemo(() => buildGeneralSettingsChanges(payload, form), [payload, form]);
   const pendingCount = useMemo(() => countGeneralSettingsPendingChanges(payload, form), [payload, form]);
@@ -698,11 +715,44 @@ function GeneralSettingsView() {
   }
 
   async function restartBridge() {
-    setStatus('正在重启 Bridge…');
-    const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/bridge/restart');
-    if (result.ok === false) throw new Error(result.error || 'Bridge 重启失败');
-    await refreshGeneralSettings();
-    setStatus('Bridge 已按当前配置重启');
+    if (bridgeRestarting) return;
+    if (saving) {
+      setStatus('正在保存设置，请稍后再重启 Bridge');
+      return;
+    }
+    if (hasChanges) {
+      setStatus('请先保存更改，再重启 Bridge');
+      return;
+    }
+    const bridgePort = Number(form.bridge_port);
+    if (!Number.isInteger(bridgePort)) {
+      setStatus('Bridge 端口必须是整数');
+      return;
+    }
+    if (!form.bridge_host.trim()) {
+      setStatus('Bridge Host 不能为空');
+      return;
+    }
+
+    setBridgeRestarting(true);
+    setStatus('正在重启 Bridge，界面会短暂断开…');
+    try {
+      const targetBridgeUrl = `http://${form.bridge_host.trim()}:${bridgePort}`;
+      const desktopResult = await restartDesktopBridge(targetBridgeUrl);
+      if (!desktopResult.success) {
+        const result = await apiPost<{ ok?: boolean; error?: string; desktop_restart_backend_required?: boolean }>('/ui/bridge/restart');
+        if (result.ok === false) throw new Error(result.error || 'Bridge 重启失败');
+        if (result.desktop_restart_backend_required) {
+          throw new Error(result.error || desktopResult.error || '当前环境无法自动重启 Bridge，请重启 Hermes-Yachiyo');
+        }
+      }
+      await refreshGeneralSettings();
+      setStatus('Bridge 已按当前配置重启');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'Bridge 重启失败');
+    } finally {
+      setBridgeRestarting(false);
+    }
   }
 
   async function createBackup(overwriteLatest = false) {
@@ -976,7 +1026,9 @@ function GeneralSettingsView() {
             ['配置漂移', payload?.bridge?.config_dirty ? listValue(payload.bridge.drift_details) : '无'],
           ]} />
           <div className="settings-action-strip">
-            <button type="button" onClick={() => void restartBridge()}>应用配置并重启 Bridge</button>
+            <button type="button" disabled={bridgeRestarting || saving} onClick={() => void restartBridge()}>
+              {bridgeRestarting ? '重启中…' : '应用配置并重启 Bridge'}
+            </button>
           </div>
         </article>
 
@@ -1223,8 +1275,8 @@ function buildGeneralSettingsChanges(
   return changes;
 }
 
-function modeFieldSections(mode: string): ModeFieldSection[] {
-  return mode === 'live2d' ? LIVE2D_FIELD_SECTIONS : BUBBLE_FIELD_SECTIONS;
+function modeFieldSections(mode: string, payload?: SettingsPayload | null): ModeFieldSection[] {
+  return mode === 'live2d' ? live2dFieldSections(payload) : BUBBLE_FIELD_SECTIONS;
 }
 
 function modeFieldSpecs(mode: string): ModeFieldSpec[] {
@@ -1270,10 +1322,10 @@ function buildModeSettingsChanges(
 function validateModeForm(form: ModeForm, specs: ModeFieldSpec[]): string {
   for (const spec of specs) {
     const raw = form[spec.key];
-    if (spec.kind === 'checkbox' || spec.kind === 'text') continue;
+    if (spec.kind === 'checkbox' || spec.kind === 'text' || spec.kind === 'textarea') continue;
     if (spec.kind === 'select') {
       const value = String(raw ?? '');
-      if (!spec.options?.some((option) => option.value === value)) return `${spec.label} 仅支持当前可选项`;
+      if (!spec.allowCustom && !spec.options?.some((option) => option.value === value)) return `${spec.label} 仅支持当前可选项`;
       continue;
     }
     const text = String(raw ?? '').trim();
@@ -1373,6 +1425,43 @@ function live2dExpressionSummary(summary: ModeConfig): string {
   return expressions.map((item) => stringValue(asRecord(item).name || asRecord(item).file || '未命名表情')).join(' / ');
 }
 
+function live2dExpressionOptions(payload?: SettingsPayload | null): ModeFieldOption[] {
+  const config = payload?.settings?.config || {};
+  const summary = asRecord(config.summary);
+  const expressions = Array.isArray(summary.expressions) ? summary.expressions : [];
+  const options: ModeFieldOption[] = [{ value: '', label: '自动匹配' }];
+  const seen = new Set(['']);
+  for (const item of expressions) {
+    const record = asRecord(item);
+    const value = stringValue(record.name || record.file).trim();
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    const file = stringValue(record.file).trim();
+    options.push({
+      value,
+      label: file && file !== value ? `${value} · ${file}` : value,
+    });
+  }
+  return options;
+}
+
+function live2dFieldSections(payload?: SettingsPayload | null): ModeFieldSection[] {
+  const expressionOptions = live2dExpressionOptions(payload);
+  return LIVE2D_FIELD_SECTIONS.map((section) => ({
+    ...section,
+    fields: section.fields.map((field) => (
+      field.key.endsWith('_expression')
+        ? { ...field, options: expressionOptions }
+        : field
+    )),
+  }));
+}
+
+function selectOptionsWithCurrentValue(options: ModeFieldOption[], value: string): ModeFieldOption[] {
+  if (!value || options.some((option) => option.value === value)) return options;
+  return [...options, { value, label: `${value}（当前配置）` }];
+}
+
 function live2dMotionSummary(summary: ModeConfig): string {
   const groups = asRecord(summary.motion_groups);
   const parts = Object.entries(groups).map(([name, items]) => `${name} × ${Array.isArray(items) ? items.length : 0}`);
@@ -1433,8 +1522,19 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
       { key: 'live2d_mode.model_path', sourceKey: 'model_path', label: '模型路径', kind: 'text', wide: true },
       { key: 'live2d_mode.width', sourceKey: 'width', label: '窗口宽度', kind: 'number', min: 240, integer: true },
       { key: 'live2d_mode.height', sourceKey: 'height', label: '窗口高度', kind: 'number', min: 240, integer: true },
-      { key: 'live2d_mode.position_x', sourceKey: 'position_x', label: '位置 X', kind: 'number', integer: true },
-      { key: 'live2d_mode.position_y', sourceKey: 'position_y', label: '位置 Y', kind: 'number', integer: true },
+      {
+        key: 'live2d_mode.position_anchor',
+        sourceKey: 'position_anchor',
+        label: '默认位置',
+        kind: 'select',
+        options: [
+          { value: 'right_bottom', label: '右下角' },
+          { value: 'left_bottom', label: '左下角' },
+          { value: 'custom', label: '自定义坐标' },
+        ],
+      },
+      { key: 'live2d_mode.position_x', sourceKey: 'position_x', label: '水平边距 / X', kind: 'number', integer: true },
+      { key: 'live2d_mode.position_y', sourceKey: 'position_y', label: '底部 / Y', kind: 'number', integer: true },
       { key: 'live2d_mode.window_on_top', sourceKey: 'window_on_top', label: '窗口置顶', kind: 'checkbox', wide: true },
       { key: 'live2d_mode.show_on_all_spaces', sourceKey: 'show_on_all_spaces', label: 'macOS 所有桌面可见', kind: 'checkbox', wide: true },
     ],
@@ -1475,6 +1575,44 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
     ],
   },
   {
+    title: '表情映射',
+    note: '选项来自当前 model3.json 的 Expressions；留空时按表情名称自动匹配。',
+    fields: [
+      {
+        key: 'live2d_mode.thinking_expression',
+        sourceKey: 'thinking_expression',
+        label: '思考时表情',
+        kind: 'select',
+        options: [{ value: '', label: '自动匹配' }],
+        allowCustom: true,
+      },
+      {
+        key: 'live2d_mode.message_expression',
+        sourceKey: 'message_expression',
+        label: '收到回复表情',
+        kind: 'select',
+        options: [{ value: '', label: '自动匹配' }],
+        allowCustom: true,
+      },
+      {
+        key: 'live2d_mode.failed_expression',
+        sourceKey: 'failed_expression',
+        label: '失败时表情',
+        kind: 'select',
+        options: [{ value: '', label: '自动匹配' }],
+        allowCustom: true,
+      },
+      {
+        key: 'live2d_mode.attention_expression',
+        sourceKey: 'attention_expression',
+        label: '提醒时表情',
+        kind: 'select',
+        options: [{ value: '', label: '自动匹配' }],
+        allowCustom: true,
+      },
+    ],
+  },
+  {
     title: '主动交互',
     fields: [
       { key: 'live2d_mode.proactive_enabled', sourceKey: 'proactive_enabled', label: '主动对话', kind: 'checkbox', wide: true },
@@ -1502,6 +1640,8 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
       { key: 'tts.command', sourceKey: 'tts_command', label: 'TTS 本地命令', kind: 'text', wide: true },
       { key: 'tts.voice', sourceKey: 'tts_voice', label: 'TTS 音色', kind: 'text' },
       { key: 'tts.timeout_seconds', sourceKey: 'tts_timeout_seconds', label: 'TTS 超时秒', kind: 'number', min: 1, max: 120, integer: true },
+      { key: 'tts.max_chars', sourceKey: 'tts_max_chars', label: 'TTS 最大播报字数', kind: 'number', min: 20, max: 240, integer: true },
+      { key: 'tts.notification_prompt', sourceKey: 'tts_notification_prompt', label: '主动播报提示词', kind: 'textarea', wide: true },
     ],
   },
 ];

@@ -103,8 +103,8 @@ def test_live2d_runtime_script_sources_prefer_cache(tmp_path, monkeypatch):
     missing_script = tmp_path / "cubism.js"
 
     monkeypatch.setattr(
-        live2d_route.live2d_mode,
-        "_get_live2d_runtime_dependency_specs",
+        live2d_route.live2d_runtime,
+        "get_live2d_runtime_dependency_specs",
         lambda: {
             "pixi_js": ("https://example.test/pixi.js", cached_script),
             "live2d_cubism_core": ("https://example.test/core.js", missing_script),
@@ -130,13 +130,13 @@ async def test_get_live2d_runtime_primes_dependencies(tmp_path, monkeypatch):
     calls = []
 
     monkeypatch.setattr(
-        live2d_route.live2d_mode,
-        "_get_live2d_runtime_dependency_specs",
+        live2d_route.live2d_runtime,
+        "get_live2d_runtime_dependency_specs",
         lambda: {"pixi_js": ("https://example.test/pixi.js", cached_script)},
     )
     monkeypatch.setattr(
-        live2d_route.live2d_mode,
-        "_prime_live2d_runtime_dependencies",
+        live2d_route.live2d_runtime,
+        "prime_live2d_runtime_dependencies",
         lambda: calls.append("prime") or (True, ""),
     )
 

@@ -13,10 +13,12 @@ only agent text deltas, not Rich banners, tool lists, or startup messages.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import inspect
 import json
 import os
+from pathlib import Path
 import sys
 import traceback
 from typing import Any, Optional
@@ -34,6 +36,40 @@ _FAILURE_DETAIL_KEYS = (
     "detail",
     "details",
 )
+_ATTACHED_IMAGE_GUARD = (
+    "本轮用户已经附加图片。请优先且尽量只根据这些附加图片回答；"
+    "不要沿用历史消息里对旧图片的描述来回答本轮图片；"
+    "不要调用桌面截图、活动窗口、浏览器视觉或其它实时桌面观察工具来替代附加图片，"
+    "除非用户明确要求你操作当前电脑或重新观察屏幕。"
+)
+_XIAOMI_NATIVE_IMAGE_MODELS = {
+    "mimo-v2.5-pro",
+    "mimo-v2.5",
+    "mimo-v2-omni",
+}
+_XIAOMI_TEXT_ONLY_IMAGE_MODELS = {
+    "mimo-v2-pro",
+    "mimo-v2-flash",
+}
+_PREFERRED_AUXILIARY_VISION_MODELS = {
+    "xiaomi": "mimo-v2.5-pro",
+}
+_PROVIDER_API_KEY_NAMES = {
+    "xiaomi": ("XIAOMI_API_KEY",),
+    "openrouter": ("OPENROUTER_API_KEY", "OPENAI_API_KEY"),
+    "anthropic": ("ANTHROPIC_API_KEY", "ANTHROPIC_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"),
+    "gemini": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+    "google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
+    "deepseek": ("DEEPSEEK_API_KEY",),
+    "xai": ("XAI_API_KEY",),
+    "kimi-coding": ("KIMI_API_KEY", "KIMI_CODING_API_KEY"),
+    "zai": ("GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"),
+    "huggingface": ("HF_TOKEN",),
+}
+
+
+class ImagePreprocessError(RuntimeError):
+    """Raised when Yachiyo cannot turn image attachments into model context."""
 
 
 def _emit(event_type: str, **payload: Any) -> None:
@@ -104,6 +140,468 @@ def _get_session_title(cli: Any, session_id: str) -> Optional[str]:
 def _is_debug_route_enabled() -> bool:
     value = os.environ.get(_DEBUG_ROUTE_ENV, "")
     return value.strip().lower() in _DEBUG_ROUTE_TRUE_VALUES
+
+
+def _collect_image_paths(payload: dict[str, Any]) -> list[Path]:
+    raw_paths = payload.get("image_paths")
+    if not isinstance(raw_paths, list):
+        return []
+    images: list[Path] = []
+    seen: set[str] = set()
+    for value in raw_paths:
+        if not isinstance(value, str) or not value:
+            continue
+        path = Path(value).expanduser()
+        try:
+            resolved = path.resolve()
+        except OSError:
+            continue
+        key = str(resolved)
+        if key in seen or not resolved.exists() or not resolved.is_file():
+            continue
+        seen.add(key)
+        images.append(resolved)
+    return images
+
+
+def _with_attached_image_guard(description: str, image_paths: list[Path]) -> str:
+    if not image_paths:
+        return description
+    count = len(image_paths)
+    return (
+        "[Yachiyo 附件图片上下文]\n"
+        f"{_ATTACHED_IMAGE_GUARD}\n"
+        f"附加图片数量：{count}\n\n"
+        f"{description}"
+    )
+
+
+def _configured_image_input_mode(cfg: dict[str, Any] | None) -> str:
+    if not isinstance(cfg, dict):
+        return "auto"
+    agent_cfg = cfg.get("agent") or {}
+    if not isinstance(agent_cfg, dict):
+        return "auto"
+    mode = str(agent_cfg.get("image_input_mode") or "auto").strip().lower()
+    return mode if mode in {"auto", "native", "text"} else "auto"
+
+
+def _lookup_model_supports_vision(provider: str, model: str) -> bool | None:
+    try:
+        from agent.models_dev import get_model_capabilities
+
+        caps = get_model_capabilities(provider, model)
+    except Exception:
+        caps = None
+    if caps is not None:
+        return bool(getattr(caps, "supports_vision", False))
+
+    provider_id = provider.strip().lower()
+    model_id = model.strip().lower()
+    if provider_id == "xiaomi":
+        if model_id in _XIAOMI_NATIVE_IMAGE_MODELS:
+            return True
+        if model_id in _XIAOMI_TEXT_ONLY_IMAGE_MODELS:
+            return False
+    return None
+
+
+def _correct_image_mode_for_provider(
+    provider: str,
+    model: str,
+    cfg: dict[str, Any] | None,
+    image_mode: str,
+) -> str:
+    provider_id = provider.strip().lower()
+    configured_mode = _configured_image_input_mode(cfg)
+    if configured_mode == "text":
+        return "text"
+    if configured_mode == "native":
+        return "native"
+    supports_vision = _lookup_model_supports_vision(provider, model)
+    if supports_vision is True:
+        return "native"
+    if supports_vision is False:
+        return "text"
+    if provider_id != "xiaomi":
+        return image_mode
+    return image_mode
+
+
+def _extract_vision_error(result: dict[str, Any]) -> str:
+    for key in ("error", "message", "analysis", "detail"):
+        value = result.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "vision 预分析没有返回有效结果"
+
+
+def _provider_api_key_names(provider: str) -> tuple[str, ...]:
+    normalized = (provider or "").strip().lower()
+    if not normalized:
+        return ()
+    return _PROVIDER_API_KEY_NAMES.get(normalized, (f"{normalized.upper().replace('-', '_')}_API_KEY",))
+
+
+def _read_hermes_env_values() -> dict[str, str]:
+    values: dict[str, str] = {}
+    candidates = []
+    env_path = os.environ.get("HERMES_ENV_FILE") or os.environ.get("HERMES_AGENT_ENV_FILE")
+    if env_path:
+        candidates.append(Path(env_path).expanduser())
+    candidates.append(Path.home() / ".hermes" / ".env")
+    for path in candidates:
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            text = line.strip()
+            if not text or text.startswith("#") or "=" not in text:
+                continue
+            key, raw_value = text.split("=", 1)
+            values[key.strip()] = raw_value.strip().strip('"').strip("'")
+        if values:
+            break
+    return values
+
+
+def _configured_provider_api_key(provider: str) -> str:
+    env_values: dict[str, str] | None = None
+    for key in _provider_api_key_names(provider):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return value
+        if env_values is None:
+            env_values = _read_hermes_env_values()
+        value = env_values.get(key, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _text_attr(obj: Any, *names: str) -> str:
+    for name in names:
+        value = getattr(obj, name, "")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _resolve_auxiliary_provider_defaults(provider: str, model: str) -> dict[str, str]:
+    try:
+        from agent.auxiliary_client import resolve_provider_client
+
+        client, resolved_model = resolve_provider_client(provider, model)
+    except Exception:
+        return {}
+    return {
+        "model": str(resolved_model or "").strip() or _text_attr(client, "model", "model_name"),
+        "base_url": _text_attr(client, "base_url", "api_base", "api_base_url"),
+        "api_key": _text_attr(client, "api_key", "key"),
+    }
+
+
+def _normalize_auxiliary_vision_model(provider: str, model: str) -> str:
+    provider_id = (provider or "").strip().lower()
+    model_id = (model or "").strip()
+    if provider_id == "xiaomi":
+        normalized = model_id.lower()
+        if (
+            not normalized
+            or normalized in _XIAOMI_TEXT_ONLY_IMAGE_MODELS
+        ):
+            return _PREFERRED_AUXILIARY_VISION_MODELS["xiaomi"]
+    return model_id
+
+
+def _configured_auxiliary_vision_override() -> dict[str, str] | None:
+    try:
+        from hermes_cli.config import load_config
+    except Exception:
+        return None
+    try:
+        cfg = load_config()
+    except Exception:
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    auxiliary = cfg.get("auxiliary") if isinstance(cfg.get("auxiliary"), dict) else {}
+    vision_cfg = auxiliary.get("vision") if isinstance(auxiliary.get("vision"), dict) else {}
+    if not any(str(vision_cfg.get(key) or "").strip() for key in ("provider", "model", "base_url", "api_key")):
+        return None
+
+    model_cfg = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+    chat_provider = str(model_cfg.get("provider") or "").strip().lower()
+    chat_model = str(model_cfg.get("default") or "").strip()
+    chat_base_url = str(model_cfg.get("base_url") or "").strip()
+    vision_provider = str(vision_cfg.get("provider") or "").strip().lower()
+    provider = vision_provider if vision_provider and vision_provider != "auto" else chat_provider
+    model = str(vision_cfg.get("model") or "").strip() or chat_model
+    model = _normalize_auxiliary_vision_model(provider, model)
+    base_url = str(vision_cfg.get("base_url") or "").strip()
+    api_key = str(vision_cfg.get("api_key") or "").strip()
+
+    defaults = _resolve_auxiliary_provider_defaults(provider, model) if provider else {}
+    model = _normalize_auxiliary_vision_model(provider, model or defaults.get("model", ""))
+    base_url = base_url or defaults.get("base_url", "")
+    if not base_url and provider == chat_provider:
+        base_url = chat_base_url
+    api_key = api_key or defaults.get("api_key", "") or _configured_provider_api_key(provider)
+
+    missing = [
+        label
+        for label, value in (
+            ("provider", provider),
+            ("model", model),
+            ("base_url", base_url),
+            ("api_key", api_key),
+        )
+        if not value
+    ]
+    if missing:
+        raise ImagePreprocessError(f"vision 链路配置不完整：缺少 {', '.join(missing)}")
+    return {
+        "model": model,
+        "base_url": base_url.rstrip("/"),
+        "api_key": api_key,
+    }
+
+
+def _configured_xiaomi_vision_override() -> dict[str, str] | None:
+    """Use the user's Xiaomi base URL for Xiaomi text-model vision fallback.
+
+    Some Xiaomi text models still need a dedicated multimodal model for
+    pre-analysis.  Yachiyo's setup UI lets users choose a custom Xiaomi
+    endpoint, so that path must inherit the endpoint or it can 401 while text
+    chat still works.
+    """
+    try:
+        from hermes_cli.config import load_config
+    except Exception:
+        return None
+    try:
+        cfg = load_config()
+    except Exception:
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    auxiliary = cfg.get("auxiliary") if isinstance(cfg.get("auxiliary"), dict) else {}
+    vision_cfg = auxiliary.get("vision") if isinstance(auxiliary.get("vision"), dict) else {}
+    vision_provider = str(vision_cfg.get("provider") or "").strip().lower()
+    if (
+        (vision_provider and vision_provider != "auto")
+        or any(str(vision_cfg.get(key) or "").strip() for key in ("model", "base_url", "api_key"))
+    ):
+        return None
+    model_cfg = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+    provider = str(model_cfg.get("provider") or "").strip().lower()
+    chat_model = str(model_cfg.get("default") or "").strip()
+    base_url = str(model_cfg.get("base_url") or "").strip()
+    if provider != "xiaomi" or _lookup_model_supports_vision(provider, chat_model) is True or not base_url:
+        return None
+    vision_model = _PREFERRED_AUXILIARY_VISION_MODELS["xiaomi"]
+    try:
+        from agent.auxiliary_client import resolve_provider_client
+
+        client, _resolved = resolve_provider_client(provider, vision_model)
+    except Exception:
+        return None
+    api_key = str(getattr(client, "api_key", "") or "").strip() if client is not None else ""
+    if not api_key:
+        return None
+    return {
+        "model": vision_model,
+        "base_url": base_url.rstrip("/"),
+        "api_key": api_key,
+    }
+
+
+async def _run_direct_vision_analysis(
+    image_path: Path,
+    prompt: str,
+    *,
+    model: str,
+    base_url: str,
+    api_key: str,
+) -> str:
+    from agent.auxiliary_client import async_call_llm, extract_content_or_reasoning
+    from tools.vision_tools import (
+        _MAX_BASE64_BYTES,
+        _RESIZE_TARGET_BYTES,
+        _detect_image_mime_type,
+        _image_to_base64_data_url,
+        _is_image_size_error,
+        _resize_image_for_vision,
+    )
+
+    mime_type = _detect_image_mime_type(image_path)
+    if not mime_type:
+        raise ValueError("Only real image files are supported for vision analysis.")
+    image_data_url = _image_to_base64_data_url(image_path, mime_type=mime_type)
+    if len(image_data_url) > _MAX_BASE64_BYTES:
+        image_data_url = _resize_image_for_vision(image_path, mime_type=mime_type)
+    if len(image_data_url) > _MAX_BASE64_BYTES:
+        raise ValueError("Image too large for vision API after resizing.")
+
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": image_data_url}},
+            ],
+        }
+    ]
+    call_kwargs = {
+        "task": "vision",
+        "provider": "custom",
+        "model": model,
+        "base_url": base_url,
+        "api_key": api_key,
+        "messages": messages,
+        "temperature": 0.1,
+        "max_tokens": 2000,
+        "timeout": 120.0,
+    }
+    try:
+        response = await async_call_llm(**call_kwargs)
+    except Exception as exc:
+        if _is_image_size_error(exc) and len(image_data_url) > _RESIZE_TARGET_BYTES:
+            image_data_url = _resize_image_for_vision(image_path, mime_type=mime_type)
+            messages[0]["content"][1]["image_url"]["url"] = image_data_url
+            response = await async_call_llm(**call_kwargs)
+        else:
+            raise
+    analysis = extract_content_or_reasoning(response).strip()
+    if not analysis:
+        response = await async_call_llm(**call_kwargs)
+        analysis = extract_content_or_reasoning(response).strip()
+    if not analysis:
+        raise ValueError("vision API returned empty content")
+    return analysis
+
+
+def _run_vision_analysis(image_path: Path, prompt: str) -> str:
+    override = _configured_auxiliary_vision_override() or _configured_xiaomi_vision_override()
+    if override is not None:
+        try:
+            return asyncio.run(
+                _run_direct_vision_analysis(
+                    image_path,
+                    prompt,
+                    model=override["model"],
+                    base_url=override["base_url"],
+                    api_key=override["api_key"],
+                )
+            )
+        except Exception as exc:
+            raise ImagePreprocessError(f"{image_path.name} 分析失败：{exc}") from exc
+
+    try:
+        from tools.vision_tools import vision_analyze_tool
+    except Exception as exc:
+        raise ImagePreprocessError(f"vision 工具不可用：{exc}") from exc
+
+    try:
+        result_json = asyncio.run(
+            vision_analyze_tool(image_url=str(image_path), user_prompt=prompt)
+        )
+    except Exception as exc:
+        raise ImagePreprocessError(f"{image_path.name} 分析失败：{exc}") from exc
+
+    try:
+        result = json.loads(result_json)
+    except json.JSONDecodeError as exc:
+        raise ImagePreprocessError(f"{image_path.name} 返回了无法解析的 vision 结果") from exc
+    if not isinstance(result, dict):
+        raise ImagePreprocessError(f"{image_path.name} 返回了无效的 vision 结果")
+    if not result.get("success"):
+        raise ImagePreprocessError(f"{image_path.name} 分析失败：{_extract_vision_error(result)}")
+    analysis = str(result.get("analysis") or "").strip()
+    if not analysis:
+        raise ImagePreprocessError(f"{image_path.name} 分析结果为空")
+    return analysis
+
+
+def _preprocess_images_with_vision(description: str, image_paths: list[Path]) -> str:
+    prompt = (
+        "请详细描述这张用户刚刚附加的图片。必须只根据图片内容回答，"
+        "包括可见文字、人物/对象、界面布局、颜色和任何显著细节。"
+    )
+    parts: list[str] = []
+    for index, image_path in enumerate(image_paths, start=1):
+        analysis = _run_vision_analysis(image_path, prompt)
+        parts.append(
+            f"[Yachiyo 已预先分析第 {index} 张附件图片：\n{analysis}\n]"
+        )
+    return "\n\n".join(parts + [description])
+
+
+def _route_images(cli: Any, description: str, image_paths: list[Path]) -> Any:
+    if not image_paths:
+        return description
+    guarded_description = _with_attached_image_guard(description, image_paths)
+    provider = str(getattr(cli, "provider", "") or "").strip()
+    model = str(getattr(cli, "model", "") or "").strip()
+    cfg: dict[str, Any] | None = None
+    try:
+        from agent.image_routing import build_native_content_parts, decide_image_input_mode
+        from hermes_cli.config import load_config
+
+        cfg = load_config()
+        image_mode = decide_image_input_mode(
+            provider,
+            model,
+            cfg,
+        )
+        image_mode = _correct_image_mode_for_provider(provider, model, cfg, image_mode)
+    except Exception:
+        image_mode = "text"
+
+    if image_mode == "native":
+        try:
+            parts, skipped = build_native_content_parts(
+                guarded_description,
+                [str(path) for path in image_paths],
+            )
+            if any(part.get("type") == "image_url" for part in parts):
+                if _is_debug_route_enabled() and skipped:
+                    print(
+                        f"[yachiyo-debug] skipped image paths={len(skipped)}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                return parts
+        except Exception as exc:
+            if _is_debug_route_enabled():
+                print(
+                    f"[yachiyo-debug] native image routing failed: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+    return _preprocess_images_with_vision(guarded_description, image_paths)
+
+
+@contextlib.contextmanager
+def _disable_agent_tools_for_image_turn(agent: Any, image_paths: list[Path]):
+    if not image_paths or agent is None:
+        yield
+        return
+    original_tools = getattr(agent, "tools", None)
+    original_valid_tool_names = getattr(agent, "valid_tool_names", None)
+    try:
+        if hasattr(agent, "tools"):
+            agent.tools = []
+        if hasattr(agent, "valid_tool_names"):
+            agent.valid_tool_names = set()
+        yield
+    finally:
+        if hasattr(agent, "tools"):
+            agent.tools = original_tools
+        if hasattr(agent, "valid_tool_names"):
+            agent.valid_tool_names = original_valid_tool_names
 
 
 def _debug_route(route: Any) -> None:
@@ -179,11 +677,14 @@ def _build_init_agent_kwargs(
 
 def _run(payload: dict[str, Any]) -> int:
     description = str(payload.get("description") or "")
+    image_paths = _collect_image_paths(payload)
     resume = payload.get("resume")
     resume = resume if isinstance(resume, str) and resume else None
-    if not description.strip():
+    if not description.strip() and not image_paths:
         _emit("error", message="消息内容不能为空")
         return 2
+    if not description.strip() and image_paths:
+        description = "What do you see in this image?"
 
     os.environ["HERMES_INTERACTIVE"] = "1"
 
@@ -278,6 +779,11 @@ def _run(payload: dict[str, Any]) -> int:
 
         cli.agent.quiet_mode = True
         cli.agent.suppress_status_output = True
+        try:
+            description_for_agent = _route_images(cli, description, image_paths)
+        except ImagePreprocessError as exc:
+            _emit("error", message=f"图片预分析失败：{exc}")
+            return 1
 
         def on_delta(delta: Any) -> None:
             if delta is None:
@@ -288,12 +794,14 @@ def _run(payload: dict[str, Any]) -> int:
             if delta:
                 _emit("delta", delta=delta)
 
-        result = cli.agent.run_conversation(
-            user_message=description,
-            conversation_history=cli.conversation_history,
-            stream_callback=on_delta,
-            task_id=cli.session_id,
-        )
+        with _disable_agent_tools_for_image_turn(cli.agent, image_paths):
+            result = cli.agent.run_conversation(
+                user_message=description_for_agent,
+                conversation_history=cli.conversation_history,
+                stream_callback=on_delta,
+                task_id=cli.session_id,
+                persist_user_message=description if image_paths else None,
+            )
 
     if isinstance(result, dict):
         response = _detail_text(result.get("final_response"), drop_empty_literals=False)

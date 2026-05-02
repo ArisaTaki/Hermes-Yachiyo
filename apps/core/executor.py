@@ -108,6 +108,11 @@ _STREAM_UPDATE_INTERVAL: float = 0.05
 _BRIDGE_SCRIPT = Path(__file__).with_name("hermes_stream_bridge.py")
 _ERROR_DETAIL_MAX_CHARS = 500
 _ERROR_DETAIL_MAX_LINES = 12
+_ATTACHED_IMAGE_GUARD = (
+    "本轮用户已经附加图片。请优先且尽量只根据这些附加图片回答；"
+    "不要调用桌面截图、活动窗口、浏览器视觉或其它实时桌面观察工具来替代附加图片，"
+    "除非用户明确要求你操作当前电脑或重新观察屏幕。"
+)
 
 
 def _read_exec_timeout() -> float:
@@ -139,6 +144,17 @@ def _format_exec_timeout(timeout: float) -> str:
     if timeout >= 60 and timeout % 60 == 0:
         return f"{int(timeout // 60)}min"
     return f"{timeout:.0f}s"
+
+
+def _with_attached_image_guard(description: str, image_paths: list[str]) -> str:
+    if not image_paths:
+        return description
+    return (
+        "[Yachiyo 附件图片上下文]\n"
+        f"{_ATTACHED_IMAGE_GUARD}\n"
+        f"附加图片数量：{len(image_paths)}\n\n"
+        f"{description}"
+    )
 
 
 _EXEC_TIMEOUT: float = _read_exec_timeout()  # hermes chat -q 执行超时（秒）
@@ -272,6 +288,19 @@ def format_persona_description(
         parts.append(f"[用户称呼]\n请称呼用户为：{address}")
     parts.append(f"[用户请求]\n{description}")
     return "\n\n".join(parts)
+
+
+def _task_image_paths(task: TaskInfo) -> list[str]:
+    paths: list[str] = []
+    for attachment in getattr(task, "attachments", []) or []:
+        if not isinstance(attachment, dict):
+            continue
+        if str(attachment.get("kind") or "image") != "image":
+            continue
+        path = str(attachment.get("path") or "").strip()
+        if path:
+            paths.append(path)
+    return paths
 
 
 def _describe_day_period(hour: int) -> str:
@@ -615,6 +644,7 @@ async def _invoke_hermes_stream_bridge(
     description: str,
     hermes_session_id: Optional[str],
     on_update: Callable[[str], None],
+    image_paths: Optional[list[str]] = None,
 ) -> HermesInvokeResult:
     """通过 Hermes agent callback 层获取真实 token 流，避免 CLI 终端 UI 噪声。"""
     started_at = time.monotonic()
@@ -635,6 +665,7 @@ async def _invoke_hermes_stream_bridge(
     payload = {
         "description": description,
         "resume": hermes_session_id,
+        "image_paths": list(image_paths or []),
     }
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -702,6 +733,7 @@ async def invoke_hermes_cli(
     description: str,
     hermes_session_id: Optional[str] = None,
     on_update: Optional[Callable[[str], None]] = None,
+    image_paths: Optional[list[str]] = None,
 ) -> HermesInvokeResult:
     """向 Hermes Agent 发起一次 CLI 调用，返回结构化结果。
 
@@ -725,11 +757,13 @@ async def invoke_hermes_cli(
         HermesInvokeResult（不抛出异常，失败信息写入 result.error_message）
     """
     started_at = time.monotonic()
+    image_paths = [path for path in (image_paths or []) if isinstance(path, str) and path]
     if on_update is not None:
         stream_result = await _invoke_hermes_stream_bridge(
             description,
             hermes_session_id,
             on_update,
+            image_paths=image_paths,
         )
         logger.info(
             "[Hermes] streaming bridge 返回: success=%s, elapsed=%.2fs",
@@ -747,9 +781,13 @@ async def invoke_hermes_cli(
             description,
             hermes_session_id=hermes_session_id,
             on_update=None,
+            image_paths=image_paths,
         )
 
-    cmd = [*_HERMES_CMD, description, *_HERMES_FLAGS]
+    description_for_cli = _with_attached_image_guard(description, image_paths)
+    cmd = [*_HERMES_CMD, description_for_cli, *_HERMES_FLAGS]
+    if image_paths:
+        cmd.extend(["--image", image_paths[0]])
     if hermes_session_id:
         cmd.extend(["--resume", hermes_session_id])
     logger.debug("[Hermes CLI] 执行: %s", " ".join(cmd))
@@ -975,6 +1013,7 @@ class HermesExecutor(ExecutionStrategy):
         hermes_sid = None
         if chat_session is not None:
             hermes_sid = chat_session.hermes_session_id
+        image_paths = _task_image_paths(task)
 
         def on_update(content: str) -> None:
             if chat_session is None:
@@ -992,6 +1031,7 @@ class HermesExecutor(ExecutionStrategy):
             description,
             hermes_session_id=hermes_sid,
             on_update=on_update if chat_session is not None else None,
+            image_paths=image_paths,
         )
         elapsed = time.monotonic() - started_at
 

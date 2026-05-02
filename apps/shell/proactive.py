@@ -19,6 +19,28 @@ _DESKTOP_WATCH_PROMPT = (
     "用简短中文判断是否有需要提醒用户的事项；如果当前模型或工具无法读取截图，"
     "请明确说明缺少的多模态/vision 能力。"
 )
+_DEFAULT_PROACTIVE_VOICE_PROMPT = (
+    "主动提醒只输出适合语音播报的一句中文招呼或提醒，保持八千代人设，"
+    "不要朗读长段分析、列表、代码、路径或调试信息。"
+)
+
+
+def build_proactive_desktop_prompt(runtime: Any | None = None) -> str:
+    """Build the desktop-watch prompt with short-notification constraints."""
+    tts_config = getattr(getattr(runtime, "config", None), "tts", None) if runtime is not None else None
+    try:
+        max_chars = max(20, min(240, int(getattr(tts_config, "max_chars", 80) or 80)))
+    except (TypeError, ValueError):
+        max_chars = 80
+    prompt = str(
+        getattr(tts_config, "notification_prompt", "") or _DEFAULT_PROACTIVE_VOICE_PROMPT
+    ).strip()
+    return (
+        f"{_DESKTOP_WATCH_PROMPT}\n\n"
+        "输出约束："
+        f"{prompt} 最多 {max_chars} 个中文字符；"
+        "如果没有明确需要提醒的事项，就只给一句自然的问候，不要展开桌面细节。"
+    )
 
 
 class ProactiveDesktopService:
@@ -176,16 +198,17 @@ class ProactiveDesktopService:
         return None
 
     def _schedule_desktop_watch_task(self) -> str:
+        prompt = build_proactive_desktop_prompt(self._runtime)
         message_id = ""
         chat_session = getattr(self._runtime, "chat_session", None)
         if chat_session is not None:
             try:
-                message_id = chat_session.add_user_message(_DESKTOP_WATCH_PROMPT)
+                message_id = chat_session.add_user_message(prompt)
             except Exception:
                 logger.debug("主动桌面观察写入聊天消息失败", exc_info=True)
 
         task = self._runtime.state.create_task(
-            _DESKTOP_WATCH_PROMPT,
+            prompt,
             task_type=TaskType.SCREENSHOT,
             risk_level=RiskLevel.LOW,
         )
