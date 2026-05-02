@@ -206,6 +206,13 @@ def test_hermes_doctor_readiness_parses_limited_tools(monkeypatch):
     assert readiness == HermesReadinessLevel.BASIC_READY
     assert tools == ["browser", "image_gen", "agent-browser"]
     assert issues == 3
+    summary = getattr(check_hermes_doctor_readiness, "last_summary")
+    assert summary["available_tools"] == ["terminal"]
+    assert summary["limited_tool_details"] == {
+        "browser": "system dependency not met",
+        "image_gen": "system dependency not met",
+        "agent-browser": "missing binary",
+    }
     assert calls == [(["/tmp/hermes", "doctor"], True, True, 1.5)]
 
 

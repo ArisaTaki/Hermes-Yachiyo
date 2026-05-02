@@ -445,6 +445,17 @@ def test_get_hermes_configuration_reads_model_and_key_status(tmp_path, monkeypat
                 return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
             if argv[-1] == "env-path":
                 return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv[-2:] == ["tools", "list"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=(
+                        "Built-in toolsets (cli):\n"
+                        "  ✓ enabled  web  Web Search & Scraping\n"
+                        "  ✓ enabled  image_gen  Image Generation\n"
+                        "  ✗ disabled  rl  RL Training\n"
+                    ),
+                    stderr="",
+                )
             raise AssertionError(argv)
 
         monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
@@ -536,6 +547,17 @@ def test_update_hermes_configuration_writes_vision_chain_settings(tmp_path, monk
                 return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
             if argv[-1] == "env-path":
                 return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv[-2:] == ["tools", "list"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=(
+                        "Built-in toolsets (cli):\n"
+                        "  ✓ enabled  web  Web\n"
+                        "  ✓ enabled  image_gen  Image Generation\n"
+                        "  ✗ disabled  rl  RL Training\n"
+                    ),
+                    stderr="",
+                )
             raise AssertionError(argv)
 
         monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
@@ -591,6 +613,8 @@ def test_update_hermes_configuration_normalizes_xiaomi_text_vision_model(tmp_pat
                 return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
             if argv[-1] == "env-path":
                 return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv[-2:] == ["tools", "list"]:
+                return SimpleNamespace(returncode=0, stdout="  ✓ enabled  browser  Browser\n", stderr="")
             raise AssertionError(argv)
 
         monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
@@ -612,6 +636,385 @@ def test_update_hermes_configuration_normalizes_xiaomi_text_vision_model(tmp_pat
         set_calls = [call for call in calls if call[1:3] == ["config", "set"]]
         vision_model_call = next(call for call in set_calls if call[3] == "auxiliary.vision.model")
         assert vision_model_call[4] == "mimo-v2.5-pro"
+    finally:
+        store.close()
+
+
+def test_get_hermes_tool_config_does_not_expose_env_values(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    config_path.write_text(
+        "web:\n"
+        "  backend: exa\n"
+        "image_gen:\n"
+        "  provider: fal\n",
+        encoding="utf-8",
+    )
+    env_path.write_text(
+        "FIRECRAWL_API_KEY=fc-secret\n"
+        "FAL_KEY=fal-secret\n",
+        encoding="utf-8",
+    )
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+
+        def fake_run(argv, **_kwargs):
+            if argv[-1] == "path":
+                return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
+            if argv[-1] == "env-path":
+                return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv[-2:] == ["tools", "list"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=(
+                        "Built-in toolsets (cli):\n"
+                        "  ✓ enabled  web  Web\n"
+                        "  ✓ enabled  image_gen  Image Generation\n"
+                        "  ✗ disabled  rl  RL Training\n"
+                    ),
+                    stderr="",
+                )
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.get_hermes_tool_config()
+        web = next(tool for tool in result["tools"] if tool["id"] == "web")
+        image_gen = next(tool for tool in result["tools"] if tool["id"] == "image_gen")
+        backend = next(field for field in web["fields"] if field["key"] == "web.backend")
+        firecrawl_key = next(field for field in web["fields"] if field["key"] == "FIRECRAWL_API_KEY")
+        exa_key = next(field for field in web["fields"] if field["key"] == "EXA_API_KEY")
+        image_provider = next(field for field in image_gen["fields"] if field["key"] == "image_gen.provider")
+        image_model = next(field for field in image_gen["fields"] if field["key"] == "image_gen.model")
+
+        assert backend["value"] == "exa"
+        assert {tool["id"] for tool in result["hermes_toolsets"]} >= {"web", "image_gen", "rl"}
+        assert all(field["key"] != "web.use_gateway" for field in web["fields"])
+        assert firecrawl_key["configured"] is True
+        assert firecrawl_key["visible_when"] == {"field": "web.backend", "equals": "firecrawl"}
+        assert exa_key["visible_when"] == {"field": "web.backend", "equals": "exa"}
+        assert firecrawl_key["value"] == ""
+        assert image_provider["kind"] == "select"
+        assert "minimax" not in {option["value"] for option in image_provider["options"]}
+        assert {option["value"] for option in image_provider["options"]} >= {"fal", "openai", "openai-codex", "xai"}
+        assert image_model["kind"] == "select"
+        assert "option_groups" in image_model
+        assert {option["value"] for option in image_model["option_groups"]["fal"]} >= {
+            "fal-ai/flux-2/klein/9b",
+        }
+        assert {option["value"] for option in image_model["option_groups"]["openai"]} >= {
+            "gpt-image-2-medium",
+        }
+        assert all(field["key"] != "XIAOMI_API_KEY" for field in image_gen["fields"])
+        assert result["tool_config_state"]["env_configured"]["FAL_KEY"] is True
+        assert "fc-secret" not in str(result)
+        assert "fal-secret" not in str(result)
+    finally:
+        store.close()
+
+
+def test_update_hermes_tool_config_uses_config_set_without_echoing_secret(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    calls = []
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+
+        def fake_run(argv, **_kwargs):
+            calls.append(argv)
+            if argv[1:3] == ["config", "set"]:
+                return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            if argv[-1] == "path":
+                return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
+            if argv[-1] == "env-path":
+                return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv[-2:] == ["tools", "list"]:
+                return SimpleNamespace(returncode=0, stdout="  ✓ enabled  browser  Browser\n", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.update_hermes_tool_config(
+            "web",
+            {
+                "web.backend": "exa",
+                "FIRECRAWL_API_KEY": "fc-secret",
+            },
+        )
+
+        set_calls = [call for call in calls if call[1:3] == ["config", "set"]]
+        assert result["ok"] is True
+        assert [(call[3], call[4]) for call in set_calls] == [
+            ("web.backend", "exa"),
+            ("FIRECRAWL_API_KEY", "fc-secret"),
+        ]
+        assert result["applied"] == [
+            {"key": "web.backend", "target": "config"},
+            {"key": "FIRECRAWL_API_KEY", "target": "env"},
+        ]
+        assert "fc-secret" not in str(result)
+    finally:
+        store.close()
+
+
+def test_update_hermes_tool_config_rejects_unknown_image_provider(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    calls = []
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+
+        def fake_run(argv, **_kwargs):
+            calls.append(argv)
+            if argv[1:3] == ["config", "set"]:
+                return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            if argv[-1] == "path":
+                return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
+            if argv[-1] == "env-path":
+                return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv[-2:] == ["tools", "list"]:
+                return SimpleNamespace(returncode=0, stdout="  ✓ enabled  browser  Browser\n", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.update_hermes_tool_config(
+            "image_gen",
+            {
+                "image_gen.provider": "minimax-image",
+                "image_gen.model": "image-01",
+            },
+        )
+
+        set_calls = [call for call in calls if call[1:3] == ["config", "set"]]
+        assert result["ok"] is False
+        assert result["field"] == "image_gen.provider"
+        assert set_calls == []
+    finally:
+        store.close()
+
+
+def test_test_hermes_tool_config_runs_static_checks_and_doctor(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    config_path.write_text("web:\n  backend: exa\n", encoding="utf-8")
+    env_path.write_text("EXA_API_KEY=exa-secret\n", encoding="utf-8")
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+
+        def fake_run(argv, **_kwargs):
+            if argv == ["/bin/hermes", "config", "path"]:
+                return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
+            if argv == ["/bin/hermes", "config", "env-path"]:
+                return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv == ["/bin/hermes", "doctor"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="◆ Tool Availability\n  ✓ web\nFound 0 issues\n",
+                    stderr="",
+                )
+            if argv == ["/bin/hermes", "tools", "list"]:
+                return SimpleNamespace(returncode=0, stdout="  ✓ enabled  web  Web\n", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.test_hermes_tool_config("web")
+
+        assert result["ok"] is True
+        assert result["success"] is True
+        assert result["status"] == "pass"
+        assert any(check["label"] == "Exa API Key" and check["status"] == "pass" for check in result["checks"])
+        assert any(check["label"] == "Hermes Doctor" and check["status"] == "pass" for check in result["checks"])
+        assert "exa-secret" not in str(result)
+    finally:
+        store.close()
+
+
+def test_check_hermes_update_reports_available_update(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+
+        def fake_run(argv, **_kwargs):
+            if argv == ["/bin/hermes", "version"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="Hermes Agent v0.11.0 (2026.4.23)\nUpdate available: 190 commits behind — run 'hermes update'\n",
+                    stderr="",
+                )
+            if argv == ["/bin/hermes", "update", "--check"]:
+                return SimpleNamespace(returncode=0, stdout="Update available: 190 commits behind\n", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.check_hermes_update()
+
+        assert result["ok"] is True
+        assert result["update_available"] is True
+        assert result["behind_commits"] == 190
+        assert result["version"] == "0.11.0"
+    finally:
+        store.close()
+
+
+def test_update_hermes_agent_uses_gateway_mode(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    calls = []
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+        monkeypatch.setattr(
+            "apps.shell.main_api._hermes_tools_manifest",
+            lambda _path: [{"id": "web", "enabled": True}],
+        )
+
+        def fake_run(argv, **_kwargs):
+            calls.append(argv)
+            if argv == ["/bin/hermes", "update", "--gateway", "--yes", "--no-backup"]:
+                return SimpleNamespace(returncode=0, stdout="Updated\n", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+        monkeypatch.setattr(MainWindowAPI, "check_hermes_update", lambda self: {"ok": True, "version": "0.12.0"})
+        monkeypatch.setattr(
+            MainWindowAPI,
+            "run_hermes_diagnostic_command",
+            lambda self, command: {"diagnostic_cache": {"command": command}},
+        )
+        monkeypatch.setattr(MainWindowAPI, "get_hermes_tool_config", lambda self: {"ok": True})
+        monkeypatch.setattr(MainWindowAPI, "get_dashboard_data", lambda self: {"hermes": {"version": "0.12.0"}})
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.update_hermes_agent()
+
+        assert calls == [["/bin/hermes", "update", "--gateway", "--yes", "--no-backup"]]
+        assert result["ok"] is True
+        assert result["message"] == "Hermes 更新完成"
+        assert result["diagnostic_cache"] == {"command": "hermes doctor"}
+    finally:
+        store.close()
+
+
+def test_update_hermes_agent_can_request_full_backup(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    calls = []
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+        monkeypatch.setattr(
+            "apps.shell.main_api._hermes_tools_manifest",
+            lambda _path: [{"id": "web", "enabled": True}],
+        )
+
+        def fake_run(argv, **_kwargs):
+            calls.append(argv)
+            if argv == ["/bin/hermes", "update", "--gateway", "--yes", "--backup"]:
+                return SimpleNamespace(returncode=0, stdout="Updated\n", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+        monkeypatch.setattr(MainWindowAPI, "check_hermes_update", lambda self: {"ok": True, "version": "0.12.0"})
+        monkeypatch.setattr(
+            MainWindowAPI,
+            "run_hermes_diagnostic_command",
+            lambda self, command: {"diagnostic_cache": {"command": command}},
+        )
+        monkeypatch.setattr(MainWindowAPI, "get_hermes_tool_config", lambda self: {"ok": True})
+        monkeypatch.setattr(MainWindowAPI, "get_dashboard_data", lambda self: {"hermes": {"version": "0.12.0"}})
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.update_hermes_agent(full_backup=True)
+
+        assert calls == [["/bin/hermes", "update", "--gateway", "--yes", "--backup"]]
+        assert result["ok"] is True
+    finally:
+        store.close()
+
+
+def test_launch_browser_cdp_writes_config_url(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    launcher = tmp_path / "hermes"
+    launcher.write_text(f"#!{sys.executable}\n", encoding="utf-8")
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    calls = []
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: (str(launcher), False),
+        )
+        monkeypatch.setattr(
+            "apps.shell.main_api._resolve_hermes_python_from_launcher",
+            lambda _path: sys.executable,
+        )
+
+        def fake_run(argv, **_kwargs):
+            calls.append(argv)
+            if argv[0] == sys.executable and argv[1] == "-c":
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout='{"ok": true, "url": "http://127.0.0.1:9222", "launched": true, "manual_command": "chrome --remote-debugging-port=9222"}\n',
+                    stderr="",
+                )
+            if argv[1:3] == ["config", "set"]:
+                return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            if argv[-1] == "path":
+                return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
+            if argv[-1] == "env-path":
+                return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv[-2:] == ["tools", "list"]:
+                return SimpleNamespace(returncode=0, stdout="  ✓ enabled  browser  Browser\n", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.launch_browser_cdp()
+
+        assert result["ok"] is True
+        assert result["url"] == "http://127.0.0.1:9222"
+        assert any(
+            call[1:5] == ["config", "set", "browser.cdp_url", "http://127.0.0.1:9222"]
+            for call in calls
+        )
     finally:
         store.close()
 

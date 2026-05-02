@@ -90,6 +90,19 @@ class HermesConfigUpdateRequest(BaseModel):
     vision_api_key: str | None = None
 
 
+class HermesToolConfigUpdateRequest(BaseModel):
+    tool_id: str
+    changes: dict[str, Any] = Field(default_factory=dict)
+
+
+class HermesToolConfigTestRequest(BaseModel):
+    tool_id: str
+
+
+class HermesUpdateRunRequest(BaseModel):
+    backup: bool = False
+
+
 class BackupCreateRequest(BaseModel):
     overwrite_latest: bool = False
 
@@ -179,6 +192,58 @@ async def update_hermes_configuration(request: HermesConfigUpdateRequest) -> dic
     return await asyncio.to_thread(
         MainWindowAPI(runtime, runtime.config).update_hermes_configuration,
         request.model_dump(exclude_none=True),
+    )
+
+
+@router.get("/hermes/tools/config")
+async def get_hermes_tool_config() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).get_hermes_tool_config
+    )
+
+
+@router.post("/hermes/tools/config")
+async def update_hermes_tool_config(request: HermesToolConfigUpdateRequest) -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).update_hermes_tool_config,
+        request.tool_id,
+        request.changes,
+    )
+
+
+@router.post("/hermes/tools/config/test")
+async def test_hermes_tool_config(request: HermesToolConfigTestRequest) -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).test_hermes_tool_config,
+        request.tool_id,
+    )
+
+
+@router.post("/hermes/update/check")
+async def check_hermes_update() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).check_hermes_update
+    )
+
+
+@router.post("/hermes/update/run")
+async def update_hermes_agent(request: HermesUpdateRunRequest | None = None) -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).update_hermes_agent,
+        bool(request.backup) if request else False,
+    )
+
+
+@router.post("/hermes/tools/browser-cdp/launch")
+async def launch_hermes_browser_cdp() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).launch_browser_cdp
     )
 
 

@@ -12,6 +12,7 @@ import logging
 import os
 import re
 import shutil
+import socket
 import struct
 import subprocess
 import tempfile
@@ -23,9 +24,11 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
+from urllib.parse import urlparse
 
 import apps.shell.config as shell_config
 from apps.installer.hermes_check import locate_hermes_binary
+from apps.installer.hermes_check import parse_hermes_doctor_output
 from apps.installer.workspace_init import get_workspace_status
 from apps.shell.chat_api import ChatAPI
 from apps.shell.chat_bridge import ChatBridge
@@ -56,6 +59,10 @@ _HERMES_CONNECTION_TEST_PROMPT = (
     "Reply with exactly: OK"
 )
 _HERMES_CONFIG_TIMEOUT = 20.0
+_HERMES_TOOLS_LIST_TIMEOUT = 10.0
+_HERMES_TOOL_TEST_TIMEOUT = 60.0
+_HERMES_UPDATE_CHECK_TIMEOUT = 45.0
+_HERMES_UPDATE_RUN_TIMEOUT = 300.0
 _HERMES_CONNECTION_CACHE_SCHEMA = 1
 _HERMES_CONNECTION_CACHE_FILE = "hermes_connection.json"
 _HERMES_IMAGE_CONNECTION_TEST_TIMEOUT = 90.0
@@ -174,6 +181,342 @@ _PROVIDER_PRESET_BY_ID = {str(item["id"]): item for item in _HERMES_PROVIDER_PRE
 _PREFERRED_AUXILIARY_VISION_MODELS = {
     "xiaomi": "mimo-v2.5-pro",
 }
+_FAL_IMAGE_GEN_MODELS = (
+    "fal-ai/flux-2/klein/9b",
+    "fal-ai/flux-2-pro",
+    "fal-ai/z-image/turbo",
+    "fal-ai/nano-banana-pro",
+    "fal-ai/ideogram/v3",
+    "fal-ai/recraft/v4/pro/text-to-image",
+    "fal-ai/qwen-image",
+)
+_OPENAI_IMAGE_GEN_MODELS = (
+    "gpt-image-2-low",
+    "gpt-image-2-medium",
+    "gpt-image-2-high",
+)
+_XAI_IMAGE_GEN_MODELS = (
+    "grok-imagine-image",
+)
+_IMAGE_GEN_MODEL_OPTIONS = {
+    "fal": _FAL_IMAGE_GEN_MODELS,
+    "openai": _OPENAI_IMAGE_GEN_MODELS,
+    "openai-codex": _OPENAI_IMAGE_GEN_MODELS,
+    "xai": _XAI_IMAGE_GEN_MODELS,
+}
+_HERMES_TOOL_ALIASES: dict[str, tuple[str, ...]] = {
+    "web": ("web", "search", "web_search", "web_extract"),
+    "browser": ("browser", "browser_navigate", "browser_click"),
+    "browser-cdp": ("browser", "browser_cdp", "browser-cdp"),
+    "vision": ("vision", "vision_analyze"),
+    "image_gen": ("image_gen", "image_generate"),
+    "terminal": ("terminal", "process"),
+    "file": ("file", "read_file", "write_file", "patch", "search_files"),
+    "skills": ("skills", "skills_list", "skill_view", "skill_manage"),
+    "code_execution": ("code_execution", "execute_code"),
+    "memory": ("memory",),
+    "session_search": ("session_search",),
+    "todo": ("todo",),
+    "cronjob": ("cronjob",),
+    "messaging": ("messaging", "send_message"),
+    "discord": ("discord", "discord_admin"),
+    "homeassistant": (
+        "homeassistant",
+        "ha_list_entities",
+        "ha_get_state",
+        "ha_list_services",
+        "ha_call_service",
+    ),
+    "spotify": ("spotify",),
+    "yuanbao": ("yuanbao", "hermes-yuanbao"),
+    "moa": ("moa", "mixture_of_agents"),
+    "rl": ("rl",),
+    "tts": ("tts", "text_to_speech"),
+    "clarify": ("clarify",),
+    "delegation": ("delegation", "delegate_task"),
+}
+_HERMES_TOOL_CONFIG_CATALOG: tuple[dict[str, Any], ...] = (
+    {
+        "id": "web",
+        "title": "联网与网页读取",
+        "summary": "配置 Hermes web_search / web_extract 使用的搜索与网页读取后端。",
+        "fields": (
+            {
+                "key": "web.backend",
+                "config_key": "web.backend",
+                "label": "Web Provider",
+                "kind": "select",
+                "default": "firecrawl",
+                "options": (
+                    {"value": "firecrawl", "label": "Firecrawl"},
+                    {"value": "exa", "label": "Exa"},
+                    {"value": "parallel", "label": "Parallel"},
+                    {"value": "tavily", "label": "Tavily"},
+                ),
+            },
+            {
+                "key": "FIRECRAWL_API_KEY",
+                "env_key": "FIRECRAWL_API_KEY",
+                "label": "Firecrawl API Key",
+                "kind": "password",
+                "help": "Firecrawl Cloud 搜索、抓取与网页读取。",
+                "visible_when": {"field": "web.backend", "equals": "firecrawl"},
+            },
+            {
+                "key": "FIRECRAWL_API_URL",
+                "env_key": "FIRECRAWL_API_URL",
+                "label": "Firecrawl 自托管 URL",
+                "kind": "text",
+                "required": False,
+                "placeholder": "http://localhost:3002",
+                "visible_when": {"field": "web.backend", "equals": "firecrawl"},
+            },
+            {
+                "key": "EXA_API_KEY",
+                "env_key": "EXA_API_KEY",
+                "label": "Exa API Key",
+                "kind": "password",
+                "visible_when": {"field": "web.backend", "equals": "exa"},
+            },
+            {
+                "key": "PARALLEL_API_KEY",
+                "env_key": "PARALLEL_API_KEY",
+                "label": "Parallel API Key",
+                "kind": "password",
+                "visible_when": {"field": "web.backend", "equals": "parallel"},
+            },
+            {
+                "key": "TAVILY_API_KEY",
+                "env_key": "TAVILY_API_KEY",
+                "label": "Tavily API Key",
+                "kind": "password",
+                "visible_when": {"field": "web.backend", "equals": "tavily"},
+            },
+        ),
+    },
+    {
+        "id": "browser",
+        "title": "浏览器自动化",
+        "summary": "配置 browser_navigate / browser_click 等基础浏览器工具。",
+        "fields": (
+            {
+                "key": "browser.cloud_provider",
+                "config_key": "browser.cloud_provider",
+                "label": "浏览器 Provider",
+                "kind": "select",
+                "default": "local",
+                "options": (
+                    {"value": "local", "label": "本机 Chromium"},
+                    {"value": "browser-use", "label": "Browser Use Cloud"},
+                    {"value": "browserbase", "label": "Browserbase"},
+                    {"value": "firecrawl", "label": "Firecrawl Browser"},
+                    {"value": "camofox", "label": "Camofox"},
+                ),
+            },
+            {
+                "key": "browser.auto_local_for_private_urls",
+                "config_key": "browser.auto_local_for_private_urls",
+                "label": "私有地址自动走本机浏览器",
+                "kind": "checkbox",
+                "default": True,
+            },
+            {
+                "key": "BROWSER_USE_API_KEY",
+                "env_key": "BROWSER_USE_API_KEY",
+                "label": "Browser Use API Key",
+                "kind": "password",
+                "visible_when": {"field": "browser.cloud_provider", "equals": "browser-use"},
+            },
+            {
+                "key": "BROWSERBASE_API_KEY",
+                "env_key": "BROWSERBASE_API_KEY",
+                "label": "Browserbase API Key",
+                "kind": "password",
+                "visible_when": {"field": "browser.cloud_provider", "equals": "browserbase"},
+            },
+            {
+                "key": "BROWSERBASE_PROJECT_ID",
+                "env_key": "BROWSERBASE_PROJECT_ID",
+                "label": "Browserbase Project ID",
+                "kind": "text",
+                "visible_when": {"field": "browser.cloud_provider", "equals": "browserbase"},
+            },
+            {
+                "key": "CAMOFOX_URL",
+                "env_key": "CAMOFOX_URL",
+                "label": "Camofox URL",
+                "kind": "text",
+                "placeholder": "http://localhost:9377",
+                "visible_when": {"field": "browser.cloud_provider", "equals": "camofox"},
+            },
+        ),
+    },
+    {
+        "id": "browser-cdp",
+        "title": "浏览器 CDP 高级控制",
+        "summary": "连接已经开启远程调试端口的 Chrome，用于 CDP 级别的高级浏览器操作。",
+        "action": "launch_browser_cdp",
+        "fields": (
+            {
+                "key": "browser.cdp_url",
+                "config_key": "browser.cdp_url",
+                "label": "CDP Endpoint",
+                "kind": "text",
+                "placeholder": "http://127.0.0.1:9222",
+            },
+            {
+                "key": "browser.allow_private_urls",
+                "config_key": "browser.allow_private_urls",
+                "label": "允许云浏览器访问私有地址",
+                "kind": "checkbox",
+                "default": False,
+            },
+        ),
+    },
+    {
+        "id": "image_gen",
+        "title": "图片生成",
+        "summary": "配置 Hermes image_generate 工具；内置路径使用 FAL，插件路径使用 image_gen.provider。",
+        "fields": (
+            {
+                "key": "image_gen.provider",
+                "config_key": "image_gen.provider",
+                "label": "Image Provider",
+                "kind": "select",
+                "default": "fal",
+                "help": "保持和当前 Hermes 已安装 image_gen provider 一致。",
+                "options_factory": "image_gen_provider_options",
+            },
+            {
+                "key": "image_gen.model",
+                "config_key": "image_gen.model",
+                "label": "图片模型",
+                "kind": "select",
+                "default": _FAL_IMAGE_GEN_MODELS[0],
+                "help": "模型列表会随 provider 变化。",
+                "options": tuple({"value": model, "label": model} for model in _FAL_IMAGE_GEN_MODELS),
+                "option_groups_factory": "image_gen_model_option_groups",
+                "options_follow_field": "image_gen.provider",
+            },
+            {
+                "key": "FAL_KEY",
+                "env_key": "FAL_KEY",
+                "label": "FAL API Key",
+                "kind": "password",
+                "visible_when": {"field": "image_gen.provider", "equals": "fal"},
+            },
+            {
+                "key": "OPENAI_API_KEY",
+                "env_key": "OPENAI_API_KEY",
+                "label": "OpenAI API Key",
+                "kind": "password",
+                "visible_when": {"field": "image_gen.provider", "in": ("openai", "openai-codex")},
+            },
+            {
+                "key": "XAI_API_KEY",
+                "env_key": "XAI_API_KEY",
+                "label": "xAI API Key",
+                "kind": "password",
+                "visible_when": {"field": "image_gen.provider", "equals": "xai"},
+            },
+        ),
+    },
+    {
+        "id": "discord",
+        "title": "Discord",
+        "summary": "配置 Discord Bot 凭据；read 与 admin 工具共用同一 token。",
+        "fields": (
+            {
+                "key": "DISCORD_BOT_TOKEN",
+                "env_key": "DISCORD_BOT_TOKEN",
+                "label": "Discord Bot Token",
+                "kind": "password",
+            },
+            {
+                "key": "DISCORD_ALLOWED_USERS",
+                "env_key": "DISCORD_ALLOWED_USERS",
+                "label": "允许用户",
+                "kind": "text",
+                "required": False,
+                "placeholder": "逗号分隔的 Discord user id",
+            },
+        ),
+    },
+    {
+        "id": "homeassistant",
+        "title": "Home Assistant",
+        "summary": "配置 Home Assistant REST API 地址和长期访问 token。",
+        "fields": (
+            {
+                "key": "HASS_URL",
+                "env_key": "HASS_URL",
+                "label": "Home Assistant URL",
+                "kind": "text",
+                "placeholder": "http://homeassistant.local:8123",
+            },
+            {
+                "key": "HASS_TOKEN",
+                "env_key": "HASS_TOKEN",
+                "label": "Long-Lived Access Token",
+                "kind": "password",
+            },
+        ),
+    },
+    {
+        "id": "moa",
+        "title": "MoA",
+        "summary": "Hermes mixture_of_agents 目前依赖 OpenRouter。",
+        "fields": (
+            {
+                "key": "OPENROUTER_API_KEY",
+                "env_key": "OPENROUTER_API_KEY",
+                "label": "OpenRouter API Key",
+                "kind": "password",
+            },
+        ),
+    },
+    {
+        "id": "rl",
+        "title": "RL",
+        "summary": "配置 Tinker / Atropos 与 Weights & Biases 凭据。",
+        "fields": (
+            {
+                "key": "TINKER_API_KEY",
+                "env_key": "TINKER_API_KEY",
+                "label": "Tinker API Key",
+                "kind": "password",
+            },
+            {
+                "key": "WANDB_API_KEY",
+                "env_key": "WANDB_API_KEY",
+                "label": "WandB API Key",
+                "kind": "password",
+            },
+        ),
+    },
+    {
+        "id": "messaging",
+        "title": "消息通知",
+        "summary": "跨平台消息发送涉及 Telegram/Slack/Matrix/Webhook 等多组凭据，第一版保留原生向导入口。",
+        "fields": (),
+        "terminal_command": "hermes setup",
+    },
+    {
+        "id": "spotify",
+        "title": "Spotify",
+        "summary": "Spotify 使用 OAuth 流程，第一版请通过 Hermes 原生 tools/setup 向导完成授权。",
+        "fields": (),
+        "terminal_command": "hermes setup",
+    },
+    {
+        "id": "yuanbao",
+        "title": "腾讯元宝",
+        "summary": "元宝扩展配置由 hermes-yuanbao 工具维护，第一版只提供状态与原生向导入口。",
+        "fields": (),
+        "terminal_command": "hermes setup",
+    },
+)
+_HERMES_TOOL_CONFIG_BY_ID = {str(item["id"]): item for item in _HERMES_TOOL_CONFIG_CATALOG}
 _TERMINAL_COMMAND_THROTTLE_SECONDS = 1.2
 _TERMINAL_COMMAND_LOCK = threading.Lock()
 _LAST_TERMINAL_COMMAND_AT = 0.0
@@ -334,6 +677,17 @@ def _fingerprint_payload(payload: dict[str, Any]) -> str:
 
 def _connection_fingerprint(configuration: dict[str, Any]) -> str:
     return _fingerprint_payload(_connection_fingerprint_payload(configuration))
+
+
+def _diagnostic_fingerprint_payload(configuration: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "connection": _connection_fingerprint_payload(configuration),
+        "tool_config_state": configuration.get("tool_config_state") or {},
+    }
+
+
+def _diagnostic_fingerprint(configuration: dict[str, Any]) -> str:
+    return _fingerprint_payload(_diagnostic_fingerprint_payload(configuration))
 
 
 def _connection_cache_matches_configuration(data: dict[str, Any], configuration: dict[str, Any]) -> bool:
@@ -535,7 +889,7 @@ def _store_image_connection_validation(
 
 def _load_diagnostic_cache(configuration: dict[str, Any]) -> dict[str, Any]:
     cache_path = _diagnostic_cache_path()
-    fingerprint = _connection_fingerprint(configuration)
+    fingerprint = _diagnostic_fingerprint(configuration)
     base: dict[str, Any] = {
         "schema_version": _HERMES_DIAGNOSTIC_CACHE_SCHEMA,
         "fingerprint": fingerprint,
@@ -576,7 +930,7 @@ def _store_diagnostic_result(
     payload: dict[str, Any],
 ) -> dict[str, Any]:
     cache_path = _diagnostic_cache_path()
-    fingerprint = _connection_fingerprint(configuration)
+    fingerprint = _diagnostic_fingerprint(configuration)
     commands: dict[str, Any] = {}
     try:
         data = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -611,30 +965,7 @@ def _store_diagnostic_result(
 
 
 def _parse_doctor_diagnostic_output(output: str) -> dict[str, Any]:
-    text = output or ""
-    match = re.search(r"Found\s+(\d+)\s+issue", text)
-    issues_count = int(match.group(1)) if match else 0
-    limited_tools: list[str] = []
-    in_tools_section = False
-    for line in text.splitlines():
-        stripped = line.strip()
-        if "Tool Availability" in stripped or (stripped.startswith("◆") and "Tool" in stripped):
-            in_tools_section = True
-            continue
-        if in_tools_section and stripped.startswith("◆"):
-            in_tools_section = False
-            continue
-        if not in_tools_section or not any(marker in line for marker in ("⚠", "✗", "❌")):
-            continue
-        name_match = re.match(r"\s*(?:⚠|✗|❌)\s+([A-Za-z0-9_.-]+)", line)
-        if name_match:
-            limited_tools.append(name_match.group(1))
-    readiness_level = "full_ready" if issues_count == 0 and not limited_tools else "basic_ready"
-    return {
-        "readiness_level": readiness_level,
-        "limited_tools": limited_tools,
-        "doctor_issues_count": issues_count,
-    }
+    return parse_hermes_doctor_output(output)
 
 
 def _hermes_command_catalog() -> list[dict[str, str]]:
@@ -721,6 +1052,33 @@ def _strip_yaml_scalar(raw: str) -> str:
     ):
         return value[1:-1]
     return value.split(" #", 1)[0].strip()
+
+
+def _read_hermes_yaml_paths(config_path: Path, wanted: set[tuple[str, ...]]) -> dict[tuple[str, ...], str]:
+    if not config_path.exists():
+        return {}
+    try:
+        lines = config_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    values: dict[tuple[str, ...], str] = {}
+    stack: list[str] = []
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        match = re.match(r"^(\s*)([A-Za-z0-9_.-]+):\s*(.*)$", line)
+        if not match:
+            continue
+        indent, key, raw_value = match.groups()
+        level = len(indent.replace("\t", "  ")) // 2
+        stack = stack[:level] + [key]
+        path_key = tuple(stack)
+        if path_key in wanted:
+            values[path_key] = _strip_yaml_scalar(raw_value)
+        flat_path_key = tuple(key.split("."))
+        if flat_path_key in wanted:
+            values[flat_path_key] = _strip_yaml_scalar(raw_value)
+    return values
 
 
 def _read_hermes_model_config(config_path: Path) -> dict[str, str]:
@@ -1080,6 +1438,403 @@ def _run_config_path_command(hermes_path: str, subcommand: str) -> Path:
     return Path(path[-1]).expanduser()
 
 
+def _canonical_tool_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", (value or "").strip().lower()).strip("_")
+
+
+def _parse_hermes_tools_list_output(output: str) -> list[dict[str, Any]]:
+    text = _ANSI_RE.sub("", output or "")
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for line in text.splitlines():
+        match = re.match(r"\s*(?:✓|✔|✅|✗|❌)\s+(enabled|disabled)\s+([A-Za-z0-9_.-]+)\s*(.*)$", line)
+        if not match:
+            continue
+        state, tool_id, raw_label = match.groups()
+        label = re.sub(r"^[^\w\u4e00-\u9fff]+", "", raw_label.strip()).strip() or tool_id
+        canonical = _canonical_tool_name(tool_id)
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        items.append(
+            {
+                "id": tool_id,
+                "canonical_id": canonical,
+                "label": label,
+                "enabled": state == "enabled",
+            }
+        )
+    return items
+
+
+def _hermes_tools_manifest(hermes_path: str) -> list[dict[str, Any]]:
+    try:
+        result = subprocess.run(
+            [hermes_path, "tools", "list"],
+            capture_output=True,
+            text=True,
+            timeout=_HERMES_TOOLS_LIST_TIMEOUT,
+            check=False,
+        )
+    except Exception as exc:
+        logger.info("读取 Hermes tools list 失败: %s", exc)
+        return []
+    if result.returncode != 0:
+        logger.info("Hermes tools list 返回非零状态: %s", result.returncode)
+        return []
+    return _parse_hermes_tools_list_output(result.stdout or result.stderr or "")
+
+
+def _read_image_gen_plugin_options() -> tuple[dict[str, str], ...]:
+    plugin_root = Path.home() / ".hermes" / "hermes-agent" / "plugins" / "image_gen"
+    if not plugin_root.exists():
+        return ()
+    options: list[dict[str, str]] = []
+    for plugin_yaml in sorted(plugin_root.glob("*/plugin.yaml")):
+        try:
+            text = plugin_yaml.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        name_match = re.search(r"(?m)^name:\s*['\"]?([^'\"\n]+)['\"]?\s*$", text)
+        name = (name_match.group(1).strip() if name_match else plugin_yaml.parent.name).strip()
+        if not name:
+            continue
+        label = {
+            "openai": "OpenAI plugin",
+            "openai-codex": "OpenAI Codex plugin",
+            "xai": "xAI plugin",
+        }.get(name, f"{name} plugin")
+        options.append({"value": name, "label": label})
+    return tuple(options)
+
+
+def _image_gen_provider_options() -> tuple[dict[str, str], ...]:
+    options: list[dict[str, str]] = [{"value": "fal", "label": "FAL.ai"}]
+    seen = {"fal"}
+    for option in _read_image_gen_plugin_options():
+        value = option["value"]
+        if value in seen:
+            continue
+        seen.add(value)
+        options.append(option)
+    # If Hermes source is unavailable, keep the known bundled plugin choices.
+    if len(options) == 1:
+        for value, label in (
+            ("openai", "OpenAI plugin"),
+            ("openai-codex", "OpenAI Codex plugin"),
+            ("xai", "xAI plugin"),
+        ):
+            options.append({"value": value, "label": label})
+    return tuple(options)
+
+
+def _image_gen_model_option_groups() -> dict[str, tuple[dict[str, str], ...]]:
+    providers = {option["value"] for option in _image_gen_provider_options()}
+    return {
+        provider: tuple({"value": model, "label": model} for model in models)
+        for provider, models in _IMAGE_GEN_MODEL_OPTIONS.items()
+        if provider in providers
+    }
+
+
+def _field_dynamic_options(field: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    factory = str(field.get("options_factory") or "")
+    if factory == "image_gen_provider_options":
+        return _image_gen_provider_options()
+    options = field.get("options")
+    if not options:
+        return ()
+    return tuple(options)
+
+
+def _field_dynamic_option_groups(field: dict[str, Any]) -> dict[str, Any]:
+    factory = str(field.get("option_groups_factory") or "")
+    if factory == "image_gen_model_option_groups":
+        return _image_gen_model_option_groups()
+    groups = field.get("option_groups")
+    if isinstance(groups, dict):
+        return groups
+    return {}
+
+
+def _tool_aliases(tool_id: str) -> tuple[str, ...]:
+    normalized = str(tool_id or "").strip()
+    aliases = _HERMES_TOOL_ALIASES.get(normalized)
+    if aliases:
+        return aliases
+    return (normalized,)
+
+
+def _tool_matches(names: list[str] | tuple[str, ...], tool_id: str) -> bool:
+    candidates = {_canonical_tool_name(name) for name in names}
+    return any(_canonical_tool_name(alias) in candidates for alias in _tool_aliases(tool_id))
+
+
+def _all_tool_config_paths() -> set[tuple[str, ...]]:
+    paths: set[tuple[str, ...]] = set()
+    for tool in _HERMES_TOOL_CONFIG_CATALOG:
+        for field in tool.get("fields", ()):
+            config_key = str(field.get("config_key") or "")
+            if config_key:
+                paths.add(tuple(config_key.split(".")))
+    return paths
+
+
+def _bool_config_value(raw: Any, default: bool = False) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    text = str(raw).strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
+def _tool_config_state(config_path: Path, env_values: dict[str, str]) -> dict[str, Any]:
+    config_values = _read_hermes_yaml_paths(config_path, _all_tool_config_paths())
+    safe_config: dict[str, Any] = {}
+    env_configured: dict[str, bool] = {}
+    for tool in _HERMES_TOOL_CONFIG_CATALOG:
+        for field in tool.get("fields", ()):
+            config_key = str(field.get("config_key") or "")
+            env_key = str(field.get("env_key") or "")
+            if config_key:
+                path = tuple(config_key.split("."))
+                raw = config_values.get(path)
+                if raw is None and "default" in field:
+                    raw = field.get("default")
+                if field.get("kind") == "checkbox":
+                    safe_config[config_key] = _bool_config_value(raw, bool(field.get("default", False)))
+                else:
+                    safe_config[config_key] = "" if raw is None else str(raw)
+            if env_key:
+                env_configured[env_key] = bool(env_values.get(env_key))
+    return {
+        "config": safe_config,
+        "env_configured": env_configured,
+    }
+
+
+def _field_visible_for_state(field: dict[str, Any], state: dict[str, Any]) -> bool:
+    condition = field.get("visible_when")
+    if not isinstance(condition, dict) or not condition.get("field"):
+        return True
+    config_state = state.get("config") if isinstance(state.get("config"), dict) else {}
+    current = str(config_state.get(str(condition.get("field")), "")).strip()
+    if "equals" in condition:
+        return current == str(condition.get("equals"))
+    if isinstance(condition.get("in"), (list, tuple)):
+        return current in {str(item) for item in condition["in"]}
+    return True
+
+
+def _field_is_configured(field: dict[str, Any], state: dict[str, Any]) -> bool:
+    config_key = str(field.get("config_key") or "")
+    env_key = str(field.get("env_key") or "")
+    if config_key:
+        config_state = state.get("config") if isinstance(state.get("config"), dict) else {}
+        value = config_state.get(config_key)
+        return bool(value) or "default" in field or field.get("kind") == "checkbox"
+    if env_key:
+        env_state = state.get("env_configured") if isinstance(state.get("env_configured"), dict) else {}
+        return bool(env_state.get(env_key))
+    return True
+
+
+def _required_tool_fields(tool: dict[str, Any], state: dict[str, Any]) -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    for field in tool.get("fields", ()):
+        if field.get("required") is False:
+            continue
+        if not _field_visible_for_state(field, state):
+            continue
+        if field.get("target") == "none":
+            continue
+        if not (field.get("config_key") or field.get("env_key")):
+            continue
+        fields.append(field)
+    return fields
+
+
+def _tool_config_field_payload(
+    field: dict[str, Any],
+    *,
+    config_values: dict[tuple[str, ...], str],
+    env_values: dict[str, str],
+) -> dict[str, Any]:
+    kind = str(field.get("kind") or "text")
+    config_key = str(field.get("config_key") or "")
+    env_key = str(field.get("env_key") or "")
+    configured = False
+    value: Any = ""
+    if config_key:
+        raw = config_values.get(tuple(config_key.split(".")))
+        configured = raw is not None and raw != ""
+        if raw is None and "default" in field:
+            raw = field.get("default")
+        if kind == "checkbox":
+            value = _bool_config_value(raw, bool(field.get("default", False)))
+        else:
+            value = "" if raw is None else str(raw)
+    elif env_key:
+        configured = bool(env_values.get(env_key))
+        value = ""
+    payload: dict[str, Any] = {
+        "key": str(field.get("key") or config_key or env_key),
+        "label": str(field.get("label") or config_key or env_key),
+        "kind": kind,
+        "configured": configured,
+        "value": value,
+        "secret": kind == "password",
+        "target": "env" if env_key else "config" if config_key else "none",
+    }
+    if config_key:
+        payload["config_key"] = config_key
+    if env_key:
+        payload["env_key"] = env_key
+    if field.get("placeholder"):
+        payload["placeholder"] = str(field["placeholder"])
+    if field.get("help"):
+        payload["help"] = str(field["help"])
+    options = _field_dynamic_options(field)
+    if options:
+        payload["options"] = list(options)
+    if field.get("visible_when"):
+        payload["visible_when"] = field["visible_when"]
+    option_groups = _field_dynamic_option_groups(field)
+    if option_groups:
+        payload["option_groups"] = option_groups
+    if field.get("options_follow_field"):
+        payload["options_follow_field"] = str(field["options_follow_field"])
+    if field.get("allow_custom"):
+        payload["allow_custom"] = True
+    return payload
+
+
+def _tool_config_payload(
+    tool: dict[str, Any],
+    *,
+    config_values: dict[tuple[str, ...], str],
+    env_values: dict[str, str],
+) -> dict[str, Any]:
+    fields = [
+        _tool_config_field_payload(field, config_values=config_values, env_values=env_values)
+        for field in tool.get("fields", ())
+    ]
+    configured_count = sum(1 for field in fields if field.get("configured"))
+    payload: dict[str, Any] = {
+        "id": str(tool["id"]),
+        "title": str(tool.get("title") or tool["id"]),
+        "summary": str(tool.get("summary") or ""),
+        "fields": fields,
+        "configured_count": configured_count,
+        "configurable": bool(fields),
+    }
+    if tool.get("action"):
+        payload["action"] = str(tool["action"])
+    if tool.get("terminal_command"):
+        payload["terminal_command"] = str(tool["terminal_command"])
+    return payload
+
+
+def _field_options(field: dict[str, Any]) -> set[str]:
+    if field.get("allow_custom"):
+        return set()
+    options = _field_dynamic_options(field)
+    if not options:
+        return set()
+    return {str(item.get("value") or "") for item in options if item.get("value") is not None}
+
+
+def _run_hermes_config_set(hermes_path: str, key: str, value: Any) -> tuple[bool, str]:
+    text_value = "true" if value is True else "false" if value is False else str(value)
+    try:
+        result = subprocess.run(
+            [hermes_path, "config", "set", key, text_value],
+            capture_output=True,
+            text=True,
+            timeout=_HERMES_CONFIG_TIMEOUT,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"写入 Hermes 配置超时：{key}"
+    except Exception as exc:
+        return False, f"写入 Hermes 配置失败：{key}，{exc}"
+    if result.returncode != 0:
+        detail = _compact_command_output(result.stderr or result.stdout)
+        return False, f"写入 Hermes 配置失败：{key}{'，' + detail if detail else ''}"
+    return True, ""
+
+
+def _test_browser_cdp_endpoint(config_state: dict[str, Any]) -> dict[str, str]:
+    config_values = config_state.get("config") if isinstance(config_state.get("config"), dict) else {}
+    raw_url = str(config_values.get("browser.cdp_url") or "").strip()
+    if not raw_url:
+        return {"label": "CDP 端口", "status": "warn", "detail": "未配置 browser.cdp_url"}
+    parsed = urlparse(raw_url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        with socket.create_connection((host, port), timeout=0.8):
+            return {"label": "CDP 端口", "status": "pass", "detail": f"可以连接 {host}:{port}"}
+    except OSError as exc:
+        return {"label": "CDP 端口", "status": "fail", "detail": f"无法连接 {host}:{port}：{exc}"}
+
+
+def _doctor_status_for_tool(summary: dict[str, Any], tool_id: str) -> tuple[str, str]:
+    available = [str(item) for item in summary.get("available_tools") or []]
+    limited = [str(item) for item in summary.get("limited_tools") or []]
+    details = summary.get("limited_tool_details")
+    detail_map = details if isinstance(details, dict) else {}
+    if _tool_matches(available, tool_id):
+        return "pass", "Doctor 已确认该工具可用"
+    if _tool_matches(limited, tool_id):
+        for alias in _tool_aliases(tool_id):
+            canonical = _canonical_tool_name(alias)
+            match = next(
+                (value for key, value in detail_map.items() if _canonical_tool_name(str(key)) == canonical),
+                "",
+            )
+            if match:
+                return "fail", f"Doctor 标记受限：{match}"
+        return "fail", "Doctor 标记该工具受限"
+    return "warn", "Doctor 输出未包含该工具的明确结论"
+
+
+def _parse_hermes_version_output(output: str) -> dict[str, Any]:
+    text = _ANSI_RE.sub("", output or "")
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    version_match = re.search(r"Hermes Agent\s+v?([0-9][^\s]*)", text)
+    behind_match = re.search(r"(\d+)\s+commits?\s+behind", text, re.I)
+    return {
+        "summary": first_line,
+        "version": version_match.group(1) if version_match else "",
+        "update_available": bool(re.search(r"update available", text, re.I) or behind_match),
+        "behind_commits": int(behind_match.group(1)) if behind_match else 0,
+    }
+
+
+def _toolset_delta(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> dict[str, Any]:
+    before_map = {str(item.get("id")): item for item in before}
+    after_map = {str(item.get("id")): item for item in after}
+    before_ids = set(before_map)
+    after_ids = set(after_map)
+    changed: list[dict[str, Any]] = []
+    for tool_id in sorted(before_ids & after_ids):
+        before_enabled = bool(before_map[tool_id].get("enabled"))
+        after_enabled = bool(after_map[tool_id].get("enabled"))
+        if before_enabled != after_enabled:
+            changed.append({"id": tool_id, "before_enabled": before_enabled, "after_enabled": after_enabled})
+    return {
+        "added": sorted(after_ids - before_ids),
+        "removed": sorted(before_ids - after_ids),
+        "changed": changed,
+    }
+
+
 class MainWindowAPI:
     """Control Center 主控台 API。"""
 
@@ -1127,7 +1882,9 @@ class MainWindowAPI:
                     "hermes_home": hermes_info.get("hermes_home", ""),
                     "ready": self._runtime.is_hermes_ready(),
                     "readiness_level": hermes_info.get("readiness_level", "unknown"),
+                    "available_tools": hermes_info.get("available_tools", []),
                     "limited_tools": hermes_info.get("limited_tools", []),
+                    "limited_tool_details": hermes_info.get("limited_tool_details", {}),
                     "doctor_issues_count": hermes_info.get("doctor_issues_count", 0),
                     "configuration_actions": _hermes_command_catalog(),
                 },
@@ -1172,7 +1929,9 @@ class MainWindowAPI:
                     "hermes_home": hermes_info.get("hermes_home", ""),
                     "ready": self._runtime.is_hermes_ready(),
                     "readiness_level": hermes_info.get("readiness_level", "unknown"),
+                    "available_tools": hermes_info.get("available_tools", []),
                     "limited_tools": hermes_info.get("limited_tools", []),
+                    "limited_tool_details": hermes_info.get("limited_tool_details", {}),
                     "doctor_issues_count": hermes_info.get("doctor_issues_count", 0),
                     "configuration_actions": _hermes_command_catalog(),
                 },
@@ -1808,6 +2567,7 @@ class MainWindowAPI:
                 chat_base_url=str(model.get("base_url") or ""),
             ),
         }
+        configuration["tool_config_state"] = _tool_config_state(config_path, env_values)
         configuration["image_input"] = build_hermes_image_input_capability(
             provider=provider,
             model=str(model.get("default") or ""),
@@ -1906,6 +2666,498 @@ class MainWindowAPI:
             "ok": True,
             "message": "Hermes 配置已保存",
             "configuration": self.get_hermes_configuration(),
+        }
+
+    def get_hermes_tool_config(self) -> Dict[str, Any]:
+        """读取工具配置目录与安全状态。
+
+        返回值只包含配置项值、环境变量名和“是否已配置”的布尔值；所有 env
+        字段都不会返回明文内容，避免把 token/key 暴露给 renderer。
+        """
+        hermes_path, needs_env_refresh = locate_hermes_binary()
+        command_exists = hermes_path is not None
+        if hermes_path is None:
+            hermes_path = "hermes"
+
+        config_path = _run_config_path_command(hermes_path, "path")
+        env_path = _run_config_path_command(hermes_path, "env-path")
+        env_values = _read_env_values(env_path)
+        config_values = _read_hermes_yaml_paths(config_path, _all_tool_config_paths())
+        hermes_toolsets = _hermes_tools_manifest(hermes_path) if command_exists else []
+        tools = [
+            _tool_config_payload(tool, config_values=config_values, env_values=env_values)
+            for tool in _HERMES_TOOL_CONFIG_CATALOG
+        ]
+        return {
+            "ok": True,
+            "command_exists": command_exists,
+            "needs_env_refresh": needs_env_refresh,
+            "config_path": str(config_path),
+            "env_path": str(env_path),
+            "hermes_toolsets": hermes_toolsets,
+            "tools": tools,
+            "tool_config_state": _tool_config_state(config_path, env_values),
+        }
+
+    def update_hermes_tool_config(self, tool_id: str, changes: Dict[str, Any]) -> Dict[str, Any]:
+        """保存单个工具的配置项，响应不回显 secret 值。"""
+        normalized_tool_id = str(tool_id or "").strip()
+        tool = _HERMES_TOOL_CONFIG_BY_ID.get(normalized_tool_id)
+        if not tool:
+            return {"ok": False, "error": "未知工具配置项", "tool_id": normalized_tool_id}
+        if not isinstance(changes, dict):
+            return {"ok": False, "error": "配置变更格式无效", "tool_id": normalized_tool_id}
+
+        field_by_key = {
+            str(field.get("key") or field.get("config_key") or field.get("env_key")): field
+            for field in tool.get("fields", ())
+        }
+        unknown = [key for key in changes if key not in field_by_key]
+        if unknown:
+            return {
+                "ok": False,
+                "error": "包含不支持的配置项",
+                "tool_id": normalized_tool_id,
+                "fields": unknown,
+            }
+
+        hermes_path, needs_env_refresh = locate_hermes_binary()
+        if hermes_path is None:
+            return {
+                "ok": False,
+                "error": "hermes 命令未找到，请先安装 Hermes Agent",
+                "tool_id": normalized_tool_id,
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        applied: list[dict[str, str]] = []
+        skipped: list[dict[str, str]] = []
+        for key, raw_value in changes.items():
+            field = field_by_key[key]
+            field_kind = str(field.get("kind") or "text")
+            config_key = str(field.get("config_key") or "")
+            env_key = str(field.get("env_key") or "")
+            target_key = env_key or config_key
+            if not target_key:
+                skipped.append({"key": key, "reason": "readonly"})
+                continue
+
+            if field_kind == "checkbox":
+                value: Any = _bool_config_value(raw_value, bool(field.get("default", False)))
+            else:
+                value = str(raw_value or "").strip()
+
+            if env_key and value == "":
+                skipped.append({"key": key, "reason": "blank_env_value"})
+                continue
+
+            options = _field_options(field)
+            if options and str(value) not in options:
+                return {
+                    "ok": False,
+                    "error": "配置项取值不在允许范围内",
+                    "tool_id": normalized_tool_id,
+                    "field": key,
+                }
+
+            ok, error = _run_hermes_config_set(hermes_path, target_key, value)
+            if not ok:
+                return {
+                    "ok": False,
+                    "error": error,
+                    "tool_id": normalized_tool_id,
+                    "field": key,
+                }
+            applied.append({"key": key, "target": "env" if env_key else "config"})
+
+        return {
+            "ok": True,
+            "message": "工具配置已保存",
+            "tool_id": normalized_tool_id,
+            "applied": applied,
+            "skipped": skipped,
+            "needs_env_refresh": needs_env_refresh,
+            "tool_config": self.get_hermes_tool_config(),
+        }
+
+    def test_hermes_tool_config(self, tool_id: str) -> Dict[str, Any]:
+        """Run a safe validation pass for a single Hermes tool configuration."""
+        normalized_tool_id = str(tool_id or "").strip()
+        tool = _HERMES_TOOL_CONFIG_BY_ID.get(normalized_tool_id)
+        if not tool:
+            return {"ok": False, "success": False, "error": "未知工具配置项", "tool_id": normalized_tool_id}
+
+        hermes_path, needs_env_refresh = locate_hermes_binary()
+        if hermes_path is None:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "hermes 命令未找到，请先安装 Hermes Agent",
+                "tool_id": normalized_tool_id,
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        config_path = _run_config_path_command(hermes_path, "path")
+        env_path = _run_config_path_command(hermes_path, "env-path")
+        env_values = _read_env_values(env_path)
+        state = _tool_config_state(config_path, env_values)
+        checks: list[dict[str, str]] = []
+
+        missing_fields: list[str] = []
+        for field in _required_tool_fields(tool, state):
+            if _field_is_configured(field, state):
+                checks.append(
+                    {
+                        "label": str(field.get("label") or field.get("key")),
+                        "status": "pass",
+                        "detail": "已配置",
+                    }
+                )
+            else:
+                missing_fields.append(str(field.get("env_key") or field.get("config_key") or field.get("key")))
+                checks.append(
+                    {
+                        "label": str(field.get("label") or field.get("key")),
+                        "status": "fail",
+                        "detail": "缺少必需配置",
+                    }
+                )
+
+        if not tool.get("fields"):
+            checks.append(
+                {
+                    "label": "配置入口",
+                    "status": "warn",
+                    "detail": "此工具主要由 Hermes 原生向导或外部授权流程配置",
+                }
+            )
+
+        if normalized_tool_id == "browser-cdp":
+            checks.append(_test_browser_cdp_endpoint(state))
+
+        started_at = time.monotonic()
+        try:
+            result = subprocess.run(
+                [hermes_path, "doctor"],
+                capture_output=True,
+                text=True,
+                timeout=_HERMES_TOOL_TEST_TIMEOUT,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            checks.append({"label": "Hermes Doctor", "status": "fail", "detail": "doctor 执行超时"})
+            return {
+                "ok": True,
+                "success": False,
+                "tool_id": normalized_tool_id,
+                "status": "fail",
+                "message": "配置静态检查完成，但 Doctor 超时",
+                "checks": checks,
+                "missing_fields": missing_fields,
+                "elapsed_seconds": round(time.monotonic() - started_at, 2),
+                "needs_env_refresh": needs_env_refresh,
+                "tool_config": self.get_hermes_tool_config(),
+            }
+        except FileNotFoundError:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "hermes 命令未找到，请先安装 Hermes Agent",
+                "tool_id": normalized_tool_id,
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+        doctor_summary = parse_hermes_doctor_output(output)
+        doctor_status, doctor_detail = _doctor_status_for_tool(doctor_summary, normalized_tool_id)
+        if result.returncode != 0 and doctor_status == "warn":
+            doctor_status = "fail"
+            doctor_detail = _compact_command_output(result.stderr or result.stdout) or "doctor 返回非零状态"
+        checks.append({"label": "Hermes Doctor", "status": doctor_status, "detail": doctor_detail})
+
+        if any(check["status"] == "fail" for check in checks):
+            status = "fail"
+            message = "配置测试未通过"
+        elif any(check["status"] == "warn" for check in checks):
+            status = "warn"
+            message = "配置测试完成，但仍有需要确认的项目"
+        else:
+            status = "pass"
+            message = "配置测试通过"
+
+        try:
+            self._runtime.refresh_hermes_installation()
+        except Exception as exc:
+            logger.warning("工具配置测试后刷新 Hermes 状态失败: %s", exc)
+
+        return {
+            "ok": True,
+            "success": status == "pass",
+            "tool_id": normalized_tool_id,
+            "status": status,
+            "message": message,
+            "checks": checks,
+            "missing_fields": missing_fields,
+            "doctor_summary": doctor_summary,
+            "elapsed_seconds": round(time.monotonic() - started_at, 2),
+            "needs_env_refresh": needs_env_refresh,
+            "tool_config": self.get_hermes_tool_config(),
+        }
+
+    def check_hermes_update(self) -> Dict[str, Any]:
+        """Check whether the installed Hermes Agent reports an available update."""
+        hermes_path, needs_env_refresh = locate_hermes_binary()
+        if hermes_path is None:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "hermes 命令未找到，请先安装 Hermes Agent",
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        try:
+            version_result = subprocess.run(
+                [hermes_path, "version"],
+                capture_output=True,
+                text=True,
+                timeout=_HERMES_UPDATE_CHECK_TIMEOUT,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "Hermes 版本检查超时",
+                "needs_env_refresh": needs_env_refresh,
+            }
+        except FileNotFoundError:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "hermes 命令未找到，请先安装 Hermes Agent",
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        version_output = _sanitize_command_output((version_result.stdout or "") + (version_result.stderr or ""))
+        parsed = _parse_hermes_version_output(version_output)
+        check_output = ""
+        check_returncode: int | None = None
+        try:
+            check_result = subprocess.run(
+                [hermes_path, "update", "--check"],
+                capture_output=True,
+                text=True,
+                timeout=_HERMES_UPDATE_CHECK_TIMEOUT,
+                check=False,
+            )
+            check_returncode = check_result.returncode
+            check_output = _sanitize_command_output((check_result.stdout or "") + (check_result.stderr or ""))
+            check_parsed = _parse_hermes_version_output(check_output)
+            parsed["update_available"] = bool(parsed["update_available"] or check_parsed["update_available"])
+            parsed["behind_commits"] = max(int(parsed.get("behind_commits") or 0), int(check_parsed.get("behind_commits") or 0))
+        except subprocess.TimeoutExpired:
+            check_output = "hermes update --check 超时，已保留 hermes version 的结果"
+        except Exception as exc:
+            check_output = f"hermes update --check 失败：{exc}"
+
+        return {
+            "ok": version_result.returncode == 0,
+            "success": version_result.returncode == 0,
+            "message": "Hermes 更新检查完成",
+            "update_available": bool(parsed["update_available"]),
+            "behind_commits": int(parsed["behind_commits"]),
+            "version": parsed["version"],
+            "summary": parsed["summary"],
+            "version_output": version_output,
+            "check_output": check_output,
+            "check_returncode": check_returncode,
+            "needs_env_refresh": needs_env_refresh,
+        }
+
+    def update_hermes_agent(self, full_backup: bool = False) -> Dict[str, Any]:
+        """Run Hermes' native updater, then refresh Yachiyo state."""
+        hermes_path, needs_env_refresh = locate_hermes_binary()
+        if hermes_path is None:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "hermes 命令未找到，请先安装 Hermes Agent",
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        before_toolsets = _hermes_tools_manifest(hermes_path)
+        started_at = time.monotonic()
+        backup_flag = "--backup" if full_backup else "--no-backup"
+        try:
+            result = subprocess.run(
+                [hermes_path, "update", "--gateway", "--yes", backup_flag],
+                capture_output=True,
+                text=True,
+                timeout=_HERMES_UPDATE_RUN_TIMEOUT,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            output = _sanitize_command_output(str(exc.stdout or "") + str(exc.stderr or ""))
+            return {
+                "ok": False,
+                "success": False,
+                "error": f"Hermes 更新超过 5 分钟未完成；已停止等待。可以在终端运行 hermes update --gateway --yes {backup_flag} 查看完整输出。",
+                "output": output,
+                "elapsed_seconds": round(time.monotonic() - started_at, 2),
+                "needs_env_refresh": needs_env_refresh,
+            }
+        except FileNotFoundError:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "hermes 命令未找到，请先安装 Hermes Agent",
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        output = _sanitize_command_output((result.stdout or "") + (result.stderr or ""))
+        try:
+            self._runtime.refresh_hermes_installation()
+        except Exception as exc:
+            logger.warning("Hermes 更新后刷新安装状态失败: %s", exc)
+
+        after_toolsets = _hermes_tools_manifest(hermes_path)
+        version = self.check_hermes_update()
+        doctor = self.run_hermes_diagnostic_command("hermes doctor") if result.returncode == 0 else None
+        return {
+            "ok": result.returncode == 0,
+            "success": result.returncode == 0,
+            "message": "Hermes 更新完成" if result.returncode == 0 else f"Hermes 更新失败（exit={result.returncode}）",
+            "returncode": result.returncode,
+            "output": output,
+            "elapsed_seconds": round(time.monotonic() - started_at, 2),
+            "needs_env_refresh": needs_env_refresh,
+            "version": version,
+            "toolset_delta": _toolset_delta(before_toolsets, after_toolsets),
+            "tool_config": self.get_hermes_tool_config(),
+            "diagnostic_cache": doctor.get("diagnostic_cache") if isinstance(doctor, dict) else None,
+            "dashboard": self.get_dashboard_data(),
+        }
+
+    def launch_browser_cdp(self) -> Dict[str, Any]:
+        """Best-effort 启动/连接本机 Chrome CDP，并写入 browser.cdp_url。"""
+        hermes_path, needs_env_refresh = locate_hermes_binary()
+        if hermes_path is None:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "hermes 命令未找到，请先安装 Hermes Agent",
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        hermes_python = _resolve_hermes_python_from_launcher(hermes_path)
+        if not hermes_python:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "无法定位 Hermes Agent 的 Python 环境，无法自动启动 Chrome 调试端口",
+                "manual_command": (
+                    'open -a "Google Chrome" --args --remote-debugging-port=9222 '
+                    '--user-data-dir="$HOME/.hermes/chrome-debug" --no-first-run '
+                    "--no-default-browser-check"
+                ),
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        script = (
+            "import json, platform, socket, time\n"
+            "from hermes_cli.browser_connect import DEFAULT_BROWSER_CDP_PORT, DEFAULT_BROWSER_CDP_URL, manual_chrome_debug_command, try_launch_chrome_debug\n"
+            "host = '127.0.0.1'\n"
+            "port = DEFAULT_BROWSER_CDP_PORT\n"
+            "system = platform.system()\n"
+            "def reachable():\n"
+            "    try:\n"
+            "        with socket.create_connection((host, port), timeout=0.3):\n"
+            "            return True\n"
+            "    except OSError:\n"
+            "        return False\n"
+            "already = reachable()\n"
+            "launched = False\n"
+            "if not already:\n"
+            "    launched = try_launch_chrome_debug(port, system)\n"
+            "    for _ in range(12):\n"
+            "        if reachable():\n"
+            "            already = True\n"
+            "            break\n"
+            "        time.sleep(0.5)\n"
+            "print(json.dumps({\n"
+            "    'ok': already,\n"
+            "    'url': DEFAULT_BROWSER_CDP_URL,\n"
+            "    'launched': launched,\n"
+            "    'manual_command': manual_chrome_debug_command(port, system) or '',\n"
+            "}, ensure_ascii=False))\n"
+        )
+        try:
+            result = subprocess.run(
+                [hermes_python, "-c", script],
+                capture_output=True,
+                text=True,
+                timeout=12.0,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "ok": False,
+                "success": False,
+                "error": "启动 Chrome 调试端口超时",
+                "url": "http://127.0.0.1:9222",
+                "manual_command": "",
+                "needs_env_refresh": needs_env_refresh,
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "success": False,
+                "error": f"启动 Chrome 调试端口失败：{exc}",
+                "url": "http://127.0.0.1:9222",
+                "manual_command": "",
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        output = (result.stdout or "").strip().splitlines()
+        launch_data: dict[str, Any] = {}
+        if output:
+            try:
+                launch_data = json.loads(output[-1])
+            except json.JSONDecodeError:
+                launch_data = {}
+        url = str(launch_data.get("url") or "http://127.0.0.1:9222")
+        manual_command = str(launch_data.get("manual_command") or "")
+        if result.returncode != 0 or not launch_data.get("ok"):
+            detail = _compact_command_output(result.stderr or result.stdout)
+            return {
+                "ok": False,
+                "success": False,
+                "error": detail or "未能自动启动或连接 Chrome 调试端口",
+                "url": url,
+                "manual_command": manual_command,
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        ok, error = _run_hermes_config_set(hermes_path, "browser.cdp_url", url)
+        if not ok:
+            return {
+                "ok": False,
+                "success": False,
+                "error": error,
+                "url": url,
+                "manual_command": manual_command,
+                "needs_env_refresh": needs_env_refresh,
+            }
+
+        return {
+            "ok": True,
+            "success": True,
+            "message": "已连接 Chrome 调试端口并写入 browser.cdp_url",
+            "url": url,
+            "launched": bool(launch_data.get("launched")),
+            "manual_command": manual_command,
+            "needs_env_refresh": needs_env_refresh,
+            "tool_config": self.get_hermes_tool_config(),
         }
 
     def recheck_hermes(self) -> Dict[str, Any]:

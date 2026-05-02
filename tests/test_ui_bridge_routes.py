@@ -96,6 +96,24 @@ async def test_settings_operation_routes_use_main_api(monkeypatch):
         def update_hermes_configuration(self, changes):
             return {"ok": True, "changes": changes}
 
+        def get_hermes_tool_config(self):
+            return {"ok": True, "tools": [{"id": "web"}]}
+
+        def update_hermes_tool_config(self, tool_id, changes):
+            return {"ok": True, "tool_id": tool_id, "changes": changes}
+
+        def test_hermes_tool_config(self, tool_id):
+            return {"ok": True, "tool_id": tool_id, "status": "pass"}
+
+        def check_hermes_update(self):
+            return {"ok": True, "update_available": True}
+
+        def update_hermes_agent(self, full_backup=False):
+            return {"ok": True, "message": "updated", "full_backup": full_backup}
+
+        def launch_browser_cdp(self):
+            return {"ok": True, "url": "http://127.0.0.1:9222"}
+
         def recheck_hermes(self):
             return {"hermes": {"ready": True}}
 
@@ -142,6 +160,30 @@ async def test_settings_operation_routes_use_main_api(monkeypatch):
     assert await ui.update_hermes_configuration(ui.HermesConfigUpdateRequest(provider="openai", model="gpt-4.1")) == {
         "ok": True,
         "changes": {"provider": "openai", "model": "gpt-4.1", "base_url": "", "api_key": ""},
+    }
+    assert await ui.get_hermes_tool_config() == {"ok": True, "tools": [{"id": "web"}]}
+    assert await ui.update_hermes_tool_config(
+        ui.HermesToolConfigUpdateRequest(tool_id="web", changes={"web.backend": "exa"})
+    ) == {
+        "ok": True,
+        "tool_id": "web",
+        "changes": {"web.backend": "exa"},
+    }
+    assert await ui.test_hermes_tool_config(ui.HermesToolConfigTestRequest(tool_id="web")) == {
+        "ok": True,
+        "tool_id": "web",
+        "status": "pass",
+    }
+    assert await ui.check_hermes_update() == {"ok": True, "update_available": True}
+    assert await ui.update_hermes_agent() == {"ok": True, "message": "updated", "full_backup": False}
+    assert await ui.update_hermes_agent(ui.HermesUpdateRunRequest(backup=True)) == {
+        "ok": True,
+        "message": "updated",
+        "full_backup": True,
+    }
+    assert await ui.launch_hermes_browser_cdp() == {
+        "ok": True,
+        "url": "http://127.0.0.1:9222",
     }
     assert await ui.recheck_hermes() == {"hermes": {"ready": True}}
     assert await ui.restart_bridge() == {"ok": True, "bridge": "restarted"}
