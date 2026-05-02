@@ -1,4 +1,4 @@
-import { CSSProperties, FormEvent, MouseEvent, PointerEvent, useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 
 import { apiGet, apiPost, bridgeUrl, getLauncherPointerState, moveLauncherWindow, openAppView, openLauncherMenu, setLauncherHitRegions, setLauncherPointerInteractive, type LauncherHitRegionRect } from '../lib/bridge';
 import type { AppView } from '../lib/view';
@@ -348,6 +348,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   const resourceHintRef = useRef<HTMLDivElement | null>(null);
   const replyRef = useRef<HTMLButtonElement | null>(null);
   const quickInputRef = useRef<HTMLFormElement | null>(null);
+  const quickInputComposingRef = useRef(false);
   const dragStateRef = useRef<LauncherDragState | null>(null);
   const pointerActivationRef = useRef(false);
   const clickSuppressedRef = useRef(false);
@@ -621,6 +622,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
 
   async function sendQuickMessage(event: FormEvent) {
     event.preventDefault();
+    if (quickInputComposingRef.current) return;
     const text = quickText.trim();
     if (!text) return;
     setQuickText('');
@@ -703,7 +705,22 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
 
       {launcher.enable_quick_input !== false && quickInputVisible ? (
         <form ref={quickInputRef} className="live2d-quick-input" onSubmit={sendQuickMessage} onClick={(event) => event.stopPropagation()}>
-          <input value={quickText} onChange={(event) => setQuickText(event.target.value)} placeholder="和八千代说点什么…" />
+          <input
+            value={quickText}
+            onChange={(event) => setQuickText(event.target.value)}
+            onCompositionEnd={() => {
+              quickInputComposingRef.current = false;
+            }}
+            onCompositionStart={() => {
+              quickInputComposingRef.current = true;
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && isImeComposingKey(event, quickInputComposingRef.current)) {
+                event.preventDefault();
+              }
+            }}
+            placeholder="和八千代说点什么…"
+          />
           <button type="submit" disabled={!quickText.trim()}>发送</button>
         </form>
       ) : null}
@@ -716,6 +733,11 @@ function pointerPoint(event: PointerLike) {
     x: Number.isFinite(event.screenX) ? event.screenX : event.clientX,
     y: Number.isFinite(event.screenY) ? event.screenY : event.clientY,
   };
+}
+
+function isImeComposingKey(event: KeyboardEvent<HTMLElement>, fallback = false) {
+  const nativeEvent = event.nativeEvent as globalThis.KeyboardEvent & { isComposing?: boolean };
+  return Boolean(fallback || nativeEvent.isComposing || nativeEvent.keyCode === 229);
 }
 
 function newDragState(event: PointerLike): LauncherDragState {
