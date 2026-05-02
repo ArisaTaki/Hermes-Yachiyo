@@ -315,39 +315,76 @@ def _diagnostic_cache_path() -> Path:
     return Path(shell_config._CONFIG_DIR) / _HERMES_DIAGNOSTIC_CACHE_FILE
 
 
-def _file_fingerprint(path: Path) -> dict[str, Any]:
-    try:
-        stat = path.stat()
-    except OSError:
-        return {"path": str(path), "exists": False}
-    return {
-        "path": str(path),
-        "exists": True,
-        "mtime_ns": stat.st_mtime_ns,
-        "size": stat.st_size,
-    }
-
-
 def _connection_fingerprint_payload(configuration: dict[str, Any]) -> dict[str, Any]:
     model = configuration.get("model") if isinstance(configuration.get("model"), dict) else {}
     api_key = configuration.get("api_key") if isinstance(configuration.get("api_key"), dict) else {}
-    config_path = Path(str(configuration.get("config_path") or "")).expanduser()
-    env_path = Path(str(configuration.get("env_path") or "")).expanduser()
     return {
         "provider": str(model.get("provider") or ""),
         "model": str(model.get("default") or ""),
         "base_url": str(model.get("base_url") or ""),
         "api_key_name": str(api_key.get("name") or ""),
         "api_key_configured": bool(api_key.get("configured")),
-        "config_file": _file_fingerprint(config_path),
-        "env_file": _file_fingerprint(env_path),
     }
 
 
-def _connection_fingerprint(configuration: dict[str, Any]) -> str:
-    payload = _connection_fingerprint_payload(configuration)
+def _fingerprint_payload(payload: dict[str, Any]) -> str:
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _connection_fingerprint(configuration: dict[str, Any]) -> str:
+    return _fingerprint_payload(_connection_fingerprint_payload(configuration))
+
+
+def _connection_cache_matches_configuration(data: dict[str, Any], configuration: dict[str, Any]) -> bool:
+    payload = _connection_fingerprint_payload(configuration)
+    return (
+        str(data.get("provider") or "") == payload["provider"]
+        and str(data.get("model") or "") == payload["model"]
+        and str(data.get("base_url") or "") == payload["base_url"]
+        and str(data.get("api_key_name") or "") == payload["api_key_name"]
+    )
+
+
+def _image_connection_fingerprint_payload(configuration: dict[str, Any]) -> dict[str, Any]:
+    image_input = configuration.get("image_input") if isinstance(configuration.get("image_input"), dict) else {}
+    vision = configuration.get("vision") if isinstance(configuration.get("vision"), dict) else {}
+    return {
+        "connection": _connection_fingerprint_payload(configuration),
+        "image_input": {
+            "mode": str(image_input.get("mode") or ""),
+            "route": str(image_input.get("route") or ""),
+            "provider": str(image_input.get("provider") or ""),
+            "model": str(image_input.get("model") or ""),
+            "supports_native_vision": image_input.get("supports_native_vision"),
+            "requires_vision_pipeline": bool(image_input.get("requires_vision_pipeline")),
+        },
+        "vision": {
+            "configured": bool(vision.get("configured")),
+            "provider": str(vision.get("provider") or ""),
+            "model": str(vision.get("model") or ""),
+            "base_url": str(vision.get("base_url") or ""),
+            "api_key_name": str(vision.get("api_key_name") or ""),
+            "api_key_configured": bool(vision.get("api_key_configured")),
+            "effective_provider": str(vision.get("effective_provider") or ""),
+            "effective_model": str(vision.get("effective_model") or ""),
+            "effective_base_url": str(vision.get("effective_base_url") or ""),
+        },
+    }
+
+
+def _image_connection_fingerprint(configuration: dict[str, Any]) -> str:
+    return _fingerprint_payload(_image_connection_fingerprint_payload(configuration))
+
+
+def _image_connection_cache_matches_configuration(data: dict[str, Any], configuration: dict[str, Any]) -> bool:
+    payload = _image_connection_fingerprint_payload(configuration)
+    image_input = payload["image_input"]
+    return (
+        str(data.get("route") or "") == image_input["route"]
+        and str(data.get("provider") or "") == image_input["provider"]
+        and str(data.get("model") or "") == image_input["model"]
+    )
 
 
 def _load_connection_validation(configuration: dict[str, Any]) -> dict[str, Any]:
@@ -365,7 +402,7 @@ def _load_connection_validation(configuration: dict[str, Any]) -> dict[str, Any]
         return base
     if not isinstance(data, dict) or data.get("schema_version") != _HERMES_CONNECTION_CACHE_SCHEMA:
         return base
-    if data.get("fingerprint") != fingerprint:
+    if data.get("fingerprint") != fingerprint and not _connection_cache_matches_configuration(data, configuration):
         return {
             **base,
             "reason": "config_changed",
@@ -426,7 +463,7 @@ def _store_connection_validation(
 
 def _load_image_connection_validation(configuration: dict[str, Any]) -> dict[str, Any]:
     cache_path = _image_connection_cache_path()
-    fingerprint = _connection_fingerprint(configuration)
+    fingerprint = _image_connection_fingerprint(configuration)
     base = {
         "verified": False,
         "success": False,
@@ -439,7 +476,7 @@ def _load_image_connection_validation(configuration: dict[str, Any]) -> dict[str
         return base
     if not isinstance(data, dict) or data.get("schema_version") != _HERMES_IMAGE_CONNECTION_CACHE_SCHEMA:
         return base
-    if data.get("fingerprint") != fingerprint:
+    if data.get("fingerprint") != fingerprint and not _image_connection_cache_matches_configuration(data, configuration):
         return {
             **base,
             "reason": "config_changed",
@@ -475,7 +512,7 @@ def _store_image_connection_validation(
     now = _utc_now_iso()
     record: dict[str, Any] = {
         "schema_version": _HERMES_IMAGE_CONNECTION_CACHE_SCHEMA,
-        "fingerprint": _connection_fingerprint(configuration),
+        "fingerprint": _image_connection_fingerprint(configuration),
         "verified": success,
         "route": str(image_input.get("route") or ""),
         "provider": str(image_input.get("provider") or ""),

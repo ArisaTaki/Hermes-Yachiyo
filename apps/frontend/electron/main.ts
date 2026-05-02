@@ -33,6 +33,7 @@ const BUBBLE_SCREEN_MARGIN = 24;
 const POSITION_SAVE_DEBOUNCE_MS = 260;
 const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
 const MAX_LAUNCHER_SHAPE_RECTS = 10000;
+type IconKind = 'dock' | 'tray' | 'window';
 
 type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'tools' | 'bubble' | 'bubble-menu' | 'live2d';
 type ModeId = 'bubble' | 'live2d';
@@ -79,6 +80,8 @@ let modeWindowTopSuppressed = false;
 let lastInstallReady: boolean | null = null;
 let lastUiSettings: UiSettings | null = null;
 let backendRestartPromise: Promise<{ success: boolean; bridgeUrl?: string; error?: string }> | null = null;
+const enforcedWindowTitles = new WeakMap<BrowserWindow, string>();
+const titleHandlersInstalled = new WeakSet<BrowserWindow>();
 const terminalSessions = new Map<string, {
   ownerId: number;
   pty: IPty;
@@ -100,7 +103,7 @@ function projectRoot(): string {
 
 function rootAssetPath(...segments: string[]): string | null {
   const roots = app.isPackaged
-    ? [process.resourcesPath, projectRoot()]
+    ? [process.resourcesPath, path.join(process.resourcesPath, 'app.asar.unpacked'), projectRoot()]
     : [projectRoot()];
   for (const root of roots) {
     const candidate = path.join(root, ...segments);
@@ -109,23 +112,68 @@ function rootAssetPath(...segments: string[]): string | null {
   return null;
 }
 
-function appIconPath(kind: 'dock' | 'tray' | 'window' = 'window'): string | undefined {
-  const preferred = ['icon.png', 'icon.icns'];
+function iconCandidates(kind: IconKind): string[] {
+  return kind === 'tray' ? ['icon.png', 'icon.icns'] : ['icon.icns', 'icon.png'];
+}
+
+function isLoadableIcon(candidate: string): boolean {
+  try {
+    return !nativeImage.createFromPath(candidate).isEmpty();
+  } catch {
+    return false;
+  }
+}
+
+function appIconPath(kind: IconKind = 'window'): string | undefined {
+  const preferred = iconCandidates(kind);
   for (const name of preferred) {
     const candidate = rootAssetPath('assets', name);
-    if (candidate) return candidate;
+    if (candidate && isLoadableIcon(candidate)) return candidate;
   }
-  return rootAssetPath('apps', 'shell', 'assets', 'avatars', 'yachiyo-default.jpg') || undefined;
+  const fallback = rootAssetPath('apps', 'shell', 'assets', 'avatars', 'yachiyo-default.jpg');
+  return fallback && isLoadableIcon(fallback) ? fallback : undefined;
 }
 
 function appIconImage(
-  kind: 'dock' | 'tray' | 'window' = 'window',
+  kind: IconKind = 'window',
   size?: number,
 ): ReturnType<typeof nativeImage.createEmpty> {
   const iconPath = appIconPath(kind);
   const image = iconPath ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty();
   if (!size || image.isEmpty()) return image;
   return image.resize({ width: size, height: size });
+}
+
+function enforceWindowTitle(targetWindow: BrowserWindow, title: string): void {
+  // TODO: if macOS still collapses frameless launcher windows in the Dock menu,
+  // replace the default Dock menu with explicit main/chat/mode window actions.
+  enforcedWindowTitles.set(targetWindow, title);
+  targetWindow.setTitle(title);
+  if (titleHandlersInstalled.has(targetWindow)) return;
+  titleHandlersInstalled.add(targetWindow);
+  targetWindow.webContents.on('page-title-updated', (event) => {
+    const enforcedTitle = enforcedWindowTitles.get(targetWindow);
+    if (!enforcedTitle) return;
+    event.preventDefault();
+    targetWindow.setTitle(enforcedTitle);
+  });
+}
+
+function mainWindowTitle(params: Record<string, string> = {}): string {
+  const view = normalizeView(params.view);
+  if (view === 'installer') return 'Hermes-Yachiyo 安装向导';
+  if (view === 'settings') return params.mode === 'live2d'
+    ? 'Hermes-Yachiyo Live2D 设置'
+    : params.mode === 'bubble'
+      ? 'Hermes-Yachiyo Bubble 设置'
+      : 'Hermes-Yachiyo 应用设置';
+  if (view === 'diagnostics') return 'Hermes-Yachiyo 诊断工具';
+  if (view === 'tools') return 'Hermes-Yachiyo 工具中心';
+  return 'Hermes-Yachiyo 主控台';
+}
+
+function modeWindowTitle(mode: ModeId): string {
+  return mode === 'live2d' ? 'Hermes-Yachiyo Live2D' : 'Hermes-Yachiyo Bubble';
 }
 
 function macOSPrerequisiteCommand(): string {
@@ -347,8 +395,9 @@ function createMainWindow(
   const bounds = mainWindowBounds(settings);
   const startHidden = Boolean(options.respectStartMinimized && settings?.app?.start_minimized);
   const focusOnReady = options.focusOnReady !== false;
+  const title = mainWindowTitle(params);
   mainWindow = new BrowserWindow({
-    title: 'Hermes-Yachiyo',
+    title,
     ...bounds,
     icon: appIconPath('window'),
     minWidth: 860,
@@ -361,6 +410,7 @@ function createMainWindow(
       nodeIntegration: false,
     },
   });
+  enforceWindowTitle(mainWindow, title);
 
   mainWindow.once('ready-to-show', () => {
     if (!mainWindow || mainWindow.isDestroyed() || startHidden) return;
@@ -395,6 +445,7 @@ function showMainWindow(
     return;
   }
   if (settings) lastUiSettings = settings;
+  enforceWindowTitle(mainWindow, mainWindowTitle(params));
   mainWindow.loadURL(rendererUrl({ view: 'main', ...params }));
   if (mainWindow.isMinimized()) mainWindow.restore();
   const startHidden = Boolean(options.respectStartMinimized && settings?.app?.start_minimized);
@@ -439,6 +490,8 @@ function configureTray(settings: UiSettings | null = lastUiSettings): void {
     tray = new Tray(trayIcon());
     tray.setToolTip('Hermes-Yachiyo');
     tray.on('click', () => showMainWindow({ view: 'main' }));
+  } else {
+    tray.setImage(trayIcon());
   }
   tray.setContextMenu(trayMenu());
 }
@@ -449,6 +502,8 @@ function showMacDockIcon(): void {
     app.setActivationPolicy('regular');
     const icon = appIconImage('dock');
     if (!icon.isEmpty()) app.dock?.setIcon(icon);
+    const aboutIcon = appIconPath('dock');
+    if (aboutIcon) app.setAboutPanelOptions({ applicationName: 'Hermes-Yachiyo', iconPath: aboutIcon });
     app.dock?.show();
   } catch {}
 }
@@ -477,7 +532,7 @@ function restoreModeWindowIfPolluted(): void {
 
 function createChatWindow(params: Record<string, string> = {}): void {
   chatWindow = new BrowserWindow({
-    title: 'Yachiyo - 对话',
+    title: 'Hermes-Yachiyo 对话',
     width: 520,
     height: 680,
     icon: appIconPath('window'),
@@ -490,6 +545,7 @@ function createChatWindow(params: Record<string, string> = {}): void {
       nodeIntegration: false,
     },
   });
+  enforceWindowTitle(chatWindow, 'Hermes-Yachiyo 对话');
 
   chatWindow.loadURL(rendererUrl({ ...params, view: 'chat' }));
   chatWindow.on('closed', () => {
@@ -786,7 +842,7 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     : booleanFromConfig(config.always_on_top, true);
 
   const createdModeWindow = new BrowserWindow({
-    title: mode === 'live2d' ? 'Hermes-Yachiyo Live2D' : 'Hermes-Yachiyo Bubble',
+    title: modeWindowTitle(mode),
     ...bounds,
     icon: appIconPath('window'),
     frame: false,
@@ -804,6 +860,7 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     },
   });
   modeWindow = createdModeWindow;
+  enforceWindowTitle(createdModeWindow, modeWindowTitle(mode));
 
   if (mode === 'live2d' && booleanFromConfig(config.show_on_all_spaces, true)) {
     createdModeWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });

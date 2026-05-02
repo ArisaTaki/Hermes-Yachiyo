@@ -211,6 +211,9 @@ type DashboardData = {
   };
 };
 
+const BACKGROUND_VALIDATION_MIN_INTERVAL_MS = 30 * 60 * 1000;
+const BACKGROUND_VALIDATION_REFRESH_AFTER_MS = 12 * 60 * 60 * 1000;
+
 export function MainView() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState('');
@@ -228,6 +231,7 @@ export function MainView() {
   const hermesConfigLoadingRef = useRef(false);
   const settingsLoadingRef = useRef(false);
   const providerDraftsRef = useRef<Record<string, HermesProviderDraft>>({});
+  const backgroundValidationRef = useRef({ connection: 0, image: 0 });
   const mountedRef = useRef(false);
 
   useEffect(() => {
@@ -292,6 +296,7 @@ export function MainView() {
           syncProviderDraftFromConfig(result);
           setConfigForm(formFromHermesConfig(result));
         }
+        void maybeRefreshValidationInBackground(result);
       }
       return result;
     } catch {
@@ -393,15 +398,18 @@ export function MainView() {
     if (actionStatus && /TTS|播报/.test(actionStatus)) setActionStatus('');
   }
 
-  async function saveHermesConfig() {
-    const action = 'config-save';
+  async function saveAndTestHermesConfig() {
+    const action = 'config-save-test';
     if (!beginHermesAction(action)) return;
+    setHermesTestResult(null);
     setActionStatus('正在保存 Hermes 配置...');
     try {
-      const result = await persistHermesConfigDraft('保存 Hermes 配置失败');
-      setActionStatus(result.message || 'Hermes 配置已保存');
+      await persistHermesConfigDraft('保存 Hermes 配置失败');
+      setActionStatus('配置已保存，正在测试模型连接...');
+      const result = await runHermesConnectionTest();
+      setActionStatus(result.success ? result.message || 'Hermes 配置已保存，模型连接测试通过' : result.error || 'Hermes 模型连接测试失败');
     } catch (err) {
-      setActionStatus(err instanceof Error ? err.message : '保存 Hermes 配置失败');
+      setActionStatus(err instanceof Error ? err.message : '保存并测试 Hermes 配置失败');
     } finally {
       finishHermesAction(action);
     }
@@ -457,64 +465,57 @@ export function MainView() {
     }
   }
 
-  async function testHermesConnection() {
-    const action = 'connection-test';
+  async function runHermesConnectionTest() {
+    const result = await apiPost<HermesConnectionTestResult>('/ui/hermes/connection-test');
+    setHermesTestResult(result);
+    if (result.connection_validation) {
+      setHermesConfig((current) => (
+        current ? { ...current, connection_validation: result.connection_validation } : current
+      ));
+    }
+    await refreshDashboardData();
+    await loadHermesConfig();
+    return result;
+  }
+
+  async function saveAndTestHermesImageConnection() {
+    const action = 'image-save-test';
     if (!beginHermesAction(action)) return;
-    setHermesTestResult(null);
-    setActionStatus('正在测试 Hermes provider/API Key 连接...');
+    setHermesImageTestResult(null);
+    setActionStatus('正在保存图片链路配置...');
     try {
-      const result = await apiPost<HermesConnectionTestResult>('/ui/hermes/connection-test');
-      setHermesTestResult(result);
-      if (result.connection_validation) {
-        setHermesConfig((current) => (
-          current ? { ...current, connection_validation: result.connection_validation } : current
-        ));
-      }
-      setActionStatus(result.success ? result.message || 'Hermes 连接测试通过' : result.error || 'Hermes 连接测试失败');
-      await refreshDashboardData();
+      await persistHermesConfigDraft('保存图片链路配置失败');
+      setActionStatus('图片链路配置已保存，正在测试...');
+      const result = await runHermesImageConnectionTest();
+      setActionStatus(result.success ? result.message || '图片链路配置已保存，测试通过' : result.error || 'Hermes 图片链路测试失败');
     } catch (err) {
-      setActionStatus(err instanceof Error ? err.message : 'Hermes 连接测试失败');
+      setActionStatus(err instanceof Error ? err.message : '保存并测试图片链路失败');
     } finally {
       finishHermesAction(action);
     }
   }
 
-  async function testHermesImageConnection() {
-    const action = 'image-connection-test';
-    if (!beginHermesAction(action)) return;
-    setHermesImageTestResult(null);
-    setActionStatus('正在测试 Hermes 图片链路...');
-    try {
-      if (configFormDirtyRef.current) {
-        setActionStatus('正在保存当前图片链路配置...');
-        await persistHermesConfigDraft('保存当前图片链路配置失败');
-        setActionStatus('配置已保存，正在测试 Hermes 图片链路...');
-      }
-      const result = await apiPost<HermesImageConnectionTestResult>('/ui/hermes/image-connection-test');
-      setHermesImageTestResult(result);
-      if (result.image_connection_validation || result.image_input) {
-        setHermesConfig((current) => {
-          if (!current) return current;
-          const validation = result.image_connection_validation || current.image_connection_validation;
-          const imageInput = {
-            ...(current.image_input || {}),
-            ...(result.image_input || {}),
-            validation,
-          };
-          return {
-            ...current,
-            image_input: imageInput,
-            image_connection_validation: validation,
-          };
-        });
-      }
-      setActionStatus(result.success ? result.message || 'Hermes 图片链路测试通过' : result.error || 'Hermes 图片链路测试失败');
-      await loadHermesConfig();
-    } catch (err) {
-      setActionStatus(err instanceof Error ? err.message : 'Hermes 图片链路测试失败');
-    } finally {
-      finishHermesAction(action);
+  async function runHermesImageConnectionTest() {
+    const result = await apiPost<HermesImageConnectionTestResult>('/ui/hermes/image-connection-test');
+    setHermesImageTestResult(result);
+    if (result.image_connection_validation || result.image_input) {
+      setHermesConfig((current) => {
+        if (!current) return current;
+        const validation = result.image_connection_validation || current.image_connection_validation;
+        const imageInput = {
+          ...(current.image_input || {}),
+          ...(result.image_input || {}),
+          validation,
+        };
+        return {
+          ...current,
+          image_input: imageInput,
+          image_connection_validation: validation,
+        };
+      });
     }
+    await loadHermesConfig();
+    return result;
   }
 
   async function recheckHermes() {
@@ -531,6 +532,63 @@ export function MainView() {
       setActionStatus(err instanceof Error ? err.message : '重新检测 Hermes 失败');
     } finally {
       finishHermesAction(action);
+    }
+  }
+
+  async function maybeRefreshValidationInBackground(config: HermesVisualConfig) {
+    if (!mountedRef.current || busyActionRef.current || configFormDirtyRef.current) return;
+    const now = Date.now();
+    const connectionAge = validationAgeMs(config.connection_validation);
+    if (
+      config.connection_validation?.verified
+      && connectionAge !== null
+      && connectionAge > BACKGROUND_VALIDATION_REFRESH_AFTER_MS
+      && now - backgroundValidationRef.current.connection > BACKGROUND_VALIDATION_MIN_INTERVAL_MS
+    ) {
+      backgroundValidationRef.current.connection = now;
+      try {
+        const result = await apiPost<HermesConnectionTestResult>('/ui/hermes/connection-test');
+        if (result.connection_validation && mountedRef.current) {
+          setHermesConfig((current) => (
+            current ? { ...current, connection_validation: result.connection_validation } : current
+          ));
+        }
+      } catch {
+        // Silent refresh keeps cached checks fresh without interrupting the user.
+      }
+    }
+
+    const imageInput = config.image_input;
+    const imageValidation = config.image_connection_validation || imageInput?.validation;
+    const imageAge = validationAgeMs(imageValidation);
+    if (
+      imageInput?.can_attach_images
+      && imageValidation?.verified
+      && imageAge !== null
+      && imageAge > BACKGROUND_VALIDATION_REFRESH_AFTER_MS
+      && now - backgroundValidationRef.current.image > BACKGROUND_VALIDATION_MIN_INTERVAL_MS
+    ) {
+      backgroundValidationRef.current.image = now;
+      try {
+        const result = await apiPost<HermesImageConnectionTestResult>('/ui/hermes/image-connection-test');
+        if ((result.image_connection_validation || result.image_input) && mountedRef.current) {
+          setHermesConfig((current) => {
+            if (!current) return current;
+            const validation = result.image_connection_validation || current.image_connection_validation;
+            return {
+              ...current,
+              image_input: {
+                ...(current.image_input || {}),
+                ...(result.image_input || {}),
+                validation,
+              },
+              image_connection_validation: validation,
+            };
+          });
+        }
+      } catch {
+        // Silent refresh keeps cached checks fresh without interrupting the user.
+      }
     }
   }
 
@@ -610,10 +668,9 @@ export function MainView() {
               onConfigChange={updateHermesConfigField}
               onTtsChange={updateTtsField}
               onRecheck={recheckHermes}
-              onSaveConfig={saveHermesConfig}
+              onSaveConfig={saveAndTestHermesConfig}
+              onSaveImageConfig={saveAndTestHermesImageConnection}
               onSaveTts={saveTtsSettings}
-              onTestConnection={testHermesConnection}
-              onTestImageConnection={testHermesImageConnection}
             />
           </article>
 
@@ -838,7 +895,7 @@ function hermesConnectionNotice(
     return {
       kind: 'warn',
       title: '模型配置变更后尚未重新验证',
-      detail: '检测到 provider、模型、Base URL 或配置文件已变化，请重新测试模型连接。',
+      detail: '检测到 provider、模型或 Base URL 变化，请保存并测试配置。',
     };
   }
   if (validation?.tested_at && !validation.verified) {
@@ -851,7 +908,7 @@ function hermesConnectionNotice(
   return {
     kind: 'warn',
     title: '模型连接尚未验证',
-    detail: '基础状态 ready 只代表 Hermes 命令、setup 和 Yachiyo 工作空间通过检查；API Key 是否能调用模型需要点击“测试模型连接”。',
+    detail: '基础状态 ready 只代表 Hermes 命令、setup 和 Yachiyo 工作空间通过检查；API Key 是否能调用模型需要点击“保存并测试配置”。',
   };
 }
 
@@ -902,14 +959,14 @@ function hermesImageConnectionNotice(
     return {
       kind: 'warn',
       title: '图片配置变更后尚未重新验证',
-      detail: '检测到 provider、模型、Base URL 或图片输入模式变化，请重新测试图片链路。',
+      detail: '检测到 provider、模型、Base URL 或图片输入模式变化，请保存并测试图片链路。',
     };
   }
   if (imageInput.requires_vision_pipeline) {
     return {
       kind: 'warn',
       title: '图片需要单独验证',
-      detail: '当前配置会先用 Hermes vision 链路识图，再把分析结果交给文本模型；“测试模型连接”只验证文字请求。',
+      detail: '当前配置会先用 Hermes vision 链路识图，再把分析结果交给文本模型；主模型测试只验证文字请求。',
     };
   }
   return null;
@@ -1074,9 +1131,8 @@ function HermesConfigCenter({
   onTtsChange,
   onRecheck,
   onSaveConfig,
+  onSaveImageConfig,
   onSaveTts,
-  onTestConnection,
-  onTestImageConnection,
 }: {
   hermes?: DashboardData['hermes'];
   config: HermesVisualConfig | null;
@@ -1089,9 +1145,8 @@ function HermesConfigCenter({
   onTtsChange: (field: keyof TtsForm, value: string | boolean | number) => void;
   onRecheck: () => Promise<void>;
   onSaveConfig: () => Promise<void>;
+  onSaveImageConfig: () => Promise<void>;
   onSaveTts: () => Promise<void>;
-  onTestConnection: () => Promise<void>;
-  onTestImageConnection: () => Promise<void>;
 }) {
   const busy = Boolean(busyAction);
   const providerOptions = config?.provider_options || [];
@@ -1117,7 +1172,7 @@ function HermesConfigCenter({
   const usesSeparateVision = imageInputMode === 'text';
   const ttsProvider = ttsForm.provider || 'none';
   const ttsEnabled = ttsProvider !== 'none';
-  const imageTestDisabled = busy || !hermes?.command_exists;
+  const imageSaveTestDisabled = busy || !hermes?.command_exists;
   return (
     <div className="hermes-config-center dashboard-hermes-center">
       <InfoList rows={[
@@ -1229,18 +1284,11 @@ function HermesConfigCenter({
           <span>{selectedProvider?.auth_type && selectedProvider.auth_type !== 'api_key' ? '该 provider 使用外部授权；如需登录请用下方高级命令。' : config?.config_path || '读取 Hermes 配置中'}</span>
           <div className="hermes-form-actions">
             <button
-              type="button"
-              disabled={busy || !hermes?.command_exists}
-              onClick={() => void onTestConnection()}
-            >
-              {busyAction === 'connection-test' ? '测试中...' : '测试模型连接'}
-            </button>
-            <button
               type="submit"
               className="primary-action"
               disabled={busy || !hermes?.command_exists}
             >
-              {busyAction === 'config-save' ? '保存中...' : '保存 Hermes 配置'}
+              {busyAction === 'config-save-test' ? '保存并测试中...' : '保存并测试配置'}
             </button>
           </div>
         </div>
@@ -1251,7 +1299,7 @@ function HermesConfigCenter({
           className="hermes-visual-config capability-config-card"
           onSubmit={(event) => {
             event.preventDefault();
-            void onSaveConfig();
+            void onSaveImageConfig();
           }}
         >
           <div className="hermes-subsection-title">
@@ -1345,15 +1393,8 @@ function HermesConfigCenter({
           <div className="hermes-config-footer">
             <span>{usesSeparateVision ? '图片会先由独立模型识别，再把结果交给主模型。' : '主模型承担图片识别；不需要额外 vision 配置。'}</span>
             <div className="hermes-form-actions">
-              <button type="submit" className="primary-action" disabled={busy || !hermes?.command_exists}>
-                {busyAction === 'config-save' ? '保存中...' : '保存图片链路'}
-              </button>
-              <button
-                type="button"
-                disabled={imageTestDisabled}
-                onClick={() => void onTestImageConnection()}
-              >
-                {busyAction === 'image-connection-test' ? '测试中...' : '测试图片链路'}
+              <button type="submit" className="primary-action" disabled={imageSaveTestDisabled}>
+                {busyAction === 'image-save-test' ? '保存并测试中...' : '保存并测试图片链路'}
               </button>
             </div>
           </div>
@@ -1538,6 +1579,14 @@ function formatShortDateTime(value?: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function validationAgeMs(validation?: Pick<HermesConnectionValidation, 'verified_at' | 'tested_at'>): number | null {
+  const value = validation?.verified_at || validation?.tested_at;
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return Date.now() - date.getTime();
 }
 
 function formatUptime(seconds?: number) {

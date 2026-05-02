@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import sys
+import time
 from dataclasses import dataclass
 from types import SimpleNamespace
 
@@ -277,6 +279,9 @@ def test_hermes_connection_validation_survives_reload_when_config_unchanged(tmp_
 
         api = MainWindowAPI(runtime, AppConfig())
         test_result = api.test_hermes_connection()
+        next_mtime = time.time() + 5
+        for path in (config_path, env_path):
+            os.utime(path, (next_mtime, next_mtime))
         config_result = api.get_hermes_configuration()
 
         assert test_result["connection_validation"]["verified"] is True
