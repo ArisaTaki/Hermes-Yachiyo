@@ -48,6 +48,7 @@ export function navigateTo(
 export function routePath(view: AppView, params: Record<string, string> = {}): string {
   if (view === 'main') return '#/';
   if (view === 'settings' && params.mode) return `#/settings/${encodeURIComponent(params.mode)}`;
+  if (view === 'tools' && params.tool) return `#/tools/${encodeURIComponent(params.tool)}`;
   return `#/${encodeURIComponent(view)}`;
 }
 
@@ -62,5 +63,6 @@ function routeFromHash(hash: string): RouteState | null {
   const [rawView, rawMode] = parts;
   if (!isAppView(rawView)) return { view: 'main', params: {} };
   if (rawView === 'settings' && rawMode) return { view: 'settings', params: { mode: rawMode } };
+  if (rawView === 'tools' && rawMode) return { view: 'tools', params: { tool: rawMode } };
   return { view: rawView, params: {} };
 }

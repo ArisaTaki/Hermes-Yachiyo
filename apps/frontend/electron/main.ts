@@ -37,7 +37,7 @@ type IconKind = 'dock' | 'tray' | 'window';
 
 type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'tools' | 'bubble' | 'bubble-menu' | 'live2d';
 type ModeId = 'bubble' | 'live2d';
-type InstallerTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup';
+type InstallerTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup' | 'update-hermes' | 'update-hermes-backup';
 
 type ModeSettings = {
   config?: Record<string, unknown>;
@@ -204,12 +204,44 @@ function hermesInstallCommand(): string {
   ].join('\n');
 }
 
+function hermesUpdateCommand(fullBackup = false): string {
+  const backupFlag = fullBackup ? '--backup' : '--no-backup';
+  const updateArgs = `--gateway --yes ${backupFlag}`;
+  const backupNote = fullBackup
+    ? '说明：已启用完整 pre-update backup。Hermes 会压缩整个 ~/.hermes，目录较大时可能长时间停在 Creating pre-update backup；--yes 会自动确认更新过程中的 stash 恢复等提示。'
+    : '说明：Yachiyo 默认跳过完整 pre-update backup；Hermes 原生完整备份会压缩整个 ~/.hermes，目录较大时可能长时间停在 Creating pre-update backup；--yes 会自动确认更新过程中的 stash 恢复等提示。';
+  return [
+    'echo "Hermes Agent 更新开始"',
+    'set -o pipefail',
+    'if ! command -v hermes >/dev/null 2>&1; then echo "未找到 hermes 命令，请先完成 Hermes Agent 安装或刷新 PATH。"; exit 127; fi',
+    'echo "当前版本："',
+    'version_output="$(hermes version 2>&1 || true)"',
+    'printf "%s\\n" "$version_output"',
+    'project_path="$(printf "%s\\n" "$version_output" | awk -F": " \'/^Project:/ {print $2; exit}\')"',
+    'if [ -n "$project_path" ] && [ -d "$project_path/.git" ]; then origin_url="$(git -C "$project_path" remote get-url origin 2>/dev/null || true)"; if [ -n "$origin_url" ]; then echo "更新来源：$origin_url / origin/main"; fi; fi',
+    'echo ""',
+    `echo "运行：hermes update ${updateArgs}"`,
+    `echo "${backupNote}"`,
+    `hermes update ${updateArgs}`,
+    'hermes_update_exit_code=$?',
+    'printf "\\nHermes Agent 更新命令已结束，退出码：%s\\n" "$hermes_update_exit_code"',
+    'if [ "$hermes_update_exit_code" -eq 0 ]; then echo "更新完成。Hermes-Yachiyo 将刷新工具清单。"; fi',
+    'exit "$hermes_update_exit_code"',
+  ].join('\n');
+}
+
 function terminalTaskCommand(task: InstallerTerminalTask): { title: string; command: string } {
   if (task === 'mac-prerequisites') {
     return { title: '准备 macOS 基础工具', command: macOSPrerequisiteCommand() };
   }
   if (task === 'install-hermes') {
     return { title: '安装 Hermes Agent', command: hermesInstallCommand() };
+  }
+  if (task === 'update-hermes') {
+    return { title: '更新 Hermes Agent', command: hermesUpdateCommand(false) };
+  }
+  if (task === 'update-hermes-backup') {
+    return { title: '更新 Hermes Agent（完整备份）', command: hermesUpdateCommand(true) };
   }
   return { title: '配置 Hermes Agent', command: 'hermes setup' };
 }
@@ -1094,7 +1126,7 @@ async function showOpenDialogForSender(
 }
 
 function normalizeTerminalTask(value: unknown): InstallerTerminalTask | null {
-  return value === 'mac-prerequisites' || value === 'install-hermes' || value === 'hermes-setup'
+  return value === 'mac-prerequisites' || value === 'install-hermes' || value === 'hermes-setup' || value === 'update-hermes' || value === 'update-hermes-backup'
     ? value
     : null;
 }
@@ -1154,7 +1186,7 @@ function startInstallerTerminal(
 ): { success: boolean; id?: string; task?: InstallerTerminalTask; title?: string; error?: string } {
   const targetWindow = BrowserWindow.fromWebContents(event.sender);
   if (!targetWindow || targetWindow !== mainWindow) {
-    return { success: false, error: '内置终端只能从主控台安装器启动' };
+    return { success: false, error: '内置终端只能从主窗口启动' };
   }
   const task = normalizeTerminalTask(rawTask);
   if (!task) return { success: false, error: '不支持的终端任务' };

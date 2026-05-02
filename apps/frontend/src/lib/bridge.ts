@@ -14,7 +14,7 @@ export type LauncherHitRegionPayload = {
     height: number;
   };
 };
-export type DesktopTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup';
+export type DesktopTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup' | 'update-hermes' | 'update-hermes-backup';
 export type DesktopTerminalStartResult = {
   success?: boolean;
   id?: string;
