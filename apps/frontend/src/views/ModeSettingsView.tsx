@@ -10,6 +10,7 @@ import {
   openDesktopMode,
   openPath,
   quitApp,
+  removeAppBundleAndQuit,
   restartDesktopBridge,
 } from '../lib/bridge';
 import { currentParam, navigateTo } from '../lib/view';
@@ -578,6 +579,7 @@ function GeneralSettingsView() {
   const [backupAction, setBackupAction] = useState('');
   const [uninstallScope, setUninstallScope] = useState('yachiyo_only');
   const [uninstallKeepConfig, setUninstallKeepConfig] = useState(true);
+  const [uninstallRemoveApp, setUninstallRemoveApp] = useState(false);
   const [uninstallPreview, setUninstallPreview] = useState<UninstallPlan | null>(null);
   const [uninstallConfirmText, setUninstallConfirmText] = useState('');
   const [uninstallRunning, setUninstallRunning] = useState(false);
@@ -652,7 +654,12 @@ function GeneralSettingsView() {
     }
   }, [form.bridge_host, form.bridge_port, status]);
 
-  async function selectDisplayMode(modeId: string) {
+  function selectDisplayMode(modeId: string) {
+    if (modeId === 'live2d' && !live2dResourceReady(payload)) {
+      setStatus('Live2D 资源未就绪，请先导入资源包或选择有效模型目录；暂不切换表现态');
+      window.setTimeout(() => navigateTo('settings', { mode: 'live2d', reason: 'live2d-resource-required' }), 350);
+      return;
+    }
     setForm((current) => ({ ...current, display_mode: modeId }));
   }
 
@@ -838,6 +845,14 @@ function GeneralSettingsView() {
       });
       if (result.ok === false) throw new Error(result.error || result.errors?.join('；') || '卸载失败');
       const backupText = result.backup_path_display ? `备份已保存到 ${result.backup_path_display}。` : '';
+      if (uninstallRemoveApp) {
+        setStatus(`卸载已执行。${backupText} 正在删除应用本体并退出…`);
+        const removeResult = await removeAppBundleAndQuit();
+        if (!removeResult.success) {
+          throw new Error(removeResult.error || '本地资料已删除，但无法自动删除应用本体；请从 Applications 中手动移除 Hermes-Yachiyo');
+        }
+        return;
+      }
       setStatus(`卸载已执行。${backupText} 应用正在退出…`);
       if (result.desktop_quit_required || result.exit_scheduled) {
         window.setTimeout(() => {
@@ -1186,6 +1201,15 @@ function GeneralSettingsView() {
             />
             <span>卸载前生成备份</span>
           </label>
+          <label className="settings-check" htmlFor="uninstall-remove-app">
+            <input
+              id="uninstall-remove-app"
+              type="checkbox"
+              checked={uninstallRemoveApp}
+              onChange={(event) => setUninstallRemoveApp(event.target.checked)}
+            />
+            <span>同时删除当前应用本体</span>
+          </label>
         </div>
         <div className="uninstall-preview-react">
           {(uninstallPreview?.targets || []).map((target) => (
@@ -1513,6 +1537,12 @@ function live2dStateLabel(state: string): string {
 
 function live2dStateClass(state: string): string {
   return state === 'path_valid' || state === 'loaded' ? 'ok' : 'warn';
+}
+
+function live2dResourceReady(payload: GeneralSettingsPayload | null): boolean {
+  const live2dConfig = asRecord(payload?.mode_settings?.live2d?.config);
+  const state = stringValue(live2dConfig.model_state || asRecord(live2dConfig.resource).state);
+  return state === 'path_valid' || state === 'loaded';
 }
 
 function live2dExpressionSummary(summary: ModeConfig): string {

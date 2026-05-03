@@ -72,6 +72,8 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.tts.trigger_probability == 0.6
     assert config.tts.notification_prompt == config_mod.DEFAULT_TTS_NOTIFICATION_PROMPT
     assert config.tts.gsv_base_url == "http://127.0.0.1:9880"
+    assert config.tts.gsv_service_workdir == ""
+    assert config.tts.gsv_service_command == "python api_v2.py -a 127.0.0.1 -p 9880"
     assert config.tts.gsv_ref_audio_language == "ja"
     assert config.tts.gsv_text_language == "zh"
     assert config.tts.gsv_top_k == 15
@@ -251,6 +253,8 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
             "tts.trigger_probability": 0.35,
             "tts.notification_prompt": "只说一句提醒。",
             "tts.gsv_base_url": "http://host.docker.internal:9880",
+            "tts.gsv_service_workdir": "/apps/GPT-SoVITS",
+            "tts.gsv_service_command": "python api_v2.py -a 127.0.0.1 -p 9880",
             "tts.gsv_ref_audio_path": "/voices/ref.wav",
             "tts.gsv_ref_audio_text": "なんだか孤独になっちゃった夜は",
             "tts.gsv_text_language": "zh",
@@ -280,6 +284,8 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     assert config.tts.trigger_probability == 0.35
     assert config.tts.notification_prompt == "只说一句提醒。"
     assert config.tts.gsv_base_url == "http://host.docker.internal:9880"
+    assert config.tts.gsv_service_workdir == "/apps/GPT-SoVITS"
+    assert config.tts.gsv_service_command == "python api_v2.py -a 127.0.0.1 -p 9880"
     assert config.tts.gsv_ref_audio_path == "/voices/ref.wav"
     assert config.tts.gsv_ref_audio_text == "なんだか孤独になっちゃった夜は"
     assert config.tts.gsv_top_k == 12

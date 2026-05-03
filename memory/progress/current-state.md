@@ -2,6 +2,20 @@
 
 ## 已完成
 
+### Milestone 75 — DMG 首装流程、Live2D Gate 与 TTS 本地服务辅助
+
+- ✅ 基于 `develop` 当前 HEAD `67b7f74` 的 DMG 清机验证反馈，修复安装向导在 Hermes 终端安装完成后的衔接：重新检测到 `installed_needs_setup` / `setup_in_progress` / `installed_not_initialized` 后会滚动到模型配置向导，引导用户填写 Provider、模型、Base URL 和 API Key。
+- ✅ 初始化 Yachiyo 工作空间前新增模型/API Key 完整性提示：如果当前 Provider、模型或所需 API Key 缺失，会提示“直接初始化可能导致首次对话不可用”，用户确认后仍可继续，取消则回到模型配置区。
+- ✅ Hermes ready / 工作空间初始化成功后，桌面壳会进入主控台并主动打开 Bubble 表现态；macOS 点击 Dock 图标时会先刷新 `/hermes/install-info`，避免使用旧的 `lastInstallReady=false` 把已初始化用户拉回安装向导，同时恢复当前表现态。
+- ✅ 通用设置中的 Live2D 模式切换新增资源 gate：若 `mode_settings.live2d.config.model_state` 不是 `path_valid` / `loaded`，不会切换到 Live2D，而是跳到 Live2D 资源配置页要求导入 ZIP 或选择有效模型目录；后端 `apply_settings_changes()` 同步拒绝无资源的 `display_mode=live2d`。
+- ✅ Electron 表现态启动也新增 Live2D gate：显式打开 Live2D 且资源未就绪时进入设置页；默认打开表现态时如当前配置是 Live2D 但资源不可用，会回退到 Bubble，避免用户进入不可点击、找不到 Dock 图标的死路。
+- ✅ Live2D 真模型渲染增加 Electron/WebGL 保护：加载 runtime 后配置 Pixi WebGL2 偏好并关闭 major performance caveat；遇到 `checkMaxIfStatementsInShader` / `invalid value of 0` 时保留静态预览并显示明确的 WebGL 回退说明，避免把资源导入成功误判成导入失败。
+- ✅ 主动关怀 TTS 的 GPT-SoVITS 配置新增本地服务辅助字段：`tts.gsv_service_workdir` 与 `tts.gsv_service_command`；导入八千代语音包后会默认填入 `http://127.0.0.1:9880`、权重/参考音频路径和默认服务启动命令，服务目录可由语音包 manifest 提供或由用户手动填写。
+- ✅ 主动关怀语音设置页新增“GPT-SoVITS 本地服务”区块：可填写服务目录与启动命令，并通过受控 `/ui/hermes/terminal-command` 打开终端启动本地服务；说明语音 ZIP 只包含权重/参考音频，本地 API 服务仍需单独运行。
+- ✅ 卸载页新增“同时删除当前应用本体”选项：完成工作区/Hermes 数据卸载后，可由 Electron 启动受控 shell 删除当前 `.app` bundle 并退出；失败时会提示手动移除 Applications 中的应用。
+- ✅ GitHub Actions DMG workflow 失败原因已定位为 CI 未安装 `pytest-asyncio`，`pyproject.toml` dev extras 已补 `pytest-asyncio>=0.23.0`，workflow 的 async smoke tests 可正常收集执行。
+- ✅ 验证：`npm --prefix apps/frontend run build` → passed；`python -m pytest tests/test_main_api_modes.py tests/test_mode_settings.py tests/test_ui_bridge_routes.py tests/test_tts.py tests/test_uninstall.py` → 131 passed，1 known duplicate ZIP warning；workflow smoke suite `python -m pytest tests/test_screenshot.py tests/test_proactive.py tests/test_chat_session.py tests/test_chat_api.py tests/test_ui_bridge_routes.py tests/test_tts.py tests/test_mode_settings.py` → 112 passed；`python -m pytest tests/test_hermes_installer.py` → 10 passed；全量 `python -m pytest` → 421 passed，1 known duplicate ZIP warning；`git diff --check` → passed。
+
 ### Milestone 74 — Tool Center Doctor 分级与工具配置修复
 
 - ✅ 基于当前 `phase-2/feature/repair-tools` 的提交树补齐进度记录：`7307fd3` 合入了 2026-05-01 至 2026-05-02 的 Electron 固定前端、配置诊断、图片附件/vision 路由、图片链路校验缓存和窗口身份持久化等工作；其前序关键提交包括 `1ddba0a`、`41126f9`、`28c23ff`、`eac0dcb`、`0d0aee0`、`254ce91`、`9f55c9f`。

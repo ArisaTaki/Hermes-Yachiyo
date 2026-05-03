@@ -490,9 +490,16 @@ function showMainWindow(
 }
 
 function showMainWindowFromAppActivation(): void {
-  const params = lastInstallReady === false ? { view: 'installer' } : { view: 'main' };
-  showMainWindow(params, lastUiSettings);
-  setTimeout(() => showMainWindow(params, lastUiSettings), 90);
+  void (async () => {
+    const installInfo = await waitForInstallInfo();
+    if (installInfo) lastInstallReady = installReady(installInfo);
+    const params = lastInstallReady === false ? { view: 'installer' } : { view: 'main' };
+    showMainWindow(params, lastUiSettings);
+    setTimeout(() => showMainWindow(params, lastUiSettings), 90);
+    if (lastInstallReady !== false) {
+      setTimeout(() => void openConfiguredDesktopMode(), 180);
+    }
+  })();
 }
 
 function trayIcon() {
@@ -1105,12 +1112,80 @@ function installReady(payload: InstallInfoPayload | null): boolean {
   return Boolean(payload?.hermes_ready || payload?.install_info?.status === 'ready');
 }
 
+function live2dResourceReady(settings: UiSettings | null | undefined): boolean {
+  const state = settings?.mode_settings?.live2d?.config?.model_state;
+  return state === 'path_valid' || state === 'loaded';
+}
+
+function openLive2DResourceSettings(settings: UiSettings | null | undefined): void {
+  showMacDockIcon();
+  showMainWindow(
+    {
+      view: 'settings',
+      mode: 'live2d',
+      reason: 'live2d-resource-required',
+    },
+    settings || lastUiSettings,
+  );
+}
+
 async function openConfiguredDesktopMode(preferredMode?: ModeId, settingsOverride?: UiSettings | null): Promise<void> {
   const settings = settingsOverride || await waitForUiSettings();
   if (settings) lastUiSettings = settings;
   const mode = preferredMode || normalizeMode(settings?.display?.current_mode);
+  if (mode === 'live2d' && !live2dResourceReady(settings)) {
+    if (preferredMode === 'live2d') {
+      openLive2DResourceSettings(settings);
+      return;
+    }
+    createDesktopModeWindow('bubble', settings?.mode_settings?.bubble?.config || {});
+    return;
+  }
   const config = settings?.mode_settings?.[mode]?.config || {};
   createDesktopModeWindow(mode, config);
+}
+
+function currentAppBundlePath(): string | null {
+  if (process.platform !== 'darwin') return null;
+  let current = app.getPath('exe');
+  for (let i = 0; i < 8; i += 1) {
+    if (current.endsWith('.app') && fs.existsSync(current)) return current;
+    const parent = path.dirname(current);
+    if (!parent || parent === current) break;
+    current = parent;
+  }
+  return null;
+}
+
+function removeCurrentAppBundleAndQuit(): { success: boolean; appBundlePath?: string; error?: string } {
+  const appBundlePath = currentAppBundlePath();
+  if (!appBundlePath) return { success: false, error: '当前运行环境不是可删除的 macOS .app 包' };
+  if (!appBundlePath.endsWith('.app')) return { success: false, error: '拒绝删除非 .app 路径' };
+  const bundleName = path.basename(appBundlePath);
+  if (!/^Hermes-Yachiyo.*\.app$/.test(bundleName)) {
+    return { success: false, appBundlePath, error: `拒绝删除非 Hermes-Yachiyo 应用包：${bundleName}` };
+  }
+  const script = [
+    'target="$1"',
+    'sleep 1',
+    'if [[ "$target" == *.app && -d "$target" ]]; then',
+    '  rm -rf "$target"',
+    'fi',
+  ].join('\n');
+  try {
+    spawn('/bin/zsh', ['-lc', script, 'hermes-yachiyo-uninstall', appBundlePath], {
+      detached: true,
+      stdio: 'ignore',
+    }).unref();
+    app.quit();
+    return { success: true, appBundlePath };
+  } catch (error) {
+    return {
+      success: false,
+      appBundlePath,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 async function showOpenDialogForSender(
@@ -1244,6 +1319,7 @@ ipcMain.handle('hermes:restartApp', () => {
   app.relaunch();
   app.quit();
 });
+ipcMain.handle('hermes:removeAppBundleAndQuit', () => removeCurrentAppBundleAndQuit());
 ipcMain.handle('hermes:restartBackend', (_event, options: unknown) => {
   const targetBridgeUrl = isRecord(options) ? options.bridgeUrl : undefined;
   return restartBackendProcess(targetBridgeUrl);

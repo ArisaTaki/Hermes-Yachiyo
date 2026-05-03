@@ -40,6 +40,7 @@ declare global {
       openPath?: (path: string) => Promise<void>;
       openView?: (view: string, params?: Record<string, string>) => Promise<void>;
       quit: () => Promise<void>;
+      removeAppBundleAndQuit?: () => Promise<{ success?: boolean; appBundlePath?: string; error?: string }>;
       restartApp?: () => Promise<void>;
       restartBackend?: (options?: { bridgeUrl?: string }) => Promise<{ success?: boolean; bridgeUrl?: string; error?: string }>;
       setLauncherHitRegions?: (mode: string, payload: LauncherHitRegionPayload) => Promise<boolean>;
@@ -253,6 +254,13 @@ export async function quitApp(): Promise<void> {
     return;
   }
   window.close();
+}
+
+export async function removeAppBundleAndQuit(): Promise<{ success?: boolean; appBundlePath?: string; error?: string }> {
+  if (!window.hermesDesktop?.removeAppBundleAndQuit) {
+    throw new Error('当前环境无法自动删除应用本体');
+  }
+  return window.hermesDesktop.removeAppBundleAndQuit();
 }
 
 export async function restartApp(): Promise<void> {

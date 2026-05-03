@@ -11,6 +11,7 @@ import {
   onDesktopTerminalData,
   onDesktopTerminalExit,
   openAppView,
+  openDesktopMode,
   resizeDesktopTerminal,
   startDesktopTerminal,
   writeDesktopTerminal,
@@ -214,6 +215,7 @@ export function InstallerView() {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const terminalIdRef = useRef<string | null>(null);
   const terminalTaskRef = useRef<DesktopTerminalTask | null>(null);
+  const configPanelRef = useRef<HTMLElement | null>(null);
 
   const loadHermesConfig = useCallback(async (options: { forceFormSync?: boolean } = {}) => {
     if (hermesConfigLoadingRef.current) return null;
@@ -300,7 +302,12 @@ export function InstallerView() {
       setBusy('');
       if (task === 'hermes-setup') {
         setSetupRunning(false);
-        setSetupAttention(true);
+        setSetupAttention(!succeeded);
+        if (succeeded) {
+          setStatus('Hermes setup 已结束，正在重新检测配置状态…');
+          window.setTimeout(() => void recheckStatus(), 100);
+          return;
+        }
       }
       if (task === 'install-hermes') {
         setInstallProgress({ running: false, success: succeeded, message: terminalExitMessage(task, succeeded, payload.exitCode) });
@@ -409,6 +416,19 @@ export function InstallerView() {
     window.requestAnimationFrame(() => {
       terminalPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
+  }
+
+  function scrollToHermesConfig() {
+    window.requestAnimationFrame(() => {
+      configPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  async function enterMainWithBubble() {
+    await openAppView('main');
+    window.setTimeout(() => {
+      void openDesktopMode('bubble');
+    }, 250);
   }
 
   async function startEmbeddedTerminal(task: DesktopTerminalTask) {
@@ -630,13 +650,15 @@ export function InstallerView() {
     if (result.ready) {
       setSetupAttention(false);
       setStatus(`Hermes 已就绪${envRefreshNote(result)}`);
-      window.setTimeout(() => void openAppView('main'), 600);
+      window.setTimeout(() => void enterMainWithBubble(), 600);
     } else if (result.needs_init || latest.install_info?.status === 'installed_not_initialized') {
       setSetupAttention(false);
       setStatus(`Hermes 配置已保存，下一步初始化 Yachiyo 工作空间${envRefreshNote(result)}`);
+      scrollToHermesConfig();
     } else if (result.status === 'installed_needs_setup' || result.status === 'setup_in_progress') {
       setSetupAttention(false);
       setStatus('Hermes 配置已保存；如仍未通过检测，可使用高级终端 setup 补充配置');
+      scrollToHermesConfig();
     } else if (result.message) {
       setStatus(`检测结果：${result.status}（${result.message}）`);
     }
@@ -724,14 +746,16 @@ export function InstallerView() {
       if (result.ready) {
         setSetupAttention(false);
         setStatus(`Hermes 已就绪${envRefreshNote(result)}`);
-        window.setTimeout(() => void openAppView('main'), 600);
+        window.setTimeout(() => void enterMainWithBubble(), 600);
       } else if (result.needs_init) {
         setSetupAttention(false);
         setStatus(`Hermes 配置完成，进入工作空间初始化${envRefreshNote(result)}`);
         await loadBackupStatus();
+        scrollToHermesConfig();
       } else if (result.status === 'installed_needs_setup' || result.status === 'setup_in_progress') {
         setSetupAttention(false);
         setStatus('Hermes 尚未完成配置，请在下方模型配置向导填写并保存');
+        scrollToHermesConfig();
       } else {
         setStatus(result.message ? `检测结果：${result.status}（${result.message}）` : `检测结果：${result.status || 'unknown'}`);
       }
@@ -742,7 +766,21 @@ export function InstallerView() {
     }
   }
 
+  function shouldWarnBeforeWorkspaceInit(): boolean {
+    const provider = configForm.provider.trim() || hermesConfig?.model?.provider || '';
+    const model = configForm.model.trim() || hermesConfig?.model?.default || '';
+    const option = providerOptionById(hermesConfig, provider);
+    const apiKeyName = option?.api_key_name || hermesConfig?.api_key?.name || '';
+    const apiKeyConfigured = option?.api_key_configured ?? hermesConfig?.api_key?.configured;
+    return !provider || !model || (Boolean(apiKeyName) && !apiKeyConfigured && !configForm.api_key.trim());
+  }
+
   async function initializeWorkspace() {
+    if (shouldWarnBeforeWorkspaceInit() && !window.confirm('当前 Hermes 模型/API Key 尚未完整配置。直接初始化工作空间可能导致首次对话不可用；之后仍可在主控台补充配置。仍要继续吗？')) {
+      setStatus('已取消初始化；请先在模型配置向导补全 Provider、模型和 API Key');
+      scrollToHermesConfig();
+      return;
+    }
     setBusy('init');
     setLogLines(['开始初始化 Yachiyo 工作空间…']);
     setStatus('正在初始化工作空间…');
@@ -792,7 +830,7 @@ export function InstallerView() {
           <h1>{title}</h1>
           <p>{installerSubtitle(statusValue, installInfo)}</p>
         </div>
-        {ready ? <button type="button" onClick={() => void openAppView('main')}>进入主控台</button> : null}
+        {ready ? <button type="button" onClick={() => void enterMainWithBubble()}>进入主控台</button> : null}
       </header>
 
       <InstallerProgressBanner
@@ -857,6 +895,7 @@ export function InstallerView() {
             onRecheck={recheckStatus}
             onRefreshBackup={loadBackupStatus}
             onStartInstall={() => startEmbeddedTerminal('install-hermes')}
+            onEnterMain={enterMainWithBubble}
           />
         </article>
       </section>
@@ -865,6 +904,7 @@ export function InstallerView() {
         <InstallerHermesConfigPanel
           busy={busy}
           config={hermesConfig}
+          panelRef={configPanelRef}
           form={configForm}
           status={configStatus}
           testResult={hermesTestResult}
@@ -943,6 +983,7 @@ function InstallerActions({
   onRecheck,
   onRefreshBackup,
   onStartInstall,
+  onEnterMain,
 }: {
   backupStatus: InstallerBackupStatus | null;
   busy: string;
@@ -960,6 +1001,7 @@ function InstallerActions({
   onRecheck: () => Promise<void>;
   onRefreshBackup: () => Promise<void>;
   onStartInstall: () => Promise<void>;
+  onEnterMain: () => Promise<void>;
 }) {
   const disabled = Boolean(busy && busy !== 'install');
   const recheckDisabled = Boolean(busy && busy !== 'install');
@@ -967,7 +1009,7 @@ function InstallerActions({
   if (ready) {
     return (
       <div className="settings-action-strip">
-        <button type="button" className="primary-action" onClick={() => void openAppView('main')}>进入主控台</button>
+        <button type="button" className="primary-action" onClick={() => void onEnterMain()}>进入主控台</button>
         <button type="button" onClick={() => void onRecheck()} disabled={recheckDisabled}>重新检测</button>
       </div>
     );
@@ -1017,6 +1059,7 @@ function InstallerActions({
 function InstallerHermesConfigPanel({
   busy,
   config,
+  panelRef,
   form,
   status,
   testResult,
@@ -1028,6 +1071,7 @@ function InstallerHermesConfigPanel({
 }: {
   busy: string;
   config: HermesVisualConfig | null;
+  panelRef: RefObject<HTMLElement | null>;
   form: HermesConfigForm;
   status: string;
   testResult: HermesConnectionTestResult | null;
@@ -1045,7 +1089,7 @@ function InstallerHermesConfigPanel({
   const apiKeyConfigured = selectedProvider?.api_key_configured ?? config?.api_key?.configured;
   const notice = installerHermesConfigNotice(config, apiKeyLabel, Boolean(apiKeyConfigured), testResult);
   return (
-    <section className="panel settings-section installer-config-panel">
+    <section ref={panelRef} className="panel settings-section installer-config-panel">
       <div className="section-heading-row">
         <div>
           <h2>模型配置向导</h2>

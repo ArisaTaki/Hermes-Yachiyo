@@ -1120,7 +1120,12 @@ def test_display_mode_change_schedules_mode_switch(tmp_path, monkeypatch):
             lambda config, boot: _fake_snapshot(),
         )
 
+        live2d_dir = tmp_path / "live2d" / "demo"
+        live2d_dir.mkdir(parents=True)
+        (live2d_dir / "demo.model3.json").write_text("{}", encoding="utf-8")
+        (live2d_dir / "demo.moc3").write_text("stub", encoding="utf-8")
         config = AppConfig(display_mode="bubble")
+        config.live2d_mode.model_path = str(live2d_dir)
         api = MainWindowAPI(runtime, config)
         result = api.update_settings({"display_mode": "live2d"})
 
@@ -1130,6 +1135,29 @@ def test_display_mode_change_schedules_mode_switch(tmp_path, monkeypatch):
         assert result["effects"]["has_restart_mode"] is True
         assert result["effects"]["has_restart_app"] is False
         assert config.display_mode == "live2d"
+    finally:
+        store.close()
+
+
+def test_display_mode_change_rejects_live2d_without_resources(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    try:
+        monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+        monkeypatch.setattr(
+            "apps.shell.main_api.get_integration_snapshot",
+            lambda config, boot: _fake_snapshot(),
+        )
+
+        config = AppConfig(display_mode="bubble")
+        config.live2d_mode.model_path = str(tmp_path / "missing-live2d-model")
+        api = MainWindowAPI(runtime, config)
+        result = api.update_settings({"display_mode": "live2d"})
+
+        assert result["ok"] is False
+        assert "Live2D 资源未就绪" in result["error"]
+        assert config.display_mode == "bubble"
     finally:
         store.close()
 

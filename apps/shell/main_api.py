@@ -1037,6 +1037,14 @@ def _is_macos_prerequisite_command(cmd: str) -> bool:
     )
 
 
+def _is_gpt_sovits_service_command(cmd: str) -> bool:
+    return (
+        "Hermes-Yachiyo GPT-SoVITS 服务启动" in cmd
+        and "cd " in cmd
+        and ("api_v2.py" in cmd or "api.py" in cmd)
+    )
+
+
 def _reset_terminal_command_gate() -> None:
     global _LAST_TERMINAL_COMMAND_AT
     with _TERMINAL_COMMAND_LOCK:
@@ -1960,6 +1968,8 @@ class MainWindowAPI:
                     "trigger_probability": self._config.tts.trigger_probability,
                     "notification_prompt": self._config.tts.notification_prompt,
                     "gsv_base_url": self._config.tts.gsv_base_url,
+                    "gsv_service_workdir": self._config.tts.gsv_service_workdir,
+                    "gsv_service_command": self._config.tts.gsv_service_command,
                     "gsv_gpt_weights_path": self._config.tts.gsv_gpt_weights_path,
                     "gsv_sovits_weights_path": self._config.tts.gsv_sovits_weights_path,
                     "gsv_ref_audio_path": self._config.tts.gsv_ref_audio_path,
@@ -2054,6 +2064,8 @@ class MainWindowAPI:
                 "trigger_probability": self._config.tts.trigger_probability,
                 "notification_prompt": self._config.tts.notification_prompt,
                 "gsv_base_url": self._config.tts.gsv_base_url,
+                "gsv_service_workdir": self._config.tts.gsv_service_workdir,
+                "gsv_service_command": self._config.tts.gsv_service_command,
                 "gsv_gpt_weights_path": self._config.tts.gsv_gpt_weights_path,
                 "gsv_sovits_weights_path": self._config.tts.gsv_sovits_weights_path,
                 "gsv_ref_audio_path": self._config.tts.gsv_ref_audio_path,
@@ -2166,7 +2178,11 @@ class MainWindowAPI:
         logger.info("open_terminal_command: cmd=%r", cmd)
         if not cmd:
             return {"success": False, "error": "终端命令为空"}
-        if cmd not in _allowed_terminal_commands() and not _is_macos_prerequisite_command(cmd):
+        if (
+            cmd not in _allowed_terminal_commands()
+            and not _is_macos_prerequisite_command(cmd)
+            and not _is_gpt_sovits_service_command(cmd)
+        ):
             return {
                 "success": False,
                 "error": "不支持的 Hermes 终端命令",

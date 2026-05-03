@@ -264,6 +264,9 @@ def test_import_tts_voice_archive_returns_gpt_sovits_settings(monkeypatch, tmp_p
     settings = result["tts_settings"]
     assert settings["enabled"] is True
     assert settings["provider"] == "gpt-sovits"
+    assert settings["gsv_base_url"] == "http://127.0.0.1:9880"
+    assert settings["gsv_service_workdir"] == ""
+    assert settings["gsv_service_command"] == "python api_v2.py -a 127.0.0.1 -p 9880"
     assert settings["gsv_top_k"] == 12
     assert Path(settings["gsv_gpt_weights_path"]).is_file()
     assert Path(settings["gsv_sovits_weights_path"]).is_file()

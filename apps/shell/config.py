@@ -575,6 +575,8 @@ class TTSConfig:
     trigger_probability: float = 0.6
     notification_prompt: str = DEFAULT_TTS_NOTIFICATION_PROMPT
     gsv_base_url: str = "http://127.0.0.1:9880"
+    gsv_service_workdir: str = ""
+    gsv_service_command: str = "python api_v2.py -a 127.0.0.1 -p 9880"
     gsv_gpt_weights_path: str = ""
     gsv_sovits_weights_path: str = ""
     gsv_ref_audio_path: str = ""
@@ -971,6 +973,10 @@ def _normalize_config_values(config: AppConfig) -> None:
     config.tts.trigger_probability = _normalize_float_range(config.tts.trigger_probability, 0.0, 1.0, 0.6)
     config.tts.notification_prompt = str(config.tts.notification_prompt or DEFAULT_TTS_NOTIFICATION_PROMPT)
     config.tts.gsv_base_url = str(config.tts.gsv_base_url or "http://127.0.0.1:9880")
+    config.tts.gsv_service_workdir = str(config.tts.gsv_service_workdir or "")
+    config.tts.gsv_service_command = str(
+        config.tts.gsv_service_command or "python api_v2.py -a 127.0.0.1 -p 9880"
+    )
     config.tts.gsv_gpt_weights_path = str(config.tts.gsv_gpt_weights_path or "")
     config.tts.gsv_sovits_weights_path = str(config.tts.gsv_sovits_weights_path or "")
     config.tts.gsv_ref_audio_path = str(config.tts.gsv_ref_audio_path or "")

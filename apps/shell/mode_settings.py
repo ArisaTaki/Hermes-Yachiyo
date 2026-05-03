@@ -133,6 +133,8 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "trigger_probability": float,
         "notification_prompt": str,
         "gsv_base_url": str,
+        "gsv_service_workdir": str,
+        "gsv_service_command": str,
         "gsv_gpt_weights_path": str,
         "gsv_sovits_weights_path": str,
         "gsv_ref_audio_path": str,
@@ -263,6 +265,8 @@ def _serialize_tts(config: AppConfig) -> dict[str, Any]:
         "trigger_probability": config.tts.trigger_probability,
         "notification_prompt": config.tts.notification_prompt,
         "gsv_base_url": config.tts.gsv_base_url,
+        "gsv_service_workdir": config.tts.gsv_service_workdir,
+        "gsv_service_command": config.tts.gsv_service_command,
         "gsv_gpt_weights_path": config.tts.gsv_gpt_weights_path,
         "gsv_sovits_weights_path": config.tts.gsv_sovits_weights_path,
         "gsv_ref_audio_path": config.tts.gsv_ref_audio_path,
@@ -300,6 +304,8 @@ def _shared_settings_fields(config: AppConfig) -> dict[str, Any]:
         "tts_trigger_probability": config.tts.trigger_probability,
         "tts_notification_prompt": config.tts.notification_prompt,
         "tts_gsv_base_url": config.tts.gsv_base_url,
+        "tts_gsv_service_workdir": config.tts.gsv_service_workdir,
+        "tts_gsv_service_command": config.tts.gsv_service_command,
         "tts_gsv_gpt_weights_path": config.tts.gsv_gpt_weights_path,
         "tts_gsv_sovits_weights_path": config.tts.gsv_sovits_weights_path,
         "tts_gsv_ref_audio_path": config.tts.gsv_ref_audio_path,
@@ -515,6 +521,9 @@ def apply_settings_changes(
         validation_error = _validate_field(key, value)
         if validation_error:
             errors.append(validation_error)
+            continue
+        if key == "display_mode" and value == "live2d" and not config.live2d_mode.is_model_configured():
+            errors.append("Live2D 资源未就绪，请先导入资源包或选择有效模型目录")
             continue
         setattr(config, key, value)
         applied[key] = value

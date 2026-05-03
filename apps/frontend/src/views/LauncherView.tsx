@@ -951,7 +951,10 @@ function installLive2DRuntimeEnvShim() {
 
 async function ensureLive2DRuntimeScripts() {
   installLive2DRuntimeEnvShim();
-  if (rendererAvailable()) return;
+  if (rendererAvailable()) {
+    configurePixiForElectronLive2D();
+    return;
+  }
   if (!live2dRuntimePromise) {
     live2dRuntimePromise = loadLive2DRuntimeScripts().catch((error) => {
       live2dRuntimePromise = null;
@@ -959,6 +962,17 @@ async function ensureLive2DRuntimeScripts() {
     });
   }
   await live2dRuntimePromise;
+  configurePixiForElectronLive2D();
+}
+
+function configurePixiForElectronLive2D() {
+  const globalWindow = window as Live2DGlobalWindow;
+  const PIXI = globalWindow.PIXI;
+  if (!PIXI?.settings) return;
+  try {
+    PIXI.settings.FAIL_IF_MAJOR_PERFORMANCE_CAVEAT = false;
+    if (PIXI.ENV?.WEBGL2 !== undefined) PIXI.settings.PREFER_ENV = PIXI.ENV.WEBGL2;
+  } catch {}
 }
 
 async function loadLive2DRuntimeScripts() {
@@ -1323,8 +1337,11 @@ function playLive2DExpression(state: Live2DRendererState, name: string) {
 }
 
 function formatRendererError(error: unknown) {
-  if (error instanceof Error && error.message) return compactRendererDetail(error.message);
-  return compactRendererDetail(String(error || 'unknown error'));
+  const detail = error instanceof Error && error.message ? error.message : String(error || 'unknown error');
+  if (/checkMaxIfStatementsInShader|invalid value of ['"`]?0['"`]?/i.test(detail)) {
+    return '当前 WebGL 环境返回的 shader if 语句上限为 0，已回退静态预览。资源导入本身已完成；可先使用 Bubble，或更新 macOS/WebGL 环境后再尝试 Live2D。';
+  }
+  return compactRendererDetail(detail);
 }
 
 function compactRendererDetail(value: string, limit = 240) {

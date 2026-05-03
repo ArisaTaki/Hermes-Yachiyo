@@ -9,6 +9,8 @@ export type TtsSettings = {
   trigger_probability?: number;
   notification_prompt?: string;
   gsv_base_url?: string;
+  gsv_service_workdir?: string;
+  gsv_service_command?: string;
   gsv_gpt_weights_path?: string;
   gsv_sovits_weights_path?: string;
   gsv_ref_audio_path?: string;
@@ -43,6 +45,8 @@ export type TtsForm = {
   trigger_probability: number;
   notification_prompt: string;
   gsv_base_url: string;
+  gsv_service_workdir: string;
+  gsv_service_command: string;
   gsv_gpt_weights_path: string;
   gsv_sovits_weights_path: string;
   gsv_ref_audio_path: string;
@@ -78,6 +82,8 @@ export function emptyTtsForm(): TtsForm {
     trigger_probability: 0.6,
     notification_prompt: '主动提醒只输出适合语音播报的一句中文招呼或提醒，保持八千代人设，不要输出括号动作、舞台提示或表情描写，不要朗读长段分析、列表、代码、路径或调试信息。',
     gsv_base_url: 'http://127.0.0.1:9880',
+    gsv_service_workdir: '',
+    gsv_service_command: 'python api_v2.py -a 127.0.0.1 -p 9880',
     gsv_gpt_weights_path: '',
     gsv_sovits_weights_path: '',
     gsv_ref_audio_path: '',
@@ -139,6 +145,8 @@ export function ttsSettingsChanges(form: TtsForm): Record<string, string | boole
     'tts.max_chars': Number(form.max_chars),
     'tts.notification_prompt': form.notification_prompt,
     'tts.gsv_base_url': form.gsv_base_url,
+    'tts.gsv_service_workdir': form.gsv_service_workdir,
+    'tts.gsv_service_command': form.gsv_service_command,
     'tts.gsv_gpt_weights_path': form.gsv_gpt_weights_path,
     'tts.gsv_sovits_weights_path': form.gsv_sovits_weights_path,
     'tts.gsv_ref_audio_path': form.gsv_ref_audio_path,

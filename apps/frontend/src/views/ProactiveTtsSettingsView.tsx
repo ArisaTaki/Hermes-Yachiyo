@@ -48,6 +48,8 @@ type TtsVoiceResource = {
   default_assets_root_display?: string;
   releases_url?: string;
   help_text?: string;
+  service_help_text?: string;
+  default_service_command?: string;
 };
 
 type TtsVoiceImportResult = SettingsUpdateResult & {
@@ -236,6 +238,31 @@ export function ProactiveTtsSettingsView() {
     await openExternalUrl(url);
   }
 
+  async function openGsvServiceTerminal() {
+    if (interactionBusy) return;
+    if (!form.gsv_service_workdir.trim()) {
+      setStatus('请先填写 GPT-SoVITS 服务目录，再打开服务终端');
+      return;
+    }
+    if (!form.gsv_service_command.trim()) {
+      setStatus('请先填写 GPT-SoVITS 启动命令');
+      return;
+    }
+    setBusyAction('service');
+    setStatus('正在打开 GPT-SoVITS 服务终端...');
+    try {
+      const result = await apiPost<{ success?: boolean; error?: string }>('/ui/hermes/terminal-command', {
+        command: buildGsvServiceTerminalCommand(form),
+      });
+      if (!result.success) throw new Error(result.error || '无法打开 GPT-SoVITS 服务终端');
+      setStatus('已打开 GPT-SoVITS 服务终端；服务启动后可点击“保存并测试”验证语音链路');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '打开 GPT-SoVITS 服务终端失败');
+    } finally {
+      setBusyAction('');
+    }
+  }
+
   const provider = form.provider || 'none';
   const enabled = Boolean(form.enabled && provider !== 'none');
   const isGsvProvider = provider === 'gpt-sovits';
@@ -391,6 +418,43 @@ export function ProactiveTtsSettingsView() {
                         />
                       </label>
                     ) : null}
+                  </div>
+                  <div className="settings-resource-panel wide">
+                    <div>
+                      <strong>GPT-SoVITS 本地服务</strong>
+                      <p>{voiceResource?.service_help_text || '语音包只负责音色文件；本地 GPT-SoVITS API 服务需要单独运行。'}</p>
+                      <span>推荐端口：9880；服务启动后再执行保存并测试。</span>
+                    </div>
+                    <div className="settings-resource-actions compact-actions">
+                      <button
+                        type="button"
+                        className={busyAction === 'service' ? 'loading-button' : undefined}
+                        disabled={interactionBusy}
+                        onClick={() => void openGsvServiceTerminal()}
+                      >
+                        {busyAction === 'service' ? '打开中...' : '打开服务终端'}
+                      </button>
+                    </div>
+                    <label className="settings-field wide" htmlFor="tts-gsv-service-workdir-page">
+                      <span>GPT-SoVITS 服务目录</span>
+                      <input
+                        id="tts-gsv-service-workdir-page"
+                        value={form.gsv_service_workdir}
+                        placeholder="/Users/you/AI/GPT-SoVITS"
+                        disabled={interactionBusy}
+                        onChange={(event) => updateField('gsv_service_workdir', event.target.value)}
+                      />
+                    </label>
+                    <label className="settings-field wide" htmlFor="tts-gsv-service-command-page">
+                      <span>服务启动命令</span>
+                      <input
+                        id="tts-gsv-service-command-page"
+                        value={form.gsv_service_command}
+                        placeholder="python api_v2.py -a 127.0.0.1 -p 9880"
+                        disabled={interactionBusy}
+                        onChange={(event) => updateField('gsv_service_command', event.target.value)}
+                      />
+                    </label>
                   </div>
                   <label className="settings-field wide" htmlFor="tts-gsv-base-url-page">
                     <span>API Base URL</span>
@@ -631,4 +695,20 @@ export function ProactiveTtsSettingsView() {
 
 function ttsFromSettings(settings: SettingsData | null): TtsSettings | undefined {
   return settings?.tts || settings?.mode_settings?.live2d?.config?.tts || settings?.mode_settings?.bubble?.config?.tts;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function buildGsvServiceTerminalCommand(form: TtsForm): string {
+  const workdir = shellQuote(form.gsv_service_workdir.trim());
+  const serviceCommand = form.gsv_service_command.trim();
+  return [
+    'echo "Hermes-Yachiyo GPT-SoVITS 服务启动"',
+    `cd ${workdir}`,
+    'if [ -f .venv/bin/activate ]; then source .venv/bin/activate; fi',
+    'if [ -f venv/bin/activate ]; then source venv/bin/activate; fi',
+    serviceCommand,
+  ].join('\n');
 }
