@@ -416,6 +416,54 @@ async def test_launcher_routes_reuse_chat_bridge_and_notification_tracker(monkey
     }
 
 
+def test_launcher_tts_only_triggers_for_proactive_attention(monkeypatch):
+    spoken = []
+    config = SimpleNamespace(
+        tts=SimpleNamespace(enabled=True, provider="command", command="say {text}", max_chars=80)
+    )
+    runtime = SimpleNamespace(config=config)
+
+    class FakeTTSService:
+        def __init__(self, _config):
+            pass
+
+        def get_status(self):
+            return {"enabled": True, "provider": "command", "ok": True, "message": "idle"}
+
+        def speak_async(self, text):
+            spoken.append(text)
+            return {"enabled": True, "provider": "command", "ok": True, "scheduled": True}
+
+    monkeypatch.setattr(ui, "TTSService", FakeTTSService)
+    ui._launcher_tts_services.clear()
+    ui._launcher_last_tts_attention.clear()
+
+    idle = ui._maybe_trigger_proactive_tts(runtime, "live2d", {"has_attention": False})
+    first = ui._maybe_trigger_proactive_tts(
+        runtime,
+        "bubble",
+        {
+            "has_attention": True,
+            "task_id": "task-1",
+            "attention_text": "桌面观察提醒：先保存一下进度。",
+        },
+    )
+    duplicate = ui._maybe_trigger_proactive_tts(
+        runtime,
+        "bubble",
+        {
+            "has_attention": True,
+            "task_id": "task-1",
+            "attention_text": "桌面观察提醒：先保存一下进度。",
+        },
+    )
+
+    assert idle["message"] == "idle"
+    assert first["scheduled"] is True
+    assert duplicate["message"] == "idle"
+    assert spoken == ["桌面观察提醒：先保存一下进度。"]
+
+
 @pytest.mark.asyncio
 async def test_launcher_live2d_payload_includes_preview_and_renderer(monkeypatch):
     monkeypatch.setattr(config_mod, "find_default_live2d_model_dir", lambda *_args, **_kwargs: None)

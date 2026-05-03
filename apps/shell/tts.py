@@ -5,11 +5,16 @@ from __future__ import annotations
 import json
 import logging
 import os
+import platform
 import re
 import shlex
+import shutil
 import subprocess
+import tempfile
 import threading
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote, urljoin
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -107,7 +112,9 @@ class TTSService:
             return "TTS HTTP endpoint 未配置"
         if provider == "command" and not (self._config.command or "").strip():
             return "TTS 本地命令未配置"
-        if provider not in {"http", "command"}:
+        if provider == "gpt-sovits" and not (self._config.gsv_base_url or "").strip():
+            return "GPT-SoVITS API Base URL 未配置"
+        if provider not in {"http", "command", "gpt-sovits"}:
             return "TTS Provider 不受支持"
         return None
 
@@ -117,6 +124,8 @@ class TTSService:
                 self._run_http(text)
             elif self._config.provider == "command":
                 self._run_command(text)
+            elif self._config.provider == "gpt-sovits":
+                self._run_gpt_sovits(text)
             self._last_status = {
                 "enabled": True,
                 "provider": self._config.provider,
@@ -184,3 +193,154 @@ class TTSService:
         if result.returncode != 0:
             detail = (result.stderr or result.stdout or "").strip()[:200]
             raise RuntimeError(f"TTS 命令退出码 {result.returncode}: {detail}")
+
+    def _run_gpt_sovits(self, text: str) -> None:
+        base_url = self._gsv_base_url()
+        self._maybe_set_gsv_weights(base_url)
+        payload = {
+            "text": text,
+            "text_lang": self._config.gsv_text_language or "zh",
+            "ref_audio_path": self._config.gsv_ref_audio_path or "",
+            "prompt_text": self._config.gsv_ref_audio_text or "",
+            "prompt_lang": self._config.gsv_ref_audio_language or "ja",
+            "top_k": self._config.gsv_top_k,
+            "top_p": self._config.gsv_top_p,
+            "temperature": self._config.gsv_temperature,
+            "text_split_method": self._config.gsv_text_split_method or "cut1",
+            "batch_size": self._config.gsv_batch_size,
+            "batch_threshold": self._config.gsv_batch_threshold,
+            "split_bucket": bool(self._config.gsv_split_bucket),
+            "speed_factor": self._config.gsv_speed_factor,
+            "fragment_interval": self._config.gsv_fragment_interval,
+            "streaming_mode": bool(self._config.gsv_streaming_mode),
+            "media_type": self._config.gsv_media_type or "wav",
+            "parallel_infer": bool(self._config.gsv_parallel_infer),
+            "repetition_penalty": self._config.gsv_repetition_penalty,
+            "seed": self._config.gsv_seed,
+        }
+        aux_path = (self._config.gsv_aux_ref_audio_path or "").strip()
+        if aux_path:
+            payload["aux_ref_audio_paths"] = [aux_path]
+
+        endpoint = self._gsv_tts_endpoint(base_url)
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = Request(
+            endpoint,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self._timeout()) as response:
+                content_type = _response_header(response, "Content-Type")
+                body = response.read()
+        except URLError as exc:
+            raise RuntimeError(exc.reason if hasattr(exc, "reason") else str(exc)) from exc
+
+        self._handle_gsv_response(body, content_type)
+
+    def _gsv_base_url(self) -> str:
+        value = (self._config.gsv_base_url or "").strip().rstrip("/")
+        return value or "http://127.0.0.1:9880"
+
+    @staticmethod
+    def _gsv_tts_endpoint(base_url: str) -> str:
+        if base_url.rstrip("/").endswith("/tts"):
+            return base_url
+        return urljoin(base_url + "/", "tts")
+
+    def _maybe_set_gsv_weights(self, base_url: str) -> None:
+        mappings = (
+            ("gsv_gpt_weights_path", "set_gpt_weights", "weights_path"),
+            ("gsv_sovits_weights_path", "set_sovits_weights", "weights_path"),
+        )
+        for attr, route, parameter in mappings:
+            value = (getattr(self._config, attr, "") or "").strip()
+            if not value:
+                continue
+            url = urljoin(base_url + "/", f"{route}?{parameter}={quote(value)}")
+            request = Request(url, method="GET")
+            try:
+                with urlopen(request, timeout=self._timeout()) as response:
+                    response.read()
+            except URLError as exc:
+                raise RuntimeError(
+                    exc.reason if hasattr(exc, "reason") else f"{route} 请求失败: {exc}"
+                ) from exc
+
+    def _handle_gsv_response(self, body: bytes, content_type: str) -> None:
+        if not body:
+            raise RuntimeError("GPT-SoVITS 返回空音频")
+        lowered = content_type.lower()
+        if "application/json" in lowered or body[:1] in {b"{", b"["}:
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except Exception as exc:
+                raise RuntimeError("GPT-SoVITS 返回 JSON 解析失败") from exc
+            audio_path = str(payload.get("audio_path") or payload.get("file_path") or "").strip()
+            if audio_path:
+                self._play_audio_file(audio_path)
+                return
+            if payload.get("error") or payload.get("message"):
+                raise RuntimeError(str(payload.get("error") or payload.get("message")))
+            raise RuntimeError("GPT-SoVITS 未返回音频路径或音频内容")
+
+        suffix = "." + (self._config.gsv_media_type or "wav").strip().lstrip(".")
+        with tempfile.NamedTemporaryFile(prefix="hermes-yachiyo-gsv-", suffix=suffix, delete=False) as tmp:
+            tmp.write(body)
+            audio_path = tmp.name
+        try:
+            self._play_audio_file(audio_path)
+        finally:
+            try:
+                Path(audio_path).unlink(missing_ok=True)
+            except OSError:
+                logger.debug("清理 GPT-SoVITS 临时音频失败: %s", audio_path, exc_info=True)
+
+    def _play_audio_file(self, audio_path: str) -> None:
+        path = str(Path(audio_path).expanduser())
+        if not Path(path).exists():
+            raise RuntimeError(f"TTS 音频文件不存在: {path}")
+        system = platform.system().lower()
+        if system == "darwin":
+            argv = ["afplay", path]
+        elif system == "windows":
+            argv = [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                (
+                    "$player = New-Object System.Media.SoundPlayer "
+                    f"{json.dumps(path)}; $player.PlaySync()"
+                ),
+            ]
+        else:
+            player = (
+                shutil.which("paplay")
+                or shutil.which("aplay")
+                or shutil.which("ffplay")
+            )
+            if not player:
+                raise RuntimeError("未找到可用音频播放器（paplay/aplay/ffplay）")
+            argv = [player, "-nodisp", "-autoexit", path] if Path(player).name == "ffplay" else [player, path]
+        result = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=self._timeout(),
+            check=False,
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout or "").strip()[:200]
+            raise RuntimeError(f"TTS 音频播放失败: {detail}")
+
+
+def _response_header(response: Any, name: str) -> str:
+    getter = getattr(response, "getheader", None)
+    if callable(getter):
+        return str(getter(name, "") or "")
+    headers = getattr(response, "headers", None)
+    if headers is not None:
+        value = headers.get(name, "")
+        return str(value or "")
+    return ""

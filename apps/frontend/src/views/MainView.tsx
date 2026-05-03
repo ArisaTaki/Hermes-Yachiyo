@@ -161,14 +161,47 @@ type TtsSettings = {
   timeout_seconds?: number;
   max_chars?: number;
   notification_prompt?: string;
+  gsv_base_url?: string;
+  gsv_gpt_weights_path?: string;
+  gsv_sovits_weights_path?: string;
+  gsv_ref_audio_path?: string;
+  gsv_ref_audio_text?: string;
+  gsv_ref_audio_language?: string;
+  gsv_aux_ref_audio_path?: string;
+  gsv_text_language?: string;
+  gsv_top_k?: number;
+  gsv_top_p?: number;
+  gsv_temperature?: number;
+  gsv_text_split_method?: string;
+  gsv_batch_size?: number;
+  gsv_batch_threshold?: number;
+  gsv_split_bucket?: boolean;
+  gsv_speed_factor?: number;
+  gsv_fragment_interval?: number;
+  gsv_streaming_mode?: boolean;
+  gsv_seed?: number;
+  gsv_parallel_infer?: boolean;
+  gsv_repetition_penalty?: number;
+  gsv_media_type?: string;
 };
 
 type SettingsData = {
   tts?: TtsSettings;
   mode_settings?: {
-    live2d?: { config?: { tts?: TtsSettings } };
-    bubble?: { config?: { tts?: TtsSettings } };
+    live2d?: { config?: ModeProactiveSettings & { tts?: TtsSettings } };
+    bubble?: { config?: ModeProactiveSettings & { tts?: TtsSettings } };
   };
+};
+
+type ModeProactiveSettings = {
+  proactive_enabled?: boolean;
+  proactive_desktop_watch_enabled?: boolean;
+  proactive_interval_seconds?: number;
+};
+
+type ProactiveForm = {
+  enabled: boolean;
+  interval_seconds: number;
 };
 
 type TtsForm = {
@@ -180,6 +213,28 @@ type TtsForm = {
   timeout_seconds: number;
   max_chars: number;
   notification_prompt: string;
+  gsv_base_url: string;
+  gsv_gpt_weights_path: string;
+  gsv_sovits_weights_path: string;
+  gsv_ref_audio_path: string;
+  gsv_ref_audio_text: string;
+  gsv_ref_audio_language: string;
+  gsv_aux_ref_audio_path: string;
+  gsv_text_language: string;
+  gsv_top_k: number;
+  gsv_top_p: number;
+  gsv_temperature: number;
+  gsv_text_split_method: string;
+  gsv_batch_size: number;
+  gsv_batch_threshold: number;
+  gsv_split_bucket: boolean;
+  gsv_speed_factor: number;
+  gsv_fragment_interval: number;
+  gsv_streaming_mode: boolean;
+  gsv_seed: number;
+  gsv_parallel_infer: boolean;
+  gsv_repetition_penalty: number;
+  gsv_media_type: string;
 };
 
 type DashboardData = {
@@ -223,9 +278,11 @@ export function MainView() {
   const [hermesImageTestResult, setHermesImageTestResult] = useState<HermesImageConnectionTestResult | null>(null);
   const [hermesConfig, setHermesConfig] = useState<HermesVisualConfig | null>(null);
   const [configForm, setConfigForm] = useState<HermesConfigForm>(emptyHermesConfigForm());
+  const [proactiveForm, setProactiveForm] = useState<ProactiveForm>(emptyProactiveForm());
   const [ttsForm, setTtsForm] = useState<TtsForm>(emptyTtsForm());
   const busyActionRef = useRef('');
   const configFormDirtyRef = useRef(false);
+  const proactiveFormDirtyRef = useRef(false);
   const ttsFormDirtyRef = useRef(false);
   const hermesConfigLoadedRef = useRef(false);
   const hermesConfigLoadingRef = useRef(false);
@@ -244,7 +301,7 @@ export function MainView() {
           setData(payload);
           setError('');
           if (!hermesConfigLoadedRef.current) void loadHermesConfig();
-          if (!ttsFormDirtyRef.current) void loadSettings();
+          if (!ttsFormDirtyRef.current || !proactiveFormDirtyRef.current) void loadSettings();
         }
       } catch (err) {
         if (!disposed) setError(err instanceof Error ? err.message : '读取主控台失败');
@@ -313,6 +370,10 @@ export function MainView() {
     try {
       const result = await apiGet<SettingsData>('/ui/settings');
       const tts = ttsFromSettings(result);
+      const proactive = proactiveFromSettings(result);
+      if (mountedRef.current && (options.forceFormSync || !proactiveFormDirtyRef.current)) {
+        setProactiveForm(formFromProactiveSettings(proactive));
+      }
       if (mountedRef.current && (options.forceFormSync || !ttsFormDirtyRef.current)) {
         setTtsForm(formFromTtsSettings(tts));
       }
@@ -398,6 +459,12 @@ export function MainView() {
     if (actionStatus && /TTS|播报/.test(actionStatus)) setActionStatus('');
   }
 
+  function updateProactiveField(field: keyof ProactiveForm, value: boolean | number) {
+    proactiveFormDirtyRef.current = true;
+    setProactiveForm((current) => ({ ...current, [field]: value }));
+    if (actionStatus && /主动关怀|桌面观察/.test(actionStatus)) setActionStatus('');
+  }
+
   async function saveAndTestHermesConfig() {
     const action = 'config-save-test';
     if (!beginHermesAction(action)) return;
@@ -445,9 +512,32 @@ export function MainView() {
           'tts.provider': ttsForm.provider,
           'tts.endpoint': ttsForm.endpoint,
           'tts.command': ttsForm.command,
+          'tts.voice': ttsForm.voice,
           'tts.timeout_seconds': Number(ttsForm.timeout_seconds),
           'tts.max_chars': Number(ttsForm.max_chars),
           'tts.notification_prompt': ttsForm.notification_prompt,
+          'tts.gsv_base_url': ttsForm.gsv_base_url,
+          'tts.gsv_gpt_weights_path': ttsForm.gsv_gpt_weights_path,
+          'tts.gsv_sovits_weights_path': ttsForm.gsv_sovits_weights_path,
+          'tts.gsv_ref_audio_path': ttsForm.gsv_ref_audio_path,
+          'tts.gsv_ref_audio_text': ttsForm.gsv_ref_audio_text,
+          'tts.gsv_ref_audio_language': ttsForm.gsv_ref_audio_language,
+          'tts.gsv_aux_ref_audio_path': ttsForm.gsv_aux_ref_audio_path,
+          'tts.gsv_text_language': ttsForm.gsv_text_language,
+          'tts.gsv_top_k': Number(ttsForm.gsv_top_k),
+          'tts.gsv_top_p': Number(ttsForm.gsv_top_p),
+          'tts.gsv_temperature': Number(ttsForm.gsv_temperature),
+          'tts.gsv_text_split_method': ttsForm.gsv_text_split_method,
+          'tts.gsv_batch_size': Number(ttsForm.gsv_batch_size),
+          'tts.gsv_batch_threshold': Number(ttsForm.gsv_batch_threshold),
+          'tts.gsv_split_bucket': Boolean(ttsForm.gsv_split_bucket),
+          'tts.gsv_speed_factor': Number(ttsForm.gsv_speed_factor),
+          'tts.gsv_fragment_interval': Number(ttsForm.gsv_fragment_interval),
+          'tts.gsv_streaming_mode': Boolean(ttsForm.gsv_streaming_mode),
+          'tts.gsv_seed': Number(ttsForm.gsv_seed),
+          'tts.gsv_parallel_infer': Boolean(ttsForm.gsv_parallel_infer),
+          'tts.gsv_repetition_penalty': Number(ttsForm.gsv_repetition_penalty),
+          'tts.gsv_media_type': ttsForm.gsv_media_type,
         },
       });
       if (result.ok === false) throw new Error(result.error || '保存 TTS 设置失败');
@@ -460,6 +550,38 @@ export function MainView() {
       setActionStatus('TTS 播报设置已保存');
     } catch (err) {
       setActionStatus(err instanceof Error ? err.message : '保存 TTS 设置失败');
+    } finally {
+      finishHermesAction(action);
+    }
+  }
+
+  async function saveProactiveSettings() {
+    const action = 'proactive-save';
+    if (!beginHermesAction(action)) return;
+    setActionStatus('正在保存主动关怀设置...');
+    const enabled = Boolean(proactiveForm.enabled);
+    const interval = Number(proactiveForm.interval_seconds);
+    try {
+      const result = await apiPost<{ ok?: boolean; error?: string; app_state?: SettingsData }>('/ui/settings', {
+        changes: {
+          'bubble_mode.proactive_enabled': enabled,
+          'bubble_mode.proactive_desktop_watch_enabled': enabled,
+          'bubble_mode.proactive_interval_seconds': interval,
+          'live2d_mode.proactive_enabled': enabled,
+          'live2d_mode.proactive_desktop_watch_enabled': enabled,
+          'live2d_mode.proactive_interval_seconds': interval,
+        },
+      });
+      if (result.ok === false) throw new Error(result.error || '保存主动关怀设置失败');
+      proactiveFormDirtyRef.current = false;
+      if (result.app_state) {
+        setProactiveForm(formFromProactiveSettings(proactiveFromSettings(result.app_state)));
+      } else {
+        await loadSettings({ forceFormSync: true });
+      }
+      setActionStatus('主动关怀设置已保存');
+    } catch (err) {
+      setActionStatus(err instanceof Error ? err.message : '保存主动关怀设置失败');
     } finally {
       finishHermesAction(action);
     }
@@ -664,12 +786,15 @@ export function MainView() {
               busyAction={busyAction}
               testResult={hermesTestResult}
               imageTestResult={hermesImageTestResult}
+              proactiveForm={proactiveForm}
               ttsForm={ttsForm}
               onConfigChange={updateHermesConfigField}
+              onProactiveChange={updateProactiveField}
               onTtsChange={updateTtsField}
               onRecheck={recheckHermes}
               onSaveConfig={saveAndTestHermesConfig}
               onSaveImageConfig={saveAndTestHermesImageConnection}
+              onSaveProactive={saveProactiveSettings}
               onSaveTts={saveTtsSettings}
             />
           </article>
@@ -767,6 +892,60 @@ function emptyTtsForm(): TtsForm {
     timeout_seconds: 20,
     max_chars: 80,
     notification_prompt: '主动提醒只输出适合语音播报的一句中文招呼或提醒，保持八千代人设，不要朗读长段分析、列表、代码、路径或调试信息。',
+    gsv_base_url: 'http://127.0.0.1:9880',
+    gsv_gpt_weights_path: '',
+    gsv_sovits_weights_path: '',
+    gsv_ref_audio_path: '',
+    gsv_ref_audio_text: '',
+    gsv_ref_audio_language: 'ja',
+    gsv_aux_ref_audio_path: '',
+    gsv_text_language: 'zh',
+    gsv_top_k: 15,
+    gsv_top_p: 1,
+    gsv_temperature: 1,
+    gsv_text_split_method: 'cut1',
+    gsv_batch_size: 1,
+    gsv_batch_threshold: 0.75,
+    gsv_split_bucket: true,
+    gsv_speed_factor: 1,
+    gsv_fragment_interval: 0.3,
+    gsv_streaming_mode: false,
+    gsv_seed: -1,
+    gsv_parallel_infer: false,
+    gsv_repetition_penalty: 1.35,
+    gsv_media_type: 'wav',
+  };
+}
+
+function emptyProactiveForm(): ProactiveForm {
+  return {
+    enabled: false,
+    interval_seconds: 300,
+  };
+}
+
+function proactiveFromSettings(settings: SettingsData | null): ModeProactiveSettings | undefined {
+  const bubble = settings?.mode_settings?.bubble?.config;
+  const live2d = settings?.mode_settings?.live2d?.config;
+  if (!bubble && !live2d) return undefined;
+  return {
+    proactive_enabled: Boolean(bubble?.proactive_enabled || live2d?.proactive_enabled),
+    proactive_desktop_watch_enabled: Boolean(
+      bubble?.proactive_desktop_watch_enabled || live2d?.proactive_desktop_watch_enabled,
+    ),
+    proactive_interval_seconds: Number(
+      live2d?.proactive_interval_seconds
+      || bubble?.proactive_interval_seconds
+      || 300,
+    ),
+  };
+}
+
+function formFromProactiveSettings(settings: ModeProactiveSettings | undefined): ProactiveForm {
+  const enabled = Boolean(settings?.proactive_enabled && settings?.proactive_desktop_watch_enabled);
+  return {
+    enabled,
+    interval_seconds: Number(settings?.proactive_interval_seconds || 300),
   };
 }
 
@@ -782,6 +961,19 @@ function formFromTtsSettings(settings: TtsSettings | undefined): TtsForm {
     provider: settings?.provider || 'none',
     timeout_seconds: Number(settings?.timeout_seconds || 20),
     max_chars: Number(settings?.max_chars || 80),
+    gsv_top_k: Number(settings?.gsv_top_k || 15),
+    gsv_top_p: Number(settings?.gsv_top_p ?? 1),
+    gsv_temperature: Number(settings?.gsv_temperature ?? 1),
+    gsv_batch_size: Number(settings?.gsv_batch_size || 1),
+    gsv_batch_threshold: Number(settings?.gsv_batch_threshold ?? 0.75),
+    gsv_split_bucket: settings?.gsv_split_bucket !== false,
+    gsv_speed_factor: Number(settings?.gsv_speed_factor || 1),
+    gsv_fragment_interval: Number(settings?.gsv_fragment_interval ?? 0.3),
+    gsv_streaming_mode: Boolean(settings?.gsv_streaming_mode),
+    gsv_seed: Number(settings?.gsv_seed ?? -1),
+    gsv_parallel_infer: Boolean(settings?.gsv_parallel_infer),
+    gsv_repetition_penalty: Number(settings?.gsv_repetition_penalty ?? 1.35),
+    gsv_media_type: settings?.gsv_media_type || 'wav',
   };
 }
 
@@ -1126,12 +1318,15 @@ function HermesConfigCenter({
   busyAction,
   testResult,
   imageTestResult,
+  proactiveForm,
   ttsForm,
   onConfigChange,
+  onProactiveChange,
   onTtsChange,
   onRecheck,
   onSaveConfig,
   onSaveImageConfig,
+  onSaveProactive,
   onSaveTts,
 }: {
   hermes?: DashboardData['hermes'];
@@ -1140,12 +1335,15 @@ function HermesConfigCenter({
   busyAction: string;
   testResult: HermesConnectionTestResult | null;
   imageTestResult: HermesImageConnectionTestResult | null;
+  proactiveForm: ProactiveForm;
   ttsForm: TtsForm;
   onConfigChange: (field: keyof HermesConfigForm, value: string) => void;
+  onProactiveChange: (field: keyof ProactiveForm, value: boolean | number) => void;
   onTtsChange: (field: keyof TtsForm, value: string | boolean | number) => void;
   onRecheck: () => Promise<void>;
   onSaveConfig: () => Promise<void>;
   onSaveImageConfig: () => Promise<void>;
+  onSaveProactive: () => Promise<void>;
   onSaveTts: () => Promise<void>;
 }) {
   const busy = Boolean(busyAction);
@@ -1172,6 +1370,7 @@ function HermesConfigCenter({
   const usesSeparateVision = imageInputMode === 'text';
   const ttsProvider = ttsForm.provider || 'none';
   const ttsEnabled = ttsProvider !== 'none';
+  const isGsvProvider = ttsProvider === 'gpt-sovits';
   const imageSaveTestDisabled = busy || !hermes?.command_exists;
   return (
     <div className="hermes-config-center dashboard-hermes-center">
@@ -1404,15 +1603,60 @@ function HermesConfigCenter({
           className="hermes-visual-config capability-config-card"
           onSubmit={(event) => {
             event.preventDefault();
+            void onSaveProactive();
+          }}
+        >
+          <div className="hermes-subsection-title">
+            <strong>主动关怀</strong>
+            <span>{proactiveForm.enabled ? '已启用' : '未启用'}</span>
+          </div>
+          <p className="capability-note">
+            主动关怀会定期读取桌面截图并用视觉模型判断是否需要搭话；Bubble 和 Live2D 共用这一套设置。
+          </p>
+          <div className="hermes-config-form-grid compact">
+            <label className="settings-check wide" htmlFor="proactive-enabled-main">
+              <input
+                id="proactive-enabled-main"
+                type="checkbox"
+                checked={proactiveForm.enabled}
+                disabled={busy}
+                onChange={(event) => onProactiveChange('enabled', event.target.checked)}
+              />
+              <span>启用主动桌面观察</span>
+            </label>
+            <label className="settings-field" htmlFor="proactive-interval-main">
+              <span>观察间隔秒</span>
+              <input
+                id="proactive-interval-main"
+                type="number"
+                min={60}
+                max={3600}
+                value={proactiveForm.interval_seconds}
+                disabled={busy || !proactiveForm.enabled}
+                onChange={(event) => onProactiveChange('interval_seconds', Number(event.target.value))}
+              />
+            </label>
+          </div>
+          <div className="hermes-config-footer">
+            <span>{proactiveForm.enabled ? '保存后会同步到 Bubble 和 Live2D。' : '关闭后不会创建主动桌面观察任务。'}</span>
+            <button type="submit" className="primary-action" disabled={busy}>
+              {busyAction === 'proactive-save' ? '保存中...' : '保存主动关怀设置'}
+            </button>
+          </div>
+        </form>
+        <form
+          className="hermes-visual-config capability-config-card"
+          onSubmit={(event) => {
+            event.preventDefault();
             void onSaveTts();
           }}
         >
           <div className="hermes-subsection-title">
-            <strong>TTS 播报链路</strong>
+            <strong>主动关怀 TTS</strong>
             <span>{ttsEnabled ? '已启用' : '未启用'}</span>
           </div>
           <p className="capability-note">
-            Live2D 收到新回复时只播报短提醒；主动桌面观察也会按这里的提示词生成适合语音的短句。
+            仅在主动桌面观察产生关怀提醒时播报；普通聊天回复不会自动播报。
           </p>
           <div className="hermes-config-form-grid compact">
             <label className="settings-field wide" htmlFor="tts-provider-main">
@@ -1424,6 +1668,7 @@ function HermesConfigCenter({
                 onChange={(event) => onTtsChange('provider', event.target.value)}
               >
                 <option value="none">none（关闭）</option>
+                <option value="gpt-sovits">GPT-SoVITS 本地服务</option>
                 <option value="http">HTTP POST</option>
                 <option value="command">本地命令</option>
               </select>
@@ -1434,28 +1679,204 @@ function HermesConfigCenter({
               </p>
             ) : null}
             {ttsProvider === 'http' ? (
-              <label className="settings-field wide" htmlFor="tts-endpoint-main">
-                <span>HTTP Endpoint</span>
-                <input
-                  id="tts-endpoint-main"
-                  value={ttsForm.endpoint}
-                  placeholder="http://127.0.0.1:9000/tts"
-                  disabled={busy}
-                  onChange={(event) => onTtsChange('endpoint', event.target.value)}
-                />
-              </label>
+              <>
+                <label className="settings-field wide" htmlFor="tts-endpoint-main">
+                  <span>HTTP Endpoint</span>
+                  <input
+                    id="tts-endpoint-main"
+                    value={ttsForm.endpoint}
+                    placeholder="http://127.0.0.1:9000/tts"
+                    disabled={busy}
+                    onChange={(event) => onTtsChange('endpoint', event.target.value)}
+                  />
+                </label>
+                <label className="settings-field" htmlFor="tts-voice-main">
+                  <span>音色</span>
+                  <input
+                    id="tts-voice-main"
+                    value={ttsForm.voice}
+                    placeholder="可选"
+                    disabled={busy}
+                    onChange={(event) => onTtsChange('voice', event.target.value)}
+                  />
+                </label>
+              </>
             ) : null}
             {ttsProvider === 'command' ? (
-              <label className="settings-field wide" htmlFor="tts-command-main">
-                <span>本地命令</span>
-                <input
-                  id="tts-command-main"
-                  value={ttsForm.command}
-                  placeholder="say {text}"
-                  disabled={busy}
-                  onChange={(event) => onTtsChange('command', event.target.value)}
-                />
-              </label>
+              <>
+                <label className="settings-field wide" htmlFor="tts-command-main">
+                  <span>本地命令</span>
+                  <input
+                    id="tts-command-main"
+                    value={ttsForm.command}
+                    placeholder="say {text}"
+                    disabled={busy}
+                    onChange={(event) => onTtsChange('command', event.target.value)}
+                  />
+                </label>
+                <label className="settings-field" htmlFor="tts-command-voice-main">
+                  <span>音色</span>
+                  <input
+                    id="tts-command-voice-main"
+                    value={ttsForm.voice}
+                    placeholder="{voice}"
+                    disabled={busy}
+                    onChange={(event) => onTtsChange('voice', event.target.value)}
+                  />
+                </label>
+              </>
+            ) : null}
+            {isGsvProvider ? (
+              <>
+                <label className="settings-field wide" htmlFor="tts-gsv-base-url-main">
+                  <span>API Base URL</span>
+                  <input
+                    id="tts-gsv-base-url-main"
+                    value={ttsForm.gsv_base_url}
+                    placeholder="http://127.0.0.1:9880"
+                    disabled={busy}
+                    onChange={(event) => onTtsChange('gsv_base_url', event.target.value)}
+                  />
+                </label>
+                <label className="settings-field wide" htmlFor="tts-gsv-gpt-weights-main">
+                  <span>GPT 模型文件路径</span>
+                  <input
+                    id="tts-gsv-gpt-weights-main"
+                    value={ttsForm.gsv_gpt_weights_path}
+                    placeholder="/Users/.../GPT_weights_v4/yachiyo.ckpt"
+                    disabled={busy}
+                    onChange={(event) => onTtsChange('gsv_gpt_weights_path', event.target.value)}
+                  />
+                </label>
+                <label className="settings-field wide" htmlFor="tts-gsv-sovits-weights-main">
+                  <span>SoVITS 模型文件路径</span>
+                  <input
+                    id="tts-gsv-sovits-weights-main"
+                    value={ttsForm.gsv_sovits_weights_path}
+                    placeholder="/Users/.../SoVITS_weights_v4/yachiyo.pth"
+                    disabled={busy}
+                    onChange={(event) => onTtsChange('gsv_sovits_weights_path', event.target.value)}
+                  />
+                </label>
+                <label className="settings-field wide" htmlFor="tts-gsv-ref-audio-main">
+                  <span>参考音频文件路径</span>
+                  <input
+                    id="tts-gsv-ref-audio-main"
+                    value={ttsForm.gsv_ref_audio_path}
+                    placeholder="/Users/.../yachiyo_ref.wav"
+                    disabled={busy}
+                    onChange={(event) => onTtsChange('gsv_ref_audio_path', event.target.value)}
+                  />
+                </label>
+                <label className="settings-field wide" htmlFor="tts-gsv-ref-text-main">
+                  <span>参考音频文本</span>
+                  <input
+                    id="tts-gsv-ref-text-main"
+                    value={ttsForm.gsv_ref_audio_text}
+                    placeholder="参考音频中说出的文本"
+                    disabled={busy}
+                    onChange={(event) => onTtsChange('gsv_ref_audio_text', event.target.value)}
+                  />
+                </label>
+                <label className="settings-field" htmlFor="tts-gsv-ref-lang-main">
+                  <span>参考文本语言</span>
+                  <input
+                    id="tts-gsv-ref-lang-main"
+                    value={ttsForm.gsv_ref_audio_language}
+                    placeholder="ja"
+                    disabled={busy}
+                    onChange={(event) => onTtsChange('gsv_ref_audio_language', event.target.value)}
+                  />
+                </label>
+                <label className="settings-field" htmlFor="tts-gsv-text-lang-main">
+                  <span>播报文本语言</span>
+                  <input
+                    id="tts-gsv-text-lang-main"
+                    value={ttsForm.gsv_text_language}
+                    placeholder="zh"
+                    disabled={busy}
+                    onChange={(event) => onTtsChange('gsv_text_language', event.target.value)}
+                  />
+                </label>
+                <label className="settings-field wide" htmlFor="tts-gsv-aux-ref-main">
+                  <span>辅助参考音频路径</span>
+                  <input
+                    id="tts-gsv-aux-ref-main"
+                    value={ttsForm.gsv_aux_ref_audio_path}
+                    placeholder="可选"
+                    disabled={busy}
+                    onChange={(event) => onTtsChange('gsv_aux_ref_audio_path', event.target.value)}
+                  />
+                </label>
+                <label className="settings-field" htmlFor="tts-gsv-top-k-main">
+                  <span>多样性 Top K</span>
+                  <input id="tts-gsv-top-k-main" type="number" min={1} max={100} value={ttsForm.gsv_top_k} disabled={busy} onChange={(event) => onTtsChange('gsv_top_k', Number(event.target.value))} />
+                </label>
+                <label className="settings-field" htmlFor="tts-gsv-top-p-main">
+                  <span>核采样阈值</span>
+                  <input id="tts-gsv-top-p-main" type="number" min={0} max={2} step="0.01" value={ttsForm.gsv_top_p} disabled={busy} onChange={(event) => onTtsChange('gsv_top_p', Number(event.target.value))} />
+                </label>
+                <label className="settings-field" htmlFor="tts-gsv-temperature-main">
+                  <span>随机性</span>
+                  <input id="tts-gsv-temperature-main" type="number" min={0} max={2} step="0.01" value={ttsForm.gsv_temperature} disabled={busy} onChange={(event) => onTtsChange('gsv_temperature', Number(event.target.value))} />
+                </label>
+                <label className="settings-field" htmlFor="tts-gsv-cut-main">
+                  <span>切分文本方法</span>
+                  <select id="tts-gsv-cut-main" value={ttsForm.gsv_text_split_method} disabled={busy} onChange={(event) => onTtsChange('gsv_text_split_method', event.target.value)}>
+                    <option value="cut0">cut0 不切分</option>
+                    <option value="cut1">cut1 四句一切</option>
+                    <option value="cut2">cut2 50字一切</option>
+                    <option value="cut3">cut3 中文句号</option>
+                    <option value="cut4">cut4 英文句号</option>
+                    <option value="cut5">cut5 标点符号</option>
+                  </select>
+                </label>
+                <label className="settings-field" htmlFor="tts-gsv-batch-size-main">
+                  <span>批处理大小</span>
+                  <input id="tts-gsv-batch-size-main" type="number" min={1} max={64} value={ttsForm.gsv_batch_size} disabled={busy} onChange={(event) => onTtsChange('gsv_batch_size', Number(event.target.value))} />
+                </label>
+                <label className="settings-field" htmlFor="tts-gsv-batch-threshold-main">
+                  <span>批处理阈值</span>
+                  <input id="tts-gsv-batch-threshold-main" type="number" min={0} max={1} step="0.01" value={ttsForm.gsv_batch_threshold} disabled={busy} onChange={(event) => onTtsChange('gsv_batch_threshold', Number(event.target.value))} />
+                </label>
+                <label className="settings-check wide" htmlFor="tts-gsv-split-bucket-main">
+                  <input id="tts-gsv-split-bucket-main" type="checkbox" checked={ttsForm.gsv_split_bucket} disabled={busy} onChange={(event) => onTtsChange('gsv_split_bucket', event.target.checked)} />
+                  <span>将文本分到桶中处理</span>
+                </label>
+                <label className="settings-field" htmlFor="tts-gsv-speed-main">
+                  <span>语音播放速度</span>
+                  <input id="tts-gsv-speed-main" type="number" min={0.25} max={4} step="0.05" value={ttsForm.gsv_speed_factor} disabled={busy} onChange={(event) => onTtsChange('gsv_speed_factor', Number(event.target.value))} />
+                </label>
+                <label className="settings-field" htmlFor="tts-gsv-fragment-main">
+                  <span>片段间隔秒</span>
+                  <input id="tts-gsv-fragment-main" type="number" min={0} max={10} step="0.1" value={ttsForm.gsv_fragment_interval} disabled={busy} onChange={(event) => onTtsChange('gsv_fragment_interval', Number(event.target.value))} />
+                </label>
+                <label className="settings-check wide" htmlFor="tts-gsv-stream-main">
+                  <input id="tts-gsv-stream-main" type="checkbox" checked={ttsForm.gsv_streaming_mode} disabled={busy} onChange={(event) => onTtsChange('gsv_streaming_mode', event.target.checked)} />
+                  <span>启用流模式</span>
+                </label>
+                <label className="settings-field" htmlFor="tts-gsv-seed-main">
+                  <span>随机种子</span>
+                  <input id="tts-gsv-seed-main" type="number" min={-1} value={ttsForm.gsv_seed} disabled={busy} onChange={(event) => onTtsChange('gsv_seed', Number(event.target.value))} />
+                </label>
+                <label className="settings-check wide" htmlFor="tts-gsv-parallel-main">
+                  <input id="tts-gsv-parallel-main" type="checkbox" checked={ttsForm.gsv_parallel_infer} disabled={busy} onChange={(event) => onTtsChange('gsv_parallel_infer', event.target.checked)} />
+                  <span>并行执行推理</span>
+                </label>
+                <label className="settings-field" htmlFor="tts-gsv-repetition-main">
+                  <span>重复惩罚因子</span>
+                  <input id="tts-gsv-repetition-main" type="number" min={0.1} max={5} step="0.01" value={ttsForm.gsv_repetition_penalty} disabled={busy} onChange={(event) => onTtsChange('gsv_repetition_penalty', Number(event.target.value))} />
+                </label>
+                <label className="settings-field" htmlFor="tts-gsv-media-main">
+                  <span>输出媒体类型</span>
+                  <select id="tts-gsv-media-main" value={ttsForm.gsv_media_type} disabled={busy} onChange={(event) => onTtsChange('gsv_media_type', event.target.value)}>
+                    <option value="wav">wav</option>
+                    <option value="mp3">mp3</option>
+                    <option value="ogg">ogg</option>
+                    <option value="flac">flac</option>
+                  </select>
+                </label>
+              </>
             ) : null}
             {ttsEnabled ? (
               <>
@@ -1497,11 +1918,14 @@ function HermesConfigCenter({
             ) : null}
           </div>
           <div className="hermes-config-footer">
-            <span>{ttsEnabled ? '实际播报前仍会硬性截短，避免长回复导致播放过久。' : '选择 HTTP 或本地命令后再配置播报参数。'}</span>
+            <span>{ttsEnabled ? '主动关怀播报前仍会硬性截短，避免观察结果过长。' : '选择 GPT-SoVITS、HTTP 或本地命令后再配置播报参数。'}</span>
             <button type="submit" className="primary-action" disabled={busy}>
               {busyAction === 'tts-save' ? '保存中...' : '保存 TTS 设置'}
             </button>
           </div>
+          <p className="capability-note">
+            Hermes Agent 自带 TTS 支持 Edge、ElevenLabs、OpenAI、MiniMax、Mistral、Gemini、xAI、NeuTTS、KittenTTS、Piper 和自定义 command provider；Yachiyo 这里配置的是桌面主动关怀播报链路。
+          </p>
         </form>
       </div>
     </div>

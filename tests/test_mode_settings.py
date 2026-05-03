@@ -68,6 +68,11 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.tts.timeout_seconds == 20
     assert config.tts.max_chars == 80
     assert config.tts.notification_prompt == config_mod.DEFAULT_TTS_NOTIFICATION_PROMPT
+    assert config.tts.gsv_base_url == "http://127.0.0.1:9880"
+    assert config.tts.gsv_ref_audio_language == "ja"
+    assert config.tts.gsv_text_language == "zh"
+    assert config.tts.gsv_top_k == 15
+    assert config.tts.gsv_media_type == "wav"
 
 
 def test_legacy_live2d_default_position_migrates_to_right_bottom(monkeypatch, tmp_path):
@@ -240,6 +245,12 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
             "tts.timeout_seconds": 10,
             "tts.max_chars": 60,
             "tts.notification_prompt": "只说一句提醒。",
+            "tts.gsv_base_url": "http://host.docker.internal:9880",
+            "tts.gsv_ref_audio_path": "/voices/ref.wav",
+            "tts.gsv_ref_audio_text": "なんだか孤独になっちゃった夜は",
+            "tts.gsv_text_language": "zh",
+            "tts.gsv_top_k": 12,
+            "tts.gsv_batch_threshold": 0.5,
         },
     )
 
@@ -261,6 +272,11 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     assert config.tts.timeout_seconds == 10
     assert config.tts.max_chars == 60
     assert config.tts.notification_prompt == "只说一句提醒。"
+    assert config.tts.gsv_base_url == "http://host.docker.internal:9880"
+    assert config.tts.gsv_ref_audio_path == "/voices/ref.wav"
+    assert config.tts.gsv_ref_audio_text == "なんだか孤独になっちゃった夜は"
+    assert config.tts.gsv_top_k == 12
+    assert config.tts.gsv_batch_threshold == 0.5
     assert result["mode_settings"]["bubble"]["config"]["summary_count"] == 2
     assert result["mode_settings"]["bubble"]["config"]["position_x_percent"] == 0.75
     assert "assistant" not in result["mode_settings"]["bubble"]["config"]
@@ -339,6 +355,8 @@ def test_apply_settings_changes_rejects_invalid_new_fields(tmp_path, monkeypatch
             "tts.provider": "bad",
             "tts.timeout_seconds": 999,
             "tts.max_chars": 999,
+            "tts.gsv_top_k": 0,
+            "tts.gsv_media_type": "raw",
             "live2d_mode.proactive_interval_seconds": 10,
         },
     )

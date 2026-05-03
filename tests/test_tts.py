@@ -29,6 +29,18 @@ class _FakeHTTPResponse:
         return b"ok"
 
 
+class _FakeAudioResponse(_FakeHTTPResponse):
+    def __init__(self, body: bytes = b"RIFFaudio", content_type: str = "audio/wav") -> None:
+        self._body = body
+        self._content_type = content_type
+
+    def read(self) -> bytes:
+        return self._body
+
+    def getheader(self, name: str, default: str = "") -> str:
+        return self._content_type if name.lower() == "content-type" else default
+
+
 def test_tts_disabled_skips_without_side_effect(monkeypatch):
     started = []
 
@@ -179,3 +191,61 @@ def test_tts_http_posts_text_voice_and_timeout(monkeypatch):
     assert request.get_method() == "POST"
     assert payload == {"text": "你好", "voice": "Kyoko"}
     assert timeout == 9
+
+
+def test_tts_gpt_sovits_posts_payload_sets_weights_and_plays_audio(monkeypatch):
+    calls = []
+    played = []
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_urlopen(request, timeout):
+        calls.append((request, timeout))
+        if request.full_url.endswith("/tts"):
+            return _FakeAudioResponse()
+        return _FakeHTTPResponse()
+
+    def fake_run(argv, **kwargs):
+        played.append((argv, kwargs))
+        return _Result()
+
+    monkeypatch.setattr(tts_mod.threading, "Thread", _ImmediateThread)
+    monkeypatch.setattr(tts_mod, "urlopen", fake_urlopen)
+    monkeypatch.setattr(tts_mod.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(tts_mod.subprocess, "run", fake_run)
+    service = TTSService(
+        TTSConfig(
+            enabled=True,
+            provider="gpt-sovits",
+            gsv_base_url="http://127.0.0.1:9880",
+            gsv_gpt_weights_path="/models/yachiyo.ckpt",
+            gsv_sovits_weights_path="/models/yachiyo.pth",
+            gsv_ref_audio_path="/voices/ref.wav",
+            gsv_ref_audio_text="なんだか孤独になっちゃった夜は",
+            gsv_ref_audio_language="ja",
+            gsv_text_language="zh",
+            gsv_top_k=12,
+            gsv_media_type="wav",
+            timeout_seconds=11,
+        )
+    )
+
+    result = service.speak_async("彩叶，休息一下吧。")
+    tts_request = calls[-1][0]
+    payload = json.loads(tts_request.data.decode("utf-8"))
+
+    assert result["ok"] is True
+    assert result["message"] == "TTS 已完成"
+    assert "set_gpt_weights" in calls[0][0].full_url
+    assert "set_sovits_weights" in calls[1][0].full_url
+    assert tts_request.full_url == "http://127.0.0.1:9880/tts"
+    assert payload["text"] == "彩叶，休息一下吧。"
+    assert payload["ref_audio_path"] == "/voices/ref.wav"
+    assert payload["prompt_lang"] == "ja"
+    assert payload["text_lang"] == "zh"
+    assert payload["top_k"] == 12
+    assert played[0][0][0] == "afplay"
+    assert played[0][1]["timeout"] == 11

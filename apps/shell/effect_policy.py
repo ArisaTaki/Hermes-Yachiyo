@@ -74,11 +74,11 @@ _FIELD_POLICIES: dict[str, tuple[EffectType, str]] = {
     "bubble_mode.avatar_path":          (EffectType.REQUIRES_MODE_RESTART,
                                          "Bubble 头像将在重启该模式后生效"),
     "bubble_mode.proactive_enabled":    (EffectType.IMMEDIATE,
-                                         "主动对话开关已更新"),
+                                         "主动关怀开关已更新"),
     "bubble_mode.proactive_desktop_watch_enabled": (EffectType.IMMEDIATE,
-                                                    "定期桌面观察开关已更新"),
+                                                    "主动关怀桌面观察已更新"),
     "bubble_mode.proactive_interval_seconds": (EffectType.IMMEDIATE,
-                                               "主动观察间隔已更新"),
+                                               "主动关怀观察间隔已更新"),
     # 共享助手/TTS 设置
     "assistant.persona_prompt": (EffectType.IMMEDIATE,
                                   "助手人设 Prompt 已即时用于后续 Hermes 调用"),
@@ -158,11 +158,11 @@ _FIELD_POLICIES: dict[str, tuple[EffectType, str]] = {
     "live2d_mode.enable_physics":     (EffectType.IMMEDIATE,
                                        "物理模拟设置已更新"),
     "live2d_mode.proactive_enabled":    (EffectType.IMMEDIATE,
-                                         "Live2D 主动对话开关已更新"),
+                                         "Live2D 主动关怀开关已更新"),
     "live2d_mode.proactive_desktop_watch_enabled": (EffectType.IMMEDIATE,
-                                                    "Live2D 定期桌面观察开关已更新"),
+                                                    "Live2D 主动关怀桌面观察已更新"),
     "live2d_mode.proactive_interval_seconds": (EffectType.IMMEDIATE,
-                                               "Live2D 主动观察间隔已更新"),
+                                               "Live2D 主动关怀观察间隔已更新"),
 }
 
 

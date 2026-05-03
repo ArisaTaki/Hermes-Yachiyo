@@ -77,7 +77,7 @@ class ProactiveDesktopService:
                 "desktop_watch_enabled": desktop_watch_enabled,
                 "status": "disabled",
                 "has_attention": False,
-                "message": "主动对话已关闭",
+                "message": "主动关怀已关闭",
             }
 
         if not desktop_watch_enabled:
@@ -86,7 +86,7 @@ class ProactiveDesktopService:
                 "desktop_watch_enabled": False,
                 "status": "idle",
                 "has_attention": False,
-                "message": "主动对话已开启，桌面观察未开启",
+                "message": "主动关怀已开启，桌面观察未开启",
             }
 
         blocker = self._desktop_watch_blocker()
@@ -119,13 +119,18 @@ class ProactiveDesktopService:
                 elif now - self._last_check_at >= interval:
                     task_id = self._schedule_desktop_watch_task()
                     return self._scheduled_state(task_id)
+                result = str(getattr(task, "result", "") or "").strip()
+                attention_text = _compact_attention_text(result)
                 return {
                     "enabled": True,
                     "desktop_watch_enabled": True,
                     "status": "completed",
                     "has_attention": has_attention,
                     "task_id": task.task_id,
-                    "message": "有新的主动观察结果" if has_attention else "主动观察结果已查看",
+                    "message": attention_text if has_attention and attention_text else "主动观察结果已查看",
+                    "result": result,
+                    "attention_text": attention_text,
+                    "attention_source": "proactive_desktop_watch",
                 }
             if task.status == TaskStatus.FAILED:
                 if (
@@ -222,3 +227,10 @@ class ProactiveDesktopService:
         self._reported_failed_task_id = None
         self._last_check_at = time.monotonic()
         return task.task_id
+
+
+def _compact_attention_text(text: str) -> str:
+    value = " ".join(str(text or "").split())
+    if not value:
+        return "有新的主动观察结果"
+    return value if len(value) <= 160 else value[:159].rstrip() + "…"

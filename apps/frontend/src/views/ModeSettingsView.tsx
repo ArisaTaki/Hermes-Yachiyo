@@ -1503,14 +1503,6 @@ const BUBBLE_FIELD_SECTIONS: ModeFieldSection[] = [
       { key: 'bubble_mode.opacity', sourceKey: 'opacity', label: '透明度', kind: 'number', min: 0.2, max: 1, step: '0.01' },
     ],
   },
-  {
-    title: '主动交互',
-    fields: [
-      { key: 'bubble_mode.proactive_enabled', sourceKey: 'proactive_enabled', label: '主动对话', kind: 'checkbox', wide: true },
-      { key: 'bubble_mode.proactive_desktop_watch_enabled', sourceKey: 'proactive_desktop_watch_enabled', label: '定期桌面观察', kind: 'checkbox', wide: true },
-      { key: 'bubble_mode.proactive_interval_seconds', sourceKey: 'proactive_interval_seconds', label: '观察间隔秒', kind: 'number', min: 60, max: 3600, integer: true },
-    ],
-  },
 ];
 
 const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
@@ -1610,38 +1602,6 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
         options: [{ value: '', label: '自动匹配' }],
         allowCustom: true,
       },
-    ],
-  },
-  {
-    title: '主动交互',
-    fields: [
-      { key: 'live2d_mode.proactive_enabled', sourceKey: 'proactive_enabled', label: '主动对话', kind: 'checkbox', wide: true },
-      { key: 'live2d_mode.proactive_desktop_watch_enabled', sourceKey: 'proactive_desktop_watch_enabled', label: '定期桌面观察', kind: 'checkbox', wide: true },
-      { key: 'live2d_mode.proactive_interval_seconds', sourceKey: 'proactive_interval_seconds', label: '观察间隔秒', kind: 'number', min: 60, max: 3600, integer: true },
-    ],
-  },
-  {
-    title: 'Live2D TTS',
-    note: 'TTS 默认关闭；none 或配置缺失时不会调用外部服务，失败也不会影响聊天。',
-    fields: [
-      { key: 'tts.enabled', sourceKey: 'tts_enabled', label: '启用 Live2D TTS', kind: 'checkbox', wide: true },
-      {
-        key: 'tts.provider',
-        sourceKey: 'tts_provider',
-        label: 'TTS Provider',
-        kind: 'select',
-        options: [
-          { value: 'none', label: 'none（关闭）' },
-          { value: 'http', label: 'http POST' },
-          { value: 'command', label: '本地命令' },
-        ],
-      },
-      { key: 'tts.endpoint', sourceKey: 'tts_endpoint', label: 'TTS HTTP Endpoint', kind: 'text', wide: true },
-      { key: 'tts.command', sourceKey: 'tts_command', label: 'TTS 本地命令', kind: 'text', wide: true },
-      { key: 'tts.voice', sourceKey: 'tts_voice', label: 'TTS 音色', kind: 'text' },
-      { key: 'tts.timeout_seconds', sourceKey: 'tts_timeout_seconds', label: 'TTS 超时秒', kind: 'number', min: 1, max: 120, integer: true },
-      { key: 'tts.max_chars', sourceKey: 'tts_max_chars', label: 'TTS 最大播报字数', kind: 'number', min: 20, max: 240, integer: true },
-      { key: 'tts.notification_prompt', sourceKey: 'tts_notification_prompt', label: '主动播报提示词', kind: 'textarea', wide: true },
     ],
   },
 ];

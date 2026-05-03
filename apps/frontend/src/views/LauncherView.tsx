@@ -28,6 +28,9 @@ type LauncherPayload = {
     enabled?: boolean;
     has_attention?: boolean;
     message?: string;
+    result?: string;
+    attention_text?: string;
+    attention_source?: string;
     error?: string;
   };
   launcher?: {
@@ -334,9 +337,9 @@ function bubbleTitle(
       ? 'Yachiyo - 头像图标'
       : `Yachiyo - ${hasAttention ? '有新消息，点击查看' : (statusLabel || '点击展开对话')}`,
   ];
-  if (proactive.error) titleParts.push(`主动对话：${proactive.error}`);
-  else if (proactive.has_attention) titleParts.push('主动对话：有新的观察结果');
-  else if (proactive.enabled && proactive.message) titleParts.push(`主动对话：${proactive.message}`);
+  if (proactive.error) titleParts.push(`主动关怀：${proactive.error}`);
+  else if (proactive.has_attention) titleParts.push(`主动关怀：${proactive.attention_text || proactive.message || '有新的观察结果'}`);
+  else if (proactive.enabled && proactive.message) titleParts.push(`主动关怀：${proactive.message}`);
   return titleParts.join('\n');
 }
 
@@ -382,7 +385,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   const resource = launcher.resource;
   const renderer = launcher.renderer;
   const replyText = proactiveAttention
-    ? (data?.proactive?.message || '有新的主动桌面观察结果')
+    ? (data?.proactive?.attention_text || data?.proactive?.message || '有新的主动桌面观察结果')
     : hasAttention && !isProcessing
         ? latestReply
         : '';

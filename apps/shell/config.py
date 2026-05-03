@@ -32,7 +32,7 @@ BubbleExpandTriggerValue = Literal["click"]
 Live2DClickActionValue = Literal["focus_stage", "open_chat", "toggle_reply"]
 Live2DDefaultOpenValue = Literal["stage", "reply_bubble", "chat_input"]
 Live2DPositionAnchorValue = Literal["left_bottom", "right_bottom", "custom"]
-TTSProviderValue = Literal["none", "http", "command"]
+TTSProviderValue = Literal["none", "http", "command", "gpt-sovits"]
 
 DEFAULT_TTS_NOTIFICATION_PROMPT = (
     "主动提醒只输出适合语音播报的一句中文招呼或提醒，保持八千代人设，"
@@ -572,6 +572,28 @@ class TTSConfig:
     timeout_seconds: int = 20
     max_chars: int = 80
     notification_prompt: str = DEFAULT_TTS_NOTIFICATION_PROMPT
+    gsv_base_url: str = "http://127.0.0.1:9880"
+    gsv_gpt_weights_path: str = ""
+    gsv_sovits_weights_path: str = ""
+    gsv_ref_audio_path: str = ""
+    gsv_ref_audio_text: str = ""
+    gsv_ref_audio_language: str = "ja"
+    gsv_aux_ref_audio_path: str = ""
+    gsv_text_language: str = "zh"
+    gsv_top_k: int = 15
+    gsv_top_p: float = 1.0
+    gsv_temperature: float = 1.0
+    gsv_text_split_method: str = "cut1"
+    gsv_batch_size: int = 1
+    gsv_batch_threshold: float = 0.75
+    gsv_split_bucket: bool = True
+    gsv_speed_factor: float = 1.0
+    gsv_fragment_interval: float = 0.3
+    gsv_streaming_mode: bool = False
+    gsv_seed: int = -1
+    gsv_parallel_infer: bool = False
+    gsv_repetition_penalty: float = 1.35
+    gsv_media_type: str = "wav"
 
 
 @dataclass
@@ -921,13 +943,43 @@ def _normalize_config_values(config: AppConfig) -> None:
     )
     config.assistant.persona_prompt = str(config.assistant.persona_prompt or "")
     config.assistant.user_address = str(config.assistant.user_address or "")
-    config.tts.provider = cast(TTSProviderValue, _normalize_literal(config.tts.provider, {"none", "http", "command"}, "none"))
+    config.tts.provider = cast(TTSProviderValue, _normalize_literal(
+        config.tts.provider,
+        {"none", "http", "command", "gpt-sovits"},
+        "none",
+    ))
     config.tts.timeout_seconds = _normalize_int_range(config.tts.timeout_seconds, 1, 120, 20)
     config.tts.endpoint = str(config.tts.endpoint or "")
     config.tts.command = str(config.tts.command or "")
     config.tts.voice = str(config.tts.voice or "")
     config.tts.max_chars = _normalize_int_range(config.tts.max_chars, 20, 240, 80)
     config.tts.notification_prompt = str(config.tts.notification_prompt or DEFAULT_TTS_NOTIFICATION_PROMPT)
+    config.tts.gsv_base_url = str(config.tts.gsv_base_url or "http://127.0.0.1:9880")
+    config.tts.gsv_gpt_weights_path = str(config.tts.gsv_gpt_weights_path or "")
+    config.tts.gsv_sovits_weights_path = str(config.tts.gsv_sovits_weights_path or "")
+    config.tts.gsv_ref_audio_path = str(config.tts.gsv_ref_audio_path or "")
+    config.tts.gsv_ref_audio_text = str(config.tts.gsv_ref_audio_text or "")
+    config.tts.gsv_ref_audio_language = str(config.tts.gsv_ref_audio_language or "ja")
+    config.tts.gsv_aux_ref_audio_path = str(config.tts.gsv_aux_ref_audio_path or "")
+    config.tts.gsv_text_language = str(config.tts.gsv_text_language or "zh")
+    config.tts.gsv_top_k = _normalize_int_range(config.tts.gsv_top_k, 1, 100, 15)
+    config.tts.gsv_top_p = _normalize_float_range(config.tts.gsv_top_p, 0.0, 2.0, 1.0)
+    config.tts.gsv_temperature = _normalize_float_range(config.tts.gsv_temperature, 0.0, 2.0, 1.0)
+    config.tts.gsv_text_split_method = str(config.tts.gsv_text_split_method or "cut1")
+    config.tts.gsv_batch_size = _normalize_int_range(config.tts.gsv_batch_size, 1, 64, 1)
+    config.tts.gsv_batch_threshold = _normalize_float_range(config.tts.gsv_batch_threshold, 0.0, 1.0, 0.75)
+    config.tts.gsv_split_bucket = bool(config.tts.gsv_split_bucket)
+    config.tts.gsv_speed_factor = _normalize_float_range(config.tts.gsv_speed_factor, 0.25, 4.0, 1.0)
+    config.tts.gsv_fragment_interval = _normalize_float_range(config.tts.gsv_fragment_interval, 0.0, 10.0, 0.3)
+    config.tts.gsv_streaming_mode = bool(config.tts.gsv_streaming_mode)
+    config.tts.gsv_seed = _normalize_int_range(config.tts.gsv_seed, -1, 2147483647, -1)
+    config.tts.gsv_parallel_infer = bool(config.tts.gsv_parallel_infer)
+    config.tts.gsv_repetition_penalty = _normalize_float_range(config.tts.gsv_repetition_penalty, 0.1, 5.0, 1.35)
+    config.tts.gsv_media_type = _normalize_literal(
+        str(config.tts.gsv_media_type or "wav").lower(),
+        {"wav", "mp3", "ogg", "flac"},
+        "wav",
+    )
     config.backup.auto_cleanup_enabled = bool(config.backup.auto_cleanup_enabled)
     config.backup.retention_count = _normalize_int_range(
         config.backup.retention_count,

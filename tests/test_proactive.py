@@ -108,6 +108,27 @@ def test_build_proactive_desktop_prompt_uses_tts_notification_constraints():
     assert "最多 33 个中文字符" in prompt
 
 
+def test_proactive_service_completed_state_exposes_observation_text():
+    runtime = _RuntimeStub()
+    runtime.config.bubble_mode.proactive_enabled = True
+    runtime.config.bubble_mode.proactive_desktop_watch_enabled = True
+    service = ProactiveDesktopService(runtime, runtime.config.bubble_mode)
+    scheduled = service.get_state()
+
+    runtime.state.update_task_status(
+        scheduled["task_id"],
+        TaskStatus.COMPLETED,
+        result="你已经连续处理工具配置很久了，建议先保存进度再休息一下。",
+    )
+    state = service.get_state()
+
+    assert state["status"] == "completed"
+    assert state["has_attention"] is True
+    assert state["attention_source"] == "proactive_desktop_watch"
+    assert state["attention_text"] == "你已经连续处理工具配置很久了，建议先保存进度再休息一下。"
+    assert state["message"] == state["attention_text"]
+
+
 def test_proactive_service_reports_failed_before_retry_interval(monkeypatch):
     now = [1000.0]
     monkeypatch.setattr(proactive_mod.time, "monotonic", lambda: now[0])

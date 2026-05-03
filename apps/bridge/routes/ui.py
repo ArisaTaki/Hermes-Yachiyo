@@ -34,7 +34,7 @@ router = APIRouter(prefix="/ui", tags=["UI"])
 _launcher_notifications: dict[str, LauncherNotificationTracker] = {}
 _launcher_proactive_services: dict[tuple[str, int], ProactiveDesktopService] = {}
 _launcher_tts_services: dict[int, TTSService] = {}
-_launcher_last_tts_reply: dict[int, str] = {}
+_launcher_last_tts_attention: dict[tuple[str, int], str] = {}
 
 
 class SendChatMessageRequest(BaseModel):
@@ -559,7 +559,11 @@ def _live2d_renderer_payload(app_config: Any, resource: dict[str, Any]) -> dict[
     }
 
 
-def _maybe_trigger_live2d_tts(runtime: Any, chat: dict[str, Any]) -> dict[str, Any]:
+def _maybe_trigger_proactive_tts(
+    runtime: Any,
+    mode_id: str,
+    proactive: dict[str, Any],
+) -> dict[str, Any]:
     config = runtime.config
     tts_config = getattr(config, "tts", None)
     if tts_config is None:
@@ -568,14 +572,23 @@ def _maybe_trigger_live2d_tts(runtime: Any, chat: dict[str, Any]) -> dict[str, A
     service = _launcher_tts_services.setdefault(key, TTSService(tts_config))
     if not getattr(tts_config, "enabled", False) or getattr(tts_config, "provider", "none") == "none":
         return service.get_status()
-    latest_reply = str(chat.get("latest_reply_full") or chat.get("latest_reply") or "").strip()
-    if not latest_reply:
+    if not proactive.get("has_attention"):
         return service.get_status()
-    if latest_reply == _launcher_last_tts_reply.get(key, ""):
+    text = str(
+        proactive.get("attention_text")
+        or proactive.get("message")
+        or proactive.get("result")
+        or ""
+    ).strip()
+    if not text:
         return service.get_status()
-    status = service.speak_async(latest_reply)
+    attention_key = str(proactive.get("task_id") or text)
+    dedupe_key = (mode_id, key)
+    if attention_key == _launcher_last_tts_attention.get(dedupe_key, ""):
+        return service.get_status()
+    status = service.speak_async(text)
     if status.get("scheduled"):
-        _launcher_last_tts_reply[key] = latest_reply
+        _launcher_last_tts_attention[dedupe_key] = attention_key
     return status
 
 
@@ -617,8 +630,7 @@ async def get_launcher_view(mode: str = "bubble") -> dict[str, Any]:
         }
 
     chat = bridge.get_conversation_overview(summary_count=summary_count, session_limit=3)
-    if mode_id == "live2d":
-        tts_status = _maybe_trigger_live2d_tts(runtime, chat)
+    tts_status = _maybe_trigger_proactive_tts(runtime, mode_id, proactive)
     tracker = _launcher_notifications.setdefault(mode_id, LauncherNotificationTracker())
     notification = tracker.update(chat, external_attention=bool(proactive.get("has_attention")))
     latest_status = "ready"
