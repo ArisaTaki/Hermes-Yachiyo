@@ -52,6 +52,12 @@ _IMAGE_EXTENSIONS_BY_MIME = {
     "image/gif": ".gif",
     "image/bmp": ".bmp",
 }
+_AUDIO_MIME_BY_EXTENSION = {
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+}
 
 
 def _attachment_root() -> Path:
@@ -64,6 +70,39 @@ def _attachment_root() -> Path:
 def _attachment_public_url(attachment_id: str) -> str:
     bridge_url = os.getenv("HERMES_YACHIYO_BRIDGE_URL", "http://127.0.0.1:8420").rstrip("/")
     return f"{bridge_url}/ui/chat/attachments/{attachment_id}"
+
+
+def allocate_chat_attachment_path(session_id: str, suffix: str) -> tuple[str, Path]:
+    """Allocate a stable attachment path under the chat attachment cache."""
+    attachment_id = uuid4().hex
+    normalized_suffix = suffix if str(suffix or "").startswith(".") else f".{suffix or 'bin'}"
+    safe_suffix = re.sub(r"[^A-Za-z0-9.]+", "", normalized_suffix) or ".bin"
+    session_dir = _attachment_root() / (session_id or "default")
+    session_dir.mkdir(parents=True, exist_ok=True)
+    return attachment_id, session_dir / f"{attachment_id}{safe_suffix}"
+
+
+def chat_attachment_record(
+    attachment_id: str,
+    path: Path | str,
+    *,
+    kind: str,
+    name: str,
+    mime_type: str,
+) -> dict[str, Any]:
+    resolved = Path(path)
+    return {
+        "id": attachment_id,
+        "kind": kind,
+        "name": name or resolved.name,
+        "mime_type": mime_type,
+        "size": resolved.stat().st_size if resolved.exists() else 0,
+        "path": str(resolved),
+    }
+
+
+def audio_mime_type_for_suffix(suffix: str) -> str:
+    return _AUDIO_MIME_BY_EXTENSION.get(str(suffix or "").lower(), "audio/wav")
 
 
 def _sanitize_attachment_name(value: str) -> str:
@@ -407,14 +446,19 @@ class ChatAPI:
             attachment_id = str(attachment.get("id") or "")
             if not attachment_id:
                 continue
-            result.append({
+            item = {
                 "id": attachment_id,
                 "kind": str(attachment.get("kind") or "image"),
                 "name": str(attachment.get("name") or "image"),
                 "mime_type": str(attachment.get("mime_type") or "image/png"),
                 "size": int(attachment.get("size") or 0),
                 "url": _attachment_public_url(attachment_id),
-            })
+            }
+            if attachment.get("source"):
+                item["source"] = str(attachment.get("source") or "")
+            if attachment.get("spoken_text"):
+                item["spoken_text"] = str(attachment.get("spoken_text") or "")
+            result.append(item)
         return result
 
     def _sync_task_status_to_messages(self) -> None:
@@ -429,10 +473,13 @@ class ChatAPI:
         同一个 task_id 永远只对应一条 assistant 消息，
         无论此方法被并发调用多少次都不会产生重复。
         """
+        synced_task_ids: set[str] = set()
         for msg in self._session.get_all_messages():
-            if msg.role != MessageRole.USER:
+            if msg.role not in (MessageRole.USER, MessageRole.ASSISTANT):
                 continue
             if msg.task_id is None:
+                continue
+            if msg.task_id in synced_task_ids:
                 continue
             if msg.status in (MessageStatus.COMPLETED, MessageStatus.FAILED):
                 continue
@@ -440,6 +487,7 @@ class ChatAPI:
             task = self._state.get_task(msg.task_id)
             if task is None:
                 continue
+            synced_task_ids.add(msg.task_id)
 
             if task.status == TaskStatus.COMPLETED:
                 result = task.result or "[任务已完成，无输出]"
@@ -630,7 +678,7 @@ class ChatAPI:
         seen: set[str] = set()
 
         for msg in self._session.get_all_messages():
-            if msg.role != MessageRole.USER:
+            if msg.role not in (MessageRole.USER, MessageRole.ASSISTANT):
                 continue
             if msg.status not in (MessageStatus.PENDING, MessageStatus.PROCESSING):
                 continue

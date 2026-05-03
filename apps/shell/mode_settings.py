@@ -87,6 +87,7 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "proactive_enabled": bool,
         "proactive_desktop_watch_enabled": bool,
         "proactive_interval_seconds": int,
+        "proactive_trigger_probability": float,
     },
     "live2d_mode": {
         "model_name": str,
@@ -115,6 +116,7 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "proactive_enabled": bool,
         "proactive_desktop_watch_enabled": bool,
         "proactive_interval_seconds": int,
+        "proactive_trigger_probability": float,
     },
     "assistant": {
         "persona_prompt": str,
@@ -128,6 +130,7 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "voice": str,
         "timeout_seconds": int,
         "max_chars": int,
+        "trigger_probability": float,
         "notification_prompt": str,
         "gsv_base_url": str,
         "gsv_gpt_weights_path": str,
@@ -192,14 +195,18 @@ def _validate_field(key: str, value: Any) -> str | None:
         return "recent_messages_limit 须在 1-10 之间"
     if key.endswith(".summary_count") and not (1 <= value <= 3):
         return "summary_count 须在 1-3 之间"
-    if key.endswith(".proactive_interval_seconds") and not (60 <= value <= 3600):
-        return "proactive_interval_seconds 须在 60-3600 秒之间"
+    if key.endswith(".proactive_interval_seconds") and not (300 <= value <= 3600):
+        return "proactive_interval_seconds 须在 300-3600 秒之间"
+    if key.endswith(".proactive_trigger_probability") and not (0.0 <= value <= 1.0):
+        return "proactive_trigger_probability 须在 0-1 之间"
     if key == "tts.provider" and value not in _TTS_PROVIDERS:
         return "tts.provider 仅支持 none / http / command / gpt-sovits"
     if key == "tts.timeout_seconds" and not (1 <= value <= 120):
         return "tts.timeout_seconds 须在 1-120 秒之间"
     if key == "tts.max_chars" and not (20 <= value <= 240):
         return "tts.max_chars 须在 20-240 字之间"
+    if key == "tts.trigger_probability" and not (0.0 <= value <= 1.0):
+        return "tts.trigger_probability 须在 0-1 之间"
     if key == "tts.gsv_top_k" and not (1 <= value <= 100):
         return "tts.gsv_top_k 须在 1-100 之间"
     if key in {"tts.gsv_top_p", "tts.gsv_temperature"} and not (0.0 <= value <= 2.0):
@@ -253,6 +260,7 @@ def _serialize_tts(config: AppConfig) -> dict[str, Any]:
         "voice": config.tts.voice,
         "timeout_seconds": config.tts.timeout_seconds,
         "max_chars": config.tts.max_chars,
+        "trigger_probability": config.tts.trigger_probability,
         "notification_prompt": config.tts.notification_prompt,
         "gsv_base_url": config.tts.gsv_base_url,
         "gsv_gpt_weights_path": config.tts.gsv_gpt_weights_path,
@@ -289,6 +297,7 @@ def _shared_settings_fields(config: AppConfig) -> dict[str, Any]:
         "tts_voice": config.tts.voice,
         "tts_timeout_seconds": config.tts.timeout_seconds,
         "tts_max_chars": config.tts.max_chars,
+        "tts_trigger_probability": config.tts.trigger_probability,
         "tts_notification_prompt": config.tts.notification_prompt,
         "tts_gsv_base_url": config.tts.gsv_base_url,
         "tts_gsv_gpt_weights_path": config.tts.gsv_gpt_weights_path,
@@ -346,6 +355,7 @@ def serialize_bubble_mode(config: AppConfig) -> dict[str, Any]:
             "proactive_enabled": mode.proactive_enabled,
             "proactive_desktop_watch_enabled": mode.proactive_desktop_watch_enabled,
             "proactive_interval_seconds": mode.proactive_interval_seconds,
+            "proactive_trigger_probability": mode.proactive_trigger_probability,
             **_shared_settings_fields(config),
         },
     }
@@ -411,6 +421,7 @@ def serialize_live2d_mode(config: AppConfig) -> dict[str, Any]:
             "proactive_enabled": mode.proactive_enabled,
             "proactive_desktop_watch_enabled": mode.proactive_desktop_watch_enabled,
             "proactive_interval_seconds": mode.proactive_interval_seconds,
+            "proactive_trigger_probability": mode.proactive_trigger_probability,
             **_shared_settings_fields(config),
             "resource": {
                 "state": resource.state.value,

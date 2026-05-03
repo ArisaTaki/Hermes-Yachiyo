@@ -1,0 +1,156 @@
+name: Build macOS DMG
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel to build
+        required: true
+        default: experimental
+        type: choice
+        options:
+          - stable
+          - experimental
+
+permissions:
+  contents: write
+
+jobs:
+  package-macos:
+    name: Package macOS DMG
+    runs-on: macos-latest
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,packaging]"
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix apps/frontend
+
+      - name: Run smoke tests
+        run: |
+          python -m pytest \
+            tests/test_screenshot.py \
+            tests/test_proactive.py \
+            tests/test_chat_session.py \
+            tests/test_chat_api.py \
+            tests/test_ui_bridge_routes.py \
+            tests/test_tts.py \
+            tests/test_mode_settings.py
+
+      - name: Build packaged backend
+        run: python scripts/build_backend.py --clean
+
+      - name: Build Electron DMG
+        run: npm --prefix apps/frontend run dist:mac
+
+      - name: Prepare release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(python - <<'PY'
+          import tomllib
+          from pathlib import Path
+          print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])
+          PY
+          )"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          STAMP="$(date -u +%Y%m%d%H%M)"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            CHANNEL="${{ inputs.channel }}"
+          elif [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+            CHANNEL="stable"
+          else
+            CHANNEL="experimental"
+          fi
+
+          if [[ "${CHANNEL}" == "stable" ]]; then
+            CHANNEL_LABEL="正式版"
+            PRERELEASE="false"
+          else
+            CHANNEL_LABEL="实验版"
+            PRERELEASE="true"
+          fi
+
+          TAG="${CHANNEL}-v${VERSION}-${STAMP}-${SHORT_SHA}"
+          TITLE="Hermes-Yachiyo ${CHANNEL_LABEL} v${VERSION} (${SHORT_SHA})"
+
+          mkdir -p release
+          shopt -s nullglob
+          for dmg in dist/electron/*.dmg; do
+            cp "$dmg" "release/Hermes-Yachiyo-${CHANNEL}-v${VERSION}-${SHORT_SHA}.dmg"
+          done
+          for asset in dist/release-assets/*.zip; do
+            cp "$asset" "release/$(basename "$asset")"
+          done
+          if ! compgen -G "release/*.dmg" > /dev/null; then
+            echo "No DMG artifact found under dist/electron" >&2
+            exit 1
+          fi
+
+          cat > release/notes.md <<EOF
+          Hermes-Yachiyo ${CHANNEL_LABEL}
+
+          - Branch: ${GITHUB_REF_NAME}
+          - Commit: ${GITHUB_SHA}
+          - Channel: ${CHANNEL}
+          - Package: macOS DMG
+          - Optional assets: release 中如包含 Hermes-Yachiyo-yachiyo-gpt-sovits-v4.zip，可在“主动关怀语音”页面导入八千代 GPT-SoVITS 音色。
+
+          首次启动后，主动桌面观察需要在 macOS 系统设置中允许 Hermes-Yachiyo 使用屏幕录制权限。
+          EOF
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "title=${TITLE}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-yachiyo-${{ steps.meta.outputs.tag }}
+          path: |
+            release/*.dmg
+            release/*.zip
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          extra_flags=()
+          if [[ "${{ steps.meta.outputs.prerelease }}" == "true" ]]; then
+            extra_flags+=(--prerelease --latest=false)
+          fi
+          release_assets=(release/*.dmg release/*.zip)
+          gh release create "${{ steps.meta.outputs.tag }}" \
+            "${release_assets[@]}" \
+            --target "${GITHUB_SHA}" \
+            --title "${{ steps.meta.outputs.title }}" \
+            --notes-file release/notes.md \
+            "${extra_flags[@]}"

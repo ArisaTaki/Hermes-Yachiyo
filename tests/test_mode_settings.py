@@ -42,6 +42,7 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.bubble_mode.position_y_percent == 1.0
     assert config.bubble_mode.edge_snap is True
     assert config.bubble_mode.proactive_enabled is False
+    assert config.bubble_mode.proactive_trigger_probability == 0.6
     assert config.live2d_mode.idle_motion_group == "Idle"
     assert config.live2d_mode.position_anchor == "right_bottom"
     assert config.live2d_mode.position_x == 0
@@ -52,6 +53,7 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.live2d_mode.model_path == ""
     assert config.live2d_mode.mouse_follow_enabled is True
     assert config.live2d_mode.proactive_enabled is False
+    assert config.live2d_mode.proactive_trigger_probability == 0.6
     assert config.live2d_mode.validate() == ModelState.NOT_CONFIGURED
     assert config.live2d is config.live2d_mode
     assert config.assistant.persona_prompt == config_mod.DEFAULT_ASSISTANT_PERSONA_PROMPT
@@ -67,6 +69,7 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.tts.voice == ""
     assert config.tts.timeout_seconds == 20
     assert config.tts.max_chars == 80
+    assert config.tts.trigger_probability == 0.6
     assert config.tts.notification_prompt == config_mod.DEFAULT_TTS_NOTIFICATION_PROMPT
     assert config.tts.gsv_base_url == "http://127.0.0.1:9880"
     assert config.tts.gsv_ref_audio_language == "ja"
@@ -236,7 +239,8 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
             "bubble_mode.edge_snap": False,
             "bubble_mode.proactive_enabled": True,
             "bubble_mode.proactive_desktop_watch_enabled": True,
-            "bubble_mode.proactive_interval_seconds": 120,
+            "bubble_mode.proactive_interval_seconds": 600,
+            "bubble_mode.proactive_trigger_probability": 0.45,
             "assistant.persona_prompt": "你是八千代。",
             "assistant.user_address": "老师",
             "tts.provider": "command",
@@ -244,6 +248,7 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
             "tts.voice": "kyoko",
             "tts.timeout_seconds": 10,
             "tts.max_chars": 60,
+            "tts.trigger_probability": 0.35,
             "tts.notification_prompt": "只说一句提醒。",
             "tts.gsv_base_url": "http://host.docker.internal:9880",
             "tts.gsv_ref_audio_path": "/voices/ref.wav",
@@ -263,7 +268,8 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     assert config.bubble_mode.edge_snap is False
     assert config.bubble_mode.proactive_enabled is True
     assert config.bubble_mode.proactive_desktop_watch_enabled is True
-    assert config.bubble_mode.proactive_interval_seconds == 120
+    assert config.bubble_mode.proactive_interval_seconds == 600
+    assert config.bubble_mode.proactive_trigger_probability == 0.45
     assert config.assistant.persona_prompt == "你是八千代。"
     assert config.assistant.user_address == "老师"
     assert config.tts.provider == "command"
@@ -271,6 +277,7 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     assert config.tts.voice == "kyoko"
     assert config.tts.timeout_seconds == 10
     assert config.tts.max_chars == 60
+    assert config.tts.trigger_probability == 0.35
     assert config.tts.notification_prompt == "只说一句提醒。"
     assert config.tts.gsv_base_url == "http://host.docker.internal:9880"
     assert config.tts.gsv_ref_audio_path == "/voices/ref.wav"
@@ -279,6 +286,7 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     assert config.tts.gsv_batch_threshold == 0.5
     assert result["mode_settings"]["bubble"]["config"]["summary_count"] == 2
     assert result["mode_settings"]["bubble"]["config"]["position_x_percent"] == 0.75
+    assert result["mode_settings"]["bubble"]["config"]["proactive_trigger_probability"] == 0.45
     assert "assistant" not in result["mode_settings"]["bubble"]["config"]
 
 
@@ -553,6 +561,7 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     config.tts.provider = "http"
     config.tts.endpoint = "http://127.0.0.1:9000/tts"
     config.tts.max_chars = 66
+    config.tts.trigger_probability = 0.4
     config.tts.notification_prompt = "短提醒"
 
     save_config(config)
@@ -570,4 +579,5 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     assert data["tts"]["provider"] == "http"
     assert data["tts"]["endpoint"] == "http://127.0.0.1:9000/tts"
     assert data["tts"]["max_chars"] == 66
+    assert data["tts"]["trigger_probability"] == 0.4
     assert data["tts"]["notification_prompt"] == "短提醒"

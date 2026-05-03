@@ -228,9 +228,10 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
   const clickSuppressedRef = useRef(false);
   const status = launcher.latest_status || (data?.chat?.is_processing ? 'processing' : 'empty');
   const showDot = launcher.show_unread_dot !== false && !launcher.suppress_status_dot;
-  const hasAttention = showDot && Boolean(launcher.has_attention);
+  const proactiveAttention = Boolean(proactive.has_attention);
+  const hasAttention = showDot && Boolean(launcher.has_attention || proactiveAttention);
   const unreadStatus = String(data?.notification?.latest_message?.status || '');
-  const dotClass = bubbleDotClass(showDot, hasAttention, status, unreadStatus);
+  const dotClass = bubbleDotClass(showDot, hasAttention, status, unreadStatus, proactiveAttention);
   const opacity = Math.max(0.2, Math.min(1, Number(launcher.opacity || 0.92)));
   const idleHidden = Boolean(launcher.auto_hide && !data?.chat?.is_processing && !launcher.has_attention && !proactive.has_attention);
   const displayMode = launcher.default_display || 'summary';
@@ -286,7 +287,7 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
   return (
     <main className="launcher-shell bubble-shell" onContextMenu={(event) => handleContextMenu(event, 'bubble')}>
       <button
-        className={`bubble-launcher ${hasAttention ? 'has-unread' : ''} ${idleHidden ? 'auto-hidden' : ''}`}
+        className={`bubble-launcher ${hasAttention ? 'has-unread' : ''} ${proactiveAttention ? 'has-proactive' : ''} ${idleHidden ? 'auto-hidden' : ''}`}
         style={style}
         type="button"
         title={title}
@@ -312,10 +313,11 @@ function normalizedStatusLabel(chat: LauncherPayload['chat']) {
   return label;
 }
 
-function bubbleDotClass(showDot: boolean, hasAttention: boolean, status: string, unreadStatus: string) {
+function bubbleDotClass(showDot: boolean, hasAttention: boolean, status: string, unreadStatus: string, proactiveAttention: boolean) {
   let className = 'status-dot';
   if (hasAttention) {
-    if (unreadStatus === 'failed') className += ' visible failed';
+    if (proactiveAttention) className += ' visible proactive';
+    else if (unreadStatus === 'failed') className += ' visible failed';
     else if (unreadStatus === 'completed') className += ' visible completed';
     else className += ' visible attention';
   } else if (showDot && status === 'processing') {
@@ -389,10 +391,10 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
     : hasAttention && !isProcessing
         ? latestReply
         : '';
-  const showReply = Boolean(launcher.show_reply_bubble !== false && !replyHidden && replyText && !isProcessing);
+  const showReply = Boolean(launcher.show_reply_bubble !== false && (proactiveAttention || !replyHidden) && replyText && !isProcessing);
   const stageTitle = live2dStageTitle(resource, launcher, data, hasAttention, proactiveAttention);
   const positionAnchor = normalizeLive2DPositionAnchor(launcher.position_anchor);
-  const characterClass = live2dCharacterClass(data, hasAttention, String(data?.notification?.latest_message?.status || ''));
+  const characterClass = live2dCharacterClass(data, hasAttention, proactiveAttention, String(data?.notification?.latest_message?.status || ''));
   const hintKey = [resource?.state || '', resource?.status_label || '', resource?.help_text || '', resource?.renderer_entry || ''].join('|');
   const hintTone = resource?.state === 'path_valid' || resource?.state === 'loaded' ? 'ok' : 'warn';
   const showResourceHint = Boolean(resource && hintTone !== 'ok' && hintKey !== dismissedHintKey);
@@ -701,7 +703,15 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
       </div>
 
       {showReply ? (
-        <button ref={replyRef} className={`live2d-reply ${proactiveAttention ? 'proactive' : ''} ${hasAttention ? 'attention' : ''}`} type="button" onClick={() => setReplyHidden(true)}>
+        <button
+          ref={replyRef}
+          className={`live2d-reply ${proactiveAttention ? 'proactive' : ''} ${hasAttention ? 'attention' : ''}`}
+          type="button"
+          onClick={() => {
+            if (proactiveAttention) void acknowledgeAndOpenChat('live2d');
+            else setReplyHidden(true);
+          }}
+        >
           {replyText}
         </button>
       ) : null}
@@ -788,10 +798,11 @@ function latestAssistantText(chat: LauncherPayload['chat'], launcher: NonNullabl
   return launcher.latest_reply || chat?.latest_reply || launcher.latest_reply_full || chat?.latest_reply_full || '';
 }
 
-function live2dCharacterClass(data: LauncherPayload | null, hasAttention: boolean, unreadStatus: string) {
+function live2dCharacterClass(data: LauncherPayload | null, hasAttention: boolean, proactiveAttention: boolean, unreadStatus: string) {
   const classes = ['live2d-character'];
   if (data?.chat?.is_processing) classes.push('processing');
   else if (hasAttention && unreadStatus === 'failed') classes.push('failed');
+  else if (proactiveAttention) classes.push('has-proactive-attention');
   else if (hasAttention) classes.push('has-message');
   return classes.join(' ');
 }

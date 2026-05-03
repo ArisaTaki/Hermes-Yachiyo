@@ -12,9 +12,10 @@ import shutil
 import subprocess
 import tempfile
 import threading
+from http.client import HTTPException
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-from urllib.parse import quote, urljoin
+from typing import TYPE_CHECKING, Any, Callable
+from urllib.parse import quote, urljoin, urlparse, urlunparse
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
@@ -22,6 +23,48 @@ if TYPE_CHECKING:
     from apps.shell.config import TTSConfig
 
 logger = logging.getLogger(__name__)
+_AUDIO_MIME_BY_MEDIA = {
+    "wav": "audio/wav",
+    "mp3": "audio/mpeg",
+    "ogg": "audio/ogg",
+    "flac": "audio/flac",
+}
+_AUDIO_SUFFIX_BY_MIME = {
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/ogg": ".ogg",
+    "audio/flac": ".flac",
+}
+TTSCompletionCallback = Callable[[dict[str, Any]], None]
+_ACTION_CUE_KEYWORDS = (
+    "歪头",
+    "歪了歪头",
+    "眨眼",
+    "眨了眨眼",
+    "点头",
+    "摇头",
+    "抬头",
+    "低头",
+    "微笑",
+    "笑",
+    "挥手",
+    "叹气",
+    "托腮",
+    "伸懒腰",
+    "揉眼",
+    "眯眼",
+    "抬手",
+    "转身",
+    "凑近",
+    "抱着",
+    "抱住",
+    "比划",
+    "表情",
+    "动作",
+)
+_LEADING_ACTION_CUE_RE = re.compile(r"^\s*[\(（\[\{【]([^)\]）}】]{1,80})[\)）\]\}】]\s*")
 
 
 def prepare_tts_text(text: str, max_chars: int = 80) -> str:
@@ -32,6 +75,7 @@ def prepare_tts_text(text: str, max_chars: int = 80) -> str:
     value = re.sub(r"\[[^\]]+\]\([^)]+\)", " ", value)
     value = re.sub(r"https?://\S+", "链接", value)
     value = re.sub(r"\s+", " ", value).strip()
+    value = _strip_leading_action_cues(value)
     if len(value) <= limit:
         return value
 
@@ -47,6 +91,18 @@ def prepare_tts_text(text: str, max_chars: int = 80) -> str:
     if punctuation_cut >= max(12, limit // 2):
         return value[: punctuation_cut + 1].strip()
     return value[: max(1, limit - 1)].rstrip() + "…"
+
+
+def _strip_leading_action_cues(text: str) -> str:
+    value = text.strip()
+    while True:
+        match = _LEADING_ACTION_CUE_RE.match(value)
+        if not match:
+            return value
+        cue = match.group(1).strip()
+        if not any(keyword in cue for keyword in _ACTION_CUE_KEYWORDS):
+            return value
+        value = value[match.end():].strip()
 
 
 class TTSService:
@@ -67,7 +123,14 @@ class TTSService:
         status["provider"] = self._config.provider
         return status
 
-    def speak_async(self, text: str) -> dict[str, Any]:
+    def speak_async(
+        self,
+        text: str,
+        *,
+        play: bool = True,
+        output_path: str | None = None,
+        on_complete: TTSCompletionCallback | None = None,
+    ) -> dict[str, Any]:
         """异步触发 TTS，立即返回调度状态。"""
         text = (text or "").strip()
         spoken_text = prepare_tts_text(text, getattr(self._config, "max_chars", 80))
@@ -80,6 +143,8 @@ class TTSService:
                 "skipped": True,
                 "message": validation_error,
             }
+            if on_complete is not None:
+                on_complete(dict(self._last_status))
             return dict(self._last_status)
 
         self._last_status = {
@@ -93,11 +158,58 @@ class TTSService:
         }
         thread = threading.Thread(
             target=self._run_safely,
-            args=(spoken_text,),
+            args=(spoken_text, play, output_path, on_complete),
             daemon=True,
             name="live2d-tts",
         )
         thread.start()
+        return dict(self._last_status)
+
+    def speak_sync(
+        self,
+        text: str,
+        *,
+        play: bool = True,
+        output_path: str | None = None,
+    ) -> dict[str, Any]:
+        """同步触发 TTS，用于配置页测试并返回最终结果。"""
+        text = (text or "").strip()
+        spoken_text = prepare_tts_text(text, getattr(self._config, "max_chars", 80))
+        validation_error = self._validation_error(spoken_text)
+        if validation_error:
+            self._last_status = {
+                "enabled": bool(self._config.enabled),
+                "provider": self._config.provider,
+                "ok": False,
+                "success": False,
+                "skipped": True,
+                "message": validation_error,
+            }
+            return dict(self._last_status)
+
+        try:
+            provider_result = self._run_provider(spoken_text, play=play, output_path=output_path)
+            self._last_status = {
+                "enabled": True,
+                "provider": self._config.provider,
+                "ok": True,
+                "success": True,
+                "message": "TTS 测试已完成",
+                "spoken_text": spoken_text,
+                "original_length": len(text),
+                **provider_result,
+            }
+        except Exception as exc:
+            logger.warning("TTS 测试失败: %s", exc)
+            self._last_status = {
+                "enabled": True,
+                "provider": self._config.provider,
+                "ok": False,
+                "success": False,
+                "error": str(exc),
+                "message": "TTS 测试失败",
+                "spoken_text": spoken_text,
+            }
         return dict(self._last_status)
 
     def _validation_error(self, text: str) -> str | None:
@@ -118,20 +230,22 @@ class TTSService:
             return "TTS Provider 不受支持"
         return None
 
-    def _run_safely(self, text: str) -> None:
+    def _run_safely(
+        self,
+        text: str,
+        play: bool,
+        output_path: str | None,
+        on_complete: TTSCompletionCallback | None,
+    ) -> None:
         try:
-            if self._config.provider == "http":
-                self._run_http(text)
-            elif self._config.provider == "command":
-                self._run_command(text)
-            elif self._config.provider == "gpt-sovits":
-                self._run_gpt_sovits(text)
+            provider_result = self._run_provider(text, play=play, output_path=output_path)
             self._last_status = {
                 "enabled": True,
                 "provider": self._config.provider,
                 "ok": True,
                 "message": "TTS 已完成",
                 "spoken_text": text,
+                **provider_result,
             }
         except Exception as exc:
             logger.warning("TTS 触发失败: %s", exc)
@@ -143,6 +257,28 @@ class TTSService:
                 "message": "TTS 触发失败",
                 "spoken_text": text,
             }
+        finally:
+            if on_complete is not None:
+                try:
+                    on_complete(dict(self._last_status))
+                except Exception:
+                    logger.debug("TTS 完成回调失败", exc_info=True)
+
+    def _run_provider(
+        self,
+        text: str,
+        *,
+        play: bool = True,
+        output_path: str | None = None,
+    ) -> dict[str, Any]:
+        if self._config.provider == "http":
+            return self._run_http(text, play=play, output_path=output_path)
+        elif self._config.provider == "command":
+            self._run_command(text)
+            return {}
+        elif self._config.provider == "gpt-sovits":
+            return self._run_gpt_sovits(text, play=play, output_path=output_path)
+        return {}
 
     def _timeout(self) -> int:
         try:
@@ -150,7 +286,7 @@ class TTSService:
         except (TypeError, ValueError):
             return 20
 
-    def _run_http(self, text: str) -> None:
+    def _run_http(self, text: str, *, play: bool, output_path: str | None) -> dict[str, Any]:
         payload = json.dumps(
             {"text": text, "voice": self._config.voice or ""},
             ensure_ascii=False,
@@ -163,9 +299,13 @@ class TTSService:
         )
         try:
             with urlopen(request, timeout=self._timeout()) as response:
-                response.read()
-        except URLError as exc:
-            raise RuntimeError(exc.reason if hasattr(exc, "reason") else str(exc)) from exc
+                content_type = _response_header(response, "Content-Type")
+                body = response.read()
+        except (URLError, OSError, HTTPException) as exc:
+            raise RuntimeError(_network_error_message("TTS HTTP 请求", request.full_url, exc)) from exc
+        if _looks_like_audio(body, content_type):
+            return self._handle_audio_response(body, content_type, output_path=output_path, play=play)
+        return {}
 
     def _run_command(self, text: str) -> None:
         argv = shlex.split(self._config.command or "")
@@ -194,8 +334,31 @@ class TTSService:
             detail = (result.stderr or result.stdout or "").strip()[:200]
             raise RuntimeError(f"TTS 命令退出码 {result.returncode}: {detail}")
 
-    def _run_gpt_sovits(self, text: str) -> None:
-        base_url = self._gsv_base_url()
+    def _run_gpt_sovits(self, text: str, *, play: bool, output_path: str | None) -> dict[str, Any]:
+        errors: list[str] = []
+        for base_url in self._gsv_base_url_candidates():
+            try:
+                return self._run_gpt_sovits_with_base_url(
+                    text,
+                    base_url,
+                    play=play,
+                    output_path=output_path,
+                )
+            except RuntimeError as exc:
+                errors.append(str(exc))
+                logger.info("GPT-SoVITS 请求失败，尝试下一个候选地址: %s", exc)
+        if errors:
+            raise RuntimeError(errors[-1])
+        raise RuntimeError("GPT-SoVITS API Base URL 未配置")
+
+    def _run_gpt_sovits_with_base_url(
+        self,
+        text: str,
+        base_url: str,
+        *,
+        play: bool,
+        output_path: str | None,
+    ) -> dict[str, Any]:
         self._maybe_set_gsv_weights(base_url)
         payload = {
             "text": text,
@@ -234,14 +397,26 @@ class TTSService:
             with urlopen(request, timeout=self._timeout()) as response:
                 content_type = _response_header(response, "Content-Type")
                 body = response.read()
-        except URLError as exc:
-            raise RuntimeError(exc.reason if hasattr(exc, "reason") else str(exc)) from exc
+        except (URLError, OSError, HTTPException) as exc:
+            raise RuntimeError(_network_error_message("GPT-SoVITS /tts 请求", endpoint, exc)) from exc
 
-        self._handle_gsv_response(body, content_type)
+        return self._handle_gsv_response(body, content_type, output_path=output_path, play=play)
 
     def _gsv_base_url(self) -> str:
         value = (self._config.gsv_base_url or "").strip().rstrip("/")
         return value or "http://127.0.0.1:9880"
+
+    def _gsv_base_url_candidates(self) -> list[str]:
+        primary = self._gsv_base_url()
+        candidates = [primary]
+        parsed = urlparse(primary)
+        host = (parsed.hostname or "").lower()
+        if host == "host.docker.internal":
+            port = f":{parsed.port}" if parsed.port else ""
+            fallback = urlunparse(parsed._replace(netloc=f"127.0.0.1{port}")).rstrip("/")
+            if fallback and fallback not in candidates:
+                candidates.append(fallback)
+        return candidates
 
     @staticmethod
     def _gsv_tts_endpoint(base_url: str) -> str:
@@ -263,12 +438,17 @@ class TTSService:
             try:
                 with urlopen(request, timeout=self._timeout()) as response:
                     response.read()
-            except URLError as exc:
-                raise RuntimeError(
-                    exc.reason if hasattr(exc, "reason") else f"{route} 请求失败: {exc}"
-                ) from exc
+            except (URLError, OSError, HTTPException) as exc:
+                raise RuntimeError(_network_error_message(f"GPT-SoVITS {route} 请求", url, exc)) from exc
 
-    def _handle_gsv_response(self, body: bytes, content_type: str) -> None:
+    def _handle_gsv_response(
+        self,
+        body: bytes,
+        content_type: str,
+        *,
+        output_path: str | None,
+        play: bool,
+    ) -> dict[str, Any]:
         if not body:
             raise RuntimeError("GPT-SoVITS 返回空音频")
         lowered = content_type.lower()
@@ -279,23 +459,66 @@ class TTSService:
                 raise RuntimeError("GPT-SoVITS 返回 JSON 解析失败") from exc
             audio_path = str(payload.get("audio_path") or payload.get("file_path") or "").strip()
             if audio_path:
-                self._play_audio_file(audio_path)
-                return
+                path = self._copy_audio_file(audio_path, output_path) if output_path else str(Path(audio_path).expanduser())
+                if play:
+                    self._play_audio_file(path)
+                return {
+                    "audio_path": path,
+                    "mime_type": _mime_type_for_audio_path(path, self._config.gsv_media_type),
+                }
             if payload.get("error") or payload.get("message"):
                 raise RuntimeError(str(payload.get("error") or payload.get("message")))
             raise RuntimeError("GPT-SoVITS 未返回音频路径或音频内容")
 
+        return self._handle_audio_response(body, content_type, output_path=output_path, play=play)
+
+    def _handle_audio_response(
+        self,
+        body: bytes,
+        content_type: str,
+        *,
+        output_path: str | None,
+        play: bool,
+    ) -> dict[str, Any]:
         suffix = "." + (self._config.gsv_media_type or "wav").strip().lstrip(".")
-        with tempfile.NamedTemporaryFile(prefix="hermes-yachiyo-gsv-", suffix=suffix, delete=False) as tmp:
-            tmp.write(body)
-            audio_path = tmp.name
+        if output_path:
+            audio_path = str(Path(output_path).expanduser())
+            Path(audio_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(audio_path).write_bytes(body)
+            keep_file = True
+        else:
+            inferred_suffix = _suffix_for_audio_response(content_type, suffix)
+            with tempfile.NamedTemporaryFile(prefix="hermes-yachiyo-gsv-", suffix=inferred_suffix, delete=False) as tmp:
+                tmp.write(body)
+                audio_path = tmp.name
+            keep_file = False
         try:
-            self._play_audio_file(audio_path)
+            if play:
+                self._play_audio_file(audio_path)
         finally:
-            try:
-                Path(audio_path).unlink(missing_ok=True)
-            except OSError:
-                logger.debug("清理 GPT-SoVITS 临时音频失败: %s", audio_path, exc_info=True)
+            if not keep_file:
+                try:
+                    Path(audio_path).unlink(missing_ok=True)
+                except OSError:
+                    logger.debug("清理 GPT-SoVITS 临时音频失败: %s", audio_path, exc_info=True)
+        result: dict[str, Any] = {
+            "mime_type": _mime_type_for_audio_path(audio_path, self._config.gsv_media_type),
+        }
+        if keep_file:
+            result["audio_path"] = audio_path
+        return result
+
+    @staticmethod
+    def _copy_audio_file(source_path: str, output_path: str | None) -> str:
+        source = Path(source_path).expanduser()
+        if not source.exists():
+            raise RuntimeError(f"TTS 音频文件不存在: {source}")
+        if not output_path:
+            return str(source)
+        target = Path(output_path).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        return str(target)
 
     def _play_audio_file(self, audio_path: str) -> None:
         path = str(Path(audio_path).expanduser())
@@ -344,3 +567,53 @@ def _response_header(response: Any, name: str) -> str:
         value = headers.get(name, "")
         return str(value or "")
     return ""
+
+
+def _looks_like_audio(body: bytes, content_type: str) -> bool:
+    lowered = (content_type or "").lower()
+    if lowered.startswith("audio/"):
+        return True
+    return body.startswith((b"RIFF", b"ID3", b"OggS", b"fLaC"))
+
+
+def _suffix_for_audio_response(content_type: str, fallback: str = ".wav") -> str:
+    mime_type = (content_type or "").split(";", 1)[0].strip().lower()
+    suffix = _AUDIO_SUFFIX_BY_MIME.get(mime_type)
+    if suffix:
+        return suffix
+    fallback = fallback if fallback.startswith(".") else f".{fallback}"
+    return fallback or ".wav"
+
+
+def _mime_type_for_audio_path(path: str, configured_media_type: str | None = None) -> str:
+    suffix = Path(path).suffix.lower()
+    if suffix == ".wav":
+        return "audio/wav"
+    if suffix == ".mp3":
+        return "audio/mpeg"
+    if suffix == ".ogg":
+        return "audio/ogg"
+    if suffix == ".flac":
+        return "audio/flac"
+    media_type = (configured_media_type or "").strip().lower().lstrip(".")
+    return _AUDIO_MIME_BY_MEDIA.get(media_type, "audio/wav")
+
+
+def _network_error_message(action: str, url: str, exc: BaseException) -> str:
+    detail = ""
+    if isinstance(exc, URLError) and getattr(exc, "reason", None):
+        detail = str(exc.reason)
+    if not detail:
+        detail = str(exc)
+    if not detail:
+        detail = exc.__class__.__name__
+
+    hint = ""
+    lowered = detail.lower()
+    if "remote end closed connection" in lowered or "remote disconnected" in lowered:
+        hint = "；远端提前关闭连接，通常是 TTS 服务进程崩溃、接口路径不匹配，或请求参数不被当前服务版本接受"
+    elif "connection refused" in lowered or "errno 61" in lowered:
+        hint = "；连接被拒绝，请确认 TTS 服务已启动并监听该地址"
+    elif "timed out" in lowered or "timeout" in lowered:
+        hint = "；请求超时，请检查模型加载耗时、超时秒数和服务日志"
+    return f"{action}失败: {url}；{detail}{hint}"

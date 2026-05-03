@@ -22,6 +22,8 @@ type ChatAttachment = {
   mime_type?: string;
   size?: number;
   url?: string;
+  source?: string;
+  spoken_text?: string;
 };
 
 type ChatMessage = {

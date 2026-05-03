@@ -36,7 +36,7 @@ TTSProviderValue = Literal["none", "http", "command", "gpt-sovits"]
 
 DEFAULT_TTS_NOTIFICATION_PROMPT = (
     "主动提醒只输出适合语音播报的一句中文招呼或提醒，保持八千代人设，"
-    "不要朗读长段分析、列表、代码、路径或调试信息。"
+    "不要输出括号动作、舞台提示或表情描写，不要朗读长段分析、列表、代码、路径或调试信息。"
 )
 
 DEFAULT_ASSISTANT_PERSONA_PROMPT = """<Role>Hermes-Yachiyo Agent</Role>
@@ -550,6 +550,7 @@ class BubbleModeConfig:
     proactive_enabled: bool = False
     proactive_desktop_watch_enabled: bool = False
     proactive_interval_seconds: int = 300
+    proactive_trigger_probability: float = 0.6
 
 
 @dataclass
@@ -571,6 +572,7 @@ class TTSConfig:
     voice: str = ""
     timeout_seconds: int = 20
     max_chars: int = 80
+    trigger_probability: float = 0.6
     notification_prompt: str = DEFAULT_TTS_NOTIFICATION_PROMPT
     gsv_base_url: str = "http://127.0.0.1:9880"
     gsv_gpt_weights_path: str = ""
@@ -637,6 +639,7 @@ class Live2DModeConfig:
     proactive_enabled: bool = False
     proactive_desktop_watch_enabled: bool = False
     proactive_interval_seconds: int = 300
+    proactive_trigger_probability: float = 0.6
 
     def has_explicit_model_path(self) -> bool:
         """用户是否显式填写了模型路径。"""
@@ -890,9 +893,15 @@ def _normalize_config_values(config: AppConfig) -> None:
     config.bubble_mode.opacity = _normalize_float_range(config.bubble_mode.opacity, 0.2, 1.0, 0.92)
     config.bubble_mode.proactive_interval_seconds = _normalize_int_range(
         config.bubble_mode.proactive_interval_seconds,
-        60,
+        300,
         3600,
         300,
+    )
+    config.bubble_mode.proactive_trigger_probability = _normalize_float_range(
+        config.bubble_mode.proactive_trigger_probability,
+        0.0,
+        1.0,
+        0.6,
     )
     config.live2d_mode.default_open_behavior = cast(Live2DDefaultOpenValue, _normalize_literal(
         config.live2d_mode.default_open_behavior,
@@ -937,9 +946,15 @@ def _normalize_config_values(config: AppConfig) -> None:
     config.live2d_mode.scale = _normalize_float_range(config.live2d_mode.scale, 0.4, 2.0, 0.6)
     config.live2d_mode.proactive_interval_seconds = _normalize_int_range(
         config.live2d_mode.proactive_interval_seconds,
-        60,
+        300,
         3600,
         300,
+    )
+    config.live2d_mode.proactive_trigger_probability = _normalize_float_range(
+        config.live2d_mode.proactive_trigger_probability,
+        0.0,
+        1.0,
+        0.6,
     )
     config.assistant.persona_prompt = str(config.assistant.persona_prompt or "")
     config.assistant.user_address = str(config.assistant.user_address or "")
@@ -953,6 +968,7 @@ def _normalize_config_values(config: AppConfig) -> None:
     config.tts.command = str(config.tts.command or "")
     config.tts.voice = str(config.tts.voice or "")
     config.tts.max_chars = _normalize_int_range(config.tts.max_chars, 20, 240, 80)
+    config.tts.trigger_probability = _normalize_float_range(config.tts.trigger_probability, 0.0, 1.0, 0.6)
     config.tts.notification_prompt = str(config.tts.notification_prompt or DEFAULT_TTS_NOTIFICATION_PROMPT)
     config.tts.gsv_base_url = str(config.tts.gsv_base_url or "http://127.0.0.1:9880")
     config.tts.gsv_gpt_weights_path = str(config.tts.gsv_gpt_weights_path or "")

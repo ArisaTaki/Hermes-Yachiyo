@@ -243,9 +243,9 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
   },
   {
     id: 'tts',
-    label: '文本转语音',
+    label: 'Hermes 文本转语音',
     category: '多模态',
-    description: '把文本转换成音频输出。',
+    description: 'Hermes Agent 自己暴露的文本转音频工具；不等同于 Yachiyo 主动关怀的 GPT-SoVITS 播报配置。',
     requirement: '需要 Hermes tts 工具集启用',
   },
   {
