@@ -1408,12 +1408,15 @@ function operationLabel(busy: string, setupAttention: boolean) {
 function terminalBusyValue(task: DesktopTerminalTask) {
   if (task === 'mac-prerequisites') return 'prep';
   if (task === 'hermes-setup') return 'setup';
+  if (task === 'update-hermes' || task === 'update-hermes-backup') return 'install';
   return 'install';
 }
 
 function terminalTaskLabel(task: DesktopTerminalTask) {
   if (task === 'mac-prerequisites') return '准备 macOS 基础工具';
   if (task === 'hermes-setup') return '配置 Hermes Agent';
+  if (task === 'update-hermes') return '更新 Hermes Agent';
+  if (task === 'update-hermes-backup') return '更新 Hermes Agent（完整备份）';
   return '安装 Hermes Agent';
 }
 
@@ -1430,6 +1433,7 @@ function terminalExitMessage(task: DesktopTerminalTask, succeeded: boolean, exit
   if (succeeded) {
     if (task === 'mac-prerequisites') return '基础工具命令已结束；请点击重新检测或继续安装 Hermes Agent。';
     if (task === 'hermes-setup') return 'Hermes setup 已结束；如果配置完成，请点击重新检测。';
+    if (task === 'update-hermes' || task === 'update-hermes-backup') return 'Hermes 更新命令已结束，请重新检测工具状态。';
     return '安装命令已结束；正在重新检测 Hermes 是否可用。';
   }
   return `${terminalTaskLabel(task)}异常结束，退出码 ${exitCode}。请查看终端输出后重试。`;
@@ -1439,6 +1443,7 @@ function terminalExitStatus(task: DesktopTerminalTask, succeeded: boolean, exitC
   if (succeeded) {
     if (task === 'mac-prerequisites') return '基础工具准备命令已结束，请重新检测或继续安装 Hermes Agent';
     if (task === 'hermes-setup') return 'Hermes setup 已结束，请重新检测';
+    if (task === 'update-hermes' || task === 'update-hermes-backup') return 'Hermes 更新命令已结束，请重新检测';
     return '安装命令已结束，请重新检测 Hermes 状态';
   }
   return `${terminalTaskLabel(task)}异常结束（退出码 ${exitCode}）`;

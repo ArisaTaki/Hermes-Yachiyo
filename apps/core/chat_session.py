@@ -235,6 +235,7 @@ class ChatSession:
         content: str,
         status: MessageStatus = MessageStatus.COMPLETED,
         error: Optional[str] = None,
+        attachments: list[dict] | None = None,
     ) -> str:
         """原子性地创建或更新 task_id 对应的 assistant 消息。
 
@@ -263,6 +264,8 @@ class ChatSession:
                 existing.content = content
                 existing.status = status
                 existing.error = error
+                if attachments is not None:
+                    existing.attachments = list(attachments)
                 self._persist_message(existing)
                 msg_id = existing.message_id
                 logger.debug(
@@ -280,6 +283,7 @@ class ChatSession:
                     created_at=datetime.now(timezone.utc),
                     task_id=task_id,
                     error=error,
+                    attachments=list(attachments or []),
                 )
                 self.messages.append(new_msg)
                 self._persist_message(new_msg)
@@ -443,7 +447,7 @@ class ChatSession:
         """查找仍在等待或执行中的用户消息。调用方需持有 _lock。"""
         for msg in self.messages:
             if (
-                msg.role == MessageRole.USER
+                msg.role in (MessageRole.USER, MessageRole.ASSISTANT)
                 and msg.status in (MessageStatus.PENDING, MessageStatus.PROCESSING)
             ):
                 return msg.message_id

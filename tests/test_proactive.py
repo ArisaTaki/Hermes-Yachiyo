@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from apps.core.chat_session import ChatSession
+from apps.core.chat_session import ChatSession, MessageRole, MessageStatus
 from apps.core.state import AppState
 import apps.shell.proactive as proactive_mod
 from apps.shell.config import AppConfig
@@ -32,6 +32,26 @@ class _RuntimeStub:
 
     def get_status(self) -> dict:
         return {"hermes": {"limited_tools": self.limited_tools}}
+
+
+def _advance_to_first_check(monkeypatch, start: float = 1000.0):
+    now = [start]
+    monkeypatch.setattr(proactive_mod.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(proactive_mod.random, "random", lambda: 0.0)
+
+    def fake_capture(target_path):
+        target_path.write_bytes(b"fake-png")
+        return {
+            "path": str(target_path),
+            "mime_type": "image/png",
+            "format": "png",
+            "width": 120,
+            "height": 80,
+            "size": 8,
+        }
+
+    monkeypatch.setattr(proactive_mod, "capture_screenshot_to_file", fake_capture)
+    return now
 
 
 def test_proactive_service_disabled():
@@ -76,15 +96,61 @@ def test_proactive_service_blocks_when_vision_limited():
     assert runtime.state.list_tasks() == []
 
 
-def test_proactive_service_creates_low_risk_screenshot_task():
+def test_proactive_service_waits_minimum_interval_before_first_check(monkeypatch):
+    now = _advance_to_first_check(monkeypatch)
     runtime = _RuntimeStub()
     runtime.config.live2d_mode.proactive_enabled = True
     runtime.config.live2d_mode.proactive_desktop_watch_enabled = True
     runtime.config.live2d_mode.proactive_interval_seconds = 60
-    runtime.config.tts.max_chars = 42
-    runtime.config.tts.notification_prompt = "只说一句轻快提醒。"
     service = ProactiveDesktopService(runtime, runtime.config.live2d_mode)
 
+    state = service.get_state()
+
+    assert state["status"] == "waiting"
+    assert state["next_check_seconds"] == 300
+    assert runtime.state.list_tasks() == []
+
+    now[0] = 1299.0
+    assert service.get_state()["status"] == "waiting"
+    assert runtime.state.list_tasks() == []
+
+    now[0] = 1300.0
+    state = service.get_state()
+
+    assert state["status"] == "scheduled"
+    assert runtime.state.list_tasks()[0].task_id == state["task_id"]
+
+
+def test_proactive_service_can_skip_whole_chain_by_probability(monkeypatch):
+    now = _advance_to_first_check(monkeypatch)
+    monkeypatch.setattr(proactive_mod.random, "random", lambda: 0.9)
+    runtime = _RuntimeStub()
+    runtime.config.live2d_mode.proactive_enabled = True
+    runtime.config.live2d_mode.proactive_desktop_watch_enabled = True
+    runtime.config.live2d_mode.proactive_interval_seconds = 300
+    runtime.config.live2d_mode.proactive_trigger_probability = 0.25
+    service = ProactiveDesktopService(runtime, runtime.config.live2d_mode)
+
+    now[0] = 1300.0
+    state = service.get_state()
+
+    assert state["status"] == "skipped"
+    assert state["trigger_probability"] == 0.25
+    assert "跳过" in state["message"]
+    assert service.last_task_id is None
+    assert runtime.state.list_tasks() == []
+    assert runtime.chat_session.get_messages() == []
+
+
+def test_proactive_service_creates_low_risk_screenshot_task(monkeypatch):
+    now = _advance_to_first_check(monkeypatch)
+    runtime = _RuntimeStub()
+    runtime.config.live2d_mode.proactive_enabled = True
+    runtime.config.live2d_mode.proactive_desktop_watch_enabled = True
+    runtime.config.live2d_mode.proactive_interval_seconds = 300
+    service = ProactiveDesktopService(runtime, runtime.config.live2d_mode)
+
+    now[0] = 1300.0
     state = service.get_state()
     tasks = runtime.state.list_tasks()
 
@@ -92,35 +158,104 @@ def test_proactive_service_creates_low_risk_screenshot_task():
     assert state["task_id"] == tasks[0].task_id
     assert tasks[0].task_type == TaskType.SCREENSHOT
     assert tasks[0].risk_level == RiskLevel.LOW
-    assert "只说一句轻快提醒" in tasks[0].description
-    assert "最多 42 个中文字符" in tasks[0].description
+    assert len(tasks[0].attachments) == 1
+    assert tasks[0].attachments[0]["kind"] == "image"
+    assert tasks[0].attachments[0]["mime_type"] == "image/png"
+    assert "详细对话框阅读" in tasks[0].description
+    assert "TTS 会在播报前另行压缩" in tasks[0].description
     assert service.last_task_id == tasks[0].task_id
 
+    messages = runtime.chat_session.get_messages()
+    assert len(messages) == 1
+    assert messages[0].role == MessageRole.ASSISTANT
+    assert messages[0].status == MessageStatus.PROCESSING
+    assert messages[0].task_id == tasks[0].task_id
+    assert messages[0].content == "正在查看当前状态。"
+    assert len(messages[0].attachments) == 1
+    assert messages[0].attachments[0]["kind"] == "image"
+    assert "主动桌面观察" not in messages[0].content
+    assert "输出约束" not in messages[0].content
 
-def test_build_proactive_desktop_prompt_uses_tts_notification_constraints():
+
+def test_proactive_service_records_local_screenshot_failure_without_running_hermes(monkeypatch):
+    now = _advance_to_first_check(monkeypatch)
+
+    def fake_capture(_target_path):
+        raise RuntimeError("当前后端进程没有 macOS 屏幕录制权限")
+
+    monkeypatch.setattr(proactive_mod, "capture_screenshot_to_file", fake_capture)
     runtime = _RuntimeStub()
-    runtime.config.tts.max_chars = 33
-    runtime.config.tts.notification_prompt = "像打招呼一样提醒。"
+    runtime.config.live2d_mode.proactive_enabled = True
+    runtime.config.live2d_mode.proactive_desktop_watch_enabled = True
+    runtime.config.live2d_mode.proactive_interval_seconds = 300
+    service = ProactiveDesktopService(runtime, runtime.config.live2d_mode)
+
+    now[0] = 1300.0
+    state = service.get_state()
+    tasks = runtime.state.list_tasks()
+
+    assert state["status"] == "failed"
+    assert state["task_id"] == tasks[0].task_id
+    assert "屏幕录制权限" in state["error"]
+    assert tasks[0].status == TaskStatus.FAILED
+    assert tasks[0].attachments == []
+    assert "本地截图捕获失败" in tasks[0].description
+
+    messages = runtime.chat_session.get_messages()
+    assert len(messages) == 1
+    assert messages[0].role == MessageRole.ASSISTANT
+    assert messages[0].status == MessageStatus.FAILED
+    assert messages[0].task_id == tasks[0].task_id
+    assert messages[0].attachments == []
+    assert "主动桌面观察暂时无法读取截图" in messages[0].content
+    assert "输出约束" not in messages[0].content
+
+
+def test_build_proactive_desktop_prompt_keeps_detailed_message_constraints():
+    runtime = _RuntimeStub()
 
     prompt = build_proactive_desktop_prompt(runtime)
 
-    assert "像打招呼一样提醒" in prompt
-    assert "最多 33 个中文字符" in prompt
+    assert "详细对话框阅读" in prompt
+    assert "TTS 会在播报前另行压缩" in prompt
+
+
+def test_proactive_service_completed_state_exposes_observation_text(monkeypatch):
+    now = _advance_to_first_check(monkeypatch)
+    runtime = _RuntimeStub()
+    runtime.config.bubble_mode.proactive_enabled = True
+    runtime.config.bubble_mode.proactive_desktop_watch_enabled = True
+    service = ProactiveDesktopService(runtime, runtime.config.bubble_mode)
+    now[0] = 1300.0
+    scheduled = service.get_state()
+
+    runtime.state.update_task_status(
+        scheduled["task_id"],
+        TaskStatus.COMPLETED,
+        result="你已经连续处理工具配置很久了，建议先保存进度再休息一下。",
+    )
+    state = service.get_state()
+
+    assert state["status"] == "completed"
+    assert state["has_attention"] is True
+    assert state["attention_source"] == "proactive_desktop_watch"
+    assert state["attention_text"] == "你已经连续处理工具配置很久了，建议先保存进度再休息一下。"
+    assert state["message"] == state["attention_text"]
 
 
 def test_proactive_service_reports_failed_before_retry_interval(monkeypatch):
-    now = [1000.0]
-    monkeypatch.setattr(proactive_mod.time, "monotonic", lambda: now[0])
+    now = _advance_to_first_check(monkeypatch)
     runtime = _RuntimeStub()
     config = AppConfig()
     config.bubble_mode.proactive_enabled = True
     config.bubble_mode.proactive_desktop_watch_enabled = True
-    config.bubble_mode.proactive_interval_seconds = 60
+    config.bubble_mode.proactive_interval_seconds = 300
     service = ProactiveDesktopService(runtime, config.bubble_mode)
 
+    now[0] = 1300.0
     scheduled = service.get_state()
     runtime.state.update_task_status(scheduled["task_id"], TaskStatus.FAILED, error="vision failed")
-    now[0] = 1030.0
+    now[0] = 1400.0
 
     state = service.get_state()
 
@@ -131,24 +266,24 @@ def test_proactive_service_reports_failed_before_retry_interval(monkeypatch):
 
 
 def test_proactive_service_retries_failed_task_after_interval(monkeypatch):
-    now = [1000.0]
-    monkeypatch.setattr(proactive_mod.time, "monotonic", lambda: now[0])
+    now = _advance_to_first_check(monkeypatch)
     runtime = _RuntimeStub()
     config = AppConfig()
     config.live2d_mode.proactive_enabled = True
     config.live2d_mode.proactive_desktop_watch_enabled = True
-    config.live2d_mode.proactive_interval_seconds = 60
+    config.live2d_mode.proactive_interval_seconds = 300
     service = ProactiveDesktopService(runtime, config.live2d_mode)
 
+    now[0] = 1300.0
     scheduled = service.get_state()
     runtime.state.update_task_status(scheduled["task_id"], TaskStatus.FAILED, error="vision failed")
-    now[0] = 1061.0
+    now[0] = 1601.0
 
     failed = service.get_state()
     assert failed["status"] == "failed"
     assert failed["task_id"] == scheduled["task_id"]
 
-    now[0] = 1062.0
+    now[0] = 1602.0
     state = service.get_state()
     tasks = runtime.state.list_tasks()
 

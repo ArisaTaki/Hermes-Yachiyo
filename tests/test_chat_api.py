@@ -433,6 +433,30 @@ def test_running_task_preserves_streamed_assistant_content(tmp_path):
         store.close()
 
 
+def test_assistant_only_task_syncs_without_visible_user_prompt(tmp_path):
+    """主动关怀这类内部任务可以只显示 assistant 状态消息。"""
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        task = runtime.state.create_task("主动桌面观察：内部执行 prompt")
+        runtime.chat_session.upsert_assistant_message(
+            task.task_id,
+            "正在查看当前状态。",
+            MessageStatus.PROCESSING,
+        )
+
+        runtime.state.update_task_status(task.task_id, TaskStatus.COMPLETED, result="周末上午过得怎么样？")
+        messages = api.get_messages()["messages"]
+
+        assert len(messages) == 1
+        assert messages[0]["role"] == "assistant"
+        assert messages[0]["task_id"] == task.task_id
+        assert messages[0]["status"] == "completed"
+        assert messages[0]["content"] == "周末上午过得怎么样？"
+        assert "主动桌面观察" not in messages[0]["content"]
+    finally:
+        store.close()
+
+
 def test_message_sorting_pairs_user_with_assistant(tmp_path):
     """消息排序：user 消息后紧跟其关联的 assistant 回复"""
     api, runtime, store = _make_api(tmp_path)

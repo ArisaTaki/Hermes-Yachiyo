@@ -16,6 +16,9 @@ dev = [
     "httpx>=0.27.0",
     "ruff>=0.3.0",
 ]
+packaging = [
+    "pyinstaller>=6.15.0",
+]
 
 [project.scripts]
 hermes-yachiyo = "apps.desktop_launcher:main"

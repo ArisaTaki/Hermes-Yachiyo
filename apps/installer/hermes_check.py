@@ -14,6 +14,7 @@ from packages.protocol.enums import HermesInstallStatus, HermesReadinessLevel, P
 from packages.protocol.install import HermesInstallInfo, HermesVersionInfo
 
 logger = logging.getLogger(__name__)
+_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 # Hermes 最低要求版本（示例）
 HERMES_MIN_VERSION = "0.8.0"
@@ -306,6 +307,57 @@ def get_hermes_home() -> str:
     return default_hermes_home
 
 
+def parse_hermes_doctor_output(output: str) -> dict[str, object]:
+    """Parse the Hermes doctor output into stable tool availability fields."""
+    text = _ANSI_RE.sub("", output or "")
+    m = re.search(r"Found\s+(\d+)\s+issue", text)
+    issues_count = int(m.group(1)) if m else 0
+    available_tools: list[str] = []
+    limited_tools: list[str] = []
+    limited_tool_details: dict[str, str] = {}
+    in_tools_section = False
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if "Tool Availability" in stripped or (stripped.startswith("◆") and "Tool" in stripped):
+            in_tools_section = True
+            continue
+        if in_tools_section and stripped.startswith("◆"):
+            in_tools_section = False
+            continue
+        if not in_tools_section:
+            continue
+
+        ok_match = re.match(r"\s*(?:✓|✔|✅)\s+([A-Za-z0-9_.-]+)", line)
+        if ok_match:
+            available_tools.append(ok_match.group(1))
+            continue
+
+        limited_match = re.match(
+            r"\s*(?:⚠️?|✗|❌)\s+([A-Za-z0-9_.-]+)(?:\s+\((.*?)\))?",
+            line,
+        )
+        if limited_match:
+            name = limited_match.group(1)
+            detail = (limited_match.group(2) or "").strip()
+            limited_tools.append(name)
+            if detail:
+                limited_tool_details[name] = detail
+
+    readiness_level = (
+        HermesReadinessLevel.FULL_READY.value
+        if issues_count == 0 and not limited_tools
+        else HermesReadinessLevel.BASIC_READY.value
+    )
+    return {
+        "readiness_level": readiness_level,
+        "available_tools": available_tools,
+        "limited_tools": limited_tools,
+        "limited_tool_details": limited_tool_details,
+        "doctor_issues_count": issues_count,
+    }
+
+
 def check_hermes_doctor_readiness(
     timeout: float = 5.0,
     hermes_path: str = "hermes",
@@ -329,40 +381,24 @@ def check_hermes_doctor_readiness(
         )
         output = result.stdout + result.stderr
 
-        # 解析末尾 issue 数
-        m = re.search(r'Found (\d+) issue', output)
-        issues_count = int(m.group(1)) if m else 0
-
-        # 解析 Tool Availability 节的受限工具
-        limited_tools: list[str] = []
-        in_tools_section = False
-        for line in output.splitlines():
-            stripped = line.strip()
-            if "Tool Availability" in stripped or (stripped.startswith("◆") and "Tool" in stripped):
-                in_tools_section = True
-                continue
-            if in_tools_section and stripped.startswith("◆"):
-                in_tools_section = False
-                continue
-            if in_tools_section and any(marker in line for marker in ("⚠", "✗", "❌")):
-                # 格式: "  ⚠ toolname (reason)"，工具名可能包含 - / _ / .
-                nm = re.match(r"\s*(?:⚠|✗|❌)\s+([A-Za-z0-9_.-]+)", line)
-                if nm:
-                    limited_tools.append(nm.group(1))
-
-        if issues_count == 0 and not limited_tools:
-            return HermesReadinessLevel.FULL_READY, [], 0
-        else:
-            return HermesReadinessLevel.BASIC_READY, limited_tools, issues_count
+        summary = parse_hermes_doctor_output(output)
+        check_hermes_doctor_readiness.last_summary = summary  # type: ignore[attr-defined]
+        readiness_level = HermesReadinessLevel(str(summary["readiness_level"]))
+        limited_tools = list(summary["limited_tools"])
+        issues_count = int(summary["doctor_issues_count"])
+        return readiness_level, limited_tools, issues_count
 
     except FileNotFoundError:
         # hermes 命令不存在（理论上不应到达此处，安装检测已先行）
+        check_hermes_doctor_readiness.last_summary = {}  # type: ignore[attr-defined]
         return HermesReadinessLevel.UNKNOWN, [], 0
     except subprocess.TimeoutExpired:
         logger.debug("hermes doctor 超时（%.1fs），跳过就绪分级", timeout)
+        check_hermes_doctor_readiness.last_summary = {}  # type: ignore[attr-defined]
         return HermesReadinessLevel.UNKNOWN, [], 0
     except Exception as exc:
         logger.debug("hermes doctor 检测失败，跳过就绪分级: %s", exc)
+        check_hermes_doctor_readiness.last_summary = {}  # type: ignore[attr-defined]
         return HermesReadinessLevel.UNKNOWN, [], 0
 
 
@@ -480,8 +516,18 @@ def check_hermes_installation() -> HermesInstallInfo:
     readiness_level, limited_tools, issues_count = check_hermes_doctor_readiness(
         hermes_path=hermes_path,
     )
+    doctor_summary = getattr(check_hermes_doctor_readiness, "last_summary", {})
     install_info.readiness_level = readiness_level
     install_info.limited_tools = limited_tools
+    if isinstance(doctor_summary, dict):
+        install_info.available_tools = [
+            str(tool) for tool in doctor_summary.get("available_tools", []) if tool
+        ]
+        details = doctor_summary.get("limited_tool_details", {})
+        if isinstance(details, dict):
+            install_info.limited_tool_details = {
+                str(key): str(value) for key, value in details.items() if key and value
+            }
     install_info.doctor_issues_count = issues_count
 
     install_info.status = HermesInstallStatus.READY

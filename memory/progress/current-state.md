@@ -2,6 +2,23 @@
 
 ## 已完成
 
+### Milestone 74 — Tool Center Doctor 分级与工具配置修复
+
+- ✅ 基于当前 `phase-2/feature/repair-tools` 的提交树补齐进度记录：`7307fd3` 合入了 2026-05-01 至 2026-05-02 的 Electron 固定前端、配置诊断、图片附件/vision 路由、图片链路校验缓存和窗口身份持久化等工作；其前序关键提交包括 `1ddba0a`、`41126f9`、`28c23ff`、`eac0dcb`、`0d0aee0`、`254ce91`、`9f55c9f`。
+- ✅ `hermes doctor` 输出解析已从只看受限项扩展为同时解析 `available_tools`、`limited_tools`、受限原因和 issue count；旧的三元返回值仍保留兼容安装器调用。
+- ✅ Runtime、Dashboard、Settings 和 Tool Center 已透传 Doctor 新字段，工具中心不再只依赖 `hermes.ready` 推断状态。
+- ✅ Tool Center 已拆分基础 `browser` 和高级 `browser-cdp`：基础浏览器自动化可按 `browser` 可用状态显示，CDP 端口缺失只影响 `browser-cdp`。
+- ✅ 新增工具配置安全接口 `/ui/hermes/tools/config`：按工具返回不同配置项，只展示 env 名和配置状态，不回传任何 token/key 明文；保存统一走 `hermes config set`。
+- ✅ 第一批配置目录已覆盖 `web`、`browser`、`browser-cdp`、`image_gen`、Discord、Home Assistant、MoA、RL；Spotify、腾讯元宝和 messaging 先提供 Hermes 原生向导入口；Tool Center 现会读取 `hermes tools list`，只展示当前 Hermes 暴露的工具组。
+- ✅ `image_gen` 配置已收敛为当前 Hermes 已知 provider：内置 FAL 与已装 OpenAI/OpenAI Codex/xAI 插件提供模型建议，不再主动列出 Hermes 未暴露的生图后端。
+- ✅ 工具配置页新增“保存并测试 / 测试配置”：保存后会做必需配置静态检查，并运行 `hermes doctor` 对应工具状态，不会默认触发发消息、生图、RL 训练等有副作用/成本的真实调用。
+- ✅ 新增 Hermes 更新检查与更新入口：Tool Center 可检查 `hermes version` / `hermes update --check`，更新通道跟随 Hermes 官方 updater 的当前 checkout `origin/main`；默认执行 `hermes update --gateway --yes --no-backup`，可勾选完整备份后改走 `--backup`，更新完成会自动刷新 `hermes tools list`、工具配置、Dashboard 与 Doctor 缓存，并展示工具清单变化。
+- ✅ `image_gen` provider 列表改为从当前 Hermes `plugins/image_gen/*/plugin.yaml` 读取，确保已安装的 OpenAI、OpenAI Codex、xAI 插件不会被前端压成只剩 FAL。
+- ✅ 新增 `/ui/hermes/tools/browser-cdp/launch`：可尝试启动或连接本机 Chrome `9222` 调试端口，成功后写入 `browser.cdp_url=http://127.0.0.1:9222`，失败时返回 Hermes 生成的手动命令。
+- ✅ Tool Center React 视图新增 `#/tools/:toolId` 独立配置页，受限/可配置卡片会进入对应配置页而不是在长列表顶部展开；配置页顶部和底部都有保存入口，未保存切换时会弹出“保存并继续 / 弃置更改 / 继续编辑”确认。
+- ✅ 诊断缓存指纹已纳入工具配置安全快照，工具配置或 env 配置状态变化后会让旧 Doctor 缓存标记为过期。
+- ✅ 验证：`python -m pytest tests/test_hermes_installer.py tests/test_main_api_modes.py tests/test_ui_bridge_routes.py tests/test_hermes_capabilities.py` → 49 passed；`npm --prefix apps/frontend run build` → passed（保留 Vite 大 chunk warning）；`git diff --check` → passed。
+
 ### Milestone 73 — 一键安装错误捕获 hotfix
 
 - ✅ `run_hermes_install()` 不再丢弃带 ANSI 颜色控制序列的安装脚本输出；会清洗控制码并保留可读错误文本，避免 UI 只显示 `exit=1` 而隐藏真正失败原因。
