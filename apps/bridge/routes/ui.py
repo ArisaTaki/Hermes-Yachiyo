@@ -15,14 +15,20 @@ from pydantic import BaseModel
 from pydantic import Field
 
 from apps.bridge.deps import get_runtime
+from apps.core.chat_session import MessageStatus
 from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH
 from apps.shell.assets import data_uri
 from apps.shell.assets import find_live2d_preview_path
 from apps.shell.chat_api import ChatAPI
+from apps.shell.chat_api import allocate_chat_attachment_path
+from apps.shell.chat_api import audio_mime_type_for_suffix
+from apps.shell.chat_api import chat_attachment_record
 from apps.shell.chat_bridge import ChatBridge
 from apps.shell.launcher_notifications import LauncherNotificationTracker
 from apps.shell.live2d_resources import import_live2d_archive_draft
 from apps.shell.live2d_resources import prepare_live2d_model_path_draft
+from apps.shell.tts_resources import get_tts_voice_resource_info
+from apps.shell.tts_resources import import_tts_voice_archive_draft
 from apps.shell.installer_api import InstallerWebViewAPI
 from apps.shell.main_api import MainWindowAPI
 from apps.shell.mode_settings import apply_settings_changes
@@ -34,7 +40,7 @@ router = APIRouter(prefix="/ui", tags=["UI"])
 _launcher_notifications: dict[str, LauncherNotificationTracker] = {}
 _launcher_proactive_services: dict[tuple[str, int], ProactiveDesktopService] = {}
 _launcher_tts_services: dict[int, TTSService] = {}
-_launcher_last_tts_reply: dict[int, str] = {}
+_launcher_last_tts_attention: dict[int, str] = {}
 
 
 class SendChatMessageRequest(BaseModel):
@@ -90,6 +96,27 @@ class HermesConfigUpdateRequest(BaseModel):
     vision_api_key: str | None = None
 
 
+class HermesToolConfigUpdateRequest(BaseModel):
+    tool_id: str
+    changes: dict[str, Any] = Field(default_factory=dict)
+
+
+class HermesToolConfigTestRequest(BaseModel):
+    tool_id: str
+
+
+class HermesUpdateRunRequest(BaseModel):
+    backup: bool = False
+
+
+class TtsTestRequest(BaseModel):
+    text: str = "八千代语音测试成功。主动关怀播报已经可以正常调用。"
+
+
+class ScreenPermissionRequest(BaseModel):
+    open_settings: bool = True
+
+
 class BackupCreateRequest(BaseModel):
     overwrite_latest: bool = False
 
@@ -105,6 +132,10 @@ class UninstallRunRequest(BaseModel):
 
 
 class Live2DResourcePathRequest(BaseModel):
+    path: str
+
+
+class TtsResourcePathRequest(BaseModel):
     path: str
 
 
@@ -124,6 +155,49 @@ async def get_settings() -> dict[str, Any]:
 async def update_settings(request: SettingsUpdateRequest) -> dict[str, Any]:
     runtime = get_runtime()
     return MainWindowAPI(runtime, runtime.config).update_settings(request.changes)
+
+
+@router.post("/tts/test")
+async def test_proactive_tts(request: TtsTestRequest) -> dict[str, Any]:
+    runtime = get_runtime()
+
+    def _run_test() -> dict[str, Any]:
+        tts_config = getattr(runtime.config, "tts", None)
+        if tts_config is None:
+            return {
+                "ok": False,
+                "success": False,
+                "provider": "none",
+                "message": "TTS 配置不存在",
+            }
+        service = TTSService(tts_config)
+        status = service.speak_sync(request.text)
+        return {
+            "tool": "proactive_tts",
+            **status,
+        }
+
+    return await asyncio.to_thread(_run_test)
+
+
+@router.get("/tts/voice-resource")
+async def get_tts_voice_resource() -> dict[str, Any]:
+    return get_tts_voice_resource_info()
+
+
+@router.post("/tts/voice-resource/import")
+async def import_tts_voice_archive_path(request: TtsResourcePathRequest) -> dict[str, Any]:
+    return import_tts_voice_archive_draft(Path(request.path))
+
+
+@router.post("/proactive/screen-permission/check")
+async def check_proactive_screen_permission(request: ScreenPermissionRequest) -> dict[str, Any]:
+    def _check() -> dict[str, Any]:
+        from apps.locald.screenshot import check_screen_capture_permission
+
+        return check_screen_capture_permission(open_settings=request.open_settings)
+
+    return await asyncio.to_thread(_check)
 
 
 @router.post("/hermes/terminal-command")
@@ -179,6 +253,58 @@ async def update_hermes_configuration(request: HermesConfigUpdateRequest) -> dic
     return await asyncio.to_thread(
         MainWindowAPI(runtime, runtime.config).update_hermes_configuration,
         request.model_dump(exclude_none=True),
+    )
+
+
+@router.get("/hermes/tools/config")
+async def get_hermes_tool_config() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).get_hermes_tool_config
+    )
+
+
+@router.post("/hermes/tools/config")
+async def update_hermes_tool_config(request: HermesToolConfigUpdateRequest) -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).update_hermes_tool_config,
+        request.tool_id,
+        request.changes,
+    )
+
+
+@router.post("/hermes/tools/config/test")
+async def test_hermes_tool_config(request: HermesToolConfigTestRequest) -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).test_hermes_tool_config,
+        request.tool_id,
+    )
+
+
+@router.post("/hermes/update/check")
+async def check_hermes_update() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).check_hermes_update
+    )
+
+
+@router.post("/hermes/update/run")
+async def update_hermes_agent(request: HermesUpdateRunRequest | None = None) -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).update_hermes_agent,
+        bool(request.backup) if request else False,
+    )
+
+
+@router.post("/hermes/tools/browser-cdp/launch")
+async def launch_hermes_browser_cdp() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).launch_browser_cdp
     )
 
 
@@ -494,7 +620,11 @@ def _live2d_renderer_payload(app_config: Any, resource: dict[str, Any]) -> dict[
     }
 
 
-def _maybe_trigger_live2d_tts(runtime: Any, chat: dict[str, Any]) -> dict[str, Any]:
+def _maybe_trigger_proactive_tts(
+    runtime: Any,
+    mode_id: str,
+    proactive: dict[str, Any],
+) -> dict[str, Any]:
     config = runtime.config
     tts_config = getattr(config, "tts", None)
     if tts_config is None:
@@ -503,15 +633,89 @@ def _maybe_trigger_live2d_tts(runtime: Any, chat: dict[str, Any]) -> dict[str, A
     service = _launcher_tts_services.setdefault(key, TTSService(tts_config))
     if not getattr(tts_config, "enabled", False) or getattr(tts_config, "provider", "none") == "none":
         return service.get_status()
-    latest_reply = str(chat.get("latest_reply_full") or chat.get("latest_reply") or "").strip()
-    if not latest_reply:
+    if not proactive.get("has_attention"):
         return service.get_status()
-    if latest_reply == _launcher_last_tts_reply.get(key, ""):
+    text = str(
+        proactive.get("attention_text")
+        or proactive.get("message")
+        or proactive.get("result")
+        or ""
+    ).strip()
+    if not text:
         return service.get_status()
-    status = service.speak_async(latest_reply)
+    attention_key = str(proactive.get("task_id") or text)
+    if attention_key == _launcher_last_tts_attention.get(key, ""):
+        return service.get_status()
+
+    output_path, attachment_id, mime_type = _allocate_tts_audio_output(runtime, tts_config)
+    task_id = str(proactive.get("task_id") or "")
+
+    def on_complete(status: dict[str, Any]) -> None:
+        if task_id:
+            _attach_proactive_tts_audio(runtime, task_id, status, attachment_id, output_path, mime_type)
+
+    status = service.speak_async(
+        text,
+        play=True,
+        output_path=str(output_path) if output_path else None,
+        on_complete=on_complete,
+    )
     if status.get("scheduled"):
-        _launcher_last_tts_reply[key] = latest_reply
+        _launcher_last_tts_attention[key] = attention_key
     return status
+
+
+def _allocate_tts_audio_output(runtime: Any, tts_config: Any) -> tuple[Path | None, str, str]:
+    provider = str(getattr(tts_config, "provider", "") or "")
+    if provider not in {"gpt-sovits", "http"}:
+        return None, "", ""
+    media_type = str(getattr(tts_config, "gsv_media_type", "wav") or "wav").strip().lower().lstrip(".")
+    suffix = f".{media_type if media_type in {'wav', 'mp3', 'ogg', 'flac'} else 'wav'}"
+    session_id = str(getattr(getattr(runtime, "chat_session", None), "session_id", "") or "proactive")
+    attachment_id, output_path = allocate_chat_attachment_path(session_id, suffix)
+    return output_path, attachment_id, audio_mime_type_for_suffix(suffix)
+
+
+def _attach_proactive_tts_audio(
+    runtime: Any,
+    task_id: str,
+    status: dict[str, Any],
+    attachment_id: str,
+    output_path: Path | None,
+    mime_type: str,
+) -> None:
+    if not status.get("ok") or not status.get("audio_path") or not output_path or not attachment_id:
+        return
+    path = Path(str(status.get("audio_path") or output_path))
+    if not path.exists():
+        return
+    chat_session = getattr(runtime, "chat_session", None)
+    if chat_session is None:
+        return
+    existing = chat_session.get_assistant_message_for_task(task_id)
+    if existing is None:
+        return
+    attachments = [
+        item for item in list(existing.attachments or [])
+        if not (isinstance(item, dict) and item.get("kind") == "audio" and item.get("source") == "proactive_tts")
+    ]
+    attachment = chat_attachment_record(
+        attachment_id,
+        path,
+        kind="audio",
+        name="主动关怀语音." + path.suffix.lstrip("."),
+        mime_type=str(status.get("mime_type") or mime_type or "audio/wav"),
+    )
+    attachment["source"] = "proactive_tts"
+    attachment["spoken_text"] = str(status.get("spoken_text") or "")
+    attachments.append(attachment)
+    chat_session.upsert_assistant_message(
+        task_id=task_id,
+        content=existing.content,
+        status=MessageStatus.COMPLETED,
+        error=existing.error,
+        attachments=attachments,
+    )
 
 
 @router.get("/launcher")
@@ -552,8 +756,7 @@ async def get_launcher_view(mode: str = "bubble") -> dict[str, Any]:
         }
 
     chat = bridge.get_conversation_overview(summary_count=summary_count, session_limit=3)
-    if mode_id == "live2d":
-        tts_status = _maybe_trigger_live2d_tts(runtime, chat)
+    tts_status = _maybe_trigger_proactive_tts(runtime, mode_id, proactive)
     tracker = _launcher_notifications.setdefault(mode_id, LauncherNotificationTracker())
     notification = tracker.update(chat, external_attention=bool(proactive.get("has_attention")))
     latest_status = "ready"

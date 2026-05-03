@@ -4,10 +4,12 @@ import { openExternalUrl } from '../lib/bridge';
 
 export type ImageAttachment = {
   id?: string;
+  kind?: string;
   name?: string;
   mime_type?: string;
   size?: number;
   url?: string;
+  spoken_text?: string;
 };
 
 type Props = {
@@ -15,6 +17,13 @@ type Props = {
 };
 
 export function ImageAttachmentViewer({ attachment }: Props) {
+  if (attachment.kind === 'audio' || String(attachment.mime_type || '').startsWith('audio/')) {
+    return <AudioAttachmentViewer attachment={attachment} />;
+  }
+  return <ImagePreviewAttachment attachment={attachment} />;
+}
+
+function ImagePreviewAttachment({ attachment }: Props) {
   const [failed, setFailed] = useState(false);
   const [open, setOpen] = useState(false);
   const name = attachment.name || '图片';
@@ -88,6 +97,27 @@ export function ImageAttachmentViewer({ attachment }: Props) {
         </div>
       ) : null}
     </>
+  );
+}
+
+function AudioAttachmentViewer({ attachment }: Props) {
+  const name = attachment.name || '语音';
+  const sizeText = formatBytes(attachment.size);
+  return (
+    <div className="message-audio-attachment">
+      <div className="message-audio-meta">
+        <strong>{name}</strong>
+        <span>{attachment.mime_type || 'audio'} · {sizeText}</span>
+      </div>
+      {attachment.url ? (
+        <audio controls preload="none" src={attachment.url}>
+          当前环境不支持音频播放。
+        </audio>
+      ) : (
+        <span className="message-attachment-fallback">语音缓存不可用</span>
+      )}
+      {attachment.spoken_text ? <p>{attachment.spoken_text}</p> : null}
+    </div>
   );
 }
 

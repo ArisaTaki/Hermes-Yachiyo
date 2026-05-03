@@ -22,6 +22,8 @@ type ChatAttachment = {
   mime_type?: string;
   size?: number;
   url?: string;
+  source?: string;
+  spoken_text?: string;
 };
 
 type ChatMessage = {
@@ -106,6 +108,7 @@ export function ChatView() {
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerComposingRef = useRef(false);
   const renderStateRef = useRef<Map<string, RenderState>>(new Map());
   const animationFrameRef = useRef<number | null>(null);
   const typewriterLastTsRef = useRef(0);
@@ -295,6 +298,7 @@ export function ChatView() {
 
   function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (isImeComposing(event, composerComposingRef.current)) return;
     event.preventDefault();
     event.currentTarget.form?.requestSubmit();
   }
@@ -493,6 +497,12 @@ export function ChatView() {
             ref={inputRef}
             value={input}
             onChange={(event) => setInput(event.target.value)}
+            onCompositionEnd={() => {
+              composerComposingRef.current = false;
+            }}
+            onCompositionStart={() => {
+              composerComposingRef.current = true;
+            }}
             onKeyDown={handleComposerKeyDown}
             onPaste={(event) => void handlePaste(event)}
             placeholder="输入消息，或直接粘贴图片..."
@@ -608,6 +618,11 @@ function compactStatusText(text: string, maxLength = 96) {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();
   if (!normalized) return '任务执行失败';
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
+}
+
+function isImeComposing(event: ReactKeyboardEvent<HTMLElement>, fallback = false) {
+  const nativeEvent = event.nativeEvent as KeyboardEvent & { isComposing?: boolean };
+  return Boolean(fallback || nativeEvent.isComposing || nativeEvent.keyCode === 229);
 }
 
 function roleLabel(role: string) {
@@ -786,7 +801,8 @@ function renderMarkdown(text: string) {
     inCode = false;
   }
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     if (line.trim().startsWith('```')) {
       if (inCode) {
         flushCode();
@@ -807,6 +823,23 @@ function renderMarkdown(text: string) {
     if (!line.trim()) {
       flushParagraph();
       closeList();
+      continue;
+    }
+
+    const nextLine = lines[index + 1] || '';
+    if (isMarkdownTableHeader(line, nextLine)) {
+      flushParagraph();
+      closeList();
+      const headers = splitMarkdownTableRow(line);
+      const alignments = splitMarkdownTableRow(nextLine).map(markdownTableAlignment);
+      const rows: string[][] = [];
+      index += 2;
+      while (index < lines.length && lineLooksLikeMarkdownTableRow(lines[index])) {
+        rows.push(splitMarkdownTableRow(lines[index]));
+        index += 1;
+      }
+      index -= 1;
+      html += renderMarkdownTable(headers, alignments, rows);
       continue;
     }
 
@@ -851,6 +884,68 @@ function renderMarkdown(text: string) {
   flushParagraph();
   closeList();
   return html;
+}
+
+function isMarkdownTableHeader(headerLine: string, separatorLine: string) {
+  const headerCells = splitMarkdownTableRow(headerLine);
+  if (headerCells.length < 2) return false;
+  return isMarkdownTableSeparator(separatorLine, headerCells.length);
+}
+
+function isMarkdownTableSeparator(line: string, expectedCells: number) {
+  const cells = splitMarkdownTableRow(line);
+  if (cells.length < 2 || cells.length < expectedCells) return false;
+  return cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, '')));
+}
+
+function lineLooksLikeMarkdownTableRow(line: string) {
+  if (!line.trim()) return false;
+  return splitMarkdownTableRow(line).length >= 2;
+}
+
+function splitMarkdownTableRow(line: string) {
+  let value = line.trim();
+  if (value.startsWith('|')) value = value.slice(1);
+  if (value.endsWith('|')) value = value.slice(0, -1);
+  const cells: string[] = [];
+  let current = '';
+  let inCode = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    const previous = value[index - 1];
+    if (char === '`' && previous !== '\\') inCode = !inCode;
+    if (char === '|' && previous !== '\\' && !inCode) {
+      cells.push(current.trim().replace(/\\\|/g, '|'));
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  cells.push(current.trim().replace(/\\\|/g, '|'));
+  return cells;
+}
+
+function markdownTableAlignment(cell: string): '' | 'left' | 'center' | 'right' {
+  const value = cell.replace(/\s+/g, '');
+  if (value.startsWith(':') && value.endsWith(':')) return 'center';
+  if (value.endsWith(':')) return 'right';
+  if (value.startsWith(':')) return 'left';
+  return '';
+}
+
+function renderMarkdownTable(headers: string[], alignments: Array<'' | 'left' | 'center' | 'right'>, rows: string[][]) {
+  const columnCount = headers.length;
+  const alignAttr = (index: number) => (alignments[index] ? ` class="align-${alignments[index]}"` : '');
+  const headerHtml = headers
+    .map((cell, index) => `<th${alignAttr(index)}>${renderInlineMarkdown(cell)}</th>`)
+    .join('');
+  const bodyHtml = rows
+    .map((row) => {
+      const cells = Array.from({ length: columnCount }, (_unused, index) => row[index] || '');
+      return `<tr>${cells.map((cell, index) => `<td${alignAttr(index)}>${renderInlineMarkdown(cell)}</td>`).join('')}</tr>`;
+    })
+    .join('');
+  return `<div class="markdown-table-wrap"><table><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`;
 }
 
 function renderInlineMarkdown(text: string) {

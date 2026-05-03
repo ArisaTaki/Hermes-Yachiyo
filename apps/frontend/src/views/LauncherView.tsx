@@ -1,4 +1,4 @@
-import { CSSProperties, FormEvent, MouseEvent, PointerEvent, useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 
 import { apiGet, apiPost, bridgeUrl, getLauncherPointerState, moveLauncherWindow, openAppView, openLauncherMenu, setLauncherHitRegions, setLauncherPointerInteractive, type LauncherHitRegionRect } from '../lib/bridge';
 import type { AppView } from '../lib/view';
@@ -28,6 +28,9 @@ type LauncherPayload = {
     enabled?: boolean;
     has_attention?: boolean;
     message?: string;
+    result?: string;
+    attention_text?: string;
+    attention_source?: string;
     error?: string;
   };
   launcher?: {
@@ -225,9 +228,10 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
   const clickSuppressedRef = useRef(false);
   const status = launcher.latest_status || (data?.chat?.is_processing ? 'processing' : 'empty');
   const showDot = launcher.show_unread_dot !== false && !launcher.suppress_status_dot;
-  const hasAttention = showDot && Boolean(launcher.has_attention);
+  const proactiveAttention = Boolean(proactive.has_attention);
+  const hasAttention = showDot && Boolean(launcher.has_attention || proactiveAttention);
   const unreadStatus = String(data?.notification?.latest_message?.status || '');
-  const dotClass = bubbleDotClass(showDot, hasAttention, status, unreadStatus);
+  const dotClass = bubbleDotClass(showDot, hasAttention, status, unreadStatus, proactiveAttention);
   const opacity = Math.max(0.2, Math.min(1, Number(launcher.opacity || 0.92)));
   const idleHidden = Boolean(launcher.auto_hide && !data?.chat?.is_processing && !launcher.has_attention && !proactive.has_attention);
   const displayMode = launcher.default_display || 'summary';
@@ -283,7 +287,7 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
   return (
     <main className="launcher-shell bubble-shell" onContextMenu={(event) => handleContextMenu(event, 'bubble')}>
       <button
-        className={`bubble-launcher ${hasAttention ? 'has-unread' : ''} ${idleHidden ? 'auto-hidden' : ''}`}
+        className={`bubble-launcher ${hasAttention ? 'has-unread' : ''} ${proactiveAttention ? 'has-proactive' : ''} ${idleHidden ? 'auto-hidden' : ''}`}
         style={style}
         type="button"
         title={title}
@@ -309,10 +313,11 @@ function normalizedStatusLabel(chat: LauncherPayload['chat']) {
   return label;
 }
 
-function bubbleDotClass(showDot: boolean, hasAttention: boolean, status: string, unreadStatus: string) {
+function bubbleDotClass(showDot: boolean, hasAttention: boolean, status: string, unreadStatus: string, proactiveAttention: boolean) {
   let className = 'status-dot';
   if (hasAttention) {
-    if (unreadStatus === 'failed') className += ' visible failed';
+    if (proactiveAttention) className += ' visible proactive';
+    else if (unreadStatus === 'failed') className += ' visible failed';
     else if (unreadStatus === 'completed') className += ' visible completed';
     else className += ' visible attention';
   } else if (showDot && status === 'processing') {
@@ -334,9 +339,9 @@ function bubbleTitle(
       ? 'Yachiyo - 头像图标'
       : `Yachiyo - ${hasAttention ? '有新消息，点击查看' : (statusLabel || '点击展开对话')}`,
   ];
-  if (proactive.error) titleParts.push(`主动对话：${proactive.error}`);
-  else if (proactive.has_attention) titleParts.push('主动对话：有新的观察结果');
-  else if (proactive.enabled && proactive.message) titleParts.push(`主动对话：${proactive.message}`);
+  if (proactive.error) titleParts.push(`主动关怀：${proactive.error}`);
+  else if (proactive.has_attention) titleParts.push(`主动关怀：${proactive.attention_text || proactive.message || '有新的观察结果'}`);
+  else if (proactive.enabled && proactive.message) titleParts.push(`主动关怀：${proactive.message}`);
   return titleParts.join('\n');
 }
 
@@ -348,6 +353,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   const resourceHintRef = useRef<HTMLDivElement | null>(null);
   const replyRef = useRef<HTMLButtonElement | null>(null);
   const quickInputRef = useRef<HTMLFormElement | null>(null);
+  const quickInputComposingRef = useRef(false);
   const dragStateRef = useRef<LauncherDragState | null>(null);
   const pointerActivationRef = useRef(false);
   const clickSuppressedRef = useRef(false);
@@ -381,14 +387,14 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   const resource = launcher.resource;
   const renderer = launcher.renderer;
   const replyText = proactiveAttention
-    ? (data?.proactive?.message || '有新的主动桌面观察结果')
+    ? (data?.proactive?.attention_text || data?.proactive?.message || '有新的主动桌面观察结果')
     : hasAttention && !isProcessing
         ? latestReply
         : '';
-  const showReply = Boolean(launcher.show_reply_bubble !== false && !replyHidden && replyText && !isProcessing);
+  const showReply = Boolean(launcher.show_reply_bubble !== false && (proactiveAttention || !replyHidden) && replyText && !isProcessing);
   const stageTitle = live2dStageTitle(resource, launcher, data, hasAttention, proactiveAttention);
   const positionAnchor = normalizeLive2DPositionAnchor(launcher.position_anchor);
-  const characterClass = live2dCharacterClass(data, hasAttention, String(data?.notification?.latest_message?.status || ''));
+  const characterClass = live2dCharacterClass(data, hasAttention, proactiveAttention, String(data?.notification?.latest_message?.status || ''));
   const hintKey = [resource?.state || '', resource?.status_label || '', resource?.help_text || '', resource?.renderer_entry || ''].join('|');
   const hintTone = resource?.state === 'path_valid' || resource?.state === 'loaded' ? 'ok' : 'warn';
   const showResourceHint = Boolean(resource && hintTone !== 'ok' && hintKey !== dismissedHintKey);
@@ -621,6 +627,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
 
   async function sendQuickMessage(event: FormEvent) {
     event.preventDefault();
+    if (quickInputComposingRef.current) return;
     const text = quickText.trim();
     if (!text) return;
     setQuickText('');
@@ -696,14 +703,37 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
       </div>
 
       {showReply ? (
-        <button ref={replyRef} className={`live2d-reply ${proactiveAttention ? 'proactive' : ''} ${hasAttention ? 'attention' : ''}`} type="button" onClick={() => setReplyHidden(true)}>
+        <button
+          ref={replyRef}
+          className={`live2d-reply ${proactiveAttention ? 'proactive' : ''} ${hasAttention ? 'attention' : ''}`}
+          type="button"
+          onClick={() => {
+            if (proactiveAttention) void acknowledgeAndOpenChat('live2d');
+            else setReplyHidden(true);
+          }}
+        >
           {replyText}
         </button>
       ) : null}
 
       {launcher.enable_quick_input !== false && quickInputVisible ? (
         <form ref={quickInputRef} className="live2d-quick-input" onSubmit={sendQuickMessage} onClick={(event) => event.stopPropagation()}>
-          <input value={quickText} onChange={(event) => setQuickText(event.target.value)} placeholder="和八千代说点什么…" />
+          <input
+            value={quickText}
+            onChange={(event) => setQuickText(event.target.value)}
+            onCompositionEnd={() => {
+              quickInputComposingRef.current = false;
+            }}
+            onCompositionStart={() => {
+              quickInputComposingRef.current = true;
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && isImeComposingKey(event, quickInputComposingRef.current)) {
+                event.preventDefault();
+              }
+            }}
+            placeholder="和八千代说点什么…"
+          />
           <button type="submit" disabled={!quickText.trim()}>发送</button>
         </form>
       ) : null}
@@ -716,6 +746,11 @@ function pointerPoint(event: PointerLike) {
     x: Number.isFinite(event.screenX) ? event.screenX : event.clientX,
     y: Number.isFinite(event.screenY) ? event.screenY : event.clientY,
   };
+}
+
+function isImeComposingKey(event: KeyboardEvent<HTMLElement>, fallback = false) {
+  const nativeEvent = event.nativeEvent as globalThis.KeyboardEvent & { isComposing?: boolean };
+  return Boolean(fallback || nativeEvent.isComposing || nativeEvent.keyCode === 229);
 }
 
 function newDragState(event: PointerLike): LauncherDragState {
@@ -763,10 +798,11 @@ function latestAssistantText(chat: LauncherPayload['chat'], launcher: NonNullabl
   return launcher.latest_reply || chat?.latest_reply || launcher.latest_reply_full || chat?.latest_reply_full || '';
 }
 
-function live2dCharacterClass(data: LauncherPayload | null, hasAttention: boolean, unreadStatus: string) {
+function live2dCharacterClass(data: LauncherPayload | null, hasAttention: boolean, proactiveAttention: boolean, unreadStatus: string) {
   const classes = ['live2d-character'];
   if (data?.chat?.is_processing) classes.push('processing');
   else if (hasAttention && unreadStatus === 'failed') classes.push('failed');
+  else if (proactiveAttention) classes.push('has-proactive-attention');
   else if (hasAttention) classes.push('has-message');
   return classes.join(' ');
 }

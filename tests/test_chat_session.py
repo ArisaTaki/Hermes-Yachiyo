@@ -120,6 +120,34 @@ def test_upsert_assistant_message_idempotent(tmp_path):
         store.close()
 
 
+def test_upsert_assistant_message_can_attach_cached_audio(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        session = ChatSession(session_id="s1")
+        session.attach_store(store, load_existing=False)
+        session.upsert_assistant_message(
+            "t1",
+            "主动关怀文本",
+            MessageStatus.COMPLETED,
+            attachments=[{
+                "id": "audio1",
+                "kind": "audio",
+                "name": "主动关怀语音.wav",
+                "mime_type": "audio/wav",
+            }],
+        )
+
+        restored = ChatSession(session_id="s1")
+        restored.attach_store(store, load_existing=True)
+        message = restored.get_messages()[0]
+
+        assert message.role == MessageRole.ASSISTANT
+        assert message.attachments[0]["kind"] == "audio"
+        assert message.attachments[0]["mime_type"] == "audio/wav"
+    finally:
+        store.close()
+
+
 def test_upsert_processing_to_completed_updates_user_status(tmp_path):
     """processing → completed 时，user 消息状态也被同步更新"""
     store = ChatStore(db_path=str(tmp_path / "chat.db"))

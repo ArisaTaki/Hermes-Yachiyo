@@ -10,6 +10,7 @@ import pytest
 
 import apps.shell.live2d_resources as live2d_resources
 import apps.shell.config as config_mod
+import apps.locald.screenshot as screenshot_mod
 from apps.bridge.routes import ui
 from apps.shell.config import AppConfig
 
@@ -96,6 +97,24 @@ async def test_settings_operation_routes_use_main_api(monkeypatch):
         def update_hermes_configuration(self, changes):
             return {"ok": True, "changes": changes}
 
+        def get_hermes_tool_config(self):
+            return {"ok": True, "tools": [{"id": "web"}]}
+
+        def update_hermes_tool_config(self, tool_id, changes):
+            return {"ok": True, "tool_id": tool_id, "changes": changes}
+
+        def test_hermes_tool_config(self, tool_id):
+            return {"ok": True, "tool_id": tool_id, "status": "pass"}
+
+        def check_hermes_update(self):
+            return {"ok": True, "update_available": True}
+
+        def update_hermes_agent(self, full_backup=False):
+            return {"ok": True, "message": "updated", "full_backup": full_backup}
+
+        def launch_browser_cdp(self):
+            return {"ok": True, "url": "http://127.0.0.1:9222"}
+
         def recheck_hermes(self):
             return {"hermes": {"ready": True}}
 
@@ -143,6 +162,30 @@ async def test_settings_operation_routes_use_main_api(monkeypatch):
         "ok": True,
         "changes": {"provider": "openai", "model": "gpt-4.1", "base_url": "", "api_key": ""},
     }
+    assert await ui.get_hermes_tool_config() == {"ok": True, "tools": [{"id": "web"}]}
+    assert await ui.update_hermes_tool_config(
+        ui.HermesToolConfigUpdateRequest(tool_id="web", changes={"web.backend": "exa"})
+    ) == {
+        "ok": True,
+        "tool_id": "web",
+        "changes": {"web.backend": "exa"},
+    }
+    assert await ui.test_hermes_tool_config(ui.HermesToolConfigTestRequest(tool_id="web")) == {
+        "ok": True,
+        "tool_id": "web",
+        "status": "pass",
+    }
+    assert await ui.check_hermes_update() == {"ok": True, "update_available": True}
+    assert await ui.update_hermes_agent() == {"ok": True, "message": "updated", "full_backup": False}
+    assert await ui.update_hermes_agent(ui.HermesUpdateRunRequest(backup=True)) == {
+        "ok": True,
+        "message": "updated",
+        "full_backup": True,
+    }
+    assert await ui.launch_hermes_browser_cdp() == {
+        "ok": True,
+        "url": "http://127.0.0.1:9222",
+    }
     assert await ui.recheck_hermes() == {"hermes": {"ready": True}}
     assert await ui.restart_bridge() == {"ok": True, "bridge": "restarted"}
     assert await ui.get_backup_status() == {"ok": True, "backups": []}
@@ -161,6 +204,22 @@ async def test_settings_operation_routes_use_main_api(monkeypatch):
         "keep_config": True,
         "confirm_text": "UNINSTALL",
     }
+
+
+@pytest.mark.asyncio
+async def test_proactive_screen_permission_route_checks_real_capture(monkeypatch):
+    calls = []
+
+    def fake_check(*, open_settings=False):
+        calls.append(open_settings)
+        return {"ok": False, "allowed": False, "permission_denied": True, "settings_opened": open_settings}
+
+    monkeypatch.setattr(screenshot_mod, "check_screen_capture_permission", fake_check)
+
+    result = await ui.check_proactive_screen_permission(ui.ScreenPermissionRequest(open_settings=True))
+
+    assert result == {"ok": False, "allowed": False, "permission_denied": True, "settings_opened": True}
+    assert calls == [True]
 
 
 @pytest.mark.asyncio
@@ -372,6 +431,135 @@ async def test_launcher_routes_reuse_chat_bridge_and_notification_tracker(monkey
         "ok": True,
         "text": "hi",
     }
+
+
+def test_launcher_tts_only_triggers_for_proactive_attention(monkeypatch):
+    spoken = []
+    config = SimpleNamespace(
+        tts=SimpleNamespace(enabled=True, provider="command", command="say {text}", max_chars=80)
+    )
+    runtime = SimpleNamespace(config=config)
+
+    class FakeTTSService:
+        def __init__(self, _config):
+            pass
+
+        def get_status(self):
+            return {"enabled": True, "provider": "command", "ok": True, "message": "idle"}
+
+        def speak_async(self, text, **_kwargs):
+            spoken.append(text)
+            return {"enabled": True, "provider": "command", "ok": True, "scheduled": True}
+
+    monkeypatch.setattr(ui, "TTSService", FakeTTSService)
+    ui._launcher_tts_services.clear()
+    ui._launcher_last_tts_attention.clear()
+
+    idle = ui._maybe_trigger_proactive_tts(runtime, "live2d", {"has_attention": False})
+    first = ui._maybe_trigger_proactive_tts(
+        runtime,
+        "bubble",
+        {
+            "has_attention": True,
+            "task_id": "task-1",
+            "attention_text": "桌面观察提醒：先保存一下进度。",
+        },
+    )
+    duplicate = ui._maybe_trigger_proactive_tts(
+        runtime,
+        "bubble",
+        {
+            "has_attention": True,
+            "task_id": "task-1",
+            "attention_text": "桌面观察提醒：先保存一下进度。",
+        },
+    )
+
+    assert idle["message"] == "idle"
+    assert first["scheduled"] is True
+    assert duplicate["message"] == "idle"
+    assert spoken == ["桌面观察提醒：先保存一下进度。"]
+
+
+def test_launcher_tts_triggers_without_probability_gate(monkeypatch):
+    spoken = []
+    config = SimpleNamespace(
+        tts=SimpleNamespace(
+            enabled=True,
+            provider="command",
+            command="say {text}",
+            max_chars=80,
+        )
+    )
+    runtime = SimpleNamespace(config=config)
+
+    class FakeTTSService:
+        def __init__(self, _config):
+            pass
+
+        def get_status(self):
+            return {"enabled": True, "provider": "command", "ok": True, "message": "idle"}
+
+        def speak_async(self, text, **_kwargs):
+            spoken.append(text)
+            return {"enabled": True, "provider": "command", "ok": True, "scheduled": True}
+
+    monkeypatch.setattr(ui, "TTSService", FakeTTSService)
+    ui._launcher_tts_services.clear()
+    ui._launcher_last_tts_attention.clear()
+
+    first = ui._maybe_trigger_proactive_tts(
+        runtime,
+        "live2d",
+        {"has_attention": True, "task_id": "task-skip", "attention_text": "先喝口水。"},
+    )
+    duplicate = ui._maybe_trigger_proactive_tts(
+        runtime,
+        "bubble",
+        {"has_attention": True, "task_id": "task-skip", "attention_text": "先喝口水。"},
+    )
+
+    assert first["scheduled"] is True
+    assert duplicate["message"] == "idle"
+    assert spoken == ["先喝口水。"]
+
+
+@pytest.mark.asyncio
+async def test_proactive_tts_test_route_invokes_sync_service(monkeypatch):
+    spoken = []
+    config = SimpleNamespace(
+        tts=SimpleNamespace(enabled=True, provider="command", command="say {text}", max_chars=80)
+    )
+    runtime = SimpleNamespace(config=config)
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+
+    class FakeTTSService:
+        def __init__(self, received_config):
+            assert received_config is config.tts
+
+        def speak_sync(self, text):
+            spoken.append(text)
+            return {
+                "ok": True,
+                "success": True,
+                "provider": "command",
+                "message": "TTS 测试已完成",
+                "spoken_text": text,
+            }
+
+    monkeypatch.setattr(ui, "TTSService", FakeTTSService)
+
+    result = await ui.test_proactive_tts(ui.TtsTestRequest(text="测试一下主动关怀语音。"))
+
+    assert result == {
+        "tool": "proactive_tts",
+        "ok": True,
+        "success": True,
+        "provider": "command",
+        "message": "TTS 测试已完成",
+        "spoken_text": "测试一下主动关怀语音。",
+    }
+    assert spoken == ["测试一下主动关怀语音。"]
 
 
 @pytest.mark.asyncio

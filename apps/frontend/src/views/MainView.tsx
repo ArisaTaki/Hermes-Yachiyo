@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { apiGet, apiPost, openAppView, openDesktopMode, quitApp } from '../lib/bridge';
+import { navigateTo } from '../lib/view';
+import {
+  emptyTtsForm,
+  formFromTtsSettings,
+  ttsProviderLabel,
+  type TtsForm,
+  type TtsSettings,
+} from '../lib/ttsSettings';
 
 type StatusRecord = {
   status?: string;
@@ -152,34 +160,34 @@ type HermesConfigForm = {
 
 type HermesProviderDraft = Pick<HermesConfigForm, 'model' | 'base_url'>;
 
-type TtsSettings = {
-  enabled?: boolean;
-  provider?: string;
-  endpoint?: string;
-  command?: string;
-  voice?: string;
-  timeout_seconds?: number;
-  max_chars?: number;
-  notification_prompt?: string;
-};
-
 type SettingsData = {
   tts?: TtsSettings;
   mode_settings?: {
-    live2d?: { config?: { tts?: TtsSettings } };
-    bubble?: { config?: { tts?: TtsSettings } };
+    live2d?: { config?: ModeProactiveSettings & { tts?: TtsSettings } };
+    bubble?: { config?: ModeProactiveSettings & { tts?: TtsSettings } };
   };
 };
 
-type TtsForm = {
+type ModeProactiveSettings = {
+  proactive_enabled?: boolean;
+  proactive_desktop_watch_enabled?: boolean;
+  proactive_interval_seconds?: number;
+  proactive_trigger_probability?: number;
+};
+
+type ProactiveForm = {
   enabled: boolean;
-  provider: string;
-  endpoint: string;
-  command: string;
-  voice: string;
-  timeout_seconds: number;
-  max_chars: number;
-  notification_prompt: string;
+  interval_seconds: string;
+  trigger_probability: number;
+};
+
+type ScreenPermissionResult = {
+  ok?: boolean;
+  allowed?: boolean;
+  permission_denied?: boolean;
+  settings_opened?: boolean;
+  error?: string;
+  message?: string;
 };
 
 type DashboardData = {
@@ -213,6 +221,18 @@ type DashboardData = {
 
 const BACKGROUND_VALIDATION_MIN_INTERVAL_MS = 30 * 60 * 1000;
 const BACKGROUND_VALIDATION_REFRESH_AFTER_MS = 12 * 60 * 60 * 1000;
+const MIN_PROACTIVE_INTERVAL_SECONDS = 300;
+
+function clampProbability(value: number): number {
+  if (!Number.isFinite(value)) return 0.6;
+  return Math.max(0, Math.min(1, value));
+}
+
+function normalizeProactiveInterval(value: string | number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return MIN_PROACTIVE_INTERVAL_SECONDS;
+  return Math.max(MIN_PROACTIVE_INTERVAL_SECONDS, Math.min(3600, Math.round(parsed)));
+}
 
 export function MainView() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -223,9 +243,11 @@ export function MainView() {
   const [hermesImageTestResult, setHermesImageTestResult] = useState<HermesImageConnectionTestResult | null>(null);
   const [hermesConfig, setHermesConfig] = useState<HermesVisualConfig | null>(null);
   const [configForm, setConfigForm] = useState<HermesConfigForm>(emptyHermesConfigForm());
+  const [proactiveForm, setProactiveForm] = useState<ProactiveForm>(emptyProactiveForm());
   const [ttsForm, setTtsForm] = useState<TtsForm>(emptyTtsForm());
   const busyActionRef = useRef('');
   const configFormDirtyRef = useRef(false);
+  const proactiveFormDirtyRef = useRef(false);
   const ttsFormDirtyRef = useRef(false);
   const hermesConfigLoadedRef = useRef(false);
   const hermesConfigLoadingRef = useRef(false);
@@ -244,7 +266,7 @@ export function MainView() {
           setData(payload);
           setError('');
           if (!hermesConfigLoadedRef.current) void loadHermesConfig();
-          if (!ttsFormDirtyRef.current) void loadSettings();
+          if (!ttsFormDirtyRef.current || !proactiveFormDirtyRef.current) void loadSettings();
         }
       } catch (err) {
         if (!disposed) setError(err instanceof Error ? err.message : '读取主控台失败');
@@ -313,6 +335,10 @@ export function MainView() {
     try {
       const result = await apiGet<SettingsData>('/ui/settings');
       const tts = ttsFromSettings(result);
+      const proactive = proactiveFromSettings(result);
+      if (mountedRef.current && (options.forceFormSync || !proactiveFormDirtyRef.current)) {
+        setProactiveForm(formFromProactiveSettings(proactive));
+      }
       if (mountedRef.current && (options.forceFormSync || !ttsFormDirtyRef.current)) {
         setTtsForm(formFromTtsSettings(tts));
       }
@@ -390,12 +416,61 @@ export function MainView() {
     ttsFormDirtyRef.current = true;
     setTtsForm((current) => {
       const next = { ...current, [field]: value };
-      if (field === 'provider') {
-        next.enabled = value !== 'none';
+      if (field === 'enabled' && value === true && next.provider === 'none') {
+        next.provider = 'gpt-sovits';
       }
       return next;
     });
     if (actionStatus && /TTS|播报/.test(actionStatus)) setActionStatus('');
+  }
+
+  function updateProactiveField(field: keyof ProactiveForm, value: boolean | string | number) {
+    proactiveFormDirtyRef.current = true;
+    setProactiveForm((current) => ({ ...current, [field]: value }));
+    if (actionStatus && /主动关怀|桌面观察/.test(actionStatus)) setActionStatus('');
+  }
+
+  function setProactiveEnabledDraft(enabled: boolean) {
+    proactiveFormDirtyRef.current = true;
+    setProactiveForm((current) => ({ ...current, enabled }));
+  }
+
+  async function checkScreenPermission(openSettings = true): Promise<ScreenPermissionResult> {
+    return apiPost<ScreenPermissionResult>('/ui/proactive/screen-permission/check', {
+      open_settings: openSettings,
+    });
+  }
+
+  function screenPermissionMessage(result: ScreenPermissionResult): string {
+    if (result.allowed || result.ok) return '屏幕录制权限已确认';
+    if (result.permission_denied) {
+      return result.settings_opened
+        ? '无法启用主动关怀：尚未授予屏幕录制权限，已打开 macOS 隐私设置。请允许 Hermes-Yachiyo / Electron 或后端进程后再开启。'
+        : '无法启用主动关怀：尚未授予屏幕录制权限。';
+    }
+    return result.error || result.message || '无法确认屏幕录制权限，主动关怀已保持关闭';
+  }
+
+  async function requestEnableProactive() {
+    if (proactiveForm.enabled) return;
+    const action = 'proactive-permission';
+    if (!beginHermesAction(action)) return;
+    setActionStatus('正在确认 macOS 屏幕录制权限...');
+    try {
+      const result = await checkScreenPermission(true);
+      if (result.allowed || result.ok) {
+        setProactiveEnabledDraft(true);
+        setActionStatus('屏幕录制权限已确认；保存后会启用主动关怀');
+      } else {
+        setProactiveEnabledDraft(false);
+        setActionStatus(screenPermissionMessage(result));
+      }
+    } catch (err) {
+      setProactiveEnabledDraft(false);
+      setActionStatus(err instanceof Error ? err.message : '无法确认屏幕录制权限，主动关怀已保持关闭');
+    } finally {
+      finishHermesAction(action);
+    }
   }
 
   async function saveAndTestHermesConfig() {
@@ -434,32 +509,55 @@ export function MainView() {
     return result;
   }
 
-  async function saveTtsSettings() {
-    const action = 'tts-save';
+  async function saveProactiveSettings() {
+    const action = 'proactive-save';
     if (!beginHermesAction(action)) return;
-    setActionStatus('正在保存 TTS 播报设置...');
+    setActionStatus('正在保存主动关怀设置...');
+    let enabled = Boolean(proactiveForm.enabled);
+    let permissionFailureMessage = '';
+    const interval = normalizeProactiveInterval(proactiveForm.interval_seconds);
+    const triggerProbability = clampProbability(Number(proactiveForm.trigger_probability));
+    setProactiveForm((current) => ({
+      ...current,
+      interval_seconds: String(interval),
+      trigger_probability: triggerProbability,
+    }));
     try {
-      const result = await apiPost<{ ok?: boolean; error?: string; app_state?: { tts?: TtsSettings } }>('/ui/settings', {
+      if (enabled) {
+        setActionStatus('正在确认 macOS 屏幕录制权限...');
+        const permission = await checkScreenPermission(true);
+        if (!permission.allowed && !permission.ok) {
+          enabled = false;
+          permissionFailureMessage = screenPermissionMessage(permission);
+          setProactiveEnabledDraft(false);
+          setActionStatus(permissionFailureMessage);
+        }
+      }
+      const result = await apiPost<{ ok?: boolean; error?: string; app_state?: SettingsData }>('/ui/settings', {
         changes: {
-          'tts.enabled': ttsForm.provider !== 'none',
-          'tts.provider': ttsForm.provider,
-          'tts.endpoint': ttsForm.endpoint,
-          'tts.command': ttsForm.command,
-          'tts.timeout_seconds': Number(ttsForm.timeout_seconds),
-          'tts.max_chars': Number(ttsForm.max_chars),
-          'tts.notification_prompt': ttsForm.notification_prompt,
+          'bubble_mode.proactive_enabled': enabled,
+          'bubble_mode.proactive_desktop_watch_enabled': enabled,
+          'bubble_mode.proactive_interval_seconds': interval,
+          'bubble_mode.proactive_trigger_probability': triggerProbability,
+          'live2d_mode.proactive_enabled': enabled,
+          'live2d_mode.proactive_desktop_watch_enabled': enabled,
+          'live2d_mode.proactive_interval_seconds': interval,
+          'live2d_mode.proactive_trigger_probability': triggerProbability,
+          'tts.enabled': Boolean(ttsForm.enabled && ttsForm.provider !== 'none'),
         },
       });
-      if (result.ok === false) throw new Error(result.error || '保存 TTS 设置失败');
+      if (result.ok === false) throw new Error(result.error || '保存主动关怀设置失败');
+      proactiveFormDirtyRef.current = false;
       ttsFormDirtyRef.current = false;
-      if (result.app_state?.tts) {
-        setTtsForm(formFromTtsSettings(result.app_state.tts));
+      if (result.app_state) {
+        setProactiveForm(formFromProactiveSettings(proactiveFromSettings(result.app_state)));
+        if (result.app_state.tts) setTtsForm(formFromTtsSettings(result.app_state.tts));
       } else {
         await loadSettings({ forceFormSync: true });
       }
-      setActionStatus('TTS 播报设置已保存');
+      setActionStatus(enabled ? '主动关怀设置已保存' : permissionFailureMessage || '主动关怀已保持关闭；请授予屏幕录制权限后再开启');
     } catch (err) {
-      setActionStatus(err instanceof Error ? err.message : '保存 TTS 设置失败');
+      setActionStatus(err instanceof Error ? err.message : '保存主动关怀设置失败');
     } finally {
       finishHermesAction(action);
     }
@@ -664,13 +762,16 @@ export function MainView() {
               busyAction={busyAction}
               testResult={hermesTestResult}
               imageTestResult={hermesImageTestResult}
+              proactiveForm={proactiveForm}
               ttsForm={ttsForm}
               onConfigChange={updateHermesConfigField}
+              onProactiveChange={updateProactiveField}
+              onProactiveEnableRequest={requestEnableProactive}
               onTtsChange={updateTtsField}
               onRecheck={recheckHermes}
               onSaveConfig={saveAndTestHermesConfig}
               onSaveImageConfig={saveAndTestHermesImageConnection}
-              onSaveTts={saveTtsSettings}
+              onSaveProactive={saveProactiveSettings}
             />
           </article>
 
@@ -757,32 +858,48 @@ function formFromHermesConfig(config: HermesVisualConfig | null): HermesConfigFo
   };
 }
 
-function emptyTtsForm(): TtsForm {
+function emptyProactiveForm(): ProactiveForm {
   return {
     enabled: false,
-    provider: 'none',
-    endpoint: '',
-    command: '',
-    voice: '',
-    timeout_seconds: 20,
-    max_chars: 80,
-    notification_prompt: '主动提醒只输出适合语音播报的一句中文招呼或提醒，保持八千代人设，不要朗读长段分析、列表、代码、路径或调试信息。',
+    interval_seconds: '300',
+    trigger_probability: 0.6,
+  };
+}
+
+function proactiveFromSettings(settings: SettingsData | null): ModeProactiveSettings | undefined {
+  const bubble = settings?.mode_settings?.bubble?.config;
+  const live2d = settings?.mode_settings?.live2d?.config;
+  if (!bubble && !live2d) return undefined;
+  return {
+    proactive_enabled: Boolean(bubble?.proactive_enabled || live2d?.proactive_enabled),
+    proactive_desktop_watch_enabled: Boolean(
+      bubble?.proactive_desktop_watch_enabled || live2d?.proactive_desktop_watch_enabled,
+    ),
+    proactive_interval_seconds: Number(
+      live2d?.proactive_interval_seconds
+      || bubble?.proactive_interval_seconds
+      || 300,
+    ),
+    proactive_trigger_probability: Number(
+      live2d?.proactive_trigger_probability
+      ?? bubble?.proactive_trigger_probability
+      ?? settings?.tts?.trigger_probability
+      ?? 0.6,
+    ),
+  };
+}
+
+function formFromProactiveSettings(settings: ModeProactiveSettings | undefined): ProactiveForm {
+  const enabled = Boolean(settings?.proactive_enabled && settings?.proactive_desktop_watch_enabled);
+  return {
+    enabled,
+    interval_seconds: String(normalizeProactiveInterval(settings?.proactive_interval_seconds || 300)),
+    trigger_probability: clampProbability(Number(settings?.proactive_trigger_probability ?? 0.6)),
   };
 }
 
 function ttsFromSettings(settings: SettingsData | null): TtsSettings | undefined {
   return settings?.tts || settings?.mode_settings?.live2d?.config?.tts || settings?.mode_settings?.bubble?.config?.tts;
-}
-
-function formFromTtsSettings(settings: TtsSettings | undefined): TtsForm {
-  return {
-    ...emptyTtsForm(),
-    ...settings,
-    enabled: Boolean(settings?.enabled),
-    provider: settings?.provider || 'none',
-    timeout_seconds: Number(settings?.timeout_seconds || 20),
-    max_chars: Number(settings?.max_chars || 80),
-  };
 }
 
 function hasLoadedHermesConfig(config: HermesVisualConfig | null): boolean {
@@ -1002,8 +1119,8 @@ function statusNoticeClass(message: string) {
 
 function hermesDetail(data: DashboardData | null): string {
   const version = data?.hermes?.version || '—';
-  const readiness = data?.hermes?.readiness_level || (data?.hermes?.ready ? 'ready' : 'unknown');
-  return `${version} / ${readiness}`;
+  const readiness = data?.hermes?.readiness_level || (data?.hermes?.ready ? 'basic_ready' : 'unknown');
+  return `${version} / ${hermesReadinessLevelLabel(readiness)}`;
 }
 
 function toolCenterDetail(hermes: DashboardData['hermes'] | undefined): string {
@@ -1126,13 +1243,16 @@ function HermesConfigCenter({
   busyAction,
   testResult,
   imageTestResult,
+  proactiveForm,
   ttsForm,
   onConfigChange,
+  onProactiveChange,
+  onProactiveEnableRequest,
   onTtsChange,
   onRecheck,
   onSaveConfig,
   onSaveImageConfig,
-  onSaveTts,
+  onSaveProactive,
 }: {
   hermes?: DashboardData['hermes'];
   config: HermesVisualConfig | null;
@@ -1140,13 +1260,16 @@ function HermesConfigCenter({
   busyAction: string;
   testResult: HermesConnectionTestResult | null;
   imageTestResult: HermesImageConnectionTestResult | null;
+  proactiveForm: ProactiveForm;
   ttsForm: TtsForm;
   onConfigChange: (field: keyof HermesConfigForm, value: string) => void;
+  onProactiveChange: (field: keyof ProactiveForm, value: boolean | string | number) => void;
+  onProactiveEnableRequest: () => Promise<void>;
   onTtsChange: (field: keyof TtsForm, value: string | boolean | number) => void;
   onRecheck: () => Promise<void>;
   onSaveConfig: () => Promise<void>;
   onSaveImageConfig: () => Promise<void>;
-  onSaveTts: () => Promise<void>;
+  onSaveProactive: () => Promise<void>;
 }) {
   const busy = Boolean(busyAction);
   const providerOptions = config?.provider_options || [];
@@ -1171,8 +1294,11 @@ function HermesConfigCenter({
   const imageInputMode = form.image_input_mode === 'text' ? 'text' : 'auto';
   const usesSeparateVision = imageInputMode === 'text';
   const ttsProvider = ttsForm.provider || 'none';
-  const ttsEnabled = ttsProvider !== 'none';
+  const ttsReady = Boolean(ttsForm.enabled && ttsProvider !== 'none');
   const imageSaveTestDisabled = busy || !hermes?.command_exists;
+  const updateProactiveIntervalDraft = (value: string) => {
+    onProactiveChange('interval_seconds', value.replace(/[^\d]/g, ''));
+  };
   return (
     <div className="hermes-config-center dashboard-hermes-center">
       <InfoList rows={[
@@ -1203,7 +1329,7 @@ function HermesConfigCenter({
       <div className="hermes-secondary-actions">
         <button
           type="button"
-          className={busyAction === 'recheck' ? 'attention-action' : undefined}
+          className={busyAction === 'recheck' ? 'attention-action loading-button' : undefined}
           disabled={busy}
           onClick={() => void onRecheck()}
         >
@@ -1285,7 +1411,7 @@ function HermesConfigCenter({
           <div className="hermes-form-actions">
             <button
               type="submit"
-              className="primary-action"
+              className={busyAction === 'config-save-test' ? 'primary-action loading-button' : 'primary-action'}
               disabled={busy || !hermes?.command_exists}
             >
               {busyAction === 'config-save-test' ? '保存并测试中...' : '保存并测试配置'}
@@ -1393,7 +1519,11 @@ function HermesConfigCenter({
           <div className="hermes-config-footer">
             <span>{usesSeparateVision ? '图片会先由独立模型识别，再把结果交给主模型。' : '主模型承担图片识别；不需要额外 vision 配置。'}</span>
             <div className="hermes-form-actions">
-              <button type="submit" className="primary-action" disabled={imageSaveTestDisabled}>
+              <button
+                type="submit"
+                className={busyAction === 'image-save-test' ? 'primary-action loading-button' : 'primary-action'}
+                disabled={imageSaveTestDisabled}
+              >
                 {busyAction === 'image-save-test' ? '保存并测试中...' : '保存并测试图片链路'}
               </button>
             </div>
@@ -1404,103 +1534,89 @@ function HermesConfigCenter({
           className="hermes-visual-config capability-config-card"
           onSubmit={(event) => {
             event.preventDefault();
-            void onSaveTts();
+            void onSaveProactive();
           }}
         >
           <div className="hermes-subsection-title">
-            <strong>TTS 播报链路</strong>
-            <span>{ttsEnabled ? '已启用' : '未启用'}</span>
+            <strong>主动关怀</strong>
+            <span>{proactiveForm.enabled ? '已启用' : '未启用'}</span>
           </div>
           <p className="capability-note">
-            Live2D 收到新回复时只播报短提醒；主动桌面观察也会按这里的提示词生成适合语音的短句。
+            主动关怀会定期读取桌面截图并用视觉模型判断是否需要搭话；Bubble 和 Live2D 共用这一套设置。
           </p>
-          <div className="hermes-config-form-grid compact">
-            <label className="settings-field wide" htmlFor="tts-provider-main">
-              <span>TTS Provider</span>
-              <select
-                id="tts-provider-main"
-                value={ttsForm.provider}
+          <div className="hermes-config-form-grid proactive-settings-grid">
+            <label className="settings-check wide" htmlFor="proactive-enabled-main">
+              <input
+                id="proactive-enabled-main"
+                type="checkbox"
+                checked={proactiveForm.enabled}
                 disabled={busy}
-                onChange={(event) => onTtsChange('provider', event.target.value)}
-              >
-                <option value="none">none（关闭）</option>
-                <option value="http">HTTP POST</option>
-                <option value="command">本地命令</option>
-              </select>
+                onChange={(event) => {
+                  if (event.target.checked) void onProactiveEnableRequest();
+                  else onProactiveChange('enabled', false);
+                }}
+              />
+              <span>启用主动桌面观察</span>
             </label>
-            {ttsProvider === 'none' ? (
-              <p className="capability-note wide-form-note">
-                关闭后不会自动播放语音。对话文本和 Live2D 表情状态不受影响。
-              </p>
-            ) : null}
-            {ttsProvider === 'http' ? (
-              <label className="settings-field wide" htmlFor="tts-endpoint-main">
-                <span>HTTP Endpoint</span>
-                <input
-                  id="tts-endpoint-main"
-                  value={ttsForm.endpoint}
-                  placeholder="http://127.0.0.1:9000/tts"
-                  disabled={busy}
-                  onChange={(event) => onTtsChange('endpoint', event.target.value)}
-                />
-              </label>
-            ) : null}
-            {ttsProvider === 'command' ? (
-              <label className="settings-field wide" htmlFor="tts-command-main">
-                <span>本地命令</span>
-                <input
-                  id="tts-command-main"
-                  value={ttsForm.command}
-                  placeholder="say {text}"
-                  disabled={busy}
-                  onChange={(event) => onTtsChange('command', event.target.value)}
-                />
-              </label>
-            ) : null}
-            {ttsEnabled ? (
-              <>
-                <label className="settings-field" htmlFor="tts-max-chars-main">
-                  <span>播报最大字数</span>
-                  <input
-                    id="tts-max-chars-main"
-                    type="number"
-                    min={20}
-                    max={240}
-                    value={ttsForm.max_chars}
-                    disabled={busy}
-                    onChange={(event) => onTtsChange('max_chars', Number(event.target.value))}
-                  />
-                </label>
-                <label className="settings-field" htmlFor="tts-timeout-main">
-                  <span>超时秒</span>
-                  <input
-                    id="tts-timeout-main"
-                    type="number"
-                    min={1}
-                    max={120}
-                    value={ttsForm.timeout_seconds}
-                    disabled={busy}
-                    onChange={(event) => onTtsChange('timeout_seconds', Number(event.target.value))}
-                  />
-                </label>
-                <label className="settings-field wide" htmlFor="tts-prompt-main">
-                  <span>主动播报提示词</span>
-                  <textarea
-                    id="tts-prompt-main"
-                    value={ttsForm.notification_prompt}
-                    rows={3}
-                    disabled={busy}
-                    onChange={(event) => onTtsChange('notification_prompt', event.target.value)}
-                  />
-                </label>
-              </>
-            ) : null}
+            <label className="settings-field wide" htmlFor="proactive-interval-main">
+              <span>观察间隔秒</span>
+              <input
+                id="proactive-interval-main"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                autoComplete="off"
+                value={proactiveForm.interval_seconds}
+                disabled={busy || !proactiveForm.enabled}
+                onChange={(event) => updateProactiveIntervalDraft(event.target.value)}
+                onBlur={(event) => onProactiveChange('interval_seconds', String(normalizeProactiveInterval(event.target.value)))}
+              />
+              <small>启动或重新开启后先等待完整间隔；失焦或保存时小于 300 秒会自动调整到 300 秒。</small>
+            </label>
+            <label className="settings-field wide" htmlFor="proactive-trigger-probability-main">
+              <span>主动关怀触发概率</span>
+              <input
+                id="proactive-trigger-probability-main"
+                type="number"
+                min={0}
+                max={1}
+                step="0.05"
+                value={proactiveForm.trigger_probability}
+                disabled={busy || !proactiveForm.enabled}
+                onChange={(event) => onProactiveChange('trigger_probability', clampProbability(Number(event.target.value)))}
+              />
+              <small>这个概率控制整条主动关怀链路是否触发：0 到点也不截图，1 每次到点都截图识图。</small>
+            </label>
+            <label className="settings-check wide" htmlFor="proactive-tts-enabled-main">
+              <input
+                id="proactive-tts-enabled-main"
+                type="checkbox"
+                checked={ttsReady}
+                disabled={busy || ttsProvider === 'none'}
+                onChange={(event) => onTtsChange('enabled', event.target.checked)}
+              />
+              <span>启用 TTS 语音</span>
+            </label>
+            <p className="capability-note wide-form-note">
+              {ttsProvider === 'none'
+                ? '未配置语音 Provider。主动关怀会先以文本方式提示；需要语音时进入设置页选择 GPT-SoVITS、HTTP 或本地命令。'
+                : `${ttsReady ? '语音已启用' : '语音已关闭'}，当前 Provider：${ttsProviderLabel(ttsProvider)}。关闭语音不会清空已填写的 GPT-SoVITS 路径和参数。`}
+            </p>
           </div>
           <div className="hermes-config-footer">
-            <span>{ttsEnabled ? '实际播报前仍会硬性截短，避免长回复导致播放过久。' : '选择 HTTP 或本地命令后再配置播报参数。'}</span>
-            <button type="submit" className="primary-action" disabled={busy}>
-              {busyAction === 'tts-save' ? '保存中...' : '保存 TTS 设置'}
-            </button>
+            <span>{proactiveForm.enabled ? '保存后会同步到 Bubble 和 Live2D；未开启语音时会以文本提醒。' : '关闭后不会创建主动桌面观察任务。'}</span>
+            <div className="hermes-form-actions">
+              <button type="button" disabled={busy} onClick={() => navigateTo('proactive-tts')}>
+                {ttsProvider === 'none' ? '启用并配置语音' : '配置语音'}
+              </button>
+              <button
+                type="submit"
+                className={busyAction === 'proactive-save' ? 'primary-action loading-button' : 'primary-action'}
+                disabled={busy}
+              >
+                {busyAction === 'proactive-save' ? '保存中...' : '保存主动关怀设置'}
+              </button>
+            </div>
           </div>
         </form>
       </div>

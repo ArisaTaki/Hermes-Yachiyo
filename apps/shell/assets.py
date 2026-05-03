@@ -17,6 +17,7 @@ LEGACY_BUNDLED_LIVE2D_MODEL_DIR = PROGRAM_LIVE2D_ASSETS_DIR / "yachiyo"
 DEFAULT_LIVE2D_MODEL_DIR = Path.home() / ".hermes" / "yachiyo" / "assets" / "live2d"
 DEFAULT_LIVE2D_PREVIEW_PATH = DEFAULT_BUBBLE_AVATAR_PATH
 LIVE2D_RELEASES_URL = "https://github.com/ArisaTaki/Hermes-Yachiyo/releases"
+TTS_RELEASES_URL = LIVE2D_RELEASES_URL
 
 
 def get_hermes_home_dir() -> Path:
@@ -35,6 +36,11 @@ def get_yachiyo_workspace_dir() -> Path:
 def get_user_live2d_assets_dir() -> Path:
     """Return the default user-scoped Live2D asset import directory."""
     return get_yachiyo_workspace_dir() / "assets" / "live2d"
+
+
+def get_user_tts_assets_dir() -> Path:
+    """Return the default user-scoped TTS voice preset import directory."""
+    return get_yachiyo_workspace_dir() / "assets" / "tts"
 
 
 def iter_live2d_candidate_dirs(root: str | Path | None = None) -> Iterator[Path]:

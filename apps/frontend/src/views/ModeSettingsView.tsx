@@ -575,6 +575,7 @@ function GeneralSettingsView() {
   const [form, setForm] = useState<GeneralSettingsForm>(emptyGeneralSettingsForm());
   const [backupStatus, setBackupStatus] = useState<BackupStatus | null>(null);
   const [backupManagerOpen, setBackupManagerOpen] = useState(false);
+  const [backupAction, setBackupAction] = useState('');
   const [uninstallScope, setUninstallScope] = useState('yachiyo_only');
   const [uninstallKeepConfig, setUninstallKeepConfig] = useState(true);
   const [uninstallPreview, setUninstallPreview] = useState<UninstallPlan | null>(null);
@@ -589,6 +590,7 @@ function GeneralSettingsView() {
   const hasChanges = pendingCount > 0;
   const uninstallConfirmPhrase = uninstallPreview?.confirm_phrase || 'UNINSTALL';
   const uninstallConfirmValid = uninstallConfirmText.trim() === uninstallConfirmPhrase;
+  const backupBusy = Boolean(backupAction);
 
   useEffect(() => {
     let disposed = false;
@@ -756,33 +758,67 @@ function GeneralSettingsView() {
   }
 
   async function createBackup(overwriteLatest = false) {
+    if (backupBusy) return;
     if (overwriteLatest && !window.confirm('将生成新备份并替换最近一次备份，继续吗？')) return;
-    setStatus('正在生成备份…');
-    const result = await apiPost<{ ok?: boolean; error?: string; status?: BackupStatus }>('/ui/backup/create', { overwrite_latest: overwriteLatest });
-    if (result.ok === false) throw new Error(result.error || '生成备份失败');
-    setBackupStatus(result.status || null);
-    await refreshBackupStatus('备份已生成');
+    setBackupAction(overwriteLatest ? 'backup-overwrite' : 'backup-create');
+    setStatus(overwriteLatest ? '正在覆盖最近一次备份…' : '正在生成备份…');
+    try {
+      const result = await apiPost<{ ok?: boolean; error?: string; status?: BackupStatus }>('/ui/backup/create', { overwrite_latest: overwriteLatest });
+      if (result.ok === false) throw new Error(result.error || '生成备份失败');
+      setBackupStatus(result.status || null);
+      await refreshBackupStatus(overwriteLatest ? '最近一次备份已覆盖' : '备份已生成');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '生成备份失败');
+    } finally {
+      setBackupAction('');
+    }
   }
 
   async function restoreBackup(backupPath = '') {
+    if (backupBusy) return;
     if (!window.confirm('恢复备份会覆盖当前本地资料并安排应用重启，继续吗？')) return;
+    setBackupAction(backupPath ? `backup-restore:${backupPath}` : 'backup-restore');
     setStatus('正在恢复备份…');
-    const result = await apiPost<{ ok?: boolean; errors?: string[]; error?: string }>('/ui/backup/restore', { backup_path: backupPath });
-    if (result.ok === false) throw new Error(result.error || result.errors?.join('；') || '恢复备份失败');
-    setStatus('备份已恢复，应用将按需要重启');
+    try {
+      const result = await apiPost<{ ok?: boolean; errors?: string[]; error?: string }>('/ui/backup/restore', { backup_path: backupPath });
+      if (result.ok === false) throw new Error(result.error || result.errors?.join('；') || '恢复备份失败');
+      setStatus('备份已恢复，应用将按需要重启');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '恢复备份失败');
+    } finally {
+      setBackupAction('');
+    }
   }
 
   async function deleteBackup(backupPath: string) {
+    if (backupBusy) return;
     if (!backupPath || !window.confirm('确认删除这份备份吗？')) return;
-    const result = await apiPost<{ ok?: boolean; error?: string; status?: BackupStatus }>('/ui/backup/delete', { backup_path: backupPath });
-    if (result.ok === false) throw new Error(result.error || '删除备份失败');
-    setBackupStatus(result.status || null);
-    await refreshBackupStatus('备份已删除');
+    setBackupAction(`backup-delete:${backupPath}`);
+    setStatus('正在删除备份…');
+    try {
+      const result = await apiPost<{ ok?: boolean; error?: string; status?: BackupStatus }>('/ui/backup/delete', { backup_path: backupPath });
+      if (result.ok === false) throw new Error(result.error || '删除备份失败');
+      setBackupStatus(result.status || null);
+      await refreshBackupStatus('备份已删除');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '删除备份失败');
+    } finally {
+      setBackupAction('');
+    }
   }
 
   async function openBackupLocation(backupPath = '') {
-    const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/backup/open-location', { backup_path: backupPath });
-    setStatus(result.ok === false ? result.error || '打开备份位置失败' : '已打开备份位置');
+    if (backupBusy) return;
+    setBackupAction(backupPath ? `backup-open:${backupPath}` : 'backup-open');
+    setStatus('正在打开备份位置…');
+    try {
+      const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/backup/open-location', { backup_path: backupPath });
+      setStatus(result.ok === false ? result.error || '打开备份位置失败' : '已打开备份位置');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '打开备份位置失败');
+    } finally {
+      setBackupAction('');
+    }
   }
 
   async function runUninstall() {
@@ -840,7 +876,7 @@ function GeneralSettingsView() {
         <article className="panel setting-card">
           <span>Hermes</span>
           <strong>{payload?.hermes?.status || '读取中'}</strong>
-          <small>{payload?.hermes?.ready ? '能力就绪' : payload?.hermes?.readiness_level || '待检测'}</small>
+          <small>{payload?.hermes?.ready ? '能力就绪' : hermesReadinessLabel(payload?.hermes?.readiness_level)}</small>
         </article>
         <article className="panel setting-card">
           <span>Bridge</span>
@@ -858,7 +894,7 @@ function GeneralSettingsView() {
         <article className="panel settings-section">
           <div className="section-heading-row">
             <h2>Hermes Agent</h2>
-            <span>{payload?.hermes?.ready ? 'ready' : payload?.hermes?.readiness_level || 'unknown'}</span>
+            <span>{payload?.hermes?.ready ? 'ready' : hermesReadinessLabel(payload?.hermes?.readiness_level)}</span>
           </div>
           <SettingsRows rows={[
             ['安装状态', payload?.hermes?.status],
@@ -1052,11 +1088,39 @@ function GeneralSettingsView() {
           ['备份状态', backupStatus?.ok === false ? backupStatus.error : '正常'],
         ]} />
         <div className="settings-action-strip">
-          <button type="button" onClick={() => void createBackup(false)}>立即生成备份</button>
-          <button type="button" onClick={() => void createBackup(true)}>覆盖最近一次备份</button>
-          <button type="button" onClick={() => void restoreBackup()}>恢复最近备份</button>
-          <button type="button" onClick={() => void openBackupLocation()}>打开备份目录</button>
-          <button type="button" onClick={() => setBackupManagerOpen((open) => !open)}>{backupManagerOpen ? '收起管理器' : '管理备份'}</button>
+          <button
+            type="button"
+            className={backupAction === 'backup-create' ? 'loading-button' : undefined}
+            disabled={backupBusy}
+            onClick={() => void createBackup(false)}
+          >
+            {backupAction === 'backup-create' ? '生成中...' : '立即生成备份'}
+          </button>
+          <button
+            type="button"
+            className={backupAction === 'backup-overwrite' ? 'loading-button' : undefined}
+            disabled={backupBusy}
+            onClick={() => void createBackup(true)}
+          >
+            {backupAction === 'backup-overwrite' ? '覆盖中...' : '覆盖最近一次备份'}
+          </button>
+          <button
+            type="button"
+            className={backupAction === 'backup-restore' ? 'loading-button' : undefined}
+            disabled={backupBusy}
+            onClick={() => void restoreBackup()}
+          >
+            {backupAction === 'backup-restore' ? '恢复中...' : '恢复最近备份'}
+          </button>
+          <button
+            type="button"
+            className={backupAction === 'backup-open' ? 'loading-button' : undefined}
+            disabled={backupBusy}
+            onClick={() => void openBackupLocation()}
+          >
+            {backupAction === 'backup-open' ? '打开中...' : '打开备份目录'}
+          </button>
+          <button type="button" disabled={backupBusy} onClick={() => setBackupManagerOpen((open) => !open)}>{backupManagerOpen ? '收起管理器' : '管理备份'}</button>
         </div>
         {backupManagerOpen ? (
           <div className="backup-manager visible">
@@ -1068,9 +1132,30 @@ function GeneralSettingsView() {
                   {!item.valid ? <div className="meta warn-text">{item.error || '备份无效'}</div> : null}
                 </div>
                 <div className="actions">
-                  <button type="button" onClick={() => void restoreBackup(item.path || '')}>恢复此版本</button>
-                  <button type="button" onClick={() => void openBackupLocation(item.path || '')}>打开位置</button>
-                  <button type="button" onClick={() => void deleteBackup(item.path || '')}>删除</button>
+                  <button
+                    type="button"
+                    className={backupAction === `backup-restore:${item.path || ''}` ? 'loading-button' : undefined}
+                    disabled={backupBusy}
+                    onClick={() => void restoreBackup(item.path || '')}
+                  >
+                    {backupAction === `backup-restore:${item.path || ''}` ? '恢复中...' : '恢复此版本'}
+                  </button>
+                  <button
+                    type="button"
+                    className={backupAction === `backup-open:${item.path || ''}` ? 'loading-button' : undefined}
+                    disabled={backupBusy}
+                    onClick={() => void openBackupLocation(item.path || '')}
+                  >
+                    {backupAction === `backup-open:${item.path || ''}` ? '打开中...' : '打开位置'}
+                  </button>
+                  <button
+                    type="button"
+                    className={backupAction === `backup-delete:${item.path || ''}` ? 'loading-button' : undefined}
+                    disabled={backupBusy}
+                    onClick={() => void deleteBackup(item.path || '')}
+                  >
+                    {backupAction === `backup-delete:${item.path || ''}` ? '删除中...' : '删除'}
+                  </button>
                 </div>
               </div>
             )) : <div className="empty-state inline-empty">暂无可管理备份</div>}
@@ -1164,6 +1249,17 @@ function listValue(items?: string[]): string {
 
 function modeLabel(mode: string) {
   return mode === 'live2d' ? 'Live2D' : 'Bubble';
+}
+
+function hermesReadinessLabel(level?: string): string {
+  const labels: Record<string, string> = {
+    full_ready: 'Doctor 完整就绪',
+    core_ready: '核心能力就绪',
+    basic_ready: '基础就绪，Doctor 未分级',
+    limited: '存在受限能力',
+    unknown: '未完成 Doctor 分级',
+  };
+  return labels[level || 'unknown'] || level || '待检测';
 }
 
 function workspaceDirs(dirs?: Record<string, string>): string {
@@ -1503,14 +1599,6 @@ const BUBBLE_FIELD_SECTIONS: ModeFieldSection[] = [
       { key: 'bubble_mode.opacity', sourceKey: 'opacity', label: '透明度', kind: 'number', min: 0.2, max: 1, step: '0.01' },
     ],
   },
-  {
-    title: '主动交互',
-    fields: [
-      { key: 'bubble_mode.proactive_enabled', sourceKey: 'proactive_enabled', label: '主动对话', kind: 'checkbox', wide: true },
-      { key: 'bubble_mode.proactive_desktop_watch_enabled', sourceKey: 'proactive_desktop_watch_enabled', label: '定期桌面观察', kind: 'checkbox', wide: true },
-      { key: 'bubble_mode.proactive_interval_seconds', sourceKey: 'proactive_interval_seconds', label: '观察间隔秒', kind: 'number', min: 60, max: 3600, integer: true },
-    ],
-  },
 ];
 
 const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
@@ -1610,38 +1698,6 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
         options: [{ value: '', label: '自动匹配' }],
         allowCustom: true,
       },
-    ],
-  },
-  {
-    title: '主动交互',
-    fields: [
-      { key: 'live2d_mode.proactive_enabled', sourceKey: 'proactive_enabled', label: '主动对话', kind: 'checkbox', wide: true },
-      { key: 'live2d_mode.proactive_desktop_watch_enabled', sourceKey: 'proactive_desktop_watch_enabled', label: '定期桌面观察', kind: 'checkbox', wide: true },
-      { key: 'live2d_mode.proactive_interval_seconds', sourceKey: 'proactive_interval_seconds', label: '观察间隔秒', kind: 'number', min: 60, max: 3600, integer: true },
-    ],
-  },
-  {
-    title: 'Live2D TTS',
-    note: 'TTS 默认关闭；none 或配置缺失时不会调用外部服务，失败也不会影响聊天。',
-    fields: [
-      { key: 'tts.enabled', sourceKey: 'tts_enabled', label: '启用 Live2D TTS', kind: 'checkbox', wide: true },
-      {
-        key: 'tts.provider',
-        sourceKey: 'tts_provider',
-        label: 'TTS Provider',
-        kind: 'select',
-        options: [
-          { value: 'none', label: 'none（关闭）' },
-          { value: 'http', label: 'http POST' },
-          { value: 'command', label: '本地命令' },
-        ],
-      },
-      { key: 'tts.endpoint', sourceKey: 'tts_endpoint', label: 'TTS HTTP Endpoint', kind: 'text', wide: true },
-      { key: 'tts.command', sourceKey: 'tts_command', label: 'TTS 本地命令', kind: 'text', wide: true },
-      { key: 'tts.voice', sourceKey: 'tts_voice', label: 'TTS 音色', kind: 'text' },
-      { key: 'tts.timeout_seconds', sourceKey: 'tts_timeout_seconds', label: 'TTS 超时秒', kind: 'number', min: 1, max: 120, integer: true },
-      { key: 'tts.max_chars', sourceKey: 'tts_max_chars', label: 'TTS 最大播报字数', kind: 'number', min: 20, max: 240, integer: true },
-      { key: 'tts.notification_prompt', sourceKey: 'tts_notification_prompt', label: '主动播报提示词', kind: 'textarea', wide: true },
     ],
   },
 ];

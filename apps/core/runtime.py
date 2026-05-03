@@ -215,7 +215,9 @@ class HermesRuntime:
                 ),
                 "hermes_home": self._hermes_install_info.hermes_home,
                 "readiness_level": self._hermes_install_info.readiness_level,
+                "available_tools": self._hermes_install_info.available_tools,
                 "limited_tools": self._hermes_install_info.limited_tools,
+                "limited_tool_details": self._hermes_install_info.limited_tool_details,
                 "doctor_issues_count": self._hermes_install_info.doctor_issues_count,
             }
 

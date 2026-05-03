@@ -1,4 +1,4 @@
-export type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'tools' | 'bubble' | 'bubble-menu' | 'live2d';
+export type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'tools' | 'proactive-tts' | 'bubble' | 'bubble-menu' | 'live2d';
 
 type RouteState = {
   view: AppView;
@@ -48,11 +48,12 @@ export function navigateTo(
 export function routePath(view: AppView, params: Record<string, string> = {}): string {
   if (view === 'main') return '#/';
   if (view === 'settings' && params.mode) return `#/settings/${encodeURIComponent(params.mode)}`;
+  if (view === 'tools' && params.tool) return `#/tools/${encodeURIComponent(params.tool)}`;
   return `#/${encodeURIComponent(view)}`;
 }
 
 function isAppView(value: string): value is AppView {
-  return ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'bubble', 'bubble-menu', 'live2d'].includes(value);
+  return ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'proactive-tts', 'bubble', 'bubble-menu', 'live2d'].includes(value);
 }
 
 function routeFromHash(hash: string): RouteState | null {
@@ -62,5 +63,6 @@ function routeFromHash(hash: string): RouteState | null {
   const [rawView, rawMode] = parts;
   if (!isAppView(rawView)) return { view: 'main', params: {} };
   if (rawView === 'settings' && rawMode) return { view: 'settings', params: { mode: rawMode } };
+  if (rawView === 'tools' && rawMode) return { view: 'tools', params: { tool: rawMode } };
   return { view: rawView, params: {} };
 }

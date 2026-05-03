@@ -1,18 +1,24 @@
 # Next Steps
 
-1. 手工验证 Hermes 首次请求冷启动日志：确认首事件、首 token、完成耗时能帮助区分冷启动与模型执行时间。
-2. 继续手工验证 Electron 固定入口的剩余交互：默认 `hermes-yachiyo` 已确认能拉起 Vite/Electron/Python backend/Bridge 且 `/ui/dashboard`、`/ui/launcher?mode=bubble` 返回 200；已补 5174 已有 Vite 时复用 dev server 并直接启动 Electron 的路径，并修复 preload 注入为 `.cjs` 后 IPC 可用。后续还需在清理 `apps/frontend/node_modules` 后验证自动 `npm ci`，并手工走完聊天发送、设置保存、表现态退出。
-3. 手工验证最新窗口/路由语义：主控台“打开表现态”已确认聚焦 Bubble mode window，点击 Bubble 已确认打开 Chat Window 单例且不再污染主窗口；后续还需补 Live2D、设置页返回主控台等同类路径。
-4. 继续手工验证 React 设置页真实编辑控件：通用设置页、Bubble/Live2D 模式设置页和 Live2D 资源操作入口已支持字段级控件、差异保存、自定义校验、Electron 原生目录/ZIP 选择、无 IPC 时内联路径导入、打开导入目录和打开 Releases；通用设置已补 Hermes/Workspace/Bridge/集成/备份/卸载等旧版内容。下一步需要在 Electron 窗口内走完文件对话框选择、保存更改、备份恢复、卸载预览和重开 Live2D 表现态链路。
-5. 继续对照旧 pywebview Chat Window 做 React 体验补全：当前已恢复单例窗口、轮询流式/typewriter/Markdown/复制/会话切换、外链打开策略、基础快捷键和处理中取消入口；后续补更完整的错误边界和消息操作细节。
-6. 继续补齐 Electron 下的 Bubble / Live2D 表现态能力：当前已迁移真实状态、未读、最近回复、右键菜单、Bubble 旧头像气泡/状态点/auto-hide/拖拽点击阈值、Live2D 预览 fallback/资源提示/默认打开行为/快捷输入、第一版 Pixi/Cubism 模型加载、Bubble 靠边吸附、位置/尺寸持久化、表现态导航保护、TTS 触发、全局鼠标跟随、基础动作/表情触发、主窗口尺寸/start_minimized/open_chat_on_start 和 Electron 原生托盘；Live2D 透明穿透先降为实验开关，默认以可点击/可右键/可操作优先。下一步用真实 Live2D 资源做手工验证，并继续补更深的 per-model 动作/表情调优。
-7. 新增 macOS App 打包路径：React 只是 renderer，产品运行态必须是 Electron `.app`；下一步应增加无新依赖的本地 `.app` 打包脚本或明确引入 electron-builder/electron-forge，确保用户可以直接启动 Hermes-Yachiyo.app，而不是长期依赖终端 dev server。
-8. TODO：制定旧 pywebview shell 退休清单。等 Electron 前端稳定覆盖聊天、主控台、设置、Bubble、Live2D、安装引导、备份/卸载和打包启动链路后，直接删除所有 pywebview UI 代码与 legacy 入口，只保留 Electron + Bridge 路径。
-9. 手工验证备份/卸载：在设置页主动生成 ZIP 备份；确认备份内有 `manifest.json`、应用配置、完整 `yachiyo-workspace`、`chat.db`、缓存/日志/导入资源；验证备份生成期间目录内不会出现正式命名的半成品 ZIP，默认自动清理保留最近 10 份、覆盖最近一次备份、恢复最近备份、管理备份中的删除/打开位置/恢复此版本、损坏/超限 ZIP 导入会失败且不留下部分输出文件、卸载确认短语首尾空白容错、空 `.hermes`/`hermes` 目录会跳过，以及卸载前生成备份和安装引导导入最近备份。
-10. 手工验证主动桌面观察：关闭状态、Hermes 未就绪 blocker、vision 受限 blocker、成功创建低风险截图任务、ack 清除提示、失败间隔后重试。
-11. 手工验证 TTS：默认关闭无感、`http` endpoint 调用、`command` 本地命令调用、错误配置不影响聊天。
-12. 手工验证 AstrBot `/y ask` / `/y chat`：allow-list 拒绝、状态/截图/窗口摘要、自然语言低风险任务创建。
-13. 调研 Hermes 原生 memory API / CLI / 存储边界，决定 `HermesMemoryAdapter` 第一版能力。
-14. 继续推进 AstrBot 宿主绑定：在 AstrBot 插件框架中注册 `/y` 命令监听并调用 `on_y_command()`。
-15. 继续对接 Hapi `/codex` 真实端点，保持 Codex CLI 执行不进入 Hermes-Yachiyo。
-16. 完善任务持久化与安全策略模块（packages/tasking / packages/security），并补跨平台本地能力适配。
+1. 手工验证 Tool Center 修复：运行 `hermes doctor` 后确认 `vision`、`terminal`、`file`、`skills`、`code_execution`、`memory`、`session_search`、`todo`、`cronjob` 等 Doctor 已确认可用的工具不再显示“待检测”；确认 `browser` 与 `browser-cdp` 分开显示，CDP 受限不再误伤基础浏览器自动化。
+2. 手工验证工具配置入口：在 Tool Center 分别打开 `web`、`image_gen`、`browser-cdp`、Home Assistant、MoA、RL 等当前 `hermes tools list` 暴露的配置，确认 env 字段只显示变量名和已配置状态，不显示密钥明文；保存后可点击“保存并测试 / 测试配置”查看静态配置检查与 Doctor 对应状态。
+3. 联网与网页读取的真实启用仍需要用户提供 Firecrawl / Exa / Parallel / Tavily / Nous Gateway 之一；配置后应分别验证 `hermes doctor` 状态、`web` 工具调用和网页读取结果。
+4. 图片生成的真实启用仍需要当前 Hermes 已知 provider 的密钥或 image_gen plugin；配置页先只列 Hermes 已暴露/已安装的 provider，后续若 Hermes 新增 provider，再由 tools/plugin manifest 驱动 UI 扩展。
+5. 手工验证 Hermes 更新入口：点击“检查更新”确认能显示当前版本/落后 commits；确认默认 `--no-backup` 更新不会停在 stash 恢复确认，勾选完整备份时能清楚提示耗时风险，完成后自动刷新 tools list、Doctor 缓存和 Tool Center provider 列表。
+6. 手工验证 Browser CDP 修补：点击“启动/连接本机 Chrome”后确认能写入 `browser.cdp_url=http://127.0.0.1:9222`；若自动启动失败，复制页面返回的手动命令执行后再次运行 Doctor。
+7. 继续手工验证 Hermes 首次请求冷启动日志：确认首事件、首 token、完成耗时能帮助区分冷启动与模型执行时间。
+8. 继续手工验证 Electron 固定入口的剩余交互：默认 `hermes-yachiyo` 已确认能拉起 Vite/Electron/Python backend/Bridge 且 `/ui/dashboard`、`/ui/launcher?mode=bubble` 返回 200；后续还需在清理 `apps/frontend/node_modules` 后验证自动 `npm ci`，并手工走完聊天发送、设置保存、表现态退出。
+9. 继续手工验证最新窗口/路由语义：主控台“打开表现态”已确认聚焦 Bubble mode window，点击 Bubble 已确认打开 Chat Window 单例且不再污染主窗口；后续还需补 Live2D、设置页返回主控台等同类路径。
+10. 继续手工验证 React 设置页真实编辑控件：通用设置页、Bubble/Live2D 模式设置页和 Live2D 资源操作入口已支持字段级控件、差异保存、自定义校验、Electron 原生目录/ZIP 选择、无 IPC 时内联路径导入、打开导入目录和打开 Releases；下一步需要在 Electron 窗口内走完文件对话框选择、保存更改、备份恢复、卸载预览和重开 Live2D 表现态链路。
+11. 继续对照旧 pywebview Chat Window 做 React 体验补全：当前已恢复单例窗口、轮询流式/typewriter/Markdown/复制/会话切换、外链打开策略、基础快捷键和处理中取消入口；后续补更完整的错误边界和消息操作细节。
+12. 继续补齐 Electron 下的 Bubble / Live2D 表现态能力：当前已迁移真实状态、未读、最近回复、右键菜单、Bubble 旧头像气泡/状态点/auto-hide/拖拽点击阈值、Live2D 预览 fallback/资源提示/默认打开行为/快捷输入、第一版 Pixi/Cubism 模型加载、Bubble 靠边吸附、位置/尺寸持久化、表现态导航保护、TTS 触发、全局鼠标跟随、基础动作/表情触发、主窗口尺寸/start_minimized/open_chat_on_start 和 Electron 原生托盘；Live2D 透明穿透先降为实验开关，默认以可点击/可右键/可操作优先。下一步用真实 Live2D 资源做手工验证，并继续补更深的 per-model 动作/表情调优。
+13. 新增 macOS App 打包路径：React 只是 renderer，产品运行态必须是 Electron `.app`；下一步应增加无新依赖的本地 `.app` 打包脚本或明确引入 electron-builder/electron-forge，确保用户可以直接启动 Hermes-Yachiyo.app，而不是长期依赖终端 dev server。
+14. TODO：制定旧 pywebview shell 退休清单。等 Electron 前端稳定覆盖聊天、主控台、设置、Bubble、Live2D、安装引导、备份/卸载和打包启动链路后，直接删除所有 pywebview UI 代码与 legacy 入口，只保留 Electron + Bridge 路径。
+15. 手工验证备份/卸载：在设置页主动生成 ZIP 备份；确认备份内有 `manifest.json`、应用配置、完整 `yachiyo-workspace`、`chat.db`、缓存/日志/导入资源；验证备份生成期间目录内不会出现正式命名的半成品 ZIP，默认自动清理保留最近 10 份、覆盖最近一次备份、恢复最近备份、管理备份中的删除/打开位置/恢复此版本、损坏/超限 ZIP 导入会失败且不留下部分输出文件、卸载确认短语首尾空白容错、空 `.hermes`/`hermes` 目录会跳过，以及卸载前生成备份和安装引导导入最近备份。
+16. 手工验证主动桌面观察：关闭状态、Hermes 未就绪 blocker、vision 受限 blocker、成功创建低风险截图任务、ack 清除提示、失败间隔后重试。
+17. 手工验证 TTS：默认关闭无感、`http` endpoint 调用、`command` 本地命令调用、错误配置不影响聊天。
+18. 手工验证 AstrBot `/y ask` / `/y chat`：allow-list 拒绝、状态/截图/窗口摘要、自然语言低风险任务创建。
+19. 调研 Hermes 原生 memory API / CLI / 存储边界，决定 `HermesMemoryAdapter` 第一版能力。
+20. 继续推进 AstrBot 宿主绑定：在 AstrBot 插件框架中注册 `/y` 命令监听并调用 `on_y_command()`。
+21. 继续对接 Hapi `/codex` 真实端点，保持 Codex CLI 执行不进入 Hermes-Yachiyo。
+22. 完善任务持久化与安全策略模块（packages/tasking / packages/security），并补跨平台本地能力适配。

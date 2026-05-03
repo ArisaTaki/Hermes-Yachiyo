@@ -3,9 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "dist-electron/main.js",
   "scripts": {
     "dev": "concurrently -k -s first \"vite --host 127.0.0.1 --port 5174 --strictPort\" \"wait-on http-get://127.0.0.1:5174 && tsc -p tsconfig.electron.json && electron dist-electron/main.js\"",
     "build": "tsc -b && vite build && tsc -p tsconfig.electron.json",
+    "dist:mac": "npm run build && electron-builder --config electron-builder.yml --mac dmg",
+    "pack:mac": "npm run build && electron-builder --config electron-builder.yml --mac dir",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "start": "electron dist-electron/main.js"
   },
@@ -13,21 +16,22 @@
     "node": ">=20.19.0"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "^6.0.1",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0",
-    "electron": "^41.3.0",
-    "node-pty": "^1.1.0",
-    "react": "^19.2.5",
-    "react-dom": "^19.2.5",
-    "typescript": "^6.0.3",
-    "vite": "^8.0.10"
+    "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "concurrently": "^9.2.1",
+    "electron": "^41.5.0",
+    "electron-builder": "^26.8.1",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10",
     "wait-on": "^9.0.5"
   }
 }
