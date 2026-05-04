@@ -8,7 +8,7 @@ Hermes-Yachiyo 的八千代 GPT-SoVITS 语音包是可选资源，和应用 DMG 
 
 请从 GitHub Releases 的独立资源页下载：
 
-- <https://github.com/ArisaTaki/Hermes-Yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
+- <https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
 
 资源文件名：
 

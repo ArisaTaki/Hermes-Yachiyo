@@ -19,4 +19,4 @@
 
 发布说明见：
 
-- https://github.com/ArisaTaki/Hermes-Yachiyo/releases
+- https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases
