@@ -66,25 +66,6 @@ jobs:
       - name: Build Electron DMG
         run: npm --prefix apps/frontend run dist:mac
 
-      - name: Prepare optional voice assets
-        env:
-          YACHIYO_TTS_VOICE_ASSET_URL: ${{ vars.YACHIYO_TTS_VOICE_ASSET_URL }}
-          YACHIYO_TTS_VOICE_ASSET_URL_SECRET: ${{ secrets.YACHIYO_TTS_VOICE_ASSET_URL }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p dist/release-assets
-          VOICE_ASSET_URL="${YACHIYO_TTS_VOICE_ASSET_URL:-${YACHIYO_TTS_VOICE_ASSET_URL_SECRET:-}}"
-          if compgen -G "dist/release-assets/*.zip" > /dev/null; then
-            echo "Voice/release ZIP assets already exist under dist/release-assets."
-          elif [[ -n "${VOICE_ASSET_URL}" ]]; then
-            echo "Downloading configured Yachiyo GPT-SoVITS voice asset."
-            curl -fL "${VOICE_ASSET_URL}" \
-              -o "dist/release-assets/Hermes-Yachiyo-yachiyo-gpt-sovits-v4.zip"
-          else
-            echo "::notice::No YACHIYO_TTS_VOICE_ASSET_URL configured; release will be created without the optional GPT-SoVITS voice ZIP."
-          fi
-
       - name: Prepare release metadata
         id: meta
         shell: bash
@@ -129,10 +110,6 @@ jobs:
           for dmg in dist/electron/*.dmg; do
             cp "$dmg" "release/Hermes-Yachiyo-${CHANNEL}-v${RELEASE_VERSION}-${SHORT_SHA}.dmg"
           done
-          for asset in dist/release-assets/*.zip; do
-            base="$(basename "$asset" .zip)"
-            cp "$asset" "release/${base}-v${RELEASE_VERSION}.zip"
-          done
           if ! compgen -G "release/*.dmg" > /dev/null; then
             echo "No DMG artifact found under dist/electron" >&2
             exit 1
@@ -147,7 +124,8 @@ jobs:
           - Base version: ${VERSION}
           - Release version: ${RELEASE_VERSION}
           - Package: macOS DMG
-          - Optional assets: release 中如包含 Hermes-Yachiyo-yachiyo-gpt-sovits-v4-v${RELEASE_VERSION}.zip，可在“主动关怀语音”页面导入八千代 GPT-SoVITS 音色。
+
+          GPT-SoVITS 语音资源包不随应用 DMG 发布；请在独立的“Yachiyo GPT-SoVITS Voice Assets”资源 release 中下载。
 
           首次启动后，主动桌面观察需要在 macOS 系统设置中允许 Hermes-Yachiyo 使用屏幕录制权限。
           EOF
@@ -161,9 +139,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hermes-yachiyo-${{ steps.meta.outputs.tag }}
-          path: |
-            release/*.dmg
-            release/*.zip
+          path: release/*.dmg
 
       - name: Create GitHub release
         env:
@@ -176,7 +152,7 @@ jobs:
           if [[ "${{ steps.meta.outputs.prerelease }}" == "true" ]]; then
             extra_flags+=(--prerelease --latest=false)
           fi
-          release_assets=(release/*.dmg release/*.zip)
+          release_assets=(release/*.dmg)
           gh release create "${{ steps.meta.outputs.tag }}" \
             "${release_assets[@]}" \
             --target "${GITHUB_SHA}" \

@@ -277,6 +277,18 @@ unzip hermes-yachiyo-live2d-yachiyo-20260423.zip -d ~/.hermes/yachiyo/assets/liv
 
 更多资源说明见 [docs/live2d-assets.md](docs/live2d-assets.md)。
 
+## 八千代 GPT-SoVITS 语音资源
+
+主动关怀 TTS 的八千代 GPT-SoVITS 语音包也是可选资源，并且和应用 DMG 分开发布。应用 release 只包含程序本体；语音包放在独立资源 release 中：
+
+<https://github.com/ArisaTaki/Hermes-Yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
+
+下载 `Hermes-Yachiyo-yachiyo-gpt-sovits-v4.zip` 后，在主控台打开“主动关怀语音”，选择 `GPT-SoVITS 本地服务`，再点击“导入语音包 ZIP”。
+
+语音包只包含已经调配好的音色资源，不包含 GPT-SoVITS 服务本体。本地 API 服务仍需单独启动或通过设置页配置 LaunchAgent。
+
+更多说明见 [docs/tts-voice-assets.md](docs/tts-voice-assets.md)。
+
 ## 常见问题
 
 ### 运行后入口或界面不对

@@ -10,7 +10,8 @@
 - ✅ Electron 首启/激活流程继续加固：只要用户已经进入过主控台或安装信息显示 ready，Dock 图标激活就不会再用旧的 `lastInstallReady=false` 打回安装向导；进入主控台时会恢复配置中的 Bubble/Live2D 表现态，Live2D 无资源时自动回退 Bubble。
 - ✅ Live2D 资源 gate 前后端双重兜底：设置页保存 `display_mode=live2d` 时如果没有有效资源，会返回 `redirect` 到 Live2D 设置页并保持 Bubble；Electron 表现态打开也会先检查资源状态，避免无资源透明窗口把用户困住。
 - ✅ 主动关怀语音页新增 GPT-SoVITS 本地服务状态/安装/移除路由：可查看 API 是否可达、服务目录是否存在、LaunchAgent 是否安装/运行，并可把当前服务目录和命令写成当前用户的 macOS LaunchAgent；不会下载或改写 GPT-SoVITS 项目本体。
-- ✅ Release workflow 改为自动生成带版本号的 stable/experimental release tag 与资产名：版本以 `pyproject.toml` 基础版本加 `GITHUB_RUN_NUMBER` 形成发布版本；DMG 和可选八千代 GPT-SoVITS ZIP 都会带上发布版本号。语音包可来自 `dist/release-assets/*.zip` 或仓库变量/密钥 `YACHIYO_TTS_VOICE_ASSET_URL`。
+- ✅ Release workflow 改为自动生成带版本号的 stable/experimental release tag 与资产名：版本以 `pyproject.toml` 基础版本加 `GITHUB_RUN_NUMBER` 形成发布版本；应用 release 只发布 DMG，不再把八千代 GPT-SoVITS ZIP 附在每次 develop/main 构建里。
+- ✅ 新增独立 `Publish TTS Voice Assets` workflow：只在手动触发时接收已经调配好的语音 ZIP URL，并上传到 `tts-assets-yachiyo-gpt-sovits-v4` 资源 release；不会从仓库重复构建语音包，也不会参与应用 DMG 常规构建。
 - ✅ 卸载“删除当前应用本体”改为 macOS Finder 删除优先、shell 删除兜底；仍属于 best-effort，因为运行中的 `.app` 删除受 Finder/权限/签名路径影响，失败时继续提示用户手动从 Applications 移除。
 - ✅ 验证：`python -m pytest tests/test_ui_bridge_routes.py tests/test_tts.py tests/test_mode_settings.py tests/test_main_api_modes.py tests/test_proactive.py tests/test_hermes_capabilities.py tests/test_executor.py` → 181 passed；`npm --prefix apps/frontend run build` → passed（保留 Vite 大 chunk warning）；`ruby -e 'require "yaml"; YAML.load_file(".github/workflows/release-macos.yml")'` → passed；`git diff --check` → passed。
 

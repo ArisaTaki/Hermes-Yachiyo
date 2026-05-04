@@ -1,0 +1,95 @@
+name: Publish TTS Voice Assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      asset_url:
+        description: Existing Yachiyo GPT-SoVITS ZIP URL. Leave empty to use repository variable/secret.
+        required: false
+        type: string
+      tag:
+        description: Resource release tag
+        required: true
+        default: tts-assets-yachiyo-gpt-sovits-v4
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish-tts-assets:
+    name: Publish existing GPT-SoVITS voice ZIP
+    runs-on: ubuntu-latest
+    env:
+      DEFAULT_ASSET_NAME: Hermes-Yachiyo-yachiyo-gpt-sovits-v4.zip
+    steps:
+      - name: Resolve asset URL
+        id: resolve
+        env:
+          INPUT_ASSET_URL: ${{ inputs.asset_url }}
+          YACHIYO_TTS_VOICE_ASSET_URL: ${{ vars.YACHIYO_TTS_VOICE_ASSET_URL }}
+          YACHIYO_TTS_VOICE_ASSET_URL_SECRET: ${{ secrets.YACHIYO_TTS_VOICE_ASSET_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSET_URL="${INPUT_ASSET_URL:-${YACHIYO_TTS_VOICE_ASSET_URL:-${YACHIYO_TTS_VOICE_ASSET_URL_SECRET:-}}}"
+          if [[ -z "${ASSET_URL}" ]]; then
+            echo "No existing voice ZIP URL was provided." >&2
+            echo "Set workflow input asset_url, repository variable YACHIYO_TTS_VOICE_ASSET_URL, or secret YACHIYO_TTS_VOICE_ASSET_URL." >&2
+            exit 1
+          fi
+          {
+            echo "asset_url=${ASSET_URL}"
+            echo "asset_name=${DEFAULT_ASSET_NAME}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Download existing voice ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          curl -fL "${{ steps.resolve.outputs.asset_url }}" -o "release/${{ steps.resolve.outputs.asset_name }}"
+          shasum -a 256 "release/${{ steps.resolve.outputs.asset_name }}" | tee release/sha256.txt
+
+      - name: Write release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          SHA256="$(cut -d ' ' -f 1 release/sha256.txt)"
+          cat > release/notes.md <<EOF
+          Yachiyo GPT-SoVITS Voice Assets
+
+          This release contains the pre-tuned Yachiyo GPT-SoVITS voice ZIP for Hermes-Yachiyo.
+
+          - Asset: \`${{ steps.resolve.outputs.asset_name }}\`
+          - SHA256: \`${SHA256}\`
+          - Import path: open Hermes-Yachiyo -> 主控台 -> 主动关怀语音 -> 导入语音包 ZIP
+
+          此资源包只包含已经调配好的八千代音色资源，不包含 GPT-SoVITS 服务本体，也不会参与应用 DMG 的常规构建。
+          EOF
+
+      - name: Create or update resource release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag }}"
+          TITLE="Yachiyo GPT-SoVITS Voice Assets"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" \
+              "release/${{ steps.resolve.outputs.asset_name }}" \
+              --clobber
+            gh release edit "${TAG}" \
+              --title "${TITLE}" \
+              --notes-file release/notes.md \
+              --prerelease=false \
+              --latest=false
+          else
+            gh release create "${TAG}" \
+              "release/${{ steps.resolve.outputs.asset_name }}" \
+              --title "${TITLE}" \
+              --notes-file release/notes.md \
+              --prerelease=false \
+              --latest=false
+          fi
