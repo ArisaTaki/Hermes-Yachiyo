@@ -570,7 +570,7 @@ class TTSConfig:
     endpoint: str = ""
     command: str = ""
     voice: str = ""
-    timeout_seconds: int = 20
+    timeout_seconds: int = 180
     max_chars: int = 80
     trigger_probability: float = 0.6
     notification_prompt: str = DEFAULT_TTS_NOTIFICATION_PROMPT
@@ -965,7 +965,7 @@ def _normalize_config_values(config: AppConfig) -> None:
         {"none", "http", "command", "gpt-sovits"},
         "none",
     ))
-    config.tts.timeout_seconds = _normalize_int_range(config.tts.timeout_seconds, 1, 120, 20)
+    config.tts.timeout_seconds = _normalize_int_range(config.tts.timeout_seconds, 1, 600, 180)
     config.tts.endpoint = str(config.tts.endpoint or "")
     config.tts.command = str(config.tts.command or "")
     config.tts.voice = str(config.tts.voice or "")

@@ -282,9 +282,9 @@ class TTSService:
 
     def _timeout(self) -> int:
         try:
-            return max(1, min(120, int(self._config.timeout_seconds or 20)))
+            return max(1, min(600, int(self._config.timeout_seconds or 180)))
         except (TypeError, ValueError):
-            return 20
+            return 180
 
     def _run_http(self, text: str, *, play: bool, output_path: str | None) -> dict[str, Any]:
         payload = json.dumps(

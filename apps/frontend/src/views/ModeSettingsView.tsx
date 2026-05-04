@@ -565,7 +565,16 @@ function Live2DResourceInfo({
       {releasesUrl ? (
         <div className="settings-meta-row">
           <span>资源下载</span>
-          <strong><a href={releasesUrl} target="_blank" rel="noreferrer">GitHub Releases</a></strong>
+          <strong>
+            <button
+              type="button"
+              className="inline-link-button"
+              disabled={disabled}
+              onClick={onOpenReleases}
+            >
+              GitHub Releases
+            </button>
+          </strong>
         </div>
       ) : null}
       <p className="settings-note">{stringValue(resource.help_text || config.help_text || '—')}</p>

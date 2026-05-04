@@ -44,6 +44,8 @@ _launcher_notifications: dict[str, LauncherNotificationTracker] = {}
 _launcher_proactive_services: dict[tuple[str, int], ProactiveDesktopService] = {}
 _launcher_tts_services: dict[int, TTSService] = {}
 _launcher_last_tts_attention: dict[int, str] = {}
+_launcher_pending_tts_attention: dict[int, str] = {}
+_launcher_completed_tts_attention: dict[int, str] = {}
 
 
 class SendChatMessageRequest(BaseModel):
@@ -666,6 +668,19 @@ def _maybe_trigger_proactive_tts(
     if not text:
         return service.get_status()
     attention_key = str(proactive.get("task_id") or text)
+    if attention_key == _launcher_pending_tts_attention.get(key, ""):
+        return {
+            **service.get_status(),
+            "pending_audio": True,
+            "attention_key": attention_key,
+            "message": "主动关怀语音生成中",
+        }
+    if attention_key == _launcher_completed_tts_attention.get(key, ""):
+        return {
+            **service.get_status(),
+            "audio_ready": True,
+            "attention_key": attention_key,
+        }
     if attention_key == _launcher_last_tts_attention.get(key, ""):
         return service.get_status()
 
@@ -675,6 +690,8 @@ def _maybe_trigger_proactive_tts(
     def on_complete(status: dict[str, Any]) -> None:
         if task_id:
             _attach_proactive_tts_audio(runtime, task_id, status, attachment_id, output_path, mime_type)
+        _launcher_pending_tts_attention.pop(key, None)
+        _launcher_completed_tts_attention[key] = attention_key
 
     status = service.speak_async(
         text,
@@ -684,6 +701,11 @@ def _maybe_trigger_proactive_tts(
     )
     if status.get("scheduled"):
         _launcher_last_tts_attention[key] = attention_key
+        _launcher_pending_tts_attention[key] = attention_key
+        status["pending_audio"] = True
+        status["attention_key"] = attention_key
+    else:
+        _launcher_completed_tts_attention[key] = attention_key
     return status
 
 
@@ -779,12 +801,26 @@ async def get_launcher_view(mode: str = "bubble") -> dict[str, Any]:
 
     chat = bridge.get_conversation_overview(summary_count=summary_count, session_limit=3)
     tts_status = _maybe_trigger_proactive_tts(runtime, mode_id, proactive)
+    visible_chat = chat
+    visible_proactive = proactive
+    if tts_status.get("pending_audio"):
+        visible_chat = dict(chat)
+        visible_chat["latest_notifiable_message"] = {}
+        visible_chat["latest_reply"] = ""
+        visible_chat["latest_reply_full"] = ""
+        visible_proactive = {
+            **proactive,
+            "has_attention": False,
+            "status": "tts_pending",
+            "message": "主动关怀语音生成中",
+            "attention_text": "",
+        }
     tracker = _launcher_notifications.setdefault(mode_id, LauncherNotificationTracker())
-    notification = tracker.update(chat, external_attention=bool(proactive.get("has_attention")))
+    notification = tracker.update(visible_chat, external_attention=bool(visible_proactive.get("has_attention")))
     latest_status = "ready"
-    if chat.get("empty"):
+    if visible_chat.get("empty"):
         latest_status = "empty"
-    elif chat.get("is_processing"):
+    elif visible_chat.get("is_processing"):
         latest_status = "processing"
     elif notification.get("has_unread"):
         latest_message = notification.get("latest_message")
@@ -794,17 +830,17 @@ async def get_launcher_view(mode: str = "bubble") -> dict[str, Any]:
     return {
         "ok": True,
         "mode": mode_id,
-        "chat": chat,
-        "proactive": proactive,
+        "chat": visible_chat,
+        "proactive": visible_proactive,
         "notification": notification,
         "tts": tts_status,
         "launcher": {
             **launcher_config,
             "has_attention": bool(notification.get("has_unread")),
             "latest_status": latest_status,
-            "status_label": chat.get("status_label", "就绪"),
-            "latest_reply": chat.get("latest_reply", ""),
-            "latest_reply_full": chat.get("latest_reply_full", ""),
+            "status_label": visible_chat.get("status_label", "就绪"),
+            "latest_reply": visible_chat.get("latest_reply", ""),
+            "latest_reply_full": visible_chat.get("latest_reply_full", ""),
         },
     }
 

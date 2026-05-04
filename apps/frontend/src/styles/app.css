@@ -374,6 +374,22 @@ button {
 }
 button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 166, 247, 0.16); }
 .ghost-button { background: transparent; }
+.inline-link-button {
+  display: inline;
+  width: auto;
+  border: 0;
+  background: transparent;
+  color: #dce8ff;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.inline-link-button:hover {
+  border: 0;
+  background: transparent;
+  color: #ffffff;
+}
 
 .notice {
   border: 1px solid rgba(120, 166, 247, 0.22);
@@ -2210,16 +2226,36 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
   margin-bottom: 4px;
 }
 .settings-resource-actions.compact-actions {
+  display: flex;
   justify-content: flex-start;
+  align-items: center;
   margin: 0;
 }
 .settings-resource-panel {
   display: grid;
+  align-content: start;
   gap: 10px;
   padding: 12px;
   border: 1px solid rgba(120, 166, 247, 0.16);
   border-radius: 8px;
   background: rgba(120, 166, 247, 0.055);
+}
+.settings-resource-panel.wide {
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr);
+}
+.settings-resource-panel .settings-resource-actions button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 0;
+  max-width: 240px;
+  height: auto;
+  min-height: 38px;
+  padding: 8px 12px;
+  white-space: nowrap;
 }
 .settings-resource-panel strong {
   font-size: 13px;

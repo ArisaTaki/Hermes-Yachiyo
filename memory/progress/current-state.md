@@ -2,6 +2,17 @@
 
 ## 已完成
 
+### Milestone 77 — Live2D 导入编码、Vision Key 兼容与 GPT-SoVITS 部署入口
+
+- ✅ Live2D ZIP 导入改为自定义解包：当压缩包文件名缺少 UTF-8 标记时，会尝试按 UTF-8 / GB18030 / 日文/韩文编码恢复真实文件名，并把可疑乱码目录名替换为安全的导入目录名，避免 `~/.hermes/yachiyo/assets/live2d/` 后出现 box drawing 乱码路径。
+- ✅ Live2D 资源下载入口统一走系统默认浏览器，并明确指向资源 release：`https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/tag/live2d-assets-20260423`；不会再把 Live2D release 打进内置窗口。
+- ✅ 图片识别链路补上 OpenRouter 旧配置兼容：当 Hermes/Yachiyo 仍保存的是 `AUTO_API_KEY`，但 provider 推断为 OpenRouter 时，原生图片输入与 vision 预分析都会把它视为可用 key；UI 仍只显示 `OPENROUTER_API_KEY` 的配置状态，不泄漏或展示 `AUTO_API_KEY` 明文。
+- ✅ 主动关怀 TTS 超时上限从 120 秒放宽到 600 秒，默认值调整为 180 秒；GPT-SoVITS 权重切换、`/tts` 生成和音频播放都使用同一超时设置，适配本地模型首次加载较慢的情况。
+- ✅ 主动关怀 TTS 触发后会先进入 `tts_pending` 状态：Bubble/Live2D 不再提前显示文本提醒，等异步 TTS 完成并把音频附件写回会话后，下一轮 launcher 轮询才把主动消息作为可见提醒推出。
+- ✅ 主动关怀语音页补齐 GPT-SoVITS 本地服务部署入口：新增“部署本地服务”按钮，会打开系统终端，经过用户确认后克隆 `RVC-Boss/GPT-SoVITS`、创建 `.venv`、安装依赖并启动 `127.0.0.1:9880` API；“安装开机自启”仍只负责把已配置的服务目录/命令写入 LaunchAgent。
+- ✅ GPT-SoVITS 语音资源面板布局收紧为紧凑按钮栏，避免三个资源按钮被 CSS grid 拉成异常高的大块；语音资源下载仍走外部默认浏览器并指向独立的 `tts-assets-yachiyo-gpt-sovits-v4` release。
+- ✅ 验证：`python -m pytest tests/test_ui_bridge_routes.py::test_launcher_tts_only_triggers_for_proactive_attention tests/test_ui_bridge_routes.py::test_launcher_tts_triggers_without_probability_gate tests/test_ui_bridge_routes.py::test_launcher_hides_proactive_reply_while_tts_audio_is_generating tests/test_ui_bridge_routes.py::test_live2d_zip_member_name_recovers_utf8_without_flag tests/test_tts.py::test_import_tts_voice_archive_returns_gpt_sovits_settings` → 5 passed；`python -m pytest tests/test_executor.py::TestHermesStreamBridgeImageRouting::test_xiaomi_text_model_vision_fallback_inherits_configured_base_url tests/test_main_api_modes.py tests/test_ui_bridge_routes.py tests/test_tts.py tests/test_mode_settings.py` → 93 passed；`python -m pytest tests/test_ui_bridge_routes.py tests/test_tts.py tests/test_main_api_modes.py tests/test_mode_settings.py tests/test_executor.py` → 165 passed；`npm --prefix apps/frontend run build` → passed（保留 Vite 大 chunk warning）；`git diff --check` → passed。
+
 ### Milestone 76 — 主动关怀截图链路、首启回退与发布自动化收口
 
 - ✅ 主动关怀桌面观察的截图附件改为只作为内部附件传给对话链路，不再把“主动桌面观察”的系统指令文本写入用户消息；对话中仍可看到生成的桌面截图附件，方便用户确认本轮观察依据。

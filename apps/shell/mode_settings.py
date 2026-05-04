@@ -203,8 +203,8 @@ def _validate_field(key: str, value: Any) -> str | None:
         return "proactive_trigger_probability 须在 0-1 之间"
     if key == "tts.provider" and value not in _TTS_PROVIDERS:
         return "tts.provider 仅支持 none / http / command / gpt-sovits"
-    if key == "tts.timeout_seconds" and not (1 <= value <= 120):
-        return "tts.timeout_seconds 须在 1-120 秒之间"
+    if key == "tts.timeout_seconds" and not (1 <= value <= 600):
+        return "tts.timeout_seconds 须在 1-600 秒之间"
     if key == "tts.max_chars" and not (20 <= value <= 240):
         return "tts.max_chars 须在 20-240 字之间"
     if key == "tts.trigger_probability" and not (0.0 <= value <= 1.0):

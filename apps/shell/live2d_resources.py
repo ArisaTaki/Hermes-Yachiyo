@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import copy
+import re
 import shutil
 import tempfile
-from pathlib import Path
+import zipfile
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 from apps.shell.assets import find_default_live2d_model_dir
@@ -47,8 +49,32 @@ def _is_relative_to(path: Path, root: Path) -> bool:
         return False
 
 
+_MOJIBAKE_MARKERS = frozenset("│─┌┐└┘├┤┬┴┼�□■")
+
+
+def _looks_like_mojibake(text: str) -> bool:
+    value = str(text or "")
+    if not value:
+        return True
+    marker_count = sum(1 for char in value if char in _MOJIBAKE_MARKERS)
+    control_count = sum(1 for char in value if ord(char) < 32)
+    return control_count > 0 or marker_count >= 2
+
+
+def _safe_import_dir_name(preferred_name: str, *, fallback: str = "yachiyo-live2d") -> str:
+    raw_name = Path(str(preferred_name or "")).name.strip()
+    if not raw_name or _looks_like_mojibake(raw_name):
+        raw_name = fallback
+    safe_name = "".join(
+        char if char.isalnum() or char in {"-", "_", "."} else "-"
+        for char in raw_name
+    )
+    safe_name = re.sub(r"-{2,}", "-", safe_name).strip(".-")
+    return safe_name or fallback
+
+
 def _pick_import_target_dir(root: Path, preferred_name: str) -> Path:
-    base_name = Path(preferred_name).name.strip() or "live2d-model"
+    base_name = _safe_import_dir_name(preferred_name)
     candidate = root / base_name
     if not candidate.exists():
         return candidate
@@ -60,7 +86,12 @@ def _pick_import_target_dir(root: Path, preferred_name: str) -> Path:
         suffix += 1
 
 
-def copy_live2d_model_dir(source_dir: Path, assets_root: Path | None = None) -> Path:
+def copy_live2d_model_dir(
+    source_dir: Path,
+    assets_root: Path | None = None,
+    *,
+    preferred_name: str | None = None,
+) -> Path:
     """Copy a selected Live2D model directory into the default user asset root."""
     source_model_dir = find_importable_live2d_dir(source_dir)
     if source_model_dir is None:
@@ -72,9 +103,63 @@ def copy_live2d_model_dir(source_dir: Path, assets_root: Path | None = None) -> 
     if _is_relative_to(source_model_dir, target_root):
         return source_model_dir
 
-    target_dir = _pick_import_target_dir(target_root, source_model_dir.name)
+    target_dir = _pick_import_target_dir(target_root, preferred_name or source_model_dir.name)
     shutil.copytree(source_model_dir, target_dir)
     return target_dir.resolve()
+
+
+def _decode_zip_member_name(info: zipfile.ZipInfo) -> str:
+    """Recover common UTF-8/GBK encoded ZIP names when the UTF-8 flag is missing."""
+    name = str(info.filename or "").replace("\\", "/")
+    if info.flag_bits & 0x800:
+        return name
+    try:
+        raw = name.encode("cp437")
+    except UnicodeEncodeError:
+        return name
+    for encoding in ("utf-8", "gb18030", "cp932", "shift_jis", "cp949"):
+        try:
+            decoded = raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        decoded = decoded.replace("\\", "/")
+        if decoded and not _looks_like_mojibake(decoded):
+            return decoded
+    return name
+
+
+def _archive_member_target(root: Path, member_name: str) -> Path:
+    parts = [part for part in PurePosixPath(member_name).parts if part not in {"", "/"}]
+    if not parts or any(part == ".." for part in parts):
+        raise ValueError("压缩包内包含不安全的路径")
+    target = (root / Path(*parts)).resolve()
+    try:
+        target.relative_to(root.resolve())
+    except ValueError as exc:
+        raise ValueError("压缩包内包含不安全的路径") from exc
+    return target
+
+
+def _unpack_live2d_archive(archive_path: Path, tmp_dir: str) -> None:
+    if archive_path.suffix.lower() != ".zip":
+        shutil.unpack_archive(str(archive_path), tmp_dir)
+        return
+    root = Path(tmp_dir).resolve()
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            for info in archive.infolist():
+                member_name = _decode_zip_member_name(info)
+                if not member_name:
+                    continue
+                if member_name.endswith("/"):
+                    _archive_member_target(root, member_name).mkdir(parents=True, exist_ok=True)
+                    continue
+                target = _archive_member_target(root, member_name)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with archive.open(info) as source, target.open("wb") as destination:
+                    shutil.copyfileobj(source, destination)
+    except zipfile.BadZipFile as exc:
+        raise shutil.ReadError(str(exc)) from exc
 
 
 def import_live2d_archive(archive_path: Path, assets_root: Path | None = None) -> Path:
@@ -85,7 +170,7 @@ def import_live2d_archive(archive_path: Path, assets_root: Path | None = None) -
 
     with tempfile.TemporaryDirectory(prefix="hermes-live2d-import-") as tmp_dir:
         try:
-            shutil.unpack_archive(str(resolved_archive), tmp_dir)
+            _unpack_live2d_archive(resolved_archive, tmp_dir)
         except (shutil.ReadError, ValueError) as exc:
             raise ValueError("所选文件不是可导入的压缩包") from exc
 
@@ -93,7 +178,11 @@ def import_live2d_archive(archive_path: Path, assets_root: Path | None = None) -
         if source_dir is None:
             raise ValueError("压缩包内未检测到有效的 Live2D 模型资源")
 
-        return copy_live2d_model_dir(source_dir, assets_root=assets_root)
+        return copy_live2d_model_dir(
+            source_dir,
+            assets_root=assets_root,
+            preferred_name=source_dir.name or resolved_archive.stem,
+        )
 
 
 def prepare_live2d_model_path_draft(

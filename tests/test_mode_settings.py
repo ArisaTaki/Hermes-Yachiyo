@@ -67,7 +67,7 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.tts.endpoint == ""
     assert config.tts.command == ""
     assert config.tts.voice == ""
-    assert config.tts.timeout_seconds == 20
+    assert config.tts.timeout_seconds == 180
     assert config.tts.max_chars == 80
     assert config.tts.trigger_probability == 0.6
     assert config.tts.notification_prompt == config_mod.DEFAULT_TTS_NOTIFICATION_PROMPT
@@ -377,7 +377,7 @@ def test_apply_settings_changes_rejects_invalid_new_fields(tmp_path, monkeypatch
 
     assert result["ok"] is False
     assert config.tts.provider == "none"
-    assert config.tts.timeout_seconds == 20
+    assert config.tts.timeout_seconds == 180
     assert config.tts.max_chars == 80
     assert config.live2d_mode.proactive_interval_seconds == 300
     assert "tts.provider" in result["error"]
@@ -440,7 +440,7 @@ def test_serialize_mode_settings_returns_separate_sections(monkeypatch, tmp_path
     assert "assistant" not in payload["bubble"]["config"]
     assert "assistant" not in payload["live2d"]["config"]
     assert payload["live2d"]["config"]["tts"]["provider"] == "none"
-    assert payload["live2d"]["config"]["tts_timeout_seconds"] == 20
+    assert payload["live2d"]["config"]["tts_timeout_seconds"] == 180
 
 
 def test_serialize_mode_window_data_returns_mode_part_only(monkeypatch, tmp_path):
@@ -533,7 +533,7 @@ def test_load_config_clears_legacy_bundled_live2d_path(tmp_path, monkeypatch):
     assert config.assistant.user_address == "老师"
     assert config.tts.enabled is True
     assert config.tts.provider == "none"
-    assert config.tts.timeout_seconds == 20
+    assert config.tts.timeout_seconds == 180
 
 
 def test_load_config_normalizes_legacy_bubble_hover_to_click(tmp_path, monkeypatch):

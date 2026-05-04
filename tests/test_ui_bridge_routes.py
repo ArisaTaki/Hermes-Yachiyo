@@ -454,6 +454,8 @@ def test_launcher_tts_only_triggers_for_proactive_attention(monkeypatch):
     monkeypatch.setattr(ui, "TTSService", FakeTTSService)
     ui._launcher_tts_services.clear()
     ui._launcher_last_tts_attention.clear()
+    ui._launcher_pending_tts_attention.clear()
+    ui._launcher_completed_tts_attention.clear()
 
     idle = ui._maybe_trigger_proactive_tts(runtime, "live2d", {"has_attention": False})
     first = ui._maybe_trigger_proactive_tts(
@@ -477,7 +479,8 @@ def test_launcher_tts_only_triggers_for_proactive_attention(monkeypatch):
 
     assert idle["message"] == "idle"
     assert first["scheduled"] is True
-    assert duplicate["message"] == "idle"
+    assert duplicate["pending_audio"] is True
+    assert duplicate["message"] == "主动关怀语音生成中"
     assert spoken == ["桌面观察提醒：先保存一下进度。"]
 
 
@@ -507,6 +510,8 @@ def test_launcher_tts_triggers_without_probability_gate(monkeypatch):
     monkeypatch.setattr(ui, "TTSService", FakeTTSService)
     ui._launcher_tts_services.clear()
     ui._launcher_last_tts_attention.clear()
+    ui._launcher_pending_tts_attention.clear()
+    ui._launcher_completed_tts_attention.clear()
 
     first = ui._maybe_trigger_proactive_tts(
         runtime,
@@ -520,8 +525,80 @@ def test_launcher_tts_triggers_without_probability_gate(monkeypatch):
     )
 
     assert first["scheduled"] is True
-    assert duplicate["message"] == "idle"
+    assert duplicate["pending_audio"] is True
     assert spoken == ["先喝口水。"]
+
+
+@pytest.mark.asyncio
+async def test_launcher_hides_proactive_reply_while_tts_audio_is_generating(monkeypatch):
+    config = SimpleNamespace(
+        tts=SimpleNamespace(enabled=True, provider="command", command="say {text}", max_chars=80),
+        bubble_mode=SimpleNamespace(
+            summary_count=2,
+            default_display="summary",
+            show_unread_dot=True,
+            auto_hide=False,
+            opacity=0.9,
+        ),
+        live2d_mode=SimpleNamespace(),
+    )
+    runtime = SimpleNamespace(config=config)
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+    monkeypatch.setattr(
+        ui,
+        "_launcher_proactive_state",
+        lambda *_args, **_kwargs: {
+            "has_attention": True,
+            "task_id": "task-pending-audio",
+            "attention_text": "八六，先保存一下进度。",
+            "message": "八六，先保存一下进度。",
+        },
+    )
+
+    class FakeChatBridge:
+        def __init__(self, _runtime):
+            pass
+
+        def get_conversation_overview(self, summary_count, session_limit):
+            return {
+                "empty": False,
+                "is_processing": False,
+                "status_label": "最近 2 条",
+                "latest_reply": "八六，先保存一下进度。",
+                "latest_reply_full": "八六，先保存一下进度。",
+                "latest_notifiable_message": {
+                    "marker": "task-pending-audio",
+                    "status": "completed",
+                    "content": "八六，先保存一下进度。",
+                },
+            }
+
+    class FakeTTSService:
+        def __init__(self, _config):
+            pass
+
+        def get_status(self):
+            return {"enabled": True, "provider": "command", "ok": True, "message": "idle"}
+
+        def speak_async(self, text, **_kwargs):
+            return {"enabled": True, "provider": "command", "ok": True, "scheduled": True}
+
+    monkeypatch.setattr(ui, "ChatBridge", FakeChatBridge)
+    monkeypatch.setattr(ui, "TTSService", FakeTTSService)
+    ui._launcher_notifications.clear()
+    ui._launcher_tts_services.clear()
+    ui._launcher_last_tts_attention.clear()
+    ui._launcher_pending_tts_attention.clear()
+    ui._launcher_completed_tts_attention.clear()
+
+    payload = await ui.get_launcher_view("bubble")
+
+    assert payload["tts"]["pending_audio"] is True
+    assert payload["proactive"]["has_attention"] is False
+    assert payload["proactive"]["status"] == "tts_pending"
+    assert payload["notification"]["has_unread"] is False
+    assert payload["launcher"]["has_attention"] is False
+    assert payload["launcher"]["latest_reply"] == ""
 
 
 @pytest.mark.asyncio
@@ -760,3 +837,12 @@ async def test_live2d_import_archive_route_returns_draft(monkeypatch, tmp_path):
     assert result["draft_changes"] == {"live2d_mode.model_path": str(imported_path)}
     assert result["preview"]["settings"]["config"]["model_path"] == str(imported_path)
     assert "已导入" in result["message"]
+
+
+def test_live2d_zip_member_name_recovers_utf8_without_flag():
+    original = "八千代辉夜姬/八千代辉夜姬.model3.json"
+    garbled = original.encode("utf-8").decode("cp437")
+    info = zipfile.ZipInfo(garbled)
+    info.flag_bits = 0
+
+    assert live2d_resources._decode_zip_member_name(info) == original

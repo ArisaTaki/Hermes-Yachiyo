@@ -1039,11 +1039,15 @@ def _is_macos_prerequisite_command(cmd: str) -> bool:
 
 
 def _is_gpt_sovits_service_command(cmd: str) -> bool:
-    return (
-        "Hermes-Yachiyo GPT-SoVITS 服务启动" in cmd
-        and "cd " in cmd
-        and ("api_v2.py" in cmd or "api.py" in cmd)
-    )
+    if "Hermes-Yachiyo GPT-SoVITS 服务启动" in cmd:
+        return "cd " in cmd and ("api_v2.py" in cmd or "api.py" in cmd)
+    if "Hermes-Yachiyo GPT-SoVITS 一键部署" in cmd:
+        return (
+            "github.com/RVC-Boss/GPT-SoVITS" in cmd
+            and "git clone" in cmd
+            and ("api_v2.py" in cmd or "api.py" in cmd)
+        )
+    return False
 
 
 def _reset_terminal_command_gate() -> None:
@@ -1292,6 +1296,19 @@ def _provider_api_key_names(provider: str) -> tuple[str, ...]:
     return (f"{normalized.upper().replace('-', '_')}_API_KEY",)
 
 
+def _configured_api_key_name(
+    api_key_names: tuple[str, ...],
+    env_values: dict[str, str],
+    provider: str,
+) -> str:
+    configured_key = next((name for name in api_key_names if env_values.get(name)), "")
+    if configured_key:
+        return configured_key
+    if (provider or "").strip().lower() == "openrouter" and env_values.get("AUTO_API_KEY"):
+        return api_key_names[0] if api_key_names else "OPENROUTER_API_KEY"
+    return ""
+
+
 def _effective_provider_id(provider: str, base_url: str = "", model: str = "") -> str:
     return (
         infer_effective_hermes_provider(provider, base_url, model)
@@ -1314,7 +1331,7 @@ def _provider_options(
         base_url_env = str(preset.get("base_url_env") or "")
         api_key_names = tuple(str(item) for item in preset.get("api_key_names", ()) if item)
         models = _preset_models(provider_id, preset)
-        configured_key = next((name for name in api_key_names if env_values.get(name)), "")
+        configured_key = _configured_api_key_name(api_key_names, env_values, provider_id)
         configured = (
             bool(configured_key)
             or str(preset.get("auth_type") or "") != "api_key" and not api_key_names
@@ -1348,7 +1365,7 @@ def _provider_options(
         if provider_id in seen:
             continue
         api_key_names = _provider_api_key_names(provider_id)
-        configured_key = next((name for name in api_key_names if env_values.get(name)), "")
+        configured_key = _configured_api_key_name(api_key_names, env_values, provider_id)
         models = [override["model"]] if override.get("model") else []
         options.append(
             {
@@ -1370,7 +1387,7 @@ def _provider_options(
 
     if current_provider and current_provider not in {option["id"] for option in options}:
         api_key_names = _provider_api_key_names(current_provider)
-        configured_key = next((name for name in api_key_names if env_values.get(name)), "")
+        configured_key = _configured_api_key_name(api_key_names, env_values, current_provider)
         options.insert(
             0,
             {
@@ -1425,7 +1442,7 @@ def _vision_configuration_summary(
         configured_model or chat_model or "",
     )
     api_key_names = _provider_api_key_names(provider_for_key)
-    configured_key = next((name for name in api_key_names if env_values.get(name)), "")
+    configured_key = _configured_api_key_name(api_key_names, env_values, provider_for_key)
     return {
         "configured": bool(image_config.get("auxiliary_vision_configured")),
         "provider": provider,

@@ -25,7 +25,10 @@ def get_tts_voice_resource_info() -> dict[str, Any]:
         "releases_url": TTS_RELEASES_URL,
         "voice_package_url": TTS_RELEASES_URL,
         "help_text": "从 Releases 下载八千代 GPT-SoVITS 语音包 ZIP 后导入，Yachiyo 会把模型权重和参考音频路径填入主动关怀 TTS 设置。",
-        "service_help_text": "语音包只包含音色资源；选择 GPT-SoVITS 本地服务时，还需要先启动 GPT-SoVITS API 服务。可在语音设置页填写服务目录和启动命令后打开终端。",
+        "service_help_text": "语音包只包含音色资源；选择 GPT-SoVITS 本地服务时，还需要先启动 GPT-SoVITS API 服务。可以从语音设置页打开部署终端，或填写已有服务目录和启动命令。",
+        "service_project_url": "https://github.com/RVC-Boss/GPT-SoVITS",
+        "default_service_workdir": str((Path.home() / "AI" / "GPT-SoVITS").expanduser()),
+        "default_service_workdir_display": "~/AI/GPT-SoVITS",
         "default_service_command": "python api_v2.py -a 127.0.0.1 -p 9880",
     }
 
@@ -113,7 +116,11 @@ def tts_settings_from_manifest(root: Path, manifest: dict[str, Any]) -> dict[str
         "enabled": True,
         "provider": "gpt-sovits",
         "gsv_base_url": str(manifest.get("base_url") or params.get("base_url") or "http://127.0.0.1:9880"),
-        "gsv_service_workdir": str(manifest.get("service_workdir") or params.get("service_workdir") or ""),
+        "gsv_service_workdir": str(
+            manifest.get("service_workdir")
+            or params.get("service_workdir")
+            or (Path.home() / "AI" / "GPT-SoVITS")
+        ),
         "gsv_service_command": str(
             manifest.get("service_command")
             or params.get("service_command")

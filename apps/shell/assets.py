@@ -16,8 +16,9 @@ PROGRAM_LIVE2D_ASSETS_DIR = ASSETS_DIR / "live2d"
 LEGACY_BUNDLED_LIVE2D_MODEL_DIR = PROGRAM_LIVE2D_ASSETS_DIR / "yachiyo"
 DEFAULT_LIVE2D_MODEL_DIR = Path.home() / ".hermes" / "yachiyo" / "assets" / "live2d"
 DEFAULT_LIVE2D_PREVIEW_PATH = DEFAULT_BUBBLE_AVATAR_PATH
-LIVE2D_RELEASES_URL = "https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases"
-TTS_RELEASES_URL = f"{LIVE2D_RELEASES_URL}/tag/tts-assets-yachiyo-gpt-sovits-v4"
+PROJECT_RELEASES_URL = "https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases"
+LIVE2D_RELEASES_URL = f"{PROJECT_RELEASES_URL}/tag/live2d-assets-20260423"
+TTS_RELEASES_URL = f"{PROJECT_RELEASES_URL}/tag/tts-assets-yachiyo-gpt-sovits-v4"
 
 
 def get_hermes_home_dir() -> Path:

@@ -50,6 +50,9 @@ type TtsVoiceResource = {
   voice_package_url?: string;
   help_text?: string;
   service_help_text?: string;
+  service_project_url?: string;
+  default_service_workdir?: string;
+  default_service_workdir_display?: string;
   default_service_command?: string;
 };
 
@@ -332,6 +335,35 @@ export function ProactiveTtsSettingsView() {
     }
   }
 
+  async function openGsvSetupTerminal() {
+    if (interactionBusy) return;
+    if (!window.confirm(
+      '将打开系统终端并尝试克隆 GPT-SoVITS、创建本地 Python 环境、安装依赖并启动 127.0.0.1:9880 API。该过程会下载较大的依赖包，耗时较久，并可能需要你按终端提示授权或处理环境问题。继续吗？',
+    )) return;
+    setBusyAction('service-setup');
+    setStatus('正在打开 GPT-SoVITS 部署终端...');
+    try {
+      const defaultWorkdir = voiceResource?.default_service_workdir || `${homePlaceholder()}/AI/GPT-SoVITS`;
+      const workdir = form.gsv_service_workdir.trim() || defaultWorkdir;
+      if (!form.gsv_service_workdir.trim()) {
+        updateField('gsv_service_workdir', workdir);
+      }
+      const command = form.gsv_service_command.trim() || voiceResource?.default_service_command || 'python api_v2.py -a 127.0.0.1 -p 9880';
+      if (!form.gsv_service_command.trim()) {
+        updateField('gsv_service_command', command);
+      }
+      const result = await apiPost<{ success?: boolean; error?: string }>('/ui/hermes/terminal-command', {
+        command: buildGsvSetupTerminalCommand(workdir, command, voiceResource?.service_project_url),
+      });
+      if (!result.success) throw new Error(result.error || '无法打开 GPT-SoVITS 部署终端');
+      setStatus('已打开 GPT-SoVITS 部署终端；服务启动并监听 9880 后，回到这里刷新状态或保存并测试');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '打开 GPT-SoVITS 部署终端失败');
+    } finally {
+      setBusyAction('');
+    }
+  }
+
   const enabled = Boolean(form.enabled && provider !== 'none');
   const isGsvProvider = provider === 'gpt-sovits';
   const isDirty = JSON.stringify(form) !== JSON.stringify(savedForm);
@@ -496,6 +528,14 @@ export function ProactiveTtsSettingsView() {
                     <div className="settings-resource-actions compact-actions">
                       <button
                         type="button"
+                        className={busyAction === 'service-setup' ? 'loading-button' : undefined}
+                        disabled={interactionBusy}
+                        onClick={() => void openGsvSetupTerminal()}
+                      >
+                        {busyAction === 'service-setup' ? '部署中...' : '部署本地服务'}
+                      </button>
+                      <button
+                        type="button"
                         className={busyAction === 'service' ? 'loading-button' : undefined}
                         disabled={interactionBusy}
                         onClick={() => void openGsvServiceTerminal()}
@@ -521,14 +561,14 @@ export function ProactiveTtsSettingsView() {
                       <button type="button" disabled={interactionBusy} onClick={() => void refreshGsvServiceStatus()}>刷新状态</button>
                     </div>
                     <p className="capability-note wide-form-note">
-                      一键安装会写入当前用户的 macOS LaunchAgent 并启动本地服务；不会下载或改写 GPT-SoVITS 项目本体。若本机尚未安装 GPT-SoVITS，请先按该项目说明准备 Python 环境和依赖。
+                      “部署本地服务”会在系统终端中下载 GPT-SoVITS 并尝试安装依赖；“安装开机自启”只会把已配置的服务命令写入当前用户的 macOS LaunchAgent。
                     </p>
                     <label className="settings-field wide" htmlFor="tts-gsv-service-workdir-page">
                       <span>GPT-SoVITS 服务目录</span>
                       <input
                         id="tts-gsv-service-workdir-page"
                         value={form.gsv_service_workdir}
-                        placeholder="/Users/you/AI/GPT-SoVITS"
+                        placeholder={voiceResource?.default_service_workdir_display || '~/AI/GPT-SoVITS'}
                         disabled={interactionBusy}
                         onChange={(event) => updateField('gsv_service_workdir', event.target.value)}
                       />
@@ -735,7 +775,7 @@ export function ProactiveTtsSettingsView() {
                       id="tts-timeout-page"
                       type="number"
                       min={1}
-                      max={120}
+                      max={600}
                       value={form.timeout_seconds}
                       disabled={interactionBusy}
                       onChange={(event) => updateField('timeout_seconds', Number(event.target.value))}
@@ -809,6 +849,10 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+function homePlaceholder(): string {
+  return '$HOME';
+}
+
 function buildGsvServiceTerminalCommand(form: TtsForm): string {
   const workdir = shellQuote(form.gsv_service_workdir.trim());
   const serviceCommand = form.gsv_service_command.trim();
@@ -819,6 +863,50 @@ function buildGsvServiceTerminalCommand(form: TtsForm): string {
     'if [ -f venv/bin/activate ]; then source venv/bin/activate; fi',
     serviceCommand,
   ].join('\n');
+}
+
+function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, projectUrl?: string): string {
+  const workdirAssignment = buildShellPathAssignment('WORKDIR', workdir.trim() || '$HOME/AI/GPT-SoVITS');
+  const quotedProjectUrl = shellQuote(projectUrl || 'https://github.com/RVC-Boss/GPT-SoVITS');
+  return [
+    'echo "Hermes-Yachiyo GPT-SoVITS 一键部署"',
+    'echo "此流程会克隆 GPT-SoVITS、创建 .venv、安装依赖并启动本地 API。"',
+    'echo "下载体积可能较大，失败时请根据终端日志补齐 Python、ffmpeg 或模型依赖。"',
+    'printf "继续执行部署？[y/N] "',
+    'read answer',
+    'case "$answer" in [yY]|[yY][eE][sS]) ;; *) echo "已取消。"; exit 1 ;; esac',
+    'set -e',
+    workdirAssignment,
+    `PROJECT_URL=${quotedProjectUrl}`,
+    'mkdir -p "$(dirname "$WORKDIR")"',
+    'if [ ! -d "$WORKDIR/.git" ]; then',
+    '  echo "克隆 GPT-SoVITS 到 $WORKDIR"',
+    '  git clone "$PROJECT_URL" "$WORKDIR"',
+    'fi',
+    'cd "$WORKDIR"',
+    'if [ ! -d .venv ]; then',
+    '  python3 -m venv .venv',
+    'fi',
+    'source .venv/bin/activate',
+    'python -m pip install --upgrade pip wheel setuptools',
+    'if [ -f requirements.txt ]; then',
+    '  python -m pip install -r requirements.txt',
+    'else',
+    '  echo "未找到 requirements.txt，跳过依赖安装。"',
+    'fi',
+    'echo "依赖步骤结束，开始启动 GPT-SoVITS API。"',
+    serviceCommand.trim() || 'python api_v2.py -a 127.0.0.1 -p 9880',
+  ].join('\n');
+}
+
+function buildShellPathAssignment(name: string, value: string): string {
+  if (value === '$HOME' || value.startsWith('$HOME/')) {
+    return `${name}="$HOME${value.slice('$HOME'.length)}"`;
+  }
+  if (value === '~' || value.startsWith('~/')) {
+    return `${name}="$HOME${value.slice(1)}"`;
+  }
+  return `${name}=${shellQuote(value)}`;
 }
 
 function gsvServiceStatusText(status: GptSovitsServiceStatus | null): string {

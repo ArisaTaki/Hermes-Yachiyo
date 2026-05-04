@@ -251,18 +251,18 @@ def _lookup_model_supports_vision(provider: str, model: str) -> bool | None:
 
     provider_id = provider.strip().lower()
     model_id = model.strip().lower()
+    if provider_id == "xiaomi":
+        if model_id in _XIAOMI_NATIVE_IMAGE_MODELS:
+            return True
+        if model_id in _XIAOMI_TEXT_ONLY_IMAGE_MODELS:
+            return False
+
     cache_result = _lookup_models_dev_cache_supports_vision(
         _PROVIDER_TO_MODELS_DEV.get(provider_id, provider_id),
         model.strip(),
     )
     if cache_result is not None:
         return cache_result
-
-    if provider_id == "xiaomi":
-        if model_id in _XIAOMI_NATIVE_IMAGE_MODELS:
-            return True
-        if model_id in _XIAOMI_TEXT_ONLY_IMAGE_MODELS:
-            return False
     return None
 
 
@@ -384,6 +384,15 @@ def _configured_provider_api_key(provider: str) -> str:
         if env_values is None:
             env_values = _read_hermes_env_values()
         value = env_values.get(key, "").strip()
+        if value:
+            return value
+    if (provider or "").strip().lower() == "openrouter":
+        value = os.environ.get("AUTO_API_KEY", "").strip()
+        if value:
+            return value
+        if env_values is None:
+            env_values = _read_hermes_env_values()
+        value = env_values.get("AUTO_API_KEY", "").strip()
         if value:
             return value
     return ""
