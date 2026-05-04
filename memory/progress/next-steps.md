@@ -5,7 +5,7 @@
 3. 手工复测模型配置为 `auto + OpenRouter Base URL` 的图片输入：只有 `AUTO_API_KEY` 旧配置时也应被识别为 OpenRouter key 可用；主动关怀/手动发图不应再误报 API Key 无效；若模型确实不支持图片，应给出真实能力说明。
 4. 手工复测 Live2D 资源 gate 与导入：清空 `~/.hermes/yachiyo/assets/live2d` 与 `live2d_mode.model_path` 后选择 Live2D，应跳到配置页且不启动 Live2D；导入中文/日文文件名 ZIP 后状态栏不应乱码，保存后真模型应能加载或至少静态预览可点击。
 5. 手工复测主动关怀 TTS 本地服务链路：导入八千代 GPT-SoVITS 语音包后确认权重/参考音频路径和默认启动命令自动填充；测试“部署本地服务”“打开服务终端”“安装开机自启”“刷新状态”“保存并测试”，并确认 TTS 开启时主动消息不会早于音频附件出现。
-6. 推送后确认 GitHub Actions `Build macOS DMG`：release tag/DMG 名称应带自动发布版本号；应用 release 不应再包含八千代 GPT-SoVITS 语音 ZIP。
+6. 推送后确认 GitHub Actions `Build macOS DMG`：release tag/DMG 名称应带自动发布版本号；应用 release 不应再包含八千代 GPT-SoVITS 语音 ZIP；重跑同一个 workflow run 时应覆盖同名 DMG asset，不再因 `ReleaseAsset.name already exists` 失败。
 7. 如需更新八千代 GPT-SoVITS 语音资源，手动触发 `Publish TTS Voice Assets` workflow，并提供已经调配好的 ZIP URL；确认它更新独立的 `tts-assets-yachiyo-gpt-sovits-v4` release。
 8. 手工复测卸载：分别验证仅卸载资料、卸载前备份、包含 Hermes Agent、以及“同时删除当前应用本体”四条路径；删除 `.app` 是 macOS best-effort，失败时应提示用户手动移除 Applications 中的应用。
 9. 后续打包前补一次真实 macOS 权限验收：主动关怀开启时是否能触发系统屏幕录制权限提示；未授权时是否回退关闭并显示原因；授权后主动桌面观察截图应真实附加到会话，而不是只生成文本 fallback。

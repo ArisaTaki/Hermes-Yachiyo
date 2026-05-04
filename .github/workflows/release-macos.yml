@@ -141,21 +141,39 @@ jobs:
           name: hermes-yachiyo-${{ steps.meta.outputs.tag }}
           path: release/*.dmg
 
-      - name: Create GitHub release
+      - name: Create or update GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           shopt -s nullglob
+          TAG="${{ steps.meta.outputs.tag }}"
+          TITLE="${{ steps.meta.outputs.title }}"
           extra_flags=()
           if [[ "${{ steps.meta.outputs.prerelease }}" == "true" ]]; then
             extra_flags+=(--prerelease --latest=false)
           fi
           release_assets=(release/*.dmg)
-          gh release create "${{ steps.meta.outputs.tag }}" \
-            "${release_assets[@]}" \
-            --target "${GITHUB_SHA}" \
-            --title "${{ steps.meta.outputs.title }}" \
-            --notes-file release/notes.md \
-            "${extra_flags[@]}"
+          if [[ "${#release_assets[@]}" -eq 0 ]]; then
+            echo "No DMG release assets found." >&2
+            exit 1
+          fi
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" \
+              "${release_assets[@]}" \
+              --clobber
+            gh release edit "${TAG}" \
+              --target "${GITHUB_SHA}" \
+              --title "${TITLE}" \
+              --notes-file release/notes.md \
+              "${extra_flags[@]}"
+          else
+            gh release create "${TAG}" \
+              "${release_assets[@]}" \
+              --target "${GITHUB_SHA}" \
+              --title "${TITLE}" \
+              --notes-file release/notes.md \
+              "${extra_flags[@]}"
+          fi

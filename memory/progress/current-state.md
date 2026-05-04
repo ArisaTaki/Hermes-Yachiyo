@@ -2,6 +2,11 @@
 
 ## 已完成
 
+### Milestone 78 — Release 重跑幂等修复
+
+- ✅ `Build macOS DMG` workflow 的发布步骤改为 `Create or update GitHub release`：当目标 release tag 已存在时，会用 `gh release upload --clobber` 覆盖同名 DMG asset，并用 `gh release edit` 刷新标题、目标 commit 和 release notes；首次运行仍走 `gh release create`。
+- ✅ 修复 GitHub Actions 重跑同一个 run 时因 `ReleaseAsset.name already exists` / HTTP 422 导致 `Create GitHub release` 失败的问题。
+
 ### Milestone 77 — Live2D 导入编码、Vision Key 兼容与 GPT-SoVITS 部署入口
 
 - ✅ Live2D ZIP 导入改为自定义解包：当压缩包文件名缺少 UTF-8 标记时，会尝试按 UTF-8 / GB18030 / 日文/韩文编码恢复真实文件名，并把可疑乱码目录名替换为安全的导入目录名，避免 `~/.hermes/yachiyo/assets/live2d/` 后出现 box drawing 乱码路径。
