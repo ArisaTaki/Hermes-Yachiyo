@@ -563,6 +563,38 @@ async def test_proactive_tts_test_route_invokes_sync_service(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_gpt_sovits_service_routes_use_runtime_config(monkeypatch):
+    config = SimpleNamespace(tts=SimpleNamespace(provider="gpt-sovits"))
+    runtime = SimpleNamespace(config=config)
+    calls = []
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+    monkeypatch.setattr(
+        ui,
+        "get_gpt_sovits_service_status",
+        lambda received_config: calls.append(("status", received_config)) or {"reachable": True},
+    )
+    monkeypatch.setattr(
+        ui,
+        "install_gpt_sovits_launch_agent",
+        lambda received_config: calls.append(("install", received_config)) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        ui,
+        "uninstall_gpt_sovits_launch_agent",
+        lambda received_config: calls.append(("uninstall", received_config)) or {"ok": True},
+    )
+
+    assert await ui.get_tts_gpt_sovits_service_status() == {"reachable": True}
+    assert await ui.install_tts_gpt_sovits_service() == {"ok": True}
+    assert await ui.uninstall_tts_gpt_sovits_service() == {"ok": True}
+    assert calls == [
+        ("status", config),
+        ("install", config),
+        ("uninstall", config),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_launcher_live2d_payload_includes_preview_and_renderer(monkeypatch):
     monkeypatch.setattr(config_mod, "find_default_live2d_model_dir", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(config_mod, "get_user_live2d_assets_dir", lambda: Path("/tmp/no-live2d-assets"))

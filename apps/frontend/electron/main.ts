@@ -79,6 +79,7 @@ let modeWindowShapeApplied = false;
 let modeWindowTopSuppressed = false;
 let lastInstallReady: boolean | null = null;
 let lastUiSettings: UiSettings | null = null;
+let hasEnteredMainExperience = false;
 let backendRestartPromise: Promise<{ success: boolean; bridgeUrl?: string; error?: string }> | null = null;
 const enforcedWindowTitles = new WeakMap<BrowserWindow, string>();
 const titleHandlersInstalled = new WeakSet<BrowserWindow>();
@@ -424,6 +425,10 @@ function createMainWindow(
     return;
   }
   if (settings) lastUiSettings = settings;
+  if (normalizeView(params.view) !== 'installer') {
+    hasEnteredMainExperience = true;
+    configureTray(settings || lastUiSettings);
+  }
   const bounds = mainWindowBounds(settings);
   const startHidden = Boolean(options.respectStartMinimized && settings?.app?.start_minimized);
   const focusOnReady = options.focusOnReady !== false;
@@ -477,6 +482,10 @@ function showMainWindow(
     return;
   }
   if (settings) lastUiSettings = settings;
+  if (normalizeView(params.view) !== 'installer') {
+    hasEnteredMainExperience = true;
+    configureTray(settings || lastUiSettings);
+  }
   enforceWindowTitle(mainWindow, mainWindowTitle(params));
   mainWindow.loadURL(rendererUrl({ view: 'main', ...params }));
   if (mainWindow.isMinimized()) mainWindow.restore();
@@ -492,11 +501,22 @@ function showMainWindow(
 function showMainWindowFromAppActivation(): void {
   void (async () => {
     const installInfo = await waitForInstallInfo();
-    if (installInfo) lastInstallReady = installReady(installInfo);
-    const params = lastInstallReady === false ? { view: 'installer' } : { view: 'main' };
+    if (installInfo) {
+      const readyNow = installReady(installInfo);
+      if (readyNow) {
+        lastInstallReady = true;
+        hasEnteredMainExperience = true;
+      } else if (!hasEnteredMainExperience && lastInstallReady !== true) {
+        lastInstallReady = false;
+      }
+    }
+    const currentRoute = routeForWindow(mainWindow);
+    const shouldShowInstaller = lastInstallReady === false
+      && !hasEnteredMainExperience
+      && currentRoute?.view !== 'main';
+    const params = shouldShowInstaller ? { view: 'installer' } : { view: 'main' };
     showMainWindow(params, lastUiSettings);
-    setTimeout(() => showMainWindow(params, lastUiSettings), 90);
-    if (lastInstallReady !== false) {
+    if (!shouldShowInstaller) {
       setTimeout(() => void openConfiguredDesktopMode(), 180);
     }
   })();
@@ -1143,6 +1163,7 @@ async function openConfiguredDesktopMode(preferredMode?: ModeId, settingsOverrid
   }
   const config = settings?.mode_settings?.[mode]?.config || {};
   createDesktopModeWindow(mode, config);
+  restoreModeWindowTopPreference();
 }
 
 function currentAppBundlePath(): string | null {
@@ -1167,9 +1188,19 @@ function removeCurrentAppBundleAndQuit(): { success: boolean; appBundlePath?: st
   }
   const script = [
     'target="$1"',
-    'sleep 1',
+    'sleep 2',
     'if [[ "$target" == *.app && -d "$target" ]]; then',
-    '  rm -rf "$target"',
+    '  if command -v osascript >/dev/null 2>&1; then',
+    '    /usr/bin/osascript - "$target" <<\'OSA\' >/dev/null 2>&1 || true',
+    'on run argv',
+    '  tell application "Finder" to delete POSIX file (item 1 of argv)',
+    'end run',
+    'OSA',
+    '  fi',
+    '  sleep 1',
+    '  if [[ -d "$target" ]]; then',
+    '    rm -rf "$target" >/dev/null 2>&1 || true',
+    '  fi',
     'fi',
   ].join('\n');
   try {
@@ -1414,22 +1445,23 @@ ipcMain.handle('hermes:openLauncherMenu', (event, mode: unknown) => {
 app.whenReady().then(() => {
   showMacDockIcon();
   startBackend();
-	  void (async () => {
-	    const installInfo = await waitForInstallInfo();
-	    lastInstallReady = installReady(installInfo);
-	    if (!lastInstallReady) {
-	      createMainWindow({ view: 'installer' });
-	      return;
-	    }
-	    const settings = await waitForUiSettings();
-	    if (settings) lastUiSettings = settings;
-	    configureTray(settings);
-	    showMainWindow({}, settings, { respectStartMinimized: true, focusOnReady: false });
-	    await openConfiguredDesktopMode(undefined, settings);
-	    if (settings?.window_mode?.open_chat_on_start) showChatWindow();
-	  })();
+  void (async () => {
+    const installInfo = await waitForInstallInfo();
+    lastInstallReady = installReady(installInfo);
+    if (!lastInstallReady) {
+      createMainWindow({ view: 'installer' });
+      return;
+    }
+    hasEnteredMainExperience = true;
+    const settings = await waitForUiSettings();
+    if (settings) lastUiSettings = settings;
+    configureTray(settings);
+    showMainWindow({}, settings, { respectStartMinimized: true, focusOnReady: false });
+    await openConfiguredDesktopMode(undefined, settings);
+    if (settings?.window_mode?.open_chat_on_start) showChatWindow();
+  })();
 
-	  app.on('activate', showMainWindowFromAppActivation);
+  app.on('activate', showMainWindowFromAppActivation);
 });
 
 app.on('before-quit', () => {

@@ -171,8 +171,7 @@ def test_proactive_service_creates_low_risk_screenshot_task(monkeypatch):
     assert messages[0].status == MessageStatus.PROCESSING
     assert messages[0].task_id == tasks[0].task_id
     assert messages[0].content == "正在查看当前状态。"
-    assert len(messages[0].attachments) == 1
-    assert messages[0].attachments[0]["kind"] == "image"
+    assert messages[0].attachments == []
     assert "主动桌面观察" not in messages[0].content
     assert "输出约束" not in messages[0].content
 

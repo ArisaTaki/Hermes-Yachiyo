@@ -51,6 +51,11 @@ type SettingsUpdateResult = {
   };
   mode_switch_scheduled?: boolean;
   target_display_mode?: string;
+  redirect?: {
+    view?: string;
+    mode?: string;
+    reason?: string;
+  };
   restart_scheduled?: boolean;
 };
 type Live2DResourceActionResult = SettingsUpdateResult & {
@@ -209,7 +214,12 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
     setStatus('保存中…');
     try {
       const result = await apiPost<SettingsUpdateResult>('/ui/settings', { changes: nextChanges });
-      if (result.ok === false) throw new Error(result.error || result.errors?.join('；') || '保存失败');
+      if (result.ok === false) {
+        if (result.redirect?.view === 'settings' && result.redirect.mode) {
+          window.setTimeout(() => navigateTo('settings', { mode: result.redirect?.mode || '', reason: result.redirect?.reason || '' }), 350);
+        }
+        throw new Error(result.error || result.errors?.join('；') || '保存失败');
+      }
       const data = await apiGet<SettingsPayload>(`/ui/modes/${mode}/settings`);
       setPayload(data);
       setForm(formFromModeSettings(data, specs));

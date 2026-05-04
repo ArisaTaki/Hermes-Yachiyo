@@ -37,6 +37,7 @@ from apps.shell.effect_policy import build_effects_summary
 from apps.shell.hermes_capabilities import (
     build_hermes_image_input_capability,
     get_current_hermes_image_input_capability,
+    infer_effective_hermes_provider,
     lookup_model_supports_vision,
     read_hermes_image_input_config,
 )
@@ -1291,6 +1292,13 @@ def _provider_api_key_names(provider: str) -> tuple[str, ...]:
     return (f"{normalized.upper().replace('-', '_')}_API_KEY",)
 
 
+def _effective_provider_id(provider: str, base_url: str = "", model: str = "") -> str:
+    return (
+        infer_effective_hermes_provider(provider, base_url, model)
+        or (provider or "").strip().lower()
+    )
+
+
 def _provider_options(
     *,
     current_provider: str,
@@ -1402,10 +1410,16 @@ def _vision_configuration_summary(
 ) -> dict[str, Any]:
     image_config = read_hermes_image_input_config(config_path)
     configured_provider = str(image_config.get("auxiliary_vision_provider") or "").strip()
-    provider = configured_provider if configured_provider and configured_provider != "auto" else ""
-    provider_for_key = provider or chat_provider
-    effective_provider = provider or chat_provider
+    effective_chat_provider = _effective_provider_id(chat_provider, chat_base_url, chat_model)
+    configured_base_url = str(image_config.get("auxiliary_vision_base_url") or "")
     configured_model = str(image_config.get("auxiliary_vision_model") or "")
+    provider = configured_provider if configured_provider and configured_provider != "auto" else ""
+    provider_for_key = (
+        _effective_provider_id(configured_provider, configured_base_url or chat_base_url, configured_model or chat_model)
+        if configured_provider
+        else effective_chat_provider
+    )
+    effective_provider = provider_for_key or provider or effective_chat_provider
     effective_model = _normalize_auxiliary_vision_model(
         effective_provider,
         configured_model or chat_model or "",
@@ -1416,12 +1430,12 @@ def _vision_configuration_summary(
         "configured": bool(image_config.get("auxiliary_vision_configured")),
         "provider": provider,
         "model": configured_model,
-        "base_url": str(image_config.get("auxiliary_vision_base_url") or ""),
+        "base_url": configured_base_url,
         "api_key_name": configured_key or (api_key_names[0] if api_key_names else ""),
         "api_key_configured": bool(configured_key or image_config.get("auxiliary_vision_api_key_configured")),
         "effective_provider": effective_provider,
         "effective_model": effective_model,
-        "effective_base_url": str(image_config.get("auxiliary_vision_base_url") or chat_base_url or ""),
+        "effective_base_url": str(configured_base_url or chat_base_url or ""),
     }
 
 
@@ -2589,7 +2603,10 @@ class MainWindowAPI:
         config_path = _run_config_path_command(hermes_path, "path")
         env_path = _run_config_path_command(hermes_path, "env-path")
         model = _read_hermes_model_config(config_path)
-        provider = model.get("provider", "")
+        raw_provider = model.get("provider", "")
+        default_model = str(model.get("default") or "")
+        base_url = str(model.get("base_url") or "")
+        provider = _effective_provider_id(raw_provider, base_url, default_model)
         env_values = _read_env_values(env_path)
         provider_options = _provider_options(
             current_provider=provider,
@@ -2612,8 +2629,9 @@ class MainWindowAPI:
             "env_path": str(env_path),
             "model": {
                 "provider": provider,
-                "default": model.get("default", ""),
-                "base_url": model.get("base_url", ""),
+                "raw_provider": raw_provider,
+                "default": default_model,
+                "base_url": base_url,
             },
             "provider_options": provider_options,
             "api_key": {
@@ -2625,14 +2643,14 @@ class MainWindowAPI:
                 config_path=config_path,
                 env_values=env_values,
                 chat_provider=provider,
-                chat_model=str(model.get("default") or ""),
-                chat_base_url=str(model.get("base_url") or ""),
+                chat_model=default_model,
+                chat_base_url=base_url,
             ),
         }
         configuration["tool_config_state"] = _tool_config_state(config_path, env_values)
         configuration["image_input"] = build_hermes_image_input_capability(
             provider=provider,
-            model=str(model.get("default") or ""),
+            model=default_model,
             config_path=config_path,
         )
         configuration["connection_validation"] = _load_connection_validation(configuration)
@@ -2667,7 +2685,11 @@ class MainWindowAPI:
         ):
             return {"ok": False, "error": "vision 预分析需要可用的 Provider"}
         if image_input_mode == "text":
-            vision_provider_for_model = (vision_provider or provider).strip()
+            vision_provider_for_model = _effective_provider_id(
+                vision_provider or provider,
+                vision_base_url or base_url,
+                vision_model or model,
+            )
             if vision_provider_for_model:
                 vision_model = _normalize_auxiliary_vision_model(
                     vision_provider_for_model,
@@ -2682,14 +2704,20 @@ class MainWindowAPI:
                 "needs_env_refresh": needs_env_refresh,
             }
 
+        effective_provider = _effective_provider_id(provider, base_url, model)
+        provider_for_config = (
+            effective_provider
+            if provider.strip().lower() in {"auto", "main"} and effective_provider
+            else provider
+        )
         commands: list[tuple[str, str]] = [
-            ("model.provider", provider),
+            ("model.provider", provider_for_config),
             ("model.default", model),
             ("model.base_url", base_url),
         ]
         if "image_input_mode" in changes:
             commands.append(("agent.image_input_mode", image_input_mode))
-        api_key_name = _provider_api_key_name(provider)
+        api_key_name = _provider_api_key_name(effective_provider or provider)
         if api_key:
             commands.append((api_key_name, api_key))
         if "vision_provider" in changes:
@@ -2699,7 +2727,12 @@ class MainWindowAPI:
         if "vision_base_url" in changes:
             commands.append(("auxiliary.vision.base_url", vision_base_url))
         if vision_api_key:
-            vision_key_name = _provider_api_key_name(vision_provider or provider)
+            vision_key_provider = _effective_provider_id(
+                vision_provider or provider,
+                vision_base_url or base_url,
+                vision_model or model,
+            )
+            vision_key_name = _provider_api_key_name(vision_key_provider or effective_provider or provider)
             if vision_key_name:
                 commands.append((vision_key_name, vision_api_key))
 

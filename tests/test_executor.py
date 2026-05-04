@@ -820,6 +820,62 @@ class TestHermesStreamBridgeImageRouting:
         assert isinstance(routed, list)
         assert routed[1]["type"] == "image_url"
 
+    def test_auto_openrouter_uses_models_cache_for_native_image_parts(self, monkeypatch, tmp_path):
+        cache_dir = tmp_path / ".hermes"
+        cache_dir.mkdir()
+        (cache_dir / "models_dev_cache.json").write_text(
+            json.dumps(
+                {
+                    "openrouter": {
+                        "models": {
+                            "anthropic/claude-opus-4.6": {
+                                "attachment": True,
+                                "modalities": {"input": ["text", "image"]},
+                            }
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(bridge_mod.Path, "home", lambda: tmp_path)
+
+        agent_pkg = types.ModuleType("agent")
+        agent_pkg.__path__ = []  # type: ignore[attr-defined]
+        image_routing = types.ModuleType("agent.image_routing")
+        image_routing.decide_image_input_mode = lambda *_args, **_kwargs: "text"
+        image_routing.build_native_content_parts = lambda text, _paths: ([
+            {"type": "text", "text": text},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+        ], [])
+        hermes_pkg = types.ModuleType("hermes_cli")
+        hermes_pkg.__path__ = []  # type: ignore[attr-defined]
+        config_mod = types.ModuleType("hermes_cli.config")
+        config_mod.load_config = lambda: {
+            "model": {
+                "provider": "auto",
+                "default": "anthropic/claude-opus-4.6",
+                "base_url": "https://openrouter.ai/api/v1",
+            },
+            "agent": {"image_input_mode": "auto"},
+        }
+        monkeypatch.setitem(sys.modules, "agent", agent_pkg)
+        monkeypatch.setitem(sys.modules, "agent.image_routing", image_routing)
+        monkeypatch.setitem(sys.modules, "hermes_cli", hermes_pkg)
+        monkeypatch.setitem(sys.modules, "hermes_cli.config", config_mod)
+
+        image = tmp_path / "screen.png"
+        image.write_bytes(b"png")
+
+        class FakeCli:
+            provider = "auto"
+            model = "anthropic/claude-opus-4.6"
+
+        routed = bridge_mod._route_images(FakeCli(), "看图", [image])
+
+        assert isinstance(routed, list)
+        assert routed[1]["type"] == "image_url"
+
     def test_text_mode_uses_vision_preprocessor(self, monkeypatch, tmp_path):
         self._install_fake_image_routing(monkeypatch, {"agent": {"image_input_mode": "text"}})
         image = tmp_path / "screen.png"
@@ -1015,6 +1071,67 @@ class TestHermesStreamBridgeImageRouting:
         assert captured["model"] == "mimo-v2.5"
         assert captured["base_url"] == "https://token-plan-cn.xiaomimimo.com/v1"
         assert captured["api_key"] == "xiaomi-vision-key"
+
+    def test_auxiliary_vision_infers_openrouter_when_provider_is_auto(self, monkeypatch, tmp_path):
+        image = tmp_path / "screen.png"
+        image.write_bytes(b"png")
+        captured = {}
+
+        hermes_pkg = types.ModuleType("hermes_cli")
+        hermes_pkg.__path__ = []  # type: ignore[attr-defined]
+        config_mod = types.ModuleType("hermes_cli.config")
+        config_mod.load_config = lambda: {
+            "model": {
+                "provider": "auto",
+                "default": "anthropic/claude-opus-4.6",
+                "base_url": "https://openrouter.ai/api/v1",
+            },
+            "auxiliary": {
+                "vision": {
+                    "provider": "auto",
+                    "model": "google/gemini-3-flash-preview",
+                }
+            },
+        }
+        agent_pkg = types.ModuleType("agent")
+        agent_pkg.__path__ = []  # type: ignore[attr-defined]
+        auxiliary_mod = types.ModuleType("agent.auxiliary_client")
+        auxiliary_mod.resolve_provider_client = lambda provider, model: (
+            types.SimpleNamespace(api_key=f"{provider}-vision-key"),
+            model,
+        )
+
+        async def fake_async_call_llm(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+        auxiliary_mod.async_call_llm = fake_async_call_llm
+        auxiliary_mod.extract_content_or_reasoning = lambda _response: "OpenRouter 辅助视觉结果"
+
+        tools_pkg = types.ModuleType("tools")
+        tools_pkg.__path__ = []  # type: ignore[attr-defined]
+        vision_mod = types.ModuleType("tools.vision_tools")
+        vision_mod._MAX_BASE64_BYTES = 20_000_000
+        vision_mod._RESIZE_TARGET_BYTES = 5_000_000
+        vision_mod._detect_image_mime_type = lambda _path: "image/png"
+        vision_mod._image_to_base64_data_url = lambda _path, mime_type: f"data:{mime_type};base64,AAAA"
+        vision_mod._resize_image_for_vision = lambda _path, mime_type: f"data:{mime_type};base64,BBBB"
+        vision_mod._is_image_size_error = lambda _exc: False
+
+        monkeypatch.setitem(sys.modules, "hermes_cli", hermes_pkg)
+        monkeypatch.setitem(sys.modules, "hermes_cli.config", config_mod)
+        monkeypatch.setitem(sys.modules, "agent", agent_pkg)
+        monkeypatch.setitem(sys.modules, "agent.auxiliary_client", auxiliary_mod)
+        monkeypatch.setitem(sys.modules, "tools", tools_pkg)
+        monkeypatch.setitem(sys.modules, "tools.vision_tools", vision_mod)
+
+        result = bridge_mod._run_vision_analysis(image, "请看图")
+
+        assert result == "OpenRouter 辅助视觉结果"
+        assert captured["provider"] == "custom"
+        assert captured["model"] == "google/gemini-3-flash-preview"
+        assert captured["base_url"] == "https://openrouter.ai/api/v1"
+        assert captured["api_key"] == "openrouter-vision-key"
 
     def test_auxiliary_xiaomi_vision_config_replaces_text_model(self, monkeypatch, tmp_path):
         image = tmp_path / "screen.png"

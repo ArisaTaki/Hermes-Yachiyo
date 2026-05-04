@@ -536,12 +536,20 @@ def apply_settings_changes(
             return {"ok": False, "error": f"保存失败: {exc}", "applied": applied}
 
     if errors and not applied:
-        return {
+        result: dict[str, Any] = {
             "ok": False,
             "error": "；".join(errors),
             "applied": applied,
             "errors": errors,
         }
+        if any("Live2D 资源未就绪" in error for error in errors):
+            result["redirect"] = {
+                "view": "settings",
+                "mode": "live2d",
+                "reason": "live2d-resource-required",
+            }
+            result["target_display_mode"] = "bubble"
+        return result
 
     result: dict[str, Any] = {"ok": True, "applied": applied, "errors": errors}
     if applied:

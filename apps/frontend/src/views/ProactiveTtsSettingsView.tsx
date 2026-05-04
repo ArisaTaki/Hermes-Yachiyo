@@ -47,9 +47,24 @@ type TtsVoiceResource = {
   default_assets_root?: string;
   default_assets_root_display?: string;
   releases_url?: string;
+  voice_package_url?: string;
   help_text?: string;
   service_help_text?: string;
   default_service_command?: string;
+};
+
+type GptSovitsServiceStatus = {
+  reachable?: boolean;
+  reachable_error?: string;
+  workdir_display?: string;
+  workdir_exists?: boolean;
+  command_configured?: boolean;
+  launch_agent_installed?: boolean;
+  launch_agent_running?: boolean;
+  platform_supported?: boolean;
+  plist_path_display?: string;
+  tools?: Record<string, boolean>;
+  logs?: { stdout?: string; stderr?: string };
 };
 
 type TtsVoiceImportResult = SettingsUpdateResult & {
@@ -66,11 +81,13 @@ export function ProactiveTtsSettingsView() {
   const [testText, setTestText] = useState('八千代语音测试成功。主动关怀播报已经可以正常调用。');
   const [testResult, setTestResult] = useState<TtsTestResult | null>(null);
   const [voiceResource, setVoiceResource] = useState<TtsVoiceResource | null>(null);
+  const [serviceStatus, setServiceStatus] = useState<GptSovitsServiceStatus | null>(null);
   const [manualVoiceArchivePath, setManualVoiceArchivePath] = useState('');
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState('');
   const [resourceBusy, setResourceBusy] = useState(false);
   const [status, setStatus] = useState('');
+  const provider = form.provider || 'none';
 
   useEffect(() => {
     let disposed = false;
@@ -109,6 +126,15 @@ export function ProactiveTtsSettingsView() {
       disposed = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (provider !== 'gpt-sovits') return undefined;
+    let disposed = false;
+    void refreshGsvServiceStatus(() => disposed);
+    return () => {
+      disposed = true;
+    };
+  }, [provider]);
 
   function updateField(field: keyof TtsForm, value: string | boolean | number) {
     setForm((current) => {
@@ -230,12 +256,55 @@ export function ProactiveTtsSettingsView() {
   }
 
   async function openVoiceReleases() {
-    const url = voiceResource?.releases_url || '';
+    const url = voiceResource?.voice_package_url || voiceResource?.releases_url || '';
     if (!url) {
       setStatus('未配置语音包下载地址');
       return;
     }
     await openExternalUrl(url);
+  }
+
+  async function refreshGsvServiceStatus(isDisposed: () => boolean = () => false) {
+    try {
+      const data = await apiGet<GptSovitsServiceStatus>('/ui/tts/gpt-sovits/service-status');
+      if (!isDisposed()) setServiceStatus(data);
+    } catch {
+      if (!isDisposed()) setServiceStatus(null);
+    }
+  }
+
+  async function installGsvLaunchAgent() {
+    if (interactionBusy) return;
+    setBusyAction('service-install');
+    setStatus('正在安装 GPT-SoVITS 开机自启服务...');
+    try {
+      await persistSettings('');
+      const result = await apiPost<{ ok?: boolean; error?: string; message?: string; status?: GptSovitsServiceStatus }>('/ui/tts/gpt-sovits/service/install');
+      if (result.ok === false) throw new Error(result.error || '安装 GPT-SoVITS 服务失败');
+      setServiceStatus(result.status || null);
+      setStatus(result.message || 'GPT-SoVITS 服务已安装并启动');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '安装 GPT-SoVITS 服务失败');
+    } finally {
+      setBusyAction('');
+    }
+  }
+
+  async function uninstallGsvLaunchAgent() {
+    if (interactionBusy) return;
+    if (!window.confirm('将停止并移除 GPT-SoVITS 开机自启服务，不会删除模型文件。继续吗？')) return;
+    setBusyAction('service-uninstall');
+    setStatus('正在移除 GPT-SoVITS 开机自启服务...');
+    try {
+      const result = await apiPost<{ ok?: boolean; error?: string; message?: string; status?: GptSovitsServiceStatus }>('/ui/tts/gpt-sovits/service/uninstall');
+      if (result.ok === false) throw new Error(result.error || '移除 GPT-SoVITS 服务失败');
+      setServiceStatus(result.status || null);
+      setStatus(result.message || 'GPT-SoVITS 服务已移除');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '移除 GPT-SoVITS 服务失败');
+    } finally {
+      setBusyAction('');
+    }
   }
 
   async function openGsvServiceTerminal() {
@@ -263,7 +332,6 @@ export function ProactiveTtsSettingsView() {
     }
   }
 
-  const provider = form.provider || 'none';
   const enabled = Boolean(form.enabled && provider !== 'none');
   const isGsvProvider = provider === 'gpt-sovits';
   const isDirty = JSON.stringify(form) !== JSON.stringify(savedForm);
@@ -404,7 +472,7 @@ export function ProactiveTtsSettingsView() {
                         {resourceBusy ? '导入中...' : filePickerAvailable ? '导入语音包 ZIP' : '按路径导入 ZIP'}
                       </button>
                       <button type="button" disabled={interactionBusy} onClick={() => void openVoiceAssetsDir()}>打开导入目录</button>
-                      <button type="button" disabled={interactionBusy || !voiceResource?.releases_url} onClick={() => void openVoiceReleases()}>打开 Releases</button>
+                      <button type="button" disabled={interactionBusy || !(voiceResource?.voice_package_url || voiceResource?.releases_url)} onClick={() => void openVoiceReleases()}>下载语音包</button>
                     </div>
                     {!filePickerAvailable ? (
                       <label className="settings-field wide" htmlFor="tts-voice-archive-path-page">
@@ -423,7 +491,7 @@ export function ProactiveTtsSettingsView() {
                     <div>
                       <strong>GPT-SoVITS 本地服务</strong>
                       <p>{voiceResource?.service_help_text || '语音包只负责音色文件；本地 GPT-SoVITS API 服务需要单独运行。'}</p>
-                      <span>推荐端口：9880；服务启动后再执行保存并测试。</span>
+                      <span>{gsvServiceStatusText(serviceStatus)}</span>
                     </div>
                     <div className="settings-resource-actions compact-actions">
                       <button
@@ -434,7 +502,27 @@ export function ProactiveTtsSettingsView() {
                       >
                         {busyAction === 'service' ? '打开中...' : '打开服务终端'}
                       </button>
+                      <button
+                        type="button"
+                        className={busyAction === 'service-install' ? 'loading-button' : undefined}
+                        disabled={interactionBusy}
+                        onClick={() => void installGsvLaunchAgent()}
+                      >
+                        {busyAction === 'service-install' ? '安装中...' : '安装开机自启'}
+                      </button>
+                      <button
+                        type="button"
+                        className={busyAction === 'service-uninstall' ? 'loading-button danger-action' : 'danger-action'}
+                        disabled={interactionBusy || !serviceStatus?.launch_agent_installed}
+                        onClick={() => void uninstallGsvLaunchAgent()}
+                      >
+                        {busyAction === 'service-uninstall' ? '移除中...' : '移除自启'}
+                      </button>
+                      <button type="button" disabled={interactionBusy} onClick={() => void refreshGsvServiceStatus()}>刷新状态</button>
                     </div>
+                    <p className="capability-note wide-form-note">
+                      一键安装会写入当前用户的 macOS LaunchAgent 并启动本地服务；不会下载或改写 GPT-SoVITS 项目本体。若本机尚未安装 GPT-SoVITS，请先按该项目说明准备 Python 环境和依赖。
+                    </p>
                     <label className="settings-field wide" htmlFor="tts-gsv-service-workdir-page">
                       <span>GPT-SoVITS 服务目录</span>
                       <input
@@ -455,6 +543,26 @@ export function ProactiveTtsSettingsView() {
                         onChange={(event) => updateField('gsv_service_command', event.target.value)}
                       />
                     </label>
+                    {serviceStatus ? (
+                      <div className="settings-meta-list wide">
+                        <div className="settings-meta-row">
+                          <span>API 可达</span>
+                          <strong className={serviceStatus.reachable ? 'ok' : 'warn'}>{serviceStatus.reachable ? '可达' : serviceStatus.reachable_error || '不可达'}</strong>
+                        </div>
+                        <div className="settings-meta-row">
+                          <span>服务目录</span>
+                          <strong className={serviceStatus.workdir_exists ? 'ok' : 'warn'}>{serviceStatus.workdir_exists ? serviceStatus.workdir_display || '已配置' : '未配置或不存在'}</strong>
+                        </div>
+                        <div className="settings-meta-row">
+                          <span>开机自启</span>
+                          <strong>{serviceStatus.launch_agent_installed ? (serviceStatus.launch_agent_running ? '已安装并运行' : '已安装，待启动') : '未安装'}</strong>
+                        </div>
+                        <div className="settings-meta-row">
+                          <span>LaunchAgent</span>
+                          <strong>{serviceStatus.plist_path_display || '—'}</strong>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                   <label className="settings-field wide" htmlFor="tts-gsv-base-url-page">
                     <span>API Base URL</span>
@@ -711,4 +819,13 @@ function buildGsvServiceTerminalCommand(form: TtsForm): string {
     'if [ -f venv/bin/activate ]; then source venv/bin/activate; fi',
     serviceCommand,
   ].join('\n');
+}
+
+function gsvServiceStatusText(status: GptSovitsServiceStatus | null): string {
+  if (!status) return '推荐端口：9880；服务启动后再执行保存并测试。';
+  if (status.reachable) return 'API 已可达；可以保存并测试语音链路。';
+  if (!status.workdir_exists) return '请先填写 GPT-SoVITS 服务目录，或先安装 GPT-SoVITS 本体。';
+  if (!status.command_configured) return '请先填写服务启动命令。';
+  if (status.launch_agent_installed) return status.launch_agent_running ? 'LaunchAgent 已运行，等待 API 就绪。' : 'LaunchAgent 已安装但未运行，可尝试重新安装或打开服务终端查看日志。';
+  return status.reachable_error || '本地 API 暂不可达，可打开服务终端或安装开机自启。';
 }

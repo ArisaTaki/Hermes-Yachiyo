@@ -2,6 +2,18 @@
 
 ## 已完成
 
+### Milestone 76 — 主动关怀截图链路、首启回退与发布自动化收口
+
+- ✅ 主动关怀桌面观察的截图附件改为只作为内部附件传给对话链路，不再把“主动桌面观察”的系统指令文本写入用户消息；对话中仍可看到生成的桌面截图附件，方便用户确认本轮观察依据。
+- ✅ 聊天附件读取改为 `inline` 响应，并移除图片查看器中的“打开原图”外部浏览器入口，避免主动关怀截图触发后自动弹出 Chrome/默认浏览器预览窗口，同时保持图片识别链路可继续读取本地附件。
+- ✅ Hermes provider 推断补强：当配置为 `auto` 但 Base URL/模型指向 OpenRouter 时，Yachiyo 会按有效 provider 写入 `OPENROUTER_API_KEY` 并使用对应模型缓存判断图片原生输入能力，避免误报“API Key 无效”或错误回退到 vision 预分析。
+- ✅ Electron 首启/激活流程继续加固：只要用户已经进入过主控台或安装信息显示 ready，Dock 图标激活就不会再用旧的 `lastInstallReady=false` 打回安装向导；进入主控台时会恢复配置中的 Bubble/Live2D 表现态，Live2D 无资源时自动回退 Bubble。
+- ✅ Live2D 资源 gate 前后端双重兜底：设置页保存 `display_mode=live2d` 时如果没有有效资源，会返回 `redirect` 到 Live2D 设置页并保持 Bubble；Electron 表现态打开也会先检查资源状态，避免无资源透明窗口把用户困住。
+- ✅ 主动关怀语音页新增 GPT-SoVITS 本地服务状态/安装/移除路由：可查看 API 是否可达、服务目录是否存在、LaunchAgent 是否安装/运行，并可把当前服务目录和命令写成当前用户的 macOS LaunchAgent；不会下载或改写 GPT-SoVITS 项目本体。
+- ✅ Release workflow 改为自动生成带版本号的 stable/experimental release tag 与资产名：版本以 `pyproject.toml` 基础版本加 `GITHUB_RUN_NUMBER` 形成发布版本；DMG 和可选八千代 GPT-SoVITS ZIP 都会带上发布版本号。语音包可来自 `dist/release-assets/*.zip` 或仓库变量/密钥 `YACHIYO_TTS_VOICE_ASSET_URL`。
+- ✅ 卸载“删除当前应用本体”改为 macOS Finder 删除优先、shell 删除兜底；仍属于 best-effort，因为运行中的 `.app` 删除受 Finder/权限/签名路径影响，失败时继续提示用户手动从 Applications 移除。
+- ✅ 验证：`python -m pytest tests/test_ui_bridge_routes.py tests/test_tts.py tests/test_mode_settings.py tests/test_main_api_modes.py tests/test_proactive.py tests/test_hermes_capabilities.py tests/test_executor.py` → 181 passed；`npm --prefix apps/frontend run build` → passed（保留 Vite 大 chunk warning）；`ruby -e 'require "yaml"; YAML.load_file(".github/workflows/release-macos.yml")'` → passed；`git diff --check` → passed。
+
 ### Milestone 75 — DMG 首装流程、Live2D Gate 与 TTS 本地服务辅助
 
 - ✅ 基于 `develop` 当前 HEAD `67b7f74` 的 DMG 清机验证反馈，修复安装向导在 Hermes 终端安装完成后的衔接：重新检测到 `installed_needs_setup` / `setup_in_progress` / `installed_not_initialized` 后会滚动到模型配置向导，引导用户填写 Provider、模型、Base URL 和 API Key。

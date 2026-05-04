@@ -8,6 +8,7 @@ import re
 import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from apps.installer.hermes_check import locate_hermes_binary
 
@@ -42,6 +43,44 @@ _PROVIDER_TO_MODELS_DEV = {
     "lmstudio": "",
     "custom": "",
 }
+_PROVIDER_ALIASES = {
+    "google": "gemini",
+    "google-ai": "gemini",
+    "google-ai-studio": "gemini",
+    "x-ai": "xai",
+    "moonshot": "kimi-coding",
+    "kimi": "kimi-coding",
+    "glm": "zai",
+    "z-ai": "zai",
+}
+_AUTO_PROVIDER_VALUES = {"", "auto", "main"}
+_PROVIDER_HOST_HINTS: tuple[tuple[str, str], ...] = (
+    ("openrouter.ai", "openrouter"),
+    ("api.openai.com", "openai"),
+    ("api.anthropic.com", "anthropic"),
+    ("generativelanguage.googleapis.com", "gemini"),
+    ("api.xiaomimimo.com", "xiaomi"),
+    ("token-plan-cn.xiaomimimo.com", "xiaomi"),
+    ("api.deepseek.com", "deepseek"),
+    ("api.x.ai", "xai"),
+    ("api.moonshot.ai", "kimi-coding"),
+    ("api.moonshot.cn", "kimi-coding"),
+    ("api.kimi.com", "kimi-coding"),
+    ("api.z.ai", "zai"),
+    ("open.bigmodel.cn", "zai"),
+    ("router.huggingface.co", "huggingface"),
+)
+_OPENROUTER_MODEL_PREFIXES = (
+    "anthropic/",
+    "openai/",
+    "google/",
+    "deepseek/",
+    "x-ai/",
+    "meta-llama/",
+    "mistralai/",
+    "qwen/",
+    "minimax/",
+)
 
 
 def get_current_hermes_image_input_capability() -> dict[str, Any]:
@@ -54,6 +93,23 @@ def get_current_hermes_image_input_capability() -> dict[str, Any]:
         model=model.get("default", ""),
         config_path=config_path,
     )
+
+
+def infer_effective_hermes_provider(provider: str, base_url: str = "", model: str = "") -> str:
+    """Infer the concrete provider behind Hermes' ``auto`` provider setting."""
+    normalized = (provider or "").strip().lower()
+    if normalized not in _AUTO_PROVIDER_VALUES:
+        return _PROVIDER_ALIASES.get(normalized, normalized)
+
+    host = (urlparse(base_url or "").hostname or "").lower()
+    for suffix, provider_id in _PROVIDER_HOST_HINTS:
+        if host == suffix or host.endswith(f".{suffix}"):
+            return provider_id
+
+    model_id = (model or "").strip().lower()
+    if any(model_id.startswith(prefix) for prefix in _OPENROUTER_MODEL_PREFIXES):
+        return "openrouter"
+    return ""
 
 
 def build_hermes_image_input_capability(
@@ -70,12 +126,21 @@ def build_hermes_image_input_capability(
     pre-analysis pipeline.
     """
     image_config = read_hermes_image_input_config(config_path)
+    model_config = read_hermes_model_config(config_path)
+    effective_provider = (
+        infer_effective_hermes_provider(
+            provider,
+            model_config.get("base_url", ""),
+            model or model_config.get("default", ""),
+        )
+        or (provider or "").strip().lower()
+    )
     mode = image_config["mode"]
     explicit_aux_vision = bool(image_config["auxiliary_vision_configured"])
-    supports_vision = lookup_model_supports_vision(provider, model)
-    if not provider or not model:
+    supports_vision = lookup_model_supports_vision(effective_provider, model)
+    if not effective_provider or not model:
         return _image_input_payload(
-            provider=provider,
+            provider=effective_provider,
             model=model,
             mode=mode,
             supports_vision=supports_vision,
@@ -88,7 +153,7 @@ def build_hermes_image_input_capability(
     if mode == "text":
         if explicit_aux_vision:
             return _image_input_payload(
-                provider=provider,
+                provider=effective_provider,
                 model=model,
                 mode=mode,
                 supports_vision=supports_vision,
@@ -98,7 +163,7 @@ def build_hermes_image_input_capability(
                 reason="图片会先交给单独的图片识别模型分析，再把结果发给当前模型。",
             )
         return _image_input_payload(
-            provider=provider,
+            provider=effective_provider,
             model=model,
             mode=mode,
             supports_vision=supports_vision,
@@ -111,7 +176,7 @@ def build_hermes_image_input_capability(
     if mode == "native":
         can_attach = supports_vision is not False
         return _image_input_payload(
-            provider=provider,
+            provider=effective_provider,
             model=model,
             mode=mode,
             supports_vision=supports_vision,
@@ -129,7 +194,7 @@ def build_hermes_image_input_capability(
 
     if supports_vision is True:
         return _image_input_payload(
-            provider=provider,
+            provider=effective_provider,
             model=model,
             mode=mode,
             supports_vision=supports_vision,
@@ -141,7 +206,7 @@ def build_hermes_image_input_capability(
 
     if supports_vision is False:
         return _image_input_payload(
-            provider=provider,
+            provider=effective_provider,
             model=model,
             mode=mode,
             supports_vision=supports_vision,
@@ -154,7 +219,7 @@ def build_hermes_image_input_capability(
         )
 
     return _image_input_payload(
-        provider=provider,
+        provider=effective_provider,
         model=model,
         mode=mode,
         supports_vision=supports_vision,

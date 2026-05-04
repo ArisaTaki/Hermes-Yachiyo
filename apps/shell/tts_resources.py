@@ -23,6 +23,7 @@ def get_tts_voice_resource_info() -> dict[str, Any]:
         "default_assets_root": str(assets_root),
         "default_assets_root_display": project_display_path(assets_root),
         "releases_url": TTS_RELEASES_URL,
+        "voice_package_url": TTS_RELEASES_URL,
         "help_text": "从 Releases 下载八千代 GPT-SoVITS 语音包 ZIP 后导入，Yachiyo 会把模型权重和参考音频路径填入主动关怀 TTS 设置。",
         "service_help_text": "语音包只包含音色资源；选择 GPT-SoVITS 本地服务时，还需要先启动 GPT-SoVITS API 服务。可在语音设置页填写服务目录和启动命令后打开终端。",
         "default_service_command": "python api_v2.py -a 127.0.0.1 -p 9880",

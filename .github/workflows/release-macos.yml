@@ -66,6 +66,25 @@ jobs:
       - name: Build Electron DMG
         run: npm --prefix apps/frontend run dist:mac
 
+      - name: Prepare optional voice assets
+        env:
+          YACHIYO_TTS_VOICE_ASSET_URL: ${{ vars.YACHIYO_TTS_VOICE_ASSET_URL }}
+          YACHIYO_TTS_VOICE_ASSET_URL_SECRET: ${{ secrets.YACHIYO_TTS_VOICE_ASSET_URL }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release-assets
+          VOICE_ASSET_URL="${YACHIYO_TTS_VOICE_ASSET_URL:-${YACHIYO_TTS_VOICE_ASSET_URL_SECRET:-}}"
+          if compgen -G "dist/release-assets/*.zip" > /dev/null; then
+            echo "Voice/release ZIP assets already exist under dist/release-assets."
+          elif [[ -n "${VOICE_ASSET_URL}" ]]; then
+            echo "Downloading configured Yachiyo GPT-SoVITS voice asset."
+            curl -fL "${VOICE_ASSET_URL}" \
+              -o "dist/release-assets/Hermes-Yachiyo-yachiyo-gpt-sovits-v4.zip"
+          else
+            echo "::notice::No YACHIYO_TTS_VOICE_ASSET_URL configured; release will be created without the optional GPT-SoVITS voice ZIP."
+          fi
+
       - name: Prepare release metadata
         id: meta
         shell: bash
@@ -77,6 +96,12 @@ jobs:
           print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])
           PY
           )"
+          IFS='.' read -r VERSION_MAJOR VERSION_MINOR VERSION_PATCH <<< "${VERSION}"
+          VERSION_MAJOR="${VERSION_MAJOR:-0}"
+          VERSION_MINOR="${VERSION_MINOR:-1}"
+          VERSION_PATCH="${VERSION_PATCH:-0}"
+          RELEASE_PATCH=$((VERSION_PATCH + GITHUB_RUN_NUMBER))
+          RELEASE_VERSION="${VERSION_MAJOR}.${VERSION_MINOR}.${RELEASE_PATCH}"
           SHORT_SHA="${GITHUB_SHA::7}"
           STAMP="$(date -u +%Y%m%d%H%M)"
 
@@ -96,16 +121,17 @@ jobs:
             PRERELEASE="true"
           fi
 
-          TAG="${CHANNEL}-v${VERSION}-${STAMP}-${SHORT_SHA}"
-          TITLE="Hermes-Yachiyo ${CHANNEL_LABEL} v${VERSION} (${SHORT_SHA})"
+          TAG="${CHANNEL}-v${RELEASE_VERSION}-${SHORT_SHA}"
+          TITLE="Hermes-Yachiyo ${CHANNEL_LABEL} v${RELEASE_VERSION} (${SHORT_SHA})"
 
           mkdir -p release
           shopt -s nullglob
           for dmg in dist/electron/*.dmg; do
-            cp "$dmg" "release/Hermes-Yachiyo-${CHANNEL}-v${VERSION}-${SHORT_SHA}.dmg"
+            cp "$dmg" "release/Hermes-Yachiyo-${CHANNEL}-v${RELEASE_VERSION}-${SHORT_SHA}.dmg"
           done
           for asset in dist/release-assets/*.zip; do
-            cp "$asset" "release/$(basename "$asset")"
+            base="$(basename "$asset" .zip)"
+            cp "$asset" "release/${base}-v${RELEASE_VERSION}.zip"
           done
           if ! compgen -G "release/*.dmg" > /dev/null; then
             echo "No DMG artifact found under dist/electron" >&2
@@ -118,8 +144,10 @@ jobs:
           - Branch: ${GITHUB_REF_NAME}
           - Commit: ${GITHUB_SHA}
           - Channel: ${CHANNEL}
+          - Base version: ${VERSION}
+          - Release version: ${RELEASE_VERSION}
           - Package: macOS DMG
-          - Optional assets: release 中如包含 Hermes-Yachiyo-yachiyo-gpt-sovits-v4.zip，可在“主动关怀语音”页面导入八千代 GPT-SoVITS 音色。
+          - Optional assets: release 中如包含 Hermes-Yachiyo-yachiyo-gpt-sovits-v4-v${RELEASE_VERSION}.zip，可在“主动关怀语音”页面导入八千代 GPT-SoVITS 音色。
 
           首次启动后，主动桌面观察需要在 macOS 系统设置中允许 Hermes-Yachiyo 使用屏幕录制权限。
           EOF
@@ -127,6 +155,7 @@ jobs:
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "title=${TITLE}" >> "$GITHUB_OUTPUT"
           echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "release_version=${RELEASE_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4

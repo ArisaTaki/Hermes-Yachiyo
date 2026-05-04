@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from apps.shell.hermes_capabilities import (
     build_hermes_image_input_capability,
+    infer_effective_hermes_provider,
     lookup_model_supports_vision,
 )
 
@@ -139,3 +140,46 @@ def test_xiaomi_models_cache_overrides_stale_fallback(tmp_path, monkeypatch):
         config_path=_config(tmp_path),
     )
     assert capability["route"] == "blocked"
+
+
+def test_auto_provider_infers_openrouter_from_base_url_for_image_capability(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "apps.shell.hermes_capabilities._load_models_dev_cache",
+        lambda: {
+            "openrouter": {
+                "models": {
+                    "anthropic/claude-opus-4.6": {
+                        "attachment": True,
+                        "modalities": {"input": ["text", "image"]},
+                    }
+                }
+            }
+        },
+    )
+
+    capability = build_hermes_image_input_capability(
+        provider="auto",
+        model="anthropic/claude-opus-4.6",
+        config_path=_config(
+            tmp_path,
+            "model:\n"
+            "  provider: auto\n"
+            "  default: anthropic/claude-opus-4.6\n"
+            "  base_url: https://openrouter.ai/api/v1\n",
+        ),
+    )
+
+    assert capability["provider"] == "openrouter"
+    assert capability["route"] == "native"
+    assert capability["can_attach_images"] is True
+
+
+def test_effective_provider_inference_keeps_explicit_provider():
+    assert (
+        infer_effective_hermes_provider(
+            "custom",
+            "https://openrouter.ai/api/v1",
+            "anthropic/claude-opus-4.6",
+        )
+        == "custom"
+    )

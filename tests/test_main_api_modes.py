@@ -479,6 +479,54 @@ def test_get_hermes_configuration_reads_model_and_key_status(tmp_path, monkeypat
         store.close()
 
 
+def test_get_hermes_configuration_infers_openrouter_for_auto_provider(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    config_path.write_text(
+        "model:\n"
+        "  provider: auto\n"
+        "  default: anthropic/claude-opus-4.6\n"
+        "  base_url: https://openrouter.ai/api/v1\n",
+        encoding="utf-8",
+    )
+    env_path.write_text("OPENROUTER_API_KEY=sk-openrouter-secret\n", encoding="utf-8")
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+
+        def fake_run(argv, **_kwargs):
+            if argv[-1] == "path":
+                return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
+            if argv[-1] == "env-path":
+                return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv[-2:] == ["tools", "list"]:
+                return SimpleNamespace(returncode=0, stdout="  ✓ enabled  browser  Browser\n", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.get_hermes_configuration()
+
+        assert result["ok"] is True
+        assert result["model"]["provider"] == "openrouter"
+        assert result["model"]["raw_provider"] == "auto"
+        assert result["api_key"] == {
+            "name": "OPENROUTER_API_KEY",
+            "configured": True,
+            "display": "已配置",
+        }
+        assert result["vision"]["effective_provider"] == "openrouter"
+        assert "AUTO_API_KEY" not in str(result)
+        assert "sk-openrouter-secret" not in str(result)
+    finally:
+        store.close()
+
+
 def test_update_hermes_configuration_uses_config_set_and_redacts_errors(tmp_path, monkeypatch):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _RuntimeStub(store)
@@ -523,6 +571,56 @@ def test_update_hermes_configuration_uses_config_set_and_redacts_errors(tmp_path
             "OPENAI_API_KEY",
         ]
         assert "sk-test-secret" not in result["message"]
+    finally:
+        store.close()
+
+
+def test_update_hermes_configuration_writes_openrouter_key_for_auto_provider(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    calls = []
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+
+        def fake_run(argv, **_kwargs):
+            calls.append(argv)
+            if argv[1:3] == ["config", "set"]:
+                return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            if argv[-1] == "path":
+                return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
+            if argv[-1] == "env-path":
+                return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv[-2:] == ["tools", "list"]:
+                return SimpleNamespace(returncode=0, stdout="  ✓ enabled  browser  Browser\n", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.update_hermes_configuration(
+            {
+                "provider": "auto",
+                "model": "anthropic/claude-opus-4.6",
+                "base_url": "https://openrouter.ai/api/v1",
+                "api_key": "sk-test-secret",
+            }
+        )
+
+        assert result["ok"] is True
+        set_calls = [call for call in calls if call[1:3] == ["config", "set"]]
+        assert [call[3] for call in set_calls[:4]] == [
+            "model.provider",
+            "model.default",
+            "model.base_url",
+            "OPENROUTER_API_KEY",
+        ]
+        assert set_calls[0][4] == "openrouter"
+        assert all(call[3] != "AUTO_API_KEY" for call in set_calls)
     finally:
         store.close()
 

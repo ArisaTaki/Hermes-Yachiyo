@@ -24,6 +24,9 @@ from apps.shell.chat_api import allocate_chat_attachment_path
 from apps.shell.chat_api import audio_mime_type_for_suffix
 from apps.shell.chat_api import chat_attachment_record
 from apps.shell.chat_bridge import ChatBridge
+from apps.shell.gpt_sovits_service import get_gpt_sovits_service_status
+from apps.shell.gpt_sovits_service import install_gpt_sovits_launch_agent
+from apps.shell.gpt_sovits_service import uninstall_gpt_sovits_launch_agent
 from apps.shell.launcher_notifications import LauncherNotificationTracker
 from apps.shell.live2d_resources import import_live2d_archive_draft
 from apps.shell.live2d_resources import prepare_live2d_model_path_draft
@@ -188,6 +191,24 @@ async def get_tts_voice_resource() -> dict[str, Any]:
 @router.post("/tts/voice-resource/import")
 async def import_tts_voice_archive_path(request: TtsResourcePathRequest) -> dict[str, Any]:
     return import_tts_voice_archive_draft(Path(request.path))
+
+
+@router.get("/tts/gpt-sovits/service-status")
+async def get_tts_gpt_sovits_service_status() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(get_gpt_sovits_service_status, runtime.config)
+
+
+@router.post("/tts/gpt-sovits/service/install")
+async def install_tts_gpt_sovits_service() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(install_gpt_sovits_launch_agent, runtime.config)
+
+
+@router.post("/tts/gpt-sovits/service/uninstall")
+async def uninstall_tts_gpt_sovits_service() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(uninstall_gpt_sovits_launch_agent, runtime.config)
 
 
 @router.post("/proactive/screen-permission/check")
@@ -444,6 +465,7 @@ async def get_chat_attachment(attachment_id: str) -> FileResponse:
         attachment["path"],
         media_type=attachment.get("mime_type") or "image/png",
         filename=attachment.get("name") or "image",
+        content_disposition_type="inline",
     )
 
 

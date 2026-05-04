@@ -270,7 +270,7 @@ class ProactiveDesktopService:
                     task_id=task.task_id,
                     content=_DESKTOP_WATCH_VISIBLE_MESSAGE,
                     status=MessageStatus.PROCESSING,
-                    attachments=attachments,
+                    attachments=[],
                 )
             except Exception:
                 logger.debug("主动桌面观察写入聊天消息失败", exc_info=True)
@@ -321,6 +321,7 @@ class ProactiveDesktopService:
                 name="主动关怀桌面截图.png",
                 mime_type="image/png",
             )
+            attachment["source"] = "proactive_desktop_watch"
             logger.info(
                 "主动桌面观察截图已捕获: %s (%sx%s, %s bytes)",
                 target_path,

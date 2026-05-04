@@ -8,6 +8,7 @@ from http.client import RemoteDisconnected
 from pathlib import Path
 
 import apps.shell.tts as tts_mod
+import apps.shell.gpt_sovits_service as gsv_service
 import apps.shell.tts_resources as tts_resources
 from apps.shell.config import TTSConfig
 from apps.shell.tts import TTSService, prepare_tts_text
@@ -272,6 +273,62 @@ def test_import_tts_voice_archive_returns_gpt_sovits_settings(monkeypatch, tmp_p
     assert Path(settings["gsv_sovits_weights_path"]).is_file()
     assert Path(settings["gsv_ref_audio_path"]).is_file()
     assert result["draft_changes"]["tts.provider"] == "gpt-sovits"
+
+
+def test_gpt_sovits_service_status_reports_local_requirements(monkeypatch, tmp_path):
+    workdir = tmp_path / "GPT-SoVITS"
+    workdir.mkdir()
+    monkeypatch.setattr(gsv_service, "_launch_agent_path", lambda: tmp_path / "agent.plist")
+    monkeypatch.setattr(gsv_service, "_launch_agent_running", lambda: False)
+    monkeypatch.setattr(gsv_service, "_service_reachable", lambda _url: {"ok": False, "error": "connection refused"})
+
+    status = gsv_service.get_gpt_sovits_service_status(
+        TTSConfig(gsv_service_workdir=str(workdir), gsv_service_command="python api_v2.py")
+    )
+
+    assert status["workdir_exists"] is True
+    assert status["command_configured"] is True
+    assert status["reachable"] is False
+    assert status["launch_agent_installed"] is False
+
+
+def test_gpt_sovits_launch_agent_install_validates_workdir(monkeypatch):
+    monkeypatch.setattr(gsv_service.platform, "system", lambda: "Darwin")
+
+    result = gsv_service.install_gpt_sovits_launch_agent(
+        TTSConfig(gsv_service_workdir="/definitely/missing", gsv_service_command="python api_v2.py")
+    )
+
+    assert result["ok"] is False
+    assert "服务目录" in result["error"]
+
+
+def test_gpt_sovits_launch_agent_install_writes_plist(monkeypatch, tmp_path):
+    workdir = tmp_path / "GPT-SoVITS"
+    workdir.mkdir()
+    plist_path = tmp_path / "LaunchAgents" / "com.hermes-yachiyo.gpt-sovits.plist"
+    launchctl_calls = []
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(gsv_service.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(gsv_service, "_launch_agent_path", lambda: plist_path)
+    monkeypatch.setattr(gsv_service, "_launchctl_domain", lambda: "gui/501")
+    monkeypatch.setattr(gsv_service, "_log_path", lambda kind: tmp_path / f"gsv-{kind}.log")
+    monkeypatch.setattr(gsv_service, "_service_reachable", lambda _url: {"ok": True})
+    monkeypatch.setattr(gsv_service, "_launch_agent_running", lambda: True)
+    monkeypatch.setattr(gsv_service, "_launchctl", lambda args, *, check: launchctl_calls.append(args) or _Result())
+
+    result = gsv_service.install_gpt_sovits_launch_agent(
+        TTSConfig(gsv_service_workdir=str(workdir), gsv_service_command="python api_v2.py -p 9880")
+    )
+
+    assert result["ok"] is True
+    assert plist_path.exists()
+    assert any(call[0] == "bootstrap" for call in launchctl_calls)
 
 
 def test_tts_http_posts_text_voice_and_timeout(monkeypatch):

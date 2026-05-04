@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
 
-import { openExternalUrl } from '../lib/bridge';
-
 export type ImageAttachment = {
   id?: string;
   kind?: string;
@@ -79,14 +77,6 @@ function ImagePreviewAttachment({ attachment }: Props) {
                 <p>{attachment.mime_type || 'image'} · {sizeText}</p>
               </div>
               <div className="image-viewer-actions">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (attachment.url) void openExternalUrl(attachment.url);
-                  }}
-                >
-                  打开原图
-                </button>
                 <button type="button" onClick={() => setOpen(false)}>关闭</button>
               </div>
             </header>

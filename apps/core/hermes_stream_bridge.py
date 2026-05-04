@@ -22,6 +22,7 @@ from pathlib import Path
 import sys
 import traceback
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 
 _EVENT_STDOUT = sys.stdout
@@ -66,6 +67,58 @@ _PROVIDER_API_KEY_NAMES = {
     "zai": ("GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"),
     "huggingface": ("HF_TOKEN",),
 }
+_PROVIDER_TO_MODELS_DEV = {
+    "openrouter": "openrouter",
+    "anthropic": "anthropic",
+    "openai": "openai",
+    "openai-codex": "openai",
+    "deepseek": "deepseek",
+    "gemini": "google",
+    "google": "google",
+    "xai": "xai",
+    "xiaomi": "xiaomi",
+    "zai": "zai",
+    "kimi-coding": "kimi-for-coding",
+    "huggingface": "huggingface",
+}
+_PROVIDER_ALIASES = {
+    "google": "gemini",
+    "google-ai": "gemini",
+    "google-ai-studio": "gemini",
+    "x-ai": "xai",
+    "moonshot": "kimi-coding",
+    "kimi": "kimi-coding",
+    "glm": "zai",
+    "z-ai": "zai",
+}
+_AUTO_PROVIDER_VALUES = {"", "auto", "main"}
+_PROVIDER_HOST_HINTS: tuple[tuple[str, str], ...] = (
+    ("openrouter.ai", "openrouter"),
+    ("api.openai.com", "openai"),
+    ("api.anthropic.com", "anthropic"),
+    ("generativelanguage.googleapis.com", "gemini"),
+    ("api.xiaomimimo.com", "xiaomi"),
+    ("token-plan-cn.xiaomimimo.com", "xiaomi"),
+    ("api.deepseek.com", "deepseek"),
+    ("api.x.ai", "xai"),
+    ("api.moonshot.ai", "kimi-coding"),
+    ("api.moonshot.cn", "kimi-coding"),
+    ("api.kimi.com", "kimi-coding"),
+    ("api.z.ai", "zai"),
+    ("open.bigmodel.cn", "zai"),
+    ("router.huggingface.co", "huggingface"),
+)
+_OPENROUTER_MODEL_PREFIXES = (
+    "anthropic/",
+    "openai/",
+    "google/",
+    "deepseek/",
+    "x-ai/",
+    "meta-llama/",
+    "mistralai/",
+    "qwen/",
+    "minimax/",
+)
 
 
 class ImagePreprocessError(RuntimeError):
@@ -198,12 +251,52 @@ def _lookup_model_supports_vision(provider: str, model: str) -> bool | None:
 
     provider_id = provider.strip().lower()
     model_id = model.strip().lower()
+    cache_result = _lookup_models_dev_cache_supports_vision(
+        _PROVIDER_TO_MODELS_DEV.get(provider_id, provider_id),
+        model.strip(),
+    )
+    if cache_result is not None:
+        return cache_result
+
     if provider_id == "xiaomi":
         if model_id in _XIAOMI_NATIVE_IMAGE_MODELS:
             return True
         if model_id in _XIAOMI_TEXT_ONLY_IMAGE_MODELS:
             return False
     return None
+
+
+def _lookup_models_dev_cache_supports_vision(provider_id: str, model_id: str) -> bool | None:
+    if not provider_id or not model_id:
+        return None
+    try:
+        data = json.loads((Path.home() / ".hermes" / "models_dev_cache.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    provider_data = data.get(provider_id)
+    if not isinstance(provider_data, dict):
+        return None
+    models = provider_data.get("models")
+    if not isinstance(models, dict):
+        return None
+    entry = models.get(model_id)
+    if not isinstance(entry, dict):
+        model_lower = model_id.lower()
+        entry = next(
+            (item for item_id, item in models.items() if str(item_id).lower() == model_lower and isinstance(item, dict)),
+            None,
+        )
+    if not isinstance(entry, dict):
+        return None
+    modalities = entry.get("modalities")
+    input_modalities: list[Any] = []
+    if isinstance(modalities, dict):
+        raw_input = modalities.get("input")
+        if isinstance(raw_input, list):
+            input_modalities = raw_input
+    return bool(entry.get("attachment", False)) or "image" in input_modalities
 
 
 def _correct_image_mode_for_provider(
@@ -241,6 +334,22 @@ def _provider_api_key_names(provider: str) -> tuple[str, ...]:
     if not normalized:
         return ()
     return _PROVIDER_API_KEY_NAMES.get(normalized, (f"{normalized.upper().replace('-', '_')}_API_KEY",))
+
+
+def _effective_provider(provider: str, base_url: str = "", model: str = "") -> str:
+    normalized = (provider or "").strip().lower()
+    if normalized not in _AUTO_PROVIDER_VALUES:
+        return _PROVIDER_ALIASES.get(normalized, normalized)
+
+    host = (urlparse(base_url or "").hostname or "").lower()
+    for suffix, provider_id in _PROVIDER_HOST_HINTS:
+        if host == suffix or host.endswith(f".{suffix}"):
+            return provider_id
+
+    model_id = (model or "").strip().lower()
+    if any(model_id.startswith(prefix) for prefix in _OPENROUTER_MODEL_PREFIXES):
+        return "openrouter"
+    return ""
 
 
 def _read_hermes_env_values() -> dict[str, str]:
@@ -332,14 +441,23 @@ def _configured_auxiliary_vision_override() -> dict[str, str] | None:
         return None
 
     model_cfg = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
-    chat_provider = str(model_cfg.get("provider") or "").strip().lower()
+    chat_provider_raw = str(model_cfg.get("provider") or "").strip().lower()
     chat_model = str(model_cfg.get("default") or "").strip()
     chat_base_url = str(model_cfg.get("base_url") or "").strip()
-    vision_provider = str(vision_cfg.get("provider") or "").strip().lower()
-    provider = vision_provider if vision_provider and vision_provider != "auto" else chat_provider
+    chat_provider = _effective_provider(chat_provider_raw, chat_base_url, chat_model) or chat_provider_raw
+    vision_provider_raw = str(vision_cfg.get("provider") or "").strip().lower()
     model = str(vision_cfg.get("model") or "").strip() or chat_model
-    model = _normalize_auxiliary_vision_model(provider, model)
     base_url = str(vision_cfg.get("base_url") or "").strip()
+    provider = (
+        _effective_provider(
+            vision_provider_raw,
+            base_url or chat_base_url,
+            model,
+        )
+        if vision_provider_raw
+        else chat_provider
+    )
+    model = _normalize_auxiliary_vision_model(provider, model)
     api_key = str(vision_cfg.get("api_key") or "").strip()
 
     defaults = _resolve_auxiliary_provider_defaults(provider, model) if provider else {}
@@ -395,9 +513,10 @@ def _configured_xiaomi_vision_override() -> dict[str, str] | None:
     ):
         return None
     model_cfg = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
-    provider = str(model_cfg.get("provider") or "").strip().lower()
+    provider_raw = str(model_cfg.get("provider") or "").strip().lower()
     chat_model = str(model_cfg.get("default") or "").strip()
     base_url = str(model_cfg.get("base_url") or "").strip()
+    provider = _effective_provider(provider_raw, base_url, chat_model) or provider_raw
     if provider != "xiaomi" or _lookup_model_supports_vision(provider, chat_model) is True or not base_url:
         return None
     vision_model = _PREFERRED_AUXILIARY_VISION_MODELS["xiaomi"]
@@ -550,6 +669,12 @@ def _route_images(cli: Any, description: str, image_paths: list[Path]) -> Any:
         from hermes_cli.config import load_config
 
         cfg = load_config()
+        model_cfg = cfg.get("model") if isinstance(cfg, dict) and isinstance(cfg.get("model"), dict) else {}
+        base_url = str(model_cfg.get("base_url") or "").strip()
+        config_provider = str(model_cfg.get("provider") or "").strip()
+        config_model = str(model_cfg.get("default") or "").strip()
+        provider = _effective_provider(provider or config_provider, base_url, model or config_model) or provider
+        model = model or config_model
         image_mode = decide_image_input_mode(
             provider,
             model,
