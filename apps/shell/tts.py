@@ -16,7 +16,7 @@ from http.client import HTTPException
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 from urllib.parse import quote, urljoin, urlparse, urlunparse
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 if TYPE_CHECKING:
@@ -224,8 +224,11 @@ class TTSService:
             return "TTS HTTP endpoint 未配置"
         if provider == "command" and not (self._config.command or "").strip():
             return "TTS 本地命令未配置"
-        if provider == "gpt-sovits" and not (self._config.gsv_base_url or "").strip():
-            return "GPT-SoVITS API Base URL 未配置"
+        if provider == "gpt-sovits":
+            if not (self._config.gsv_base_url or "").strip():
+                return "GPT-SoVITS API Base URL 未配置"
+            if not (self._config.gsv_ref_audio_path or "").strip():
+                return "GPT-SoVITS 参考音频路径未配置；请先导入语音包或填写 ref_audio_path"
         if provider not in {"http", "command", "gpt-sovits"}:
             return "TTS Provider 不受支持"
         return None
@@ -397,6 +400,8 @@ class TTSService:
             with urlopen(request, timeout=self._timeout()) as response:
                 content_type = _response_header(response, "Content-Type")
                 body = response.read()
+        except HTTPError as exc:
+            raise RuntimeError(_http_error_message("GPT-SoVITS /tts 请求", endpoint, exc)) from exc
         except (URLError, OSError, HTTPException) as exc:
             raise RuntimeError(_network_error_message("GPT-SoVITS /tts 请求", endpoint, exc)) from exc
 
@@ -438,6 +443,8 @@ class TTSService:
             try:
                 with urlopen(request, timeout=self._timeout()) as response:
                     response.read()
+            except HTTPError as exc:
+                raise RuntimeError(_http_error_message(f"GPT-SoVITS {route} 请求", url, exc)) from exc
             except (URLError, OSError, HTTPException) as exc:
                 raise RuntimeError(_network_error_message(f"GPT-SoVITS {route} 请求", url, exc)) from exc
 
@@ -617,3 +624,42 @@ def _network_error_message(action: str, url: str, exc: BaseException) -> str:
     elif "timed out" in lowered or "timeout" in lowered:
         hint = "；请求超时，请检查模型加载耗时、超时秒数和服务日志"
     return f"{action}失败: {url}；{detail}{hint}"
+
+
+def _http_error_message(action: str, url: str, exc: HTTPError) -> str:
+    status = f"HTTP {exc.code}"
+    if exc.reason:
+        status = f"{status} {exc.reason}"
+    detail = _http_error_body_detail(exc)
+    hint = ""
+    lowered = detail.lower()
+    if exc.code == 400:
+        hint = "；请检查参考音频、语言、切分方式、媒体格式和当前 GPT-SoVITS API 版本是否匹配"
+    elif exc.code in {404, 405}:
+        hint = "；请确认 Base URL 指向 GPT-SoVITS API 根地址，并且服务使用 api_v2.py 启动"
+    elif "ref_audio" in lowered:
+        hint = "；请确认语音包已导入并保存，参考音频路径对当前服务可见"
+    if detail:
+        return f"{action}失败: {url}；{status}；{detail}{hint}"
+    return f"{action}失败: {url}；{status}{hint}"
+
+
+def _http_error_body_detail(exc: HTTPError) -> str:
+    try:
+        body = exc.read().decode("utf-8", "replace").strip()
+    except Exception:
+        return ""
+    if not body:
+        return ""
+    try:
+        payload = json.loads(body)
+    except Exception:
+        return body[:500]
+    if isinstance(payload, dict):
+        for key in ("message", "error", "detail"):
+            value = payload.get(key)
+            if value:
+                if isinstance(value, str):
+                    return value[:500]
+                return json.dumps(value, ensure_ascii=False)[:500]
+    return json.dumps(payload, ensure_ascii=False)[:500]

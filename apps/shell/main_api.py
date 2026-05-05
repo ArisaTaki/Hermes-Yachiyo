@@ -1114,6 +1114,13 @@ def _is_gpt_sovits_service_command(cmd: str) -> bool:
             and "git clone" in cmd
             and ("api_v2.py" in cmd or "api.py" in cmd)
         )
+    if "Hermes-Yachiyo GPT-SoVITS Docker 部署" in cmd:
+        return (
+            "github.com/RVC-Boss/GPT-SoVITS" in cmd
+            and "docker compose" in cmd
+            and "hermes-yachiyo-gpt-sovits" in cmd
+            and ("api_v2.py" in cmd or "api.py" in cmd)
+        )
     return False
 
 

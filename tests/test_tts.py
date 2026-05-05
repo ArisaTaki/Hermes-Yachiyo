@@ -6,7 +6,9 @@ import json
 import plistlib
 import zipfile
 from http.client import RemoteDisconnected
+from io import BytesIO
 from pathlib import Path
+from urllib.error import HTTPError
 
 import apps.shell.tts as tts_mod
 import apps.shell.gpt_sovits_service as gsv_service
@@ -457,7 +459,15 @@ def test_tts_gpt_sovits_can_cache_audio_without_playback(tmp_path, monkeypatch):
 
     monkeypatch.setattr(tts_mod, "urlopen", fake_urlopen)
     monkeypatch.setattr(tts_mod.subprocess, "run", lambda *args, **kwargs: played.append((args, kwargs)))
-    service = TTSService(TTSConfig(enabled=True, provider="gpt-sovits", gsv_media_type="wav"))
+    service = TTSService(
+        TTSConfig(
+            enabled=True,
+            provider="gpt-sovits",
+            gsv_media_type="wav",
+            gsv_ref_audio_path="/voices/ref.wav",
+            gsv_ref_audio_text="ref text",
+        )
+    )
     output_path = tmp_path / "cached.wav"
 
     result = service.speak_sync("缓存这句语音。", play=False, output_path=str(output_path))
@@ -481,6 +491,8 @@ def test_tts_gpt_sovits_remote_disconnect_reports_endpoint(monkeypatch):
             enabled=True,
             provider="gpt-sovits",
             gsv_base_url="http://127.0.0.1:9880",
+            gsv_ref_audio_path="/voices/ref.wav",
+            gsv_ref_audio_text="ref text",
         )
     )
 
@@ -550,6 +562,8 @@ def test_tts_gpt_sovits_weight_error_reports_step(monkeypatch):
             provider="gpt-sovits",
             gsv_base_url="http://127.0.0.1:9880",
             gsv_gpt_weights_path="/models/yachiyo.ckpt",
+            gsv_ref_audio_path="/voices/ref.wav",
+            gsv_ref_audio_text="ref text",
         )
     )
 
@@ -558,3 +572,52 @@ def test_tts_gpt_sovits_weight_error_reports_step(monkeypatch):
     assert result["ok"] is False
     assert "set_gpt_weights" in result["error"]
     assert "连接被拒绝" in result["error"]
+
+
+def test_tts_gpt_sovits_validates_reference_audio_before_request(monkeypatch):
+    called = []
+    monkeypatch.setattr(tts_mod, "urlopen", lambda *_args, **_kwargs: called.append(True))
+    service = TTSService(
+        TTSConfig(
+            enabled=True,
+            provider="gpt-sovits",
+            gsv_base_url="http://127.0.0.1:9880",
+        )
+    )
+
+    result = service.speak_sync("测试语音调用。")
+
+    assert result["ok"] is False
+    assert result["skipped"] is True
+    assert "参考音频路径" in result["message"]
+    assert called == []
+
+
+def test_tts_gpt_sovits_http_error_reports_json_body(monkeypatch):
+    def fake_urlopen(request, timeout):
+        if request.full_url.endswith("/tts"):
+            raise HTTPError(
+                request.full_url,
+                400,
+                "Bad Request",
+                hdrs=None,
+                fp=BytesIO(b'{"message":"ref_audio_path is required"}'),
+            )
+        return _FakeHTTPResponse()
+
+    monkeypatch.setattr(tts_mod, "urlopen", fake_urlopen)
+    service = TTSService(
+        TTSConfig(
+            enabled=True,
+            provider="gpt-sovits",
+            gsv_base_url="http://127.0.0.1:9880",
+            gsv_ref_audio_path="/voices/ref.wav",
+            gsv_ref_audio_text="ref text",
+        )
+    )
+
+    result = service.speak_sync("测试语音调用。")
+
+    assert result["ok"] is False
+    assert "HTTP 400" in result["error"]
+    assert "ref_audio_path is required" in result["error"]

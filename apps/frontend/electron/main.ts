@@ -35,7 +35,7 @@ const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
 const MAX_LAUNCHER_SHAPE_RECTS = 10000;
 type IconKind = 'dock' | 'tray' | 'window';
 
-type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'tools' | 'bubble' | 'bubble-menu' | 'live2d';
+type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'tools' | 'proactive-tts' | 'bubble' | 'bubble-menu' | 'live2d';
 type ModeId = 'bubble' | 'live2d';
 type InstallerTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup' | 'update-hermes' | 'update-hermes-backup';
 
@@ -170,6 +170,7 @@ function mainWindowTitle(params: Record<string, string> = {}): string {
       : 'Hermes-Yachiyo 应用设置';
   if (view === 'diagnostics') return 'Hermes-Yachiyo 诊断工具';
   if (view === 'tools') return 'Hermes-Yachiyo 工具中心';
+  if (view === 'proactive-tts') return 'Hermes-Yachiyo 主动关怀语音';
   return 'Hermes-Yachiyo 主控台';
 }
 
@@ -535,9 +536,9 @@ function showMainWindowFromAppActivation(): void {
     const shouldShowInstaller = lastInstallReady === false
       && !hasEnteredMainExperience
       && currentRoute?.view !== 'main';
-    const params = shouldShowInstaller ? { view: 'installer' } : { view: 'main' };
+    const params = shouldShowInstaller ? { view: 'installer' } : mainActivationRouteParams(currentRoute);
     showMainWindow(params, lastUiSettings);
-    if (!shouldShowInstaller) {
+    if (!shouldShowInstaller && params.view === 'main') {
       setTimeout(() => void openConfiguredDesktopMode(), 180);
     }
   })();
@@ -591,6 +592,14 @@ function showMacDockIcon(): void {
 function routeForWindow(targetWindow: BrowserWindow | null): { view: AppView; params: Record<string, string> } | null {
   if (!targetWindow || targetWindow.isDestroyed()) return null;
   return routeFromUrl(targetWindow.webContents.getURL());
+}
+
+function mainActivationRouteParams(route: { view: AppView; params: Record<string, string> } | null): Record<string, string> {
+  if (!route) return { view: 'main' };
+  if (route.view === 'chat' || route.view === 'bubble' || route.view === 'bubble-menu' || route.view === 'live2d') {
+    return { view: 'main' };
+  }
+  return { ...route.params, view: route.view };
 }
 
 function restoreMainWindowIfPolluted(): void {
@@ -673,7 +682,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeView(value: unknown): AppView {
-  const views: AppView[] = ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'bubble', 'bubble-menu', 'live2d'];
+  const views: AppView[] = ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'proactive-tts', 'bubble', 'bubble-menu', 'live2d'];
   return typeof value === 'string' && views.includes(value as AppView) ? (value as AppView) : 'main';
 }
 

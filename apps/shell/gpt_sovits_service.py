@@ -10,11 +10,13 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import urljoin
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
 LAUNCH_AGENT_LABEL = "com.hermes-yachiyo.gpt-sovits"
+DOCKER_CONTAINER_NAME = "hermes-yachiyo-gpt-sovits"
 
 
 def get_gpt_sovits_service_status(config: Any) -> dict[str, Any]:
@@ -24,6 +26,7 @@ def get_gpt_sovits_service_status(config: Any) -> dict[str, Any]:
     workdir = _expand_path(str(getattr(tts, "gsv_service_workdir", "") or ""))
     command = str(getattr(tts, "gsv_service_command", "") or "").strip()
     plist_path = _launch_agent_path()
+    docker_compose_path = (workdir / ".hermes-yachiyo" / "docker-compose.yml") if workdir else None
     reachable = _service_reachable(base_url)
     return {
         "provider": "gpt-sovits",
@@ -47,7 +50,9 @@ def get_gpt_sovits_service_status(config: Any) -> dict[str, Any]:
             "uv": _tool_exists("uv"),
             "ffmpeg": _tool_exists("ffmpeg"),
             "mecab_config": _tool_exists("mecab-config"),
+            "docker": _tool_exists("docker"),
         },
+        "docker": _docker_status(docker_compose_path),
         "logs": {
             "stdout": _display_path(_log_path("out")),
             "stderr": _display_path(_log_path("err")),
@@ -75,7 +80,7 @@ def get_gpt_sovits_service_status_for_values(
 def install_gpt_sovits_launch_agent(config: Any) -> dict[str, Any]:
     """Install and start a user LaunchAgent for the configured GPT-SoVITS service."""
     if platform.system() != "Darwin":
-        return {"ok": False, "error": "GPT-SoVITS 开机自启目前仅支持 macOS LaunchAgent"}
+        return {"ok": False, "error": "GPT-SoVITS 后台/开机自启目前仅支持 macOS LaunchAgent"}
     tts = getattr(config, "tts", config)
     workdir = _expand_path(str(getattr(tts, "gsv_service_workdir", "") or ""))
     command = str(getattr(tts, "gsv_service_command", "") or "").strip()
@@ -111,7 +116,7 @@ def install_gpt_sovits_launch_agent(config: Any) -> dict[str, Any]:
     _launchctl(["kickstart", "-k", f"{_launchctl_domain()}/{LAUNCH_AGENT_LABEL}"], check=False)
     return {
         "ok": True,
-        "message": "已安装并启动 GPT-SoVITS LaunchAgent",
+        "message": "已启动 GPT-SoVITS 后台服务，并安装为登录后自动运行",
         "status": get_gpt_sovits_service_status(config),
     }
 
@@ -119,13 +124,13 @@ def install_gpt_sovits_launch_agent(config: Any) -> dict[str, Any]:
 def uninstall_gpt_sovits_launch_agent(config: Any | None = None) -> dict[str, Any]:
     """Stop and remove the GPT-SoVITS LaunchAgent if present."""
     if platform.system() != "Darwin":
-        return {"ok": False, "error": "GPT-SoVITS 开机自启目前仅支持 macOS LaunchAgent"}
+        return {"ok": False, "error": "GPT-SoVITS 后台/开机自启目前仅支持 macOS LaunchAgent"}
     plist_path = _launch_agent_path()
     _launchctl(["bootout", _launchctl_domain(), str(plist_path)], check=False)
     plist_path.unlink(missing_ok=True)
     result = {
         "ok": True,
-        "message": "已移除 GPT-SoVITS LaunchAgent",
+        "message": "已停止 GPT-SoVITS 后台服务，并移除开机自启",
     }
     if config is not None:
         result["status"] = get_gpt_sovits_service_status(config)
@@ -147,8 +152,9 @@ def _service_shell_command(command: str) -> str:
 def _service_reachable(base_url: str) -> dict[str, Any]:
     if not base_url:
         return {"ok": False, "error": "API Base URL 未配置"}
+    health_url = urljoin(base_url.rstrip("/") + "/", "docs")
     try:
-        with urlopen(Request(base_url), timeout=2):
+        with urlopen(Request(health_url), timeout=2):
             return {"ok": True}
     except HTTPError:
         return {"ok": True}
@@ -196,14 +202,73 @@ def _expand_path(value: str) -> Path | None:
     return Path(os.path.expandvars(text)).expanduser() if text else None
 
 
-def _tool_exists(*names: str) -> bool:
+def _tool_path(*names: str) -> str | None:
     for name in names:
-        if shutil.which(name):
-            return True
+        found = shutil.which(name)
+        if found:
+            return found
         for prefix in ("/opt/homebrew/bin", "/usr/local/bin"):
-            if (Path(prefix) / name).exists():
-                return True
-    return False
+            candidate = Path(prefix) / name
+            if candidate.exists():
+                return str(candidate)
+    return None
+
+
+def _tool_exists(*names: str) -> bool:
+    return _tool_path(*names) is not None
+
+
+def _docker_status(compose_file: Path | None) -> dict[str, Any]:
+    docker = _tool_path("docker")
+    status: dict[str, Any] = {
+        "available": bool(docker),
+        "compose_available": False,
+        "daemon_running": False,
+        "container_name": DOCKER_CONTAINER_NAME,
+        "container_running": False,
+        "compose_file": str(compose_file) if compose_file else "",
+        "compose_file_display": _display_path(compose_file) if compose_file else "",
+        "error": "",
+    }
+    if not docker:
+        status["error"] = "未检测到 Docker"
+        return status
+
+    compose = _run_docker(docker, ["compose", "version"], timeout=3)
+    status["compose_available"] = compose.returncode == 0
+    if compose.returncode != 0:
+        status["error"] = _command_error("docker compose version", compose)
+        return status
+
+    info = _run_docker(docker, ["info"], timeout=3)
+    status["daemon_running"] = info.returncode == 0
+    if info.returncode != 0:
+        status["error"] = _command_error("docker info", info)
+        return status
+
+    ps = _run_docker(
+        docker,
+        ["ps", "--filter", f"name=^/{DOCKER_CONTAINER_NAME}$", "--format", "{{.Names}}"],
+        timeout=3,
+    )
+    if ps.returncode == 0:
+        status["container_running"] = DOCKER_CONTAINER_NAME in {line.strip() for line in ps.stdout.splitlines()}
+    else:
+        status["error"] = _command_error("docker ps", ps)
+    return status
+
+
+def _run_docker(docker: str, args: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            [docker, *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except Exception as exc:
+        return subprocess.CompletedProcess([docker, *args], 1, stdout="", stderr=str(exc))
 
 
 def _display_path(path: Path | None) -> str:
