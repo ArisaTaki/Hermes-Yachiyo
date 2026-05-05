@@ -2151,6 +2151,36 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
   resize: vertical;
   line-height: 1.55;
 }
+.live2d-expression-rules {
+  gap: 10px;
+}
+.live2d-expression-rule-list {
+  display: grid;
+  gap: 8px;
+}
+.live2d-expression-rule-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.72fr) minmax(220px, 1fr);
+  gap: 10px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 10px;
+}
+.live2d-expression-rule-row > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.live2d-expression-rule-row strong {
+  overflow-wrap: anywhere;
+}
+.live2d-expression-rule-row span {
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
 .settings-field input:focus,
 .settings-field select:focus,
 .settings-field textarea:focus {
@@ -2697,18 +2727,24 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
 }
 .live2d-reply {
   position: absolute;
-  left: 50%;
-  bottom: clamp(300px, 44vh, 520px);
-  transform: translateX(-50%);
-  min-width: 46px;
-  min-height: 38px;
-  padding: 6px 14px;
+  left: calc(50% + clamp(38px, 12vw, 72px));
+  top: clamp(46px, 12vh, 92px);
+  bottom: auto;
+  transform: none;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
   border-radius: 999px;
   background: rgba(18, 22, 30, 0.78);
   border: 1px solid var(--border);
   color: #fff7df;
   font-size: 22px;
   font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   backdrop-filter: blur(12px);
   -webkit-app-region: no-drag;
   text-align: center;
@@ -2803,6 +2839,7 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
   .chat-toast { left: 12px; right: 12px; max-width: none; }
   .installer-config-actions .settings-action-strip { justify-content: stretch; }
   .diagnostic-command-grid { grid-template-columns: 1fr; }
+  .live2d-expression-rule-row { grid-template-columns: 1fr; }
   .doctor-repair-actions,
   .doctor-tool-grid,
   .tool-center-summary,

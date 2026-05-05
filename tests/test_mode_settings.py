@@ -53,6 +53,7 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.live2d_mode.model_name == ""
     assert config.live2d_mode.model_path == ""
     assert config.live2d_mode.mouse_follow_enabled is True
+    assert config.live2d_mode.expression_keywords == {}
     assert config.live2d_mode.proactive_enabled is False
     assert config.live2d_mode.proactive_trigger_probability == 0.6
     assert config.live2d_mode.validate() == ModelState.NOT_CONFIGURED
@@ -426,6 +427,20 @@ def test_apply_settings_changes_supports_legacy_live2d_prefix(tmp_path, monkeypa
     assert config.live2d_mode.window_on_top is False
     assert config.live2d_mode.scale == 1.25
     assert config.live2d_mode.mouse_follow_enabled is False
+
+
+def test_apply_settings_changes_updates_live2d_expression_keywords(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    config = AppConfig()
+
+    result = apply_settings_changes(
+        config,
+        {"live2d_mode.expression_keywords": {"笑咪咪": "开心, 成功", "泪珠": "难过 sad"}},
+    )
+
+    assert result["ok"] is True
+    assert config.live2d_mode.expression_keywords == {"笑咪咪": "开心, 成功", "泪珠": "难过 sad"}
 
 
 def test_live2d_auto_open_chat_window_is_startup_only_effect(tmp_path, monkeypatch):

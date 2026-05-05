@@ -63,6 +63,7 @@ type LauncherPayload = {
       enable_expressions?: boolean;
       enable_physics?: boolean;
       expression_mappings?: Record<string, string>;
+      expression_keywords?: Record<string, string>;
       expressions?: Array<{ name?: string; file?: string }>;
       motion_groups?: Record<string, Array<Record<string, unknown>>>;
     };
@@ -92,13 +93,6 @@ const LIVE2D_MASK_MAX_FILL_RATIO = 0.72;
 const LIVE2D_IDLE_MOTION_FIRST_MS = 700;
 const LIVE2D_IDLE_MOTION_MIN_MS = 8500;
 const LIVE2D_IDLE_MOTION_JITTER_MS = 6500;
-const LIVE2D_EXPRESSION_CANDIDATES: Record<string, string[]> = {
-  thinking: ['思考', 'thinking', 'think', '疑问', '困惑', '眯眯眼', 'half', 'blink'],
-  message: ['笑咪咪', '笑', 'happy', 'smile', 'joy'],
-  failed: ['眼泪', '泪珠', '泪', 'cry', 'sad', 'tear'],
-  attention: ['笑咪咪', '笑', 'happy', 'smile', 'notice'],
-};
-
 type PointerLike = {
   screenX: number;
   screenY: number;
@@ -395,6 +389,8 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   const resource = launcher.resource;
   const renderer = launcher.renderer;
   const rendererMotionSignature = live2dMotionGroupSignature(renderer?.motion_groups);
+  const rendererExpressionKeywordSignature = live2dStringRecordSignature(renderer?.expression_keywords);
+  const rendererExpressionMappingSignature = live2dStringRecordSignature(renderer?.expression_mappings);
   const replyText = proactiveAttention
     ? (data?.proactive?.attention_text || data?.proactive?.message || '有新的主动桌面观察结果')
     : hasAttention && !isProcessing
@@ -526,11 +522,12 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
     const reactionKey = latestReply || data?.notification?.latest_message?.content || '';
     if (!reactionKey || reactionKey === lastReactionKeyRef.current) return;
     lastReactionKeyRef.current = reactionKey;
-    playLive2DReaction(rendererStateRef.current, renderer);
-  }, [rendererReady, hasAttention, latestReply, data?.notification?.latest_message?.content, renderer?.enable_expressions, renderer?.idle_motion_group, renderer?.expression_mappings]);
+    playLive2DReaction(rendererStateRef.current, renderer, reactionKey);
+  }, [rendererReady, hasAttention, latestReply, data?.notification?.latest_message?.content, renderer?.enable_expressions, renderer?.idle_motion_group, rendererExpressionMappingSignature, rendererExpressionKeywordSignature]);
 
   useEffect(() => {
     if (!rendererReady) return;
+    const expressionText = latestReply || data?.notification?.latest_message?.content || data?.proactive?.attention_text || data?.proactive?.message || '';
     const expressionKey = live2dStatusExpressionKey({
       hasAttention,
       isProcessing,
@@ -538,13 +535,15 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
       unreadStatus: String(data?.notification?.latest_message?.status || ''),
     });
     if (!expressionKey) {
+      if (lastStatusExpressionKeyRef.current) resetLive2DExpression(rendererStateRef.current);
       lastStatusExpressionKeyRef.current = '';
       return;
     }
-    if (expressionKey === lastStatusExpressionKeyRef.current) return;
-    lastStatusExpressionKeyRef.current = expressionKey;
-    playLive2DStatusExpression(rendererStateRef.current, renderer, expressionKey);
-  }, [rendererReady, hasAttention, isProcessing, proactiveAttention, data?.notification?.latest_message?.status, renderer?.expressions, renderer?.expression_mappings]);
+    const statusExpressionKey = `${expressionKey}:${expressionText}:${rendererExpressionMappingSignature}:${rendererExpressionKeywordSignature}`;
+    if (statusExpressionKey === lastStatusExpressionKeyRef.current) return;
+    lastStatusExpressionKeyRef.current = statusExpressionKey;
+    playLive2DStatusExpression(rendererStateRef.current, renderer, expressionKey, expressionText);
+  }, [rendererReady, hasAttention, isProcessing, proactiveAttention, latestReply, data?.notification?.latest_message?.content, data?.notification?.latest_message?.status, data?.proactive?.attention_text, data?.proactive?.message, renderer?.expressions, rendererExpressionMappingSignature, rendererExpressionKeywordSignature]);
 
   function handleWindowPointerDown(event: PointerEvent<HTMLElement>) {
     pointerActivationRef.current = false;
@@ -606,6 +605,8 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
 
   async function activateLive2DStage() {
     if (launcher.click_action === 'toggle_reply') {
+      resetLive2DExpression(rendererStateRef.current);
+      lastStatusExpressionKeyRef.current = '';
       setReplyHidden((value) => !value);
       try {
         await apiPost('/ui/launcher/ack', { mode: 'live2d' });
@@ -615,6 +616,8 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
     if (launcher.click_action === 'focus_stage') {
       return;
     }
+    resetLive2DExpression(rendererStateRef.current);
+    lastStatusExpressionKeyRef.current = '';
     await acknowledgeAndOpenChat('live2d');
   }
 
@@ -723,6 +726,8 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
           type="button"
           aria-label={replyCue.label}
           onClick={() => {
+            resetLive2DExpression(rendererStateRef.current);
+            lastStatusExpressionKeyRef.current = '';
             if (proactiveAttention) void acknowledgeAndOpenChat('live2d');
             else setReplyHidden(true);
           }}
@@ -1306,11 +1311,12 @@ function startLive2DIdleMotionLoop(
 function playLive2DReaction(
   state: Live2DRendererState,
   renderer: NonNullable<LauncherPayload['launcher']>['renderer'],
+  text = '',
 ) {
   const group = selectLive2DIdleMotionGroup(renderer);
   const motionCount = live2dMotionCount(renderer?.motion_groups?.[group]);
   if (group) playLive2DMotion(state, group, motionCount > 0 ? Math.floor(Math.random() * motionCount) : undefined);
-  playLive2DStatusExpression(state, renderer, 'message');
+  playLive2DStatusExpression(state, renderer, 'message', text);
 }
 
 function selectLive2DIdleMotionGroup(renderer: NonNullable<LauncherPayload['launcher']>['renderer']) {
@@ -1336,6 +1342,13 @@ function live2dMotionGroupSignature(groups: NonNullable<NonNullable<LauncherPayl
     .join('|');
 }
 
+function live2dStringRecordSignature(value: Record<string, string> | undefined) {
+  return Object.entries(value || {})
+    .map(([key, item]) => `${key}:${item}`)
+    .sort()
+    .join('|');
+}
+
 function live2dMotionCount(items: Array<Record<string, unknown>> | undefined) {
   return Array.isArray(items) ? items.length : 0;
 }
@@ -1344,31 +1357,39 @@ function playLive2DStatusExpression(
   state: Live2DRendererState,
   renderer: NonNullable<LauncherPayload['launcher']>['renderer'],
   stateKey: string,
+  text = '',
 ) {
-  if (renderer?.enable_expressions !== true) return;
-  const expressionName = selectLive2DExpression(renderer?.expressions, stateKey, renderer?.expression_mappings);
+  if (renderer?.enable_expressions !== true) {
+    resetLive2DExpression(state);
+    return;
+  }
+  const expressionName = selectLive2DExpression(renderer, stateKey, text);
   if (expressionName) playLive2DExpression(state, expressionName);
+  else resetLive2DExpression(state);
 }
 
 function selectLive2DExpression(
-  expressions: NonNullable<NonNullable<LauncherPayload['launcher']>['renderer']>['expressions'],
+  renderer: NonNullable<LauncherPayload['launcher']>['renderer'],
   stateKey: string,
-  mappings?: Record<string, string>,
+  text = '',
 ) {
+  const expressions = renderer?.expressions;
   const items = expressions || [];
   if (!items.length) return '';
-  const configured = String(mappings?.[stateKey] || '').trim();
+  const configured = String(renderer?.expression_mappings?.[stateKey] || '').trim();
   if (configured) {
     const configuredMatch = matchLive2DExpression(items, configured);
     return configuredMatch ? live2dExpressionIdentifier(configuredMatch) : configured;
   }
-  const candidates = LIVE2D_EXPRESSION_CANDIDATES[stateKey] || [];
-  for (const candidate of candidates) {
-    const match = matchLive2DExpression(items, candidate);
-    if (match) return String(match.name || match.file || '').trim();
+  if (stateKey === 'thinking' || !String(text || '').trim()) return '';
+  const emotionTokens = live2dReplyEmotionTokens(text, stateKey);
+  for (const expression of items) {
+    const expressionId = live2dExpressionIdentifier(expression);
+    const rawRule = String(renderer?.expression_keywords?.[expressionId] || '').trim();
+    if (!rawRule) continue;
+    if (live2dExpressionRuleMatches(rawRule, text, emotionTokens)) return expressionId;
   }
-  const fallback = items[0];
-  return live2dExpressionIdentifier(fallback);
+  return '';
 }
 
 function live2dExpressionIdentifier(expression?: { name?: string; file?: string }) {
@@ -1396,6 +1417,54 @@ function normalizeExpressionToken(value: string) {
     .toLowerCase();
 }
 
+function live2dExpressionRuleMatches(rule: string, text: string, emotionTokens: Set<string>) {
+  const normalizedText = normalizeExpressionRuleText(text);
+  const tokens = splitExpressionRuleTokens(rule);
+  return tokens.some((token) => {
+    const normalized = normalizeExpressionRuleText(token);
+    return Boolean(normalized && (normalizedText.includes(normalized) || emotionTokens.has(normalized)));
+  });
+}
+
+function splitExpressionRuleTokens(value: string) {
+  return String(value || '')
+    .split(/[,，、;；\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizeExpressionRuleText(value: string) {
+  return String(value || '')
+    .replace(/[_\-\s"'“”‘’`~～。.!！?？,，、;；:：()[\]{}<>《》【】]/g, '')
+    .toLowerCase();
+}
+
+function live2dReplyEmotionTokens(text: string, stateKey: string) {
+  const normalized = normalizeExpressionRuleText(text);
+  const tokens = new Set<string>();
+  const add = (...items: string[]) => {
+    items.map(normalizeExpressionRuleText).filter(Boolean).forEach((item) => tokens.add(item));
+  };
+  if (stateKey === 'failed') add('失败', '错误', '抱歉', '悲伤', '难过', 'sad', 'error', 'failed');
+  if (stateKey === 'attention') add('提醒', '注意', '发现', '关怀', 'notice', 'attention');
+  if (/(开心|高兴|太好了|好耶|哈哈|嘿嘿|成功|完成|通过|不错|喜欢|漂亮|顺利|可以|ok|success|great|happy|smile|thanks|thank)/i.test(normalized)) {
+    add('开心', '高兴', '喜悦', '成功', '笑', 'happy', 'joy', 'smile');
+  }
+  if (/(抱歉|对不起|不好意思|失败|错误|没办法|无法|遗憾|难过|哭|sad|sorry|failed|error)/i.test(normalized)) {
+    add('悲伤', '难过', '失败', '抱歉', 'sad', 'cry', 'sorry', 'failed');
+  }
+  if (/(惊讶|竟然|真的假的|哇|诶|欸|wow|surprise)/i.test(normalized)) {
+    add('惊讶', '意外', 'surprise', 'wow');
+  }
+  if (/(生气|气死|讨厌|不爽|怒|angry)/i.test(normalized)) {
+    add('生气', '愤怒', 'angry');
+  }
+  if (/(思考|想想|分析|可能|也许|检查|确认|thinking|think)/i.test(normalized)) {
+    add('思考', '困惑', 'thinking', 'think');
+  }
+  return tokens;
+}
+
 function playLive2DMotion(state: Live2DRendererState, group: string, index?: number) {
   const model = state.model;
   if (!model || typeof model.motion !== 'function') return;
@@ -1413,6 +1482,26 @@ function playLive2DExpression(state: Live2DRendererState, name: string) {
       const result = model.expression(candidate);
       if (result && typeof result.catch === 'function') result.catch(() => {});
     } catch {}
+  }
+}
+
+function resetLive2DExpression(state: Live2DRendererState) {
+  const model = state.model;
+  if (!model) return;
+  const candidates = [
+    model.internalModel?.motionManager?.expressionManager,
+    model.internalModel?.motionManager?.expressionManager?.manager,
+    model.internalModel?.expressionManager,
+  ];
+  for (const candidate of candidates) {
+    for (const method of ['resetExpression', 'restoreExpression', 'reset', 'stopAllMotions']) {
+      try {
+        if (candidate && typeof candidate[method] === 'function') {
+          candidate[method]();
+          return;
+        }
+      } catch {}
+    }
   }
 }
 

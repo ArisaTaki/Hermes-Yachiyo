@@ -742,6 +742,7 @@ class Live2DModeConfig:
     message_expression: str = ""      # 收到回复/新消息时使用的表情；为空则自动匹配
     failed_expression: str = ""       # 失败状态使用的表情；为空则自动匹配
     attention_expression: str = ""    # 主动提醒/未读状态使用的表情；为空则自动匹配
+    expression_keywords: dict[str, str] = field(default_factory=dict)  # 表情名 -> 回复内容情绪/关键词
     proactive_enabled: bool = False
     proactive_desktop_watch_enabled: bool = False
     proactive_interval_seconds: int = 300

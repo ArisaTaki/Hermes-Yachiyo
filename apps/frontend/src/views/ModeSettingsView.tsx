@@ -22,8 +22,10 @@ type SettingsPayload = {
 type ModeConfig = Record<string, unknown>;
 type ModeFormValue = string | boolean;
 type ModeForm = Record<string, ModeFormValue>;
-type ModeFieldKind = 'text' | 'textarea' | 'number' | 'checkbox' | 'select' | 'percent';
+type ModeParsedValue = string | number | boolean | Record<string, string>;
+type ModeFieldKind = 'text' | 'textarea' | 'number' | 'checkbox' | 'select' | 'percent' | 'expressionRules';
 type ModeFieldOption = { value: string; label: string };
+type Live2DExpressionItem = { name?: string; file?: string };
 type ModeFieldSpec = {
   key: string;
   sourceKey?: string;
@@ -36,6 +38,7 @@ type ModeFieldSpec = {
   wide?: boolean;
   options?: ModeFieldOption[];
   allowCustom?: boolean;
+  expressions?: Live2DExpressionItem[];
 };
 type ModeFieldSection = { title: string; note?: string; fields: ModeFieldSpec[] };
 type SettingsUpdateResult = {
@@ -461,6 +464,9 @@ function renderModeField(
       </div>
     );
   }
+  if (field.kind === 'expressionRules') {
+    return renderExpressionRulesField(field, value, onChange);
+  }
   return (
     <div className={`settings-field ${field.wide ? 'wide' : ''}`} key={field.key}>
       <label htmlFor={fieldId(field.key)}>{field.label}</label>
@@ -477,6 +483,53 @@ function renderModeField(
         />
         {field.kind === 'percent' ? <span>%</span> : null}
       </div>
+    </div>
+  );
+}
+
+function renderExpressionRulesField(
+  field: ModeFieldSpec,
+  value: ModeFormValue | undefined,
+  onChange: (key: string, value: ModeFormValue) => void,
+) {
+  const expressions = field.expressions || [];
+  const rules = parseExpressionRulesFormValue(value);
+  const updateRule = (expression: Live2DExpressionItem, nextValue: string) => {
+    const key = live2dExpressionIdentifier(expression);
+    if (!key) return;
+    const nextRules = { ...rules };
+    const normalized = nextValue.trim();
+    if (normalized) nextRules[key] = normalized;
+    else delete nextRules[key];
+    onChange(field.key, JSON.stringify(sortStringRecord(nextRules)));
+  };
+  return (
+    <div className={`settings-field live2d-expression-rules ${field.wide ? 'wide' : ''}`} key={field.key}>
+      <label>{field.label}</label>
+      {expressions.length ? (
+        <div className="live2d-expression-rule-list">
+          {expressions.map((expression) => {
+            const key = live2dExpressionIdentifier(expression);
+            const file = stringValue(expression.file).trim();
+            return (
+              <div className="live2d-expression-rule-row" key={key || file}>
+                <div>
+                  <strong>{stringValue(expression.name || expression.file || '未命名表情')}</strong>
+                  {file ? <span>{file}</span> : null}
+                </div>
+                <input
+                  type="text"
+                  value={key ? rules[key] || '' : ''}
+                  placeholder="例如：开心, 高兴, 成功, happy"
+                  onChange={(event) => updateRule(expression, event.target.value)}
+                />
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <small>当前模型没有声明可配置表情；导入包含 Expressions 或 .exp3.json 的模型后会自动列出。</small>
+      )}
     </div>
   );
 }
@@ -1443,9 +1496,9 @@ function buildModeSettingsChanges(
   payload: SettingsPayload,
   form: ModeForm,
   specs: ModeFieldSpec[],
-): Record<string, string | number | boolean> {
+): Record<string, ModeParsedValue> {
   const config = payload.settings?.config || {};
-  const changes: Record<string, string | number | boolean> = {};
+  const changes: Record<string, ModeParsedValue> = {};
   specs.forEach((spec) => {
     const parsed = parseModeFieldValue(form[spec.key], spec);
     const current = modeConfigValue(config, spec);
@@ -1458,7 +1511,7 @@ function buildModeSettingsChanges(
 
 function shouldActivateLive2DAfterSave(
   mode: string,
-  changes: Record<string, string | number | boolean>,
+  changes: Record<string, ModeParsedValue>,
   activationPending: boolean,
 ): boolean {
   if (mode !== 'live2d') return false;
@@ -1470,6 +1523,7 @@ function shouldActivateLive2DAfterSave(
 function validateModeForm(form: ModeForm, specs: ModeFieldSpec[]): string {
   for (const spec of specs) {
     const raw = form[spec.key];
+    if (spec.kind === 'expressionRules') continue;
     if (spec.kind === 'checkbox' || spec.kind === 'text' || spec.kind === 'textarea') continue;
     if (spec.kind === 'select') {
       const value = String(raw ?? '');
@@ -1487,8 +1541,9 @@ function validateModeForm(form: ModeForm, specs: ModeFieldSpec[]): string {
   return '';
 }
 
-function parseModeFieldValue(value: ModeFormValue | undefined, spec: ModeFieldSpec): string | number | boolean {
+function parseModeFieldValue(value: ModeFormValue | undefined, spec: ModeFieldSpec): ModeParsedValue {
   if (spec.kind === 'checkbox') return Boolean(value);
+  if (spec.kind === 'expressionRules') return parseExpressionRulesFormValue(value);
   if (spec.kind === 'number') {
     const number = Number(value);
     return spec.integer ? Math.trunc(number) : number;
@@ -1503,13 +1558,17 @@ function modeConfigValue(config: ModeConfig, spec: ModeFieldSpec): unknown {
 
 function modeFormValue(value: unknown, spec: ModeFieldSpec): ModeFormValue {
   if (spec.kind === 'checkbox') return Boolean(value);
+  if (spec.kind === 'expressionRules') return JSON.stringify(cleanStringRecord(value));
   if (spec.kind === 'percent') return formatNumber(Number(value || 0) * 100);
   if (spec.kind === 'number') return value === undefined || value === null ? '' : formatNumber(Number(value));
   return String(value ?? '');
 }
 
-function sameModeConfigValue(current: unknown, next: string | number | boolean, spec: ModeFieldSpec): boolean {
+function sameModeConfigValue(current: unknown, next: ModeParsedValue, spec: ModeFieldSpec): boolean {
   if (spec.kind === 'checkbox') return Boolean(current) === next;
+  if (spec.kind === 'expressionRules') {
+    return JSON.stringify(sortStringRecord(cleanStringRecord(current))) === JSON.stringify(sortStringRecord(next));
+  }
   if (spec.kind === 'number' || spec.kind === 'percent') return nearlyEqual(Number(current), Number(next));
   return String(current ?? '') === String(next);
 }
@@ -1552,6 +1611,34 @@ function stringValue(value: unknown): string {
   return value === undefined || value === null ? '' : String(value);
 }
 
+function cleanStringRecord(value: unknown): Record<string, string> {
+  const record = asRecord(value);
+  return Object.fromEntries(
+    Object.entries(record)
+      .map(([key, item]) => [key.trim(), stringValue(item).trim()])
+      .filter(([key, item]) => Boolean(key && item)),
+  );
+}
+
+function sortStringRecord(value: unknown): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(cleanStringRecord(value)).sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
+function parseExpressionRulesFormValue(value: unknown): Record<string, string> {
+  if (typeof value !== 'string') return cleanStringRecord(value);
+  try {
+    return cleanStringRecord(JSON.parse(value));
+  } catch {
+    return {};
+  }
+}
+
+function live2dExpressionIdentifier(expression: Live2DExpressionItem): string {
+  return stringValue(expression.name || expression.file).trim();
+}
+
 function live2dStateLabel(state: string): string {
   const labels: Record<string, string> = {
     not_configured: '未检测到资源',
@@ -1580,17 +1667,13 @@ function live2dExpressionSummary(summary: ModeConfig): string {
 }
 
 function live2dExpressionOptions(payload?: SettingsPayload | null): ModeFieldOption[] {
-  const config = payload?.settings?.config || {};
-  const summary = asRecord(config.summary);
-  const expressions = Array.isArray(summary.expressions) ? summary.expressions : [];
   const options: ModeFieldOption[] = [{ value: '', label: '自动匹配' }];
   const seen = new Set(['']);
-  for (const item of expressions) {
-    const record = asRecord(item);
-    const value = stringValue(record.name || record.file).trim();
+  for (const expression of live2dExpressions(payload)) {
+    const value = live2dExpressionIdentifier(expression);
     if (!value || seen.has(value)) continue;
     seen.add(value);
-    const file = stringValue(record.file).trim();
+    const file = stringValue(expression.file).trim();
     options.push({
       value,
       label: file && file !== value ? `${value} · ${file}` : value,
@@ -1599,15 +1682,31 @@ function live2dExpressionOptions(payload?: SettingsPayload | null): ModeFieldOpt
   return options;
 }
 
+function live2dExpressions(payload?: SettingsPayload | null): Live2DExpressionItem[] {
+  const config = payload?.settings?.config || {};
+  const summary = asRecord(config.summary);
+  const expressions = Array.isArray(summary.expressions) ? summary.expressions : [];
+  return expressions
+    .map((item) => {
+      const record = asRecord(item);
+      return {
+        name: stringValue(record.name).trim(),
+        file: stringValue(record.file).trim(),
+      };
+    })
+    .filter((item) => Boolean(live2dExpressionIdentifier(item)));
+}
+
 function live2dFieldSections(payload?: SettingsPayload | null): ModeFieldSection[] {
   const expressionOptions = live2dExpressionOptions(payload);
+  const expressions = live2dExpressions(payload);
   return LIVE2D_FIELD_SECTIONS.map((section) => ({
     ...section,
-    fields: section.fields.map((field) => (
-      field.key.endsWith('_expression')
-        ? { ...field, options: expressionOptions }
-        : field
-    )),
+    fields: section.fields.map((field) => {
+      if (field.kind === 'expressionRules') return { ...field, expressions };
+      if (field.key.endsWith('_expression')) return { ...field, options: expressionOptions };
+      return field;
+    }),
   }));
 }
 
@@ -1722,39 +1821,14 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
   },
   {
     title: '表情映射',
-    note: '选项来自当前 model3.json 的 Expressions；留空时按表情名称自动匹配。',
+    note: '选项来自当前 model3.json 的 Expressions；每行填写会触发该表情的回复情绪或关键词，逗号、空格、顿号都可以分隔。没有命中时保持默认表情。',
     fields: [
       {
-        key: 'live2d_mode.thinking_expression',
-        sourceKey: 'thinking_expression',
-        label: '思考时表情',
-        kind: 'select',
-        options: [{ value: '', label: '自动匹配' }],
-        allowCustom: true,
-      },
-      {
-        key: 'live2d_mode.message_expression',
-        sourceKey: 'message_expression',
-        label: '收到回复表情',
-        kind: 'select',
-        options: [{ value: '', label: '自动匹配' }],
-        allowCustom: true,
-      },
-      {
-        key: 'live2d_mode.failed_expression',
-        sourceKey: 'failed_expression',
-        label: '失败时表情',
-        kind: 'select',
-        options: [{ value: '', label: '自动匹配' }],
-        allowCustom: true,
-      },
-      {
-        key: 'live2d_mode.attention_expression',
-        sourceKey: 'attention_expression',
-        label: '提醒时表情',
-        kind: 'select',
-        options: [{ value: '', label: '自动匹配' }],
-        allowCustom: true,
+        key: 'live2d_mode.expression_keywords',
+        sourceKey: 'expression_keywords',
+        label: '回复内容表情规则',
+        kind: 'expressionRules',
+        wide: true,
       },
     ],
   },

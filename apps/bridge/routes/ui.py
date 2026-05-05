@@ -670,6 +670,7 @@ def _live2d_renderer_payload(app_config: Any, resource: dict[str, Any]) -> dict[
             "failed": getattr(live2d, "failed_expression", ""),
             "attention": getattr(live2d, "attention_expression", ""),
         },
+        "expression_keywords": getattr(live2d, "expression_keywords", {}),
         "expressions": getattr(summary, "expressions", []) if summary else [],
         "motion_groups": getattr(summary, "motion_groups", {}) if summary else {},
     }
