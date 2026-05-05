@@ -1556,12 +1556,34 @@ function reportLive2DRegions({
   const canvasRegion = rendererReady && canvas ? live2DCanvasHitRegion(canvas) : null;
   const previewRegion = preview ? live2DPreviewHitRegion(preview) : null;
   const hitRegion = canvasRegion || previewRegion || null;
+  positionLive2DReply(reply, hitRegion);
   const uiRegions = [resourceHint, reply, quickInput]
     .map((element) => elementRegion(element))
     .filter((region): region is Live2DHitRegion => Boolean(region));
   hitRegionRef.current = hitRegion;
   uiRegionsRef.current = uiRegions;
   syncLive2DHitRegions(hitRegion, uiRegions, shapeAppliedRef, shapeSignatureRef);
+}
+
+function positionLive2DReply(reply: HTMLButtonElement | null, hitRegion: Live2DHitRegion | null) {
+  if (!reply || !hitRegion) {
+    if (reply) {
+      reply.style.left = '';
+      reply.style.top = '';
+      reply.style.bottom = '';
+    }
+    return;
+  }
+  const bounds = normalizedRegionBounds(hitRegion);
+  const width = Math.max(reply.offsetWidth || 0, 44);
+  const height = Math.max(reply.offsetHeight || 0, 44);
+  const viewportWidth = Math.max(window.innerWidth || 1, 1);
+  const viewportHeight = Math.max(window.innerHeight || 1, 1);
+  const left = clampValue(bounds.left + bounds.width * 0.58, 8, viewportWidth - width - 8);
+  const top = clampValue(bounds.top - height * 0.24, 8, viewportHeight - height - 8);
+  reply.style.left = `${Math.round(left)}px`;
+  reply.style.top = `${Math.round(top)}px`;
+  reply.style.bottom = 'auto';
 }
 
 function syncLive2DHitRegions(

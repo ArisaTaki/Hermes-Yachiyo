@@ -147,6 +147,7 @@ class BackupPathRequest(BaseModel):
 class UninstallRunRequest(BaseModel):
     scope: str = "yachiyo_only"
     keep_config: bool = True
+    include_gpt_sovits: bool = False
     confirm_text: str = ""
 
 
@@ -398,9 +399,17 @@ async def open_backup_location(request: BackupPathRequest) -> dict[str, Any]:
 
 
 @router.get("/uninstall/preview")
-async def get_uninstall_preview(scope: str = "yachiyo_only", keep_config: bool = True) -> dict[str, Any]:
+async def get_uninstall_preview(
+    scope: str = "yachiyo_only",
+    keep_config: bool = True,
+    include_gpt_sovits: bool = False,
+) -> dict[str, Any]:
     runtime = get_runtime()
-    return MainWindowAPI(runtime, runtime.config).get_uninstall_preview(scope, keep_config)
+    return MainWindowAPI(runtime, runtime.config).get_uninstall_preview(
+        scope,
+        keep_config,
+        include_gpt_sovits,
+    )
 
 
 @router.post("/uninstall/run")
@@ -410,6 +419,7 @@ async def run_uninstall(request: UninstallRunRequest) -> dict[str, Any]:
         request.scope,
         request.keep_config,
         request.confirm_text,
+        include_gpt_sovits=request.include_gpt_sovits,
     )
 
 

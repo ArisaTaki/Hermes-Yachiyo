@@ -3412,12 +3412,17 @@ class MainWindowAPI:
         self,
         scope: str = "yachiyo_only",
         keep_config: bool = True,
+        include_gpt_sovits: bool = False,
     ) -> Dict[str, Any]:
         """生成卸载预览，不修改文件系统。"""
         try:
             from apps.installer.uninstall import build_uninstall_plan
 
-            plan = build_uninstall_plan(scope, keep_config_snapshot=bool(keep_config))
+            plan = build_uninstall_plan(
+                scope,
+                keep_config_snapshot=bool(keep_config),
+                include_gpt_sovits=bool(include_gpt_sovits),
+            )
             return {"ok": True, "plan": plan.to_dict()}
         except Exception as exc:
             logger.error("生成卸载预览失败: %s", exc)
@@ -3428,6 +3433,7 @@ class MainWindowAPI:
         scope: str = "yachiyo_only",
         keep_config: bool = True,
         confirm_text: str = "",
+        include_gpt_sovits: bool = False,
     ) -> Dict[str, Any]:
         """执行 Hermes-Yachiyo 卸载，并在成功后安排应用退出。"""
         try:
@@ -3436,6 +3442,7 @@ class MainWindowAPI:
             result = execute_uninstall(
                 scope,
                 keep_config_snapshot=bool(keep_config),
+                include_gpt_sovits=bool(include_gpt_sovits),
                 confirm_text=confirm_text,
             )
             payload = result.to_dict()

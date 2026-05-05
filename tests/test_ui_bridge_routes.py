@@ -137,11 +137,22 @@ async def test_settings_operation_routes_use_main_api(monkeypatch):
         def open_backup_location(self, backup_path):
             return {"ok": True, "open": backup_path}
 
-        def get_uninstall_preview(self, scope, keep_config):
-            return {"ok": True, "scope": scope, "keep_config": keep_config}
+        def get_uninstall_preview(self, scope, keep_config, include_gpt_sovits=False):
+            return {
+                "ok": True,
+                "scope": scope,
+                "keep_config": keep_config,
+                "include_gpt_sovits": include_gpt_sovits,
+            }
 
-        def run_uninstall(self, scope, keep_config, confirm_text):
-            return {"ok": True, "scope": scope, "keep_config": keep_config, "confirm_text": confirm_text}
+        def run_uninstall(self, scope, keep_config, confirm_text, include_gpt_sovits=False):
+            return {
+                "ok": True,
+                "scope": scope,
+                "keep_config": keep_config,
+                "include_gpt_sovits": include_gpt_sovits,
+                "confirm_text": confirm_text,
+            }
 
     monkeypatch.setattr(ui, "MainWindowAPI", FakeMainWindowAPI)
 
@@ -194,15 +205,22 @@ async def test_settings_operation_routes_use_main_api(monkeypatch):
     assert await ui.restore_backup(ui.BackupPathRequest(backup_path="backup.zip")) == {"ok": True, "restore": "backup.zip"}
     assert await ui.delete_backup(ui.BackupPathRequest(backup_path="backup.zip")) == {"ok": True, "delete": "backup.zip"}
     assert await ui.open_backup_location(ui.BackupPathRequest(backup_path="backup.zip")) == {"ok": True, "open": "backup.zip"}
-    assert await ui.get_uninstall_preview(scope="include_hermes", keep_config=False) == {
+    assert await ui.get_uninstall_preview(scope="include_hermes", keep_config=False, include_gpt_sovits=True) == {
         "ok": True,
         "scope": "include_hermes",
         "keep_config": False,
+        "include_gpt_sovits": True,
     }
-    assert await ui.run_uninstall(ui.UninstallRunRequest(scope="yachiyo_only", keep_config=True, confirm_text="UNINSTALL")) == {
+    assert await ui.run_uninstall(ui.UninstallRunRequest(
+        scope="yachiyo_only",
+        keep_config=True,
+        include_gpt_sovits=True,
+        confirm_text="UNINSTALL",
+    )) == {
         "ok": True,
         "scope": "yachiyo_only",
         "keep_config": True,
+        "include_gpt_sovits": True,
         "confirm_text": "UNINSTALL",
     }
 

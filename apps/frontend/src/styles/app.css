@@ -2728,7 +2728,7 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
 .live2d-reply {
   position: absolute;
   left: calc(50% + clamp(38px, 12vw, 72px));
-  top: clamp(46px, 12vh, 92px);
+  top: clamp(220px, 42vh, 420px);
   bottom: auto;
   transform: none;
   width: 44px;

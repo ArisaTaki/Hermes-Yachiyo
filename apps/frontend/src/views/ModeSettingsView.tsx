@@ -668,6 +668,7 @@ function GeneralSettingsView() {
   const [backupAction, setBackupAction] = useState('');
   const [uninstallScope, setUninstallScope] = useState('yachiyo_only');
   const [uninstallKeepConfig, setUninstallKeepConfig] = useState(true);
+  const [uninstallGptSovits, setUninstallGptSovits] = useState(false);
   const [uninstallPreview, setUninstallPreview] = useState<UninstallPlan | null>(null);
   const [uninstallConfirmText, setUninstallConfirmText] = useState('');
   const [uninstallRunning, setUninstallRunning] = useState(false);
@@ -717,7 +718,11 @@ function GeneralSettingsView() {
 
   useEffect(() => {
     let disposed = false;
-    const query = new URLSearchParams({ scope: uninstallScope, keep_config: String(uninstallKeepConfig) });
+    const query = new URLSearchParams({
+      scope: uninstallScope,
+      keep_config: String(uninstallKeepConfig),
+      include_gpt_sovits: String(uninstallGptSovits),
+    });
     apiGet<UninstallPreviewResult>(`/ui/uninstall/preview?${query.toString()}`)
       .then((data) => {
         if (!disposed) setUninstallPreview(data.plan || null);
@@ -731,7 +736,7 @@ function GeneralSettingsView() {
     return () => {
       disposed = true;
     };
-  }, [uninstallScope, uninstallKeepConfig]);
+  }, [uninstallScope, uninstallKeepConfig, uninstallGptSovits]);
 
   useEffect(() => {
     if (status === 'Bridge 端口必须是整数' && Number.isInteger(Number(form.bridge_port))) {
@@ -930,6 +935,7 @@ function GeneralSettingsView() {
       const result = await apiPost<{ ok?: boolean; error?: string; errors?: string[]; backup_path_display?: string; desktop_quit_required?: boolean; exit_scheduled?: boolean }>('/ui/uninstall/run', {
         scope: uninstallScope,
         keep_config: uninstallKeepConfig,
+        include_gpt_sovits: uninstallGptSovits,
         confirm_text: uninstallConfirmText,
       });
       if (result.ok === false) throw new Error(result.error || result.errors?.join('；') || '卸载失败');
@@ -947,7 +953,11 @@ function GeneralSettingsView() {
   }
 
   async function refreshUninstallPreview() {
-    const query = new URLSearchParams({ scope: uninstallScope, keep_config: String(uninstallKeepConfig) });
+    const query = new URLSearchParams({
+      scope: uninstallScope,
+      keep_config: String(uninstallKeepConfig),
+      include_gpt_sovits: String(uninstallGptSovits),
+    });
     const data = await apiGet<UninstallPreviewResult>(`/ui/uninstall/preview?${query.toString()}`);
     if (data.ok === false) throw new Error(data.error || '生成卸载清单失败');
     setUninstallPreview(data.plan || null);
@@ -1279,6 +1289,15 @@ function GeneralSettingsView() {
               onChange={(event) => setUninstallKeepConfig(event.target.checked)}
             />
             <span>卸载前生成备份</span>
+          </label>
+          <label className="settings-check" htmlFor="uninstall-gpt-sovits">
+            <input
+              id="uninstall-gpt-sovits"
+              type="checkbox"
+              checked={uninstallGptSovits}
+              onChange={(event) => setUninstallGptSovits(event.target.checked)}
+            />
+            <span>同时卸载 GPT-SoVITS 本地服务</span>
           </label>
         </div>
         <div className="uninstall-preview-react">
