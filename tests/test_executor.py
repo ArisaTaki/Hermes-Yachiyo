@@ -23,6 +23,7 @@ from apps.core.executor import (
     _parse_hermes_title,
     _read_exec_timeout,
     _resolve_hermes_python,
+    resolve_hermes_stream_bridge_script,
     format_persona_description,
 )
 import apps.core.executor as executor_mod
@@ -330,6 +331,14 @@ class TestHermesStreamBridgeHelpers:
         launcher.write_text(f"#!{py}\n")
 
         assert _resolve_hermes_python(str(launcher)) == str(py)
+
+    def test_resolve_stream_bridge_script_prefers_pyinstaller_meipass(self, monkeypatch, tmp_path):
+        bridge = tmp_path / "apps" / "core" / "hermes_stream_bridge.py"
+        bridge.parent.mkdir(parents=True)
+        bridge.write_text("# bridge", encoding="utf-8")
+        monkeypatch.setattr(executor_mod.sys, "_MEIPASS", str(tmp_path), raising=False)
+
+        assert resolve_hermes_stream_bridge_script() == bridge
 
     @pytest.mark.asyncio
     async def test_invoke_falls_back_to_cli_when_stream_bridge_unavailable(

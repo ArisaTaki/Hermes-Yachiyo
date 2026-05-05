@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 from urllib.parse import urlparse
 
+from apps.core.executor import resolve_hermes_stream_bridge_script
 import apps.shell.config as shell_config
 from apps.installer.hermes_check import locate_hermes_binary
 from apps.installer.hermes_check import parse_hermes_doctor_output
@@ -2549,8 +2550,16 @@ class MainWindowAPI:
                 "needs_env_refresh": needs_env_refresh,
             }
 
-        repo_root = Path(__file__).resolve().parents[2]
-        bridge_script = repo_root / "apps" / "core" / "hermes_stream_bridge.py"
+        bridge_script = resolve_hermes_stream_bridge_script()
+        if not bridge_script.exists():
+            return {
+                "ok": False,
+                "success": False,
+                "error": "无法定位 Hermes-Yachiyo 图片桥接脚本，无法测试图片链路",
+                "route": route,
+                "image_input": image_input,
+                "needs_env_refresh": needs_env_refresh,
+            }
         probe_prompt = (
             "Hermes-Yachiyo 图片链路自检。请查看附件测试图片，并且只回答图片右上角色块的颜色。"
             "不要解释，不要猜测；如果没有看到图片，请直接回答“看不到图片”。"

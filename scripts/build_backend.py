@@ -15,6 +15,7 @@ ENTRYPOINT = ROOT / "packaging" / "backend_entry.py"
 DIST_DIR = ROOT / "dist" / "backend"
 BUILD_DIR = ROOT / "build" / "pyinstaller"
 ASSETS_DIR = ROOT / "apps" / "shell" / "assets"
+BRIDGE_SCRIPT = ROOT / "apps" / "core" / "hermes_stream_bridge.py"
 
 
 def _data_separator() -> str:
@@ -31,7 +32,10 @@ def build_backend(clean: bool = False) -> Path:
 
     output_name = "hermes-yachiyo-backend.exe" if os.name == "nt" else "hermes-yachiyo-backend"
     output_path = DIST_DIR / output_name
-    data_arg = f"{ASSETS_DIR}{_data_separator()}apps/shell/assets"
+    data_args = [
+        f"{ASSETS_DIR}{_data_separator()}apps/shell/assets",
+        f"{BRIDGE_SCRIPT}{_data_separator()}apps/core",
+    ]
 
     command = [
         sys.executable,
@@ -48,8 +52,10 @@ def build_backend(clean: bool = False) -> Path:
         str(BUILD_DIR),
         "--specpath",
         str(BUILD_DIR),
-        "--add-data",
-        data_arg,
+    ]
+    for data_arg in data_args:
+        command.extend(["--add-data", data_arg])
+    command.extend([
         "--hidden-import",
         "uvicorn.loops.auto",
         "--hidden-import",
@@ -59,7 +65,7 @@ def build_backend(clean: bool = False) -> Path:
         "--hidden-import",
         "uvicorn.lifespan.on",
         str(ENTRYPOINT),
-    ]
+    ])
     subprocess.run(command, cwd=ROOT, check=True)
     if not output_path.exists():
         raise FileNotFoundError(f"PyInstaller did not create {output_path}")

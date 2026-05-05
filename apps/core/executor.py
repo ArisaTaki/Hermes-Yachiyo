@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -105,7 +106,6 @@ _EXEC_TIMEOUT_ENV = "HERMES_YACHIYO_EXEC_TIMEOUT_SECONDS"
 _DEFAULT_EXEC_TIMEOUT: float = 30 * 60.0
 _PROBE_TIMEOUT: float = 5.0   # hermes --version 探测超时（秒）
 _STREAM_UPDATE_INTERVAL: float = 0.05
-_BRIDGE_SCRIPT = Path(__file__).with_name("hermes_stream_bridge.py")
 _ERROR_DETAIL_MAX_CHARS = 500
 _ERROR_DETAIL_MAX_LINES = 12
 _ATTACHED_IMAGE_GUARD = (
@@ -113,6 +113,22 @@ _ATTACHED_IMAGE_GUARD = (
     "不要调用桌面截图、活动窗口、浏览器视觉或其它实时桌面观察工具来替代附加图片，"
     "除非用户明确要求你操作当前电脑或重新观察屏幕。"
 )
+
+
+def resolve_hermes_stream_bridge_script() -> Path:
+    """Locate the bridge script in source and PyInstaller onefile builds."""
+    candidates: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", "")
+    if meipass:
+        candidates.append(Path(str(meipass)) / "apps" / "core" / "hermes_stream_bridge.py")
+    candidates.append(Path(__file__).with_name("hermes_stream_bridge.py"))
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0] if candidates else Path(__file__).with_name("hermes_stream_bridge.py")
+
+
+_BRIDGE_SCRIPT = resolve_hermes_stream_bridge_script()
 
 
 def _read_exec_timeout() -> float:
