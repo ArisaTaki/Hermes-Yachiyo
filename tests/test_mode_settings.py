@@ -14,6 +14,7 @@ from apps.shell.assets import (
 from apps.shell.config import AppConfig, ModelState, load_config, save_config
 from apps.shell.mode_settings import (
     apply_settings_changes,
+    build_display_settings,
     serialize_mode_settings,
     serialize_mode_window_data,
 )
@@ -457,6 +458,16 @@ def test_serialize_mode_window_data_returns_mode_part_only(monkeypatch, tmp_path
     assert payload["settings"]["config"]["show_on_all_spaces"] is True
     assert payload["settings"]["config"]["show_reply_bubble"] is True
     assert payload["settings"]["config"]["enable_quick_input"] is True
+
+
+def test_display_settings_fall_back_to_bubble_when_live2d_assets_missing(monkeypatch, tmp_path):
+    _patch_no_live2d_assets(monkeypatch, tmp_path)
+    config = AppConfig(display_mode="live2d")
+
+    payload = build_display_settings(config)
+
+    assert payload["current_mode"] == "bubble"
+    assert payload["configured_mode"] == "live2d"
 
 
 def test_load_config_reads_legacy_live2d_block(tmp_path, monkeypatch):

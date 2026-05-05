@@ -9,7 +9,6 @@ import {
   openExternalUrl,
   openDesktopMode,
   openPath,
-  quitApp,
   removeAppBundleAndQuit,
   restartDesktopBridge,
 } from '../lib/bridge';
@@ -162,6 +161,9 @@ export function ModeSettingsView() {
 }
 
 function SpecificModeSettingsView({ mode }: { mode: string }) {
+  const [activationPending, setActivationPending] = useState(
+    mode === 'live2d' && currentParam('reason') === 'live2d-resource-required',
+  );
   const [payload, setPayload] = useState<SettingsPayload | null>(null);
   const [form, setForm] = useState<ModeForm>({});
   const [manualModelPath, setManualModelPath] = useState('');
@@ -172,7 +174,7 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
   const sections = useMemo(() => modeFieldSections(mode, payload), [mode, payload]);
   const specs = useMemo(() => sections.flatMap((section) => section.fields), [sections]);
   const pendingCount = useMemo(() => countModePendingChanges(payload, form, specs), [payload, form, specs]);
-  const hasChanges = pendingCount > 0;
+  const hasChanges = pendingCount > 0 || activationPending;
   const desktopFilePickerAvailable = hasDesktopFilePicker();
 
   useEffect(() => {
@@ -206,6 +208,9 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
       return;
     }
     const nextChanges = buildModeSettingsChanges(payload, form, specs);
+    if (activationPending && mode === 'live2d') {
+      nextChanges.display_mode = 'live2d';
+    }
     if (!Object.keys(nextChanges).length) {
       setStatus('没有待保存的更改');
       return;
@@ -225,9 +230,12 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
       setForm(formFromModeSettings(data, specs));
       const hint = result.effects?.hint ? `，${result.effects.hint}` : '';
       if (result.effects?.has_restart_mode) {
-        await openDesktopMode(mode);
-        setStatus(`已保存，并已重新打开 ${modeLabel(mode)} 表现态`);
+        const targetMode = String(result.target_display_mode || nextChanges.display_mode || mode);
+        await openDesktopMode(targetMode);
+        setActivationPending(false);
+        setStatus(`已保存，并已重新打开 ${modeLabel(targetMode)} 表现态`);
       } else {
+        setActivationPending(false);
         setStatus(result.restart_scheduled ? '已保存，正在重启应用…' : `已保存${hint}`);
       }
     } catch (err) {
@@ -240,6 +248,7 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
   function resetDraft() {
     if (!payload) return;
     setForm(formFromModeSettings(payload, specs));
+    setActivationPending(false);
     setStatus('已丢弃未保存的修改');
   }
 
@@ -362,7 +371,7 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
         ))}
 
         <div className="settings-savebar">
-          <span>{hasChanges ? `${pendingCount} 项待保存` : '设置已同步'}</span>
+          <span>{hasChanges ? `${pendingCount + (activationPending ? 1 : 0)} 项待保存` : '设置已同步'}</span>
           <div className="settings-save-actions">
             <button type="button" disabled={!hasChanges || saving} onClick={resetDraft}>重置草稿</button>
             <button type="submit" disabled={!hasChanges || saving}>{saving ? '保存中…' : '保存更改'}</button>
@@ -598,7 +607,6 @@ function GeneralSettingsView() {
   const [backupAction, setBackupAction] = useState('');
   const [uninstallScope, setUninstallScope] = useState('yachiyo_only');
   const [uninstallKeepConfig, setUninstallKeepConfig] = useState(true);
-  const [uninstallRemoveApp, setUninstallRemoveApp] = useState(false);
   const [uninstallPreview, setUninstallPreview] = useState<UninstallPlan | null>(null);
   const [uninstallConfirmText, setUninstallConfirmText] = useState('');
   const [uninstallRunning, setUninstallRunning] = useState(false);
@@ -864,22 +872,12 @@ function GeneralSettingsView() {
       });
       if (result.ok === false) throw new Error(result.error || result.errors?.join('；') || '卸载失败');
       const backupText = result.backup_path_display ? `备份已保存到 ${result.backup_path_display}。` : '';
-      if (uninstallRemoveApp) {
-        setStatus(`卸载已执行。${backupText} 正在删除应用本体并退出…`);
-        const removeResult = await removeAppBundleAndQuit();
-        if (!removeResult.success) {
-          throw new Error(removeResult.error || '本地资料已删除，但无法自动删除应用本体；请从 Applications 中手动移除 Hermes-Yachiyo');
-        }
-        return;
+      setStatus(`卸载已执行。${backupText} 正在删除应用本体并退出…`);
+      const removeResult = await removeAppBundleAndQuit();
+      if (!removeResult.success) {
+        throw new Error(removeResult.error || '本地资料已删除，但无法自动删除应用本体；请从 Applications 中手动移除 Hermes-Yachiyo');
       }
-      setStatus(`卸载已执行。${backupText} 应用正在退出…`);
-      if (result.desktop_quit_required || result.exit_scheduled) {
-        window.setTimeout(() => {
-          void quitApp();
-        }, 250);
-        return;
-      }
-      setUninstallRunning(false);
+      return;
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '卸载失败');
       setUninstallRunning(false);
@@ -1202,7 +1200,7 @@ function GeneralSettingsView() {
           <h2>卸载</h2>
           <span>{uninstallPreview ? `${uninstallPreview.removable_count || 0}/${uninstallPreview.existing_count || 0} 可删除` : '生成清单中'}</span>
         </div>
-        <p className="settings-note">卸载会删除所选范围内的本地资料；如选择同时卸载 Hermes Agent，会额外删除可识别且安全范围内的 Hermes Home 与命令。</p>
+        <p className="settings-note">卸载会删除所选范围内的本地资料，并在完成后删除当前 Hermes-Yachiyo 应用本体；如选择同时卸载 Hermes Agent，会额外删除可识别且安全范围内的 Hermes Home 与命令。</p>
         <div className="settings-form-grid uninstall-options">
           <div className="settings-field">
             <label htmlFor="uninstall-scope">卸载范围</label>
@@ -1219,15 +1217,6 @@ function GeneralSettingsView() {
               onChange={(event) => setUninstallKeepConfig(event.target.checked)}
             />
             <span>卸载前生成备份</span>
-          </label>
-          <label className="settings-check" htmlFor="uninstall-remove-app">
-            <input
-              id="uninstall-remove-app"
-              type="checkbox"
-              checked={uninstallRemoveApp}
-              onChange={(event) => setUninstallRemoveApp(event.target.checked)}
-            />
-            <span>同时删除当前应用本体</span>
           </label>
         </div>
         <div className="uninstall-preview-react">

@@ -192,6 +192,18 @@ def build_hermes_image_input_capability(
             ),
         )
 
+    if explicit_aux_vision:
+        return _image_input_payload(
+            provider=effective_provider,
+            model=model,
+            mode=mode,
+            supports_vision=supports_vision,
+            route="vision_text",
+            can_attach=True,
+            requires_vision_pipeline=True,
+            reason="已配置单独图片识别模型，图片会先经 vision 链路分析后再发给当前模型。",
+        )
+
     if supports_vision is True:
         return _image_input_payload(
             provider=effective_provider,

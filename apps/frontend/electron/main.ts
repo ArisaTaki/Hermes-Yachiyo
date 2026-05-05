@@ -854,6 +854,7 @@ function restoreModeWindowTopPreference(): void {
 }
 
 function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> = {}): void {
+  showMacDockIcon();
   if (modeWindow && !modeWindow.isDestroyed() && activeMode === mode) {
     const nextSignature = modeConfigSignature(config);
     activeModeConfig = config;

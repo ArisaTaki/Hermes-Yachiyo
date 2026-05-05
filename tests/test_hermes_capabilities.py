@@ -60,7 +60,7 @@ def test_separate_vision_config_enables_text_pipeline(tmp_path):
     assert capability["requires_vision_pipeline"] is True
 
 
-def test_auto_mode_uses_main_model_when_it_supports_images(tmp_path, monkeypatch):
+def test_auto_mode_uses_separate_vision_when_explicitly_configured(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "apps.shell.hermes_capabilities._load_models_dev_cache",
         lambda: {
@@ -90,7 +90,8 @@ def test_auto_mode_uses_main_model_when_it_supports_images(tmp_path, monkeypatch
     )
 
     assert capability["can_attach_images"] is True
-    assert capability["route"] == "native"
+    assert capability["route"] == "vision_text"
+    assert capability["requires_vision_pipeline"] is True
 
 
 def test_xiaomi_pro_native_mode_is_allowed(tmp_path, monkeypatch):

@@ -239,6 +239,22 @@ def _configured_image_input_mode(cfg: dict[str, Any] | None) -> str:
     return mode if mode in {"auto", "native", "text"} else "auto"
 
 
+def _has_explicit_auxiliary_vision(cfg: dict[str, Any] | None) -> bool:
+    if not isinstance(cfg, dict):
+        return False
+    auxiliary_cfg = cfg.get("auxiliary") or {}
+    if not isinstance(auxiliary_cfg, dict):
+        return False
+    vision_cfg = auxiliary_cfg.get("vision") or {}
+    if not isinstance(vision_cfg, dict):
+        return False
+    provider = str(vision_cfg.get("provider") or "").strip().lower()
+    model = str(vision_cfg.get("model") or "").strip()
+    base_url = str(vision_cfg.get("base_url") or "").strip()
+    api_key = str(vision_cfg.get("api_key") or "").strip()
+    return bool((provider and provider != "auto") or model or base_url or api_key)
+
+
 def _lookup_model_supports_vision(provider: str, model: str) -> bool | None:
     try:
         from agent.models_dev import get_model_capabilities
@@ -311,6 +327,8 @@ def _correct_image_mode_for_provider(
         return "text"
     if configured_mode == "native":
         return "native"
+    if _has_explicit_auxiliary_vision(cfg):
+        return "text"
     supports_vision = _lookup_model_supports_vision(provider, model)
     if supports_vision is True:
         return "native"

@@ -171,6 +171,7 @@ export function ProactiveTtsSettingsView() {
     setStatus('正在保存主动关怀语音设置...');
     try {
       await persistSettings('主动关怀语音设置已保存');
+      window.setTimeout(() => void openAppView('main'), 700);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '保存主动关怀语音设置失败');
     } finally {

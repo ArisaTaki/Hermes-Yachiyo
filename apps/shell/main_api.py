@@ -46,6 +46,7 @@ from apps.shell.mode_catalog import list_mode_options
 from apps.shell.mode_settings import (
     apply_settings_changes,
     build_display_settings,
+    effective_display_mode,
     serialize_mode_settings,
 )
 
@@ -1939,7 +1940,7 @@ class MainWindowAPI:
                     "hapi": snap.hapi.to_dict(),
                 },
                 "modes": {
-                    "current": self._config.display_mode,
+                    "current": effective_display_mode(self._config),
                     "items": list_mode_options(),
                 },
                 "chat": self._chat_bridge.get_conversation_overview(
@@ -2078,7 +2079,7 @@ class MainWindowAPI:
         """
         snap = self._get_snapshot()
         return {
-            "display_mode": self._config.display_mode,
+            "display_mode": effective_display_mode(self._config),
             "mode_settings": serialize_mode_settings(self._config),
             "assistant": {
                 "persona_prompt": self._config.assistant.persona_prompt,

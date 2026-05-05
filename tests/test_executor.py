@@ -820,6 +820,31 @@ class TestHermesStreamBridgeImageRouting:
         assert isinstance(routed, list)
         assert routed[1]["type"] == "image_url"
 
+    def test_auto_with_auxiliary_vision_uses_vision_preprocessor(self, monkeypatch, tmp_path):
+        self._install_fake_image_routing(
+            monkeypatch,
+            {
+                "agent": {"image_input_mode": "auto"},
+                "auxiliary": {"vision": {"provider": "xiaomi", "model": "mimo-v2.5-pro"}},
+            },
+        )
+        image = tmp_path / "screen.png"
+        image.write_bytes(b"png")
+        monkeypatch.setattr(
+            bridge_mod,
+            "_preprocess_images_with_vision",
+            lambda text, images: f"vision::{text}::{len(images)}",
+        )
+
+        class FakeCli:
+            provider = "xiaomi"
+            model = "mimo-v2.5-pro"
+
+        routed = bridge_mod._route_images(FakeCli(), "看图", [image])
+
+        assert routed.startswith("vision::[Yachiyo 附件图片上下文]")
+        assert "看图::1" in routed
+
     def test_auto_openrouter_uses_models_cache_for_native_image_parts(self, monkeypatch, tmp_path):
         cache_dir = tmp_path / ".hermes"
         cache_dir.mkdir()

@@ -711,31 +711,6 @@ export function InstallerView() {
     }
   }
 
-  async function testHermesConnection() {
-    if (busy) {
-      setConfigStatus('上一个操作正在处理，请稍候');
-      return;
-    }
-    setBusy('config-test');
-    setHermesTestResult(null);
-    setConfigStatus('正在测试 Hermes provider/API Key 连接…');
-    try {
-      const result = await apiPost<HermesConnectionTestResult>('/ui/hermes/connection-test');
-      setHermesTestResult(result);
-      if (result.connection_validation) {
-        setHermesConfig((current) => (
-          current ? { ...current, connection_validation: result.connection_validation } : current
-        ));
-      }
-      setConfigStatus(result.success ? result.message || 'Hermes 连接测试通过' : result.error || 'Hermes 连接测试失败');
-      await refreshAfterHermesConfig();
-    } catch (error) {
-      setConfigStatus(error instanceof Error ? error.message : 'Hermes 连接测试失败');
-    } finally {
-      setBusy('');
-    }
-  }
-
   async function recheckStatus() {
     setBusy('recheck');
     setStatus('正在重新检测 Hermes 状态…');
@@ -910,9 +885,7 @@ export function InstallerView() {
           testResult={hermesTestResult}
           onConfigChange={updateHermesConfigField}
           onOpenAdvancedSetup={() => startEmbeddedTerminal('hermes-setup')}
-          onSaveConfig={() => saveHermesConfig(false)}
           onSaveAndTest={() => saveHermesConfig(true)}
-          onTestConnection={testHermesConnection}
         />
       ) : null}
 
@@ -1065,9 +1038,7 @@ function InstallerHermesConfigPanel({
   testResult,
   onConfigChange,
   onOpenAdvancedSetup,
-  onSaveConfig,
   onSaveAndTest,
-  onTestConnection,
 }: {
   busy: string;
   config: HermesVisualConfig | null;
@@ -1077,9 +1048,7 @@ function InstallerHermesConfigPanel({
   testResult: HermesConnectionTestResult | null;
   onConfigChange: (field: keyof HermesConfigForm, value: string) => void;
   onOpenAdvancedSetup: () => Promise<void>;
-  onSaveConfig: () => Promise<void>;
   onSaveAndTest: () => Promise<void>;
-  onTestConnection: () => Promise<void>;
 }) {
   const disabled = Boolean(busy);
   const providerOptions = config?.provider_options || [];
@@ -1180,12 +1149,6 @@ function InstallerHermesConfigPanel({
             <div className="settings-action-strip">
               <button type="submit" className="primary-action" disabled={disabled || !config?.command_exists}>
                 {busy === 'config-test' ? '测试中...' : '保存并测试连接'}
-              </button>
-              <button type="button" onClick={() => void onSaveConfig()} disabled={disabled || !config?.command_exists}>
-                {busy === 'config' ? '保存中...' : '仅保存'}
-              </button>
-              <button type="button" onClick={() => void onTestConnection()} disabled={disabled || !config?.command_exists}>
-                测试连接
               </button>
               <button type="button" onClick={() => void onOpenAdvancedSetup()} disabled={disabled}>
                 高级终端 setup
@@ -1409,7 +1372,7 @@ function installerHermesConfigNotice(
     return {
       kind: 'warn',
       title: '当前 Provider 缺少 API Key',
-      detail: `请填写 ${apiKeyLabel} 后保存；如果已经在外部配置过，也可以直接测试连接。`,
+      detail: `请填写 ${apiKeyLabel} 后使用“保存并测试连接”；如果已经在外部配置过，也会在保存后一起验证。`,
     };
   }
   if (testResult && !testResult.success) {

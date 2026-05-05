@@ -466,10 +466,19 @@ def serialize_mode_window_data(config: AppConfig, mode_id: str) -> dict[str, Any
 
 
 def build_display_settings(config: AppConfig) -> dict[str, Any]:
+    current_mode = effective_display_mode(config)
     return {
-        "current_mode": config.display_mode,
+        "current_mode": current_mode,
+        "configured_mode": config.display_mode,
         "available_modes": list_mode_options(),
     }
+
+
+def effective_display_mode(config: AppConfig) -> str:
+    """Return the runnable display mode, falling back when Live2D has no assets."""
+    if config.display_mode == "live2d" and not config.live2d_mode.is_model_configured():
+        return "bubble"
+    return config.display_mode
 
 
 def apply_settings_changes(
