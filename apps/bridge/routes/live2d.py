@@ -14,6 +14,8 @@ from fastapi.responses import FileResponse, Response
 
 from apps.bridge.deps import get_runtime
 from apps.bridge.server import get_live2d_asset_token
+from apps.shell.config import discover_live2d_sidecar_expressions
+from apps.shell.config import discover_live2d_sidecar_motion_groups
 from apps.shell import live2d_runtime
 
 router = APIRouter(tags=["Live2D"])
@@ -125,8 +127,93 @@ def _rewrite_live2d_manifest_paths(value: Any, token: str, *, key: str = "") -> 
 
 def _render_live2d_manifest(asset: Path, token: str) -> bytes:
     payload = json.loads(asset.read_text(encoding="utf-8"))
+    payload = _apply_live2d_manifest_runtime_overrides(payload, asset)
     rewritten = _rewrite_live2d_manifest_paths(payload, token)
     return json.dumps(rewritten, ensure_ascii=False).encode("utf-8")
+
+
+def _apply_live2d_manifest_runtime_overrides(payload: Any, asset: Path) -> Any:
+    """Patch underspecified model3 manifests for the Electron Live2D renderer."""
+    if not isinstance(payload, dict):
+        return payload
+    refs = payload.setdefault("FileReferences", {})
+    if not isinstance(refs, dict):
+        return payload
+
+    live2d_config = None
+    try:
+        live2d_config = get_runtime().config.live2d_mode
+    except Exception:
+        live2d_config = None
+
+    if live2d_config is not None and not bool(getattr(live2d_config, "enable_physics", False)):
+        refs.pop("Physics", None)
+
+    refs["Expressions"] = _merge_manifest_expressions(
+        refs.get("Expressions"),
+        discover_live2d_sidecar_expressions(asset),
+    )
+    refs["Motions"] = _merge_manifest_motions(
+        refs.get("Motions"),
+        discover_live2d_sidecar_motion_groups(asset),
+    )
+    return payload
+
+
+def _merge_manifest_expressions(raw_expressions: Any, discovered: list[dict[str, str]]) -> list[dict[str, str]]:
+    merged: list[dict[str, str]] = []
+    seen: set[str] = set()
+    if isinstance(raw_expressions, list):
+        for item in raw_expressions:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("Name") or item.get("name") or "").strip()
+            file_path = str(item.get("File") or item.get("file") or "").strip()
+            key = (file_path or name).lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            merged.append({"Name": name or Path(file_path).stem, "File": file_path})
+    for item in discovered:
+        name = str(item.get("name") or "").strip()
+        file_path = str(item.get("file") or "").strip()
+        key = (file_path or name).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        merged.append({"Name": name or Path(file_path).stem, "File": file_path})
+    return merged
+
+
+def _merge_manifest_motions(raw_motions: Any, discovered: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, str]]]:
+    merged: dict[str, list[dict[str, str]]] = {}
+    seen: set[str] = set()
+    if isinstance(raw_motions, dict):
+        for group, items in raw_motions.items():
+            if not isinstance(items, list):
+                continue
+            group_name = str(group or "").strip() or "Idle"
+            target = merged.setdefault(group_name, [])
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                file_path = str(item.get("File") or item.get("file") or "").strip()
+                if not file_path or file_path.lower() in seen:
+                    continue
+                seen.add(file_path.lower())
+                next_item = dict(item)
+                next_item["File"] = file_path
+                target.append(next_item)
+    for group, items in discovered.items():
+        group_name = str(group or "").strip() or "Idle"
+        target = merged.setdefault(group_name, [])
+        for item in items:
+            file_path = str(item.get("file") or "").strip()
+            if not file_path or file_path.lower() in seen:
+                continue
+            seen.add(file_path.lower())
+            target.append({"File": file_path})
+    return {group: items for group, items in merged.items() if items}
 
 
 @router.get("/live2d/runtime")

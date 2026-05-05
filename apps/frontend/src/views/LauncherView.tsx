@@ -123,6 +123,7 @@ type Live2DGlobalWindow = typeof window & {
 type Live2DRendererState = {
   app?: any;
   model?: any;
+  modelKey?: string;
   modelUrl?: string;
   loadToken: number;
 };
@@ -387,6 +388,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   const hasAttention = Boolean(data?.notification?.has_unread);
   const proactiveAttention = Boolean(data?.proactive?.has_attention);
   const isProcessing = Boolean(data?.chat?.is_processing);
+  const unreadStatus = String(data?.notification?.latest_message?.status || '');
   const resource = launcher.resource;
   const renderer = launcher.renderer;
   const replyText = proactiveAttention
@@ -394,10 +396,11 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
     : hasAttention && !isProcessing
         ? latestReply
         : '';
+  const replyCue = live2dReplyCue({ proactiveAttention, status: unreadStatus });
   const showReply = Boolean(launcher.show_reply_bubble !== false && (proactiveAttention || !replyHidden) && replyText && !isProcessing);
   const stageTitle = live2dStageTitle(resource, launcher, data, hasAttention, proactiveAttention);
   const positionAnchor = normalizeLive2DPositionAnchor(launcher.position_anchor);
-  const characterClass = live2dCharacterClass(data, hasAttention, proactiveAttention, String(data?.notification?.latest_message?.status || ''));
+  const characterClass = live2dCharacterClass(data, hasAttention, proactiveAttention, unreadStatus);
   const hintKey = [resource?.state || '', resource?.status_label || '', resource?.help_text || '', resource?.renderer_entry || ''].join('|');
   const hintTone = resource?.state === 'path_valid' || resource?.state === 'loaded' ? 'ok' : 'warn';
   const showResourceHint = Boolean(resource && hintTone !== 'ok' && hintKey !== dismissedHintKey);
@@ -434,7 +437,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
     return () => {
       disposed = true;
     };
-  }, [renderer?.enabled, renderer?.model_url, renderer?.reason, launcher.scale, positionAnchor]);
+  }, [renderer?.enabled, renderer?.model_url, renderer?.reason, renderer?.enable_physics, launcher.scale, positionAnchor]);
 
   useEffect(() => {
     const rendererState = rendererStateRef.current;
@@ -712,14 +715,15 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
       {showReply ? (
         <button
           ref={replyRef}
-          className={`live2d-reply ${proactiveAttention ? 'proactive' : ''} ${hasAttention ? 'attention' : ''}`}
+          className={`live2d-reply ${proactiveAttention ? 'proactive' : ''} ${hasAttention ? 'attention' : ''} ${replyCue.tone}`}
           type="button"
+          aria-label={replyCue.label}
           onClick={() => {
             if (proactiveAttention) void acknowledgeAndOpenChat('live2d');
             else setReplyHidden(true);
           }}
         >
-          {replyText}
+          <span aria-hidden="true">{replyCue.symbol}</span>
         </button>
       ) : null}
 
@@ -867,6 +871,18 @@ function live2dStatusExpressionKey({
   return '';
 }
 
+function live2dReplyCue({
+  proactiveAttention,
+  status,
+}: {
+  proactiveAttention: boolean;
+  status: string;
+}) {
+  if (status === 'failed') return { label: '回复失败，点击打开对话', symbol: '!', tone: 'failed' };
+  if (proactiveAttention) return { label: '新的主动关怀，点击打开对话', symbol: '!', tone: 'proactive-cue' };
+  return { label: '新的回复，点击隐藏提示', symbol: '!', tone: 'message-cue' };
+}
+
 async function ensureLive2DRenderer({
   canvas,
   character,
@@ -901,6 +917,7 @@ async function ensureLive2DRenderer({
     onError('Live2D 舞台尚未就绪，已回退到静态预览');
     return;
   }
+  const modelKey = `${renderer.model_url}|physics:${renderer.enable_physics === true ? '1' : '0'}`;
 
   try {
     await ensureLive2DRuntimeScripts();
@@ -908,7 +925,7 @@ async function ensureLive2DRenderer({
       throw new Error(`Live2D 渲染依赖未加载，已回退到静态预览 ${rendererDiagnostics()}`);
     }
 
-    if (state.model && state.modelUrl === renderer.model_url) {
+    if (state.model && state.modelUrl === renderer.model_url && state.modelKey === modelKey) {
       fitLive2DModel(state, character, scale, positionAnchor);
       onLoading(false);
       onReady(true);
@@ -934,6 +951,7 @@ async function ensureLive2DRenderer({
       return;
     }
     state.model = model;
+    state.modelKey = modelKey;
     state.modelUrl = renderer.model_url;
     state.model.interactive = false;
     app.stage.addChild(model);
@@ -1122,6 +1140,7 @@ function destroyLive2DRenderer(
   }
   if (state.model && typeof state.model.destroy === 'function') state.model.destroy();
   state.model = undefined;
+  state.modelKey = '';
   state.modelUrl = '';
   if (state.app && typeof state.app.destroy === 'function') {
     state.app.destroy(false, { children: true, texture: false, baseTexture: false });
@@ -1275,6 +1294,7 @@ function playLive2DStatusExpression(
   renderer: NonNullable<LauncherPayload['launcher']>['renderer'],
   stateKey: string,
 ) {
+  if (renderer?.enable_expressions !== true) return;
   const expressionName = selectLive2DExpression(renderer?.expressions, stateKey, renderer?.expression_mappings);
   if (expressionName) playLive2DExpression(state, expressionName);
 }
@@ -1337,10 +1357,21 @@ function playLive2DMotion(state: Live2DRendererState, group: string, index?: num
 function playLive2DExpression(state: Live2DRendererState, name: string) {
   const model = state.model;
   if (!model || typeof model.expression !== 'function') return;
-  try {
-    const result = model.expression(name);
-    if (result && typeof result.catch === 'function') result.catch(() => {});
-  } catch {}
+  for (const candidate of live2dExpressionCallCandidates(name)) {
+    try {
+      const result = model.expression(candidate);
+      if (result && typeof result.catch === 'function') result.catch(() => {});
+    } catch {}
+  }
+}
+
+function live2dExpressionCallCandidates(name: string) {
+  const raw = String(name || '').trim();
+  if (!raw) return [];
+  const fileName = raw.split(/[\\/]/).pop() || raw;
+  const withoutJson = fileName.replace(/\.json$/i, '');
+  const withoutExp = withoutJson.replace(/\.exp3$/i, '');
+  return Array.from(new Set([raw, fileName, withoutJson, withoutExp].filter(Boolean)));
 }
 
 function formatRendererError(error: unknown) {

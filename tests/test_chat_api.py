@@ -178,6 +178,31 @@ def test_user_requested_desktop_snapshot_attaches_in_normal_chat(tmp_path, monke
         store.close()
 
 
+def test_user_implicit_current_activity_request_attaches_desktop_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    captures = []
+
+    def fake_capture(target_path: Path):
+        captures.append(target_path)
+        target_path.write_bytes(b"fake-current-activity-png")
+        return {"width": 1920, "height": 1080, "size": target_path.stat().st_size}
+
+    monkeypatch.setattr(chat_api_mod, "capture_screenshot_to_file", fake_capture)
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        result = api.send_message("你能看看我现在在做什么不")
+
+        assert result["ok"] is True
+        assert len(captures) == 1
+        assert result["attachments"][0]["source"] == "user_requested_desktop_snapshot"
+        task = runtime.state.get_task(result["task_id"])
+        assert task is not None
+        assert task.attachments[0]["source"] == "user_requested_desktop_snapshot"
+        assert "附加当前桌面截图" in task.description
+    finally:
+        store.close()
+
+
 def test_plain_message_does_not_attach_desktop_snapshot(tmp_path, monkeypatch):
     monkeypatch.setattr(
         chat_api_mod,

@@ -431,6 +431,10 @@ def _read_live2d_manifest_metadata(model3_path: Path) -> tuple[list[dict[str, st
             file_path = str(item.get("File") or "").strip()
             name = str(item.get("Name") or "").strip() or Path(file_path).stem or f"expression-{index + 1}"
             expressions.append({"name": name, "file": file_path})
+    expressions = _merge_live2d_expression_metadata(
+        expressions,
+        discover_live2d_sidecar_expressions(model3_path),
+    )
 
     motion_groups: dict[str, list[dict[str, Any]]] = {}
     raw_motions = refs.get("Motions")
@@ -453,7 +457,107 @@ def _read_live2d_manifest_metadata(model3_path: Path) -> tuple[list[dict[str, st
                 })
             if motions:
                 motion_groups[group_name] = motions
+    motion_groups = _merge_live2d_motion_metadata(
+        motion_groups,
+        discover_live2d_sidecar_motion_groups(model3_path),
+    )
     return expressions, motion_groups
+
+
+def _relative_live2d_asset_path(root: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except Exception:
+        return path.name
+
+
+def _live2d_display_stem(path: Path, suffix: str) -> str:
+    name = path.name
+    if name.lower().endswith(suffix):
+        return name[: -len(suffix)]
+    return path.stem
+
+
+def discover_live2d_sidecar_expressions(model3_path: Path) -> list[dict[str, str]]:
+    """Discover expression files next to model3.json when the manifest omits them."""
+    root = Path(model3_path).expanduser().resolve().parent
+    if not root.exists():
+        return []
+    expressions: list[dict[str, str]] = []
+    for path in sorted(root.rglob("*.exp3.json"), key=lambda item: item.as_posix().lower()):
+        if not path.is_file():
+            continue
+        rel_path = _relative_live2d_asset_path(root, path)
+        expressions.append({
+            "name": _live2d_display_stem(path, ".exp3.json"),
+            "file": rel_path,
+        })
+    return expressions
+
+
+def discover_live2d_sidecar_motion_groups(model3_path: Path) -> dict[str, list[dict[str, Any]]]:
+    """Discover motion3 files next to model3.json when the manifest omits them."""
+    root = Path(model3_path).expanduser().resolve().parent
+    if not root.exists():
+        return {}
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for path in sorted(root.rglob("*.motion3.json"), key=lambda item: item.as_posix().lower()):
+        if not path.is_file():
+            continue
+        rel_path = _relative_live2d_asset_path(root, path)
+        parent_name = path.parent.name.strip()
+        group_name = parent_name if parent_name and path.parent != root else "Idle"
+        items = groups.setdefault(group_name, [])
+        items.append({
+            "group": group_name,
+            "index": len(items),
+            "file": rel_path,
+            "display_name": _live2d_display_stem(path, ".motion3.json"),
+            "has_sound": False,
+        })
+    return groups
+
+
+def _merge_live2d_expression_metadata(
+    declared: list[dict[str, str]],
+    discovered: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    merged: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in [*declared, *discovered]:
+        name = str(item.get("name") or "").strip()
+        file_path = str(item.get("file") or "").strip()
+        key = (file_path or name).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        merged.append({"name": name or Path(file_path).stem, "file": file_path})
+    return merged
+
+
+def _merge_live2d_motion_metadata(
+    declared: dict[str, list[dict[str, Any]]],
+    discovered: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[dict[str, Any]]]:
+    merged: dict[str, list[dict[str, Any]]] = {group: list(items) for group, items in declared.items()}
+    seen = {
+        str(item.get("file") or "").lower()
+        for items in merged.values()
+        for item in items
+        if str(item.get("file") or "").strip()
+    }
+    for group, items in discovered.items():
+        target = merged.setdefault(group, [])
+        for item in items:
+            file_path = str(item.get("file") or "").strip()
+            key = file_path.lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            next_item = dict(item)
+            next_item["index"] = len(target)
+            target.append(next_item)
+    return {group: items for group, items in merged.items() if items}
 
 
 def _attach_live2d_manifest_metadata(summary: ModelSummary) -> None:

@@ -226,6 +226,28 @@ def test_live2d_model_summary_reads_expression_and_motion_metadata(monkeypatch, 
     assert summary["motion_groups"]["TapBody"][0]["display_name"] == "tap.motion3"
 
 
+def test_live2d_model_summary_discovers_sidecar_expressions_and_motions(monkeypatch, tmp_path):
+    user_root = tmp_path / "user-assets" / "live2d"
+    model_dir = _create_live2d_model_dir(user_root / "yachiyo")
+    (model_dir / "demo.model3.json").write_text(
+        json.dumps({"FileReferences": {"Moc": "demo.moc3", "Textures": []}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (model_dir / "笑咪咪.exp3.json").write_text("{}", encoding="utf-8")
+    motion_dir = model_dir / "Idle"
+    motion_dir.mkdir()
+    (motion_dir / "idle.motion3.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(config_mod, "get_user_live2d_assets_dir", lambda: user_root)
+    monkeypatch.setattr(config_mod, "find_default_live2d_model_dir", lambda *_args, **_kwargs: model_dir)
+
+    config = AppConfig()
+    payload = serialize_mode_window_data(config, "live2d")
+    summary = payload["settings"]["config"]["summary"]
+
+    assert summary["expressions"] == [{"name": "笑咪咪", "file": "笑咪咪.exp3.json"}]
+    assert summary["motion_groups"]["Idle"][0]["file"] == "Idle/idle.motion3.json"
+
+
 def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
     monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
