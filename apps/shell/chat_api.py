@@ -60,6 +60,22 @@ _AUDIO_MIME_BY_EXTENSION = {
     ".ogg": "audio/ogg",
     ".flac": "audio/flac",
 }
+_DESKTOP_SNAPSHOT_REQUEST_RE = re.compile(
+    r"("
+    r"(?:看|看看|查看|瞧|识别|分析|读|读取|扫一眼|截图|截屏|能看到|能看见|看得到)"
+    r".{0,18}(?:桌面|屏幕|当前窗口|窗口|画面|截图|截屏)"
+    r"|"
+    r"(?:桌面|屏幕|当前窗口|窗口|画面|截图|截屏)"
+    r".{0,18}(?:看|看看|查看|瞧|识别|分析|读|读取|有什么|是什么|情况|状态|能看到|能看见|看得到)"
+    r"|"
+    r"(?:look|see|view|read|analy[sz]e|inspect|screenshot|screen shot)"
+    r".{0,24}(?:screen|desktop|window|screenshot)"
+    r"|"
+    r"(?:screen|desktop|window|screenshot)"
+    r".{0,24}(?:look|see|view|read|analy[sz]e|inspect)"
+    r")",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _attachment_root() -> Path:
@@ -231,9 +247,19 @@ class ChatAPI:
             saved_attachments = self._save_attachments(raw_attachments)
             if not text and saved_attachments:
                 text = "请识别并分析这张图片。"
-            task_description, saved_attachments = self._attach_proactive_desktop_snapshot_if_needed(
+            should_attach_desktop_snapshot = self._should_attach_desktop_snapshot(text, saved_attachments)
+            if should_attach_desktop_snapshot and self._should_enforce_image_capability():
+                image_input = get_current_hermes_image_input_capability()
+                if image_input.get("can_attach_images") is False:
+                    return {
+                        "ok": False,
+                        "error": str(image_input.get("reason") or "当前 Hermes 模型暂不支持图片输入"),
+                        "image_input": image_input,
+                    }
+            task_description, saved_attachments = self._attach_desktop_snapshot_if_needed(
                 text,
                 saved_attachments,
+                should_attach=should_attach_desktop_snapshot,
             )
             if saved_attachments and not raw_attachments and self._should_enforce_image_capability():
                 image_input = get_current_hermes_image_input_capability()
@@ -286,36 +312,51 @@ class ChatAPI:
         executor = getattr(runner, "executor", None)
         return getattr(executor, "name", "") == "HermesExecutor"
 
-    def _attach_proactive_desktop_snapshot_if_needed(
+    @staticmethod
+    def _should_attach_desktop_snapshot(text: str, saved_attachments: list[dict]) -> bool:
+        if saved_attachments:
+            return False
+        value = (text or "").strip()
+        if not value:
+            return False
+        return bool(_DESKTOP_SNAPSHOT_REQUEST_RE.search(value))
+
+    def _attach_desktop_snapshot_if_needed(
         self,
         text: str,
         saved_attachments: list[dict],
+        *,
+        should_attach: bool,
     ) -> tuple[str, list[dict]]:
-        """Attach a fresh desktop screenshot for follow-up messages in the proactive session."""
-        if saved_attachments or not is_proactive_chat_session(self._session.session_id):
+        """Attach a fresh desktop screenshot when the user explicitly asks Yachiyo to look."""
+        if saved_attachments or not should_attach:
             return text, saved_attachments
 
         attachment_id, target_path = allocate_chat_attachment_path(self._session.session_id, ".png")
+        proactive_session = is_proactive_chat_session(self._session.session_id)
+        source = "proactive_desktop_followup" if proactive_session else "user_requested_desktop_snapshot"
+        note_subject = "这条主动关怀追问" if proactive_session else "这条消息"
         try:
             meta = capture_screenshot_to_file(target_path)
             attachment = chat_attachment_record(
                 attachment_id,
                 target_path,
                 kind="image",
-                name="主动关怀即时桌面截图.png",
+                name="主动关怀即时桌面截图.png" if proactive_session else "当前桌面截图.png",
                 mime_type="image/png",
             )
-            attachment["source"] = "proactive_desktop_followup"
+            attachment["source"] = source
             _cleanup_attachment_cache({Path(str(attachment["path"]))})
             logger.info(
-                "主动关怀追问已附加即时桌面截图: %s (%sx%s)",
+                "用户请求查看桌面，已附加即时截图: session=%s path=%s (%sx%s)",
+                self._session.session_id,
                 target_path,
                 meta.get("width") if isinstance(meta, dict) else "?",
                 meta.get("height") if isinstance(meta, dict) else "?",
             )
             task_description = (
                 f"{text}\n\n"
-                "[Yachiyo 已为这条主动关怀追问附加当前桌面截图；"
+                f"[Yachiyo 已为{note_subject}附加当前桌面截图；"
                 "请优先基于附件图片回答用户问题。]"
             )
             return task_description, [attachment]
@@ -323,11 +364,11 @@ class ChatAPI:
             try:
                 target_path.unlink(missing_ok=True)
             except OSError:
-                logger.debug("清理主动关怀追问截图失败: %s", target_path, exc_info=True)
-            logger.warning("主动关怀追问截图捕获失败: %s", exc)
+                logger.debug("清理按需桌面截图失败: %s", target_path, exc_info=True)
+            logger.warning("按需桌面截图捕获失败: %s", exc)
             task_description = (
                 f"{text}\n\n"
-                f"[Yachiyo 尝试为这条主动关怀追问捕获当前桌面截图，但失败：{exc}。"
+                f"[Yachiyo 尝试为{note_subject}捕获当前桌面截图，但失败：{exc}。"
                 "请向用户说明当前无法读取桌面截图。]"
             )
             return task_description, saved_attachments

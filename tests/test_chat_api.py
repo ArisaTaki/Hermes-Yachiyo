@@ -150,6 +150,54 @@ def test_proactive_session_followup_attaches_fresh_desktop_snapshot(tmp_path, mo
         store.close()
 
 
+def test_user_requested_desktop_snapshot_attaches_in_normal_chat(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    captures = []
+
+    def fake_capture(target_path: Path):
+        captures.append(target_path)
+        target_path.write_bytes(b"fake-screen-png")
+        return {"width": 1920, "height": 1080, "size": target_path.stat().st_size}
+
+    monkeypatch.setattr(chat_api_mod, "capture_screenshot_to_file", fake_capture)
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        result = api.send_message("帮我看看我的桌面情况")
+
+        assert result["ok"] is True
+        assert len(captures) == 1
+        assert result["attachments"][0]["source"] == "user_requested_desktop_snapshot"
+        user = runtime.chat_session.get_messages()[0]
+        assert user.content == "帮我看看我的桌面情况"
+        assert user.attachments[0]["source"] == "user_requested_desktop_snapshot"
+        task = runtime.state.get_task(result["task_id"])
+        assert task is not None
+        assert task.attachments[0]["source"] == "user_requested_desktop_snapshot"
+        assert "附加当前桌面截图" in task.description
+    finally:
+        store.close()
+
+
+def test_plain_message_does_not_attach_desktop_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        chat_api_mod,
+        "capture_screenshot_to_file",
+        lambda _target_path: (_ for _ in ()).throw(AssertionError("should not capture")),
+    )
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        result = api.send_message("你好，今天聊点别的")
+
+        assert result["ok"] is True
+        assert result["attachments"] == []
+        task = runtime.state.get_task(result["task_id"])
+        assert task is not None
+        assert task.attachments == []
+        assert task.description == "你好，今天聊点别的"
+    finally:
+        store.close()
+
+
 def test_attachment_cache_cleanup_prunes_old_files(tmp_path, monkeypatch):
     hermes_home = tmp_path / "hermes-home"
     monkeypatch.setenv("HERMES_HOME", str(hermes_home))
