@@ -67,17 +67,6 @@ type GptSovitsServiceStatus = {
   platform_supported?: boolean;
   plist_path_display?: string;
   tools?: Record<string, boolean>;
-  docker?: {
-    available?: boolean;
-    compose_available?: boolean;
-    daemon_running?: boolean;
-    container_name?: string;
-    container_running?: boolean;
-    compose_file_display?: string;
-    autostart_installed?: boolean;
-    autostart_path_display?: string;
-    error?: string;
-  };
   logs?: { stdout?: string; stderr?: string };
 };
 
@@ -346,7 +335,7 @@ export function ProactiveTtsSettingsView() {
         command: buildGsvServiceTerminalCommand(form),
       });
       if (!result.success) throw new Error(result.error || '无法打开 GPT-SoVITS 调试终端');
-      setStatus('已打开 GPT-SoVITS 调试终端；这是前台运行方式，后台服务或 Docker 已占用端口时请先停止其中一个');
+      setStatus('已打开 GPT-SoVITS 调试终端；这是前台运行方式，本地后台服务已占用端口时请先停止后台服务');
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '打开 GPT-SoVITS 调试终端失败');
     } finally {
@@ -357,7 +346,7 @@ export function ProactiveTtsSettingsView() {
   async function openGsvSetupTerminal() {
     if (interactionBusy) return;
     if (!window.confirm(
-      '将打开系统终端并尝试克隆 GPT-SoVITS、创建本地 Python 3.11 环境并安装依赖。部署完成后不会直接占用 9880 端口；需要运行服务时请使用后台服务、Docker 或调试终端。继续吗？',
+      '将打开系统终端并尝试克隆 GPT-SoVITS、创建本地 Python 3.11 环境并安装依赖。部署完成后不会直接占用 9880 端口；需要运行服务时请使用本地后台服务或调试终端。继续吗？',
     )) return;
     setBusyAction('service-setup');
     setStatus('正在打开 GPT-SoVITS 本地依赖部署终端...');
@@ -375,7 +364,7 @@ export function ProactiveTtsSettingsView() {
         command: buildGsvSetupTerminalCommand(workdir, command, voiceResource?.service_project_url),
       });
       if (!result.success) throw new Error(result.error || '无法打开 GPT-SoVITS 本地依赖部署终端');
-      setStatus('已打开 GPT-SoVITS 本地依赖部署终端；依赖装好后可启动后台服务、Docker 或调试终端');
+      setStatus('已打开 GPT-SoVITS 本地依赖部署终端；依赖装好后可启动本地后台服务或调试终端');
       window.setTimeout(() => void refreshGsvServiceStatus(
         () => false,
         { base_url: form.gsv_base_url, workdir, command },
@@ -387,46 +376,12 @@ export function ProactiveTtsSettingsView() {
     }
   }
 
-  async function openGsvDockerSetupTerminal() {
-    if (interactionBusy) return;
-    if (!window.confirm(
-      '将使用 Docker Compose 构建并后台启动 GPT-SoVITS API。需要已安装并正在运行 Docker Desktop；容器会映射 9880 端口，并挂载当前用户目录以读取语音包与模型文件。继续吗？',
-    )) return;
-    setBusyAction('service-docker');
-    setStatus('正在打开 GPT-SoVITS Docker 部署终端...');
-    try {
-      const defaultWorkdir = voiceResource?.default_service_workdir_display || voiceResource?.default_service_workdir || `${homePlaceholder()}/AI/GPT-SoVITS`;
-      const workdir = form.gsv_service_workdir.trim() || defaultWorkdir;
-      if (!form.gsv_service_workdir.trim()) {
-        updateField('gsv_service_workdir', workdir);
-      }
-      if (!form.gsv_base_url.trim()) {
-        updateField('gsv_base_url', 'http://127.0.0.1:9880');
-      }
-      const result = await apiPost<{ success?: boolean; error?: string }>('/ui/hermes/terminal-command', {
-        command: buildGsvDockerSetupTerminalCommand(workdir, voiceResource?.service_project_url),
-      });
-      if (!result.success) throw new Error(result.error || '无法打开 GPT-SoVITS Docker 部署终端');
-      setStatus('已打开 GPT-SoVITS Docker 部署终端；构建完成后容器会在后台运行，可刷新状态并保存测试');
-      window.setTimeout(() => void refreshGsvServiceStatus(
-        () => false,
-        { base_url: form.gsv_base_url || 'http://127.0.0.1:9880', workdir, command: form.gsv_service_command },
-      ), 800);
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : '打开 GPT-SoVITS Docker 部署终端失败');
-    } finally {
-      setBusyAction('');
-    }
-  }
-
   const enabled = Boolean(form.enabled && provider !== 'none');
   const isGsvProvider = provider === 'gpt-sovits';
   const isDirty = JSON.stringify(form) !== JSON.stringify(savedForm);
   const filePickerAvailable = hasDesktopFilePicker();
   const busy = Boolean(busyAction);
   const interactionBusy = busy || loading || resourceBusy;
-  const dockerContainerRunning = Boolean(serviceStatus?.docker?.container_running);
-  const localBackgroundInstalled = Boolean(serviceStatus?.launch_agent_installed);
 
   return (
     <main className="app-shell">
@@ -582,67 +537,43 @@ export function ProactiveTtsSettingsView() {
                       <p>{voiceResource?.service_help_text || '语音包只负责音色文件；本地 GPT-SoVITS API 服务需要单独运行。'}</p>
                       <span>{gsvServiceStatusText(serviceStatus)}</span>
                     </div>
-                    <div className="settings-service-groups wide">
-                      <div className="settings-service-group">
-                        <div className="settings-service-heading">
-                          <strong>本地服务</strong>
-                          <span>使用宿主机 Python 环境；后台/自启由 macOS LaunchAgent 管理。</span>
-                        </div>
-                        <div className="settings-resource-actions compact-actions">
-                          <button
-                            type="button"
-                            className={busyAction === 'service-setup' ? 'loading-button' : undefined}
-                            disabled={interactionBusy}
-                            onClick={() => void openGsvSetupTerminal()}
-                          >
-                            {busyAction === 'service-setup' ? '部署中...' : '部署本地依赖'}
-                          </button>
-                          <button
-                            type="button"
-                            className={busyAction === 'service' ? 'loading-button' : undefined}
-                            disabled={interactionBusy || dockerContainerRunning}
-                            onClick={() => void openGsvServiceTerminal()}
-                          >
-                            {busyAction === 'service' ? '打开中...' : '打开调试终端'}
-                          </button>
-                          <button
-                            type="button"
-                            className={busyAction === 'service-install' ? 'loading-button' : undefined}
-                            disabled={interactionBusy || dockerContainerRunning}
-                            onClick={() => void installGsvLaunchAgent()}
-                          >
-                            {busyAction === 'service-install' ? '启动中...' : '启动本地后台/自启'}
-                          </button>
-                          <button
-                            type="button"
-                            className={busyAction === 'service-uninstall' ? 'loading-button danger-action' : 'danger-action'}
-                            disabled={interactionBusy || !serviceStatus?.launch_agent_installed}
-                            onClick={() => void uninstallGsvLaunchAgent()}
-                          >
-                            {busyAction === 'service-uninstall' ? '停止中...' : '停止本地后台'}
-                          </button>
-                        </div>
-                      </div>
-                      <div className="settings-service-group">
-                        <div className="settings-service-heading">
-                          <strong>Docker 部署</strong>
-                          <span>容器后台运行并映射 9880；部署后会配置 Docker Desktop 登录自启。</span>
-                        </div>
-                        <div className="settings-resource-actions compact-actions">
-                          <button
-                            type="button"
-                            className={busyAction === 'service-docker' ? 'loading-button' : undefined}
-                            disabled={interactionBusy || localBackgroundInstalled}
-                            onClick={() => void openGsvDockerSetupTerminal()}
-                          >
-                            {busyAction === 'service-docker' ? '部署中...' : '部署 Docker 服务'}
-                          </button>
-                          <button type="button" disabled={interactionBusy} onClick={() => void refreshGsvServiceStatus()}>刷新状态</button>
-                        </div>
-                      </div>
+                    <div className="settings-resource-actions compact-actions">
+                      <button
+                        type="button"
+                        className={busyAction === 'service-setup' ? 'loading-button' : undefined}
+                        disabled={interactionBusy}
+                        onClick={() => void openGsvSetupTerminal()}
+                      >
+                        {busyAction === 'service-setup' ? '部署中...' : '部署本地依赖'}
+                      </button>
+                      <button
+                        type="button"
+                        className={busyAction === 'service' ? 'loading-button' : undefined}
+                        disabled={interactionBusy}
+                        onClick={() => void openGsvServiceTerminal()}
+                      >
+                        {busyAction === 'service' ? '打开中...' : '打开调试终端'}
+                      </button>
+                      <button
+                        type="button"
+                        className={busyAction === 'service-install' ? 'loading-button' : undefined}
+                        disabled={interactionBusy}
+                        onClick={() => void installGsvLaunchAgent()}
+                      >
+                        {busyAction === 'service-install' ? '启动中...' : '启动本地后台/自启'}
+                      </button>
+                      <button
+                        type="button"
+                        className={busyAction === 'service-uninstall' ? 'loading-button danger-action' : 'danger-action'}
+                        disabled={interactionBusy || !serviceStatus?.launch_agent_installed}
+                        onClick={() => void uninstallGsvLaunchAgent()}
+                      >
+                        {busyAction === 'service-uninstall' ? '停止中...' : '停止本地后台'}
+                      </button>
+                      <button type="button" disabled={interactionBusy} onClick={() => void refreshGsvServiceStatus()}>刷新状态</button>
                     </div>
                     <p className="capability-note wide-form-note">
-                      本地后台与 Docker 都会占用 9880，请只保留一种运行方式；首次 Docker 构建会很慢，完成后会复用镜像缓存。
+                      本地依赖部署只准备 Python 环境；调试终端是前台临时运行；本地后台/自启会使用 macOS LaunchAgent 管理服务。
                     </p>
                     <label className="settings-field wide" htmlFor="tts-gsv-service-workdir-page">
                       <span>GPT-SoVITS 服务目录</span>
@@ -677,10 +608,6 @@ export function ProactiveTtsSettingsView() {
                         <div className="settings-meta-row">
                           <span>本地自启</span>
                           <strong>{serviceStatus.launch_agent_installed ? (serviceStatus.launch_agent_running ? '已安装并运行' : '已安装，待启动') : '未安装'}</strong>
-                        </div>
-                        <div className="settings-meta-row">
-                          <span>Docker</span>
-                          <strong>{formatGsvDockerStatus(serviceStatus.docker)}</strong>
                         </div>
                         <div className="settings-meta-row">
                           <span>LaunchAgent</span>
@@ -1019,112 +946,7 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
     `SERVICE_COMMAND=${shellQuote(configuredCommand)}`,
     'echo "本地依赖部署完成。"',
     'echo "如果需要前台调试，可回到设置页点击“打开调试终端”，或手动运行：$SERVICE_COMMAND"',
-    'echo "如果需要后台运行，请回到设置页点击“启动后台/自启”或“部署 Docker 服务”。"',
-  ].join('\n');
-}
-
-function buildGsvDockerSetupTerminalCommand(workdir: string, projectUrl?: string): string {
-  const workdirAssignment = buildShellPathAssignment('WORKDIR', workdir.trim() || '$HOME/AI/GPT-SoVITS');
-  const quotedProjectUrl = shellQuote(projectUrl || 'https://github.com/RVC-Boss/GPT-SoVITS');
-  return [
-    'echo "Hermes-Yachiyo GPT-SoVITS Docker 部署"',
-    'echo "此流程会检查 Docker Desktop、克隆 GPT-SoVITS、写入 Hermes 专用 Compose 文件，并以后台容器启动 0.0.0.0:9880 API。"',
-    'echo "构建镜像会下载较大的 Python 与模型依赖；首次构建 10-30 分钟都可能正常，后续会复用缓存。"',
-    'echo "如果 Docker Desktop 未运行，脚本会提示你先启动。部署完成后会设置容器随 Docker 自动恢复，并设置 Docker Desktop 登录自启。"',
-    'printf "继续执行 Docker 部署？[y/N] "',
-    'read answer',
-    'case "$answer" in [yY]|[yY][eE][sS]) ;; *) echo "已取消。"; exit 1 ;; esac',
-    'set -e',
-    'if [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi',
-    'if [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"; fi',
-    'if ! command -v docker >/dev/null 2>&1; then',
-    '  echo "未检测到 Docker。请先安装 Docker Desktop：https://www.docker.com/products/docker-desktop/"',
-    '  if command -v brew >/dev/null 2>&1; then echo "也可以执行：brew install --cask docker"; fi',
-    '  exit 1',
-    'fi',
-    'if ! docker info >/dev/null 2>&1; then',
-    '  echo "Docker 已安装但后台未运行。正在尝试打开 Docker Desktop，请等它启动完成后重新运行本流程。"',
-    '  open -a Docker >/dev/null 2>&1 || true',
-    '  exit 1',
-    'fi',
-    'if ! docker compose version >/dev/null 2>&1; then echo "当前 Docker 缺少 compose 子命令，请更新 Docker Desktop。"; exit 1; fi',
-    'if ! command -v git >/dev/null 2>&1; then',
-    '  if command -v brew >/dev/null 2>&1; then brew list git >/dev/null 2>&1 || brew install git; fi',
-    'fi',
-    'if ! command -v git >/dev/null 2>&1; then echo "未找到 git，请先安装 Git。"; exit 1; fi',
-    workdirAssignment,
-    `PROJECT_URL=${quotedProjectUrl}`,
-    'mkdir -p "$(dirname "$WORKDIR")"',
-    'if [ ! -d "$WORKDIR/.git" ]; then',
-    '  echo "克隆 GPT-SoVITS 到 $WORKDIR"',
-    '  git clone "$PROJECT_URL" "$WORKDIR"',
-    'fi',
-    'cd "$WORKDIR"',
-    'mkdir -p .hermes-yachiyo',
-    "cat > .hermes-yachiyo/Dockerfile <<'DOCKERFILE'",
-    'FROM python:3.11-slim',
-    'ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1',
-    'RUN apt-get update \\',
-    '  && apt-get install -y --no-install-recommends \\',
-    '    bash ca-certificates cmake curl ffmpeg git libmecab-dev libsndfile1 mecab mecab-ipadic-utf8 pkg-config build-essential \\',
-    '  && rm -rf /var/lib/apt/lists/*',
-    'WORKDIR /workspace/GPT-SoVITS',
-    'COPY requirements.txt /tmp/gpt-sovits-requirements.txt',
-    'RUN python -m pip install --upgrade pip wheel setuptools \\',
-    '  && python -m pip install -r /tmp/gpt-sovits-requirements.txt',
-    'DOCKERFILE',
-    "cat > .hermes-yachiyo/docker-compose.yml <<'YAML'",
-    'services:',
-    '  gpt-sovits:',
-    '    container_name: hermes-yachiyo-gpt-sovits',
-    '    build:',
-    '      context: ..',
-    '      dockerfile: .hermes-yachiyo/Dockerfile',
-    '    working_dir: /workspace/GPT-SoVITS',
-    '    command: ["bash", "-lc", "python api_v2.py -a 0.0.0.0 -p 9880"]',
-    '    restart: unless-stopped',
-    '    environment:',
-    '      PYTHONUNBUFFERED: "1"',
-    '    ports:',
-    '      - "9880:9880"',
-    '    volumes:',
-    '      - ..:/workspace/GPT-SoVITS',
-    '      - ${HOME}:${HOME}:ro',
-    'YAML',
-    'echo "开始构建并启动 Docker 后台服务。"',
-    'docker compose -f .hermes-yachiyo/docker-compose.yml up -d --build',
-    'docker compose -f .hermes-yachiyo/docker-compose.yml ps',
-    'if [ "$(uname)" = "Darwin" ]; then',
-    '  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.hermes/yachiyo/logs"',
-    '  DOCKER_AUTOSTART_PLIST="$HOME/Library/LaunchAgents/com.hermes-yachiyo.docker-desktop.plist"',
-    '  cat > "$DOCKER_AUTOSTART_PLIST" <<PLIST',
-    '<?xml version="1.0" encoding="UTF-8"?>',
-    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
-    '<plist version="1.0">',
-    '<dict>',
-    '  <key>Label</key>',
-    '  <string>com.hermes-yachiyo.docker-desktop</string>',
-    '  <key>ProgramArguments</key>',
-    '  <array>',
-    '    <string>/usr/bin/open</string>',
-    '    <string>-a</string>',
-    '    <string>Docker</string>',
-    '  </array>',
-    '  <key>RunAtLoad</key>',
-    '  <true/>',
-    '  <key>StandardOutPath</key>',
-    '  <string>$HOME/.hermes/yachiyo/logs/docker-desktop-out.log</string>',
-    '  <key>StandardErrorPath</key>',
-    '  <string>$HOME/.hermes/yachiyo/logs/docker-desktop-err.log</string>',
-    '</dict>',
-    '</plist>',
-    'PLIST',
-    '  launchctl bootout "gui/$(id -u)" "$DOCKER_AUTOSTART_PLIST" >/dev/null 2>&1 || true',
-    '  launchctl bootstrap "gui/$(id -u)" "$DOCKER_AUTOSTART_PLIST" >/dev/null 2>&1 || true',
-    '  echo "已安装 Docker Desktop 登录自启；容器 restart: unless-stopped 会随 Docker 启动自动恢复。"',
-    'fi',
-    'echo "Docker 服务已提交到后台运行。API 地址：http://127.0.0.1:9880"',
-    'echo "查看日志：docker compose -f $WORKDIR/.hermes-yachiyo/docker-compose.yml logs -f gpt-sovits"',
+    'echo "如果需要后台运行，请回到设置页点击“启动本地后台/自启”。"',
   ].join('\n');
 }
 
@@ -1143,12 +965,10 @@ function gsvServiceStatusText(status: GptSovitsServiceStatus | null): string {
   if (status.reachable) return 'API 已可达；可以保存并测试语音链路。';
   if (!status.workdir_exists) return '请先填写 GPT-SoVITS 服务目录，或先安装 GPT-SoVITS 本体。';
   if (!status.command_configured) return '请先填写服务启动命令。';
-  if (status.docker?.available === false) return '未检测到 Docker；可使用本地依赖部署，或先安装 Docker Desktop 后使用容器服务。';
-  if (status.docker?.available && status.docker?.daemon_running === false) return 'Docker 已安装但未运行；启动 Docker Desktop 后可部署容器服务。';
   if (status.tools?.python311 === false) return '建议先安装 Python 3.11：brew install python@3.11。';
   if (status.tools?.mecab_config === false) return '缺少 mecab-config，部署前需要：brew install mecab。';
   if (status.launch_agent_installed) return status.launch_agent_running ? 'LaunchAgent 已运行，等待 API 就绪。' : 'LaunchAgent 已安装但未运行，可尝试重新启动后台服务或打开调试终端查看日志。';
-  return status.reachable_error || '本地 API 暂不可达，可打开调试终端、启动后台服务或部署 Docker。';
+  return status.reachable_error || '本地 API 暂不可达，可打开调试终端或启动本地后台服务。';
 }
 
 function formatGsvTools(tools?: Record<string, boolean>): string {
@@ -1160,13 +980,4 @@ function formatGsvTools(tools?: Record<string, boolean>): string {
     ['mecab-config', tools.mecab_config],
   ];
   return items.map(([label, ok]) => `${label} ${ok ? '可用' : '缺失'}`).join(' / ');
-}
-
-function formatGsvDockerStatus(status?: GptSovitsServiceStatus['docker']): string {
-  if (!status) return '—';
-  if (!status.available) return '未安装';
-  if (!status.compose_available) return '缺少 Compose';
-  if (!status.daemon_running) return 'Docker 未运行';
-  if (status.container_running) return status.autostart_installed ? '容器运行中，自启已安装' : '容器运行中';
-  return status.error || '可用，容器未运行';
 }

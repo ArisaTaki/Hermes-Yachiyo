@@ -16,8 +16,6 @@ from urllib.request import Request, urlopen
 
 
 LAUNCH_AGENT_LABEL = "com.hermes-yachiyo.gpt-sovits"
-DOCKER_CONTAINER_NAME = "hermes-yachiyo-gpt-sovits"
-DOCKER_AUTOSTART_LABEL = "com.hermes-yachiyo.docker-desktop"
 
 
 def get_gpt_sovits_service_status(config: Any) -> dict[str, Any]:
@@ -27,7 +25,6 @@ def get_gpt_sovits_service_status(config: Any) -> dict[str, Any]:
     workdir = _expand_path(str(getattr(tts, "gsv_service_workdir", "") or ""))
     command = str(getattr(tts, "gsv_service_command", "") or "").strip()
     plist_path = _launch_agent_path()
-    docker_compose_path = (workdir / ".hermes-yachiyo" / "docker-compose.yml") if workdir else None
     reachable = _service_reachable(base_url)
     return {
         "provider": "gpt-sovits",
@@ -51,9 +48,7 @@ def get_gpt_sovits_service_status(config: Any) -> dict[str, Any]:
             "uv": _tool_exists("uv"),
             "ffmpeg": _tool_exists("ffmpeg"),
             "mecab_config": _tool_exists("mecab-config"),
-            "docker": _tool_exists("docker"),
         },
-        "docker": _docker_status(docker_compose_path),
         "logs": {
             "stdout": _display_path(_log_path("out")),
             "stderr": _display_path(_log_path("err")),
@@ -167,10 +162,6 @@ def _launch_agent_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{LAUNCH_AGENT_LABEL}.plist"
 
 
-def _docker_autostart_path() -> Path:
-    return Path.home() / "Library" / "LaunchAgents" / f"{DOCKER_AUTOSTART_LABEL}.plist"
-
-
 def _launch_agent_running() -> bool:
     if platform.system() != "Darwin":
         return False
@@ -221,62 +212,6 @@ def _tool_path(*names: str) -> str | None:
 
 def _tool_exists(*names: str) -> bool:
     return _tool_path(*names) is not None
-
-
-def _docker_status(compose_file: Path | None) -> dict[str, Any]:
-    docker = _tool_path("docker")
-    status: dict[str, Any] = {
-        "available": bool(docker),
-        "compose_available": False,
-        "daemon_running": False,
-        "container_name": DOCKER_CONTAINER_NAME,
-        "container_running": False,
-        "compose_file": str(compose_file) if compose_file else "",
-        "compose_file_display": _display_path(compose_file) if compose_file else "",
-        "autostart_installed": _docker_autostart_path().exists(),
-        "autostart_path": str(_docker_autostart_path()),
-        "autostart_path_display": _display_path(_docker_autostart_path()),
-        "error": "",
-    }
-    if not docker:
-        status["error"] = "未检测到 Docker"
-        return status
-
-    compose = _run_docker(docker, ["compose", "version"], timeout=3)
-    status["compose_available"] = compose.returncode == 0
-    if compose.returncode != 0:
-        status["error"] = _command_error("docker compose version", compose)
-        return status
-
-    info = _run_docker(docker, ["info"], timeout=3)
-    status["daemon_running"] = info.returncode == 0
-    if info.returncode != 0:
-        status["error"] = _command_error("docker info", info)
-        return status
-
-    ps = _run_docker(
-        docker,
-        ["ps", "--filter", f"name=^/{DOCKER_CONTAINER_NAME}$", "--format", "{{.Names}}"],
-        timeout=3,
-    )
-    if ps.returncode == 0:
-        status["container_running"] = DOCKER_CONTAINER_NAME in {line.strip() for line in ps.stdout.splitlines()}
-    else:
-        status["error"] = _command_error("docker ps", ps)
-    return status
-
-
-def _run_docker(docker: str, args: list[str], *, timeout: int) -> subprocess.CompletedProcess[str]:
-    try:
-        return subprocess.run(
-            [docker, *args],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except Exception as exc:
-        return subprocess.CompletedProcess([docker, *args], 1, stdout="", stderr=str(exc))
 
 
 def _display_path(path: Path | None) -> str:
