@@ -14,7 +14,9 @@ only agent text deltas, not Rich banners, tool lists, or startup messages.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
+import io
 import inspect
 import json
 import os
@@ -28,6 +30,8 @@ from urllib.parse import urlparse
 _EVENT_STDOUT = sys.stdout
 _DEBUG_ROUTE_ENV = "HERMES_YACHIYO_DEBUG_ROUTE"
 _DEBUG_ROUTE_TRUE_VALUES = {"1", "true", "yes", "on", "debug"}
+_MAX_IMAGE_DATA_URL_BYTES = 20_000_000
+_RESIZE_IMAGE_TARGET_BYTES = 5_000_000
 _EMPTY_DETAIL_VALUES = {"", "none", "null"}
 _FAILURE_DETAIL_KEYS = (
     "error",
@@ -565,6 +569,140 @@ def _configured_xiaomi_vision_override() -> dict[str, str] | None:
     }
 
 
+def _configured_main_vision_override() -> dict[str, str] | None:
+    """Use the configured main provider through Yachiyo's direct vision path."""
+    try:
+        from hermes_cli.config import load_config
+    except Exception:
+        return None
+    try:
+        cfg = load_config()
+    except Exception:
+        return None
+    if not isinstance(cfg, dict):
+        return None
+    model_cfg = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+    provider_raw = str(model_cfg.get("provider") or "").strip().lower()
+    chat_model = str(model_cfg.get("default") or "").strip()
+    base_url = str(model_cfg.get("base_url") or "").strip()
+    provider = _effective_provider(provider_raw, base_url, chat_model) or provider_raw
+    if not provider or not chat_model:
+        return None
+
+    supports_vision = _lookup_model_supports_vision(provider, chat_model)
+    if supports_vision is False and provider != "xiaomi":
+        return None
+    model = chat_model
+    if provider == "xiaomi" and supports_vision is False:
+        model = _PREFERRED_AUXILIARY_VISION_MODELS["xiaomi"]
+
+    defaults = _resolve_auxiliary_provider_defaults(provider, model)
+    model = _normalize_auxiliary_vision_model(provider, model or defaults.get("model", ""))
+    base_url = base_url or defaults.get("base_url", "")
+    api_key = defaults.get("api_key", "") or _configured_provider_api_key(provider)
+    missing = [
+        label
+        for label, value in (
+            ("provider", provider),
+            ("model", model),
+            ("base_url", base_url),
+            ("api_key", api_key),
+        )
+        if not value
+    ]
+    if missing:
+        raise ImagePreprocessError(f"Yachiyo vision 链路配置不完整：缺少 {', '.join(missing)}")
+    return {
+        "model": model,
+        "base_url": base_url.rstrip("/"),
+        "api_key": api_key,
+    }
+
+
+def _detect_image_mime_type(image_path: Path) -> str:
+    try:
+        header = image_path.read_bytes()[:16]
+    except OSError:
+        return ""
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if header.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if header.startswith(b"GIF87a") or header.startswith(b"GIF89a"):
+        return "image/gif"
+    if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        return "image/webp"
+    suffix = image_path.suffix.lower()
+    return {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+    }.get(suffix, "")
+
+
+def _image_to_base64_data_url(image_path: Path, *, mime_type: str) -> str:
+    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _jpeg_data_url(data: bytes) -> str:
+    return "data:image/jpeg;base64," + base64.b64encode(data).decode("ascii")
+
+
+def _resize_image_for_vision(image_path: Path, *, mime_type: str) -> str:
+    try:
+        from PIL import Image, ImageOps
+    except Exception as exc:
+        raise ValueError("Image too large and Pillow is unavailable for resizing.") from exc
+
+    try:
+        with Image.open(image_path) as opened:
+            source = ImageOps.exif_transpose(opened)
+            if source.mode in {"RGBA", "LA"} or "transparency" in source.info:
+                canvas = Image.new("RGB", source.size, (255, 255, 255))
+                alpha = source.getchannel("A") if source.mode in {"RGBA", "LA"} else None
+                canvas.paste(source.convert("RGBA"), mask=alpha)
+                source = canvas
+            elif source.mode != "RGB":
+                source = source.convert("RGB")
+
+            resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", Image.BICUBIC)
+            last_data: bytes | None = None
+            for edge in (2048, 1600, 1280, 1024, 768, 512):
+                image = source.copy()
+                image.thumbnail((edge, edge), resampling)
+                for quality in (88, 80, 72, 64):
+                    buffer = io.BytesIO()
+                    image.save(buffer, format="JPEG", quality=quality, optimize=True)
+                    data = buffer.getvalue()
+                    last_data = data
+                    data_url = _jpeg_data_url(data)
+                    if len(data_url) <= _RESIZE_IMAGE_TARGET_BYTES:
+                        return data_url
+            if last_data:
+                return _jpeg_data_url(last_data)
+    except OSError as exc:
+        raise ValueError(f"Cannot resize image: {exc}") from exc
+    raise ValueError("Image too large for vision API after resizing.")
+
+
+def _is_image_size_error(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(
+        token in text
+        for token in (
+            "image too large",
+            "payload too large",
+            "request too large",
+            "content length",
+            "base64",
+            "413",
+        )
+    )
+
+
 async def _run_direct_vision_analysis(
     image_path: Path,
     prompt: str,
@@ -574,22 +712,14 @@ async def _run_direct_vision_analysis(
     api_key: str,
 ) -> str:
     from agent.auxiliary_client import async_call_llm, extract_content_or_reasoning
-    from tools.vision_tools import (
-        _MAX_BASE64_BYTES,
-        _RESIZE_TARGET_BYTES,
-        _detect_image_mime_type,
-        _image_to_base64_data_url,
-        _is_image_size_error,
-        _resize_image_for_vision,
-    )
 
     mime_type = _detect_image_mime_type(image_path)
     if not mime_type:
         raise ValueError("Only real image files are supported for vision analysis.")
     image_data_url = _image_to_base64_data_url(image_path, mime_type=mime_type)
-    if len(image_data_url) > _MAX_BASE64_BYTES:
+    if len(image_data_url) > _MAX_IMAGE_DATA_URL_BYTES:
         image_data_url = _resize_image_for_vision(image_path, mime_type=mime_type)
-    if len(image_data_url) > _MAX_BASE64_BYTES:
+    if len(image_data_url) > _MAX_IMAGE_DATA_URL_BYTES:
         raise ValueError("Image too large for vision API after resizing.")
 
     messages = [
@@ -615,7 +745,7 @@ async def _run_direct_vision_analysis(
     try:
         response = await async_call_llm(**call_kwargs)
     except Exception as exc:
-        if _is_image_size_error(exc) and len(image_data_url) > _RESIZE_TARGET_BYTES:
+        if _is_image_size_error(exc) and len(image_data_url) > _RESIZE_IMAGE_TARGET_BYTES:
             image_data_url = _resize_image_for_vision(image_path, mime_type=mime_type)
             messages[0]["content"][1]["image_url"]["url"] = image_data_url
             response = await async_call_llm(**call_kwargs)
@@ -631,45 +761,28 @@ async def _run_direct_vision_analysis(
 
 
 def _run_vision_analysis(image_path: Path, prompt: str) -> str:
-    override = _configured_auxiliary_vision_override() or _configured_xiaomi_vision_override()
-    if override is not None:
-        try:
-            return asyncio.run(
-                _run_direct_vision_analysis(
-                    image_path,
-                    prompt,
-                    model=override["model"],
-                    base_url=override["base_url"],
-                    api_key=override["api_key"],
-                )
+    override = (
+        _configured_auxiliary_vision_override()
+        or _configured_xiaomi_vision_override()
+        or _configured_main_vision_override()
+    )
+    if override is None:
+        raise ImagePreprocessError(
+            "Yachiyo vision 链路不可用：请在主控台配置支持图片的主模型，"
+            "或单独设置图片 Provider/模型。"
+        )
+    try:
+        return asyncio.run(
+            _run_direct_vision_analysis(
+                image_path,
+                prompt,
+                model=override["model"],
+                base_url=override["base_url"],
+                api_key=override["api_key"],
             )
-        except Exception as exc:
-            raise ImagePreprocessError(f"{image_path.name} 分析失败：{exc}") from exc
-
-    try:
-        from tools.vision_tools import vision_analyze_tool
-    except Exception as exc:
-        raise ImagePreprocessError(f"vision 工具不可用：{exc}") from exc
-
-    try:
-        result_json = asyncio.run(
-            vision_analyze_tool(image_url=str(image_path), user_prompt=prompt)
         )
     except Exception as exc:
         raise ImagePreprocessError(f"{image_path.name} 分析失败：{exc}") from exc
-
-    try:
-        result = json.loads(result_json)
-    except json.JSONDecodeError as exc:
-        raise ImagePreprocessError(f"{image_path.name} 返回了无法解析的 vision 结果") from exc
-    if not isinstance(result, dict):
-        raise ImagePreprocessError(f"{image_path.name} 返回了无效的 vision 结果")
-    if not result.get("success"):
-        raise ImagePreprocessError(f"{image_path.name} 分析失败：{_extract_vision_error(result)}")
-    analysis = str(result.get("analysis") or "").strip()
-    if not analysis:
-        raise ImagePreprocessError(f"{image_path.name} 分析结果为空")
-    return analysis
 
 
 def _preprocess_images_with_vision(description: str, image_paths: list[Path]) -> str:
@@ -690,51 +803,8 @@ def _route_images(cli: Any, description: str, image_paths: list[Path]) -> Any:
     if not image_paths:
         return description
     guarded_description = _with_attached_image_guard(description, image_paths)
-    provider = str(getattr(cli, "provider", "") or "").strip()
-    model = str(getattr(cli, "model", "") or "").strip()
-    cfg: dict[str, Any] | None = None
-    try:
-        from agent.image_routing import build_native_content_parts, decide_image_input_mode
-        from hermes_cli.config import load_config
-
-        cfg = load_config()
-        model_cfg = cfg.get("model") if isinstance(cfg, dict) and isinstance(cfg.get("model"), dict) else {}
-        base_url = str(model_cfg.get("base_url") or "").strip()
-        config_provider = str(model_cfg.get("provider") or "").strip()
-        config_model = str(model_cfg.get("default") or "").strip()
-        provider = _effective_provider(provider or config_provider, base_url, model or config_model) or provider
-        model = model or config_model
-        image_mode = decide_image_input_mode(
-            provider,
-            model,
-            cfg,
-        )
-        image_mode = _correct_image_mode_for_provider(provider, model, cfg, image_mode)
-    except Exception:
-        image_mode = "text"
-
-    if image_mode == "native":
-        try:
-            parts, skipped = build_native_content_parts(
-                guarded_description,
-                [str(path) for path in image_paths],
-            )
-            if any(part.get("type") == "image_url" for part in parts):
-                if _is_debug_route_enabled() and skipped:
-                    print(
-                        f"[yachiyo-debug] skipped image paths={len(skipped)}",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-                return parts
-        except Exception as exc:
-            if _is_debug_route_enabled():
-                print(
-                    f"[yachiyo-debug] native image routing failed: {exc}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-
+    if _is_debug_route_enabled():
+        print("[yachiyo-debug] image route=yachiyo_vision_text", file=sys.stderr, flush=True)
     return _preprocess_images_with_vision(guarded_description, image_paths)
 
 

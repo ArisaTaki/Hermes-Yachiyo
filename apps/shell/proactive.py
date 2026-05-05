@@ -362,21 +362,13 @@ class ProactiveDesktopService:
         if not isinstance(executor, HermesExecutor) and getattr(executor, "name", "") != "HermesExecutor":
             return "主动桌面观察需要 Hermes 执行器；当前执行器不支持读取桌面截图"
 
-        hermes_info = {}
-        try:
-            hermes_info = self._runtime.get_status().get("hermes", {})
-        except Exception:
-            hermes_info = {}
-        limited_tools = set(hermes_info.get("limited_tools") or [])
-        if "vision" in limited_tools:
-            return "Hermes vision 工具受限，当前模型/配置无法读取截图；请在主控台运行 hermes setup 或 hermes doctor"
         try:
             image_input = get_current_hermes_image_input_capability()
         except Exception:
-            logger.debug("主动桌面观察读取 Hermes 图片链路能力失败", exc_info=True)
+            logger.debug("主动桌面观察读取 Yachiyo 图片链路能力失败", exc_info=True)
             return None
         if image_input.get("can_attach_images") is False:
-            reason = str(image_input.get("reason") or "当前 Hermes 图片链路不可用")
+            reason = str(image_input.get("reason") or "当前 Yachiyo 图片链路不可用")
             return f"主动桌面观察需要可用的图片识别链路：{reason}"
         return None
 

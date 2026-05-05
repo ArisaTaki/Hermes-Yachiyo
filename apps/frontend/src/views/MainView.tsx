@@ -389,7 +389,7 @@ export function MainView() {
       model: cached?.model || saved?.default || option?.default_model || option?.models?.[0] || '',
       base_url: cached?.base_url ?? saved?.base_url ?? option?.base_url ?? current.base_url,
       api_key: '',
-      image_input_mode: current.image_input_mode || 'auto',
+      image_input_mode: 'text',
       vision_provider: current.vision_provider,
       vision_model: current.vision_model,
       vision_base_url: current.vision_base_url,
@@ -421,7 +421,15 @@ export function MainView() {
       });
     }
     if (actionStatus && /不能为空|配置已保存|连接测试/.test(actionStatus)) setActionStatus('');
-    if (field === 'provider' || field === 'model' || field === 'base_url' || field === 'image_input_mode') {
+    if (
+      field === 'provider'
+      || field === 'model'
+      || field === 'base_url'
+      || field === 'image_input_mode'
+      || field === 'vision_provider'
+      || field === 'vision_model'
+      || field === 'vision_base_url'
+    ) {
       setHermesImageTestResult(null);
     }
   }
@@ -507,7 +515,10 @@ export function MainView() {
   async function persistHermesConfigDraft(errorMessage: string) {
     if (!configForm.provider.trim()) throw new Error('Provider 不能为空');
     if (!configForm.model.trim()) throw new Error('模型名称不能为空');
-    const result = await apiPost<{ ok?: boolean; error?: string; message?: string; configuration?: HermesVisualConfig }>('/ui/hermes/config', configForm);
+    const result = await apiPost<{ ok?: boolean; error?: string; message?: string; configuration?: HermesVisualConfig }>('/ui/hermes/config', {
+      ...configForm,
+      image_input_mode: 'text',
+    });
     if (result.ok === false) throw new Error(result.error || errorMessage);
     if (result.configuration) {
       configFormDirtyRef.current = false;
@@ -637,7 +648,7 @@ export function MainView() {
       await persistHermesConfigDraft('保存图片链路配置失败');
       setActionStatus('图片链路配置已保存，正在测试...');
       const result = await runHermesImageConnectionTest();
-      setActionStatus(result.success ? result.message || '图片链路配置已保存，测试通过' : result.error || 'Hermes 图片链路测试失败');
+      setActionStatus(result.success ? result.message || '图片链路配置已保存，测试通过' : result.error || 'Yachiyo 图片链路测试失败');
     } catch (err) {
       setActionStatus(err instanceof Error ? err.message : '保存并测试图片链路失败');
     } finally {
@@ -889,7 +900,7 @@ function emptyHermesConfigForm(): HermesConfigForm {
     model: '',
     base_url: '',
     api_key: '',
-    image_input_mode: 'auto',
+    image_input_mode: 'text',
     vision_provider: '',
     vision_model: '',
     vision_base_url: '',
@@ -903,7 +914,7 @@ function formFromHermesConfig(config: HermesVisualConfig | null): HermesConfigFo
     model: config?.model?.default || '',
     base_url: config?.model?.base_url || '',
     api_key: '',
-    image_input_mode: config?.image_input?.mode === 'text' ? 'text' : 'auto',
+    image_input_mode: 'text',
     vision_provider: config?.vision?.provider || '',
     vision_model: config?.vision?.configured ? (config?.vision?.effective_model || config?.vision?.model || '') : (config?.vision?.model || ''),
     vision_base_url: config?.vision?.base_url || '',
@@ -1106,7 +1117,7 @@ function hermesImageConnectionNotice(
     return {
       kind: 'danger',
       title: '图片链路测试失败',
-      detail: testResult.error || '请检查图片输入模式、vision provider、Base URL 和 API Key。',
+      detail: testResult.error || '请检查 Yachiyo vision provider、Base URL 和 API Key。',
     };
   }
   if (testResult?.success) return null;
@@ -1129,21 +1140,14 @@ function hermesImageConnectionNotice(
     return {
       kind: 'warn',
       title: '图片配置变更后尚未重新验证',
-      detail: '检测到 provider、模型、Base URL 或图片输入模式变化，请保存并测试图片链路。',
+      detail: '检测到 provider、模型或 Base URL 变化，请保存并测试图片链路。',
     };
   }
   if (imageInput.requires_vision_pipeline) {
     return {
       kind: 'warn',
       title: '图片需要单独验证',
-      detail: '当前配置会先用 Hermes vision 链路识图，再把分析结果交给文本模型；主模型测试只验证文字请求。',
-    };
-  }
-  if (imageInput.route === 'native') {
-    return {
-      kind: 'warn',
-      title: '原生图片链路尚未验证',
-      detail: '当前模型声明支持图片，但仍需要保存并测试图片链路来确认正式 App 能实际识别附件。',
+      detail: '当前配置会先用 Yachiyo vision 识图，再把分析结果交给 Hermes 主模型；主模型测试只验证文字请求。',
     };
   }
   return null;
@@ -1162,7 +1166,6 @@ function hermesImageConnectionStatusLabel(
 ): string {
   if (!imageInput) return '未检测';
   if (imageInput.route === 'blocked') return '不可用';
-  if (imageInput.route === 'native' && imageInput.supports_native_vision === true) return '原生多模态';
   if (validation?.verified) {
     const testedAt = formatShortDateTime(validation.verified_at || validation.tested_at);
     return testedAt === '—' ? '已验证' : `已验证 · ${testedAt}`;
@@ -1353,8 +1356,6 @@ function HermesConfigCenter({
     connectionValidation,
   );
   const imageNotice = hermesImageConnectionNotice(config?.image_input, imageTestResult, imageValidation);
-  const imageInputMode = form.image_input_mode === 'text' ? 'text' : 'auto';
-  const usesSeparateVision = imageInputMode === 'text';
   const ttsProvider = ttsForm.provider || 'none';
   const ttsReady = Boolean(ttsForm.enabled && ttsProvider !== 'none');
   const imageSaveTestDisabled = busy || !hermes?.command_exists;
@@ -1495,91 +1496,71 @@ function HermesConfigCenter({
             <span>{config?.image_input?.label || '未检测'}</span>
           </div>
           <p className="capability-note">
-            默认直接把图片交给主模型。只有主模型不是多模态时，才需要单独设置图片识别模型。
+            图片一律先由 Yachiyo vision 预分析，再把文本结果交给 Hermes 主模型；不再走 Hermes 原生图片输入或 Hermes vision 工具。
           </p>
           <div className="hermes-config-form-grid compact">
-            <label className="settings-field wide" htmlFor="hermes-image-input-mode">
-              <span>图片输入模式</span>
+            <label className="settings-field" htmlFor="hermes-vision-provider">
+              <span>图片 Provider</span>
               <select
-                id="hermes-image-input-mode"
-                value={imageInputMode}
+                id="hermes-vision-provider"
+                value={form.vision_provider}
                 disabled={busy}
-                onChange={(event) => onConfigChange('image_input_mode', event.target.value)}
+                onChange={(event) => onConfigChange('vision_provider', event.target.value)}
               >
-                <option value="auto">使用主模型识别图片（推荐）</option>
-                <option value="text">单独设置图片识别模型</option>
+                <option value="">自动跟随主模型</option>
+                {providerOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {providerOptionLabel(option)}
+                  </option>
+                ))}
               </select>
             </label>
-            {usesSeparateVision ? (
-              <>
-                <label className="settings-field" htmlFor="hermes-vision-provider">
-                  <span>图片 Provider</span>
-                  <select
-                    id="hermes-vision-provider"
-                    value={form.vision_provider}
-                    disabled={busy}
-                    onChange={(event) => onConfigChange('vision_provider', event.target.value)}
-                  >
-                    <option value="">自动跟随主模型</option>
-                    {providerOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {providerOptionLabel(option)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="settings-field" htmlFor="hermes-vision-model">
-                  <span>图片模型</span>
-                  {visionModelOptions.length ? (
-                    <select
-                      id="hermes-vision-model"
-                      value={form.vision_model}
-                      disabled={busy}
-                      onChange={(event) => onConfigChange('vision_model', event.target.value)}
-                    >
-                      <option value="">自动选择</option>
-                      {visionModelOptions.map((model) => <option key={model} value={model}>{model}</option>)}
-                    </select>
-                  ) : (
-                    <input
-                      id="hermes-vision-model"
-                      value={form.vision_model}
-                      placeholder="留空则由 Hermes 自动选择"
-                      disabled={busy}
-                      onChange={(event) => onConfigChange('vision_model', event.target.value)}
-                    />
-                  )}
-                </label>
-                <label className="settings-field wide" htmlFor="hermes-vision-base-url">
-                  <span>图片 Base URL</span>
-                  <input
-                    id="hermes-vision-base-url"
-                    value={form.vision_base_url}
-                    placeholder={config?.vision?.effective_base_url || '留空则跟随 provider 默认值'}
-                    disabled={busy}
-                    onChange={(event) => onConfigChange('vision_base_url', event.target.value)}
-                  />
-                </label>
-                <label className="settings-field wide" htmlFor="hermes-vision-api-key">
-                  <span>图片 API Key</span>
-                  <input
-                    id="hermes-vision-api-key"
-                    type="password"
-                    value={form.vision_api_key}
-                    placeholder={visionApiKeyConfigured ? '已配置，留空则不修改' : visionApiKeyLabel ? `输入 ${visionApiKeyLabel}` : '留空则复用主 provider 凭据'}
-                    disabled={busy || (!visionApiKeyLabel && !form.vision_provider)}
-                    onChange={(event) => onConfigChange('vision_api_key', event.target.value)}
-                  />
-                </label>
-              </>
-            ) : (
-              <p className="capability-note wide-form-note">
-                当前未单独设置图片模型。聊天窗口会把图片直接交给主模型；如果主模型不支持图片，会在发送前给出提示并阻止粘贴。
-              </p>
-            )}
+            <label className="settings-field" htmlFor="hermes-vision-model">
+              <span>图片模型</span>
+              {visionModelOptions.length ? (
+                <select
+                  id="hermes-vision-model"
+                  value={form.vision_model}
+                  disabled={busy}
+                  onChange={(event) => onConfigChange('vision_model', event.target.value)}
+                >
+                  <option value="">自动选择</option>
+                  {visionModelOptions.map((model) => <option key={model} value={model}>{model}</option>)}
+                </select>
+              ) : (
+                <input
+                  id="hermes-vision-model"
+                  value={form.vision_model}
+                  placeholder="留空则由 Yachiyo 自动选择"
+                  disabled={busy}
+                  onChange={(event) => onConfigChange('vision_model', event.target.value)}
+                />
+              )}
+            </label>
+            <label className="settings-field wide" htmlFor="hermes-vision-base-url">
+              <span>图片 Base URL</span>
+              <input
+                id="hermes-vision-base-url"
+                value={form.vision_base_url}
+                placeholder={config?.vision?.effective_base_url || '留空则跟随 provider 默认值'}
+                disabled={busy}
+                onChange={(event) => onConfigChange('vision_base_url', event.target.value)}
+              />
+            </label>
+            <label className="settings-field wide" htmlFor="hermes-vision-api-key">
+              <span>图片 API Key</span>
+              <input
+                id="hermes-vision-api-key"
+                type="password"
+                value={form.vision_api_key}
+                placeholder={visionApiKeyConfigured ? '已配置，留空则不修改' : visionApiKeyLabel ? `输入 ${visionApiKeyLabel}` : '留空则复用主 provider 凭据'}
+                disabled={busy || (!visionApiKeyLabel && !form.vision_provider)}
+                onChange={(event) => onConfigChange('vision_api_key', event.target.value)}
+              />
+            </label>
           </div>
           <div className="hermes-config-footer">
-            <span>{usesSeparateVision ? '图片会先由独立模型识别，再把结果交给主模型。' : '主模型承担图片识别；不需要额外 vision 配置。'}</span>
+            <span>图片会先由 Yachiyo vision 识别，再把结果交给主模型。</span>
             <div className="hermes-form-actions">
               <button
                 type="submit"

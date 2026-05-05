@@ -421,7 +421,7 @@ def test_hermes_image_connection_resolves_command_name_from_path(tmp_path, monke
         store.close()
 
 
-def test_hermes_image_connection_native_route_runs_stream_bridge_probe(tmp_path, monkeypatch):
+def test_hermes_image_connection_yachiyo_vision_route_runs_stream_bridge_probe(tmp_path, monkeypatch):
     config_path = tmp_path / "config.yaml"
     env_path = tmp_path / ".env"
     config_path.write_text(
@@ -470,11 +470,11 @@ def test_hermes_image_connection_native_route_runs_stream_bridge_probe(tmp_path,
                 },
                 "api_key": {"name": "XIAOMI_API_KEY", "configured": True},
                 "image_input": {
-                    "route": "native",
+                    "route": "vision_text",
                     "provider": "xiaomi",
                     "model": "mimo-v2.5-pro",
                     "supports_native_vision": True,
-                    "requires_vision_pipeline": False,
+                    "requires_vision_pipeline": True,
                 },
             },
         )

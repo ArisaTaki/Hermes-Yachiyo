@@ -228,13 +228,6 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
     requirement: '需要 browser.cdp_url 或本机 Chrome 调试端口',
   },
   {
-    id: 'vision',
-    label: '图像理解',
-    category: '多模态',
-    description: '读取截图和图片内容，辅助视觉类任务。',
-    requirement: '需要模型或 provider 支持视觉输入',
-  },
-  {
     id: 'image_gen',
     label: '图片生成',
     category: '多模态',
@@ -378,6 +371,8 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
     planned: true,
   },
 ];
+
+const HIDDEN_HERMES_TOOLS = new Set(['vision', 'vision_analyze']);
 
 export function ToolCenterView() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -912,22 +907,29 @@ export function ToolCenterView() {
   const doctorCache = diagnosticCache?.commands?.doctor;
   const cacheStale = Boolean(diagnosticCache?.stale);
   const doctorSummary = !cacheStale ? doctorCache?.doctor_summary : undefined;
-  const limitedToolNames = cacheStale
+  const rawLimitedToolNames = cacheStale
     ? []
     : doctorSummary
       ? doctorSummary.limited_tools || []
       : hermes?.limited_tools || [];
-  const availableToolNames = cacheStale
+  const limitedToolNames = rawLimitedToolNames.filter((tool) => !isHiddenHermesTool(tool));
+  const rawAvailableToolNames = cacheStale
     ? []
     : doctorSummary?.available_tools?.length
       ? doctorSummary.available_tools
       : hermes?.available_tools || [];
-  const limitedToolDetails = cacheStale
+  const availableToolNames = rawAvailableToolNames.filter((tool) => !isHiddenHermesTool(tool));
+  const rawLimitedToolDetails = cacheStale
     ? {}
     : doctorSummary
       ? doctorSummary.limited_tool_details || {}
       : hermes?.limited_tool_details || {};
-  const issueCount = cacheStale ? 0 : doctorSummary?.doctor_issues_count ?? hermes?.doctor_issues_count ?? 0;
+  const limitedToolDetails = Object.fromEntries(
+    Object.entries(rawLimitedToolDetails).filter(([tool]) => !isHiddenHermesTool(tool)),
+  );
+  const hiddenLimitedCount = rawLimitedToolNames.filter((tool) => isHiddenHermesTool(tool)).length;
+  const rawIssueCount = doctorSummary?.doctor_issues_count ?? hermes?.doctor_issues_count ?? 0;
+  const issueCount = cacheStale ? 0 : Math.max(0, rawIssueCount - hiddenLimitedCount);
   const doctorReferencedTools = [
     ...limitedToolNames,
     ...availableToolNames,
@@ -1687,10 +1689,14 @@ function catalogForHermesToolsets(
   toolsets?: HermesToolsetItem[],
   doctorReferencedTools?: string[],
 ): HermesToolCatalogItem[] {
-  const baseCatalog = catalog.filter((item) => !item.planned);
+  const baseCatalog = catalog.filter((item) => !item.planned && !isHiddenHermesTool(item.id));
   if (!toolsets?.length && !doctorReferencedTools?.length) return baseCatalog;
-  const supported = new Set((toolsets || []).map((item) => canonicalToolName(item.canonical_id || item.id)));
-  const referenced = new Set((doctorReferencedTools || []).map(canonicalToolName));
+  const supported = new Set(
+    (toolsets || [])
+      .filter((item) => !isHiddenHermesTool(item.canonical_id || item.id))
+      .map((item) => canonicalToolName(item.canonical_id || item.id)),
+  );
+  const referenced = new Set((doctorReferencedTools || []).filter((tool) => !isHiddenHermesTool(tool)).map(canonicalToolName));
   return baseCatalog.filter((item) => {
     const aliases = toolNameAliases(item).map(canonicalToolName);
     if (item.id === 'browser-cdp') {
@@ -1823,6 +1829,10 @@ function attentionItemsForTools(
   }
 
   return items;
+}
+
+function isHiddenHermesTool(tool: string | undefined): boolean {
+  return Boolean(tool && HIDDEN_HERMES_TOOLS.has(canonicalToolName(tool)));
 }
 
 function limitedDetailFor(item: HermesToolCatalogItem, details: Record<string, string>): string {

@@ -43,7 +43,7 @@ def _allow_image_input(monkeypatch):
     monkeypatch.setattr(
         proactive_mod,
         "get_current_hermes_image_input_capability",
-        lambda: {"can_attach_images": True, "route": "native"},
+        lambda: {"can_attach_images": True, "route": "vision_text"},
     )
 
 
@@ -94,7 +94,7 @@ def test_proactive_service_blocks_when_hermes_not_ready():
     assert runtime.state.list_tasks() == []
 
 
-def test_proactive_service_blocks_when_vision_limited():
+def test_proactive_service_ignores_hermes_vision_tool_limit():
     runtime = _RuntimeStub()
     runtime.limited_tools = ["vision"]
     config = AppConfig()
@@ -104,8 +104,7 @@ def test_proactive_service_blocks_when_vision_limited():
 
     state = service.get_state()
 
-    assert state["status"] == "blocked"
-    assert "vision" in state["error"]
+    assert state["status"] == "waiting"
     assert runtime.state.list_tasks() == []
 
 

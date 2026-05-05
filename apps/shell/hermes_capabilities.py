@@ -120,10 +120,9 @@ def build_hermes_image_input_capability(
 ) -> dict[str, Any]:
     """Summarize whether chat can submit images for the active Hermes model.
 
-    Hermes supports two image paths: native multimodal input and a text
-    pre-analysis path backed by ``vision_analyze``.  Yachiyo should not submit
-    images silently when the active model would require an unconfigured vision
-    pre-analysis pipeline.
+    Yachiyo intentionally routes every image through its own vision pre-analysis
+    path.  Hermes native multimodal input and Hermes' ``vision_analyze`` tool
+    are not advertised as available routes here.
     """
     image_config = read_hermes_image_input_config(config_path)
     model_config = read_hermes_model_config(config_path)
@@ -135,7 +134,7 @@ def build_hermes_image_input_capability(
         )
         or (provider or "").strip().lower()
     )
-    mode = image_config["mode"]
+    mode = "text"
     explicit_aux_vision = bool(image_config["auxiliary_vision_configured"])
     supports_vision = lookup_model_supports_vision(effective_provider, model)
     if not effective_provider or not model:
@@ -150,48 +149,6 @@ def build_hermes_image_input_capability(
             reason="Hermes 模型配置未完成，暂不能提交图片。",
         )
 
-    if mode == "text":
-        if explicit_aux_vision:
-            return _image_input_payload(
-                provider=effective_provider,
-                model=model,
-                mode=mode,
-                supports_vision=supports_vision,
-                route="vision_text",
-                can_attach=True,
-                requires_vision_pipeline=True,
-                reason="图片会先交给单独的图片识别模型分析，再把结果发给当前模型。",
-            )
-        return _image_input_payload(
-            provider=effective_provider,
-            model=model,
-            mode=mode,
-            supports_vision=supports_vision,
-            route="blocked",
-            can_attach=False,
-            requires_vision_pipeline=True,
-            reason="图片识别模式已设为单独模型，但还没有完成图片 Provider 或图片模型配置。",
-        )
-
-    if mode == "native":
-        can_attach = supports_vision is not False
-        return _image_input_payload(
-            provider=effective_provider,
-            model=model,
-            mode=mode,
-            supports_vision=supports_vision,
-            route="native" if can_attach else "blocked",
-            can_attach=can_attach,
-            requires_vision_pipeline=False,
-            reason=(
-                "当前模型支持原生图片输入。"
-                if supports_vision is True
-                else "未能确认当前模型支持原生图片输入；如发送失败，请切回自动或配置 vision 链路。"
-                if supports_vision is None
-                else "当前模型未声明多模态能力，不能强制原生发送图片。"
-            ),
-        )
-
     if explicit_aux_vision:
         return _image_input_payload(
             provider=effective_provider,
@@ -201,7 +158,7 @@ def build_hermes_image_input_capability(
             route="vision_text",
             can_attach=True,
             requires_vision_pipeline=True,
-            reason="已配置单独图片识别模型，图片会先经 vision 链路分析后再发给当前模型。",
+            reason="图片会先由 Yachiyo vision 预分析，再把结果交给当前主模型。",
         )
 
     if effective_provider == "xiaomi" and supports_vision is False:
@@ -214,8 +171,8 @@ def build_hermes_image_input_capability(
             can_attach=True,
             requires_vision_pipeline=True,
             reason=(
-                "当前小米主模型的原生图片入口不可用；Yachiyo 会自动使用 mimo-v2.5 "
-                "先识别图片，再把结果交给主模型。"
+                "当前小米主模型不走原生图片入口；Yachiyo 会自动使用 mimo-v2.5 "
+                "预分析图片，再把结果交给主模型。"
             ),
         )
 
@@ -225,10 +182,10 @@ def build_hermes_image_input_capability(
             model=model,
             mode=mode,
             supports_vision=supports_vision,
-            route="native",
+            route="vision_text",
             can_attach=True,
-            requires_vision_pipeline=False,
-            reason="当前模型支持原生图片输入。",
+            requires_vision_pipeline=True,
+            reason="当前主模型支持图片；Yachiyo 会直接调用它做 vision 预分析，不再走 Hermes 原生图片输入。",
         )
 
     if supports_vision is False:
@@ -250,10 +207,10 @@ def build_hermes_image_input_capability(
         model=model,
         mode=mode,
         supports_vision=supports_vision,
-        route="unknown",
+        route="vision_text",
         can_attach=True,
-        requires_vision_pipeline=False,
-        reason="未能确认当前模型能力；允许提交图片，若失败请切换多模态模型或配置 vision 链路。",
+        requires_vision_pipeline=True,
+        reason="未能确认当前模型图片能力；Yachiyo 会尝试直接 vision 预分析，若测试失败请配置单独图片模型。",
     )
 
 
@@ -272,10 +229,8 @@ def _image_input_payload(
     requires_vision_pipeline: bool,
     reason: str,
 ) -> dict[str, Any]:
-    if can_attach and route == "native":
-        label = "图片可用"
-    elif can_attach and route == "vision_text":
-        label = "需 vision 链路"
+    if can_attach and route == "vision_text":
+        label = "Yachiyo vision"
     elif can_attach:
         label = "能力未确认"
     else:
@@ -286,6 +241,7 @@ def _image_input_payload(
         "route": route,
         "supports_native_vision": supports_vision,
         "requires_vision_pipeline": requires_vision_pipeline,
+        "native_disabled": True,
         "provider": provider,
         "model": model,
         "label": label,
@@ -313,7 +269,8 @@ def read_hermes_image_input_config(config_path: Path) -> dict[str, Any]:
             ("auxiliary", "vision", "api_key"),
         },
     )
-    mode = values.get(("agent", "image_input_mode"), "auto").strip().lower()
+    stored_mode = values.get(("agent", "image_input_mode"), "auto").strip().lower()
+    mode = stored_mode
     if mode not in _VALID_IMAGE_INPUT_MODES:
         mode = "auto"
     vision_provider = values.get(("auxiliary", "vision", "provider"), "").strip().lower()
@@ -322,7 +279,8 @@ def read_hermes_image_input_config(config_path: Path) -> dict[str, Any]:
     vision_api_key = values.get(("auxiliary", "vision", "api_key"), "").strip()
     explicit = bool((vision_provider and vision_provider != "auto") or vision_model or vision_base_url or vision_api_key)
     return {
-        "mode": mode,
+        "mode": "text",
+        "stored_mode": mode,
         "auxiliary_vision_configured": explicit,
         "auxiliary_vision_provider": vision_provider,
         "auxiliary_vision_model": vision_model,

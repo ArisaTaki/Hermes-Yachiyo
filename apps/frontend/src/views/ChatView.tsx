@@ -656,7 +656,7 @@ function canAttachImages(executor: ExecutorPayload | null) {
 
 function imageInputUnavailableText(executor: ExecutorPayload | null) {
   return executor?.image_input?.reason
-    || '当前主模型不能直接读取图片。请在主控台切换支持图片的模型，或单独设置图片识别模型后再发送。';
+    || '当前 Yachiyo vision 链路不可用。请在主控台切换支持图片的主模型，或单独设置图片识别模型后再发送。';
 }
 
 function imageInputHelpText(executor: ExecutorPayload | null) {

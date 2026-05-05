@@ -211,7 +211,6 @@ _HERMES_TOOL_ALIASES: dict[str, tuple[str, ...]] = {
     "web": ("web", "search", "web_search", "web_extract"),
     "browser": ("browser", "browser_navigate", "browser_click"),
     "browser-cdp": ("browser", "browser_cdp", "browser-cdp"),
-    "vision": ("vision", "vision_analyze"),
     "image_gen": ("image_gen", "image_generate"),
     "terminal": ("terminal", "process"),
     "file": ("file", "read_file", "write_file", "patch", "search_files"),
@@ -2507,8 +2506,8 @@ class MainWindowAPI:
     def test_hermes_image_connection(self) -> Dict[str, Any]:
         """验证当前图片输入链路。
 
-        文本 provider/API Key 通过不代表图片输入可用。原生多模态模型可直接通过；
-        文本模型需要用户显式配置独立图片识别模型后，才会测试 vision 预分析链路。
+        文本 provider/API Key 通过不代表图片输入可用；所有图片都会先经过
+        Yachiyo vision 预分析，再把文字结果交给 Hermes 主模型。
         """
         configuration = self.get_hermes_configuration()
         image_input = configuration.get("image_input") if isinstance(configuration.get("image_input"), dict) else {}
@@ -2546,7 +2545,7 @@ class MainWindowAPI:
             return {
                 "ok": False,
                 "success": False,
-                "error": "无法定位 Hermes Agent 的 Python 环境，无法测试图片链路",
+                "error": "无法定位 Hermes Agent 的 Python 环境，无法测试 Yachiyo 图片链路",
                 "needs_env_refresh": needs_env_refresh,
             }
 
@@ -2555,7 +2554,7 @@ class MainWindowAPI:
             return {
                 "ok": False,
                 "success": False,
-                "error": "无法定位 Hermes-Yachiyo 图片桥接脚本，无法测试图片链路",
+                "error": "无法定位 Hermes-Yachiyo 图片桥接脚本，无法测试 Yachiyo 图片链路",
                 "route": route,
                 "image_input": image_input,
                 "needs_env_refresh": needs_env_refresh,
@@ -2588,7 +2587,7 @@ class MainWindowAPI:
                 payload = {
                     "ok": False,
                     "success": False,
-                    "error": "Hermes 图片链路测试超时，请检查 vision provider、Base URL 或网络",
+                    "error": "Yachiyo 图片链路测试超时，请检查 vision provider、Base URL 或网络",
                     "detail": detail,
                     "route": route,
                     "image_input": image_input,
@@ -2611,7 +2610,7 @@ class MainWindowAPI:
             payload = {
                 "ok": True,
                 "success": True,
-                "message": "Hermes 图片链路测试通过，测试图片已被实际识别",
+                "message": "Yachiyo 图片链路测试通过，测试图片已被实际识别",
                 "output_preview": stdout,
                 "stderr_preview": stderr,
                 "route": route,
@@ -2631,9 +2630,9 @@ class MainWindowAPI:
         if result.returncode == 0 and not bridge_failed and response:
             detail = f"图片链路没有识别出测试图右上角的绿色色块，模型返回：{response[:500]}"
         error = (
-            f"Hermes 图片链路测试失败：{detail}"
+            f"Yachiyo 图片链路测试失败：{detail}"
             if detail
-            else f"Hermes 图片链路测试失败（exit={result.returncode}）"
+            else f"Yachiyo 图片链路测试失败（exit={result.returncode}）"
         )
         payload = {
             "ok": False,
@@ -2741,7 +2740,7 @@ class MainWindowAPI:
         model = str(changes.get("model") or "").strip()
         base_url = str(changes.get("base_url") or "").strip()
         api_key = str(changes.get("api_key") or "").strip()
-        image_input_mode = str(changes.get("image_input_mode") or "auto").strip().lower()
+        image_input_mode = str(changes.get("image_input_mode") or "text").strip().lower()
         vision_provider = str(changes.get("vision_provider") or "").strip()
         vision_model = str(changes.get("vision_model") or "").strip()
         vision_base_url = str(changes.get("vision_base_url") or "").strip()
@@ -2750,12 +2749,12 @@ class MainWindowAPI:
             return {"ok": False, "error": "Provider 不能为空"}
         if not model:
             return {"ok": False, "error": "模型名称不能为空"}
-        if "image_input_mode" in changes and image_input_mode not in {"auto", "native", "text"}:
-            return {"ok": False, "error": "图片输入模式仅支持 auto / native / text"}
         has_vision_changes = any(
             key in changes
             for key in ("vision_provider", "vision_model", "vision_base_url", "vision_api_key")
         )
+        if "image_input_mode" in changes or has_vision_changes:
+            image_input_mode = "text"
         if has_vision_changes and "image_input_mode" in changes and image_input_mode == "text" and not (
             vision_provider or provider
         ):

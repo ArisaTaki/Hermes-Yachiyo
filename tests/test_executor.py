@@ -791,24 +791,25 @@ class TestHermesStreamBridgeImageRouting:
         monkeypatch.setitem(sys.modules, "hermes_cli", hermes_pkg)
         monkeypatch.setitem(sys.modules, "hermes_cli.config", config_mod)
 
-    def test_xiaomi_native_keeps_image_parts(self, monkeypatch, tmp_path):
+    def test_xiaomi_native_mode_still_uses_yachiyo_vision_preprocessor(self, monkeypatch, tmp_path):
         self._install_fake_image_routing(monkeypatch, {"agent": {"image_input_mode": "native"}})
         image = tmp_path / "screen.png"
         image.write_bytes(b"png")
+        monkeypatch.setattr(
+            bridge_mod,
+            "_preprocess_images_with_vision",
+            lambda text, images: f"vision::{text}::{len(images)}",
+        )
 
         class FakeCli:
             provider = "xiaomi"
             model = "mimo-v2.5"
 
-            def _preprocess_images_with_vision(self, text, images, *, announce=True):
-                raise AssertionError("native mode should not preprocess")
-
         routed = bridge_mod._route_images(FakeCli(), "看图", [image])
 
-        assert isinstance(routed, list)
-        assert "不要调用桌面截图" in routed[0]["text"]
-        assert routed[0]["text"].endswith("看图")
-        assert routed[1]["type"] == "image_url"
+        assert routed.startswith("vision::[Yachiyo 附件图片上下文]")
+        assert "不要调用桌面截图" in routed
+        assert "看图::1" in routed
 
     def test_xiaomi_pro_auto_uses_vision_preprocessor(self, monkeypatch, tmp_path):
         self._install_fake_image_routing(monkeypatch, {"agent": {"image_input_mode": "auto"}})
@@ -854,7 +855,7 @@ class TestHermesStreamBridgeImageRouting:
         assert routed.startswith("vision::[Yachiyo 附件图片上下文]")
         assert "看图::1" in routed
 
-    def test_auto_openrouter_uses_models_cache_for_native_image_parts(self, monkeypatch, tmp_path):
+    def test_auto_openrouter_uses_yachiyo_vision_preprocessor(self, monkeypatch, tmp_path):
         cache_dir = tmp_path / ".hermes"
         cache_dir.mkdir()
         (cache_dir / "models_dev_cache.json").write_text(
@@ -900,6 +901,11 @@ class TestHermesStreamBridgeImageRouting:
 
         image = tmp_path / "screen.png"
         image.write_bytes(b"png")
+        monkeypatch.setattr(
+            bridge_mod,
+            "_preprocess_images_with_vision",
+            lambda text, images: f"vision::{text}::{len(images)}",
+        )
 
         class FakeCli:
             provider = "auto"
@@ -907,8 +913,8 @@ class TestHermesStreamBridgeImageRouting:
 
         routed = bridge_mod._route_images(FakeCli(), "看图", [image])
 
-        assert isinstance(routed, list)
-        assert routed[1]["type"] == "image_url"
+        assert routed.startswith("vision::[Yachiyo 附件图片上下文]")
+        assert "看图::1" in routed
 
     def test_text_mode_uses_vision_preprocessor(self, monkeypatch, tmp_path):
         self._install_fake_image_routing(monkeypatch, {"agent": {"image_input_mode": "text"}})
@@ -955,16 +961,16 @@ class TestHermesStreamBridgeImageRouting:
     def test_strict_vision_preprocessor_does_not_emit_tool_retry_hint(self, monkeypatch, tmp_path):
         image = tmp_path / "screen.png"
         image.write_bytes(b"png")
-        tools_pkg = types.ModuleType("tools")
-        tools_pkg.__path__ = []  # type: ignore[attr-defined]
-        vision_mod = types.ModuleType("tools.vision_tools")
+        monkeypatch.setattr(
+            bridge_mod,
+            "_configured_auxiliary_vision_override",
+            lambda: {"model": "vision-model", "base_url": "https://vision.example/v1", "api_key": "test-key"},
+        )
 
-        async def fake_vision_analyze_tool(**_kwargs):
-            return json.dumps({"success": True, "analysis": "一张图片"})
+        async def fake_run_direct_vision_analysis(*_args, **_kwargs):
+            return "一张图片"
 
-        vision_mod.vision_analyze_tool = fake_vision_analyze_tool
-        monkeypatch.setitem(sys.modules, "tools", tools_pkg)
-        monkeypatch.setitem(sys.modules, "tools.vision_tools", vision_mod)
+        monkeypatch.setattr(bridge_mod, "_run_direct_vision_analysis", fake_run_direct_vision_analysis)
 
         routed = bridge_mod._preprocess_images_with_vision("请看图", [image])
 
@@ -975,16 +981,16 @@ class TestHermesStreamBridgeImageRouting:
     def test_strict_vision_preprocessor_raises_on_failed_analysis(self, monkeypatch, tmp_path):
         image = tmp_path / "screen.png"
         image.write_bytes(b"png")
-        tools_pkg = types.ModuleType("tools")
-        tools_pkg.__path__ = []  # type: ignore[attr-defined]
-        vision_mod = types.ModuleType("tools.vision_tools")
+        monkeypatch.setattr(
+            bridge_mod,
+            "_configured_auxiliary_vision_override",
+            lambda: {"model": "vision-model", "base_url": "https://vision.example/v1", "api_key": "test-key"},
+        )
 
-        async def fake_vision_analyze_tool(**_kwargs):
-            return json.dumps({"success": False, "error": "missing key"})
+        async def fake_run_direct_vision_analysis(*_args, **_kwargs):
+            raise RuntimeError("missing key")
 
-        vision_mod.vision_analyze_tool = fake_vision_analyze_tool
-        monkeypatch.setitem(sys.modules, "tools", tools_pkg)
-        monkeypatch.setitem(sys.modules, "tools.vision_tools", vision_mod)
+        monkeypatch.setattr(bridge_mod, "_run_direct_vision_analysis", fake_run_direct_vision_analysis)
 
         with pytest.raises(bridge_mod.ImagePreprocessError, match="missing key"):
             bridge_mod._preprocess_images_with_vision("请看图", [image])
