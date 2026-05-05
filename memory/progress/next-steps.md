@@ -1,5 +1,9 @@
 # Next Steps
 
+1. 基于本轮新增的 `docs/user-manual.md`、`docs/screenshot-index.md`、`docs/experience-report-2026-05-05.md` 和 `docs/public/images/hermes-yachiyo/first-run/` 创建 VitePress 文档站点结构，并按安装、模型配置、桌面表现态、资源导入、工具中心、维护排障拆页。
+2. VitePress 接入后检查所有 `/images/hermes-yachiyo/first-run/*.png` 引用是否能在站点中正确加载，并确认截图中 API Key 仍保持遮蔽。
+3. 发布说明中补充本轮首用真实发现：GitHub 克隆中断时的手动安装 fallback、GPT-SoVITS 首次加载可能较慢、导入资源会显著增加备份体积、工具中心外部 Key 缺失属于预期受限状态。
+
 1. 用最新 develop DMG 再做一次清机首装复测：安装 Hermes 后应滚动到模型配置区；不填 API Key 初始化会提示风险；初始化完成后进入主控台并默认打开 Bubble；再次点击 Dock 图标不能回到安装向导，也不能让 Bubble 消失。
 2. 手工复测主动关怀截图链路：授权屏幕录制后触发主动桌面观察，应能把桌面截图作为会话附件传入图片识别；点击附件只在应用内查看，不应自动弹出 Chrome/默认浏览器预览。
 3. 手工复测模型配置为 `auto + OpenRouter Base URL` 的图片输入：只有 `AUTO_API_KEY` 旧配置时也应被识别为 OpenRouter key 可用；主动关怀/手动发图不应再误报 API Key 无效；若模型确实不支持图片，应给出真实能力说明。

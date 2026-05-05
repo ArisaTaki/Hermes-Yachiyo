@@ -2,6 +2,15 @@
 
 ## 已完成
 
+### Documentation — DMG 首用走查与 VitePress 素材
+
+- ✅ 使用 `/Applications/Hermes-Yachiyo.app` 发布包，在隔离 HOME/Profile 下完成一次真实“第一次用户”走查。
+- ✅ 覆盖并截图：安装向导、Hermes Agent 检测、Xiaomi MiMo 模型配置、连接测试、工作空间初始化、主控台、图片链路、文本对话、图片附件、Bubble、Live2D 导入与渲染、GPT-SoVITS 导入与 TTS 测试、主动关怀、工具中心、诊断、更新检查、备份和卸载预览。
+- ✅ 新增 43 张截图到 `docs/public/images/hermes-yachiyo/first-run/`，VitePress 可直接通过 `/images/hermes-yachiyo/first-run/<file>.png` 引用。
+- ✅ 新增/更新文档：`docs/user-manual.md`、`docs/screenshot-index.md`、`docs/experience-report-2026-05-05.md`、`docs/first-run-smoke-test-2026-05-05.md`。
+- ✅ 真实边界已记录：GUI 安装遇到 GitHub 克隆中断后可手动安装并重新检测；Web/CDP/Image Gen 缺外部 Key 时工具中心按预期受限；GPT-SoVITS 手动测试成功但一次主动关怀自动播报返回 HTTP 400。
+- ✅ 测试环境已清理，未把一次性 API Key 明文写入文档。
+
 ### Milestone 78 — Release 重跑幂等修复
 
 - ✅ `Build macOS DMG` workflow 的发布步骤改为 `Create or update GitHub release`：当目标 release tag 已存在时，会用 `gh release upload --clobber` 覆盖同名 DMG asset，并用 `gh release edit` 刷新标题、目标 commit 和 release notes；首次运行仍走 `gh release create`。

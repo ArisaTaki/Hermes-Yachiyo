@@ -1,5 +1,35 @@
 # Session Summary
 
+## Documentation — DMG 首用走查与 VitePress 素材整理
+
+### 核心结果
+
+本轮按“完全第一次使用用户”路径实测 `/Applications/Hermes-Yachiyo.app` 发布包，并把安装、模型配置、工作空间、聊天、图片链路、Bubble、Live2D、GPT-SoVITS、主动关怀、工具中心、诊断、备份和卸载预览整理为后续 VitePress 可直接使用的文档与截图素材。
+
+### 主要产出
+
+- `docs/public/images/hermes-yachiyo/first-run/`：新增 43 张真实运行截图，覆盖首启安装、配置、导入、桌面表现态、工具中心、诊断和维护页面。
+- `docs/user-manual.md`：重写为带截图引用的实际使用手册，截图路径使用 VitePress public 前缀 `/images/hermes-yachiyo/first-run/...`。
+- `docs/screenshot-index.md`：新增截图索引表，记录每张截图的场景、用途和建议引用方式。
+- `docs/experience-report-2026-05-05.md`：新增首用体验报告，记录通过项、真实摩擦点和发布前建议。
+- `docs/first-run-smoke-test-2026-05-05.md`：同步更新本次真实测试数据，包含隔离 HOME、465.3 MB 备份结果和主动关怀 TTS 边界。
+
+### 实测结论
+
+- 核心首用闭环已跑通：Xiaomi MiMo 连接测试、Yachiyo 工作空间初始化、文本对话、图片识别、Bubble 快捷消息、Live2D ZIP 导入与真模型渲染、GPT-SoVITS 资源导入与手动 TTS 测试、主动关怀文本生成、工具中心、诊断、更新检查、备份和卸载预览均可用。
+- GUI 安装 Hermes Agent 时遇到一次 GitHub 克隆中断（`RPC failed / curl 18 / early EOF / invalid index-pack output`），通过手动 tarball fallback 安装 Hermes Agent 后，应用重新检测可继续流程。
+- 工具中心中 Web、Browser CDP、Image Gen 在缺少外部 Key 或 CDP 端点时按预期显示受限；这不影响 Yachiyo 主功能。
+- GPT-SoVITS 手动测试成功，但一次主动关怀自动播报返回 HTTP 400；文档已记录为真实边界，建议后续在 UI 展示最近一次 TTS 错误。
+- 已清理隔离测试 HOME、Electron profile、临时资源和测试进程；文档中未写入一次性 API Key 明文。
+
+### 后续建议
+
+1. 在公司环境创建 VitePress docs 站点时，直接把 `docs/public/images/hermes-yachiyo/first-run/` 作为 public 图片目录使用。
+2. 将 `docs/user-manual.md` 拆成安装、模型配置、表现态、资源导入、工具中心、维护排障等 VitePress 页面。
+3. 发布说明中加入 GUI 安装 GitHub 网络失败、GPT-SoVITS 首次加载较慢、导入资源会增大备份体积等真实首用提示。
+
+---
+
 ## Hotfix — Milestone 73: One-click install error capture
 
 ### 核心结果
