@@ -122,6 +122,10 @@ class ScreenPermissionRequest(BaseModel):
     open_settings: bool = True
 
 
+class ProactiveTestRequest(BaseModel):
+    mode: str = "bubble"
+
+
 class BackupCreateRequest(BaseModel):
     overwrite_latest: bool = False
 
@@ -520,13 +524,20 @@ def _bubble_avatar_url(config: Any) -> str:
         return data_uri(DEFAULT_BUBBLE_AVATAR_PATH)
 
 
-def _launcher_proactive_state(runtime: Any, mode_id: str, mode_config: Any) -> dict[str, Any]:
+def _launcher_proactive_service(runtime: Any, mode_id: str, mode_config: Any) -> ProactiveDesktopService:
     key = (mode_id, id(runtime))
-    service = _launcher_proactive_services.setdefault(
+    return _launcher_proactive_services.setdefault(
         key,
         ProactiveDesktopService(runtime, mode_config),
     )
-    return service.get_state()
+
+
+def _launcher_proactive_state(runtime: Any, mode_id: str, mode_config: Any) -> dict[str, Any]:
+    return _launcher_proactive_service(runtime, mode_id, mode_config).get_state()
+
+
+def _mode_config_for_launcher(runtime: Any, mode_id: str) -> Any:
+    return runtime.config.live2d_mode if mode_id == "live2d" else runtime.config.bubble_mode
 
 
 def _live2d_resource_payload(config: Any) -> dict[str, Any]:
@@ -856,6 +867,18 @@ async def acknowledge_launcher(request: LauncherAckRequest) -> dict[str, Any]:
     if service is not None:
         service.acknowledge()
     return {"ok": True, "mode": mode_id}
+
+
+@router.post("/proactive/test")
+async def trigger_proactive_test(request: ProactiveTestRequest) -> dict[str, Any]:
+    runtime = get_runtime()
+    mode_id = "live2d" if request.mode == "live2d" else "bubble"
+    service = _launcher_proactive_service(
+        runtime,
+        mode_id,
+        _mode_config_for_launcher(runtime, mode_id),
+    )
+    return {"mode": mode_id, **service.trigger_now()}
 
 
 @router.post("/launcher/quick-message")

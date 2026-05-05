@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from apps.core.chat_session import ChatSession, MessageRole, MessageStatus
 from apps.core.state import AppState
 import apps.shell.proactive as proactive_mod
@@ -32,6 +34,15 @@ class _RuntimeStub:
 
     def get_status(self) -> dict:
         return {"hermes": {"limited_tools": self.limited_tools}}
+
+
+@pytest.fixture(autouse=True)
+def _allow_image_input(monkeypatch):
+    monkeypatch.setattr(
+        proactive_mod,
+        "get_current_hermes_image_input_capability",
+        lambda: {"can_attach_images": True, "route": "native"},
+    )
 
 
 def _advance_to_first_check(monkeypatch, start: float = 1000.0):
@@ -96,6 +107,25 @@ def test_proactive_service_blocks_when_vision_limited():
     assert runtime.state.list_tasks() == []
 
 
+def test_proactive_service_blocks_when_image_chain_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        proactive_mod,
+        "get_current_hermes_image_input_capability",
+        lambda: {"can_attach_images": False, "reason": "当前主模型未声明图片输入能力"},
+    )
+    runtime = _RuntimeStub()
+    config = AppConfig()
+    config.bubble_mode.proactive_enabled = True
+    config.bubble_mode.proactive_desktop_watch_enabled = True
+    service = ProactiveDesktopService(runtime, config.bubble_mode)
+
+    state = service.get_state()
+
+    assert state["status"] == "blocked"
+    assert "图片识别链路" in state["error"]
+    assert runtime.state.list_tasks() == []
+
+
 def test_proactive_service_waits_minimum_interval_before_first_check(monkeypatch):
     now = _advance_to_first_check(monkeypatch)
     runtime = _RuntimeStub()
@@ -140,6 +170,40 @@ def test_proactive_service_can_skip_whole_chain_by_probability(monkeypatch):
     assert service.last_task_id is None
     assert runtime.state.list_tasks() == []
     assert runtime.chat_session.get_messages() == []
+
+
+def test_proactive_service_trigger_now_bypasses_wait_and_probability(monkeypatch):
+    now = _advance_to_first_check(monkeypatch)
+    monkeypatch.setattr(proactive_mod.random, "random", lambda: 0.99)
+    runtime = _RuntimeStub()
+    runtime.config.live2d_mode.proactive_enabled = True
+    runtime.config.live2d_mode.proactive_desktop_watch_enabled = True
+    runtime.config.live2d_mode.proactive_interval_seconds = 300
+    runtime.config.live2d_mode.proactive_trigger_probability = 0.0
+    service = ProactiveDesktopService(runtime, runtime.config.live2d_mode)
+
+    state = service.trigger_now()
+    tasks = runtime.state.list_tasks()
+
+    assert now[0] == 1000.0
+    assert state["ok"] is True
+    assert state["manual"] is True
+    assert state["status"] == "scheduled"
+    assert state["task_id"] == tasks[0].task_id
+    assert tasks[0].task_type == TaskType.SCREENSHOT
+    assert len(tasks[0].attachments) == 1
+
+
+def test_proactive_service_trigger_now_requires_enabled_watch():
+    runtime = _RuntimeStub()
+    service = ProactiveDesktopService(runtime, runtime.config.bubble_mode)
+
+    state = service.trigger_now()
+
+    assert state["ok"] is False
+    assert state["status"] == "disabled"
+    assert "启用" in state["error"]
+    assert runtime.state.list_tasks() == []
 
 
 def test_proactive_service_creates_low_risk_screenshot_task(monkeypatch):

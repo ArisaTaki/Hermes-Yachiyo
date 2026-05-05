@@ -421,6 +421,75 @@ def test_hermes_image_connection_resolves_command_name_from_path(tmp_path, monke
         store.close()
 
 
+def test_hermes_image_connection_native_route_runs_stream_bridge_probe(tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    config_path.write_text(
+        "model:\n"
+        "  provider: xiaomi\n"
+        "  default: mimo-v2.5-pro\n"
+        "  base_url: https://token-plan-cn.xiaomimimo.com/v1\n",
+        encoding="utf-8",
+    )
+    env_path.write_text("XIAOMI_API_KEY=tp-test-secret\n", encoding="utf-8")
+    launcher = tmp_path / "hermes"
+    launcher.write_text(f"#!{sys.executable}\n", encoding="utf-8")
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    calls = []
+    try:
+        monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path / "yachiyo-config")
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: (str(launcher), False),
+        )
+
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return SimpleNamespace(
+                returncode=0,
+                stdout='{"type":"done","response":"绿色","failed":false}\n',
+                stderr="",
+            )
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        monkeypatch.setattr(
+            api,
+            "get_hermes_configuration",
+            lambda: {
+                "ok": True,
+                "command_exists": True,
+                "config_path": str(config_path),
+                "env_path": str(env_path),
+                "model": {
+                    "provider": "xiaomi",
+                    "default": "mimo-v2.5-pro",
+                    "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+                },
+                "api_key": {"name": "XIAOMI_API_KEY", "configured": True},
+                "image_input": {
+                    "route": "native",
+                    "provider": "xiaomi",
+                    "model": "mimo-v2.5-pro",
+                    "supports_native_vision": True,
+                    "requires_vision_pipeline": False,
+                },
+            },
+        )
+
+        result = api.test_hermes_image_connection()
+
+        assert result["success"] is True
+        assert "实际识别" in result["message"]
+        assert calls[0][0][0] == sys.executable
+        assert calls[0][0][1].endswith("hermes_stream_bridge.py")
+        assert "image_paths" in calls[0][1]["input"]
+    finally:
+        store.close()
+
+
 def test_get_hermes_configuration_reads_model_and_key_status(tmp_path, monkeypatch):
     config_path = tmp_path / "config.yaml"
     env_path = tmp_path / ".env"

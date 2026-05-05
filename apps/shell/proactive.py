@@ -14,6 +14,7 @@ from apps.shell.chat_api import (
     allocate_chat_attachment_path,
     chat_attachment_record,
 )
+from apps.shell.hermes_capabilities import get_current_hermes_image_input_capability
 from packages.protocol.enums import RiskLevel, TaskStatus, TaskType
 
 if TYPE_CHECKING:
@@ -23,7 +24,8 @@ logger = logging.getLogger(__name__)
 
 _DESKTOP_WATCH_PROMPT = (
     "主动桌面观察：请查看用户当前桌面状态。若本轮附加了屏幕截图，请直接基于附件图片判断；"
-    "若没有截图附件，再必要时调用可用的屏幕截图/视觉工具，"
+    "这张截图会通过与对话窗口图片附件相同的图片识别链路传入，"
+    "不要改用桌面截图/视觉工具替代附件；"
     "生成一段适合在详细对话框阅读的主动关怀消息，说明是否有需要提醒用户的事项；"
     "如果当前模型或工具无法读取截图，"
     "请明确说明缺少的多模态/vision 能力。"
@@ -64,6 +66,55 @@ class ProactiveDesktopService:
         if self._attention_task_id:
             self._acknowledged_task_id = self._attention_task_id
         self._attention_task_id = None
+
+    def trigger_now(self) -> dict[str, Any]:
+        """立即安排一次主动桌面观察，跳过间隔和触发概率。"""
+        enabled = bool(getattr(self._mode_config, "proactive_enabled", False))
+        desktop_watch_enabled = bool(
+            getattr(self._mode_config, "proactive_desktop_watch_enabled", False)
+        )
+        if not enabled or not desktop_watch_enabled:
+            return {
+                "enabled": enabled,
+                "desktop_watch_enabled": desktop_watch_enabled,
+                "status": "disabled" if not enabled else "idle",
+                "has_attention": False,
+                "ok": False,
+                "error": "请先启用并保存主动桌面观察后再测试",
+            }
+
+        blocker = self._desktop_watch_blocker()
+        if blocker:
+            self._reset_wait_baseline()
+            return {
+                "enabled": True,
+                "desktop_watch_enabled": True,
+                "status": "blocked",
+                "has_attention": False,
+                "ok": False,
+                "error": blocker,
+            }
+
+        task = self._current_task()
+        if task is not None and task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+            return {
+                "enabled": True,
+                "desktop_watch_enabled": True,
+                "status": task.status.value,
+                "has_attention": False,
+                "ok": True,
+                "task_id": task.task_id,
+                "message": "已有主动桌面观察正在进行",
+            }
+
+        task_id = self._schedule_desktop_watch_task()
+        state = self._state_after_schedule(task_id)
+        return {
+            **state,
+            "ok": state.get("status") != "failed",
+            "manual": True,
+            "message": state.get("message") or "已立即安排主动桌面观察",
+        }
 
     def get_state(self) -> dict[str, Any]:
         """返回当前主动观察状态，并在满足间隔时创建低风险截图任务。"""
@@ -249,6 +300,14 @@ class ProactiveDesktopService:
         limited_tools = set(hermes_info.get("limited_tools") or [])
         if "vision" in limited_tools:
             return "Hermes vision 工具受限，当前模型/配置无法读取截图；请在主控台运行 hermes setup 或 hermes doctor"
+        try:
+            image_input = get_current_hermes_image_input_capability()
+        except Exception:
+            logger.debug("主动桌面观察读取 Hermes 图片链路能力失败", exc_info=True)
+            return None
+        if image_input.get("can_attach_images") is False:
+            reason = str(image_input.get("reason") or "当前 Hermes 图片链路不可用")
+            return f"主动桌面观察需要可用的图片识别链路：{reason}"
         return None
 
     def _schedule_desktop_watch_task(self) -> str:

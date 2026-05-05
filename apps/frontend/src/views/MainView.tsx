@@ -181,6 +181,20 @@ type ProactiveForm = {
   trigger_probability: number;
 };
 
+type ProactiveSaveOutcome = {
+  enabled: boolean;
+  message: string;
+};
+
+type ProactiveTestResult = {
+  ok?: boolean;
+  status?: string;
+  error?: string;
+  message?: string;
+  task_id?: string;
+  mode?: string;
+};
+
 type ScreenPermissionResult = {
   ok?: boolean;
   allowed?: boolean;
@@ -509,10 +523,7 @@ export function MainView() {
     return result;
   }
 
-  async function saveProactiveSettings() {
-    const action = 'proactive-save';
-    if (!beginHermesAction(action)) return;
-    setActionStatus('正在保存主动关怀设置...');
+  async function persistProactiveSettings(): Promise<ProactiveSaveOutcome> {
     let enabled = Boolean(proactiveForm.enabled);
     let permissionFailureMessage = '';
     const interval = normalizeProactiveInterval(proactiveForm.interval_seconds);
@@ -555,9 +566,50 @@ export function MainView() {
       } else {
         await loadSettings({ forceFormSync: true });
       }
-      setActionStatus(enabled ? '主动关怀设置已保存' : permissionFailureMessage || '主动关怀已保持关闭；请授予屏幕录制权限后再开启');
+      return {
+        enabled,
+        message: enabled ? '主动关怀设置已保存' : permissionFailureMessage || '主动关怀已保持关闭；请授予屏幕录制权限后再开启',
+      };
+    } catch (err) {
+      throw err instanceof Error ? err : new Error('保存主动关怀设置失败');
+    }
+  }
+
+  async function saveProactiveSettings() {
+    const action = 'proactive-save';
+    if (!beginHermesAction(action)) return;
+    setActionStatus('正在保存主动关怀设置...');
+    try {
+      const outcome = await persistProactiveSettings();
+      setActionStatus(outcome.message);
     } catch (err) {
       setActionStatus(err instanceof Error ? err.message : '保存主动关怀设置失败');
+    } finally {
+      finishHermesAction(action);
+    }
+  }
+
+  async function saveAndTestProactiveNow() {
+    const action = 'proactive-test';
+    if (!beginHermesAction(action)) return;
+    setActionStatus('正在保存主动关怀设置...');
+    try {
+      const outcome = await persistProactiveSettings();
+      if (!outcome.enabled) {
+        setActionStatus(outcome.message);
+        return;
+      }
+      setActionStatus('正在立即触发主动桌面观察...');
+      const result = await apiPost<ProactiveTestResult>('/ui/proactive/test', {
+        mode: data?.modes?.current || 'bubble',
+      });
+      if (result.ok === false || result.status === 'blocked' || result.status === 'failed') {
+        throw new Error(result.error || result.message || '主动关怀测试触发失败');
+      }
+      setActionStatus(result.message || '已立即安排主动桌面观察；稍后可在对话窗口查看结果');
+      await refreshDashboardData();
+    } catch (err) {
+      setActionStatus(err instanceof Error ? err.message : '主动关怀测试触发失败');
     } finally {
       finishHermesAction(action);
     }
@@ -772,6 +824,7 @@ export function MainView() {
               onSaveConfig={saveAndTestHermesConfig}
               onSaveImageConfig={saveAndTestHermesImageConnection}
               onSaveProactive={saveProactiveSettings}
+              onTestProactive={saveAndTestProactiveNow}
             />
           </article>
 
@@ -1086,6 +1139,13 @@ function hermesImageConnectionNotice(
       detail: '当前配置会先用 Hermes vision 链路识图，再把分析结果交给文本模型；主模型测试只验证文字请求。',
     };
   }
+  if (imageInput.route === 'native') {
+    return {
+      kind: 'warn',
+      title: '原生图片链路尚未验证',
+      detail: '当前模型声明支持图片，但仍需要保存并测试图片链路来确认正式 App 能实际识别附件。',
+    };
+  }
   return null;
 }
 
@@ -1253,6 +1313,7 @@ function HermesConfigCenter({
   onSaveConfig,
   onSaveImageConfig,
   onSaveProactive,
+  onTestProactive,
 }: {
   hermes?: DashboardData['hermes'];
   config: HermesVisualConfig | null;
@@ -1270,6 +1331,7 @@ function HermesConfigCenter({
   onSaveConfig: () => Promise<void>;
   onSaveImageConfig: () => Promise<void>;
   onSaveProactive: () => Promise<void>;
+  onTestProactive: () => Promise<void>;
 }) {
   const busy = Boolean(busyAction);
   const providerOptions = config?.provider_options || [];
@@ -1608,6 +1670,14 @@ function HermesConfigCenter({
             <div className="hermes-form-actions">
               <button type="button" disabled={busy} onClick={() => navigateTo('proactive-tts')}>
                 {ttsProvider === 'none' ? '启用并配置语音' : '配置语音'}
+              </button>
+              <button
+                type="button"
+                className={busyAction === 'proactive-test' ? 'loading-button' : ''}
+                disabled={busy || !proactiveForm.enabled}
+                onClick={() => void onTestProactive()}
+              >
+                {busyAction === 'proactive-test' ? '测试中...' : '保存并立即测试'}
               </button>
               <button
                 type="submit"

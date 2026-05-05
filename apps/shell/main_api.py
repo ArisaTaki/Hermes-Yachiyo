@@ -889,6 +889,71 @@ def _store_image_connection_validation(
     return _load_image_connection_validation(configuration)
 
 
+_IMAGE_PROBE_BAD_MARKERS = (
+    "看不到",
+    "无法",
+    "不能读取",
+    "未能读取",
+    "没有收到图片",
+    "没有加载",
+    "api key",
+    "api 密钥",
+    "密钥问题",
+    "cannot see",
+    "unable to see",
+    "no image",
+    "not see",
+)
+
+
+def _parse_stream_bridge_probe(stdout: str) -> tuple[str, str, bool]:
+    """Return (response, error, failed) from newline-delimited bridge events."""
+    parts: list[str] = []
+    final_response = ""
+    error_message = ""
+    failed = False
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        event_type = event.get("type")
+        if event_type == "delta":
+            delta = event.get("delta")
+            if isinstance(delta, str):
+                parts.append(delta)
+        elif event_type == "error":
+            message = event.get("message")
+            if isinstance(message, str) and message.strip():
+                error_message = message.strip()
+                failed = True
+        elif event_type == "done":
+            response = event.get("response")
+            if isinstance(response, str):
+                final_response = response.strip()
+            failed = failed or bool(event.get("failed"))
+            error = event.get("error")
+            if isinstance(error, str) and error.strip():
+                error_message = error.strip()
+    response_text = final_response or "".join(parts).strip() or stdout.strip()
+    return response_text, error_message, failed
+
+
+def _image_probe_response_ok(response: str) -> bool:
+    value = str(response or "").strip()
+    if not value:
+        return False
+    lower = value.lower()
+    if any(marker in lower for marker in _IMAGE_PROBE_BAD_MARKERS):
+        return False
+    return value.upper() == "OK" or "绿" in value or "green" in lower
+
+
 def _load_diagnostic_cache(configuration: dict[str, Any]) -> dict[str, Any]:
     cache_path = _diagnostic_cache_path()
     fingerprint = _diagnostic_fingerprint(configuration)
@@ -2467,21 +2532,6 @@ class MainWindowAPI:
                 error=str(payload["error"]),
             )
             return payload
-        if route == "native" and image_input.get("supports_native_vision") is True:
-            payload = {
-                "ok": True,
-                "success": True,
-                "message": "当前模型声明支持原生图片输入，不需要额外 vision 预分析链路",
-                "route": route,
-                "image_input": image_input,
-            }
-            payload["image_connection_validation"] = _store_image_connection_validation(
-                configuration,
-                success=True,
-                message=str(payload["message"]),
-            )
-            return payload
-
         hermes_path, needs_env_refresh = locate_hermes_binary()
         if hermes_path is None:
             return {
@@ -2500,27 +2550,23 @@ class MainWindowAPI:
             }
 
         repo_root = Path(__file__).resolve().parents[2]
-        script = (
-            "import sys\n"
-            "from pathlib import Path\n"
-            "repo = Path(sys.argv[1])\n"
-            "image = Path(sys.argv[2])\n"
-            "sys.path.insert(0, str(repo))\n"
-            "from apps.core.hermes_stream_bridge import _preprocess_images_with_vision\n"
-            "result = _preprocess_images_with_vision('Hermes-Yachiyo 图片链路自检。只要能看到这张测试图片，请简短回答 OK。', [image])\n"
-            "bad = ('看不到', '无法', '不能读取', '未能读取', '没有收到图片', '没有加载', 'cannot see', 'unable to see', 'no image')\n"
-            "lower = result.lower()\n"
-            "if any(item in lower for item in bad):\n"
-            "    raise SystemExit('图片链路返回了无法识图的结果：' + result[:500])\n"
-            "print('OK')\n"
+        bridge_script = repo_root / "apps" / "core" / "hermes_stream_bridge.py"
+        probe_prompt = (
+            "Hermes-Yachiyo 图片链路自检。请查看附件测试图片，并且只回答图片右上角色块的颜色。"
+            "不要解释，不要猜测；如果没有看到图片，请直接回答“看不到图片”。"
         )
         started_at = time.monotonic()
         with tempfile.TemporaryDirectory(prefix="yachiyo-vision-test-") as tmpdir:
             image_path = Path(tmpdir) / "vision-test.png"
             image_path.write_bytes(_VISION_TEST_PNG)
+            probe_payload = {
+                "description": probe_prompt,
+                "image_paths": [str(image_path)],
+            }
             try:
                 result = subprocess.run(
-                    [hermes_python, "-c", script, str(repo_root), str(image_path)],
+                    [hermes_python, str(bridge_script)],
+                    input=json.dumps(probe_payload, ensure_ascii=False),
                     capture_output=True,
                     text=True,
                     timeout=_HERMES_IMAGE_CONNECTION_TEST_TIMEOUT,
@@ -2551,11 +2597,12 @@ class MainWindowAPI:
         elapsed = round(time.monotonic() - started_at, 2)
         stdout = _compact_command_output(result.stdout)
         stderr = _compact_command_output(result.stderr)
-        if result.returncode == 0:
+        response, bridge_error, bridge_failed = _parse_stream_bridge_probe(result.stdout)
+        if result.returncode == 0 and not bridge_failed and _image_probe_response_ok(response):
             payload = {
                 "ok": True,
                 "success": True,
-                "message": "Hermes 图片链路测试通过",
+                "message": "Hermes 图片链路测试通过，测试图片已被实际识别",
                 "output_preview": stdout,
                 "stderr_preview": stderr,
                 "route": route,
@@ -2571,7 +2618,9 @@ class MainWindowAPI:
             )
             return payload
 
-        detail = stderr or stdout
+        detail = bridge_error or stderr or stdout
+        if result.returncode == 0 and not bridge_failed and response:
+            detail = f"图片链路没有识别出测试图右上角的绿色色块，模型返回：{response[:500]}"
         error = (
             f"Hermes 图片链路测试失败：{detail}"
             if detail

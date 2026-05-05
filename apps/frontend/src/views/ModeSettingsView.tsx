@@ -142,6 +142,7 @@ type UninstallPlan = {
 };
 
 type UninstallPreviewResult = { ok?: boolean; error?: string; plan?: UninstallPlan };
+const LIVE2D_ACTIVATION_DRAFT_KEY = 'hermes-yachiyo-live2d-activation-draft';
 
 type GeneralSettingsForm = {
   persona_prompt: string;
@@ -162,7 +163,11 @@ export function ModeSettingsView() {
 
 function SpecificModeSettingsView({ mode }: { mode: string }) {
   const [activationPending, setActivationPending] = useState(
-    mode === 'live2d' && currentParam('reason') === 'live2d-resource-required',
+    mode === 'live2d'
+      && (
+        currentParam('reason') === 'live2d-resource-required'
+        || window.sessionStorage.getItem(LIVE2D_ACTIVATION_DRAFT_KEY) === '1'
+      ),
   );
   const [payload, setPayload] = useState<SettingsPayload | null>(null);
   const [form, setForm] = useState<ModeForm>({});
@@ -208,7 +213,7 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
       return;
     }
     const nextChanges = buildModeSettingsChanges(payload, form, specs);
-    if (activationPending && mode === 'live2d') {
+    if (shouldActivateLive2DAfterSave(mode, nextChanges, activationPending)) {
       nextChanges.display_mode = 'live2d';
     }
     if (!Object.keys(nextChanges).length) {
@@ -233,9 +238,11 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
         const targetMode = String(result.target_display_mode || nextChanges.display_mode || mode);
         await openDesktopMode(targetMode);
         setActivationPending(false);
+        window.sessionStorage.removeItem(LIVE2D_ACTIVATION_DRAFT_KEY);
         setStatus(`已保存，并已重新打开 ${modeLabel(targetMode)} 表现态`);
       } else {
         setActivationPending(false);
+        window.sessionStorage.removeItem(LIVE2D_ACTIVATION_DRAFT_KEY);
         setStatus(result.restart_scheduled ? '已保存，正在重启应用…' : `已保存${hint}`);
       }
     } catch (err) {
@@ -249,6 +256,7 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
     if (!payload) return;
     setForm(formFromModeSettings(payload, specs));
     setActivationPending(false);
+    window.sessionStorage.removeItem(LIVE2D_ACTIVATION_DRAFT_KEY);
     setStatus('已丢弃未保存的修改');
   }
 
@@ -683,6 +691,7 @@ function GeneralSettingsView() {
 
   function selectDisplayMode(modeId: string) {
     if (modeId === 'live2d' && !live2dResourceReady(payload)) {
+      window.sessionStorage.setItem(LIVE2D_ACTIVATION_DRAFT_KEY, '1');
       setStatus('Live2D 资源未就绪，请先导入资源包或选择有效模型目录；暂不切换表现态');
       window.setTimeout(() => navigateTo('settings', { mode: 'live2d', reason: 'live2d-resource-required' }), 350);
       return;
@@ -1445,6 +1454,17 @@ function buildModeSettingsChanges(
     }
   });
   return changes;
+}
+
+function shouldActivateLive2DAfterSave(
+  mode: string,
+  changes: Record<string, string | number | boolean>,
+  activationPending: boolean,
+): boolean {
+  if (mode !== 'live2d') return false;
+  if (activationPending) return true;
+  const modelPath = changes['live2d_mode.model_path'];
+  return typeof modelPath === 'string' && modelPath.trim().length > 0;
 }
 
 function validateModeForm(form: ModeForm, specs: ModeFieldSpec[]): string {
