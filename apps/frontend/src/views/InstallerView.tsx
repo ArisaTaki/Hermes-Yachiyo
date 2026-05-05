@@ -315,7 +315,7 @@ export function InstallerView() {
         setSetupAttention(!succeeded);
         if (succeeded) {
           setStatus('安装完成，正在重新检测…');
-          window.setTimeout(() => void recheckStatus(), 100);
+          window.setTimeout(() => void recheckStatus({ afterInstall: true }), 100);
           return;
         }
       }
@@ -553,7 +553,7 @@ export function InstallerView() {
     }
     if (progress.success) {
       setStatus('安装完成，正在重新检测…');
-      await recheckStatus();
+      await recheckStatus({ afterInstall: true });
       return;
     }
     if (progress.success === false) {
@@ -718,22 +718,28 @@ export function InstallerView() {
     }
   }
 
-  async function recheckStatus() {
+  async function recheckStatus(options: { afterInstall?: boolean } = {}) {
     setBusy('recheck');
     setStatus('正在重新检测 Hermes 状态…');
     try {
       const result = await apiPost<RecheckResult>('/ui/installer/status/recheck');
       const latest = await loadInstallInfo();
       if (latest.install_info?.command_exists) await loadHermesConfig();
+      const needsInitialization = Boolean(result.needs_init || latest.install_info?.status === 'installed_not_initialized');
       if (result.ready) {
         setSetupAttention(false);
         setStatus(`Hermes 已就绪${envRefreshNote(result)}`);
         window.setTimeout(() => void enterMainWithBubble(), 600);
-      } else if (result.needs_init) {
+      } else if (needsInitialization) {
         setSetupAttention(false);
-        setStatus(`Hermes 配置完成，进入工作空间初始化${envRefreshNote(result)}`);
-        await loadBackupStatus();
-        scrollToInstallerActions();
+        if (options.afterInstall) {
+          setStatus(`Hermes Agent 已安装，下一步配置模型 Provider 与 API Key${envRefreshNote(result)}`);
+          scrollToHermesConfig();
+        } else {
+          setStatus(`Hermes 配置完成，进入工作空间初始化${envRefreshNote(result)}`);
+          await loadBackupStatus();
+          scrollToInstallerActions();
+        }
       } else if (result.status === 'installed_needs_setup' || result.status === 'setup_in_progress') {
         setSetupAttention(false);
         setStatus('Hermes 尚未完成配置，请在下方模型配置向导填写并保存');

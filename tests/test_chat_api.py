@@ -9,7 +9,9 @@ from pathlib import Path
 from apps.core.chat_session import ChatMessage, ChatSession, MessageRole, MessageStatus
 from apps.core.chat_store import ChatStore
 import apps.core.chat_store as _store_mod
+from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID
 from apps.core.state import AppState
+import apps.shell.chat_api as chat_api_mod
 from apps.shell.chat_api import ChatAPI
 from packages.protocol.enums import TaskStatus
 
@@ -113,6 +115,37 @@ def test_send_message_accepts_pasted_image_attachment(tmp_path, monkeypatch):
         messages = api.get_messages()["messages"]
         assert messages[0]["attachments"][0]["url"].startswith("http://127.0.0.1:9999/ui/chat/attachments/")
         assert "path" not in messages[0]["attachments"][0]
+    finally:
+        store.close()
+
+
+def test_proactive_session_followup_attaches_fresh_desktop_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    captures = []
+
+    def fake_capture(target_path: Path):
+        captures.append(target_path)
+        target_path.write_bytes(b"fake-proactive-png")
+        return {"width": 3024, "height": 1964, "size": target_path.stat().st_size}
+
+    monkeypatch.setattr(chat_api_mod, "capture_screenshot_to_file", fake_capture)
+    api, runtime, store = _make_api(tmp_path)
+    runtime.chat_session = ChatSession(session_id=PROACTIVE_CHAT_SESSION_ID)
+    runtime.chat_session.attach_store(store, load_existing=False)
+    try:
+        result = api.send_message("你可以主动看一下桌面吗？")
+
+        assert result["ok"] is True
+        assert len(captures) == 1
+        assert len(result["attachments"]) == 1
+        assert result["attachments"][0]["source"] == "proactive_desktop_followup"
+        user = runtime.chat_session.get_messages()[0]
+        assert user.content == "你可以主动看一下桌面吗？"
+        assert user.attachments[0]["source"] == "proactive_desktop_followup"
+        task = runtime.state.get_task(result["task_id"])
+        assert task is not None
+        assert task.attachments[0]["source"] == "proactive_desktop_followup"
+        assert "附加当前桌面截图" in task.description
     finally:
         store.close()
 

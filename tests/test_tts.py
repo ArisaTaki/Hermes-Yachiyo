@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import plistlib
 import zipfile
 from http.client import RemoteDisconnected
 from pathlib import Path
@@ -292,6 +293,26 @@ def test_gpt_sovits_service_status_reports_local_requirements(monkeypatch, tmp_p
     assert status["launch_agent_installed"] is False
 
 
+def test_gpt_sovits_service_status_uses_unsaved_draft_and_expands_env(monkeypatch, tmp_path):
+    workdir = tmp_path / "GPT-SoVITS"
+    workdir.mkdir()
+    monkeypatch.setenv("GSV_TEST_ROOT", str(tmp_path))
+    monkeypatch.setattr(gsv_service, "_launch_agent_path", lambda: tmp_path / "agent.plist")
+    monkeypatch.setattr(gsv_service, "_launch_agent_running", lambda: False)
+    monkeypatch.setattr(gsv_service, "_service_reachable", lambda _url: {"ok": True})
+
+    status = gsv_service.get_gpt_sovits_service_status_for_values(
+        base_url="http://127.0.0.1:9880",
+        workdir="$GSV_TEST_ROOT/GPT-SoVITS",
+        command="python api_v2.py",
+    )
+
+    assert status["reachable"] is True
+    assert status["workdir_exists"] is True
+    assert status["workdir"] == str(workdir)
+    assert status["command_configured"] is True
+
+
 def test_gpt_sovits_launch_agent_install_validates_workdir(monkeypatch):
     monkeypatch.setattr(gsv_service.platform, "system", lambda: "Darwin")
 
@@ -328,6 +349,10 @@ def test_gpt_sovits_launch_agent_install_writes_plist(monkeypatch, tmp_path):
 
     assert result["ok"] is True
     assert plist_path.exists()
+    plist = plistlib.loads(plist_path.read_bytes())
+    shell_command = plist["ProgramArguments"][-1]
+    assert "brew shellenv" in shell_command
+    assert "source .venv/bin/activate" in shell_command
     assert any(call[0] == "bootstrap" for call in launchctl_calls)
 
 

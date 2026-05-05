@@ -29,6 +29,8 @@ from apps.core.chat_session import (
     MessageRole,
     MessageStatus,
 )
+from apps.core.special_sessions import is_proactive_chat_session
+from apps.locald.screenshot import capture_screenshot_to_file
 from apps.shell.hermes_capabilities import get_current_hermes_image_input_capability
 from packages.protocol.enums import TaskStatus, TaskType
 
@@ -229,6 +231,18 @@ class ChatAPI:
             saved_attachments = self._save_attachments(raw_attachments)
             if not text and saved_attachments:
                 text = "请识别并分析这张图片。"
+            task_description, saved_attachments = self._attach_proactive_desktop_snapshot_if_needed(
+                text,
+                saved_attachments,
+            )
+            if saved_attachments and not raw_attachments and self._should_enforce_image_capability():
+                image_input = get_current_hermes_image_input_capability()
+                if image_input.get("can_attach_images") is False:
+                    return {
+                        "ok": False,
+                        "error": str(image_input.get("reason") or "当前 Hermes 模型暂不支持图片输入"),
+                        "image_input": image_input,
+                    }
 
             # 1. 添加用户消息
             message_id = self._session.add_user_message(text, saved_attachments)
@@ -236,7 +250,7 @@ class ChatAPI:
             # 2. 创建任务
             task = self._state.create_task(
                 task_type=TaskType.GENERAL,
-                description=text,
+                description=task_description,
                 attachments=saved_attachments,
                 chat_session_id=self._session.session_id,
             )
@@ -249,7 +263,7 @@ class ChatAPI:
                 "消息已发送: message_id=%s, task_id=%s, len=%d, attachments=%d",
                 message_id,
                 task_id,
-                len(text),
+                len(task_description),
                 len(saved_attachments),
             )
 
@@ -271,6 +285,52 @@ class ChatAPI:
             return False
         executor = getattr(runner, "executor", None)
         return getattr(executor, "name", "") == "HermesExecutor"
+
+    def _attach_proactive_desktop_snapshot_if_needed(
+        self,
+        text: str,
+        saved_attachments: list[dict],
+    ) -> tuple[str, list[dict]]:
+        """Attach a fresh desktop screenshot for follow-up messages in the proactive session."""
+        if saved_attachments or not is_proactive_chat_session(self._session.session_id):
+            return text, saved_attachments
+
+        attachment_id, target_path = allocate_chat_attachment_path(self._session.session_id, ".png")
+        try:
+            meta = capture_screenshot_to_file(target_path)
+            attachment = chat_attachment_record(
+                attachment_id,
+                target_path,
+                kind="image",
+                name="主动关怀即时桌面截图.png",
+                mime_type="image/png",
+            )
+            attachment["source"] = "proactive_desktop_followup"
+            _cleanup_attachment_cache({Path(str(attachment["path"]))})
+            logger.info(
+                "主动关怀追问已附加即时桌面截图: %s (%sx%s)",
+                target_path,
+                meta.get("width") if isinstance(meta, dict) else "?",
+                meta.get("height") if isinstance(meta, dict) else "?",
+            )
+            task_description = (
+                f"{text}\n\n"
+                "[Yachiyo 已为这条主动关怀追问附加当前桌面截图；"
+                "请优先基于附件图片回答用户问题。]"
+            )
+            return task_description, [attachment]
+        except Exception as exc:
+            try:
+                target_path.unlink(missing_ok=True)
+            except OSError:
+                logger.debug("清理主动关怀追问截图失败: %s", target_path, exc_info=True)
+            logger.warning("主动关怀追问截图捕获失败: %s", exc)
+            task_description = (
+                f"{text}\n\n"
+                f"[Yachiyo 尝试为这条主动关怀追问捕获当前桌面截图，但失败：{exc}。"
+                "请向用户说明当前无法读取桌面截图。]"
+            )
+            return task_description, saved_attachments
 
     def get_messages(self, limit: int = 50) -> Dict[str, Any]:
         """获取消息列表，同时同步任务状态到消息

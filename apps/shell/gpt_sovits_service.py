@@ -8,6 +8,7 @@ import plistlib
 import shutil
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -40,15 +41,35 @@ def get_gpt_sovits_service_status(config: Any) -> dict[str, Any]:
         "launch_agent_running": _launch_agent_running(),
         "platform_supported": platform.system() == "Darwin",
         "tools": {
-            "python": bool(shutil.which("python3") or shutil.which("python")),
-            "git": bool(shutil.which("git")),
-            "uv": bool(shutil.which("uv")),
+            "python": _tool_exists("python3.11", "python3", "python"),
+            "python311": _tool_exists("python3.11"),
+            "git": _tool_exists("git"),
+            "uv": _tool_exists("uv"),
+            "ffmpeg": _tool_exists("ffmpeg"),
+            "mecab_config": _tool_exists("mecab-config"),
         },
         "logs": {
             "stdout": _display_path(_log_path("out")),
             "stderr": _display_path(_log_path("err")),
         },
     }
+
+
+def get_gpt_sovits_service_status_for_values(
+    *,
+    base_url: str = "",
+    workdir: str = "",
+    command: str = "",
+) -> dict[str, Any]:
+    """Return status for unsaved UI draft values."""
+    config = SimpleNamespace(
+        tts=SimpleNamespace(
+            gsv_base_url=base_url,
+            gsv_service_workdir=workdir,
+            gsv_service_command=command,
+        )
+    )
+    return get_gpt_sovits_service_status(config)
 
 
 def install_gpt_sovits_launch_agent(config: Any) -> dict[str, Any]:
@@ -114,6 +135,8 @@ def uninstall_gpt_sovits_launch_agent(config: Any | None = None) -> dict[str, An
 def _service_shell_command(command: str) -> str:
     return "\n".join(
         [
+            'if [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi',
+            'if [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"; fi',
             "if [ -f .venv/bin/activate ]; then source .venv/bin/activate; fi",
             "if [ -f venv/bin/activate ]; then source venv/bin/activate; fi",
             command,
@@ -170,7 +193,17 @@ def _log_path(kind: str) -> Path:
 
 def _expand_path(value: str) -> Path | None:
     text = value.strip()
-    return Path(text).expanduser() if text else None
+    return Path(os.path.expandvars(text)).expanduser() if text else None
+
+
+def _tool_exists(*names: str) -> bool:
+    for name in names:
+        if shutil.which(name):
+            return True
+        for prefix in ("/opt/homebrew/bin", "/usr/local/bin"):
+            if (Path(prefix) / name).exists():
+                return True
+    return False
 
 
 def _display_path(path: Path | None) -> str:

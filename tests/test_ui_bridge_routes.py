@@ -654,6 +654,11 @@ async def test_gpt_sovits_service_routes_use_runtime_config(monkeypatch):
     )
     monkeypatch.setattr(
         ui,
+        "get_gpt_sovits_service_status_for_values",
+        lambda **kwargs: calls.append(("draft_status", kwargs)) or {"workdir_exists": True},
+    )
+    monkeypatch.setattr(
+        ui,
         "install_gpt_sovits_launch_agent",
         lambda received_config: calls.append(("install", received_config)) or {"ok": True},
     )
@@ -664,10 +669,25 @@ async def test_gpt_sovits_service_routes_use_runtime_config(monkeypatch):
     )
 
     assert await ui.get_tts_gpt_sovits_service_status() == {"reachable": True}
+    assert await ui.get_tts_gpt_sovits_service_status_for_draft(
+        ui.GptSovitsServiceStatusRequest(
+            base_url="http://127.0.0.1:9880",
+            workdir="~/AI/GPT-SoVITS",
+            command="python api_v2.py",
+        )
+    ) == {"workdir_exists": True}
     assert await ui.install_tts_gpt_sovits_service() == {"ok": True}
     assert await ui.uninstall_tts_gpt_sovits_service() == {"ok": True}
     assert calls == [
         ("status", config),
+        (
+            "draft_status",
+            {
+                "base_url": "http://127.0.0.1:9880",
+                "workdir": "~/AI/GPT-SoVITS",
+                "command": "python api_v2.py",
+            },
+        ),
         ("install", config),
         ("uninstall", config),
     ]

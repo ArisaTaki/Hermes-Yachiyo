@@ -25,6 +25,7 @@ from apps.shell.chat_api import audio_mime_type_for_suffix
 from apps.shell.chat_api import chat_attachment_record
 from apps.shell.chat_bridge import ChatBridge
 from apps.shell.gpt_sovits_service import get_gpt_sovits_service_status
+from apps.shell.gpt_sovits_service import get_gpt_sovits_service_status_for_values
 from apps.shell.gpt_sovits_service import install_gpt_sovits_launch_agent
 from apps.shell.gpt_sovits_service import uninstall_gpt_sovits_launch_agent
 from apps.shell.launcher_notifications import LauncherNotificationTracker
@@ -121,6 +122,12 @@ class TtsTestRequest(BaseModel):
     text: str = "八千代语音测试成功。主动关怀播报已经可以正常调用。"
 
 
+class GptSovitsServiceStatusRequest(BaseModel):
+    base_url: str = ""
+    workdir: str = ""
+    command: str = ""
+
+
 class ScreenPermissionRequest(BaseModel):
     open_settings: bool = True
 
@@ -206,6 +213,16 @@ async def import_tts_voice_archive_path(request: TtsResourcePathRequest) -> dict
 async def get_tts_gpt_sovits_service_status() -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(get_gpt_sovits_service_status, runtime.config)
+
+
+@router.post("/tts/gpt-sovits/service-status")
+async def get_tts_gpt_sovits_service_status_for_draft(request: GptSovitsServiceStatusRequest) -> dict[str, Any]:
+    return await asyncio.to_thread(
+        get_gpt_sovits_service_status_for_values,
+        base_url=request.base_url,
+        workdir=request.workdir,
+        command=request.command,
+    )
 
 
 @router.post("/tts/gpt-sovits/service/install")

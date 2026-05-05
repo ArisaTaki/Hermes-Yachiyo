@@ -268,9 +268,16 @@ export function ProactiveTtsSettingsView() {
     await openExternalUrl(url);
   }
 
-  async function refreshGsvServiceStatus(isDisposed: () => boolean = () => false) {
+  async function refreshGsvServiceStatus(
+    isDisposed: () => boolean = () => false,
+    draft: { base_url?: string; workdir?: string; command?: string } = {},
+  ) {
     try {
-      const data = await apiGet<GptSovitsServiceStatus>('/ui/tts/gpt-sovits/service-status');
+      const data = await apiPost<GptSovitsServiceStatus>('/ui/tts/gpt-sovits/service-status', {
+        base_url: draft.base_url ?? form.gsv_base_url,
+        workdir: draft.workdir ?? form.gsv_service_workdir,
+        command: draft.command ?? form.gsv_service_command,
+      });
       if (!isDisposed()) setServiceStatus(data);
     } catch {
       if (!isDisposed()) setServiceStatus(null);
@@ -344,7 +351,7 @@ export function ProactiveTtsSettingsView() {
     setBusyAction('service-setup');
     setStatus('正在打开 GPT-SoVITS 部署终端...');
     try {
-      const defaultWorkdir = voiceResource?.default_service_workdir || `${homePlaceholder()}/AI/GPT-SoVITS`;
+      const defaultWorkdir = voiceResource?.default_service_workdir_display || voiceResource?.default_service_workdir || `${homePlaceholder()}/AI/GPT-SoVITS`;
       const workdir = form.gsv_service_workdir.trim() || defaultWorkdir;
       if (!form.gsv_service_workdir.trim()) {
         updateField('gsv_service_workdir', workdir);
@@ -358,6 +365,10 @@ export function ProactiveTtsSettingsView() {
       });
       if (!result.success) throw new Error(result.error || '无法打开 GPT-SoVITS 部署终端');
       setStatus('已打开 GPT-SoVITS 部署终端；服务启动并监听 9880 后，回到这里刷新状态或保存并测试');
+      window.setTimeout(() => void refreshGsvServiceStatus(
+        () => false,
+        { base_url: form.gsv_base_url, workdir, command },
+      ), 500);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '打开 GPT-SoVITS 部署终端失败');
     } finally {
@@ -601,6 +612,10 @@ export function ProactiveTtsSettingsView() {
                         <div className="settings-meta-row">
                           <span>LaunchAgent</span>
                           <strong>{serviceStatus.plist_path_display || '—'}</strong>
+                        </div>
+                        <div className="settings-meta-row">
+                          <span>依赖检查</span>
+                          <strong>{formatGsvTools(serviceStatus.tools)}</strong>
                         </div>
                       </div>
                     ) : null}
@@ -855,11 +870,14 @@ function homePlaceholder(): string {
 }
 
 function buildGsvServiceTerminalCommand(form: TtsForm): string {
-  const workdir = shellQuote(form.gsv_service_workdir.trim());
+  const workdirAssignment = buildShellPathAssignment('WORKDIR', form.gsv_service_workdir.trim());
   const serviceCommand = form.gsv_service_command.trim();
   return [
     'echo "Hermes-Yachiyo GPT-SoVITS 服务启动"',
-    `cd ${workdir}`,
+    workdirAssignment,
+    'cd "$WORKDIR"',
+    'if [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi',
+    'if [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"; fi',
     'if [ -f .venv/bin/activate ]; then source .venv/bin/activate; fi',
     'if [ -f venv/bin/activate ]; then source venv/bin/activate; fi',
     serviceCommand,
@@ -872,11 +890,32 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
   return [
     'echo "Hermes-Yachiyo GPT-SoVITS 一键部署"',
     'echo "此流程会克隆 GPT-SoVITS、创建 .venv、安装依赖并启动本地 API。"',
-    'echo "下载体积可能较大，失败时请根据终端日志补齐 Python、ffmpeg 或模型依赖。"',
+    'echo "下载体积可能较大；脚本会优先准备 Homebrew python@3.11、ffmpeg 与 mecab。"',
     'printf "继续执行部署？[y/N] "',
     'read answer',
     'case "$answer" in [yY]|[yY][eE][sS]) ;; *) echo "已取消。"; exit 1 ;; esac',
     'set -e',
+    'if [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi',
+    'if [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"; fi',
+    'if command -v brew >/dev/null 2>&1; then',
+    '  echo "检查 Homebrew 依赖：git ffmpeg mecab python@3.11"',
+    '  brew list git >/dev/null 2>&1 || brew install git',
+    '  brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg',
+    '  brew list mecab >/dev/null 2>&1 || brew install mecab',
+    '  brew list python@3.11 >/dev/null 2>&1 || brew install python@3.11',
+    '  if [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi',
+    '  if [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"; fi',
+    'fi',
+    'if ! command -v git >/dev/null 2>&1; then echo "未找到 git，请先安装 Git。"; exit 1; fi',
+    'if ! command -v mecab-config >/dev/null 2>&1; then echo "未找到 mecab-config。请先执行：brew install mecab"; exit 1; fi',
+    'PYTHON_BIN=""',
+    'for candidate in python3.11 /opt/homebrew/bin/python3.11 /usr/local/bin/python3.11; do',
+    '  if command -v "$candidate" >/dev/null 2>&1; then PYTHON_BIN="$(command -v "$candidate")"; break; fi',
+    '  if [ -x "$candidate" ]; then PYTHON_BIN="$candidate"; break; fi',
+    'done',
+    'if [ -z "$PYTHON_BIN" ]; then echo "未找到 Python 3.11。请先执行：brew install python@3.11"; exit 1; fi',
+    'PY_VERSION="$("$PYTHON_BIN" -V 2>&1 | awk \'{print $2}\' | cut -d. -f1,2)"',
+    'if [ "$PY_VERSION" != "3.11" ]; then echo "当前 Python 版本为 $PY_VERSION，GPT-SoVITS 本地部署需要 Python 3.11。"; exit 1; fi',
     workdirAssignment,
     `PROJECT_URL=${quotedProjectUrl}`,
     'mkdir -p "$(dirname "$WORKDIR")"',
@@ -885,10 +924,18 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
     '  git clone "$PROJECT_URL" "$WORKDIR"',
     'fi',
     'cd "$WORKDIR"',
+    'if [ -x .venv/bin/python ]; then',
+    '  VENV_VERSION="$(.venv/bin/python -V 2>&1 | awk \'{print $2}\' | cut -d. -f1,2)"',
+    '  if [ "$VENV_VERSION" != "3.11" ]; then',
+    '    echo "检测到现有 .venv 使用 Python $VENV_VERSION，将重建为 Python 3.11"',
+    '    rm -rf .venv',
+    '  fi',
+    'fi',
     'if [ ! -d .venv ]; then',
-    '  python3 -m venv .venv',
+    '  "$PYTHON_BIN" -m venv .venv',
     'fi',
     'source .venv/bin/activate',
+    'python -V',
     'python -m pip install --upgrade pip wheel setuptools',
     'if [ -f requirements.txt ]; then',
     '  python -m pip install -r requirements.txt',
@@ -915,6 +962,19 @@ function gsvServiceStatusText(status: GptSovitsServiceStatus | null): string {
   if (status.reachable) return 'API 已可达；可以保存并测试语音链路。';
   if (!status.workdir_exists) return '请先填写 GPT-SoVITS 服务目录，或先安装 GPT-SoVITS 本体。';
   if (!status.command_configured) return '请先填写服务启动命令。';
+  if (status.tools?.python311 === false) return '建议先安装 Python 3.11：brew install python@3.11。';
+  if (status.tools?.mecab_config === false) return '缺少 mecab-config，部署前需要：brew install mecab。';
   if (status.launch_agent_installed) return status.launch_agent_running ? 'LaunchAgent 已运行，等待 API 就绪。' : 'LaunchAgent 已安装但未运行，可尝试重新安装或打开服务终端查看日志。';
   return status.reachable_error || '本地 API 暂不可达，可打开服务终端或安装开机自启。';
+}
+
+function formatGsvTools(tools?: Record<string, boolean>): string {
+  if (!tools) return '—';
+  const items: Array<[string, boolean | undefined]> = [
+    ['Python 3.11', tools.python311],
+    ['git', tools.git],
+    ['ffmpeg', tools.ffmpeg],
+    ['mecab-config', tools.mecab_config],
+  ];
+  return items.map(([label, ok]) => `${label} ${ok ? '可用' : '缺失'}`).join(' / ');
 }
