@@ -802,7 +802,7 @@ def test_update_hermes_configuration_normalizes_xiaomi_text_vision_model(tmp_pat
         assert result["ok"] is True
         set_calls = [call for call in calls if call[1:3] == ["config", "set"]]
         vision_model_call = next(call for call in set_calls if call[3] == "auxiliary.vision.model")
-        assert vision_model_call[4] == "mimo-v2.5-pro"
+        assert vision_model_call[4] == "mimo-v2.5"
     finally:
         store.close()
 

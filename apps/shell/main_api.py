@@ -182,7 +182,7 @@ _HERMES_PROVIDER_PRESETS: tuple[dict[str, Any], ...] = (
 )
 _PROVIDER_PRESET_BY_ID = {str(item["id"]): item for item in _HERMES_PROVIDER_PRESETS}
 _PREFERRED_AUXILIARY_VISION_MODELS = {
-    "xiaomi": "mimo-v2.5-pro",
+    "xiaomi": "mimo-v2.5",
 }
 _FAL_IMAGE_GEN_MODELS = (
     "fal-ai/flux-2/klein/9b",

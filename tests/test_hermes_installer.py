@@ -13,6 +13,7 @@ from apps.installer.hermes_check import (
 )
 from apps.installer.hermes_install import (
     HERMES_INSTALL_TIMEOUT_SECONDS,
+    build_hermes_install_script,
     clean_terminal_line,
     run_hermes_install,
     summarize_install_failure,
@@ -80,6 +81,17 @@ fatal: fetch-pack: invalid index-pack output
     assert "GitHub" in message
     assert "网络" in message
     assert "Releases" in message
+
+
+def test_hermes_install_script_retries_network_sensitive_steps():
+    script = build_hermes_install_script()
+
+    assert "curl --retry 3" in script
+    assert "for attempt in 1 2 3" in script
+    assert "GIT_CONFIG_KEY_0=http.version" in script
+    assert "GIT_CONFIG_VALUE_0=HTTP/1.1" in script
+    assert "target_existed" in script
+    assert "--skip-setup" in script
 
 
 def test_hermes_install_cleans_ansi_without_dropping_text():

@@ -215,6 +215,7 @@ export function InstallerView() {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const terminalIdRef = useRef<string | null>(null);
   const terminalTaskRef = useRef<DesktopTerminalTask | null>(null);
+  const actionsPanelRef = useRef<HTMLElement | null>(null);
   const configPanelRef = useRef<HTMLElement | null>(null);
 
   const loadHermesConfig = useCallback(async (options: { forceFormSync?: boolean } = {}) => {
@@ -421,6 +422,12 @@ export function InstallerView() {
   function scrollToHermesConfig() {
     window.requestAnimationFrame(() => {
       configPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  function scrollToInstallerActions() {
+    window.requestAnimationFrame(() => {
+      actionsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   }
 
@@ -654,7 +661,7 @@ export function InstallerView() {
     } else if (result.needs_init || latest.install_info?.status === 'installed_not_initialized') {
       setSetupAttention(false);
       setStatus(`Hermes 配置已保存，下一步初始化 Yachiyo 工作空间${envRefreshNote(result)}`);
-      scrollToHermesConfig();
+      scrollToInstallerActions();
     } else if (result.status === 'installed_needs_setup' || result.status === 'setup_in_progress') {
       setSetupAttention(false);
       setStatus('Hermes 配置已保存；如仍未通过检测，可使用高级终端 setup 补充配置');
@@ -726,7 +733,7 @@ export function InstallerView() {
         setSetupAttention(false);
         setStatus(`Hermes 配置完成，进入工作空间初始化${envRefreshNote(result)}`);
         await loadBackupStatus();
-        scrollToHermesConfig();
+        scrollToInstallerActions();
       } else if (result.status === 'installed_needs_setup' || result.status === 'setup_in_progress') {
         setSetupAttention(false);
         setStatus('Hermes 尚未完成配置，请在下方模型配置向导填写并保存');
@@ -846,7 +853,7 @@ export function InstallerView() {
           <GuidanceList actions={payload?.install_guidance?.actions || []} suggestions={installInfo?.suggestions || []} />
         </article>
 
-        <article className="panel settings-section">
+        <article className="panel settings-section" ref={actionsPanelRef}>
           <div className="section-heading-row">
             <h2>操作</h2>
             <span className={`process-badge ${busy ? 'active' : setupAttention ? 'attention' : ''}`}>

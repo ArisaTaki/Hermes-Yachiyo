@@ -286,6 +286,8 @@ def summarize_install_failure(output: str, returncode: int) -> str:
     """Return a user-facing summary for common installer failures."""
     normalized = output.lower()
     git_network_markers = (
+        "curl 18",
+        "expected flush after ref listing",
         "rpc failed",
         "early eof",
         "fetch-pack",
@@ -295,12 +297,45 @@ def summarize_install_failure(output: str, returncode: int) -> str:
     )
     if any(marker in normalized for marker in git_network_markers):
         return (
-            "从 GitHub 克隆 Hermes Agent 时网络传输中断。"
+            "从 GitHub 克隆 Hermes Agent 时网络传输中断；安装器已自动重试但仍未完成。"
             "请检查网络或代理后重试；也可以改用 Releases 二进制安装。"
         )
     if "could not resolve host" in normalized or "failed to connect" in normalized:
         return "无法连接 GitHub 或安装脚本源，请检查网络、代理或 DNS 后重试。"
     return f"安装脚本执行失败（exit={returncode}），请查看上方安装日志中的错误详情"
+
+
+def build_hermes_install_script() -> str:
+    """Build the shell wrapper used to download and run Hermes Agent installer."""
+    return (
+        "set -o pipefail\n"
+        'install_script="$(mktemp -t hermes-agent-install.XXXXXX)" || exit 1\n'
+        'target_dir="${HERMES_AGENT_INSTALL_DIR:-$HOME/.hermes/hermes-agent}"\n'
+        "target_existed=0\n"
+        '[ -e "$target_dir" ] && target_existed=1\n'
+        'trap \'rm -f "$install_script"\' EXIT\n'
+        f"curl --retry 3 --retry-delay 2 --connect-timeout 20 -fsSL {HERMES_INSTALL_SCRIPT_URL} -o \"$install_script\" || exit $?\n"
+        "export GIT_CONFIG_COUNT=3\n"
+        "export GIT_CONFIG_KEY_0=http.version\n"
+        "export GIT_CONFIG_VALUE_0=HTTP/1.1\n"
+        "export GIT_CONFIG_KEY_1=http.postBuffer\n"
+        "export GIT_CONFIG_VALUE_1=524288000\n"
+        "export GIT_CONFIG_KEY_2=http.lowSpeedTime\n"
+        "export GIT_CONFIG_VALUE_2=60\n"
+        "last_exit=0\n"
+        "for attempt in 1 2 3; do\n"
+        '  printf "\\nHermes Agent 安装尝试 %s/3\\n" "$attempt"\n'
+        '  bash "$install_script" --skip-setup\n'
+        "  last_exit=$?\n"
+        '  if [ "$last_exit" -eq 0 ]; then exit 0; fi\n'
+        '  if [ "$attempt" -lt 3 ]; then\n'
+        '    printf "Hermes Agent 安装尝试 %s/3 失败，退出码：%s；即将重试...\\n" "$attempt" "$last_exit"\n'
+        '    if [ "$target_existed" -eq 0 ] && [ -d "$target_dir" ] && [ ! -x "$target_dir/venv/bin/hermes" ]; then rm -rf "$target_dir"; fi\n'
+        "    sleep $((attempt * 2))\n"
+        "  fi\n"
+        "done\n"
+        'exit "$last_exit"'
+    )
 
 
 async def run_hermes_install(
@@ -334,12 +369,7 @@ async def run_hermes_install(
     logger.info("开始安装 Hermes Agent（脚本: %s）", HERMES_INSTALL_SCRIPT_URL)
 
     # 下载后执行：跳过官方交互式 setup，改由 Yachiyo 的 GUI 配置向导处理。
-    install_script = (
-        'install_script="$(mktemp -t hermes-agent-install.XXXXXX)" || exit 1\n'
-        'trap \'rm -f "$install_script"\' EXIT\n'
-        f'curl -fsSL {HERMES_INSTALL_SCRIPT_URL} -o "$install_script" || exit $?\n'
-        'bash "$install_script" --skip-setup'
-    )
+    install_script = build_hermes_install_script()
     cmd = [
         "bash", "-c",
         install_script,

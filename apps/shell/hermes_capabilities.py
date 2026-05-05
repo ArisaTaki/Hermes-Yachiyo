@@ -18,11 +18,11 @@ _HERMES_CONFIG_TIMEOUT = 5.0
 _VALID_IMAGE_INPUT_MODES = {"auto", "native", "text"}
 
 _XIAOMI_NATIVE_IMAGE_MODELS = {
-    "mimo-v2.5-pro",
     "mimo-v2.5",
     "mimo-v2-omni",
 }
 _XIAOMI_TEXT_ONLY_MODELS = {
+    "mimo-v2.5-pro",
     "mimo-v2-pro",
     "mimo-v2-flash",
 }
@@ -204,6 +204,21 @@ def build_hermes_image_input_capability(
             reason="已配置单独图片识别模型，图片会先经 vision 链路分析后再发给当前模型。",
         )
 
+    if effective_provider == "xiaomi" and supports_vision is False:
+        return _image_input_payload(
+            provider=effective_provider,
+            model=model,
+            mode=mode,
+            supports_vision=supports_vision,
+            route="vision_text",
+            can_attach=True,
+            requires_vision_pipeline=True,
+            reason=(
+                "当前小米主模型的原生图片入口不可用；Yachiyo 会自动使用 mimo-v2.5 "
+                "先识别图片，再把结果交给主模型。"
+            ),
+        )
+
     if supports_vision is True:
         return _image_input_payload(
             provider=effective_provider,
@@ -319,17 +334,17 @@ def read_hermes_image_input_config(config_path: Path) -> dict[str, Any]:
 
 def lookup_model_supports_vision(provider: str, model: str) -> bool | None:
     provider_id_raw, model_id_raw = _normalized_provider_model(provider, model)
-    provider_id = _PROVIDER_TO_MODELS_DEV.get((provider or "").strip().lower())
-    model_id = (model or "").strip()
-    cache_result = _lookup_models_dev_supports_vision(provider_id, model_id)
-    if cache_result is not None:
-        return cache_result
-
     if provider_id_raw == "xiaomi":
         if model_id_raw in _XIAOMI_NATIVE_IMAGE_MODELS:
             return True
         if model_id_raw in _XIAOMI_TEXT_ONLY_MODELS:
             return False
+
+    provider_id = _PROVIDER_TO_MODELS_DEV.get((provider or "").strip().lower())
+    model_id = (model or "").strip()
+    cache_result = _lookup_models_dev_supports_vision(provider_id, model_id)
+    if cache_result is not None:
+        return cache_result
 
     return None
 

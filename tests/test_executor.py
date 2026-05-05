@@ -798,7 +798,7 @@ class TestHermesStreamBridgeImageRouting:
 
         class FakeCli:
             provider = "xiaomi"
-            model = "mimo-v2.5-pro"
+            model = "mimo-v2.5"
 
             def _preprocess_images_with_vision(self, text, images, *, announce=True):
                 raise AssertionError("native mode should not preprocess")
@@ -810,7 +810,7 @@ class TestHermesStreamBridgeImageRouting:
         assert routed[0]["text"].endswith("看图")
         assert routed[1]["type"] == "image_url"
 
-    def test_xiaomi_pro_auto_uses_native_image_parts(self, monkeypatch, tmp_path):
+    def test_xiaomi_pro_auto_uses_vision_preprocessor(self, monkeypatch, tmp_path):
         self._install_fake_image_routing(monkeypatch, {"agent": {"image_input_mode": "auto"}})
         image = tmp_path / "screen.png"
         image.write_bytes(b"png")
@@ -826,8 +826,8 @@ class TestHermesStreamBridgeImageRouting:
 
         routed = bridge_mod._route_images(FakeCli(), "看图", [image])
 
-        assert isinstance(routed, list)
-        assert routed[1]["type"] == "image_url"
+        assert routed.startswith("vision::[Yachiyo 附件图片上下文]")
+        assert "看图::1" in routed
 
     def test_auto_with_auxiliary_vision_uses_vision_preprocessor(self, monkeypatch, tmp_path):
         self._install_fake_image_routing(
@@ -1040,7 +1040,7 @@ class TestHermesStreamBridgeImageRouting:
 
         assert result == "一张图片"
         assert captured["provider"] == "custom"
-        assert captured["model"] == "mimo-v2.5-pro"
+        assert captured["model"] == "mimo-v2.5"
         assert captured["base_url"] == "https://token-plan-cn.xiaomimimo.com/v1"
         assert captured["api_key"] == "tp-test"
 
@@ -1224,7 +1224,7 @@ class TestHermesStreamBridgeImageRouting:
         result = bridge_mod._run_vision_analysis(image, "请看图")
 
         assert result == "辅助视觉结果"
-        assert captured["model"] == "mimo-v2.5-pro"
+        assert captured["model"] == "mimo-v2.5"
 
     def test_image_turn_temporarily_disables_agent_tools(self, tmp_path):
         image = tmp_path / "screen.png"

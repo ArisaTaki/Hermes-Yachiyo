@@ -13,7 +13,7 @@ def _config(tmp_path, body: str = ""):
     return path
 
 
-def test_xiaomi_pro_auto_uses_native_images_from_models_cache(tmp_path, monkeypatch):
+def test_xiaomi_pro_auto_uses_text_pipeline_despite_stale_models_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "apps.shell.hermes_capabilities._load_models_dev_cache",
         lambda: {
@@ -35,9 +35,9 @@ def test_xiaomi_pro_auto_uses_native_images_from_models_cache(tmp_path, monkeypa
     )
 
     assert capability["can_attach_images"] is True
-    assert capability["route"] == "native"
-    assert capability["requires_vision_pipeline"] is False
-    assert capability["supports_native_vision"] is True
+    assert capability["route"] == "vision_text"
+    assert capability["requires_vision_pipeline"] is True
+    assert capability["supports_native_vision"] is False
 
 
 def test_separate_vision_config_enables_text_pipeline(tmp_path):
@@ -94,7 +94,7 @@ def test_auto_mode_uses_separate_vision_when_explicitly_configured(tmp_path, mon
     assert capability["requires_vision_pipeline"] is True
 
 
-def test_xiaomi_pro_native_mode_is_allowed(tmp_path, monkeypatch):
+def test_xiaomi_pro_native_mode_is_blocked_when_known_unsupported(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "apps.shell.hermes_capabilities._load_models_dev_cache",
         lambda: {
@@ -115,11 +115,11 @@ def test_xiaomi_pro_native_mode_is_allowed(tmp_path, monkeypatch):
         config_path=_config(tmp_path, "agent:\n  image_input_mode: native\n"),
     )
 
-    assert capability["can_attach_images"] is True
-    assert capability["route"] == "native"
+    assert capability["can_attach_images"] is False
+    assert capability["route"] == "blocked"
 
 
-def test_xiaomi_models_cache_overrides_stale_fallback(tmp_path, monkeypatch):
+def test_xiaomi_verified_native_models_override_stale_models_cache(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "apps.shell.hermes_capabilities._load_models_dev_cache",
         lambda: {
@@ -134,13 +134,13 @@ def test_xiaomi_models_cache_overrides_stale_fallback(tmp_path, monkeypatch):
         },
     )
 
-    assert lookup_model_supports_vision("xiaomi", "mimo-v2.5") is False
+    assert lookup_model_supports_vision("xiaomi", "mimo-v2.5") is True
     capability = build_hermes_image_input_capability(
         provider="xiaomi",
         model="mimo-v2.5",
         config_path=_config(tmp_path),
     )
-    assert capability["route"] == "blocked"
+    assert capability["route"] == "native"
 
 
 def test_auto_provider_infers_openrouter_from_base_url_for_image_capability(tmp_path, monkeypatch):

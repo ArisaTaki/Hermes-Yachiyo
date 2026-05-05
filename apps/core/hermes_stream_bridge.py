@@ -44,16 +44,16 @@ _ATTACHED_IMAGE_GUARD = (
     "除非用户明确要求你操作当前电脑或重新观察屏幕。"
 )
 _XIAOMI_NATIVE_IMAGE_MODELS = {
-    "mimo-v2.5-pro",
     "mimo-v2.5",
     "mimo-v2-omni",
 }
 _XIAOMI_TEXT_ONLY_IMAGE_MODELS = {
+    "mimo-v2.5-pro",
     "mimo-v2-pro",
     "mimo-v2-flash",
 }
 _PREFERRED_AUXILIARY_VISION_MODELS = {
-    "xiaomi": "mimo-v2.5-pro",
+    "xiaomi": "mimo-v2.5",
 }
 _PROVIDER_API_KEY_NAMES = {
     "xiaomi": ("XIAOMI_API_KEY",),
@@ -256,6 +256,14 @@ def _has_explicit_auxiliary_vision(cfg: dict[str, Any] | None) -> bool:
 
 
 def _lookup_model_supports_vision(provider: str, model: str) -> bool | None:
+    provider_id = provider.strip().lower()
+    model_id = model.strip().lower()
+    if provider_id == "xiaomi":
+        if model_id in _XIAOMI_NATIVE_IMAGE_MODELS:
+            return True
+        if model_id in _XIAOMI_TEXT_ONLY_IMAGE_MODELS:
+            return False
+
     try:
         from agent.models_dev import get_model_capabilities
 
@@ -264,14 +272,6 @@ def _lookup_model_supports_vision(provider: str, model: str) -> bool | None:
         caps = None
     if caps is not None:
         return bool(getattr(caps, "supports_vision", False))
-
-    provider_id = provider.strip().lower()
-    model_id = model.strip().lower()
-    if provider_id == "xiaomi":
-        if model_id in _XIAOMI_NATIVE_IMAGE_MODELS:
-            return True
-        if model_id in _XIAOMI_TEXT_ONLY_IMAGE_MODELS:
-            return False
 
     cache_result = _lookup_models_dev_cache_supports_vision(
         _PROVIDER_TO_MODELS_DEV.get(provider_id, provider_id),
@@ -326,6 +326,8 @@ def _correct_image_mode_for_provider(
     if configured_mode == "text":
         return "text"
     if configured_mode == "native":
+        if provider_id == "xiaomi" and _lookup_model_supports_vision(provider, model) is False:
+            return "text"
         return "native"
     if _has_explicit_auxiliary_vision(cfg):
         return "text"
