@@ -284,6 +284,7 @@ def test_gpt_sovits_service_status_reports_local_requirements(monkeypatch, tmp_p
     monkeypatch.setattr(gsv_service, "_launch_agent_path", lambda: tmp_path / "agent.plist")
     monkeypatch.setattr(gsv_service, "_launch_agent_running", lambda: False)
     monkeypatch.setattr(gsv_service, "_service_reachable", lambda _url: {"ok": False, "error": "connection refused"})
+    monkeypatch.setattr(gsv_service, "_python_package_available", lambda _workdir, package: False)
 
     status = gsv_service.get_gpt_sovits_service_status(
         TTSConfig(gsv_service_workdir=str(workdir), gsv_service_command="python api_v2.py")
@@ -293,6 +294,7 @@ def test_gpt_sovits_service_status_reports_local_requirements(monkeypatch, tmp_p
     assert status["command_configured"] is True
     assert status["reachable"] is False
     assert status["launch_agent_installed"] is False
+    assert status["tools"]["torchcodec"] is False
 
 
 def test_gpt_sovits_service_status_uses_unsaved_draft_and_expands_env(monkeypatch, tmp_path):
@@ -302,6 +304,7 @@ def test_gpt_sovits_service_status_uses_unsaved_draft_and_expands_env(monkeypatc
     monkeypatch.setattr(gsv_service, "_launch_agent_path", lambda: tmp_path / "agent.plist")
     monkeypatch.setattr(gsv_service, "_launch_agent_running", lambda: False)
     monkeypatch.setattr(gsv_service, "_service_reachable", lambda _url: {"ok": True})
+    monkeypatch.setattr(gsv_service, "_python_package_available", lambda _workdir, package: package == "torchcodec")
 
     status = gsv_service.get_gpt_sovits_service_status_for_values(
         base_url="http://127.0.0.1:9880",
@@ -313,6 +316,7 @@ def test_gpt_sovits_service_status_uses_unsaved_draft_and_expands_env(monkeypatc
     assert status["workdir_exists"] is True
     assert status["workdir"] == str(workdir)
     assert status["command_configured"] is True
+    assert status["tools"]["torchcodec"] is True
 
 
 def test_gpt_sovits_launch_agent_install_validates_workdir(monkeypatch):

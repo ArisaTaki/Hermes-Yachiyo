@@ -48,6 +48,7 @@ def get_gpt_sovits_service_status(config: Any) -> dict[str, Any]:
             "uv": _tool_exists("uv"),
             "ffmpeg": _tool_exists("ffmpeg"),
             "mecab_config": _tool_exists("mecab-config"),
+            "torchcodec": _python_package_available(workdir, "torchcodec"),
         },
         "logs": {
             "stdout": _display_path(_log_path("out")),
@@ -212,6 +213,39 @@ def _tool_path(*names: str) -> str | None:
 
 def _tool_exists(*names: str) -> bool:
     return _tool_path(*names) is not None
+
+
+def _python_package_available(workdir: Path | None, package: str) -> bool:
+    venv_candidates: list[Path] = []
+    if workdir:
+        venv_candidates.extend([workdir / ".venv" / "bin" / "python", workdir / "venv" / "bin" / "python"])
+    candidates = [python for python in venv_candidates if python.exists()]
+    if not candidates:
+        for tool in (_tool_path("python3.11"), _tool_path("python3"), _tool_path("python")):
+            if tool:
+                candidates.append(Path(tool))
+
+    seen: set[str] = set()
+    for python in candidates:
+        key = str(python)
+        if key in seen:
+            continue
+        seen.add(key)
+        if not python.exists():
+            continue
+        try:
+            result = subprocess.run(
+                [str(python), "-c", f"import {package}"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False,
+            )
+        except Exception:
+            continue
+        if result.returncode == 0:
+            return True
+    return False
 
 
 def _display_path(path: Path | None) -> str:

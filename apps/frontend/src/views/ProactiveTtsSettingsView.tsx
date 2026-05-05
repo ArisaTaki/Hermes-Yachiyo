@@ -943,6 +943,8 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
     'else',
     '  echo "未找到 requirements.txt，跳过依赖安装。"',
     'fi',
+    'python -m pip install torchcodec',
+    'python -c "import torchcodec"',
     `SERVICE_COMMAND=${shellQuote(configuredCommand)}`,
     'echo "本地依赖部署完成。"',
     'echo "如果需要前台调试，可回到设置页点击“打开调试终端”，或手动运行：$SERVICE_COMMAND"',
@@ -962,6 +964,7 @@ function buildShellPathAssignment(name: string, value: string): string {
 
 function gsvServiceStatusText(status: GptSovitsServiceStatus | null): string {
   if (!status) return '推荐端口：9880；服务启动后再执行保存并测试。';
+  if (status.workdir_exists && status.tools?.torchcodec === false) return '缺少 torchcodec，请重新执行“部署本地依赖”后再测试语音。';
   if (status.reachable) return 'API 已可达；可以保存并测试语音链路。';
   if (!status.workdir_exists) return '请先填写 GPT-SoVITS 服务目录，或先安装 GPT-SoVITS 本体。';
   if (!status.command_configured) return '请先填写服务启动命令。';
@@ -978,6 +981,7 @@ function formatGsvTools(tools?: Record<string, boolean>): string {
     ['git', tools.git],
     ['ffmpeg', tools.ffmpeg],
     ['mecab-config', tools.mecab_config],
+    ['torchcodec', tools.torchcodec],
   ];
   return items.map(([label, ok]) => `${label} ${ok ? '可用' : '缺失'}`).join(' / ');
 }
