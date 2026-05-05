@@ -62,6 +62,7 @@ def test_send_message_creates_task_and_links_user_message(tmp_path):
         task = runtime.state.get_task(result["task_id"])
         assert task is not None
         assert task.description == "你好"
+        assert task.chat_session_id == runtime.chat_session.session_id
 
         user = runtime.chat_session.get_messages()[0]
         assert user.role == MessageRole.USER
@@ -71,6 +72,20 @@ def test_send_message_creates_task_and_links_user_message(tmp_path):
         assert api.get_session_info()["is_processing"] is True
     finally:
         store.close()
+
+
+def test_sort_messages_keeps_assistant_only_task_in_timeline():
+    proactive = _chat_message("proactive", MessageRole.ASSISTANT, "主动提醒", task_id="tp")
+    user = _chat_message("user", MessageRole.USER, "收到", task_id="tu")
+    assistant = _chat_message("assistant", MessageRole.ASSISTANT, "继续回复", task_id="tu")
+
+    sorted_messages = ChatAPI._sort_messages_by_task([proactive, user, assistant])
+
+    assert [message.message_id for message in sorted_messages] == [
+        "proactive",
+        "user",
+        "assistant",
+    ]
 
 
 def test_send_message_accepts_pasted_image_attachment(tmp_path, monkeypatch):

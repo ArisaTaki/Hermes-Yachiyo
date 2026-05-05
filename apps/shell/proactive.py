@@ -7,8 +7,9 @@ import random
 import time
 from typing import TYPE_CHECKING, Any
 
-from apps.core.chat_session import MessageStatus
+from apps.core.chat_session import ChatSession, MessageStatus
 from apps.core.executor import HermesExecutor
+from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID, PROACTIVE_CHAT_SESSION_TITLE
 from apps.locald.screenshot import capture_screenshot_to_file
 from apps.shell.chat_api import (
     allocate_chat_attachment_path,
@@ -32,6 +33,47 @@ _DESKTOP_WATCH_PROMPT = (
 )
 _MIN_PROACTIVE_INTERVAL_SECONDS = 300
 _DESKTOP_WATCH_VISIBLE_MESSAGE = "正在查看当前状态。"
+
+
+def get_proactive_chat_session(runtime: Any) -> ChatSession | Any | None:
+    """Return the dedicated proactive chat session without changing current UI state."""
+    current = getattr(runtime, "chat_session", None)
+    if current is not None and getattr(current, "session_id", "") == PROACTIVE_CHAT_SESSION_ID:
+        _ensure_proactive_session_title(current)
+        return current
+
+    store = getattr(current, "_store", None)
+    if store is None:
+        store = getattr(runtime, "store", None)
+    if store is None:
+        return current
+
+    cached = getattr(runtime, "_proactive_chat_session", None)
+    if (
+        cached is not None
+        and getattr(cached, "session_id", "") == PROACTIVE_CHAT_SESSION_ID
+        and getattr(cached, "_store", None) is store
+    ):
+        _ensure_proactive_session_title(cached)
+        return cached
+
+    session = ChatSession(session_id=PROACTIVE_CHAT_SESSION_ID)
+    session.attach_store(store, load_existing=True)
+    _ensure_proactive_session_title(session)
+    try:
+        setattr(runtime, "_proactive_chat_session", session)
+    except Exception:
+        logger.debug("主动关怀会话缓存失败", exc_info=True)
+    return session
+
+
+def _ensure_proactive_session_title(chat_session: Any | None) -> None:
+    if chat_session is None:
+        return
+    try:
+        chat_session.set_session_title(PROACTIVE_CHAT_SESSION_TITLE)
+    except Exception:
+        logger.debug("主动关怀会话标题写入失败", exc_info=True)
 
 
 def build_proactive_desktop_prompt(runtime: Any | None = None) -> str:
@@ -61,6 +103,10 @@ class ProactiveDesktopService:
     def last_task_id(self) -> str | None:
         return self._last_task_id
 
+    @property
+    def session_id(self) -> str:
+        return PROACTIVE_CHAT_SESSION_ID
+
     def acknowledge(self) -> None:
         """确认当前主动观察提示，清除 attention 状态。"""
         if self._attention_task_id:
@@ -75,6 +121,7 @@ class ProactiveDesktopService:
         )
         if not enabled or not desktop_watch_enabled:
             return {
+                "session_id": self.session_id,
                 "enabled": enabled,
                 "desktop_watch_enabled": desktop_watch_enabled,
                 "status": "disabled" if not enabled else "idle",
@@ -87,6 +134,7 @@ class ProactiveDesktopService:
         if blocker:
             self._reset_wait_baseline()
             return {
+                "session_id": self.session_id,
                 "enabled": True,
                 "desktop_watch_enabled": True,
                 "status": "blocked",
@@ -98,6 +146,7 @@ class ProactiveDesktopService:
         task = self._current_task()
         if task is not None and task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
             return {
+                "session_id": self.session_id,
                 "enabled": True,
                 "desktop_watch_enabled": True,
                 "status": task.status.value,
@@ -125,6 +174,7 @@ class ProactiveDesktopService:
         if not enabled:
             self._reset_wait_baseline()
             return {
+                "session_id": self.session_id,
                 "enabled": False,
                 "desktop_watch_enabled": desktop_watch_enabled,
                 "status": "disabled",
@@ -135,6 +185,7 @@ class ProactiveDesktopService:
         if not desktop_watch_enabled:
             self._reset_wait_baseline()
             return {
+                "session_id": self.session_id,
                 "enabled": True,
                 "desktop_watch_enabled": False,
                 "status": "idle",
@@ -146,6 +197,7 @@ class ProactiveDesktopService:
         if blocker:
             self._reset_wait_baseline()
             return {
+                "session_id": self.session_id,
                 "enabled": True,
                 "desktop_watch_enabled": True,
                 "status": "blocked",
@@ -159,6 +211,7 @@ class ProactiveDesktopService:
         if task is not None:
             if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
                 return {
+                    "session_id": self.session_id,
                     "enabled": True,
                     "desktop_watch_enabled": True,
                     "status": task.status.value,
@@ -173,8 +226,14 @@ class ProactiveDesktopService:
                 elif now - self._last_check_at >= interval:
                     return self._maybe_schedule_after_interval()
                 result = str(getattr(task, "result", "") or "").strip()
+                self._upsert_proactive_message(
+                    task.task_id,
+                    result or "[主动观察已完成，无输出]",
+                    MessageStatus.COMPLETED,
+                )
                 attention_text = _compact_attention_text(result)
                 return {
+                    "session_id": self.session_id,
                     "enabled": True,
                     "desktop_watch_enabled": True,
                     "status": "completed",
@@ -192,7 +251,14 @@ class ProactiveDesktopService:
                 ):
                     return self._maybe_schedule_after_interval()
                 self._reported_failed_task_id = task.task_id
+                self._upsert_proactive_message(
+                    task.task_id,
+                    task.error or "主动桌面观察失败",
+                    MessageStatus.FAILED,
+                    error=task.error or "主动桌面观察失败",
+                )
                 return {
+                    "session_id": self.session_id,
                     "enabled": True,
                     "desktop_watch_enabled": True,
                     "status": "failed",
@@ -205,6 +271,7 @@ class ProactiveDesktopService:
             return self._maybe_schedule_after_interval()
 
         return {
+            "session_id": self.session_id,
             "enabled": True,
             "desktop_watch_enabled": True,
             "status": "waiting",
@@ -233,6 +300,7 @@ class ProactiveDesktopService:
     def _scheduled_state(task_id: str) -> dict[str, Any]:
         return {
             "enabled": True,
+            "session_id": PROACTIVE_CHAT_SESSION_ID,
             "desktop_watch_enabled": True,
             "status": "scheduled",
             "has_attention": False,
@@ -244,6 +312,7 @@ class ProactiveDesktopService:
         task = self._runtime.state.get_task(task_id)
         if task is not None and task.status == TaskStatus.FAILED:
             return {
+                "session_id": self.session_id,
                 "enabled": True,
                 "desktop_watch_enabled": True,
                 "status": "failed",
@@ -261,6 +330,7 @@ class ProactiveDesktopService:
             self._attention_task_id = None
             self._reported_failed_task_id = None
             return {
+                "session_id": self.session_id,
                 "enabled": True,
                 "desktop_watch_enabled": True,
                 "status": "skipped",
@@ -311,7 +381,7 @@ class ProactiveDesktopService:
         return None
 
     def _schedule_desktop_watch_task(self) -> str:
-        chat_session = getattr(self._runtime, "chat_session", None)
+        chat_session = get_proactive_chat_session(self._runtime)
         attachments, screenshot_error = self._capture_desktop_attachments(chat_session)
         prompt = build_proactive_desktop_prompt(self._runtime)
         if screenshot_error:
@@ -321,6 +391,7 @@ class ProactiveDesktopService:
             task_type=TaskType.SCREENSHOT,
             risk_level=RiskLevel.LOW,
             attachments=attachments,
+            chat_session_id=getattr(chat_session, "session_id", None),
         )
 
         if chat_session is not None:
@@ -346,6 +417,7 @@ class ProactiveDesktopService:
             task_type=TaskType.SCREENSHOT,
             risk_level=RiskLevel.LOW,
             attachments=[],
+            chat_session_id=getattr(chat_session, "session_id", None),
         )
         self._runtime.state.update_task_status(
             task.task_id,
@@ -367,6 +439,26 @@ class ProactiveDesktopService:
         self._reported_failed_task_id = task.task_id
         self._last_check_at = time.monotonic()
         return task.task_id
+
+    def _upsert_proactive_message(
+        self,
+        task_id: str,
+        content: str,
+        status: MessageStatus,
+        error: str | None = None,
+    ) -> None:
+        chat_session = get_proactive_chat_session(self._runtime)
+        if chat_session is None:
+            return
+        try:
+            chat_session.upsert_assistant_message(
+                task_id=task_id,
+                content=content,
+                status=status,
+                error=error,
+            )
+        except Exception:
+            logger.debug("主动关怀结果写入专用会话失败", exc_info=True)
 
     def _capture_desktop_attachments(self, chat_session: Any | None) -> tuple[list[dict], str]:
         session_id = str(getattr(chat_session, "session_id", "") or "proactive")

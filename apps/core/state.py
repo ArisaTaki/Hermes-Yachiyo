@@ -57,6 +57,7 @@ class AppState:
         task_type: TaskType = TaskType.GENERAL,
         risk_level: RiskLevel = RiskLevel.LOW,
         attachments: list[dict] | None = None,
+        chat_session_id: str | None = None,
     ) -> TaskInfo:
         with self._lock:
             now = _now()
@@ -69,6 +70,7 @@ class AppState:
                 created_at=now,
                 updated_at=now,
                 attachments=list(attachments or []),
+                chat_session_id=(chat_session_id or None),
             )
             self._tasks[task.task_id] = task
         logger.info("任务已创建: %s", task.task_id)

@@ -27,6 +27,7 @@ type LauncherPayload = {
   proactive?: {
     enabled?: boolean;
     has_attention?: boolean;
+    session_id?: string;
     message?: string;
     result?: string;
     attention_text?: string;
@@ -206,10 +207,12 @@ function useLauncher(mode: 'bubble' | 'live2d') {
 }
 
 async function acknowledgeAndOpenChat(mode: 'bubble' | 'live2d') {
+  let sessionId = '';
   try {
-    await apiPost('/ui/launcher/ack', { mode });
+    const result = await apiPost<{ session_id?: string }>('/ui/launcher/ack', { mode });
+    sessionId = result.session_id || '';
   } catch {}
-  await openAppView('chat');
+  await openAppView('chat', sessionId ? { session_id: sessionId } : {});
 }
 
 function openSettings(mode: 'bubble' | 'live2d') {
@@ -631,7 +634,11 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
     const text = quickText.trim();
     if (!text) return;
     setQuickText('');
-    await apiPost('/ui/launcher/quick-message', { text });
+    await apiPost('/ui/launcher/quick-message', {
+      text,
+      mode: data?.mode || 'live2d',
+      session_id: proactiveAttention ? String(data?.proactive?.session_id || '') : '',
+    });
     setReplyHidden(false);
     setQuickInputVisible(false);
     await refresh();

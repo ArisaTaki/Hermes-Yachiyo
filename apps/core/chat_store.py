@@ -144,6 +144,7 @@ class ChatStore:
             rows = conn.execute(
                 """
                 SELECT s.session_id, s.title, s.created_at, s.hermes_session_id,
+                       MAX(m.created_at) AS last_message_at,
                        (
                            SELECT um.content
                            FROM chat_messages um
@@ -157,7 +158,7 @@ class ChatStore:
                 LEFT JOIN chat_messages m ON m.session_id = s.session_id
                 GROUP BY s.session_id
                 HAVING COUNT(m.message_id) > 0
-                ORDER BY s.created_at DESC
+                ORDER BY COALESCE(last_message_at, s.created_at) DESC, s.created_at DESC
                 LIMIT ?
                 """,
                 (limit,),

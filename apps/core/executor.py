@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from packages.protocol.schemas import TaskInfo
+from apps.core.special_sessions import is_proactive_chat_session
 
 if TYPE_CHECKING:
     from apps.core.chat_session import ChatSession
@@ -1025,7 +1026,7 @@ class HermesExecutor(ExecutionStrategy):
             user_address,
             format_environment_context(),
         )
-        chat_session = self._chat_session
+        chat_session = self._chat_session_for_task(task)
         hermes_sid = None
         if chat_session is not None:
             hermes_sid = chat_session.hermes_session_id
@@ -1062,7 +1063,11 @@ class HermesExecutor(ExecutionStrategy):
             # 记录 session_id 以便后续 --resume
             if invoke_result.hermes_session_id and chat_session is not None:
                 chat_session.set_hermes_session_id(invoke_result.hermes_session_id)
-            if invoke_result.hermes_title and chat_session is not None:
+            if (
+                invoke_result.hermes_title
+                and chat_session is not None
+                and not is_proactive_chat_session(chat_session.session_id)
+            ):
                 chat_session.set_session_title(invoke_result.hermes_title)
             return invoke_result.output
 
@@ -1078,6 +1083,24 @@ class HermesExecutor(ExecutionStrategy):
             returncode=invoke_result.returncode,
             stderr=invoke_result.stderr,
         )
+
+    def _chat_session_for_task(self, task: TaskInfo) -> Optional["ChatSession"]:
+        session_id = str(getattr(task, "chat_session_id", "") or "")
+        current = self._chat_session
+        if not session_id:
+            return current
+        if current is not None and current.session_id == session_id:
+            return current
+        try:
+            from apps.core.chat_session import ChatSession
+            from apps.core.chat_store import get_chat_store
+
+            session = ChatSession(session_id=session_id)
+            session.attach_store(get_chat_store(), load_existing=True)
+            return session
+        except Exception:
+            logger.debug("无法为任务加载指定聊天会话: %s", session_id, exc_info=True)
+            return current
 
 
 # ── 执行器选择工厂 ────────────────────────────────────────────────────────────

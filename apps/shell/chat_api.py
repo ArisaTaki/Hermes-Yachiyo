@@ -238,6 +238,7 @@ class ChatAPI:
                 task_type=TaskType.GENERAL,
                 description=text,
                 attachments=saved_attachments,
+                chat_session_id=self._session.session_id,
             )
             task_id = task.task_id
 
@@ -322,17 +323,25 @@ class ChatAPI:
         输出时，每条 user 消息后立即插入对应 assistant 消息。
         system 消息和无 task_id 的消息保持原始顺序。
         """
-        # 建立 task_id → assistant 消息的映射
+        user_task_ids = {
+            msg.task_id
+            for msg in messages
+            if msg.role == MessageRole.USER and msg.task_id
+        }
+
+        # 建立 task_id → assistant 消息的映射。只有同页存在 user
+        # 消息的 task 才做配对重排；主动关怀这类 assistant-only
+        # 消息保持原本时间线位置。
         assistant_by_task: dict[str, ChatMessage] = {}
         for msg in messages:
-            if msg.role == MessageRole.ASSISTANT and msg.task_id:
+            if msg.role == MessageRole.ASSISTANT and msg.task_id in user_task_ids:
                 assistant_by_task[msg.task_id] = msg
 
         result: list[ChatMessage] = []
         inserted_assistant_ids: set[str] = set()
 
         for msg in messages:
-            if msg.role == MessageRole.ASSISTANT and msg.task_id:
+            if msg.role == MessageRole.ASSISTANT and msg.task_id in user_task_ids:
                 # assistant 消息由 user 消息触发插入，跳过
                 continue
             result.append(msg)
@@ -347,7 +356,7 @@ class ChatAPI:
         for msg in messages:
             if (
                 msg.role == MessageRole.ASSISTANT
-                and msg.task_id
+                and msg.task_id in user_task_ids
                 and msg.message_id not in inserted_assistant_ids
             ):
                 result.append(msg)

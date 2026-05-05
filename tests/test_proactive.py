@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 
 from apps.core.chat_session import ChatSession, MessageRole, MessageStatus
+from apps.core.chat_store import ChatStore
+from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID, PROACTIVE_CHAT_SESSION_TITLE
 from apps.core.state import AppState
 import apps.shell.proactive as proactive_mod
 from apps.shell.config import AppConfig
@@ -238,6 +240,40 @@ def test_proactive_service_creates_low_risk_screenshot_task(monkeypatch):
     assert messages[0].attachments == []
     assert "主动桌面观察" not in messages[0].content
     assert "输出约束" not in messages[0].content
+
+
+def test_proactive_service_uses_dedicated_session_when_store_is_available(monkeypatch, tmp_path):
+    now = _advance_to_first_check(monkeypatch)
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub()
+    runtime.store = store
+    runtime.chat_session.attach_store(store, load_existing=False)
+    runtime.config.live2d_mode.proactive_enabled = True
+    runtime.config.live2d_mode.proactive_desktop_watch_enabled = True
+    runtime.config.live2d_mode.proactive_interval_seconds = 300
+    service = ProactiveDesktopService(runtime, runtime.config.live2d_mode)
+
+    try:
+        now[0] = 1300.0
+        state = service.get_state()
+
+        assert state["status"] == "scheduled"
+        assert state["session_id"] == PROACTIVE_CHAT_SESSION_ID
+        assert runtime.chat_session.get_messages() == []
+
+        proactive_session = ChatSession(session_id=PROACTIVE_CHAT_SESSION_ID)
+        proactive_session.attach_store(store, load_existing=True)
+        messages = proactive_session.get_messages()
+        stored = store.get_session(PROACTIVE_CHAT_SESSION_ID)
+
+        assert stored is not None
+        assert stored.title == PROACTIVE_CHAT_SESSION_TITLE
+        assert len(messages) == 1
+        assert messages[0].role == MessageRole.ASSISTANT
+        assert messages[0].task_id == state["task_id"]
+        assert runtime.state.get_task(state["task_id"]).chat_session_id == PROACTIVE_CHAT_SESSION_ID
+    finally:
+        store.close()
 
 
 def test_proactive_service_records_local_screenshot_failure_without_running_hermes(monkeypatch):

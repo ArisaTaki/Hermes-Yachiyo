@@ -37,6 +37,7 @@ from apps.shell.main_api import MainWindowAPI
 from apps.shell.mode_settings import apply_settings_changes
 from apps.shell.mode_settings import serialize_mode_window_data
 from apps.shell.proactive import ProactiveDesktopService
+from apps.shell.proactive import get_proactive_chat_session
 from apps.shell.tts import TTSService
 
 router = APIRouter(prefix="/ui", tags=["UI"])
@@ -59,6 +60,8 @@ class LauncherAckRequest(BaseModel):
 
 class LauncherQuickMessageRequest(BaseModel):
     text: str
+    mode: str = "bubble"
+    session_id: str = ""
 
 
 class LauncherWorkAreaRequest(BaseModel):
@@ -726,7 +729,8 @@ def _allocate_tts_audio_output(runtime: Any, tts_config: Any) -> tuple[Path | No
         return None, "", ""
     media_type = str(getattr(tts_config, "gsv_media_type", "wav") or "wav").strip().lower().lstrip(".")
     suffix = f".{media_type if media_type in {'wav', 'mp3', 'ogg', 'flac'} else 'wav'}"
-    session_id = str(getattr(getattr(runtime, "chat_session", None), "session_id", "") or "proactive")
+    chat_session = get_proactive_chat_session(runtime)
+    session_id = str(getattr(chat_session, "session_id", "") or "proactive")
     attachment_id, output_path = allocate_chat_attachment_path(session_id, suffix)
     return output_path, attachment_id, audio_mime_type_for_suffix(suffix)
 
@@ -744,12 +748,14 @@ def _attach_proactive_tts_audio(
     path = Path(str(status.get("audio_path") or output_path))
     if not path.exists():
         return
-    chat_session = getattr(runtime, "chat_session", None)
+    chat_session = get_proactive_chat_session(runtime)
     if chat_session is None:
         return
     existing = chat_session.get_assistant_message_for_task(task_id)
     if existing is None:
         return
+    task = runtime.state.get_task(task_id)
+    content = str(getattr(task, "result", "") or existing.content or "")
     attachments = [
         item for item in list(existing.attachments or [])
         if not (isinstance(item, dict) and item.get("kind") == "audio" and item.get("source") == "proactive_tts")
@@ -766,7 +772,7 @@ def _attach_proactive_tts_audio(
     attachments.append(attachment)
     chat_session.upsert_assistant_message(
         task_id=task_id,
-        content=existing.content,
+        content=content,
         status=MessageStatus.COMPLETED,
         error=existing.error,
         attachments=attachments,
@@ -864,9 +870,14 @@ async def acknowledge_launcher(request: LauncherAckRequest) -> dict[str, Any]:
     tracker = _launcher_notifications.setdefault(mode_id, LauncherNotificationTracker())
     tracker.acknowledge(chat)
     service = _launcher_proactive_services.get((mode_id, id(runtime)))
+    session_id = ""
     if service is not None:
         service.acknowledge()
-    return {"ok": True, "mode": mode_id}
+        session_id = service.session_id
+    else:
+        chat_session = get_proactive_chat_session(runtime)
+        session_id = str(getattr(chat_session, "session_id", "") or "")
+    return {"ok": True, "mode": mode_id, "session_id": session_id}
 
 
 @router.post("/proactive/test")
@@ -883,7 +894,17 @@ async def trigger_proactive_test(request: ProactiveTestRequest) -> dict[str, Any
 
 @router.post("/launcher/quick-message")
 async def send_launcher_quick_message(request: LauncherQuickMessageRequest) -> dict[str, Any]:
-    return ChatBridge(get_runtime()).send_quick_message(request.text)
+    runtime = get_runtime()
+    session_id = str(request.session_id or "").strip()
+    if session_id:
+        loaded = ChatAPI(runtime).load_session(session_id)
+        if not loaded.get("ok"):
+            return loaded
+        mode_id = "live2d" if request.mode == "live2d" else "bubble"
+        service = _launcher_proactive_services.get((mode_id, id(runtime)))
+        if service is not None and session_id == service.session_id:
+            service.acknowledge()
+    return ChatBridge(runtime).send_quick_message(request.text)
 
 
 @router.post("/launcher/position")

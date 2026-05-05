@@ -6,6 +6,7 @@ import type {
 
 import { ImageAttachmentViewer } from '../components/ImageAttachmentViewer';
 import { apiGet, apiPost, bridgeUrl, copyText, openAppView, openExternalUrl } from '../lib/bridge';
+import { currentParam } from '../lib/view';
 
 type PendingAttachment = {
   id: string;
@@ -157,9 +158,22 @@ export function ChatView() {
   }, []);
 
   useEffect(() => {
-    void refreshMessages();
-    void loadSessions();
-    void loadExecutor();
+    const requestedSessionId = currentParam('session_id').trim();
+    void (async () => {
+      if (requestedSessionId) {
+        try {
+          const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/chat/sessions/load', {
+            session_id: requestedSessionId,
+          });
+          if (result.ok === false) throw new Error(result.error || '切换会话失败');
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : '切换会话失败');
+        }
+      }
+      await refreshMessages();
+      await loadSessions();
+      await loadExecutor();
+    })();
   }, [loadExecutor, loadSessions, refreshMessages]);
 
   useEffect(() => {

@@ -44,6 +44,7 @@ class TaskInfo(BaseModel):
     result: str | None = None
     error: str | None = None
     attachments: list[dict] = Field(default_factory=list)
+    chat_session_id: str | None = None
 
 
 class TaskGetResponse(BaseModel):

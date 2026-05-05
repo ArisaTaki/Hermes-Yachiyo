@@ -644,7 +644,11 @@ function showChatWindow(params: Record<string, string> = {}): void {
     return;
   }
   const route = routeForWindow(chatWindow);
-  if (route?.view !== 'chat') {
+  const requestedSessionId = params.session_id || '';
+  if (
+    route?.view !== 'chat'
+    || (requestedSessionId && route.params.session_id !== requestedSessionId)
+  ) {
     chatWindow.loadURL(rendererUrl({ ...params, view: 'chat' }));
   }
   showMacDockIcon();

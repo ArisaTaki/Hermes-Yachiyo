@@ -12,6 +12,7 @@ import apps.shell.live2d_resources as live2d_resources
 import apps.shell.config as config_mod
 import apps.locald.screenshot as screenshot_mod
 from apps.bridge.routes import ui
+from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID
 from apps.shell.config import AppConfig
 
 
@@ -426,6 +427,7 @@ async def test_launcher_routes_reuse_chat_bridge_and_notification_tracker(monkey
     assert await ui.acknowledge_launcher(ui.LauncherAckRequest(mode="live2d")) == {
         "ok": True,
         "mode": "live2d",
+        "session_id": PROACTIVE_CHAT_SESSION_ID,
     }
     assert await ui.send_launcher_quick_message(ui.LauncherQuickMessageRequest(text="hi")) == {
         "ok": True,
