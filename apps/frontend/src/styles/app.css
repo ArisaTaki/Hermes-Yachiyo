@@ -2231,6 +2231,24 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
   align-items: center;
   margin: 0;
 }
+.settings-service-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.settings-service-group {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 10px;
+  border-top: 1px solid rgba(120, 166, 247, 0.16);
+}
+.settings-service-heading {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
 .settings-resource-panel {
   display: grid;
   align-content: start;
@@ -2775,7 +2793,8 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
   .refined-message { max-width: 94%; }
   .dashboard-hermes-center .hermes-command-grid { grid-template-columns: 1fr; }
   .hermes-config-form-grid,
-  .capability-settings-grid { grid-template-columns: 1fr; }
+  .capability-settings-grid,
+  .settings-service-groups { grid-template-columns: 1fr; }
   .hermes-config-footer { align-items: stretch; flex-direction: column; }
   .hermes-form-actions,
   .hermes-secondary-actions { justify-content: stretch; }

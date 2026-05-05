@@ -74,6 +74,8 @@ type GptSovitsServiceStatus = {
     container_name?: string;
     container_running?: boolean;
     compose_file_display?: string;
+    autostart_installed?: boolean;
+    autostart_path_display?: string;
     error?: string;
   };
   logs?: { stdout?: string; stderr?: string };
@@ -423,6 +425,8 @@ export function ProactiveTtsSettingsView() {
   const filePickerAvailable = hasDesktopFilePicker();
   const busy = Boolean(busyAction);
   const interactionBusy = busy || loading || resourceBusy;
+  const dockerContainerRunning = Boolean(serviceStatus?.docker?.container_running);
+  const localBackgroundInstalled = Boolean(serviceStatus?.launch_agent_installed);
 
   return (
     <main className="app-shell">
@@ -578,51 +582,67 @@ export function ProactiveTtsSettingsView() {
                       <p>{voiceResource?.service_help_text || '语音包只负责音色文件；本地 GPT-SoVITS API 服务需要单独运行。'}</p>
                       <span>{gsvServiceStatusText(serviceStatus)}</span>
                     </div>
-                    <div className="settings-resource-actions compact-actions">
-                      <button
-                        type="button"
-                        className={busyAction === 'service-setup' ? 'loading-button' : undefined}
-                        disabled={interactionBusy}
-                        onClick={() => void openGsvSetupTerminal()}
-                      >
-                        {busyAction === 'service-setup' ? '部署中...' : '部署本地依赖'}
-                      </button>
-                      <button
-                        type="button"
-                        className={busyAction === 'service-docker' ? 'loading-button' : undefined}
-                        disabled={interactionBusy}
-                        onClick={() => void openGsvDockerSetupTerminal()}
-                      >
-                        {busyAction === 'service-docker' ? '部署中...' : '部署 Docker 服务'}
-                      </button>
-                      <button
-                        type="button"
-                        className={busyAction === 'service' ? 'loading-button' : undefined}
-                        disabled={interactionBusy}
-                        onClick={() => void openGsvServiceTerminal()}
-                      >
-                        {busyAction === 'service' ? '打开中...' : '打开调试终端'}
-                      </button>
-                      <button
-                        type="button"
-                        className={busyAction === 'service-install' ? 'loading-button' : undefined}
-                        disabled={interactionBusy}
-                        onClick={() => void installGsvLaunchAgent()}
-                      >
-                        {busyAction === 'service-install' ? '启动中...' : '启动后台/自启'}
-                      </button>
-                      <button
-                        type="button"
-                        className={busyAction === 'service-uninstall' ? 'loading-button danger-action' : 'danger-action'}
-                        disabled={interactionBusy || !serviceStatus?.launch_agent_installed}
-                        onClick={() => void uninstallGsvLaunchAgent()}
-                      >
-                        {busyAction === 'service-uninstall' ? '停止中...' : '停止后台服务'}
-                      </button>
-                      <button type="button" disabled={interactionBusy} onClick={() => void refreshGsvServiceStatus()}>刷新状态</button>
+                    <div className="settings-service-groups wide">
+                      <div className="settings-service-group">
+                        <div className="settings-service-heading">
+                          <strong>本地服务</strong>
+                          <span>使用宿主机 Python 环境；后台/自启由 macOS LaunchAgent 管理。</span>
+                        </div>
+                        <div className="settings-resource-actions compact-actions">
+                          <button
+                            type="button"
+                            className={busyAction === 'service-setup' ? 'loading-button' : undefined}
+                            disabled={interactionBusy}
+                            onClick={() => void openGsvSetupTerminal()}
+                          >
+                            {busyAction === 'service-setup' ? '部署中...' : '部署本地依赖'}
+                          </button>
+                          <button
+                            type="button"
+                            className={busyAction === 'service' ? 'loading-button' : undefined}
+                            disabled={interactionBusy || dockerContainerRunning}
+                            onClick={() => void openGsvServiceTerminal()}
+                          >
+                            {busyAction === 'service' ? '打开中...' : '打开调试终端'}
+                          </button>
+                          <button
+                            type="button"
+                            className={busyAction === 'service-install' ? 'loading-button' : undefined}
+                            disabled={interactionBusy || dockerContainerRunning}
+                            onClick={() => void installGsvLaunchAgent()}
+                          >
+                            {busyAction === 'service-install' ? '启动中...' : '启动本地后台/自启'}
+                          </button>
+                          <button
+                            type="button"
+                            className={busyAction === 'service-uninstall' ? 'loading-button danger-action' : 'danger-action'}
+                            disabled={interactionBusy || !serviceStatus?.launch_agent_installed}
+                            onClick={() => void uninstallGsvLaunchAgent()}
+                          >
+                            {busyAction === 'service-uninstall' ? '停止中...' : '停止本地后台'}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="settings-service-group">
+                        <div className="settings-service-heading">
+                          <strong>Docker 部署</strong>
+                          <span>容器后台运行并映射 9880；部署后会配置 Docker Desktop 登录自启。</span>
+                        </div>
+                        <div className="settings-resource-actions compact-actions">
+                          <button
+                            type="button"
+                            className={busyAction === 'service-docker' ? 'loading-button' : undefined}
+                            disabled={interactionBusy || localBackgroundInstalled}
+                            onClick={() => void openGsvDockerSetupTerminal()}
+                          >
+                            {busyAction === 'service-docker' ? '部署中...' : '部署 Docker 服务'}
+                          </button>
+                          <button type="button" disabled={interactionBusy} onClick={() => void refreshGsvServiceStatus()}>刷新状态</button>
+                        </div>
+                      </div>
                     </div>
                     <p className="capability-note wide-form-note">
-                      “部署本地依赖”只准备 Python 环境，不会启动服务；“打开调试终端”是前台临时运行；“启动后台/自启”使用 macOS LaunchAgent；Docker 服务会用容器后台运行并映射 9880。
+                      本地后台与 Docker 都会占用 9880，请只保留一种运行方式；首次 Docker 构建会很慢，完成后会复用镜像缓存。
                     </p>
                     <label className="settings-field wide" htmlFor="tts-gsv-service-workdir-page">
                       <span>GPT-SoVITS 服务目录</span>
@@ -655,7 +675,7 @@ export function ProactiveTtsSettingsView() {
                           <strong className={serviceStatus.workdir_exists ? 'ok' : 'warn'}>{serviceStatus.workdir_exists ? serviceStatus.workdir_display || '已配置' : '未配置或不存在'}</strong>
                         </div>
                         <div className="settings-meta-row">
-                          <span>开机自启</span>
+                          <span>本地自启</span>
                           <strong>{serviceStatus.launch_agent_installed ? (serviceStatus.launch_agent_running ? '已安装并运行' : '已安装，待启动') : '未安装'}</strong>
                         </div>
                         <div className="settings-meta-row">
@@ -1009,7 +1029,8 @@ function buildGsvDockerSetupTerminalCommand(workdir: string, projectUrl?: string
   return [
     'echo "Hermes-Yachiyo GPT-SoVITS Docker 部署"',
     'echo "此流程会检查 Docker Desktop、克隆 GPT-SoVITS、写入 Hermes 专用 Compose 文件，并以后台容器启动 0.0.0.0:9880 API。"',
-    'echo "构建镜像会下载较大的 Python 与模型依赖；如果 Docker Desktop 未运行，脚本会提示你先启动。"',
+    'echo "构建镜像会下载较大的 Python 与模型依赖；首次构建 10-30 分钟都可能正常，后续会复用缓存。"',
+    'echo "如果 Docker Desktop 未运行，脚本会提示你先启动。部署完成后会设置容器随 Docker 自动恢复，并设置 Docker Desktop 登录自启。"',
     'printf "继续执行 Docker 部署？[y/N] "',
     'read answer',
     'case "$answer" in [yY]|[yY][eE][sS]) ;; *) echo "已取消。"; exit 1 ;; esac',
@@ -1073,6 +1094,35 @@ function buildGsvDockerSetupTerminalCommand(workdir: string, projectUrl?: string
     'echo "开始构建并启动 Docker 后台服务。"',
     'docker compose -f .hermes-yachiyo/docker-compose.yml up -d --build',
     'docker compose -f .hermes-yachiyo/docker-compose.yml ps',
+    'if [ "$(uname)" = "Darwin" ]; then',
+    '  mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.hermes/yachiyo/logs"',
+    '  DOCKER_AUTOSTART_PLIST="$HOME/Library/LaunchAgents/com.hermes-yachiyo.docker-desktop.plist"',
+    '  cat > "$DOCKER_AUTOSTART_PLIST" <<PLIST',
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
+    '<dict>',
+    '  <key>Label</key>',
+    '  <string>com.hermes-yachiyo.docker-desktop</string>',
+    '  <key>ProgramArguments</key>',
+    '  <array>',
+    '    <string>/usr/bin/open</string>',
+    '    <string>-a</string>',
+    '    <string>Docker</string>',
+    '  </array>',
+    '  <key>RunAtLoad</key>',
+    '  <true/>',
+    '  <key>StandardOutPath</key>',
+    '  <string>$HOME/.hermes/yachiyo/logs/docker-desktop-out.log</string>',
+    '  <key>StandardErrorPath</key>',
+    '  <string>$HOME/.hermes/yachiyo/logs/docker-desktop-err.log</string>',
+    '</dict>',
+    '</plist>',
+    'PLIST',
+    '  launchctl bootout "gui/$(id -u)" "$DOCKER_AUTOSTART_PLIST" >/dev/null 2>&1 || true',
+    '  launchctl bootstrap "gui/$(id -u)" "$DOCKER_AUTOSTART_PLIST" >/dev/null 2>&1 || true',
+    '  echo "已安装 Docker Desktop 登录自启；容器 restart: unless-stopped 会随 Docker 启动自动恢复。"',
+    'fi',
     'echo "Docker 服务已提交到后台运行。API 地址：http://127.0.0.1:9880"',
     'echo "查看日志：docker compose -f $WORKDIR/.hermes-yachiyo/docker-compose.yml logs -f gpt-sovits"',
   ].join('\n');
@@ -1117,6 +1167,6 @@ function formatGsvDockerStatus(status?: GptSovitsServiceStatus['docker']): strin
   if (!status.available) return '未安装';
   if (!status.compose_available) return '缺少 Compose';
   if (!status.daemon_running) return 'Docker 未运行';
-  if (status.container_running) return '容器运行中';
+  if (status.container_running) return status.autostart_installed ? '容器运行中，自启已安装' : '容器运行中';
   return status.error || '可用，容器未运行';
 }

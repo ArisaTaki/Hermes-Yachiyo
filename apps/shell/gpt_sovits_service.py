@@ -17,6 +17,7 @@ from urllib.request import Request, urlopen
 
 LAUNCH_AGENT_LABEL = "com.hermes-yachiyo.gpt-sovits"
 DOCKER_CONTAINER_NAME = "hermes-yachiyo-gpt-sovits"
+DOCKER_AUTOSTART_LABEL = "com.hermes-yachiyo.docker-desktop"
 
 
 def get_gpt_sovits_service_status(config: Any) -> dict[str, Any]:
@@ -166,6 +167,10 @@ def _launch_agent_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{LAUNCH_AGENT_LABEL}.plist"
 
 
+def _docker_autostart_path() -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{DOCKER_AUTOSTART_LABEL}.plist"
+
+
 def _launch_agent_running() -> bool:
     if platform.system() != "Darwin":
         return False
@@ -228,6 +233,9 @@ def _docker_status(compose_file: Path | None) -> dict[str, Any]:
         "container_running": False,
         "compose_file": str(compose_file) if compose_file else "",
         "compose_file_display": _display_path(compose_file) if compose_file else "",
+        "autostart_installed": _docker_autostart_path().exists(),
+        "autostart_path": str(_docker_autostart_path()),
+        "autostart_path_display": _display_path(_docker_autostart_path()),
         "error": "",
     }
     if not docker:
