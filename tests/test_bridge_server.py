@@ -96,6 +96,8 @@ def test_render_live2d_manifest_keeps_json_structure(tmp_path):
 
     assert decoded["FileReferences"]["Moc"].endswith("model.moc3?token=token-xyz")
     assert decoded["FileReferences"]["Textures"][0].endswith("tex.png?token=token-xyz")
+    assert "Expressions" not in decoded["FileReferences"]
+    assert "Motions" not in decoded["FileReferences"]
 
 
 def test_render_live2d_manifest_injects_sidecar_expressions(tmp_path, monkeypatch):
@@ -133,6 +135,24 @@ def test_render_live2d_manifest_respects_physics_toggle(tmp_path, monkeypatch):
     refs = json.loads(payload.decode("utf-8"))["FileReferences"]
 
     assert "Physics" not in refs
+
+
+def test_render_live2d_manifest_keeps_physics_when_enabled(tmp_path, monkeypatch):
+    manifest_path = tmp_path / "model.model3.json"
+    manifest_path.write_text(
+        '{"FileReferences":{"Moc":"model.moc3","Textures":[],"Physics":"model.physics3.json"}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        live2d_route,
+        "get_runtime",
+        lambda: SimpleNamespace(config=SimpleNamespace(live2d_mode=SimpleNamespace(enable_physics=True))),
+    )
+
+    payload = live2d_route._render_live2d_manifest(manifest_path, "token-xyz")
+    refs = json.loads(payload.decode("utf-8"))["FileReferences"]
+
+    assert refs["Physics"].endswith("model.physics3.json?token=token-xyz")
 
 
 def test_live2d_runtime_script_sources_prefer_cache(tmp_path, monkeypatch):

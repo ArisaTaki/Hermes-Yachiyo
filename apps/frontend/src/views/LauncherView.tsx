@@ -89,6 +89,9 @@ const LIVE2D_MAX_SHAPE_RECTS = 6000;
 const LIVE2D_SHAPE_MAX_COLS = 88;
 const LIVE2D_SHAPE_MAX_ROWS = 132;
 const LIVE2D_MASK_MAX_FILL_RATIO = 0.72;
+const LIVE2D_IDLE_MOTION_FIRST_MS = 700;
+const LIVE2D_IDLE_MOTION_MIN_MS = 8500;
+const LIVE2D_IDLE_MOTION_JITTER_MS = 6500;
 const LIVE2D_EXPRESSION_CANDIDATES: Record<string, string[]> = {
   thinking: ['思考', 'thinking', 'think', '疑问', '困惑', '眯眯眼', 'half', 'blink'],
   message: ['笑咪咪', '笑', 'happy', 'smile', 'joy'],
@@ -391,6 +394,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   const unreadStatus = String(data?.notification?.latest_message?.status || '');
   const resource = launcher.resource;
   const renderer = launcher.renderer;
+  const rendererMotionSignature = live2dMotionGroupSignature(renderer?.motion_groups);
   const replyText = proactiveAttention
     ? (data?.proactive?.attention_text || data?.proactive?.message || '有新的主动桌面观察结果')
     : hasAttention && !isProcessing
@@ -400,7 +404,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   const showReply = Boolean(launcher.show_reply_bubble !== false && (proactiveAttention || !replyHidden) && replyText && !isProcessing);
   const stageTitle = live2dStageTitle(resource, launcher, data, hasAttention, proactiveAttention);
   const positionAnchor = normalizeLive2DPositionAnchor(launcher.position_anchor);
-  const characterClass = live2dCharacterClass(data, hasAttention, proactiveAttention, unreadStatus);
+  const characterClass = live2dCharacterClass(data, hasAttention, proactiveAttention, unreadStatus, rendererReady);
   const hintKey = [resource?.state || '', resource?.status_label || '', resource?.help_text || '', resource?.renderer_entry || ''].join('|');
   const hintTone = resource?.state === 'path_valid' || resource?.state === 'loaded' ? 'ok' : 'warn';
   const showResourceHint = Boolean(resource && hintTone !== 'ok' && hintKey !== dismissedHintKey);
@@ -488,8 +492,8 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
 
   useEffect(() => {
     if (!rendererReady) return;
-    startLive2DIdleMotion(rendererStateRef.current, renderer);
-  }, [rendererReady, renderer?.idle_motion_group]);
+    return startLive2DIdleMotionLoop(rendererStateRef.current, renderer);
+  }, [rendererReady, renderer?.idle_motion_group, rendererMotionSignature]);
 
   useEffect(() => {
     if (!rendererReady || launcher.mouse_follow_enabled === false) return;
@@ -809,8 +813,15 @@ function latestAssistantText(chat: LauncherPayload['chat'], launcher: NonNullabl
   return launcher.latest_reply || chat?.latest_reply || launcher.latest_reply_full || chat?.latest_reply_full || '';
 }
 
-function live2dCharacterClass(data: LauncherPayload | null, hasAttention: boolean, proactiveAttention: boolean, unreadStatus: string) {
+function live2dCharacterClass(
+  data: LauncherPayload | null,
+  hasAttention: boolean,
+  proactiveAttention: boolean,
+  unreadStatus: string,
+  rendererReady = false,
+) {
   const classes = ['live2d-character'];
+  if (rendererReady) classes.push('renderer-ready');
   if (data?.chat?.is_processing) classes.push('processing');
   else if (hasAttention && unreadStatus === 'failed') classes.push('failed');
   else if (proactiveAttention) classes.push('has-proactive-attention');
@@ -938,7 +949,7 @@ async function ensureLive2DRenderer({
     onLoading(true);
     onReady(false);
     onError('');
-    destroyLive2DRenderer(state, { keepToken: true });
+    destroyLive2DRenderer(state, { keepApp: true, keepToken: true });
 
     const app = ensurePixiApp(state, canvas, character);
     const Live2DModelCtor = getLive2DModelCtor();
@@ -996,7 +1007,7 @@ function configurePixiForElectronLive2D() {
   if (!PIXI?.settings) return;
   try {
     PIXI.settings.FAIL_IF_MAJOR_PERFORMANCE_CAVEAT = false;
-    if (PIXI.ENV?.WEBGL2 !== undefined) PIXI.settings.PREFER_ENV = PIXI.ENV.WEBGL2;
+    if (PIXI.ENV?.WEBGL !== undefined) PIXI.settings.PREFER_ENV = PIXI.ENV.WEBGL;
   } catch {}
 }
 
@@ -1132,7 +1143,7 @@ function fitLive2DModel(
 
 function destroyLive2DRenderer(
   state: Live2DRendererState,
-  options: { keepToken?: boolean } = {},
+  options: { keepApp?: boolean; keepToken?: boolean } = {},
 ) {
   if (!options.keepToken) state.loadToken += 1;
   if (state.model && state.app?.stage && typeof state.app.stage.removeChild === 'function') {
@@ -1142,10 +1153,10 @@ function destroyLive2DRenderer(
   state.model = undefined;
   state.modelKey = '';
   state.modelUrl = '';
-  if (state.app && typeof state.app.destroy === 'function') {
+  if (!options.keepApp && state.app && typeof state.app.destroy === 'function') {
     state.app.destroy(false, { children: true, texture: false, baseTexture: false });
   }
-  state.app = undefined;
+  if (!options.keepApp) state.app = undefined;
 }
 
 function focusLive2DRenderer(
@@ -1271,22 +1282,62 @@ function scaleLauncherPointerCoordinate(value: number, sourceSize: number, targe
   return value * (Math.max(targetSize || 1, 1) / sourceSize);
 }
 
-function startLive2DIdleMotion(
+function startLive2DIdleMotionLoop(
   state: Live2DRendererState,
   renderer: NonNullable<LauncherPayload['launcher']>['renderer'],
 ) {
-  const group = String(renderer?.idle_motion_group || 'Idle').trim();
-  if (!group) return;
-  playLive2DMotion(state, group, 0);
+  const group = selectLive2DIdleMotionGroup(renderer);
+  if (!group) return undefined;
+  let stopped = false;
+  let timer = 0;
+  const run = () => {
+    if (stopped) return;
+    const motionCount = live2dMotionCount(renderer?.motion_groups?.[group]);
+    playLive2DMotion(state, group, motionCount > 0 ? Math.floor(Math.random() * motionCount) : undefined);
+    timer = window.setTimeout(run, LIVE2D_IDLE_MOTION_MIN_MS + Math.random() * LIVE2D_IDLE_MOTION_JITTER_MS);
+  };
+  timer = window.setTimeout(run, LIVE2D_IDLE_MOTION_FIRST_MS);
+  return () => {
+    stopped = true;
+    if (timer) window.clearTimeout(timer);
+  };
 }
 
 function playLive2DReaction(
   state: Live2DRendererState,
   renderer: NonNullable<LauncherPayload['launcher']>['renderer'],
 ) {
-  const group = String(renderer?.idle_motion_group || 'Idle').trim();
-  if (group) playLive2DMotion(state, group, 0);
+  const group = selectLive2DIdleMotionGroup(renderer);
+  const motionCount = live2dMotionCount(renderer?.motion_groups?.[group]);
+  if (group) playLive2DMotion(state, group, motionCount > 0 ? Math.floor(Math.random() * motionCount) : undefined);
   playLive2DStatusExpression(state, renderer, 'message');
+}
+
+function selectLive2DIdleMotionGroup(renderer: NonNullable<LauncherPayload['launcher']>['renderer']) {
+  const configured = String(renderer?.idle_motion_group || 'Idle').trim();
+  const groups = renderer?.motion_groups || {};
+  const groupNames = Object.keys(groups).filter((group) => live2dMotionCount(groups[group]) > 0);
+  if (configured) {
+    const exact = groupNames.find((group) => group === configured);
+    if (exact) return exact;
+    const normalizedConfigured = configured.toLowerCase();
+    const caseMatch = groupNames.find((group) => group.toLowerCase() === normalizedConfigured);
+    if (caseMatch) return caseMatch;
+    if (normalizedConfigured === 'idle' && groupNames.length) return groupNames[0];
+    return configured;
+  }
+  return groupNames[0] || 'Idle';
+}
+
+function live2dMotionGroupSignature(groups: NonNullable<NonNullable<LauncherPayload['launcher']>['renderer']>['motion_groups']) {
+  return Object.entries(groups || {})
+    .map(([group, items]) => `${group}:${(items || []).map((item) => String(item.file || item.File || '')).join(',')}`)
+    .sort()
+    .join('|');
+}
+
+function live2dMotionCount(items: Array<Record<string, unknown>> | undefined) {
+  return Array.isArray(items) ? items.length : 0;
 }
 
 function playLive2DStatusExpression(
@@ -1377,7 +1428,7 @@ function live2dExpressionCallCandidates(name: string) {
 function formatRendererError(error: unknown) {
   const detail = error instanceof Error && error.message ? error.message : String(error || 'unknown error');
   if (/checkMaxIfStatementsInShader|invalid value of ['"`]?0['"`]?/i.test(detail)) {
-    return '当前 WebGL 环境返回的 shader if 语句上限为 0，已回退静态预览。资源导入本身已完成；可先使用 Bubble，或更新 macOS/WebGL 环境后再尝试 Live2D。';
+    return '当前 WebGL 环境没有返回可用的 shader 条件分支上限，已回退静态预览。请重新打开 Live2D；如果只在启用物理时出现，先关闭物理模拟再试。';
   }
   return compactRendererDetail(detail);
 }

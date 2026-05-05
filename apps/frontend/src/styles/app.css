@@ -2533,6 +2533,9 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
   align-items: flex-end;
   justify-content: center;
 }
+.live2d-character.renderer-ready {
+  animation: live2d-idle-breathe 6.4s ease-in-out infinite;
+}
 .live2d-character.has-message {
   animation: live2d-message-breathe 1.8s ease-in-out infinite;
 }
@@ -2558,6 +2561,14 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
 }
 .live2d-character.failed {
   opacity: 0.92;
+}
+@keyframes live2d-idle-breathe {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-1.5px) scale(1.004);
+  }
 }
 @keyframes live2d-message-breathe {
   0%, 100% {

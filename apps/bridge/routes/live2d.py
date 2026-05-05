@@ -149,15 +149,24 @@ def _apply_live2d_manifest_runtime_overrides(payload: Any, asset: Path) -> Any:
     if live2d_config is not None and not bool(getattr(live2d_config, "enable_physics", False)):
         refs.pop("Physics", None)
 
-    refs["Expressions"] = _merge_manifest_expressions(
+    expressions = _merge_manifest_expressions(
         refs.get("Expressions"),
         discover_live2d_sidecar_expressions(asset),
     )
-    refs["Motions"] = _merge_manifest_motions(
+    motions = _merge_manifest_motions(
         refs.get("Motions"),
         discover_live2d_sidecar_motion_groups(asset),
     )
+    _set_manifest_section(refs, "Expressions", expressions)
+    _set_manifest_section(refs, "Motions", motions)
     return payload
+
+
+def _set_manifest_section(refs: dict[str, Any], key: str, value: Any) -> None:
+    if value:
+        refs[key] = value
+    else:
+        refs.pop(key, None)
 
 
 def _merge_manifest_expressions(raw_expressions: Any, discovered: list[dict[str, str]]) -> list[dict[str, str]]:
