@@ -660,6 +660,45 @@ async def test_proactive_tts_test_route_invokes_sync_service(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_proactive_tts_status_route_returns_last_launcher_status(monkeypatch):
+    config = SimpleNamespace(
+        tts=SimpleNamespace(enabled=True, provider="command", command="say {text}", max_chars=80)
+    )
+    runtime = SimpleNamespace(config=config)
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+
+    class FakeTTSService:
+        def __init__(self, received_config):
+            assert received_config is config.tts
+
+        def get_status(self):
+            return {
+                "enabled": True,
+                "provider": "command",
+                "ok": False,
+                "error": "boom",
+                "message": "TTS 触发失败",
+            }
+
+    service = FakeTTSService(config.tts)
+    ui._launcher_tts_services.clear()
+    ui._launcher_tts_services[id(runtime)] = service
+
+    result = await ui.get_proactive_tts_status()
+
+    assert result == {
+        "tool": "proactive_tts",
+        "source": "launcher",
+        "enabled": True,
+        "provider": "command",
+        "ok": False,
+        "error": "boom",
+        "message": "TTS 触发失败",
+    }
+    ui._launcher_tts_services.clear()
+
+
+@pytest.mark.asyncio
 async def test_gpt_sovits_service_routes_use_runtime_config(monkeypatch):
     config = SimpleNamespace(tts=SimpleNamespace(provider="gpt-sovits"))
     runtime = SimpleNamespace(config=config)

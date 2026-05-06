@@ -2,6 +2,23 @@
 
 ## 已完成
 
+### UX Fixes — 首用体验报告修复
+
+- ✅ 新增 `/ui/tts/status`，主动关怀语音页可以显示最近一次自动播报的生成中、成功或失败状态，便于定位 GPT-SoVITS 自动播报 HTTP 400 等问题。
+- ✅ 工具中心已区分 Hermes Agent 的 `tts` 工具与 Yachiyo 主动关怀 TTS；无 Hermes 原生配置卡片时会引导用户打开“主动关怀语音”页面。
+- ✅ 备份策略和备份操作区已提示 Live2D/GPT-SoVITS/附件缓存会进入备份，资源越大备份越大、耗时越久。
+- ✅ 图片附件读取时新增极小尺寸保护，低于 16x16 的图片会提示换用正常尺寸截图，减少上游视觉模型“图片不可处理”的失败体验。
+- ✅ 验证：相关 TTS route tests 4 passed；`npm --prefix apps/frontend run build` passed（保留既有 Vite large chunk warning）；`git diff --check` passed。
+
+### Documentation — DMG 首用走查与 VitePress 素材
+
+- ✅ 使用 `/Applications/Hermes-Yachiyo.app` 发布包，在隔离 HOME/Profile 下完成一次真实“第一次用户”走查。
+- ✅ 覆盖并截图：安装向导、Hermes Agent 检测、Xiaomi MiMo 模型配置、连接测试、工作空间初始化、主控台、图片链路、文本对话、图片附件、Bubble、Live2D 导入与渲染、GPT-SoVITS 导入与 TTS 测试、主动关怀、工具中心、诊断、更新检查、备份和卸载预览。
+- ✅ 新增 43 张截图到 `docs/public/images/hermes-yachiyo/first-run/`，VitePress 可直接通过 `/images/hermes-yachiyo/first-run/<file>.png` 引用。
+- ✅ 新增/更新文档：`docs/user-manual.md`、`docs/screenshot-index.md`、`docs/experience-report-2026-05-05.md`、`docs/first-run-smoke-test-2026-05-05.md`。
+- ✅ 真实边界已记录：GUI 安装遇到 GitHub 克隆中断后可手动安装并重新检测；Web/CDP/Image Gen 缺外部 Key 时工具中心按预期受限；GPT-SoVITS 手动测试成功但一次主动关怀自动播报返回 HTTP 400。
+- ✅ 测试环境已清理，未把一次性 API Key 明文写入文档。
+
 ### Milestone 78 — Release 重跑幂等修复
 
 - ✅ `Build macOS DMG` workflow 的发布步骤改为 `Create or update GitHub release`：当目标 release tag 已存在时，会用 `gh release upload --clobber` 覆盖同名 DMG asset，并用 `gh release edit` 刷新标题、目标 commit 和 release notes；首次运行仍走 `gh release create`。

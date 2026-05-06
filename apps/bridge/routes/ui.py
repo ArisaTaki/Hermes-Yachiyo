@@ -200,6 +200,27 @@ async def test_proactive_tts(request: TtsTestRequest) -> dict[str, Any]:
     return await asyncio.to_thread(_run_test)
 
 
+@router.get("/tts/status")
+async def get_proactive_tts_status() -> dict[str, Any]:
+    runtime = get_runtime()
+    tts_config = getattr(runtime.config, "tts", None)
+    if tts_config is None:
+        return {
+            "tool": "proactive_tts",
+            "enabled": False,
+            "provider": "none",
+            "ok": False,
+            "message": "TTS 配置不存在",
+        }
+    service = _launcher_tts_services.get(id(runtime))
+    status = service.get_status() if service is not None else TTSService(tts_config).get_status()
+    return {
+        "tool": "proactive_tts",
+        "source": "launcher" if service is not None else "config",
+        **status,
+    }
+
+
 @router.get("/tts/voice-resource")
 async def get_tts_voice_resource() -> dict[str, Any]:
     return get_tts_voice_resource_info()
