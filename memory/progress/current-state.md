@@ -2,6 +2,14 @@
 
 ## 已完成
 
+### UX Fixes — 首用体验报告修复
+
+- ✅ 新增 `/ui/tts/status`，主动关怀语音页可以显示最近一次自动播报的生成中、成功或失败状态，便于定位 GPT-SoVITS 自动播报 HTTP 400 等问题。
+- ✅ 工具中心已区分 Hermes Agent 的 `tts` 工具与 Yachiyo 主动关怀 TTS；无 Hermes 原生配置卡片时会引导用户打开“主动关怀语音”页面。
+- ✅ 备份策略和备份操作区已提示 Live2D/GPT-SoVITS/附件缓存会进入备份，资源越大备份越大、耗时越久。
+- ✅ 图片附件读取时新增极小尺寸保护，低于 16x16 的图片会提示换用正常尺寸截图，减少上游视觉模型“图片不可处理”的失败体验。
+- ✅ 验证：相关 TTS route tests 4 passed；`npm --prefix apps/frontend run build` passed（保留既有 Vite large chunk warning）；`git diff --check` passed。
+
 ### Documentation — DMG 首用走查与 VitePress 素材
 
 - ✅ 使用 `/Applications/Hermes-Yachiyo.app` 发布包，在隔离 HOME/Profile 下完成一次真实“第一次用户”走查。

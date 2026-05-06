@@ -43,6 +43,15 @@ type TtsTestResult = {
   skipped?: boolean;
 };
 
+type TtsRuntimeStatus = TtsTestResult & {
+  tool?: string;
+  source?: string;
+  scheduled?: boolean;
+  pending_audio?: boolean;
+  audio_ready?: boolean;
+  attention_key?: string;
+};
+
 type TtsVoiceResource = {
   default_assets_root?: string;
   default_assets_root_display?: string;
@@ -83,6 +92,7 @@ export function ProactiveTtsSettingsView() {
   const [savedForm, setSavedForm] = useState<TtsForm>(emptyTtsForm());
   const [testText, setTestText] = useState('八千代语音测试成功。主动关怀播报已经可以正常调用。');
   const [testResult, setTestResult] = useState<TtsTestResult | null>(null);
+  const [runtimeStatus, setRuntimeStatus] = useState<TtsRuntimeStatus | null>(null);
   const [voiceResource, setVoiceResource] = useState<TtsVoiceResource | null>(null);
   const [serviceStatus, setServiceStatus] = useState<GptSovitsServiceStatus | null>(null);
   const [manualVoiceArchivePath, setManualVoiceArchivePath] = useState('');
@@ -113,6 +123,26 @@ export function ProactiveTtsSettingsView() {
     void load();
     return () => {
       disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    async function refreshRuntimeStatus() {
+      try {
+        const data = await apiGet<TtsRuntimeStatus>('/ui/tts/status');
+        if (!disposed) setRuntimeStatus(data);
+      } catch {
+        if (!disposed) setRuntimeStatus(null);
+      }
+    }
+    void refreshRuntimeStatus();
+    const timer = window.setInterval(() => {
+      void refreshRuntimeStatus();
+    }, 5000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
     };
   }, []);
 
@@ -200,6 +230,7 @@ export function ProactiveTtsSettingsView() {
       setStatus('设置已保存，正在调用 TTS Provider...');
       const result = await apiPost<TtsTestResult>('/ui/tts/test', { text: testText });
       setTestResult(result);
+      setRuntimeStatus(result);
       setStatus(result.success ? result.message || '测试语音已完成' : result.error || result.message || '测试语音失败');
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '保存并测试主动关怀语音失败');
@@ -397,6 +428,12 @@ export function ProactiveTtsSettingsView() {
       </header>
 
       {status ? <div className={`notice ${/失败|错误/.test(status) ? 'danger' : ''}`}>{status}</div> : null}
+      {shouldShowRuntimeStatus(runtimeStatus) ? (
+        <div className={`notice ${ttsRuntimeStatusTone(runtimeStatus)}`}>
+          <strong>{ttsRuntimeStatusTitle(runtimeStatus)}</strong>
+          <span>{ttsRuntimeStatusDetail(runtimeStatus)}</span>
+        </div>
+      ) : null}
 
       <section className="dashboard-workbench single-column">
         <article className="panel">
@@ -859,6 +896,33 @@ export function ProactiveTtsSettingsView() {
 
 function ttsFromSettings(settings: SettingsData | null): TtsSettings | undefined {
   return settings?.tts || settings?.mode_settings?.live2d?.config?.tts || settings?.mode_settings?.bubble?.config?.tts;
+}
+
+function shouldShowRuntimeStatus(status: TtsRuntimeStatus | null): status is TtsRuntimeStatus {
+  if (!status) return false;
+  if (status.error || status.pending_audio || status.audio_ready || status.scheduled) return true;
+  const message = String(status.message || '').trim();
+  return Boolean(message && !/待触发|未启用|配置不存在/.test(message));
+}
+
+function ttsRuntimeStatusTone(status: TtsRuntimeStatus) {
+  if (status.ok === false || status.success === false || status.error) return 'danger';
+  if (status.pending_audio || status.scheduled) return 'warn';
+  return '';
+}
+
+function ttsRuntimeStatusTitle(status: TtsRuntimeStatus) {
+  if (status.pending_audio || status.scheduled) return '最近一次主动播报正在生成语音';
+  if (status.ok === false || status.success === false || status.error) return '最近一次主动播报语音失败';
+  if (status.audio_ready || status.success || status.ok) return '最近一次主动播报语音已完成';
+  return '最近一次主动播报语音状态';
+}
+
+function ttsRuntimeStatusDetail(status: TtsRuntimeStatus) {
+  const provider = status.provider ? ttsProviderLabel(status.provider) : '未知 Provider';
+  const message = status.error || status.message || '暂无详细信息';
+  const spoken = status.spoken_text ? `；播报文本：${status.spoken_text}` : '';
+  return `${provider}：${message}${spoken}`;
 }
 
 function shellQuote(value: string): string {

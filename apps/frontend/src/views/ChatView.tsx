@@ -13,6 +13,8 @@ type PendingAttachment = {
   name: string;
   mime_type: string;
   size: number;
+  width?: number;
+  height?: number;
   data_url: string;
 };
 
@@ -752,10 +754,21 @@ function readPendingAttachment(file: File): Promise<PendingAttachment> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error(`读取图片失败：${file.name || '未命名'}`));
-    reader.onload = () => {
+    reader.onload = async () => {
       const dataUrl = typeof reader.result === 'string' ? reader.result : '';
       if (!dataUrl.startsWith('data:image/')) {
         reject(new Error('只支持图片附件'));
+        return;
+      }
+      let dimensions: { width: number; height: number };
+      try {
+        dimensions = await loadImageDimensions(dataUrl);
+      } catch {
+        reject(new Error(`无法读取图片尺寸：${file.name || '未命名'}`));
+        return;
+      }
+      if (dimensions.width < 16 || dimensions.height < 16) {
+        reject(new Error('图片尺寸过小，容易被上游视觉模型判定为不可处理；请换用正常尺寸的截图或图片。'));
         return;
       }
       resolve({
@@ -763,10 +776,21 @@ function readPendingAttachment(file: File): Promise<PendingAttachment> {
         name: file.name || 'pasted-image.png',
         mime_type: file.type || 'image/png',
         size: file.size,
+        width: dimensions.width,
+        height: dimensions.height,
         data_url: dataUrl,
       });
     };
     reader.readAsDataURL(file);
+  });
+}
+
+function loadImageDimensions(dataUrl: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth || image.width, height: image.naturalHeight || image.height });
+    image.onerror = () => reject(new Error('image load failed'));
+    image.src = dataUrl;
   });
 }
 

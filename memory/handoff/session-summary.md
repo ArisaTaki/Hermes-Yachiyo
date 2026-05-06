@@ -1,5 +1,28 @@
 # Session Summary
 
+## UX Fixes — First-run report follow-up
+
+### 核心结果
+
+本轮回看 2026-05-05 DMG 首用体验报告中的可修项，已把几个低风险但影响真实用户理解的点落到产品代码里。
+
+### 主要变更
+
+- `apps/bridge/routes/ui.py`：新增 `/ui/tts/status`，返回 Yachiyo 主动关怀 TTS 的最近运行状态；若已有 launcher TTS 服务，会暴露最近一次自动播报的成功、pending 或失败信息。
+- `apps/frontend/src/views/ProactiveTtsSettingsView.tsx`：主动关怀语音页轮询 `/ui/tts/status`，显示最近一次自动播报是否生成中、成功或失败；手动“保存并测试”结果仍独立显示。
+- `apps/frontend/src/views/ToolCenterView.tsx`：工具中心把 Hermes Agent 的 `tts` 工具与 Yachiyo 主动关怀语音入口区分开；没有 Hermes 原生配置卡片时，提供跳转到“主动关怀语音”的入口，不再让用户落到“未知工具配置项”。
+- `apps/frontend/src/views/ModeSettingsView.tsx`：备份策略和备份操作区增加提示，说明 Live2D、GPT-SoVITS 权重、参考音频和附件缓存会进入备份，大资源会显著增加备份大小和耗时。
+- `apps/frontend/src/views/ChatView.tsx`：图片附件读取时检查图片尺寸，低于 16x16 的极小图片会直接提示用户换用正常截图，避免上游视觉模型报“不可处理”。
+- `tests/test_ui_bridge_routes.py`：新增 `/ui/tts/status` 路由测试，并覆盖最近 launcher TTS 错误回传。
+
+### 验证结果
+
+- `python -m pytest tests/test_ui_bridge_routes.py::test_proactive_tts_test_route_invokes_sync_service tests/test_ui_bridge_routes.py::test_proactive_tts_status_route_returns_last_launcher_status tests/test_ui_bridge_routes.py::test_launcher_tts_only_triggers_for_proactive_attention tests/test_ui_bridge_routes.py::test_launcher_hides_proactive_reply_while_tts_audio_is_generating` → 4 passed。
+- `npm --prefix apps/frontend run build` → passed（保留既有 Vite large chunk warning）。
+- `git diff --check` → passed。
+
+---
+
 ## Documentation — DMG 首用走查与 VitePress 素材整理
 
 ### 核心结果

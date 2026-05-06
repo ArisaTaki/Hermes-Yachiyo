@@ -1012,6 +1012,21 @@ export function ToolCenterView() {
             onOpenTerminalWizard={(command) => void openTerminalWizard(command)}
             onRunDoctor={() => void openAppView('diagnostics', { command: 'hermes doctor', return_to: 'tools' })}
           />
+        ) : selectedCatalogItem?.id === 'tts' ? (
+          <section className="tool-config-panel empty">
+            <strong>Yachiyo 主动关怀语音在独立页面配置</strong>
+            <span>
+              这里的 TTS 是 Hermes Agent 的工具能力；Bubble/Live2D 主动播报请到“主动关怀语音”页配置 GPT-SoVITS、HTTP 或本地命令。
+            </span>
+            <div className="tool-config-actions">
+              <button type="button" className="primary-action" onClick={() => navigateTo('proactive-tts')}>
+                打开主动关怀语音
+              </button>
+              <button type="button" onClick={() => void openAppView('diagnostics', { command: 'hermes doctor', return_to: 'tools' })}>
+                运行 Doctor
+              </button>
+            </div>
+          </section>
         ) : (
           <section className="tool-config-panel empty">
             <strong>没有找到这个工具配置</strong>
@@ -1229,6 +1244,13 @@ function ToolCategoryList({
                         {selected ? '正在配置' : '配置'}
                       </button>
                       <span>{configCount.configured}/{configCount.total} 已配置</span>
+                    </div>
+                  ) : item.id === 'tts' ? (
+                    <div className="tool-card-actions">
+                      <button type="button" onClick={() => navigateTo('proactive-tts')}>
+                        主动关怀语音
+                      </button>
+                      <span>Yachiyo 播报入口</span>
                     </div>
                   ) : null}
                 </article>

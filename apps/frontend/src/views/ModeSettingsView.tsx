@@ -1115,6 +1115,9 @@ function GeneralSettingsView() {
             <h2>备份策略</h2>
             <span>配置、工作空间、聊天数据库、缓存、日志和导入资源</span>
           </div>
+          <p className="settings-note wide-form-note">
+            Live2D 模型、GPT-SoVITS 权重、参考音频和附件缓存都会进入备份；导入资源越大，备份生成、恢复和传输就会越久。
+          </p>
           <label className="settings-check wide" htmlFor="backup-auto-cleanup">
             <input
               id="backup-auto-cleanup"
@@ -1191,6 +1194,9 @@ function GeneralSettingsView() {
           ['最近备份', backupSummary(backupStatus?.latest || null)],
           ['备份状态', backupStatus?.ok === false ? backupStatus.error : '正常'],
         ]} />
+        <p className="settings-note">
+          备份会包含已导入的 Live2D 与 GPT-SoVITS 资源。完整资源包可能让备份达到数百 MB，生成期间请保持应用打开。
+        </p>
         <div className="settings-action-strip">
           <button
             type="button"
