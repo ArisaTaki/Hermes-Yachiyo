@@ -53,6 +53,12 @@ class HermesInstallInfo(BaseModel):
     limited_tools: list[str] = Field(default_factory=list)
     """受限工具名称列表（hermes doctor 检测到的 ⚠ 工具）"""
 
+    available_tools: list[str] = Field(default_factory=list)
+    """可用工具名称列表（hermes doctor 检测到的 ✓ 工具）"""
+
+    limited_tool_details: dict[str, str] = Field(default_factory=dict)
+    """受限工具的原因摘要，key 为工具名称"""
+
     doctor_issues_count: int = 0
     """hermes doctor 报告的 issue 数（0 表示完整就绪）"""
 

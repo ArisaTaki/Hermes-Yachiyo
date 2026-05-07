@@ -188,12 +188,6 @@ hermes-yachiyo
 hermes-yachiyo-backend
 ```
 
-旧 pywebview 入口只保留给兼容验证：
-
-```bash
-hermes-yachiyo-legacy-pywebview
-```
-
 ## 第一次打开后怎么做
 
 应用会先检测 Hermes Agent 是否可用，然后按状态引导：
@@ -251,7 +245,7 @@ Live2D 是角色桌面入口：
 
 为了避免仓库过大，Live2D 模型不直接放进主仓库。资源包从 GitHub Releases 下载：
 
-<https://github.com/ArisaTaki/Hermes-Yachiyo/releases>
+<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases>
 
 推荐目录：
 
@@ -283,9 +277,21 @@ unzip hermes-yachiyo-live2d-yachiyo-20260423.zip -d ~/.hermes/yachiyo/assets/liv
 
 更多资源说明见 [docs/live2d-assets.md](docs/live2d-assets.md)。
 
+## 八千代 GPT-SoVITS 语音资源
+
+主动关怀 TTS 的八千代 GPT-SoVITS 语音包也是可选资源，并且和应用 DMG 分开发布。应用 release 只包含程序本体；语音包放在独立资源 release 中：
+
+<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
+
+下载 `Hermes-Yachiyo-yachiyo-gpt-sovits-v4.zip` 后，在主控台打开“主动关怀语音”，选择 `GPT-SoVITS 本地服务`，再点击“导入语音包 ZIP”。
+
+语音包只包含已经调配好的音色资源，不包含 GPT-SoVITS 服务本体。本地 API 服务仍需单独启动或通过设置页配置 LaunchAgent。
+
+更多说明见 [docs/tts-voice-assets.md](docs/tts-voice-assets.md)。
+
 ## 常见问题
 
-### 运行后还是旧的 pywebview 窗口
+### 运行后入口或界面不对
 
 当前虚拟环境里的命令入口可能还是旧版本。回到仓库根目录重新安装：
 
@@ -391,7 +397,7 @@ apps/
   frontend/           Electron + React/Vite/TypeScript 前端
   desktop_backend/    无窗口 Python 后端入口
   desktop_launcher.py 源码开发启动器
-  shell/              配置、安装、legacy pywebview 兼容层
+  shell/              配置、安装、桌面后端 UI 数据适配
   core/               Hermes 运行时封装、任务状态、聊天状态
   bridge/             本地 FastAPI Bridge
   locald/             截图、活动窗口等本地能力
@@ -410,7 +416,7 @@ docs/                 架构与资源文档
 - Electron 负责桌面窗口、托盘、内置终端和原生能力。
 - Python backend 负责运行时、配置、安装检测和本地 Bridge。
 - Bridge 只监听本机，供 UI 和插件调用。
-- pywebview 已经是 legacy 路径，新 UI 工作应放在 `apps/frontend/`。
+- 旧 pywebview 承载层已移除，新 UI 工作统一放在 `apps/frontend/`。
 
 更详细的前端架构见 [docs/desktop-frontend-architecture.md](docs/desktop-frontend-architecture.md)。
 

@@ -1,18 +1,38 @@
 # Next Steps
 
-1. 手工验证 Hermes 首次请求冷启动日志：确认首事件、首 token、完成耗时能帮助区分冷启动与模型执行时间。
-2. 继续手工验证 Electron 固定入口的剩余交互：默认 `hermes-yachiyo` 已确认能拉起 Vite/Electron/Python backend/Bridge 且 `/ui/dashboard`、`/ui/launcher?mode=bubble` 返回 200；已补 5174 已有 Vite 时复用 dev server 并直接启动 Electron 的路径，并修复 preload 注入为 `.cjs` 后 IPC 可用。后续还需在清理 `apps/frontend/node_modules` 后验证自动 `npm ci`，并手工走完聊天发送、设置保存、表现态退出。
-3. 手工验证最新窗口/路由语义：主控台“打开表现态”已确认聚焦 Bubble mode window，点击 Bubble 已确认打开 Chat Window 单例且不再污染主窗口；后续还需补 Live2D、设置页返回主控台等同类路径。
-4. 继续手工验证 React 设置页真实编辑控件：通用设置页、Bubble/Live2D 模式设置页和 Live2D 资源操作入口已支持字段级控件、差异保存、自定义校验、Electron 原生目录/ZIP 选择、无 IPC 时内联路径导入、打开导入目录和打开 Releases；通用设置已补 Hermes/Workspace/Bridge/集成/备份/卸载等旧版内容。下一步需要在 Electron 窗口内走完文件对话框选择、保存更改、备份恢复、卸载预览和重开 Live2D 表现态链路。
-5. 继续对照旧 pywebview Chat Window 做 React 体验补全：当前已恢复单例窗口、轮询流式/typewriter/Markdown/复制/会话切换、外链打开策略、基础快捷键和处理中取消入口；后续补更完整的错误边界和消息操作细节。
-6. 继续补齐 Electron 下的 Bubble / Live2D 表现态能力：当前已迁移真实状态、未读、最近回复、右键菜单、Bubble 旧头像气泡/状态点/auto-hide/拖拽点击阈值、Live2D 预览 fallback/资源提示/默认打开行为/快捷输入、第一版 Pixi/Cubism 模型加载、Bubble 靠边吸附、位置/尺寸持久化、表现态导航保护、TTS 触发、全局鼠标跟随、基础动作/表情触发、主窗口尺寸/start_minimized/open_chat_on_start 和 Electron 原生托盘；Live2D 透明穿透先降为实验开关，默认以可点击/可右键/可操作优先。下一步用真实 Live2D 资源做手工验证，并继续补更深的 per-model 动作/表情调优。
-7. 新增 macOS App 打包路径：React 只是 renderer，产品运行态必须是 Electron `.app`；下一步应增加无新依赖的本地 `.app` 打包脚本或明确引入 electron-builder/electron-forge，确保用户可以直接启动 Hermes-Yachiyo.app，而不是长期依赖终端 dev server。
-8. TODO：制定旧 pywebview shell 退休清单。等 Electron 前端稳定覆盖聊天、主控台、设置、Bubble、Live2D、安装引导、备份/卸载和打包启动链路后，直接删除所有 pywebview UI 代码与 legacy 入口，只保留 Electron + Bridge 路径。
-9. 手工验证备份/卸载：在设置页主动生成 ZIP 备份；确认备份内有 `manifest.json`、应用配置、完整 `yachiyo-workspace`、`chat.db`、缓存/日志/导入资源；验证备份生成期间目录内不会出现正式命名的半成品 ZIP，默认自动清理保留最近 10 份、覆盖最近一次备份、恢复最近备份、管理备份中的删除/打开位置/恢复此版本、损坏/超限 ZIP 导入会失败且不留下部分输出文件、卸载确认短语首尾空白容错、空 `.hermes`/`hermes` 目录会跳过，以及卸载前生成备份和安装引导导入最近备份。
-10. 手工验证主动桌面观察：关闭状态、Hermes 未就绪 blocker、vision 受限 blocker、成功创建低风险截图任务、ack 清除提示、失败间隔后重试。
-11. 手工验证 TTS：默认关闭无感、`http` endpoint 调用、`command` 本地命令调用、错误配置不影响聊天。
-12. 手工验证 AstrBot `/y ask` / `/y chat`：allow-list 拒绝、状态/截图/窗口摘要、自然语言低风险任务创建。
-13. 调研 Hermes 原生 memory API / CLI / 存储边界，决定 `HermesMemoryAdapter` 第一版能力。
-14. 继续推进 AstrBot 宿主绑定：在 AstrBot 插件框架中注册 `/y` 命令监听并调用 `on_y_command()`。
-15. 继续对接 Hapi `/codex` 真实端点，保持 Codex CLI 执行不进入 Hermes-Yachiyo。
-16. 完善任务持久化与安全策略模块（packages/tasking / packages/security），并补跨平台本地能力适配。
+## 当前优先项
+
+1. 推送后验证 `Build macOS DMG`：`develop-latest` / `main-latest` 的 latest JSON 应包含 `changelog.generated_from=git`、`sections`、`commits` 和 `compare_url`；GitHub versioned release notes 与 rolling latest release notes 都应展示同一份“更新日志”。
+2. 用下一版 develop DMG 验证应用更新页：检查更新后应显示“更新内容”，下载时有进度，下载完成后按钮切换为“安装并重启”；退出页面或重启后仍能识别已下载但未安装的更高版本 DMG。
+3. 验证更新安装后的首次重开体验：Bridge/backend 尚未就绪时安装向导应显示“正在启动本地 Bridge”并自动重试，而不是直接红色报错；Bridge 可用后应自动恢复主控台或安装状态。
+4. 验证自签名免费分发链路：latest DMG 可挂载；首次打开 `.app` 仍应是未知开发者/Gatekeeper 允许打开流程，而不是“移到废纸篓”的 DMG 挂载前拒绝。
+5. 验证 Hermes Agent 脏安装修复：删掉损坏的 `~/.local/bin/hermes` 或保留旧 `~/.hermes/hermes-agent` 时，Yachiyo 应给出可修复状态；修复后图片链路测试不应再报 Hermes Python 环境缺失或 `env: ... Permission denied`。
+
+1. 基于本轮新增的 `docs/user-manual.md`、`docs/screenshot-index.md`、`docs/experience-report-2026-05-05.md` 和 `docs/public/images/hermes-yachiyo/first-run/` 创建 VitePress 文档站点结构，并按安装、模型配置、桌面表现态、资源导入、工具中心、维护排障拆页。
+2. VitePress 接入后检查所有 `/images/hermes-yachiyo/first-run/*.png` 引用是否能在站点中正确加载，并确认截图中 API Key 仍保持遮蔽。
+3. 发布说明中补充本轮首用真实发现：GitHub 克隆中断时的手动安装 fallback、GPT-SoVITS 首次加载可能较慢、导入资源会显著增加备份体积、工具中心外部 Key 缺失属于预期受限状态。
+4. 下一轮 DMG 复测时重点确认：主动关怀语音页能展示最近一次自动 TTS 错误；工具中心 `tts` 卡片能跳到主动关怀语音；备份页大资源提示可见；1x1/极小图片附件会被前端拦截。
+
+1. 用最新 develop DMG 再做一次清机首装复测：安装 Hermes 后应滚动到模型配置区；不填 API Key 初始化会提示风险；初始化完成后进入主控台并默认打开 Bubble；再次点击 Dock 图标不能回到安装向导，也不能让 Bubble 消失。
+2. 手工复测主动关怀截图链路：授权屏幕录制后触发主动桌面观察，应能把桌面截图作为会话附件传入图片识别；点击附件只在应用内查看，不应自动弹出 Chrome/默认浏览器预览。
+3. 手工复测模型配置为 `auto + OpenRouter Base URL` 的图片输入：只有 `AUTO_API_KEY` 旧配置时也应被识别为 OpenRouter key 可用；主动关怀/手动发图不应再误报 API Key 无效；若模型确实不支持图片，应给出真实能力说明。
+4. 手工复测 Live2D 资源 gate 与导入：清空 `~/.hermes/yachiyo/assets/live2d` 与 `live2d_mode.model_path` 后选择 Live2D，应跳到配置页且不启动 Live2D；导入中文/日文文件名 ZIP 后状态栏不应乱码，保存后真模型应能加载或至少静态预览可点击。
+5. 手工复测主动关怀 TTS 本地服务链路：导入八千代 GPT-SoVITS 语音包后确认权重/参考音频路径和默认启动命令自动填充；测试“部署本地服务”“打开服务终端”“安装开机自启”“刷新状态”“保存并测试”，并确认 TTS 开启时主动消息不会早于音频附件出现。
+6. 推送后确认 GitHub Actions `Build macOS DMG`：release tag/DMG 名称应带自动发布版本号；应用 release 不应再包含八千代 GPT-SoVITS 语音 ZIP；重跑同一个 workflow run 时应覆盖同名 DMG asset，不再因 `ReleaseAsset.name already exists` 失败。
+7. 如需更新八千代 GPT-SoVITS 语音资源，手动触发 `Publish TTS Voice Assets` workflow，并提供已经调配好的 ZIP URL；确认它更新独立的 `tts-assets-yachiyo-gpt-sovits-v4` release。
+8. 手工复测卸载：分别验证仅卸载资料、卸载前备份、包含 Hermes Agent、以及“同时删除当前应用本体”四条路径；删除 `.app` 是 macOS best-effort，失败时应提示用户手动移除 Applications 中的应用。
+9. 后续打包前补一次真实 macOS 权限验收：主动关怀开启时是否能触发系统屏幕录制权限提示；未授权时是否回退关闭并显示原因；授权后主动桌面观察截图应真实附加到会话，而不是只生成文本 fallback。
+
+10. 手工验证 Tool Center 修复：运行 `hermes doctor` 后确认 Doctor 已确认可用的工具不再显示“待检测”；确认 `browser` 与 `browser-cdp` 分开显示，CDP 受限不再误伤基础浏览器自动化。
+11. 手工验证工具配置入口：在 Tool Center 分别打开 `web`、`image_gen`、`browser-cdp`、Home Assistant、MoA、RL 等当前 `hermes tools list` 暴露的配置，确认 env 字段只显示变量名和已配置状态，不显示密钥明文；保存后可点击“保存并测试 / 测试配置”查看静态配置检查与 Doctor 对应状态。
+12. 联网与网页读取的真实启用仍需要用户提供 Firecrawl / Exa / Parallel / Tavily / Nous Gateway 之一；配置后应分别验证 `hermes doctor` 状态、`web` 工具调用和网页读取结果。
+13. 图片生成的真实启用仍需要当前 Hermes 已知 provider 的密钥或 image_gen plugin；配置页先只列 Hermes 已暴露/已安装的 provider，后续若 Hermes 新增 provider，再由 tools/plugin manifest 驱动 UI 扩展。
+14. 手工验证 Hermes 更新入口：点击“检查更新”确认能显示当前版本/落后 commits；确认默认 `--no-backup` 更新不会停在 stash 恢复确认，勾选完整备份时能清楚提示耗时风险，完成后自动刷新 tools list、Doctor 缓存和 Tool Center provider 列表。
+15. 手工验证 Browser CDP 修补：点击“启动/连接本机 Chrome”后确认能写入 `browser.cdp_url=http://127.0.0.1:9222`；若自动启动失败，复制页面返回的手动命令执行后再次运行 Doctor。
+16. 继续对照旧 pywebview Chat Window 做 React 体验补全：当前已恢复单例窗口、轮询流式/typewriter/Markdown/复制/会话切换、外链打开策略、基础快捷键和处理中取消入口；后续补更完整的错误边界和消息操作细节。
+17. TODO：制定旧 pywebview shell 退休清单。等 Electron 前端稳定覆盖聊天、主控台、设置、Bubble、Live2D、安装引导、备份/卸载和打包启动链路后，直接删除所有 pywebview UI 代码与 legacy 入口，只保留 Electron + Bridge 路径。
+18. 手工验证 AstrBot `/y ask` / `/y chat`：allow-list 拒绝、状态/截图/窗口摘要、自然语言低风险任务创建。
+19. 调研 Hermes 原生 memory API / CLI / 存储边界，决定 `HermesMemoryAdapter` 第一版能力。
+20. 继续推进 AstrBot 宿主绑定：在 AstrBot 插件框架中注册 `/y` 命令监听并调用 `on_y_command()`。
+21. 继续对接 Hapi `/codex` 真实端点，保持 Codex CLI 执行不进入 Hermes-Yachiyo。
+22. 完善任务持久化与安全策略模块（packages/tasking / packages/security），并补跨平台本地能力适配。

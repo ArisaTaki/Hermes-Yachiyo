@@ -11,13 +11,14 @@ from typing import Callable, Iterator
 SHELL_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SHELL_DIR.parents[1]
 ASSETS_DIR = SHELL_DIR / "assets"
-UI_ASSETS_DIR = SHELL_DIR / "ui"
 DEFAULT_BUBBLE_AVATAR_PATH = ASSETS_DIR / "avatars" / "yachiyo-default.jpg"
 PROGRAM_LIVE2D_ASSETS_DIR = ASSETS_DIR / "live2d"
 LEGACY_BUNDLED_LIVE2D_MODEL_DIR = PROGRAM_LIVE2D_ASSETS_DIR / "yachiyo"
 DEFAULT_LIVE2D_MODEL_DIR = Path.home() / ".hermes" / "yachiyo" / "assets" / "live2d"
 DEFAULT_LIVE2D_PREVIEW_PATH = DEFAULT_BUBBLE_AVATAR_PATH
-LIVE2D_RELEASES_URL = "https://github.com/ArisaTaki/Hermes-Yachiyo/releases"
+PROJECT_RELEASES_URL = "https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases"
+LIVE2D_RELEASES_URL = f"{PROJECT_RELEASES_URL}/tag/live2d-assets-20260423"
+TTS_RELEASES_URL = f"{PROJECT_RELEASES_URL}/tag/tts-assets-yachiyo-gpt-sovits-v4"
 
 
 def get_hermes_home_dir() -> Path:
@@ -36,6 +37,11 @@ def get_yachiyo_workspace_dir() -> Path:
 def get_user_live2d_assets_dir() -> Path:
     """Return the default user-scoped Live2D asset import directory."""
     return get_yachiyo_workspace_dir() / "assets" / "live2d"
+
+
+def get_user_tts_assets_dir() -> Path:
+    """Return the default user-scoped TTS voice preset import directory."""
+    return get_yachiyo_workspace_dir() / "assets" / "tts"
 
 
 def iter_live2d_candidate_dirs(root: str | Path | None = None) -> Iterator[Path]:
@@ -66,37 +72,11 @@ def file_uri(path: str | Path) -> str:
 
 
 def data_uri(path: str | Path) -> str:
-    """Embed a local asset as a data URI for pywebview HTML strings."""
+    """Embed a local asset as a browser-safe data URI."""
     asset_path = Path(path).expanduser().resolve()
     mime_type = mimetypes.guess_type(asset_path.name)[0] or "application/octet-stream"
     encoded = base64.b64encode(asset_path.read_bytes()).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"
-
-
-def read_ui_asset(relative_path: str) -> str:
-    """Read a bundled UI text asset from apps/shell/ui."""
-    asset_path = (UI_ASSETS_DIR / relative_path).resolve()
-    try:
-        asset_path.relative_to(UI_ASSETS_DIR.resolve())
-    except ValueError as exc:
-        raise ValueError(f"非法 UI 资源路径: {relative_path}") from exc
-    return asset_path.read_text(encoding="utf-8")
-
-
-def inject_css(html: str, relative_path: str, *, occurrence: int = 1) -> str:
-    """Inject a bundled CSS asset before a selected </style> tag."""
-    css = read_ui_asset(relative_path).rstrip()
-    marker = "</style>"
-    if occurrence < 1:
-        raise ValueError("occurrence 必须大于 0")
-    start = 0
-    index = -1
-    for _ in range(occurrence):
-        index = html.find(marker, start)
-        if index < 0:
-            raise ValueError(f"HTML 中未找到第 {occurrence} 个 </style> 标记")
-        start = index + len(marker)
-    return f"{html[:index]}{css}\n    {html[index:]}"
 
 
 def project_display_path(path: str | Path) -> str:

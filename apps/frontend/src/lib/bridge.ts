@@ -14,7 +14,7 @@ export type LauncherHitRegionPayload = {
     height: number;
   };
 };
-export type DesktopTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup';
+export type DesktopTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup' | 'update-hermes' | 'update-hermes-backup';
 export type DesktopTerminalStartResult = {
   success?: boolean;
   id?: string;
@@ -24,14 +24,114 @@ export type DesktopTerminalStartResult = {
 };
 export type DesktopTerminalDataPayload = { id: string; data: string };
 export type DesktopTerminalExitPayload = { id: string; exitCode: number; signal?: number; task?: DesktopTerminalTask };
+export type AppBuildMetadata = {
+  name?: string;
+  channel?: string;
+  branch?: string;
+  version?: string;
+  base_version?: string;
+  commit?: string;
+  short_commit?: string;
+  build_number?: number;
+  repository?: string;
+  latest_json_url?: string;
+  built_at?: string;
+};
+export type ReleaseChangelogCommit = {
+  commit?: string;
+  short_commit?: string;
+  author?: string;
+  authored_at?: string;
+  subject?: string;
+  category?: string;
+  url?: string | null;
+};
+export type ReleaseChangelogSection = {
+  title?: string;
+  items?: ReleaseChangelogCommit[];
+};
+export type ReleaseChangelog = {
+  generated_from?: string;
+  previous_tag?: string | null;
+  previous_commit?: string | null;
+  current_tag?: string;
+  compare_url?: string | null;
+  commit_count?: number;
+  commits?: ReleaseChangelogCommit[];
+  sections?: ReleaseChangelogSection[];
+  summary?: string[];
+};
+export type LatestReleaseMetadata = {
+  name?: string;
+  channel?: string;
+  branch?: string;
+  source_branch?: string;
+  version?: string;
+  base_version?: string;
+  commit?: string;
+  short_commit?: string;
+  build_number?: number;
+  run_number?: number;
+  tag?: string;
+  signing?: string;
+  dmg_name?: string;
+  sha256?: string;
+  download_url?: string;
+  latest_json_url?: string;
+  published_at?: string;
+  changelog?: ReleaseChangelog;
+};
+export type AppUpdateInfo = {
+  supported?: boolean;
+  packaged?: boolean;
+  current?: AppBuildMetadata;
+  latest_json_url?: string;
+  app_bundle_path?: string;
+  downloaded_dmg_path?: string;
+  downloaded_update?: AppUpdateDownloadResult;
+  error?: string;
+};
+export type AppUpdateCheckResult = AppUpdateInfo & {
+  ok?: boolean;
+  update_available?: boolean;
+  latest?: LatestReleaseMetadata;
+  reason?: string;
+};
+export type AppUpdateDownloadResult = {
+  ok?: boolean;
+  path?: string;
+  file_name?: string;
+  sha256?: string;
+  verified?: boolean;
+  latest?: LatestReleaseMetadata;
+  error?: string;
+};
+export type AppUpdateInstallResult = {
+  success?: boolean;
+  appBundlePath?: string;
+  dmgPath?: string;
+  error?: string;
+};
+export type AppUpdateDownloadProgress = {
+  status?: 'starting' | 'downloading' | 'verifying' | 'completed' | 'failed' | string;
+  file_name?: string;
+  received_bytes?: number;
+  total_bytes?: number;
+  percent?: number;
+  error?: string;
+};
 
 declare global {
   interface Window {
     hermesDesktop?: {
       chooseLive2DArchive?: () => Promise<string | null>;
       chooseLive2DModelDirectory?: () => Promise<string | null>;
+      checkAppUpdate?: () => Promise<AppUpdateCheckResult>;
       copyText?: (text: string) => Promise<void>;
+      downloadAppUpdate?: () => Promise<AppUpdateDownloadResult>;
+      getAppUpdateInfo?: () => Promise<AppUpdateInfo>;
       getBridgeUrl: () => Promise<string>;
+      installAppUpdate?: (dmgPath?: string) => Promise<AppUpdateInstallResult>;
       getLauncherPointerState?: (mode: string) => Promise<{ ok?: boolean; x?: number; y?: number; width?: number; height?: number; inside?: boolean; updated_at?: number }>;
       moveLauncherWindow?: (deltaX: number, deltaY: number) => Promise<boolean>;
       openDesktopMode?: (mode?: string) => Promise<void>;
@@ -40,7 +140,9 @@ declare global {
       openPath?: (path: string) => Promise<void>;
       openView?: (view: string, params?: Record<string, string>) => Promise<void>;
       quit: () => Promise<void>;
+      removeAppBundleAndQuit?: () => Promise<{ success?: boolean; appBundlePath?: string; error?: string }>;
       restartApp?: () => Promise<void>;
+      restartBackend?: (options?: { bridgeUrl?: string }) => Promise<{ success?: boolean; bridgeUrl?: string; error?: string }>;
       setLauncherHitRegions?: (mode: string, payload: LauncherHitRegionPayload) => Promise<boolean>;
       setLauncherPointerInteractive?: (mode: string, interactive: boolean) => Promise<boolean>;
       terminalKill?: (id: string) => Promise<boolean>;
@@ -49,6 +151,7 @@ declare global {
       terminalWrite?: (id: string, data: string) => Promise<boolean>;
       onTerminalData?: (callback: (payload: DesktopTerminalDataPayload) => void) => () => void;
       onTerminalExit?: (callback: (payload: DesktopTerminalExitPayload) => void) => () => void;
+      onAppUpdateDownloadProgress?: (callback: (payload: AppUpdateDownloadProgress) => void) => () => void;
     };
   }
 }
@@ -117,7 +220,15 @@ export async function openAppView(
 
 function appViewUrl(view: string, params: Record<string, string> = {}): string {
   const route = isAppView(view) ? routePath(view, params) : routePath('main');
-  return `${window.location.pathname}${window.location.search}${route}`;
+  const query = new URLSearchParams(window.location.search);
+  Object.entries(params)
+    .filter(([key]) => key !== 'view' && key !== 'mode')
+    .forEach(([key, value]) => {
+      if (value) query.set(key, value);
+      else query.delete(key);
+    });
+  const search = query.toString();
+  return `${window.location.pathname}${search ? `?${search}` : ''}${route}`;
 }
 
 function isLauncherView(): boolean {
@@ -126,7 +237,7 @@ function isLauncherView(): boolean {
 }
 
 function isAppView(value: string): value is AppView {
-  return ['main', 'chat', 'settings', 'installer', 'bubble', 'bubble-menu', 'live2d'].includes(value);
+  return ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'proactive-tts', 'bubble', 'bubble-menu', 'live2d'].includes(value);
 }
 
 export async function openDesktopMode(mode?: string): Promise<void> {
@@ -246,12 +357,60 @@ export async function quitApp(): Promise<void> {
   window.close();
 }
 
+export async function removeAppBundleAndQuit(): Promise<{ success?: boolean; appBundlePath?: string; error?: string }> {
+  if (!window.hermesDesktop?.removeAppBundleAndQuit) {
+    throw new Error('当前环境无法自动删除应用本体');
+  }
+  return window.hermesDesktop.removeAppBundleAndQuit();
+}
+
 export async function restartApp(): Promise<void> {
   if (window.hermesDesktop?.restartApp) {
     await window.hermesDesktop.restartApp();
     return;
   }
   window.location.reload();
+}
+
+export async function getAppUpdateInfo(): Promise<AppUpdateInfo> {
+  if (!window.hermesDesktop?.getAppUpdateInfo) {
+    return { supported: false, packaged: false, error: '当前环境不支持应用更新' };
+  }
+  return window.hermesDesktop.getAppUpdateInfo();
+}
+
+export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
+  if (!window.hermesDesktop?.checkAppUpdate) {
+    return { ok: false, supported: false, packaged: false, update_available: false, error: '当前环境不支持应用更新' };
+  }
+  return window.hermesDesktop.checkAppUpdate();
+}
+
+export async function downloadAppUpdate(): Promise<AppUpdateDownloadResult> {
+  if (!window.hermesDesktop?.downloadAppUpdate) {
+    return { ok: false, error: '当前环境不支持应用更新' };
+  }
+  return window.hermesDesktop.downloadAppUpdate();
+}
+
+export async function installAppUpdate(dmgPath?: string): Promise<AppUpdateInstallResult> {
+  if (!window.hermesDesktop?.installAppUpdate) {
+    return { success: false, error: '当前环境不支持应用更新' };
+  }
+  return window.hermesDesktop.installAppUpdate(dmgPath);
+}
+
+export function onAppUpdateDownloadProgress(callback: (payload: AppUpdateDownloadProgress) => void): () => void {
+  return window.hermesDesktop?.onAppUpdateDownloadProgress?.(callback) || (() => {});
+}
+
+export async function restartDesktopBridge(bridgeUrl?: string): Promise<{ success?: boolean; bridgeUrl?: string; error?: string }> {
+  if (!window.hermesDesktop?.restartBackend) {
+    return { success: false, error: '当前环境不支持自动重启 Bridge，请重启 Hermes-Yachiyo' };
+  }
+  const result = await window.hermesDesktop.restartBackend({ bridgeUrl });
+  if (result.bridgeUrl) cachedBridgeUrl = result.bridgeUrl.replace(/\/$/, '');
+  return result;
 }
 
 export function hasEmbeddedTerminal(): boolean {

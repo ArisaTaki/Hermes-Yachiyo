@@ -51,9 +51,9 @@ class HermesInstallGuide:
                 "message": "Hermes Agent 已安装，需要完成初始配置",
                 "actions": [
                     "Hermes Agent 安装成功，但尚未完成初始配置。",
-                    "请在终端中运行以下命令完成交互式配置：",
+                    "请在本页的模型配置向导中填写 Provider、模型、Base URL 和 API Key。",
+                    "如果需要 Hermes 原生高级配置，也可以打开终端运行：",
                     "  hermes setup",
-                    "配置过程会要求你设置 API 密钥、模型偏好等选项。",
                     "完成后回到此窗口点击「重新检测」按钮继续。",
                 ],
             }
@@ -129,7 +129,7 @@ class HermesInstallGuide:
                     "  brew install git curl",
                     "",
                     "第 2 步 - 使用官方安装脚本安装 Hermes Agent:",
-                    "  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
+                    "  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup",
                     "",
                     "如果已经安装过 Homebrew、git 和 curl，可以直接从第 2 步开始。",
                     "",
@@ -149,7 +149,7 @@ class HermesInstallGuide:
             base_info.update({
                 "actions": [
                     "方式1 - 使用官方安装脚本:",
-                    "  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
+                    "  curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup",
                     "",
                     "方式2 - 下载二进制文件:",
                     "  访问 https://github.com/NousResearch/hermes-agent/releases",
@@ -178,7 +178,7 @@ class HermesInstallGuide:
             "actions": [
                 "请升级到最新版本的 Hermes Agent",
                 "重新运行官方安装脚本:",
-                "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
+                "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup",
                 "或下载最新二进制文件并替换",
                 "升级完成后重新启动 Hermes-Yachiyo"
             ]
@@ -286,6 +286,8 @@ def summarize_install_failure(output: str, returncode: int) -> str:
     """Return a user-facing summary for common installer failures."""
     normalized = output.lower()
     git_network_markers = (
+        "curl 18",
+        "expected flush after ref listing",
         "rpc failed",
         "early eof",
         "fetch-pack",
@@ -295,12 +297,65 @@ def summarize_install_failure(output: str, returncode: int) -> str:
     )
     if any(marker in normalized for marker in git_network_markers):
         return (
-            "从 GitHub 克隆 Hermes Agent 时网络传输中断。"
+            "从 GitHub 克隆 Hermes Agent 时网络传输中断；安装器已自动重试但仍未完成。"
             "请检查网络或代理后重试；也可以改用 Releases 二进制安装。"
         )
     if "could not resolve host" in normalized or "failed to connect" in normalized:
         return "无法连接 GitHub 或安装脚本源，请检查网络、代理或 DNS 后重试。"
     return f"安装脚本执行失败（exit={returncode}），请查看上方安装日志中的错误详情"
+
+
+def build_hermes_install_script() -> str:
+    """Build the shell wrapper used to download and run Hermes Agent installer."""
+    return (
+        "set -o pipefail\n"
+        'install_script="$(mktemp -t hermes-agent-install.XXXXXX)" || exit 1\n'
+        'target_dir="${HERMES_AGENT_INSTALL_DIR:-$HOME/.hermes/hermes-agent}"\n'
+        'install_lock_dir="${HERMES_AGENT_INSTALL_LOCK_DIR:-$HOME/.hermes/.hermes-agent-install.lock}"\n'
+        'mkdir -p "$(dirname "$install_lock_dir")" || exit $?\n'
+        'if ! mkdir "$install_lock_dir" 2>/dev/null; then\n'
+        '  echo "Hermes Agent 正在被另一个 Hermes-Yachiyo 进程安装或更新，请稍后重试。"\n'
+        "  exit 75\n"
+        "fi\n"
+        'shim_path="$HOME/.local/bin/hermes"\n'
+        'target_bin="$target_dir/venv/bin/hermes"\n'
+        'if [ -L "$shim_path" ]; then\n'
+        '  shim_target="$(readlink "$shim_path" 2>/dev/null || true)"\n'
+        '  case "$shim_target" in\n'
+        '    "$target_bin"|*/.hermes/hermes-agent/venv/bin/hermes)\n'
+        '      rm -f "$shim_path"\n'
+        '      ;;\n'
+        '  esac\n'
+        "fi\n"
+        'if [ -f "$target_bin" ] && grep -Fq "exec \\"$target_bin\\"" "$target_bin" 2>/dev/null; then\n'
+        '  printf "检测到损坏的 Hermes 启动脚本，正在清理后重新安装...\\n"\n'
+        '  rm -rf "$target_dir"\n'
+        "fi\n"
+        "target_existed=0\n"
+        '[ -e "$target_dir" ] && target_existed=1\n'
+        'trap \'rm -rf "$install_lock_dir"; rm -f "$install_script"\' EXIT\n'
+        f"curl --retry 3 --retry-delay 2 --connect-timeout 20 -fsSL {HERMES_INSTALL_SCRIPT_URL} -o \"$install_script\" || exit $?\n"
+        "export GIT_CONFIG_COUNT=3\n"
+        "export GIT_CONFIG_KEY_0=http.version\n"
+        "export GIT_CONFIG_VALUE_0=HTTP/1.1\n"
+        "export GIT_CONFIG_KEY_1=http.postBuffer\n"
+        "export GIT_CONFIG_VALUE_1=524288000\n"
+        "export GIT_CONFIG_KEY_2=http.lowSpeedTime\n"
+        "export GIT_CONFIG_VALUE_2=60\n"
+        "last_exit=0\n"
+        "for attempt in 1 2 3; do\n"
+        '  printf "\\nHermes Agent 安装尝试 %s/3\\n" "$attempt"\n'
+        '  bash "$install_script" --skip-setup\n'
+        "  last_exit=$?\n"
+        '  if [ "$last_exit" -eq 0 ]; then exit 0; fi\n'
+        '  if [ "$attempt" -lt 3 ]; then\n'
+        '    printf "Hermes Agent 安装尝试 %s/3 失败，退出码：%s；即将重试...\\n" "$attempt" "$last_exit"\n'
+        '    if [ "$target_existed" -eq 0 ] && [ -d "$target_dir" ] && [ ! -x "$target_dir/venv/bin/hermes" ]; then rm -rf "$target_dir"; fi\n'
+        "    sleep $((attempt * 2))\n"
+        "  fi\n"
+        "done\n"
+        'exit "$last_exit"'
+    )
 
 
 async def run_hermes_install(
@@ -309,7 +364,7 @@ async def run_hermes_install(
 ) -> InstallResult:
     """运行 Hermes Agent 官方安装脚本。
 
-    执行：curl -fsSL <install_script_url> | bash
+    执行：下载官方 install.sh 后以 --skip-setup 运行。
 
     Args:
         on_output: 可选回调 (line: str) → None，实时接收安装输出行
@@ -333,17 +388,17 @@ async def run_hermes_install(
 
     logger.info("开始安装 Hermes Agent（脚本: %s）", HERMES_INSTALL_SCRIPT_URL)
 
-    # 构造管道命令：curl ... | bash
+    # 下载后执行：跳过官方交互式 setup，改由 Yachiyo 的 GUI 配置向导处理。
+    install_script = build_hermes_install_script()
     cmd = [
         "bash", "-c",
-        f"curl -fsSL {HERMES_INSTALL_SCRIPT_URL} | bash"
+        install_script,
     ]
 
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
-            stdin=asyncio.subprocess.DEVNULL,   # 明确关闭 stdin，防止安装脚本末尾的
-                                                 # hermes setup 等交互程序阻塞等待输入
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,   # 合并 stderr 到 stdout，方便实时展示
         )
@@ -434,9 +489,7 @@ async def run_hermes_install(
 
     if rc != 0:
         # 安装脚本非零退出时，先检查 hermes 命令是否已经可用。
-        # 常见原因：官方安装脚本末尾自动调用 hermes setup，
-        # 由于我们关闭了 stdin（DEVNULL），hermes setup 立即退出导致脚本返回非零，
-        # 或当前 GUI 进程 PATH 尚未刷新，但 hermes 二进制本身已安装成功。
+        # 常见原因：当前 GUI 进程 PATH 尚未刷新，但 hermes 二进制本身已安装成功。
         try:
             hermes_path, needs_env_refresh = locate_hermes_binary()
             if hermes_path is None:

@@ -17,26 +17,37 @@ import {
 import * as nodePty from 'node-pty';
 import type { IPty } from 'node-pty';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import http, { type IncomingMessage, type RequestOptions } from 'node:http';
+import https from 'node:https';
 import { createRequire } from 'node:module';
+import { createServer } from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const FRONTEND_DEV_URL = process.env.HERMES_YACHIYO_FRONTEND_DEV_URL || 'http://127.0.0.1:5174';
-const BRIDGE_URL = process.env.HERMES_YACHIYO_BRIDGE_URL || 'http://127.0.0.1:8420';
+const DEV_BRIDGE_URL = 'http://127.0.0.1:8420';
+const PACKAGED_BRIDGE_URL = 'http://127.0.0.1:18420';
+let bridgeUrl = process.env.HERMES_YACHIYO_BRIDGE_URL || (app.isPackaged ? PACKAGED_BRIDGE_URL : DEV_BRIDGE_URL);
+const APP_BUILD_METADATA_FILE = 'hermes-yachiyo-build.json';
+const DEFAULT_UPDATE_REPOSITORY = 'kuguya-AI-app-develop/Hermes-Yachiyo';
 const BRIDGE_SETTINGS_RETRIES = 40;
 const BRIDGE_SETTINGS_RETRY_MS = 250;
 const BUBBLE_SCREEN_MARGIN = 24;
 const POSITION_SAVE_DEBOUNCE_MS = 260;
 const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
 const MAX_LAUNCHER_SHAPE_RECTS = 10000;
+type IconKind = 'dock' | 'tray' | 'window';
 
-type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'bubble' | 'bubble-menu' | 'live2d';
+type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'tools' | 'proactive-tts' | 'bubble' | 'bubble-menu' | 'live2d';
 type ModeId = 'bubble' | 'live2d';
-type InstallerTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup';
+type InstallerTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup' | 'update-hermes' | 'update-hermes-backup';
 
 type ModeSettings = {
   config?: Record<string, unknown>;
@@ -63,6 +74,105 @@ type InstallInfoPayload = {
   } | null;
 };
 
+type AppBuildMetadata = {
+  name: string;
+  channel: string;
+  branch: string;
+  version: string;
+  base_version?: string;
+  commit: string;
+  short_commit?: string;
+  build_number?: number;
+  repository: string;
+  latest_json_url: string;
+  built_at?: string;
+};
+
+type ReleaseChangelogCommit = {
+  commit?: string;
+  short_commit?: string;
+  author?: string;
+  authored_at?: string;
+  subject?: string;
+  category?: string;
+  url?: string | null;
+};
+
+type ReleaseChangelogSection = {
+  title?: string;
+  items?: ReleaseChangelogCommit[];
+};
+
+type ReleaseChangelog = {
+  generated_from?: string;
+  previous_tag?: string | null;
+  previous_commit?: string | null;
+  current_tag?: string;
+  compare_url?: string | null;
+  commit_count?: number;
+  commits?: ReleaseChangelogCommit[];
+  sections?: ReleaseChangelogSection[];
+  summary?: string[];
+};
+
+type LatestReleaseMetadata = {
+  name?: string;
+  channel?: string;
+  branch?: string;
+  source_branch?: string;
+  version?: string;
+  base_version?: string;
+  commit?: string;
+  short_commit?: string;
+  build_number?: number;
+  run_number?: number;
+  tag?: string;
+  signing?: string;
+  dmg_name?: string;
+  sha256?: string;
+  download_url?: string;
+  latest_json_url?: string;
+  published_at?: string;
+  changelog?: ReleaseChangelog;
+};
+
+type AppUpdateInfo = {
+  supported: boolean;
+  packaged: boolean;
+  current: AppBuildMetadata;
+  latest_json_url: string;
+  app_bundle_path?: string;
+  downloaded_dmg_path?: string;
+  downloaded_update?: AppUpdateDownloadResult;
+  error?: string;
+};
+
+type AppUpdateCheckResult = AppUpdateInfo & {
+  ok: boolean;
+  update_available: boolean;
+  latest?: LatestReleaseMetadata;
+  reason?: string;
+};
+
+type AppUpdateDownloadResult = {
+  ok: boolean;
+  path?: string;
+  file_name?: string;
+  sha256?: string;
+  verified?: boolean;
+  latest?: LatestReleaseMetadata;
+  error?: string;
+};
+
+type AppUpdateDownloadProgress = {
+  status: 'starting' | 'downloading' | 'verifying' | 'completed' | 'failed';
+  file_name?: string;
+  received_bytes?: number;
+  total_bytes?: number;
+  percent?: number;
+  error?: string;
+};
+
 let backendProcess: ChildProcessWithoutNullStreams | null = null;
 let mainWindow: BrowserWindow | null = null;
 let chatWindow: BrowserWindow | null = null;
@@ -72,11 +182,17 @@ let activeMode: ModeId | null = null;
 let activeModeConfig: Record<string, unknown> = {};
 let activeModeConfigSignature = '';
 let positionSaveTimer: NodeJS.Timeout | null = null;
+let positionSaveSuppressedUntil = 0;
 let modeWindowIgnoringMouse = false;
 let modeWindowShapeApplied = false;
 let modeWindowTopSuppressed = false;
 let lastInstallReady: boolean | null = null;
 let lastUiSettings: UiSettings | null = null;
+let hasEnteredMainExperience = false;
+let backendRestartPromise: Promise<{ success: boolean; bridgeUrl?: string; error?: string }> | null = null;
+let lastDownloadedAppUpdate: AppUpdateDownloadResult | null = null;
+const enforcedWindowTitles = new WeakMap<BrowserWindow, string>();
+const titleHandlersInstalled = new WeakSet<BrowserWindow>();
 const terminalSessions = new Map<string, {
   ownerId: number;
   pty: IPty;
@@ -89,10 +205,551 @@ type MainWindowOptions = {
   focusOnReady?: boolean;
 };
 
+app.setName('Hermes-Yachiyo');
 showMacDockIcon();
 
 function projectRoot(): string {
   return path.resolve(__dirname, '..', '..', '..');
+}
+
+function rootAssetPath(...segments: string[]): string | null {
+  const roots = app.isPackaged
+    ? [process.resourcesPath, path.join(process.resourcesPath, 'app.asar.unpacked'), projectRoot()]
+    : [projectRoot()];
+  for (const root of roots) {
+    const candidate = path.join(root, ...segments);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function defaultLatestJsonUrl(branch = 'develop', repository = DEFAULT_UPDATE_REPOSITORY): string {
+  const latestBranch = branch === 'main' ? 'main' : 'develop';
+  return `https://github.com/${repository}/releases/download/${latestBranch}-latest/Hermes-Yachiyo-${latestBranch}-latest.json`;
+}
+
+function defaultAppBuildMetadata(): AppBuildMetadata {
+  return {
+    name: 'Hermes-Yachiyo',
+    channel: 'experimental',
+    branch: 'develop',
+    version: app.getVersion() || '0.0.0-dev',
+    commit: 'dev',
+    short_commit: 'dev',
+    build_number: 0,
+    repository: DEFAULT_UPDATE_REPOSITORY,
+    latest_json_url: defaultLatestJsonUrl('develop'),
+    built_at: 'dev',
+  };
+}
+
+function readJsonFile<T>(filePath: string): T | null {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
+  } catch {
+    return null;
+  }
+}
+
+function readAppBuildMetadata(): AppBuildMetadata {
+  const fallback = defaultAppBuildMetadata();
+  const candidates = [
+    path.resolve(__dirname, '..', 'dist', APP_BUILD_METADATA_FILE),
+    rootAssetPath('apps', 'frontend', 'public', APP_BUILD_METADATA_FILE),
+    rootAssetPath('dist', APP_BUILD_METADATA_FILE),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  for (const candidate of candidates) {
+    const data = readJsonFile<Partial<AppBuildMetadata>>(candidate);
+    if (!data) continue;
+    const branch = typeof data.branch === 'string' && data.branch.trim() ? data.branch.trim() : fallback.branch;
+    const repository = typeof data.repository === 'string' && data.repository.trim() ? data.repository.trim() : fallback.repository;
+    return {
+      ...fallback,
+      ...data,
+      name: typeof data.name === 'string' && data.name.trim() ? data.name.trim() : fallback.name,
+      channel: typeof data.channel === 'string' && data.channel.trim() ? data.channel.trim() : fallback.channel,
+      branch,
+      version: typeof data.version === 'string' && data.version.trim() ? data.version.trim() : fallback.version,
+      commit: typeof data.commit === 'string' && data.commit.trim() ? data.commit.trim() : fallback.commit,
+      repository,
+      latest_json_url: typeof data.latest_json_url === 'string' && data.latest_json_url.trim()
+        ? data.latest_json_url.trim()
+        : defaultLatestJsonUrl(branch, repository),
+      build_number: numericBuildNumber(data.build_number) ?? fallback.build_number,
+    };
+  }
+  return fallback;
+}
+
+function numericBuildNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return Math.trunc(parsed);
+  }
+  return undefined;
+}
+
+function compareVersionStrings(left: unknown, right: unknown): number {
+  if (typeof left !== 'string' || typeof right !== 'string') return 0;
+  const leftParts = left.split(/[.-]/).map((part) => Number.parseInt(part, 10));
+  const rightParts = right.split(/[.-]/).map((part) => Number.parseInt(part, 10));
+  const maxLength = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < maxLength; index += 1) {
+    const leftValue = Number.isFinite(leftParts[index]) ? leftParts[index] : 0;
+    const rightValue = Number.isFinite(rightParts[index]) ? rightParts[index] : 0;
+    if (leftValue > rightValue) return 1;
+    if (leftValue < rightValue) return -1;
+  }
+  return 0;
+}
+
+function updateDownloadsDir(): string {
+  return path.join(app.getPath('userData'), 'updates');
+}
+
+function updateDownloadRecordPath(): string {
+  return path.join(updateDownloadsDir(), 'downloaded-update.json');
+}
+
+function safeDmgFileName(value: unknown, branch: string): string {
+  const fallback = `Hermes-Yachiyo-${branch === 'main' ? 'main' : 'develop'}-latest.dmg`;
+  if (typeof value !== 'string' || !value.trim()) return fallback;
+  const name = path.basename(value.trim());
+  return /^[A-Za-z0-9._-]+\.dmg$/.test(name) ? name : fallback;
+}
+
+function downloadedUpdateIsForDifferentBuild(
+  current: AppBuildMetadata,
+  download: AppUpdateDownloadResult | null | undefined,
+): download is AppUpdateDownloadResult {
+  if (!download?.ok || !download.path || !fs.existsSync(download.path)) return false;
+  const latest = download.latest || {};
+  if (compareVersionStrings(latest.version, current.version) > 0) return true;
+  const currentBuild = numericBuildNumber(current.build_number);
+  const latestBuild = numericBuildNumber(latest.build_number ?? latest.run_number);
+  if (currentBuild !== undefined && latestBuild !== undefined && latestBuild > currentBuild) return true;
+  const currentCommit = typeof current.commit === 'string' ? current.commit.trim() : '';
+  const latestCommit = typeof latest.commit === 'string' ? latest.commit.trim() : '';
+  return Boolean(currentCommit && latestCommit && currentCommit !== 'dev' && latestCommit !== currentCommit);
+}
+
+function downloadedUpdateMatchesLatest(download: AppUpdateDownloadResult | null | undefined, latest: LatestReleaseMetadata): download is AppUpdateDownloadResult {
+  if (!download?.ok || !download.path || !fs.existsSync(download.path)) return false;
+  const expectedSha = typeof latest.sha256 === 'string' ? latest.sha256.trim().toLowerCase() : '';
+  if (expectedSha && download.sha256?.toLowerCase() === expectedSha) return true;
+  const downloadLatest = download.latest || {};
+  if (latest.commit && downloadLatest.commit && latest.commit === downloadLatest.commit) return true;
+  if (latest.version && downloadLatest.version && latest.version === downloadLatest.version) {
+    return numericBuildNumber(latest.build_number ?? latest.run_number) === numericBuildNumber(downloadLatest.build_number ?? downloadLatest.run_number);
+  }
+  return false;
+}
+
+function readDownloadedAppUpdate(current?: AppBuildMetadata): AppUpdateDownloadResult | null {
+  if (lastDownloadedAppUpdate?.ok && (!current || downloadedUpdateIsForDifferentBuild(current, lastDownloadedAppUpdate))) {
+    return lastDownloadedAppUpdate;
+  }
+  const record = readJsonFile<AppUpdateDownloadResult>(updateDownloadRecordPath());
+  if (!record?.ok || !record.path || !fs.existsSync(record.path)) return null;
+  if (current && !downloadedUpdateIsForDifferentBuild(current, record)) return null;
+  lastDownloadedAppUpdate = record;
+  return record;
+}
+
+function writeDownloadedAppUpdate(record: AppUpdateDownloadResult): void {
+  try {
+    fs.mkdirSync(updateDownloadsDir(), { recursive: true });
+    fs.writeFileSync(updateDownloadRecordPath(), JSON.stringify(record, null, 2), 'utf8');
+  } catch (error) {
+    console.warn('[updater] failed to persist downloaded update:', error);
+  }
+}
+
+function clearDownloadedAppUpdate(): void {
+  lastDownloadedAppUpdate = null;
+  try {
+    fs.rmSync(updateDownloadRecordPath(), { force: true });
+  } catch {}
+}
+
+function appUpdateInfo(): AppUpdateInfo {
+  const current = readAppBuildMetadata();
+  const appBundlePath = currentAppBundlePath() || undefined;
+  const downloadedUpdate = readDownloadedAppUpdate(current) || undefined;
+  return {
+    supported: process.platform === 'darwin' && app.isPackaged && Boolean(appBundlePath),
+    packaged: app.isPackaged,
+    current,
+    latest_json_url: current.latest_json_url || defaultLatestJsonUrl(current.branch, current.repository),
+    app_bundle_path: appBundlePath,
+    downloaded_dmg_path: downloadedUpdate?.path,
+    downloaded_update: downloadedUpdate,
+  };
+}
+
+function updateAvailableReason(current: AppBuildMetadata, latest: LatestReleaseMetadata): { available: boolean; reason: string } {
+  const versionComparison = compareVersionStrings(latest.version, current.version);
+  if (versionComparison > 0) return { available: true, reason: `发现版本 ${latest.version}` };
+  const currentBuild = numericBuildNumber(current.build_number);
+  const latestBuild = numericBuildNumber(latest.build_number ?? latest.run_number);
+  if (currentBuild !== undefined && latestBuild !== undefined) {
+    if (latestBuild > currentBuild) return { available: true, reason: `发现构建 ${latestBuild}` };
+  }
+  if (versionComparison < 0) return { available: false, reason: '当前版本高于该渠道 latest' };
+  if (currentBuild !== undefined && latestBuild !== undefined && latestBuild < currentBuild) {
+    return { available: false, reason: '当前构建高于该渠道 latest' };
+  }
+  const currentCommit = typeof current.commit === 'string' ? current.commit.trim() : '';
+  const latestCommit = typeof latest.commit === 'string' ? latest.commit.trim() : '';
+  if (currentCommit && latestCommit && currentCommit !== 'dev' && latestCommit !== currentCommit) {
+    return { available: true, reason: `发现提交 ${latest.short_commit || latestCommit.slice(0, 7)}` };
+  }
+  return { available: false, reason: '当前已是该渠道最新版本' };
+}
+
+function httpRequest(
+  url: URL,
+  options: RequestOptions,
+  callback: (response: IncomingMessage) => void,
+) {
+  if (url.protocol === 'https:') return https.get(url, options, callback);
+  if (url.protocol === 'http:') return http.get(url, options, callback);
+  throw new Error('仅支持 http(s) 更新链接');
+}
+
+function redirectedUrl(location: string, baseUrl: URL): URL {
+  return new URL(location, baseUrl);
+}
+
+function cacheBustedUrl(url: string): string {
+  const parsed = new URL(url);
+  parsed.searchParams.set('_yachiyo_update_check', `${Date.now()}`);
+  return parsed.toString();
+}
+
+function fetchJson<T>(url: string, redirects = 5): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      reject(new Error('更新元数据链接无效'));
+      return;
+    }
+    const request = httpRequest(parsed, {
+      headers: {
+        Accept: 'application/json',
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+        'User-Agent': 'Hermes-Yachiyo-Updater',
+      },
+    }, (response) => {
+      const status = response.statusCode || 0;
+      const location = response.headers.location;
+      if ([301, 302, 303, 307, 308].includes(status) && location && redirects > 0) {
+        response.resume();
+        resolve(fetchJson<T>(redirectedUrl(location, parsed).toString(), redirects - 1));
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        response.resume();
+        reject(new Error(`更新元数据请求失败：HTTP ${status}`));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk: Buffer | string) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      response.on('end', () => {
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as T);
+        } catch {
+          reject(new Error('更新元数据不是有效 JSON'));
+        }
+      });
+    });
+    request.setTimeout(20000, () => request.destroy(new Error('更新元数据请求超时')));
+    request.on('error', reject);
+  });
+}
+
+function downloadFile(
+  url: string,
+  destination: string,
+  onProgress?: (progress: AppUpdateDownloadProgress) => void,
+  redirects = 5,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      reject(new Error('DMG 下载链接无效'));
+      return;
+    }
+    const tmpDestination = `${destination}.part`;
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    onProgress?.({ status: 'starting', file_name: path.basename(destination), received_bytes: 0 });
+    const request = httpRequest(parsed, {
+      headers: {
+        Accept: 'application/octet-stream',
+        'User-Agent': 'Hermes-Yachiyo-Updater',
+      },
+    }, (response) => {
+      const status = response.statusCode || 0;
+      const location = response.headers.location;
+      if ([301, 302, 303, 307, 308].includes(status) && location && redirects > 0) {
+        response.resume();
+        downloadFile(redirectedUrl(location, parsed).toString(), destination, onProgress, redirects - 1).then(resolve, reject);
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        response.resume();
+        reject(new Error(`DMG 下载失败：HTTP ${status}`));
+        return;
+      }
+      const totalBytes = Number(response.headers['content-length']) || undefined;
+      let receivedBytes = 0;
+      const progressStream = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          receivedBytes += chunk.length;
+          onProgress?.({
+            status: 'downloading',
+            file_name: path.basename(destination),
+            received_bytes: receivedBytes,
+            total_bytes: totalBytes,
+            percent: totalBytes ? Math.min(100, Math.round((receivedBytes / totalBytes) * 1000) / 10) : undefined,
+          });
+          callback(null, chunk);
+        },
+      });
+      const output = fs.createWriteStream(tmpDestination);
+      pipeline(response, progressStream, output)
+        .then(() => fs.promises.rename(tmpDestination, destination))
+        .then(() => resolve(), reject);
+    });
+    request.setTimeout(120000, () => request.destroy(new Error('DMG 下载超时')));
+    request.on('error', (error) => {
+      fs.rm(tmpDestination, { force: true }, () => reject(error));
+    });
+  });
+}
+
+function sha256File(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', (chunk: Buffer) => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
+  const info = appUpdateInfo();
+  try {
+    const latest = await fetchJson<LatestReleaseMetadata>(cacheBustedUrl(info.latest_json_url));
+    const decision = updateAvailableReason(info.current, latest);
+    const downloadedUpdate = downloadedUpdateMatchesLatest(info.downloaded_update, latest)
+      ? info.downloaded_update
+      : undefined;
+    return {
+      ...info,
+      downloaded_dmg_path: downloadedUpdate?.path,
+      downloaded_update: downloadedUpdate,
+      ok: true,
+      update_available: decision.available,
+      latest,
+      reason: decision.reason,
+    };
+  } catch (error) {
+    return {
+      ...info,
+      ok: false,
+      update_available: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function downloadAppUpdate(
+  onProgress?: (progress: AppUpdateDownloadProgress) => void,
+): Promise<AppUpdateDownloadResult> {
+  const check = await checkAppUpdate();
+  if (!check.ok || !check.latest) {
+    return { ok: false, error: check.error || '无法读取更新元数据' };
+  }
+  if (downloadedUpdateMatchesLatest(check.downloaded_update, check.latest)) {
+    return check.downloaded_update;
+  }
+  const downloadUrl = typeof check.latest.download_url === 'string' ? check.latest.download_url.trim() : '';
+  if (!downloadUrl) return { ok: false, latest: check.latest, error: '更新元数据缺少 DMG 下载链接' };
+
+  const fileName = safeDmgFileName(check.latest.dmg_name || downloadUrl, check.current.branch);
+  const destination = path.join(updateDownloadsDir(), fileName);
+  try {
+    await downloadFile(downloadUrl, destination, onProgress);
+    onProgress?.({ status: 'verifying', file_name: fileName });
+    const actualSha256 = await sha256File(destination);
+    const expectedSha256 = typeof check.latest.sha256 === 'string' ? check.latest.sha256.trim().toLowerCase() : '';
+    if (expectedSha256 && actualSha256.toLowerCase() !== expectedSha256) {
+      await fs.promises.rm(destination, { force: true });
+      clearDownloadedAppUpdate();
+      return {
+        ok: false,
+        latest: check.latest,
+        error: 'DMG SHA256 校验失败，已删除下载文件',
+      };
+    }
+    lastDownloadedAppUpdate = {
+      ok: true,
+      path: destination,
+      file_name: fileName,
+      sha256: actualSha256,
+      verified: Boolean(expectedSha256),
+      latest: check.latest,
+    };
+    writeDownloadedAppUpdate(lastDownloadedAppUpdate);
+    onProgress?.({ status: 'completed', file_name: fileName, percent: 100 });
+    return lastDownloadedAppUpdate;
+  } catch (error) {
+    onProgress?.({
+      status: 'failed',
+      file_name: fileName,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      ok: false,
+      latest: check.latest,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function normalizedDownloadedDmgPath(value: unknown): string | null {
+  const candidate = typeof value === 'string' && value.trim()
+    ? value.trim()
+    : lastDownloadedAppUpdate?.path || '';
+  if (!candidate) return null;
+  const resolved = path.resolve(candidate);
+  const downloads = path.resolve(updateDownloadsDir());
+  if (!resolved.startsWith(`${downloads}${path.sep}`)) return null;
+  if (!resolved.endsWith('.dmg')) return null;
+  return fs.existsSync(resolved) ? resolved : null;
+}
+
+function installDownloadedAppUpdate(rawPath: unknown): { success: boolean; appBundlePath?: string; dmgPath?: string; error?: string } {
+  if (process.platform !== 'darwin') return { success: false, error: '应用更新安装仅支持 macOS' };
+  if (!app.isPackaged) return { success: false, error: '开发环境不支持覆盖安装，请使用已打包的 DMG 版本' };
+  const appBundlePath = currentAppBundlePath();
+  if (!appBundlePath) return { success: false, error: '当前运行环境不是可更新的 macOS .app 包' };
+  const dmgPath = normalizedDownloadedDmgPath(rawPath);
+  if (!dmgPath) return { success: false, appBundlePath, error: '未找到已下载的更新 DMG' };
+  const appName = path.basename(appBundlePath);
+  if (!/^Hermes-Yachiyo.*\.app$/.test(appName)) {
+    return { success: false, appBundlePath, dmgPath, error: `拒绝覆盖非 Hermes-Yachiyo 应用包：${appName}` };
+  }
+  const script = [
+    'set -euo pipefail',
+    'app_path="$1"',
+    'dmg_path="$2"',
+    'app_name="$3"',
+    'app_pid="$4"',
+    'while kill -0 "$app_pid" >/dev/null 2>&1; do sleep 0.25; done',
+    'mount_dir="$(mktemp -d "${TMPDIR:-/tmp}/hermes-yachiyo-update.XXXXXX")"',
+    'cleanup() { /usr/bin/hdiutil detach "$mount_dir" -quiet >/dev/null 2>&1 || true; rmdir "$mount_dir" >/dev/null 2>&1 || true; }',
+    'trap cleanup EXIT',
+    '/usr/bin/hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_dir" -quiet',
+    'source_app="$mount_dir/$app_name"',
+    'if [[ ! -d "$source_app" ]]; then source_app="$(/usr/bin/find "$mount_dir" -maxdepth 2 -type d -name "$app_name" -print -quit)"; fi',
+    'if [[ ! -d "$source_app" ]]; then echo "Cannot find $app_name in DMG" >&2; exit 1; fi',
+    'parent_dir="$(dirname "$app_path")"',
+    'tmp_app="$parent_dir/.$app_name.updating.$$"',
+    'rm -rf "$tmp_app"',
+    '/usr/bin/ditto "$source_app" "$tmp_app"',
+    'rm -rf "$app_path"',
+    'mv "$tmp_app" "$app_path"',
+    '/usr/bin/open "$app_path"',
+  ].join('\n');
+  try {
+    spawn('/bin/zsh', ['-lc', script, 'hermes-yachiyo-update', appBundlePath, dmgPath, appName, String(process.pid)], {
+      detached: true,
+      stdio: 'ignore',
+    }).unref();
+    app.quit();
+    return { success: true, appBundlePath, dmgPath };
+  } catch (error) {
+    return {
+      success: false,
+      appBundlePath,
+      dmgPath,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function iconCandidates(kind: IconKind): string[] {
+  return kind === 'tray' ? ['icon.png', 'icon.icns'] : ['icon.icns', 'icon.png'];
+}
+
+function isLoadableIcon(candidate: string): boolean {
+  try {
+    return !nativeImage.createFromPath(candidate).isEmpty();
+  } catch {
+    return false;
+  }
+}
+
+function appIconPath(kind: IconKind = 'window'): string | undefined {
+  const preferred = iconCandidates(kind);
+  for (const name of preferred) {
+    const candidate = rootAssetPath('assets', name);
+    if (candidate && isLoadableIcon(candidate)) return candidate;
+  }
+  const fallback = rootAssetPath('apps', 'shell', 'assets', 'avatars', 'yachiyo-default.jpg');
+  return fallback && isLoadableIcon(fallback) ? fallback : undefined;
+}
+
+function appIconImage(
+  kind: IconKind = 'window',
+  size?: number,
+): ReturnType<typeof nativeImage.createEmpty> {
+  const iconPath = appIconPath(kind);
+  const image = iconPath ? nativeImage.createFromPath(iconPath) : nativeImage.createEmpty();
+  if (!size || image.isEmpty()) return image;
+  return image.resize({ width: size, height: size });
+}
+
+function enforceWindowTitle(targetWindow: BrowserWindow, title: string): void {
+  // TODO: if macOS still collapses frameless launcher windows in the Dock menu,
+  // replace the default Dock menu with explicit main/chat/mode window actions.
+  enforcedWindowTitles.set(targetWindow, title);
+  targetWindow.setTitle(title);
+  if (titleHandlersInstalled.has(targetWindow)) return;
+  titleHandlersInstalled.add(targetWindow);
+  targetWindow.webContents.on('page-title-updated', (event) => {
+    const enforcedTitle = enforcedWindowTitles.get(targetWindow);
+    if (!enforcedTitle) return;
+    event.preventDefault();
+    targetWindow.setTitle(enforcedTitle);
+  });
+}
+
+function mainWindowTitle(params: Record<string, string> = {}): string {
+  const view = normalizeView(params.view);
+  if (view === 'installer') return 'Hermes-Yachiyo 安装向导';
+  if (view === 'settings') return params.mode === 'live2d'
+    ? 'Hermes-Yachiyo Live2D 设置'
+    : params.mode === 'bubble'
+      ? 'Hermes-Yachiyo Bubble 设置'
+      : 'Hermes-Yachiyo 应用设置';
+  if (view === 'diagnostics') return 'Hermes-Yachiyo 诊断工具';
+  if (view === 'tools') return 'Hermes-Yachiyo 工具中心';
+  if (view === 'proactive-tts') return 'Hermes-Yachiyo 主动关怀语音';
+  return 'Hermes-Yachiyo 主控台';
+}
+
+function modeWindowTitle(mode: ModeId): string {
+  return mode === 'live2d' ? 'Hermes-Yachiyo Live2D' : 'Hermes-Yachiyo Bubble';
 }
 
 function macOSPrerequisiteCommand(): string {
@@ -111,10 +768,86 @@ function hermesInstallCommand(): string {
   return [
     'echo "Hermes Agent 安装开始"',
     'set -o pipefail',
-    'curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash',
-    'hermes_install_exit_code=$?',
+    'install_script="$(mktemp -t hermes-agent-install.XXXXXX)" || exit 1',
+    'target_dir="${HERMES_AGENT_INSTALL_DIR:-$HOME/.hermes/hermes-agent}"',
+    'install_lock_dir="${HERMES_AGENT_INSTALL_LOCK_DIR:-$HOME/.hermes/.hermes-agent-install.lock}"',
+    'mkdir -p "$(dirname "$install_lock_dir")" || exit $?',
+    'if ! mkdir "$install_lock_dir" 2>/dev/null; then',
+    '  echo "Hermes Agent 正在被另一个 Hermes-Yachiyo 进程安装或更新，请稍后重试。"',
+    '  exit 75',
+    'fi',
+    'shim_path="$HOME/.local/bin/hermes"',
+    'target_bin="$target_dir/venv/bin/hermes"',
+    'if [ -L "$shim_path" ]; then',
+    '  shim_target="$(readlink "$shim_path" 2>/dev/null || true)"',
+    '  case "$shim_target" in',
+    '    "$target_bin"|*/.hermes/hermes-agent/venv/bin/hermes)',
+    '      rm -f "$shim_path"',
+    '      ;;',
+    '  esac',
+    'fi',
+    'if [ -f "$target_bin" ] && grep -Fq "exec \\"$target_bin\\"" "$target_bin" 2>/dev/null; then',
+    '  printf "检测到损坏的 Hermes 启动脚本，正在清理后重新安装...\\n"',
+    '  rm -rf "$target_dir"',
+    'fi',
+    'target_existed=0',
+    '[ -e "$target_dir" ] && target_existed=1',
+    'trap \'rm -rf "$install_lock_dir"; rm -f "$install_script"\' EXIT',
+    'curl --retry 3 --retry-delay 2 --connect-timeout 20 -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh -o "$install_script"',
+    'curl_exit_code=$?',
+    'if [ "$curl_exit_code" -ne 0 ]; then printf "\\nHermes Agent 安装脚本下载失败，退出码：%s\\n" "$curl_exit_code"; exit "$curl_exit_code"; fi',
+    'export GIT_CONFIG_COUNT=3',
+    'export GIT_CONFIG_KEY_0=http.version',
+    'export GIT_CONFIG_VALUE_0=HTTP/1.1',
+    'export GIT_CONFIG_KEY_1=http.postBuffer',
+    'export GIT_CONFIG_VALUE_1=524288000',
+    'export GIT_CONFIG_KEY_2=http.lowSpeedTime',
+    'export GIT_CONFIG_VALUE_2=60',
+    'last_exit=0',
+    'for attempt in 1 2 3; do',
+    '  printf "\\nHermes Agent 安装尝试 %s/3\\n" "$attempt"',
+    '  bash "$install_script" --skip-setup',
+    '  last_exit=$?',
+    '  if [ "$last_exit" -eq 0 ]; then break; fi',
+    '  if [ "$attempt" -lt 3 ]; then',
+    '    printf "Hermes Agent 安装尝试 %s/3 失败，退出码：%s；即将重试...\\n" "$attempt" "$last_exit"',
+    '    if [ "$target_existed" -eq 0 ] && [ -d "$target_dir" ] && [ ! -x "$target_dir/venv/bin/hermes" ]; then rm -rf "$target_dir"; fi',
+    '    sleep $((attempt * 2))',
+    '  fi',
+    'done',
+    'hermes_install_exit_code="$last_exit"',
     'printf "\\nHermes Agent 安装命令已结束，退出码：%s\\n" "$hermes_install_exit_code"',
     'exit "$hermes_install_exit_code"',
+  ].join('\n');
+}
+
+function hermesUpdateCommand(fullBackup = false): string {
+  const backupFlag = fullBackup ? '--backup' : '--no-backup';
+  const updateArgs = `--gateway --yes ${backupFlag}`;
+  const backupNote = fullBackup
+    ? '说明：已启用完整 pre-update backup。Hermes 会压缩整个 ~/.hermes，目录较大时可能长时间停在 Creating pre-update backup；--yes 会自动确认更新过程中的 stash 恢复等提示。'
+    : '说明：Yachiyo 默认跳过完整 pre-update backup；Hermes 原生完整备份会压缩整个 ~/.hermes，目录较大时可能长时间停在 Creating pre-update backup；--yes 会自动确认更新过程中的 stash 恢复等提示。';
+  return [
+    'echo "Hermes Agent 更新开始"',
+    'set -o pipefail',
+    'if ! command -v hermes >/dev/null 2>&1; then echo "未找到 hermes 命令，请先完成 Hermes Agent 安装或刷新 PATH。"; exit 127; fi',
+    'install_lock_dir="${HERMES_AGENT_INSTALL_LOCK_DIR:-$HOME/.hermes/.hermes-agent-install.lock}"',
+    'mkdir -p "$(dirname "$install_lock_dir")" || exit $?',
+    'if ! mkdir "$install_lock_dir" 2>/dev/null; then echo "Hermes Agent 正在被另一个 Hermes-Yachiyo 进程安装或更新，请稍后重试。"; exit 75; fi',
+    'trap \'rm -rf "$install_lock_dir"\' EXIT',
+    'echo "当前版本："',
+    'version_output="$(hermes version 2>&1 || true)"',
+    'printf "%s\\n" "$version_output"',
+    'project_path="$(printf "%s\\n" "$version_output" | awk -F": " \'/^Project:/ {print $2; exit}\')"',
+    'if [ -n "$project_path" ] && [ -d "$project_path/.git" ]; then origin_url="$(git -C "$project_path" remote get-url origin 2>/dev/null || true)"; if [ -n "$origin_url" ]; then echo "更新来源：$origin_url / origin/main"; fi; fi',
+    'echo ""',
+    `echo "运行：hermes update ${updateArgs}"`,
+    `echo "${backupNote}"`,
+    `hermes update ${updateArgs}`,
+    'hermes_update_exit_code=$?',
+    'printf "\\nHermes Agent 更新命令已结束，退出码：%s\\n" "$hermes_update_exit_code"',
+    'if [ "$hermes_update_exit_code" -eq 0 ]; then echo "更新完成。Hermes-Yachiyo 将刷新工具清单。"; fi',
+    'exit "$hermes_update_exit_code"',
   ].join('\n');
 }
 
@@ -124,6 +857,12 @@ function terminalTaskCommand(task: InstallerTerminalTask): { title: string; comm
   }
   if (task === 'install-hermes') {
     return { title: '安装 Hermes Agent', command: hermesInstallCommand() };
+  }
+  if (task === 'update-hermes') {
+    return { title: '更新 Hermes Agent', command: hermesUpdateCommand(false) };
+  }
+  if (task === 'update-hermes-backup') {
+    return { title: '更新 Hermes Agent（完整备份）', command: hermesUpdateCommand(true) };
   }
   return { title: '配置 Hermes Agent', command: 'hermes setup' };
 }
@@ -153,6 +892,76 @@ function packagedBackendPath(): string | null {
   return path.join(process.resourcesPath, 'backend', binaryName);
 }
 
+function bridgeEndpoint(url: string): { host: string; port: number } | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:') return null;
+    if (!parsed.port) return null;
+    const port = Number(parsed.port);
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) return null;
+    return { host: parsed.hostname || '127.0.0.1', port };
+  } catch {
+    return null;
+  }
+}
+
+function isLocalBridgeHost(host: string): boolean {
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+}
+
+function normalizedLocalBridgeHost(host: string): string {
+  return host === '::1' || host === 'localhost' ? '127.0.0.1' : host;
+}
+
+function isTcpPortAvailable(host: string, port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    let settled = false;
+    const finish = (available: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(available);
+    };
+    server.once('error', () => finish(false));
+    server.once('listening', () => {
+      server.close(() => finish(true));
+    });
+    server.listen({ host, port });
+  });
+}
+
+function allocateLocalBridgeUrl(host: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.once('listening', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : null;
+      server.close(() => {
+        if (!port) {
+          reject(new Error('Could not allocate a local bridge port'));
+          return;
+        }
+        resolve(`http://${host}:${port}`);
+      });
+    });
+    server.listen({ host, port: 0 });
+  });
+}
+
+async function prepareBridgeUrlForPackagedBackend(): Promise<void> {
+  if (!app.isPackaged || process.env.HERMES_YACHIYO_BRIDGE_URL) return;
+  const endpoint = bridgeEndpoint(bridgeUrl);
+  if (!endpoint || !isLocalBridgeHost(endpoint.host)) return;
+
+  const host = normalizedLocalBridgeHost(endpoint.host);
+  if (await isTcpPortAvailable(host, endpoint.port)) return;
+
+  const previousBridgeUrl = bridgeUrl;
+  bridgeUrl = await allocateLocalBridgeUrl(host);
+  console.warn(`[backend] ${previousBridgeUrl} is already in use; using ${bridgeUrl} for this app session.`);
+}
+
 function startBackend(): void {
   if (process.env.HERMES_YACHIYO_SKIP_BACKEND === '1') return;
   if (backendProcess) return;
@@ -166,6 +975,7 @@ function startBackend(): void {
       ...process.env,
       PYTHONPATH: projectRoot(),
       HERMES_YACHIYO_DESKTOP_BACKEND: '1',
+      HERMES_YACHIYO_BRIDGE_URL: bridgeUrl,
     },
   });
 
@@ -187,8 +997,90 @@ function stopBackend(): void {
   backendProcess = null;
 }
 
+function terminateBackend(timeoutMs = 5000): Promise<void> {
+  const processToStop = backendProcess;
+  if (!processToStop) return Promise.resolve();
+  backendProcess = null;
+  return new Promise((resolve) => {
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      resolve();
+    };
+    processToStop.once('exit', finish);
+    processToStop.once('error', finish);
+    try {
+      processToStop.kill('SIGTERM');
+    } catch {
+      finish();
+      return;
+    }
+    setTimeout(() => {
+      if (!finished) {
+        try {
+          processToStop.kill('SIGKILL');
+        } catch {}
+        finish();
+      }
+    }, timeoutMs);
+  });
+}
+
+function normalizeBridgeUrl(value: unknown): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const parsed = new URL(value.trim());
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.origin.replace(/\/$/, '');
+  } catch {
+    return null;
+  }
+}
+
+function reloadWindowWithCurrentRoute(targetWindow: BrowserWindow | null): void {
+  if (!targetWindow || targetWindow.isDestroyed()) return;
+  const route = routeForWindow(targetWindow);
+  if (!route) return;
+  targetWindow.loadURL(rendererUrl({ view: route.view, ...route.params }));
+}
+
+function reloadRendererWindows(): void {
+  reloadWindowWithCurrentRoute(mainWindow);
+  reloadWindowWithCurrentRoute(chatWindow);
+  reloadWindowWithCurrentRoute(modeWindow);
+}
+
+async function restartBackendProcess(targetBridgeUrl?: unknown): Promise<{ success: boolean; bridgeUrl?: string; error?: string }> {
+  if (backendRestartPromise) return backendRestartPromise;
+  backendRestartPromise = (async () => {
+    const nextBridgeUrl = normalizeBridgeUrl(targetBridgeUrl) || bridgeUrl;
+    const previousBridgeUrl = bridgeUrl;
+    bridgeUrl = nextBridgeUrl;
+    await terminateBackend();
+    startBackend();
+    const settings = await waitForUiSettings();
+    if (!settings) {
+      return {
+        success: false,
+        bridgeUrl,
+        error: `Bridge 重启后仍无法连接：${bridgeUrl}`,
+      };
+    }
+    lastUiSettings = settings;
+    configureTray(settings);
+    if (bridgeUrl !== previousBridgeUrl) {
+      setTimeout(reloadRendererWindows, 120);
+    }
+    return { success: true, bridgeUrl };
+  })().finally(() => {
+    backendRestartPromise = null;
+  });
+  return backendRestartPromise;
+}
+
 function rendererUrl(params: Record<string, string> = {}): string {
-  const query = new URLSearchParams({ bridge: BRIDGE_URL });
+  const query = new URLSearchParams({ bridge: bridgeUrl });
   Object.entries(params)
     .filter(([key]) => key !== 'view' && key !== 'mode')
     .forEach(([key, value]) => query.set(key, value));
@@ -223,12 +1115,18 @@ function createMainWindow(
     return;
   }
   if (settings) lastUiSettings = settings;
+  if (normalizeView(params.view) !== 'installer') {
+    hasEnteredMainExperience = true;
+    configureTray(settings || lastUiSettings);
+  }
   const bounds = mainWindowBounds(settings);
   const startHidden = Boolean(options.respectStartMinimized && settings?.app?.start_minimized);
   const focusOnReady = options.focusOnReady !== false;
+  const title = mainWindowTitle(params);
   mainWindow = new BrowserWindow({
-    title: 'Hermes-Yachiyo',
+    title,
     ...bounds,
+    icon: appIconPath('window'),
     minWidth: 860,
     minHeight: 580,
     show: false,
@@ -239,6 +1137,7 @@ function createMainWindow(
       nodeIntegration: false,
     },
   });
+  enforceWindowTitle(mainWindow, title);
 
   mainWindow.once('ready-to-show', () => {
     if (!mainWindow || mainWindow.isDestroyed() || startHidden) return;
@@ -273,6 +1172,11 @@ function showMainWindow(
     return;
   }
   if (settings) lastUiSettings = settings;
+  if (normalizeView(params.view) !== 'installer') {
+    hasEnteredMainExperience = true;
+    configureTray(settings || lastUiSettings);
+  }
+  enforceWindowTitle(mainWindow, mainWindowTitle(params));
   mainWindow.loadURL(rendererUrl({ view: 'main', ...params }));
   if (mainWindow.isMinimized()) mainWindow.restore();
   const startHidden = Boolean(options.respectStartMinimized && settings?.app?.start_minimized);
@@ -285,17 +1189,32 @@ function showMainWindow(
 }
 
 function showMainWindowFromAppActivation(): void {
-  const params = lastInstallReady === false ? { view: 'installer' } : { view: 'main' };
-  showMainWindow(params, lastUiSettings);
-  setTimeout(() => showMainWindow(params, lastUiSettings), 90);
+  void (async () => {
+    const installInfo = await waitForInstallInfo();
+    if (installInfo) {
+      const readyNow = installReady(installInfo);
+      if (readyNow) {
+        lastInstallReady = true;
+        hasEnteredMainExperience = true;
+      } else if (!hasEnteredMainExperience && lastInstallReady !== true) {
+        lastInstallReady = false;
+      }
+    }
+    const currentRoute = routeForWindow(mainWindow);
+    const shouldShowInstaller = lastInstallReady === false
+      && !hasEnteredMainExperience
+      && currentRoute?.view !== 'main';
+    const params = shouldShowInstaller ? { view: 'installer' } : mainActivationRouteParams(currentRoute);
+    showMainWindow(params, lastUiSettings);
+    if (!shouldShowInstaller && params.view === 'main') {
+      setTimeout(() => void openConfiguredDesktopMode(), 180);
+    }
+  })();
 }
 
 function trayIcon() {
-  const iconPath = path.resolve(projectRoot(), 'apps', 'shell', 'assets', 'avatars', 'yachiyo-default.jpg');
-  const image = nativeImage.createFromPath(iconPath);
-  if (image.isEmpty()) return image;
   const size = process.platform === 'darwin' ? 18 : 20;
-  return image.resize({ width: size, height: size });
+  return appIconImage('tray', size);
 }
 
 function trayMenu(): Menu {
@@ -320,6 +1239,8 @@ function configureTray(settings: UiSettings | null = lastUiSettings): void {
     tray = new Tray(trayIcon());
     tray.setToolTip('Hermes-Yachiyo');
     tray.on('click', () => showMainWindow({ view: 'main' }));
+  } else {
+    tray.setImage(trayIcon());
   }
   tray.setContextMenu(trayMenu());
 }
@@ -328,6 +1249,10 @@ function showMacDockIcon(): void {
   if (process.platform !== 'darwin') return;
   try {
     app.setActivationPolicy('regular');
+    const icon = appIconImage('dock');
+    if (!icon.isEmpty()) app.dock?.setIcon(icon);
+    const aboutIcon = appIconPath('dock');
+    if (aboutIcon) app.setAboutPanelOptions({ applicationName: 'Hermes-Yachiyo', iconPath: aboutIcon });
     app.dock?.show();
   } catch {}
 }
@@ -335,6 +1260,14 @@ function showMacDockIcon(): void {
 function routeForWindow(targetWindow: BrowserWindow | null): { view: AppView; params: Record<string, string> } | null {
   if (!targetWindow || targetWindow.isDestroyed()) return null;
   return routeFromUrl(targetWindow.webContents.getURL());
+}
+
+function mainActivationRouteParams(route: { view: AppView; params: Record<string, string> } | null): Record<string, string> {
+  if (!route) return { view: 'main' };
+  if (route.view === 'chat' || route.view === 'bubble' || route.view === 'bubble-menu' || route.view === 'live2d') {
+    return { view: 'main' };
+  }
+  return { ...route.params, view: route.view };
 }
 
 function restoreMainWindowIfPolluted(): void {
@@ -356,9 +1289,10 @@ function restoreModeWindowIfPolluted(): void {
 
 function createChatWindow(params: Record<string, string> = {}): void {
   chatWindow = new BrowserWindow({
-    title: 'Yachiyo - 对话',
+    title: 'Hermes-Yachiyo 对话',
     width: 520,
     height: 680,
+    icon: appIconPath('window'),
     minWidth: 420,
     minHeight: 560,
     backgroundColor: '#121622',
@@ -368,6 +1302,7 @@ function createChatWindow(params: Record<string, string> = {}): void {
       nodeIntegration: false,
     },
   });
+  enforceWindowTitle(chatWindow, 'Hermes-Yachiyo 对话');
 
   chatWindow.loadURL(rendererUrl({ ...params, view: 'chat' }));
   chatWindow.on('closed', () => {
@@ -386,7 +1321,11 @@ function showChatWindow(params: Record<string, string> = {}): void {
     return;
   }
   const route = routeForWindow(chatWindow);
-  if (route?.view !== 'chat') {
+  const requestedSessionId = params.session_id || '';
+  if (
+    route?.view !== 'chat'
+    || (requestedSessionId && route.params.session_id !== requestedSessionId)
+  ) {
     chatWindow.loadURL(rendererUrl({ ...params, view: 'chat' }));
   }
   showMacDockIcon();
@@ -411,7 +1350,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeView(value: unknown): AppView {
-  const views: AppView[] = ['main', 'chat', 'settings', 'installer', 'bubble', 'bubble-menu', 'live2d'];
+  const views: AppView[] = ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'proactive-tts', 'bubble', 'bubble-menu', 'live2d'];
   return typeof value === 'string' && views.includes(value as AppView) ? (value as AppView) : 'main';
 }
 
@@ -463,6 +1402,10 @@ function booleanFromConfig(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+function stringFromConfig(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
@@ -500,7 +1443,7 @@ function boundsChanged(first: Rectangle, second: Rectangle): boolean {
 async function saveLauncherPosition(mode: ModeId, bounds: Rectangle): Promise<void> {
   const workArea = workAreaForBounds(bounds);
   try {
-    const response = await fetch(`${BRIDGE_URL}/ui/launcher/position`, {
+    const response = await fetch(`${bridgeUrl}/ui/launcher/position`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -524,6 +1467,7 @@ async function saveLauncherPosition(mode: ModeId, bounds: Rectangle): Promise<vo
 }
 
 function scheduleModeWindowPositionSave(mode: ModeId, config: Record<string, unknown>): void {
+  if (Date.now() < positionSaveSuppressedUntil) return;
   if (positionSaveTimer) clearTimeout(positionSaveTimer);
   positionSaveTimer = setTimeout(() => {
     if (!modeWindow || modeWindow.isDestroyed() || activeMode !== mode) return;
@@ -539,13 +1483,36 @@ function scheduleModeWindowPositionSave(mode: ModeId, config: Record<string, unk
   }, POSITION_SAVE_DEBOUNCE_MS);
 }
 
+function suppressModeWindowPositionSave(durationMs = 900): void {
+  positionSaveSuppressedUntil = Math.max(positionSaveSuppressedUntil, Date.now() + durationMs);
+}
+
 function desktopModeBounds(mode: ModeId, config: Record<string, unknown>) {
   if (mode === 'live2d') {
+    const display = screen.getPrimaryDisplay().workArea;
+    const width = Math.round(clamp(numberFromConfig(config.width, 420), 300, 760));
+    const height = Math.round(clamp(numberFromConfig(config.height, 680), 420, 900));
+    const anchor = stringFromConfig(config.position_anchor, 'right_bottom');
+    const positionX = Math.round(numberFromConfig(config.position_x, 0));
+    const positionY = Math.round(numberFromConfig(config.position_y, 0));
+    if (anchor === 'left_bottom' || anchor === 'right_bottom') {
+      const maxX = display.x + Math.max(0, display.width - width);
+      const maxY = display.y + Math.max(0, display.height - height);
+      const anchoredX = anchor === 'right_bottom'
+        ? display.x + display.width - width - positionX
+        : display.x + positionX;
+      return {
+        width,
+        height,
+        x: Math.round(clamp(anchoredX, display.x, maxX)),
+        y: Math.round(clamp(display.y + display.height - height - positionY, display.y, maxY)),
+      };
+    }
     return {
-      width: Math.round(clamp(numberFromConfig(config.width, 420), 300, 760)),
-      height: Math.round(clamp(numberFromConfig(config.height, 680), 420, 900)),
-      x: Math.round(numberFromConfig(config.position_x, 48)),
-      y: Math.round(numberFromConfig(config.position_y, 48)),
+      width,
+      height,
+      x: positionX,
+      y: positionY,
     };
   }
 
@@ -589,12 +1556,14 @@ function restoreModeWindowTopPreference(): void {
 }
 
 function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> = {}): void {
+  showMacDockIcon();
   if (modeWindow && !modeWindow.isDestroyed() && activeMode === mode) {
     const nextSignature = modeConfigSignature(config);
     activeModeConfig = config;
     if (nextSignature !== activeModeConfigSignature) {
       activeModeConfigSignature = nextSignature;
       const bounds = desktopModeBounds(mode, config);
+      suppressModeWindowPositionSave();
       modeWindow.setBounds(bounds, false);
       applyModeWindowTopPreference();
       if (mode === 'live2d') {
@@ -628,14 +1597,16 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
   modeWindowIgnoringMouse = false;
   modeWindowShapeApplied = false;
   modeWindowTopSuppressed = false;
+  suppressModeWindowPositionSave();
   const bounds = desktopModeBounds(mode, config);
   const alwaysOnTop = mode === 'live2d'
     ? booleanFromConfig(config.window_on_top, true)
     : booleanFromConfig(config.always_on_top, true);
 
   const createdModeWindow = new BrowserWindow({
-    title: mode === 'live2d' ? 'Hermes-Yachiyo Live2D' : 'Hermes-Yachiyo Bubble',
+    title: modeWindowTitle(mode),
     ...bounds,
+    icon: appIconPath('window'),
     frame: false,
     transparent: true,
     resizable: mode === 'live2d',
@@ -651,6 +1622,7 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     },
   });
   modeWindow = createdModeWindow;
+  enforceWindowTitle(createdModeWindow, modeWindowTitle(mode));
 
   if (mode === 'live2d' && booleanFromConfig(config.show_on_all_spaces, true)) {
     createdModeWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
@@ -679,6 +1651,7 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     modeWindowIgnoringMouse = false;
     modeWindowShapeApplied = false;
     modeWindowTopSuppressed = false;
+    positionSaveSuppressedUntil = 0;
     activeModeConfig = {};
     activeModeConfigSignature = '';
     modeWindow = null;
@@ -825,13 +1798,13 @@ function delay(ms: number): Promise<void> {
 }
 
 async function fetchUiSettings(): Promise<UiSettings> {
-  const response = await fetch(`${BRIDGE_URL}/ui/settings`);
+  const response = await fetch(`${bridgeUrl}/ui/settings`);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return (await response.json()) as UiSettings;
 }
 
 async function fetchInstallInfo(): Promise<InstallInfoPayload> {
-  const response = await fetch(`${BRIDGE_URL}/hermes/install-info`);
+  const response = await fetch(`${bridgeUrl}/hermes/install-info`);
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   return (await response.json()) as InstallInfoPayload;
 }
@@ -862,12 +1835,91 @@ function installReady(payload: InstallInfoPayload | null): boolean {
   return Boolean(payload?.hermes_ready || payload?.install_info?.status === 'ready');
 }
 
+function live2dResourceReady(settings: UiSettings | null | undefined): boolean {
+  const state = settings?.mode_settings?.live2d?.config?.model_state;
+  return state === 'path_valid' || state === 'loaded';
+}
+
+function openLive2DResourceSettings(settings: UiSettings | null | undefined): void {
+  showMacDockIcon();
+  showMainWindow(
+    {
+      view: 'settings',
+      mode: 'live2d',
+      reason: 'live2d-resource-required',
+    },
+    settings || lastUiSettings,
+  );
+}
+
 async function openConfiguredDesktopMode(preferredMode?: ModeId, settingsOverride?: UiSettings | null): Promise<void> {
   const settings = settingsOverride || await waitForUiSettings();
   if (settings) lastUiSettings = settings;
   const mode = preferredMode || normalizeMode(settings?.display?.current_mode);
+  if (mode === 'live2d' && !live2dResourceReady(settings)) {
+    if (preferredMode === 'live2d') {
+      openLive2DResourceSettings(settings);
+      return;
+    }
+    createDesktopModeWindow('bubble', settings?.mode_settings?.bubble?.config || {});
+    return;
+  }
   const config = settings?.mode_settings?.[mode]?.config || {};
   createDesktopModeWindow(mode, config);
+  restoreModeWindowTopPreference();
+}
+
+function currentAppBundlePath(): string | null {
+  if (process.platform !== 'darwin') return null;
+  let current = app.getPath('exe');
+  for (let i = 0; i < 8; i += 1) {
+    if (current.endsWith('.app') && fs.existsSync(current)) return current;
+    const parent = path.dirname(current);
+    if (!parent || parent === current) break;
+    current = parent;
+  }
+  return null;
+}
+
+function removeCurrentAppBundleAndQuit(): { success: boolean; appBundlePath?: string; error?: string } {
+  const appBundlePath = currentAppBundlePath();
+  if (!appBundlePath) return { success: false, error: '当前运行环境不是可删除的 macOS .app 包' };
+  if (!appBundlePath.endsWith('.app')) return { success: false, error: '拒绝删除非 .app 路径' };
+  const bundleName = path.basename(appBundlePath);
+  if (!/^Hermes-Yachiyo.*\.app$/.test(bundleName)) {
+    return { success: false, appBundlePath, error: `拒绝删除非 Hermes-Yachiyo 应用包：${bundleName}` };
+  }
+  const script = [
+    'target="$1"',
+    'sleep 2',
+    'if [[ "$target" == *.app && -d "$target" ]]; then',
+    '  if command -v osascript >/dev/null 2>&1; then',
+    '    /usr/bin/osascript - "$target" <<\'OSA\' >/dev/null 2>&1 || true',
+    'on run argv',
+    '  tell application "Finder" to delete POSIX file (item 1 of argv)',
+    'end run',
+    'OSA',
+    '  fi',
+    '  sleep 1',
+    '  if [[ -d "$target" ]]; then',
+    '    rm -rf "$target" >/dev/null 2>&1 || true',
+    '  fi',
+    'fi',
+  ].join('\n');
+  try {
+    spawn('/bin/zsh', ['-lc', script, 'hermes-yachiyo-uninstall', appBundlePath], {
+      detached: true,
+      stdio: 'ignore',
+    }).unref();
+    app.quit();
+    return { success: true, appBundlePath };
+  } catch (error) {
+    return {
+      success: false,
+      appBundlePath,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 async function showOpenDialogForSender(
@@ -883,7 +1935,7 @@ async function showOpenDialogForSender(
 }
 
 function normalizeTerminalTask(value: unknown): InstallerTerminalTask | null {
-  return value === 'mac-prerequisites' || value === 'install-hermes' || value === 'hermes-setup'
+  return value === 'mac-prerequisites' || value === 'install-hermes' || value === 'hermes-setup' || value === 'update-hermes' || value === 'update-hermes-backup'
     ? value
     : null;
 }
@@ -943,7 +1995,7 @@ function startInstallerTerminal(
 ): { success: boolean; id?: string; task?: InstallerTerminalTask; title?: string; error?: string } {
   const targetWindow = BrowserWindow.fromWebContents(event.sender);
   if (!targetWindow || targetWindow !== mainWindow) {
-    return { success: false, error: '内置终端只能从主控台安装器启动' };
+    return { success: false, error: '内置终端只能从主窗口启动' };
   }
   const task = normalizeTerminalTask(rawTask);
   if (!task) return { success: false, error: '不支持的终端任务' };
@@ -993,13 +2045,24 @@ function startInstallerTerminal(
   return { success: true, id, task, title };
 }
 
-ipcMain.handle('hermes:getBridgeUrl', () => BRIDGE_URL);
+ipcMain.handle('hermes:getBridgeUrl', () => bridgeUrl);
 ipcMain.handle('hermes:quit', () => {
   app.quit();
 });
 ipcMain.handle('hermes:restartApp', () => {
   app.relaunch();
   app.quit();
+});
+ipcMain.handle('hermes:removeAppBundleAndQuit', () => removeCurrentAppBundleAndQuit());
+ipcMain.handle('hermes:getAppUpdateInfo', () => appUpdateInfo());
+ipcMain.handle('hermes:checkAppUpdate', () => checkAppUpdate());
+ipcMain.handle('hermes:downloadAppUpdate', (event) => downloadAppUpdate((progress) => {
+  if (!event.sender.isDestroyed()) event.sender.send('hermes:appUpdateDownloadProgress', progress);
+}));
+ipcMain.handle('hermes:installAppUpdate', (_event, dmgPath: unknown) => installDownloadedAppUpdate(dmgPath));
+ipcMain.handle('hermes:restartBackend', (_event, options: unknown) => {
+  const targetBridgeUrl = isRecord(options) ? options.bridgeUrl : undefined;
+  return restartBackendProcess(targetBridgeUrl);
 });
 ipcMain.handle('hermes:copyText', (_event, value: unknown) => {
   clipboard.writeText(typeof value === 'string' ? value : '');
@@ -1090,23 +2153,25 @@ ipcMain.handle('hermes:openLauncherMenu', (event, mode: unknown) => {
 
 app.whenReady().then(() => {
   showMacDockIcon();
-  startBackend();
-	  void (async () => {
-	    const installInfo = await waitForInstallInfo();
-	    lastInstallReady = installReady(installInfo);
-	    if (!lastInstallReady) {
-	      createMainWindow({ view: 'installer' });
-	      return;
-	    }
-	    const settings = await waitForUiSettings();
-	    if (settings) lastUiSettings = settings;
-	    configureTray(settings);
-	    showMainWindow({}, settings, { respectStartMinimized: true, focusOnReady: false });
-	    await openConfiguredDesktopMode(undefined, settings);
-	    if (settings?.window_mode?.open_chat_on_start) showChatWindow();
-	  })();
+  void (async () => {
+    await prepareBridgeUrlForPackagedBackend();
+    startBackend();
+    const installInfo = await waitForInstallInfo();
+    lastInstallReady = installReady(installInfo);
+    if (!lastInstallReady) {
+      createMainWindow({ view: 'installer' });
+      return;
+    }
+    hasEnteredMainExperience = true;
+    const settings = await waitForUiSettings();
+    if (settings) lastUiSettings = settings;
+    configureTray(settings);
+    showMainWindow({}, settings, { respectStartMinimized: true, focusOnReady: false });
+    await openConfiguredDesktopMode(undefined, settings);
+    if (settings?.window_mode?.open_chat_on_start) showChatWindow();
+  })();
 
-	  app.on('activate', showMainWindowFromAppActivation);
+  app.on('activate', showMainWindowFromAppActivation);
 });
 
 app.on('before-quit', () => {

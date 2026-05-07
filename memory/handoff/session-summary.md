@@ -1,5 +1,89 @@
 # Session Summary
 
+## Milestone 79 — macOS 发布链路、应用更新器与更新日志
+
+### 核心结果
+
+本轮补齐了最近几次 macOS 发布/更新相关提交的 memory 记录，并把 Yachiyo 应用更新日志接入 release 流程：每次 `main` / `develop` 打包时，CI 会基于当前渠道上一条 release tag 自动从 git commit 生成 changelog。
+
+### 主要变更
+
+- `.github/workflows/release-macos.yml`：checkout 改为 `fetch-depth: 0`，让 CI 能读取历史 tag 和 commit；发布元数据阶段会生成 `release/changelog.json` 与 `release/changelog.md`。
+- `scripts/generate_release_changelog.py`：新增 commit changelog 生成脚本，按 commit 前缀归类为新增/改进、修复、工程/发布、文档、测试、重构/优化和其他，并输出 JSON + Markdown。
+- latest JSON：新增 `changelog` 字段，包含 previous tag、previous commit、compare URL、commit 列表、分组 sections 和 summary。
+- GitHub release notes：版本化 release 与 `main-latest` / `develop-latest` rolling release 都会嵌入同一份“更新日志”。
+- `apps/frontend/src/views/ModeSettingsView.tsx`：应用更新区会显示 latest JSON 里的“更新内容”，并提供“查看提交对比”入口。
+- `docs/release-packaging.md`：补充 release changelog 的生成来源、发布位置和应用内展示方式。
+- `memory/progress/current-state.md`、`memory/progress/next-steps.md`：补齐 macOS 发布、更新器、Gatekeeper、自签名、Hermes 脏安装修复和更新日志后续验证项。
+
+### 待验证
+
+- 推送后检查 `develop-latest` / `main-latest` 的 JSON 是否带 `changelog`，并确认 GitHub release notes 展示分组 commit。
+- 用下一版 DMG 实测应用内更新页的“更新内容”、下载进度、已下载更新持久化和“安装并重启”。
+
+### 验证结果
+
+- `python scripts/generate_release_changelog.py --channel experimental ...` → passed，本地确认上一条基线为 `experimental-v0.1.32-88e91d9`，当前 `9cbedb5` 被归到“新增/改进”。
+- `python -m py_compile scripts/generate_release_changelog.py` → passed。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/release-macos.yml")'` → passed。
+- `PATH=<Node 20.19 runtime> npm --prefix apps/frontend run build` → passed（保留 Vite large chunk warning）。
+- `git diff --check` → passed。
+
+---
+
+## UX Fixes — First-run report follow-up
+
+### 核心结果
+
+本轮回看 2026-05-05 DMG 首用体验报告中的可修项，已把几个低风险但影响真实用户理解的点落到产品代码里。
+
+### 主要变更
+
+- `apps/bridge/routes/ui.py`：新增 `/ui/tts/status`，返回 Yachiyo 主动关怀 TTS 的最近运行状态；若已有 launcher TTS 服务，会暴露最近一次自动播报的成功、pending 或失败信息。
+- `apps/frontend/src/views/ProactiveTtsSettingsView.tsx`：主动关怀语音页轮询 `/ui/tts/status`，显示最近一次自动播报是否生成中、成功或失败；手动“保存并测试”结果仍独立显示。
+- `apps/frontend/src/views/ToolCenterView.tsx`：工具中心把 Hermes Agent 的 `tts` 工具与 Yachiyo 主动关怀语音入口区分开；没有 Hermes 原生配置卡片时，提供跳转到“主动关怀语音”的入口，不再让用户落到“未知工具配置项”。
+- `apps/frontend/src/views/ModeSettingsView.tsx`：备份策略和备份操作区增加提示，说明 Live2D、GPT-SoVITS 权重、参考音频和附件缓存会进入备份，大资源会显著增加备份大小和耗时。
+- `apps/frontend/src/views/ChatView.tsx`：图片附件读取时检查图片尺寸，低于 16x16 的极小图片会直接提示用户换用正常截图，避免上游视觉模型报“不可处理”。
+- `tests/test_ui_bridge_routes.py`：新增 `/ui/tts/status` 路由测试，并覆盖最近 launcher TTS 错误回传。
+
+### 验证结果
+
+- `python -m pytest tests/test_ui_bridge_routes.py::test_proactive_tts_test_route_invokes_sync_service tests/test_ui_bridge_routes.py::test_proactive_tts_status_route_returns_last_launcher_status tests/test_ui_bridge_routes.py::test_launcher_tts_only_triggers_for_proactive_attention tests/test_ui_bridge_routes.py::test_launcher_hides_proactive_reply_while_tts_audio_is_generating` → 4 passed。
+- `npm --prefix apps/frontend run build` → passed（保留既有 Vite large chunk warning）。
+- `git diff --check` → passed。
+
+---
+
+## Documentation — DMG 首用走查与 VitePress 素材整理
+
+### 核心结果
+
+本轮按“完全第一次使用用户”路径实测 `/Applications/Hermes-Yachiyo.app` 发布包，并把安装、模型配置、工作空间、聊天、图片链路、Bubble、Live2D、GPT-SoVITS、主动关怀、工具中心、诊断、备份和卸载预览整理为后续 VitePress 可直接使用的文档与截图素材。
+
+### 主要产出
+
+- `docs/public/images/hermes-yachiyo/first-run/`：新增 43 张真实运行截图，覆盖首启安装、配置、导入、桌面表现态、工具中心、诊断和维护页面。
+- `docs/user-manual.md`：重写为带截图引用的实际使用手册，截图路径使用 VitePress public 前缀 `/images/hermes-yachiyo/first-run/...`。
+- `docs/screenshot-index.md`：新增截图索引表，记录每张截图的场景、用途和建议引用方式。
+- `docs/experience-report-2026-05-05.md`：新增首用体验报告，记录通过项、真实摩擦点和发布前建议。
+- `docs/first-run-smoke-test-2026-05-05.md`：同步更新本次真实测试数据，包含隔离 HOME、465.3 MB 备份结果和主动关怀 TTS 边界。
+
+### 实测结论
+
+- 核心首用闭环已跑通：Xiaomi MiMo 连接测试、Yachiyo 工作空间初始化、文本对话、图片识别、Bubble 快捷消息、Live2D ZIP 导入与真模型渲染、GPT-SoVITS 资源导入与手动 TTS 测试、主动关怀文本生成、工具中心、诊断、更新检查、备份和卸载预览均可用。
+- GUI 安装 Hermes Agent 时遇到一次 GitHub 克隆中断（`RPC failed / curl 18 / early EOF / invalid index-pack output`），通过手动 tarball fallback 安装 Hermes Agent 后，应用重新检测可继续流程。
+- 工具中心中 Web、Browser CDP、Image Gen 在缺少外部 Key 或 CDP 端点时按预期显示受限；这不影响 Yachiyo 主功能。
+- GPT-SoVITS 手动测试成功，但一次主动关怀自动播报返回 HTTP 400；文档已记录为真实边界，建议后续在 UI 展示最近一次 TTS 错误。
+- 已清理隔离测试 HOME、Electron profile、临时资源和测试进程；文档中未写入一次性 API Key 明文。
+
+### 后续建议
+
+1. 在公司环境创建 VitePress docs 站点时，直接把 `docs/public/images/hermes-yachiyo/first-run/` 作为 public 图片目录使用。
+2. 将 `docs/user-manual.md` 拆成安装、模型配置、表现态、资源导入、工具中心、维护排障等 VitePress 页面。
+3. 发布说明中加入 GUI 安装 GitHub 网络失败、GPT-SoVITS 首次加载较慢、导入资源会增大备份体积等真实首用提示。
+
+---
+
 ## Hotfix — Milestone 73: One-click install error capture
 
 ### 核心结果

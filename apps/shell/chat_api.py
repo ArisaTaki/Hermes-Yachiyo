@@ -12,8 +12,16 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import logging
+import os
+import re
+import shutil
+import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List
+from uuid import uuid4
 
 from apps.core.chat_session import (
     ChatMessage,
@@ -21,12 +29,184 @@ from apps.core.chat_session import (
     MessageRole,
     MessageStatus,
 )
+from apps.core.special_sessions import is_proactive_chat_session
+from apps.locald.screenshot import capture_screenshot_to_file
+from apps.shell.hermes_capabilities import get_current_hermes_image_input_capability
 from packages.protocol.enums import TaskStatus, TaskType
 
 if TYPE_CHECKING:
     from apps.core.runtime import HermesRuntime
 
 logger = logging.getLogger(__name__)
+
+_MAX_CHAT_ATTACHMENTS = 4
+_MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+_MAX_ATTACHMENT_CACHE_BYTES = int(os.getenv("HERMES_YACHIYO_ATTACHMENT_CACHE_BYTES", str(512 * 1024 * 1024)))
+_MAX_ATTACHMENT_CACHE_AGE_SECONDS = int(
+    os.getenv("HERMES_YACHIYO_ATTACHMENT_CACHE_AGE_SECONDS", str(30 * 24 * 60 * 60))
+)
+_DATA_URL_RE = re.compile(r"^data:(image/[A-Za-z0-9.+-]+);base64,(.*)$", re.DOTALL)
+_IMAGE_EXTENSIONS_BY_MIME = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/bmp": ".bmp",
+}
+_AUDIO_MIME_BY_EXTENSION = {
+    ".wav": "audio/wav",
+    ".mp3": "audio/mpeg",
+    ".ogg": "audio/ogg",
+    ".flac": "audio/flac",
+}
+_DESKTOP_SNAPSHOT_REQUEST_RE = re.compile(
+    r"("
+    r"(?:看|看看|查看|瞧|识别|分析|读|读取|扫一眼|截图|截屏|能看到|能看见|看得到)"
+    r".{0,18}(?:桌面|屏幕|当前窗口|窗口|画面|截图|截屏)"
+    r"|"
+    r"(?:桌面|屏幕|当前窗口|窗口|画面|截图|截屏)"
+    r".{0,18}(?:看|看看|查看|瞧|识别|分析|读|读取|有什么|是什么|情况|状态|能看到|能看见|看得到)"
+    r"|"
+    r"(?:看|看看|瞧|瞅|观察|识别|分析)"
+    r".{0,18}(?:我|这边|这儿|这里)"
+    r".{0,18}(?:现在|当前|正在)?"
+    r".{0,8}(?:在)?(?:做什么|干什么|干嘛|忙什么|弄什么)"
+    r"|"
+    r"(?:我|这边|这儿|这里)"
+    r".{0,18}(?:现在|当前|正在)"
+    r".{0,8}(?:在)?(?:做什么|干什么|干嘛|忙什么|弄什么)"
+    r"|"
+    r"(?:look|see|view|read|analy[sz]e|inspect|screenshot|screen shot)"
+    r".{0,24}(?:screen|desktop|window|screenshot)"
+    r"|"
+    r"(?:screen|desktop|window|screenshot)"
+    r".{0,24}(?:look|see|view|read|analy[sz]e|inspect)"
+    r")",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _attachment_root() -> Path:
+    hermes_home = os.getenv("HERMES_HOME", os.path.expanduser("~/.hermes"))
+    root = Path(hermes_home) / "yachiyo" / "attachments"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _attachment_public_url(attachment_id: str) -> str:
+    bridge_url = os.getenv("HERMES_YACHIYO_BRIDGE_URL", "http://127.0.0.1:8420").rstrip("/")
+    return f"{bridge_url}/ui/chat/attachments/{attachment_id}"
+
+
+def allocate_chat_attachment_path(session_id: str, suffix: str) -> tuple[str, Path]:
+    """Allocate a stable attachment path under the chat attachment cache."""
+    attachment_id = uuid4().hex
+    normalized_suffix = suffix if str(suffix or "").startswith(".") else f".{suffix or 'bin'}"
+    safe_suffix = re.sub(r"[^A-Za-z0-9.]+", "", normalized_suffix) or ".bin"
+    session_dir = _attachment_root() / (session_id or "default")
+    session_dir.mkdir(parents=True, exist_ok=True)
+    return attachment_id, session_dir / f"{attachment_id}{safe_suffix}"
+
+
+def chat_attachment_record(
+    attachment_id: str,
+    path: Path | str,
+    *,
+    kind: str,
+    name: str,
+    mime_type: str,
+) -> dict[str, Any]:
+    resolved = Path(path)
+    return {
+        "id": attachment_id,
+        "kind": kind,
+        "name": name or resolved.name,
+        "mime_type": mime_type,
+        "size": resolved.stat().st_size if resolved.exists() else 0,
+        "path": str(resolved),
+    }
+
+
+def audio_mime_type_for_suffix(suffix: str) -> str:
+    return _AUDIO_MIME_BY_EXTENSION.get(str(suffix or "").lower(), "audio/wav")
+
+
+def _sanitize_attachment_name(value: str) -> str:
+    name = Path(value or "image").name.strip() or "image"
+    return re.sub(r"[^A-Za-z0-9._ -]+", "_", name)[:96] or "image"
+
+
+def _cleanup_attachment_cache(protected_paths: set[Path] | None = None) -> None:
+    """Keep image attachment storage bounded.
+
+    Attachments live on disk for chat history previews.  This cleanup only runs
+    after new attachments are saved, removes files older than the retention
+    window first, then trims oldest files if the cache still exceeds the cap.
+    """
+    root = _attachment_root()
+    protected = {path.resolve() for path in protected_paths or set()}
+    now = time.time()
+    files: list[tuple[float, int, Path]] = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            resolved = path.resolve()
+            stat = path.stat()
+        except OSError:
+            continue
+        if resolved in protected:
+            continue
+        files.append((stat.st_mtime, stat.st_size, path))
+
+    for mtime, _size, path in files:
+        if _MAX_ATTACHMENT_CACHE_AGE_SECONDS > 0 and now - mtime > _MAX_ATTACHMENT_CACHE_AGE_SECONDS:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+    if _MAX_ATTACHMENT_CACHE_BYTES <= 0:
+        return
+
+    remaining: list[tuple[float, int, Path]] = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            resolved = path.resolve()
+            stat = path.stat()
+        except OSError:
+            continue
+        if resolved in protected:
+            continue
+        remaining.append((stat.st_mtime, stat.st_size, path))
+
+    total = sum(size for _mtime, size, _path in remaining)
+    for _mtime, size, path in sorted(remaining, key=lambda item: item[0]):
+        if total <= _MAX_ATTACHMENT_CACHE_BYTES:
+            break
+        try:
+            path.unlink()
+            total -= size
+        except OSError:
+            pass
+
+
+def _remove_attachment_session_dir(session_id: str) -> None:
+    session_id = (session_id or "").strip()
+    if not re.fullmatch(r"[a-f0-9]{8}", session_id):
+        return
+    target = _attachment_root() / session_id
+    try:
+        resolved = target.resolve()
+        root = _attachment_root().resolve()
+    except OSError:
+        return
+    if root not in resolved.parents or not resolved.exists():
+        return
+    shutil.rmtree(resolved, ignore_errors=True)
 
 
 class ChatAPI:
@@ -43,7 +223,7 @@ class ChatAPI:
     def _state(self):
         return self._runtime.state
 
-    def send_message(self, text: str) -> Dict[str, Any]:
+    def send_message(self, text: str, attachments: list[dict] | None = None) -> Dict[str, Any]:
         """发送用户消息并创建对应任务
 
         流程：
@@ -60,17 +240,54 @@ class ChatAPI:
             或 {"ok": False, "error": str}
         """
         text = (text or "").strip()
-        if not text:
+        raw_attachments = attachments or []
+        if not text and not raw_attachments:
             return {"ok": False, "error": "消息内容不能为空"}
 
         try:
+            if raw_attachments and self._should_enforce_image_capability():
+                image_input = get_current_hermes_image_input_capability()
+                if image_input.get("can_attach_images") is False:
+                    return {
+                        "ok": False,
+                        "error": str(image_input.get("reason") or "当前 Hermes 模型暂不支持图片输入"),
+                        "image_input": image_input,
+                    }
+            saved_attachments = self._save_attachments(raw_attachments)
+            if not text and saved_attachments:
+                text = "请识别并分析这张图片。"
+            should_attach_desktop_snapshot = self._should_attach_desktop_snapshot(text, saved_attachments)
+            if should_attach_desktop_snapshot and self._should_enforce_image_capability():
+                image_input = get_current_hermes_image_input_capability()
+                if image_input.get("can_attach_images") is False:
+                    return {
+                        "ok": False,
+                        "error": str(image_input.get("reason") or "当前 Hermes 模型暂不支持图片输入"),
+                        "image_input": image_input,
+                    }
+            task_description, saved_attachments = self._attach_desktop_snapshot_if_needed(
+                text,
+                saved_attachments,
+                should_attach=should_attach_desktop_snapshot,
+            )
+            if saved_attachments and not raw_attachments and self._should_enforce_image_capability():
+                image_input = get_current_hermes_image_input_capability()
+                if image_input.get("can_attach_images") is False:
+                    return {
+                        "ok": False,
+                        "error": str(image_input.get("reason") or "当前 Hermes 模型暂不支持图片输入"),
+                        "image_input": image_input,
+                    }
+
             # 1. 添加用户消息
-            message_id = self._session.add_user_message(text)
+            message_id = self._session.add_user_message(text, saved_attachments)
 
             # 2. 创建任务
             task = self._state.create_task(
                 task_type=TaskType.GENERAL,
-                description=text,
+                description=task_description,
+                attachments=saved_attachments,
+                chat_session_id=self._session.session_id,
             )
             task_id = task.task_id
 
@@ -78,10 +295,11 @@ class ChatAPI:
             self._session.link_message_to_task(message_id, task_id)
 
             logger.info(
-                "消息已发送: message_id=%s, task_id=%s, len=%d",
+                "消息已发送: message_id=%s, task_id=%s, len=%d, attachments=%d",
                 message_id,
                 task_id,
-                len(text),
+                len(task_description),
+                len(saved_attachments),
             )
 
             return {
@@ -89,11 +307,80 @@ class ChatAPI:
                 "message_id": message_id,
                 "task_id": task_id,
                 "status": "pending",
+                "attachments": self._serialize_attachments(saved_attachments),
             }
 
         except Exception as exc:
             logger.error("发送消息失败: %s", exc)
             return {"ok": False, "error": str(exc)}
+
+    def _should_enforce_image_capability(self) -> bool:
+        runner = getattr(self._runtime, "task_runner", None)
+        if runner is None:
+            return False
+        executor = getattr(runner, "executor", None)
+        return getattr(executor, "name", "") == "HermesExecutor"
+
+    @staticmethod
+    def _should_attach_desktop_snapshot(text: str, saved_attachments: list[dict]) -> bool:
+        if saved_attachments:
+            return False
+        value = (text or "").strip()
+        if not value:
+            return False
+        return bool(_DESKTOP_SNAPSHOT_REQUEST_RE.search(value))
+
+    def _attach_desktop_snapshot_if_needed(
+        self,
+        text: str,
+        saved_attachments: list[dict],
+        *,
+        should_attach: bool,
+    ) -> tuple[str, list[dict]]:
+        """Attach a fresh desktop screenshot when the user explicitly asks Yachiyo to look."""
+        if saved_attachments or not should_attach:
+            return text, saved_attachments
+
+        attachment_id, target_path = allocate_chat_attachment_path(self._session.session_id, ".png")
+        proactive_session = is_proactive_chat_session(self._session.session_id)
+        source = "proactive_desktop_followup" if proactive_session else "user_requested_desktop_snapshot"
+        note_subject = "这条主动关怀追问" if proactive_session else "这条消息"
+        try:
+            meta = capture_screenshot_to_file(target_path)
+            attachment = chat_attachment_record(
+                attachment_id,
+                target_path,
+                kind="image",
+                name="主动关怀即时桌面截图.png" if proactive_session else "当前桌面截图.png",
+                mime_type="image/png",
+            )
+            attachment["source"] = source
+            _cleanup_attachment_cache({Path(str(attachment["path"]))})
+            logger.info(
+                "用户请求查看桌面，已附加即时截图: session=%s path=%s (%sx%s)",
+                self._session.session_id,
+                target_path,
+                meta.get("width") if isinstance(meta, dict) else "?",
+                meta.get("height") if isinstance(meta, dict) else "?",
+            )
+            task_description = (
+                f"{text}\n\n"
+                f"[Yachiyo 已为{note_subject}附加当前桌面截图；"
+                "请优先基于附件图片回答用户问题。]"
+            )
+            return task_description, [attachment]
+        except Exception as exc:
+            try:
+                target_path.unlink(missing_ok=True)
+            except OSError:
+                logger.debug("清理按需桌面截图失败: %s", target_path, exc_info=True)
+            logger.warning("按需桌面截图捕获失败: %s", exc)
+            task_description = (
+                f"{text}\n\n"
+                f"[Yachiyo 尝试为{note_subject}捕获当前桌面截图，但失败：{exc}。"
+                "请向用户说明当前无法读取桌面截图。]"
+            )
+            return task_description, saved_attachments
 
     def get_messages(self, limit: int = 50) -> Dict[str, Any]:
         """获取消息列表，同时同步任务状态到消息
@@ -128,6 +415,7 @@ class ChatAPI:
                         "task_id": m.task_id,
                         "error": m.error,
                         "created_at": m.created_at.isoformat(),
+                        "attachments": self._serialize_attachments(m.attachments),
                     }
                     for m in sorted_msgs
                 ],
@@ -145,17 +433,25 @@ class ChatAPI:
         输出时，每条 user 消息后立即插入对应 assistant 消息。
         system 消息和无 task_id 的消息保持原始顺序。
         """
-        # 建立 task_id → assistant 消息的映射
+        user_task_ids = {
+            msg.task_id
+            for msg in messages
+            if msg.role == MessageRole.USER and msg.task_id
+        }
+
+        # 建立 task_id → assistant 消息的映射。只有同页存在 user
+        # 消息的 task 才做配对重排；主动关怀这类 assistant-only
+        # 消息保持原本时间线位置。
         assistant_by_task: dict[str, ChatMessage] = {}
         for msg in messages:
-            if msg.role == MessageRole.ASSISTANT and msg.task_id:
+            if msg.role == MessageRole.ASSISTANT and msg.task_id in user_task_ids:
                 assistant_by_task[msg.task_id] = msg
 
         result: list[ChatMessage] = []
         inserted_assistant_ids: set[str] = set()
 
         for msg in messages:
-            if msg.role == MessageRole.ASSISTANT and msg.task_id:
+            if msg.role == MessageRole.ASSISTANT and msg.task_id in user_task_ids:
                 # assistant 消息由 user 消息触发插入，跳过
                 continue
             result.append(msg)
@@ -170,11 +466,118 @@ class ChatAPI:
         for msg in messages:
             if (
                 msg.role == MessageRole.ASSISTANT
-                and msg.task_id
+                and msg.task_id in user_task_ids
                 and msg.message_id not in inserted_assistant_ids
             ):
                 result.append(msg)
 
+        return result
+
+    def get_attachment_file(self, attachment_id: str) -> Dict[str, Any]:
+        """返回聊天附件文件信息，供 HTTP 路由发送预览图。"""
+        attachment_id = (attachment_id or "").strip()
+        if not attachment_id or not re.fullmatch(r"[a-f0-9]{32}", attachment_id):
+            return {"ok": False, "error": "附件 ID 无效"}
+
+        for msg in self._session.get_all_messages():
+            for attachment in msg.attachments or []:
+                if str(attachment.get("id") or "") != attachment_id:
+                    continue
+                path = Path(str(attachment.get("path") or ""))
+                root = _attachment_root().resolve()
+                try:
+                    resolved = path.resolve()
+                except OSError:
+                    return {"ok": False, "error": "附件路径无效"}
+                if root not in resolved.parents:
+                    return {"ok": False, "error": "附件路径越界"}
+                if not resolved.exists() or not resolved.is_file():
+                    return {"ok": False, "error": "附件文件不存在"}
+                return {
+                    "ok": True,
+                    "path": str(resolved),
+                    "mime_type": str(attachment.get("mime_type") or "image/png"),
+                    "name": str(attachment.get("name") or resolved.name),
+                }
+        return {"ok": False, "error": "附件不存在或不属于当前会话"}
+
+    def _save_attachments(self, attachments: list[dict]) -> list[dict]:
+        if not attachments:
+            return []
+        if len(attachments) > _MAX_CHAT_ATTACHMENTS:
+            raise ValueError(f"最多一次发送 {_MAX_CHAT_ATTACHMENTS} 张图片")
+
+        session_dir = _attachment_root() / self._session.session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+        saved: list[dict] = []
+        for index, item in enumerate(attachments, start=1):
+            saved.append(self._save_attachment(item, session_dir, index))
+        _cleanup_attachment_cache(
+            {Path(str(attachment["path"])) for attachment in saved if attachment.get("path")}
+        )
+        return saved
+
+    def _save_attachment(self, item: dict, session_dir: Path, index: int) -> dict:
+        if not isinstance(item, dict):
+            raise ValueError("附件格式无效")
+        data_url = str(item.get("data_url") or item.get("dataUrl") or "")
+        match = _DATA_URL_RE.match(data_url)
+        if not match:
+            raise ValueError("只支持粘贴图片附件")
+
+        mime_type = match.group(1).lower()
+        extension = _IMAGE_EXTENSIONS_BY_MIME.get(mime_type)
+        if not extension:
+            raise ValueError(f"暂不支持此图片格式：{mime_type}")
+
+        try:
+            raw = base64.b64decode(match.group(2), validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("图片数据无法解析") from exc
+
+        if not raw:
+            raise ValueError("图片内容为空")
+        if len(raw) > _MAX_ATTACHMENT_BYTES:
+            limit_mb = _MAX_ATTACHMENT_BYTES // (1024 * 1024)
+            raise ValueError(f"单张图片不能超过 {limit_mb} MB")
+
+        attachment_id = uuid4().hex
+        safe_name = _sanitize_attachment_name(str(item.get("name") or f"image-{index}{extension}"))
+        if not Path(safe_name).suffix:
+            safe_name += extension
+        target = session_dir / f"{attachment_id}{extension}"
+        target.write_bytes(raw)
+        return {
+            "id": attachment_id,
+            "kind": "image",
+            "name": safe_name,
+            "mime_type": mime_type,
+            "size": len(raw),
+            "path": str(target),
+        }
+
+    @staticmethod
+    def _serialize_attachments(attachments: list[dict] | None) -> list[dict]:
+        result: list[dict] = []
+        for attachment in attachments or []:
+            if not isinstance(attachment, dict):
+                continue
+            attachment_id = str(attachment.get("id") or "")
+            if not attachment_id:
+                continue
+            item = {
+                "id": attachment_id,
+                "kind": str(attachment.get("kind") or "image"),
+                "name": str(attachment.get("name") or "image"),
+                "mime_type": str(attachment.get("mime_type") or "image/png"),
+                "size": int(attachment.get("size") or 0),
+                "url": _attachment_public_url(attachment_id),
+            }
+            if attachment.get("source"):
+                item["source"] = str(attachment.get("source") or "")
+            if attachment.get("spoken_text"):
+                item["spoken_text"] = str(attachment.get("spoken_text") or "")
+            result.append(item)
         return result
 
     def _sync_task_status_to_messages(self) -> None:
@@ -189,10 +592,13 @@ class ChatAPI:
         同一个 task_id 永远只对应一条 assistant 消息，
         无论此方法被并发调用多少次都不会产生重复。
         """
+        synced_task_ids: set[str] = set()
         for msg in self._session.get_all_messages():
-            if msg.role != MessageRole.USER:
+            if msg.role not in (MessageRole.USER, MessageRole.ASSISTANT):
                 continue
             if msg.task_id is None:
+                continue
+            if msg.task_id in synced_task_ids:
                 continue
             if msg.status in (MessageStatus.COMPLETED, MessageStatus.FAILED):
                 continue
@@ -200,6 +606,7 @@ class ChatAPI:
             task = self._state.get_task(msg.task_id)
             if task is None:
                 continue
+            synced_task_ids.add(msg.task_id)
 
             if task.status == TaskStatus.COMPLETED:
                 result = task.result or "[任务已完成，无输出]"
@@ -253,10 +660,11 @@ class ChatAPI:
         }
 
     def get_executor_info(self) -> Dict[str, Any]:
+        image_input = get_current_hermes_image_input_capability()
         runner = self._runtime.task_runner
         if runner is None:
-            return {"executor": "none", "available": False}
-        return {"executor": runner.executor.name, "available": True}
+            return {"executor": "none", "available": False, "image_input": image_input}
+        return {"executor": runner.executor.name, "available": True, "image_input": image_input}
 
     def list_sessions(self, limit: int = 20) -> Dict[str, Any]:
         """列出最近会话，包含当前空白会话。"""
@@ -351,6 +759,7 @@ class ChatAPI:
 
             store = get_chat_store()
             store.delete_session(deleted_session_id)
+            _remove_attachment_session_dir(deleted_session_id)
             remaining = store.list_sessions(limit=1)
             remaining_count = store.count_sessions()
 
@@ -388,7 +797,7 @@ class ChatAPI:
         seen: set[str] = set()
 
         for msg in self._session.get_all_messages():
-            if msg.role != MessageRole.USER:
+            if msg.role not in (MessageRole.USER, MessageRole.ASSISTANT):
                 continue
             if msg.status not in (MessageStatus.PENDING, MessageStatus.PROCESSING):
                 continue

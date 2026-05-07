@@ -1,14 +1,4 @@
-"""显示模式系统
-
-提供 DisplayMode 枚举、resolve_display_mode() 解析函数和统一分发入口 launch_mode()。
-每个模式模块导出一个 run(runtime, config) 函数，负责阻塞主线程直到界面关闭。
-
-模式说明：
-  bubble  — 轻量常驻悬浮聊天模式
-  live2d  — 角色聊天壳（保留 renderer 接入位）
-
-主控台是可从 launcher 打开的控制中心，不再作为 display mode 启动。
-"""
+"""Display mode identifiers shared by the Electron frontend and Python backend."""
 
 from __future__ import annotations
 
@@ -17,7 +7,6 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from apps.core.runtime import HermesRuntime
     from apps.shell.config import AppConfig
 
 logger = logging.getLogger(__name__)
@@ -49,19 +38,3 @@ def resolve_display_mode(config: "AppConfig") -> DisplayMode:
         logger.warning("未知显示模式 %r，回退为 %s", raw, _DEFAULT_DISPLAY_MODE)
         mode = _DEFAULT_DISPLAY_MODE
     return mode
-
-
-def launch_mode(runtime: "HermesRuntime", config: "AppConfig") -> None:
-    """根据 config.display_mode 启动对应显示模式（阻塞主线程）。
-
-    调用方通常已通过 resolve_display_mode() 记录了决策日志；
-    此处只负责分发，不重复记录。
-    """
-    mode = resolve_display_mode(config)
-
-    if mode == DisplayMode.BUBBLE:
-        from apps.shell.modes.bubble import run
-    else:  # LIVE2D
-        from apps.shell.modes.live2d import run
-
-    run(runtime, config)

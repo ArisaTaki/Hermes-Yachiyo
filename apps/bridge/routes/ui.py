@@ -9,33 +9,50 @@ from urllib.parse import quote
 from urllib.parse import urlencode
 
 from fastapi import APIRouter
+from fastapi import HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from pydantic import Field
 
 from apps.bridge.deps import get_runtime
+from apps.core.chat_session import MessageStatus
 from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH
 from apps.shell.assets import data_uri
 from apps.shell.assets import find_live2d_preview_path
 from apps.shell.chat_api import ChatAPI
+from apps.shell.chat_api import allocate_chat_attachment_path
+from apps.shell.chat_api import audio_mime_type_for_suffix
+from apps.shell.chat_api import chat_attachment_record
 from apps.shell.chat_bridge import ChatBridge
+from apps.shell.gpt_sovits_service import get_gpt_sovits_service_status
+from apps.shell.gpt_sovits_service import get_gpt_sovits_service_status_for_values
+from apps.shell.gpt_sovits_service import install_gpt_sovits_launch_agent
+from apps.shell.gpt_sovits_service import uninstall_gpt_sovits_launch_agent
 from apps.shell.launcher_notifications import LauncherNotificationTracker
 from apps.shell.live2d_resources import import_live2d_archive_draft
 from apps.shell.live2d_resources import prepare_live2d_model_path_draft
+from apps.shell.tts_resources import get_tts_voice_resource_info
+from apps.shell.tts_resources import import_tts_voice_archive_draft
 from apps.shell.installer_api import InstallerWebViewAPI
 from apps.shell.main_api import MainWindowAPI
 from apps.shell.mode_settings import apply_settings_changes
 from apps.shell.mode_settings import serialize_mode_window_data
 from apps.shell.proactive import ProactiveDesktopService
+from apps.shell.proactive import get_proactive_chat_session
 from apps.shell.tts import TTSService
 
 router = APIRouter(prefix="/ui", tags=["UI"])
 _launcher_notifications: dict[str, LauncherNotificationTracker] = {}
 _launcher_proactive_services: dict[tuple[str, int], ProactiveDesktopService] = {}
 _launcher_tts_services: dict[int, TTSService] = {}
-_launcher_last_tts_reply: dict[int, str] = {}
+_launcher_last_tts_attention: dict[int, str] = {}
+_launcher_pending_tts_attention: dict[int, str] = {}
+_launcher_completed_tts_attention: dict[int, str] = {}
 
 
 class SendChatMessageRequest(BaseModel):
     text: str
+    attachments: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class LauncherAckRequest(BaseModel):
@@ -44,6 +61,8 @@ class LauncherAckRequest(BaseModel):
 
 class LauncherQuickMessageRequest(BaseModel):
     text: str
+    mode: str = "bubble"
+    session_id: str = ""
 
 
 class LauncherWorkAreaRequest(BaseModel):
@@ -79,6 +98,42 @@ class HermesConfigUpdateRequest(BaseModel):
     model: str = ""
     base_url: str = ""
     api_key: str = ""
+    image_input_mode: str | None = None
+    vision_provider: str | None = None
+    vision_model: str | None = None
+    vision_base_url: str | None = None
+    vision_api_key: str | None = None
+
+
+class HermesToolConfigUpdateRequest(BaseModel):
+    tool_id: str
+    changes: dict[str, Any] = Field(default_factory=dict)
+
+
+class HermesToolConfigTestRequest(BaseModel):
+    tool_id: str
+
+
+class HermesUpdateRunRequest(BaseModel):
+    backup: bool = False
+
+
+class TtsTestRequest(BaseModel):
+    text: str = "八千代语音测试成功。主动关怀播报已经可以正常调用。"
+
+
+class GptSovitsServiceStatusRequest(BaseModel):
+    base_url: str = ""
+    workdir: str = ""
+    command: str = ""
+
+
+class ScreenPermissionRequest(BaseModel):
+    open_settings: bool = True
+
+
+class ProactiveTestRequest(BaseModel):
+    mode: str = "bubble"
 
 
 class BackupCreateRequest(BaseModel):
@@ -92,10 +147,15 @@ class BackupPathRequest(BaseModel):
 class UninstallRunRequest(BaseModel):
     scope: str = "yachiyo_only"
     keep_config: bool = True
+    include_gpt_sovits: bool = False
     confirm_text: str = ""
 
 
 class Live2DResourcePathRequest(BaseModel):
+    path: str
+
+
+class TtsResourcePathRequest(BaseModel):
     path: str
 
 
@@ -117,10 +177,119 @@ async def update_settings(request: SettingsUpdateRequest) -> dict[str, Any]:
     return MainWindowAPI(runtime, runtime.config).update_settings(request.changes)
 
 
+@router.post("/tts/test")
+async def test_proactive_tts(request: TtsTestRequest) -> dict[str, Any]:
+    runtime = get_runtime()
+
+    def _run_test() -> dict[str, Any]:
+        tts_config = getattr(runtime.config, "tts", None)
+        if tts_config is None:
+            return {
+                "ok": False,
+                "success": False,
+                "provider": "none",
+                "message": "TTS 配置不存在",
+            }
+        service = TTSService(tts_config)
+        status = service.speak_sync(request.text)
+        return {
+            "tool": "proactive_tts",
+            **status,
+        }
+
+    return await asyncio.to_thread(_run_test)
+
+
+@router.get("/tts/status")
+async def get_proactive_tts_status() -> dict[str, Any]:
+    runtime = get_runtime()
+    tts_config = getattr(runtime.config, "tts", None)
+    if tts_config is None:
+        return {
+            "tool": "proactive_tts",
+            "enabled": False,
+            "provider": "none",
+            "ok": False,
+            "message": "TTS 配置不存在",
+        }
+    service = _launcher_tts_services.get(id(runtime))
+    status = service.get_status() if service is not None else TTSService(tts_config).get_status()
+    return {
+        "tool": "proactive_tts",
+        "source": "launcher" if service is not None else "config",
+        **status,
+    }
+
+
+@router.get("/tts/voice-resource")
+async def get_tts_voice_resource() -> dict[str, Any]:
+    return get_tts_voice_resource_info()
+
+
+@router.post("/tts/voice-resource/import")
+async def import_tts_voice_archive_path(request: TtsResourcePathRequest) -> dict[str, Any]:
+    return import_tts_voice_archive_draft(Path(request.path))
+
+
+@router.get("/tts/gpt-sovits/service-status")
+async def get_tts_gpt_sovits_service_status() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(get_gpt_sovits_service_status, runtime.config)
+
+
+@router.post("/tts/gpt-sovits/service-status")
+async def get_tts_gpt_sovits_service_status_for_draft(request: GptSovitsServiceStatusRequest) -> dict[str, Any]:
+    return await asyncio.to_thread(
+        get_gpt_sovits_service_status_for_values,
+        base_url=request.base_url,
+        workdir=request.workdir,
+        command=request.command,
+    )
+
+
+@router.post("/tts/gpt-sovits/service/install")
+async def install_tts_gpt_sovits_service() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(install_gpt_sovits_launch_agent, runtime.config)
+
+
+@router.post("/tts/gpt-sovits/service/uninstall")
+async def uninstall_tts_gpt_sovits_service() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(uninstall_gpt_sovits_launch_agent, runtime.config)
+
+
+@router.post("/proactive/screen-permission/check")
+async def check_proactive_screen_permission(request: ScreenPermissionRequest) -> dict[str, Any]:
+    def _check() -> dict[str, Any]:
+        from apps.locald.screenshot import check_screen_capture_permission
+
+        return check_screen_capture_permission(open_settings=request.open_settings)
+
+    return await asyncio.to_thread(_check)
+
+
 @router.post("/hermes/terminal-command")
 async def open_hermes_terminal_command(request: TerminalCommandRequest) -> dict[str, Any]:
     runtime = get_runtime()
     return MainWindowAPI(runtime, runtime.config).open_terminal_command(request.command)
+
+
+@router.post("/hermes/diagnostic-command")
+async def run_hermes_diagnostic_command(request: TerminalCommandRequest) -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).run_hermes_diagnostic_command,
+        request.command,
+    )
+
+
+@router.get("/hermes/diagnostics/cache")
+async def get_hermes_diagnostic_cache() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).get_hermes_diagnostic_cache
+    )
 
 
 @router.post("/hermes/connection-test")
@@ -128,6 +297,14 @@ async def test_hermes_connection() -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(
         MainWindowAPI(runtime, runtime.config).test_hermes_connection
+    )
+
+
+@router.post("/hermes/image-connection-test")
+async def test_hermes_image_connection() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).test_hermes_image_connection
     )
 
 
@@ -144,7 +321,59 @@ async def update_hermes_configuration(request: HermesConfigUpdateRequest) -> dic
     runtime = get_runtime()
     return await asyncio.to_thread(
         MainWindowAPI(runtime, runtime.config).update_hermes_configuration,
-        request.model_dump(),
+        request.model_dump(exclude_none=True),
+    )
+
+
+@router.get("/hermes/tools/config")
+async def get_hermes_tool_config() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).get_hermes_tool_config
+    )
+
+
+@router.post("/hermes/tools/config")
+async def update_hermes_tool_config(request: HermesToolConfigUpdateRequest) -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).update_hermes_tool_config,
+        request.tool_id,
+        request.changes,
+    )
+
+
+@router.post("/hermes/tools/config/test")
+async def test_hermes_tool_config(request: HermesToolConfigTestRequest) -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).test_hermes_tool_config,
+        request.tool_id,
+    )
+
+
+@router.post("/hermes/update/check")
+async def check_hermes_update() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).check_hermes_update
+    )
+
+
+@router.post("/hermes/update/run")
+async def update_hermes_agent(request: HermesUpdateRunRequest | None = None) -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).update_hermes_agent,
+        bool(request.backup) if request else False,
+    )
+
+
+@router.post("/hermes/tools/browser-cdp/launch")
+async def launch_hermes_browser_cdp() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(
+        MainWindowAPI(runtime, runtime.config).launch_browser_cdp
     )
 
 
@@ -191,9 +420,17 @@ async def open_backup_location(request: BackupPathRequest) -> dict[str, Any]:
 
 
 @router.get("/uninstall/preview")
-async def get_uninstall_preview(scope: str = "yachiyo_only", keep_config: bool = True) -> dict[str, Any]:
+async def get_uninstall_preview(
+    scope: str = "yachiyo_only",
+    keep_config: bool = True,
+    include_gpt_sovits: bool = False,
+) -> dict[str, Any]:
     runtime = get_runtime()
-    return MainWindowAPI(runtime, runtime.config).get_uninstall_preview(scope, keep_config)
+    return MainWindowAPI(runtime, runtime.config).get_uninstall_preview(
+        scope,
+        keep_config,
+        include_gpt_sovits,
+    )
 
 
 @router.post("/uninstall/run")
@@ -203,6 +440,7 @@ async def run_uninstall(request: UninstallRunRequest) -> dict[str, Any]:
         request.scope,
         request.keep_config,
         request.confirm_text,
+        include_gpt_sovits=request.include_gpt_sovits,
     )
 
 
@@ -272,7 +510,20 @@ async def get_chat_messages(limit: int = 80) -> dict[str, Any]:
 
 @router.post("/chat/messages")
 async def send_chat_message(request: SendChatMessageRequest) -> dict[str, Any]:
-    return ChatAPI(get_runtime()).send_message(request.text)
+    return ChatAPI(get_runtime()).send_message(request.text, request.attachments)
+
+
+@router.get("/chat/attachments/{attachment_id}")
+async def get_chat_attachment(attachment_id: str) -> FileResponse:
+    attachment = ChatAPI(get_runtime()).get_attachment_file(attachment_id)
+    if not attachment.get("ok"):
+        raise HTTPException(status_code=404, detail=attachment.get("error") or "附件不存在")
+    return FileResponse(
+        attachment["path"],
+        media_type=attachment.get("mime_type") or "image/png",
+        filename=attachment.get("name") or "image",
+        content_disposition_type="inline",
+    )
 
 
 @router.get("/chat/session")
@@ -324,13 +575,20 @@ def _bubble_avatar_url(config: Any) -> str:
         return data_uri(DEFAULT_BUBBLE_AVATAR_PATH)
 
 
-def _launcher_proactive_state(runtime: Any, mode_id: str, mode_config: Any) -> dict[str, Any]:
+def _launcher_proactive_service(runtime: Any, mode_id: str, mode_config: Any) -> ProactiveDesktopService:
     key = (mode_id, id(runtime))
-    service = _launcher_proactive_services.setdefault(
+    return _launcher_proactive_services.setdefault(
         key,
         ProactiveDesktopService(runtime, mode_config),
     )
-    return service.get_state()
+
+
+def _launcher_proactive_state(runtime: Any, mode_id: str, mode_config: Any) -> dict[str, Any]:
+    return _launcher_proactive_service(runtime, mode_id, mode_config).get_state()
+
+
+def _mode_config_for_launcher(runtime: Any, mode_id: str) -> Any:
+    return runtime.config.live2d_mode if mode_id == "live2d" else runtime.config.bubble_mode
 
 
 def _live2d_resource_payload(config: Any) -> dict[str, Any]:
@@ -437,12 +695,23 @@ def _live2d_renderer_payload(app_config: Any, resource: dict[str, Any]) -> dict[
         "idle_motion_group": getattr(live2d, "idle_motion_group", "Idle"),
         "enable_expressions": getattr(live2d, "enable_expressions", False),
         "enable_physics": getattr(live2d, "enable_physics", False),
+        "expression_mappings": {
+            "thinking": getattr(live2d, "thinking_expression", ""),
+            "message": getattr(live2d, "message_expression", ""),
+            "failed": getattr(live2d, "failed_expression", ""),
+            "attention": getattr(live2d, "attention_expression", ""),
+        },
+        "expression_keywords": getattr(live2d, "expression_keywords", {}),
         "expressions": getattr(summary, "expressions", []) if summary else [],
         "motion_groups": getattr(summary, "motion_groups", {}) if summary else {},
     }
 
 
-def _maybe_trigger_live2d_tts(runtime: Any, chat: dict[str, Any]) -> dict[str, Any]:
+def _maybe_trigger_proactive_tts(
+    runtime: Any,
+    mode_id: str,
+    proactive: dict[str, Any],
+) -> dict[str, Any]:
     config = runtime.config
     tts_config = getattr(config, "tts", None)
     if tts_config is None:
@@ -451,15 +720,112 @@ def _maybe_trigger_live2d_tts(runtime: Any, chat: dict[str, Any]) -> dict[str, A
     service = _launcher_tts_services.setdefault(key, TTSService(tts_config))
     if not getattr(tts_config, "enabled", False) or getattr(tts_config, "provider", "none") == "none":
         return service.get_status()
-    latest_reply = str(chat.get("latest_reply_full") or chat.get("latest_reply") or "").strip()
-    if not latest_reply:
+    if not proactive.get("has_attention"):
         return service.get_status()
-    if latest_reply == _launcher_last_tts_reply.get(key, ""):
+    text = str(
+        proactive.get("attention_text")
+        or proactive.get("message")
+        or proactive.get("result")
+        or ""
+    ).strip()
+    if not text:
         return service.get_status()
-    status = service.speak_async(latest_reply)
+    attention_key = str(proactive.get("task_id") or text)
+    if attention_key == _launcher_pending_tts_attention.get(key, ""):
+        return {
+            **service.get_status(),
+            "pending_audio": True,
+            "attention_key": attention_key,
+            "message": "主动关怀语音生成中",
+        }
+    if attention_key == _launcher_completed_tts_attention.get(key, ""):
+        return {
+            **service.get_status(),
+            "audio_ready": True,
+            "attention_key": attention_key,
+        }
+    if attention_key == _launcher_last_tts_attention.get(key, ""):
+        return service.get_status()
+
+    output_path, attachment_id, mime_type = _allocate_tts_audio_output(runtime, tts_config)
+    task_id = str(proactive.get("task_id") or "")
+
+    def on_complete(status: dict[str, Any]) -> None:
+        if task_id:
+            _attach_proactive_tts_audio(runtime, task_id, status, attachment_id, output_path, mime_type)
+        _launcher_pending_tts_attention.pop(key, None)
+        _launcher_completed_tts_attention[key] = attention_key
+
+    status = service.speak_async(
+        text,
+        play=True,
+        output_path=str(output_path) if output_path else None,
+        on_complete=on_complete,
+    )
     if status.get("scheduled"):
-        _launcher_last_tts_reply[key] = latest_reply
+        _launcher_last_tts_attention[key] = attention_key
+        _launcher_pending_tts_attention[key] = attention_key
+        status["pending_audio"] = True
+        status["attention_key"] = attention_key
+    else:
+        _launcher_completed_tts_attention[key] = attention_key
     return status
+
+
+def _allocate_tts_audio_output(runtime: Any, tts_config: Any) -> tuple[Path | None, str, str]:
+    provider = str(getattr(tts_config, "provider", "") or "")
+    if provider not in {"gpt-sovits", "http"}:
+        return None, "", ""
+    media_type = str(getattr(tts_config, "gsv_media_type", "wav") or "wav").strip().lower().lstrip(".")
+    suffix = f".{media_type if media_type in {'wav', 'mp3', 'ogg', 'flac'} else 'wav'}"
+    chat_session = get_proactive_chat_session(runtime)
+    session_id = str(getattr(chat_session, "session_id", "") or "proactive")
+    attachment_id, output_path = allocate_chat_attachment_path(session_id, suffix)
+    return output_path, attachment_id, audio_mime_type_for_suffix(suffix)
+
+
+def _attach_proactive_tts_audio(
+    runtime: Any,
+    task_id: str,
+    status: dict[str, Any],
+    attachment_id: str,
+    output_path: Path | None,
+    mime_type: str,
+) -> None:
+    if not status.get("ok") or not status.get("audio_path") or not output_path or not attachment_id:
+        return
+    path = Path(str(status.get("audio_path") or output_path))
+    if not path.exists():
+        return
+    chat_session = get_proactive_chat_session(runtime)
+    if chat_session is None:
+        return
+    existing = chat_session.get_assistant_message_for_task(task_id)
+    if existing is None:
+        return
+    task = runtime.state.get_task(task_id)
+    content = str(getattr(task, "result", "") or existing.content or "")
+    attachments = [
+        item for item in list(existing.attachments or [])
+        if not (isinstance(item, dict) and item.get("kind") == "audio" and item.get("source") == "proactive_tts")
+    ]
+    attachment = chat_attachment_record(
+        attachment_id,
+        path,
+        kind="audio",
+        name="主动关怀语音." + path.suffix.lstrip("."),
+        mime_type=str(status.get("mime_type") or mime_type or "audio/wav"),
+    )
+    attachment["source"] = "proactive_tts"
+    attachment["spoken_text"] = str(status.get("spoken_text") or "")
+    attachments.append(attachment)
+    chat_session.upsert_assistant_message(
+        task_id=task_id,
+        content=content,
+        status=MessageStatus.COMPLETED,
+        error=existing.error,
+        attachments=attachments,
+    )
 
 
 @router.get("/launcher")
@@ -478,6 +844,7 @@ async def get_launcher_view(mode: str = "bubble") -> dict[str, Any]:
             "enable_quick_input": live2d_config.enable_quick_input,
             "click_action": live2d_config.click_action,
             "default_open_behavior": live2d_config.default_open_behavior,
+            "position_anchor": getattr(live2d_config, "position_anchor", "right_bottom"),
             "scale": getattr(live2d_config, "scale", 1.0),
             "mouse_follow_enabled": getattr(live2d_config, "mouse_follow_enabled", True),
             "preview_url": _live2d_preview_url(live2d_config),
@@ -499,14 +866,27 @@ async def get_launcher_view(mode: str = "bubble") -> dict[str, Any]:
         }
 
     chat = bridge.get_conversation_overview(summary_count=summary_count, session_limit=3)
-    if mode_id == "live2d":
-        tts_status = _maybe_trigger_live2d_tts(runtime, chat)
+    tts_status = _maybe_trigger_proactive_tts(runtime, mode_id, proactive)
+    visible_chat = chat
+    visible_proactive = proactive
+    if tts_status.get("pending_audio"):
+        visible_chat = dict(chat)
+        visible_chat["latest_notifiable_message"] = {}
+        visible_chat["latest_reply"] = ""
+        visible_chat["latest_reply_full"] = ""
+        visible_proactive = {
+            **proactive,
+            "has_attention": False,
+            "status": "tts_pending",
+            "message": "主动关怀语音生成中",
+            "attention_text": "",
+        }
     tracker = _launcher_notifications.setdefault(mode_id, LauncherNotificationTracker())
-    notification = tracker.update(chat, external_attention=bool(proactive.get("has_attention")))
+    notification = tracker.update(visible_chat, external_attention=bool(visible_proactive.get("has_attention")))
     latest_status = "ready"
-    if chat.get("empty"):
+    if visible_chat.get("empty"):
         latest_status = "empty"
-    elif chat.get("is_processing"):
+    elif visible_chat.get("is_processing"):
         latest_status = "processing"
     elif notification.get("has_unread"):
         latest_message = notification.get("latest_message")
@@ -516,17 +896,17 @@ async def get_launcher_view(mode: str = "bubble") -> dict[str, Any]:
     return {
         "ok": True,
         "mode": mode_id,
-        "chat": chat,
-        "proactive": proactive,
+        "chat": visible_chat,
+        "proactive": visible_proactive,
         "notification": notification,
         "tts": tts_status,
         "launcher": {
             **launcher_config,
             "has_attention": bool(notification.get("has_unread")),
             "latest_status": latest_status,
-            "status_label": chat.get("status_label", "就绪"),
-            "latest_reply": chat.get("latest_reply", ""),
-            "latest_reply_full": chat.get("latest_reply_full", ""),
+            "status_label": visible_chat.get("status_label", "就绪"),
+            "latest_reply": visible_chat.get("latest_reply", ""),
+            "latest_reply_full": visible_chat.get("latest_reply_full", ""),
         },
     }
 
@@ -539,14 +919,41 @@ async def acknowledge_launcher(request: LauncherAckRequest) -> dict[str, Any]:
     tracker = _launcher_notifications.setdefault(mode_id, LauncherNotificationTracker())
     tracker.acknowledge(chat)
     service = _launcher_proactive_services.get((mode_id, id(runtime)))
+    session_id = ""
     if service is not None:
         service.acknowledge()
-    return {"ok": True, "mode": mode_id}
+        session_id = service.session_id
+    else:
+        chat_session = get_proactive_chat_session(runtime)
+        session_id = str(getattr(chat_session, "session_id", "") or "")
+    return {"ok": True, "mode": mode_id, "session_id": session_id}
+
+
+@router.post("/proactive/test")
+async def trigger_proactive_test(request: ProactiveTestRequest) -> dict[str, Any]:
+    runtime = get_runtime()
+    mode_id = "live2d" if request.mode == "live2d" else "bubble"
+    service = _launcher_proactive_service(
+        runtime,
+        mode_id,
+        _mode_config_for_launcher(runtime, mode_id),
+    )
+    return {"mode": mode_id, **service.trigger_now()}
 
 
 @router.post("/launcher/quick-message")
 async def send_launcher_quick_message(request: LauncherQuickMessageRequest) -> dict[str, Any]:
-    return ChatBridge(get_runtime()).send_quick_message(request.text)
+    runtime = get_runtime()
+    session_id = str(request.session_id or "").strip()
+    if session_id:
+        loaded = ChatAPI(runtime).load_session(session_id)
+        if not loaded.get("ok"):
+            return loaded
+        mode_id = "live2d" if request.mode == "live2d" else "bubble"
+        service = _launcher_proactive_services.get((mode_id, id(runtime)))
+        if service is not None and session_id == service.session_id:
+            service.acknowledge()
+    return ChatBridge(runtime).send_quick_message(request.text)
 
 
 @router.post("/launcher/position")
@@ -555,6 +962,7 @@ async def save_launcher_position(request: LauncherPositionRequest) -> dict[str, 
     mode_id = "live2d" if request.mode == "live2d" else "bubble"
     if mode_id == "live2d":
         changes: dict[str, Any] = {
+            "live2d_mode.position_anchor": "custom",
             "live2d_mode.position_x": int(request.x),
             "live2d_mode.position_y": int(request.y),
         }

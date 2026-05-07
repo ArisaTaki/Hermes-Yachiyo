@@ -1,15 +1,27 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 import {
+  type AppUpdateCheckResult,
+  type AppUpdateDownloadResult,
+  type AppUpdateDownloadProgress,
+  type AppUpdateInfo,
+  type ReleaseChangelog,
+  type ReleaseChangelogCommit,
   apiGet,
   apiPost,
+  checkAppUpdate,
   chooseLive2DArchive,
   chooseLive2DModelDirectory,
+  downloadAppUpdate,
+  getAppUpdateInfo,
   hasDesktopFilePicker,
+  installAppUpdate,
+  onAppUpdateDownloadProgress,
   openExternalUrl,
   openDesktopMode,
   openPath,
-  quitApp,
+  removeAppBundleAndQuit,
+  restartDesktopBridge,
 } from '../lib/bridge';
 import { currentParam, navigateTo } from '../lib/view';
 
@@ -21,8 +33,10 @@ type SettingsPayload = {
 type ModeConfig = Record<string, unknown>;
 type ModeFormValue = string | boolean;
 type ModeForm = Record<string, ModeFormValue>;
-type ModeFieldKind = 'text' | 'number' | 'checkbox' | 'select' | 'percent';
+type ModeParsedValue = string | number | boolean | Record<string, string>;
+type ModeFieldKind = 'text' | 'textarea' | 'number' | 'checkbox' | 'select' | 'percent' | 'expressionRules';
 type ModeFieldOption = { value: string; label: string };
+type Live2DExpressionItem = { name?: string; file?: string };
 type ModeFieldSpec = {
   key: string;
   sourceKey?: string;
@@ -34,6 +48,8 @@ type ModeFieldSpec = {
   integer?: boolean;
   wide?: boolean;
   options?: ModeFieldOption[];
+  allowCustom?: boolean;
+  expressions?: Live2DExpressionItem[];
 };
 type ModeFieldSection = { title: string; note?: string; fields: ModeFieldSpec[] };
 type SettingsUpdateResult = {
@@ -48,6 +64,11 @@ type SettingsUpdateResult = {
   };
   mode_switch_scheduled?: boolean;
   target_display_mode?: string;
+  redirect?: {
+    view?: string;
+    mode?: string;
+    reason?: string;
+  };
   restart_scheduled?: boolean;
 };
 type Live2DResourceActionResult = SettingsUpdateResult & {
@@ -135,6 +156,7 @@ type UninstallPlan = {
 };
 
 type UninstallPreviewResult = { ok?: boolean; error?: string; plan?: UninstallPlan };
+const LIVE2D_ACTIVATION_DRAFT_KEY = 'hermes-yachiyo-live2d-activation-draft';
 
 type GeneralSettingsForm = {
   persona_prompt: string;
@@ -154,6 +176,13 @@ export function ModeSettingsView() {
 }
 
 function SpecificModeSettingsView({ mode }: { mode: string }) {
+  const [activationPending, setActivationPending] = useState(
+    mode === 'live2d'
+      && (
+        currentParam('reason') === 'live2d-resource-required'
+        || window.sessionStorage.getItem(LIVE2D_ACTIVATION_DRAFT_KEY) === '1'
+      ),
+  );
   const [payload, setPayload] = useState<SettingsPayload | null>(null);
   const [form, setForm] = useState<ModeForm>({});
   const [manualModelPath, setManualModelPath] = useState('');
@@ -161,10 +190,10 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const sections = useMemo(() => modeFieldSections(mode), [mode]);
+  const sections = useMemo(() => modeFieldSections(mode, payload), [mode, payload]);
   const specs = useMemo(() => sections.flatMap((section) => section.fields), [sections]);
   const pendingCount = useMemo(() => countModePendingChanges(payload, form, specs), [payload, form, specs]);
-  const hasChanges = pendingCount > 0;
+  const hasChanges = pendingCount > 0 || activationPending;
   const desktopFilePickerAvailable = hasDesktopFilePicker();
 
   useEffect(() => {
@@ -198,6 +227,9 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
       return;
     }
     const nextChanges = buildModeSettingsChanges(payload, form, specs);
+    if (shouldActivateLive2DAfterSave(mode, nextChanges, activationPending)) {
+      nextChanges.display_mode = 'live2d';
+    }
     if (!Object.keys(nextChanges).length) {
       setStatus('没有待保存的更改');
       return;
@@ -206,15 +238,25 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
     setStatus('保存中…');
     try {
       const result = await apiPost<SettingsUpdateResult>('/ui/settings', { changes: nextChanges });
-      if (result.ok === false) throw new Error(result.error || result.errors?.join('；') || '保存失败');
+      if (result.ok === false) {
+        if (result.redirect?.view === 'settings' && result.redirect.mode) {
+          window.setTimeout(() => navigateTo('settings', { mode: result.redirect?.mode || '', reason: result.redirect?.reason || '' }), 350);
+        }
+        throw new Error(result.error || result.errors?.join('；') || '保存失败');
+      }
       const data = await apiGet<SettingsPayload>(`/ui/modes/${mode}/settings`);
       setPayload(data);
       setForm(formFromModeSettings(data, specs));
       const hint = result.effects?.hint ? `，${result.effects.hint}` : '';
       if (result.effects?.has_restart_mode) {
-        await openDesktopMode(mode);
-        setStatus(`已保存，并已重新打开 ${modeLabel(mode)} 表现态`);
+        const targetMode = String(result.target_display_mode || nextChanges.display_mode || mode);
+        await openDesktopMode(targetMode);
+        setActivationPending(false);
+        window.sessionStorage.removeItem(LIVE2D_ACTIVATION_DRAFT_KEY);
+        setStatus(`已保存，并已重新打开 ${modeLabel(targetMode)} 表现态`);
       } else {
+        setActivationPending(false);
+        window.sessionStorage.removeItem(LIVE2D_ACTIVATION_DRAFT_KEY);
         setStatus(result.restart_scheduled ? '已保存，正在重启应用…' : `已保存${hint}`);
       }
     } catch (err) {
@@ -227,6 +269,8 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
   function resetDraft() {
     if (!payload) return;
     setForm(formFromModeSettings(payload, specs));
+    setActivationPending(false);
+    window.sessionStorage.removeItem(LIVE2D_ACTIVATION_DRAFT_KEY);
     setStatus('已丢弃未保存的修改');
   }
 
@@ -349,7 +393,7 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
         ))}
 
         <div className="settings-savebar">
-          <span>{hasChanges ? `${pendingCount} 项待保存` : '设置已同步'}</span>
+          <span>{hasChanges ? `${pendingCount + (activationPending ? 1 : 0)} 项待保存` : '设置已同步'}</span>
           <div className="settings-save-actions">
             <button type="button" disabled={!hasChanges || saving} onClick={resetDraft}>重置草稿</button>
             <button type="submit" disabled={!hasChanges || saving}>{saving ? '保存中…' : '保存更改'}</button>
@@ -402,6 +446,7 @@ function renderModeField(
     );
   }
   if (field.kind === 'select') {
+    const options = selectOptionsWithCurrentValue(field.options || [], String(value ?? ''));
     return (
       <div className={`settings-field ${field.wide ? 'wide' : ''}`} key={field.key}>
         <label htmlFor={fieldId(field.key)}>{field.label}</label>
@@ -410,12 +455,28 @@ function renderModeField(
           value={String(value ?? '')}
           onChange={(event) => onChange(field.key, event.target.value)}
         >
-          {(field.options || []).map((option) => (
+          {options.map((option) => (
             <option key={option.value} value={option.value}>{option.label}</option>
           ))}
         </select>
       </div>
     );
+  }
+  if (field.kind === 'textarea') {
+    return (
+      <div className={`settings-field ${field.wide ? 'wide' : ''}`} key={field.key}>
+        <label htmlFor={fieldId(field.key)}>{field.label}</label>
+        <textarea
+          id={fieldId(field.key)}
+          rows={4}
+          value={String(value ?? '')}
+          onChange={(event) => onChange(field.key, event.target.value)}
+        />
+      </div>
+    );
+  }
+  if (field.kind === 'expressionRules') {
+    return renderExpressionRulesField(field, value, onChange);
   }
   return (
     <div className={`settings-field ${field.wide ? 'wide' : ''}`} key={field.key}>
@@ -433,6 +494,53 @@ function renderModeField(
         />
         {field.kind === 'percent' ? <span>%</span> : null}
       </div>
+    </div>
+  );
+}
+
+function renderExpressionRulesField(
+  field: ModeFieldSpec,
+  value: ModeFormValue | undefined,
+  onChange: (key: string, value: ModeFormValue) => void,
+) {
+  const expressions = field.expressions || [];
+  const rules = parseExpressionRulesFormValue(value);
+  const updateRule = (expression: Live2DExpressionItem, nextValue: string) => {
+    const key = live2dExpressionIdentifier(expression);
+    if (!key) return;
+    const nextRules = { ...rules };
+    const normalized = nextValue.trim();
+    if (normalized) nextRules[key] = normalized;
+    else delete nextRules[key];
+    onChange(field.key, JSON.stringify(sortStringRecord(nextRules)));
+  };
+  return (
+    <div className={`settings-field live2d-expression-rules ${field.wide ? 'wide' : ''}`} key={field.key}>
+      <label>{field.label}</label>
+      {expressions.length ? (
+        <div className="live2d-expression-rule-list">
+          {expressions.map((expression) => {
+            const key = live2dExpressionIdentifier(expression);
+            const file = stringValue(expression.file).trim();
+            return (
+              <div className="live2d-expression-rule-row" key={key || file}>
+                <div>
+                  <strong>{stringValue(expression.name || expression.file || '未命名表情')}</strong>
+                  {file ? <span>{file}</span> : null}
+                </div>
+                <input
+                  type="text"
+                  value={key ? rules[key] || '' : ''}
+                  placeholder="例如：开心, 高兴, 成功, happy"
+                  onChange={(event) => updateRule(expression, event.target.value)}
+                />
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <small>当前模型没有声明可配置表情；导入包含 Expressions 或 .exp3.json 的模型后会自动列出。</small>
+      )}
     </div>
   );
 }
@@ -538,7 +646,16 @@ function Live2DResourceInfo({
       {releasesUrl ? (
         <div className="settings-meta-row">
           <span>资源下载</span>
-          <strong><a href={releasesUrl} target="_blank" rel="noreferrer">GitHub Releases</a></strong>
+          <strong>
+            <button
+              type="button"
+              className="inline-link-button"
+              disabled={disabled}
+              onClick={onOpenReleases}
+            >
+              GitHub Releases
+            </button>
+          </strong>
         </div>
       ) : null}
       <p className="settings-note">{stringValue(resource.help_text || config.help_text || '—')}</p>
@@ -559,19 +676,35 @@ function GeneralSettingsView() {
   const [form, setForm] = useState<GeneralSettingsForm>(emptyGeneralSettingsForm());
   const [backupStatus, setBackupStatus] = useState<BackupStatus | null>(null);
   const [backupManagerOpen, setBackupManagerOpen] = useState(false);
+  const [backupAction, setBackupAction] = useState('');
+  const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateInfo | null>(null);
+  const [appUpdateCheck, setAppUpdateCheck] = useState<AppUpdateCheckResult | null>(null);
+  const [appUpdateDownload, setAppUpdateDownload] = useState<AppUpdateDownloadResult | null>(null);
+  const [appUpdateProgress, setAppUpdateProgress] = useState<AppUpdateDownloadProgress | null>(null);
+  const [appUpdateAction, setAppUpdateAction] = useState('');
   const [uninstallScope, setUninstallScope] = useState('yachiyo_only');
   const [uninstallKeepConfig, setUninstallKeepConfig] = useState(true);
+  const [uninstallGptSovits, setUninstallGptSovits] = useState(false);
   const [uninstallPreview, setUninstallPreview] = useState<UninstallPlan | null>(null);
   const [uninstallConfirmText, setUninstallConfirmText] = useState('');
   const [uninstallRunning, setUninstallRunning] = useState(false);
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
+  const [bridgeRestarting, setBridgeRestarting] = useState(false);
 
   const changes = useMemo(() => buildGeneralSettingsChanges(payload, form), [payload, form]);
   const pendingCount = useMemo(() => countGeneralSettingsPendingChanges(payload, form), [payload, form]);
   const hasChanges = pendingCount > 0;
   const uninstallConfirmPhrase = uninstallPreview?.confirm_phrase || 'UNINSTALL';
   const uninstallConfirmValid = uninstallConfirmText.trim() === uninstallConfirmPhrase;
+  const backupBusy = Boolean(backupAction);
+  const appUpdateBusy = Boolean(appUpdateAction);
+  const appUpdateCurrent = appUpdateCheck?.current || appUpdateInfo?.current;
+  const appUpdateLatest = appUpdateCheck?.latest || appUpdateDownload?.latest || appUpdateInfo?.downloaded_update?.latest;
+  const appUpdateChangelog = appUpdateLatest?.changelog || appUpdateDownload?.latest?.changelog || appUpdateInfo?.downloaded_update?.latest?.changelog;
+  const appUpdateSupported = Boolean(appUpdateCheck?.supported ?? appUpdateInfo?.supported);
+  const appUpdateDownloaded = appUpdateDownload?.ok ? appUpdateDownload : appUpdateInfo?.downloaded_update;
+  const appUpdateDownloadedPath = appUpdateDownloaded?.path || appUpdateInfo?.downloaded_dmg_path || '';
 
   useEffect(() => {
     let disposed = false;
@@ -608,7 +741,40 @@ function GeneralSettingsView() {
 
   useEffect(() => {
     let disposed = false;
-    const query = new URLSearchParams({ scope: uninstallScope, keep_config: String(uninstallKeepConfig) });
+    async function loadAppUpdateInfo() {
+      try {
+        const info = await getAppUpdateInfo();
+        if (disposed) return;
+        setAppUpdateInfo(info);
+        if (info.downloaded_update?.ok) setAppUpdateDownload(info.downloaded_update);
+        const result = await checkAppUpdate();
+        if (disposed) return;
+        setAppUpdateCheck(result);
+        setAppUpdateInfo(result);
+        if (result.downloaded_update?.ok) setAppUpdateDownload(result.downloaded_update);
+      } catch (err) {
+        if (!disposed) {
+          setAppUpdateInfo({ supported: false, packaged: false, error: err instanceof Error ? err.message : '读取应用更新信息失败' });
+        }
+      }
+    }
+    void loadAppUpdateInfo();
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => onAppUpdateDownloadProgress((progress) => {
+    setAppUpdateProgress(progress);
+  }), []);
+
+  useEffect(() => {
+    let disposed = false;
+    const query = new URLSearchParams({
+      scope: uninstallScope,
+      keep_config: String(uninstallKeepConfig),
+      include_gpt_sovits: String(uninstallGptSovits),
+    });
     apiGet<UninstallPreviewResult>(`/ui/uninstall/preview?${query.toString()}`)
       .then((data) => {
         if (!disposed) setUninstallPreview(data.plan || null);
@@ -622,7 +788,7 @@ function GeneralSettingsView() {
     return () => {
       disposed = true;
     };
-  }, [uninstallScope, uninstallKeepConfig]);
+  }, [uninstallScope, uninstallKeepConfig, uninstallGptSovits]);
 
   useEffect(() => {
     if (status === 'Bridge 端口必须是整数' && Number.isInteger(Number(form.bridge_port))) {
@@ -633,7 +799,13 @@ function GeneralSettingsView() {
     }
   }, [form.bridge_host, form.bridge_port, status]);
 
-  async function selectDisplayMode(modeId: string) {
+  function selectDisplayMode(modeId: string) {
+    if (modeId === 'live2d' && !live2dResourceReady(payload)) {
+      window.sessionStorage.setItem(LIVE2D_ACTIVATION_DRAFT_KEY, '1');
+      setStatus('Live2D 资源未就绪，请先导入资源包或选择有效模型目录；暂不切换表现态');
+      window.setTimeout(() => navigateTo('settings', { mode: 'live2d', reason: 'live2d-resource-required' }), 350);
+      return;
+    }
     setForm((current) => ({ ...current, display_mode: modeId }));
   }
 
@@ -698,41 +870,167 @@ function GeneralSettingsView() {
   }
 
   async function restartBridge() {
-    setStatus('正在重启 Bridge…');
-    const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/bridge/restart');
-    if (result.ok === false) throw new Error(result.error || 'Bridge 重启失败');
-    await refreshGeneralSettings();
-    setStatus('Bridge 已按当前配置重启');
+    if (bridgeRestarting) return;
+    if (saving) {
+      setStatus('正在保存设置，请稍后再重启 Bridge');
+      return;
+    }
+    if (hasChanges) {
+      setStatus('请先保存更改，再重启 Bridge');
+      return;
+    }
+    const bridgePort = Number(form.bridge_port);
+    if (!Number.isInteger(bridgePort)) {
+      setStatus('Bridge 端口必须是整数');
+      return;
+    }
+    if (!form.bridge_host.trim()) {
+      setStatus('Bridge Host 不能为空');
+      return;
+    }
+
+    setBridgeRestarting(true);
+    setStatus('正在重启 Bridge，界面会短暂断开…');
+    try {
+      const targetBridgeUrl = `http://${form.bridge_host.trim()}:${bridgePort}`;
+      const desktopResult = await restartDesktopBridge(targetBridgeUrl);
+      if (!desktopResult.success) {
+        const result = await apiPost<{ ok?: boolean; error?: string; desktop_restart_backend_required?: boolean }>('/ui/bridge/restart');
+        if (result.ok === false) throw new Error(result.error || 'Bridge 重启失败');
+        if (result.desktop_restart_backend_required) {
+          throw new Error(result.error || desktopResult.error || '当前环境无法自动重启 Bridge，请重启 Hermes-Yachiyo');
+        }
+      }
+      await refreshGeneralSettings();
+      setStatus('Bridge 已按当前配置重启');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : 'Bridge 重启失败');
+    } finally {
+      setBridgeRestarting(false);
+    }
+  }
+
+  async function runAppUpdateCheck(showMessage = true) {
+    if (appUpdateAction) return;
+    setAppUpdateAction('check');
+    if (showMessage) setStatus('正在检查应用更新…');
+    try {
+      const result = await checkAppUpdate();
+      setAppUpdateCheck(result);
+      setAppUpdateInfo(result);
+      setAppUpdateDownload(result.downloaded_update?.ok ? result.downloaded_update : null);
+      if (showMessage) {
+        if (result.ok === false) throw new Error(result.error || '检查应用更新失败');
+        setStatus(result.update_available ? result.reason || '发现可用更新' : result.reason || '当前已是最新版本');
+      }
+    } catch (err) {
+      if (showMessage) setStatus(err instanceof Error ? err.message : '检查应用更新失败');
+    } finally {
+      setAppUpdateAction('');
+    }
+  }
+
+  async function runAppUpdateDownload() {
+    if (appUpdateAction) return;
+    setAppUpdateAction('download');
+    setAppUpdateProgress({ status: 'starting', file_name: appUpdateLatest?.dmg_name });
+    setStatus('正在下载应用更新…');
+    try {
+      const result = await downloadAppUpdate();
+      setAppUpdateDownload(result);
+      if (!result.ok) throw new Error(result.error || '下载应用更新失败');
+      const info = await getAppUpdateInfo();
+      setAppUpdateInfo(info);
+      setAppUpdateProgress({ status: 'completed', file_name: result.file_name, percent: 100 });
+      setStatus(result.verified ? '更新已下载并通过校验，可安装并重启' : '更新已下载，可安装并重启；当前元数据未提供 SHA256 校验值');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '下载应用更新失败');
+    } finally {
+      setAppUpdateAction('');
+    }
+  }
+
+  async function runAppUpdateInstall() {
+    if (appUpdateAction) return;
+    const dmgPath = appUpdateDownload?.path || appUpdateInfo?.downloaded_dmg_path || '';
+    if (!dmgPath) {
+      setStatus('请先下载应用更新');
+      return;
+    }
+    if (!window.confirm('将退出 Hermes-Yachiyo，用已下载的 DMG 覆盖当前应用，然后重新打开。继续吗？')) return;
+    setAppUpdateAction('install');
+    setStatus('正在准备安装更新，应用将退出并重新打开…');
+    try {
+      const result = await installAppUpdate(dmgPath);
+      if (!result.success) throw new Error(result.error || '启动更新安装失败');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '启动更新安装失败');
+      setAppUpdateAction('');
+    }
   }
 
   async function createBackup(overwriteLatest = false) {
+    if (backupBusy) return;
     if (overwriteLatest && !window.confirm('将生成新备份并替换最近一次备份，继续吗？')) return;
-    setStatus('正在生成备份…');
-    const result = await apiPost<{ ok?: boolean; error?: string; status?: BackupStatus }>('/ui/backup/create', { overwrite_latest: overwriteLatest });
-    if (result.ok === false) throw new Error(result.error || '生成备份失败');
-    setBackupStatus(result.status || null);
-    await refreshBackupStatus('备份已生成');
+    setBackupAction(overwriteLatest ? 'backup-overwrite' : 'backup-create');
+    setStatus(overwriteLatest ? '正在覆盖最近一次备份…' : '正在生成备份…');
+    try {
+      const result = await apiPost<{ ok?: boolean; error?: string; status?: BackupStatus }>('/ui/backup/create', { overwrite_latest: overwriteLatest });
+      if (result.ok === false) throw new Error(result.error || '生成备份失败');
+      setBackupStatus(result.status || null);
+      await refreshBackupStatus(overwriteLatest ? '最近一次备份已覆盖' : '备份已生成');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '生成备份失败');
+    } finally {
+      setBackupAction('');
+    }
   }
 
   async function restoreBackup(backupPath = '') {
+    if (backupBusy) return;
     if (!window.confirm('恢复备份会覆盖当前本地资料并安排应用重启，继续吗？')) return;
+    setBackupAction(backupPath ? `backup-restore:${backupPath}` : 'backup-restore');
     setStatus('正在恢复备份…');
-    const result = await apiPost<{ ok?: boolean; errors?: string[]; error?: string }>('/ui/backup/restore', { backup_path: backupPath });
-    if (result.ok === false) throw new Error(result.error || result.errors?.join('；') || '恢复备份失败');
-    setStatus('备份已恢复，应用将按需要重启');
+    try {
+      const result = await apiPost<{ ok?: boolean; errors?: string[]; error?: string }>('/ui/backup/restore', { backup_path: backupPath });
+      if (result.ok === false) throw new Error(result.error || result.errors?.join('；') || '恢复备份失败');
+      setStatus('备份已恢复，应用将按需要重启');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '恢复备份失败');
+    } finally {
+      setBackupAction('');
+    }
   }
 
   async function deleteBackup(backupPath: string) {
+    if (backupBusy) return;
     if (!backupPath || !window.confirm('确认删除这份备份吗？')) return;
-    const result = await apiPost<{ ok?: boolean; error?: string; status?: BackupStatus }>('/ui/backup/delete', { backup_path: backupPath });
-    if (result.ok === false) throw new Error(result.error || '删除备份失败');
-    setBackupStatus(result.status || null);
-    await refreshBackupStatus('备份已删除');
+    setBackupAction(`backup-delete:${backupPath}`);
+    setStatus('正在删除备份…');
+    try {
+      const result = await apiPost<{ ok?: boolean; error?: string; status?: BackupStatus }>('/ui/backup/delete', { backup_path: backupPath });
+      if (result.ok === false) throw new Error(result.error || '删除备份失败');
+      setBackupStatus(result.status || null);
+      await refreshBackupStatus('备份已删除');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '删除备份失败');
+    } finally {
+      setBackupAction('');
+    }
   }
 
   async function openBackupLocation(backupPath = '') {
-    const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/backup/open-location', { backup_path: backupPath });
-    setStatus(result.ok === false ? result.error || '打开备份位置失败' : '已打开备份位置');
+    if (backupBusy) return;
+    setBackupAction(backupPath ? `backup-open:${backupPath}` : 'backup-open');
+    setStatus('正在打开备份位置…');
+    try {
+      const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/backup/open-location', { backup_path: backupPath });
+      setStatus(result.ok === false ? result.error || '打开备份位置失败' : '已打开备份位置');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '打开备份位置失败');
+    } finally {
+      setBackupAction('');
+    }
   }
 
   async function runUninstall() {
@@ -748,18 +1046,17 @@ function GeneralSettingsView() {
       const result = await apiPost<{ ok?: boolean; error?: string; errors?: string[]; backup_path_display?: string; desktop_quit_required?: boolean; exit_scheduled?: boolean }>('/ui/uninstall/run', {
         scope: uninstallScope,
         keep_config: uninstallKeepConfig,
+        include_gpt_sovits: uninstallGptSovits,
         confirm_text: uninstallConfirmText,
       });
       if (result.ok === false) throw new Error(result.error || result.errors?.join('；') || '卸载失败');
       const backupText = result.backup_path_display ? `备份已保存到 ${result.backup_path_display}。` : '';
-      setStatus(`卸载已执行。${backupText} 应用正在退出…`);
-      if (result.desktop_quit_required || result.exit_scheduled) {
-        window.setTimeout(() => {
-          void quitApp();
-        }, 250);
-        return;
+      setStatus(`卸载已执行。${backupText} 正在删除应用本体并退出…`);
+      const removeResult = await removeAppBundleAndQuit();
+      if (!removeResult.success) {
+        throw new Error(removeResult.error || '本地资料已删除，但无法自动删除应用本体；请从 Applications 中手动移除 Hermes-Yachiyo');
       }
-      setUninstallRunning(false);
+      return;
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '卸载失败');
       setUninstallRunning(false);
@@ -767,7 +1064,11 @@ function GeneralSettingsView() {
   }
 
   async function refreshUninstallPreview() {
-    const query = new URLSearchParams({ scope: uninstallScope, keep_config: String(uninstallKeepConfig) });
+    const query = new URLSearchParams({
+      scope: uninstallScope,
+      keep_config: String(uninstallKeepConfig),
+      include_gpt_sovits: String(uninstallGptSovits),
+    });
     const data = await apiGet<UninstallPreviewResult>(`/ui/uninstall/preview?${query.toString()}`);
     if (data.ok === false) throw new Error(data.error || '生成卸载清单失败');
     setUninstallPreview(data.plan || null);
@@ -790,7 +1091,7 @@ function GeneralSettingsView() {
         <article className="panel setting-card">
           <span>Hermes</span>
           <strong>{payload?.hermes?.status || '读取中'}</strong>
-          <small>{payload?.hermes?.ready ? '能力就绪' : payload?.hermes?.readiness_level || '待检测'}</small>
+          <small>{payload?.hermes?.ready ? '能力就绪' : hermesReadinessLabel(payload?.hermes?.readiness_level)}</small>
         </article>
         <article className="panel setting-card">
           <span>Bridge</span>
@@ -808,7 +1109,7 @@ function GeneralSettingsView() {
         <article className="panel settings-section">
           <div className="section-heading-row">
             <h2>Hermes Agent</h2>
-            <span>{payload?.hermes?.ready ? 'ready' : payload?.hermes?.readiness_level || 'unknown'}</span>
+            <span>{payload?.hermes?.ready ? 'ready' : hermesReadinessLabel(payload?.hermes?.readiness_level)}</span>
           </div>
           <SettingsRows rows={[
             ['安装状态', payload?.hermes?.status],
@@ -925,6 +1226,9 @@ function GeneralSettingsView() {
             <h2>备份策略</h2>
             <span>配置、工作空间、聊天数据库、缓存、日志和导入资源</span>
           </div>
+          <p className="settings-note wide-form-note">
+            Live2D 模型、GPT-SoVITS 权重、参考音频和附件缓存都会进入备份；导入资源越大，备份生成、恢复和传输就会越久。
+          </p>
           <label className="settings-check wide" htmlFor="backup-auto-cleanup">
             <input
               id="backup-auto-cleanup"
@@ -976,7 +1280,9 @@ function GeneralSettingsView() {
             ['配置漂移', payload?.bridge?.config_dirty ? listValue(payload.bridge.drift_details) : '无'],
           ]} />
           <div className="settings-action-strip">
-            <button type="button" onClick={() => void restartBridge()}>应用配置并重启 Bridge</button>
+            <button type="button" disabled={bridgeRestarting || saving} onClick={() => void restartBridge()}>
+              {bridgeRestarting ? '重启中…' : '应用配置并重启 Bridge'}
+            </button>
           </div>
         </article>
 
@@ -992,6 +1298,36 @@ function GeneralSettingsView() {
 
       <section className="panel settings-section">
         <div className="section-heading-row">
+          <h2>应用更新</h2>
+          <span>{appUpdateStatusLabel(appUpdateInfo, appUpdateCheck)}</span>
+        </div>
+        <SettingsRows rows={[
+          ['渠道', appUpdateChannelLabel(appUpdateCurrent?.channel, appUpdateCurrent?.branch)],
+          ['当前构建', appUpdateBuildLabel(appUpdateCurrent?.version, appUpdateCurrent?.build_number, appUpdateCurrent?.short_commit)],
+          ['最新构建', appUpdateBuildLabel(appUpdateLatest?.version, appUpdateLatest?.build_number ?? appUpdateLatest?.run_number, appUpdateLatest?.short_commit)],
+          ['更新元数据', appUpdateInfo?.latest_json_url],
+          ['下载文件', appUpdateDownloaded?.file_name || appUpdateProgress?.file_name || appUpdateLatest?.dmg_name],
+          ['下载进度', appUpdateProgressLabel(appUpdateProgress, appUpdateDownloaded)],
+          ['校验状态', appUpdateVerificationLabel(appUpdateDownloaded || null)],
+        ]} />
+        <AppUpdateChangelogPanel changelog={appUpdateChangelog} />
+        <div className="settings-action-strip">
+          <button type="button" disabled={appUpdateBusy || !appUpdateSupported} onClick={() => void runAppUpdateCheck()}>
+            {appUpdateAction === 'check' ? '检查中...' : '检查更新'}
+          </button>
+          <button
+            type="button"
+            className={appUpdateDownloadedPath ? 'primary-action' : undefined}
+            disabled={appUpdateBusy || !appUpdateSupported || (!appUpdateDownloadedPath && !appUpdateCheck?.update_available)}
+            onClick={() => (appUpdateDownloadedPath ? void runAppUpdateInstall() : void runAppUpdateDownload())}
+          >
+            {appUpdateAction === 'install' ? '准备中...' : appUpdateDownloadedPath ? '安装并重启' : appUpdateAction === 'download' ? appUpdateDownloadButtonLabel(appUpdateProgress) : '下载更新'}
+          </button>
+        </div>
+      </section>
+
+      <section className="panel settings-section">
+        <div className="section-heading-row">
           <h2>备份</h2>
           <span>{backupStatus?.has_backup ? `${backupStatus.count || 0} 份 / ${backupStatus.total_size_display || '0 B'}` : '暂无备份'}</span>
         </div>
@@ -999,12 +1335,43 @@ function GeneralSettingsView() {
           ['最近备份', backupSummary(backupStatus?.latest || null)],
           ['备份状态', backupStatus?.ok === false ? backupStatus.error : '正常'],
         ]} />
+        <p className="settings-note">
+          备份会包含已导入的 Live2D 与 GPT-SoVITS 资源。完整资源包可能让备份达到数百 MB，生成期间请保持应用打开。
+        </p>
         <div className="settings-action-strip">
-          <button type="button" onClick={() => void createBackup(false)}>立即生成备份</button>
-          <button type="button" onClick={() => void createBackup(true)}>覆盖最近一次备份</button>
-          <button type="button" onClick={() => void restoreBackup()}>恢复最近备份</button>
-          <button type="button" onClick={() => void openBackupLocation()}>打开备份目录</button>
-          <button type="button" onClick={() => setBackupManagerOpen((open) => !open)}>{backupManagerOpen ? '收起管理器' : '管理备份'}</button>
+          <button
+            type="button"
+            className={backupAction === 'backup-create' ? 'loading-button' : undefined}
+            disabled={backupBusy}
+            onClick={() => void createBackup(false)}
+          >
+            {backupAction === 'backup-create' ? '生成中...' : '立即生成备份'}
+          </button>
+          <button
+            type="button"
+            className={backupAction === 'backup-overwrite' ? 'loading-button' : undefined}
+            disabled={backupBusy}
+            onClick={() => void createBackup(true)}
+          >
+            {backupAction === 'backup-overwrite' ? '覆盖中...' : '覆盖最近一次备份'}
+          </button>
+          <button
+            type="button"
+            className={backupAction === 'backup-restore' ? 'loading-button' : undefined}
+            disabled={backupBusy}
+            onClick={() => void restoreBackup()}
+          >
+            {backupAction === 'backup-restore' ? '恢复中...' : '恢复最近备份'}
+          </button>
+          <button
+            type="button"
+            className={backupAction === 'backup-open' ? 'loading-button' : undefined}
+            disabled={backupBusy}
+            onClick={() => void openBackupLocation()}
+          >
+            {backupAction === 'backup-open' ? '打开中...' : '打开备份目录'}
+          </button>
+          <button type="button" disabled={backupBusy} onClick={() => setBackupManagerOpen((open) => !open)}>{backupManagerOpen ? '收起管理器' : '管理备份'}</button>
         </div>
         {backupManagerOpen ? (
           <div className="backup-manager visible">
@@ -1016,9 +1383,30 @@ function GeneralSettingsView() {
                   {!item.valid ? <div className="meta warn-text">{item.error || '备份无效'}</div> : null}
                 </div>
                 <div className="actions">
-                  <button type="button" onClick={() => void restoreBackup(item.path || '')}>恢复此版本</button>
-                  <button type="button" onClick={() => void openBackupLocation(item.path || '')}>打开位置</button>
-                  <button type="button" onClick={() => void deleteBackup(item.path || '')}>删除</button>
+                  <button
+                    type="button"
+                    className={backupAction === `backup-restore:${item.path || ''}` ? 'loading-button' : undefined}
+                    disabled={backupBusy}
+                    onClick={() => void restoreBackup(item.path || '')}
+                  >
+                    {backupAction === `backup-restore:${item.path || ''}` ? '恢复中...' : '恢复此版本'}
+                  </button>
+                  <button
+                    type="button"
+                    className={backupAction === `backup-open:${item.path || ''}` ? 'loading-button' : undefined}
+                    disabled={backupBusy}
+                    onClick={() => void openBackupLocation(item.path || '')}
+                  >
+                    {backupAction === `backup-open:${item.path || ''}` ? '打开中...' : '打开位置'}
+                  </button>
+                  <button
+                    type="button"
+                    className={backupAction === `backup-delete:${item.path || ''}` ? 'loading-button' : undefined}
+                    disabled={backupBusy}
+                    onClick={() => void deleteBackup(item.path || '')}
+                  >
+                    {backupAction === `backup-delete:${item.path || ''}` ? '删除中...' : '删除'}
+                  </button>
                 </div>
               </div>
             )) : <div className="empty-state inline-empty">暂无可管理备份</div>}
@@ -1031,7 +1419,7 @@ function GeneralSettingsView() {
           <h2>卸载</h2>
           <span>{uninstallPreview ? `${uninstallPreview.removable_count || 0}/${uninstallPreview.existing_count || 0} 可删除` : '生成清单中'}</span>
         </div>
-        <p className="settings-note">卸载会删除所选范围内的本地资料；如选择同时卸载 Hermes Agent，会额外删除可识别且安全范围内的 Hermes Home 与命令。</p>
+        <p className="settings-note">卸载会删除所选范围内的本地资料，并在完成后删除当前 Hermes-Yachiyo 应用本体；如选择同时卸载 Hermes Agent，会额外删除可识别且安全范围内的 Hermes Home 与命令。</p>
         <div className="settings-form-grid uninstall-options">
           <div className="settings-field">
             <label htmlFor="uninstall-scope">卸载范围</label>
@@ -1048,6 +1436,15 @@ function GeneralSettingsView() {
               onChange={(event) => setUninstallKeepConfig(event.target.checked)}
             />
             <span>卸载前生成备份</span>
+          </label>
+          <label className="settings-check" htmlFor="uninstall-gpt-sovits">
+            <input
+              id="uninstall-gpt-sovits"
+              type="checkbox"
+              checked={uninstallGptSovits}
+              onChange={(event) => setUninstallGptSovits(event.target.checked)}
+            />
+            <span>同时卸载 GPT-SoVITS 本地服务</span>
           </label>
         </div>
         <div className="uninstall-preview-react">
@@ -1106,12 +1503,138 @@ function IntegrationRows({ title, item }: { title: string; item?: StatusRecord }
   );
 }
 
+function AppUpdateChangelogPanel({ changelog }: { changelog?: ReleaseChangelog }) {
+  const sections = (changelog?.sections || [])
+    .map((section) => ({
+      title: section.title || '更新',
+      items: (section.items || []).filter((item) => item?.subject),
+    }))
+    .filter((section) => section.items.length);
+  const fallbackItems = !sections.length
+    ? (changelog?.commits || []).filter((item) => item?.subject)
+    : [];
+  const hasContent = sections.length > 0 || fallbackItems.length > 0;
+  if (!hasContent) return null;
+  const compareUrl = typeof changelog?.compare_url === 'string' ? changelog.compare_url : '';
+  return (
+    <div className="app-update-changelog">
+      <div className="app-update-changelog-heading">
+        <h3>更新内容</h3>
+        {compareUrl ? (
+          <button type="button" onClick={() => void openExternalUrl(compareUrl)}>查看提交对比</button>
+        ) : null}
+      </div>
+      {sections.length ? sections.map((section) => (
+        <div className="app-update-changelog-section" key={section.title}>
+          <strong>{section.title}</strong>
+          <ul>
+            {section.items.map((item) => <AppUpdateChangelogItem key={changelogItemKey(item)} item={item} />)}
+          </ul>
+        </div>
+      )) : (
+        <div className="app-update-changelog-section">
+          <ul>
+            {fallbackItems.map((item) => <AppUpdateChangelogItem key={changelogItemKey(item)} item={item} />)}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AppUpdateChangelogItem({ item }: { item: ReleaseChangelogCommit }) {
+  return (
+    <li>
+      <span>{item.subject}</span>
+      {item.short_commit ? <small>{item.short_commit}</small> : null}
+    </li>
+  );
+}
+
+function changelogItemKey(item: ReleaseChangelogCommit): string {
+  return item.commit || `${item.short_commit || ''}-${item.subject || ''}`;
+}
+
 function listValue(items?: string[]): string {
   return items?.length ? items.join('、') : '—';
 }
 
+function appUpdateChannelLabel(channel?: string, branch?: string): string {
+  if (channel === 'stable' || branch === 'main') return '正式版 / main';
+  if (channel === 'experimental' || branch === 'develop') return '开发版 / develop';
+  return channel || branch || '—';
+}
+
+function appUpdateBuildLabel(version?: string, buildNumber?: number, shortCommit?: string): string {
+  const parts = [
+    version || '',
+    buildNumber !== undefined ? `#${buildNumber}` : '',
+    shortCommit || '',
+  ].filter(Boolean);
+  return parts.length ? parts.join(' / ') : '—';
+}
+
+function appUpdateStatusLabel(info: AppUpdateInfo | null, check: AppUpdateCheckResult | null): string {
+  if (info?.downloaded_update?.ok || check?.downloaded_update?.ok) return '已下载';
+  if (check?.ok === false) return '检查失败';
+  if (check?.update_available) return '有更新';
+  if (check?.ok) return '已是最新';
+  if (info?.supported === false) return info.packaged ? '不可更新' : '开发环境';
+  return '待检查';
+}
+
+function appUpdateVerificationLabel(download: AppUpdateDownloadResult | null): string {
+  if (!download) return '—';
+  if (download.ok === false) return '失败';
+  return download.verified ? 'SHA256 已通过' : '未提供 SHA256';
+}
+
+function appUpdateProgressLabel(
+  progress: AppUpdateDownloadProgress | null,
+  download: AppUpdateDownloadResult | undefined,
+): string {
+  if (download?.ok) return '已下载';
+  if (!progress) return '—';
+  if (progress.status === 'verifying') return '校验中';
+  if (progress.status === 'completed') return '100%';
+  if (progress.status === 'failed') return progress.error || '失败';
+  if (typeof progress.percent === 'number') return `${progress.percent.toFixed(progress.percent % 1 ? 1 : 0)}%`;
+  if (progress.received_bytes) return formatByteCount(progress.received_bytes);
+  if (progress.status === 'starting') return '准备下载';
+  return '下载中';
+}
+
+function appUpdateDownloadButtonLabel(progress: AppUpdateDownloadProgress | null): string {
+  if (progress?.status === 'verifying') return '校验中...';
+  if (typeof progress?.percent === 'number') return `下载中 ${progress.percent.toFixed(0)}%`;
+  return '下载中...';
+}
+
+function formatByteCount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
 function modeLabel(mode: string) {
   return mode === 'live2d' ? 'Live2D' : 'Bubble';
+}
+
+function hermesReadinessLabel(level?: string): string {
+  const labels: Record<string, string> = {
+    full_ready: 'Doctor 完整就绪',
+    core_ready: '核心能力就绪',
+    basic_ready: '基础就绪，Doctor 未分级',
+    limited: '存在受限能力',
+    unknown: '未完成 Doctor 分级',
+  };
+  return labels[level || 'unknown'] || level || '待检测';
 }
 
 function workspaceDirs(dirs?: Record<string, string>): string {
@@ -1223,8 +1746,8 @@ function buildGeneralSettingsChanges(
   return changes;
 }
 
-function modeFieldSections(mode: string): ModeFieldSection[] {
-  return mode === 'live2d' ? LIVE2D_FIELD_SECTIONS : BUBBLE_FIELD_SECTIONS;
+function modeFieldSections(mode: string, payload?: SettingsPayload | null): ModeFieldSection[] {
+  return mode === 'live2d' ? live2dFieldSections(payload) : BUBBLE_FIELD_SECTIONS;
 }
 
 function modeFieldSpecs(mode: string): ModeFieldSpec[] {
@@ -1254,9 +1777,9 @@ function buildModeSettingsChanges(
   payload: SettingsPayload,
   form: ModeForm,
   specs: ModeFieldSpec[],
-): Record<string, string | number | boolean> {
+): Record<string, ModeParsedValue> {
   const config = payload.settings?.config || {};
-  const changes: Record<string, string | number | boolean> = {};
+  const changes: Record<string, ModeParsedValue> = {};
   specs.forEach((spec) => {
     const parsed = parseModeFieldValue(form[spec.key], spec);
     const current = modeConfigValue(config, spec);
@@ -1267,13 +1790,25 @@ function buildModeSettingsChanges(
   return changes;
 }
 
+function shouldActivateLive2DAfterSave(
+  mode: string,
+  changes: Record<string, ModeParsedValue>,
+  activationPending: boolean,
+): boolean {
+  if (mode !== 'live2d') return false;
+  if (activationPending) return true;
+  const modelPath = changes['live2d_mode.model_path'];
+  return typeof modelPath === 'string' && modelPath.trim().length > 0;
+}
+
 function validateModeForm(form: ModeForm, specs: ModeFieldSpec[]): string {
   for (const spec of specs) {
     const raw = form[spec.key];
-    if (spec.kind === 'checkbox' || spec.kind === 'text') continue;
+    if (spec.kind === 'expressionRules') continue;
+    if (spec.kind === 'checkbox' || spec.kind === 'text' || spec.kind === 'textarea') continue;
     if (spec.kind === 'select') {
       const value = String(raw ?? '');
-      if (!spec.options?.some((option) => option.value === value)) return `${spec.label} 仅支持当前可选项`;
+      if (!spec.allowCustom && !spec.options?.some((option) => option.value === value)) return `${spec.label} 仅支持当前可选项`;
       continue;
     }
     const text = String(raw ?? '').trim();
@@ -1287,8 +1822,9 @@ function validateModeForm(form: ModeForm, specs: ModeFieldSpec[]): string {
   return '';
 }
 
-function parseModeFieldValue(value: ModeFormValue | undefined, spec: ModeFieldSpec): string | number | boolean {
+function parseModeFieldValue(value: ModeFormValue | undefined, spec: ModeFieldSpec): ModeParsedValue {
   if (spec.kind === 'checkbox') return Boolean(value);
+  if (spec.kind === 'expressionRules') return parseExpressionRulesFormValue(value);
   if (spec.kind === 'number') {
     const number = Number(value);
     return spec.integer ? Math.trunc(number) : number;
@@ -1303,13 +1839,17 @@ function modeConfigValue(config: ModeConfig, spec: ModeFieldSpec): unknown {
 
 function modeFormValue(value: unknown, spec: ModeFieldSpec): ModeFormValue {
   if (spec.kind === 'checkbox') return Boolean(value);
+  if (spec.kind === 'expressionRules') return JSON.stringify(cleanStringRecord(value));
   if (spec.kind === 'percent') return formatNumber(Number(value || 0) * 100);
   if (spec.kind === 'number') return value === undefined || value === null ? '' : formatNumber(Number(value));
   return String(value ?? '');
 }
 
-function sameModeConfigValue(current: unknown, next: string | number | boolean, spec: ModeFieldSpec): boolean {
+function sameModeConfigValue(current: unknown, next: ModeParsedValue, spec: ModeFieldSpec): boolean {
   if (spec.kind === 'checkbox') return Boolean(current) === next;
+  if (spec.kind === 'expressionRules') {
+    return JSON.stringify(sortStringRecord(cleanStringRecord(current))) === JSON.stringify(sortStringRecord(next));
+  }
   if (spec.kind === 'number' || spec.kind === 'percent') return nearlyEqual(Number(current), Number(next));
   return String(current ?? '') === String(next);
 }
@@ -1352,6 +1892,34 @@ function stringValue(value: unknown): string {
   return value === undefined || value === null ? '' : String(value);
 }
 
+function cleanStringRecord(value: unknown): Record<string, string> {
+  const record = asRecord(value);
+  return Object.fromEntries(
+    Object.entries(record)
+      .map(([key, item]) => [key.trim(), stringValue(item).trim()])
+      .filter(([key, item]) => Boolean(key && item)),
+  );
+}
+
+function sortStringRecord(value: unknown): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(cleanStringRecord(value)).sort(([left], [right]) => left.localeCompare(right)),
+  );
+}
+
+function parseExpressionRulesFormValue(value: unknown): Record<string, string> {
+  if (typeof value !== 'string') return cleanStringRecord(value);
+  try {
+    return cleanStringRecord(JSON.parse(value));
+  } catch {
+    return {};
+  }
+}
+
+function live2dExpressionIdentifier(expression: Live2DExpressionItem): string {
+  return stringValue(expression.name || expression.file).trim();
+}
+
 function live2dStateLabel(state: string): string {
   const labels: Record<string, string> = {
     not_configured: '未检测到资源',
@@ -1367,10 +1935,65 @@ function live2dStateClass(state: string): string {
   return state === 'path_valid' || state === 'loaded' ? 'ok' : 'warn';
 }
 
+function live2dResourceReady(payload: GeneralSettingsPayload | null): boolean {
+  const live2dConfig = asRecord(payload?.mode_settings?.live2d?.config);
+  const state = stringValue(live2dConfig.model_state || asRecord(live2dConfig.resource).state);
+  return state === 'path_valid' || state === 'loaded';
+}
+
 function live2dExpressionSummary(summary: ModeConfig): string {
   const expressions = Array.isArray(summary.expressions) ? summary.expressions : [];
   if (!expressions.length) return '当前模型未声明可选表情';
   return expressions.map((item) => stringValue(asRecord(item).name || asRecord(item).file || '未命名表情')).join(' / ');
+}
+
+function live2dExpressionOptions(payload?: SettingsPayload | null): ModeFieldOption[] {
+  const options: ModeFieldOption[] = [{ value: '', label: '自动匹配' }];
+  const seen = new Set(['']);
+  for (const expression of live2dExpressions(payload)) {
+    const value = live2dExpressionIdentifier(expression);
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    const file = stringValue(expression.file).trim();
+    options.push({
+      value,
+      label: file && file !== value ? `${value} · ${file}` : value,
+    });
+  }
+  return options;
+}
+
+function live2dExpressions(payload?: SettingsPayload | null): Live2DExpressionItem[] {
+  const config = payload?.settings?.config || {};
+  const summary = asRecord(config.summary);
+  const expressions = Array.isArray(summary.expressions) ? summary.expressions : [];
+  return expressions
+    .map((item) => {
+      const record = asRecord(item);
+      return {
+        name: stringValue(record.name).trim(),
+        file: stringValue(record.file).trim(),
+      };
+    })
+    .filter((item) => Boolean(live2dExpressionIdentifier(item)));
+}
+
+function live2dFieldSections(payload?: SettingsPayload | null): ModeFieldSection[] {
+  const expressionOptions = live2dExpressionOptions(payload);
+  const expressions = live2dExpressions(payload);
+  return LIVE2D_FIELD_SECTIONS.map((section) => ({
+    ...section,
+    fields: section.fields.map((field) => {
+      if (field.kind === 'expressionRules') return { ...field, expressions };
+      if (field.key.endsWith('_expression')) return { ...field, options: expressionOptions };
+      return field;
+    }),
+  }));
+}
+
+function selectOptionsWithCurrentValue(options: ModeFieldOption[], value: string): ModeFieldOption[] {
+  if (!value || options.some((option) => option.value === value)) return options;
+  return [...options, { value, label: `${value}（当前配置）` }];
 }
 
 function live2dMotionSummary(summary: ModeConfig): string {
@@ -1414,14 +2037,6 @@ const BUBBLE_FIELD_SECTIONS: ModeFieldSection[] = [
       { key: 'bubble_mode.opacity', sourceKey: 'opacity', label: '透明度', kind: 'number', min: 0.2, max: 1, step: '0.01' },
     ],
   },
-  {
-    title: '主动交互',
-    fields: [
-      { key: 'bubble_mode.proactive_enabled', sourceKey: 'proactive_enabled', label: '主动对话', kind: 'checkbox', wide: true },
-      { key: 'bubble_mode.proactive_desktop_watch_enabled', sourceKey: 'proactive_desktop_watch_enabled', label: '定期桌面观察', kind: 'checkbox', wide: true },
-      { key: 'bubble_mode.proactive_interval_seconds', sourceKey: 'proactive_interval_seconds', label: '观察间隔秒', kind: 'number', min: 60, max: 3600, integer: true },
-    ],
-  },
 ];
 
 const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
@@ -1433,8 +2048,19 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
       { key: 'live2d_mode.model_path', sourceKey: 'model_path', label: '模型路径', kind: 'text', wide: true },
       { key: 'live2d_mode.width', sourceKey: 'width', label: '窗口宽度', kind: 'number', min: 240, integer: true },
       { key: 'live2d_mode.height', sourceKey: 'height', label: '窗口高度', kind: 'number', min: 240, integer: true },
-      { key: 'live2d_mode.position_x', sourceKey: 'position_x', label: '位置 X', kind: 'number', integer: true },
-      { key: 'live2d_mode.position_y', sourceKey: 'position_y', label: '位置 Y', kind: 'number', integer: true },
+      {
+        key: 'live2d_mode.position_anchor',
+        sourceKey: 'position_anchor',
+        label: '默认位置',
+        kind: 'select',
+        options: [
+          { value: 'right_bottom', label: '右下角' },
+          { value: 'left_bottom', label: '左下角' },
+          { value: 'custom', label: '自定义坐标' },
+        ],
+      },
+      { key: 'live2d_mode.position_x', sourceKey: 'position_x', label: '水平边距 / X', kind: 'number', integer: true },
+      { key: 'live2d_mode.position_y', sourceKey: 'position_y', label: '底部 / Y', kind: 'number', integer: true },
       { key: 'live2d_mode.window_on_top', sourceKey: 'window_on_top', label: '窗口置顶', kind: 'checkbox', wide: true },
       { key: 'live2d_mode.show_on_all_spaces', sourceKey: 'show_on_all_spaces', label: 'macOS 所有桌面可见', kind: 'checkbox', wide: true },
     ],
@@ -1475,33 +2101,16 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
     ],
   },
   {
-    title: '主动交互',
+    title: '表情映射',
+    note: '选项来自当前 model3.json 的 Expressions；每行填写会触发该表情的回复情绪或关键词，逗号、空格、顿号都可以分隔。没有命中时保持默认表情。',
     fields: [
-      { key: 'live2d_mode.proactive_enabled', sourceKey: 'proactive_enabled', label: '主动对话', kind: 'checkbox', wide: true },
-      { key: 'live2d_mode.proactive_desktop_watch_enabled', sourceKey: 'proactive_desktop_watch_enabled', label: '定期桌面观察', kind: 'checkbox', wide: true },
-      { key: 'live2d_mode.proactive_interval_seconds', sourceKey: 'proactive_interval_seconds', label: '观察间隔秒', kind: 'number', min: 60, max: 3600, integer: true },
-    ],
-  },
-  {
-    title: 'Live2D TTS',
-    note: 'TTS 默认关闭；none 或配置缺失时不会调用外部服务，失败也不会影响聊天。',
-    fields: [
-      { key: 'tts.enabled', sourceKey: 'tts_enabled', label: '启用 Live2D TTS', kind: 'checkbox', wide: true },
       {
-        key: 'tts.provider',
-        sourceKey: 'tts_provider',
-        label: 'TTS Provider',
-        kind: 'select',
-        options: [
-          { value: 'none', label: 'none（关闭）' },
-          { value: 'http', label: 'http POST' },
-          { value: 'command', label: '本地命令' },
-        ],
+        key: 'live2d_mode.expression_keywords',
+        sourceKey: 'expression_keywords',
+        label: '回复内容表情规则',
+        kind: 'expressionRules',
+        wide: true,
       },
-      { key: 'tts.endpoint', sourceKey: 'tts_endpoint', label: 'TTS HTTP Endpoint', kind: 'text', wide: true },
-      { key: 'tts.command', sourceKey: 'tts_command', label: 'TTS 本地命令', kind: 'text', wide: true },
-      { key: 'tts.voice', sourceKey: 'tts_voice', label: 'TTS 音色', kind: 'text' },
-      { key: 'tts.timeout_seconds', sourceKey: 'tts_timeout_seconds', label: 'TTS 超时秒', kind: 'number', min: 1, max: 120, integer: true },
     ],
   },
 ];

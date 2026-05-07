@@ -9,12 +9,9 @@
   - send_quick_message(): 快捷发送一条消息（委托 ChatAPI）
 
 使用方：
-  - BubbleWindowAPI
-  - Live2DWindowAPI
+  - Electron LauncherView（Bubble / Live2D）
   - MainWindowAPI（Control Center）
-
-不使用方（直接用 ChatAPI）：
-  - ChatWindowAPI（完整聊天窗口）
+  - ChatView 以外的轻量摘要入口
 """
 
 from __future__ import annotations

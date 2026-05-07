@@ -7,6 +7,7 @@ import logging
 import os
 import platform
 import re
+import shutil
 import subprocess
 from typing import Tuple
 
@@ -14,6 +15,7 @@ from packages.protocol.enums import HermesInstallStatus, HermesReadinessLevel, P
 from packages.protocol.install import HermesInstallInfo, HermesVersionInfo
 
 logger = logging.getLogger(__name__)
+_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 # Hermes 最低要求版本（示例）
 HERMES_MIN_VERSION = "0.8.0"
@@ -24,6 +26,38 @@ PLATFORM_MAPPING = {
     "Linux": Platform.LINUX,
     "Windows": Platform.WINDOWS_NATIVE,  # 需要检测是否在 WSL2
 }
+
+
+def _resolve_hermes_candidate(hermes_path: str) -> str | None:
+    expanded = os.path.expanduser(hermes_path)
+    if os.path.sep in expanded or expanded.startswith("."):
+        return expanded
+    return shutil.which(expanded)
+
+
+def is_self_referential_hermes_wrapper(hermes_path: str) -> bool:
+    """Detect a damaged hermes launcher that execs its own resolved path."""
+    candidate = _resolve_hermes_candidate(hermes_path)
+    if not candidate or not os.path.isfile(candidate):
+        return False
+
+    resolved = os.path.realpath(candidate)
+    try:
+        with open(resolved, "r", encoding="utf-8", errors="ignore") as handle:
+            content = handle.read(4096)
+    except OSError:
+        return False
+
+    if "exec " not in content or "hermes" not in content:
+        return False
+
+    for match in re.finditer(r'^\s*exec\s+["\']?([^"\'\s]+)["\']?', content, re.MULTILINE):
+        target = os.path.expanduser(match.group(1))
+        if not os.path.isabs(target):
+            target = os.path.join(os.path.dirname(resolved), target)
+        if os.path.realpath(target) == resolved:
+            return True
+    return False
 
 
 def detect_platform() -> Platform:
@@ -64,6 +98,9 @@ def check_hermes_command(hermes_path: str = "hermes") -> Tuple[bool, str | None]
     Returns:
         (exists, error_message)
     """
+    if is_self_referential_hermes_wrapper(hermes_path):
+        return False, "hermes 启动脚本指向自身，当前 Hermes Agent 安装已损坏，请重新安装"
+
     try:
         result = subprocess.run(
             [hermes_path, "--version"],
@@ -306,6 +343,57 @@ def get_hermes_home() -> str:
     return default_hermes_home
 
 
+def parse_hermes_doctor_output(output: str) -> dict[str, object]:
+    """Parse the Hermes doctor output into stable tool availability fields."""
+    text = _ANSI_RE.sub("", output or "")
+    m = re.search(r"Found\s+(\d+)\s+issue", text)
+    issues_count = int(m.group(1)) if m else 0
+    available_tools: list[str] = []
+    limited_tools: list[str] = []
+    limited_tool_details: dict[str, str] = {}
+    in_tools_section = False
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if "Tool Availability" in stripped or (stripped.startswith("◆") and "Tool" in stripped):
+            in_tools_section = True
+            continue
+        if in_tools_section and stripped.startswith("◆"):
+            in_tools_section = False
+            continue
+        if not in_tools_section:
+            continue
+
+        ok_match = re.match(r"\s*(?:✓|✔|✅)\s+([A-Za-z0-9_.-]+)", line)
+        if ok_match:
+            available_tools.append(ok_match.group(1))
+            continue
+
+        limited_match = re.match(
+            r"\s*(?:⚠️?|✗|❌)\s+([A-Za-z0-9_.-]+)(?:\s+\((.*?)\))?",
+            line,
+        )
+        if limited_match:
+            name = limited_match.group(1)
+            detail = (limited_match.group(2) or "").strip()
+            limited_tools.append(name)
+            if detail:
+                limited_tool_details[name] = detail
+
+    readiness_level = (
+        HermesReadinessLevel.FULL_READY.value
+        if issues_count == 0 and not limited_tools
+        else HermesReadinessLevel.BASIC_READY.value
+    )
+    return {
+        "readiness_level": readiness_level,
+        "available_tools": available_tools,
+        "limited_tools": limited_tools,
+        "limited_tool_details": limited_tool_details,
+        "doctor_issues_count": issues_count,
+    }
+
+
 def check_hermes_doctor_readiness(
     timeout: float = 5.0,
     hermes_path: str = "hermes",
@@ -329,41 +417,44 @@ def check_hermes_doctor_readiness(
         )
         output = result.stdout + result.stderr
 
-        # 解析末尾 issue 数
-        m = re.search(r'Found (\d+) issue', output)
-        issues_count = int(m.group(1)) if m else 0
-
-        # 解析 Tool Availability 节的受限工具
-        limited_tools: list[str] = []
-        in_tools_section = False
-        for line in output.splitlines():
-            stripped = line.strip()
-            if "Tool Availability" in stripped or (stripped.startswith("◆") and "Tool" in stripped):
-                in_tools_section = True
-                continue
-            if in_tools_section and stripped.startswith("◆"):
-                in_tools_section = False
-                continue
-            if in_tools_section and any(marker in line for marker in ("⚠", "✗", "❌")):
-                # 格式: "  ⚠ toolname (reason)"，工具名可能包含 - / _ / .
-                nm = re.match(r"\s*(?:⚠|✗|❌)\s+([A-Za-z0-9_.-]+)", line)
-                if nm:
-                    limited_tools.append(nm.group(1))
-
-        if issues_count == 0 and not limited_tools:
-            return HermesReadinessLevel.FULL_READY, [], 0
-        else:
-            return HermesReadinessLevel.BASIC_READY, limited_tools, issues_count
+        summary = parse_hermes_doctor_output(output)
+        check_hermes_doctor_readiness.last_summary = summary  # type: ignore[attr-defined]
+        readiness_level = HermesReadinessLevel(str(summary["readiness_level"]))
+        limited_tools = list(summary["limited_tools"])
+        issues_count = int(summary["doctor_issues_count"])
+        return readiness_level, limited_tools, issues_count
 
     except FileNotFoundError:
         # hermes 命令不存在（理论上不应到达此处，安装检测已先行）
+        check_hermes_doctor_readiness.last_summary = {}  # type: ignore[attr-defined]
         return HermesReadinessLevel.UNKNOWN, [], 0
     except subprocess.TimeoutExpired:
         logger.debug("hermes doctor 超时（%.1fs），跳过就绪分级", timeout)
+        check_hermes_doctor_readiness.last_summary = {}  # type: ignore[attr-defined]
         return HermesReadinessLevel.UNKNOWN, [], 0
     except Exception as exc:
         logger.debug("hermes doctor 检测失败，跳过就绪分级: %s", exc)
+        check_hermes_doctor_readiness.last_summary = {}  # type: ignore[attr-defined]
         return HermesReadinessLevel.UNKNOWN, [], 0
+
+
+def find_existing_hermes_agent_install_dir() -> str | None:
+    """Return the Hermes Agent project directory if it exists but may be broken."""
+    candidates = [
+        os.getenv("HERMES_AGENT_INSTALL_DIR", "").strip(),
+        "~/.hermes/hermes-agent",
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = os.path.expanduser(candidate)
+        if os.path.isdir(path) and (
+            os.path.isdir(os.path.join(path, ".git"))
+            or os.path.exists(os.path.join(path, "venv"))
+            or os.path.exists(os.path.join(path, "hermes"))
+        ):
+            return path
+    return None
 
 
 def check_hermes_installation() -> HermesInstallInfo:
@@ -405,13 +496,25 @@ def check_hermes_installation() -> HermesInstallInfo:
     
     if not command_exists:
         install_info.status = HermesInstallStatus.NOT_INSTALLED
-        install_info.error_message = error_message
-        install_info.suggestions = [
-            "请安装 Hermes Agent: https://github.com/NousResearch/hermes-agent",
-            "macOS: curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
-            "Linux: curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash",
-            "确保 hermes 命令在 PATH 环境变量中"
-        ]
+        existing_install_dir = find_existing_hermes_agent_install_dir()
+        if existing_install_dir:
+            install_info.error_message = (
+                f"Hermes Agent 安装目录存在，但 hermes 命令入口不可用：{error_message}"
+            )
+            install_info.suggestions = [
+                "检测到现有 Hermes Agent 安装目录，但命令入口缺失或不可执行",
+                f"安装目录: {existing_install_dir}",
+                "请点击「安装 Hermes Agent」修复现有安装并重建 hermes 命令入口",
+                "修复完成后点击「重新检测」",
+            ]
+        else:
+            install_info.error_message = error_message
+            install_info.suggestions = [
+                "请安装 Hermes Agent: https://github.com/NousResearch/hermes-agent",
+                "macOS: curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup",
+                "Linux: curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup",
+                "确保 hermes 命令在 PATH 环境变量中"
+            ]
         return install_info
     
     # 3. Hermes Agent 版本兼容性检查
@@ -432,7 +535,7 @@ def check_hermes_installation() -> HermesInstallInfo:
         install_info.error_message = f"Hermes 版本 {version_info.version} 不兼容，需要 {HERMES_MIN_VERSION}+"
         install_info.suggestions = [
             f"请升级 Hermes Agent 到 {HERMES_MIN_VERSION}+ 版本",
-            "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash"
+            "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup"
         ]
         return install_info
     
@@ -480,8 +583,18 @@ def check_hermes_installation() -> HermesInstallInfo:
     readiness_level, limited_tools, issues_count = check_hermes_doctor_readiness(
         hermes_path=hermes_path,
     )
+    doctor_summary = getattr(check_hermes_doctor_readiness, "last_summary", {})
     install_info.readiness_level = readiness_level
     install_info.limited_tools = limited_tools
+    if isinstance(doctor_summary, dict):
+        install_info.available_tools = [
+            str(tool) for tool in doctor_summary.get("available_tools", []) if tool
+        ]
+        details = doctor_summary.get("limited_tool_details", {})
+        if isinstance(details, dict):
+            install_info.limited_tool_details = {
+                str(key): str(value) for key, value in details.items() if key and value
+            }
     install_info.doctor_issues_count = issues_count
 
     install_info.status = HermesInstallStatus.READY
@@ -515,6 +628,9 @@ def find_hermes_in_common_paths() -> str | None:
     for path_template in HERMES_COMMON_INSTALL_PATHS:
         path = os.path.expanduser(path_template)
         if os.path.isfile(path) and os.access(path, os.X_OK):
+            if is_self_referential_hermes_wrapper(path):
+                logger.warning("忽略损坏的 hermes 启动脚本: %s", path)
+                continue
             logger.debug("在常见路径找到 hermes: %s", path)
             return path
     return None
@@ -552,6 +668,9 @@ def probe_hermes_via_login_shell() -> str | None:
             if result.returncode == 0:
                 found = result.stdout.strip()
                 if found and os.path.isfile(found):
+                    if is_self_referential_hermes_wrapper(found):
+                        logger.warning("忽略登录 Shell 找到的损坏 hermes 启动脚本: %s", found)
+                        continue
                     logger.debug("通过登录 Shell (%s) 找到 hermes: %s", shell, found)
                     return found
         except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
@@ -590,11 +709,12 @@ def locate_hermes_binary() -> tuple[str | None, bool]:
             - needs_env_refresh: True 表示通过备用途径找到并已注入 PATH，
               用户的 Shell 会话仍需 ``source ~/.bashrc`` 才能使用 hermes 命令。
     """
-    import shutil
-
     # 策略 1：当前 PATH
-    if shutil.which("hermes"):
+    current_path = shutil.which("hermes")
+    if current_path and not is_self_referential_hermes_wrapper(current_path):
         return "hermes", False
+    if current_path:
+        logger.warning("当前 PATH 中的 hermes 启动脚本已损坏: %s", current_path)
 
     # 策略 2：常见路径直接扫描
     common_path = find_hermes_in_common_paths()

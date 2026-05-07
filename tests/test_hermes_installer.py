@@ -1,17 +1,22 @@
 """Hermes 安装检测与安装器配置测试。"""
 
+import asyncio
 import inspect
 from types import SimpleNamespace
 
 import pytest
 
 from apps.installer.hermes_check import (
+    check_hermes_command,
     check_hermes_installation,
     check_hermes_doctor_readiness,
+    find_existing_hermes_agent_install_dir,
+    is_self_referential_hermes_wrapper,
     is_version_compatible,
 )
 from apps.installer.hermes_install import (
     HERMES_INSTALL_TIMEOUT_SECONDS,
+    build_hermes_install_script,
     clean_terminal_line,
     run_hermes_install,
     summarize_install_failure,
@@ -81,6 +86,21 @@ fatal: fetch-pack: invalid index-pack output
     assert "Releases" in message
 
 
+def test_hermes_install_script_retries_network_sensitive_steps():
+    script = build_hermes_install_script()
+
+    assert "curl --retry 3" in script
+    assert "for attempt in 1 2 3" in script
+    assert "GIT_CONFIG_KEY_0=http.version" in script
+    assert "GIT_CONFIG_VALUE_0=HTTP/1.1" in script
+    assert "target_existed" in script
+    assert "install_lock_dir" in script
+    assert 'mkdir "$install_lock_dir"' in script
+    assert 'readlink "$shim_path"' in script
+    assert "检测到损坏的 Hermes 启动脚本" in script
+    assert "--skip-setup" in script
+
+
 def test_hermes_install_cleans_ansi_without_dropping_text():
     line = "\x1b[32mInstalling Hermes\x1b[0m\r"
 
@@ -97,8 +117,10 @@ async def test_run_install_keeps_sanitized_ansi_error_output(monkeypatch):
         ],
     )
     seen_lines = []
+    subprocess_calls = []
 
     async def fake_create_subprocess_exec(*args, **kwargs):
+        subprocess_calls.append((args, kwargs))
         return process
 
     monkeypatch.setattr(
@@ -122,6 +144,8 @@ async def test_run_install_keeps_sanitized_ansi_error_output(monkeypatch):
     assert "\x1b[" not in result.stdout
     assert "ERROR: Package installation failed." in seen_lines
     assert "错误详情" in result.message
+    assert "--skip-setup" in subprocess_calls[0][0][2]
+    assert subprocess_calls[0][1]["stdin"] is asyncio.subprocess.DEVNULL
 
 
 @pytest.mark.asyncio
@@ -171,6 +195,63 @@ def test_hermes_doctor_readiness_keeps_startup_bounded():
     assert timeout_param.default == 5.0
 
 
+def test_hermes_command_detects_self_referential_wrapper(tmp_path, monkeypatch):
+    hermes_path = tmp_path / "hermes"
+    hermes_path.write_text(
+        f'#!/usr/bin/env bash\nexec "{hermes_path}" "$@"\n',
+        encoding="utf-8",
+    )
+    hermes_path.chmod(0o755)
+
+    def fake_run(*_args, **_kwargs):
+        raise AssertionError("self-referential wrapper should not be executed")
+
+    monkeypatch.setattr("apps.installer.hermes_check.subprocess.run", fake_run)
+
+    assert is_self_referential_hermes_wrapper(str(hermes_path)) is True
+    exists, error = check_hermes_command(str(hermes_path))
+
+    assert exists is False
+    assert error
+    assert "启动脚本指向自身" in error
+
+
+def test_install_check_reports_repairable_existing_install(tmp_path, monkeypatch):
+    install_dir = tmp_path / "hermes-agent"
+    (install_dir / ".git").mkdir(parents=True)
+
+    monkeypatch.setenv("HERMES_AGENT_INSTALL_DIR", str(install_dir))
+    monkeypatch.setattr(
+        "apps.installer.hermes_check.detect_platform",
+        lambda: Platform.MACOS,
+    )
+    monkeypatch.setattr(
+        "apps.installer.hermes_check.locate_hermes_binary",
+        lambda: (None, False),
+    )
+    monkeypatch.setattr(
+        "apps.installer.hermes_check.check_hermes_command",
+        lambda _path="hermes": (False, "hermes 命令未找到"),
+    )
+
+    info = check_hermes_installation()
+
+    assert info.status == HermesInstallStatus.NOT_INSTALLED
+    assert info.command_exists is False
+    assert info.error_message
+    assert "安装目录存在" in info.error_message
+    assert any(str(install_dir) in suggestion for suggestion in info.suggestions)
+    assert any("修复" in suggestion for suggestion in info.suggestions)
+
+
+def test_find_existing_hermes_agent_install_dir_uses_env(tmp_path, monkeypatch):
+    install_dir = tmp_path / "hermes-agent"
+    (install_dir / "venv").mkdir(parents=True)
+    monkeypatch.setenv("HERMES_AGENT_INSTALL_DIR", str(install_dir))
+
+    assert find_existing_hermes_agent_install_dir() == str(install_dir)
+
+
 def test_hermes_doctor_readiness_parses_limited_tools(monkeypatch):
     class Result:
         stdout = """
@@ -201,6 +282,13 @@ def test_hermes_doctor_readiness_parses_limited_tools(monkeypatch):
     assert readiness == HermesReadinessLevel.BASIC_READY
     assert tools == ["browser", "image_gen", "agent-browser"]
     assert issues == 3
+    summary = getattr(check_hermes_doctor_readiness, "last_summary")
+    assert summary["available_tools"] == ["terminal"]
+    assert summary["limited_tool_details"] == {
+        "browser": "system dependency not met",
+        "image_gen": "system dependency not met",
+        "agent-browser": "missing binary",
+    }
     assert calls == [(["/tmp/hermes", "doctor"], True, True, 1.5)]
 
 

@@ -120,6 +120,34 @@ def test_upsert_assistant_message_idempotent(tmp_path):
         store.close()
 
 
+def test_upsert_assistant_message_can_attach_cached_audio(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        session = ChatSession(session_id="s1")
+        session.attach_store(store, load_existing=False)
+        session.upsert_assistant_message(
+            "t1",
+            "主动关怀文本",
+            MessageStatus.COMPLETED,
+            attachments=[{
+                "id": "audio1",
+                "kind": "audio",
+                "name": "主动关怀语音.wav",
+                "mime_type": "audio/wav",
+            }],
+        )
+
+        restored = ChatSession(session_id="s1")
+        restored.attach_store(store, load_existing=True)
+        message = restored.get_messages()[0]
+
+        assert message.role == MessageRole.ASSISTANT
+        assert message.attachments[0]["kind"] == "audio"
+        assert message.attachments[0]["mime_type"] == "audio/wav"
+    finally:
+        store.close()
+
+
 def test_upsert_processing_to_completed_updates_user_status(tmp_path):
     """processing → completed 时，user 消息状态也被同步更新"""
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
@@ -240,6 +268,32 @@ def test_user_message_sets_session_summary_title(tmp_path):
         stored = store.get_session("s1")
         assert stored is not None
         assert stored.title == "帮我分析这个项目 并列出需要修复的问题"
+    finally:
+        store.close()
+
+
+def test_chat_session_persists_user_attachments(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        session = ChatSession(session_id="s1")
+        session.attach_store(store, load_existing=False)
+        session.add_user_message(
+            "看图",
+            attachments=[{
+                "id": "a1",
+                "kind": "image",
+                "name": "screen.png",
+                "mime_type": "image/png",
+                "size": 8,
+                "path": str(tmp_path / "screen.png"),
+            }],
+        )
+
+        restored = ChatSession(session_id="s1")
+        restored.attach_store(store)
+
+        assert restored.messages[0].attachments[0]["id"] == "a1"
+        assert restored.to_dict()["messages"][0]["attachments"][0]["name"] == "screen.png"
     finally:
         store.close()
 

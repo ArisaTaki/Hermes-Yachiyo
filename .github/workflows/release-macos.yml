@@ -1,0 +1,463 @@
+name: Build macOS DMG
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel to build
+        required: true
+        default: experimental
+        type: choice
+        options:
+          - stable
+          - experimental
+
+permissions:
+  contents: write
+
+jobs:
+  package-macos:
+    name: Package macOS DMG
+    runs-on: macos-latest
+    env:
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+          cache: npm
+          cache-dependency-path: apps/frontend/package-lock.json
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,packaging]"
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix apps/frontend
+
+      - name: Run smoke tests
+        run: |
+          python -m pytest \
+            tests/test_screenshot.py \
+            tests/test_proactive.py \
+            tests/test_chat_session.py \
+            tests/test_chat_api.py \
+            tests/test_ui_bridge_routes.py \
+            tests/test_tts.py \
+            tests/test_mode_settings.py
+
+      - name: Build packaged backend
+        run: python scripts/build_backend.py --clean
+
+      - name: Import macOS self-signing certificate
+        id: macos_signing
+        shell: bash
+        env:
+          MACOS_CODESIGN_CERTIFICATE_BASE64: ${{ secrets.MACOS_CODESIGN_CERTIFICATE_BASE64 }}
+          MACOS_CODESIGN_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CODESIGN_CERTIFICATE_PASSWORD }}
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${MACOS_CODESIGN_CERTIFICATE_BASE64}" ]]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "signing_mode=unsigned" >> "$GITHUB_OUTPUT"
+            echo "No macOS self-signing certificate configured; the DMG will be unsigned." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          SIGNING_IDENTITY="${MACOS_CODESIGN_IDENTITY:-Hermes-Yachiyo Self Signed}"
+          CERT_PASSWORD="${MACOS_CODESIGN_CERTIFICATE_PASSWORD:-}"
+          if [[ -z "${CERT_PASSWORD}" ]]; then
+            echo "MACOS_CODESIGN_CERTIFICATE_PASSWORD is required when MACOS_CODESIGN_CERTIFICATE_BASE64 is configured." >&2
+            echo "Set the password value from dist/signing/*.github-secrets.env, without the variable name." >&2
+            exit 1
+          fi
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
+          KEYCHAIN_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.keychain-db"
+          CERT_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.p12"
+          CERT_PEM_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.pem"
+          CERT_X509_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.crt"
+
+          CLEAN_CERT_BASE64="$(printf '%s' "${MACOS_CODESIGN_CERTIFICATE_BASE64}" | tr -d '[:space:]')"
+          if ! printf '%s' "${CLEAN_CERT_BASE64}" | base64 --decode > "${CERT_PATH}" 2>/dev/null; then
+            printf '%s' "${CLEAN_CERT_BASE64}" | base64 -D > "${CERT_PATH}"
+          fi
+          if [[ ! -s "${CERT_PATH}" ]]; then
+            echo "Decoded MACOS_CODESIGN_CERTIFICATE_BASE64 is empty." >&2
+            exit 1
+          fi
+          if ! openssl pkcs12 -in "${CERT_PATH}" -info -noout -passin "pass:${CERT_PASSWORD}" >/dev/null 2>&1; then
+            echo "Cannot read the macOS signing p12 with MACOS_CODESIGN_CERTIFICATE_PASSWORD." >&2
+            echo "Check that MACOS_CODESIGN_CERTIFICATE_BASE64 and MACOS_CODESIGN_CERTIFICATE_PASSWORD come from the same generated dist/signing/*.github-secrets.env file." >&2
+            echo "When adding GitHub Secrets, paste only the value after '='; do not include the KEY= prefix." >&2
+            exit 1
+          fi
+
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          if ! security import "${CERT_PATH}" \
+              -k "${KEYCHAIN_PATH}" \
+              -P "${CERT_PASSWORD}" \
+              -T /usr/bin/codesign \
+              -T /usr/bin/security; then
+            echo "macOS Keychain could not import the signing p12." >&2
+            echo "If OpenSSL validation passed but security import failed, regenerate the certificate with the current scripts/create_macos_self_signed_cert.sh and update all MACOS_CODESIGN_* Secrets from the new *.github-secrets.env file." >&2
+            exit 1
+          fi
+          openssl pkcs12 \
+            -in "${CERT_PATH}" \
+            -clcerts \
+            -nokeys \
+            -out "${CERT_PEM_PATH}" \
+            -passin "pass:${CERT_PASSWORD}"
+          openssl x509 -in "${CERT_PEM_PATH}" -out "${CERT_X509_PATH}"
+          sudo security add-trusted-cert \
+            -d \
+            -r trustRoot \
+            -p codeSign \
+            -k /Library/Keychains/System.keychain \
+            "${CERT_X509_PATH}"
+          security list-keychains -d user -s "${KEYCHAIN_PATH}" $(security list-keychains -d user | tr -d '"')
+          security default-keychain -d user -s "${KEYCHAIN_PATH}"
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "${KEYCHAIN_PASSWORD}" \
+            "${KEYCHAIN_PATH}" >/dev/null
+          IDENTITY_OUTPUT="$(security find-identity -v -p codesigning "${KEYCHAIN_PATH}")"
+          echo "${IDENTITY_OUTPUT}"
+          if ! grep -Eq '^[[:space:]]*[0-9]+\) [A-F0-9]{40} ' <<< "${IDENTITY_OUTPUT}"; then
+            echo "No valid macOS code signing identity found after importing the p12." >&2
+            exit 1
+          fi
+
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "signing_mode=self-signed-app-unsigned-dmg" >> "$GITHUB_OUTPUT"
+          echo "identity=${SIGNING_IDENTITY}" >> "$GITHUB_OUTPUT"
+          echo "keychain=${KEYCHAIN_PATH}" >> "$GITHUB_OUTPUT"
+          echo "Imported self-signing certificate identity: ${SIGNING_IDENTITY}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Write app build metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(python - <<'PY'
+          import tomllib
+          from pathlib import Path
+          print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])
+          PY
+          )"
+          IFS='.' read -r VERSION_MAJOR VERSION_MINOR VERSION_PATCH <<< "${VERSION}"
+          VERSION_MAJOR="${VERSION_MAJOR:-0}"
+          VERSION_MINOR="${VERSION_MINOR:-1}"
+          VERSION_PATCH="${VERSION_PATCH:-0}"
+          RELEASE_PATCH=$((VERSION_PATCH + GITHUB_RUN_NUMBER))
+          RELEASE_VERSION="${VERSION_MAJOR}.${VERSION_MINOR}.${RELEASE_PATCH}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            CHANNEL="${{ inputs.channel }}"
+          elif [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+            CHANNEL="stable"
+          else
+            CHANNEL="experimental"
+          fi
+
+          if [[ "${CHANNEL}" == "stable" ]]; then
+            LATEST_BRANCH="main"
+          else
+            LATEST_BRANCH="develop"
+          fi
+
+          mkdir -p apps/frontend/public
+          cat > apps/frontend/public/hermes-yachiyo-build.json <<EOF
+          {
+            "name": "Hermes-Yachiyo",
+            "channel": "${CHANNEL}",
+            "branch": "${LATEST_BRANCH}",
+            "source_branch": "${GITHUB_REF_NAME}",
+            "version": "${RELEASE_VERSION}",
+            "base_version": "${VERSION}",
+            "commit": "${GITHUB_SHA}",
+            "short_commit": "${SHORT_SHA}",
+            "build_number": ${GITHUB_RUN_NUMBER},
+            "repository": "${GITHUB_REPOSITORY}",
+            "latest_json_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_BRANCH}-latest/Hermes-Yachiyo-${LATEST_BRANCH}-latest.json",
+            "built_at": "${STAMP}"
+          }
+          EOF
+
+      - name: Build Electron DMG
+        shell: bash
+        env:
+          MACOS_SIGNING_ENABLED: ${{ steps.macos_signing.outputs.enabled }}
+          MACOS_CODESIGN_IDENTITY: ${{ steps.macos_signing.outputs.identity }}
+        run: |
+          set -euo pipefail
+          if [[ "${MACOS_SIGNING_ENABLED}" == "true" ]]; then
+            scripts/build_macos_self_signed_dmg.sh "${MACOS_CODESIGN_IDENTITY}"
+          else
+            CSC_IDENTITY_AUTO_DISCOVERY=false npm --prefix apps/frontend run dist:mac
+          fi
+
+      - name: Prepare release metadata
+        id: meta
+        shell: bash
+        env:
+          MACOS_SIGNING_MODE: ${{ steps.macos_signing.outputs.signing_mode }}
+        run: |
+          set -euo pipefail
+          SIGNING_MODE="${MACOS_SIGNING_MODE:-unsigned}"
+          VERSION="$(python - <<'PY'
+          import tomllib
+          from pathlib import Path
+          print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])
+          PY
+          )"
+          IFS='.' read -r VERSION_MAJOR VERSION_MINOR VERSION_PATCH <<< "${VERSION}"
+          VERSION_MAJOR="${VERSION_MAJOR:-0}"
+          VERSION_MINOR="${VERSION_MINOR:-1}"
+          VERSION_PATCH="${VERSION_PATCH:-0}"
+          RELEASE_PATCH=$((VERSION_PATCH + GITHUB_RUN_NUMBER))
+          RELEASE_VERSION="${VERSION_MAJOR}.${VERSION_MINOR}.${RELEASE_PATCH}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            CHANNEL="${{ inputs.channel }}"
+          elif [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+            CHANNEL="stable"
+          else
+            CHANNEL="experimental"
+          fi
+
+          if [[ "${CHANNEL}" == "stable" ]]; then
+            CHANNEL_LABEL="正式版"
+            PRERELEASE="false"
+            LATEST_BRANCH="main"
+          else
+            CHANNEL_LABEL="实验版"
+            PRERELEASE="true"
+            LATEST_BRANCH="develop"
+          fi
+
+          TAG="${CHANNEL}-v${RELEASE_VERSION}-${SHORT_SHA}"
+          TITLE="Hermes-Yachiyo ${CHANNEL_LABEL} v${RELEASE_VERSION} (${SHORT_SHA})"
+          LATEST_TAG="${LATEST_BRANCH}-latest"
+          LATEST_TITLE="Hermes-Yachiyo ${CHANNEL_LABEL} latest"
+          VERSIONED_DMG="Hermes-Yachiyo-${CHANNEL}-v${RELEASE_VERSION}-${SHORT_SHA}.dmg"
+          LATEST_DMG="Hermes-Yachiyo-${LATEST_BRANCH}-latest.dmg"
+          LATEST_JSON="Hermes-Yachiyo-${LATEST_BRANCH}-latest.json"
+
+          mkdir -p release
+          shopt -s nullglob
+          dmg_files=(dist/electron/*.dmg)
+          if [[ "${#dmg_files[@]}" -eq 0 ]]; then
+            echo "No DMG artifact found under dist/electron" >&2
+            exit 1
+          fi
+          if [[ "${#dmg_files[@]}" -gt 1 ]]; then
+            echo "Multiple DMG artifacts found; using ${dmg_files[0]}" >&2
+          fi
+          cp "${dmg_files[0]}" "release/${VERSIONED_DMG}"
+          cp "${dmg_files[0]}" "release/${LATEST_DMG}"
+          VERSIONED_SHA256="$(shasum -a 256 "release/${VERSIONED_DMG}" | tee "release/${VERSIONED_DMG}.sha256" | awk '{print $1}')"
+          LATEST_SHA256="$(shasum -a 256 "release/${LATEST_DMG}" | tee "release/${LATEST_DMG}.sha256" | awk '{print $1}')"
+          python scripts/generate_release_changelog.py \
+            --channel "${CHANNEL}" \
+            --tag "${TAG}" \
+            --repository "${GITHUB_REPOSITORY}" \
+            --output-json release/changelog.json \
+            --output-markdown release/changelog.md
+          CHANGELOG_JSON="$(python - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.dumps(json.loads(Path("release/changelog.json").read_text()), ensure_ascii=False, indent=12))
+          PY
+          )"
+
+          cat > "release/${LATEST_JSON}" <<EOF
+          {
+            "name": "Hermes-Yachiyo",
+            "channel": "${CHANNEL}",
+            "branch": "${LATEST_BRANCH}",
+            "source_branch": "${GITHUB_REF_NAME}",
+            "version": "${RELEASE_VERSION}",
+            "base_version": "${VERSION}",
+            "commit": "${GITHUB_SHA}",
+            "short_commit": "${SHORT_SHA}",
+            "build_number": ${GITHUB_RUN_NUMBER},
+            "run_number": ${GITHUB_RUN_NUMBER},
+            "run_id": "${GITHUB_RUN_ID}",
+            "tag": "${TAG}",
+            "signing": "${SIGNING_MODE}",
+            "dmg_name": "${LATEST_DMG}",
+            "sha256": "${LATEST_SHA256}",
+            "download_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_DMG}",
+            "latest_json_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_JSON}",
+            "published_at": "${STAMP}",
+            "changelog": ${CHANGELOG_JSON}
+          }
+          EOF
+
+          cat > release/notes.md <<EOF
+          Hermes-Yachiyo ${CHANNEL_LABEL}
+
+          - Branch: ${GITHUB_REF_NAME}
+          - Commit: ${GITHUB_SHA}
+          - Channel: ${CHANNEL}
+          - Base version: ${VERSION}
+          - Release version: ${RELEASE_VERSION}
+          - Signing: ${SIGNING_MODE}
+          - Package: macOS DMG
+          - Latest channel download: https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_DMG}
+
+          $(cat release/changelog.md)
+
+          当前免费分发链路只自签名 .app，DMG 保持未签名，以避免 macOS 在挂载 DMG 前直接拒绝。首次启动应用时仍会显示未知开发者 / Gatekeeper 提示；请在 Finder 中按住 Control 点击应用并选择“打开”，或在系统设置的“隐私与安全性”中允许打开。
+
+          GPT-SoVITS 语音资源包不随应用 DMG 发布；请在独立的“Yachiyo GPT-SoVITS Voice Assets”资源 release 中下载。
+
+          首次启动后，主动桌面观察需要在 macOS 系统设置中允许 Hermes-Yachiyo 使用屏幕录制权限。
+          EOF
+
+          cat > release/latest-notes.md <<EOF
+          Hermes-Yachiyo ${CHANNEL_LABEL} latest
+
+          This rolling release always points to the latest ${LATEST_BRANCH} DMG.
+
+          - Branch: ${GITHUB_REF_NAME}
+          - Commit: ${GITHUB_SHA}
+          - Channel: ${CHANNEL}
+          - Base version: ${VERSION}
+          - Release version: ${RELEASE_VERSION}
+          - Signing: ${SIGNING_MODE}
+          - DMG: https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_DMG}
+
+          $(cat release/changelog.md)
+
+          当前免费分发链路只自签名 .app，DMG 保持未签名；macOS 仍会在首次启动应用时显示未知开发者 / Gatekeeper 提示。
+          EOF
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "title=${TITLE}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "release_version=${RELEASE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+          echo "latest_title=${LATEST_TITLE}" >> "$GITHUB_OUTPUT"
+          echo "versioned_dmg=${VERSIONED_DMG}" >> "$GITHUB_OUTPUT"
+          echo "latest_dmg=${LATEST_DMG}" >> "$GITHUB_OUTPUT"
+          echo "latest_json=${LATEST_JSON}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-yachiyo-${{ steps.meta.outputs.tag }}
+          path: |
+            release/*.dmg
+            release/*.sha256
+            release/*.json
+            release/*.md
+
+      - name: Create or update versioned GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.meta.outputs.tag }}"
+          TITLE="${{ steps.meta.outputs.title }}"
+          PRERELEASE="${{ steps.meta.outputs.prerelease }}"
+          VERSIONED_DMG="${{ steps.meta.outputs.versioned_dmg }}"
+          LATEST_DMG="${{ steps.meta.outputs.latest_dmg }}"
+          LATEST_JSON="${{ steps.meta.outputs.latest_json }}"
+          extra_flags=()
+          release_assets=(
+            "release/${VERSIONED_DMG}"
+            "release/${VERSIONED_DMG}.sha256"
+          )
+          if [[ "${PRERELEASE}" == "true" ]]; then
+            extra_flags+=(--prerelease --latest=false)
+          else
+            extra_flags+=(--latest=true)
+            release_assets+=(
+              "release/${LATEST_DMG}"
+              "release/${LATEST_DMG}.sha256"
+              "release/${LATEST_JSON}"
+            )
+          fi
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" \
+              "${release_assets[@]}" \
+              --clobber
+            gh release edit "${TAG}" \
+              --target "${GITHUB_SHA}" \
+              --title "${TITLE}" \
+              --notes-file release/notes.md \
+              "${extra_flags[@]}"
+          else
+            gh release create "${TAG}" \
+              "${release_assets[@]}" \
+              --target "${GITHUB_SHA}" \
+              --title "${TITLE}" \
+              --notes-file release/notes.md \
+              "${extra_flags[@]}"
+          fi
+
+      - name: Create or update latest channel release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          LATEST_TAG="${{ steps.meta.outputs.latest_tag }}"
+          LATEST_TITLE="${{ steps.meta.outputs.latest_title }}"
+          PRERELEASE="${{ steps.meta.outputs.prerelease }}"
+          LATEST_DMG="${{ steps.meta.outputs.latest_dmg }}"
+          LATEST_JSON="${{ steps.meta.outputs.latest_json }}"
+          latest_flags=(--latest=false)
+          latest_assets=(
+            "release/${LATEST_DMG}"
+            "release/${LATEST_DMG}.sha256"
+            "release/${LATEST_JSON}"
+          )
+          if [[ "${PRERELEASE}" == "true" ]]; then
+            latest_flags+=(--prerelease)
+          fi
+
+          if gh release view "${LATEST_TAG}" >/dev/null 2>&1; then
+            gh release upload "${LATEST_TAG}" \
+              "${latest_assets[@]}" \
+              --clobber
+            gh release edit "${LATEST_TAG}" \
+              --target "${GITHUB_SHA}" \
+              --title "${LATEST_TITLE}" \
+              --notes-file release/latest-notes.md \
+              "${latest_flags[@]}"
+          else
+            gh release create "${LATEST_TAG}" \
+              "${latest_assets[@]}" \
+              --target "${GITHUB_SHA}" \
+              --title "${LATEST_TITLE}" \
+              --notes-file release/latest-notes.md \
+              "${latest_flags[@]}"
+          fi

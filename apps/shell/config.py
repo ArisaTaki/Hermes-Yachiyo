@@ -31,7 +31,13 @@ BubbleDisplayValue = Literal["icon", "summary", "recent_reply"]
 BubbleExpandTriggerValue = Literal["click"]
 Live2DClickActionValue = Literal["focus_stage", "open_chat", "toggle_reply"]
 Live2DDefaultOpenValue = Literal["stage", "reply_bubble", "chat_input"]
-TTSProviderValue = Literal["none", "http", "command"]
+Live2DPositionAnchorValue = Literal["left_bottom", "right_bottom", "custom"]
+TTSProviderValue = Literal["none", "http", "command", "gpt-sovits"]
+
+DEFAULT_TTS_NOTIFICATION_PROMPT = (
+    "主动提醒只输出适合语音播报的一句中文招呼或提醒，保持八千代人设，"
+    "不要输出括号动作、舞台提示或表情描写，不要朗读长段分析、列表、代码、路径或调试信息。"
+)
 
 DEFAULT_ASSISTANT_PERSONA_PROMPT = """<Role>Hermes-Yachiyo Agent</Role>
 
@@ -425,6 +431,10 @@ def _read_live2d_manifest_metadata(model3_path: Path) -> tuple[list[dict[str, st
             file_path = str(item.get("File") or "").strip()
             name = str(item.get("Name") or "").strip() or Path(file_path).stem or f"expression-{index + 1}"
             expressions.append({"name": name, "file": file_path})
+    expressions = _merge_live2d_expression_metadata(
+        expressions,
+        discover_live2d_sidecar_expressions(model3_path),
+    )
 
     motion_groups: dict[str, list[dict[str, Any]]] = {}
     raw_motions = refs.get("Motions")
@@ -447,7 +457,107 @@ def _read_live2d_manifest_metadata(model3_path: Path) -> tuple[list[dict[str, st
                 })
             if motions:
                 motion_groups[group_name] = motions
+    motion_groups = _merge_live2d_motion_metadata(
+        motion_groups,
+        discover_live2d_sidecar_motion_groups(model3_path),
+    )
     return expressions, motion_groups
+
+
+def _relative_live2d_asset_path(root: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except Exception:
+        return path.name
+
+
+def _live2d_display_stem(path: Path, suffix: str) -> str:
+    name = path.name
+    if name.lower().endswith(suffix):
+        return name[: -len(suffix)]
+    return path.stem
+
+
+def discover_live2d_sidecar_expressions(model3_path: Path) -> list[dict[str, str]]:
+    """Discover expression files next to model3.json when the manifest omits them."""
+    root = Path(model3_path).expanduser().resolve().parent
+    if not root.exists():
+        return []
+    expressions: list[dict[str, str]] = []
+    for path in sorted(root.rglob("*.exp3.json"), key=lambda item: item.as_posix().lower()):
+        if not path.is_file():
+            continue
+        rel_path = _relative_live2d_asset_path(root, path)
+        expressions.append({
+            "name": _live2d_display_stem(path, ".exp3.json"),
+            "file": rel_path,
+        })
+    return expressions
+
+
+def discover_live2d_sidecar_motion_groups(model3_path: Path) -> dict[str, list[dict[str, Any]]]:
+    """Discover motion3 files next to model3.json when the manifest omits them."""
+    root = Path(model3_path).expanduser().resolve().parent
+    if not root.exists():
+        return {}
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for path in sorted(root.rglob("*.motion3.json"), key=lambda item: item.as_posix().lower()):
+        if not path.is_file():
+            continue
+        rel_path = _relative_live2d_asset_path(root, path)
+        parent_name = path.parent.name.strip()
+        group_name = parent_name if parent_name and path.parent != root else "Idle"
+        items = groups.setdefault(group_name, [])
+        items.append({
+            "group": group_name,
+            "index": len(items),
+            "file": rel_path,
+            "display_name": _live2d_display_stem(path, ".motion3.json"),
+            "has_sound": False,
+        })
+    return groups
+
+
+def _merge_live2d_expression_metadata(
+    declared: list[dict[str, str]],
+    discovered: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    merged: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in [*declared, *discovered]:
+        name = str(item.get("name") or "").strip()
+        file_path = str(item.get("file") or "").strip()
+        key = (file_path or name).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        merged.append({"name": name or Path(file_path).stem, "file": file_path})
+    return merged
+
+
+def _merge_live2d_motion_metadata(
+    declared: dict[str, list[dict[str, Any]]],
+    discovered: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[dict[str, Any]]]:
+    merged: dict[str, list[dict[str, Any]]] = {group: list(items) for group, items in declared.items()}
+    seen = {
+        str(item.get("file") or "").lower()
+        for items in merged.values()
+        for item in items
+        if str(item.get("file") or "").strip()
+    }
+    for group, items in discovered.items():
+        target = merged.setdefault(group, [])
+        for item in items:
+            file_path = str(item.get("file") or "").strip()
+            key = file_path.lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            next_item = dict(item)
+            next_item["index"] = len(target)
+            target.append(next_item)
+    return {group: items for group, items in merged.items() if items}
 
 
 def _attach_live2d_manifest_metadata(summary: ModelSummary) -> None:
@@ -544,6 +654,7 @@ class BubbleModeConfig:
     proactive_enabled: bool = False
     proactive_desktop_watch_enabled: bool = False
     proactive_interval_seconds: int = 300
+    proactive_trigger_probability: float = 0.6
 
 
 @dataclass
@@ -563,7 +674,34 @@ class TTSConfig:
     endpoint: str = ""
     command: str = ""
     voice: str = ""
-    timeout_seconds: int = 20
+    timeout_seconds: int = 180
+    max_chars: int = 80
+    trigger_probability: float = 0.6
+    notification_prompt: str = DEFAULT_TTS_NOTIFICATION_PROMPT
+    gsv_base_url: str = "http://127.0.0.1:9880"
+    gsv_service_workdir: str = ""
+    gsv_service_command: str = "python api_v2.py -a 127.0.0.1 -p 9880"
+    gsv_gpt_weights_path: str = ""
+    gsv_sovits_weights_path: str = ""
+    gsv_ref_audio_path: str = ""
+    gsv_ref_audio_text: str = ""
+    gsv_ref_audio_language: str = "ja"
+    gsv_aux_ref_audio_path: str = ""
+    gsv_text_language: str = "zh"
+    gsv_top_k: int = 15
+    gsv_top_p: float = 1.0
+    gsv_temperature: float = 1.0
+    gsv_text_split_method: str = "cut1"
+    gsv_batch_size: int = 1
+    gsv_batch_threshold: float = 0.75
+    gsv_split_bucket: bool = True
+    gsv_speed_factor: float = 1.0
+    gsv_fragment_interval: float = 0.3
+    gsv_streaming_mode: bool = False
+    gsv_seed: int = -1
+    gsv_parallel_infer: bool = False
+    gsv_repetition_penalty: float = 1.35
+    gsv_media_type: str = "wav"
 
 
 @dataclass
@@ -585,9 +723,10 @@ class Live2DModeConfig:
     model_path: str = ""  # 显式模型目录路径；为空时自动在用户目录查找
     width: int = 420
     height: int = 680
-    position_x: int = 48
-    position_y: int = 48
-    scale: float = 1.0                 # 角色缩放（参考 Live2DRenderer 的 SetScale）
+    position_anchor: Live2DPositionAnchorValue = "right_bottom"
+    position_x: int = 0              # *_bottom 时表示水平边距；custom 时表示屏幕绝对 X
+    position_y: int = 0              # *_bottom 时表示底部边距；custom 时表示屏幕绝对 Y
+    scale: float = 0.6                # 角色缩放（参考 Live2DRenderer 的 SetScale）
     window_on_top: bool = True        # 角色窗口是否置顶
     show_on_all_spaces: bool = True    # macOS: 置顶时加入所有 Spaces / 全屏辅助层
     show_reply_bubble: bool = True
@@ -599,9 +738,15 @@ class Live2DModeConfig:
     idle_motion_group: str = "Idle"   # 待机动作组名（Live2D Cubism 约定）
     enable_expressions: bool = False  # 是否启用表情系统（等待渲染器支持）
     enable_physics: bool = False      # 是否启用物理模拟（等待渲染器支持）
+    thinking_expression: str = ""     # 处理中/思考状态使用的表情；为空则自动匹配
+    message_expression: str = ""      # 收到回复/新消息时使用的表情；为空则自动匹配
+    failed_expression: str = ""       # 失败状态使用的表情；为空则自动匹配
+    attention_expression: str = ""    # 主动提醒/未读状态使用的表情；为空则自动匹配
+    expression_keywords: dict[str, str] = field(default_factory=dict)  # 表情名 -> 回复内容情绪/关键词
     proactive_enabled: bool = False
     proactive_desktop_watch_enabled: bool = False
     proactive_interval_seconds: int = 300
+    proactive_trigger_probability: float = 0.6
 
     def has_explicit_model_path(self) -> bool:
         """用户是否显式填写了模型路径。"""
@@ -789,6 +934,18 @@ def _load_nested_dataclass(
         for field_name, value in nested.items()
         if field_name in cls.__dataclass_fields__
     }
+    if cls is Live2DModeConfig and "position_anchor" not in valid:
+        legacy_x = valid.get("position_x")
+        legacy_y = valid.get("position_y")
+        legacy_scale = valid.get("scale")
+        if legacy_x == 48 and legacy_y == 48:
+            valid["position_anchor"] = "right_bottom"
+            valid["position_x"] = 0
+            valid["position_y"] = 0
+            if legacy_scale == 1.0:
+                valid["scale"] = 0.6
+        elif "position_x" in valid or "position_y" in valid:
+            valid["position_anchor"] = "custom"
     return cls(**valid)
 
 
@@ -843,9 +1000,15 @@ def _normalize_config_values(config: AppConfig) -> None:
     config.bubble_mode.opacity = _normalize_float_range(config.bubble_mode.opacity, 0.2, 1.0, 0.92)
     config.bubble_mode.proactive_interval_seconds = _normalize_int_range(
         config.bubble_mode.proactive_interval_seconds,
-        60,
+        300,
         3600,
         300,
+    )
+    config.bubble_mode.proactive_trigger_probability = _normalize_float_range(
+        config.bubble_mode.proactive_trigger_probability,
+        0.0,
+        1.0,
+        0.6,
     )
     config.live2d_mode.default_open_behavior = cast(Live2DDefaultOpenValue, _normalize_literal(
         config.live2d_mode.default_open_behavior,
@@ -857,20 +1020,93 @@ def _normalize_config_values(config: AppConfig) -> None:
         {"focus_stage", "open_chat", "toggle_reply"},
         "open_chat",
     ))
-    config.live2d_mode.scale = _normalize_float_range(config.live2d_mode.scale, 0.4, 2.0, 1.0)
+    config.live2d_mode.position_anchor = cast(Live2DPositionAnchorValue, _normalize_literal(
+        config.live2d_mode.position_anchor,
+        {"left_bottom", "right_bottom", "custom"},
+        "right_bottom",
+    ))
+    try:
+        live2d_scale_number: float | None = float(config.live2d_mode.scale)
+    except (TypeError, ValueError):
+        live2d_scale_number = None
+    if (
+        config.live2d_mode.position_anchor == "left_bottom"
+        and config.live2d_mode.position_x in {0, 24}
+        and config.live2d_mode.position_y in {0, 24}
+        and live2d_scale_number in {0.5, 0.72, 1.0}
+    ):
+        config.live2d_mode.position_anchor = "right_bottom"
+        config.live2d_mode.position_x = 0
+        config.live2d_mode.position_y = 0
+        config.live2d_mode.scale = 0.6
+    elif (
+        config.live2d_mode.position_anchor == "custom"
+        and config.live2d_mode.width == 420
+        and config.live2d_mode.height == 680
+        and config.live2d_mode.position_x in {0, 24, 48}
+        and live2d_scale_number in {0.5, 0.72, 1.0}
+    ):
+        config.live2d_mode.position_anchor = "right_bottom"
+        config.live2d_mode.position_x = 0
+        config.live2d_mode.position_y = 0
+        config.live2d_mode.scale = 0.6
+    config.live2d_mode.scale = _normalize_float_range(config.live2d_mode.scale, 0.4, 2.0, 0.6)
     config.live2d_mode.proactive_interval_seconds = _normalize_int_range(
         config.live2d_mode.proactive_interval_seconds,
-        60,
+        300,
         3600,
         300,
     )
+    config.live2d_mode.proactive_trigger_probability = _normalize_float_range(
+        config.live2d_mode.proactive_trigger_probability,
+        0.0,
+        1.0,
+        0.6,
+    )
     config.assistant.persona_prompt = str(config.assistant.persona_prompt or "")
     config.assistant.user_address = str(config.assistant.user_address or "")
-    config.tts.provider = cast(TTSProviderValue, _normalize_literal(config.tts.provider, {"none", "http", "command"}, "none"))
-    config.tts.timeout_seconds = _normalize_int_range(config.tts.timeout_seconds, 1, 120, 20)
+    config.tts.provider = cast(TTSProviderValue, _normalize_literal(
+        config.tts.provider,
+        {"none", "http", "command", "gpt-sovits"},
+        "none",
+    ))
+    config.tts.timeout_seconds = _normalize_int_range(config.tts.timeout_seconds, 1, 600, 180)
     config.tts.endpoint = str(config.tts.endpoint or "")
     config.tts.command = str(config.tts.command or "")
     config.tts.voice = str(config.tts.voice or "")
+    config.tts.max_chars = _normalize_int_range(config.tts.max_chars, 20, 240, 80)
+    config.tts.trigger_probability = _normalize_float_range(config.tts.trigger_probability, 0.0, 1.0, 0.6)
+    config.tts.notification_prompt = str(config.tts.notification_prompt or DEFAULT_TTS_NOTIFICATION_PROMPT)
+    config.tts.gsv_base_url = str(config.tts.gsv_base_url or "http://127.0.0.1:9880")
+    config.tts.gsv_service_workdir = str(config.tts.gsv_service_workdir or "")
+    config.tts.gsv_service_command = str(
+        config.tts.gsv_service_command or "python api_v2.py -a 127.0.0.1 -p 9880"
+    )
+    config.tts.gsv_gpt_weights_path = str(config.tts.gsv_gpt_weights_path or "")
+    config.tts.gsv_sovits_weights_path = str(config.tts.gsv_sovits_weights_path or "")
+    config.tts.gsv_ref_audio_path = str(config.tts.gsv_ref_audio_path or "")
+    config.tts.gsv_ref_audio_text = str(config.tts.gsv_ref_audio_text or "")
+    config.tts.gsv_ref_audio_language = str(config.tts.gsv_ref_audio_language or "ja")
+    config.tts.gsv_aux_ref_audio_path = str(config.tts.gsv_aux_ref_audio_path or "")
+    config.tts.gsv_text_language = str(config.tts.gsv_text_language or "zh")
+    config.tts.gsv_top_k = _normalize_int_range(config.tts.gsv_top_k, 1, 100, 15)
+    config.tts.gsv_top_p = _normalize_float_range(config.tts.gsv_top_p, 0.0, 2.0, 1.0)
+    config.tts.gsv_temperature = _normalize_float_range(config.tts.gsv_temperature, 0.0, 2.0, 1.0)
+    config.tts.gsv_text_split_method = str(config.tts.gsv_text_split_method or "cut1")
+    config.tts.gsv_batch_size = _normalize_int_range(config.tts.gsv_batch_size, 1, 64, 1)
+    config.tts.gsv_batch_threshold = _normalize_float_range(config.tts.gsv_batch_threshold, 0.0, 1.0, 0.75)
+    config.tts.gsv_split_bucket = bool(config.tts.gsv_split_bucket)
+    config.tts.gsv_speed_factor = _normalize_float_range(config.tts.gsv_speed_factor, 0.25, 4.0, 1.0)
+    config.tts.gsv_fragment_interval = _normalize_float_range(config.tts.gsv_fragment_interval, 0.0, 10.0, 0.3)
+    config.tts.gsv_streaming_mode = bool(config.tts.gsv_streaming_mode)
+    config.tts.gsv_seed = _normalize_int_range(config.tts.gsv_seed, -1, 2147483647, -1)
+    config.tts.gsv_parallel_infer = bool(config.tts.gsv_parallel_infer)
+    config.tts.gsv_repetition_penalty = _normalize_float_range(config.tts.gsv_repetition_penalty, 0.1, 5.0, 1.35)
+    config.tts.gsv_media_type = _normalize_literal(
+        str(config.tts.gsv_media_type or "wav").lower(),
+        {"wav", "mp3", "ogg", "flac"},
+        "wav",
+    )
     config.backup.auto_cleanup_enabled = bool(config.backup.auto_cleanup_enabled)
     config.backup.retention_count = _normalize_int_range(
         config.backup.retention_count,

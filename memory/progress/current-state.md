@@ -2,6 +2,102 @@
 
 ## 已完成
 
+### Milestone 79 — macOS 发布链路、应用更新器与安装体验收口
+
+- ✅ macOS release workflow 现在覆盖 `main` 与 `develop` 两条渠道：`main` 生成正式版 stable DMG，`develop` 生成实验版 experimental prerelease DMG；滚动 release 分别维护 `main-latest` 与 `develop-latest`。
+- ✅ 固定下载资产已统一：`Hermes-Yachiyo-main-latest.dmg`、`Hermes-Yachiyo-develop-latest.dmg`，并同步上传 `.sha256` 与 `.json` 元数据；latest JSON 包含 channel、branch、version、commit、build number、DMG 名称、SHA256、download URL 和 published time。
+- ✅ CI 在构建前写入 `apps/frontend/public/hermes-yachiyo-build.json`，打包后的应用可知道自己所属渠道、当前版本、commit、build number 与对应 latest JSON URL。
+- ✅ 免费分发签名策略已确认并落地：`.app` 自签名，`.dmg` 保持未签名；避免自签名 DMG 被 macOS 挂载前直接拒绝。首次启动仍需用户通过 Finder Control-click -> Open 或系统设置允许未知开发者应用。
+- ✅ 新增 `scripts/create_macos_self_signed_cert.sh` 与 `scripts/build_macos_self_signed_dmg.sh`，支持本地生成自签名证书、导出 GitHub Secrets 辅助 env、签名 `.app` 并创建未签名 DMG。
+- ✅ 打包版 Bridge 默认端口与开发环境拆开：开发默认 `8420`，打包默认 `18420`；打包版若发现 `18420` 已被占用，会临时分配空闲本地端口并传给内置 backend，避免误连本地 develop backend。
+- ✅ 应用内更新器已接入通用设置页：按当前渠道检查对应 latest JSON，比较版本/build/commit，下载 DMG，校验 SHA256，退出当前应用后挂载 DMG、覆盖当前 `.app` 并重新打开。
+- ✅ 更新器请求 latest JSON 时加 cache-busting query 与 `Cache-Control: no-cache` / `Pragma: no-cache`，避免 GitHub rolling asset/CDN 在 release 刚更新时返回旧 JSON，导致 `0.1.31` 误判为最新。
+- ✅ 更新下载有实时进度：Electron main 通过 IPC 推送 `starting/downloading/verifying/completed/failed` 状态，设置页显示百分比或已下载大小；下载完成后按钮变为“安装并重启”。
+- ✅ 已下载但未安装的更新会持久化到 Electron `userData/updates/downloaded-update.json`；重新进入设置页或重启后会自动识别本地 DMG 是否仍是当前渠道的更高版本，并直接提供“安装并重启”。
+- ✅ release 更新日志已接入 git commit 同步：CI 以当前渠道上一条 `stable-v*` / `experimental-v*` tag 为基线生成 changelog，写入 GitHub release notes 与 latest JSON；应用内“应用更新”区会展示 latest JSON 中的更新内容和提交对比入口。
+- ✅ 安装向导在更新后 backend/Bridge 尚未完全启动时，不再直接显示红色“无法连接本地 Bridge”；会进入“正在启动本地 Bridge”状态，并每 1.2 秒自动重新检测，Bridge 可用后恢复正常安装/就绪流程。
+- ✅ Hermes Agent 检测修复：当 `~/.local/bin/hermes` 是 bash wrapper 且实际 `exec ~/.hermes/hermes-agent/venv/bin/hermes` 时，Yachiyo 会继续解析真实 venv launcher，定位 Hermes Agent 自带 Python，避免图片链路测试误报“无法定位 Hermes Agent 的 Python 环境”。
+- ✅ Hermes 安装检测更稳：若存在 `~/.hermes/hermes-agent` 但 `hermes` 命令缺失或 wrapper 损坏，会返回可修复的 not installed/repair 指引，而不是把脏安装误判为 ready。
+- ✅ 图片链路执行修复：`hermes_stream_bridge.py` 的 shebang 解析不再把 `/usr/bin/env` 当成脚本执行，修复打包临时目录中出现 `env: ...hermes_stream_bridge.py: Permission denied` 的问题。
+- ✅ 验证：`python scripts/generate_release_changelog.py --channel experimental ...` 本地生成 changelog JSON/Markdown passed；`python -m py_compile scripts/generate_release_changelog.py` → passed；`PATH=<Node 20.19 runtime> npm --prefix apps/frontend run build` → passed（保留 Vite large chunk warning）；`python -m pytest tests/test_hermes_installer.py tests/test_runtime.py tests/test_executor.py tests/test_main_api_modes.py` → 134 passed；`ruby -e 'require "yaml"; YAML.load_file(".github/workflows/release-macos.yml")'` → passed；`git diff --check` → passed。
+
+### UX Fixes — 首用体验报告修复
+
+- ✅ 新增 `/ui/tts/status`，主动关怀语音页可以显示最近一次自动播报的生成中、成功或失败状态，便于定位 GPT-SoVITS 自动播报 HTTP 400 等问题。
+- ✅ 工具中心已区分 Hermes Agent 的 `tts` 工具与 Yachiyo 主动关怀 TTS；无 Hermes 原生配置卡片时会引导用户打开“主动关怀语音”页面。
+- ✅ 备份策略和备份操作区已提示 Live2D/GPT-SoVITS/附件缓存会进入备份，资源越大备份越大、耗时越久。
+- ✅ 图片附件读取时新增极小尺寸保护，低于 16x16 的图片会提示换用正常尺寸截图，减少上游视觉模型“图片不可处理”的失败体验。
+- ✅ 验证：相关 TTS route tests 4 passed；`npm --prefix apps/frontend run build` passed（保留既有 Vite large chunk warning）；`git diff --check` passed。
+
+### Documentation — DMG 首用走查与 VitePress 素材
+
+- ✅ 使用 `/Applications/Hermes-Yachiyo.app` 发布包，在隔离 HOME/Profile 下完成一次真实“第一次用户”走查。
+- ✅ 覆盖并截图：安装向导、Hermes Agent 检测、Xiaomi MiMo 模型配置、连接测试、工作空间初始化、主控台、图片链路、文本对话、图片附件、Bubble、Live2D 导入与渲染、GPT-SoVITS 导入与 TTS 测试、主动关怀、工具中心、诊断、更新检查、备份和卸载预览。
+- ✅ 新增 43 张截图到 `docs/public/images/hermes-yachiyo/first-run/`，VitePress 可直接通过 `/images/hermes-yachiyo/first-run/<file>.png` 引用。
+- ✅ 新增/更新文档：`docs/user-manual.md`、`docs/screenshot-index.md`、`docs/experience-report-2026-05-05.md`、`docs/first-run-smoke-test-2026-05-05.md`。
+- ✅ 真实边界已记录：GUI 安装遇到 GitHub 克隆中断后可手动安装并重新检测；Web/CDP/Image Gen 缺外部 Key 时工具中心按预期受限；GPT-SoVITS 手动测试成功但一次主动关怀自动播报返回 HTTP 400。
+- ✅ 测试环境已清理，未把一次性 API Key 明文写入文档。
+
+### Milestone 78 — Release 重跑幂等修复
+
+- ✅ `Build macOS DMG` workflow 的发布步骤改为 `Create or update GitHub release`：当目标 release tag 已存在时，会用 `gh release upload --clobber` 覆盖同名 DMG asset，并用 `gh release edit` 刷新标题、目标 commit 和 release notes；首次运行仍走 `gh release create`。
+- ✅ 修复 GitHub Actions 重跑同一个 run 时因 `ReleaseAsset.name already exists` / HTTP 422 导致 `Create GitHub release` 失败的问题。
+
+### Milestone 77 — Live2D 导入编码、Vision Key 兼容与 GPT-SoVITS 部署入口
+
+- ✅ Live2D ZIP 导入改为自定义解包：当压缩包文件名缺少 UTF-8 标记时，会尝试按 UTF-8 / GB18030 / 日文/韩文编码恢复真实文件名，并把可疑乱码目录名替换为安全的导入目录名，避免 `~/.hermes/yachiyo/assets/live2d/` 后出现 box drawing 乱码路径。
+- ✅ Live2D 资源下载入口统一走系统默认浏览器，并明确指向资源 release：`https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/tag/live2d-assets-20260423`；不会再把 Live2D release 打进内置窗口。
+- ✅ 图片识别链路补上 OpenRouter 旧配置兼容：当 Hermes/Yachiyo 仍保存的是 `AUTO_API_KEY`，但 provider 推断为 OpenRouter 时，原生图片输入与 vision 预分析都会把它视为可用 key；UI 仍只显示 `OPENROUTER_API_KEY` 的配置状态，不泄漏或展示 `AUTO_API_KEY` 明文。
+- ✅ 主动关怀 TTS 超时上限从 120 秒放宽到 600 秒，默认值调整为 180 秒；GPT-SoVITS 权重切换、`/tts` 生成和音频播放都使用同一超时设置，适配本地模型首次加载较慢的情况。
+- ✅ 主动关怀 TTS 触发后会先进入 `tts_pending` 状态：Bubble/Live2D 不再提前显示文本提醒，等异步 TTS 完成并把音频附件写回会话后，下一轮 launcher 轮询才把主动消息作为可见提醒推出。
+- ✅ 主动关怀语音页补齐 GPT-SoVITS 本地服务部署入口：新增“部署本地服务”按钮，会打开系统终端，经过用户确认后克隆 `RVC-Boss/GPT-SoVITS`、创建 `.venv`、安装依赖并启动 `127.0.0.1:9880` API；“安装开机自启”仍只负责把已配置的服务目录/命令写入 LaunchAgent。
+- ✅ GPT-SoVITS 语音资源面板布局收紧为紧凑按钮栏，避免三个资源按钮被 CSS grid 拉成异常高的大块；语音资源下载仍走外部默认浏览器并指向独立的 `tts-assets-yachiyo-gpt-sovits-v4` release。
+- ✅ 验证：`python -m pytest tests/test_ui_bridge_routes.py::test_launcher_tts_only_triggers_for_proactive_attention tests/test_ui_bridge_routes.py::test_launcher_tts_triggers_without_probability_gate tests/test_ui_bridge_routes.py::test_launcher_hides_proactive_reply_while_tts_audio_is_generating tests/test_ui_bridge_routes.py::test_live2d_zip_member_name_recovers_utf8_without_flag tests/test_tts.py::test_import_tts_voice_archive_returns_gpt_sovits_settings` → 5 passed；`python -m pytest tests/test_executor.py::TestHermesStreamBridgeImageRouting::test_xiaomi_text_model_vision_fallback_inherits_configured_base_url tests/test_main_api_modes.py tests/test_ui_bridge_routes.py tests/test_tts.py tests/test_mode_settings.py` → 93 passed；`python -m pytest tests/test_ui_bridge_routes.py tests/test_tts.py tests/test_main_api_modes.py tests/test_mode_settings.py tests/test_executor.py` → 165 passed；`npm --prefix apps/frontend run build` → passed（保留 Vite 大 chunk warning）；`git diff --check` → passed。
+
+### Milestone 76 — 主动关怀截图链路、首启回退与发布自动化收口
+
+- ✅ 主动关怀桌面观察的截图附件改为只作为内部附件传给对话链路，不再把“主动桌面观察”的系统指令文本写入用户消息；对话中仍可看到生成的桌面截图附件，方便用户确认本轮观察依据。
+- ✅ 聊天附件读取改为 `inline` 响应，并移除图片查看器中的“打开原图”外部浏览器入口，避免主动关怀截图触发后自动弹出 Chrome/默认浏览器预览窗口，同时保持图片识别链路可继续读取本地附件。
+- ✅ Hermes provider 推断补强：当配置为 `auto` 但 Base URL/模型指向 OpenRouter 时，Yachiyo 会按有效 provider 写入 `OPENROUTER_API_KEY` 并使用对应模型缓存判断图片原生输入能力，避免误报“API Key 无效”或错误回退到 vision 预分析。
+- ✅ Electron 首启/激活流程继续加固：只要用户已经进入过主控台或安装信息显示 ready，Dock 图标激活就不会再用旧的 `lastInstallReady=false` 打回安装向导；进入主控台时会恢复配置中的 Bubble/Live2D 表现态，Live2D 无资源时自动回退 Bubble。
+- ✅ Live2D 资源 gate 前后端双重兜底：设置页保存 `display_mode=live2d` 时如果没有有效资源，会返回 `redirect` 到 Live2D 设置页并保持 Bubble；Electron 表现态打开也会先检查资源状态，避免无资源透明窗口把用户困住。
+- ✅ 主动关怀语音页新增 GPT-SoVITS 本地服务状态/安装/移除路由：可查看 API 是否可达、服务目录是否存在、LaunchAgent 是否安装/运行，并可把当前服务目录和命令写成当前用户的 macOS LaunchAgent；不会下载或改写 GPT-SoVITS 项目本体。
+- ✅ Release workflow 改为自动生成带版本号的 stable/experimental release tag 与资产名：版本以 `pyproject.toml` 基础版本加 `GITHUB_RUN_NUMBER` 形成发布版本；应用 release 只发布 DMG，不再把八千代 GPT-SoVITS ZIP 附在每次 develop/main 构建里。
+- ✅ 新增独立 `Publish TTS Voice Assets` workflow：只在手动触发时接收已经调配好的语音 ZIP URL，并上传到 `tts-assets-yachiyo-gpt-sovits-v4` 资源 release；不会从仓库重复构建语音包，也不会参与应用 DMG 常规构建。
+- ✅ 卸载“删除当前应用本体”改为 macOS Finder 删除优先、shell 删除兜底；仍属于 best-effort，因为运行中的 `.app` 删除受 Finder/权限/签名路径影响，失败时继续提示用户手动从 Applications 移除。
+- ✅ 验证：`python -m pytest tests/test_ui_bridge_routes.py tests/test_tts.py tests/test_mode_settings.py tests/test_main_api_modes.py tests/test_proactive.py tests/test_hermes_capabilities.py tests/test_executor.py` → 181 passed；`npm --prefix apps/frontend run build` → passed（保留 Vite 大 chunk warning）；`ruby -e 'require "yaml"; YAML.load_file(".github/workflows/release-macos.yml")'` → passed；`git diff --check` → passed。
+
+### Milestone 75 — DMG 首装流程、Live2D Gate 与 TTS 本地服务辅助
+
+- ✅ 基于 `develop` 当前 HEAD `67b7f74` 的 DMG 清机验证反馈，修复安装向导在 Hermes 终端安装完成后的衔接：重新检测到 `installed_needs_setup` / `setup_in_progress` / `installed_not_initialized` 后会滚动到模型配置向导，引导用户填写 Provider、模型、Base URL 和 API Key。
+- ✅ 初始化 Yachiyo 工作空间前新增模型/API Key 完整性提示：如果当前 Provider、模型或所需 API Key 缺失，会提示“直接初始化可能导致首次对话不可用”，用户确认后仍可继续，取消则回到模型配置区。
+- ✅ Hermes ready / 工作空间初始化成功后，桌面壳会进入主控台并主动打开 Bubble 表现态；macOS 点击 Dock 图标时会先刷新 `/hermes/install-info`，避免使用旧的 `lastInstallReady=false` 把已初始化用户拉回安装向导，同时恢复当前表现态。
+- ✅ 通用设置中的 Live2D 模式切换新增资源 gate：若 `mode_settings.live2d.config.model_state` 不是 `path_valid` / `loaded`，不会切换到 Live2D，而是跳到 Live2D 资源配置页要求导入 ZIP 或选择有效模型目录；后端 `apply_settings_changes()` 同步拒绝无资源的 `display_mode=live2d`。
+- ✅ Electron 表现态启动也新增 Live2D gate：显式打开 Live2D 且资源未就绪时进入设置页；默认打开表现态时如当前配置是 Live2D 但资源不可用，会回退到 Bubble，避免用户进入不可点击、找不到 Dock 图标的死路。
+- ✅ Live2D 真模型渲染增加 Electron/WebGL 保护：加载 runtime 后配置 Pixi WebGL2 偏好并关闭 major performance caveat；遇到 `checkMaxIfStatementsInShader` / `invalid value of 0` 时保留静态预览并显示明确的 WebGL 回退说明，避免把资源导入成功误判成导入失败。
+- ✅ 主动关怀 TTS 的 GPT-SoVITS 配置新增本地服务辅助字段：`tts.gsv_service_workdir` 与 `tts.gsv_service_command`；导入八千代语音包后会默认填入 `http://127.0.0.1:9880`、权重/参考音频路径和默认服务启动命令，服务目录可由语音包 manifest 提供或由用户手动填写。
+- ✅ 主动关怀语音设置页新增“GPT-SoVITS 本地服务”区块：可填写服务目录与启动命令，并通过受控 `/ui/hermes/terminal-command` 打开终端启动本地服务；说明语音 ZIP 只包含权重/参考音频，本地 API 服务仍需单独运行。
+- ✅ 卸载页新增“同时删除当前应用本体”选项：完成工作区/Hermes 数据卸载后，可由 Electron 启动受控 shell 删除当前 `.app` bundle 并退出；失败时会提示手动移除 Applications 中的应用。
+- ✅ GitHub Actions DMG workflow 失败原因已定位为 CI 未安装 `pytest-asyncio`，`pyproject.toml` dev extras 已补 `pytest-asyncio>=0.23.0`，workflow 的 async smoke tests 可正常收集执行。
+- ✅ 验证：`npm --prefix apps/frontend run build` → passed；`python -m pytest tests/test_main_api_modes.py tests/test_mode_settings.py tests/test_ui_bridge_routes.py tests/test_tts.py tests/test_uninstall.py` → 131 passed，1 known duplicate ZIP warning；workflow smoke suite `python -m pytest tests/test_screenshot.py tests/test_proactive.py tests/test_chat_session.py tests/test_chat_api.py tests/test_ui_bridge_routes.py tests/test_tts.py tests/test_mode_settings.py` → 112 passed；`python -m pytest tests/test_hermes_installer.py` → 10 passed；全量 `python -m pytest` → 421 passed，1 known duplicate ZIP warning；`git diff --check` → passed。
+
+### Milestone 74 — Tool Center Doctor 分级与工具配置修复
+
+- ✅ 基于当前 `phase-2/feature/repair-tools` 的提交树补齐进度记录：`7307fd3` 合入了 2026-05-01 至 2026-05-02 的 Electron 固定前端、配置诊断、图片附件/vision 路由、图片链路校验缓存和窗口身份持久化等工作；其前序关键提交包括 `1ddba0a`、`41126f9`、`28c23ff`、`eac0dcb`、`0d0aee0`、`254ce91`、`9f55c9f`。
+- ✅ `hermes doctor` 输出解析已从只看受限项扩展为同时解析 `available_tools`、`limited_tools`、受限原因和 issue count；旧的三元返回值仍保留兼容安装器调用。
+- ✅ Runtime、Dashboard、Settings 和 Tool Center 已透传 Doctor 新字段，工具中心不再只依赖 `hermes.ready` 推断状态。
+- ✅ Tool Center 已拆分基础 `browser` 和高级 `browser-cdp`：基础浏览器自动化可按 `browser` 可用状态显示，CDP 端口缺失只影响 `browser-cdp`。
+- ✅ 新增工具配置安全接口 `/ui/hermes/tools/config`：按工具返回不同配置项，只展示 env 名和配置状态，不回传任何 token/key 明文；保存统一走 `hermes config set`。
+- ✅ 第一批配置目录已覆盖 `web`、`browser`、`browser-cdp`、`image_gen`、Discord、Home Assistant、MoA、RL；Spotify、腾讯元宝和 messaging 先提供 Hermes 原生向导入口；Tool Center 现会读取 `hermes tools list`，只展示当前 Hermes 暴露的工具组。
+- ✅ `image_gen` 配置已收敛为当前 Hermes 已知 provider：内置 FAL 与已装 OpenAI/OpenAI Codex/xAI 插件提供模型建议，不再主动列出 Hermes 未暴露的生图后端。
+- ✅ 工具配置页新增“保存并测试 / 测试配置”：保存后会做必需配置静态检查，并运行 `hermes doctor` 对应工具状态，不会默认触发发消息、生图、RL 训练等有副作用/成本的真实调用。
+- ✅ 新增 Hermes 更新检查与更新入口：Tool Center 可检查 `hermes version` / `hermes update --check`，更新通道跟随 Hermes 官方 updater 的当前 checkout `origin/main`；默认执行 `hermes update --gateway --yes --no-backup`，可勾选完整备份后改走 `--backup`，更新完成会自动刷新 `hermes tools list`、工具配置、Dashboard 与 Doctor 缓存，并展示工具清单变化。
+- ✅ `image_gen` provider 列表改为从当前 Hermes `plugins/image_gen/*/plugin.yaml` 读取，确保已安装的 OpenAI、OpenAI Codex、xAI 插件不会被前端压成只剩 FAL。
+- ✅ 新增 `/ui/hermes/tools/browser-cdp/launch`：可尝试启动或连接本机 Chrome `9222` 调试端口，成功后写入 `browser.cdp_url=http://127.0.0.1:9222`，失败时返回 Hermes 生成的手动命令。
+- ✅ Tool Center React 视图新增 `#/tools/:toolId` 独立配置页，受限/可配置卡片会进入对应配置页而不是在长列表顶部展开；配置页顶部和底部都有保存入口，未保存切换时会弹出“保存并继续 / 弃置更改 / 继续编辑”确认。
+- ✅ 诊断缓存指纹已纳入工具配置安全快照，工具配置或 env 配置状态变化后会让旧 Doctor 缓存标记为过期。
+- ✅ 验证：`python -m pytest tests/test_hermes_installer.py tests/test_main_api_modes.py tests/test_ui_bridge_routes.py tests/test_hermes_capabilities.py` → 49 passed；`npm --prefix apps/frontend run build` → passed（保留 Vite 大 chunk warning）；`git diff --check` → passed。
+
 ### Milestone 73 — 一键安装错误捕获 hotfix
 
 - ✅ `run_hermes_install()` 不再丢弃带 ANSI 颜色控制序列的安装脚本输出；会清洗控制码并保留可读错误文本，避免 UI 只显示 `exit=1` 而隐藏真正失败原因。

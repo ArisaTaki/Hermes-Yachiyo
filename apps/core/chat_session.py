@@ -21,6 +21,7 @@ ChatSession 是 Bubble / Live2D / Chat Window / 主控台摘要共享的消息�
 from __future__ import annotations
 
 import logging
+import json
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -59,6 +60,7 @@ class ChatMessage:
     created_at: datetime
     task_id: Optional[str] = None  # 关联的任务 ID（仅 user 消息）
     error: Optional[str] = None    # 失败原因
+    attachments: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -103,6 +105,7 @@ class ChatSession:
                 continue
 
             error = stored.error
+            attachments = _parse_attachments_json(stored.attachments_json)
             if status in (MessageStatus.PENDING, MessageStatus.PROCESSING):
                 status = MessageStatus.FAILED
                 error = error or "应用已重启，原任务状态不可恢复"
@@ -116,6 +119,7 @@ class ChatSession:
                 created_at=created_at,
                 task_id=stored.task_id,
                 error=error,
+                attachments=attachments,
             ))
 
         self.messages = restored
@@ -135,20 +139,24 @@ class ChatSession:
             task_id=msg.task_id,
             error=msg.error,
             created_at=msg.created_at.isoformat(),
+            attachments_json=json.dumps(msg.attachments or [], ensure_ascii=False),
         ))
 
-    def _ensure_summary_title_locked(self, content: str) -> None:
+    def _ensure_summary_title_locked(self, content: str, attachments: list[dict] | None = None) -> None:
         """为无标题会话写入首条用户消息摘要。调用方需持有 _lock。"""
         if self._store is None:
             return
         from apps.core.chat_store import make_session_title
 
         title = make_session_title(content)
+        if not title and attachments:
+            title = f"图片分析 ({len(attachments)})"
         if title:
             self._store.set_session_title_if_empty(self.session_id, title)
     
-    def add_user_message(self, content: str) -> str:
+    def add_user_message(self, content: str, attachments: list[dict] | None = None) -> str:
         """添加用户消息，返回 message_id"""
+        normalized_attachments = list(attachments or [])
         with self._lock:
             msg_id = uuid4().hex[:12]
             msg = ChatMessage(
@@ -157,12 +165,13 @@ class ChatSession:
                 content=content,
                 status=MessageStatus.PENDING,
                 created_at=datetime.now(timezone.utc),
+                attachments=normalized_attachments,
             )
             self.messages.append(msg)
             self._pending_message_id = msg_id
             self._persist_message(msg)
-            self._ensure_summary_title_locked(content)
-        logger.info("用户消息已添加: %s (len=%d)", msg_id, len(content))
+            self._ensure_summary_title_locked(content, normalized_attachments)
+        logger.info("用户消息已添加: %s (len=%d, attachments=%d)", msg_id, len(content), len(normalized_attachments))
         return msg_id
     
     def link_message_to_task(self, message_id: str, task_id: str) -> bool:
@@ -226,6 +235,7 @@ class ChatSession:
         content: str,
         status: MessageStatus = MessageStatus.COMPLETED,
         error: Optional[str] = None,
+        attachments: list[dict] | None = None,
     ) -> str:
         """原子性地创建或更新 task_id 对应的 assistant 消息。
 
@@ -254,6 +264,8 @@ class ChatSession:
                 existing.content = content
                 existing.status = status
                 existing.error = error
+                if attachments is not None:
+                    existing.attachments = list(attachments)
                 self._persist_message(existing)
                 msg_id = existing.message_id
                 logger.debug(
@@ -271,6 +283,7 @@ class ChatSession:
                     created_at=datetime.now(timezone.utc),
                     task_id=task_id,
                     error=error,
+                    attachments=list(attachments or []),
                 )
                 self.messages.append(new_msg)
                 self._persist_message(new_msg)
@@ -424,6 +437,7 @@ class ChatSession:
                         "task_id": m.task_id,
                         "error": m.error,
                         "created_at": m.created_at.isoformat(),
+                        "attachments": m.attachments,
                     }
                     for m in self.messages
                 ],
@@ -433,7 +447,7 @@ class ChatSession:
         """查找仍在等待或执行中的用户消息。调用方需持有 _lock。"""
         for msg in self.messages:
             if (
-                msg.role == MessageRole.USER
+                msg.role in (MessageRole.USER, MessageRole.ASSISTANT)
                 and msg.status in (MessageStatus.PENDING, MessageStatus.PROCESSING)
             ):
                 return msg.message_id
@@ -484,6 +498,18 @@ def switch_chat_session(session_id: str) -> ChatSession:
         _global_session = session
     logger.info("切换到会话: %s (messages=%d)", session_id, session.message_count())
     return session
+
+
+def _parse_attachments_json(value: str | None) -> list[dict]:
+    if not value:
+        return []
+    try:
+        data = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [item for item in data if isinstance(item, dict)]
 
 
 def reset_chat_session() -> ChatSession:

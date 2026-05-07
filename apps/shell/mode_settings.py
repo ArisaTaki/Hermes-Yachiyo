@@ -18,7 +18,10 @@ from apps.shell.config import (
 )
 from apps.shell.effect_policy import build_effects_summary
 from apps.shell.mode_catalog import get_mode_descriptor, list_mode_options
-from apps.shell.modes.bubble import _MAX_LAUNCHER_SIZE, _MIN_LAUNCHER_SIZE
+_MIN_LAUNCHER_SIZE = 80
+_MAX_LAUNCHER_SIZE = 192
+_TTS_PROVIDERS = {"none", "http", "command", "gpt-sovits"}
+_GSV_MEDIA_TYPES = {"wav", "mp3", "ogg", "flac"}
 
 logger = logging.getLogger(__name__)
 
@@ -84,12 +87,14 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "proactive_enabled": bool,
         "proactive_desktop_watch_enabled": bool,
         "proactive_interval_seconds": int,
+        "proactive_trigger_probability": float,
     },
     "live2d_mode": {
         "model_name": str,
         "model_path": str,
         "width": int,
         "height": int,
+        "position_anchor": str,
         "position_x": int,
         "position_y": int,
         "scale": float,
@@ -104,9 +109,15 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "idle_motion_group": str,
         "enable_expressions": bool,
         "enable_physics": bool,
+        "thinking_expression": str,
+        "message_expression": str,
+        "failed_expression": str,
+        "attention_expression": str,
+        "expression_keywords": dict,
         "proactive_enabled": bool,
         "proactive_desktop_watch_enabled": bool,
         "proactive_interval_seconds": int,
+        "proactive_trigger_probability": float,
     },
     "assistant": {
         "persona_prompt": str,
@@ -119,6 +130,33 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "command": str,
         "voice": str,
         "timeout_seconds": int,
+        "max_chars": int,
+        "trigger_probability": float,
+        "notification_prompt": str,
+        "gsv_base_url": str,
+        "gsv_service_workdir": str,
+        "gsv_service_command": str,
+        "gsv_gpt_weights_path": str,
+        "gsv_sovits_weights_path": str,
+        "gsv_ref_audio_path": str,
+        "gsv_ref_audio_text": str,
+        "gsv_ref_audio_language": str,
+        "gsv_aux_ref_audio_path": str,
+        "gsv_text_language": str,
+        "gsv_top_k": int,
+        "gsv_top_p": float,
+        "gsv_temperature": float,
+        "gsv_text_split_method": str,
+        "gsv_batch_size": int,
+        "gsv_batch_threshold": float,
+        "gsv_split_bucket": bool,
+        "gsv_speed_factor": float,
+        "gsv_fragment_interval": float,
+        "gsv_streaming_mode": bool,
+        "gsv_seed": int,
+        "gsv_parallel_infer": bool,
+        "gsv_repetition_penalty": float,
+        "gsv_media_type": str,
     },
     "backup": {
         "auto_cleanup_enabled": bool,
@@ -160,12 +198,36 @@ def _validate_field(key: str, value: Any) -> str | None:
         return "recent_messages_limit 须在 1-10 之间"
     if key.endswith(".summary_count") and not (1 <= value <= 3):
         return "summary_count 须在 1-3 之间"
-    if key.endswith(".proactive_interval_seconds") and not (60 <= value <= 3600):
-        return "proactive_interval_seconds 须在 60-3600 秒之间"
-    if key == "tts.provider" and value not in {"none", "http", "command"}:
-        return "tts.provider 仅支持 none / http / command"
-    if key == "tts.timeout_seconds" and not (1 <= value <= 120):
-        return "tts.timeout_seconds 须在 1-120 秒之间"
+    if key.endswith(".proactive_interval_seconds") and not (300 <= value <= 3600):
+        return "proactive_interval_seconds 须在 300-3600 秒之间"
+    if key.endswith(".proactive_trigger_probability") and not (0.0 <= value <= 1.0):
+        return "proactive_trigger_probability 须在 0-1 之间"
+    if key == "tts.provider" and value not in _TTS_PROVIDERS:
+        return "tts.provider 仅支持 none / http / command / gpt-sovits"
+    if key == "tts.timeout_seconds" and not (1 <= value <= 600):
+        return "tts.timeout_seconds 须在 1-600 秒之间"
+    if key == "tts.max_chars" and not (20 <= value <= 240):
+        return "tts.max_chars 须在 20-240 字之间"
+    if key == "tts.trigger_probability" and not (0.0 <= value <= 1.0):
+        return "tts.trigger_probability 须在 0-1 之间"
+    if key == "tts.gsv_top_k" and not (1 <= value <= 100):
+        return "tts.gsv_top_k 须在 1-100 之间"
+    if key in {"tts.gsv_top_p", "tts.gsv_temperature"} and not (0.0 <= value <= 2.0):
+        return f"{key} 须在 0-2 之间"
+    if key == "tts.gsv_batch_size" and not (1 <= value <= 64):
+        return "tts.gsv_batch_size 须在 1-64 之间"
+    if key == "tts.gsv_batch_threshold" and not (0.0 <= value <= 1.0):
+        return "tts.gsv_batch_threshold 须在 0-1 之间"
+    if key == "tts.gsv_speed_factor" and not (0.25 <= value <= 4.0):
+        return "tts.gsv_speed_factor 须在 0.25-4 之间"
+    if key == "tts.gsv_fragment_interval" and not (0.0 <= value <= 10.0):
+        return "tts.gsv_fragment_interval 须在 0-10 秒之间"
+    if key == "tts.gsv_seed" and not (-1 <= value <= 2147483647):
+        return "tts.gsv_seed 须在 -1 到 2147483647 之间"
+    if key == "tts.gsv_repetition_penalty" and not (0.1 <= value <= 5.0):
+        return "tts.gsv_repetition_penalty 须在 0.1-5 之间"
+    if key == "tts.gsv_media_type" and value not in _GSV_MEDIA_TYPES:
+        return "tts.gsv_media_type 仅支持 wav / mp3 / ogg / flac"
     if key == "backup.retention_count" and not (1 <= value <= 100):
         return "备份保留份数须在 1-100 之间"
     if key.endswith(".opacity") and not (0.2 <= value <= 1.0):
@@ -180,6 +242,8 @@ def _validate_field(key: str, value: Any) -> str | None:
         return "default_open_behavior 仅支持 stage / reply_bubble / chat_input"
     if key.endswith(".click_action") and value not in {"focus_stage", "open_chat", "toggle_reply"}:
         return "click_action 仅支持 focus_stage / open_chat / toggle_reply"
+    if key.endswith(".position_anchor") and value not in {"left_bottom", "right_bottom", "custom"}:
+        return "position_anchor 仅支持 left_bottom / right_bottom / custom"
     return None
 
 
@@ -198,6 +262,33 @@ def _serialize_tts(config: AppConfig) -> dict[str, Any]:
         "command": config.tts.command,
         "voice": config.tts.voice,
         "timeout_seconds": config.tts.timeout_seconds,
+        "max_chars": config.tts.max_chars,
+        "trigger_probability": config.tts.trigger_probability,
+        "notification_prompt": config.tts.notification_prompt,
+        "gsv_base_url": config.tts.gsv_base_url,
+        "gsv_service_workdir": config.tts.gsv_service_workdir,
+        "gsv_service_command": config.tts.gsv_service_command,
+        "gsv_gpt_weights_path": config.tts.gsv_gpt_weights_path,
+        "gsv_sovits_weights_path": config.tts.gsv_sovits_weights_path,
+        "gsv_ref_audio_path": config.tts.gsv_ref_audio_path,
+        "gsv_ref_audio_text": config.tts.gsv_ref_audio_text,
+        "gsv_ref_audio_language": config.tts.gsv_ref_audio_language,
+        "gsv_aux_ref_audio_path": config.tts.gsv_aux_ref_audio_path,
+        "gsv_text_language": config.tts.gsv_text_language,
+        "gsv_top_k": config.tts.gsv_top_k,
+        "gsv_top_p": config.tts.gsv_top_p,
+        "gsv_temperature": config.tts.gsv_temperature,
+        "gsv_text_split_method": config.tts.gsv_text_split_method,
+        "gsv_batch_size": config.tts.gsv_batch_size,
+        "gsv_batch_threshold": config.tts.gsv_batch_threshold,
+        "gsv_split_bucket": config.tts.gsv_split_bucket,
+        "gsv_speed_factor": config.tts.gsv_speed_factor,
+        "gsv_fragment_interval": config.tts.gsv_fragment_interval,
+        "gsv_streaming_mode": config.tts.gsv_streaming_mode,
+        "gsv_seed": config.tts.gsv_seed,
+        "gsv_parallel_infer": config.tts.gsv_parallel_infer,
+        "gsv_repetition_penalty": config.tts.gsv_repetition_penalty,
+        "gsv_media_type": config.tts.gsv_media_type,
     }
 
 
@@ -210,6 +301,33 @@ def _shared_settings_fields(config: AppConfig) -> dict[str, Any]:
         "tts_command": config.tts.command,
         "tts_voice": config.tts.voice,
         "tts_timeout_seconds": config.tts.timeout_seconds,
+        "tts_max_chars": config.tts.max_chars,
+        "tts_trigger_probability": config.tts.trigger_probability,
+        "tts_notification_prompt": config.tts.notification_prompt,
+        "tts_gsv_base_url": config.tts.gsv_base_url,
+        "tts_gsv_service_workdir": config.tts.gsv_service_workdir,
+        "tts_gsv_service_command": config.tts.gsv_service_command,
+        "tts_gsv_gpt_weights_path": config.tts.gsv_gpt_weights_path,
+        "tts_gsv_sovits_weights_path": config.tts.gsv_sovits_weights_path,
+        "tts_gsv_ref_audio_path": config.tts.gsv_ref_audio_path,
+        "tts_gsv_ref_audio_text": config.tts.gsv_ref_audio_text,
+        "tts_gsv_ref_audio_language": config.tts.gsv_ref_audio_language,
+        "tts_gsv_aux_ref_audio_path": config.tts.gsv_aux_ref_audio_path,
+        "tts_gsv_text_language": config.tts.gsv_text_language,
+        "tts_gsv_top_k": config.tts.gsv_top_k,
+        "tts_gsv_top_p": config.tts.gsv_top_p,
+        "tts_gsv_temperature": config.tts.gsv_temperature,
+        "tts_gsv_text_split_method": config.tts.gsv_text_split_method,
+        "tts_gsv_batch_size": config.tts.gsv_batch_size,
+        "tts_gsv_batch_threshold": config.tts.gsv_batch_threshold,
+        "tts_gsv_split_bucket": config.tts.gsv_split_bucket,
+        "tts_gsv_speed_factor": config.tts.gsv_speed_factor,
+        "tts_gsv_fragment_interval": config.tts.gsv_fragment_interval,
+        "tts_gsv_streaming_mode": config.tts.gsv_streaming_mode,
+        "tts_gsv_seed": config.tts.gsv_seed,
+        "tts_gsv_parallel_infer": config.tts.gsv_parallel_infer,
+        "tts_gsv_repetition_penalty": config.tts.gsv_repetition_penalty,
+        "tts_gsv_media_type": config.tts.gsv_media_type,
     }
 
 
@@ -220,8 +338,7 @@ def serialize_bubble_mode(config: AppConfig) -> dict[str, Any]:
         "title": get_mode_descriptor("bubble").settings_title,
         "summary": (
             f"{mode.width}×{mode.height} · {mode.default_display} · "
-            f"摘要 {mode.summary_count} 条 · "
-            f"主动 {'开启' if mode.proactive_enabled else '关闭'}"
+            f"摘要 {mode.summary_count} 条"
         ),
         "config": {
             "width": mode.width,
@@ -245,6 +362,7 @@ def serialize_bubble_mode(config: AppConfig) -> dict[str, Any]:
             "proactive_enabled": mode.proactive_enabled,
             "proactive_desktop_watch_enabled": mode.proactive_desktop_watch_enabled,
             "proactive_interval_seconds": mode.proactive_interval_seconds,
+            "proactive_trigger_probability": mode.proactive_trigger_probability,
             **_shared_settings_fields(config),
         },
     }
@@ -288,6 +406,7 @@ def serialize_live2d_mode(config: AppConfig) -> dict[str, Any]:
             "releases_url": resource.releases_url,
             "width": mode.width,
             "height": mode.height,
+            "position_anchor": mode.position_anchor,
             "position_x": mode.position_x,
             "position_y": mode.position_y,
             "scale": mode.scale,
@@ -302,9 +421,15 @@ def serialize_live2d_mode(config: AppConfig) -> dict[str, Any]:
             "idle_motion_group": mode.idle_motion_group,
             "enable_expressions": mode.enable_expressions,
             "enable_physics": mode.enable_physics,
+            "thinking_expression": mode.thinking_expression,
+            "message_expression": mode.message_expression,
+            "failed_expression": mode.failed_expression,
+            "attention_expression": mode.attention_expression,
+            "expression_keywords": mode.expression_keywords,
             "proactive_enabled": mode.proactive_enabled,
             "proactive_desktop_watch_enabled": mode.proactive_desktop_watch_enabled,
             "proactive_interval_seconds": mode.proactive_interval_seconds,
+            "proactive_trigger_probability": mode.proactive_trigger_probability,
             **_shared_settings_fields(config),
             "resource": {
                 "state": resource.state.value,
@@ -343,10 +468,19 @@ def serialize_mode_window_data(config: AppConfig, mode_id: str) -> dict[str, Any
 
 
 def build_display_settings(config: AppConfig) -> dict[str, Any]:
+    current_mode = effective_display_mode(config)
     return {
-        "current_mode": config.display_mode,
+        "current_mode": current_mode,
+        "configured_mode": config.display_mode,
         "available_modes": list_mode_options(),
     }
+
+
+def effective_display_mode(config: AppConfig) -> str:
+    """Return the runnable display mode, falling back when Live2D has no assets."""
+    if config.display_mode == "live2d" and not config.live2d_mode.is_model_configured():
+        return "bubble"
+    return config.display_mode
 
 
 def apply_settings_changes(
@@ -399,6 +533,9 @@ def apply_settings_changes(
         if validation_error:
             errors.append(validation_error)
             continue
+        if key == "display_mode" and value == "live2d" and not config.live2d_mode.is_model_configured():
+            errors.append("Live2D 资源未就绪，请先导入资源包或选择有效模型目录")
+            continue
         setattr(config, key, value)
         applied[key] = value
 
@@ -410,12 +547,20 @@ def apply_settings_changes(
             return {"ok": False, "error": f"保存失败: {exc}", "applied": applied}
 
     if errors and not applied:
-        return {
+        result: dict[str, Any] = {
             "ok": False,
             "error": "；".join(errors),
             "applied": applied,
             "errors": errors,
         }
+        if any("Live2D 资源未就绪" in error for error in errors):
+            result["redirect"] = {
+                "view": "settings",
+                "mode": "live2d",
+                "reason": "live2d-resource-required",
+            }
+            result["target_display_mode"] = "bubble"
+        return result
 
     result: dict[str, Any] = {"ok": True, "applied": applied, "errors": errors}
     if applied:

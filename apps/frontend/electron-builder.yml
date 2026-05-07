@@ -1,0 +1,41 @@
+appId: io.github.arisataki.hermes-yachiyo
+productName: Hermes-Yachiyo
+copyright: Copyright © 2026 Hermes-Yachiyo
+
+directories:
+  output: ../../dist/electron
+
+files:
+  - dist/**
+  - dist-electron/**
+  - package.json
+  - node_modules/**
+
+extraResources:
+  - from: ../../dist/backend/hermes-yachiyo-backend
+    to: backend/hermes-yachiyo-backend
+  - from: ../../assets
+    to: assets
+
+asarUnpack:
+  - node_modules/node-pty/**
+
+mac:
+  icon: ../../assets/icon.icns
+  category: public.app-category.productivity
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: ../../packaging/entitlements.mac.plist
+  entitlementsInherit: ../../packaging/entitlements.mac.plist
+  target:
+    - target: dmg
+  extendInfo:
+    NSAppleEventsUsageDescription: Hermes-Yachiyo 需要读取当前窗口标题和应用名称，用于主动关怀和上下文提示。
+    NSDocumentsFolderUsageDescription: Hermes-Yachiyo 需要访问用户选择的项目文件和资源目录。
+    NSDownloadsFolderUsageDescription: Hermes-Yachiyo 需要访问用户选择导入的下载资源。
+    NSMicrophoneUsageDescription: Hermes-Yachiyo 的语音相关功能可能需要访问麦克风输入。
+
+dmg:
+  artifactName: Hermes-Yachiyo-${version}-${arch}.${ext}
+
+publish: null

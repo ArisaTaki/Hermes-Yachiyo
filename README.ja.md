@@ -216,14 +216,14 @@ pip install -e ".[dev]"
 
 ```
 apps/
-  shell/              # デスクトップアプリケーションシェル
-    app.py              # メインエントリポイント
-    startup.py          # 起動判定ロジック
-    window.py           # メインウィンドウ (pywebview)
+  frontend/           # Electron + React/Vite/TypeScript フロントエンド
+  desktop_backend/    # ヘッドレス Python バックエンド入口
+  desktop_launcher.py # 開発ランチャー
+  shell/              # 設定、インストーラー、UI データアダプター
     config.py           # 設定管理 + Live2D バリデーション
     effect_policy.py    # 設定効果ポリシー
     integration_status.py  # 統合ステータス統一ソース
-    main_api.py         # ウィンドウ API
+    main_api.py         # ダッシュボード / メンテナンス API
     settings.py         # 設定ページビルダー
     tray.py             # システムトレイ
     modes/              # 表示モード
@@ -286,7 +286,7 @@ tests/                # テストスイート（105 テスト）
 - [ ] クロスプラットフォーム対応（Windows / Linux）
 - [ ] AstrBot 実環境 QQ テスト
 - [ ] Bridge HTTPS + 認証
-- [ ] デスクトップシェル技術アップグレード（pywebview 置換）
+- [x] Electron + React デスクトップシェル
 
 ## 📄 ライセンス
 

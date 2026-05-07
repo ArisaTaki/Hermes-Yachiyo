@@ -1,1 +1,0 @@
-"""Bundled pywebview UI resources."""

@@ -14,7 +14,6 @@ import pytest
 
 import apps.shell.config as config_mod
 import apps.shell.main_api as main_api_mod
-import apps.shell.window as window_mod
 from apps.installer import backup as backup_mod
 from apps.installer import uninstall as uninstall_mod
 from apps.installer.backup import create_backup, get_backup_status, import_backup
@@ -81,6 +80,82 @@ def test_yachiyo_only_plan_includes_config_and_workspace(tmp_path, monkeypatch):
     assert plan.to_dict()["removable_count"] == 2
     assert BackupPlan.__doc__ == "卸载前资料备份计划。"
     assert "tempfile._get_candidate_names" not in Path(backup_mod.__file__).read_text(encoding="utf-8")
+
+
+def test_uninstall_plan_can_include_gpt_sovits_service(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    workdir = home / "AI" / "GPT-SoVITS"
+    (workdir / "GPT_SoVITS").mkdir(parents=True)
+    plist = home / "Library" / "LaunchAgents" / "com.hermes-yachiyo.gpt-sovits.plist"
+    plist.parent.mkdir(parents=True)
+    plist.write_text("<plist />", encoding="utf-8")
+    (config_dir / "config.json").write_text(
+        json.dumps({"tts": {"gsv_service_workdir": str(workdir)}}),
+        encoding="utf-8",
+    )
+
+    keep_plan = build_uninstall_plan(
+        UninstallScope.YACHIYO_ONLY,
+        keep_config_snapshot=False,
+        backup_root=home / "backups",
+    )
+    delete_plan = build_uninstall_plan(
+        UninstallScope.YACHIYO_ONLY,
+        keep_config_snapshot=False,
+        include_gpt_sovits=True,
+        backup_root=home / "backups",
+    )
+
+    assert any("GPT-SoVITS 本地服务" in warning for warning in keep_plan.warnings)
+    target_ids = {target.id for target in delete_plan.targets}
+    assert "gpt_sovits_launch_agent" in target_ids
+    assert "gpt_sovits_workdir_1" in target_ids
+    assert next(target for target in delete_plan.targets if target.id == "gpt_sovits_workdir_1").removable is True
+
+
+def test_execute_uninstall_removes_selected_gpt_sovits_service(tmp_path, monkeypatch):
+    home, hermes_home, config_dir = _prepare_home(tmp_path, monkeypatch)
+    config_dir.mkdir(parents=True)
+    workspace = hermes_home / "yachiyo"
+    workspace.mkdir(parents=True)
+    (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
+    workdir = home / "AI" / "GPT-SoVITS"
+    (workdir / "GPT_SoVITS").mkdir(parents=True)
+    plist = home / "Library" / "LaunchAgents" / "com.hermes-yachiyo.gpt-sovits.plist"
+    plist.parent.mkdir(parents=True)
+    plist.write_text("<plist />", encoding="utf-8")
+    (config_dir / "config.json").write_text(
+        json.dumps({"tts": {"gsv_service_workdir": str(workdir)}}),
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fake_uninstall_launch_agent():
+        calls.append("uninstall")
+        plist.unlink(missing_ok=True)
+        return {"ok": True}
+
+    monkeypatch.setattr(uninstall_mod.gpt_sovits_service, "uninstall_gpt_sovits_launch_agent", fake_uninstall_launch_agent)
+
+    result = execute_uninstall(
+        UninstallScope.YACHIYO_ONLY,
+        keep_config_snapshot=False,
+        include_gpt_sovits=True,
+        confirm_text=UNINSTALL_CONFIRM_PHRASE,
+        backup_root=home / "backups",
+    )
+
+    removed_paths = {item["path"] for item in result.removed}
+    assert result.ok is True
+    assert not workdir.exists()
+    assert not plist.exists()
+    assert str(workdir) in removed_paths
+    assert str(plist) in removed_paths
+    assert calls
 
 
 def test_execute_yachiyo_only_creates_backup_and_removes_targets(tmp_path, monkeypatch):
@@ -946,8 +1021,8 @@ def test_main_window_api_exposes_uninstall_preview(monkeypatch):
     fake_plan = SimpleNamespace(to_dict=lambda: {"scope": "yachiyo_only", "targets": []})
     calls = []
 
-    def fake_build(scope, keep_config_snapshot):
-        calls.append((scope, keep_config_snapshot))
+    def fake_build(scope, keep_config_snapshot, include_gpt_sovits=False):
+        calls.append((scope, keep_config_snapshot, include_gpt_sovits))
         return fake_plan
 
     monkeypatch.setattr(uninstall_mod, "build_uninstall_plan", fake_build)
@@ -956,40 +1031,18 @@ def test_main_window_api_exposes_uninstall_preview(monkeypatch):
     result = api.get_uninstall_preview("yachiyo_only", True)
 
     assert result == {"ok": True, "plan": {"scope": "yachiyo_only", "targets": []}}
-    assert calls == [("yachiyo_only", True)]
+    assert calls == [("yachiyo_only", True, False)]
 
 
-def test_main_window_api_uninstall_schedules_legacy_exit(monkeypatch):
-    calls = []
+def test_main_window_api_uninstall_requests_desktop_quit(monkeypatch):
     fake_result = SimpleNamespace(ok=True, to_dict=lambda: {"ok": True})
 
     monkeypatch.delenv("HERMES_YACHIYO_DESKTOP_BACKEND", raising=False)
     monkeypatch.setattr(
         uninstall_mod,
         "execute_uninstall",
-        lambda scope, keep_config_snapshot, confirm_text: fake_result,
+        lambda scope, keep_config_snapshot, confirm_text, include_gpt_sovits=False: fake_result,
     )
-    monkeypatch.setattr(window_mod, "request_app_exit", lambda: calls.append(True))
-
-    api = MainWindowAPI(SimpleNamespace(), AppConfig())
-    result = api.run_uninstall("yachiyo_only", True, UNINSTALL_CONFIRM_PHRASE)
-
-    assert result["ok"] is True
-    assert result["exit_scheduled"] is True
-    assert calls == [True]
-
-
-def test_main_window_api_uninstall_defers_quit_to_electron(monkeypatch):
-    calls = []
-    fake_result = SimpleNamespace(ok=True, to_dict=lambda: {"ok": True})
-
-    monkeypatch.setenv("HERMES_YACHIYO_DESKTOP_BACKEND", "1")
-    monkeypatch.setattr(
-        uninstall_mod,
-        "execute_uninstall",
-        lambda scope, keep_config_snapshot, confirm_text: fake_result,
-    )
-    monkeypatch.setattr(window_mod, "request_app_exit", lambda: calls.append(True))
 
     api = MainWindowAPI(SimpleNamespace(), AppConfig())
     result = api.run_uninstall("yachiyo_only", True, UNINSTALL_CONFIRM_PHRASE)
@@ -997,7 +1050,24 @@ def test_main_window_api_uninstall_defers_quit_to_electron(monkeypatch):
     assert result["ok"] is True
     assert result["exit_scheduled"] is False
     assert result["desktop_quit_required"] is True
-    assert calls == []
+
+
+def test_main_window_api_uninstall_defers_quit_to_electron(monkeypatch):
+    fake_result = SimpleNamespace(ok=True, to_dict=lambda: {"ok": True})
+
+    monkeypatch.setenv("HERMES_YACHIYO_DESKTOP_BACKEND", "1")
+    monkeypatch.setattr(
+        uninstall_mod,
+        "execute_uninstall",
+        lambda scope, keep_config_snapshot, confirm_text, include_gpt_sovits=False: fake_result,
+    )
+
+    api = MainWindowAPI(SimpleNamespace(), AppConfig())
+    result = api.run_uninstall("yachiyo_only", True, UNINSTALL_CONFIRM_PHRASE)
+
+    assert result["ok"] is True
+    assert result["exit_scheduled"] is False
+    assert result["desktop_quit_required"] is True
 
 
 def test_main_window_api_creates_backup_without_uninstall(tmp_path, monkeypatch):
@@ -1089,15 +1159,12 @@ def test_main_window_api_restores_backup(tmp_path, monkeypatch):
 
     backup = create_backup()
     (config_dir / "config.json").write_text('{"display_mode":"bubble"}', encoding="utf-8")
-    restart_calls = []
-    monkeypatch.setattr(window_mod, "request_app_restart", lambda: restart_calls.append(True))
-
     api = MainWindowAPI(SimpleNamespace(), AppConfig())
     result = api.restore_backup(backup.path)
 
     assert result["ok"] is True
-    assert result["restart_scheduled"] is True
-    assert restart_calls == [True]
+    assert result["restart_scheduled"] is False
+    assert result["desktop_restart_required"] is True
     assert (config_dir / "config.json").read_text(encoding="utf-8") == '{"display_mode":"live2d"}'
 
 

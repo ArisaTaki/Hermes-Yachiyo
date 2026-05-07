@@ -30,7 +30,25 @@ class TestChatStore:
         ))
         sessions = store.list_sessions()
         assert len(sessions) == 2
-        assert sessions[0].session_id in ("s1", "s2")
+        assert sessions[0].session_id == "s2"
+
+    def test_list_sessions_orders_by_latest_message_time(self, store: ChatStore):
+        store.create_session("older")
+        store.create_session("newer")
+        store.save_message(StoredMessage(
+            message_id="m1", session_id="newer", role="user",
+            content="first", status="completed", task_id=None,
+            error=None, created_at="2026-01-01T00:00:00+00:00",
+        ))
+        store.save_message(StoredMessage(
+            message_id="m2", session_id="older", role="assistant",
+            content="later", status="completed", task_id="t1",
+            error=None, created_at="2026-01-01T00:00:05+00:00",
+        ))
+
+        sessions = store.list_sessions()
+
+        assert [session.session_id for session in sessions] == ["older", "newer"]
 
     def test_save_and_load_messages(self, store: ChatStore):
         store.create_session("s1")

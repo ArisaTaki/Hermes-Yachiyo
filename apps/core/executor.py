@@ -18,13 +18,16 @@ import logging
 import os
 import re
 import shutil
+import shlex
 import subprocess
+import sys
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from packages.protocol.schemas import TaskInfo
+from apps.core.special_sessions import is_proactive_chat_session
 
 if TYPE_CHECKING:
     from apps.core.chat_session import ChatSession
@@ -105,9 +108,29 @@ _EXEC_TIMEOUT_ENV = "HERMES_YACHIYO_EXEC_TIMEOUT_SECONDS"
 _DEFAULT_EXEC_TIMEOUT: float = 30 * 60.0
 _PROBE_TIMEOUT: float = 5.0   # hermes --version 探测超时（秒）
 _STREAM_UPDATE_INTERVAL: float = 0.05
-_BRIDGE_SCRIPT = Path(__file__).with_name("hermes_stream_bridge.py")
 _ERROR_DETAIL_MAX_CHARS = 500
 _ERROR_DETAIL_MAX_LINES = 12
+_ATTACHED_IMAGE_GUARD = (
+    "本轮用户已经附加图片。请优先且尽量只根据这些附加图片回答；"
+    "不要调用桌面截图、活动窗口、浏览器视觉或其它实时桌面观察工具来替代附加图片，"
+    "除非用户明确要求你操作当前电脑或重新观察屏幕。"
+)
+
+
+def resolve_hermes_stream_bridge_script() -> Path:
+    """Locate the bridge script in source and PyInstaller onefile builds."""
+    candidates: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", "")
+    if meipass:
+        candidates.append(Path(str(meipass)) / "apps" / "core" / "hermes_stream_bridge.py")
+    candidates.append(Path(__file__).with_name("hermes_stream_bridge.py"))
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0] if candidates else Path(__file__).with_name("hermes_stream_bridge.py")
+
+
+_BRIDGE_SCRIPT = resolve_hermes_stream_bridge_script()
 
 
 def _read_exec_timeout() -> float:
@@ -139,6 +162,17 @@ def _format_exec_timeout(timeout: float) -> str:
     if timeout >= 60 and timeout % 60 == 0:
         return f"{int(timeout // 60)}min"
     return f"{timeout:.0f}s"
+
+
+def _with_attached_image_guard(description: str, image_paths: list[str]) -> str:
+    if not image_paths:
+        return description
+    return (
+        "[Yachiyo 附件图片上下文]\n"
+        f"{_ATTACHED_IMAGE_GUARD}\n"
+        f"附加图片数量：{len(image_paths)}\n\n"
+        f"{description}"
+    )
 
 
 _EXEC_TIMEOUT: float = _read_exec_timeout()  # hermes chat -q 执行超时（秒）
@@ -274,6 +308,19 @@ def format_persona_description(
     return "\n\n".join(parts)
 
 
+def _task_image_paths(task: TaskInfo) -> list[str]:
+    paths: list[str] = []
+    for attachment in getattr(task, "attachments", []) or []:
+        if not isinstance(attachment, dict):
+            continue
+        if str(attachment.get("kind") or "image") != "image":
+            continue
+        path = str(attachment.get("path") or "").strip()
+        if path:
+            paths.append(path)
+    return paths
+
+
 def _describe_day_period(hour: int) -> str:
     if 5 <= hour < 9:
         return "早上"
@@ -406,11 +453,45 @@ def _parse_hermes_title(stdout: str) -> Optional[str]:
     return title or None
 
 
-def _resolve_hermes_python(hermes_cmd: Optional[str] = None) -> Optional[str]:
+def _resolve_shell_exec_target(launcher: str) -> Optional[str]:
+    try:
+        with open(launcher, "r", encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return None
+    launcher_dir = os.path.dirname(os.path.abspath(launcher))
+    for raw_line in lines[1:]:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            parts = shlex.split(line)
+        except ValueError:
+            continue
+        if len(parts) < 2 or parts[0] != "exec":
+            continue
+        target = parts[1]
+        if not target or "$" in target or "`" in target:
+            continue
+        if not os.path.isabs(target):
+            target = os.path.abspath(os.path.join(launcher_dir, target))
+        return target if os.path.exists(target) else None
+    return None
+
+
+def _resolve_hermes_python(hermes_cmd: Optional[str] = None, _seen: Optional[set[str]] = None) -> Optional[str]:
     """从 hermes launcher shebang 找到 Hermes 自己的 Python 解释器。"""
-    launcher = hermes_cmd or shutil.which("hermes")
+    if hermes_cmd:
+        launcher = shutil.which(hermes_cmd) if os.path.sep not in hermes_cmd else hermes_cmd
+    else:
+        launcher = shutil.which("hermes")
     if not launcher:
         return None
+    launcher = os.path.realpath(launcher)
+    seen = _seen or set()
+    if launcher in seen:
+        return None
+    seen.add(launcher)
     try:
         with open(launcher, "r", encoding="utf-8") as fh:
             first_line = fh.readline().strip()
@@ -418,12 +499,41 @@ def _resolve_hermes_python(hermes_cmd: Optional[str] = None) -> Optional[str]:
         return None
     if not first_line.startswith("#!"):
         return None
-    python = first_line[2:].strip()
-    if not python:
+    shebang = first_line[2:].strip()
+    if not shebang:
         return None
-    if " " in python:
-        python = python.split(" ", 1)[0]
-    return python if os.path.exists(python) else None
+    try:
+        parts = shlex.split(shebang)
+    except ValueError:
+        parts = shebang.split()
+    if not parts:
+        return None
+
+    executable = parts[0]
+    if os.path.basename(executable) == "env":
+        args = parts[1:]
+        if args[:1] == ["-S"]:
+            try:
+                args = shlex.split(" ".join(args[1:]))
+            except ValueError:
+                args = args[1:]
+        while args and args[0].startswith("-"):
+            args = args[1:]
+        if not args:
+            return None
+        executable = args[0]
+
+    executable_name = os.path.basename(executable)
+    if executable_name in {"bash", "sh", "zsh"}:
+        target = _resolve_shell_exec_target(launcher)
+        if target:
+            return _resolve_hermes_python(target, seen)
+        return None
+    if executable_name not in {"python", "python3"} and not executable_name.startswith("python3."):
+        return None
+
+    resolved = shutil.which(executable) if os.path.sep not in executable else executable
+    return resolved if resolved and os.path.exists(resolved) else None
 
 
 def _parse_bridge_event(line: str) -> Optional[dict[str, Any]]:
@@ -615,6 +725,7 @@ async def _invoke_hermes_stream_bridge(
     description: str,
     hermes_session_id: Optional[str],
     on_update: Callable[[str], None],
+    image_paths: Optional[list[str]] = None,
 ) -> HermesInvokeResult:
     """通过 Hermes agent callback 层获取真实 token 流，避免 CLI 终端 UI 噪声。"""
     started_at = time.monotonic()
@@ -635,6 +746,7 @@ async def _invoke_hermes_stream_bridge(
     payload = {
         "description": description,
         "resume": hermes_session_id,
+        "image_paths": list(image_paths or []),
     }
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -702,6 +814,7 @@ async def invoke_hermes_cli(
     description: str,
     hermes_session_id: Optional[str] = None,
     on_update: Optional[Callable[[str], None]] = None,
+    image_paths: Optional[list[str]] = None,
 ) -> HermesInvokeResult:
     """向 Hermes Agent 发起一次 CLI 调用，返回结构化结果。
 
@@ -725,11 +838,13 @@ async def invoke_hermes_cli(
         HermesInvokeResult（不抛出异常，失败信息写入 result.error_message）
     """
     started_at = time.monotonic()
+    image_paths = [path for path in (image_paths or []) if isinstance(path, str) and path]
     if on_update is not None:
         stream_result = await _invoke_hermes_stream_bridge(
             description,
             hermes_session_id,
             on_update,
+            image_paths=image_paths,
         )
         logger.info(
             "[Hermes] streaming bridge 返回: success=%s, elapsed=%.2fs",
@@ -747,9 +862,13 @@ async def invoke_hermes_cli(
             description,
             hermes_session_id=hermes_session_id,
             on_update=None,
+            image_paths=image_paths,
         )
 
-    cmd = [*_HERMES_CMD, description, *_HERMES_FLAGS]
+    description_for_cli = _with_attached_image_guard(description, image_paths)
+    cmd = [*_HERMES_CMD, description_for_cli, *_HERMES_FLAGS]
+    if image_paths:
+        cmd.extend(["--image", image_paths[0]])
     if hermes_session_id:
         cmd.extend(["--resume", hermes_session_id])
     logger.debug("[Hermes CLI] 执行: %s", " ".join(cmd))
@@ -971,10 +1090,11 @@ class HermesExecutor(ExecutionStrategy):
             user_address,
             format_environment_context(),
         )
-        chat_session = self._chat_session
+        chat_session = self._chat_session_for_task(task)
         hermes_sid = None
         if chat_session is not None:
             hermes_sid = chat_session.hermes_session_id
+        image_paths = _task_image_paths(task)
 
         def on_update(content: str) -> None:
             if chat_session is None:
@@ -992,6 +1112,7 @@ class HermesExecutor(ExecutionStrategy):
             description,
             hermes_session_id=hermes_sid,
             on_update=on_update if chat_session is not None else None,
+            image_paths=image_paths,
         )
         elapsed = time.monotonic() - started_at
 
@@ -1006,7 +1127,11 @@ class HermesExecutor(ExecutionStrategy):
             # 记录 session_id 以便后续 --resume
             if invoke_result.hermes_session_id and chat_session is not None:
                 chat_session.set_hermes_session_id(invoke_result.hermes_session_id)
-            if invoke_result.hermes_title and chat_session is not None:
+            if (
+                invoke_result.hermes_title
+                and chat_session is not None
+                and not is_proactive_chat_session(chat_session.session_id)
+            ):
                 chat_session.set_session_title(invoke_result.hermes_title)
             return invoke_result.output
 
@@ -1022,6 +1147,24 @@ class HermesExecutor(ExecutionStrategy):
             returncode=invoke_result.returncode,
             stderr=invoke_result.stderr,
         )
+
+    def _chat_session_for_task(self, task: TaskInfo) -> Optional["ChatSession"]:
+        session_id = str(getattr(task, "chat_session_id", "") or "")
+        current = self._chat_session
+        if not session_id:
+            return current
+        if current is not None and current.session_id == session_id:
+            return current
+        try:
+            from apps.core.chat_session import ChatSession
+            from apps.core.chat_store import get_chat_store
+
+            session = ChatSession(session_id=session_id)
+            session.attach_store(get_chat_store(), load_existing=True)
+            return session
+        except Exception:
+            logger.debug("无法为任务加载指定聊天会话: %s", session_id, exc_info=True)
+            return current
 
 
 # ── 执行器选择工厂 ────────────────────────────────────────────────────────────

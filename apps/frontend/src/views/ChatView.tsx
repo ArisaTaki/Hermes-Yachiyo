@@ -1,6 +1,33 @@
 import { FormEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from 'react';
+import type {
+  ClipboardEvent as ReactClipboardEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 
-import { apiGet, apiPost, copyText, openAppView, openExternalUrl } from '../lib/bridge';
+import { ImageAttachmentViewer } from '../components/ImageAttachmentViewer';
+import { apiGet, apiPost, bridgeUrl, copyText, openAppView, openExternalUrl } from '../lib/bridge';
+import { currentParam } from '../lib/view';
+
+type PendingAttachment = {
+  id: string;
+  name: string;
+  mime_type: string;
+  size: number;
+  width?: number;
+  height?: number;
+  data_url: string;
+};
+
+type ChatAttachment = {
+  id?: string;
+  kind?: string;
+  name?: string;
+  mime_type?: string;
+  size?: number;
+  url?: string;
+  source?: string;
+  spoken_text?: string;
+};
 
 type ChatMessage = {
   id?: string;
@@ -9,6 +36,7 @@ type ChatMessage = {
   text?: string;
   status?: string;
   error?: string;
+  attachments?: ChatAttachment[];
 };
 
 type MessagesPayload = {
@@ -30,9 +58,20 @@ type SessionsPayload = {
   sessions?: SessionItem[];
 };
 
+type ImageInputPayload = {
+  can_attach_images?: boolean;
+  mode?: string;
+  route?: string;
+  supports_native_vision?: boolean | null;
+  requires_vision_pipeline?: boolean;
+  label?: string;
+  reason?: string;
+};
+
 type ExecutorPayload = {
   executor?: string;
   available?: boolean;
+  image_input?: ImageInputPayload;
 };
 
 type RenderState = {
@@ -40,36 +79,52 @@ type RenderState = {
   target: string;
 };
 
+type ChatNotice = {
+  id: number;
+  kind: 'warn' | 'danger';
+  title: string;
+  detail: string;
+};
+
 const ACTIVE_POLL_INTERVAL_MS = 500;
 const IDLE_POLL_INTERVAL_MS = 3000;
+const EXECUTOR_POLL_INTERVAL_MS = 3000;
 const TYPE_BASE_CHARS_PER_SECOND = 85;
 const TYPE_MAX_CHARS_PER_SECOND = 360;
 const SCROLL_BOTTOM_THRESHOLD = 14;
 const COPY_FEEDBACK_MS = 1500;
+const MAX_ATTACHMENTS = 4;
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 
 export function ChatView() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [status, setStatus] = useState('就绪');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [sessions, setSessions] = useState<SessionsPayload | null>(null);
   const [executor, setExecutor] = useState<ExecutorPayload | null>(null);
+  const [notice, setNotice] = useState<ChatNotice | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState('');
   const [, setRenderTick] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerComposingRef = useRef(false);
   const renderStateRef = useRef<Map<string, RenderState>>(new Map());
   const animationFrameRef = useRef<number | null>(null);
   const typewriterLastTsRef = useRef(0);
   const stickToBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
+  const noticeTimerRef = useRef<number | null>(null);
 
   const refreshMessages = useCallback(async () => {
     try {
       const payload = await apiGet<MessagesPayload>('/ui/chat/messages?limit=80');
       if (payload.ok === false) throw new Error(payload.error || '读取消息失败');
-      const nextMessages = payload.messages || [];
+      const baseUrl = await bridgeUrl();
+      const nextMessages = withResolvedAttachmentUrls(payload.messages || [], baseUrl);
       const processing = Boolean(payload.is_processing);
       const failed = latestFailedMessage(nextMessages);
       setMessages(nextMessages);
@@ -105,9 +160,22 @@ export function ChatView() {
   }, []);
 
   useEffect(() => {
-    void refreshMessages();
-    void loadSessions();
-    void loadExecutor();
+    const requestedSessionId = currentParam('session_id').trim();
+    void (async () => {
+      if (requestedSessionId) {
+        try {
+          const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/chat/sessions/load', {
+            session_id: requestedSessionId,
+          });
+          if (result.ok === false) throw new Error(result.error || '切换会话失败');
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : '切换会话失败');
+        }
+      }
+      await refreshMessages();
+      await loadSessions();
+      await loadExecutor();
+    })();
   }, [loadExecutor, loadSessions, refreshMessages]);
 
   useEffect(() => {
@@ -115,6 +183,13 @@ export function ChatView() {
     const timer = window.setInterval(refreshMessages, interval);
     return () => window.clearInterval(timer);
   }, [isProcessing, refreshMessages]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void loadExecutor();
+    }, EXECUTOR_POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [loadExecutor]);
 
   useEffect(() => {
     syncRenderStates(messages, renderStateRef.current);
@@ -131,6 +206,7 @@ export function ChatView() {
   useEffect(() => {
     return () => {
       if (animationFrameRef.current !== null) window.cancelAnimationFrame(animationFrameRef.current);
+      if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
     };
   }, []);
 
@@ -194,24 +270,86 @@ export function ChatView() {
   async function submit(event: FormEvent) {
     event.preventDefault();
     const text = input.trim();
-    if (!text || isSending) return;
+    if ((!text && attachments.length === 0) || isSending) return;
+    if (attachments.length > 0 && !canAttachImages(executor)) {
+      showImageInputBlocked();
+      return;
+    }
+    const outgoingAttachments = attachments;
     setInput('');
+    setAttachments([]);
     setIsSending(true);
     setIsProcessing(true);
-    setStatus('发送中...');
+    setStatus(outgoingAttachments.length ? '发送图片中...' : '发送中...');
     stickToBottomRef.current = true;
     try {
-      const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/chat/messages', { text });
+      const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/chat/messages', {
+        text,
+        attachments: outgoingAttachments,
+      });
       if (result.ok === false) throw new Error(result.error || '发送失败');
       setStatus('等待回复...');
       await refreshMessages();
       await loadSessions();
     } catch (error) {
+      setInput(text);
+      setAttachments(outgoingAttachments);
       setStatus(error instanceof Error ? error.message : '发送失败');
       setIsProcessing(false);
     } finally {
       setIsSending(false);
     }
+  }
+
+  async function handlePaste(event: ReactClipboardEvent<HTMLTextAreaElement>) {
+    const files = clipboardImageFiles(event.clipboardData);
+    if (files.length === 0) return;
+    event.preventDefault();
+    if (!canAttachImages(executor)) {
+      showImageInputBlocked();
+      return;
+    }
+    await addImageFiles(files);
+  }
+
+  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (isImeComposing(event, composerComposingRef.current)) return;
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  }
+
+  async function addImageFiles(files: File[]) {
+    if (!canAttachImages(executor)) {
+      showImageInputBlocked();
+      return;
+    }
+    const remaining = MAX_ATTACHMENTS - attachments.length;
+    if (remaining <= 0) {
+      setStatus(`一次最多附加 ${MAX_ATTACHMENTS} 张图片`);
+      return;
+    }
+    const accepted = files.filter((file) => file.type.startsWith('image/')).slice(0, remaining);
+    if (accepted.length === 0) {
+      setStatus('剪贴板里没有可用图片');
+      return;
+    }
+    const tooLarge = accepted.find((file) => file.size > MAX_ATTACHMENT_BYTES);
+    if (tooLarge) {
+      setStatus(`图片 ${tooLarge.name || '未命名'} 超过 8 MB`);
+      return;
+    }
+    try {
+      const next = await Promise.all(accepted.map(readPendingAttachment));
+      setAttachments((current) => [...current, ...next].slice(0, MAX_ATTACHMENTS));
+      setStatus(next.length > 1 ? `已附加 ${next.length} 张图片` : '已附加图片');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : '读取图片失败');
+    }
+  }
+
+  function removeAttachment(id: string) {
+    setAttachments((current) => current.filter((attachment) => attachment.id !== id));
   }
 
   async function clearSession() {
@@ -292,8 +430,26 @@ export function ChatView() {
     void openExternalUrl(anchor.href);
   }
 
+  function showNotice(title: string, detail: string, kind: ChatNotice['kind'] = 'warn') {
+    if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+    setNotice({ id: Date.now(), kind, title, detail });
+    noticeTimerRef.current = window.setTimeout(() => setNotice(null), 5200);
+  }
+
+  function showImageInputBlocked() {
+    showNotice('当前不能发送图片', imageInputUnavailableText(executor), 'warn');
+    setStatus('图片未附加');
+  }
+
   return (
     <main className="app-shell chat-shell refined-chat-shell">
+      {notice ? (
+        <div className={`chat-toast ${notice.kind}`} role="status">
+          <strong>{notice.title}</strong>
+          <span>{notice.detail}</span>
+          <button type="button" aria-label="关闭提示" onClick={() => setNotice(null)}>×</button>
+        </div>
+      ) : null}
       <header className="chat-topbar">
         <div className="chat-title-block">
           <h1>Yachiyo</h1>
@@ -335,14 +491,63 @@ export function ChatView() {
       </section>
 
       <form className="composer refined-composer" onSubmit={submit}>
+        <div className="composer-body">
+          {attachments.length ? (
+            <div className="composer-attachments" aria-label="已附加图片">
+              {attachments.map((attachment) => (
+                <figure className="composer-attachment" key={attachment.id}>
+                  <img src={attachment.data_url} alt={attachment.name} />
+                  <figcaption>{attachment.name}</figcaption>
+                  <button
+                    type="button"
+                    aria-label={`移除 ${attachment.name}`}
+                    onClick={() => removeAttachment(attachment.id)}
+                  >
+                    ×
+                  </button>
+                </figure>
+              ))}
+            </div>
+          ) : null}
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onCompositionEnd={() => {
+              composerComposingRef.current = false;
+            }}
+            onCompositionStart={() => {
+              composerComposingRef.current = true;
+            }}
+            onKeyDown={handleComposerKeyDown}
+            onPaste={(event) => void handlePaste(event)}
+            placeholder="输入消息，或直接粘贴图片..."
+            disabled={isSending}
+            rows={1}
+          />
+        </div>
         <input
-          ref={inputRef}
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          placeholder="输入消息..."
-          disabled={isSending}
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(event) => {
+            const files = Array.from(event.target.files || []);
+            event.target.value = '';
+            void addImageFiles(files);
+          }}
         />
-        <button type="submit" disabled={isSending || !input.trim()}>发送</button>
+        <button
+          type="button"
+          className="composer-attach-button"
+          disabled={isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS}
+          title={imageInputHelpText(executor)}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          图片
+        </button>
+        <button type="submit" disabled={isSending || (!input.trim() && attachments.length === 0)}>发送</button>
       </form>
       <footer className="status-line refined-status-line">{status}</footer>
     </main>
@@ -383,6 +588,13 @@ function MessageBubble({ copied, displayContent, message, onCopy }: {
       ) : (
         <div className="message-content markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(displayContent) }} />
       )}
+      {message.attachments?.length ? (
+        <div className="message-attachments">
+          {message.attachments.map((attachment) => (
+            <ImageAttachmentViewer attachment={attachment} key={attachment.id || attachment.name} />
+          ))}
+        </div>
+      ) : null}
       {message.error ? <div className="message-error">{message.error}</div> : null}
     </article>
   );
@@ -424,6 +636,11 @@ function compactStatusText(text: string, maxLength = 96) {
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
 }
 
+function isImeComposing(event: ReactKeyboardEvent<HTMLElement>, fallback = false) {
+  const nativeEvent = event.nativeEvent as KeyboardEvent & { isComposing?: boolean };
+  return Boolean(fallback || nativeEvent.isComposing || nativeEvent.keyCode === 229);
+}
+
 function roleLabel(role: string) {
   if (role === 'user') return '你';
   if (role === 'assistant') return 'Yachiyo';
@@ -435,9 +652,44 @@ function executorLabel(executor: ExecutorPayload | null) {
   return executor.executor === 'HermesExecutor' ? 'Hermes' : '模拟';
 }
 
+function canAttachImages(executor: ExecutorPayload | null) {
+  return executor?.available === true && executor.image_input?.can_attach_images === true;
+}
+
+function imageInputUnavailableText(executor: ExecutorPayload | null) {
+  return executor?.image_input?.reason
+    || '当前 Yachiyo vision 链路不可用。请在主控台切换支持图片的主模型，或单独设置图片识别模型后再发送。';
+}
+
+function imageInputHelpText(executor: ExecutorPayload | null) {
+  const imageInput = executor?.image_input;
+  if (!imageInput) return '附加图片';
+  return imageInput.reason || imageInput.label || '附加图片';
+}
+
 function sessionLabel(session: SessionItem) {
   const title = session.title || session.session_id.slice(0, 8);
   return `${title} (${session.message_count || 0})`;
+}
+
+function withResolvedAttachmentUrls(messages: ChatMessage[], baseUrl: string): ChatMessage[] {
+  return messages.map((message) => {
+    if (!message.attachments?.length) return message;
+    return {
+      ...message,
+      attachments: message.attachments.map((attachment) => ({
+        ...attachment,
+        url: resolveAttachmentUrl(attachment.url, baseUrl),
+      })),
+    };
+  });
+}
+
+function resolveAttachmentUrl(url: string | undefined, baseUrl: string) {
+  if (!url) return '';
+  if (/^https?:\/\//i.test(url) || url.startsWith('data:')) return url;
+  if (!url.startsWith('/')) return url;
+  return `${baseUrl}${url}`;
 }
 
 function syncRenderStates(messages: ChatMessage[], states: Map<string, RenderState>) {
@@ -486,6 +738,62 @@ function isNearBottom(container: HTMLDivElement) {
   return container.scrollHeight - container.scrollTop - container.clientHeight <= SCROLL_BOTTOM_THRESHOLD;
 }
 
+function clipboardImageFiles(data: DataTransfer | null) {
+  if (!data) return [];
+  const files: File[] = [];
+  for (const item of Array.from(data.items || [])) {
+    if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+    const file = item.getAsFile();
+    if (file) files.push(file);
+  }
+  if (files.length) return files;
+  return Array.from(data.files || []).filter((file) => file.type.startsWith('image/'));
+}
+
+function readPendingAttachment(file: File): Promise<PendingAttachment> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`读取图片失败：${file.name || '未命名'}`));
+    reader.onload = async () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUrl.startsWith('data:image/')) {
+        reject(new Error('只支持图片附件'));
+        return;
+      }
+      let dimensions: { width: number; height: number };
+      try {
+        dimensions = await loadImageDimensions(dataUrl);
+      } catch {
+        reject(new Error(`无法读取图片尺寸：${file.name || '未命名'}`));
+        return;
+      }
+      if (dimensions.width < 16 || dimensions.height < 16) {
+        reject(new Error('图片尺寸过小，容易被上游视觉模型判定为不可处理；请换用正常尺寸的截图或图片。'));
+        return;
+      }
+      resolve({
+        id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        name: file.name || 'pasted-image.png',
+        mime_type: file.type || 'image/png',
+        size: file.size,
+        width: dimensions.width,
+        height: dimensions.height,
+        data_url: dataUrl,
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImageDimensions(dataUrl: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth || image.width, height: image.naturalHeight || image.height });
+    image.onerror = () => reject(new Error('image load failed'));
+    image.src = dataUrl;
+  });
+}
+
 function escapeHtml(text: string) {
   return text
     .replace(/&/g, '&amp;')
@@ -531,7 +839,8 @@ function renderMarkdown(text: string) {
     inCode = false;
   }
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     if (line.trim().startsWith('```')) {
       if (inCode) {
         flushCode();
@@ -552,6 +861,23 @@ function renderMarkdown(text: string) {
     if (!line.trim()) {
       flushParagraph();
       closeList();
+      continue;
+    }
+
+    const nextLine = lines[index + 1] || '';
+    if (isMarkdownTableHeader(line, nextLine)) {
+      flushParagraph();
+      closeList();
+      const headers = splitMarkdownTableRow(line);
+      const alignments = splitMarkdownTableRow(nextLine).map(markdownTableAlignment);
+      const rows: string[][] = [];
+      index += 2;
+      while (index < lines.length && lineLooksLikeMarkdownTableRow(lines[index])) {
+        rows.push(splitMarkdownTableRow(lines[index]));
+        index += 1;
+      }
+      index -= 1;
+      html += renderMarkdownTable(headers, alignments, rows);
       continue;
     }
 
@@ -596,6 +922,68 @@ function renderMarkdown(text: string) {
   flushParagraph();
   closeList();
   return html;
+}
+
+function isMarkdownTableHeader(headerLine: string, separatorLine: string) {
+  const headerCells = splitMarkdownTableRow(headerLine);
+  if (headerCells.length < 2) return false;
+  return isMarkdownTableSeparator(separatorLine, headerCells.length);
+}
+
+function isMarkdownTableSeparator(line: string, expectedCells: number) {
+  const cells = splitMarkdownTableRow(line);
+  if (cells.length < 2 || cells.length < expectedCells) return false;
+  return cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, '')));
+}
+
+function lineLooksLikeMarkdownTableRow(line: string) {
+  if (!line.trim()) return false;
+  return splitMarkdownTableRow(line).length >= 2;
+}
+
+function splitMarkdownTableRow(line: string) {
+  let value = line.trim();
+  if (value.startsWith('|')) value = value.slice(1);
+  if (value.endsWith('|')) value = value.slice(0, -1);
+  const cells: string[] = [];
+  let current = '';
+  let inCode = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    const previous = value[index - 1];
+    if (char === '`' && previous !== '\\') inCode = !inCode;
+    if (char === '|' && previous !== '\\' && !inCode) {
+      cells.push(current.trim().replace(/\\\|/g, '|'));
+      current = '';
+      continue;
+    }
+    current += char;
+  }
+  cells.push(current.trim().replace(/\\\|/g, '|'));
+  return cells;
+}
+
+function markdownTableAlignment(cell: string): '' | 'left' | 'center' | 'right' {
+  const value = cell.replace(/\s+/g, '');
+  if (value.startsWith(':') && value.endsWith(':')) return 'center';
+  if (value.endsWith(':')) return 'right';
+  if (value.startsWith(':')) return 'left';
+  return '';
+}
+
+function renderMarkdownTable(headers: string[], alignments: Array<'' | 'left' | 'center' | 'right'>, rows: string[][]) {
+  const columnCount = headers.length;
+  const alignAttr = (index: number) => (alignments[index] ? ` class="align-${alignments[index]}"` : '');
+  const headerHtml = headers
+    .map((cell, index) => `<th${alignAttr(index)}>${renderInlineMarkdown(cell)}</th>`)
+    .join('');
+  const bodyHtml = rows
+    .map((row) => {
+      const cells = Array.from({ length: columnCount }, (_unused, index) => row[index] || '');
+      return `<tr>${cells.map((cell, index) => `<td${alignAttr(index)}>${renderInlineMarkdown(cell)}</td>`).join('')}</tr>`;
+    })
+    .join('');
+  return `<div class="markdown-table-wrap"><table><thead><tr>${headerHtml}</tr></thead><tbody>${bodyHtml}</tbody></table></div>`;
 }
 
 function renderInlineMarkdown(text: string) {
