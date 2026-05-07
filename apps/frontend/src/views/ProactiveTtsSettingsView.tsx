@@ -73,6 +73,20 @@ type GptSovitsServiceStatus = {
   command_configured?: boolean;
   launch_agent_installed?: boolean;
   launch_agent_running?: boolean;
+  api_process?: {
+    running?: boolean;
+    pid?: number;
+    ppid?: number;
+    command?: string;
+    port?: number;
+  };
+  related_launch_agents?: Array<{
+    label?: string;
+    path_display?: string;
+    working_directory?: string;
+    managed_by_hermes?: boolean;
+    running?: boolean;
+  }>;
   platform_supported?: boolean;
   plist_path_display?: string;
   tools?: Record<string, boolean>;
@@ -334,6 +348,53 @@ export function ProactiveTtsSettingsView() {
     }
   }
 
+  async function useExistingGsvService() {
+    if (interactionBusy) return;
+    setBusyAction('service-use-existing');
+    setStatus('正在保存现有 GPT-SoVITS 服务配置...');
+    try {
+      const next = await persistSettings('');
+      await refreshGsvServiceStatus(() => false, {
+        base_url: next.gsv_base_url,
+        workdir: next.gsv_service_workdir,
+        command: next.gsv_service_command,
+      });
+      setStatus('已保留现有 GPT-SoVITS 服务，Yachiyo 将复用当前 API，不接管自启。');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '保存现有 GPT-SoVITS 服务配置失败');
+    } finally {
+      setBusyAction('');
+    }
+  }
+
+  async function adoptGsvLaunchAgent() {
+    if (interactionBusy) return;
+    const agent = firstExternalGsvLaunchAgent(serviceStatus);
+    const label = agent?.label || '外部 GPT-SoVITS 服务';
+    const confirmed = window.confirm(
+      `将停用外部 GPT-SoVITS LaunchAgent（${label}），保留服务目录和模型文件，并安装 Hermes-Yachiyo 自己的后台/自启。继续吗？`,
+    );
+    if (!confirmed) return;
+    setBusyAction('service-adopt');
+    setStatus('正在接管 GPT-SoVITS 后台服务...');
+    try {
+      await persistSettings('');
+      const result = await apiPost<{
+        ok?: boolean;
+        error?: string;
+        message?: string;
+        status?: GptSovitsServiceStatus;
+      }>('/ui/tts/gpt-sovits/service/adopt');
+      if (result.ok === false) throw new Error(result.error || '接管 GPT-SoVITS 后台服务失败');
+      setServiceStatus(result.status || null);
+      setStatus(result.message || 'GPT-SoVITS 后台服务已交由 Hermes-Yachiyo 管理');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '接管 GPT-SoVITS 后台服务失败');
+    } finally {
+      setBusyAction('');
+    }
+  }
+
   async function uninstallGsvLaunchAgent() {
     if (interactionBusy) return;
     if (!window.confirm('将停止并移除 GPT-SoVITS 开机自启服务，不会删除模型文件。继续吗？')) return;
@@ -415,6 +476,8 @@ export function ProactiveTtsSettingsView() {
   const filePickerAvailable = hasDesktopFilePicker();
   const busy = Boolean(busyAction);
   const interactionBusy = busy || loading || resourceBusy;
+  const externalGsvServiceDetected = hasExternalGsvService(serviceStatus);
+  const externalGsvAgent = firstExternalGsvLaunchAgent(serviceStatus);
 
   return (
     <main className="app-shell">
@@ -593,14 +656,16 @@ export function ProactiveTtsSettingsView() {
                       >
                         {busyAction === 'service' ? '打开中...' : '打开调试终端'}
                       </button>
-                      <button
-                        type="button"
-                        className={busyAction === 'service-install' ? 'loading-button' : undefined}
-                        disabled={interactionBusy}
-                        onClick={() => void installGsvLaunchAgent()}
-                      >
-                        {busyAction === 'service-install' ? '启动中...' : '启动本地后台/自启'}
-                      </button>
+                      {!externalGsvServiceDetected ? (
+                        <button
+                          type="button"
+                          className={busyAction === 'service-install' ? 'loading-button' : undefined}
+                          disabled={interactionBusy}
+                          onClick={() => void installGsvLaunchAgent()}
+                        >
+                          {busyAction === 'service-install' ? '启动中...' : '启动本地后台/自启'}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className={busyAction === 'service-uninstall' ? 'loading-button danger-action' : 'danger-action'}
@@ -611,6 +676,30 @@ export function ProactiveTtsSettingsView() {
                       </button>
                       <button type="button" disabled={interactionBusy} onClick={() => void refreshGsvServiceStatus()}>刷新状态</button>
                     </div>
+                    {externalGsvServiceDetected ? (
+                      <div className="settings-resource-fallback">
+                        <p className="settings-note">
+                          检测到外部 GPT-SoVITS 服务：{externalGsvAgent?.label || '未知 LaunchAgent'}。
+                          复用会保留原服务；接管会停用该自启项并改由 Hermes-Yachiyo 管理。
+                        </p>
+                        <button
+                          type="button"
+                          className={busyAction === 'service-use-existing' ? 'loading-button' : undefined}
+                          disabled={interactionBusy}
+                          onClick={() => void useExistingGsvService()}
+                        >
+                          {busyAction === 'service-use-existing' ? '保存中...' : '使用现有服务'}
+                        </button>
+                        <button
+                          type="button"
+                          className={busyAction === 'service-adopt' ? 'loading-button' : undefined}
+                          disabled={interactionBusy}
+                          onClick={() => void adoptGsvLaunchAgent()}
+                        >
+                          {busyAction === 'service-adopt' ? '接管中...' : '交由 Yachiyo 管理'}
+                        </button>
+                      </div>
+                    ) : null}
                     <p className="capability-note wide-form-note">
                       运行时部署会准备 Python 环境和 GPT-SoVITS 基础预训练模型；调试终端是前台临时运行；本地后台/自启会使用 macOS LaunchAgent 管理服务。
                     </p>
@@ -645,8 +734,12 @@ export function ProactiveTtsSettingsView() {
                           <strong className={serviceStatus.workdir_exists ? 'ok' : 'warn'}>{serviceStatus.workdir_exists ? serviceStatus.workdir_display || '已配置' : '未配置或不存在'}</strong>
                         </div>
                         <div className="settings-meta-row">
-                          <span>本地自启</span>
-                          <strong>{serviceStatus.launch_agent_installed ? (serviceStatus.launch_agent_running ? '已安装并运行' : '已安装，待启动') : '未安装'}</strong>
+                          <span>API 进程</span>
+                          <strong className={serviceStatus.api_process?.running ? 'ok' : 'warn'}>{formatGsvApiProcess(serviceStatus.api_process)}</strong>
+                        </div>
+                        <div className="settings-meta-row">
+                          <span>自启管理</span>
+                          <strong>{formatGsvLaunchAgentStatus(serviceStatus)}</strong>
                         </div>
                         <div className="settings-meta-row">
                           <span>LaunchAgent</span>
@@ -1114,6 +1207,11 @@ function gsvServiceStatusText(status: GptSovitsServiceStatus | null): string {
   if (!status) return '推荐端口：9880；服务启动后再执行保存并测试。';
   if (status.workdir_exists && status.tools?.torchcodec === false) return '缺少 torchcodec，请重新执行“部署运行时/基础模型”后再测试语音。';
   if (status.workdir_exists && status.missing_model_files?.length) return '缺少 GPT-SoVITS 预训练模型，请重新执行“部署运行时/基础模型”后再测试语音。';
+  if (status.reachable && status.api_process?.running && !status.launch_agent_installed) {
+    const agent = firstExternalGsvLaunchAgent(status);
+    if (agent?.label) return `API 已可达；检测到正在运行的服务进程，由其他 LaunchAgent 管理：${agent.label}。`;
+    return 'API 已可达；检测到正在运行的服务进程，但不是由 Hermes-Yachiyo 后台服务管理。';
+  }
   if (status.reachable) return 'API 已可达；可以保存并测试语音链路。';
   if (!status.workdir_exists) return '请先填写 GPT-SoVITS 服务目录，或先安装 GPT-SoVITS 本体。';
   if (!status.command_configured) return '请先填写服务启动命令。';
@@ -1133,6 +1231,33 @@ function formatGsvTools(tools?: Record<string, boolean>): string {
     ['torchcodec', tools.torchcodec],
   ];
   return items.map(([label, ok]) => `${label} ${ok ? '可用' : '缺失'}`).join(' / ');
+}
+
+function formatGsvApiProcess(process?: GptSovitsServiceStatus['api_process']): string {
+  if (!process?.running) return '未检测到监听进程';
+  const pid = process.pid ? `PID ${process.pid}` : '运行中';
+  const port = process.port ? `:${process.port}` : '';
+  const launchd = process.ppid === 1 ? '，launchd 持有' : '';
+  return `${pid}${port}${launchd}`;
+}
+
+function formatGsvLaunchAgentStatus(status: GptSovitsServiceStatus): string {
+  if (status.launch_agent_installed) {
+    return status.launch_agent_running ? 'Hermes 已安装并运行' : 'Hermes 已安装，待启动';
+  }
+  const agent = firstExternalGsvLaunchAgent(status);
+  if (agent?.label) {
+    return `其他 LaunchAgent：${agent.label}${agent.running ? '（运行中）' : '（未运行）'}`;
+  }
+  return '未安装';
+}
+
+function hasExternalGsvService(status: GptSovitsServiceStatus | null): boolean {
+  return Boolean(status?.api_process?.running && !status.launch_agent_installed && firstExternalGsvLaunchAgent(status));
+}
+
+function firstExternalGsvLaunchAgent(status: GptSovitsServiceStatus | null | undefined) {
+  return status?.related_launch_agents?.find((agent) => !agent.managed_by_hermes);
 }
 
 function formatGsvModels(models?: Record<string, boolean>): string {

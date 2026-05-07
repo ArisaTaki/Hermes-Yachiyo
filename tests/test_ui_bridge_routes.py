@@ -8,9 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import apps.shell.live2d_resources as live2d_resources
-import apps.shell.config as config_mod
 import apps.locald.screenshot as screenshot_mod
+import apps.shell.config as config_mod
+import apps.shell.live2d_resources as live2d_resources
 from apps.bridge.routes import ui
 from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID
 from apps.shell.config import AppConfig
@@ -721,6 +721,11 @@ async def test_gpt_sovits_service_routes_use_runtime_config(monkeypatch):
     )
     monkeypatch.setattr(
         ui,
+        "adopt_gpt_sovits_launch_agent",
+        lambda received_config: calls.append(("adopt", received_config)) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        ui,
         "uninstall_gpt_sovits_launch_agent",
         lambda received_config: calls.append(("uninstall", received_config)) or {"ok": True},
     )
@@ -734,6 +739,7 @@ async def test_gpt_sovits_service_routes_use_runtime_config(monkeypatch):
         )
     ) == {"workdir_exists": True}
     assert await ui.install_tts_gpt_sovits_service() == {"ok": True}
+    assert await ui.adopt_tts_gpt_sovits_service() == {"ok": True}
     assert await ui.uninstall_tts_gpt_sovits_service() == {"ok": True}
     assert calls == [
         ("status", config),
@@ -746,6 +752,7 @@ async def test_gpt_sovits_service_routes_use_runtime_config(monkeypatch):
             },
         ),
         ("install", config),
+        ("adopt", config),
         ("uninstall", config),
     ]
 

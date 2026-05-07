@@ -5,41 +5,37 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
-from fastapi import APIRouter
-from fastapi import HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from apps.bridge.deps import get_runtime
 from apps.core.chat_session import MessageStatus
-from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH
-from apps.shell.assets import data_uri
-from apps.shell.assets import find_live2d_preview_path
-from apps.shell.chat_api import ChatAPI
-from apps.shell.chat_api import allocate_chat_attachment_path
-from apps.shell.chat_api import audio_mime_type_for_suffix
-from apps.shell.chat_api import chat_attachment_record
+from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri, find_live2d_preview_path
+from apps.shell.chat_api import (
+    ChatAPI,
+    allocate_chat_attachment_path,
+    audio_mime_type_for_suffix,
+    chat_attachment_record,
+)
 from apps.shell.chat_bridge import ChatBridge
-from apps.shell.gpt_sovits_service import get_gpt_sovits_service_status
-from apps.shell.gpt_sovits_service import get_gpt_sovits_service_status_for_values
-from apps.shell.gpt_sovits_service import install_gpt_sovits_launch_agent
-from apps.shell.gpt_sovits_service import uninstall_gpt_sovits_launch_agent
-from apps.shell.launcher_notifications import LauncherNotificationTracker
-from apps.shell.live2d_resources import import_live2d_archive_draft
-from apps.shell.live2d_resources import prepare_live2d_model_path_draft
-from apps.shell.tts_resources import get_tts_voice_resource_info
-from apps.shell.tts_resources import import_tts_voice_archive_draft
+from apps.shell.gpt_sovits_service import (
+    adopt_gpt_sovits_launch_agent,
+    get_gpt_sovits_service_status,
+    get_gpt_sovits_service_status_for_values,
+    install_gpt_sovits_launch_agent,
+    uninstall_gpt_sovits_launch_agent,
+)
 from apps.shell.installer_api import InstallerWebViewAPI
+from apps.shell.launcher_notifications import LauncherNotificationTracker
+from apps.shell.live2d_resources import import_live2d_archive_draft, prepare_live2d_model_path_draft
 from apps.shell.main_api import MainWindowAPI
-from apps.shell.mode_settings import apply_settings_changes
-from apps.shell.mode_settings import serialize_mode_window_data
-from apps.shell.proactive import ProactiveDesktopService
-from apps.shell.proactive import get_proactive_chat_session
+from apps.shell.mode_settings import apply_settings_changes, serialize_mode_window_data
+from apps.shell.proactive import ProactiveDesktopService, get_proactive_chat_session
 from apps.shell.tts import TTSService
+from apps.shell.tts_resources import get_tts_voice_resource_info, import_tts_voice_archive_draft
 
 router = APIRouter(prefix="/ui", tags=["UI"])
 _launcher_notifications: dict[str, LauncherNotificationTracker] = {}
@@ -251,6 +247,12 @@ async def get_tts_gpt_sovits_service_status_for_draft(request: GptSovitsServiceS
 async def install_tts_gpt_sovits_service() -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(install_gpt_sovits_launch_agent, runtime.config)
+
+
+@router.post("/tts/gpt-sovits/service/adopt")
+async def adopt_tts_gpt_sovits_service() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(adopt_gpt_sovits_launch_agent, runtime.config)
 
 
 @router.post("/tts/gpt-sovits/service/uninstall")

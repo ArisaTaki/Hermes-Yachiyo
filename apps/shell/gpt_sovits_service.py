@@ -7,11 +7,12 @@ import platform
 import plistlib
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from urllib.error import HTTPError
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
 
 LAUNCH_AGENT_LABEL = "com.hermes-yachiyo.gpt-sovits"
@@ -26,6 +27,8 @@ def get_gpt_sovits_service_status(config: Any) -> dict[str, Any]:
     plist_path = _launch_agent_path()
     reachable = _service_reachable(base_url)
     model_status = _gpt_sovits_model_status(workdir)
+    api_process = _service_process_status(base_url)
+    related_launch_agents = _related_launch_agents(workdir)
     return {
         "provider": "gpt-sovits",
         "base_url": base_url,
@@ -40,6 +43,8 @@ def get_gpt_sovits_service_status(config: Any) -> dict[str, Any]:
         "plist_path_display": _display_path(plist_path),
         "launch_agent_installed": plist_path.exists(),
         "launch_agent_running": _launch_agent_running(),
+        "api_process": api_process,
+        "related_launch_agents": related_launch_agents,
         "platform_supported": platform.system() == "Darwin",
         "tools": {
             "python": _tool_exists("python3.11", "python3", "python"),
@@ -120,6 +125,76 @@ def install_gpt_sovits_launch_agent(config: Any) -> dict[str, Any]:
     }
 
 
+def adopt_gpt_sovits_launch_agent(config: Any) -> dict[str, Any]:
+    """Disable user-level third-party GPT-SoVITS agents and install the Hermes agent."""
+    if platform.system() != "Darwin":
+        return {"ok": False, "error": "GPT-SoVITS 后台/开机自启目前仅支持 macOS LaunchAgent"}
+
+    tts = getattr(config, "tts", config)
+    base_url = str(getattr(tts, "gsv_base_url", "") or "").rstrip("/")
+    workdir = _expand_path(str(getattr(tts, "gsv_service_workdir", "") or ""))
+    command = str(getattr(tts, "gsv_service_command", "") or "").strip()
+    if not workdir or not workdir.exists() or not workdir.is_dir():
+        return {"ok": False, "error": "请先填写存在的 GPT-SoVITS 服务目录"}
+    if not command:
+        return {"ok": False, "error": "请先填写 GPT-SoVITS 服务启动命令"}
+
+    external_agents = [
+        agent for agent in _related_launch_agents(workdir) if not agent["managed_by_hermes"]
+    ]
+    if not external_agents:
+        return {
+            "ok": False,
+            "error": "未检测到可接管的外部 GPT-SoVITS 用户级 LaunchAgent",
+            "status": get_gpt_sovits_service_status(config),
+        }
+
+    unsafe_agents = []
+    for agent in external_agents:
+        if not _is_user_launch_agent_path(Path(str(agent.get("path") or ""))):
+            unsafe_agents.append(agent)
+    if unsafe_agents:
+        labels = "、".join(
+            str(agent.get("label") or agent.get("path_display") or "未知服务")
+            for agent in unsafe_agents
+        )
+        return {
+            "ok": False,
+            "error": f"检测到系统级或不可写的 GPT-SoVITS 自启项，无法自动接管：{labels}",
+            "status": get_gpt_sovits_service_status(config),
+        }
+
+    current_process = _service_process_status(base_url)
+    disabled_agents: list[dict[str, str]] = []
+    try:
+        for agent in external_agents:
+            disabled_agents.append(_disable_user_launch_agent(agent))
+    except OSError as exc:
+        return {
+            "ok": False,
+            "error": f"停用外部 GPT-SoVITS 自启项失败：{exc}",
+            "disabled_launch_agents": disabled_agents,
+            "status": get_gpt_sovits_service_status(config),
+        }
+
+    if not _wait_for_service_process_stop(base_url, current_process.get("pid")):
+        return {
+            "ok": False,
+            "error": (
+                "外部 GPT-SoVITS 服务仍占用 API 端口，已停用自启项；"
+                "请停止该进程后再启动 Hermes-Yachiyo 后台服务"
+            ),
+            "disabled_launch_agents": disabled_agents,
+            "status": get_gpt_sovits_service_status(config),
+        }
+
+    install_result = install_gpt_sovits_launch_agent(config)
+    install_result["disabled_launch_agents"] = disabled_agents
+    if install_result.get("ok") is True:
+        install_result["message"] = "已停用外部 GPT-SoVITS 自启项，并交由 Hermes-Yachiyo 管理"
+    return install_result
+
+
 def uninstall_gpt_sovits_launch_agent(config: Any | None = None) -> dict[str, Any]:
     """Stop and remove the GPT-SoVITS LaunchAgent if present."""
     if platform.system() != "Darwin":
@@ -166,9 +241,13 @@ def _launch_agent_path() -> Path:
 
 
 def _launch_agent_running() -> bool:
+    return _launch_agent_label_running(LAUNCH_AGENT_LABEL)
+
+
+def _launch_agent_label_running(label: str) -> bool:
     if platform.system() != "Darwin":
         return False
-    result = _launchctl(["print", f"{_launchctl_domain()}/{LAUNCH_AGENT_LABEL}"], check=False)
+    result = _launchctl(["print", f"{_launchctl_domain()}/{label}"], check=False)
     return result.returncode == 0
 
 
@@ -191,6 +270,202 @@ def _command_error(command: str, result: subprocess.CompletedProcess[str]) -> st
         part.strip() for part in (result.stderr, result.stdout) if part and part.strip()
     )
     return f"{command} 失败，退出码 {result.returncode}{f'：{detail}' if detail else ''}"
+
+
+def _service_process_status(base_url: str) -> dict[str, Any]:
+    port = _base_url_port(base_url)
+    if not port or platform.system() not in {"Darwin", "Linux"}:
+        return {"running": False}
+
+    try:
+        result = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-Fp"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return {"running": False, "port": port}
+    if result.returncode != 0:
+        return {"running": False, "port": port}
+
+    pid = _first_lsof_pid(result.stdout)
+    if not pid:
+        return {"running": False, "port": port}
+
+    process = {"running": True, "port": port, "pid": pid}
+    process.update(_process_snapshot(pid))
+    return process
+
+
+def _base_url_port(base_url: str) -> int | None:
+    if not base_url:
+        return None
+    parsed = urlparse(base_url)
+    if parsed.port:
+        return parsed.port
+    if parsed.scheme == "http":
+        return 80
+    if parsed.scheme == "https":
+        return 443
+    return None
+
+
+def _first_lsof_pid(output: str) -> int | None:
+    for line in output.splitlines():
+        if not line.startswith("p"):
+            continue
+        try:
+            return int(line[1:])
+        except ValueError:
+            continue
+    return None
+
+
+def _process_snapshot(pid: int) -> dict[str, Any]:
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "pid=", "-o", "ppid=", "-o", "command=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return {}
+    if result.returncode != 0:
+        return {}
+    line = result.stdout.strip()
+    if not line:
+        return {}
+    parts = line.split(None, 2)
+    snapshot: dict[str, Any] = {}
+    if len(parts) >= 2:
+        try:
+            snapshot["ppid"] = int(parts[1])
+        except ValueError:
+            pass
+    if len(parts) >= 3:
+        snapshot["command"] = parts[2]
+    return snapshot
+
+
+def _related_launch_agents(workdir: Path | None) -> list[dict[str, Any]]:
+    if platform.system() != "Darwin":
+        return []
+    roots = [Path.home() / "Library" / "LaunchAgents", Path("/Library/LaunchAgents")]
+    workdir_text = str(workdir.expanduser()) if workdir else ""
+    agents: list[dict[str, Any]] = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for plist_path in sorted(root.glob("*.plist")):
+            info = _launch_agent_info(plist_path, workdir_text)
+            if info is not None:
+                agents.append(info)
+    return agents
+
+
+def _launch_agent_info(plist_path: Path, workdir_text: str) -> dict[str, Any] | None:
+    try:
+        payload = plistlib.loads(plist_path.read_bytes())
+    except Exception:
+        return None
+    label = str(payload.get("Label") or plist_path.stem)
+    args = payload.get("ProgramArguments")
+    if isinstance(args, list):
+        arg_text = " ".join(str(item) for item in args)
+    else:
+        arg_text = str(args or "")
+    working_directory = str(payload.get("WorkingDirectory") or "")
+    haystack = " ".join([label, arg_text, working_directory])
+    if not _looks_like_related_gpt_sovits_agent(haystack, workdir_text):
+        return None
+    return {
+        "label": label,
+        "path": str(plist_path),
+        "path_display": _display_path(plist_path),
+        "working_directory": working_directory,
+        "managed_by_hermes": label == LAUNCH_AGENT_LABEL,
+        "running": _launch_agent_label_running(label),
+    }
+
+
+def _disable_user_launch_agent(agent: dict[str, Any]) -> dict[str, str]:
+    label = str(agent.get("label") or "")
+    plist_path = Path(str(agent.get("path") or "")).expanduser()
+    if not _is_user_launch_agent_path(plist_path):
+        raise OSError(f"不是用户级 LaunchAgent：{agent.get('path_display') or plist_path}")
+
+    domain = _launchctl_domain()
+    if label:
+        _launchctl(["bootout", f"{domain}/{label}"], check=False)
+    if plist_path.exists():
+        _launchctl(["bootout", domain, str(plist_path)], check=False)
+        disabled_path = _disabled_launch_agent_path(plist_path)
+        plist_path.rename(disabled_path)
+    else:
+        disabled_path = plist_path
+
+    return {
+        "label": label,
+        "path": str(plist_path),
+        "path_display": _display_path(plist_path),
+        "disabled_path": str(disabled_path),
+        "disabled_path_display": _display_path(disabled_path),
+    }
+
+
+def _wait_for_service_process_stop(
+    base_url: str,
+    previous_pid: int | None,
+    *,
+    timeout_seconds: float = 8,
+) -> bool:
+    if not _base_url_port(base_url):
+        return True
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        process = _service_process_status(base_url)
+        if not process.get("running"):
+            return True
+        if previous_pid and process.get("pid") != previous_pid:
+            return False
+        time.sleep(0.35)
+    return not _service_process_status(base_url).get("running")
+
+
+def _is_user_launch_agent_path(path: Path) -> bool:
+    if not str(path):
+        return False
+    try:
+        path.expanduser().resolve().relative_to(
+            (Path.home() / "Library" / "LaunchAgents").resolve()
+        )
+    except Exception:
+        return False
+    return path.suffix == ".plist"
+
+
+def _disabled_launch_agent_path(plist_path: Path) -> Path:
+    base = plist_path.with_name(f"{plist_path.name}.hermes-yachiyo-disabled")
+    if not base.exists():
+        return base
+    for index in range(2, 100):
+        candidate = plist_path.with_name(f"{plist_path.name}.hermes-yachiyo-disabled-{index}")
+        if not candidate.exists():
+            return candidate
+    return plist_path.with_name(f"{plist_path.name}.hermes-yachiyo-disabled-{int(time.time())}")
+
+
+def _looks_like_related_gpt_sovits_agent(haystack: str, workdir_text: str) -> bool:
+    if LAUNCH_AGENT_LABEL in haystack:
+        return True
+    if workdir_text and workdir_text in haystack:
+        return True
+    lowered = haystack.lower()
+    return "gpt-sovits" in lowered and ("api_v2.py" in lowered or "gsv" in lowered)
 
 
 def _log_path(kind: str) -> Path:
