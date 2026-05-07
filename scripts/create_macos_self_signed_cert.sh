@@ -73,10 +73,11 @@ prompt = no
 CN = ${IDENTITY}
 
 [ codesign ]
-basicConstraints = critical,CA:false
-keyUsage = critical,digitalSignature
+basicConstraints = critical,CA:true
+keyUsage = critical,digitalSignature,keyCertSign,cRLSign
 extendedKeyUsage = codeSigning
 subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid:always,issuer
 EOF
 
 openssl req \
