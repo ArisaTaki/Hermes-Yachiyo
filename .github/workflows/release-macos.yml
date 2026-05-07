@@ -89,8 +89,6 @@ jobs:
           KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
           KEYCHAIN_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.keychain-db"
           CERT_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.p12"
-          CERT_PEM_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.pem"
-          CERT_X509_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.crt"
 
           CLEAN_CERT_BASE64="$(printf '%s' "${MACOS_CODESIGN_CERTIFICATE_BASE64}" | tr -d '[:space:]')"
           if ! printf '%s' "${CLEAN_CERT_BASE64}" | base64 --decode > "${CERT_PATH}" 2>/dev/null; then
@@ -119,18 +117,6 @@ jobs:
             echo "If OpenSSL validation passed but security import failed, regenerate the certificate with the current scripts/create_macos_self_signed_cert.sh and update all MACOS_CODESIGN_* Secrets from the new *.github-secrets.env file." >&2
             exit 1
           fi
-          openssl pkcs12 \
-            -in "${CERT_PATH}" \
-            -clcerts \
-            -nokeys \
-            -out "${CERT_PEM_PATH}" \
-            -passin "pass:${CERT_PASSWORD}"
-          openssl x509 -in "${CERT_PEM_PATH}" -out "${CERT_X509_PATH}"
-          security add-trusted-cert \
-            -r trustRoot \
-            -p codeSign \
-            -k "${KEYCHAIN_PATH}" \
-            "${CERT_X509_PATH}"
           security list-keychains -d user -s "${KEYCHAIN_PATH}" $(security list-keychains -d user | tr -d '"')
           security default-keychain -d user -s "${KEYCHAIN_PATH}"
           security set-key-partition-list \
