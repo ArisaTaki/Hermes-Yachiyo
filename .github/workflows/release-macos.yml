@@ -89,6 +89,8 @@ jobs:
           KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
           KEYCHAIN_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.keychain-db"
           CERT_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.p12"
+          CERT_PEM_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.pem"
+          CERT_X509_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.crt"
 
           CLEAN_CERT_BASE64="$(printf '%s' "${MACOS_CODESIGN_CERTIFICATE_BASE64}" | tr -d '[:space:]')"
           if ! printf '%s' "${CLEAN_CERT_BASE64}" | base64 --decode > "${CERT_PATH}" 2>/dev/null; then
@@ -117,14 +119,32 @@ jobs:
             echo "If OpenSSL validation passed but security import failed, regenerate the certificate with the current scripts/create_macos_self_signed_cert.sh and update all MACOS_CODESIGN_* Secrets from the new *.github-secrets.env file." >&2
             exit 1
           fi
+          openssl pkcs12 \
+            -in "${CERT_PATH}" \
+            -clcerts \
+            -nokeys \
+            -out "${CERT_PEM_PATH}" \
+            -passin "pass:${CERT_PASSWORD}"
+          openssl x509 -in "${CERT_PEM_PATH}" -out "${CERT_X509_PATH}"
+          sudo security add-trusted-cert \
+            -d \
+            -r trustAsRoot \
+            -p codeSign \
+            -k /Library/Keychains/System.keychain \
+            "${CERT_X509_PATH}"
           security list-keychains -d user -s "${KEYCHAIN_PATH}" $(security list-keychains -d user | tr -d '"')
           security default-keychain -d user -s "${KEYCHAIN_PATH}"
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
             -s \
             -k "${KEYCHAIN_PASSWORD}" \
-            "${KEYCHAIN_PATH}"
-          security find-identity -v -p codesigning "${KEYCHAIN_PATH}"
+            "${KEYCHAIN_PATH}" >/dev/null
+          IDENTITY_OUTPUT="$(security find-identity -v -p codesigning "${KEYCHAIN_PATH}")"
+          echo "${IDENTITY_OUTPUT}"
+          if ! grep -Eq '^[[:space:]]*[0-9]+\) [A-F0-9]{40} ' <<< "${IDENTITY_OUTPUT}"; then
+            echo "No valid macOS code signing identity found after importing the p12." >&2
+            exit 1
+          fi
 
           echo "enabled=true" >> "$GITHUB_OUTPUT"
           echo "signing_mode=self-signed" >> "$GITHUB_OUTPUT"
