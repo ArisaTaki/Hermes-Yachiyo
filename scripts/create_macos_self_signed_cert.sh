@@ -95,8 +95,17 @@ openssl pkcs12 \
   -inkey "${KEY_PATH}" \
   -in "${CERT_PATH}" \
   -name "${IDENTITY}" \
+  -keypbe PBE-SHA1-3DES \
+  -certpbe PBE-SHA1-3DES \
+  -macalg SHA1 \
   -out "${P12_PATH}" \
   -passout "pass:${PASSWORD}"
+
+openssl pkcs12 \
+  -in "${P12_PATH}" \
+  -info \
+  -noout \
+  -passin "pass:${PASSWORD}" >/dev/null
 
 base64 < "${P12_PATH}" | tr -d '\n' > "${BASE64_PATH}"
 
