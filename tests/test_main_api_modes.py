@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import apps.shell.config as config_mod
+import apps.shell.main_api as main_api_mod
 from apps.core.chat_session import ChatSession
 from apps.core.chat_store import ChatStore
 from apps.core.state import AppState
@@ -1133,6 +1134,15 @@ def test_update_hermes_agent_can_request_full_backup(tmp_path, monkeypatch):
         assert result["ok"] is True
     finally:
         store.close()
+
+
+def test_resolve_hermes_python_from_launcher_ignores_env_without_python(tmp_path, monkeypatch):
+    launcher = tmp_path / "hermes"
+    launcher.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    monkeypatch.setattr("apps.core.executor._resolve_hermes_python", lambda _launcher: None)
+
+    assert main_api_mod._resolve_hermes_python_from_launcher(str(launcher)) is None
 
 
 def test_launch_browser_cdp_writes_config_url(tmp_path, monkeypatch):

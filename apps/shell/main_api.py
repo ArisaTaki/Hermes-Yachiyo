@@ -641,6 +641,11 @@ def _resolve_hermes_python_from_launcher(hermes_path: str) -> str | None:
     if not first_line.startswith("#!"):
         return None
     python = first_line[2:].strip().split(" ", 1)[0]
+    python_name = Path(python).name
+    if python_name == "env":
+        return None
+    if python_name not in {"python", "python3"} and not python_name.startswith("python3."):
+        return None
     return python if python and Path(python).exists() else None
 
 

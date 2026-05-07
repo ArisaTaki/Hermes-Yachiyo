@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from pathlib import Path
 import sys
 import types
 
@@ -331,6 +332,21 @@ class TestHermesStreamBridgeHelpers:
         launcher.write_text(f"#!{py}\n")
 
         assert _resolve_hermes_python(str(launcher)) == str(py)
+
+    def test_resolve_hermes_python_from_env_shebang(self, tmp_path):
+        launcher = tmp_path / "hermes"
+        launcher.write_text("#!/usr/bin/env python3\n", encoding="utf-8")
+
+        resolved = _resolve_hermes_python(str(launcher))
+
+        assert resolved
+        assert Path(resolved).name.startswith("python")
+
+    def test_resolve_hermes_python_rejects_env_bash_wrapper(self, tmp_path):
+        launcher = tmp_path / "hermes"
+        launcher.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+        assert _resolve_hermes_python(str(launcher)) is None
 
     def test_resolve_stream_bridge_script_prefers_pyinstaller_meipass(self, monkeypatch, tmp_path):
         bridge = tmp_path / "apps" / "core" / "hermes_stream_bridge.py"

@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import shutil
+import shlex
 import subprocess
 import sys
 import time
@@ -464,12 +465,36 @@ def _resolve_hermes_python(hermes_cmd: Optional[str] = None) -> Optional[str]:
         return None
     if not first_line.startswith("#!"):
         return None
-    python = first_line[2:].strip()
-    if not python:
+    shebang = first_line[2:].strip()
+    if not shebang:
         return None
-    if " " in python:
-        python = python.split(" ", 1)[0]
-    return python if os.path.exists(python) else None
+    try:
+        parts = shlex.split(shebang)
+    except ValueError:
+        parts = shebang.split()
+    if not parts:
+        return None
+
+    executable = parts[0]
+    if os.path.basename(executable) == "env":
+        args = parts[1:]
+        if args[:1] == ["-S"]:
+            try:
+                args = shlex.split(" ".join(args[1:]))
+            except ValueError:
+                args = args[1:]
+        while args and args[0].startswith("-"):
+            args = args[1:]
+        if not args:
+            return None
+        executable = args[0]
+
+    executable_name = os.path.basename(executable)
+    if executable_name not in {"python", "python3"} and not executable_name.startswith("python3."):
+        return None
+
+    resolved = shutil.which(executable) if os.path.sep not in executable else executable
+    return resolved if resolved and os.path.exists(resolved) else None
 
 
 def _parse_bridge_event(line: str) -> Optional[dict[str, Any]]:
