@@ -19,6 +19,7 @@ import type { IPty } from 'node-pty';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
+import { createServer } from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -292,6 +293,76 @@ function packagedBackendPath(): string | null {
   if (!app.isPackaged) return null;
   const binaryName = process.platform === 'win32' ? 'hermes-yachiyo-backend.exe' : 'hermes-yachiyo-backend';
   return path.join(process.resourcesPath, 'backend', binaryName);
+}
+
+function bridgeEndpoint(url: string): { host: string; port: number } | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:') return null;
+    if (!parsed.port) return null;
+    const port = Number(parsed.port);
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) return null;
+    return { host: parsed.hostname || '127.0.0.1', port };
+  } catch {
+    return null;
+  }
+}
+
+function isLocalBridgeHost(host: string): boolean {
+  return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+}
+
+function normalizedLocalBridgeHost(host: string): string {
+  return host === '::1' || host === 'localhost' ? '127.0.0.1' : host;
+}
+
+function isTcpPortAvailable(host: string, port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    let settled = false;
+    const finish = (available: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(available);
+    };
+    server.once('error', () => finish(false));
+    server.once('listening', () => {
+      server.close(() => finish(true));
+    });
+    server.listen({ host, port });
+  });
+}
+
+function allocateLocalBridgeUrl(host: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.once('listening', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address ? address.port : null;
+      server.close(() => {
+        if (!port) {
+          reject(new Error('Could not allocate a local bridge port'));
+          return;
+        }
+        resolve(`http://${host}:${port}`);
+      });
+    });
+    server.listen({ host, port: 0 });
+  });
+}
+
+async function prepareBridgeUrlForPackagedBackend(): Promise<void> {
+  if (!app.isPackaged || process.env.HERMES_YACHIYO_BRIDGE_URL) return;
+  const endpoint = bridgeEndpoint(bridgeUrl);
+  if (!endpoint || !isLocalBridgeHost(endpoint.host)) return;
+
+  const host = normalizedLocalBridgeHost(endpoint.host);
+  if (await isTcpPortAvailable(host, endpoint.port)) return;
+
+  const previousBridgeUrl = bridgeUrl;
+  bridgeUrl = await allocateLocalBridgeUrl(host);
+  console.warn(`[backend] ${previousBridgeUrl} is already in use; using ${bridgeUrl} for this app session.`);
 }
 
 function startBackend(): void {
@@ -1479,8 +1550,9 @@ ipcMain.handle('hermes:openLauncherMenu', (event, mode: unknown) => {
 
 app.whenReady().then(() => {
   showMacDockIcon();
-  startBackend();
   void (async () => {
+    await prepareBridgeUrlForPackagedBackend();
+    startBackend();
     const installInfo = await waitForInstallInfo();
     lastInstallReady = installReady(installInfo);
     if (!lastInstallReady) {

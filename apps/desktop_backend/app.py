@@ -10,6 +10,27 @@ import logging
 import os
 import signal
 import sys
+from urllib.parse import urlparse
+
+
+def _bridge_endpoint_from_env(config: object) -> tuple[str, int]:
+    bridge_url = os.getenv("HERMES_YACHIYO_BRIDGE_URL", "").strip()
+    if bridge_url:
+        parsed = urlparse(bridge_url)
+        try:
+            port = parsed.port
+        except ValueError:
+            port = None
+        if parsed.scheme == "http" and parsed.hostname and port:
+            return parsed.hostname, port
+        logging.getLogger(__name__).warning(
+            "忽略无效 HERMES_YACHIYO_BRIDGE_URL=%r，使用保存的 Bridge 配置",
+            bridge_url,
+        )
+    return (
+        str(getattr(config, "bridge_host", "127.0.0.1")),
+        int(getattr(config, "bridge_port", 8420)),
+    )
 
 
 def _setup_logging() -> None:
@@ -31,6 +52,7 @@ def main() -> None:
     from apps.shell.config import load_config
 
     config = load_config()
+    bridge_host, bridge_port = _bridge_endpoint_from_env(config)
     install_info = check_hermes_installation()
     runtime = HermesRuntime(config)
     runtime.start(install_info=install_info)
@@ -45,7 +67,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _shutdown)
 
     try:
-        start_bridge(host=config.bridge_host, port=config.bridge_port)
+        start_bridge(host=bridge_host, port=bridge_port)
     finally:
         runtime.stop()
 
