@@ -53,6 +53,8 @@ def main() -> None:
 
     config = load_config()
     bridge_host, bridge_port = _bridge_endpoint_from_env(config)
+    config.bridge_host = bridge_host
+    config.bridge_port = bridge_port
     install_info = check_hermes_installation()
     runtime = HermesRuntime(config)
     runtime.start(install_info=install_info)

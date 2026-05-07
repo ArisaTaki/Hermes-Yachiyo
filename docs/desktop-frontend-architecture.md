@@ -170,9 +170,11 @@ are missing and a lockfile is present.
 
 During manual validation, `hermes-yachiyo` should show Vite on
 `127.0.0.1:5174`, then Electron should start the Python backend and Bridge on
-`127.0.0.1:8420`. A terminal exit code of 130 means the run was interrupted
-with Ctrl-C; normal frontend child-process failures are reported with a concise
-launcher message and the detailed process logs above it.
+`127.0.0.1:8420`. Packaged DMG builds use `127.0.0.1:18420` by default, and
+fall back to a free local port if that port is already occupied. A terminal exit
+code of 130 means the run was interrupted with Ctrl-C; normal frontend
+child-process failures are reported with a concise launcher message and the
+detailed process logs above it.
 
 If `hermes-yachiyo` does not start the Electron shell after changing the entry
 point, the active virtualenv has a stale console script. Run `pip install -e .`

@@ -27,7 +27,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const FRONTEND_DEV_URL = process.env.HERMES_YACHIYO_FRONTEND_DEV_URL || 'http://127.0.0.1:5174';
-let bridgeUrl = process.env.HERMES_YACHIYO_BRIDGE_URL || 'http://127.0.0.1:8420';
+const DEV_BRIDGE_URL = 'http://127.0.0.1:8420';
+const PACKAGED_BRIDGE_URL = 'http://127.0.0.1:18420';
+let bridgeUrl = process.env.HERMES_YACHIYO_BRIDGE_URL || (app.isPackaged ? PACKAGED_BRIDGE_URL : DEV_BRIDGE_URL);
 const BRIDGE_SETTINGS_RETRIES = 40;
 const BRIDGE_SETTINGS_RETRY_MS = 250;
 const BUBBLE_SCREEN_MARGIN = 24;
@@ -197,9 +199,29 @@ function hermesInstallCommand(): string {
     'set -o pipefail',
     'install_script="$(mktemp -t hermes-agent-install.XXXXXX)" || exit 1',
     'target_dir="${HERMES_AGENT_INSTALL_DIR:-$HOME/.hermes/hermes-agent}"',
+    'install_lock_dir="${HERMES_AGENT_INSTALL_LOCK_DIR:-$HOME/.hermes/.hermes-agent-install.lock}"',
+    'mkdir -p "$(dirname "$install_lock_dir")" || exit $?',
+    'if ! mkdir "$install_lock_dir" 2>/dev/null; then',
+    '  echo "Hermes Agent 正在被另一个 Hermes-Yachiyo 进程安装或更新，请稍后重试。"',
+    '  exit 75',
+    'fi',
+    'shim_path="$HOME/.local/bin/hermes"',
+    'target_bin="$target_dir/venv/bin/hermes"',
+    'if [ -L "$shim_path" ]; then',
+    '  shim_target="$(readlink "$shim_path" 2>/dev/null || true)"',
+    '  case "$shim_target" in',
+    '    "$target_bin"|*/.hermes/hermes-agent/venv/bin/hermes)',
+    '      rm -f "$shim_path"',
+    '      ;;',
+    '  esac',
+    'fi',
+    'if [ -f "$target_bin" ] && grep -Fq "exec \\"$target_bin\\"" "$target_bin" 2>/dev/null; then',
+    '  printf "检测到损坏的 Hermes 启动脚本，正在清理后重新安装...\\n"',
+    '  rm -rf "$target_dir"',
+    'fi',
     'target_existed=0',
     '[ -e "$target_dir" ] && target_existed=1',
-    'trap \'rm -f "$install_script"\' EXIT',
+    'trap \'rm -rf "$install_lock_dir"; rm -f "$install_script"\' EXIT',
     'curl --retry 3 --retry-delay 2 --connect-timeout 20 -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh -o "$install_script"',
     'curl_exit_code=$?',
     'if [ "$curl_exit_code" -ne 0 ]; then printf "\\nHermes Agent 安装脚本下载失败，退出码：%s\\n" "$curl_exit_code"; exit "$curl_exit_code"; fi',
@@ -238,6 +260,10 @@ function hermesUpdateCommand(fullBackup = false): string {
     'echo "Hermes Agent 更新开始"',
     'set -o pipefail',
     'if ! command -v hermes >/dev/null 2>&1; then echo "未找到 hermes 命令，请先完成 Hermes Agent 安装或刷新 PATH。"; exit 127; fi',
+    'install_lock_dir="${HERMES_AGENT_INSTALL_LOCK_DIR:-$HOME/.hermes/.hermes-agent-install.lock}"',
+    'mkdir -p "$(dirname "$install_lock_dir")" || exit $?',
+    'if ! mkdir "$install_lock_dir" 2>/dev/null; then echo "Hermes Agent 正在被另一个 Hermes-Yachiyo 进程安装或更新，请稍后重试。"; exit 75; fi',
+    'trap \'rm -rf "$install_lock_dir"\' EXIT',
     'echo "当前版本："',
     'version_output="$(hermes version 2>&1 || true)"',
     'printf "%s\\n" "$version_output"',

@@ -7,6 +7,7 @@ import logging
 import os
 import platform
 import re
+import shutil
 import subprocess
 from typing import Tuple
 
@@ -25,6 +26,38 @@ PLATFORM_MAPPING = {
     "Linux": Platform.LINUX,
     "Windows": Platform.WINDOWS_NATIVE,  # 需要检测是否在 WSL2
 }
+
+
+def _resolve_hermes_candidate(hermes_path: str) -> str | None:
+    expanded = os.path.expanduser(hermes_path)
+    if os.path.sep in expanded or expanded.startswith("."):
+        return expanded
+    return shutil.which(expanded)
+
+
+def is_self_referential_hermes_wrapper(hermes_path: str) -> bool:
+    """Detect a damaged hermes launcher that execs its own resolved path."""
+    candidate = _resolve_hermes_candidate(hermes_path)
+    if not candidate or not os.path.isfile(candidate):
+        return False
+
+    resolved = os.path.realpath(candidate)
+    try:
+        with open(resolved, "r", encoding="utf-8", errors="ignore") as handle:
+            content = handle.read(4096)
+    except OSError:
+        return False
+
+    if "exec " not in content or "hermes" not in content:
+        return False
+
+    for match in re.finditer(r'^\s*exec\s+["\']?([^"\'\s]+)["\']?', content, re.MULTILINE):
+        target = os.path.expanduser(match.group(1))
+        if not os.path.isabs(target):
+            target = os.path.join(os.path.dirname(resolved), target)
+        if os.path.realpath(target) == resolved:
+            return True
+    return False
 
 
 def detect_platform() -> Platform:
@@ -65,6 +98,9 @@ def check_hermes_command(hermes_path: str = "hermes") -> Tuple[bool, str | None]
     Returns:
         (exists, error_message)
     """
+    if is_self_referential_hermes_wrapper(hermes_path):
+        return False, "hermes 启动脚本指向自身，当前 Hermes Agent 安装已损坏，请重新安装"
+
     try:
         result = subprocess.run(
             [hermes_path, "--version"],
@@ -561,6 +597,9 @@ def find_hermes_in_common_paths() -> str | None:
     for path_template in HERMES_COMMON_INSTALL_PATHS:
         path = os.path.expanduser(path_template)
         if os.path.isfile(path) and os.access(path, os.X_OK):
+            if is_self_referential_hermes_wrapper(path):
+                logger.warning("忽略损坏的 hermes 启动脚本: %s", path)
+                continue
             logger.debug("在常见路径找到 hermes: %s", path)
             return path
     return None
@@ -598,6 +637,9 @@ def probe_hermes_via_login_shell() -> str | None:
             if result.returncode == 0:
                 found = result.stdout.strip()
                 if found and os.path.isfile(found):
+                    if is_self_referential_hermes_wrapper(found):
+                        logger.warning("忽略登录 Shell 找到的损坏 hermes 启动脚本: %s", found)
+                        continue
                     logger.debug("通过登录 Shell (%s) 找到 hermes: %s", shell, found)
                     return found
         except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
@@ -636,11 +678,12 @@ def locate_hermes_binary() -> tuple[str | None, bool]:
             - needs_env_refresh: True 表示通过备用途径找到并已注入 PATH，
               用户的 Shell 会话仍需 ``source ~/.bashrc`` 才能使用 hermes 命令。
     """
-    import shutil
-
     # 策略 1：当前 PATH
-    if shutil.which("hermes"):
+    current_path = shutil.which("hermes")
+    if current_path and not is_self_referential_hermes_wrapper(current_path):
         return "hermes", False
+    if current_path:
+        logger.warning("当前 PATH 中的 hermes 启动脚本已损坏: %s", current_path)
 
     # 策略 2：常见路径直接扫描
     common_path = find_hermes_in_common_paths()

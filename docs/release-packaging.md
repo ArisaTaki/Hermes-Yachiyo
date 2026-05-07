@@ -63,6 +63,11 @@ Hermes-Yachiyo.app/Contents/Resources/backend/hermes-yachiyo-backend
 
 这由 `apps/frontend/electron/main.ts` 中的 packaged backend 路径控制。`scripts/build_backend.py` 使用 PyInstaller 把 `apps.desktop_backend.app` 冻结为单文件后端，`apps/frontend/electron-builder.yml` 再把它放进 Electron Resources。
 
+打包版默认 Bridge 地址是 `http://127.0.0.1:18420`，开发模式默认是
+`http://127.0.0.1:8420`。如果打包版启动时发现 `18420` 已被占用，会临时
+分配一个空闲本地端口并传给内置 Python backend，避免连接到本地 develop
+环境的旧 backend。
+
 ## 权限与首次启动
 
 主动桌面观察依赖 macOS 屏幕录制权限。开发模式下，TCC 权限可能落在 Terminal、Python、Electron 或启动器进程上，表现会不稳定；打包后用户只需要给 `Hermes-Yachiyo.app` 授权，链路更清楚。

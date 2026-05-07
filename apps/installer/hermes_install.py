@@ -311,9 +311,29 @@ def build_hermes_install_script() -> str:
         "set -o pipefail\n"
         'install_script="$(mktemp -t hermes-agent-install.XXXXXX)" || exit 1\n'
         'target_dir="${HERMES_AGENT_INSTALL_DIR:-$HOME/.hermes/hermes-agent}"\n'
+        'install_lock_dir="${HERMES_AGENT_INSTALL_LOCK_DIR:-$HOME/.hermes/.hermes-agent-install.lock}"\n'
+        'mkdir -p "$(dirname "$install_lock_dir")" || exit $?\n'
+        'if ! mkdir "$install_lock_dir" 2>/dev/null; then\n'
+        '  echo "Hermes Agent 正在被另一个 Hermes-Yachiyo 进程安装或更新，请稍后重试。"\n'
+        "  exit 75\n"
+        "fi\n"
+        'shim_path="$HOME/.local/bin/hermes"\n'
+        'target_bin="$target_dir/venv/bin/hermes"\n'
+        'if [ -L "$shim_path" ]; then\n'
+        '  shim_target="$(readlink "$shim_path" 2>/dev/null || true)"\n'
+        '  case "$shim_target" in\n'
+        '    "$target_bin"|*/.hermes/hermes-agent/venv/bin/hermes)\n'
+        '      rm -f "$shim_path"\n'
+        '      ;;\n'
+        '  esac\n'
+        "fi\n"
+        'if [ -f "$target_bin" ] && grep -Fq "exec \\"$target_bin\\"" "$target_bin" 2>/dev/null; then\n'
+        '  printf "检测到损坏的 Hermes 启动脚本，正在清理后重新安装...\\n"\n'
+        '  rm -rf "$target_dir"\n'
+        "fi\n"
         "target_existed=0\n"
         '[ -e "$target_dir" ] && target_existed=1\n'
-        'trap \'rm -f "$install_script"\' EXIT\n'
+        'trap \'rm -rf "$install_lock_dir"; rm -f "$install_script"\' EXIT\n'
         f"curl --retry 3 --retry-delay 2 --connect-timeout 20 -fsSL {HERMES_INSTALL_SCRIPT_URL} -o \"$install_script\" || exit $?\n"
         "export GIT_CONFIG_COUNT=3\n"
         "export GIT_CONFIG_KEY_0=http.version\n"

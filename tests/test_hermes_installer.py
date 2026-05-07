@@ -7,8 +7,10 @@ from types import SimpleNamespace
 import pytest
 
 from apps.installer.hermes_check import (
+    check_hermes_command,
     check_hermes_installation,
     check_hermes_doctor_readiness,
+    is_self_referential_hermes_wrapper,
     is_version_compatible,
 )
 from apps.installer.hermes_install import (
@@ -91,6 +93,10 @@ def test_hermes_install_script_retries_network_sensitive_steps():
     assert "GIT_CONFIG_KEY_0=http.version" in script
     assert "GIT_CONFIG_VALUE_0=HTTP/1.1" in script
     assert "target_existed" in script
+    assert "install_lock_dir" in script
+    assert 'mkdir "$install_lock_dir"' in script
+    assert 'readlink "$shim_path"' in script
+    assert "检测到损坏的 Hermes 启动脚本" in script
     assert "--skip-setup" in script
 
 
@@ -186,6 +192,27 @@ def test_hermes_doctor_readiness_keeps_startup_bounded():
     timeout_param = inspect.signature(check_hermes_doctor_readiness).parameters["timeout"]
 
     assert timeout_param.default == 5.0
+
+
+def test_hermes_command_detects_self_referential_wrapper(tmp_path, monkeypatch):
+    hermes_path = tmp_path / "hermes"
+    hermes_path.write_text(
+        f'#!/usr/bin/env bash\nexec "{hermes_path}" "$@"\n',
+        encoding="utf-8",
+    )
+    hermes_path.chmod(0o755)
+
+    def fake_run(*_args, **_kwargs):
+        raise AssertionError("self-referential wrapper should not be executed")
+
+    monkeypatch.setattr("apps.installer.hermes_check.subprocess.run", fake_run)
+
+    assert is_self_referential_hermes_wrapper(str(hermes_path)) is True
+    exists, error = check_hermes_command(str(hermes_path))
+
+    assert exists is False
+    assert error
+    assert "启动脚本指向自身" in error
 
 
 def test_hermes_doctor_readiness_parses_limited_tools(monkeypatch):
