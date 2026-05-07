@@ -5,6 +5,8 @@ import {
   type AppUpdateDownloadResult,
   type AppUpdateDownloadProgress,
   type AppUpdateInfo,
+  type ReleaseChangelog,
+  type ReleaseChangelogCommit,
   apiGet,
   apiPost,
   checkAppUpdate,
@@ -699,6 +701,7 @@ function GeneralSettingsView() {
   const appUpdateBusy = Boolean(appUpdateAction);
   const appUpdateCurrent = appUpdateCheck?.current || appUpdateInfo?.current;
   const appUpdateLatest = appUpdateCheck?.latest || appUpdateDownload?.latest || appUpdateInfo?.downloaded_update?.latest;
+  const appUpdateChangelog = appUpdateLatest?.changelog || appUpdateDownload?.latest?.changelog || appUpdateInfo?.downloaded_update?.latest?.changelog;
   const appUpdateSupported = Boolean(appUpdateCheck?.supported ?? appUpdateInfo?.supported);
   const appUpdateDownloaded = appUpdateDownload?.ok ? appUpdateDownload : appUpdateInfo?.downloaded_update;
   const appUpdateDownloadedPath = appUpdateDownloaded?.path || appUpdateInfo?.downloaded_dmg_path || '';
@@ -1307,6 +1310,7 @@ function GeneralSettingsView() {
           ['下载进度', appUpdateProgressLabel(appUpdateProgress, appUpdateDownloaded)],
           ['校验状态', appUpdateVerificationLabel(appUpdateDownloaded || null)],
         ]} />
+        <AppUpdateChangelogPanel changelog={appUpdateChangelog} />
         <div className="settings-action-strip">
           <button type="button" disabled={appUpdateBusy || !appUpdateSupported} onClick={() => void runAppUpdateCheck()}>
             {appUpdateAction === 'check' ? '检查中...' : '检查更新'}
@@ -1497,6 +1501,58 @@ function IntegrationRows({ title, item }: { title: string; item?: StatusRecord }
       {item?.blockers?.length ? <p className="warn-text">{item.blockers.join('；')}</p> : null}
     </div>
   );
+}
+
+function AppUpdateChangelogPanel({ changelog }: { changelog?: ReleaseChangelog }) {
+  const sections = (changelog?.sections || [])
+    .map((section) => ({
+      title: section.title || '更新',
+      items: (section.items || []).filter((item) => item?.subject),
+    }))
+    .filter((section) => section.items.length);
+  const fallbackItems = !sections.length
+    ? (changelog?.commits || []).filter((item) => item?.subject)
+    : [];
+  const hasContent = sections.length > 0 || fallbackItems.length > 0;
+  if (!hasContent) return null;
+  const compareUrl = typeof changelog?.compare_url === 'string' ? changelog.compare_url : '';
+  return (
+    <div className="app-update-changelog">
+      <div className="app-update-changelog-heading">
+        <h3>更新内容</h3>
+        {compareUrl ? (
+          <button type="button" onClick={() => void openExternalUrl(compareUrl)}>查看提交对比</button>
+        ) : null}
+      </div>
+      {sections.length ? sections.map((section) => (
+        <div className="app-update-changelog-section" key={section.title}>
+          <strong>{section.title}</strong>
+          <ul>
+            {section.items.map((item) => <AppUpdateChangelogItem key={changelogItemKey(item)} item={item} />)}
+          </ul>
+        </div>
+      )) : (
+        <div className="app-update-changelog-section">
+          <ul>
+            {fallbackItems.map((item) => <AppUpdateChangelogItem key={changelogItemKey(item)} item={item} />)}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AppUpdateChangelogItem({ item }: { item: ReleaseChangelogCommit }) {
+  return (
+    <li>
+      <span>{item.subject}</span>
+      {item.short_commit ? <small>{item.short_commit}</small> : null}
+    </li>
+  );
+}
+
+function changelogItemKey(item: ReleaseChangelogCommit): string {
+  return item.commit || `${item.short_commit || ''}-${item.subject || ''}`;
 }
 
 function listValue(items?: string[]): string {

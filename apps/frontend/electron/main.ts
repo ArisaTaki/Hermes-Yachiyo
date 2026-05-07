@@ -88,6 +88,33 @@ type AppBuildMetadata = {
   built_at?: string;
 };
 
+type ReleaseChangelogCommit = {
+  commit?: string;
+  short_commit?: string;
+  author?: string;
+  authored_at?: string;
+  subject?: string;
+  category?: string;
+  url?: string | null;
+};
+
+type ReleaseChangelogSection = {
+  title?: string;
+  items?: ReleaseChangelogCommit[];
+};
+
+type ReleaseChangelog = {
+  generated_from?: string;
+  previous_tag?: string | null;
+  previous_commit?: string | null;
+  current_tag?: string;
+  compare_url?: string | null;
+  commit_count?: number;
+  commits?: ReleaseChangelogCommit[];
+  sections?: ReleaseChangelogSection[];
+  summary?: string[];
+};
+
 type LatestReleaseMetadata = {
   name?: string;
   channel?: string;
@@ -106,6 +133,7 @@ type LatestReleaseMetadata = {
   download_url?: string;
   latest_json_url?: string;
   published_at?: string;
+  changelog?: ReleaseChangelog;
 };
 
 type AppUpdateInfo = {

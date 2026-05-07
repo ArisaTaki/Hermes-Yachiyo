@@ -37,6 +37,30 @@ export type AppBuildMetadata = {
   latest_json_url?: string;
   built_at?: string;
 };
+export type ReleaseChangelogCommit = {
+  commit?: string;
+  short_commit?: string;
+  author?: string;
+  authored_at?: string;
+  subject?: string;
+  category?: string;
+  url?: string | null;
+};
+export type ReleaseChangelogSection = {
+  title?: string;
+  items?: ReleaseChangelogCommit[];
+};
+export type ReleaseChangelog = {
+  generated_from?: string;
+  previous_tag?: string | null;
+  previous_commit?: string | null;
+  current_tag?: string;
+  compare_url?: string | null;
+  commit_count?: number;
+  commits?: ReleaseChangelogCommit[];
+  sections?: ReleaseChangelogSection[];
+  summary?: string[];
+};
 export type LatestReleaseMetadata = {
   name?: string;
   channel?: string;
@@ -55,6 +79,7 @@ export type LatestReleaseMetadata = {
   download_url?: string;
   latest_json_url?: string;
   published_at?: string;
+  changelog?: ReleaseChangelog;
 };
 export type AppUpdateInfo = {
   supported?: boolean;

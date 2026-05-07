@@ -28,6 +28,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -279,6 +281,18 @@ jobs:
           cp "${dmg_files[0]}" "release/${LATEST_DMG}"
           VERSIONED_SHA256="$(shasum -a 256 "release/${VERSIONED_DMG}" | tee "release/${VERSIONED_DMG}.sha256" | awk '{print $1}')"
           LATEST_SHA256="$(shasum -a 256 "release/${LATEST_DMG}" | tee "release/${LATEST_DMG}.sha256" | awk '{print $1}')"
+          python scripts/generate_release_changelog.py \
+            --channel "${CHANNEL}" \
+            --tag "${TAG}" \
+            --repository "${GITHUB_REPOSITORY}" \
+            --output-json release/changelog.json \
+            --output-markdown release/changelog.md
+          CHANGELOG_JSON="$(python - <<'PY'
+          import json
+          from pathlib import Path
+          print(json.dumps(json.loads(Path("release/changelog.json").read_text()), ensure_ascii=False, indent=12))
+          PY
+          )"
 
           cat > "release/${LATEST_JSON}" <<EOF
           {
@@ -299,7 +313,8 @@ jobs:
             "sha256": "${LATEST_SHA256}",
             "download_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_DMG}",
             "latest_json_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_JSON}",
-            "published_at": "${STAMP}"
+            "published_at": "${STAMP}",
+            "changelog": ${CHANGELOG_JSON}
           }
           EOF
 
@@ -314,6 +329,8 @@ jobs:
           - Signing: ${SIGNING_MODE}
           - Package: macOS DMG
           - Latest channel download: https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_DMG}
+
+          $(cat release/changelog.md)
 
           当前免费分发链路只自签名 .app，DMG 保持未签名，以避免 macOS 在挂载 DMG 前直接拒绝。首次启动应用时仍会显示未知开发者 / Gatekeeper 提示；请在 Finder 中按住 Control 点击应用并选择“打开”，或在系统设置的“隐私与安全性”中允许打开。
 
@@ -334,6 +351,8 @@ jobs:
           - Release version: ${RELEASE_VERSION}
           - Signing: ${SIGNING_MODE}
           - DMG: https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_DMG}
+
+          $(cat release/changelog.md)
 
           当前免费分发链路只自签名 .app，DMG 保持未签名；macOS 仍会在首次启动应用时显示未知开发者 / Gatekeeper 提示。
           EOF
@@ -356,6 +375,7 @@ jobs:
             release/*.dmg
             release/*.sha256
             release/*.json
+            release/*.md
 
       - name: Create or update versioned GitHub release
         env:

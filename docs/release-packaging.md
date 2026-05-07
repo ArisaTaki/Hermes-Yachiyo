@@ -114,4 +114,10 @@ experimental-v<发布版本>-<短SHA>
 
 固定 DMG 旁边会同时发布同名 `.sha256` 和 `.json` 文件，门户或安装页可以用它们展示版本、commit 和校验值。
 
+Release workflow 会基于当前渠道上一条 `stable-v*` / `experimental-v*` tag 生成更新日志。更新日志来源是 `git log`，会按 commit 前缀粗分为“新增/改进”“修复”“工程/发布”“文档”“测试”“重构/优化”等分组，并同时写入：
+
+- 版本化 GitHub release notes。
+- `main-latest` / `develop-latest` 滚动 release notes。
+- 固定 latest JSON 的 `changelog` 字段，应用内“应用更新”页面会直接展示这份更新内容。
+
 后续如果要面向普通用户无 Gatekeeper 警告地分发，需要再补 Apple Developer ID 签名与 notarization；当前链路先保证可重复构建和可安装 DMG。

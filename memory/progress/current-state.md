@@ -2,6 +2,25 @@
 
 ## 已完成
 
+### Milestone 79 — macOS 发布链路、应用更新器与安装体验收口
+
+- ✅ macOS release workflow 现在覆盖 `main` 与 `develop` 两条渠道：`main` 生成正式版 stable DMG，`develop` 生成实验版 experimental prerelease DMG；滚动 release 分别维护 `main-latest` 与 `develop-latest`。
+- ✅ 固定下载资产已统一：`Hermes-Yachiyo-main-latest.dmg`、`Hermes-Yachiyo-develop-latest.dmg`，并同步上传 `.sha256` 与 `.json` 元数据；latest JSON 包含 channel、branch、version、commit、build number、DMG 名称、SHA256、download URL 和 published time。
+- ✅ CI 在构建前写入 `apps/frontend/public/hermes-yachiyo-build.json`，打包后的应用可知道自己所属渠道、当前版本、commit、build number 与对应 latest JSON URL。
+- ✅ 免费分发签名策略已确认并落地：`.app` 自签名，`.dmg` 保持未签名；避免自签名 DMG 被 macOS 挂载前直接拒绝。首次启动仍需用户通过 Finder Control-click -> Open 或系统设置允许未知开发者应用。
+- ✅ 新增 `scripts/create_macos_self_signed_cert.sh` 与 `scripts/build_macos_self_signed_dmg.sh`，支持本地生成自签名证书、导出 GitHub Secrets 辅助 env、签名 `.app` 并创建未签名 DMG。
+- ✅ 打包版 Bridge 默认端口与开发环境拆开：开发默认 `8420`，打包默认 `18420`；打包版若发现 `18420` 已被占用，会临时分配空闲本地端口并传给内置 backend，避免误连本地 develop backend。
+- ✅ 应用内更新器已接入通用设置页：按当前渠道检查对应 latest JSON，比较版本/build/commit，下载 DMG，校验 SHA256，退出当前应用后挂载 DMG、覆盖当前 `.app` 并重新打开。
+- ✅ 更新器请求 latest JSON 时加 cache-busting query 与 `Cache-Control: no-cache` / `Pragma: no-cache`，避免 GitHub rolling asset/CDN 在 release 刚更新时返回旧 JSON，导致 `0.1.31` 误判为最新。
+- ✅ 更新下载有实时进度：Electron main 通过 IPC 推送 `starting/downloading/verifying/completed/failed` 状态，设置页显示百分比或已下载大小；下载完成后按钮变为“安装并重启”。
+- ✅ 已下载但未安装的更新会持久化到 Electron `userData/updates/downloaded-update.json`；重新进入设置页或重启后会自动识别本地 DMG 是否仍是当前渠道的更高版本，并直接提供“安装并重启”。
+- ✅ release 更新日志已接入 git commit 同步：CI 以当前渠道上一条 `stable-v*` / `experimental-v*` tag 为基线生成 changelog，写入 GitHub release notes 与 latest JSON；应用内“应用更新”区会展示 latest JSON 中的更新内容和提交对比入口。
+- ✅ 安装向导在更新后 backend/Bridge 尚未完全启动时，不再直接显示红色“无法连接本地 Bridge”；会进入“正在启动本地 Bridge”状态，并每 1.2 秒自动重新检测，Bridge 可用后恢复正常安装/就绪流程。
+- ✅ Hermes Agent 检测修复：当 `~/.local/bin/hermes` 是 bash wrapper 且实际 `exec ~/.hermes/hermes-agent/venv/bin/hermes` 时，Yachiyo 会继续解析真实 venv launcher，定位 Hermes Agent 自带 Python，避免图片链路测试误报“无法定位 Hermes Agent 的 Python 环境”。
+- ✅ Hermes 安装检测更稳：若存在 `~/.hermes/hermes-agent` 但 `hermes` 命令缺失或 wrapper 损坏，会返回可修复的 not installed/repair 指引，而不是把脏安装误判为 ready。
+- ✅ 图片链路执行修复：`hermes_stream_bridge.py` 的 shebang 解析不再把 `/usr/bin/env` 当成脚本执行，修复打包临时目录中出现 `env: ...hermes_stream_bridge.py: Permission denied` 的问题。
+- ✅ 验证：`python scripts/generate_release_changelog.py --channel experimental ...` 本地生成 changelog JSON/Markdown passed；`python -m py_compile scripts/generate_release_changelog.py` → passed；`PATH=<Node 20.19 runtime> npm --prefix apps/frontend run build` → passed（保留 Vite large chunk warning）；`python -m pytest tests/test_hermes_installer.py tests/test_runtime.py tests/test_executor.py tests/test_main_api_modes.py` → 134 passed；`ruby -e 'require "yaml"; YAML.load_file(".github/workflows/release-macos.yml")'` → passed；`git diff --check` → passed。
+
 ### UX Fixes — 首用体验报告修复
 
 - ✅ 新增 `/ui/tts/status`，主动关怀语音页可以显示最近一次自动播报的生成中、成功或失败状态，便于定位 GPT-SoVITS 自动播报 HTTP 400 等问题。

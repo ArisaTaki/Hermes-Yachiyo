@@ -2243,6 +2243,56 @@ button:hover { border-color: rgba(120, 166, 247, 0.42); background: rgba(120, 16
   font-size: 12px;
   line-height: 1.55;
 }
+.app-update-changelog {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.app-update-changelog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.app-update-changelog-heading h3 {
+  margin: 0;
+  font-size: 13px;
+}
+.app-update-changelog-heading button {
+  padding: 6px 10px;
+}
+.app-update-changelog-section {
+  display: grid;
+  gap: 6px;
+}
+.app-update-changelog-section strong {
+  color: var(--muted);
+  font-size: 12px;
+}
+.app-update-changelog-section ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.app-update-changelog-section li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+}
+.app-update-changelog-section li span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.app-update-changelog-section li small {
+  color: var(--muted);
+  font-size: 11px;
+}
 .settings-meta-list {
   display: grid;
   gap: 8px;

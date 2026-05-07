@@ -1,5 +1,36 @@
 # Session Summary
 
+## Milestone 79 — macOS 发布链路、应用更新器与更新日志
+
+### 核心结果
+
+本轮补齐了最近几次 macOS 发布/更新相关提交的 memory 记录，并把 Yachiyo 应用更新日志接入 release 流程：每次 `main` / `develop` 打包时，CI 会基于当前渠道上一条 release tag 自动从 git commit 生成 changelog。
+
+### 主要变更
+
+- `.github/workflows/release-macos.yml`：checkout 改为 `fetch-depth: 0`，让 CI 能读取历史 tag 和 commit；发布元数据阶段会生成 `release/changelog.json` 与 `release/changelog.md`。
+- `scripts/generate_release_changelog.py`：新增 commit changelog 生成脚本，按 commit 前缀归类为新增/改进、修复、工程/发布、文档、测试、重构/优化和其他，并输出 JSON + Markdown。
+- latest JSON：新增 `changelog` 字段，包含 previous tag、previous commit、compare URL、commit 列表、分组 sections 和 summary。
+- GitHub release notes：版本化 release 与 `main-latest` / `develop-latest` rolling release 都会嵌入同一份“更新日志”。
+- `apps/frontend/src/views/ModeSettingsView.tsx`：应用更新区会显示 latest JSON 里的“更新内容”，并提供“查看提交对比”入口。
+- `docs/release-packaging.md`：补充 release changelog 的生成来源、发布位置和应用内展示方式。
+- `memory/progress/current-state.md`、`memory/progress/next-steps.md`：补齐 macOS 发布、更新器、Gatekeeper、自签名、Hermes 脏安装修复和更新日志后续验证项。
+
+### 待验证
+
+- 推送后检查 `develop-latest` / `main-latest` 的 JSON 是否带 `changelog`，并确认 GitHub release notes 展示分组 commit。
+- 用下一版 DMG 实测应用内更新页的“更新内容”、下载进度、已下载更新持久化和“安装并重启”。
+
+### 验证结果
+
+- `python scripts/generate_release_changelog.py --channel experimental ...` → passed，本地确认上一条基线为 `experimental-v0.1.32-88e91d9`，当前 `9cbedb5` 被归到“新增/改进”。
+- `python -m py_compile scripts/generate_release_changelog.py` → passed。
+- `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/release-macos.yml")'` → passed。
+- `PATH=<Node 20.19 runtime> npm --prefix apps/frontend run build` → passed（保留 Vite large chunk warning）。
+- `git diff --check` → passed。
+
+---
+
 ## UX Fixes — First-run report follow-up
 
 ### 核心结果

@@ -1,5 +1,13 @@
 # Next Steps
 
+## 当前优先项
+
+1. 推送后验证 `Build macOS DMG`：`develop-latest` / `main-latest` 的 latest JSON 应包含 `changelog.generated_from=git`、`sections`、`commits` 和 `compare_url`；GitHub versioned release notes 与 rolling latest release notes 都应展示同一份“更新日志”。
+2. 用下一版 develop DMG 验证应用更新页：检查更新后应显示“更新内容”，下载时有进度，下载完成后按钮切换为“安装并重启”；退出页面或重启后仍能识别已下载但未安装的更高版本 DMG。
+3. 验证更新安装后的首次重开体验：Bridge/backend 尚未就绪时安装向导应显示“正在启动本地 Bridge”并自动重试，而不是直接红色报错；Bridge 可用后应自动恢复主控台或安装状态。
+4. 验证自签名免费分发链路：latest DMG 可挂载；首次打开 `.app` 仍应是未知开发者/Gatekeeper 允许打开流程，而不是“移到废纸篓”的 DMG 挂载前拒绝。
+5. 验证 Hermes Agent 脏安装修复：删掉损坏的 `~/.local/bin/hermes` 或保留旧 `~/.hermes/hermes-agent` 时，Yachiyo 应给出可修复状态；修复后图片链路测试不应再报 Hermes Python 环境缺失或 `env: ... Permission denied`。
+
 1. 基于本轮新增的 `docs/user-manual.md`、`docs/screenshot-index.md`、`docs/experience-report-2026-05-05.md` 和 `docs/public/images/hermes-yachiyo/first-run/` 创建 VitePress 文档站点结构，并按安装、模型配置、桌面表现态、资源导入、工具中心、维护排障拆页。
 2. VitePress 接入后检查所有 `/images/hermes-yachiyo/first-run/*.png` 引用是否能在站点中正确加载，并确认截图中 API Key 仍保持遮蔽。
 3. 发布说明中补充本轮首用真实发现：GitHub 克隆中断时的手动安装 fallback、GPT-SoVITS 首次加载可能较慢、导入资源会显著增加备份体积、工具中心外部 Key 缺失属于预期受限状态。
