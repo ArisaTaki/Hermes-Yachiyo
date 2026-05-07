@@ -11,7 +11,7 @@ ENTITLEMENTS="${ENTITLEMENTS:-${ROOT}/packaging/entitlements.mac.plist}"
 TMP_BASE="${RUNNER_TEMP:-/tmp}"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "macOS DMG signing requires macOS." >&2
+  echo "macOS DMG packaging requires macOS." >&2
   exit 1
 fi
 
@@ -67,13 +67,5 @@ hdiutil create \
   -ov \
   -format UDZO \
   "${DMG_PATH}"
-
-codesign \
-  --force \
-  --verbose \
-  --timestamp=none \
-  --sign "${SIGNING_IDENTITY}" \
-  "${DMG_PATH}"
-codesign --verify --verbose=2 "${DMG_PATH}"
 
 echo "${DMG_PATH}"

@@ -24,7 +24,7 @@ npm --prefix apps/frontend run dist:mac
 
 ## 免费自签名打包
 
-免费试用阶段可以使用自签名证书让 `.app` 和 `.dmg` 具备签名完整性，但它不会让 macOS 把应用识别为已验证开发者。用户从浏览器下载后，仍会看到未知开发者 / Gatekeeper 提示，需要使用 Finder 的 Control-click -> Open，或在系统设置的“隐私与安全性”中允许打开。
+免费试用阶段可以使用自签名证书让 `.app` 具备签名完整性，但不要自签名 `.dmg`。实测自签名且未公证的 DMG 会被 macOS 在挂载前直接拒绝，提示“Apple 无法验证此 DMG 是否包含可能危害 Mac 安全或泄漏隐私的恶意软件”。当前策略是：`.app` 自签名，`.dmg` 保持未签名，让用户至少能挂载安装包；首次启动应用时仍会看到未知开发者 / Gatekeeper 提示，需要使用 Finder 的 Control-click -> Open，或在系统设置的“隐私与安全性”中允许打开。
 
 本地生成自签名证书：
 
@@ -51,7 +51,7 @@ scripts/build_macos_self_signed_dmg.sh "Hermes-Yachiyo Self Signed"
 
 `MACOS_CODESIGN_IDENTITY` 是证书名，不是发布渠道名。自签名阶段建议使用中性的 `Hermes-Yachiyo Self Signed`；`main` 和 `develop` 可以共用同一张自签名证书。发布渠道由分支、release tag、DMG 文件名和下载链接区分。
 
-CI 中如果检测到 `MACOS_CODESIGN_CERTIFICATE_BASE64`，会自动导入证书、构建 `.app`、签名 `.app`、打包 `.dmg` 并签名 `.dmg`。如果没有配置该 Secret，workflow 会退回 unsigned DMG，发布流程不会因此失败。
+CI 中如果检测到 `MACOS_CODESIGN_CERTIFICATE_BASE64`，会自动导入证书、构建 `.app`、签名 `.app`，再打包未签名 `.dmg`。如果没有配置该 Secret，workflow 会退回完全 unsigned DMG，发布流程不会因此失败。
 
 ## 打包结构
 
@@ -81,7 +81,7 @@ Hermes-Yachiyo.app/Contents/Resources/backend/hermes-yachiyo-backend
 1. 安装 Python 与 Node 依赖。
 2. 运行关键 smoke tests。
 3. PyInstaller 构建后端。
-4. 如果配置了自签名证书，electron-builder 生成 `.app` 目录后由脚本签名并创建 DMG；否则 electron-builder 直接生成 unsigned DMG。
+4. 如果配置了自签名证书，electron-builder 生成 `.app` 目录后由脚本签名 `.app` 并创建未签名 DMG；否则 electron-builder 直接生成 unsigned DMG。
 5. 上传 workflow artifact。
 6. 创建 GitHub Release。
 
