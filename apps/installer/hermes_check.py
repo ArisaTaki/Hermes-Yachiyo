@@ -438,6 +438,25 @@ def check_hermes_doctor_readiness(
         return HermesReadinessLevel.UNKNOWN, [], 0
 
 
+def find_existing_hermes_agent_install_dir() -> str | None:
+    """Return the Hermes Agent project directory if it exists but may be broken."""
+    candidates = [
+        os.getenv("HERMES_AGENT_INSTALL_DIR", "").strip(),
+        "~/.hermes/hermes-agent",
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = os.path.expanduser(candidate)
+        if os.path.isdir(path) and (
+            os.path.isdir(os.path.join(path, ".git"))
+            or os.path.exists(os.path.join(path, "venv"))
+            or os.path.exists(os.path.join(path, "hermes"))
+        ):
+            return path
+    return None
+
+
 def check_hermes_installation() -> HermesInstallInfo:
     """完整的 Hermes Agent 安装检测
     
@@ -477,13 +496,25 @@ def check_hermes_installation() -> HermesInstallInfo:
     
     if not command_exists:
         install_info.status = HermesInstallStatus.NOT_INSTALLED
-        install_info.error_message = error_message
-        install_info.suggestions = [
-            "请安装 Hermes Agent: https://github.com/NousResearch/hermes-agent",
-            "macOS: curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup",
-            "Linux: curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup",
-            "确保 hermes 命令在 PATH 环境变量中"
-        ]
+        existing_install_dir = find_existing_hermes_agent_install_dir()
+        if existing_install_dir:
+            install_info.error_message = (
+                f"Hermes Agent 安装目录存在，但 hermes 命令入口不可用：{error_message}"
+            )
+            install_info.suggestions = [
+                "检测到现有 Hermes Agent 安装目录，但命令入口缺失或不可执行",
+                f"安装目录: {existing_install_dir}",
+                "请点击「安装 Hermes Agent」修复现有安装并重建 hermes 命令入口",
+                "修复完成后点击「重新检测」",
+            ]
+        else:
+            install_info.error_message = error_message
+            install_info.suggestions = [
+                "请安装 Hermes Agent: https://github.com/NousResearch/hermes-agent",
+                "macOS: curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup",
+                "Linux: curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash -s -- --skip-setup",
+                "确保 hermes 命令在 PATH 环境变量中"
+            ]
         return install_info
     
     # 3. Hermes Agent 版本兼容性检查

@@ -17,11 +17,15 @@ import {
 import * as nodePty from 'node-pty';
 import type { IPty } from 'node-pty';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
+import http, { type IncomingMessage, type RequestOptions } from 'node:http';
+import https from 'node:https';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -30,6 +34,8 @@ const FRONTEND_DEV_URL = process.env.HERMES_YACHIYO_FRONTEND_DEV_URL || 'http://
 const DEV_BRIDGE_URL = 'http://127.0.0.1:8420';
 const PACKAGED_BRIDGE_URL = 'http://127.0.0.1:18420';
 let bridgeUrl = process.env.HERMES_YACHIYO_BRIDGE_URL || (app.isPackaged ? PACKAGED_BRIDGE_URL : DEV_BRIDGE_URL);
+const APP_BUILD_METADATA_FILE = 'hermes-yachiyo-build.json';
+const DEFAULT_UPDATE_REPOSITORY = 'kuguya-AI-app-develop/Hermes-Yachiyo';
 const BRIDGE_SETTINGS_RETRIES = 40;
 const BRIDGE_SETTINGS_RETRY_MS = 250;
 const BUBBLE_SCREEN_MARGIN = 24;
@@ -67,6 +73,67 @@ type InstallInfoPayload = {
   } | null;
 };
 
+type AppBuildMetadata = {
+  name: string;
+  channel: string;
+  branch: string;
+  version: string;
+  base_version?: string;
+  commit: string;
+  short_commit?: string;
+  build_number?: number;
+  repository: string;
+  latest_json_url: string;
+  built_at?: string;
+};
+
+type LatestReleaseMetadata = {
+  name?: string;
+  channel?: string;
+  branch?: string;
+  source_branch?: string;
+  version?: string;
+  base_version?: string;
+  commit?: string;
+  short_commit?: string;
+  build_number?: number;
+  run_number?: number;
+  tag?: string;
+  signing?: string;
+  dmg_name?: string;
+  sha256?: string;
+  download_url?: string;
+  latest_json_url?: string;
+  published_at?: string;
+};
+
+type AppUpdateInfo = {
+  supported: boolean;
+  packaged: boolean;
+  current: AppBuildMetadata;
+  latest_json_url: string;
+  app_bundle_path?: string;
+  downloaded_dmg_path?: string;
+  error?: string;
+};
+
+type AppUpdateCheckResult = AppUpdateInfo & {
+  ok: boolean;
+  update_available: boolean;
+  latest?: LatestReleaseMetadata;
+  reason?: string;
+};
+
+type AppUpdateDownloadResult = {
+  ok: boolean;
+  path?: string;
+  file_name?: string;
+  sha256?: string;
+  verified?: boolean;
+  latest?: LatestReleaseMetadata;
+  error?: string;
+};
+
 let backendProcess: ChildProcessWithoutNullStreams | null = null;
 let mainWindow: BrowserWindow | null = null;
 let chatWindow: BrowserWindow | null = null;
@@ -84,6 +151,7 @@ let lastInstallReady: boolean | null = null;
 let lastUiSettings: UiSettings | null = null;
 let hasEnteredMainExperience = false;
 let backendRestartPromise: Promise<{ success: boolean; bridgeUrl?: string; error?: string }> | null = null;
+let lastDownloadedAppUpdate: AppUpdateDownloadResult | null = null;
 const enforcedWindowTitles = new WeakMap<BrowserWindow, string>();
 const titleHandlersInstalled = new WeakSet<BrowserWindow>();
 const terminalSessions = new Map<string, {
@@ -114,6 +182,346 @@ function rootAssetPath(...segments: string[]): string | null {
     if (fs.existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+function defaultLatestJsonUrl(branch = 'develop', repository = DEFAULT_UPDATE_REPOSITORY): string {
+  const latestBranch = branch === 'main' ? 'main' : 'develop';
+  return `https://github.com/${repository}/releases/download/${latestBranch}-latest/Hermes-Yachiyo-${latestBranch}-latest.json`;
+}
+
+function defaultAppBuildMetadata(): AppBuildMetadata {
+  return {
+    name: 'Hermes-Yachiyo',
+    channel: 'experimental',
+    branch: 'develop',
+    version: app.getVersion() || '0.0.0-dev',
+    commit: 'dev',
+    short_commit: 'dev',
+    build_number: 0,
+    repository: DEFAULT_UPDATE_REPOSITORY,
+    latest_json_url: defaultLatestJsonUrl('develop'),
+    built_at: 'dev',
+  };
+}
+
+function readJsonFile<T>(filePath: string): T | null {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8')) as T;
+  } catch {
+    return null;
+  }
+}
+
+function readAppBuildMetadata(): AppBuildMetadata {
+  const fallback = defaultAppBuildMetadata();
+  const candidates = [
+    path.resolve(__dirname, '..', 'dist', APP_BUILD_METADATA_FILE),
+    rootAssetPath('apps', 'frontend', 'public', APP_BUILD_METADATA_FILE),
+    rootAssetPath('dist', APP_BUILD_METADATA_FILE),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  for (const candidate of candidates) {
+    const data = readJsonFile<Partial<AppBuildMetadata>>(candidate);
+    if (!data) continue;
+    const branch = typeof data.branch === 'string' && data.branch.trim() ? data.branch.trim() : fallback.branch;
+    const repository = typeof data.repository === 'string' && data.repository.trim() ? data.repository.trim() : fallback.repository;
+    return {
+      ...fallback,
+      ...data,
+      name: typeof data.name === 'string' && data.name.trim() ? data.name.trim() : fallback.name,
+      channel: typeof data.channel === 'string' && data.channel.trim() ? data.channel.trim() : fallback.channel,
+      branch,
+      version: typeof data.version === 'string' && data.version.trim() ? data.version.trim() : fallback.version,
+      commit: typeof data.commit === 'string' && data.commit.trim() ? data.commit.trim() : fallback.commit,
+      repository,
+      latest_json_url: typeof data.latest_json_url === 'string' && data.latest_json_url.trim()
+        ? data.latest_json_url.trim()
+        : defaultLatestJsonUrl(branch, repository),
+      build_number: numericBuildNumber(data.build_number) ?? fallback.build_number,
+    };
+  }
+  return fallback;
+}
+
+function numericBuildNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return Math.trunc(parsed);
+  }
+  return undefined;
+}
+
+function updateDownloadsDir(): string {
+  return path.join(app.getPath('userData'), 'updates');
+}
+
+function safeDmgFileName(value: unknown, branch: string): string {
+  const fallback = `Hermes-Yachiyo-${branch === 'main' ? 'main' : 'develop'}-latest.dmg`;
+  if (typeof value !== 'string' || !value.trim()) return fallback;
+  const name = path.basename(value.trim());
+  return /^[A-Za-z0-9._-]+\.dmg$/.test(name) ? name : fallback;
+}
+
+function appUpdateInfo(): AppUpdateInfo {
+  const current = readAppBuildMetadata();
+  const appBundlePath = currentAppBundlePath() || undefined;
+  return {
+    supported: process.platform === 'darwin' && app.isPackaged && Boolean(appBundlePath),
+    packaged: app.isPackaged,
+    current,
+    latest_json_url: current.latest_json_url || defaultLatestJsonUrl(current.branch, current.repository),
+    app_bundle_path: appBundlePath,
+    downloaded_dmg_path: lastDownloadedAppUpdate?.ok ? lastDownloadedAppUpdate.path : undefined,
+  };
+}
+
+function updateAvailableReason(current: AppBuildMetadata, latest: LatestReleaseMetadata): { available: boolean; reason: string } {
+  const currentBuild = numericBuildNumber(current.build_number);
+  const latestBuild = numericBuildNumber(latest.build_number ?? latest.run_number);
+  if (currentBuild !== undefined && latestBuild !== undefined) {
+    if (latestBuild > currentBuild) return { available: true, reason: `发现构建 ${latestBuild}` };
+    return { available: false, reason: '当前已是该渠道最新构建' };
+  }
+  const currentCommit = typeof current.commit === 'string' ? current.commit.trim() : '';
+  const latestCommit = typeof latest.commit === 'string' ? latest.commit.trim() : '';
+  if (currentCommit && latestCommit && currentCommit !== 'dev' && latestCommit !== currentCommit) {
+    return { available: true, reason: `发现提交 ${latest.short_commit || latestCommit.slice(0, 7)}` };
+  }
+  if (latest.version && latest.version !== current.version) {
+    return { available: true, reason: `发现版本 ${latest.version}` };
+  }
+  return { available: false, reason: '当前已是该渠道最新版本' };
+}
+
+function httpRequest(
+  url: URL,
+  options: RequestOptions,
+  callback: (response: IncomingMessage) => void,
+) {
+  if (url.protocol === 'https:') return https.get(url, options, callback);
+  if (url.protocol === 'http:') return http.get(url, options, callback);
+  throw new Error('仅支持 http(s) 更新链接');
+}
+
+function redirectedUrl(location: string, baseUrl: URL): URL {
+  return new URL(location, baseUrl);
+}
+
+function fetchJson<T>(url: string, redirects = 5): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      reject(new Error('更新元数据链接无效'));
+      return;
+    }
+    const request = httpRequest(parsed, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'Hermes-Yachiyo-Updater',
+      },
+    }, (response) => {
+      const status = response.statusCode || 0;
+      const location = response.headers.location;
+      if ([301, 302, 303, 307, 308].includes(status) && location && redirects > 0) {
+        response.resume();
+        resolve(fetchJson<T>(redirectedUrl(location, parsed).toString(), redirects - 1));
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        response.resume();
+        reject(new Error(`更新元数据请求失败：HTTP ${status}`));
+        return;
+      }
+      const chunks: Buffer[] = [];
+      response.on('data', (chunk: Buffer | string) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      response.on('end', () => {
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as T);
+        } catch {
+          reject(new Error('更新元数据不是有效 JSON'));
+        }
+      });
+    });
+    request.setTimeout(20000, () => request.destroy(new Error('更新元数据请求超时')));
+    request.on('error', reject);
+  });
+}
+
+function downloadFile(url: string, destination: string, redirects = 5): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      reject(new Error('DMG 下载链接无效'));
+      return;
+    }
+    const tmpDestination = `${destination}.part`;
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    const request = httpRequest(parsed, {
+      headers: {
+        Accept: 'application/octet-stream',
+        'User-Agent': 'Hermes-Yachiyo-Updater',
+      },
+    }, (response) => {
+      const status = response.statusCode || 0;
+      const location = response.headers.location;
+      if ([301, 302, 303, 307, 308].includes(status) && location && redirects > 0) {
+        response.resume();
+        downloadFile(redirectedUrl(location, parsed).toString(), destination, redirects - 1).then(resolve, reject);
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        response.resume();
+        reject(new Error(`DMG 下载失败：HTTP ${status}`));
+        return;
+      }
+      const output = fs.createWriteStream(tmpDestination);
+      pipeline(response, output)
+        .then(() => fs.promises.rename(tmpDestination, destination))
+        .then(() => resolve(), reject);
+    });
+    request.setTimeout(120000, () => request.destroy(new Error('DMG 下载超时')));
+    request.on('error', (error) => {
+      fs.rm(tmpDestination, { force: true }, () => reject(error));
+    });
+  });
+}
+
+function sha256File(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', (chunk: Buffer) => hash.update(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(hash.digest('hex')));
+  });
+}
+
+async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
+  const info = appUpdateInfo();
+  try {
+    const latest = await fetchJson<LatestReleaseMetadata>(info.latest_json_url);
+    const decision = updateAvailableReason(info.current, latest);
+    return {
+      ...info,
+      ok: true,
+      update_available: decision.available,
+      latest,
+      reason: decision.reason,
+    };
+  } catch (error) {
+    return {
+      ...info,
+      ok: false,
+      update_available: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function downloadAppUpdate(): Promise<AppUpdateDownloadResult> {
+  const check = await checkAppUpdate();
+  if (!check.ok || !check.latest) {
+    return { ok: false, error: check.error || '无法读取更新元数据' };
+  }
+  const downloadUrl = typeof check.latest.download_url === 'string' ? check.latest.download_url.trim() : '';
+  if (!downloadUrl) return { ok: false, latest: check.latest, error: '更新元数据缺少 DMG 下载链接' };
+
+  const fileName = safeDmgFileName(check.latest.dmg_name || downloadUrl, check.current.branch);
+  const destination = path.join(updateDownloadsDir(), fileName);
+  try {
+    await downloadFile(downloadUrl, destination);
+    const actualSha256 = await sha256File(destination);
+    const expectedSha256 = typeof check.latest.sha256 === 'string' ? check.latest.sha256.trim().toLowerCase() : '';
+    if (expectedSha256 && actualSha256.toLowerCase() !== expectedSha256) {
+      await fs.promises.rm(destination, { force: true });
+      return {
+        ok: false,
+        latest: check.latest,
+        error: 'DMG SHA256 校验失败，已删除下载文件',
+      };
+    }
+    lastDownloadedAppUpdate = {
+      ok: true,
+      path: destination,
+      file_name: fileName,
+      sha256: actualSha256,
+      verified: Boolean(expectedSha256),
+      latest: check.latest,
+    };
+    return lastDownloadedAppUpdate;
+  } catch (error) {
+    return {
+      ok: false,
+      latest: check.latest,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function normalizedDownloadedDmgPath(value: unknown): string | null {
+  const candidate = typeof value === 'string' && value.trim()
+    ? value.trim()
+    : lastDownloadedAppUpdate?.path || '';
+  if (!candidate) return null;
+  const resolved = path.resolve(candidate);
+  const downloads = path.resolve(updateDownloadsDir());
+  if (!resolved.startsWith(`${downloads}${path.sep}`)) return null;
+  if (!resolved.endsWith('.dmg')) return null;
+  return fs.existsSync(resolved) ? resolved : null;
+}
+
+function installDownloadedAppUpdate(rawPath: unknown): { success: boolean; appBundlePath?: string; dmgPath?: string; error?: string } {
+  if (process.platform !== 'darwin') return { success: false, error: '应用更新安装仅支持 macOS' };
+  if (!app.isPackaged) return { success: false, error: '开发环境不支持覆盖安装，请使用已打包的 DMG 版本' };
+  const appBundlePath = currentAppBundlePath();
+  if (!appBundlePath) return { success: false, error: '当前运行环境不是可更新的 macOS .app 包' };
+  const dmgPath = normalizedDownloadedDmgPath(rawPath);
+  if (!dmgPath) return { success: false, appBundlePath, error: '未找到已下载的更新 DMG' };
+  const appName = path.basename(appBundlePath);
+  if (!/^Hermes-Yachiyo.*\.app$/.test(appName)) {
+    return { success: false, appBundlePath, dmgPath, error: `拒绝覆盖非 Hermes-Yachiyo 应用包：${appName}` };
+  }
+  const script = [
+    'set -euo pipefail',
+    'app_path="$1"',
+    'dmg_path="$2"',
+    'app_name="$3"',
+    'app_pid="$4"',
+    'while kill -0 "$app_pid" >/dev/null 2>&1; do sleep 0.25; done',
+    'mount_dir="$(mktemp -d "${TMPDIR:-/tmp}/hermes-yachiyo-update.XXXXXX")"',
+    'cleanup() { /usr/bin/hdiutil detach "$mount_dir" -quiet >/dev/null 2>&1 || true; rmdir "$mount_dir" >/dev/null 2>&1 || true; }',
+    'trap cleanup EXIT',
+    '/usr/bin/hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_dir" -quiet',
+    'source_app="$mount_dir/$app_name"',
+    'if [[ ! -d "$source_app" ]]; then source_app="$(/usr/bin/find "$mount_dir" -maxdepth 2 -type d -name "$app_name" -print -quit)"; fi',
+    'if [[ ! -d "$source_app" ]]; then echo "Cannot find $app_name in DMG" >&2; exit 1; fi',
+    'parent_dir="$(dirname "$app_path")"',
+    'tmp_app="$parent_dir/.$app_name.updating.$$"',
+    'rm -rf "$tmp_app"',
+    '/usr/bin/ditto "$source_app" "$tmp_app"',
+    'rm -rf "$app_path"',
+    'mv "$tmp_app" "$app_path"',
+    '/usr/bin/open "$app_path"',
+  ].join('\n');
+  try {
+    spawn('/bin/zsh', ['-lc', script, 'hermes-yachiyo-update', appBundlePath, dmgPath, appName, String(process.pid)], {
+      detached: true,
+      stdio: 'ignore',
+    }).unref();
+    app.quit();
+    return { success: true, appBundlePath, dmgPath };
+  } catch (error) {
+    return {
+      success: false,
+      appBundlePath,
+      dmgPath,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function iconCandidates(kind: IconKind): string[] {
@@ -1483,6 +1891,10 @@ ipcMain.handle('hermes:restartApp', () => {
   app.quit();
 });
 ipcMain.handle('hermes:removeAppBundleAndQuit', () => removeCurrentAppBundleAndQuit());
+ipcMain.handle('hermes:getAppUpdateInfo', () => appUpdateInfo());
+ipcMain.handle('hermes:checkAppUpdate', () => checkAppUpdate());
+ipcMain.handle('hermes:downloadAppUpdate', () => downloadAppUpdate());
+ipcMain.handle('hermes:installAppUpdate', (_event, dmgPath: unknown) => installDownloadedAppUpdate(dmgPath));
 ipcMain.handle('hermes:restartBackend', (_event, options: unknown) => {
   const targetBridgeUrl = isRecord(options) ? options.bridgeUrl : undefined;
   return restartBackendProcess(targetBridgeUrl);

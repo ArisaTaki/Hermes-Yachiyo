@@ -1,11 +1,18 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 
 import {
+  type AppUpdateCheckResult,
+  type AppUpdateDownloadResult,
+  type AppUpdateInfo,
   apiGet,
   apiPost,
+  checkAppUpdate,
   chooseLive2DArchive,
   chooseLive2DModelDirectory,
+  downloadAppUpdate,
+  getAppUpdateInfo,
   hasDesktopFilePicker,
+  installAppUpdate,
   openExternalUrl,
   openDesktopMode,
   openPath,
@@ -666,6 +673,10 @@ function GeneralSettingsView() {
   const [backupStatus, setBackupStatus] = useState<BackupStatus | null>(null);
   const [backupManagerOpen, setBackupManagerOpen] = useState(false);
   const [backupAction, setBackupAction] = useState('');
+  const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateInfo | null>(null);
+  const [appUpdateCheck, setAppUpdateCheck] = useState<AppUpdateCheckResult | null>(null);
+  const [appUpdateDownload, setAppUpdateDownload] = useState<AppUpdateDownloadResult | null>(null);
+  const [appUpdateAction, setAppUpdateAction] = useState('');
   const [uninstallScope, setUninstallScope] = useState('yachiyo_only');
   const [uninstallKeepConfig, setUninstallKeepConfig] = useState(true);
   const [uninstallGptSovits, setUninstallGptSovits] = useState(false);
@@ -682,6 +693,11 @@ function GeneralSettingsView() {
   const uninstallConfirmPhrase = uninstallPreview?.confirm_phrase || 'UNINSTALL';
   const uninstallConfirmValid = uninstallConfirmText.trim() === uninstallConfirmPhrase;
   const backupBusy = Boolean(backupAction);
+  const appUpdateBusy = Boolean(appUpdateAction);
+  const appUpdateCurrent = appUpdateCheck?.current || appUpdateInfo?.current;
+  const appUpdateLatest = appUpdateCheck?.latest || appUpdateDownload?.latest;
+  const appUpdateSupported = Boolean(appUpdateCheck?.supported ?? appUpdateInfo?.supported);
+  const appUpdateDownloadedPath = appUpdateDownload?.path || appUpdateInfo?.downloaded_dmg_path || '';
 
   useEffect(() => {
     let disposed = false;
@@ -710,6 +726,22 @@ function GeneralSettingsView() {
       })
       .catch((err) => {
         if (!disposed) setBackupStatus({ ok: false, error: err instanceof Error ? err.message : '读取备份状态失败' });
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    getAppUpdateInfo()
+      .then((data) => {
+        if (!disposed) setAppUpdateInfo(data);
+      })
+      .catch((err) => {
+        if (!disposed) {
+          setAppUpdateInfo({ supported: false, packaged: false, error: err instanceof Error ? err.message : '读取应用更新信息失败' });
+        }
       });
     return () => {
       disposed = true;
@@ -855,6 +887,61 @@ function GeneralSettingsView() {
       setStatus(err instanceof Error ? err.message : 'Bridge 重启失败');
     } finally {
       setBridgeRestarting(false);
+    }
+  }
+
+  async function runAppUpdateCheck(showMessage = true) {
+    if (appUpdateAction) return;
+    setAppUpdateAction('check');
+    if (showMessage) setStatus('正在检查应用更新…');
+    try {
+      const result = await checkAppUpdate();
+      setAppUpdateCheck(result);
+      setAppUpdateInfo(result);
+      setAppUpdateDownload(null);
+      if (showMessage) {
+        if (result.ok === false) throw new Error(result.error || '检查应用更新失败');
+        setStatus(result.update_available ? result.reason || '发现可用更新' : result.reason || '当前已是最新版本');
+      }
+    } catch (err) {
+      if (showMessage) setStatus(err instanceof Error ? err.message : '检查应用更新失败');
+    } finally {
+      setAppUpdateAction('');
+    }
+  }
+
+  async function runAppUpdateDownload() {
+    if (appUpdateAction) return;
+    setAppUpdateAction('download');
+    setStatus('正在下载应用更新…');
+    try {
+      const result = await downloadAppUpdate();
+      setAppUpdateDownload(result);
+      if (!result.ok) throw new Error(result.error || '下载应用更新失败');
+      setStatus(result.verified ? '更新已下载并通过校验' : '更新已下载；当前元数据未提供 SHA256 校验值');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '下载应用更新失败');
+    } finally {
+      setAppUpdateAction('');
+    }
+  }
+
+  async function runAppUpdateInstall() {
+    if (appUpdateAction) return;
+    const dmgPath = appUpdateDownload?.path || appUpdateInfo?.downloaded_dmg_path || '';
+    if (!dmgPath) {
+      setStatus('请先下载应用更新');
+      return;
+    }
+    if (!window.confirm('将退出 Hermes-Yachiyo，并用已下载的 DMG 覆盖当前应用。继续吗？')) return;
+    setAppUpdateAction('install');
+    setStatus('正在准备安装更新，应用即将退出…');
+    try {
+      const result = await installAppUpdate(dmgPath);
+      if (!result.success) throw new Error(result.error || '启动更新安装失败');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '启动更新安装失败');
+      setAppUpdateAction('');
     }
   }
 
@@ -1187,6 +1274,32 @@ function GeneralSettingsView() {
 
       <section className="panel settings-section">
         <div className="section-heading-row">
+          <h2>应用更新</h2>
+          <span>{appUpdateStatusLabel(appUpdateInfo, appUpdateCheck)}</span>
+        </div>
+        <SettingsRows rows={[
+          ['渠道', appUpdateChannelLabel(appUpdateCurrent?.channel, appUpdateCurrent?.branch)],
+          ['当前构建', appUpdateBuildLabel(appUpdateCurrent?.version, appUpdateCurrent?.build_number, appUpdateCurrent?.short_commit)],
+          ['最新构建', appUpdateBuildLabel(appUpdateLatest?.version, appUpdateLatest?.build_number ?? appUpdateLatest?.run_number, appUpdateLatest?.short_commit)],
+          ['更新元数据', appUpdateInfo?.latest_json_url],
+          ['下载文件', appUpdateDownload?.file_name || appUpdateLatest?.dmg_name],
+          ['校验状态', appUpdateVerificationLabel(appUpdateDownload)],
+        ]} />
+        <div className="settings-action-strip">
+          <button type="button" disabled={appUpdateBusy || !appUpdateSupported} onClick={() => void runAppUpdateCheck()}>
+            {appUpdateAction === 'check' ? '检查中...' : '检查更新'}
+          </button>
+          <button type="button" disabled={appUpdateBusy || !appUpdateSupported || !appUpdateCheck?.update_available} onClick={() => void runAppUpdateDownload()}>
+            {appUpdateAction === 'download' ? '下载中...' : '下载更新'}
+          </button>
+          <button type="button" className="primary-action" disabled={appUpdateBusy || !appUpdateDownloadedPath} onClick={() => void runAppUpdateInstall()}>
+            {appUpdateAction === 'install' ? '准备中...' : '退出并安装'}
+          </button>
+        </div>
+      </section>
+
+      <section className="panel settings-section">
+        <div className="section-heading-row">
           <h2>备份</h2>
           <span>{backupStatus?.has_backup ? `${backupStatus.count || 0} 份 / ${backupStatus.total_size_display || '0 B'}` : '暂无备份'}</span>
         </div>
@@ -1364,6 +1477,35 @@ function IntegrationRows({ title, item }: { title: string; item?: StatusRecord }
 
 function listValue(items?: string[]): string {
   return items?.length ? items.join('、') : '—';
+}
+
+function appUpdateChannelLabel(channel?: string, branch?: string): string {
+  if (channel === 'stable' || branch === 'main') return '正式版 / main';
+  if (channel === 'experimental' || branch === 'develop') return '开发版 / develop';
+  return channel || branch || '—';
+}
+
+function appUpdateBuildLabel(version?: string, buildNumber?: number, shortCommit?: string): string {
+  const parts = [
+    version || '',
+    buildNumber !== undefined ? `#${buildNumber}` : '',
+    shortCommit || '',
+  ].filter(Boolean);
+  return parts.length ? parts.join(' / ') : '—';
+}
+
+function appUpdateStatusLabel(info: AppUpdateInfo | null, check: AppUpdateCheckResult | null): string {
+  if (check?.ok === false) return '检查失败';
+  if (check?.update_available) return '有更新';
+  if (check?.ok) return '已是最新';
+  if (info?.supported === false) return info.packaged ? '不可更新' : '开发环境';
+  return '待检查';
+}
+
+function appUpdateVerificationLabel(download: AppUpdateDownloadResult | null): string {
+  if (!download) return '—';
+  if (download.ok === false) return '失败';
+  return download.verified ? 'SHA256 已通过' : '未提供 SHA256';
 }
 
 function modeLabel(mode: string) {

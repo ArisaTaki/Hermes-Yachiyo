@@ -10,6 +10,7 @@ from apps.installer.hermes_check import (
     check_hermes_command,
     check_hermes_installation,
     check_hermes_doctor_readiness,
+    find_existing_hermes_agent_install_dir,
     is_self_referential_hermes_wrapper,
     is_version_compatible,
 )
@@ -213,6 +214,42 @@ def test_hermes_command_detects_self_referential_wrapper(tmp_path, monkeypatch):
     assert exists is False
     assert error
     assert "启动脚本指向自身" in error
+
+
+def test_install_check_reports_repairable_existing_install(tmp_path, monkeypatch):
+    install_dir = tmp_path / "hermes-agent"
+    (install_dir / ".git").mkdir(parents=True)
+
+    monkeypatch.setenv("HERMES_AGENT_INSTALL_DIR", str(install_dir))
+    monkeypatch.setattr(
+        "apps.installer.hermes_check.detect_platform",
+        lambda: Platform.MACOS,
+    )
+    monkeypatch.setattr(
+        "apps.installer.hermes_check.locate_hermes_binary",
+        lambda: (None, False),
+    )
+    monkeypatch.setattr(
+        "apps.installer.hermes_check.check_hermes_command",
+        lambda _path="hermes": (False, "hermes 命令未找到"),
+    )
+
+    info = check_hermes_installation()
+
+    assert info.status == HermesInstallStatus.NOT_INSTALLED
+    assert info.command_exists is False
+    assert info.error_message
+    assert "安装目录存在" in info.error_message
+    assert any(str(install_dir) in suggestion for suggestion in info.suggestions)
+    assert any("修复" in suggestion for suggestion in info.suggestions)
+
+
+def test_find_existing_hermes_agent_install_dir_uses_env(tmp_path, monkeypatch):
+    install_dir = tmp_path / "hermes-agent"
+    (install_dir / "venv").mkdir(parents=True)
+    monkeypatch.setenv("HERMES_AGENT_INSTALL_DIR", str(install_dir))
+
+    assert find_existing_hermes_agent_install_dir() == str(install_dir)
 
 
 def test_hermes_doctor_readiness_parses_limited_tools(monkeypatch):

@@ -1,0 +1,13 @@
+{
+  "name": "Hermes-Yachiyo",
+  "channel": "experimental",
+  "branch": "develop",
+  "version": "0.0.0-dev",
+  "base_version": "0.0.0",
+  "commit": "dev",
+  "short_commit": "dev",
+  "build_number": 0,
+  "repository": "kuguya-AI-app-develop/Hermes-Yachiyo",
+  "latest_json_url": "https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/download/develop-latest/Hermes-Yachiyo-develop-latest.json",
+  "built_at": "dev"
+}

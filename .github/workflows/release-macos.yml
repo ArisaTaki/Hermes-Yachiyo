@@ -152,6 +152,57 @@ jobs:
           echo "keychain=${KEYCHAIN_PATH}" >> "$GITHUB_OUTPUT"
           echo "Imported self-signing certificate identity: ${SIGNING_IDENTITY}" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Write app build metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(python - <<'PY'
+          import tomllib
+          from pathlib import Path
+          print(tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"])
+          PY
+          )"
+          IFS='.' read -r VERSION_MAJOR VERSION_MINOR VERSION_PATCH <<< "${VERSION}"
+          VERSION_MAJOR="${VERSION_MAJOR:-0}"
+          VERSION_MINOR="${VERSION_MINOR:-1}"
+          VERSION_PATCH="${VERSION_PATCH:-0}"
+          RELEASE_PATCH=$((VERSION_PATCH + GITHUB_RUN_NUMBER))
+          RELEASE_VERSION="${VERSION_MAJOR}.${VERSION_MINOR}.${RELEASE_PATCH}"
+          SHORT_SHA="${GITHUB_SHA::7}"
+          STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            CHANNEL="${{ inputs.channel }}"
+          elif [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+            CHANNEL="stable"
+          else
+            CHANNEL="experimental"
+          fi
+
+          if [[ "${CHANNEL}" == "stable" ]]; then
+            LATEST_BRANCH="main"
+          else
+            LATEST_BRANCH="develop"
+          fi
+
+          mkdir -p apps/frontend/public
+          cat > apps/frontend/public/hermes-yachiyo-build.json <<EOF
+          {
+            "name": "Hermes-Yachiyo",
+            "channel": "${CHANNEL}",
+            "branch": "${LATEST_BRANCH}",
+            "source_branch": "${GITHUB_REF_NAME}",
+            "version": "${RELEASE_VERSION}",
+            "base_version": "${VERSION}",
+            "commit": "${GITHUB_SHA}",
+            "short_commit": "${SHORT_SHA}",
+            "build_number": ${GITHUB_RUN_NUMBER},
+            "repository": "${GITHUB_REPOSITORY}",
+            "latest_json_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_BRANCH}-latest/Hermes-Yachiyo-${LATEST_BRANCH}-latest.json",
+            "built_at": "${STAMP}"
+          }
+          EOF
+
       - name: Build Electron DMG
         shell: bash
         env:
@@ -226,21 +277,28 @@ jobs:
           fi
           cp "${dmg_files[0]}" "release/${VERSIONED_DMG}"
           cp "${dmg_files[0]}" "release/${LATEST_DMG}"
-          shasum -a 256 "release/${VERSIONED_DMG}" > "release/${VERSIONED_DMG}.sha256"
-          shasum -a 256 "release/${LATEST_DMG}" > "release/${LATEST_DMG}.sha256"
+          VERSIONED_SHA256="$(shasum -a 256 "release/${VERSIONED_DMG}" | tee "release/${VERSIONED_DMG}.sha256" | awk '{print $1}')"
+          LATEST_SHA256="$(shasum -a 256 "release/${LATEST_DMG}" | tee "release/${LATEST_DMG}.sha256" | awk '{print $1}')"
 
           cat > "release/${LATEST_JSON}" <<EOF
           {
             "name": "Hermes-Yachiyo",
             "channel": "${CHANNEL}",
-            "branch": "${GITHUB_REF_NAME}",
+            "branch": "${LATEST_BRANCH}",
+            "source_branch": "${GITHUB_REF_NAME}",
             "version": "${RELEASE_VERSION}",
             "base_version": "${VERSION}",
             "commit": "${GITHUB_SHA}",
             "short_commit": "${SHORT_SHA}",
+            "build_number": ${GITHUB_RUN_NUMBER},
+            "run_number": ${GITHUB_RUN_NUMBER},
+            "run_id": "${GITHUB_RUN_ID}",
             "tag": "${TAG}",
             "signing": "${SIGNING_MODE}",
+            "dmg_name": "${LATEST_DMG}",
+            "sha256": "${LATEST_SHA256}",
             "download_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_DMG}",
+            "latest_json_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_JSON}",
             "published_at": "${STAMP}"
           }
           EOF

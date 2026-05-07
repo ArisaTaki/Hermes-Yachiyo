@@ -24,14 +24,80 @@ export type DesktopTerminalStartResult = {
 };
 export type DesktopTerminalDataPayload = { id: string; data: string };
 export type DesktopTerminalExitPayload = { id: string; exitCode: number; signal?: number; task?: DesktopTerminalTask };
+export type AppBuildMetadata = {
+  name?: string;
+  channel?: string;
+  branch?: string;
+  version?: string;
+  base_version?: string;
+  commit?: string;
+  short_commit?: string;
+  build_number?: number;
+  repository?: string;
+  latest_json_url?: string;
+  built_at?: string;
+};
+export type LatestReleaseMetadata = {
+  name?: string;
+  channel?: string;
+  branch?: string;
+  source_branch?: string;
+  version?: string;
+  base_version?: string;
+  commit?: string;
+  short_commit?: string;
+  build_number?: number;
+  run_number?: number;
+  tag?: string;
+  signing?: string;
+  dmg_name?: string;
+  sha256?: string;
+  download_url?: string;
+  latest_json_url?: string;
+  published_at?: string;
+};
+export type AppUpdateInfo = {
+  supported?: boolean;
+  packaged?: boolean;
+  current?: AppBuildMetadata;
+  latest_json_url?: string;
+  app_bundle_path?: string;
+  downloaded_dmg_path?: string;
+  error?: string;
+};
+export type AppUpdateCheckResult = AppUpdateInfo & {
+  ok?: boolean;
+  update_available?: boolean;
+  latest?: LatestReleaseMetadata;
+  reason?: string;
+};
+export type AppUpdateDownloadResult = {
+  ok?: boolean;
+  path?: string;
+  file_name?: string;
+  sha256?: string;
+  verified?: boolean;
+  latest?: LatestReleaseMetadata;
+  error?: string;
+};
+export type AppUpdateInstallResult = {
+  success?: boolean;
+  appBundlePath?: string;
+  dmgPath?: string;
+  error?: string;
+};
 
 declare global {
   interface Window {
     hermesDesktop?: {
       chooseLive2DArchive?: () => Promise<string | null>;
       chooseLive2DModelDirectory?: () => Promise<string | null>;
+      checkAppUpdate?: () => Promise<AppUpdateCheckResult>;
       copyText?: (text: string) => Promise<void>;
+      downloadAppUpdate?: () => Promise<AppUpdateDownloadResult>;
+      getAppUpdateInfo?: () => Promise<AppUpdateInfo>;
       getBridgeUrl: () => Promise<string>;
+      installAppUpdate?: (dmgPath?: string) => Promise<AppUpdateInstallResult>;
       getLauncherPointerState?: (mode: string) => Promise<{ ok?: boolean; x?: number; y?: number; width?: number; height?: number; inside?: boolean; updated_at?: number }>;
       moveLauncherWindow?: (deltaX: number, deltaY: number) => Promise<boolean>;
       openDesktopMode?: (mode?: string) => Promise<void>;
@@ -269,6 +335,34 @@ export async function restartApp(): Promise<void> {
     return;
   }
   window.location.reload();
+}
+
+export async function getAppUpdateInfo(): Promise<AppUpdateInfo> {
+  if (!window.hermesDesktop?.getAppUpdateInfo) {
+    return { supported: false, packaged: false, error: '当前环境不支持应用更新' };
+  }
+  return window.hermesDesktop.getAppUpdateInfo();
+}
+
+export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
+  if (!window.hermesDesktop?.checkAppUpdate) {
+    return { ok: false, supported: false, packaged: false, update_available: false, error: '当前环境不支持应用更新' };
+  }
+  return window.hermesDesktop.checkAppUpdate();
+}
+
+export async function downloadAppUpdate(): Promise<AppUpdateDownloadResult> {
+  if (!window.hermesDesktop?.downloadAppUpdate) {
+    return { ok: false, error: '当前环境不支持应用更新' };
+  }
+  return window.hermesDesktop.downloadAppUpdate();
+}
+
+export async function installAppUpdate(dmgPath?: string): Promise<AppUpdateInstallResult> {
+  if (!window.hermesDesktop?.installAppUpdate) {
+    return { success: false, error: '当前环境不支持应用更新' };
+  }
+  return window.hermesDesktop.installAppUpdate(dmgPath);
 }
 
 export async function restartDesktopBridge(bridgeUrl?: string): Promise<{ success?: boolean; bridgeUrl?: string; error?: string }> {
