@@ -263,6 +263,7 @@ def _gpt_sovits_model_status(workdir: Path | None) -> dict[str, Any]:
         "s1v3": _nonempty_file(pretrained / "s1v3.ckpt"),
         "s2Gv4": _nonempty_file(pretrained / "gsv-v4-pretrained" / "s2Gv4.pth"),
         "vocoder": _nonempty_file(pretrained / "gsv-v4-pretrained" / "vocoder.pth"),
+        "g2pw": _nonempty_file(workdir / "GPT_SoVITS" / "text" / "G2PWModel" / "g2pW.onnx"),
         "bert": _has_model_weight(pretrained / "chinese-roberta-wwm-ext-large"),
         "cnhubert": _has_model_weight(pretrained / "chinese-hubert-base"),
     }

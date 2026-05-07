@@ -338,11 +338,13 @@ def test_gpt_sovits_service_status_reports_pretrained_model_files(monkeypatch, t
     (pretrained / "gsv-v4-pretrained").mkdir(parents=True)
     (pretrained / "chinese-roberta-wwm-ext-large").mkdir(parents=True)
     (pretrained / "chinese-hubert-base").mkdir(parents=True)
+    (workdir / "GPT_SoVITS" / "text" / "G2PWModel").mkdir(parents=True)
     (pretrained / "s1v3.ckpt").write_bytes(b"gpt")
     (pretrained / "gsv-v4-pretrained" / "s2Gv4.pth").write_bytes(b"sovits")
     (pretrained / "gsv-v4-pretrained" / "vocoder.pth").write_bytes(b"vocoder")
     (pretrained / "chinese-roberta-wwm-ext-large" / "model.safetensors").write_bytes(b"bert")
     (pretrained / "chinese-hubert-base" / "pytorch_model.bin").write_bytes(b"hubert")
+    (workdir / "GPT_SoVITS" / "text" / "G2PWModel" / "g2pW.onnx").write_bytes(b"g2pw")
     monkeypatch.setattr(gsv_service, "_launch_agent_path", lambda: tmp_path / "agent.plist")
     monkeypatch.setattr(gsv_service, "_launch_agent_running", lambda: False)
     monkeypatch.setattr(

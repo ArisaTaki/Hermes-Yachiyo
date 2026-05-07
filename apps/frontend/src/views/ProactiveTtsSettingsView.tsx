@@ -945,6 +945,12 @@ const GSV_PRETRAINED_MODEL_URLS = [
   'https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/pretrained_models.zip',
 ];
 
+const GSV_G2PW_MODEL_URLS = [
+  'https://www.modelscope.cn/models/XXXXRT/GPT-SoVITS-Pretrained/resolve/master/G2PWModel.zip',
+  'https://hf-mirror.com/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/G2PWModel.zip',
+  'https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/G2PWModel.zip',
+];
+
 function buildGsvServiceTerminalCommand(form: TtsForm): string {
   const workdirAssignment = buildShellPathAssignment('WORKDIR', form.gsv_service_workdir.trim());
   const serviceCommand = form.gsv_service_command.trim();
@@ -1004,6 +1010,7 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
     'fi',
     'cd "$WORKDIR"',
     ...buildGsvPretrainedModelSetupLines(),
+    ...buildGsvG2pwModelSetupLines(),
     'if [ -x .venv/bin/python ]; then',
     '  VENV_VERSION="$(.venv/bin/python -V 2>&1 | awk \'{print $2}\' | cut -d. -f1,2)"',
     '  if [ "$VENV_VERSION" != "3.11" ]; then',
@@ -1064,6 +1071,35 @@ function buildGsvPretrainedModelSetupLines(): string[] {
   ];
 }
 
+function buildGsvG2pwModelSetupLines(): string[] {
+  const urls = `G2PW_MODEL_URLS=(${GSV_G2PW_MODEL_URLS.map(shellQuote).join(' ')})`;
+  return [
+    'G2PW_DIR="GPT_SoVITS/text/G2PWModel"',
+    'if [ ! -s "$G2PW_DIR/g2pW.onnx" ]; then',
+    '  echo "检测到中文 G2PW 模型不完整，开始下载 G2PWModel.zip"',
+    urls,
+    '  G2PW_ZIP="$(mktemp "${TMPDIR:-/tmp}/hermes-gsv-g2pw.XXXXXX")"',
+    '  DOWNLOAD_OK=0',
+    '  for G2PW_URL in "${G2PW_MODEL_URLS[@]}"; do',
+    '    echo "下载：$G2PW_URL"',
+    '    if command -v curl >/dev/null 2>&1; then',
+    '      if curl -L --fail --retry 5 --connect-timeout 20 -o "$G2PW_ZIP" "$G2PW_URL"; then DOWNLOAD_OK=1; break; fi',
+    '    else',
+    "      if \"$PYTHON_BIN\" -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' \"$G2PW_URL\" \"$G2PW_ZIP\"; then DOWNLOAD_OK=1; break; fi",
+    '    fi',
+    '  done',
+    '  if [ "$DOWNLOAD_OK" -ne 1 ]; then echo "G2PW 模型下载失败，请检查网络后重试。"; rm -f "$G2PW_ZIP"; exit 1; fi',
+    '  rm -rf "$G2PW_DIR"',
+    '  unzip -q -o "$G2PW_ZIP" -d GPT_SoVITS/text',
+    '  rm -f "$G2PW_ZIP"',
+    '  if [ ! -s "$G2PW_DIR/g2pW.onnx" ]; then echo "G2PW 模型解压后仍缺少 g2pW.onnx。"; exit 1; fi',
+    '  echo "中文 G2PW 模型已准备完成"',
+    'else',
+    '  echo "中文 G2PW 模型已存在，跳过下载"',
+    'fi',
+  ];
+}
+
 function buildShellPathAssignment(name: string, value: string): string {
   if (value === '$HOME' || value.startsWith('$HOME/')) {
     return `${name}="$HOME${value.slice('$HOME'.length)}"`;
@@ -1105,6 +1141,7 @@ function formatGsvModels(models?: Record<string, boolean>): string {
     ['s1v3', models.s1v3],
     ['s2Gv4', models.s2Gv4],
     ['vocoder', models.vocoder],
+    ['G2PW', models.g2pw],
     ['BERT', models.bert],
     ['CNHuBERT', models.cnhubert],
   ];
