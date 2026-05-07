@@ -22,6 +22,37 @@ npm --prefix apps/frontend run dist:mac
 - Python 后端：`dist/backend/hermes-yachiyo-backend`
 - Electron DMG：`dist/electron/*.dmg`
 
+## 免费自签名打包
+
+免费试用阶段可以使用自签名证书让 `.app` 和 `.dmg` 具备签名完整性，但它不会让 macOS 把应用识别为已验证开发者。用户从浏览器下载后，仍会看到未知开发者 / Gatekeeper 提示，需要使用 Finder 的 Control-click -> Open，或在系统设置的“隐私与安全性”中允许打开。
+
+本地生成自签名证书：
+
+```bash
+scripts/create_macos_self_signed_cert.sh
+```
+
+该脚本会在 `dist/signing/` 下生成 p12、base64 和 GitHub Secrets 辅助文件，并默认导入当前用户的 login keychain。`dist/` 已被 `.gitignore` 排除，不要把这些文件提交到仓库。
+
+需要在 GitHub 仓库 Secrets 中配置：
+
+```text
+MACOS_CODESIGN_CERTIFICATE_BASE64
+MACOS_CODESIGN_CERTIFICATE_PASSWORD
+MACOS_CODESIGN_IDENTITY
+```
+
+本地使用自签名证书构建 DMG：
+
+```bash
+python scripts/build_backend.py --clean
+scripts/build_macos_self_signed_dmg.sh "Hermes-Yachiyo Self Signed"
+```
+
+`MACOS_CODESIGN_IDENTITY` 是证书名，不是发布渠道名。自签名阶段建议使用中性的 `Hermes-Yachiyo Self Signed`；`main` 和 `develop` 可以共用同一张自签名证书。发布渠道由分支、release tag、DMG 文件名和下载链接区分。
+
+CI 中如果检测到 `MACOS_CODESIGN_CERTIFICATE_BASE64`，会自动导入证书、构建 `.app`、签名 `.app`、打包 `.dmg` 并签名 `.dmg`。如果没有配置该 Secret，workflow 会退回 unsigned DMG，发布流程不会因此失败。
+
 ## 打包结构
 
 Electron packaged 模式会启动：
@@ -50,15 +81,32 @@ Hermes-Yachiyo.app/Contents/Resources/backend/hermes-yachiyo-backend
 1. 安装 Python 与 Node 依赖。
 2. 运行关键 smoke tests。
 3. PyInstaller 构建后端。
-4. electron-builder 生成 DMG。
+4. 如果配置了自签名证书，electron-builder 生成 `.app` 目录后由脚本签名并创建 DMG；否则 electron-builder 直接生成 unsigned DMG。
 5. 上传 workflow artifact。
 6. 创建 GitHub Release。
 
 Release tag 格式：
 
 ```text
-stable-v<版本>-<UTC时间>-<短SHA>
-experimental-v<版本>-<UTC时间>-<短SHA>
+stable-v<发布版本>-<短SHA>
+experimental-v<发布版本>-<短SHA>
 ```
 
-后续如果要面向普通用户分发，需要再补 Apple Developer ID 签名与 notarization；当前链路先保证可重复构建和可安装 DMG。
+发布版本由 `pyproject.toml` 的基础版本加上 `GITHUB_RUN_NUMBER` 生成，例如基础版本 `0.1.0` 在第 20 次 workflow 运行时会生成 `0.1.20`。
+
+固定下载链接：
+
+- 最新正式版 DMG：<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/latest/download/Hermes-Yachiyo-main-latest.dmg>
+- 最新正式版滚动 release：<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/download/main-latest/Hermes-Yachiyo-main-latest.dmg>
+- 最新实验版 DMG：<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/download/develop-latest/Hermes-Yachiyo-develop-latest.dmg>
+
+`main` 的版本化 release 会显式标记为 GitHub Latest，并额外上传 `Hermes-Yachiyo-main-latest.dmg`，因此门户网站可以使用 `releases/latest/download/...`。`develop` 是 prerelease，GitHub 的 `releases/latest` 不会稳定指向它，所以 workflow 维护 `develop-latest` 这个滚动 release。
+
+渠道区分规则：
+
+- `main` -> `stable` release，固定 DMG 名为 `Hermes-Yachiyo-main-latest.dmg`。
+- `develop` -> `experimental` prerelease，固定 DMG 名为 `Hermes-Yachiyo-develop-latest.dmg`。
+
+固定 DMG 旁边会同时发布同名 `.sha256` 和 `.json` 文件，门户或安装页可以用它们展示版本、commit 和校验值。
+
+后续如果要面向普通用户无 Gatekeeper 警告地分发，需要再补 Apple Developer ID 签名与 notarization；当前链路先保证可重复构建和可安装 DMG。
