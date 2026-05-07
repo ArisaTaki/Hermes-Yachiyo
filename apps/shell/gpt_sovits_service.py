@@ -10,10 +10,9 @@ import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from urllib.parse import urljoin
 from urllib.error import HTTPError
+from urllib.parse import urljoin
 from urllib.request import Request, urlopen
-
 
 LAUNCH_AGENT_LABEL = "com.hermes-yachiyo.gpt-sovits"
 
@@ -26,6 +25,7 @@ def get_gpt_sovits_service_status(config: Any) -> dict[str, Any]:
     command = str(getattr(tts, "gsv_service_command", "") or "").strip()
     plist_path = _launch_agent_path()
     reachable = _service_reachable(base_url)
+    model_status = _gpt_sovits_model_status(workdir)
     return {
         "provider": "gpt-sovits",
         "base_url": base_url,
@@ -50,6 +50,8 @@ def get_gpt_sovits_service_status(config: Any) -> dict[str, Any]:
             "mecab_config": _tool_exists("mecab-config"),
             "torchcodec": _python_package_available(workdir, "torchcodec"),
         },
+        "models": model_status["models"],
+        "missing_model_files": model_status["missing"],
         "logs": {
             "stdout": _display_path(_log_path("out")),
             "stderr": _display_path(_log_path("err")),
@@ -185,7 +187,9 @@ def _launchctl(args: list[str], *, check: bool) -> subprocess.CompletedProcess[s
 
 
 def _command_error(command: str, result: subprocess.CompletedProcess[str]) -> str:
-    detail = "\n".join(part.strip() for part in (result.stderr, result.stdout) if part and part.strip())
+    detail = "\n".join(
+        part.strip() for part in (result.stderr, result.stdout) if part and part.strip()
+    )
     return f"{command} 失败，退出码 {result.returncode}{f'：{detail}' if detail else ''}"
 
 
@@ -218,7 +222,9 @@ def _tool_exists(*names: str) -> bool:
 def _python_package_available(workdir: Path | None, package: str) -> bool:
     venv_candidates: list[Path] = []
     if workdir:
-        venv_candidates.extend([workdir / ".venv" / "bin" / "python", workdir / "venv" / "bin" / "python"])
+        venv_candidates.extend(
+            [workdir / ".venv" / "bin" / "python", workdir / "venv" / "bin" / "python"]
+        )
     candidates = [python for python in venv_candidates if python.exists()]
     if not candidates:
         for tool in (_tool_path("python3.11"), _tool_path("python3"), _tool_path("python")):
@@ -246,6 +252,35 @@ def _python_package_available(workdir: Path | None, package: str) -> bool:
         if result.returncode == 0:
             return True
     return False
+
+
+def _gpt_sovits_model_status(workdir: Path | None) -> dict[str, Any]:
+    if not workdir:
+        return {"models": {}, "missing": []}
+
+    pretrained = workdir / "GPT_SoVITS" / "pretrained_models"
+    models = {
+        "s1v3": _nonempty_file(pretrained / "s1v3.ckpt"),
+        "s2Gv4": _nonempty_file(pretrained / "gsv-v4-pretrained" / "s2Gv4.pth"),
+        "vocoder": _nonempty_file(pretrained / "gsv-v4-pretrained" / "vocoder.pth"),
+        "bert": _has_model_weight(pretrained / "chinese-roberta-wwm-ext-large"),
+        "cnhubert": _has_model_weight(pretrained / "chinese-hubert-base"),
+    }
+    return {
+        "models": models,
+        "missing": [name for name, ok in models.items() if not ok],
+    }
+
+
+def _has_model_weight(path: Path) -> bool:
+    return any(_nonempty_file(path / name) for name in ("pytorch_model.bin", "model.safetensors"))
+
+
+def _nonempty_file(path: Path) -> bool:
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
 
 
 def _display_path(path: Path | None) -> str:

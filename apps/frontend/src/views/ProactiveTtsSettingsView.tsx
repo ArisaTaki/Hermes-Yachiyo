@@ -76,6 +76,8 @@ type GptSovitsServiceStatus = {
   platform_supported?: boolean;
   plist_path_display?: string;
   tools?: Record<string, boolean>;
+  models?: Record<string, boolean>;
+  missing_model_files?: string[];
   logs?: { stdout?: string; stderr?: string };
 };
 
@@ -248,17 +250,17 @@ export function ProactiveTtsSettingsView() {
   async function importVoiceArchive() {
     if (busy || loading || resourceBusy) return;
     setResourceBusy(true);
-    setStatus('正在导入八千代语音包...');
+    setStatus('正在导入八千代音色包...');
     try {
       const selectedPath = hasDesktopFilePicker()
         ? await chooseLive2DArchive()
         : manualVoiceArchivePath.trim();
       if (!selectedPath) {
-        setStatus(hasDesktopFilePicker() ? '已取消导入语音包' : '请输入语音包 ZIP 路径');
+        setStatus(hasDesktopFilePicker() ? '已取消导入音色包' : '请输入音色包 ZIP 路径');
         return;
       }
       const result = await apiPost<TtsVoiceImportResult>('/ui/tts/voice-resource/import', { path: selectedPath });
-      if (result.ok === false) throw new Error(result.error || '导入语音包失败');
+      if (result.ok === false) throw new Error(result.error || '导入音色包失败');
       const next = formFromTtsSettings(result.tts_settings || {});
       setForm((current) => ({
         ...current,
@@ -268,9 +270,9 @@ export function ProactiveTtsSettingsView() {
       setVoiceResource(result.resource || voiceResource);
       setTestResult(null);
       const displayPath = result.imported_path_display ? `：${result.imported_path_display}` : '';
-      setStatus(`${result.message || '语音包已导入，等待保存 TTS 设置'}${displayPath}`);
+      setStatus(`${result.message || '音色包已导入，等待保存 TTS 设置'}${displayPath}`);
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : '导入语音包失败');
+      setStatus(err instanceof Error ? err.message : '导入音色包失败');
     } finally {
       setResourceBusy(false);
     }
@@ -279,21 +281,21 @@ export function ProactiveTtsSettingsView() {
   async function openVoiceAssetsDir() {
     const root = voiceResource?.default_assets_root || '';
     if (!root) {
-      setStatus('未找到语音包导入目录');
+      setStatus('未找到音色包导入目录');
       return;
     }
     try {
       await openPath(root);
-      setStatus(`已打开语音包导入目录：${voiceResource?.default_assets_root_display || root}`);
+      setStatus(`已打开音色包导入目录：${voiceResource?.default_assets_root_display || root}`);
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : '打开语音包导入目录失败');
+      setStatus(err instanceof Error ? err.message : '打开音色包导入目录失败');
     }
   }
 
   async function openVoiceReleases() {
     const url = voiceResource?.voice_package_url || voiceResource?.releases_url || '';
     if (!url) {
-      setStatus('未配置语音包下载地址');
+      setStatus('未配置音色包下载地址');
       return;
     }
     await openExternalUrl(url);
@@ -539,8 +541,8 @@ export function ProactiveTtsSettingsView() {
                 <>
                   <div className="settings-resource-panel wide">
                     <div>
-                      <strong>八千代语音包</strong>
-                      <p>{voiceResource?.help_text || '可从 Releases 下载八千代 GPT-SoVITS 语音包 ZIP 并导入。'}</p>
+                      <strong>八千代音色包</strong>
+                      <p>{voiceResource?.help_text || '可从 Releases 下载八千代 GPT-SoVITS 音色包 ZIP 并导入。'}</p>
                       <span>默认导入目录：{voiceResource?.default_assets_root_display || '—'}</span>
                     </div>
                     <div className="settings-resource-actions compact-actions">
@@ -550,14 +552,14 @@ export function ProactiveTtsSettingsView() {
                         disabled={interactionBusy}
                         onClick={() => void importVoiceArchive()}
                       >
-                        {resourceBusy ? '导入中...' : filePickerAvailable ? '导入语音包 ZIP' : '按路径导入 ZIP'}
+                        {resourceBusy ? '导入中...' : filePickerAvailable ? '导入音色包 ZIP' : '按路径导入 ZIP'}
                       </button>
                       <button type="button" disabled={interactionBusy} onClick={() => void openVoiceAssetsDir()}>打开导入目录</button>
-                      <button type="button" disabled={interactionBusy || !(voiceResource?.voice_package_url || voiceResource?.releases_url)} onClick={() => void openVoiceReleases()}>下载语音包</button>
+                      <button type="button" disabled={interactionBusy || !(voiceResource?.voice_package_url || voiceResource?.releases_url)} onClick={() => void openVoiceReleases()}>下载音色包</button>
                     </div>
                     {!filePickerAvailable ? (
                       <label className="settings-field wide" htmlFor="tts-voice-archive-path-page">
-                        <span>语音包 ZIP 路径</span>
+                        <span>音色包 ZIP 路径</span>
                         <input
                           id="tts-voice-archive-path-page"
                           value={manualVoiceArchivePath}
@@ -571,7 +573,7 @@ export function ProactiveTtsSettingsView() {
                   <div className="settings-resource-panel wide">
                     <div>
                       <strong>GPT-SoVITS 本地服务</strong>
-                      <p>{voiceResource?.service_help_text || '语音包只负责音色文件；本地 GPT-SoVITS API 服务需要单独运行。'}</p>
+                      <p>{voiceResource?.service_help_text || '音色包不包含 GPT-SoVITS 基础预训练模型与运行时；本地 API 服务需要单独部署并启动。'}</p>
                       <span>{gsvServiceStatusText(serviceStatus)}</span>
                     </div>
                     <div className="settings-resource-actions compact-actions">
@@ -581,7 +583,7 @@ export function ProactiveTtsSettingsView() {
                         disabled={interactionBusy}
                         onClick={() => void openGsvSetupTerminal()}
                       >
-                        {busyAction === 'service-setup' ? '部署中...' : '部署本地依赖'}
+                        {busyAction === 'service-setup' ? '部署中...' : '部署运行时/基础模型'}
                       </button>
                       <button
                         type="button"
@@ -610,7 +612,7 @@ export function ProactiveTtsSettingsView() {
                       <button type="button" disabled={interactionBusy} onClick={() => void refreshGsvServiceStatus()}>刷新状态</button>
                     </div>
                     <p className="capability-note wide-form-note">
-                      本地依赖部署只准备 Python 环境；调试终端是前台临时运行；本地后台/自启会使用 macOS LaunchAgent 管理服务。
+                      运行时部署会准备 Python 环境和 GPT-SoVITS 基础预训练模型；调试终端是前台临时运行；本地后台/自启会使用 macOS LaunchAgent 管理服务。
                     </p>
                     <label className="settings-field wide" htmlFor="tts-gsv-service-workdir-page">
                       <span>GPT-SoVITS 服务目录</span>
@@ -653,6 +655,10 @@ export function ProactiveTtsSettingsView() {
                         <div className="settings-meta-row">
                           <span>依赖检查</span>
                           <strong>{formatGsvTools(serviceStatus.tools)}</strong>
+                        </div>
+                        <div className="settings-meta-row">
+                          <span>模型检查</span>
+                          <strong>{formatGsvModels(serviceStatus.models)}</strong>
                         </div>
                       </div>
                     ) : null}
@@ -933,6 +939,12 @@ function homePlaceholder(): string {
   return '$HOME';
 }
 
+const GSV_PRETRAINED_MODEL_URLS = [
+  'https://www.modelscope.cn/models/XXXXRT/GPT-SoVITS-Pretrained/resolve/master/pretrained_models.zip',
+  'https://hf-mirror.com/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/pretrained_models.zip',
+  'https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/pretrained_models.zip',
+];
+
 function buildGsvServiceTerminalCommand(form: TtsForm): string {
   const workdirAssignment = buildShellPathAssignment('WORKDIR', form.gsv_service_workdir.trim());
   const serviceCommand = form.gsv_service_command.trim();
@@ -954,8 +966,8 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
   const configuredCommand = serviceCommand.trim() || 'python api_v2.py -a 127.0.0.1 -p 9880';
   return [
     'echo "Hermes-Yachiyo GPT-SoVITS 一键部署"',
-    'echo "此流程会克隆 GPT-SoVITS、创建 .venv 并安装依赖；不会直接启动本地 API。"',
-    'echo "下载体积可能较大；脚本会优先准备 Homebrew python@3.11、ffmpeg 与 mecab。"',
+    'echo "此流程会克隆 GPT-SoVITS、创建 .venv、安装依赖并准备预训练模型；不会直接启动本地 API。"',
+    'echo "下载体积可能较大；脚本会优先准备 Homebrew python@3.11、ffmpeg、mecab 与 unzip。"',
     'printf "继续执行部署？[y/N] "',
     'read answer',
     'case "$answer" in [yY]|[yY][eE][sS]) ;; *) echo "已取消。"; exit 1 ;; esac',
@@ -963,15 +975,17 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
     'if [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi',
     'if [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"; fi',
     'if command -v brew >/dev/null 2>&1; then',
-    '  echo "检查 Homebrew 依赖：git ffmpeg mecab python@3.11"',
+    '  echo "检查 Homebrew 依赖：git ffmpeg mecab python@3.11 unzip"',
     '  brew list git >/dev/null 2>&1 || brew install git',
     '  brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg',
     '  brew list mecab >/dev/null 2>&1 || brew install mecab',
     '  brew list python@3.11 >/dev/null 2>&1 || brew install python@3.11',
+    '  brew list unzip >/dev/null 2>&1 || brew install unzip',
     '  if [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi',
     '  if [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"; fi',
     'fi',
     'if ! command -v git >/dev/null 2>&1; then echo "未找到 git，请先安装 Git。"; exit 1; fi',
+    'if ! command -v unzip >/dev/null 2>&1; then echo "未找到 unzip，请先安装 unzip。"; exit 1; fi',
     'if ! command -v mecab-config >/dev/null 2>&1; then echo "未找到 mecab-config。请先执行：brew install mecab"; exit 1; fi',
     'PYTHON_BIN=""',
     'for candidate in python3.11 /opt/homebrew/bin/python3.11 /usr/local/bin/python3.11; do',
@@ -989,6 +1003,7 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
     '  git clone "$PROJECT_URL" "$WORKDIR"',
     'fi',
     'cd "$WORKDIR"',
+    ...buildGsvPretrainedModelSetupLines(),
     'if [ -x .venv/bin/python ]; then',
     '  VENV_VERSION="$(.venv/bin/python -V 2>&1 | awk \'{print $2}\' | cut -d. -f1,2)"',
     '  if [ "$VENV_VERSION" != "3.11" ]; then',
@@ -1016,6 +1031,39 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
   ].join('\n');
 }
 
+function buildGsvPretrainedModelSetupLines(): string[] {
+  const urls = `PRETRAINED_MODEL_URLS=(${GSV_PRETRAINED_MODEL_URLS.map(shellQuote).join(' ')})`;
+  return [
+    'PRETRAINED_DIR="GPT_SoVITS/pretrained_models"',
+    'MISSING_PRETRAINED=0',
+    'for required_model in "$PRETRAINED_DIR/s1v3.ckpt" "$PRETRAINED_DIR/gsv-v4-pretrained/s2Gv4.pth" "$PRETRAINED_DIR/gsv-v4-pretrained/vocoder.pth"; do',
+    '  if [ ! -s "$required_model" ]; then MISSING_PRETRAINED=1; fi',
+    'done',
+    'if [ ! -s "$PRETRAINED_DIR/chinese-roberta-wwm-ext-large/pytorch_model.bin" ] && [ ! -s "$PRETRAINED_DIR/chinese-roberta-wwm-ext-large/model.safetensors" ]; then MISSING_PRETRAINED=1; fi',
+    'if [ ! -s "$PRETRAINED_DIR/chinese-hubert-base/pytorch_model.bin" ] && [ ! -s "$PRETRAINED_DIR/chinese-hubert-base/model.safetensors" ]; then MISSING_PRETRAINED=1; fi',
+    'if [ "$MISSING_PRETRAINED" -eq 1 ]; then',
+    '  echo "检测到 GPT-SoVITS 预训练模型不完整，开始下载 pretrained_models.zip"',
+    urls,
+    '  PRETRAINED_ZIP="$(mktemp "${TMPDIR:-/tmp}/hermes-gsv-pretrained.XXXXXX")"',
+    '  DOWNLOAD_OK=0',
+    '  for PRETRAINED_URL in "${PRETRAINED_MODEL_URLS[@]}"; do',
+    '    echo "下载：$PRETRAINED_URL"',
+    '    if command -v curl >/dev/null 2>&1; then',
+    '      if curl -L --fail --retry 5 --connect-timeout 20 -o "$PRETRAINED_ZIP" "$PRETRAINED_URL"; then DOWNLOAD_OK=1; break; fi',
+    '    else',
+    "      if \"$PYTHON_BIN\" -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' \"$PRETRAINED_URL\" \"$PRETRAINED_ZIP\"; then DOWNLOAD_OK=1; break; fi",
+    '    fi',
+    '  done',
+    '  if [ "$DOWNLOAD_OK" -ne 1 ]; then echo "预训练模型下载失败，请检查网络后重试。"; rm -f "$PRETRAINED_ZIP"; exit 1; fi',
+    '  unzip -q -o "$PRETRAINED_ZIP" -d GPT_SoVITS',
+    '  rm -f "$PRETRAINED_ZIP"',
+    '  echo "GPT-SoVITS 预训练模型已准备完成"',
+    'else',
+    '  echo "GPT-SoVITS 预训练模型已存在，跳过下载"',
+    'fi',
+  ];
+}
+
 function buildShellPathAssignment(name: string, value: string): string {
   if (value === '$HOME' || value.startsWith('$HOME/')) {
     return `${name}="$HOME${value.slice('$HOME'.length)}"`;
@@ -1028,7 +1076,8 @@ function buildShellPathAssignment(name: string, value: string): string {
 
 function gsvServiceStatusText(status: GptSovitsServiceStatus | null): string {
   if (!status) return '推荐端口：9880；服务启动后再执行保存并测试。';
-  if (status.workdir_exists && status.tools?.torchcodec === false) return '缺少 torchcodec，请重新执行“部署本地依赖”后再测试语音。';
+  if (status.workdir_exists && status.tools?.torchcodec === false) return '缺少 torchcodec，请重新执行“部署运行时/基础模型”后再测试语音。';
+  if (status.workdir_exists && status.missing_model_files?.length) return '缺少 GPT-SoVITS 预训练模型，请重新执行“部署运行时/基础模型”后再测试语音。';
   if (status.reachable) return 'API 已可达；可以保存并测试语音链路。';
   if (!status.workdir_exists) return '请先填写 GPT-SoVITS 服务目录，或先安装 GPT-SoVITS 本体。';
   if (!status.command_configured) return '请先填写服务启动命令。';
@@ -1048,4 +1097,16 @@ function formatGsvTools(tools?: Record<string, boolean>): string {
     ['torchcodec', tools.torchcodec],
   ];
   return items.map(([label, ok]) => `${label} ${ok ? '可用' : '缺失'}`).join(' / ');
+}
+
+function formatGsvModels(models?: Record<string, boolean>): string {
+  if (!models || Object.keys(models).length === 0) return '—';
+  const items: Array<[string, boolean | undefined]> = [
+    ['s1v3', models.s1v3],
+    ['s2Gv4', models.s2Gv4],
+    ['vocoder', models.vocoder],
+    ['BERT', models.bert],
+    ['CNHuBERT', models.cnhubert],
+  ];
+  return items.map(([label, ok]) => `${label} ${ok ? '就绪' : '缺失'}`).join(' / ');
 }

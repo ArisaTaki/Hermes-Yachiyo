@@ -21,6 +21,8 @@ def test_open_terminal_command_macos_uses_command_file(tmp_path, monkeypatch):
         script_path = Path(args[-1])
         content = script_path.read_text(encoding="utf-8")
         assert "echo hello" in content
+        assert "hermes_status=$?" in content
+        assert "status=$?" not in content.splitlines()
         assert os.access(script_path, os.X_OK)
         return Result()
 

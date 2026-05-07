@@ -1444,8 +1444,13 @@ function GeneralSettingsView() {
               checked={uninstallGptSovits}
               onChange={(event) => setUninstallGptSovits(event.target.checked)}
             />
-            <span>同时卸载 GPT-SoVITS 本地服务</span>
+            <span>同时卸载 GPT-SoVITS 服务目录与基础模型</span>
           </label>
+          {uninstallGptSovits ? (
+            <p className="warn-text">
+              将删除 GPT-SoVITS 服务目录，包括已下载的基础预训练模型、虚拟环境和本地服务文件。
+            </p>
+          ) : null}
         </div>
         <div className="uninstall-preview-react">
           {(uninstallPreview?.targets || []).map((target) => (
