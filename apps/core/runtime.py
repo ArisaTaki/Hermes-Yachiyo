@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 from apps.core.chat_session import ChatSession, get_chat_session
 from apps.core.state import AppState
 from apps.core.version import get_app_version
+from apps.installer.hermes_check import check_hermes_command
 from apps.installer.hermes_check import check_hermes_installation
 from packages.protocol.enums import HermesInstallStatus
 from packages.protocol.install import HermesInstallInfo
@@ -49,6 +50,7 @@ class HermesRuntime:
         self._task_runner_thread: threading.Thread | None = None
         self._task_runner_loop: asyncio.AbstractEventLoop | None = None
         self._task_runner_loop_ready = threading.Event()
+        self._last_ready_command_probe_at = 0.0
 
     @property
     def state(self) -> AppState:
@@ -194,6 +196,7 @@ class HermesRuntime:
 
     def get_status(self) -> dict:
         """获取运行时状态摘要"""
+        self._refresh_if_ready_cache_is_stale()
         status = {
             "service": "hermes-yachiyo",
             "version": get_app_version(),
@@ -227,7 +230,46 @@ class HermesRuntime:
         """检查 Hermes Agent 是否就绪可用"""
         if not self._hermes_install_info:
             return False
-        return self._hermes_install_info.status == HermesInstallStatus.READY
+        return (
+            self._hermes_install_info.status == HermesInstallStatus.READY
+            and self._hermes_install_info.command_exists
+        )
+
+    def _refresh_if_ready_cache_is_stale(self) -> None:
+        """Refresh cached READY state if the hermes command disappeared.
+
+        The dashboard polls cached runtime status frequently. If a user removes
+        Hermes Agent or an incomplete installer leaves only ``~/.hermes`` while
+        the desktop backend is still running, the old READY cache can otherwise
+        keep the main window in a contradictory state.
+        """
+        if not self._hermes_install_info:
+            return
+        if self._hermes_install_info.status != HermesInstallStatus.READY:
+            return
+        if not self._hermes_install_info.command_exists:
+            logger.warning("Hermes READY cache is inconsistent: command_exists=false")
+            self.refresh_hermes_installation()
+            return
+
+        now = time.monotonic()
+        if now - self._last_ready_command_probe_at < 15.0:
+            return
+        self._last_ready_command_probe_at = now
+
+        command_ok, error_message = check_hermes_command()
+        if command_ok:
+            return
+
+        logger.warning(
+            "Hermes READY cache is stale; hermes command probe failed: %s",
+            error_message,
+        )
+        self.refresh_hermes_installation()
+        try:
+            self.refresh_task_runner_executor()
+        except Exception as exc:
+            logger.warning("刷新 Hermes executor 失败: %s", exc)
 
     def refresh_hermes_installation(self) -> HermesInstallInfo:
         """重新检测 Hermes Agent 状态并写回运行时缓存。"""
