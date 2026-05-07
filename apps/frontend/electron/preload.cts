@@ -2,6 +2,14 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 type TerminalDataPayload = { id: string; data: string };
 type TerminalExitPayload = { id: string; exitCode: number; signal?: number; task?: string };
+type AppUpdateDownloadProgress = {
+  status: string;
+  file_name?: string;
+  received_bytes?: number;
+  total_bytes?: number;
+  percent?: number;
+  error?: string;
+};
 
 contextBridge.exposeInMainWorld('hermesDesktop', {
   chooseLive2DArchive: () => ipcRenderer.invoke('hermes:chooseLive2DArchive') as Promise<string | null>,
@@ -38,5 +46,10 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     const listener = (_event: unknown, payload: TerminalExitPayload) => callback(payload);
     ipcRenderer.on('hermes:terminalExit', listener);
     return () => ipcRenderer.removeListener('hermes:terminalExit', listener);
+  },
+  onAppUpdateDownloadProgress: (callback: (payload: AppUpdateDownloadProgress) => void) => {
+    const listener = (_event: unknown, payload: AppUpdateDownloadProgress) => callback(payload);
+    ipcRenderer.on('hermes:appUpdateDownloadProgress', listener);
+    return () => ipcRenderer.removeListener('hermes:appUpdateDownloadProgress', listener);
   },
 });

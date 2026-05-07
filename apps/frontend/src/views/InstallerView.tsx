@@ -176,6 +176,7 @@ type EmbeddedTerminalSession = {
 
 const INSTALL_POLL_MS = 600;
 const SETUP_POLL_MS = 3000;
+const BRIDGE_BOOT_RETRY_MS = 1200;
 const INSTALL_STALL_WARNING_MS = 60_000;
 const MACOS_PREREQUISITE_COMMAND = [
   'echo "Hermes-Yachiyo macOS 基础工具检查"',
@@ -193,6 +194,7 @@ export function InstallerView() {
   const [installProgress, setInstallProgress] = useState<InstallProgress | null>(null);
   const [setupRunning, setSetupRunning] = useState(false);
   const [setupAttention, setSetupAttention] = useState(false);
+  const [bridgeBooting, setBridgeBooting] = useState(false);
   const [status, setStatus] = useState('正在检测 Hermes Agent…');
   const [logLines, setLogLines] = useState<string[]>([]);
   const [busy, setBusy] = useState('');
@@ -206,6 +208,7 @@ export function InstallerView() {
   const configFormDirtyRef = useRef(false);
   const hermesConfigLoadingRef = useRef(false);
   const providerDraftsRef = useRef<Record<string, HermesProviderDraft>>({});
+  const bridgeRetryingRef = useRef(false);
   const setupTerminalOpenedRef = useRef(false);
   const lastInstallLineCountRef = useRef(0);
   const lastInstallLogAtRef = useRef(0);
@@ -253,24 +256,47 @@ export function InstallerView() {
     }
   }, []);
 
+  const loadInstallerSnapshot = useCallback(async () => {
+    const data = await loadInstallInfo();
+    setBridgeBooting(false);
+    setBusy((current) => (current === 'bridge' ? '' : current));
+    if (data.install_info?.status === 'installed_not_initialized') void loadBackupStatus();
+    if (data.install_info?.command_exists) void loadHermesConfig({ forceFormSync: true });
+    const progress = await apiGet<InstallProgress>('/ui/installer/install/progress');
+    applyInstallProgress(progress, true);
+    return data;
+  }, [loadBackupStatus, loadHermesConfig, loadInstallInfo]);
+
   useEffect(() => {
     let disposed = false;
     async function load() {
       try {
-        const data = await loadInstallInfo();
-        if (!disposed && data.install_info?.status === 'installed_not_initialized') void loadBackupStatus();
-        if (!disposed && data.install_info?.command_exists) void loadHermesConfig({ forceFormSync: true });
-        const progress = await apiGet<InstallProgress>('/ui/installer/install/progress');
-        if (!disposed) applyInstallProgress(progress, true);
+        await loadInstallerSnapshot();
       } catch (error) {
-        if (!disposed) setStatus(error instanceof Error ? error.message : '检测失败');
+        if (!disposed) handleBridgeOrInstallLoadError(error);
       }
     }
     void load();
     return () => {
       disposed = true;
     };
-  }, [loadBackupStatus, loadHermesConfig, loadInstallInfo]);
+  }, [loadInstallerSnapshot]);
+
+  useEffect(() => {
+    if (!bridgeBooting) return undefined;
+    const timer = window.setInterval(() => {
+      if (bridgeRetryingRef.current) return;
+      bridgeRetryingRef.current = true;
+      loadInstallerSnapshot()
+        .catch((error) => {
+          handleBridgeOrInstallLoadError(error);
+        })
+        .finally(() => {
+          bridgeRetryingRef.current = false;
+        });
+    }, BRIDGE_BOOT_RETRY_MS);
+    return () => window.clearInterval(timer);
+  }, [bridgeBooting, loadInstallerSnapshot]);
 
   useEffect(() => {
     if (!installProgress?.running) return undefined;
@@ -340,6 +366,19 @@ export function InstallerView() {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  function handleBridgeOrInstallLoadError(error: unknown) {
+    const message = error instanceof Error ? error.message : '检测失败';
+    if (isBridgeUnavailableMessage(message)) {
+      setBridgeBooting(true);
+      setBusy('bridge');
+      setStatus(bridgeBootStatusText(message));
+      return;
+    }
+    setBridgeBooting(false);
+    setBusy((current) => (current === 'bridge' ? '' : current));
+    setStatus(message);
+  }
 
   function applyInstallProgress(progress: InstallProgress, fromInitialLoad: boolean) {
     setInstallProgress(progress);
@@ -1414,6 +1453,7 @@ function installerNoticeClass(message: string) {
 }
 
 function operationLabel(busy: string, setupAttention: boolean) {
+  if (busy === 'bridge') return '启动中';
   if (busy === 'prep') return '准备中';
   if (busy === 'install') return '安装中';
   if (busy === 'setup') return '配置中';
@@ -1475,6 +1515,7 @@ function installerBannerTone(
   progress: InstallProgress | null,
   setupAttention: boolean,
 ) {
+  if (isBridgeUnavailableMessage(status)) return 'active';
   if (progress?.success === false || /失败|错误|异常|不支持|无法/.test(status)) return 'danger';
   if (statusValue === 'ready') return 'success';
   if (setupAttention || statusValue === 'installed_not_initialized' || statusValue === 'installed_needs_setup' || statusValue === 'setup_in_progress') return 'attention';
@@ -1489,6 +1530,7 @@ function installerBannerTitle(
   setupRunning: boolean,
   setupAttention: boolean,
 ) {
+  if (busy === 'bridge') return '正在启动本地 Bridge';
   if (busy === 'recheck') return '正在重新检测环境';
   if (progress?.running || busy === 'install') return '正在安装 Hermes Agent';
   if (progress?.success === false) return '安装没有完成';
@@ -1509,6 +1551,16 @@ function installerBannerDetail(status: string, progress: InstallProgress | null)
   }
   if (progress?.success === false) return progress.message || status || '请查看安装日志后重试。';
   return status || '等待下一步操作。';
+}
+
+function isBridgeUnavailableMessage(message: string) {
+  return /本地 Bridge 正在启动|无法连接本地 Bridge|Bridge 重启后仍无法连接|Failed to fetch|fetch failed/i.test(message);
+}
+
+function bridgeBootStatusText(message: string) {
+  const match = message.match(/https?:\/\/[^\s，。)）]+/);
+  const url = match?.[0] || '本地 Bridge';
+  return `本地 Bridge 正在启动：${url}。界面会自动重新检测，通常几秒内恢复。`;
 }
 
 function installerTitle(status: string) {

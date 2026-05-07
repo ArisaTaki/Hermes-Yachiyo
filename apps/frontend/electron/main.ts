@@ -25,6 +25,7 @@ import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import process from 'node:process';
+import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -114,6 +115,7 @@ type AppUpdateInfo = {
   latest_json_url: string;
   app_bundle_path?: string;
   downloaded_dmg_path?: string;
+  downloaded_update?: AppUpdateDownloadResult;
   error?: string;
 };
 
@@ -131,6 +133,15 @@ type AppUpdateDownloadResult = {
   sha256?: string;
   verified?: boolean;
   latest?: LatestReleaseMetadata;
+  error?: string;
+};
+
+type AppUpdateDownloadProgress = {
+  status: 'starting' | 'downloading' | 'verifying' | 'completed' | 'failed';
+  file_name?: string;
+  received_bytes?: number;
+  total_bytes?: number;
+  percent?: number;
   error?: string;
 };
 
@@ -251,8 +262,26 @@ function numericBuildNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+function compareVersionStrings(left: unknown, right: unknown): number {
+  if (typeof left !== 'string' || typeof right !== 'string') return 0;
+  const leftParts = left.split(/[.-]/).map((part) => Number.parseInt(part, 10));
+  const rightParts = right.split(/[.-]/).map((part) => Number.parseInt(part, 10));
+  const maxLength = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < maxLength; index += 1) {
+    const leftValue = Number.isFinite(leftParts[index]) ? leftParts[index] : 0;
+    const rightValue = Number.isFinite(rightParts[index]) ? rightParts[index] : 0;
+    if (leftValue > rightValue) return 1;
+    if (leftValue < rightValue) return -1;
+  }
+  return 0;
+}
+
 function updateDownloadsDir(): string {
   return path.join(app.getPath('userData'), 'updates');
+}
+
+function updateDownloadRecordPath(): string {
+  return path.join(updateDownloadsDir(), 'downloaded-update.json');
 }
 
 function safeDmgFileName(value: unknown, branch: string): string {
@@ -262,33 +291,91 @@ function safeDmgFileName(value: unknown, branch: string): string {
   return /^[A-Za-z0-9._-]+\.dmg$/.test(name) ? name : fallback;
 }
 
+function downloadedUpdateIsForDifferentBuild(
+  current: AppBuildMetadata,
+  download: AppUpdateDownloadResult | null | undefined,
+): download is AppUpdateDownloadResult {
+  if (!download?.ok || !download.path || !fs.existsSync(download.path)) return false;
+  const latest = download.latest || {};
+  if (compareVersionStrings(latest.version, current.version) > 0) return true;
+  const currentBuild = numericBuildNumber(current.build_number);
+  const latestBuild = numericBuildNumber(latest.build_number ?? latest.run_number);
+  if (currentBuild !== undefined && latestBuild !== undefined && latestBuild > currentBuild) return true;
+  const currentCommit = typeof current.commit === 'string' ? current.commit.trim() : '';
+  const latestCommit = typeof latest.commit === 'string' ? latest.commit.trim() : '';
+  return Boolean(currentCommit && latestCommit && currentCommit !== 'dev' && latestCommit !== currentCommit);
+}
+
+function downloadedUpdateMatchesLatest(download: AppUpdateDownloadResult | null | undefined, latest: LatestReleaseMetadata): download is AppUpdateDownloadResult {
+  if (!download?.ok || !download.path || !fs.existsSync(download.path)) return false;
+  const expectedSha = typeof latest.sha256 === 'string' ? latest.sha256.trim().toLowerCase() : '';
+  if (expectedSha && download.sha256?.toLowerCase() === expectedSha) return true;
+  const downloadLatest = download.latest || {};
+  if (latest.commit && downloadLatest.commit && latest.commit === downloadLatest.commit) return true;
+  if (latest.version && downloadLatest.version && latest.version === downloadLatest.version) {
+    return numericBuildNumber(latest.build_number ?? latest.run_number) === numericBuildNumber(downloadLatest.build_number ?? downloadLatest.run_number);
+  }
+  return false;
+}
+
+function readDownloadedAppUpdate(current?: AppBuildMetadata): AppUpdateDownloadResult | null {
+  if (lastDownloadedAppUpdate?.ok && (!current || downloadedUpdateIsForDifferentBuild(current, lastDownloadedAppUpdate))) {
+    return lastDownloadedAppUpdate;
+  }
+  const record = readJsonFile<AppUpdateDownloadResult>(updateDownloadRecordPath());
+  if (!record?.ok || !record.path || !fs.existsSync(record.path)) return null;
+  if (current && !downloadedUpdateIsForDifferentBuild(current, record)) return null;
+  lastDownloadedAppUpdate = record;
+  return record;
+}
+
+function writeDownloadedAppUpdate(record: AppUpdateDownloadResult): void {
+  try {
+    fs.mkdirSync(updateDownloadsDir(), { recursive: true });
+    fs.writeFileSync(updateDownloadRecordPath(), JSON.stringify(record, null, 2), 'utf8');
+  } catch (error) {
+    console.warn('[updater] failed to persist downloaded update:', error);
+  }
+}
+
+function clearDownloadedAppUpdate(): void {
+  lastDownloadedAppUpdate = null;
+  try {
+    fs.rmSync(updateDownloadRecordPath(), { force: true });
+  } catch {}
+}
+
 function appUpdateInfo(): AppUpdateInfo {
   const current = readAppBuildMetadata();
   const appBundlePath = currentAppBundlePath() || undefined;
+  const downloadedUpdate = readDownloadedAppUpdate(current) || undefined;
   return {
     supported: process.platform === 'darwin' && app.isPackaged && Boolean(appBundlePath),
     packaged: app.isPackaged,
     current,
     latest_json_url: current.latest_json_url || defaultLatestJsonUrl(current.branch, current.repository),
     app_bundle_path: appBundlePath,
-    downloaded_dmg_path: lastDownloadedAppUpdate?.ok ? lastDownloadedAppUpdate.path : undefined,
+    downloaded_dmg_path: downloadedUpdate?.path,
+    downloaded_update: downloadedUpdate,
   };
 }
 
 function updateAvailableReason(current: AppBuildMetadata, latest: LatestReleaseMetadata): { available: boolean; reason: string } {
+  const versionComparison = compareVersionStrings(latest.version, current.version);
+  if (versionComparison > 0) return { available: true, reason: `发现版本 ${latest.version}` };
   const currentBuild = numericBuildNumber(current.build_number);
   const latestBuild = numericBuildNumber(latest.build_number ?? latest.run_number);
   if (currentBuild !== undefined && latestBuild !== undefined) {
     if (latestBuild > currentBuild) return { available: true, reason: `发现构建 ${latestBuild}` };
-    return { available: false, reason: '当前已是该渠道最新构建' };
+  }
+  if (versionComparison < 0) return { available: false, reason: '当前版本高于该渠道 latest' };
+  if (currentBuild !== undefined && latestBuild !== undefined && latestBuild < currentBuild) {
+    return { available: false, reason: '当前构建高于该渠道 latest' };
   }
   const currentCommit = typeof current.commit === 'string' ? current.commit.trim() : '';
   const latestCommit = typeof latest.commit === 'string' ? latest.commit.trim() : '';
   if (currentCommit && latestCommit && currentCommit !== 'dev' && latestCommit !== currentCommit) {
     return { available: true, reason: `发现提交 ${latest.short_commit || latestCommit.slice(0, 7)}` };
-  }
-  if (latest.version && latest.version !== current.version) {
-    return { available: true, reason: `发现版本 ${latest.version}` };
   }
   return { available: false, reason: '当前已是该渠道最新版本' };
 }
@@ -307,6 +394,12 @@ function redirectedUrl(location: string, baseUrl: URL): URL {
   return new URL(location, baseUrl);
 }
 
+function cacheBustedUrl(url: string): string {
+  const parsed = new URL(url);
+  parsed.searchParams.set('_yachiyo_update_check', `${Date.now()}`);
+  return parsed.toString();
+}
+
 function fetchJson<T>(url: string, redirects = 5): Promise<T> {
   return new Promise((resolve, reject) => {
     let parsed: URL;
@@ -319,6 +412,8 @@ function fetchJson<T>(url: string, redirects = 5): Promise<T> {
     const request = httpRequest(parsed, {
       headers: {
         Accept: 'application/json',
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
         'User-Agent': 'Hermes-Yachiyo-Updater',
       },
     }, (response) => {
@@ -349,7 +444,12 @@ function fetchJson<T>(url: string, redirects = 5): Promise<T> {
   });
 }
 
-function downloadFile(url: string, destination: string, redirects = 5): Promise<void> {
+function downloadFile(
+  url: string,
+  destination: string,
+  onProgress?: (progress: AppUpdateDownloadProgress) => void,
+  redirects = 5,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     let parsed: URL;
     try {
@@ -360,6 +460,7 @@ function downloadFile(url: string, destination: string, redirects = 5): Promise<
     }
     const tmpDestination = `${destination}.part`;
     fs.mkdirSync(path.dirname(destination), { recursive: true });
+    onProgress?.({ status: 'starting', file_name: path.basename(destination), received_bytes: 0 });
     const request = httpRequest(parsed, {
       headers: {
         Accept: 'application/octet-stream',
@@ -370,7 +471,7 @@ function downloadFile(url: string, destination: string, redirects = 5): Promise<
       const location = response.headers.location;
       if ([301, 302, 303, 307, 308].includes(status) && location && redirects > 0) {
         response.resume();
-        downloadFile(redirectedUrl(location, parsed).toString(), destination, redirects - 1).then(resolve, reject);
+        downloadFile(redirectedUrl(location, parsed).toString(), destination, onProgress, redirects - 1).then(resolve, reject);
         return;
       }
       if (status < 200 || status >= 300) {
@@ -378,8 +479,23 @@ function downloadFile(url: string, destination: string, redirects = 5): Promise<
         reject(new Error(`DMG 下载失败：HTTP ${status}`));
         return;
       }
+      const totalBytes = Number(response.headers['content-length']) || undefined;
+      let receivedBytes = 0;
+      const progressStream = new Transform({
+        transform(chunk: Buffer, _encoding, callback) {
+          receivedBytes += chunk.length;
+          onProgress?.({
+            status: 'downloading',
+            file_name: path.basename(destination),
+            received_bytes: receivedBytes,
+            total_bytes: totalBytes,
+            percent: totalBytes ? Math.min(100, Math.round((receivedBytes / totalBytes) * 1000) / 10) : undefined,
+          });
+          callback(null, chunk);
+        },
+      });
       const output = fs.createWriteStream(tmpDestination);
-      pipeline(response, output)
+      pipeline(response, progressStream, output)
         .then(() => fs.promises.rename(tmpDestination, destination))
         .then(() => resolve(), reject);
     });
@@ -403,10 +519,15 @@ function sha256File(filePath: string): Promise<string> {
 async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   const info = appUpdateInfo();
   try {
-    const latest = await fetchJson<LatestReleaseMetadata>(info.latest_json_url);
+    const latest = await fetchJson<LatestReleaseMetadata>(cacheBustedUrl(info.latest_json_url));
     const decision = updateAvailableReason(info.current, latest);
+    const downloadedUpdate = downloadedUpdateMatchesLatest(info.downloaded_update, latest)
+      ? info.downloaded_update
+      : undefined;
     return {
       ...info,
+      downloaded_dmg_path: downloadedUpdate?.path,
+      downloaded_update: downloadedUpdate,
       ok: true,
       update_available: decision.available,
       latest,
@@ -422,10 +543,15 @@ async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   }
 }
 
-async function downloadAppUpdate(): Promise<AppUpdateDownloadResult> {
+async function downloadAppUpdate(
+  onProgress?: (progress: AppUpdateDownloadProgress) => void,
+): Promise<AppUpdateDownloadResult> {
   const check = await checkAppUpdate();
   if (!check.ok || !check.latest) {
     return { ok: false, error: check.error || '无法读取更新元数据' };
+  }
+  if (downloadedUpdateMatchesLatest(check.downloaded_update, check.latest)) {
+    return check.downloaded_update;
   }
   const downloadUrl = typeof check.latest.download_url === 'string' ? check.latest.download_url.trim() : '';
   if (!downloadUrl) return { ok: false, latest: check.latest, error: '更新元数据缺少 DMG 下载链接' };
@@ -433,11 +559,13 @@ async function downloadAppUpdate(): Promise<AppUpdateDownloadResult> {
   const fileName = safeDmgFileName(check.latest.dmg_name || downloadUrl, check.current.branch);
   const destination = path.join(updateDownloadsDir(), fileName);
   try {
-    await downloadFile(downloadUrl, destination);
+    await downloadFile(downloadUrl, destination, onProgress);
+    onProgress?.({ status: 'verifying', file_name: fileName });
     const actualSha256 = await sha256File(destination);
     const expectedSha256 = typeof check.latest.sha256 === 'string' ? check.latest.sha256.trim().toLowerCase() : '';
     if (expectedSha256 && actualSha256.toLowerCase() !== expectedSha256) {
       await fs.promises.rm(destination, { force: true });
+      clearDownloadedAppUpdate();
       return {
         ok: false,
         latest: check.latest,
@@ -452,8 +580,15 @@ async function downloadAppUpdate(): Promise<AppUpdateDownloadResult> {
       verified: Boolean(expectedSha256),
       latest: check.latest,
     };
+    writeDownloadedAppUpdate(lastDownloadedAppUpdate);
+    onProgress?.({ status: 'completed', file_name: fileName, percent: 100 });
     return lastDownloadedAppUpdate;
   } catch (error) {
+    onProgress?.({
+      status: 'failed',
+      file_name: fileName,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return {
       ok: false,
       latest: check.latest,
@@ -1893,7 +2028,9 @@ ipcMain.handle('hermes:restartApp', () => {
 ipcMain.handle('hermes:removeAppBundleAndQuit', () => removeCurrentAppBundleAndQuit());
 ipcMain.handle('hermes:getAppUpdateInfo', () => appUpdateInfo());
 ipcMain.handle('hermes:checkAppUpdate', () => checkAppUpdate());
-ipcMain.handle('hermes:downloadAppUpdate', () => downloadAppUpdate());
+ipcMain.handle('hermes:downloadAppUpdate', (event) => downloadAppUpdate((progress) => {
+  if (!event.sender.isDestroyed()) event.sender.send('hermes:appUpdateDownloadProgress', progress);
+}));
 ipcMain.handle('hermes:installAppUpdate', (_event, dmgPath: unknown) => installDownloadedAppUpdate(dmgPath));
 ipcMain.handle('hermes:restartBackend', (_event, options: unknown) => {
   const targetBridgeUrl = isRecord(options) ? options.bridgeUrl : undefined;

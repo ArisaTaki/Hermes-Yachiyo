@@ -63,6 +63,7 @@ export type AppUpdateInfo = {
   latest_json_url?: string;
   app_bundle_path?: string;
   downloaded_dmg_path?: string;
+  downloaded_update?: AppUpdateDownloadResult;
   error?: string;
 };
 export type AppUpdateCheckResult = AppUpdateInfo & {
@@ -84,6 +85,14 @@ export type AppUpdateInstallResult = {
   success?: boolean;
   appBundlePath?: string;
   dmgPath?: string;
+  error?: string;
+};
+export type AppUpdateDownloadProgress = {
+  status?: 'starting' | 'downloading' | 'verifying' | 'completed' | 'failed' | string;
+  file_name?: string;
+  received_bytes?: number;
+  total_bytes?: number;
+  percent?: number;
   error?: string;
 };
 
@@ -117,6 +126,7 @@ declare global {
       terminalWrite?: (id: string, data: string) => Promise<boolean>;
       onTerminalData?: (callback: (payload: DesktopTerminalDataPayload) => void) => () => void;
       onTerminalExit?: (callback: (payload: DesktopTerminalExitPayload) => void) => () => void;
+      onAppUpdateDownloadProgress?: (callback: (payload: AppUpdateDownloadProgress) => void) => () => void;
     };
   }
 }
@@ -363,6 +373,10 @@ export async function installAppUpdate(dmgPath?: string): Promise<AppUpdateInsta
     return { success: false, error: '当前环境不支持应用更新' };
   }
   return window.hermesDesktop.installAppUpdate(dmgPath);
+}
+
+export function onAppUpdateDownloadProgress(callback: (payload: AppUpdateDownloadProgress) => void): () => void {
+  return window.hermesDesktop?.onAppUpdateDownloadProgress?.(callback) || (() => {});
 }
 
 export async function restartDesktopBridge(bridgeUrl?: string): Promise<{ success?: boolean; bridgeUrl?: string; error?: string }> {

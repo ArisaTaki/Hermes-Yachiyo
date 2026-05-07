@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   type AppUpdateCheckResult,
   type AppUpdateDownloadResult,
+  type AppUpdateDownloadProgress,
   type AppUpdateInfo,
   apiGet,
   apiPost,
@@ -13,6 +14,7 @@ import {
   getAppUpdateInfo,
   hasDesktopFilePicker,
   installAppUpdate,
+  onAppUpdateDownloadProgress,
   openExternalUrl,
   openDesktopMode,
   openPath,
@@ -676,6 +678,7 @@ function GeneralSettingsView() {
   const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [appUpdateCheck, setAppUpdateCheck] = useState<AppUpdateCheckResult | null>(null);
   const [appUpdateDownload, setAppUpdateDownload] = useState<AppUpdateDownloadResult | null>(null);
+  const [appUpdateProgress, setAppUpdateProgress] = useState<AppUpdateDownloadProgress | null>(null);
   const [appUpdateAction, setAppUpdateAction] = useState('');
   const [uninstallScope, setUninstallScope] = useState('yachiyo_only');
   const [uninstallKeepConfig, setUninstallKeepConfig] = useState(true);
@@ -695,9 +698,10 @@ function GeneralSettingsView() {
   const backupBusy = Boolean(backupAction);
   const appUpdateBusy = Boolean(appUpdateAction);
   const appUpdateCurrent = appUpdateCheck?.current || appUpdateInfo?.current;
-  const appUpdateLatest = appUpdateCheck?.latest || appUpdateDownload?.latest;
+  const appUpdateLatest = appUpdateCheck?.latest || appUpdateDownload?.latest || appUpdateInfo?.downloaded_update?.latest;
   const appUpdateSupported = Boolean(appUpdateCheck?.supported ?? appUpdateInfo?.supported);
-  const appUpdateDownloadedPath = appUpdateDownload?.path || appUpdateInfo?.downloaded_dmg_path || '';
+  const appUpdateDownloaded = appUpdateDownload?.ok ? appUpdateDownload : appUpdateInfo?.downloaded_update;
+  const appUpdateDownloadedPath = appUpdateDownloaded?.path || appUpdateInfo?.downloaded_dmg_path || '';
 
   useEffect(() => {
     let disposed = false;
@@ -734,19 +738,32 @@ function GeneralSettingsView() {
 
   useEffect(() => {
     let disposed = false;
-    getAppUpdateInfo()
-      .then((data) => {
-        if (!disposed) setAppUpdateInfo(data);
-      })
-      .catch((err) => {
+    async function loadAppUpdateInfo() {
+      try {
+        const info = await getAppUpdateInfo();
+        if (disposed) return;
+        setAppUpdateInfo(info);
+        if (info.downloaded_update?.ok) setAppUpdateDownload(info.downloaded_update);
+        const result = await checkAppUpdate();
+        if (disposed) return;
+        setAppUpdateCheck(result);
+        setAppUpdateInfo(result);
+        if (result.downloaded_update?.ok) setAppUpdateDownload(result.downloaded_update);
+      } catch (err) {
         if (!disposed) {
           setAppUpdateInfo({ supported: false, packaged: false, error: err instanceof Error ? err.message : '读取应用更新信息失败' });
         }
-      });
+      }
+    }
+    void loadAppUpdateInfo();
     return () => {
       disposed = true;
     };
   }, []);
+
+  useEffect(() => onAppUpdateDownloadProgress((progress) => {
+    setAppUpdateProgress(progress);
+  }), []);
 
   useEffect(() => {
     let disposed = false;
@@ -898,7 +915,7 @@ function GeneralSettingsView() {
       const result = await checkAppUpdate();
       setAppUpdateCheck(result);
       setAppUpdateInfo(result);
-      setAppUpdateDownload(null);
+      setAppUpdateDownload(result.downloaded_update?.ok ? result.downloaded_update : null);
       if (showMessage) {
         if (result.ok === false) throw new Error(result.error || '检查应用更新失败');
         setStatus(result.update_available ? result.reason || '发现可用更新' : result.reason || '当前已是最新版本');
@@ -913,12 +930,16 @@ function GeneralSettingsView() {
   async function runAppUpdateDownload() {
     if (appUpdateAction) return;
     setAppUpdateAction('download');
+    setAppUpdateProgress({ status: 'starting', file_name: appUpdateLatest?.dmg_name });
     setStatus('正在下载应用更新…');
     try {
       const result = await downloadAppUpdate();
       setAppUpdateDownload(result);
       if (!result.ok) throw new Error(result.error || '下载应用更新失败');
-      setStatus(result.verified ? '更新已下载并通过校验' : '更新已下载；当前元数据未提供 SHA256 校验值');
+      const info = await getAppUpdateInfo();
+      setAppUpdateInfo(info);
+      setAppUpdateProgress({ status: 'completed', file_name: result.file_name, percent: 100 });
+      setStatus(result.verified ? '更新已下载并通过校验，可安装并重启' : '更新已下载，可安装并重启；当前元数据未提供 SHA256 校验值');
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '下载应用更新失败');
     } finally {
@@ -933,9 +954,9 @@ function GeneralSettingsView() {
       setStatus('请先下载应用更新');
       return;
     }
-    if (!window.confirm('将退出 Hermes-Yachiyo，并用已下载的 DMG 覆盖当前应用。继续吗？')) return;
+    if (!window.confirm('将退出 Hermes-Yachiyo，用已下载的 DMG 覆盖当前应用，然后重新打开。继续吗？')) return;
     setAppUpdateAction('install');
-    setStatus('正在准备安装更新，应用即将退出…');
+    setStatus('正在准备安装更新，应用将退出并重新打开…');
     try {
       const result = await installAppUpdate(dmgPath);
       if (!result.success) throw new Error(result.error || '启动更新安装失败');
@@ -1282,18 +1303,21 @@ function GeneralSettingsView() {
           ['当前构建', appUpdateBuildLabel(appUpdateCurrent?.version, appUpdateCurrent?.build_number, appUpdateCurrent?.short_commit)],
           ['最新构建', appUpdateBuildLabel(appUpdateLatest?.version, appUpdateLatest?.build_number ?? appUpdateLatest?.run_number, appUpdateLatest?.short_commit)],
           ['更新元数据', appUpdateInfo?.latest_json_url],
-          ['下载文件', appUpdateDownload?.file_name || appUpdateLatest?.dmg_name],
-          ['校验状态', appUpdateVerificationLabel(appUpdateDownload)],
+          ['下载文件', appUpdateDownloaded?.file_name || appUpdateProgress?.file_name || appUpdateLatest?.dmg_name],
+          ['下载进度', appUpdateProgressLabel(appUpdateProgress, appUpdateDownloaded)],
+          ['校验状态', appUpdateVerificationLabel(appUpdateDownloaded || null)],
         ]} />
         <div className="settings-action-strip">
           <button type="button" disabled={appUpdateBusy || !appUpdateSupported} onClick={() => void runAppUpdateCheck()}>
             {appUpdateAction === 'check' ? '检查中...' : '检查更新'}
           </button>
-          <button type="button" disabled={appUpdateBusy || !appUpdateSupported || !appUpdateCheck?.update_available} onClick={() => void runAppUpdateDownload()}>
-            {appUpdateAction === 'download' ? '下载中...' : '下载更新'}
-          </button>
-          <button type="button" className="primary-action" disabled={appUpdateBusy || !appUpdateDownloadedPath} onClick={() => void runAppUpdateInstall()}>
-            {appUpdateAction === 'install' ? '准备中...' : '退出并安装'}
+          <button
+            type="button"
+            className={appUpdateDownloadedPath ? 'primary-action' : undefined}
+            disabled={appUpdateBusy || !appUpdateSupported || (!appUpdateDownloadedPath && !appUpdateCheck?.update_available)}
+            onClick={() => (appUpdateDownloadedPath ? void runAppUpdateInstall() : void runAppUpdateDownload())}
+          >
+            {appUpdateAction === 'install' ? '准备中...' : appUpdateDownloadedPath ? '安装并重启' : appUpdateAction === 'download' ? appUpdateDownloadButtonLabel(appUpdateProgress) : '下载更新'}
           </button>
         </div>
       </section>
@@ -1495,6 +1519,7 @@ function appUpdateBuildLabel(version?: string, buildNumber?: number, shortCommit
 }
 
 function appUpdateStatusLabel(info: AppUpdateInfo | null, check: AppUpdateCheckResult | null): string {
+  if (info?.downloaded_update?.ok || check?.downloaded_update?.ok) return '已下载';
   if (check?.ok === false) return '检查失败';
   if (check?.update_available) return '有更新';
   if (check?.ok) return '已是最新';
@@ -1506,6 +1531,39 @@ function appUpdateVerificationLabel(download: AppUpdateDownloadResult | null): s
   if (!download) return '—';
   if (download.ok === false) return '失败';
   return download.verified ? 'SHA256 已通过' : '未提供 SHA256';
+}
+
+function appUpdateProgressLabel(
+  progress: AppUpdateDownloadProgress | null,
+  download: AppUpdateDownloadResult | undefined,
+): string {
+  if (download?.ok) return '已下载';
+  if (!progress) return '—';
+  if (progress.status === 'verifying') return '校验中';
+  if (progress.status === 'completed') return '100%';
+  if (progress.status === 'failed') return progress.error || '失败';
+  if (typeof progress.percent === 'number') return `${progress.percent.toFixed(progress.percent % 1 ? 1 : 0)}%`;
+  if (progress.received_bytes) return formatByteCount(progress.received_bytes);
+  if (progress.status === 'starting') return '准备下载';
+  return '下载中';
+}
+
+function appUpdateDownloadButtonLabel(progress: AppUpdateDownloadProgress | null): string {
+  if (progress?.status === 'verifying') return '校验中...';
+  if (typeof progress?.percent === 'number') return `下载中 ${progress.percent.toFixed(0)}%`;
+  return '下载中...';
+}
+
+function formatByteCount(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = value;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) {
+    size /= 1024;
+    unit += 1;
+  }
+  return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
 function modeLabel(mode: string) {
