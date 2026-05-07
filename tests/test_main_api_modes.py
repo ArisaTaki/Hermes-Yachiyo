@@ -1145,6 +1145,16 @@ def test_resolve_hermes_python_from_launcher_ignores_env_without_python(tmp_path
     assert main_api_mod._resolve_hermes_python_from_launcher(str(launcher)) is None
 
 
+def test_resolve_hermes_python_from_launcher_uses_executor_wrapper_resolution(tmp_path, monkeypatch):
+    launcher = tmp_path / "hermes"
+    launcher.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    expected = str(tmp_path / "hermes-agent" / "venv" / "bin" / "python3")
+
+    monkeypatch.setattr("apps.core.executor._resolve_hermes_python", lambda _launcher: expected)
+
+    assert main_api_mod._resolve_hermes_python_from_launcher(str(launcher)) == expected
+
+
 def test_launch_browser_cdp_writes_config_url(tmp_path, monkeypatch):
     config_path = tmp_path / "config.yaml"
     env_path = tmp_path / ".env"

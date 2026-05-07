@@ -348,6 +348,33 @@ class TestHermesStreamBridgeHelpers:
 
         assert _resolve_hermes_python(str(launcher)) is None
 
+    def test_resolve_hermes_python_from_bash_wrapper_exec_target(self, tmp_path):
+        venv_bin = tmp_path / "hermes-agent" / "venv" / "bin"
+        venv_bin.mkdir(parents=True)
+        py = venv_bin / "python3"
+        py.write_text("", encoding="utf-8")
+        target = venv_bin / "hermes"
+        target.write_text(f"#!{py}\n", encoding="utf-8")
+        launcher = tmp_path / "hermes"
+        launcher.write_text(
+            "#!/usr/bin/env bash\n"
+            "unset PYTHONPATH\n"
+            f"exec \"{target}\" \"$@\"\n",
+            encoding="utf-8",
+        )
+
+        assert _resolve_hermes_python(str(launcher)) == str(py)
+
+    def test_resolve_hermes_python_searches_path_for_command_name(self, tmp_path, monkeypatch):
+        py = tmp_path / "python"
+        py.write_text("", encoding="utf-8")
+        launcher = tmp_path / "hermes"
+        launcher.write_text(f"#!{py}\n", encoding="utf-8")
+        launcher.chmod(0o755)
+        monkeypatch.setenv("PATH", str(tmp_path))
+
+        assert _resolve_hermes_python("hermes") == str(py)
+
     def test_resolve_stream_bridge_script_prefers_pyinstaller_meipass(self, monkeypatch, tmp_path):
         bridge = tmp_path / "apps" / "core" / "hermes_stream_bridge.py"
         bridge.parent.mkdir(parents=True)

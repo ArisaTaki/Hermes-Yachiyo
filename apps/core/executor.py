@@ -453,11 +453,45 @@ def _parse_hermes_title(stdout: str) -> Optional[str]:
     return title or None
 
 
-def _resolve_hermes_python(hermes_cmd: Optional[str] = None) -> Optional[str]:
+def _resolve_shell_exec_target(launcher: str) -> Optional[str]:
+    try:
+        with open(launcher, "r", encoding="utf-8") as fh:
+            lines = fh.readlines()
+    except OSError:
+        return None
+    launcher_dir = os.path.dirname(os.path.abspath(launcher))
+    for raw_line in lines[1:]:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            parts = shlex.split(line)
+        except ValueError:
+            continue
+        if len(parts) < 2 or parts[0] != "exec":
+            continue
+        target = parts[1]
+        if not target or "$" in target or "`" in target:
+            continue
+        if not os.path.isabs(target):
+            target = os.path.abspath(os.path.join(launcher_dir, target))
+        return target if os.path.exists(target) else None
+    return None
+
+
+def _resolve_hermes_python(hermes_cmd: Optional[str] = None, _seen: Optional[set[str]] = None) -> Optional[str]:
     """从 hermes launcher shebang 找到 Hermes 自己的 Python 解释器。"""
-    launcher = hermes_cmd or shutil.which("hermes")
+    if hermes_cmd:
+        launcher = shutil.which(hermes_cmd) if os.path.sep not in hermes_cmd else hermes_cmd
+    else:
+        launcher = shutil.which("hermes")
     if not launcher:
         return None
+    launcher = os.path.realpath(launcher)
+    seen = _seen or set()
+    if launcher in seen:
+        return None
+    seen.add(launcher)
     try:
         with open(launcher, "r", encoding="utf-8") as fh:
             first_line = fh.readline().strip()
@@ -490,6 +524,11 @@ def _resolve_hermes_python(hermes_cmd: Optional[str] = None) -> Optional[str]:
         executable = args[0]
 
     executable_name = os.path.basename(executable)
+    if executable_name in {"bash", "sh", "zsh"}:
+        target = _resolve_shell_exec_target(launcher)
+        if target:
+            return _resolve_hermes_python(target, seen)
+        return None
     if executable_name not in {"python", "python3"} and not executable_name.startswith("python3."):
         return None
 
