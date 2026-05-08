@@ -34,6 +34,50 @@ def test_node_version_supported_requires_vite_minimum() -> None:
     assert not desktop_launcher._node_version_supported((20, 18, 9))
 
 
+def test_prepare_development_bridge_env_defaults_to_dev_port() -> None:
+    env: dict[str, str] = {}
+
+    desktop_launcher._prepare_development_bridge_env(env)
+
+    assert env[desktop_launcher.BRIDGE_URL_ENV] == desktop_launcher.DEV_BRIDGE_URL
+
+
+def test_prepare_development_bridge_env_replaces_packaged_default_port() -> None:
+    env = {desktop_launcher.BRIDGE_URL_ENV: desktop_launcher.PACKAGED_BRIDGE_URL}
+
+    desktop_launcher._prepare_development_bridge_env(env)
+
+    assert env[desktop_launcher.BRIDGE_URL_ENV] == desktop_launcher.DEV_BRIDGE_URL
+
+
+def test_prepare_development_bridge_env_replaces_any_18420_url() -> None:
+    env = {desktop_launcher.BRIDGE_URL_ENV: "http://0.0.0.0:18420"}
+
+    desktop_launcher._prepare_development_bridge_env(env)
+
+    assert env[desktop_launcher.BRIDGE_URL_ENV] == desktop_launcher.DEV_BRIDGE_URL
+
+
+def test_prepare_development_bridge_env_preserves_custom_dev_port() -> None:
+    env = {desktop_launcher.BRIDGE_URL_ENV: "http://127.0.0.1:49321/ui/settings"}
+
+    desktop_launcher._prepare_development_bridge_env(env)
+
+    assert env[desktop_launcher.BRIDGE_URL_ENV] == "http://127.0.0.1:49321"
+
+
+def test_bridge_server_ready_checks_selected_bridge_url(monkeypatch) -> None:
+    urls = []
+    monkeypatch.setattr(
+        desktop_launcher,
+        "_local_http_ready",
+        lambda url: urls.append(url) or True,
+    )
+
+    assert desktop_launcher._bridge_server_ready("http://127.0.0.1:49321")
+    assert urls == ["http://127.0.0.1:49321/ui/settings"]
+
+
 def test_ensure_node_version_reports_old_node(monkeypatch) -> None:
     monkeypatch.setattr(desktop_launcher, "_node_executable", lambda env: "/usr/bin/node")
 

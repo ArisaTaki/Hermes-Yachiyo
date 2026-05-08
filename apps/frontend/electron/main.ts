@@ -32,9 +32,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const FRONTEND_DEV_URL = process.env.HERMES_YACHIYO_FRONTEND_DEV_URL || 'http://127.0.0.1:5174';
+const BRIDGE_URL_ENV = 'HERMES_YACHIYO_BRIDGE_URL';
 const DEV_BRIDGE_URL = 'http://127.0.0.1:8420';
 const PACKAGED_BRIDGE_URL = 'http://127.0.0.1:18420';
-let bridgeUrl = process.env.HERMES_YACHIYO_BRIDGE_URL || (app.isPackaged ? PACKAGED_BRIDGE_URL : DEV_BRIDGE_URL);
+let bridgeUrl = initialBridgeUrl();
 const APP_BUILD_METADATA_FILE = 'hermes-yachiyo-build.json';
 const DEFAULT_UPDATE_REPOSITORY = 'kuguya-AI-app-develop/Hermes-Yachiyo';
 const BRIDGE_SETTINGS_RETRIES = 40;
@@ -887,9 +888,18 @@ function ensureNodePtySpawnHelperExecutable(): void {
 }
 
 function packagedBackendPath(): string | null {
-  if (!app.isPackaged) return null;
   const binaryName = process.platform === 'win32' ? 'hermes-yachiyo-backend.exe' : 'hermes-yachiyo-backend';
-  return path.join(process.resourcesPath, 'backend', binaryName);
+  const candidate = path.join(process.resourcesPath, 'backend', binaryName);
+  return app.isPackaged && fs.existsSync(candidate) ? candidate : null;
+}
+
+function initialBridgeUrl(): string {
+  const envBridgeUrl = normalizeBridgeUrl(process.env[BRIDGE_URL_ENV]);
+  if (packagedBackendPath()) return envBridgeUrl || PACKAGED_BRIDGE_URL;
+  if (!envBridgeUrl) return DEV_BRIDGE_URL;
+  const endpoint = bridgeEndpoint(envBridgeUrl);
+  if (endpoint?.port === 18420) return DEV_BRIDGE_URL;
+  return envBridgeUrl;
 }
 
 function bridgeEndpoint(url: string): { host: string; port: number } | null {
@@ -950,7 +960,7 @@ function allocateLocalBridgeUrl(host: string): Promise<string> {
 }
 
 async function prepareBridgeUrlForPackagedBackend(): Promise<void> {
-  if (!app.isPackaged || process.env.HERMES_YACHIYO_BRIDGE_URL) return;
+  if (!packagedBackendPath() || process.env[BRIDGE_URL_ENV]) return;
   const endpoint = bridgeEndpoint(bridgeUrl);
   if (!endpoint || !isLocalBridgeHost(endpoint.host)) return;
 
@@ -975,7 +985,7 @@ function startBackend(): void {
       ...process.env,
       PYTHONPATH: projectRoot(),
       HERMES_YACHIYO_DESKTOP_BACKEND: '1',
-      HERMES_YACHIYO_BRIDGE_URL: bridgeUrl,
+      [BRIDGE_URL_ENV]: bridgeUrl,
     },
   });
 
