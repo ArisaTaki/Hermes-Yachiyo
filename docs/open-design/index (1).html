@@ -1,0 +1,756 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><script data-od-sandbox-shim>(function(){
+  function makeStore(){
+    var data = {};
+    var api = {
+      getItem: function(k){ return Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null; },
+      setItem: function(k, v){ data[k] = String(v); },
+      removeItem: function(k){ delete data[k]; },
+      clear: function(){ data = {}; },
+      key: function(i){ return Object.keys(data)[i] || null; }
+    };
+    Object.defineProperty(api, 'length', { get: function(){ return Object.keys(data).length; } });
+    return api;
+  }
+  function tryShim(name){
+    var works = false;
+    try { works = !!window[name] && typeof window[name].getItem === 'function'; void window[name].length; }
+    catch (_) { works = false; }
+    if (works) return;
+    try { Object.defineProperty(window, name, { configurable: true, value: makeStore() }); }
+    catch (_) { try { window[name] = makeStore(); } catch (__) {} }
+  }
+  tryShim('localStorage');
+  tryShim('sessionStorage');
+})();</script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hermes-Yachiyo Phase 3 中文工作台方向</title>
+  <style>
+    :root {
+      --bg: oklch(17.6% 0.014 258.4);
+      --surface: oklch(21.5% 0.023 254.3);
+      --fg: oklch(96.1% 0.008 236.6);
+      --muted: oklch(78.1% 0.022 252.5);
+      --border: oklch(32.6% 0.034 257.1);
+      --accent: oklch(51.1% 0.086 186.4);
+      --violet: oklch(62.3% 0.207 278.8);
+      --warn: oklch(76.9% 0.165 70.1);
+      --danger: oklch(51.4% 0.198 16.9);
+      --line: color-mix(in oklch, var(--border) 58%, transparent);
+      --teal-soft: color-mix(in oklch, var(--accent) 18%, transparent);
+      --violet-soft: color-mix(in oklch, var(--violet) 15%, transparent);
+      --warn-soft: color-mix(in oklch, var(--warn) 18%, transparent);
+      --danger-soft: color-mix(in oklch, var(--danger) 15%, transparent);
+      --font-display: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "SF Pro Display", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --font-body: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "SF Pro Text", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --font-mono: "SF Mono", "Berkeley Mono", ui-monospace, Menlo, Consolas, monospace;
+      color-scheme: dark;
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      min-height: 100%;
+      margin: 0;
+      background: linear-gradient(180deg, color-mix(in oklch, var(--bg) 88%, black 12%), #05070c);
+      color: var(--fg);
+      font-family: var(--font-body);
+      font-feature-settings: "cv01", "ss03";
+      letter-spacing: 0;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+    body { display: grid; place-items: center; padding: 24px; overflow-x: hidden; }
+    button { border: 0; color: inherit; font: inherit; cursor: pointer; }
+    code { font-family: var(--font-mono); }
+
+    .stage { inline-size: min(1740px, 100%); }
+    .app-window {
+      overflow: hidden;
+      min-height: min(980px, calc(100vh - 48px));
+      border: 1px solid color-mix(in oklch, var(--border) 82%, white 12%);
+      border-radius: 18px;
+      background: color-mix(in oklch, var(--bg) 92%, white 2%);
+      box-shadow: 0 40px 80px rgba(0, 0, 0, .42), inset 0 0 0 1px rgba(255,255,255,.03);
+    }
+
+    .titlebar {
+      display: grid;
+      grid-template-columns: 172px minmax(0, 1fr) auto;
+      align-items: center;
+      height: 52px;
+      padding-inline: 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.035);
+      backdrop-filter: blur(18px);
+    }
+    .traffic, .top-actions, .brand-row, .segmented, .button-row { display: flex; align-items: center; gap: 8px; }
+    .dot { inline-size: 12px; block-size: 12px; border-radius: 999px; }
+    .red { background: #ff5f57; } .yellow { background: #ffbd2e; } .green { background: #28c840; }
+    .window-title {
+      min-width: 0;
+      justify-self: center;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 510;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .command, .small-btn, .primary-btn, .ghost-btn, .segmented button {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      white-space: nowrap;
+    }
+    .command {
+      min-inline-size: 184px;
+      padding: 7px 10px;
+      color: color-mix(in oklch, var(--muted) 88%, white 8%);
+      background: rgba(255,255,255,.035);
+      text-align: start;
+      font-size: 12px;
+      font-weight: 510;
+    }
+    .small-btn, .primary-btn, .ghost-btn { min-height: 34px; padding: 7px 11px; font-size: 12px; font-weight: 590; }
+    .small-btn, .ghost-btn, .segmented button { color: color-mix(in oklch, var(--muted) 88%, white 5%); background: rgba(255,255,255,.03); }
+    .primary-btn { color: var(--fg); border-color: color-mix(in oklch, var(--accent) 54%, white 8%); background: color-mix(in oklch, var(--accent) 34%, var(--surface)); }
+
+    .app-grid {
+      display: grid;
+      grid-template-columns: 292px minmax(760px, 1fr) 386px;
+      min-height: calc(min(980px, calc(100vh - 48px)) - 52px);
+    }
+    .sidebar, .inspector { background: rgba(255,255,255,.018); }
+    .sidebar { display: grid; grid-template-rows: auto 1fr auto; border-right: 1px solid var(--line); }
+    .brand-block { padding: 22px 18px 16px; border-bottom: 1px solid var(--line); }
+    .mark {
+      display: grid;
+      place-items: center;
+      inline-size: 34px;
+      block-size: 34px;
+      border: 1px solid color-mix(in oklch, var(--accent) 62%, white 12%);
+      border-radius: 10px;
+      color: color-mix(in oklch, var(--accent) 76%, white 20%);
+      background: linear-gradient(135deg, rgba(15,118,110,.22), rgba(113,112,255,.08));
+      font: 700 12px var(--font-mono);
+    }
+    .brand-title { margin: 0; font-size: 15px; font-weight: 590; }
+    .brand-sub, .panel-title p, .inspector-head p { margin: 4px 0 0; color: color-mix(in oklch, var(--muted) 74%, transparent); font-size: 12px; line-height: 1.5; }
+    .local-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin-top: 16px;
+      border: 1px solid color-mix(in oklch, var(--accent) 54%, transparent);
+      border-radius: 999px;
+      padding: 6px 9px;
+      color: color-mix(in oklch, var(--accent) 68%, white 22%);
+      background: var(--teal-soft);
+      font: 11px var(--font-mono);
+    }
+    .pulse { inline-size: 6px; block-size: 6px; border-radius: 999px; background: currentColor; box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 20%, transparent); }
+    .nav { padding: 12px; overflow: auto; }
+    .nav-section {
+      margin: 16px 0 8px 8px;
+      color: color-mix(in oklch, var(--muted) 58%, transparent);
+      font-size: 10px;
+      font-weight: 590;
+      text-transform: uppercase;
+    }
+    .nav-item {
+      display: grid;
+      grid-template-columns: 22px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      width: 100%;
+      min-height: 36px;
+      border-radius: 6px;
+      padding: 8px 9px;
+      color: color-mix(in oklch, var(--muted) 90%, white 4%);
+      background: transparent;
+      text-align: start;
+      font-size: 13px;
+      font-weight: 510;
+    }
+    .nav-item.active { color: var(--fg); background: rgba(255,255,255,.05); box-shadow: inset 0 0 0 1px var(--line); }
+    .glyph {
+      display: grid;
+      place-items: center;
+      inline-size: 20px;
+      block-size: 20px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      color: color-mix(in oklch, var(--muted) 78%, white 8%);
+      font: 10px var(--font-mono);
+    }
+    .nav-item.active .glyph { border-color: color-mix(in oklch, var(--accent) 48%, white 6%); color: color-mix(in oklch, var(--accent) 70%, white 18%); background: var(--teal-soft); }
+    .count, .path, .eyebrow, .metric strong, .step-number, .terminal, .tag, .input-like, .resource-row span, .tool-row span, .stage-label, .mini-code { font-family: var(--font-mono); }
+    .count { color: color-mix(in oklch, var(--muted) 62%, transparent); font-size: 11px; }
+    .sidebar-footer { margin: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: rgba(255,255,255,.025); }
+    .path-label { color: color-mix(in oklch, var(--muted) 74%, transparent); font-size: 11px; font-weight: 510; }
+    .path { margin-top: 8px; color: oklch(88% 0.016 252); font-size: 11px; line-height: 1.5; word-break: break-all; }
+
+    .main {
+      overflow: auto;
+      background: linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px), linear-gradient(180deg, rgba(255,255,255,.014) 1px, transparent 1px);
+      background-size: 44px 44px;
+    }
+    .main-inner { display: grid; gap: 16px; padding: 22px; }
+    .page-head, .panel, .strategy-card, .status-card, .detail-card, .ia-node, .terminal, .mini-window, .mode-canvas, .step, .setup-card {
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.026);
+    }
+    .page-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: start;
+      border-radius: 14px;
+      padding: 18px;
+      background: linear-gradient(135deg, rgba(255,255,255,.045), rgba(255,255,255,.018));
+    }
+    .eyebrow { color: color-mix(in oklch, var(--accent) 70%, white 18%); font-size: 11px; text-transform: uppercase; }
+    .page-head h1 {
+      max-inline-size: 760px;
+      margin: 8px 0 0;
+      font: 510 clamp(34px, 3.3vw, 52px)/1.06 var(--font-display);
+      text-wrap: balance;
+    }
+    .page-head p { max-inline-size: 800px; margin: 12px 0 0; color: var(--muted); font-size: 15px; line-height: 1.72; }
+    .head-metrics { display: grid; grid-template-columns: repeat(2, 118px); gap: 10px; }
+    .metric { border: 1px solid var(--line); border-radius: 8px; padding: 11px; background: rgba(255,255,255,.032); }
+    .metric strong { display: block; font-size: 20px; font-weight: 590; }
+    .metric span { display: block; margin-top: 4px; color: color-mix(in oklch, var(--muted) 72%, transparent); font-size: 11px; }
+
+    .strategy-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+    .strategy-card { min-height: 154px; border-radius: 8px; padding: 13px; }
+    .strategy-card h2, .detail-card h3, .ia-node h3 { margin: 0; font-size: 13px; font-weight: 590; }
+    .strategy-card p, .strategy-card li, .detail-card p, .ia-node p { color: color-mix(in oklch, var(--muted) 86%, white 2%); font-size: 12px; line-height: 1.55; }
+    .strategy-card p, .ia-node p { margin: 8px 0 0; }
+    .strategy-card ul { display: grid; gap: 5px; margin: 9px 0 0; padding: 0; list-style: none; }
+    .strategy-card li { position: relative; padding-inline-start: 12px; }
+    .strategy-card li::before { content: ""; position: absolute; inset-inline-start: 0; top: .72em; inline-size: 4px; block-size: 4px; border-radius: 99px; background: color-mix(in oklch, var(--accent) 78%, white 4%); }
+
+    .workbench { display: grid; grid-template-columns: minmax(0, 1fr) 322px; gap: 14px; }
+    .panel { border-radius: 14px; box-shadow: inset 0 0 0 1px rgba(255,255,255,.014); }
+    .panel-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+    .panel-title h2, .inspector-head h2 { margin: 0; font-size: 16px; font-weight: 590; }
+    .button-row { flex-wrap: wrap; }
+    .segmented { border: 1px solid var(--line); border-radius: 8px; padding: 3px; background: rgba(0,0,0,.16); flex-wrap: wrap; }
+    .segmented button { min-height: 28px; padding: 5px 9px; font-size: 12px; font-weight: 510; background: transparent; }
+    .segmented button.active { color: var(--fg); background: rgba(255,255,255,.07); }
+    .setup-body { display: grid; gap: 14px; padding: 16px; }
+    .stepper { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+    .step { min-height: 90px; border-radius: 8px; padding: 11px; }
+    .step.done, .status-card.good, .ia-node.primary { border-color: color-mix(in oklch, var(--accent) 42%, transparent); background: var(--teal-soft); }
+    .step.active { border-color: color-mix(in oklch, var(--violet) 54%, white 6%); background: var(--violet-soft); }
+    .step-number { color: color-mix(in oklch, var(--muted) 68%, transparent); font-size: 11px; }
+    .step strong { display: block; margin-top: 8px; font-size: 13px; font-weight: 590; }
+    .step span { display: block; margin-top: 5px; color: color-mix(in oklch, var(--muted) 76%, transparent); font-size: 11px; line-height: 1.42; }
+    .install-grid, .mode-preview { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 14px; }
+    .terminal { overflow: hidden; border-radius: 8px; background: #070a10; font-size: 11px; line-height: 1.45; }
+    .terminal-top { display: flex; align-items: center; justify-content: space-between; height: 34px; padding-inline: 11px; border-bottom: 1px solid rgba(255,255,255,.06); color: color-mix(in oklch, var(--muted) 70%, transparent); }
+    .terminal-lines { display: grid; gap: 7px; min-height: 236px; padding: 13px; color: color-mix(in oklch, var(--fg) 88%, var(--accent) 12%); }
+    .terminal-lines span { color: color-mix(in oklch, var(--muted) 75%, transparent); }
+    .terminal-lines b { color: color-mix(in oklch, var(--accent) 70%, white 22%); font-weight: 500; }
+    .setup-card { display: grid; gap: 12px; border-radius: 8px; padding: 14px; }
+    .setup-card h3 { margin: 0; font-size: 15px; font-weight: 590; }
+    .setup-card p { margin: 0; color: color-mix(in oklch, var(--muted) 86%, white 2%); font-size: 12px; line-height: 1.62; }
+    .check-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+    .check-list li { display: grid; grid-template-columns: 18px 1fr auto; gap: 9px; align-items: center; min-height: 34px; border: 1px solid var(--line); border-radius: 6px; padding: 8px 9px; color: color-mix(in oklch, var(--muted) 88%, white 3%); background: rgba(255,255,255,.025); font-size: 12px; }
+    .status-dot { inline-size: 8px; block-size: 8px; border-radius: 99px; background: color-mix(in oklch, var(--accent) 82%, white 8%); box-shadow: 0 0 0 3px var(--teal-soft); }
+    .status-dot.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+    .status-column { display: grid; align-content: start; gap: 10px; }
+    .status-card { border-radius: 8px; padding: 12px; }
+    .status-card.warn { border-color: color-mix(in oklch, var(--warn) 48%, transparent); background: var(--warn-soft); }
+    .status-card .label { color: color-mix(in oklch, var(--muted) 78%, transparent); font-size: 11px; font-weight: 510; }
+    .status-card strong { display: block; margin-top: 6px; font-size: 20px; font-weight: 590; }
+    .status-card p { margin: 6px 0 0; color: color-mix(in oklch, var(--muted) 84%, white 2%); font-size: 12px; line-height: 1.52; }
+
+    .mini-window, .mode-canvas { min-height: 310px; overflow: hidden; border-radius: 13px; background: #0b0f19; }
+    .mini-titlebar { display: flex; align-items: center; gap: 8px; height: 32px; padding-inline: 11px; border-bottom: 1px solid var(--line); color: color-mix(in oklch, var(--muted) 82%, white 4%); background: rgba(255,255,255,.045); font-size: 12px; font-weight: 590; }
+    .chat-area { display: grid; gap: 10px; padding: 14px; }
+    .bubble { max-width: 86%; border: 1px solid var(--line); border-radius: 10px; padding: 10px 11px; color: oklch(88% 0.016 252); background: rgba(255,255,255,.038); font-size: 12px; line-height: 1.55; }
+    .bubble.agent { border-color: color-mix(in oklch, var(--accent) 44%, transparent); background: color-mix(in oklch, var(--accent) 18%, #0b0f19); }
+    .bubble.user { justify-self: end; border-color: color-mix(in oklch, var(--violet) 42%, transparent); background: color-mix(in oklch, var(--violet) 16%, #0b0f19); }
+    .composer { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 10px; color: color-mix(in oklch, var(--muted) 72%, transparent); background: rgba(255,255,255,.03); font-size: 12px; }
+    .mode-canvas { position: relative; background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.012)), #080b12; }
+    .moon-grid { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px), linear-gradient(180deg, rgba(255,255,255,.032) 1px, transparent 1px); background-size: 32px 32px; mask-image: linear-gradient(180deg, rgba(0,0,0,.95), transparent 82%); opacity: .34; }
+    .desktop-bubble { position: absolute; inset-inline-end: 26px; top: 44px; width: 218px; border: 1px solid color-mix(in oklch, var(--accent) 48%, white 4%); border-radius: 16px; padding: 14px; background: color-mix(in oklch, var(--surface) 88%, var(--accent) 7%); box-shadow: 0 20px 48px rgba(0,0,0,.36); }
+    .desktop-bubble strong { display: block; font-size: 13px; font-weight: 590; }
+    .desktop-bubble p { margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .live2d-stage { position: absolute; inset-inline-start: 34px; bottom: 24px; width: 190px; height: 232px; border: 1px solid var(--line); border-radius: 24px 24px 12px 12px; background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.018)), color-mix(in oklch, var(--surface) 70%, var(--accent) 6%); }
+    .live2d-stage::before { content: ""; position: absolute; left: 50%; top: 34px; width: 72px; height: 72px; transform: translateX(-50%); border: 1px solid color-mix(in oklch, var(--accent) 40%, white 4%); border-radius: 999px; background: radial-gradient(circle at 50% 42%, rgba(255,255,255,.12), transparent 58%), rgba(15,118,110,.1); }
+    .live2d-stage::after { content: ""; position: absolute; left: 50%; top: 116px; width: 112px; height: 92px; transform: translateX(-50%); border: 1px solid color-mix(in oklch, var(--accent) 36%, transparent); border-radius: 42px 42px 18px 18px; background: rgba(255,255,255,.035); }
+    .stage-label { position: absolute; inset-inline: 18px; bottom: 14px; color: color-mix(in oklch, var(--muted) 82%, white 5%); font-size: 11px; line-height: 1.45; }
+
+    .inspector { display: grid; grid-template-rows: auto 1fr; border-left: 1px solid var(--line); }
+    .inspector-head { padding: 18px; border-bottom: 1px solid var(--line); }
+    .inspector-body { display: grid; align-content: start; gap: 12px; overflow: auto; padding: 14px; }
+    .detail-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+    .detail-tabs button { min-height: 32px; border: 1px solid var(--line); border-radius: 6px; color: color-mix(in oklch, var(--muted) 74%, transparent); background: rgba(255,255,255,.028); font-size: 11px; font-weight: 590; }
+    .detail-tabs button.active { color: var(--fg); border-color: color-mix(in oklch, var(--accent) 45%, white 6%); background: var(--teal-soft); }
+    .detail-panel { display: none; gap: 12px; }
+    .detail-panel.active { display: grid; }
+    .detail-card { border-radius: 8px; padding: 12px; }
+    .detail-card p { margin: 7px 0 0; }
+    .field-grid, .resource-list, .tool-list { display: grid; gap: 8px; margin-top: 10px; }
+    .field { display: grid; gap: 5px; }
+    .field label { color: color-mix(in oklch, var(--muted) 70%, transparent); font-size: 11px; font-weight: 510; }
+    .input-like { min-height: 34px; border: 1px solid var(--line); border-radius: 6px; padding: 8px 9px; color: oklch(88% 0.016 252); background: rgba(0,0,0,.18); font-size: 11px; line-height: 1.42; }
+    .resource-row, .tool-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; min-height: 40px; border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: rgba(255,255,255,.022); }
+    .resource-row strong, .tool-row strong { display: block; font-size: 12px; font-weight: 590; }
+    .resource-row span, .tool-row span { display: block; margin-top: 2px; color: color-mix(in oklch, var(--muted) 70%, transparent); font-size: 10px; line-height: 1.4; }
+    .tag { border: 1px solid var(--line); border-radius: 999px; padding: 4px 7px; color: color-mix(in oklch, var(--muted) 85%, white 6%); background: rgba(255,255,255,.028); font-size: 10px; white-space: nowrap; }
+    .tag.good { border-color: color-mix(in oklch, var(--accent) 46%, transparent); color: color-mix(in oklch, var(--accent) 74%, white 17%); background: var(--teal-soft); }
+    .tag.warn { border-color: color-mix(in oklch, var(--warn) 48%, transparent); color: color-mix(in oklch, var(--warn) 72%, white 12%); background: var(--warn-soft); }
+    .danger-zone { border-color: color-mix(in oklch, var(--danger) 44%, transparent); background: var(--danger-soft); }
+    .confirm-box { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; margin-top: 10px; border: 1px solid color-mix(in oklch, var(--danger) 48%, transparent); border-radius: 6px; padding: 9px; background: rgba(0,0,0,.16); }
+    .confirm-box code { color: color-mix(in oklch, var(--danger) 42%, white 52%); font-size: 11px; }
+    .ia-map { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 16px; }
+    .ia-node { min-height: 118px; border-radius: 8px; padding: 12px; }
+
+    @media (max-width: 1420px) {
+      body { padding: 14px; }
+      .app-grid { grid-template-columns: 250px minmax(680px, 1fr) 340px; }
+      .strategy-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .workbench { grid-template-columns: 1fr; }
+      .status-column { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
+    @media (max-width: 1160px) {
+      .app-window { min-height: auto; }
+      .titlebar { grid-template-columns: auto 1fr; }
+      .top-actions, .sidebar, .inspector { display: none; }
+      .app-grid, .page-head, .install-grid, .mode-preview { grid-template-columns: 1fr; }
+      .main-inner { padding: 14px; }
+      .head-metrics, .stepper, .ia-map { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <main class="app-window" aria-label="Hermes-Yachiyo Phase 3 中文工作台原型">
+      <header class="titlebar">
+        <div class="traffic" aria-hidden="true">
+          <span class="dot red"></span>
+          <span class="dot yellow"></span>
+          <span class="dot green"></span>
+        </div>
+        <div class="window-title">Hermes-Yachiyo Phase 3 UI 重设计 - 月下桌面 Agent 工作台</div>
+        <div class="top-actions">
+          <button class="command">搜索命令、设置或工具</button>
+          <button class="small-btn">运行诊断</button>
+        </div>
+      </header>
+
+      <div class="app-grid">
+        <aside class="sidebar" aria-label="工作台导航">
+          <section class="brand-block">
+            <div class="brand-row">
+              <div class="mark">HY</div>
+              <div>
+                <h1 class="brand-title">Hermes-Yachiyo</h1>
+                <p class="brand-sub">本地个人 Agent 工作台</p>
+              </div>
+            </div>
+            <div class="local-pill"><span class="pulse"></span>默认仅在本机运行</div>
+          </section>
+
+          <nav class="nav" aria-label="主要区域">
+            <div class="nav-section">首次启动</div>
+            <button class="nav-item active"><span class="glyph">01</span><span>安装运行手册</span><span class="count">5</span></button>
+            <button class="nav-item"><span class="glyph">02</span><span>模型与供应商</span><span class="count">4</span></button>
+            <button class="nav-item"><span class="glyph">03</span><span>工作区初始化</span><span class="count">~/.h</span></button>
+
+            <div class="nav-section">日常桌面</div>
+            <button class="nav-item"><span class="glyph">CW</span><span>聊天窗口</span><span class="count">1</span></button>
+            <button class="nav-item"><span class="glyph">BU</span><span>气泡模式</span><span class="count">edge</span></button>
+            <button class="nav-item"><span class="glyph">L2</span><span>Live2D 模式</span><span class="count">zip</span></button>
+            <button class="nav-item"><span class="glyph">PC</span><span>主动关照</span><span class="count">tts</span></button>
+
+            <div class="nav-section">维护与安全</div>
+            <button class="nav-item"><span class="glyph">TL</span><span>工具</span><span class="count">22</span></button>
+            <button class="nav-item"><span class="glyph">DX</span><span>诊断</span><span class="count">10</span></button>
+            <button class="nav-item"><span class="glyph">BR</span><span>备份 / 恢复</span><span class="count">safe</span></button>
+            <button class="nav-item"><span class="glyph">UN</span><span>卸载预览</span><span class="count">dry</span></button>
+          </nav>
+
+          <section class="sidebar-footer">
+            <div class="path-label">工作区目标路径</div>
+            <div class="path">~/.hermes/yachiyo/<br>assets/live2d/<br>attachments/ logs/ backups/</div>
+          </section>
+        </aside>
+
+        <section class="main" aria-label="中文设计方向画布">
+          <div class="main-inner">
+            <section class="page-head">
+              <div>
+                <span class="eyebrow">Phase 3 direction / desktop-first agent OS</span>
+                <h1>一张月光下的本地 Agent 工作台：安装、配置、初始化、陪伴使用。</h1>
+                <p>
+                  把 Hermes-Yachiyo 定位为 macOS 桌面上的 Hermes Agent 控制室：
+                  先完成运行时安装、模型供应商验证和本地工作区初始化，再进入聊天窗口、
+                  气泡模式、Live2D 模式、主动关照、TTS / GPT-SoVITS 资源、工具、
+                  诊断、备份恢复与卸载预览。
+                </p>
+              </div>
+              <div class="head-metrics" aria-label="原型指标">
+                <div class="metric"><strong>3</strong><span>详情状态</span></div>
+                <div class="metric"><strong>9</strong><span>首批 IA 区域</span></div>
+                <div class="metric"><strong>22</strong><span>工具组可见</span></div>
+                <div class="metric"><strong>127.0.0.1</strong><span>本机桥接立场</span></div>
+              </div>
+            </section>
+
+            <section class="strategy-grid" aria-label="Phase 3 中文方向总览">
+              <article class="strategy-card">
+                <h2>1. 产品定位</h2>
+                <p>macOS 本地优先的个人 Agent 工作台，不是 SaaS 落地页，也不是通用聊天机器人。Yachiyo 负责桌面外壳、资源、关照、设置和安全维护。</p>
+              </article>
+              <article class="strategy-card">
+                <h2>2. 主要用户流</h2>
+                <ul>
+                  <li>安装 Hermes Agent</li>
+                  <li>配置模型供应商与默认模型</li>
+                  <li>初始化本地工作区</li>
+                  <li>首条消息后切换气泡或 Live2D</li>
+                </ul>
+              </article>
+              <article class="strategy-card">
+                <h2>3. 信息架构</h2>
+                <p>安装、供应商、工作区、会话、桌面模式、关照与语音、工具、诊断、维护。</p>
+              </article>
+              <article class="strategy-card">
+                <h2>4. 组件方向</h2>
+                <ul>
+                  <li>本机状态胶囊</li>
+                  <li>安装步骤卡</li>
+                  <li>供应商字段组</li>
+                  <li>资源导入行</li>
+                  <li>诊断发现项</li>
+                </ul>
+              </article>
+              <article class="strategy-card">
+                <h2>5. 视觉 Token</h2>
+                <p>月黑背景、半透明层级面板、Hermes 青绿表示可用 / 本机，紫色只用于当前选择和关键操作。</p>
+              </article>
+              <article class="strategy-card">
+                <h2>6. 优先重设计</h2>
+                <ul>
+                  <li>首次安装与运行手册</li>
+                  <li>供应商配置</li>
+                  <li>聊天与模式切换</li>
+                  <li>资源管理与诊断</li>
+                </ul>
+              </article>
+            </section>
+
+            <section class="workbench" aria-label="首次启动工作台">
+              <article class="panel">
+                <header class="panel-header">
+                  <div class="panel-title">
+                    <h2>首次启动运行手册</h2>
+                    <p>在用户打开聊天、气泡或 Live2D 前，把每一层可用性讲清楚。</p>
+                  </div>
+                  <div class="button-row">
+                    <button class="primary-btn" data-detail="install">安装 Hermes Agent</button>
+                    <button class="ghost-btn" data-detail="provider">配置供应商</button>
+                  </div>
+                </header>
+
+                <div class="setup-body">
+                  <div class="stepper" aria-label="首次启动步骤">
+                    <div class="step done">
+                      <span class="step-number">01</span>
+                      <strong>macOS 基础</strong>
+                      <span>已检测 Git、Python、命令行工具和 Shell 环境。</span>
+                    </div>
+                    <div class="step active">
+                      <span class="step-number">02</span>
+                      <strong>Hermes Agent</strong>
+                      <span>一键安装，展示终端输出、失败原因与重试入口。</span>
+                    </div>
+                    <div class="step">
+                      <span class="step-number">03</span>
+                      <strong>模型供应商</strong>
+                      <span>供应商、模型、Base URL、API Key 和连接测试。</span>
+                    </div>
+                    <div class="step">
+                      <span class="step-number">04</span>
+                      <strong>本地工作区</strong>
+                      <span>初始化数据、附件、日志、资源和备份目录。</span>
+                    </div>
+                    <div class="step">
+                      <span class="step-number">05</span>
+                      <strong>首条消息</strong>
+                      <span>打开聊天，再同步到气泡或 Live2D 模式。</span>
+                    </div>
+                  </div>
+
+                  <div class="install-grid">
+                    <div class="terminal" aria-label="安装输出预览">
+                      <div class="terminal-top">
+                        <span>install-hermes-agent</span>
+                        <span>运行中 00:42</span>
+                      </div>
+                      <div class="terminal-lines">
+                        <div><span>$</span> checking macOS command line tools</div>
+                        <div><b>ready</b> git, python3, shell environment</div>
+                        <div><span>$</span> resolving Hermes Agent channel main-latest</div>
+                        <div><b>installing</b> user-scoped Hermes runtime</div>
+                        <div><span>$</span> hermes setup --yachiyo-workspace</div>
+                        <div><b>next</b> 保存供应商并执行连接测试</div>
+                        <div><span>$</span> bridge target will bind to 127.0.0.1:8420</div>
+                      </div>
+                    </div>
+
+                    <div class="setup-card">
+                      <h3>可用性契约</h3>
+                      <p>
+                        应用不应该只给一个笼统的“已就绪”。它需要逐层说明：
+                        Hermes 命令、Hermes setup、供应商连接、本地工作区、
+                        Bridge、桌面模式资源和 Doctor 诊断分别处在什么状态。
+                      </p>
+                      <ul class="check-list">
+                        <li><span class="status-dot"></span><span>Hermes 命令已检测</span><code>0.12.0</code></li>
+                        <li><span class="status-dot warn"></span><span>供应商仍需连接测试</span><code>/v1</code></li>
+                        <li><span class="status-dot"></span><span>工作区路径可写</span><code>~/.hermes</code></li>
+                        <li><span class="status-dot warn"></span><span>Live2D ZIP 尚未导入</span><code>.model3.json</code></li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </article>
+
+              <aside class="status-column" aria-label="本地状态卡片">
+                <div class="status-card good">
+                  <div class="label">Hermes Agent</div>
+                  <strong>已检测</strong>
+                  <p>命令路径和 setup 完成度拆开呈现，方便定位问题。</p>
+                </div>
+                <div class="status-card good">
+                  <div class="label">工作区</div>
+                  <strong>本机</strong>
+                  <p>聊天、资源、附件、日志和备份都落在用户自己的路径下。</p>
+                </div>
+                <div class="status-card">
+                  <div class="label">Bridge</div>
+                  <strong>127.0.0.1</strong>
+                  <p>暴露本机传输状态，但不要让端口号成为产品概念。</p>
+                </div>
+                <div class="status-card warn">
+                  <div class="label">Doctor</div>
+                  <strong>10 项受限</strong>
+                  <p>受限工具不应阻塞聊天、气泡或 Live2D 的基础使用。</p>
+                </div>
+              </aside>
+            </section>
+
+            <section class="panel" aria-label="聊天与桌面模式预览">
+              <header class="panel-header">
+                <div class="panel-title">
+                  <h2>聊天窗口、气泡模式、Live2D 共享同一条会话链</h2>
+                  <p>每种桌面模式都是入口，不是另起一个聊天机器人。</p>
+                </div>
+                <div class="segmented" role="tablist" aria-label="模式预览">
+                  <button class="active" data-mode="chat">聊天</button>
+                  <button data-mode="bubble">气泡</button>
+                  <button data-mode="live2d">Live2D</button>
+                </div>
+              </header>
+              <div class="mode-preview">
+                <div class="mini-window">
+                  <div class="mini-titlebar">
+                    <span class="dot red"></span>
+                    <span class="dot yellow"></span>
+                    <span class="dot green"></span>
+                    <span>Hermes-Yachiyo 聊天窗口</span>
+                  </div>
+                  <div class="chat-area">
+                    <div class="bubble agent">Yachiyo 已准备好。Hermes Agent 已安装，但供应商连接还需要测试，之后再信任图像和 TTS 路由。</div>
+                    <div class="bubble user">初始化工作区，并把气泡固定在桌面边缘。</div>
+                    <div class="bubble agent">工作区已创建在 <span class="mini-code">~/.hermes/yachiyo/</span>。气泡会同步未读、运行中、失败和最近回复状态。</div>
+                    <div class="composer">输入消息、粘贴图片，或停止当前任务...</div>
+                  </div>
+                </div>
+                <div class="mode-canvas">
+                  <div class="moon-grid"></div>
+                  <div class="live2d-stage">
+                    <div class="stage-label">Live2D 资源舞台：导入 ZIP 后才加载动态模型；未导入时显示安静的静态占位。</div>
+                  </div>
+                  <div class="desktop-bubble">
+                    <strong>气泡模式</strong>
+                    <p>未读 1。主动关照已暂停，等待屏幕录制权限和 TTS 供应商配置。</p>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel" aria-label="信息架构地图">
+              <header class="panel-header">
+                <div class="panel-title">
+                  <h2>Phase 3 信息架构</h2>
+                  <p>按用户意图组织：准备、对话、人格化桌面、资源、诊断和维护。</p>
+                </div>
+              </header>
+              <div class="ia-map">
+                <div class="ia-node primary"><h3>首页 / 运行手册</h3><p>首次启动清单、本机状态、启动聊天、模式切换和下一步行动。</p></div>
+                <div class="ia-node"><h3>供应商</h3><p>供应商、模型、Base URL、API Key、图像路由和连接测试历史。</p></div>
+                <div class="ia-node"><h3>工作区</h3><p>本地路径、聊天数据库、附件、日志、资源文件夹和备份目标。</p></div>
+                <div class="ia-node"><h3>会话</h3><p>聊天窗口、Markdown 回复、图片附件、停止任务、会话摘要。</p></div>
+                <div class="ia-node"><h3>桌面模式</h3><p>气泡、Live2D、共享会话状态、窗口行为、透明度、置顶与边缘吸附。</p></div>
+                <div class="ia-node"><h3>关照与语音</h3><p>主动观察、屏幕录制权限、TTS 供应商、GPT-SoVITS 服务状态。</p></div>
+                <div class="ia-node"><h3>工具与诊断</h3><p>Hermes 工具组、受限状态、CDP 端点、配置检查、鉴权列表与发现项。</p></div>
+                <div class="ia-node"><h3>维护</h3><p>更新、备份、恢复、卸载预演、删除范围和确认短语。</p></div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <aside class="inspector" aria-label="详情状态">
+          <header class="inspector-head">
+            <h2>详情态原型</h2>
+            <p>先把工程需要落地的界面做清楚：安装器、供应商配置、卸载预览。</p>
+          </header>
+          <div class="inspector-body">
+            <div class="detail-tabs" role="tablist" aria-label="详情状态切换">
+              <button class="active" data-detail="install">安装</button>
+              <button data-detail="provider">供应商</button>
+              <button data-detail="uninstall">卸载</button>
+            </div>
+
+            <section class="detail-panel active" data-panel="install">
+              <div class="detail-card">
+                <h3>安装弹窗方向</h3>
+                <p>一个面板负责环境检查、一键安装、实时输出、重试，以及“为什么被阻塞”的解释。</p>
+                <div class="resource-list">
+                  <div class="resource-row"><div><strong>macOS 工具</strong><span>git / python3 / shell</span></div><span class="tag good">就绪</span></div>
+                  <div class="resource-row"><div><strong>Hermes Agent</strong><span>用户级安装</span></div><span class="tag good">已检测</span></div>
+                  <div class="resource-row"><div><strong>Bridge</strong><span>127.0.0.1:8420</span></div><span class="tag">等待</span></div>
+                </div>
+              </div>
+              <div class="detail-card">
+                <h3>工程说明</h3>
+                <p>拆分“已安装 Hermes”、“setup 完成”、“供应商已测试”和“工作区已初始化”，不要压成一个绿色状态。</p>
+              </div>
+            </section>
+
+            <section class="detail-panel" data-panel="provider">
+              <div class="detail-card">
+                <h3>模型 / 供应商配置</h3>
+                <p>密钥只显示是否存在，不显示明文；连接测试结果要能回到首次启动手册。</p>
+                <div class="field-grid">
+                  <div class="field">
+                    <label>供应商</label>
+                    <div class="input-like">OpenAI-compatible</div>
+                  </div>
+                  <div class="field">
+                    <label>默认模型</label>
+                    <div class="input-like">gpt-4.1-mini 或自定义模型</div>
+                  </div>
+                  <div class="field">
+                    <label>Base URL</label>
+                    <div class="input-like">https://provider.example/v1</div>
+                  </div>
+                  <div class="field">
+                    <label>API Key</label>
+                    <div class="input-like">本机保存，界面隐藏</div>
+                  </div>
+                </div>
+              </div>
+              <div class="detail-card">
+                <h3>图像路由</h3>
+                <p>如果聊天模型不支持原生图像输入，用户发送第一张图前应能选择独立视觉模型。</p>
+              </div>
+            </section>
+
+            <section class="detail-panel" data-panel="uninstall">
+              <div class="detail-card danger-zone">
+                <h3>卸载预览</h3>
+                <p>任何破坏性操作前先生成 dry-run 删除清单。要求确认短语，并清楚展示删除范围。</p>
+                <div class="tool-list">
+                  <div class="tool-row"><div><strong>Yachiyo 工作区</strong><span>~/.hermes/yachiyo/</span></div><span class="tag warn">删除</span></div>
+                  <div class="tool-row"><div><strong>应用配置</strong><span>settings 与 bridge cache</span></div><span class="tag">可选</span></div>
+                  <div class="tool-row"><div><strong>GPT-SoVITS 服务</strong><span>LaunchAgent 与本地配置</span></div><span class="tag">可选</span></div>
+                  <div class="tool-row"><div><strong>.app 包</strong><span>/Applications best effort</span></div><span class="tag warn">可能需手动</span></div>
+                </div>
+                <div class="confirm-box"><code>输入 UNINSTALL</code><span class="tag warn">预演</span></div>
+              </div>
+            </section>
+
+            <div class="detail-card">
+              <h3>资源管理方向</h3>
+              <div class="resource-list">
+                <div class="resource-row"><div><strong>Live2D ZIP</strong><span>assets/live2d/</span></div><span class="tag warn">缺失</span></div>
+                <div class="resource-row"><div><strong>GPT-SoVITS 声音包</strong><span>yachiyo-gpt-sovits-v4.zip</span></div><span class="tag">可导入</span></div>
+                <div class="resource-row"><div><strong>本地 TTS API</strong><span>127.0.0.1:9880</span></div><span class="tag">离线</span></div>
+              </div>
+            </div>
+
+            <div class="detail-card">
+              <h3>工具与诊断</h3>
+              <div class="tool-list">
+                <div class="tool-row"><div><strong>浏览器 CDP</strong><span>127.0.0.1:9222</span></div><span class="tag warn">受限</span></div>
+                <div class="tool-row"><div><strong>Web 供应商</strong><span>Firecrawl / Exa / Tavily</span></div><span class="tag">需要 Key</span></div>
+                <div class="tool-row"><div><strong>Doctor 命令</strong><span>config check / auth list</span></div><span class="tag good">安全</span></div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const detailButtons = document.querySelectorAll("[data-detail]");
+    const detailPanels = document.querySelectorAll("[data-panel]");
+
+    function setDetail(name) {
+      detailButtons.forEach((button) => {
+        button.classList.toggle("active", button.dataset.detail === name);
+      });
+      detailPanels.forEach((panel) => {
+        panel.classList.toggle("active", panel.dataset.panel === name);
+      });
+    }
+
+    detailButtons.forEach((button) => {
+      button.addEventListener("click", () => setDetail(button.dataset.detail));
+    });
+
+    const modeButtons = document.querySelectorAll("[data-mode]");
+    const bubbleText = document.querySelector(".desktop-bubble strong");
+    const bubbleBody = document.querySelector(".desktop-bubble p");
+    const stageLabel = document.querySelector(".stage-label");
+
+    const modeCopy = {
+      chat: {
+        title: "聊天交接",
+        body: "当前会话正在运行。气泡和 Live2D 同步未读、运行中、失败和最新回复状态。",
+        stage: "聊天窗口保留完整上下文、Markdown、附件和停止任务控制。"
+      },
+      bubble: {
+        title: "气泡模式",
+        body: "未读 1。桌面边缘入口，展示摘要、处理中、失败和快速消息状态。",
+        stage: "气泡是轻量桌面入口，不是第二套会话。"
+      },
+      live2d: {
+        title: "Live2D 模式",
+        body: "导入资源 ZIP 后加载动态模型；未就绪时保留静态占位和设置入口。",
+        stage: "Live2D 舞台要展示模型加载、关照消息和 TTS 就绪度，但不要做成重动画背景。"
+      }
+    };
+
+    modeButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        modeButtons.forEach((item) => item.classList.toggle("active", item === button));
+        const copy = modeCopy[button.dataset.mode];
+        bubbleText.textContent = copy.title;
+        bubbleBody.textContent = copy.body;
+        stageLabel.textContent = copy.stage;
+      });
+    });
+  </script>
+</body>
+</html>
