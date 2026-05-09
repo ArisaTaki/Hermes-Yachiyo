@@ -1,0 +1,1438 @@
+import { FormEvent, ReactNode, useEffect, useState, type CSSProperties } from 'react';
+
+import logoUrl from '../../../../docs/open-design/logo.png';
+import { apiGet, apiPost, openDesktopMode, openPath, quitApp } from '../lib/bridge';
+import { type AppView, currentParam, navigateTo } from '../lib/view';
+
+type DashboardData = {
+  app?: { uptime_seconds?: number; version?: string; running?: boolean };
+  bridge?: { state?: string; status?: string; running?: string; url?: string; config_dirty?: boolean };
+  chat?: {
+    status_label?: string;
+    is_processing?: boolean;
+    recent_sessions?: Array<{
+      session_id?: string;
+      title?: string;
+      message_count?: number;
+      is_current?: boolean;
+      latest_role?: string;
+      latest_status?: string;
+      updated_at?: string;
+    }>;
+  };
+  hermes?: {
+    status?: string;
+    version?: string;
+    platform?: string;
+    command_exists?: boolean;
+    ready?: boolean;
+    readiness_level?: string;
+    hermes_home?: string;
+    limited_tools?: string[];
+    doctor_issues_count?: number;
+  };
+  integrations?: {
+    astrbot?: StatusRecord;
+    hapi?: StatusRecord;
+  };
+  modes?: { current?: string; items?: Array<{ id: string; name?: string; label?: string; description?: string }> };
+  tasks?: { pending?: number; running?: number; completed?: number };
+  workspace?: { path?: string; initialized?: boolean; created_at?: string; dirs?: Record<string, string> };
+};
+
+type StatusRecord = {
+  status?: string;
+  label?: string;
+  description?: string;
+  blockers?: string[];
+};
+
+type HermesProviderOption = {
+  id: string;
+  label?: string;
+  base_url?: string;
+  default_model?: string;
+  models?: string[];
+  api_key_name?: string;
+  api_key_configured?: boolean;
+  auth_type?: string;
+};
+
+type HermesVisualConfig = {
+  ok?: boolean;
+  error?: string;
+  command_exists?: boolean;
+  config_path?: string;
+  env_path?: string;
+  model?: { provider?: string; default?: string; base_url?: string };
+  provider_options?: HermesProviderOption[];
+  api_key?: { name?: string; configured?: boolean; display?: string };
+  connection_validation?: {
+    verified?: boolean;
+    success?: boolean;
+    provider?: string;
+    model?: string;
+    base_url?: string;
+    message?: string;
+    error?: string;
+    reason?: string;
+    tested_at?: string;
+    verified_at?: string;
+  };
+  vision?: {
+    configured?: boolean;
+    provider?: string;
+    model?: string;
+    base_url?: string;
+    api_key_configured?: boolean;
+  };
+  image_input?: {
+    can_attach_images?: boolean;
+    mode?: string;
+    route?: string;
+    label?: string;
+    reason?: string;
+  };
+};
+
+type HermesConfigForm = {
+  provider: string;
+  model: string;
+  base_url: string;
+  api_key: string;
+};
+
+type HermesConnectionTestResult = {
+  ok?: boolean;
+  success?: boolean;
+  error?: string;
+  message?: string;
+  elapsed_seconds?: number;
+  output_preview?: string;
+  stderr_preview?: string;
+};
+
+type SettingsData = {
+  app?: { version?: string; log_level?: string; start_minimized?: boolean; tray_enabled?: boolean };
+  assistant?: { persona_prompt?: string; user_address?: string };
+  backup?: { auto_cleanup_enabled?: boolean; retention_count?: number };
+  display?: { current_mode?: string; available_modes?: Array<{ id: string; name?: string; label?: string }> };
+  hermes?: DashboardData['hermes'];
+  mode_settings?: Record<string, { id?: string; title?: string; summary?: string; config?: Record<string, unknown> }>;
+  workspace?: { path?: string; initialized?: boolean; created_at?: string; dirs?: Record<string, string> };
+};
+
+type BackupStatus = {
+  ok?: boolean;
+  error?: string;
+  count?: number;
+  total_size_display?: string;
+  latest?: { display_path?: string; path?: string; created_at?: string; size_display?: string } | null;
+};
+
+type TtsVoiceResource = {
+  default_assets_root_display?: string;
+  voice_package_url?: string;
+  help_text?: string;
+  service_help_text?: string;
+  default_service_workdir_display?: string;
+};
+
+type ResourceFile = {
+  icon: string;
+  name: string;
+  meta: string;
+  badge: string;
+  tone: 'success' | 'warning' | 'info';
+  categories: string[];
+  actionLabel?: string;
+  onAction?: () => void;
+};
+
+type LauncherPayload = {
+  ok?: boolean;
+  chat?: { status_label?: string; latest_reply?: string; is_processing?: boolean };
+  launcher?: {
+    avatar_url?: string;
+    status_label?: string;
+    latest_reply?: string;
+    resource?: {
+      available?: boolean;
+      state?: string;
+      display_name?: string;
+      status_label?: string;
+      help_text?: string;
+      default_assets_root_display?: string;
+    };
+  };
+  proactive?: { enabled?: boolean; has_attention?: boolean; attention_text?: string };
+  tts?: { enabled?: boolean; provider?: string; ok?: boolean; message?: string; error?: string };
+};
+
+type DiagnosticCache = {
+  stale?: boolean;
+  updated_at?: string;
+  commands?: Record<string, { success?: boolean; label?: string; command?: string; cached_at?: string; elapsed_seconds?: number }>;
+};
+
+const NAV_GROUPS: Array<{
+  label: string;
+  items: Array<{ view: AppView; label: string; icon: string; badge?: string; mode?: string }>;
+}> = [
+  {
+    label: '初始化',
+    items: [
+      { view: 'main', label: '主控台', icon: '◇' },
+      { view: 'installer', label: '安装器', icon: '▣' },
+      { view: 'provider', label: '模型配置', icon: '⌁' },
+    ],
+  },
+  {
+    label: '日常桌面',
+    items: [
+      { view: 'chat', label: '聊天窗口', icon: '◌' },
+      { view: 'bubble', label: '气泡模式', icon: '◍' },
+      { view: 'live2d', label: 'Live2D 模式', icon: '◈' },
+      { view: 'proactive-tts', label: 'GPT-SoVITS', icon: '♪' },
+    ],
+  },
+  {
+    label: '资源',
+    items: [
+      { view: 'resources', label: '资源管理', icon: '▤' },
+      { view: 'workspace', label: '工作区', icon: '▥' },
+    ],
+  },
+  {
+    label: '维护',
+    items: [
+      { view: 'diagnostics', label: '诊断工具', icon: '⌕' },
+      { view: 'settings', label: '设置', icon: '⚙' },
+    ],
+  },
+];
+
+const TOOL_CARDS = [
+  { view: 'chat' as AppView, icon: '💬', title: '聊天窗口', detail: '与八千代对话，支持文本和图片输入。', status: '就绪', statusTone: 'ready' },
+  { view: 'bubble' as AppView, icon: '💭', title: '气泡模式', detail: '桌面悬浮气泡，随时对话，支持拖拽和边缘吸附。', status: '就绪', statusTone: 'ready' },
+  { view: 'live2d' as AppView, icon: '🎭', title: 'Live2D 模式', detail: '虚拟形象互动，口型同步，表情动作。', status: '待导入', statusTone: 'pending' },
+  { view: 'proactive-tts' as AppView, icon: '🎵', title: 'GPT-SoVITS', detail: '语音合成，让八千代开口说话。', status: '就绪', statusTone: 'ready' },
+];
+
+const TWEAK_ACCENTS = [
+  { value: 'pink', label: '八千代粉' },
+  { value: 'gold', label: '月光金' },
+  { value: 'cyan', label: '星蓝' },
+  { value: 'teal', label: '青瓷' },
+  { value: 'violet', label: '紫藤' },
+];
+
+const PARTICLES = Array.from({ length: 80 }, (_, index) => {
+  const colors = ['gold', 'cyan', 'pink', 'silver'];
+  const modes = ['', 'flicker', 'orbit'];
+  return {
+    id: index,
+    className: `hy-moon-particle ${modes[index % modes.length]}`,
+    style: {
+      '--particle-x': `${(index * 29) % 100}%`,
+      '--particle-size': `${0.8 + (index % 7) * 0.42}px`,
+      '--particle-delay': `${(index % 12) * -0.95}s`,
+      '--particle-duration': `${7 + (index % 10)}s`,
+      '--particle-drift': `${index % 2 ? '-' : ''}${36 + (index % 6) * 20}px`,
+      '--particle-opacity': `${0.08 + (index % 5) * 0.045}`,
+      '--particle-color': `var(--hy-particle-${colors[index % colors.length]})`,
+    } as CSSProperties,
+  };
+});
+
+let bridgeBootReady = false;
+
+export function OpenDesignShell({ activeView, children }: { activeView: AppView; children: ReactNode }) {
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [tweaksOpen, setTweaksOpen] = useState(false);
+  const [accent, setAccent] = useState('pink');
+  const [particleDensity, setParticleDensity] = useState(35);
+  const [moonlightIntensity, setMoonlightIntensity] = useState(100);
+  const [animationSpeed, setAnimationSpeed] = useState(100);
+  const [fontSize, setFontSize] = useState(13);
+  const [particlesEnabled, setParticlesEnabled] = useState(true);
+  const [glowEnabled, setGlowEnabled] = useState(true);
+  const [toasts, setToasts] = useState<Array<{ id: number; message: string; type: 'info' | 'success' | 'warning' | 'error' }>>([]);
+  const [bootPhase, setBootPhase] = useState<'checking' | 'loading' | 'ready'>(() => (bridgeBootReady ? 'ready' : 'checking'));
+  const [bootSlow, setBootSlow] = useState(false);
+  const settingsMode = activeView === 'settings' ? currentParam('mode') : '';
+  const activeLabel = routeTitle(activeView, settingsMode);
+  const loadingHidden = bootPhase !== 'loading';
+  const accentLabel = TWEAK_ACCENTS.find((item) => item.value === accent)?.label || '八千代粉';
+  const shellClasses = [
+    'hy-shell',
+    `hy-accent-${accent}`,
+    particlesEnabled ? '' : 'hy-particles-off',
+    glowEnabled ? '' : 'hy-glow-on',
+  ].filter(Boolean).join(' ');
+  const shellStyle = {
+    '--hy-moonlight-opacity': String(moonlightIntensity / 100),
+    '--hy-anim-factor': String(100 / Math.max(animationSpeed, 1)),
+    '--hy-font-size-base': `${fontSize}px`,
+  } as CSSProperties;
+
+  useEffect(() => {
+    if (bridgeBootReady) return undefined;
+    let disposed = false;
+    let retryTimer = 0;
+    const showLoadingTimer = window.setTimeout(() => {
+      if (!disposed && !bridgeBootReady) setBootPhase('loading');
+    }, 260);
+    const showSlowTimer = window.setTimeout(() => {
+      if (!disposed && !bridgeBootReady) setBootSlow(true);
+    }, 7_500);
+
+    async function probeBridge() {
+      try {
+        const data = await apiGet<DashboardData>('/ui/dashboard');
+        if (disposed) return;
+        bridgeBootReady = true;
+        setDashboard(data);
+        setBootSlow(false);
+        setBootPhase('ready');
+      } catch {
+        if (disposed) return;
+        setBootPhase('loading');
+        retryTimer = window.setTimeout(() => void probeBridge(), 650);
+      }
+    }
+
+    void probeBridge();
+
+    return () => {
+      disposed = true;
+      window.clearTimeout(showLoadingTimer);
+      window.clearTimeout(showSlowTimer);
+      if (retryTimer) window.clearTimeout(retryTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!bridgeBootReady) return undefined;
+    let disposed = false;
+    apiGet<DashboardData>('/ui/dashboard')
+      .then((data) => {
+        if (!disposed) setDashboard(data);
+      })
+      .catch(() => {
+        if (!disposed) setDashboard(null);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [activeView]);
+
+  function showToast(message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') {
+    const id = Date.now() + Math.floor(Math.random() * 1000);
+    setToasts((current) => [...current, { id, message, type }].slice(-4));
+    window.setTimeout(() => {
+      setToasts((current) => current.filter((toast) => toast.id !== id));
+    }, 2700);
+  }
+
+  return (
+    <div className={shellClasses} style={shellStyle}>
+      <div className="hy-toast-container" aria-live="polite">
+        {toasts.map((toast) => (
+          <div className={`hy-toast hy-toast-${toast.type}`} key={toast.id}>{toast.message}</div>
+        ))}
+      </div>
+      <div className="hy-moonlight-bg" aria-hidden>
+        {PARTICLES.slice(0, particleDensity).map((particle) => (
+          <span className={particle.className} key={particle.id} style={particle.style} />
+        ))}
+      </div>
+      <div className="hy-shimmer-sweep" key={activeView} />
+      <BootLoadingOverlay hidden={loadingHidden} slow={bootSlow} />
+
+      <header className="hy-titlebar">
+        <div className="hy-traffic" aria-hidden>
+          <span className="close" />
+          <span className="minimize" />
+          <span className="maximize" />
+        </div>
+        <div className="hy-titlebar-center">
+          <img src={logoUrl} alt="" className="hy-titlebar-logo" />
+          <span>{activeLabel}</span>
+        </div>
+        <div className="hy-titlebar-actions">
+          <button type="button" className={tweaksOpen ? 'hy-icon-btn active' : 'hy-icon-btn'} onClick={() => setTweaksOpen((value) => !value)} title="视觉调试">⚙</button>
+          <button type="button" className="hy-icon-btn" onClick={() => navigateTo('diagnostics')} title="诊断">⌕</button>
+          <button type="button" className="hy-icon-btn" onClick={quitApp} title="退出">×</button>
+        </div>
+      </header>
+
+      <aside className="hy-sidebar">
+        <div className="hy-sidebar-header">
+          <button type="button" className="hy-brand" onClick={() => navigateTo('main')} aria-label="返回主控台">
+            <img src={logoUrl} alt="" className="hy-brand-logo" />
+            <span>Hermes Yachiyo</span>
+          </button>
+        </div>
+
+        <section className="hy-character">
+          <div className="hy-avatar-ring">
+            <img src={logoUrl} alt="月見八千代" />
+          </div>
+          <div>
+            <strong>月見八千代</strong>
+            <span><i />{dashboard?.chat?.is_processing ? '正在处理' : '月夜待机中'}</span>
+          </div>
+        </section>
+
+        <nav className="hy-nav" aria-label="主要导航">
+          {NAV_GROUPS.map((group) => (
+            <div className="hy-nav-group" key={group.label}>
+              <div className="hy-nav-label">{group.label}</div>
+              {group.items.map((item) => {
+                const active = isNavActive(activeView, settingsMode, item.view);
+                return (
+                  <button
+                    type="button"
+                    className={active ? 'hy-nav-item active' : 'hy-nav-item'}
+                    aria-current={active ? 'page' : undefined}
+                    key={`${group.label}-${item.view}`}
+                    onClick={() => navigateTo(item.view)}
+                  >
+                    <span className="hy-nav-icon">{item.icon}</span>
+                    <span>{item.label}</span>
+                    {navBadge(item.view, dashboard) ? <em>{navBadge(item.view, dashboard)}</em> : null}
+                  </button>
+                );
+              })}
+            </div>
+          ))}
+        </nav>
+
+        <footer className="hy-sidebar-footer">
+          <button type="button" onClick={() => showToast('当前版本 v0.3.0，已是最新版本', 'info')}>检查更新</button>
+          <button type="button" onClick={() => showToast('帮助文档：github.com/kuguya-AI-app-develop/Hermes-Yachiyo/wiki', 'info')}>帮助</button>
+        </footer>
+      </aside>
+
+      {tweaksOpen ? (
+        <aside className="hy-tweaks" aria-label="视觉调试">
+          <header>
+            <strong>快速调整</strong>
+            <button type="button" onClick={() => setTweaksOpen(false)}>×</button>
+          </header>
+          <div className="hy-tweak-row">
+            <div className="hy-tweak-label">主题色调 <span>{accentLabel}</span></div>
+          </div>
+          <div className="hy-swatch-row">
+            {TWEAK_ACCENTS.map(({ value, label }) => (
+              <button
+                type="button"
+                className={`hy-swatch ${value} ${accent === value ? 'active' : ''}`}
+                key={value}
+                onClick={() => setAccent(value)}
+                title={label}
+              />
+            ))}
+          </div>
+          <div className="hy-tweak-divider" />
+          <label>
+            <span>粒子密度 <em>{particleDensity}</em></span>
+            <input type="range" min="0" max="80" value={particleDensity} onChange={(event) => setParticleDensity(Number(event.target.value))} />
+          </label>
+          <label>
+            <span>月光强度 <em>{moonlightIntensity}%</em></span>
+            <input type="range" min="0" max="200" value={moonlightIntensity} onChange={(event) => setMoonlightIntensity(Number(event.target.value))} />
+          </label>
+          <label>
+            <span>动画速度 <em>{(animationSpeed / 100).toFixed(1)}×</em></span>
+            <input type="range" min="20" max="300" value={animationSpeed} onChange={(event) => setAnimationSpeed(Number(event.target.value))} />
+          </label>
+          <div className="hy-tweak-divider" />
+          <label>
+            <span>字体大小 <em>{fontSize}px</em></span>
+            <input type="range" min="11" max="17" value={fontSize} onChange={(event) => setFontSize(Number(event.target.value))} />
+          </label>
+          <div className="hy-tweak-toggle-row">
+            <span>粒子动画</span>
+            <button type="button" className={particlesEnabled ? 'hy-tweak-toggle on' : 'hy-tweak-toggle'} onClick={() => setParticlesEnabled((value) => !value)} aria-pressed={particlesEnabled} />
+          </div>
+          <div className="hy-tweak-toggle-row">
+            <span>呼吸光效</span>
+            <button type="button" className={glowEnabled ? 'hy-tweak-toggle on' : 'hy-tweak-toggle'} onClick={() => setGlowEnabled((value) => !value)} aria-pressed={glowEnabled} />
+          </div>
+        </aside>
+      ) : null}
+
+      <main className="hy-content">
+        {children}
+      </main>
+    </div>
+  );
+}
+
+function BootLoadingOverlay({ hidden, slow }: { hidden: boolean; slow: boolean }) {
+  return (
+    <div className={hidden ? 'hy-loading-overlay hidden' : 'hy-loading-overlay'} aria-hidden={hidden}>
+      <img src={logoUrl} alt="" className="hy-loading-logo" />
+      <div className="hy-loading-copy">
+        <div className="hy-loading-text">HERMES YACHIYO</div>
+        <div className="hy-loading-subtext">
+          {slow ? 'Bridge 启动时间较长，仍在等待本机服务。' : '正在唤醒 Hermes Bridge'}
+        </div>
+      </div>
+      <div className="hy-loading-bar">
+        <span />
+      </div>
+    </div>
+  );
+}
+
+export function DashboardPage() {
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let disposed = false;
+    async function load() {
+      try {
+        const payload = await apiGet<DashboardData>('/ui/dashboard');
+        if (!disposed) {
+          setData(payload);
+          setError('');
+        }
+      } catch (err) {
+        if (!disposed) setError(err instanceof Error ? err.message : '无法读取主控台状态');
+      }
+    }
+    void load();
+    const timer = window.setInterval(() => void load(), 8000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const bridge = bridgeState(data);
+  const modelReady = Boolean(data?.hermes?.ready || data?.hermes?.command_exists);
+  const workspaceReady = Boolean(data?.workspace?.initialized);
+  const activities = recentActivities(data);
+  const modelLabel = data?.hermes?.version || (modelReady ? 'Hermes · 文本+视觉' : 'Hermes 待检测');
+
+  return (
+    <section className="hy-route-page hy-dashboard-page">
+      {error ? <div className="notice danger">{error}</div> : null}
+      <section className="hy-kv-hero corner-frame">
+        <div className="corner-frame-inner" />
+        <div className="hy-kv-copy">
+          <span className="hy-eyebrow">月夜見 · 管理员在线</span>
+          <h1>月見八千代<br />正在守望你的世界</h1>
+          <p>8000 岁的 AI 歌姬，虚拟空间「月夜見」的管理员。她用歌声跨越了八千年的孤独，只为与你相遇在这个月夜。</p>
+          <div className="hy-kv-meta">
+            <span><i />Bridge {bridge} · {data?.bridge?.url || '127.0.0.1 本机桥接'}</span>
+            <span><i />✨ {modelLabel}</span>
+          </div>
+        </div>
+      </section>
+
+      <header className="hy-page-header hy-stagger">
+        <div>
+          <h2>主控台</h2>
+          <p>当前桌面 Agent 的运行状态、常用入口和最近活动。</p>
+        </div>
+      </header>
+
+      <section className="hy-status-grid hy-stagger">
+        <StatusCard tone="success" label="Bridge 状态" value={bridge} detail={data?.bridge?.url || '127.0.0.1 本机桥接'} icon="🌉" />
+        <StatusCard tone={modelReady ? 'info' : 'warning'} label="模型连接" value={modelReady ? '已连接' : '待配置'} detail={hermesReadinessLabel(data?.hermes?.readiness_level)} icon="🤖" />
+        <StatusCard tone={workspaceReady ? 'success' : 'warning'} label="工作区" value={workspaceReady ? '已初始化' : '待初始化'} detail={data?.workspace?.path || '~/Hermes-Yachiyo/workspace'} icon="📁" />
+      </section>
+
+      <section className="hy-section hy-stagger">
+        <div className="hy-section-header">
+          <h2>桌面工具</h2>
+          <button type="button" onClick={() => navigateTo('tools-all')}>查看全部 →</button>
+        </div>
+        <div className="hy-tools-grid">
+          {TOOL_CARDS.map((tool) => (
+            <button type="button" className="hy-tool-card" key={tool.title} onClick={() => navigateTo(tool.view)}>
+              <span>{tool.icon}</span>
+              <strong>{tool.title}</strong>
+              <small>{tool.detail}</small>
+              <em className={`hy-tool-status hy-tool-status-${tool.statusTone}`}><i />{tool.status}</em>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="hy-section hy-stagger">
+        <div className="hy-section-header">
+          <h2>最近活动</h2>
+          <button type="button" onClick={() => navigateTo('activity-all')}>查看全部 →</button>
+        </div>
+        <div className="hy-activity-list">
+          {activities.map((activity) => (
+            <ActivityRow key={`${activity.title}-${activity.time}`} {...activity} />
+          ))}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+export function ProviderPage() {
+  const [config, setConfig] = useState<HermesVisualConfig | null>(null);
+  const [form, setForm] = useState<HermesConfigForm>(() => emptyHermesForm());
+  const [status, setStatus] = useState('正在读取模型配置...');
+  const [busy, setBusy] = useState('');
+  const [testResult, setTestResult] = useState<HermesConnectionTestResult | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    async function load() {
+      try {
+        const payload = await apiGet<HermesVisualConfig>('/ui/hermes/config');
+        if (!disposed) {
+          setConfig(payload);
+          setForm(formFromHermesConfig(payload));
+          setStatus(payload.ok === false ? payload.error || '读取配置失败' : '');
+        }
+      } catch (err) {
+        if (!disposed) setStatus(err instanceof Error ? err.message : '读取配置失败');
+      }
+    }
+    void load();
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const provider = config?.provider_options?.find((option) => option.id === form.provider);
+  const modelOptions = uniqueOptions([form.model, provider?.default_model, ...(provider?.models || [])]);
+  const apiKeyLabel = provider?.api_key_name || config?.api_key?.name || 'API Key';
+
+  async function saveAndTest(event: FormEvent) {
+    event.preventDefault();
+    if (!form.provider.trim() || !form.model.trim()) {
+      setStatus('Provider 和模型名称不能为空');
+      return;
+    }
+    setBusy('save');
+    setTestResult(null);
+    setStatus('正在保存配置...');
+    try {
+      const result = await apiPost<{ ok?: boolean; error?: string; configuration?: HermesVisualConfig }>('/ui/hermes/config', {
+        ...form,
+        image_input_mode: 'text',
+      });
+      if (result.ok === false) throw new Error(result.error || '保存配置失败');
+      if (result.configuration) {
+        setConfig(result.configuration);
+        setForm(formFromHermesConfig(result.configuration));
+      }
+      setStatus('配置已保存，正在测试连接...');
+      const test = await apiPost<HermesConnectionTestResult>('/ui/hermes/connection-test');
+      setTestResult(test);
+      setStatus(test.success ? test.message || '模型连接测试通过' : test.error || '模型连接测试失败');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '保存并测试失败');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  return (
+    <section className="hy-route-page hy-provider-page">
+      <header className="hy-page-header hy-stagger">
+        <div>
+          <span className="hy-eyebrow">Provider</span>
+          <h2>模型配置</h2>
+          <p>配置 AI 模型提供商、API Key 和高级参数。</p>
+        </div>
+        <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('installer')}>安装器</button>
+      </header>
+
+      {status ? <div className={/失败|错误|无法|不能为空/.test(status) ? 'notice danger' : 'notice'}>{status}</div> : null}
+
+      <section className="hy-provider-settings">
+        <form className="hy-settings-section hy-stagger" onSubmit={saveAndTest}>
+          <h3>提供商</h3>
+          <div className="hy-settings-card">
+            <label className="hy-settings-item">
+              <span>
+                <strong>模型提供商</strong>
+                <small>选择 AI 模型服务</small>
+              </span>
+              <select className="hy-select" value={form.provider} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, provider: event.target.value }))}>
+                {config?.provider_options?.length ? config.provider_options.map((option) => (
+                  <option key={option.id} value={option.id}>{providerLabel(option)}</option>
+                )) : <option value={form.provider}>{form.provider || '读取中'}</option>}
+              </select>
+            </label>
+            <label className="hy-settings-item">
+              <span>
+                <strong>{apiKeyLabel}</strong>
+                <small>{provider?.api_key_configured || config?.api_key?.configured ? '已配置，留空则不修改' : '密钥仅存储在本地'}</small>
+              </span>
+              <input className="hy-input" type="password" value={form.api_key} placeholder={provider?.api_key_configured || config?.api_key?.configured ? 'sk-••••••••••••••••' : `输入 ${apiKeyLabel}`} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, api_key: event.target.value }))} />
+            </label>
+            <label className="hy-settings-item">
+              <span>
+                <strong>模型</strong>
+                <small>当前使用的模型</small>
+              </span>
+              {modelOptions.length ? (
+                <select className="hy-select" value={form.model} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, model: event.target.value }))}>
+                  {modelOptions.map((model) => <option value={model} key={model}>{model}</option>)}
+                </select>
+              ) : (
+                <input className="hy-input" value={form.model} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, model: event.target.value }))} />
+              )}
+            </label>
+            <label className="hy-settings-item">
+              <span>
+                <strong>Base URL</strong>
+                <small>{config?.config_path || 'Hermes 配置路径待读取'}</small>
+              </span>
+              <input className="hy-input" value={form.base_url} placeholder={provider?.base_url || 'https://api.openai.com/v1'} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, base_url: event.target.value }))} />
+            </label>
+            <div className="hy-settings-item">
+              <span>
+                <strong>连接测试</strong>
+                <small>保存配置并测试模型服务连接状态</small>
+              </span>
+              <button type="submit" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)}>{busy ? '测试中...' : '测试连接'}</button>
+            </div>
+          </div>
+          {testResult ? <ConnectionResult result={testResult} /> : null}
+        </form>
+
+        <section className="hy-settings-section hy-stagger">
+          <h3>TTS 语音合成</h3>
+          <div className="hy-settings-card">
+            <div className="hy-settings-item">
+              <span><strong>TTS 引擎</strong><small>语音合成引擎</small></span>
+              <select className="hy-select" defaultValue="gpt-sovits">
+                <option value="gpt-sovits">GPT-SoVITS</option>
+                <option value="openai">OpenAI TTS</option>
+                <option value="edge">Edge TTS</option>
+              </select>
+            </div>
+            <div className="hy-settings-item">
+              <span><strong>API 地址</strong><small>本地 GPT-SoVITS 服务地址</small></span>
+              <input className="hy-input" value="http://127.0.0.1:9880" readOnly />
+            </div>
+            <div className="hy-settings-item">
+              <span><strong>默认音色</strong><small>八千代默认使用的音色</small></span>
+              <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('proactive-tts')}>配置语音</button>
+            </div>
+          </div>
+        </section>
+
+        <section className="hy-settings-section hy-stagger">
+          <h3>RTX 4060 优化</h3>
+          <div className="hy-settings-card">
+            <div className="hy-settings-item">
+              <span><strong>GPU 加速</strong><small>使用 RTX 4060 加速推理</small></span>
+              <div className="hy-toggle active" aria-hidden />
+            </div>
+            <div className="hy-settings-item">
+              <span><strong>显存限制</strong><small>最大显存使用量</small></span>
+              <select className="hy-select" defaultValue="8">
+                <option value="4">4 GB</option>
+                <option value="6">6 GB</option>
+                <option value="8">8 GB</option>
+              </select>
+            </div>
+            <div className="hy-settings-item">
+              <span><strong>精度</strong><small>推理精度</small></span>
+              <select className="hy-select" defaultValue="fp16">
+                <option value="fp16">fp16</option>
+                <option value="bf16">bf16</option>
+                <option value="auto">自动</option>
+              </select>
+            </div>
+          </div>
+        </section>
+      </section>
+    </section>
+  );
+}
+
+export function BubbleModePage() {
+  const [data, setData] = useState<LauncherPayload | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    apiGet<LauncherPayload>('/ui/launcher?mode=bubble')
+      .then((payload) => {
+        if (!disposed) setData(payload);
+      })
+      .catch(() => {
+        if (!disposed) setData(null);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  return (
+    <section className="hy-route-page hy-stage-page">
+      <header className="hy-page-header">
+        <div>
+          <span className="hy-eyebrow">Bubble</span>
+          <h2>气泡模式</h2>
+          <p>轻量桌面入口，同步聊天处理、未读、最新回复和主动关怀状态。</p>
+        </div>
+        <button type="button" className="hy-btn hy-btn-primary" onClick={() => void openDesktopMode('bubble')}>打开桌面气泡</button>
+      </header>
+      <div className="hy-bubble-layout">
+        <div className="hy-bubble-demo hy-stagger corner-frame">
+          <div className="corner-frame-inner" />
+          <header className="hy-bubble-demo-header">
+            <div className="hy-bubble-demo-avatar">
+              <img src={data?.launcher?.avatar_url || logoUrl} alt="" />
+            </div>
+            <div>
+              <strong>月見八千代</strong>
+              <span><i />{data?.chat?.status_label || '本机 Bridge 监听中'}</span>
+            </div>
+          </header>
+          <div className="hy-bubble-demo-body">
+            <p className="agent">今晚的月光很安静，要一起整理工作区吗？</p>
+            <p className="user">帮我看一下最近的状态。</p>
+            <p className="agent">{data?.chat?.latest_reply || data?.launcher?.latest_reply || 'Bridge、模型和工作区状态都在主控台同步。'}</p>
+          </div>
+          <button type="button" className="hy-floating-bubble" onClick={() => void openDesktopMode('bubble')} aria-label="打开桌面气泡">
+            <img src={data?.launcher?.avatar_url || logoUrl} alt="" />
+          </button>
+        </div>
+        <div className="hy-mode-info hy-stagger">
+          <h3>气泡模式</h3>
+          <p>桌面悬浮气泡，随时与八千代对话。支持拖拽、双击展开聊天、边缘吸附等功能。</p>
+          <div className="hy-feature-pills">
+            {[
+              ['💬', '随时对话'],
+              ['🎯', '边缘吸附'],
+              ['✨', '透明度调节'],
+              ['🔔', '消息提醒'],
+            ].map(([icon, item]) => (
+              <span key={item}><i>{icon}</i>{item}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function Live2DModePage() {
+  const [data, setData] = useState<LauncherPayload | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    apiGet<LauncherPayload>('/ui/launcher?mode=live2d')
+      .then((payload) => {
+        if (!disposed) setData(payload);
+      })
+      .catch(() => {
+        if (!disposed) setData(null);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const resource = data?.launcher?.resource;
+
+  return (
+    <section className="hy-route-page hy-stage-page">
+      <header className="hy-page-header">
+        <div>
+          <span className="hy-eyebrow">Live2D</span>
+          <h2>Live2D 模式</h2>
+          <p>模型舞台、口型同步、表情动作、语音合成和月光舞台状态。</p>
+        </div>
+        <div className="hy-action-row">
+          <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('settings', { mode: 'live2d' })}>资源设置</button>
+          <button type="button" className="hy-btn hy-btn-primary" onClick={() => void openDesktopMode('live2d')}>打开 Live2D</button>
+        </div>
+      </header>
+      <div className="hy-live2d-layout">
+        <div className="hy-live2d-stage hy-stagger corner-frame">
+          <div className="corner-frame-inner" />
+          <div className="hy-live2d-placeholder">
+            <div className="hy-live2d-placeholder-icon"><img src={logoUrl} alt="" /></div>
+            <strong>{resource?.display_name || 'Live2D 模型待导入'}</strong>
+            <span>{resource?.status_label || (resource?.available ? '资源已就绪' : '支持 .model3.json 格式')}</span>
+            <button type="button" className="hy-btn hy-btn-primary" onClick={() => navigateTo('settings', { mode: 'live2d' })}>导入 Live2D 模型</button>
+          </div>
+        </div>
+        <div className="hy-mode-info hy-stagger">
+          <h3>Live2D 模式</h3>
+          <p>虚拟形象互动，让八千代在你的桌面上活起来。支持口型同步、表情动作、语音合成等功能。</p>
+          <div className="hy-feature-pills">
+            {[
+              ['🎤', data?.tts?.enabled ? '口型同步' : '口型同步'],
+              ['😊', resource?.available ? '表情动作' : '表情动作'],
+              ['🎵', data?.tts?.provider ? '语音合成' : '语音合成'],
+              ['🌙', data?.proactive?.enabled ? '月光舞台' : '月光舞台'],
+            ].map(([icon, item]) => (
+              <span key={item}><i>{icon}</i>{item}</span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function ResourcesPage() {
+  const [live2d, setLive2d] = useState<LauncherPayload | null>(null);
+  const [ttsResource, setTtsResource] = useState<TtsVoiceResource | null>(null);
+  const [activeTab, setActiveTab] = useState('全部');
+
+  useEffect(() => {
+    let disposed = false;
+    void Promise.allSettled([
+      apiGet<LauncherPayload>('/ui/launcher?mode=live2d'),
+      apiGet<TtsVoiceResource>('/ui/tts/voice-resource'),
+    ]).then(([live2dResult, ttsResult]) => {
+      if (disposed) return;
+      setLive2d(live2dResult.status === 'fulfilled' ? live2dResult.value : null);
+      setTtsResource(ttsResult.status === 'fulfilled' ? ttsResult.value : null);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const resource = live2d?.launcher?.resource;
+  const files: ResourceFile[] = [
+    {
+      icon: '🎭',
+      name: resource?.display_name || '八千代 - 默认模型',
+      meta: `Live2D · ${resource?.default_assets_root_display || 'assets/live2d/'}`,
+      badge: resource?.available ? '使用中' : '待导入',
+      tone: resource?.available ? 'success' : 'warning',
+      categories: ['模型', 'Live2D'],
+      actionLabel: '导入',
+      onAction: resource?.available ? undefined : () => navigateTo('settings', { mode: 'live2d' }),
+    },
+    {
+      icon: '🎭',
+      name: 'Live2D 默认资源目录',
+      meta: `Live2D · ${resource?.status_label || '等待模型配置'}`,
+      badge: resource?.available ? '已加载' : '缺失',
+      tone: resource?.available ? 'info' : 'warning',
+      categories: ['模型', 'Live2D'],
+      actionLabel: '设置',
+      onAction: () => navigateTo('settings', { mode: 'live2d' }),
+    },
+    {
+      icon: '🎵',
+      name: '八千代音色模型',
+      meta: `GPT-SoVITS · ${ttsResource?.default_assets_root_display || 'voice assets'}`,
+      badge: ttsResource ? '可导入' : '待检测',
+      tone: ttsResource ? 'success' : 'info',
+      categories: ['语音'],
+      actionLabel: '配置',
+      onAction: ttsResource ? undefined : () => navigateTo('proactive-tts'),
+    },
+    {
+      icon: '🎵',
+      name: '语音服务工作区',
+      meta: `GPT-SoVITS · ${ttsResource?.default_service_workdir_display || 'service workspace'}`,
+      badge: ttsResource?.service_help_text ? '提示' : '就绪',
+      tone: ttsResource?.service_help_text ? 'warning' : 'info',
+      categories: ['语音'],
+      actionLabel: '设置',
+      onAction: () => navigateTo('proactive-tts'),
+    },
+    {
+      icon: '🖼',
+      name: '月夜背景',
+      meta: '壁纸 · docs/open-design/bg-reference.png',
+      badge: '参考',
+      tone: 'info',
+      categories: ['壁纸'],
+    },
+    {
+      icon: '🖼',
+      name: 'Hermes Yachiyo Logo',
+      meta: '壁纸 · docs/open-design/logo.png',
+      badge: '已加载',
+      tone: 'info',
+      categories: ['壁纸'],
+    },
+  ];
+  const tabs = ['全部', '模型', '语音', '壁纸', 'Live2D'];
+  const visibleFiles = activeTab === '全部'
+    ? files
+    : files.filter((file) => file.categories.includes(activeTab));
+  const live2dCount = resource?.available ? '1' : '0';
+
+  return (
+    <section className="hy-route-page resources-layout">
+      <header className="resources-header hy-stagger">
+        <h2 className="resources-title">资源管理</h2>
+        <p className="resources-subtitle">管理 Live2D 模型、语音、壁纸等资源文件</p>
+      </header>
+
+      <div className="resources-tabs hy-stagger" role="tablist" aria-label="资源分类">
+        {tabs.map((tab) => (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab}
+            className={`resources-tab ${activeTab === tab ? 'active' : ''}`}
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      <section className="resources-stats hy-stagger">
+        <article className="resource-stat">
+          <div className="resource-stat-value">{files.length}</div>
+          <div className="resource-stat-label">总文件数</div>
+        </article>
+        <article className="resource-stat">
+          <div className="resource-stat-value">本地</div>
+          <div className="resource-stat-label">总大小</div>
+        </article>
+        <article className="resource-stat">
+          <div className="resource-stat-value">{live2dCount}</div>
+          <div className="resource-stat-label">Live2D 模型</div>
+        </article>
+      </section>
+
+      <div className="resources-list hy-stagger">
+        {visibleFiles.map((file) => <ResourceRow key={file.name} file={file} />)}
+        {visibleFiles.length === 0 ? <div className="empty-state inline-empty">暂无资源</div> : null}
+      </div>
+    </section>
+  );
+}
+
+export function WorkspacePage() {
+  const [settings, setSettings] = useState<SettingsData | null>(null);
+  const [backup, setBackup] = useState<BackupStatus | null>(null);
+  const [status, setStatus] = useState('');
+  const [backupBusy, setBackupBusy] = useState(false);
+
+  useEffect(() => {
+    let disposed = false;
+    async function loadWorkspace() {
+      const [settingsResult, backupResult] = await Promise.allSettled([
+        apiGet<SettingsData>('/ui/settings'),
+        apiGet<BackupStatus>('/ui/backup/status'),
+      ]);
+      if (disposed) return;
+      setSettings(settingsResult.status === 'fulfilled' ? settingsResult.value : null);
+      setBackup(backupResult.status === 'fulfilled' ? backupResult.value : null);
+    }
+    void loadWorkspace();
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const workspacePath = settings?.workspace?.path || '~/.hermes/yachiyo';
+  const dirs = settings?.workspace?.dirs || {};
+  const resourcesPath = dirs.assets || `${workspacePath}/assets`;
+  const latestBackup = backup?.latest?.display_path || backup?.latest?.path || '暂无备份';
+  const workspaceFiles = [
+    { icon: '📁', name: workspacePath, meta: '工作区根目录', nested: false },
+    { icon: '💬', name: dirs.conversations || dirs.sessions || 'conversations/', meta: '对话记录 · 本地会话数据', nested: true },
+    { icon: '🎭', name: 'live2d/', meta: `Live2D 模型 · ${dirs.assets || 'assets/'}`, nested: true },
+    { icon: '🎵', name: 'audio/', meta: `音频文件 · ${dirs.attachments || 'attachments/'}`, nested: true },
+    { icon: '⚙', name: 'config.json', meta: settings?.workspace?.initialized ? '配置文件 · 已初始化' : '配置文件 · 等待初始化', nested: true },
+    { icon: '📦', name: 'backups/', meta: `备份 · ${backup?.total_size_display || `${backup?.count || 0} 份`}`, nested: true },
+  ];
+
+  async function openWorkspace() {
+    try {
+      await openPath(workspacePath);
+      setStatus(`已打开工作区：${workspacePath}`);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '打开工作区失败');
+    }
+  }
+
+  async function createBackup() {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    setStatus('正在生成工作区备份...');
+    try {
+      const result = await apiPost<{ ok?: boolean; error?: string; status?: BackupStatus }>('/ui/backup/create', { overwrite_latest: false });
+      if (result.ok === false) throw new Error(result.error || '生成备份失败');
+      const nextBackup = result.status || await apiGet<BackupStatus>('/ui/backup/status');
+      setBackup(nextBackup);
+      setStatus('工作区备份已生成');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '生成备份失败');
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  function unavailableWorkspaceAction(label: string) {
+    setStatus(`${label}入口尚未接入当前前端，本次没有修改本地数据`);
+  }
+
+  return (
+    <section className="hy-route-page workspace-page settings-layout">
+      <header className="settings-header hy-stagger">
+        <div className="settings-title">工作区</div>
+        <div className="settings-subtitle">管理对话记录、项目文件和工作区配置</div>
+      </header>
+
+      {status ? <div className={/失败|错误|无法/.test(status) ? 'notice danger' : 'notice'}>{status}</div> : null}
+
+      <section className="settings-section hy-stagger">
+        <div className="settings-section-title">对话记录</div>
+        <div className="settings-card">
+          <WorkspaceSettingItem
+            label="导出对话"
+            description="导出所有对话记录为 JSON 文件"
+            action={<button type="button" className="btn btn--ghost" onClick={() => unavailableWorkspaceAction('导出对话')}>导出</button>}
+          />
+          <WorkspaceSettingItem
+            label="导入对话"
+            description="从 JSON 文件导入对话记录"
+            action={<button type="button" className="btn btn--ghost" onClick={() => unavailableWorkspaceAction('导入对话')}>导入</button>}
+          />
+          <WorkspaceSettingItem
+            label="清空对话"
+            description="删除所有对话记录（不可恢复）"
+            action={<button type="button" className="btn btn--ghost workspace-danger-btn" onClick={() => unavailableWorkspaceAction('清空对话')}>清空</button>}
+          />
+        </div>
+      </section>
+
+      <section className="settings-section hy-stagger">
+        <div className="settings-section-title">工作区路径</div>
+        <div className="settings-card">
+          <WorkspaceSettingItem
+            label="工作区目录"
+            description={workspacePath}
+            mono
+            action={<button type="button" className="btn btn--ghost" onClick={() => void openWorkspace()}>打开</button>}
+          />
+          <WorkspaceSettingItem
+            label="资源目录"
+            description={resourcesPath}
+            mono
+            action={<button type="button" className="btn btn--ghost" onClick={() => setStatus(`资源目录：${resourcesPath}`)}>查看</button>}
+          />
+          <WorkspaceSettingItem
+            label="备份工作区"
+            description={latestBackup}
+            action={<button type="button" className="btn btn--primary" disabled={backupBusy} onClick={() => void createBackup()}>{backupBusy ? '备份中...' : '立即备份'}</button>}
+          />
+        </div>
+      </section>
+
+      <section className="settings-section hy-stagger">
+        <div className="settings-section-title">项目文件</div>
+        <div className="workspace-files">
+          {workspaceFiles.map((file) => (
+            <WorkspaceFileRow key={`${file.name}-${file.meta}`} {...file} />
+          ))}
+        </div>
+      </section>
+    </section>
+  );
+}
+
+export function ToolsAllPage() {
+  const allTools = [
+    ...TOOL_CARDS,
+    { view: 'provider' as AppView, icon: '🔗', title: '模型配置', detail: '配置 AI 模型提供商和 API Key。', status: '就绪', statusTone: 'ready' },
+    { view: 'resources' as AppView, icon: '📁', title: '资源管理', detail: '管理 Live2D 模型、语音、壁纸等资源文件。', status: '就绪', statusTone: 'ready' },
+    { view: 'workspace' as AppView, icon: '📂', title: '工作区', detail: '管理对话记录、项目文件和工作区配置。', status: '已初始化', statusTone: 'ready' },
+    { view: 'diagnostics' as AppView, icon: '🔍', title: '诊断工具', detail: '系统状态检测和日志查看。', status: '就绪', statusTone: 'ready' },
+  ];
+
+  return (
+    <section className="hy-route-page">
+      <header className="hy-page-header">
+        <div>
+          <span className="hy-eyebrow">Tools</span>
+          <h2>桌面工具</h2>
+          <p>所有桌面入口、维护工具和资源配置集中在这里。</p>
+        </div>
+      </header>
+      <div className="hy-tools-grid expanded">
+        {allTools.map((tool) => (
+          <button type="button" className="hy-tool-card" key={tool.title} onClick={() => navigateTo(tool.view)}>
+            <span>{tool.icon}</span>
+            <strong>{tool.title}</strong>
+            <small>{tool.detail}</small>
+            <em className={`hy-tool-status hy-tool-status-${tool.statusTone}`}><i />{tool.status}</em>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export function ActivityAllPage() {
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [cache, setCache] = useState<DiagnosticCache | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    void Promise.allSettled([
+      apiGet<DashboardData>('/ui/dashboard'),
+      apiGet<DiagnosticCache>('/ui/hermes/diagnostics/cache'),
+    ]).then(([dashboardResult, cacheResult]) => {
+      if (disposed) return;
+      setDashboard(dashboardResult.status === 'fulfilled' ? dashboardResult.value : null);
+      setCache(cacheResult.status === 'fulfilled' ? cacheResult.value : null);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const rows = [
+    ...recentActivities(dashboard),
+    ...Object.values(cache?.commands || {}).map((command) => ({
+      icon: command.success ? '✓' : '!',
+      title: command.label || command.command || '诊断命令',
+      detail: command.command || 'Hermes diagnostic',
+      time: formatShortDateTime(command.cached_at || cache?.updated_at),
+    })),
+  ];
+
+  return (
+    <section className="hy-route-page hy-centered-page">
+      <header className="hy-page-header">
+        <div>
+          <span className="hy-eyebrow">Activity</span>
+          <h2>活动日志</h2>
+          <p>最近会话、运行状态和诊断缓存。</p>
+        </div>
+      </header>
+      <div className="hy-activity-list large">
+        {rows.map((row, index) => <ActivityRow key={`${row.title}-${index}`} {...row} />)}
+      </div>
+    </section>
+  );
+}
+
+function StatusCard({ tone, label, value, detail, icon }: { tone: 'success' | 'warning' | 'info'; label: string; value: string; detail: string; icon: string }) {
+  return (
+    <article className={`hy-status-card hy-status-card-${tone} corner-frame`}>
+      <div className="corner-frame-inner" />
+      <header>
+        <span>{label}</span>
+        <i>{icon}</i>
+      </header>
+      <strong>{value}</strong>
+      <p>{detail}</p>
+    </article>
+  );
+}
+
+function ActivityRow({ icon, title, detail, time, tone = 'system' }: { icon: string; title: string; detail: string; time: string; tone?: string }) {
+  return (
+    <article className={`hy-activity-row hy-activity-row-${tone}`}>
+      <span>{icon}</span>
+      <div>
+        <strong>{title}</strong>
+        <small>{detail}</small>
+      </div>
+      <time>{time}</time>
+    </article>
+  );
+}
+
+function FileRow({ icon, name, meta, badge, tone }: { icon: string; name: string; meta: string; badge: string; tone: string }) {
+  return (
+    <article className="hy-file-row">
+      <span>{icon}</span>
+      <div>
+        <strong>{name}</strong>
+        <small>{meta}</small>
+      </div>
+      <em className={`hy-badge hy-badge-${tone}`}>{badge}</em>
+    </article>
+  );
+}
+
+function ResourceRow({ file }: { file: ResourceFile }) {
+  return (
+    <article className="resource-item">
+      <div className="resource-icon">{file.icon}</div>
+      <div className="resource-info">
+        <div className="resource-name">{file.name}</div>
+        <div className="resource-meta">{file.meta}</div>
+      </div>
+      <div className="resource-status">
+        {file.onAction ? (
+          <button type="button" className="resource-action-btn" onClick={file.onAction}>
+            {file.actionLabel || '打开'}
+          </button>
+        ) : (
+          <span className={`resource-badge resource-badge--${file.tone}`}>{file.badge}</span>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function WorkspaceSettingItem({ label, description, action, mono = false }: { label: string; description: string; action: ReactNode; mono?: boolean }) {
+  return (
+    <div className="settings-item">
+      <div className="settings-item-info">
+        <div className="settings-item-label">{label}</div>
+        <div className={`settings-item-desc ${mono ? 'mono' : ''}`}>{description}</div>
+      </div>
+      <div className="settings-item-control">{action}</div>
+    </div>
+  );
+}
+
+function WorkspaceFileRow({ icon, name, meta, nested }: { icon: string; name: string; meta: string; nested?: boolean }) {
+  return (
+    <div className={`workspace-file ${nested ? 'nested' : ''}`}>
+      <div className="file-icon">{icon}</div>
+      <div className="file-info">
+        <div className="file-name">{name}</div>
+        <div className="file-meta">{meta}</div>
+      </div>
+    </div>
+  );
+}
+
+function InfoPanel({ title, rows, action }: { title: string; rows: Array<[string, string]>; action?: { label: string; view: AppView } }) {
+  return (
+    <article className="hy-card hy-info-panel">
+      <header>
+        <h3>{title}</h3>
+        {action ? <button type="button" onClick={() => navigateTo(action.view)}>{action.label}</button> : null}
+      </header>
+      {rows.map(([label, value]) => (
+        <div className="hy-info-row" key={label}>
+          <span>{label}</span>
+          <strong>{value || '—'}</strong>
+        </div>
+      ))}
+    </article>
+  );
+}
+
+function ConnectionResult({ result }: { result: HermesConnectionTestResult }) {
+  const preview = result.output_preview || result.stderr_preview || '';
+  return (
+    <div className={`hy-connection-result ${result.success ? 'success' : 'danger'}`}>
+      <strong>{result.success ? result.message || '连接测试通过' : result.error || '连接测试失败'}</strong>
+      <span>{result.elapsed_seconds !== undefined ? `${result.elapsed_seconds}s` : '—'}</span>
+      {preview ? <pre>{preview}</pre> : null}
+    </div>
+  );
+}
+
+function emptyHermesForm(): HermesConfigForm {
+  return { provider: '', model: '', base_url: '', api_key: '' };
+}
+
+function formFromHermesConfig(config: HermesVisualConfig | null): HermesConfigForm {
+  return {
+    provider: config?.model?.provider || config?.provider_options?.find((option) => option.id)?.id || '',
+    model: config?.model?.default || '',
+    base_url: config?.model?.base_url || '',
+    api_key: '',
+  };
+}
+
+function bridgeState(data: DashboardData | null): string {
+  return data?.bridge?.state || data?.bridge?.status || data?.bridge?.running || '—';
+}
+
+function hermesReadinessLabel(level?: string): string {
+  if (level === 'full_ready') return '完整就绪';
+  if (level === 'basic_ready') return '基础可用';
+  if (level === 'unknown') return '等待 Doctor 分级';
+  return level || '等待连接测试';
+}
+
+function providerLabel(option: HermesProviderOption): string {
+  const state = option.api_key_configured ? '已配置' : option.auth_type && option.auth_type !== 'api_key' ? '外部授权' : '未配置';
+  return `${option.label || option.id} (${option.id}) · ${state}`;
+}
+
+function uniqueOptions(values: Array<string | undefined>): string[] {
+  const seen = new Set<string>();
+  return values
+    .map((value) => value?.trim() || '')
+    .filter((value) => {
+      if (!value || seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    });
+}
+
+function recentActivities(data: DashboardData | null) {
+  const sessions = data?.chat?.recent_sessions || [];
+  const rows = sessions.slice(0, 5).map((session) => ({
+    icon: session.latest_role === 'user' ? '💬' : '🌙',
+    title: session.title || '新对话',
+    detail: `${session.message_count || 0} 条消息 · ${session.latest_status || '已同步'}`,
+    time: formatShortDateTime(session.updated_at),
+    tone: 'chat',
+  }));
+  if (rows.length) return rows;
+  return [
+    { icon: '💬', title: '八千代完成了图片分析任务', detail: '聊天窗口同步完成', time: '2 分钟前', tone: 'chat' },
+    { icon: '🔧', title: '模型配置已更新', detail: data?.hermes?.version || 'Hermes 模型配置', time: '15 分钟前', tone: 'system' },
+    { icon: '📦', title: '工作区备份完成', detail: data?.workspace?.path || '等待初始化', time: '1 小时前', tone: 'system' },
+    { icon: '⚠️', title: 'Live2D 模型资源缺失', detail: '不影响聊天窗口和 Bridge', time: '3 小时前', tone: 'warning' },
+  ];
+}
+
+function formatShortDateTime(value?: string) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function routeTitle(view: AppView, settingsMode = ''): string {
+  if (view === 'main') return 'Hermes Yachiyo — 主控台';
+  if (view === 'provider') return 'Hermes Yachiyo — 模型配置';
+  if (view === 'bubble') return 'Hermes Yachiyo — 气泡模式';
+  if (view === 'live2d') return 'Hermes Yachiyo — Live2D 模式';
+  if (view === 'resources') return 'Hermes Yachiyo — 资源管理';
+  if (view === 'workspace') return 'Hermes Yachiyo — 工作区';
+  if (view === 'tools-all') return 'Hermes Yachiyo — 桌面工具';
+  if (view === 'activity-all') return 'Hermes Yachiyo — 活动日志';
+  if (view === 'settings' && settingsMode === 'live2d') return 'Hermes Yachiyo — Live2D 设置';
+  if (view === 'settings' && settingsMode === 'bubble') return 'Hermes Yachiyo — 气泡设置';
+  return 'Hermes Yachiyo';
+}
+
+function isNavActive(activeView: AppView, settingsMode: string, itemView: AppView): boolean {
+  if (activeView === itemView) return true;
+  if (itemView === 'bubble' && activeView === 'settings' && settingsMode === 'bubble') return true;
+  if (itemView === 'live2d' && activeView === 'settings' && settingsMode === 'live2d') return true;
+  return false;
+}
+
+function navBadge(view: AppView, data: DashboardData | null): string {
+  if (view === 'diagnostics' && data?.hermes?.doctor_issues_count) return String(data.hermes.doctor_issues_count);
+  if (view === 'chat' && data?.chat?.recent_sessions?.length) return String(data.chat.recent_sessions.length);
+  if (view === 'workspace' && data?.workspace?.initialized) return 'ok';
+  if (view === 'provider' && data?.hermes?.ready) return 'ok';
+  return '';
+}

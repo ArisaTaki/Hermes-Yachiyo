@@ -237,7 +237,23 @@ function isLauncherView(): boolean {
 }
 
 function isAppView(value: string): value is AppView {
-  return ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'proactive-tts', 'bubble', 'bubble-menu', 'live2d'].includes(value);
+  return [
+    'main',
+    'chat',
+    'settings',
+    'installer',
+    'provider',
+    'resources',
+    'workspace',
+    'diagnostics',
+    'tools',
+    'tools-all',
+    'activity-all',
+    'proactive-tts',
+    'bubble',
+    'bubble-menu',
+    'live2d',
+  ].includes(value);
 }
 
 export async function openDesktopMode(mode?: string): Promise<void> {
