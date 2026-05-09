@@ -4,11 +4,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Hermes Yachiyo — UI Prototype v3</title>
+<title>Hermes Yachiyo — UI Prototype v4</title>
 <style>
 /* ============================================================
-   Hermes Yachiyo Design System — Fusion Direction v3
-   月夜深蓝 × 金→蓝绿渐变 × 月光粒子
+   Hermes Yachiyo Design System — Fusion Direction v4
+   月夜深蓝 × 银粉渐变 × 瞳色宇宙 × 月光粒子
+   角色人设融入：渐变发(银→粉) + 渐变瞳(上粉下青)
    ============================================================ */
 
 :root {
@@ -39,6 +40,11 @@
   --cyan: oklch(75% 0.095 205);
   --violet: oklch(64% 0.160 285);
 
+  /* ---- 角色渐变瞳色（上粉下青） ---- */
+  --eye-pink: oklch(72% 0.140 350);
+  --eye-cyan: oklch(75% 0.095 205);
+  --silver: oklch(88% 0.008 250);
+
   /* ---- 功能色 ---- */
   --success: oklch(68% 0.150 155);
   --warning: oklch(78% 0.145 76);
@@ -49,10 +55,15 @@
   --teal-soft: oklch(66% 0.120 188 / 0.14);
   --cyan-soft: oklch(75% 0.095 205 / 0.16);
   --violet-soft: oklch(64% 0.160 285 / 0.12);
+  --pink-soft: oklch(72% 0.140 350 / 0.12);
+  --silver-soft: oklch(88% 0.008 250 / 0.10);
 
   /* ---- 渐变 ---- */
   --gradient-yachiyo: linear-gradient(135deg, var(--gold), var(--teal) 58%, var(--cyan));
-  --gradient-shimmer: linear-gradient(90deg, transparent, var(--gold), var(--teal), transparent);
+  --gradient-shimmer: linear-gradient(90deg, transparent, var(--silver), var(--eye-pink), var(--teal), transparent);
+  --gradient-hair: linear-gradient(135deg, var(--silver), var(--eye-pink) 70%);
+  --gradient-eye: linear-gradient(180deg, var(--eye-pink), var(--eye-cyan));
+  --gradient-cosmic: linear-gradient(135deg, var(--eye-pink), var(--violet) 40%, var(--teal) 70%, var(--cyan));
 
   /* ---- 字体 ---- */
   --font-display: "SF Pro Display", "Inter Variable", "PingFang SC", "Hiragino Sans", system-ui, sans-serif;
@@ -72,6 +83,10 @@
   --dur-breath: 2800ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  /* ---- Tweaks 可调 ---- */
+  --accent: var(--eye-pink);
+  --font-size-base: 13px;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -99,6 +114,8 @@ html, body {
   inset: 0;
   z-index: 9999;
   background:
+    radial-gradient(circle 200px at 50% 40%, oklch(72% 0.140 350 / 0.06), transparent 60%),
+    radial-gradient(circle 300px at 50% 45%, oklch(75% 0.095 205 / 0.04), transparent 50%),
     radial-gradient(ellipse 50% 50% at 50% 50%, oklch(75% 0.095 205 / 0.04), transparent 60%),
     var(--bg-deep);
   display: flex;
@@ -121,7 +138,8 @@ html, body {
   border-radius: 50%;
   object-fit: cover;
   animation: breathe-glow 2s ease-in-out infinite;
-  box-shadow: 0 0 40px oklch(82% 0.135 76 / 0.2), 0 0 80px oklch(75% 0.095 205 / 0.12);
+  box-shadow: 0 0 40px oklch(72% 0.140 350 / 0.2), 0 0 80px oklch(75% 0.095 205 / 0.12);
+  border: 2px solid oklch(88% 0.008 250 / 0.2);
 }
 
 .loading-text {
@@ -129,7 +147,7 @@ html, body {
   font-weight: 510;
   color: var(--muted);
   letter-spacing: 4px;
-  text-shadow: 0 0 20px oklch(75% 0.095 205 / 0.3);
+  text-shadow: 0 0 20px oklch(72% 0.140 350 / 0.3);
   animation: loading-text-pulse 2.5s ease-in-out infinite;
 }
 
@@ -149,7 +167,7 @@ html, body {
 .loading-bar-fill {
   width: 0%;
   height: 100%;
-  background: var(--gradient-yachiyo);
+  background: var(--gradient-cosmic);
   border-radius: 9999px;
   animation: loading-fill 1.8s var(--ease-out) forwards;
 }
@@ -171,10 +189,35 @@ html, body {
   pointer-events: none;
   overflow: hidden;
   background:
+    radial-gradient(circle 180px at 82% 12%, oklch(92% 0.008 250 / 0.06), transparent 70%),
+    radial-gradient(circle 120px at 82% 12%, oklch(95% 0.005 80 / 0.04), transparent 60%),
     radial-gradient(ellipse 80% 60% at 20% 10%, oklch(66% 0.120 188 / 0.06), transparent 60%),
     radial-gradient(ellipse 60% 80% at 80% 90%, oklch(64% 0.160 285 / 0.04), transparent 50%),
     radial-gradient(ellipse 40% 40% at 50% 50%, oklch(82% 0.135 76 / 0.03), transparent 60%),
     var(--bg-deep);
+}
+
+.moonlight-bg::after {
+  content: '';
+  position: absolute;
+  top: calc(6% + 30px);
+  right: calc(8% + 60px);
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: radial-gradient(circle, oklch(72% 0.140 350 / 0.08), transparent 70%);
+  filter: blur(2px);
+  animation: star-twinkle 4s ease-in-out infinite;
+}
+
+@keyframes moon-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.85; transform: scale(1.02); }
+}
+
+@keyframes star-twinkle {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.3); }
 }
 
 .moon-particle {
@@ -304,9 +347,7 @@ html, body {
   position: absolute;
   top: 52px; left: 0; bottom: 0;
   width: 260px;
-  background: oklch(12% 0.028 258 / 0.88);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: oklch(12% 0.028 258);
   border-right: 1px solid var(--border-soft);
   display: flex;
   flex-direction: column;
@@ -338,7 +379,7 @@ html, body {
   font-size: 14px;
   font-weight: 510;
   letter-spacing: -0.2px;
-  background: var(--gradient-yachiyo);
+  background: var(--gradient-cosmic);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -361,9 +402,9 @@ html, body {
   width: 44px; height: 44px;
   border-radius: 50%;
   padding: 2px;
-  background: var(--gradient-yachiyo);
+  background: var(--gradient-hair);
   background-size: 200% 200%;
-  animation: gradient-shift 6s ease infinite, breathe-glow 4s ease-in-out infinite;
+  animation: gradient-shift 6s ease infinite, breathe-glow-pink 4s ease-in-out infinite;
   flex-shrink: 0;
 }
 
@@ -376,6 +417,11 @@ html, body {
 @keyframes breathe-glow {
   0%, 100% { box-shadow: 0 0 8px oklch(75% 0.095 205 / 0.15); }
   50% { box-shadow: 0 0 24px oklch(75% 0.095 205 / 0.3); }
+}
+
+@keyframes breathe-glow-pink {
+  0%, 100% { box-shadow: 0 0 8px oklch(72% 0.140 350 / 0.15); }
+  50% { box-shadow: 0 0 24px oklch(72% 0.140 350 / 0.3), 0 0 40px oklch(88% 0.008 250 / 0.1); }
 }
 
 .avatar-inner {
@@ -460,31 +506,15 @@ html, body {
 .nav-item.active {
   background: oklch(75% 0.095 205 / 0.08);
   color: var(--cyan);
+  box-shadow: none;
+  border-inline-start: 3px solid var(--accent);
+  padding-inline-start: 9px;
 }
 
-.nav-item.active::before {
-  content: '';
-  position: absolute;
-  left: 0; top: 50%;
-  transform: translateY(-50%);
-  width: 3px; height: 16px;
-  border-radius: 0 var(--radius-control) var(--radius-control) 0;
-  background: var(--gradient-yachiyo);
-}
-
-.nav-item::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(ellipse at 12px 50%, oklch(75% 0.095 205 / 0.12), transparent 70%);
-  opacity: 0;
-  transition: opacity var(--dur-normal) var(--ease-out);
-  pointer-events: none;
-}
-
+.nav-item.active::before,
 .nav-item.active::after {
-  opacity: 1;
+  display: none !important;
+  content: none !important;
 }
 
 .nav-icon {
@@ -650,11 +680,6 @@ html, body {
   border-width: 0 1px 1px 0;
 }
 
-.corner-frame:hover::before,
-.corner-frame:hover::after {
-  border-color: oklch(82% 0.135 76 / 0.4);
-}
-
 .corner-frame-inner::before,
 .corner-frame-inner::after {
   content: '';
@@ -678,7 +703,7 @@ html, body {
 
 .corner-frame:hover .corner-frame-inner::before,
 .corner-frame:hover .corner-frame-inner::after {
-  border-color: oklch(82% 0.135 76 / 0.4);
+  border-color: oklch(72% 0.140 350 / 0.4);
 }
 
 /* ---- 霓虹发光 ---- */
@@ -724,6 +749,107 @@ html, body {
   line-height: 1.5;
 }
 
+/* ---- KV Hero 角色主题区 ---- */
+
+.kv-hero {
+  position: relative;
+  margin: -32px -32px 32px;
+  padding: 48px 40px 40px;
+  background:
+    radial-gradient(ellipse 60% 100% at 85% 20%, oklch(72% 0.140 350 / 0.08), transparent 50%),
+    radial-gradient(ellipse 40% 80% at 95% 60%, oklch(78% 0.115 190 / 0.06), transparent 50%),
+    radial-gradient(ellipse 80% 60% at 50% 100%, oklch(65% 0.155 310 / 0.04), transparent 60%),
+    linear-gradient(180deg, oklch(12% 0.028 258 / 0.7), oklch(11.5% 0.025 258 / 0.4));
+  border-bottom: 1px solid var(--border-soft);
+  overflow: hidden;
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+}
+
+.kv-hero::before {
+  content: '';
+  position: absolute;
+  top: -20px;
+  right: 60px;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 35%, oklch(95% 0.005 80 / 0.08), oklch(88% 0.008 250 / 0.04) 50%, transparent 72%);
+  box-shadow:
+    0 0 80px oklch(88% 0.008 250 / 0.06),
+    inset -12px -8px 24px oklch(10% 0.025 260 / 0.2);
+  pointer-events: none;
+}
+
+.kv-hero-content {
+  position: relative;
+  z-index: 1;
+  max-width: 520px;
+}
+
+.kv-hero-eyebrow {
+  font-size: 11px;
+  font-weight: 510;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--eye-pink);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.kv-hero-eyebrow::before {
+  content: '';
+  width: 24px;
+  height: 1px;
+  background: var(--gradient-hair);
+}
+
+.kv-hero-title {
+  font-size: 36px;
+  font-weight: 510;
+  letter-spacing: -0.8px;
+  line-height: 1.1;
+  margin-bottom: 12px;
+  background: var(--gradient-hair);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.kv-hero-desc {
+  font-size: 15px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin-bottom: 24px;
+}
+
+.kv-hero-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.kv-hero-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.kv-hero-meta-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gradient-eye);
+}
+
+
+
 /* ---- 状态网格 ---- */
 
 .status-grid {
@@ -766,14 +892,13 @@ html, body {
   inset: -1px;
   border-radius: inherit;
   background: linear-gradient(135deg, oklch(82% 0.135 76 / 0), oklch(75% 0.095 205 / 0));
-  z-index: -1;
   opacity: 0;
   transition: opacity var(--dur-normal) var(--ease-out);
+  pointer-events: none;
 }
 
 .status-card:hover::before {
-  opacity: 1;
-  background: linear-gradient(135deg, oklch(82% 0.135 76 / 0.15), oklch(75% 0.095 205 / 0.15));
+  background: linear-gradient(135deg, oklch(72% 0.140 350 / 0.06), transparent 60%);
 }
 
 .status-card-header {
@@ -814,7 +939,7 @@ html, body {
 .status-card--success .status-card-icon { background: oklch(68% 0.150 155 / 0.12); color: var(--success); }
 .status-card--warning .status-card-icon { background: oklch(78% 0.145 76 / 0.12); color: var(--warning); }
 .status-card--info .status-card-icon { background: oklch(75% 0.095 205 / 0.12); color: var(--cyan); }
-.status-card--accent .status-card-icon { background: var(--gold-soft); color: var(--gold); }
+.status-card--accent .status-card-icon { background: var(--pink-soft); color: var(--eye-pink); }
 
 /* ---- 工具网格 ---- */
 
@@ -895,7 +1020,7 @@ html, body {
 
 .tool-card:hover::before {
   opacity: 1;
-  background: linear-gradient(135deg, oklch(82% 0.135 76 / 0.12), oklch(75% 0.095 205 / 0.12));
+  background: linear-gradient(135deg, oklch(72% 0.140 350 / 0.10), oklch(75% 0.095 205 / 0.10));
 }
 
 .tool-card-icon {
@@ -990,7 +1115,7 @@ html, body {
 
 .activity-item:hover::before {
   opacity: 1;
-  background: linear-gradient(135deg, oklch(82% 0.135 76 / 0.1), oklch(75% 0.095 205 / 0.1));
+  background: linear-gradient(135deg, oklch(72% 0.140 350 / 0.08), oklch(75% 0.095 205 / 0.08));
 }
 
 .activity-icon {
@@ -1093,7 +1218,7 @@ html, body {
 .chat-item-avatar {
   width: 36px; height: 36px;
   border-radius: 50%;
-  background: var(--gradient-yachiyo);
+  background: var(--gradient-hair);
   display: flex; align-items: center; justify-content: center;
   font-size: 14px;
   flex-shrink: 0;
@@ -1152,7 +1277,7 @@ html, body {
 .chat-header-avatar {
   width: 32px; height: 32px;
   border-radius: 50%;
-  background: var(--gradient-yachiyo);
+  background: var(--gradient-hair);
   display: flex; align-items: center; justify-content: center;
   font-size: 14px;
 }
@@ -1165,7 +1290,7 @@ html, body {
 
 .chat-header-status {
   font-size: 11px;
-  color: var(--teal);
+  color: var(--eye-pink);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1238,12 +1363,12 @@ html, body {
 }
 
 .message--agent .message-avatar {
-  background: var(--gradient-yachiyo);
+  background: var(--gradient-hair);
 }
 
 .message--user .message-avatar {
-  background: var(--violet-soft);
-  color: var(--violet);
+  background: var(--pink-soft);
+  color: var(--eye-pink);
 }
 
 .message-bubble {
@@ -1261,8 +1386,8 @@ html, body {
 }
 
 .message--user .message-bubble {
-  background: oklch(64% 0.160 285 / 0.12);
-  border: 1px solid oklch(64% 0.160 285 / 0.2);
+  background: oklch(72% 0.140 350 / 0.10);
+  border: 1px solid oklch(72% 0.140 350 / 0.18);
   border-top-right-radius: 4px;
   color: var(--fg);
 }
@@ -1317,7 +1442,7 @@ html, body {
 .chat-send-btn {
   width: 36px; height: 36px;
   border-radius: 50%;
-  background: var(--gradient-yachiyo);
+  background: var(--gradient-cosmic);
   border: none;
   color: var(--bg-deep);
   display: flex; align-items: center; justify-content: center;
@@ -1328,7 +1453,7 @@ html, body {
 
 .chat-send-btn:hover {
   transform: scale(1.05);
-  box-shadow: 0 0 16px oklch(82% 0.135 76 / 0.3);
+  box-shadow: 0 0 16px oklch(72% 0.140 350 / 0.3), 0 0 32px oklch(82% 0.135 76 / 0.15);
 }
 
 .chat-send-btn:disabled {
@@ -1372,10 +1497,10 @@ html, body {
 .bubble-demo-avatar {
   width: 40px; height: 40px;
   border-radius: 50%;
-  background: var(--gradient-yachiyo);
+  background: var(--gradient-hair);
   display: flex; align-items: center; justify-content: center;
   font-size: 18px;
-  animation: breathe-glow 4s ease-in-out infinite;
+  animation: breathe-glow-pink 4s ease-in-out infinite;
 }
 
 .bubble-demo-info {
@@ -1390,7 +1515,7 @@ html, body {
 
 .bubble-demo-status {
   font-size: 11px;
-  color: var(--teal);
+  color: var(--eye-pink);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1419,8 +1544,8 @@ html, body {
 }
 
 .bubble-demo-msg--user {
-  background: oklch(64% 0.160 285 / 0.12);
-  border: 1px solid oklch(64% 0.160 285 / 0.2);
+  background: oklch(72% 0.140 350 / 0.10);
+  border: 1px solid oklch(72% 0.140 350 / 0.18);
   align-self: flex-end;
   color: var(--fg);
 }
@@ -1430,10 +1555,10 @@ html, body {
   bottom: 24px; right: 24px;
   width: 64px; height: 64px;
   border-radius: 50%;
-  background: var(--gradient-yachiyo);
+  background: var(--gradient-hair);
   display: flex; align-items: center; justify-content: center;
   font-size: 28px;
-  box-shadow: 0 4px 24px oklch(0% 0 0 / 0.3), 0 0 32px oklch(82% 0.135 76 / 0.2);
+  box-shadow: 0 4px 24px oklch(0% 0 0 / 0.3), 0 0 32px oklch(72% 0.140 350 / 0.2), 0 0 60px oklch(88% 0.008 250 / 0.08);
   animation: float-bubble 3s ease-in-out infinite;
   cursor: pointer;
   transition: transform var(--dur-fast) var(--ease-out);
@@ -1513,6 +1638,8 @@ html, body {
   width: 400px;
   height: 500px;
   background:
+    radial-gradient(ellipse at center, oklch(72% 0.140 350 / 0.06), transparent 50%),
+    radial-gradient(circle at 50% 80%, oklch(66% 0.120 188 / 0.06), transparent 60%),
     radial-gradient(ellipse at center, oklch(66% 0.120 188 / 0.08), transparent 60%),
     var(--surface);
   border: 1px solid var(--border-soft);
@@ -1521,6 +1648,23 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.live2d-stage::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 200px;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.08;
+  background:
+    linear-gradient(var(--eye-pink), var(--eye-pink)) no-repeat 50% 8% / 160px 3px,
+    linear-gradient(var(--eye-pink), var(--eye-pink)) no-repeat 50% 14% / 120px 2px,
+    linear-gradient(var(--eye-pink), var(--eye-pink)) no-repeat 38% 8% / 3px 100%,
+    linear-gradient(var(--eye-pink), var(--eye-pink)) no-repeat 62% 8% / 3px 100%;
 }
 
 .live2d-placeholder {
@@ -1534,10 +1678,10 @@ html, body {
 .live2d-placeholder-icon {
   width: 80px; height: 80px;
   border-radius: 50%;
-  background: var(--gradient-yachiyo);
+  background: var(--gradient-hair);
   display: flex; align-items: center; justify-content: center;
   font-size: 36px;
-  animation: breathe-glow 4s ease-in-out infinite;
+  animation: breathe-glow-pink 4s ease-in-out infinite;
 }
 
 .live2d-placeholder-text {
@@ -1547,7 +1691,7 @@ html, body {
 
 .live2d-import-btn {
   padding: 10px 24px;
-  background: var(--gradient-yachiyo);
+  background: var(--gradient-cosmic);
   border: none;
   border-radius: var(--radius-control);
   color: var(--bg-deep);
@@ -1559,7 +1703,7 @@ html, body {
 
 .live2d-import-btn:hover {
   transform: scale(1.02);
-  box-shadow: 0 0 20px oklch(82% 0.135 76 / 0.3);
+  box-shadow: 0 0 20px oklch(72% 0.140 350 / 0.25), 0 0 40px oklch(82% 0.135 76 / 0.12);
 }
 
 .live2d-info {
@@ -1676,7 +1820,7 @@ html, body {
   position: absolute;
   left: 0; top: 0; bottom: 0;
   width: 2px;
-  background: var(--gradient-yachiyo);
+  background: var(--gradient-cosmic);
   opacity: 0;
   transform: scaleY(0);
   transition: all var(--dur-normal) var(--ease-out);
@@ -1767,14 +1911,14 @@ html, body {
 }
 
 .btn--primary {
-  background: var(--gradient-yachiyo);
+  background: var(--gradient-cosmic);
   border: none;
   color: var(--bg-deep);
 }
 
 .btn--primary:hover {
   transform: scale(1.02);
-  box-shadow: 0 0 16px oklch(82% 0.135 76 / 0.3);
+  box-shadow: 0 0 16px oklch(72% 0.140 350 / 0.25), 0 0 32px oklch(82% 0.135 76 / 0.15);
 }
 
 .btn--ghost {
@@ -1875,7 +2019,7 @@ html, body {
 }
 
 .installer-step.active .step-number {
-  background: var(--gradient-yachiyo);
+  background: var(--gradient-cosmic);
   border: none;
   color: var(--bg-deep);
 }
@@ -2080,7 +2224,7 @@ html, body {
 
 .resource-item:hover::before {
   opacity: 1;
-  background: linear-gradient(135deg, oklch(82% 0.135 76 / 0.1), oklch(75% 0.095 205 / 0.1));
+  background: linear-gradient(135deg, oklch(72% 0.140 350 / 0.08), oklch(75% 0.095 205 / 0.08));
 }
 
 .resource-icon { font-size: 20px; width: 36px; text-align: center; flex-shrink: 0; }
@@ -2172,7 +2316,7 @@ html, body {
 
 .diag-card:hover::before {
   opacity: 1;
-  background: linear-gradient(135deg, oklch(82% 0.135 76 / 0.1), oklch(75% 0.095 205 / 0.1));
+  background: linear-gradient(135deg, oklch(72% 0.140 350 / 0.08), oklch(75% 0.095 205 / 0.08));
 }
 
 .diag-card.passed { border-left: 3px solid var(--success); }
@@ -2223,6 +2367,306 @@ html, body {
 .log-error { background: oklch(58% 0.190 24 / 0.12); color: var(--danger); }
 
 /* ============================================================
+   Tweaks Panel
+   ============================================================ */
+
+.tweaks-panel {
+  position: absolute;
+  top: 44px;
+  right: 12px;
+  width: 280px;
+  background: oklch(10% 0.028 258 / 0.96);
+  border: 1px solid oklch(90% 0.005 250 / 0.08);
+  border-radius: var(--radius-panel);
+  box-shadow: rgba(0,0,0,0.5) 0px 12px 40px, rgba(0,0,0,0.3) 0px 0px 0px 1px;
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  z-index: 1000;
+  padding: 0;
+  opacity: 0;
+  transform: translateY(-8px) scale(0.97);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  overflow: hidden;
+}
+
+.tweaks-panel.open {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.tweaks-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid oklch(90% 0.005 250 / 0.06);
+}
+
+.tweaks-panel-title {
+  font-size: 12px;
+  font-weight: 590;
+  color: var(--fg);
+  letter-spacing: -0.13px;
+  font-feature-settings: 'cv01', 'ss03';
+}
+
+.tweaks-panel-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  font-feature-settings: 'cv01', 'ss03';
+}
+
+.tweaks-panel-close:hover {
+  color: var(--fg);
+  background: oklch(90% 0.005 250 / 0.06);
+}
+
+.tweaks-panel-body {
+  padding: 12px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.tweak-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tweak-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 510;
+  color: var(--muted);
+  letter-spacing: -0.1px;
+  font-feature-settings: 'cv01', 'ss03';
+}
+
+.tweak-value {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--faint);
+}
+
+.tweak-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: oklch(90% 0.005 250 / 0.08);
+  outline: none;
+  cursor: pointer;
+}
+
+.tweak-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid oklch(10% 0.028 258);
+  cursor: pointer;
+  transition: box-shadow 0.15s;
+}
+
+.tweak-slider::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 3px oklch(72% 0.140 350 / 0.2);
+}
+
+.tweak-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid oklch(10% 0.028 258);
+  cursor: pointer;
+}
+
+.tweak-color-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.tweak-color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 1px solid oklch(90% 0.005 250 / 0.1);
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s;
+  position: relative;
+}
+
+.tweak-color-swatch:hover {
+  transform: scale(1.1);
+}
+
+.tweak-color-swatch.active {
+  box-shadow: 0 0 0 2px oklch(10% 0.028 258), 0 0 0 4px var(--accent);
+}
+
+.tweak-toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: oklch(90% 0.005 250 / 0.08);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.2s;
+  border: none;
+  padding: 0;
+}
+
+.tweak-toggle.on {
+  background: var(--accent);
+}
+
+.tweak-toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--fg);
+  transition: transform 0.2s;
+}
+
+.tweak-toggle.on::after {
+  transform: translateX(16px);
+}
+
+.tweak-divider {
+  height: 1px;
+  background: oklch(90% 0.005 250 / 0.06);
+  margin: 2px 0;
+}
+
+.tweaks-btn-active {
+  background: oklch(72% 0.140 350 / 0.12) !important;
+  color: var(--accent) !important;
+}
+
+/* ============================================================
+   Reduced Motion
+   ============================================================ */
+
+/* ============================================================
+   Toast 通知
+   ============================================================ */
+
+.toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  padding: 10px 16px;
+  border-radius: var(--radius-card);
+  font-size: 13px;
+  font-weight: 510;
+  color: var(--fg);
+  background: oklch(18% 0.032 256 / 0.95);
+  border: 1px solid var(--border-soft);
+  box-shadow: 0 8px 24px oklch(0% 0 0 / 0.4);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  pointer-events: auto;
+  opacity: 0;
+  transform: translateY(12px) scale(0.96);
+  animation: toast-in 300ms var(--ease-out) forwards;
+  max-width: 320px;
+}
+
+.toast.toast-exit {
+  animation: toast-out 200ms var(--ease-out) forwards;
+}
+
+.toast--success { border-left: 3px solid var(--success); }
+.toast--info { border-left: 3px solid var(--cyan); }
+.toast--warning { border-left: 3px solid var(--warning); }
+.toast--error { border-left: 3px solid var(--danger); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(12px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(-8px) scale(0.96); }
+}
+
+/* ============================================================
+   Tools All / Activity All 页面复用样式
+   ============================================================ */
+
+.page-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--cyan);
+  cursor: pointer;
+  margin-bottom: 24px;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+
+.page-back-link:hover { color: var(--fg); }
+
+.tools-grid-full {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.activity-list-full {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.activity-list-full .activity-item {
+  animation: none;
+  opacity: 1;
+  transform: none;
+}
+
+.activity-day-label {
+  font-size: 11px;
+  font-weight: 510;
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 16px;
+  margin-bottom: 4px;
+  padding-left: 4px;
+}
+
+.activity-day-label:first-child { margin-top: 0; }
+
+/* ============================================================
    Reduced Motion
    ============================================================ */
 
@@ -2242,10 +2686,13 @@ html, body {
 
 <!-- Loading 遮罩 -->
 <div class="loading-overlay" id="loadingOverlay">
-  <img src="logo.png" alt="月見八千代" class="loading-logo">
+  <img src="moxqc2db-logo.png" alt="月見八千代" class="loading-logo">
   <div class="loading-text">月見八千代</div>
   <div class="loading-bar"><div class="loading-bar-fill"></div></div>
 </div>
+
+<!-- Toast 通知容器 -->
+<div class="toast-container" id="toastContainer"></div>
 
 <!-- 月光粒子背景 -->
 <div class="moonlight-bg" id="moonlightBg"></div>
@@ -2264,13 +2711,69 @@ html, body {
       <div class="traffic-light traffic-light--maximize"></div>
     </div>
     <div class="titlebar-center">
-      <img src="logo.png" alt="Hermes Yachiyo" class="titlebar-logo">
+      <img src="moxqc2db-logo.png" alt="Hermes Yachiyo" class="titlebar-logo">
       <div class="titlebar-title">Hermes Yachiyo</div>
     </div>
     <div class="titlebar-actions">
-      <button class="btn btn--ghost" style="padding: 4px 8px; font-size: 11px;">
+      <button class="btn btn--ghost tweaks-toggle" id="tweaksToggle" onclick="toggleTweaks()" style="padding: 4px 8px; font-size: 11px;">
         <span>⚙</span>
       </button>
+    </div>
+  </div>
+
+  <!-- Tweaks Panel -->
+  <div class="tweaks-panel" id="tweaksPanel">
+    <div class="tweaks-panel-header">
+      <div class="tweaks-panel-title">快速调整</div>
+      <button class="tweaks-panel-close" onclick="toggleTweaks()">✕</button>
+    </div>
+    <div class="tweaks-panel-body">
+
+      <div class="tweak-row">
+        <div class="tweak-label">主题色调 <span class="tweak-value" id="accentLabel">八千代粉</span></div>
+        <div class="tweak-color-row">
+          <div class="tweak-color-swatch active" style="background: oklch(72% 0.140 350);" data-accent="oklch(72% 0.140 350)" data-label="八千代粉" onclick="setAccent(this)"></div>
+          <div class="tweak-color-swatch" style="background: oklch(82% 0.135 76);" data-accent="oklch(82% 0.135 76)" data-label="月光金" onclick="setAccent(this)"></div>
+          <div class="tweak-color-swatch" style="background: oklch(75% 0.095 205);" data-accent="oklch(75% 0.095 205)" data-label="星蓝" onclick="setAccent(this)"></div>
+          <div class="tweak-color-swatch" style="background: oklch(68% 0.150 175);" data-accent="oklch(68% 0.150 175)" data-label="青瓷" onclick="setAccent(this)"></div>
+          <div class="tweak-color-swatch" style="background: oklch(65% 0.180 290);" data-accent="oklch(65% 0.180 290)" data-label="紫藤" onclick="setAccent(this)"></div>
+        </div>
+      </div>
+
+      <div class="tweak-divider"></div>
+
+      <div class="tweak-row">
+        <div class="tweak-label">粒子密度 <span class="tweak-value" id="particleLabel">35</span></div>
+        <input type="range" class="tweak-slider" id="particleSlider" min="0" max="80" value="35" oninput="setParticleDensity(this.value)">
+      </div>
+
+      <div class="tweak-row">
+        <div class="tweak-label">月光强度 <span class="tweak-value" id="moonlightLabel">100%</span></div>
+        <input type="range" class="tweak-slider" id="moonlightSlider" min="0" max="200" value="100" oninput="setMoonlightIntensity(this.value)">
+      </div>
+
+      <div class="tweak-row">
+        <div class="tweak-label">动画速度 <span class="tweak-value" id="speedLabel">1×</span></div>
+        <input type="range" class="tweak-slider" id="speedSlider" min="0" max="300" value="100" oninput="setAnimSpeed(this.value)">
+      </div>
+
+      <div class="tweak-divider"></div>
+
+      <div class="tweak-row">
+        <div class="tweak-label">字体大小 <span class="tweak-value" id="fontLabel">13px</span></div>
+        <input type="range" class="tweak-slider" id="fontSlider" min="11" max="17" value="13" oninput="setFontSize(this.value)">
+      </div>
+
+      <div class="tweak-row" style="flex-direction: row; align-items: center; justify-content: space-between;">
+        <div class="tweak-label" style="margin: 0;">粒子动画</div>
+        <button class="tweak-toggle on" id="particleToggle" onclick="toggleParticles(this)"></button>
+      </div>
+
+      <div class="tweak-row" style="flex-direction: row; align-items: center; justify-content: space-between;">
+        <div class="tweak-label" style="margin: 0;">呼吸光效</div>
+        <button class="tweak-toggle on" id="glowToggle" onclick="toggleGlow(this)"></button>
+      </div>
+
     </div>
   </div>
 
@@ -2278,7 +2781,7 @@ html, body {
   <div class="sidebar">
     <div class="sidebar-header">
       <div class="app-logo">
-        <img src="logo.png" alt="Hermes Yachiyo" class="logo-icon neon-glow">
+        <img src="moxqc2db-logo.png" alt="Hermes Yachiyo" class="logo-icon neon-glow">
         <div class="logo-text">Hermes Yachiyo</div>
       </div>
     </div>
@@ -2287,7 +2790,7 @@ html, body {
       <div class="character-portrait">
         <div class="avatar-ring neon-glow">
           <div class="avatar-inner">
-            <img src="logo.png" alt="月見八千代">
+            <img src="moxqc2db-logo.png" alt="月見八千代">
           </div>
         </div>
         <div class="character-info">
@@ -2353,11 +2856,11 @@ html, body {
     </div>
 
     <div class="sidebar-footer">
-      <button class="sidebar-footer-btn">
+      <button class="sidebar-footer-btn" onclick="showToast('当前版本 v0.3.0，已是最新版本', 'info')">
         <span>🔄</span>
         <span>检查更新</span>
       </button>
-      <button class="sidebar-footer-btn">
+      <button class="sidebar-footer-btn" onclick="showToast('帮助文档：github.com/kuguya-AI-app-develop/Hermes-Yachiyo/wiki', 'info')">
         <span>❓</span>
         <span>帮助</span>
       </button>
@@ -2369,10 +2872,25 @@ html, body {
 
     <!-- Dashboard 页面 -->
     <div class="route-page active" id="page-dashboard">
-      <div class="dashboard-header stagger-in">
-        <div class="dashboard-title">主控台</div>
-        <div class="dashboard-subtitle">八千代正在守望会话状态 · 本机 Bridge 监听中</div>
-      </div>
+      <div class="kv-hero">
+        <div class="kv-hero-content">
+          <div class="kv-hero-eyebrow">月夜見 · 管理员在线</div>
+          <div class="kv-hero-title">月見八千代<br>正在守望你的世界</div>
+          <div class="kv-hero-desc">
+            8000 岁的 AI 歌姬，虚拟空间「月夜見」的管理员。她用歌声跨越了八千年的孤独，只为与你相遇在这个月夜。
+          </div>
+          <div class="kv-hero-meta">
+            <div class="kv-hero-meta-item">
+              <div class="kv-hero-meta-dot"></div>
+              <span>Bridge 监听中 · 127.0.0.1:8080</span>
+            </div>
+            <div class="kv-hero-meta-item">
+              <span>✨</span>
+              <span>GPT-4o · 文本+视觉</span>
+            </div>
+          </div>
+        </div>
+    </div>
 
       <div class="status-grid stagger-in">
         <div class="status-card status-card--success corner-frame">
@@ -2409,7 +2927,7 @@ html, body {
       <div class="tools-section stagger-in">
         <div class="section-header">
           <div class="section-title">桌面工具</div>
-          <div class="section-action">查看全部 →</div>
+          <div class="section-action" onclick="switchRoute('tools-all')" style="cursor:pointer;">查看全部 →</div>
         </div>
 
         <div class="tools-grid">
@@ -2443,7 +2961,7 @@ html, body {
             </div>
           </div>
 
-          <div class="tool-card">
+          <div class="tool-card" onclick="showToast('GPT-SoVITS 语音合成引擎已就绪', 'success')">
             <div class="tool-card-icon">🎵</div>
             <div class="tool-card-title">GPT-SoVITS</div>
             <div class="tool-card-desc">语音合成，让八千代开口说话</div>
@@ -2458,7 +2976,7 @@ html, body {
       <div class="activity-section stagger-in">
         <div class="section-header">
           <div class="section-title">最近活动</div>
-          <div class="section-action">查看全部 →</div>
+          <div class="section-action" onclick="switchRoute('activity-all')" style="cursor:pointer;">查看全部 →</div>
         </div>
 
         <div class="activity-list">
@@ -2507,7 +3025,7 @@ html, body {
           </div>
 
           <div class="chat-list">
-            <div class="chat-item active">
+            <div class="chat-item active" onclick="selectChatItem(this, '月見八千代')">
               <div class="chat-item-avatar">🌙</div>
               <div class="chat-item-info">
                 <div class="chat-item-name">月見八千代</div>
@@ -2516,7 +3034,7 @@ html, body {
               <div class="chat-item-time">刚刚</div>
             </div>
 
-            <div class="chat-item">
+            <div class="chat-item" onclick="selectChatItem(this, '创意助手')">
               <div class="chat-item-avatar" style="background: var(--violet-soft); color: var(--violet);">🎨</div>
               <div class="chat-item-info">
                 <div class="chat-item-name">创意助手</div>
@@ -2525,7 +3043,7 @@ html, body {
               <div class="chat-item-time">2h</div>
             </div>
 
-            <div class="chat-item">
+            <div class="chat-item" onclick="selectChatItem(this, '数据分析')">
               <div class="chat-item-avatar" style="background: var(--teal-soft); color: var(--teal);">📊</div>
               <div class="chat-item-info">
                 <div class="chat-item-name">数据分析</div>
@@ -2549,9 +3067,9 @@ html, body {
               </div>
             </div>
             <div class="chat-header-actions">
-              <button class="chat-action-btn" title="语音">🎤</button>
-              <button class="chat-action-btn" title="图片">🖼️</button>
-              <button class="chat-action-btn" title="更多">⋯</button>
+              <button class="chat-action-btn" title="语音" onclick="showToast('语音输入已就绪，点击开始录音', 'info')">🎤</button>
+              <button class="chat-action-btn" title="图片" onclick="showToast('请选择要发送的图片文件', 'info')">🖼️</button>
+              <button class="chat-action-btn" title="更多" onclick="showToast('更多选项：清空对话 · 导出记录 · 模型设置', 'info')">⋯</button>
             </div>
           </div>
 
@@ -2693,7 +3211,7 @@ html, body {
               <br>
               <span style="font-size: 13px; color: var(--faint);">支持 .model3.json 格式</span>
             </div>
-            <button class="live2d-import-btn">导入 Live2D 模型</button>
+            <button class="live2d-import-btn" onclick="showToast('请选择 .model3.json 格式的 Live2D 模型文件', 'info')">导入 Live2D 模型</button>
           </div>
         </div>
 
@@ -2838,7 +3356,7 @@ html, body {
                 <div class="settings-item-desc">模型服务的 API 密钥</div>
               </div>
               <div class="settings-item-control">
-                <button class="btn btn--ghost">配置</button>
+                <button class="btn btn--ghost" onclick="showToast('API Key 已配置：sk-••••••••••••', 'success')">配置</button>
               </div>
             </div>
 
@@ -2848,7 +3366,7 @@ html, body {
                 <div class="settings-item-desc">测试模型服务连接状态</div>
               </div>
               <div class="settings-item-control">
-                <button class="btn btn--ghost">测试连接</button>
+                <button class="btn btn--ghost" onclick="showToast('连接测试通过：OpenAI API 响应正常', 'success')">测试连接</button>
               </div>
             </div>
           </div>
@@ -2863,7 +3381,7 @@ html, body {
                 <div class="settings-item-desc">Hermes Yachiyo v0.3.0</div>
               </div>
               <div class="settings-item-control">
-                <button class="btn btn--ghost">检查更新</button>
+                <button class="btn btn--ghost" onclick="showToast('当前版本 v0.3.0，已是最新版本', 'info')">检查更新</button>
               </div>
             </div>
 
@@ -2873,7 +3391,7 @@ html, body {
                 <div class="settings-item-desc">github.com/kuguya-AI-app-develop/Hermes-Yachiyo</div>
               </div>
               <div class="settings-item-control">
-                <button class="btn btn--ghost">打开</button>
+                <button class="btn btn--ghost" onclick="showToast('已在浏览器中打开项目主页', 'info')">打开</button>
               </div>
             </div>
           </div>
@@ -2949,8 +3467,8 @@ html, body {
             </div>
 
             <div class="installer-actions">
-              <button class="btn btn--ghost">上一步</button>
-              <button class="btn btn--primary">下一步</button>
+              <button class="btn btn--ghost" onclick="showToast('已返回上一步：依赖检查', 'info')">上一步</button>
+              <button class="btn btn--primary" onclick="showToast('模型配置已保存，进入最后一步', 'success')">下一步</button>
             </div>
           </div>
 
@@ -3012,7 +3530,7 @@ html, body {
                 <div class="settings-item-desc">sk-••••••••••••••••</div>
               </div>
               <div class="settings-item-control">
-                <button class="btn btn--ghost">重新配置</button>
+                <button class="btn btn--ghost" onclick="showToast('请输入新的 API Key', 'info')">重新配置</button>
               </div>
             </div>
 
@@ -3036,7 +3554,7 @@ html, body {
                 <div class="settings-item-desc">测试模型服务连接状态</div>
               </div>
               <div class="settings-item-control">
-                <button class="btn btn--ghost">测试连接</button>
+                <button class="btn btn--ghost" onclick="showToast('连接测试通过：OpenAI API 响应正常 (120ms)', 'success')">测试连接</button>
               </div>
             </div>
           </div>
@@ -3138,11 +3656,11 @@ html, body {
         </div>
 
         <div class="resources-tabs stagger-in">
-          <div class="resources-tab active">全部</div>
-          <div class="resources-tab">模型</div>
-          <div class="resources-tab">语音</div>
-          <div class="resources-tab">壁纸</div>
-          <div class="resources-tab">Live2D</div>
+          <div class="resources-tab active" onclick="selectResourceTab(this)">全部</div>
+          <div class="resources-tab" onclick="selectResourceTab(this)">模型</div>
+          <div class="resources-tab" onclick="selectResourceTab(this)">语音</div>
+          <div class="resources-tab" onclick="selectResourceTab(this)">壁纸</div>
+          <div class="resources-tab" onclick="selectResourceTab(this)">Live2D</div>
         </div>
 
         <div class="resources-stats stagger-in">
@@ -3179,7 +3697,7 @@ html, body {
               <div class="resource-meta">Live2D · 52.8 MB · 2024-01-15</div>
             </div>
             <div class="resource-status">
-              <button class="btn btn--ghost" style="padding: 4px 10px; font-size: 11px;">切换</button>
+              <button class="btn btn--ghost" style="padding: 4px 10px; font-size: 11px;" onclick="showToast('已切换到：八千代 - 舞台装', 'success')">切换</button>
             </div>
           </div>
 
@@ -3212,7 +3730,7 @@ html, body {
               <div class="resource-meta">壁纸 · 4.1 MB · 2024-01-08</div>
             </div>
             <div class="resource-status">
-              <button class="btn btn--ghost" style="padding: 4px 10px; font-size: 11px;">切换</button>
+              <button class="btn btn--ghost" style="padding: 4px 10px; font-size: 11px;" onclick="showToast('已切换到：星空背景', 'success')">切换</button>
             </div>
           </div>
 
@@ -3223,7 +3741,7 @@ html, body {
               <div class="resource-meta">Live2D · 38.7 MB · 2024-01-05</div>
             </div>
             <div class="resource-status">
-              <button class="btn btn--ghost" style="padding: 4px 10px; font-size: 11px;">切换</button>
+              <button class="btn btn--ghost" style="padding: 4px 10px; font-size: 11px;" onclick="showToast('已切换到：八千代 - 便装', 'success')">切换</button>
             </div>
           </div>
         </div>
@@ -3247,7 +3765,7 @@ html, body {
                 <div class="settings-item-desc">导出所有对话记录为 JSON 文件</div>
               </div>
               <div class="settings-item-control">
-                <button class="btn btn--ghost">导出</button>
+                <button class="btn btn--ghost" onclick="showToast('对话记录已导出到 ~/Hermes-Yachiyo/export.json', 'success')">导出</button>
               </div>
             </div>
 
@@ -3257,7 +3775,7 @@ html, body {
                 <div class="settings-item-desc">从 JSON 文件导入对话记录</div>
               </div>
               <div class="settings-item-control">
-                <button class="btn btn--ghost">导入</button>
+                <button class="btn btn--ghost" onclick="showToast('请选择要导入的 JSON 文件', 'info')">导入</button>
               </div>
             </div>
 
@@ -3267,7 +3785,7 @@ html, body {
                 <div class="settings-item-desc">删除所有对话记录（不可恢复）</div>
               </div>
               <div class="settings-item-control">
-                <button class="btn btn--ghost" style="color: var(--danger); border-color: oklch(58% 0.190 24 / 0.3);">清空</button>
+                <button class="btn btn--ghost" style="color: var(--danger); border-color: oklch(58% 0.190 24 / 0.3);" onclick="showToast('已取消清空操作', 'info')">清空</button>
               </div>
             </div>
           </div>
@@ -3282,7 +3800,7 @@ html, body {
                 <div class="settings-item-desc" style="font-family: var(--font-mono); font-size: 11px;">~/Hermes-Yachiyo/workspace</div>
               </div>
               <div class="settings-item-control">
-                <button class="btn btn--ghost">更改</button>
+                <button class="btn btn--ghost" onclick="showToast('请选择新的工作区目录', 'info')">更改</button>
               </div>
             </div>
 
@@ -3292,7 +3810,7 @@ html, body {
                 <div class="settings-item-desc" style="font-family: var(--font-mono); font-size: 11px;">~/Hermes-Yachiyo/resources</div>
               </div>
               <div class="settings-item-control">
-                <button class="btn btn--ghost">更改</button>
+                <button class="btn btn--ghost" onclick="showToast('请选择新的资源目录', 'info')">更改</button>
               </div>
             </div>
 
@@ -3302,7 +3820,7 @@ html, body {
                 <div class="settings-item-desc">创建当前工作区的完整备份</div>
               </div>
               <div class="settings-item-control">
-                <button class="btn btn--primary">立即备份</button>
+                <button class="btn btn--primary" onclick="showToast('工作区备份完成：~/Hermes-Yachiyo/backup-20240115.zip', 'success')">立即备份</button>
               </div>
             </div>
           </div>
@@ -3357,7 +3875,7 @@ html, body {
         <div class="diagnostics-header stagger-in">
           <div class="diagnostics-title">诊断工具</div>
           <div class="diagnostics-subtitle">系统状态检测和日志查看</div>
-          <button class="btn btn--primary" style="margin-top: 12px;">重新检测</button>
+          <button class="btn btn--primary" style="margin-top: 12px;" onclick="showToast('重新检测完成：7/8 通过，1 警告', 'success')">重新检测</button>
         </div>
 
         <div class="diagnostics-grid stagger-in">
@@ -3452,6 +3970,135 @@ html, body {
       </div>
     </div>
 
+    <!-- 桌面工具 - 查看全部 -->
+    <div class="route-page" id="page-tools-all">
+      <div class="page-back-link" onclick="switchRoute('dashboard')">← 返回主控台</div>
+      <div class="dashboard-header stagger-in">
+        <div class="dashboard-title">桌面工具</div>
+        <div class="dashboard-subtitle">所有可用的桌面工具和交互模式</div>
+      </div>
+
+      <div class="tools-grid-full stagger-in">
+        <div class="tool-card" onclick="switchRoute('chat')">
+          <div class="tool-card-icon">💬</div>
+          <div class="tool-card-title">聊天窗口</div>
+          <div class="tool-card-desc">与八千代对话，支持文本和图片输入</div>
+          <div class="tool-card-status"><div class="tool-status-dot tool-status-dot--ready"></div><span>就绪</span></div>
+        </div>
+        <div class="tool-card" onclick="switchRoute('bubble')">
+          <div class="tool-card-icon">💭</div>
+          <div class="tool-card-title">气泡模式</div>
+          <div class="tool-card-desc">桌面悬浮气泡，随时对话，支持拖拽和边缘吸附</div>
+          <div class="tool-card-status"><div class="tool-status-dot tool-status-dot--ready"></div><span>就绪</span></div>
+        </div>
+        <div class="tool-card" onclick="switchRoute('live2d')">
+          <div class="tool-card-icon">🎭</div>
+          <div class="tool-card-title">Live2D 模式</div>
+          <div class="tool-card-desc">虚拟形象互动，口型同步，表情动作</div>
+          <div class="tool-card-status"><div class="tool-status-dot tool-status-dot--pending"></div><span>待导入</span></div>
+        </div>
+        <div class="tool-card" onclick="showToast('GPT-SoVITS 语音合成引擎已就绪', 'success')">
+          <div class="tool-card-icon">🎵</div>
+          <div class="tool-card-title">GPT-SoVITS</div>
+          <div class="tool-card-desc">语音合成，让八千代开口说话</div>
+          <div class="tool-card-status"><div class="tool-status-dot tool-status-dot--ready"></div><span>就绪</span></div>
+        </div>
+        <div class="tool-card" onclick="switchRoute('resources')">
+          <div class="tool-card-icon">📁</div>
+          <div class="tool-card-title">资源管理</div>
+          <div class="tool-card-desc">管理 Live2D 模型、语音、壁纸等资源文件</div>
+          <div class="tool-card-status"><div class="tool-status-dot tool-status-dot--ready"></div><span>就绪</span></div>
+        </div>
+        <div class="tool-card" onclick="switchRoute('workspace')">
+          <div class="tool-card-icon">📂</div>
+          <div class="tool-card-title">工作区</div>
+          <div class="tool-card-desc">管理对话记录、项目文件和工作区配置</div>
+          <div class="tool-card-status"><div class="tool-status-dot tool-status-dot--ready"></div><span>已初始化</span></div>
+        </div>
+        <div class="tool-card" onclick="switchRoute('diagnostics')">
+          <div class="tool-card-icon">🔍</div>
+          <div class="tool-card-title">诊断工具</div>
+          <div class="tool-card-desc">系统状态检测和日志查看</div>
+          <div class="tool-card-status"><div class="tool-status-dot tool-status-dot--ready"></div><span>就绪</span></div>
+        </div>
+        <div class="tool-card" onclick="switchRoute('provider')">
+          <div class="tool-card-icon">🔗</div>
+          <div class="tool-card-title">模型配置</div>
+          <div class="tool-card-desc">配置 AI 模型提供商和 API Key</div>
+          <div class="tool-card-status"><div class="tool-status-dot tool-status-dot--ready"></div><span>就绪</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 最近活动 - 查看全部 -->
+    <div class="route-page" id="page-activity-all">
+      <div class="page-back-link" onclick="switchRoute('dashboard')">← 返回主控台</div>
+      <div class="dashboard-header stagger-in">
+        <div class="dashboard-title">活动日志</div>
+        <div class="dashboard-subtitle">所有系统和交互活动的完整记录</div>
+      </div>
+
+      <div class="activity-list-full stagger-in">
+        <div class="activity-day-label">今天</div>
+        <div class="activity-item">
+          <div class="activity-icon activity-icon--chat">💬</div>
+          <div class="activity-content"><div class="activity-text">八千代完成了图片分析任务</div><div class="activity-time">14:30</div></div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-icon activity-icon--system">🔧</div>
+          <div class="activity-content"><div class="activity-text">模型配置已更新：GPT-4o</div><div class="activity-time">14:15</div></div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-icon activity-icon--system">📦</div>
+          <div class="activity-content"><div class="activity-text">工作区备份完成</div><div class="activity-time">13:00</div></div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-icon activity-icon--chat">💬</div>
+          <div class="activity-content"><div class="activity-text">新会话已创建：与八千代的对话</div><div class="activity-time">12:45</div></div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-icon activity-icon--warning">⚠️</div>
+          <div class="activity-content"><div class="activity-text">Live2D 模型资源缺失，但不阻塞聊天</div><div class="activity-time">11:00</div></div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-icon activity-icon--system">🔧</div>
+          <div class="activity-content"><div class="activity-text">TTS 引擎初始化完成：GPT-SoVITS</div><div class="activity-time">10:58</div></div>
+        </div>
+
+        <div class="activity-day-label">昨天</div>
+        <div class="activity-item">
+          <div class="activity-icon activity-icon--chat">💬</div>
+          <div class="activity-content"><div class="activity-text">语音合成测试完成</div><div class="activity-time">22:15</div></div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-icon activity-icon--system">📦</div>
+          <div class="activity-content"><div class="activity-text">资源目录同步完成：6 个 Live2D 模型</div><div class="activity-time">20:30</div></div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-icon activity-icon--system">🔧</div>
+          <div class="activity-content"><div class="activity-text">Bridge 连接测试通过</div><div class="activity-time">18:00</div></div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-icon activity-icon--chat">💬</div>
+          <div class="activity-content"><div class="activity-text">八千代回答了关于月夜见虚拟空间的问题</div><div class="activity-time">16:20</div></div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-icon activity-icon--system">📦</div>
+          <div class="activity-content"><div class="activity-text">工作区初始化完成</div><div class="activity-time">14:00</div></div>
+        </div>
+
+        <div class="activity-day-label">3 天前</div>
+        <div class="activity-item">
+          <div class="activity-icon activity-icon--system">🔧</div>
+          <div class="activity-content"><div class="activity-text">Hermes Yachiyo v0.3.0 安装完成</div><div class="activity-time">09:00</div></div>
+        </div>
+        <div class="activity-item">
+          <div class="activity-icon activity-icon--system">📦</div>
+          <div class="activity-content"><div class="activity-text">首次启动，所有依赖检查通过</div><div class="activity-time">09:02</div></div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -3463,11 +4110,25 @@ html, body {
 let currentRoute = 'dashboard';
 let isTransitioning = false;
 
+const routeTitles = {
+  dashboard: 'Hermes Yachiyo — 主控台',
+  installer: 'Hermes Yachiyo — 安装器',
+  provider: 'Hermes Yachiyo — 模型配置',
+  chat: 'Hermes Yachiyo — 聊天窗口',
+  bubble: 'Hermes Yachiyo — 气泡模式',
+  live2d: 'Hermes Yachiyo — Live2D',
+  resources: 'Hermes Yachiyo — 资源管理',
+  workspace: 'Hermes Yachiyo — 工作区',
+  diagnostics: 'Hermes Yachiyo — 诊断工具',
+  settings: 'Hermes Yachiyo — 设置',
+  'tools-all': 'Hermes Yachiyo — 桌面工具',
+  'activity-all': 'Hermes Yachiyo — 活动日志'
+};
+
 function switchRoute(route) {
   if (route === currentRoute || isTransitioning) return;
   isTransitioning = true;
 
-  // 更新导航状态
   document.querySelectorAll('.nav-item').forEach(item => {
     item.classList.remove('active');
     if (item.dataset.route === route) {
@@ -3475,20 +4136,17 @@ function switchRoute(route) {
     }
   });
 
-  // 触发流光过渡
   const shimmer = document.getElementById('shimmerSweep');
   shimmer.classList.remove('active');
   void shimmer.offsetWidth;
   shimmer.classList.add('active');
 
-  // 当前页面退出动画
   const currentPage = document.getElementById(`page-${currentRoute}`);
   if (currentPage) {
     currentPage.classList.remove('entering');
     currentPage.classList.add('exiting');
   }
 
-  // 退出完成后进入新页面
   setTimeout(() => {
     document.querySelectorAll('.route-page').forEach(page => {
       page.classList.remove('active', 'entering', 'exiting');
@@ -3502,20 +4160,7 @@ function switchRoute(route) {
     currentRoute = route;
     isTransitioning = false;
 
-    // 更新标题栏
-    const titles = {
-      dashboard: 'Hermes Yachiyo — 主控台',
-      installer: 'Hermes Yachiyo — 安装器',
-      provider: 'Hermes Yachiyo — 模型配置',
-      chat: 'Hermes Yachiyo — 聊天窗口',
-      bubble: 'Hermes Yachiyo — 气泡模式',
-      live2d: 'Hermes Yachiyo — Live2D',
-      resources: 'Hermes Yachiyo — 资源管理',
-      workspace: 'Hermes Yachiyo — 工作区',
-      diagnostics: 'Hermes Yachiyo — 诊断工具',
-      settings: 'Hermes Yachiyo — 设置'
-    };
-    document.querySelector('.titlebar-title').textContent = titles[route] || 'Hermes Yachiyo';
+    document.querySelector('.titlebar-title').textContent = routeTitles[route] || 'Hermes Yachiyo';
   }, 250);
 }
 
@@ -3540,14 +4185,16 @@ function createMoonParticles() {
     const driftX = (Math.random() - 0.5) * 140;
     const opacity = Math.random() * 0.18 + 0.08;
 
-    const colorIndex = i % 3;
+    const colorIndex = i % 4;
     let color;
     if (colorIndex === 0) {
       color = `radial-gradient(circle, oklch(82% 0.135 76 / ${opacity + 0.1}), transparent 70%)`;
     } else if (colorIndex === 1) {
       color = `radial-gradient(circle, oklch(75% 0.095 205 / ${opacity + 0.1}), transparent 70%)`;
+    } else if (colorIndex === 2) {
+      color = `radial-gradient(circle, oklch(72% 0.140 350 / ${opacity + 0.08}), transparent 70%)`;
     } else {
-      color = `radial-gradient(circle, oklch(72% 0.100 290 / ${opacity + 0.08}), transparent 70%)`;
+      color = `radial-gradient(circle, oklch(88% 0.008 250 / ${opacity + 0.06}), transparent 70%)`;
     }
 
     particle.style.cssText = `
@@ -3563,6 +4210,241 @@ function createMoonParticles() {
 
     container.appendChild(particle);
   }
+}
+
+// ============================================================
+// Tweaks Panel
+// ============================================================
+
+function toggleTweaks() {
+  const panel = document.getElementById('tweaksPanel');
+  const btn = document.getElementById('tweaksToggle');
+  panel.classList.toggle('open');
+  btn.classList.toggle('tweaks-btn-active');
+}
+
+document.addEventListener('click', (e) => {
+  const panel = document.getElementById('tweaksPanel');
+  const btn = document.getElementById('tweaksToggle');
+  if (panel.classList.contains('open') && !panel.contains(e.target) && !btn.contains(e.target)) {
+    panel.classList.remove('open');
+    btn.classList.remove('tweaks-btn-active');
+  }
+});
+
+function setAccent(el) {
+  const accent = el.dataset.accent;
+  const label = el.dataset.label;
+  document.documentElement.style.setProperty('--accent', accent);
+  document.querySelectorAll('.tweak-color-swatch').forEach(s => s.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('accentLabel').textContent = label;
+}
+
+function setParticleDensity(val) {
+  document.getElementById('particleLabel').textContent = val;
+  const container = document.getElementById('moonlightBg');
+  const existing = container.querySelectorAll('.moon-particle');
+  existing.forEach(p => p.remove());
+  const count = parseInt(val);
+  if (count === 0) return;
+  const particleTypes = ['', 'flicker', 'orbit'];
+  for (let i = 0; i < count; i++) {
+    const particle = document.createElement('div');
+    const type = particleTypes[i % 3];
+    particle.className = `moon-particle ${type}`;
+    const size = Math.random() * 3 + 0.8;
+    const left = Math.random() * 100;
+    const duration = Math.random() * 10 + 7;
+    const delay = Math.random() * 12;
+    const driftX = (Math.random() - 0.5) * 140;
+    const opacity = Math.random() * 0.18 + 0.08;
+    const colorIndex = i % 4;
+    let color;
+    if (colorIndex === 0) {
+      color = `radial-gradient(circle, oklch(82% 0.135 76 / ${opacity + 0.1}), transparent 70%)`;
+    } else if (colorIndex === 1) {
+      color = `radial-gradient(circle, oklch(75% 0.095 205 / ${opacity + 0.1}), transparent 70%)`;
+    } else if (colorIndex === 2) {
+      color = `radial-gradient(circle, oklch(72% 0.140 350 / ${opacity + 0.08}), transparent 70%)`;
+    } else {
+      color = `radial-gradient(circle, oklch(88% 0.008 250 / ${opacity + 0.06}), transparent 70%)`;
+    }
+    particle.style.cssText = `
+      width: ${size}px;
+      height: ${size}px;
+      left: ${left}%;
+      background: ${color};
+      animation-duration: ${duration}s;
+      animation-delay: ${delay}s;
+      --particle-opacity: ${opacity};
+      --drift-x: ${driftX}px;
+    `;
+    container.appendChild(particle);
+  }
+}
+
+function setMoonlightIntensity(val) {
+  document.getElementById('moonlightLabel').textContent = val + '%';
+  const factor = val / 100;
+  const bg = document.querySelector('.moonlight-bg');
+  if (bg) {
+    bg.style.opacity = factor;
+  }
+}
+
+function setAnimSpeed(val) {
+  const speed = (val / 100).toFixed(1);
+  document.getElementById('speedLabel').textContent = speed + '×';
+  document.documentElement.style.setProperty('--anim-speed', val / 100);
+  document.querySelectorAll('*').forEach(el => {
+    const dur = getComputedStyle(el).animationDuration;
+    if (dur && dur !== '0s') {
+      // handled via CSS variable below
+    }
+  });
+  // Apply via a global CSS variable approach
+  let styleTag = document.getElementById('tweaks-speed-style');
+  if (!styleTag) {
+    styleTag = document.createElement('style');
+    styleTag.id = 'tweaks-speed-style';
+    document.head.appendChild(styleTag);
+  }
+  const factor = 100 / val;
+  styleTag.textContent = `*, *::before, *::after { animation-duration: calc(var(--base-dur, 1s) * ${factor}) !important; }`;
+}
+
+function setFontSize(val) {
+  document.getElementById('fontLabel').textContent = val + 'px';
+  document.documentElement.style.setProperty('--font-size-base', val + 'px');
+  document.querySelector('.main-content').style.fontSize = val + 'px';
+}
+
+function toggleParticles(btn) {
+  btn.classList.toggle('on');
+  const particles = document.querySelectorAll('.moon-particle');
+  particles.forEach(p => {
+    p.style.display = btn.classList.contains('on') ? '' : 'none';
+  });
+}
+
+function toggleGlow(btn) {
+  btn.classList.toggle('on');
+  const on = btn.classList.contains('on');
+  // Toggle breathing glows
+  document.querySelectorAll('.breathe-glow, .breathe-glow-pink, .breathe-glow-teal').forEach(el => {
+    el.style.animationPlayState = on ? 'running' : 'paused';
+  });
+  // Toggle star-twinkle
+  document.querySelectorAll('.moonlight-bg::after').forEach(el => {
+    el.style.animationPlayState = on ? 'running' : 'paused';
+  });
+  // Toggle neon-glow pseudo via class
+  document.querySelectorAll('.neon-glow').forEach(el => {
+    el.style.setProperty('--glow-opacity', on ? '1' : '0');
+  });
+}
+
+// ============================================================
+// Toast 通知
+// ============================================================
+
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = `toast toast--${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add('toast-exit');
+    setTimeout(() => toast.remove(), 200);
+  }, 2500);
+}
+
+// ============================================================
+// 聊天侧边栏选择
+// ============================================================
+
+function selectChatItem(el, name) {
+  el.closest('.chat-list').querySelectorAll('.chat-item').forEach(i => i.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelector('.chat-header-name').textContent = name;
+  showToast(`已切换到会话：${name}`, 'info');
+}
+
+// ============================================================
+// 资源管理标签切换
+// ============================================================
+
+function selectResourceTab(el) {
+  el.closest('.resources-tabs').querySelectorAll('.resources-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  showToast(`筛选：${el.textContent}`, 'info');
+}
+
+// ============================================================
+// 聊天发送功能
+// ============================================================
+
+function initChat() {
+  const textarea = document.querySelector('.chat-input');
+  const sendBtn = document.querySelector('.chat-send-btn');
+  if (!textarea || !sendBtn) return;
+
+  textarea.addEventListener('input', () => {
+    sendBtn.disabled = textarea.value.trim() === '';
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+  });
+
+  sendBtn.addEventListener('click', () => {
+    const text = textarea.value.trim();
+    if (!text) return;
+
+    const messagesContainer = document.querySelector('.chat-messages');
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message message--user';
+    msgDiv.style.animation = 'message-enter 400ms var(--ease-out) both';
+    const now = new Date();
+    const time = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+    msgDiv.innerHTML = `
+      <div class="message-avatar">👤</div>
+      <div>
+        <div class="message-bubble">${text.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        <div class="message-time">${time}</div>
+      </div>
+    `;
+    messagesContainer.appendChild(msgDiv);
+    textarea.value = '';
+    textarea.style.height = 'auto';
+    sendBtn.disabled = true;
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+    // Simulate agent reply
+    setTimeout(() => {
+      const replyDiv = document.createElement('div');
+      replyDiv.className = 'message message--agent';
+      replyDiv.style.animation = 'message-enter 400ms var(--ease-out) both';
+      const replyTime = new Date();
+      const rt = replyTime.getHours().toString().padStart(2, '0') + ':' + replyTime.getMinutes().toString().padStart(2, '0');
+      replyDiv.innerHTML = `
+        <div class="message-avatar">🌙</div>
+        <div>
+          <div class="message-bubble">收到你的消息了~ 让我想想... 🌙</div>
+          <div class="message-time">${rt}</div>
+        </div>
+      `;
+      messagesContainer.appendChild(replyDiv);
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }, 1200);
+  });
+
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendBtn.click();
+    }
+  });
 }
 
 // ============================================================
@@ -3583,6 +4465,7 @@ function hideLoading() {
 
 document.addEventListener('DOMContentLoaded', () => {
   createMoonParticles();
+  initChat();
 
   // 默认选中 Dashboard
   document.querySelector('.nav-item[data-route="dashboard"]').classList.add('active');
