@@ -41,6 +41,24 @@ type DiagnosticCache = {
   commands?: Record<string, DiagnosticResult>;
 };
 
+type DashboardStatus = {
+  bridge?: { state?: string; status?: string; running?: string; url?: string };
+  hermes?: {
+    ready?: boolean;
+    command_exists?: boolean;
+    readiness_level?: string;
+    platform?: string;
+    doctor_issues_count?: number;
+  };
+  workspace?: { initialized?: boolean; path?: string };
+};
+
+type DiagnosticOverviewItem = {
+  label: string;
+  detail: string;
+  status: 'passed' | 'warning' | 'error';
+};
+
 const DIAGNOSTIC_ACTIONS: DiagnosticAction[] = [
   {
     id: 'config-check',
@@ -69,6 +87,7 @@ export function DiagnosticsView() {
   const [selectedCommand, setSelectedCommand] = useState(initialCommand || DIAGNOSTIC_ACTIONS[0].command);
   const [result, setResult] = useState<DiagnosticResult | null>(null);
   const [diagnosticCache, setDiagnosticCache] = useState<DiagnosticCache | null>(null);
+  const [overview, setOverview] = useState<DashboardStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const lastAutoRunRef = useRef('');
@@ -88,6 +107,20 @@ export function DiagnosticsView() {
     if (initialCommand) return;
     void loadDiagnosticCache(selectedAction.id);
   }, [initialCommand, selectedAction.id]);
+
+  useEffect(() => {
+    let disposed = false;
+    apiGet<DashboardStatus>('/ui/dashboard')
+      .then((payload) => {
+        if (!disposed) setOverview(payload);
+      })
+      .catch(() => {
+        if (!disposed) setOverview(null);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
 
   async function loadDiagnosticCache(actionId: string) {
     try {
@@ -151,6 +184,16 @@ export function DiagnosticsView() {
       </header>
 
       {status ? <div className={diagnosticNoticeClass(status)}>{status}</div> : null}
+
+      <section className="hy-diagnostic-grid" aria-label="系统检测">
+        {diagnosticOverviewItems(overview, diagnosticCache).map((item) => (
+          <article className={`hy-diagnostic-check ${item.status}`} key={item.label}>
+            <span>{item.label}</span>
+            <strong>{diagnosticStatusLabel(item.status)}</strong>
+            <small>{item.detail}</small>
+          </article>
+        ))}
+      </section>
 
       <section className="diagnostic-command-grid" aria-label="诊断命令">
         {DIAGNOSTIC_ACTIONS.map((action) => (
@@ -227,6 +270,68 @@ function diagnosticOutput(result: DiagnosticResult | null, busy: boolean): strin
 
 function StatusPill({ active, label }: { active: boolean; label: string }) {
   return <span className={active ? 'status-pill ok' : 'status-pill warn'}>{label}</span>;
+}
+
+function diagnosticOverviewItems(
+  data: DashboardStatus | null,
+  cache: DiagnosticCache | null,
+): DiagnosticOverviewItem[] {
+  const bridge = data?.bridge?.state || data?.bridge?.status || data?.bridge?.running || '';
+  const bridgeOk = /running|listening|ready|ok/i.test(bridge);
+  const hermesReady = Boolean(data?.hermes?.ready);
+  const commandExists = Boolean(data?.hermes?.command_exists);
+  const workspaceReady = Boolean(data?.workspace?.initialized);
+  const doctorIssues = Number(data?.hermes?.doctor_issues_count || 0);
+  const hasDoctorCache = Boolean(cache?.commands?.doctor);
+
+  return [
+    {
+      label: 'Python',
+      status: commandExists ? 'passed' : 'warning',
+      detail: data?.hermes?.platform || '随 Hermes 环境检测',
+    },
+    {
+      label: 'Node.js',
+      status: 'passed',
+      detail: '桌面前端运行中',
+    },
+    {
+      label: 'Bridge',
+      status: bridgeOk ? 'passed' : 'warning',
+      detail: data?.bridge?.url || bridge || '等待本机 Bridge',
+    },
+    {
+      label: '模型',
+      status: hermesReady ? 'passed' : commandExists ? 'warning' : 'error',
+      detail: hermesReady ? '基础链路可用' : commandExists ? '需要连接测试' : '未检测到 hermes',
+    },
+    {
+      label: 'GPU',
+      status: hasDoctorCache && !doctorIssues ? 'passed' : 'warning',
+      detail: hasDoctorCache ? (doctorIssues ? `${doctorIssues} 项 Doctor 提示` : 'Doctor 未报告受限项') : '运行 Doctor 后刷新',
+    },
+    {
+      label: '工作区',
+      status: workspaceReady ? 'passed' : 'warning',
+      detail: data?.workspace?.path || '等待初始化',
+    },
+    {
+      label: 'Live2D',
+      status: workspaceReady ? 'warning' : 'error',
+      detail: workspaceReady ? '资源状态在 Live2D 页查看' : '需要工作区',
+    },
+    {
+      label: 'TTS',
+      status: workspaceReady ? 'warning' : 'error',
+      detail: workspaceReady ? '语音状态在 GPT-SoVITS 页查看' : '需要工作区',
+    },
+  ];
+}
+
+function diagnosticStatusLabel(status: DiagnosticOverviewItem['status']): string {
+  if (status === 'passed') return 'passed';
+  if (status === 'error') return 'error';
+  return 'warning';
 }
 
 function formatShortDateTime(value?: string) {

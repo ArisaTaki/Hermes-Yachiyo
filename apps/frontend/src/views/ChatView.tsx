@@ -106,6 +106,7 @@ export function ChatView() {
   const [sessions, setSessions] = useState<SessionsPayload | null>(null);
   const [executor, setExecutor] = useState<ExecutorPayload | null>(null);
   const [notice, setNotice] = useState<ChatNotice | null>(null);
+  const [sessionQuery, setSessionQuery] = useState('');
   const [copiedMessageId, setCopiedMessageId] = useState('');
   const [, setRenderTick] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -441,8 +442,20 @@ export function ChatView() {
     setStatus('图片未附加');
   }
 
+  const sessionItems = sessions?.sessions || [];
+  const normalizedSessionQuery = sessionQuery.trim().toLowerCase();
+  const visibleSessions = normalizedSessionQuery
+    ? sessionItems.filter((session) => {
+        const title = sessionTitle(session).toLowerCase();
+        return title.includes(normalizedSessionQuery)
+          || session.session_id.toLowerCase().includes(normalizedSessionQuery);
+      })
+    : sessionItems;
+  const currentSession = sessionItems.find((session) => session.session_id === sessions?.current_session_id);
+  const currentTitle = currentSession ? sessionTitle(currentSession) : '月見八千代';
+
   return (
-    <main className="app-shell chat-shell refined-chat-shell">
+    <main className="app-shell chat-shell refined-chat-shell open-chat-shell">
       {notice ? (
         <div className={`chat-toast ${notice.kind}`} role="status">
           <strong>{notice.title}</strong>
@@ -450,106 +463,161 @@ export function ChatView() {
           <button type="button" aria-label="关闭提示" onClick={() => setNotice(null)}>×</button>
         </div>
       ) : null}
-      <header className="chat-topbar">
-        <div className="chat-title-block">
-          <h1>Yachiyo</h1>
-          <p>本地会话</p>
-        </div>
-        <div className="chat-toolbar">
-          <select
-            className="session-select"
-            value={sessions?.current_session_id || ''}
-            onChange={(event) => void switchSession(event.target.value)}
-            disabled={!sessions?.sessions?.length}
-            title="切换会话"
-          >
-            {sessions?.sessions?.length ? sessions.sessions.map((session) => (
-              <option key={session.session_id} value={session.session_id}>
-                {sessionLabel(session)}
-              </option>
-            )) : <option value="">无对话</option>}
-          </select>
-          <span className="executor-badge">{executorLabel(executor)}</span>
-          <button type="button" className="ghost-button" onClick={() => void openAppView('main')}>主控台</button>
-          <button type="button" className="ghost-button" onClick={() => void cancelProcessing()} disabled={!isProcessing}>停止</button>
-          <button type="button" className="ghost-button" onClick={() => void clearSession()}>新对话</button>
-          <button type="button" className="ghost-button danger-action" onClick={() => void deleteSession()} disabled={!sessions?.sessions?.length}>删除</button>
-        </div>
-      </header>
 
-      <section className="chat-list refined-chat-list" ref={listRef} onClick={handleMessageListClick} onScroll={handleScroll}>
-        {messages.length === 0 ? <div className="empty-state">发送消息开始对话</div> : null}
-        {messages.map((message, index) => (
-          <MessageBubble
-            copied={copiedMessageId === message.id}
-            displayContent={displayMessageText(message, renderStateRef.current)}
-            key={message.id || index}
-            message={message}
-            onCopy={() => void copyMessage(message)}
-          />
-        ))}
-      </section>
+      <div className="chat-layout hy-chat-workspace">
+        <aside className="chat-sidebar hy-chat-sessions" aria-label="会话列表">
+          <div className="chat-sidebar-header hy-chat-sessions-head">
+            <div className="chat-sidebar-title">会话列表</div>
+            <input
+              type="search"
+              className="chat-search"
+              value={sessionQuery}
+              onChange={(event) => setSessionQuery(event.target.value)}
+              placeholder="搜索会话..."
+              aria-label="搜索会话"
+            />
+          </div>
+          <div className="chat-list hy-chat-session-list">
+            {visibleSessions.length ? visibleSessions.map((session) => (
+              <button
+                type="button"
+                className={`chat-item ${session.session_id === sessions?.current_session_id ? 'active' : ''}`}
+                key={session.session_id}
+                onClick={() => void switchSession(session.session_id)}
+              >
+                <span className="chat-item-avatar">🌙</span>
+                <span className="chat-item-info">
+                  <strong className="chat-item-name">{sessionTitle(session)}</strong>
+                  <span className="chat-item-preview">{sessionPreview(session)}</span>
+                </span>
+                <span className="chat-item-time">
+                  {session.session_id === sessions?.current_session_id ? '当前' : `${session.message_count || 0} 条`}
+                </span>
+              </button>
+            )) : (
+              <div className="empty-state inline-empty">
+                {sessionItems.length ? '无匹配会话' : '暂无对话'}
+              </div>
+            )}
+          </div>
+        </aside>
 
-      <form className="composer refined-composer" onSubmit={submit}>
-        <div className="composer-body">
-          {attachments.length ? (
-            <div className="composer-attachments" aria-label="已附加图片">
-              {attachments.map((attachment) => (
-                <figure className="composer-attachment" key={attachment.id}>
-                  <img src={attachment.data_url} alt={attachment.name} />
-                  <figcaption>{attachment.name}</figcaption>
-                  <button
-                    type="button"
-                    aria-label={`移除 ${attachment.name}`}
-                    onClick={() => removeAttachment(attachment.id)}
-                  >
-                    ×
-                  </button>
-                </figure>
-              ))}
+        <section className="chat-main hy-chat-mainpane">
+          <header className="chat-header">
+            <div className="chat-header-info">
+              <div className="chat-header-avatar">🌙</div>
+              <div>
+                <div className="chat-header-name">{currentTitle}</div>
+                <div className="chat-header-status">
+                  <div className={`status-dot ${isProcessing ? 'processing' : 'completed'}`} />
+                  <span>{isProcessing ? '处理中 · 本机 Bridge' : `${status} · ${executorLabel(executor)}`}</span>
+                </div>
+              </div>
             </div>
-          ) : null}
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onCompositionEnd={() => {
-              composerComposingRef.current = false;
-            }}
-            onCompositionStart={() => {
-              composerComposingRef.current = true;
-            }}
-            onKeyDown={handleComposerKeyDown}
-            onPaste={(event) => void handlePaste(event)}
-            placeholder="输入消息，或直接粘贴图片..."
-            disabled={isSending}
-            rows={1}
-          />
-        </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          hidden
-          onChange={(event) => {
-            const files = Array.from(event.target.files || []);
-            event.target.value = '';
-            void addImageFiles(files);
-          }}
-        />
-        <button
-          type="button"
-          className="composer-attach-button"
-          disabled={isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS}
-          title={imageInputHelpText(executor)}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          图片
-        </button>
-        <button type="submit" disabled={isSending || (!input.trim() && attachments.length === 0)}>发送</button>
-      </form>
-      <footer className="status-line refined-status-line">{status}</footer>
+            <div className="chat-header-actions">
+              <button type="button" className="chat-action-btn" title="主控台" aria-label="打开主控台" onClick={() => void openAppView('main')}>⌂</button>
+              <button
+                type="button"
+                className="chat-action-btn"
+                title={imageInputHelpText(executor)}
+                aria-label="附加图片"
+                disabled={isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                🖼
+              </button>
+              <button type="button" className="chat-action-btn" title="停止生成" aria-label="停止生成" onClick={() => void cancelProcessing()} disabled={!isProcessing}>■</button>
+              <button type="button" className="chat-action-btn" title="新对话" aria-label="新对话" onClick={() => void clearSession()}>＋</button>
+              <button type="button" className="chat-action-btn danger-action" title="删除对话" aria-label="删除对话" onClick={() => void deleteSession()} disabled={!sessions?.sessions?.length}>×</button>
+            </div>
+          </header>
+
+          <section className="chat-messages refined-chat-list" ref={listRef} onClick={handleMessageListClick} onScroll={handleScroll}>
+            {messages.length === 0 ? <div className="empty-state">发送消息开始对话</div> : null}
+            {messages.map((message, index) => (
+              <MessageBubble
+                copied={copiedMessageId === message.id}
+                displayContent={displayMessageText(message, renderStateRef.current)}
+                key={message.id || index}
+                message={message}
+                onCopy={() => void copyMessage(message)}
+              />
+            ))}
+          </section>
+
+          <form className="chat-input-area composer refined-composer" onSubmit={submit}>
+            <div className="chat-input-wrapper">
+              <div className="composer-body">
+                {attachments.length ? (
+                  <div className="composer-attachments" aria-label="已附加图片">
+                    {attachments.map((attachment) => (
+                      <figure className="composer-attachment" key={attachment.id}>
+                        <img src={attachment.data_url} alt={attachment.name} />
+                        <figcaption>{attachment.name}</figcaption>
+                        <button
+                          type="button"
+                          aria-label={`移除 ${attachment.name}`}
+                          onClick={() => removeAttachment(attachment.id)}
+                        >
+                          ×
+                        </button>
+                      </figure>
+                    ))}
+                  </div>
+                ) : null}
+                <textarea
+                  className="chat-input"
+                  ref={inputRef}
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onCompositionEnd={() => {
+                    composerComposingRef.current = false;
+                  }}
+                  onCompositionStart={() => {
+                    composerComposingRef.current = true;
+                  }}
+                  onKeyDown={handleComposerKeyDown}
+                  onPaste={(event) => void handlePaste(event)}
+                  placeholder="输入消息..."
+                  disabled={isSending}
+                  rows={1}
+                />
+              </div>
+              <button
+                type="button"
+                className="chat-attach-btn"
+                disabled={isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS}
+                title={imageInputHelpText(executor)}
+                aria-label="附加图片"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                🖼
+              </button>
+              <button
+                type="submit"
+                className="chat-send-btn neon-glow"
+                disabled={isSending || (!input.trim() && attachments.length === 0)}
+                aria-label="发送消息"
+              >
+                ↑
+              </button>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(event) => {
+                const files = Array.from(event.target.files || []);
+                event.target.value = '';
+                void addImageFiles(files);
+              }}
+            />
+          </form>
+          <footer className="status-line refined-status-line">{status}</footer>
+        </section>
+      </div>
     </main>
   );
 }
@@ -570,40 +638,45 @@ function MessageBubble({ copied, displayContent, message, onCopy }: {
         : '';
   const isProcessingEmpty = role === 'assistant' && message.status === 'processing' && !displayContent;
   return (
-    <article className={`chat-bubble refined-message ${role} ${statusClass}`}>
-      <div className="message-header">
-        <span>{roleLabel(role)}{message.status === 'pending' ? ' · 等待中' : ''}</span>
-        <button
-          className={`message-copy-button ${copied ? 'copied' : ''}`}
-          type="button"
-          title={copied ? '已复制' : '复制内容'}
-          aria-label={copied ? '已复制' : '复制内容'}
-          onClick={onCopy}
-        >
-          {copied ? '✓' : '⧉'}
-        </button>
-      </div>
-      {isProcessingEmpty ? (
-        <TypingIndicator />
-      ) : (
-        <div className="message-content markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(displayContent) }} />
-      )}
-      {message.attachments?.length ? (
-        <div className="message-attachments">
-          {message.attachments.map((attachment) => (
-            <ImageAttachmentViewer attachment={attachment} key={attachment.id || attachment.name} />
-          ))}
+    <article className={`message message--${messageVisualRole(role)} refined-message ${role} ${statusClass}`}>
+      <div className="message-avatar">{messageAvatar(role)}</div>
+      <div className="message-stack">
+        <div className="message-bubble">
+          {isProcessingEmpty ? (
+            <TypingIndicator />
+          ) : (
+            <div className="message-content markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(displayContent) }} />
+          )}
+          {message.attachments?.length ? (
+            <div className="message-attachments">
+              {message.attachments.map((attachment) => (
+                <ImageAttachmentViewer attachment={attachment} key={attachment.id || attachment.name} />
+              ))}
+            </div>
+          ) : null}
+          {message.error ? <div className="message-error">{message.error}</div> : null}
         </div>
-      ) : null}
-      {message.error ? <div className="message-error">{message.error}</div> : null}
+        <div className="message-time">
+          <span>{messageMetaText(role, message.status)}</span>
+          <button
+            className={`message-copy-button ${copied ? 'copied' : ''}`}
+            type="button"
+            title={copied ? '已复制' : '复制内容'}
+            aria-label={copied ? '已复制' : '复制内容'}
+            onClick={onCopy}
+          >
+            {copied ? '✓' : '⧉'}
+          </button>
+        </div>
+      </div>
     </article>
   );
 }
 
 function TypingIndicator() {
   return (
-    <span className="typing-indicator" aria-label="处理中">
-      <span>.</span><span>.</span><span>.</span>
+    <span className="typing-indicator loading-dots" aria-label="处理中">
+      <span className="loading-dot" /><span className="loading-dot" /><span className="loading-dot" />
     </span>
   );
 }
@@ -647,6 +720,29 @@ function roleLabel(role: string) {
   return '系统';
 }
 
+function messageVisualRole(role: string) {
+  if (role === 'user') return 'user';
+  if (role === 'assistant') return 'agent';
+  return 'system';
+}
+
+function messageAvatar(role: string) {
+  if (role === 'user') return '👤';
+  if (role === 'assistant') return '🌙';
+  return 'i';
+}
+
+function messageMetaText(role: string, status?: string) {
+  const statusText = status === 'pending'
+    ? ' · 等待中'
+    : status === 'processing'
+      ? ' · 输入中'
+      : status === 'failed'
+        ? ' · 失败'
+        : '';
+  return `${roleLabel(role)}${statusText}`;
+}
+
 function executorLabel(executor: ExecutorPayload | null) {
   if (!executor?.available) return '—';
   return executor.executor === 'HermesExecutor' ? 'Hermes' : '模拟';
@@ -667,9 +763,13 @@ function imageInputHelpText(executor: ExecutorPayload | null) {
   return imageInput.reason || imageInput.label || '附加图片';
 }
 
-function sessionLabel(session: SessionItem) {
-  const title = session.title || session.session_id.slice(0, 8);
-  return `${title} (${session.message_count || 0})`;
+function sessionTitle(session: SessionItem) {
+  return session.title || session.session_id.slice(0, 8);
+}
+
+function sessionPreview(session: SessionItem) {
+  if (!session.message_count) return '新的月夜会话';
+  return `共 ${session.message_count} 条消息`;
 }
 
 function withResolvedAttachmentUrls(messages: ChatMessage[], baseUrl: string): ChatMessage[] {

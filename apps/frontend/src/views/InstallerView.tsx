@@ -849,10 +849,32 @@ export function InstallerView() {
     && !ready
     && ['installed_needs_setup', 'setup_in_progress', 'installed_not_initialized'].includes(statusValue),
   );
+  const installerSteps = [
+    {
+      label: '欢迎',
+      detail: '启动 Hermes-Yachiyo',
+      state: 'done',
+    },
+    {
+      label: '依赖检查',
+      detail: installInfo?.platform || '检测 macOS 基础环境',
+      state: installInfo?.command_exists || ready ? 'done' : 'current',
+    },
+    {
+      label: '模型配置',
+      detail: hermesConfig?.connection_validation?.verified ? '连接已验证' : '配置 Provider 与模型',
+      state: ready || hermesConfig?.connection_validation?.verified ? 'done' : installInfo?.command_exists ? 'current' : 'pending',
+    },
+    {
+      label: '完成',
+      detail: ready ? '主控台可用' : '等待工作区初始化',
+      state: ready ? 'done' : 'pending',
+    },
+  ];
 
   return (
-    <main className="app-shell installer-shell">
-      <header className="topbar">
+    <main className="app-shell installer-shell hy-installer-route">
+      <header className="topbar hy-installer-header hy-stagger">
         <div>
           <h1>{title}</h1>
           <p>{installerSubtitle(statusValue, installInfo)}</p>
@@ -869,7 +891,20 @@ export function InstallerView() {
         statusValue={statusValue}
       />
 
-      <section className="settings-grid expanded-settings-grid">
+      <section className="hy-installer-steps hy-stagger" aria-label="安装步骤">
+        {installerSteps.map((step, index) => (
+          <div className="hy-installer-step-segment" key={step.label}>
+            <article className={`hy-installer-step ${step.state}`}>
+              <span className="hy-installer-step-number">{step.state === 'done' ? '✓' : index + 1}</span>
+              <strong>{step.label}</strong>
+              <small>{step.detail}</small>
+            </article>
+            {index < installerSteps.length - 1 ? <i className={step.state === 'done' ? 'hy-installer-step-connector done' : 'hy-installer-step-connector'} aria-hidden /> : null}
+          </div>
+        ))}
+      </section>
+
+      <section className="settings-grid expanded-settings-grid hy-installer-status-grid hy-stagger">
         <article className="panel setting-card">
           <span>安装状态</span>
           <strong>{installStatusLabel(statusValue)}</strong>
@@ -889,7 +924,7 @@ export function InstallerView() {
 
       {installInfo?.error_message ? <div className="notice danger">{installInfo.error_message}</div> : null}
 
-      <section className="settings-detail-grid">
+      <section className="settings-detail-grid hy-installer-content hy-stagger">
         <article className="panel settings-section">
           <div className="section-heading-row">
             <h2>引导步骤</h2>
