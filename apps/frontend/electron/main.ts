@@ -46,7 +46,22 @@ const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
 const MAX_LAUNCHER_SHAPE_RECTS = 10000;
 type IconKind = 'dock' | 'tray' | 'window';
 
-type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'tools' | 'proactive-tts' | 'bubble' | 'bubble-menu' | 'live2d';
+type AppView =
+  | 'main'
+  | 'chat'
+  | 'settings'
+  | 'installer'
+  | 'provider'
+  | 'resources'
+  | 'workspace'
+  | 'diagnostics'
+  | 'tools'
+  | 'tools-all'
+  | 'activity-all'
+  | 'proactive-tts'
+  | 'bubble'
+  | 'bubble-menu'
+  | 'live2d';
 type ModeId = 'bubble' | 'live2d';
 type InstallerTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup' | 'update-hermes' | 'update-hermes-backup';
 
@@ -738,6 +753,9 @@ function enforceWindowTitle(targetWindow: BrowserWindow, title: string): void {
 function mainWindowTitle(params: Record<string, string> = {}): string {
   const view = normalizeView(params.view);
   if (view === 'installer') return 'Hermes-Yachiyo 安装向导';
+  if (view === 'provider') return 'Hermes-Yachiyo 模型配置';
+  if (view === 'resources') return 'Hermes-Yachiyo 资源管理';
+  if (view === 'workspace') return 'Hermes-Yachiyo 工作区';
   if (view === 'settings') return params.mode === 'live2d'
     ? 'Hermes-Yachiyo Live2D 设置'
     : params.mode === 'bubble'
@@ -745,6 +763,8 @@ function mainWindowTitle(params: Record<string, string> = {}): string {
       : 'Hermes-Yachiyo 应用设置';
   if (view === 'diagnostics') return 'Hermes-Yachiyo 诊断工具';
   if (view === 'tools') return 'Hermes-Yachiyo 工具中心';
+  if (view === 'tools-all') return 'Hermes-Yachiyo 桌面工具';
+  if (view === 'activity-all') return 'Hermes-Yachiyo 活动日志';
   if (view === 'proactive-tts') return 'Hermes-Yachiyo 主动关怀语音';
   return 'Hermes-Yachiyo 主控台';
 }
@@ -1115,6 +1135,43 @@ function mainWindowBounds(settings: UiSettings | null = lastUiSettings): { width
   };
 }
 
+function chatWindowBounds(settings: UiSettings | null = lastUiSettings, workArea: Rectangle = screen.getPrimaryDisplay().workArea): { width: number; height: number } {
+  const base = mainWindowBounds(settings);
+  const maxWidth = Math.max(860, Math.min(1440, workArea.width));
+  const maxHeight = Math.max(580, Math.min(1000, workArea.height));
+  return {
+    width: Math.round(clamp(Math.max(base.width, 1120), 860, maxWidth)),
+    height: Math.round(clamp(Math.max(base.height, 760), 580, maxHeight)),
+  };
+}
+
+function chatWindowMinSize(settings: UiSettings | null = lastUiSettings, workArea: Rectangle = screen.getPrimaryDisplay().workArea): { width: number; height: number } {
+  const bounds = chatWindowBounds(settings, workArea);
+  return {
+    width: Math.min(1080, bounds.width),
+    height: Math.min(720, bounds.height),
+  };
+}
+
+function ensureChatWindowUsableBounds(settings: UiSettings | null = lastUiSettings): void {
+  if (!chatWindow || chatWindow.isDestroyed()) return;
+  const current = chatWindow.getBounds();
+  const workArea = screen.getDisplayMatching(current).workArea;
+  const target = chatWindowBounds(settings, workArea);
+  const minimum = chatWindowMinSize(settings, workArea);
+  chatWindow.setMinimumSize(minimum.width, minimum.height);
+  if (current.width >= minimum.width && current.height >= minimum.height) return;
+  const width = Math.max(current.width, target.width);
+  const height = Math.max(current.height, target.height);
+  const x = width >= workArea.width
+    ? workArea.x
+    : Math.round(clamp(current.x, workArea.x, workArea.x + workArea.width - width));
+  const y = height >= workArea.height
+    ? workArea.y
+    : Math.round(clamp(current.y, workArea.y, workArea.y + workArea.height - height));
+  chatWindow.setBounds({ x, y, width, height }, false);
+}
+
 function createMainWindow(
   params: Record<string, string> = {},
   settings: UiSettings | null = lastUiSettings,
@@ -1140,7 +1197,13 @@ function createMainWindow(
     minWidth: 860,
     minHeight: 580,
     show: false,
-    backgroundColor: '#0e1117',
+    backgroundColor: '#060913',
+    ...(process.platform === 'darwin'
+      ? {
+          titleBarStyle: 'hiddenInset' as const,
+          trafficLightPosition: { x: 16, y: 18 },
+        }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -1293,19 +1356,26 @@ function restoreModeWindowIfPolluted(): void {
   const route = routeForWindow(modeWindow);
   if (!route) return;
   if (route.view !== activeMode && !(activeMode === 'bubble' && route.view === 'bubble-menu')) {
-    modeWindow.loadURL(rendererUrl({ view: activeMode }));
+    modeWindow.loadURL(rendererUrl({ view: activeMode, surface: 'desktop' }));
   }
 }
 
 function createChatWindow(params: Record<string, string> = {}): void {
+  const bounds = chatWindowBounds();
+  const minimum = chatWindowMinSize();
   chatWindow = new BrowserWindow({
     title: 'Hermes-Yachiyo 对话',
-    width: 520,
-    height: 680,
+    ...bounds,
     icon: appIconPath('window'),
-    minWidth: 420,
-    minHeight: 560,
-    backgroundColor: '#121622',
+    minWidth: minimum.width,
+    minHeight: minimum.height,
+    backgroundColor: '#060913',
+    ...(process.platform === 'darwin'
+      ? {
+          titleBarStyle: 'hiddenInset' as const,
+          trafficLightPosition: { x: 16, y: 18 },
+        }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -1330,6 +1400,7 @@ function showChatWindow(params: Record<string, string> = {}): void {
     createChatWindow(params);
     return;
   }
+  ensureChatWindowUsableBounds();
   const route = routeForWindow(chatWindow);
   const requestedSessionId = params.session_id || '';
   if (
@@ -1360,7 +1431,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeView(value: unknown): AppView {
-  const views: AppView[] = ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'proactive-tts', 'bubble', 'bubble-menu', 'live2d'];
+  const views: AppView[] = [
+    'main',
+    'chat',
+    'settings',
+    'installer',
+    'provider',
+    'resources',
+    'workspace',
+    'diagnostics',
+    'tools',
+    'tools-all',
+    'activity-all',
+    'proactive-tts',
+    'bubble',
+    'bubble-menu',
+    'live2d',
+  ];
   return typeof value === 'string' && views.includes(value as AppView) ? (value as AppView) : 'main';
 }
 
@@ -1579,11 +1666,11 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
       if (mode === 'live2d') {
         modeWindow.setVisibleOnAllWorkspaces(booleanFromConfig(config.show_on_all_spaces, true), { visibleOnFullScreen: true });
       }
-      modeWindow.loadURL(rendererUrl({ view: mode }));
+      modeWindow.loadURL(rendererUrl({ view: mode, surface: 'desktop' }));
     }
     const route = routeForWindow(modeWindow);
     if (route?.view !== mode && !(mode === 'bubble' && route?.view === 'bubble-menu')) {
-      modeWindow.loadURL(rendererUrl({ view: mode }));
+      modeWindow.loadURL(rendererUrl({ view: mode, surface: 'desktop' }));
     }
     modeWindow.show();
     modeWindow.focus();
@@ -1638,7 +1725,7 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     createdModeWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   }
   applyModeWindowTopPreference();
-  createdModeWindow.loadURL(rendererUrl({ view: mode }));
+  createdModeWindow.loadURL(rendererUrl({ view: mode, surface: 'desktop' }));
   createdModeWindow.webContents.on('will-navigate', (event, targetUrl) => {
     if (redirectDesktopModeNavigation(targetUrl, mode)) event.preventDefault();
   });
@@ -2166,17 +2253,18 @@ app.whenReady().then(() => {
   void (async () => {
     await prepareBridgeUrlForPackagedBackend();
     startBackend();
+    createMainWindow({ view: 'main' }, lastUiSettings, { focusOnReady: false });
     const installInfo = await waitForInstallInfo();
     lastInstallReady = installReady(installInfo);
     if (!lastInstallReady) {
-      createMainWindow({ view: 'installer' });
+      showMainWindow({ view: 'installer' }, lastUiSettings, { focusOnReady: false });
       return;
     }
     hasEnteredMainExperience = true;
     const settings = await waitForUiSettings();
     if (settings) lastUiSettings = settings;
     configureTray(settings);
-    showMainWindow({}, settings, { respectStartMinimized: true, focusOnReady: false });
+    showMainWindow({}, settings, { focusOnReady: false });
     await openConfiguredDesktopMode(undefined, settings);
     if (settings?.window_mode?.open_chat_on_start) showChatWindow();
   })();
