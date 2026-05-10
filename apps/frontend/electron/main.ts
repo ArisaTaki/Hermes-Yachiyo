@@ -43,6 +43,7 @@ const BRIDGE_SETTINGS_RETRY_MS = 250;
 const BUBBLE_SCREEN_MARGIN = 24;
 const POSITION_SAVE_DEBOUNCE_MS = 260;
 const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
+const TRANSPARENT_WINDOW_BACKGROUND = '#00000000';
 const MAX_LAUNCHER_SHAPE_RECTS = 10000;
 type IconKind = 'dock' | 'tray' | 'window';
 
@@ -766,6 +767,7 @@ function mainWindowTitle(params: Record<string, string> = {}): string {
   if (view === 'tools-all') return 'Hermes-Yachiyo 桌面工具';
   if (view === 'activity-all') return 'Hermes-Yachiyo 活动日志';
   if (view === 'proactive-tts') return 'Hermes-Yachiyo 主动关怀语音';
+  if (view === 'chat') return 'Hermes-Yachiyo 对话';
   return 'Hermes-Yachiyo 主控台';
 }
 
@@ -1112,7 +1114,7 @@ async function restartBackendProcess(targetBridgeUrl?: unknown): Promise<{ succe
 function rendererUrl(params: Record<string, string> = {}): string {
   const query = new URLSearchParams({ bridge: bridgeUrl });
   Object.entries(params)
-    .filter(([key]) => key !== 'view' && key !== 'mode')
+    .filter(([key]) => key !== 'view' && key !== 'mode' && key !== 'restore')
     .forEach(([key, value]) => query.set(key, value));
   const route = routeHash(params);
   if (!app.isPackaged) return `${FRONTEND_DEV_URL}?${query.toString()}${route}`;
@@ -1236,10 +1238,6 @@ function showMainWindow(
   settings: UiSettings | null = lastUiSettings,
   options: MainWindowOptions = {},
 ): void {
-  if (normalizeView(params.view) === 'chat') {
-    showChatWindow(params);
-    return;
-  }
   if (!mainWindow || mainWindow.isDestroyed()) {
     createMainWindow(params, settings, options);
     return;
@@ -1337,7 +1335,7 @@ function routeForWindow(targetWindow: BrowserWindow | null): { view: AppView; pa
 
 function mainActivationRouteParams(route: { view: AppView; params: Record<string, string> } | null): Record<string, string> {
   if (!route) return { view: 'main' };
-  if (route.view === 'chat' || route.view === 'bubble' || route.view === 'bubble-menu' || route.view === 'live2d') {
+  if (route.view === 'bubble' || route.view === 'bubble-menu' || route.view === 'live2d') {
     return { view: 'main' };
   }
   return { ...route.params, view: route.view };
@@ -1346,7 +1344,7 @@ function mainActivationRouteParams(route: { view: AppView; params: Record<string
 function restoreMainWindowIfPolluted(): void {
   const route = routeForWindow(mainWindow);
   if (!route) return;
-  if (route.view === 'chat' || route.view === 'bubble' || route.view === 'bubble-menu' || route.view === 'live2d') {
+  if (route.view === 'bubble' || route.view === 'bubble-menu' || route.view === 'live2d') {
     mainWindow?.loadURL(rendererUrl({ view: 'main' }));
   }
 }
@@ -1396,27 +1394,25 @@ function createChatWindow(params: Record<string, string> = {}): void {
 function showChatWindow(params: Record<string, string> = {}): void {
   restoreMainWindowIfPolluted();
   restoreModeWindowIfPolluted();
-  if (!chatWindow) {
-    createChatWindow(params);
-    return;
-  }
-  ensureChatWindowUsableBounds();
-  const route = routeForWindow(chatWindow);
-  const requestedSessionId = params.session_id || '';
-  if (
-    route?.view !== 'chat'
-    || (requestedSessionId && route.params.session_id !== requestedSessionId)
-  ) {
-    chatWindow.loadURL(rendererUrl({ ...params, view: 'chat' }));
-  }
-  showMacDockIcon();
-  chatWindow.show();
-  chatWindow.focus();
+  showMainWindow({ ...params, view: 'chat' });
+}
+
+function showMainWindowAtLastRoute(params: Record<string, string> = {}): void {
+  restoreMainWindowIfPolluted();
+  restoreModeWindowIfPolluted();
+  const cleanParams = { ...params };
+  delete cleanParams.restore;
+  const route = routeForWindow(mainWindow);
+  showMainWindow({ ...mainActivationRouteParams(route), ...cleanParams });
 }
 
 function openAppView(view: AppView, params: Record<string, string> = {}): void {
   if (view === 'chat') {
     showChatWindow(params);
+    return;
+  }
+  if (view === 'main' && params.restore === 'last') {
+    showMainWindowAtLastRoute(params);
     return;
   }
   if (view === 'bubble' || view === 'bubble-menu' || view === 'live2d') {
@@ -1480,7 +1476,8 @@ function routeFromUrl(rawUrl: string): { view: AppView; params: Record<string, s
     if (view === 'settings' && rawMode) params.mode = rawMode;
     return { view, params };
   }
-  return { view: normalizeView(parsed.searchParams.get('view')), params };
+  const view = normalizeView(parsed.searchParams.get('view'));
+  return { view, params };
 }
 
 function redirectDesktopModeNavigation(targetUrl: string, launcherMode: ModeId): boolean {
@@ -1652,6 +1649,28 @@ function restoreModeWindowTopPreference(): void {
   applyModeWindowTopPreference();
 }
 
+function repaintTransparentModeWindow(targetWindow: BrowserWindow): void {
+  if (targetWindow.isDestroyed()) return;
+  targetWindow.setBackgroundColor(TRANSPARENT_WINDOW_BACKGROUND);
+  if (process.platform === 'darwin') {
+    try {
+      targetWindow.invalidateShadow();
+    } catch {}
+  }
+}
+
+function showTransparentModeWindowWhenReady(targetWindow: BrowserWindow): void {
+  let shown = false;
+  const show = () => {
+    if (shown || targetWindow.isDestroyed()) return;
+    shown = true;
+    repaintTransparentModeWindow(targetWindow);
+    targetWindow.showInactive();
+  };
+  targetWindow.once('ready-to-show', show);
+  setTimeout(show, 1200);
+}
+
 function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> = {}): void {
   showMacDockIcon();
   if (modeWindow && !modeWindow.isDestroyed() && activeMode === mode) {
@@ -1662,6 +1681,9 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
       const bounds = desktopModeBounds(mode, config);
       suppressModeWindowPositionSave();
       modeWindow.setBounds(bounds, false);
+      repaintTransparentModeWindow(modeWindow);
+      setModeWindowPointerInteractive(mode, false);
+      modeWindowShapeApplied = false;
       applyModeWindowTopPreference();
       if (mode === 'live2d') {
         modeWindow.setVisibleOnAllWorkspaces(booleanFromConfig(config.show_on_all_spaces, true), { visibleOnFullScreen: true });
@@ -1672,6 +1694,9 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     if (route?.view !== mode && !(mode === 'bubble' && route?.view === 'bubble-menu')) {
       modeWindow.loadURL(rendererUrl({ view: mode, surface: 'desktop' }));
     }
+    repaintTransparentModeWindow(modeWindow);
+    setModeWindowPointerInteractive(mode, false);
+    modeWindowShapeApplied = false;
     modeWindow.show();
     modeWindow.focus();
     return;
@@ -1709,15 +1734,19 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     resizable: mode === 'live2d',
     movable: true,
     skipTaskbar: true,
+    show: false,
+    paintWhenInitiallyHidden: true,
     alwaysOnTop,
     hasShadow: false,
-    backgroundColor: '#00000000',
+    backgroundColor: TRANSPARENT_WINDOW_BACKGROUND,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+  repaintTransparentModeWindow(createdModeWindow);
+  showTransparentModeWindowWhenReady(createdModeWindow);
   modeWindow = createdModeWindow;
   enforceWindowTitle(createdModeWindow, modeWindowTitle(mode));
 
@@ -1726,6 +1755,11 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
   }
   applyModeWindowTopPreference();
   createdModeWindow.loadURL(rendererUrl({ view: mode, surface: 'desktop' }));
+  createdModeWindow.webContents.on('did-start-loading', () => {
+    modeWindowShapeApplied = false;
+    setModeWindowPointerInteractive(mode, false);
+  });
+  createdModeWindow.webContents.on('did-finish-load', () => repaintTransparentModeWindow(createdModeWindow));
   createdModeWindow.webContents.on('will-navigate', (event, targetUrl) => {
     if (redirectDesktopModeNavigation(targetUrl, mode)) event.preventDefault();
   });
@@ -1733,12 +1767,17 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     if (redirectDesktopModeNavigation(url, mode)) return { action: 'deny' };
     return { action: 'allow' };
   });
-  if (mode === 'live2d' && LIVE2D_POINTER_PASSTHROUGH_ENABLED) {
-    setTimeout(() => setModeWindowPointerInteractive('live2d', false), 260);
+  if ((mode === 'live2d' || mode === 'bubble') && LIVE2D_POINTER_PASSTHROUGH_ENABLED) {
+    setTimeout(() => setModeWindowPointerInteractive(mode, false), 260);
   }
   createdModeWindow.on('focus', restoreModeWindowTopPreference);
   createdModeWindow.on('move', () => scheduleModeWindowPositionSave(mode, config));
-  createdModeWindow.on('resize', () => scheduleModeWindowPositionSave(mode, config));
+  createdModeWindow.on('resize', () => {
+    repaintTransparentModeWindow(createdModeWindow);
+    modeWindowShapeApplied = false;
+    setModeWindowPointerInteractive(mode, false);
+    scheduleModeWindowPositionSave(mode, config);
+  });
   createdModeWindow.on('closed', () => {
     if (modeWindow !== createdModeWindow) return;
     if (positionSaveTimer) {
@@ -1771,14 +1810,14 @@ function setModeWindowHitRegions(mode: ModeId, rawRegions: unknown): boolean {
   const bounds = modeWindow.getBounds();
   const shapePayload = normalizeLauncherShapePayload(rawRegions, bounds);
   const shapeRects = normalizeLauncherShapeRects(shapePayload.regions, bounds, shapePayload.scaleX, shapePayload.scaleY);
-  if (!shapeRects.length) return false;
+  if (!shapeRects.length) {
+    modeWindowShapeApplied = false;
+    setModeWindowPointerInteractive(mode, false);
+    return false;
+  }
   try {
     modeWindow.setShape(shapeRects);
     modeWindowShapeApplied = true;
-    if (modeWindowIgnoringMouse) {
-      modeWindow.setIgnoreMouseEvents(false);
-      modeWindowIgnoringMouse = false;
-    }
     return true;
   } catch (error) {
     modeWindowShapeApplied = false;
@@ -2232,7 +2271,7 @@ ipcMain.handle('hermes:openLauncherMenu', (event, mode: unknown) => {
   const targetWindow = BrowserWindow.fromWebContents(event.sender) || undefined;
   const menu = Menu.buildFromTemplate([
     { label: '打开对话', click: () => showChatWindow() },
-    { label: '主控台', click: () => showMainWindow({ view: 'main' }) },
+    { label: '主控台', click: () => showMainWindowAtLastRoute({ restore: 'last' }) },
     { label: `${modeId === 'live2d' ? 'Live2D' : 'Bubble'} 设置`, click: () => showMainWindow({ view: 'settings', mode: modeId }) },
     { type: 'separator' },
     { label: '重新打开表现态', click: () => void openConfiguredDesktopMode(modeId) },

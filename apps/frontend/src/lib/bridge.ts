@@ -222,7 +222,7 @@ function appViewUrl(view: string, params: Record<string, string> = {}): string {
   const route = isAppView(view) ? routePath(view, params) : routePath('main');
   const query = new URLSearchParams(window.location.search);
   Object.entries(params)
-    .filter(([key]) => key !== 'view' && key !== 'mode')
+    .filter(([key]) => key !== 'view' && key !== 'mode' && key !== 'restore')
     .forEach(([key, value]) => {
       if (value) query.set(key, value);
       else query.delete(key);

@@ -622,7 +622,7 @@ export function MainView() {
       if (result.ok === false || result.status === 'blocked' || result.status === 'failed') {
         throw new Error(result.error || result.message || '主动关怀测试触发失败');
       }
-      setActionStatus(result.message || '已立即安排主动桌面观察；稍后可在对话窗口查看结果');
+      setActionStatus(result.message || '已立即安排主动桌面观察；稍后可在主控台对话查看结果');
       await refreshDashboardData();
     } catch (err) {
       setActionStatus(err instanceof Error ? err.message : '主动关怀测试触发失败');
@@ -799,15 +799,15 @@ export function MainView() {
     {
       number: '05',
       title: '首条消息',
-      detail: data?.chat?.status_label || '打开聊天窗口，再同步到气泡或 Live2D。',
+      detail: data?.chat?.status_label || '打开主控台对话，再同步到气泡或 Live2D。',
       state: data?.chat?.recent_sessions?.length ? 'done' : 'pending',
     },
   ];
   const modePreviewCopy = {
     chat: {
       title: '聊天交接',
-      body: data?.chat?.status_label || '聊天窗口保留完整上下文、Markdown、附件和停止任务控制。',
-      stage: '聊天窗口是完整会话入口，气泡和 Live2D 只同步状态与最新回复。',
+      body: data?.chat?.status_label || '主控台对话保留完整上下文、Markdown、附件和停止任务控制。',
+      stage: '主控台对话是完整会话入口，气泡和 Live2D 只同步状态与最新回复。',
     },
     bubble: {
       title: '气泡模式',
@@ -862,7 +862,7 @@ export function MainView() {
                 <Phase3NavButton code="03" title="工作区初始化" meta={workspaceReady ? 'ok' : '~/.h'} onClick={() => void openAppView('installer')} />
 
                 <Phase3NavSection title="日常桌面" />
-                <Phase3NavButton code="CW" title="聊天窗口" meta={conversationCountLabel(data?.chat?.recent_sessions)} onClick={() => void openAppView('chat')} />
+                <Phase3NavButton code="CW" title="主控台对话" meta={conversationCountLabel(data?.chat?.recent_sessions)} onClick={() => void openAppView('main', { focus: 'chat' })} />
                 <Phase3NavButton code="BU" title="气泡模式" meta="edge" onClick={() => openDesktopMode('bubble')} />
                 <Phase3NavButton code="L2" title="Live2D 模式" meta="zip" onClick={() => openDesktopMode('live2d')} />
                 <Phase3NavButton code="PC" title="主动关照" meta="tts" onClick={() => navigateTo('proactive-tts')} />
@@ -870,7 +870,7 @@ export function MainView() {
                 <Phase3NavSection title="维护与安全" />
                 <Phase3NavButton code="TL" title="工具" meta={toolCenterDetail(data?.hermes)} onClick={() => void openAppView('tools')} />
                 <Phase3NavButton code="DX" title="诊断" meta={data?.hermes?.doctor_issues_count ? String(data.hermes.doctor_issues_count) : '10'} onClick={() => void openAppView('diagnostics')} />
-                <Phase3NavButton code="BR" title="备份 / 恢复" meta="safe" onClick={() => void openAppView('settings')} />
+                <Phase3NavButton code="BR" title="备份 / 恢复" meta="safe" onClick={() => navigateTo('settings', { mode: 'system' })} />
                 <Phase3NavButton code="UN" title="卸载预览" meta="dry" onClick={() => setActiveDetail('uninstall')} />
               </nav>
 
@@ -891,7 +891,7 @@ export function MainView() {
                     <h1>一张月光下的本地 Agent 工作台：安装、配置、初始化、陪伴使用。</h1>
                     <p>
                       把 Hermes-Yachiyo 定位为 macOS 桌面上的 Hermes Agent 控制室：
-                      先完成运行时安装、模型供应商验证和本地工作区初始化，再进入聊天窗口、
+                      先完成运行时安装、模型供应商验证和本地工作区初始化，再进入主控台对话、
                       气泡模式、Live2D 模式、主动关照、TTS / GPT-SoVITS 资源、工具、诊断、备份恢复与卸载预览。
                     </p>
                   </div>
@@ -976,7 +976,7 @@ export function MainView() {
                 <section className="phase3-panel" aria-label="聊天与桌面模式预览">
                   <header className="phase3-panel-header">
                     <div>
-                      <h2>聊天窗口、气泡模式、Live2D 共享同一条会话链</h2>
+                      <h2>主控台对话、气泡模式、Live2D 共享同一条会话链</h2>
                       <p>每种桌面模式都是入口，不是另起一个聊天机器人。</p>
                     </div>
                     <div className="phase3-segmented" role="tablist" aria-label="模式预览">
@@ -998,13 +998,13 @@ export function MainView() {
                         <span className="phase3-dot red" />
                         <span className="phase3-dot yellow" />
                         <span className="phase3-dot green" />
-                        <span>Hermes-Yachiyo 聊天窗口</span>
+                        <span>Hermes-Yachiyo 主控台对话</span>
                       </div>
                       <div className="phase3-chat-area">
                         <div className="phase3-bubble agent">Yachiyo 已准备好。Hermes Agent {data?.hermes?.command_exists ? '已安装' : '仍需安装'}，供应商连接{providerVerified ? '已测试' : '还需要测试'}。</div>
                         <div className="phase3-bubble user">初始化工作区，并把气泡固定在桌面边缘。</div>
                         <div className="phase3-bubble agent">工作区{workspaceReady ? `位于 ${data?.workspace?.path}` : '将创建在 ~/.hermes/yachiyo/'}。气泡会同步未读、运行中、失败和最近回复状态。</div>
-                        <button type="button" className="phase3-composer" onClick={() => void openAppView('chat')}>输入消息、粘贴图片，或停止当前任务...</button>
+                        <button type="button" className="phase3-composer" onClick={() => void openAppView('main', { focus: 'chat' })}>输入消息、粘贴图片，或停止当前任务...</button>
                       </div>
                     </div>
                     <div className="phase3-mode-canvas">
@@ -1031,7 +1031,7 @@ export function MainView() {
                     <Phase3IaNode primary title="首页 / 运行手册" body="首次启动清单、本机状态、启动聊天、模式切换和下一步行动。" />
                     <Phase3IaNode title="供应商" body="供应商、模型、Base URL、API Key、图像路由和连接测试历史。" />
                     <Phase3IaNode title="工作区" body="本地路径、聊天数据库、附件、日志、资源文件夹和备份目标。" />
-                    <Phase3IaNode title="会话" body="聊天窗口、Markdown 回复、图片附件、停止任务、会话摘要。" />
+                    <Phase3IaNode title="会话" body="主控台对话、Markdown 回复、图片附件、停止任务、会话摘要。" />
                     <Phase3IaNode title="桌面模式" body="气泡、Live2D、共享会话状态、窗口行为、透明度、置顶与边缘吸附。" />
                     <Phase3IaNode title="关照与语音" body="主动观察、屏幕录制权限、TTS 供应商、GPT-SoVITS 服务状态。" />
                     <Phase3IaNode title="工具与诊断" body="Hermes 工具组、受限状态、CDP 端点、配置检查、鉴权列表与发现项。" />
@@ -2058,7 +2058,7 @@ function HermesConnectionResult({ result }: { result: HermesConnectionTestResult
 
 function ConversationList({ sessions }: { sessions: ChatSession[] }) {
   if (!sessions.length) {
-    return <div className="empty-state inline-empty">暂无对话。打开聊天窗口开始完整对话。</div>;
+    return <div className="empty-state inline-empty">暂无对话。打开主控台对话开始完整对话。</div>;
   }
   return (
     <div className="conversation-list">
@@ -2067,7 +2067,7 @@ function ConversationList({ sessions }: { sessions: ChatSession[] }) {
           className={session.is_current ? 'conversation-card current' : 'conversation-card'}
           key={session.session_id || session.title}
           type="button"
-          onClick={() => void openAppView('chat')}
+          onClick={() => void openAppView('main', { focus: 'chat' })}
         >
           <span className="conversation-main-row">
             <strong>{session.title || '新对话'}</strong>

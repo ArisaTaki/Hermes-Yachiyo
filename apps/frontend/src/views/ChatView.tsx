@@ -79,6 +79,10 @@ type RenderState = {
   target: string;
 };
 
+type ChatViewProps = {
+  embedded?: boolean;
+};
+
 type ChatNotice = {
   id: number;
   kind: 'warn' | 'danger';
@@ -96,7 +100,7 @@ const COPY_FEEDBACK_MS = 1500;
 const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 
-export function ChatView() {
+export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -455,7 +459,7 @@ export function ChatView() {
   const currentTitle = currentSession ? sessionTitle(currentSession) : '月見八千代';
 
   return (
-    <main className="app-shell chat-shell refined-chat-shell open-chat-shell">
+    <section className={`${embedded ? '' : 'app-shell '}chat-shell refined-chat-shell open-chat-shell${embedded ? ' embedded-chat-shell' : ''}`}>
       {notice ? (
         <div className={`chat-toast ${notice.kind}`} role="status">
           <strong>{notice.title}</strong>
@@ -515,7 +519,9 @@ export function ChatView() {
               </div>
             </div>
             <div className="chat-header-actions">
-              <button type="button" className="chat-action-btn" title="主控台" aria-label="打开主控台" onClick={() => void openAppView('main')}>⌂</button>
+              {embedded ? null : (
+                <button type="button" className="chat-action-btn" title="主控台" aria-label="打开主控台" onClick={() => void openAppView('main')}>⌂</button>
+              )}
               <button
                 type="button"
                 className="chat-action-btn"
@@ -618,7 +624,7 @@ export function ChatView() {
           <footer className="status-line refined-status-line">{status}</footer>
         </section>
       </div>
-    </main>
+    </section>
   );
 }
 
