@@ -106,6 +106,10 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "auto_open_chat_window": bool,
         "enable_quick_input": bool,
         "mouse_follow_enabled": bool,
+        "render_quality_preset": str,
+        "render_fps": int,
+        "render_resolution": float,
+        "hit_region_precision": str,
         "idle_motion_group": str,
         "enable_expressions": bool,
         "enable_physics": bool,
@@ -244,6 +248,14 @@ def _validate_field(key: str, value: Any) -> str | None:
         return "click_action 仅支持 focus_stage / open_chat / toggle_reply"
     if key.endswith(".position_anchor") and value not in {"left_bottom", "right_bottom", "custom"}:
         return "position_anchor 仅支持 left_bottom / right_bottom / custom"
+    if key.endswith(".render_quality_preset") and value not in {"battery", "balanced", "quality", "custom"}:
+        return "render_quality_preset 仅支持 battery / balanced / quality / custom"
+    if key.endswith(".render_fps") and not (12 <= value <= 60):
+        return "render_fps 须在 12-60 之间"
+    if key.endswith(".render_resolution") and not (0.5 <= value <= 2.0):
+        return "render_resolution 须在 0.5-2.0 之间"
+    if key.endswith(".hit_region_precision") and value not in {"low", "medium", "high"}:
+        return "hit_region_precision 仅支持 low / medium / high"
     return None
 
 
@@ -418,6 +430,10 @@ def serialize_live2d_mode(config: AppConfig) -> dict[str, Any]:
             "auto_open_chat_window": mode.auto_open_chat_window,
             "enable_quick_input": mode.enable_quick_input,
             "mouse_follow_enabled": mode.mouse_follow_enabled,
+            "render_quality_preset": mode.render_quality_preset,
+            "render_fps": mode.render_fps,
+            "render_resolution": mode.render_resolution,
+            "hit_region_precision": mode.hit_region_precision,
             "idle_motion_group": mode.idle_motion_group,
             "enable_expressions": mode.enable_expressions,
             "enable_physics": mode.enable_physics,

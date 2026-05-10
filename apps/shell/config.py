@@ -32,6 +32,8 @@ BubbleExpandTriggerValue = Literal["click"]
 Live2DClickActionValue = Literal["focus_stage", "open_chat", "toggle_reply"]
 Live2DDefaultOpenValue = Literal["stage", "reply_bubble", "chat_input"]
 Live2DPositionAnchorValue = Literal["left_bottom", "right_bottom", "custom"]
+Live2DRenderQualityPresetValue = Literal["battery", "balanced", "quality", "custom"]
+Live2DHitRegionPrecisionValue = Literal["low", "medium", "high"]
 TTSProviderValue = Literal["none", "http", "command", "gpt-sovits"]
 
 DEFAULT_TTS_NOTIFICATION_PROMPT = (
@@ -735,6 +737,10 @@ class Live2DModeConfig:
     auto_open_chat_window: bool = False
     enable_quick_input: bool = True
     mouse_follow_enabled: bool = True
+    render_quality_preset: Live2DRenderQualityPresetValue = "balanced"
+    render_fps: int = 24
+    render_resolution: float = 1.25
+    hit_region_precision: Live2DHitRegionPrecisionValue = "medium"
     idle_motion_group: str = "Idle"   # 待机动作组名（Live2D Cubism 约定）
     enable_expressions: bool = False  # 是否启用表情系统（等待渲染器支持）
     enable_physics: bool = False      # 是否启用物理模拟（等待渲染器支持）
