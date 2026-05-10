@@ -172,7 +172,181 @@ type GeneralSettingsForm = {
 
 export function ModeSettingsView() {
   const mode = currentParam('mode');
-  return mode ? <SpecificModeSettingsView mode={mode} /> : <GeneralSettingsView />;
+  if (mode === 'system') return <SystemSettingsView />;
+  return mode ? <SpecificModeSettingsView mode={mode} /> : <ReferenceSettingsHome />;
+}
+
+function ReferenceSettingsHome() {
+  const [payload, setPayload] = useState<GeneralSettingsPayload | null>(null);
+  const [hermesConfig, setHermesConfig] = useState<{
+    model?: { provider?: string };
+    provider_options?: Array<{ id: string; label?: string; api_key_configured?: boolean; auth_type?: string }>;
+    api_key?: { configured?: boolean; display?: string };
+  } | null>(null);
+  const [startupEnabled, setStartupEnabled] = useState(true);
+  const [animationsEnabled, setAnimationsEnabled] = useState(true);
+  const [language, setLanguage] = useState('zh-CN');
+  const [theme, setTheme] = useState('dark');
+  const [fontSize, setFontSize] = useState('normal');
+  const [providerDraft, setProviderDraft] = useState('');
+  const [connectionTestResult, setConnectionTestResult] = useState<{ success?: boolean; ok?: boolean; error?: string; message?: string } | null>(null);
+  const [connectionTesting, setConnectionTesting] = useState(false);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateResult, setUpdateResult] = useState<{ checked?: boolean; update_available?: boolean; reason?: string } | null>(null);
+
+  const FALLBACK_PROVIDER_OPTIONS: Array<{ id: string; label: string; api_key_configured?: boolean }> = [
+    { id: 'openai', label: 'OpenAI' },
+    { id: 'anthropic', label: 'Anthropic' },
+    { id: 'local', label: '本地模型' },
+  ];
+
+  useEffect(() => {
+    let disposed = false;
+    void Promise.allSettled([
+      apiGet<GeneralSettingsPayload>('/ui/settings'),
+      apiGet<{ model?: { provider?: string }; provider_options?: Array<{ id: string; label?: string; api_key_configured?: boolean; auth_type?: string }>; api_key?: { configured?: boolean; display?: string } }>('/ui/hermes/config'),
+    ]).then(([settingsResult, configResult]) => {
+      if (disposed) return;
+      if (settingsResult.status === 'fulfilled') setPayload(settingsResult.value);
+      if (configResult.status === 'fulfilled') {
+        setHermesConfig(configResult.value);
+        setProviderDraft(configResult.value.model?.provider || '');
+      }
+    });
+    return () => { disposed = true; };
+  }, []);
+
+  async function runConnectionTest() {
+    if (connectionTesting) return;
+    setConnectionTesting(true);
+    setConnectionTestResult(null);
+    try {
+      const result = await apiPost<{ success?: boolean; ok?: boolean; error?: string; message?: string }>('/ui/hermes/connection-test', {});
+      setConnectionTestResult(result);
+    } catch (err) {
+      setConnectionTestResult({ success: false, error: err instanceof Error ? err.message : '连接失败，请检查模型配置' });
+    } finally {
+      setConnectionTesting(false);
+    }
+  }
+
+  async function runUpdateCheck() {
+    if (updateChecking) return;
+    setUpdateChecking(true);
+    setUpdateResult(null);
+    try {
+      const result = await checkAppUpdate();
+      if (result.ok === false || result.error) {
+        setUpdateResult({ checked: true, update_available: false, reason: result.error || result.reason || '当前环境不支持应用更新' });
+      } else {
+        setUpdateResult({ checked: true, update_available: result.update_available, reason: result.reason });
+      }
+    } catch (err) {
+      setUpdateResult({ checked: true, update_available: false, reason: err instanceof Error ? err.message : '检查更新失败' });
+    } finally {
+      setUpdateChecking(false);
+    }
+  }
+
+  const appVersion = payload?.app?.version || '0.1.0';
+  const trayEnabled = payload?.app?.tray_enabled !== false;
+  const providerOptions = hermesConfig?.provider_options?.length ? hermesConfig.provider_options : FALLBACK_PROVIDER_OPTIONS;
+  const realProvider = hermesConfig?.model?.provider || '';
+  const currentProvider = providerDraft || realProvider || providerOptions[0]?.id || 'openai';
+  const currentProviderOption = providerOptions.find((opt) => opt.id === currentProvider);
+  const apiKeyConfigured = currentProviderOption?.api_key_configured ?? hermesConfig?.api_key?.configured ?? false;
+  const apiKeyDisplay = hermesConfig?.api_key?.display || '';
+  const providerDraftDirty = providerDraft && realProvider && providerDraft !== realProvider;
+
+  const connectionTestOk = connectionTestResult?.success ?? connectionTestResult?.ok;
+  const connectionTestMessage = connectionTestResult?.error || connectionTestResult?.message || '连接失败，请检查模型配置';
+
+  const updateDescription = updateResult?.checked
+    ? (updateResult.update_available ? (updateResult.reason || '发现可用更新') : (updateResult.reason || '当前已是最新版本'))
+    : `Hermes Yachiyo v${appVersion}`;
+
+  return (
+    <main className="app-shell settings-page">
+      <div className="settings-page-header">
+        <div className="settings-page-title">设置</div>
+        <div className="settings-page-subtitle">配置 Hermes Yachiyo 的各项参数</div>
+      </div>
+
+      <SettingsSection title="通用">
+        <SettingsItem label="开机自启" description="系统启动时自动运行 Hermes Yachiyo">
+          <SettingsToggle checked={startupEnabled} onChange={setStartupEnabled} />
+        </SettingsItem>
+        <SettingsItem label="最小化到托盘" description={trayEnabled ? '已启用，前往系统设置可修改' : '已禁用，前往系统设置可修改'}>
+          <SettingsToggle checked={trayEnabled} onChange={() => navigateTo('settings', { mode: 'system' })} />
+        </SettingsItem>
+        <SettingsItem label="语言" description="界面显示语言">
+          <select className="settings-select" value={language} onChange={(e) => setLanguage(e.target.value)}>
+            <option value="zh-CN">简体中文</option>
+            <option value="en">English</option>
+            <option value="ja">日本語</option>
+          </select>
+        </SettingsItem>
+      </SettingsSection>
+
+      <SettingsSection title="外观">
+        <SettingsItem label="主题" description="选择界面主题风格">
+          <select className="settings-select" value={theme} onChange={(e) => setTheme(e.target.value)}>
+            <option value="dark">月夜深蓝</option>
+            <option value="light">极简白</option>
+            <option value="system">跟随系统</option>
+          </select>
+        </SettingsItem>
+        <SettingsItem label="动画效果" description="启用粒子、流光、呼吸等动画">
+          <SettingsToggle checked={animationsEnabled} onChange={setAnimationsEnabled} />
+        </SettingsItem>
+        <SettingsItem label="字体大小" description="调整界面文字大小">
+          <select className="settings-select" value={fontSize} onChange={(e) => setFontSize(e.target.value)}>
+            <option value="small">小</option>
+            <option value="normal">标准</option>
+            <option value="large">大</option>
+          </select>
+        </SettingsItem>
+      </SettingsSection>
+
+      <SettingsSection title="模型">
+        <SettingsItem label="模型提供商" description={providerDraftDirty ? '已切换，前往模型配置可保存' : '选择 AI 模型服务'}>
+          <select className="settings-select" value={currentProvider} onChange={(e) => setProviderDraft(e.target.value)}>
+            {providerOptions.map((opt) => (
+              <option key={opt.id} value={opt.id}>{opt.label || opt.id}</option>
+            ))}
+          </select>
+        </SettingsItem>
+        <SettingsItem label="API Key" description={apiKeyConfigured ? `已配置${apiKeyDisplay ? `：${apiKeyDisplay}` : ''}` : '未配置，前往模型配置可设置'}>
+          <SettingsActionButton onClick={() => navigateTo('provider')}>{apiKeyConfigured ? '查看' : '配置'}</SettingsActionButton>
+        </SettingsItem>
+        <SettingsItem
+          label="连接测试"
+          description={connectionTestResult ? (connectionTestOk ? '连接正常' : `连接失败：${connectionTestMessage}`) : '测试模型服务连接状态'}
+        >
+          <SettingsActionButton
+            loading={connectionTesting}
+            onClick={() => void runConnectionTest()}
+          >
+            {connectionTesting ? '测试中…' : '测试连接'}
+          </SettingsActionButton>
+        </SettingsItem>
+      </SettingsSection>
+
+      <SettingsSection title="关于">
+        <SettingsItem label="版本" description={updateDescription}>
+          <SettingsActionButton
+            loading={updateChecking}
+            onClick={() => void runUpdateCheck()}
+          >
+            {updateChecking ? '检查中…' : updateResult?.update_available ? '前往更新' : '检查更新'}
+          </SettingsActionButton>
+        </SettingsItem>
+        <SettingsItem label="项目主页" description="github.com/kuguya-AI-app-develop/Hermes-Yachiyo">
+          <SettingsActionButton onClick={() => void openExternalUrl('https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo')}>打开</SettingsActionButton>
+        </SettingsItem>
+      </SettingsSection>
+    </main>
+  );
 }
 
 function SpecificModeSettingsView({ mode }: { mode: string }) {
@@ -214,7 +388,7 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
   }, [mode]);
 
   function updateField(key: string, value: ModeFormValue) {
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm((current) => nextModeFormValue(current, key, value));
     if (status && status !== '保存中…') setStatus('');
   }
 
@@ -352,19 +526,16 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
   }
 
   return (
-    <main className="app-shell settings-shell">
-      <header className="topbar compact">
-        <div>
-          <h1>{payload?.mode?.settings_title || '模式设置'}</h1>
-          <p>{payload?.mode?.settings_description || '读取中…'}</p>
-        </div>
-        <button type="button" className="ghost-button" onClick={() => navigateTo('settings', {}, ['mode'])}>通用设置</button>
-      </header>
+    <main className="app-shell settings-page">
+      <div className="settings-page-header">
+        <div className="settings-page-title">{payload?.mode?.settings_title || '模式设置'}</div>
+        <div className="settings-page-subtitle">{payload?.mode?.settings_description || '读取中…'}</div>
+      </div>
 
       {status ? <div className={statusClassName(status)}>{status}</div> : null}
-      <section className="panel">
-        <h2>当前状态</h2>
-        <p>{payload?.settings?.summary || '读取中…'}</p>
+
+      <SettingsSection title="当前状态">
+        <SettingsItem label="状态摘要" description={payload?.settings?.summary || '读取中…'} />
         {mode === 'live2d' ? (
           <Live2DResourceInfo
             config={payload?.settings?.config || {}}
@@ -380,23 +551,32 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
             onOpenReleases={openLive2DReleases}
           />
         ) : <BubbleResourceInfo config={payload?.settings?.config || {}} />}
-      </section>
+      </SettingsSection>
 
-      <form className="settings-form" onSubmit={submitModeSettings} noValidate>
+      <form onSubmit={submitModeSettings} noValidate>
         {sections.map((section) => (
-          <ModeFieldPanel
-            key={section.title}
-            section={section}
-            form={form}
-            onChange={updateField}
-          />
+          <SettingsSection key={section.title} title={section.title}>
+            {section.note ? <p className="settings-note" style={{ margin: '-8px 20px 12px' }}>{section.note}</p> : null}
+            <div className="settings-form-grid" style={{ padding: '12px 20px 16px' }}>
+              {section.fields.map((field) => renderModeField(field, form, updateField))}
+            </div>
+          </SettingsSection>
         ))}
 
         <div className="settings-savebar">
-          <span>{hasChanges ? `${pendingCount + (activationPending ? 1 : 0)} 项待保存` : '设置已同步'}</span>
+          <span className={status ? `settings-savebar-message ${statusToneClassName(status)}` : ''}>
+            {status || (hasChanges ? `${pendingCount + (activationPending ? 1 : 0)} 项待保存` : '设置已同步')}
+          </span>
           <div className="settings-save-actions">
-            <button type="button" disabled={!hasChanges || saving} onClick={resetDraft}>重置草稿</button>
-            <button type="submit" disabled={!hasChanges || saving}>{saving ? '保存中…' : '保存更改'}</button>
+            <SettingsActionButton disabled={!hasChanges || saving} onClick={resetDraft}>重置草稿</SettingsActionButton>
+            <SettingsActionButton
+              variant="primary"
+              disabled={!hasChanges || saving}
+              loading={saving}
+              submit
+            >
+              {saving ? '保存中…' : '保存更改'}
+            </SettingsActionButton>
           </div>
         </div>
       </form>
@@ -491,11 +671,70 @@ function renderModeField(
           step={field.step}
           value={String(value ?? '')}
           onChange={(event) => onChange(field.key, event.target.value)}
+          onBlur={(event) => {
+            const normalized = normalizedNumericFieldValue(event.target.value, field);
+            if (normalized !== null && normalized !== event.target.value) onChange(field.key, normalized);
+          }}
         />
         {field.kind === 'percent' ? <span>%</span> : null}
       </div>
     </div>
   );
+}
+
+function nextModeFormValue(current: ModeForm, key: string, value: ModeFormValue): ModeForm {
+  const next = { ...current, [key]: value };
+  if (key === 'live2d_mode.render_quality_preset') {
+    const preset = live2dRenderPresetFormValues(String(value || ''));
+    if (preset) return { ...next, ...preset };
+    return next;
+  }
+  if (
+    key === 'live2d_mode.render_fps'
+    || key === 'live2d_mode.render_resolution'
+    || key === 'live2d_mode.hit_region_precision'
+  ) {
+    next['live2d_mode.render_quality_preset'] = 'custom';
+  }
+  return next;
+}
+
+function live2dRenderPresetFormValues(value: string): ModeForm | null {
+  if (value === 'battery') {
+    return {
+      'live2d_mode.render_fps': '15',
+      'live2d_mode.render_resolution': '0.75',
+      'live2d_mode.hit_region_precision': 'low',
+    };
+  }
+  if (value === 'balanced') {
+    return {
+      'live2d_mode.render_fps': '24',
+      'live2d_mode.render_resolution': '1.25',
+      'live2d_mode.hit_region_precision': 'medium',
+    };
+  }
+  if (value === 'quality') {
+    return {
+      'live2d_mode.render_fps': '30',
+      'live2d_mode.render_resolution': '1.5',
+      'live2d_mode.hit_region_precision': 'high',
+    };
+  }
+  return null;
+}
+
+function normalizedNumericFieldValue(value: string, field: ModeFieldSpec): string | null {
+  if (field.kind !== 'number' && field.kind !== 'percent') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return value;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) return value;
+  const min = field.min ?? Number.NEGATIVE_INFINITY;
+  const max = field.max ?? Number.POSITIVE_INFINITY;
+  const clamped = Math.min(Math.max(parsed, min), max);
+  const normalized = field.integer ? String(Math.trunc(clamped)) : formatNumber(clamped);
+  return normalized;
 }
 
 function renderExpressionRulesField(
@@ -671,7 +910,87 @@ function Live2DResourceInfo({
   );
 }
 
-function GeneralSettingsView() {
+function SettingsSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="settings-group">
+      <div className="settings-group-title">{title}</div>
+      <div className="settings-card">{children}</div>
+    </div>
+  );
+}
+
+function SettingsItem({
+  label,
+  description,
+  children,
+  wide,
+}: {
+  label: string;
+  description?: string;
+  children?: React.ReactNode;
+  wide?: boolean;
+}) {
+  return (
+    <div className={`settings-item${wide ? ' settings-item-wide' : ''}`}>
+      <div className="settings-item-info">
+        <div className="settings-item-label">{label}</div>
+        {description ? <div className="settings-item-desc">{description}</div> : null}
+      </div>
+      {children ? <div className="settings-item-control">{children}</div> : null}
+    </div>
+  );
+}
+
+function SettingsToggle({
+  checked,
+  onChange,
+  disabled,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      className="settings-toggle"
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+    />
+  );
+}
+
+function SettingsActionButton({
+  children,
+  onClick,
+  disabled,
+  variant,
+  loading,
+  submit,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  variant?: 'primary' | 'danger';
+  loading?: boolean;
+  submit?: boolean;
+}) {
+  const className = [
+    'settings-action-btn',
+    variant === 'primary' ? 'primary' : '',
+    variant === 'danger' ? 'danger' : '',
+    loading ? 'loading' : '',
+  ].filter(Boolean).join(' ');
+  return (
+    <button type={submit ? 'submit' : 'button'} className={className} disabled={disabled || loading} onClick={onClick}>
+      {children}
+    </button>
+  );
+}
+
+function SystemSettingsView() {
   const [payload, setPayload] = useState<GeneralSettingsPayload | null>(null);
   const [form, setForm] = useState<GeneralSettingsForm>(emptyGeneralSettingsForm());
   const [backupStatus, setBackupStatus] = useState<BackupStatus | null>(null);
@@ -1076,488 +1395,329 @@ function GeneralSettingsView() {
   }
 
   return (
-    <main className="app-shell settings-shell">
-      <header className="topbar compact">
-        <div>
-          <h1>通用设置</h1>
-          <p>{payload?.workspace?.path || '读取中…'}</p>
-        </div>
-        <button type="button" className="ghost-button" onClick={() => navigateTo('main', {}, ['mode'])}>主控台</button>
-      </header>
+    <main className="app-shell settings-page">
+      <div className="settings-page-header">
+        <button type="button" className="page-back-link" onClick={() => navigateTo('settings')}>← 返回设置</button>
+        <div className="settings-page-title">系统设置</div>
+        <div className="settings-page-subtitle">高级配置和系统维护</div>
+      </div>
 
-      {status ? <div className="notice">{status}</div> : null}
+      {status ? <div className={statusClassName(status)}>{status}</div> : null}
 
-      <section className="settings-grid expanded-settings-grid">
-        <article className="panel setting-card">
-          <span>Hermes</span>
-          <strong>{payload?.hermes?.status || '读取中'}</strong>
-          <small>{payload?.hermes?.ready ? '能力就绪' : hermesReadinessLabel(payload?.hermes?.readiness_level)}</small>
-        </article>
-        <article className="panel setting-card">
-          <span>Bridge</span>
-          <strong>{payload?.bridge?.state || '—'}</strong>
-          <small>{payload?.bridge?.url || `${payload?.bridge?.host || '127.0.0.1'}:${payload?.bridge?.port || 8420}`}</small>
-        </article>
-        <article className="panel setting-card">
-          <span>Application</span>
-          <strong>{payload?.app?.version || '0.1.0'}</strong>
-          <small>{payload?.app?.log_level || 'INFO'}</small>
-        </article>
-      </section>
+      <form onSubmit={submitSettings} noValidate>
+        <SettingsSection title="通用">
+          <SettingsItem label="最小化到托盘" description="关闭窗口时最小化到系统托盘">
+            <SettingsToggle
+              checked={form.tray_enabled}
+              onChange={(next) => setForm((current) => ({ ...current, tray_enabled: next }))}
+            />
+          </SettingsItem>
+          <SettingsItem label="语言" description="界面显示语言">
+            <select className="settings-select" value="zh-CN" onChange={() => {}}>
+              <option value="zh-CN">简体中文</option>
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+            </select>
+          </SettingsItem>
+        </SettingsSection>
 
-      <section className="settings-detail-grid">
-        <article className="panel settings-section">
-          <div className="section-heading-row">
-            <h2>Hermes Agent</h2>
-            <span>{payload?.hermes?.ready ? 'ready' : hermesReadinessLabel(payload?.hermes?.readiness_level)}</span>
-          </div>
-          <SettingsRows rows={[
-            ['安装状态', payload?.hermes?.status],
-            ['能力就绪', payload?.hermes?.ready ? '是' : '否'],
-            ['版本', payload?.hermes?.version],
-            ['平台', payload?.hermes?.platform],
-            ['命令可用', payload?.hermes?.command_exists ? '是' : '否'],
-            ['Hermes Home', payload?.hermes?.hermes_home],
-            ['受限工具', listValue(payload?.hermes?.limited_tools)],
-            ['诊断提示', payload?.hermes?.doctor_issues_count ? `${payload.hermes.doctor_issues_count} 项` : '无'],
-          ]} />
-          <div className="settings-action-strip">
-            <button type="button" className="primary-action" onClick={() => navigateTo('main', {}, ['mode'])}>打开主控台配置中心</button>
-          </div>
-        </article>
+        <SettingsSection title="显示模式">
+          <SettingsItem label="显示模式" description={form.display_mode === payload?.display?.current_mode ? '当前表现态' : '待切换'}>
+            <div className="segmented-list">
+              {(payload?.display?.available_modes || []).map((item) => (
+                <button
+                  className={item.id === form.display_mode ? 'selected' : ''}
+                  type="button"
+                  key={item.id}
+                  onClick={() => void selectDisplayMode(item.id)}
+                >
+                  {item.name || item.label || item.id}
+                </button>
+              ))}
+            </div>
+          </SettingsItem>
+        </SettingsSection>
 
-        <article className="panel settings-section">
-          <div className="section-heading-row">
-            <h2>Yachiyo 工作空间</h2>
-            <span>{payload?.workspace?.initialized ? '已初始化' : '未初始化'}</span>
-          </div>
-          <SettingsRows rows={[
-            ['路径', payload?.workspace?.path],
-            ['创建时间', formatSettingsDate(payload?.workspace?.created_at)],
-            ['目录', workspaceDirs(payload?.workspace?.dirs)],
-          ]} />
-        </article>
-      </section>
-
-      <form className="settings-form" onSubmit={submitSettings} noValidate>
-        <section className="panel settings-section">
-          <div className="section-heading-row">
-            <h2>显示模式</h2>
-            <span>{form.display_mode === payload?.display?.current_mode ? '当前' : '待切换'}</span>
-          </div>
-          <div className="segmented-list">
-            {(payload?.display?.available_modes || []).map((item) => (
-              <button
-                className={item.id === form.display_mode ? 'selected' : ''}
-                type="button"
-                key={item.id}
-                onClick={() => void selectDisplayMode(item.id)}
-              >
-                {item.name || item.label || item.id}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="panel settings-section settings-form-grid">
-          <div className="settings-field wide">
-            <label htmlFor="assistant-address">助手称呼</label>
+        <SettingsSection title="助手">
+          <SettingsItem label="助手称呼" description="用户对助手的称呼方式">
             <input
-              id="assistant-address"
+              className="settings-input"
               value={form.user_address}
               onChange={(event) => setForm((current) => ({ ...current, user_address: event.target.value }))}
             />
-          </div>
-          <div className="settings-field wide">
-            <label htmlFor="assistant-persona">助手人设</label>
+          </SettingsItem>
+          <SettingsItem label="助手人设" description="定义助手的性格和行为风格" wide>
             <textarea
-              id="assistant-persona"
-              rows={8}
+              className="settings-textarea"
+              rows={6}
               value={form.persona_prompt}
               onChange={(event) => setForm((current) => ({ ...current, persona_prompt: event.target.value }))}
             />
-          </div>
-        </section>
+          </SettingsItem>
+        </SettingsSection>
 
-        <section className="panel settings-section settings-form-grid">
-          <label className="settings-check wide" htmlFor="bridge-enabled">
-            <input
-              id="bridge-enabled"
-              type="checkbox"
+        <SettingsSection title="Bridge">
+          <SettingsItem label="启用 Bridge" description="内部通信服务">
+            <SettingsToggle
               checked={form.bridge_enabled}
-              onChange={(event) => setForm((current) => ({ ...current, bridge_enabled: event.target.checked }))}
+              onChange={(next) => setForm((current) => ({ ...current, bridge_enabled: next }))}
             />
-            <span>启用 Bridge</span>
-          </label>
-          <div className="settings-field">
-            <label htmlFor="bridge-host">Bridge Host</label>
+          </SettingsItem>
+          <SettingsItem label="Bridge Host" description="Bridge 监听地址">
             <input
-              id="bridge-host"
+              className="settings-input"
               value={form.bridge_host}
               onChange={(event) => setForm((current) => ({ ...current, bridge_host: event.target.value }))}
             />
-          </div>
-          <div className="settings-field">
-            <label htmlFor="bridge-port">Bridge Port</label>
+          </SettingsItem>
+          <SettingsItem label="Bridge Port" description="Bridge 监听端口">
             <input
-              id="bridge-port"
+              className="settings-input"
               inputMode="numeric"
               value={form.bridge_port}
               onChange={(event) => setForm((current) => ({ ...current, bridge_port: event.target.value }))}
             />
-          </div>
-          <label className="settings-check wide" htmlFor="tray-enabled">
-            <input
-              id="tray-enabled"
-              type="checkbox"
-              checked={form.tray_enabled}
-              onChange={(event) => setForm((current) => ({ ...current, tray_enabled: event.target.checked }))}
-            />
-            <span>启用托盘入口</span>
-          </label>
-          <div className="settings-meta-row wide-meta">
-            <span>启动最小化</span>
-            <strong>{payload?.app?.start_minimized ? '是' : '否'}</strong>
-          </div>
-        </section>
+          </SettingsItem>
+          <SettingsItem label="重启 Bridge" description={payload?.bridge?.config_dirty ? '配置已变更，需要重启生效' : '按当前配置重启内部通信服务'}>
+            <SettingsActionButton
+              disabled={bridgeRestarting || saving || hasChanges}
+              loading={bridgeRestarting}
+              onClick={() => void restartBridge()}
+            >
+              {bridgeRestarting ? '重启中…' : '应用配置并重启'}
+            </SettingsActionButton>
+          </SettingsItem>
+        </SettingsSection>
 
-        <section className="panel settings-section settings-form-grid">
-          <div className="section-heading-row wide-heading">
-            <h2>备份策略</h2>
-            <span>配置、工作空间、聊天数据库、缓存、日志和导入资源</span>
-          </div>
-          <p className="settings-note wide-form-note">
-            Live2D 模型、GPT-SoVITS 权重、参考音频和附件缓存都会进入备份；导入资源越大，备份生成、恢复和传输就会越久。
-          </p>
-          <label className="settings-check wide" htmlFor="backup-auto-cleanup">
-            <input
-              id="backup-auto-cleanup"
-              type="checkbox"
+        <SettingsSection title="备份">
+          <SettingsItem label="自动清理旧备份" description="启用后自动删除超出保留份数的旧备份">
+            <SettingsToggle
               checked={form.backup_auto_cleanup_enabled}
-              onChange={(event) => setForm((current) => ({ ...current, backup_auto_cleanup_enabled: event.target.checked }))}
+              onChange={(next) => setForm((current) => ({ ...current, backup_auto_cleanup_enabled: next }))}
             />
-            <span>自动清理旧备份</span>
-          </label>
-          <div className="settings-field">
-            <label htmlFor="backup-retention-count">保留最近</label>
+          </SettingsItem>
+          <SettingsItem label="备份保留份数" description="自动清理时保留的最近备份份数（1-100）">
             <input
-              id="backup-retention-count"
+              className="settings-input"
               inputMode="numeric"
               value={form.backup_retention_count}
               onChange={(event) => setForm((current) => ({ ...current, backup_retention_count: event.target.value }))}
             />
+          </SettingsItem>
+          <SettingsItem label="备份" description={backupStatus?.has_backup ? `${backupStatus.count || 0} 份 / ${backupStatus.total_size_display || '0 B'}` : '暂无备份'}>
+            <SettingsActionButton
+              disabled={backupBusy}
+              loading={backupAction === 'backup-create'}
+              onClick={() => void createBackup(false)}
+            >
+              {backupAction === 'backup-create' ? '生成中…' : '生成备份'}
+            </SettingsActionButton>
+            <SettingsActionButton
+              disabled={backupBusy}
+              onClick={() => setBackupManagerOpen((open) => !open)}
+            >
+              {backupManagerOpen ? '收起' : '管理'}
+            </SettingsActionButton>
+          </SettingsItem>
+          {backupManagerOpen ? (
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div className="settings-action-strip" style={{ marginBottom: 8 }}>
+                <SettingsActionButton
+                  disabled={backupBusy}
+                  loading={backupAction === 'backup-overwrite'}
+                  onClick={() => void createBackup(true)}
+                >
+                  {backupAction === 'backup-overwrite' ? '覆盖中…' : '覆盖最近一次'}
+                </SettingsActionButton>
+                <SettingsActionButton
+                  disabled={backupBusy}
+                  loading={backupAction === 'backup-restore'}
+                  onClick={() => void restoreBackup()}
+                >
+                  {backupAction === 'backup-restore' ? '恢复中…' : '恢复最近备份'}
+                </SettingsActionButton>
+                <SettingsActionButton
+                  disabled={backupBusy}
+                  loading={backupAction === 'backup-open'}
+                  onClick={() => void openBackupLocation()}
+                >
+                  {backupAction === 'backup-open' ? '打开中…' : '打开备份目录'}
+                </SettingsActionButton>
+              </div>
+              {(backupStatus?.backups || []).length ? (
+                <div className="backup-manager">
+                  {(backupStatus?.backups || []).map((item) => (
+                    <div className="backup-item" key={item.path || item.display_path}>
+                      <div>
+                        <div className="name">{backupFileName(item)}</div>
+                        <div className="meta">{formatSettingsDate(item.created_at)} · {item.size_display || '未知大小'}</div>
+                        {!item.valid ? <div className="meta" style={{ color: '#ffd89a' }}>{item.error || '备份无效'}</div> : null}
+                      </div>
+                      <div className="actions">
+                        <SettingsActionButton
+                          disabled={backupBusy}
+                          loading={backupAction === `backup-restore:${item.path || ''}`}
+                          onClick={() => void restoreBackup(item.path || '')}
+                        >
+                          {backupAction === `backup-restore:${item.path || ''}` ? '恢复中…' : '恢复'}
+                        </SettingsActionButton>
+                        <SettingsActionButton
+                          disabled={backupBusy}
+                          loading={backupAction === `backup-open:${item.path || ''}`}
+                          onClick={() => void openBackupLocation(item.path || '')}
+                        >
+                          {backupAction === `backup-open:${item.path || ''}` ? '打开中…' : '打开位置'}
+                        </SettingsActionButton>
+                        <SettingsActionButton
+                          variant="danger"
+                          disabled={backupBusy}
+                          loading={backupAction === `backup-delete:${item.path || ''}`}
+                          onClick={() => void deleteBackup(item.path || '')}
+                        >
+                          {backupAction === `backup-delete:${item.path || ''}` ? '删除中…' : '删除'}
+                        </SettingsActionButton>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="inline-empty">暂无可管理备份</div>
+              )}
+            </div>
+          ) : null}
+        </SettingsSection>
+
+        <SettingsSection title="更新">
+          <SettingsItem label="应用版本" description={`Hermes Yachiyo v${payload?.app?.version || '0.1.0'}`}>
+            <SettingsActionButton
+              disabled={appUpdateBusy || !appUpdateSupported}
+              loading={appUpdateAction === 'check'}
+              onClick={() => void runAppUpdateCheck()}
+            >
+              {appUpdateAction === 'check' ? '检查中…' : '检查更新'}
+            </SettingsActionButton>
+          </SettingsItem>
+          {appUpdateDownloadedPath ? (
+            <SettingsItem label="安装更新" description={appUpdateStatusLabel(appUpdateInfo, appUpdateCheck)}>
+              <SettingsActionButton
+                variant="primary"
+                disabled={appUpdateBusy}
+                loading={appUpdateAction === 'install'}
+                onClick={() => void runAppUpdateInstall()}
+              >
+                {appUpdateAction === 'install' ? '准备中…' : '安装并重启'}
+              </SettingsActionButton>
+            </SettingsItem>
+          ) : appUpdateCheck?.update_available ? (
+            <SettingsItem label="下载更新" description={appUpdateStatusLabel(appUpdateInfo, appUpdateCheck)}>
+              <SettingsActionButton
+                disabled={appUpdateBusy || !appUpdateSupported}
+                loading={appUpdateAction === 'download'}
+                onClick={() => void runAppUpdateDownload()}
+              >
+                {appUpdateAction === 'download' ? appUpdateDownloadButtonLabel(appUpdateProgress) : '下载更新'}
+              </SettingsActionButton>
+            </SettingsItem>
+          ) : null}
+        </SettingsSection>
+
+        <SettingsSection title="卸载">
+          <SettingsItem label="卸载" description="删除本地资料并卸载应用">
+            <SettingsActionButton
+              variant="danger"
+              disabled={uninstallRunning || !uninstallConfirmValid}
+              loading={uninstallRunning}
+              onClick={() => void runUninstall()}
+            >
+              {uninstallRunning ? '正在卸载…' : '卸载'}
+            </SettingsActionButton>
+          </SettingsItem>
+          <div style={{ padding: '0 20px 16px' }}>
+            <div className="settings-form-grid uninstall-options">
+              <div className="settings-field">
+                <label htmlFor="uninstall-scope">卸载范围</label>
+                <select id="uninstall-scope" value={uninstallScope} onChange={(event) => setUninstallScope(event.target.value)}>
+                  <option value="yachiyo_only">仅卸载 Hermes-Yachiyo</option>
+                  <option value="include_hermes">也卸载 Hermes Agent 架构</option>
+                </select>
+              </div>
+              <label className="settings-check" htmlFor="uninstall-keep-config">
+                <input
+                  id="uninstall-keep-config"
+                  type="checkbox"
+                  checked={uninstallKeepConfig}
+                  onChange={(event) => setUninstallKeepConfig(event.target.checked)}
+                />
+                <span>卸载前生成备份</span>
+              </label>
+              <label className="settings-check" htmlFor="uninstall-gpt-sovits">
+                <input
+                  id="uninstall-gpt-sovits"
+                  type="checkbox"
+                  checked={uninstallGptSovits}
+                  onChange={(event) => setUninstallGptSovits(event.target.checked)}
+                />
+                <span>同时卸载 GPT-SoVITS</span>
+              </label>
+            </div>
+            {uninstallGptSovits ? (
+              <p className="warn-text" style={{ marginTop: 8 }}>
+                将删除 GPT-SoVITS 服务目录，包括已下载的基础预训练模型、虚拟环境和本地服务文件。
+              </p>
+            ) : null}
+            {uninstallPreview ? (
+              <div className="uninstall-preview-react">
+                {(uninstallPreview.targets || []).map((target) => (
+                  <div className="uninstall-target-react" key={target.id || target.path}>
+                    <div>
+                      <strong>{target.label || target.id}</strong>
+                      <span>{target.display_path || target.path || '—'}</span>
+                    </div>
+                    <small>{target.exists ? (target.removable ? '将删除' : target.reason || '跳过') : '不存在'}</small>
+                  </div>
+                ))}
+                {uninstallPreview.warnings?.length ? <p className="warn-text">{uninstallPreview.warnings.join('；')}</p> : null}
+              </div>
+            ) : null}
+            <div className="settings-field uninstall-confirm-field">
+              <label htmlFor="uninstall-confirm-text">输入 {uninstallConfirmPhrase} 确认</label>
+              <input
+                id="uninstall-confirm-text"
+                value={uninstallConfirmText}
+                disabled={uninstallRunning}
+                onChange={(event) => setUninstallConfirmText(event.target.value)}
+              />
+            </div>
           </div>
-        </section>
+        </SettingsSection>
+
+        <SettingsSection title="模式配置">
+          <div style={{ padding: '4px 0' }}>
+            <div className="mode-summary-list">
+              {Object.entries(payload?.mode_settings || {}).map(([modeId, item]) => (
+                <button type="button" key={modeId} onClick={() => navigateTo('settings', { mode: modeId })}>
+                  <strong>{item.title || modeId}</strong>
+                  <span>{item.summary || '—'}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </SettingsSection>
 
         <div className="settings-savebar">
           <span>{hasChanges ? `${pendingCount} 项待保存` : '设置已同步'}</span>
-          <button type="submit" disabled={!hasChanges || saving}>{saving ? '保存中…' : '保存更改'}</button>
+          <SettingsActionButton
+            variant="primary"
+            disabled={!hasChanges || saving}
+            loading={saving}
+            submit
+          >
+            {saving ? '保存中…' : '保存更改'}
+          </SettingsActionButton>
         </div>
       </form>
-
-      <section className="panel settings-section">
-        <h2>模式配置</h2>
-        <div className="mode-summary-list">
-          {Object.entries(payload?.mode_settings || {}).map(([modeId, item]) => (
-            <button type="button" key={modeId} onClick={() => navigateTo('settings', { mode: modeId })}>
-              <strong>{item.title || modeId}</strong>
-              <span>{item.summary || '—'}</span>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <section className="settings-detail-grid">
-        <article className="panel settings-section">
-          <div className="section-heading-row">
-            <h2>Bridge / 内部通信</h2>
-            <span>{payload?.bridge?.config_dirty ? '需重启' : '已对齐'}</span>
-          </div>
-          <SettingsRows rows={[
-            ['运行状态', payload?.bridge?.state],
-            ['保存地址', payload?.bridge?.url],
-            ['运行地址', payload?.bridge?.boot_config?.url],
-            ['配置漂移', payload?.bridge?.config_dirty ? listValue(payload.bridge.drift_details) : '无'],
-          ]} />
-          <div className="settings-action-strip">
-            <button type="button" disabled={bridgeRestarting || saving} onClick={() => void restartBridge()}>
-              {bridgeRestarting ? '重启中…' : '应用配置并重启 Bridge'}
-            </button>
-          </div>
-        </article>
-
-        <article className="panel settings-section">
-          <div className="section-heading-row">
-            <h2>集成服务</h2>
-          </div>
-          <IntegrationRows title="AstrBot / QQ" item={payload?.integrations?.astrbot} />
-          <IntegrationRows title="Hapi / Codex" item={payload?.integrations?.hapi} />
-          <p className="settings-note">AstrBot 是通过 QQ 远程控制 Yachiyo 的桥接入口，依赖 Bridge 运行。</p>
-        </article>
-      </section>
-
-      <section className="panel settings-section">
-        <div className="section-heading-row">
-          <h2>应用更新</h2>
-          <span>{appUpdateStatusLabel(appUpdateInfo, appUpdateCheck)}</span>
-        </div>
-        <SettingsRows rows={[
-          ['渠道', appUpdateChannelLabel(appUpdateCurrent?.channel, appUpdateCurrent?.branch)],
-          ['当前构建', appUpdateBuildLabel(appUpdateCurrent?.version, appUpdateCurrent?.build_number, appUpdateCurrent?.short_commit)],
-          ['最新构建', appUpdateBuildLabel(appUpdateLatest?.version, appUpdateLatest?.build_number ?? appUpdateLatest?.run_number, appUpdateLatest?.short_commit)],
-          ['更新元数据', appUpdateInfo?.latest_json_url],
-          ['下载文件', appUpdateDownloaded?.file_name || appUpdateProgress?.file_name || appUpdateLatest?.dmg_name],
-          ['下载进度', appUpdateProgressLabel(appUpdateProgress, appUpdateDownloaded)],
-          ['校验状态', appUpdateVerificationLabel(appUpdateDownloaded || null)],
-        ]} />
-        <AppUpdateChangelogPanel changelog={appUpdateChangelog} />
-        <div className="settings-action-strip">
-          <button type="button" disabled={appUpdateBusy || !appUpdateSupported} onClick={() => void runAppUpdateCheck()}>
-            {appUpdateAction === 'check' ? '检查中...' : '检查更新'}
-          </button>
-          <button
-            type="button"
-            className={appUpdateDownloadedPath ? 'primary-action' : undefined}
-            disabled={appUpdateBusy || !appUpdateSupported || (!appUpdateDownloadedPath && !appUpdateCheck?.update_available)}
-            onClick={() => (appUpdateDownloadedPath ? void runAppUpdateInstall() : void runAppUpdateDownload())}
-          >
-            {appUpdateAction === 'install' ? '准备中...' : appUpdateDownloadedPath ? '安装并重启' : appUpdateAction === 'download' ? appUpdateDownloadButtonLabel(appUpdateProgress) : '下载更新'}
-          </button>
-        </div>
-      </section>
-
-      <section className="panel settings-section">
-        <div className="section-heading-row">
-          <h2>备份</h2>
-          <span>{backupStatus?.has_backup ? `${backupStatus.count || 0} 份 / ${backupStatus.total_size_display || '0 B'}` : '暂无备份'}</span>
-        </div>
-        <SettingsRows rows={[
-          ['最近备份', backupSummary(backupStatus?.latest || null)],
-          ['备份状态', backupStatus?.ok === false ? backupStatus.error : '正常'],
-        ]} />
-        <p className="settings-note">
-          备份会包含已导入的 Live2D 与 GPT-SoVITS 资源。完整资源包可能让备份达到数百 MB，生成期间请保持应用打开。
-        </p>
-        <div className="settings-action-strip">
-          <button
-            type="button"
-            className={backupAction === 'backup-create' ? 'loading-button' : undefined}
-            disabled={backupBusy}
-            onClick={() => void createBackup(false)}
-          >
-            {backupAction === 'backup-create' ? '生成中...' : '立即生成备份'}
-          </button>
-          <button
-            type="button"
-            className={backupAction === 'backup-overwrite' ? 'loading-button' : undefined}
-            disabled={backupBusy}
-            onClick={() => void createBackup(true)}
-          >
-            {backupAction === 'backup-overwrite' ? '覆盖中...' : '覆盖最近一次备份'}
-          </button>
-          <button
-            type="button"
-            className={backupAction === 'backup-restore' ? 'loading-button' : undefined}
-            disabled={backupBusy}
-            onClick={() => void restoreBackup()}
-          >
-            {backupAction === 'backup-restore' ? '恢复中...' : '恢复最近备份'}
-          </button>
-          <button
-            type="button"
-            className={backupAction === 'backup-open' ? 'loading-button' : undefined}
-            disabled={backupBusy}
-            onClick={() => void openBackupLocation()}
-          >
-            {backupAction === 'backup-open' ? '打开中...' : '打开备份目录'}
-          </button>
-          <button type="button" disabled={backupBusy} onClick={() => setBackupManagerOpen((open) => !open)}>{backupManagerOpen ? '收起管理器' : '管理备份'}</button>
-        </div>
-        {backupManagerOpen ? (
-          <div className="backup-manager visible">
-            {(backupStatus?.backups || []).length ? (backupStatus?.backups || []).map((item) => (
-              <div className="backup-item" key={item.path || item.display_path}>
-                <div>
-                  <div className="name">{backupFileName(item)}</div>
-                  <div className="meta">{formatSettingsDate(item.created_at)} · {item.size_display || '未知大小'}</div>
-                  {!item.valid ? <div className="meta warn-text">{item.error || '备份无效'}</div> : null}
-                </div>
-                <div className="actions">
-                  <button
-                    type="button"
-                    className={backupAction === `backup-restore:${item.path || ''}` ? 'loading-button' : undefined}
-                    disabled={backupBusy}
-                    onClick={() => void restoreBackup(item.path || '')}
-                  >
-                    {backupAction === `backup-restore:${item.path || ''}` ? '恢复中...' : '恢复此版本'}
-                  </button>
-                  <button
-                    type="button"
-                    className={backupAction === `backup-open:${item.path || ''}` ? 'loading-button' : undefined}
-                    disabled={backupBusy}
-                    onClick={() => void openBackupLocation(item.path || '')}
-                  >
-                    {backupAction === `backup-open:${item.path || ''}` ? '打开中...' : '打开位置'}
-                  </button>
-                  <button
-                    type="button"
-                    className={backupAction === `backup-delete:${item.path || ''}` ? 'loading-button' : undefined}
-                    disabled={backupBusy}
-                    onClick={() => void deleteBackup(item.path || '')}
-                  >
-                    {backupAction === `backup-delete:${item.path || ''}` ? '删除中...' : '删除'}
-                  </button>
-                </div>
-              </div>
-            )) : <div className="empty-state inline-empty">暂无可管理备份</div>}
-          </div>
-        ) : null}
-      </section>
-
-      <section className="panel settings-section danger-section-react">
-        <div className="section-heading-row">
-          <h2>卸载</h2>
-          <span>{uninstallPreview ? `${uninstallPreview.removable_count || 0}/${uninstallPreview.existing_count || 0} 可删除` : '生成清单中'}</span>
-        </div>
-        <p className="settings-note">卸载会删除所选范围内的本地资料，并在完成后删除当前 Hermes-Yachiyo 应用本体；如选择同时卸载 Hermes Agent，会额外删除可识别且安全范围内的 Hermes Home 与命令。</p>
-        <div className="settings-form-grid uninstall-options">
-          <div className="settings-field">
-            <label htmlFor="uninstall-scope">卸载范围</label>
-            <select id="uninstall-scope" value={uninstallScope} onChange={(event) => setUninstallScope(event.target.value)}>
-              <option value="yachiyo_only">仅卸载 Hermes-Yachiyo</option>
-              <option value="include_hermes">也卸载 Hermes Agent 架构</option>
-            </select>
-          </div>
-          <label className="settings-check" htmlFor="uninstall-keep-config">
-            <input
-              id="uninstall-keep-config"
-              type="checkbox"
-              checked={uninstallKeepConfig}
-              onChange={(event) => setUninstallKeepConfig(event.target.checked)}
-            />
-            <span>卸载前生成备份</span>
-          </label>
-          <label className="settings-check" htmlFor="uninstall-gpt-sovits">
-            <input
-              id="uninstall-gpt-sovits"
-              type="checkbox"
-              checked={uninstallGptSovits}
-              onChange={(event) => setUninstallGptSovits(event.target.checked)}
-            />
-            <span>同时卸载 GPT-SoVITS 服务目录与基础模型</span>
-          </label>
-          {uninstallGptSovits ? (
-            <p className="warn-text">
-              将删除 GPT-SoVITS 服务目录，包括已下载的基础预训练模型、虚拟环境和本地服务文件。
-            </p>
-          ) : null}
-        </div>
-        <div className="uninstall-preview-react">
-          {(uninstallPreview?.targets || []).map((target) => (
-            <div className="uninstall-target-react" key={target.id || target.path}>
-              <div>
-                <strong>{target.label || target.id}</strong>
-                <span>{target.display_path || target.path || '—'}</span>
-              </div>
-              <small>{target.exists ? (target.removable ? '将删除' : target.reason || '跳过') : '不存在'}</small>
-            </div>
-          ))}
-          {uninstallPreview?.warnings?.length ? <p className="warn-text">{uninstallPreview.warnings.join('；')}</p> : null}
-        </div>
-        <div className="settings-field uninstall-confirm-field">
-          <label htmlFor="uninstall-confirm-text">输入 {uninstallConfirmPhrase} 确认</label>
-          <input
-            id="uninstall-confirm-text"
-            value={uninstallConfirmText}
-            disabled={uninstallRunning}
-            onChange={(event) => setUninstallConfirmText(event.target.value)}
-          />
-        </div>
-        <div className="settings-action-strip">
-          <button type="button" disabled={uninstallRunning} onClick={() => void refreshUninstallPreview()}>刷新清单</button>
-          <button type="button" className="danger-action" disabled={uninstallRunning || !uninstallConfirmValid} onClick={() => void runUninstall()}>{uninstallRunning ? '正在卸载' : '卸载'}</button>
-        </div>
-      </section>
     </main>
   );
-}
-
-function SettingsRows({ rows }: { rows: Array<[string, string | number | undefined | null]> }) {
-  return (
-    <div className="settings-meta-list compact-list">
-      {rows.map(([label, value]) => (
-        <div className="settings-meta-row" key={label}>
-          <span>{label}</span>
-          <strong>{value === undefined || value === null || value === '' ? '—' : value}</strong>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function IntegrationRows({ title, item }: { title: string; item?: StatusRecord }) {
-  return (
-    <div className="integration-block">
-      <div className="integration-title-row">
-        <strong>{title}</strong>
-        <span>{item?.label || item?.status || '—'}</span>
-      </div>
-      {item?.description ? <p>{item.description}</p> : null}
-      {item?.blockers?.length ? <p className="warn-text">{item.blockers.join('；')}</p> : null}
-    </div>
-  );
-}
-
-function AppUpdateChangelogPanel({ changelog }: { changelog?: ReleaseChangelog }) {
-  const sections = (changelog?.sections || [])
-    .map((section) => ({
-      title: section.title || '更新',
-      items: (section.items || []).filter((item) => item?.subject),
-    }))
-    .filter((section) => section.items.length);
-  const fallbackItems = !sections.length
-    ? (changelog?.commits || []).filter((item) => item?.subject)
-    : [];
-  const hasContent = sections.length > 0 || fallbackItems.length > 0;
-  if (!hasContent) return null;
-  const compareUrl = typeof changelog?.compare_url === 'string' ? changelog.compare_url : '';
-  return (
-    <div className="app-update-changelog">
-      <div className="app-update-changelog-heading">
-        <h3>更新内容</h3>
-        {compareUrl ? (
-          <button type="button" onClick={() => void openExternalUrl(compareUrl)}>查看提交对比</button>
-        ) : null}
-      </div>
-      {sections.length ? sections.map((section) => (
-        <div className="app-update-changelog-section" key={section.title}>
-          <strong>{section.title}</strong>
-          <ul>
-            {section.items.map((item) => <AppUpdateChangelogItem key={changelogItemKey(item)} item={item} />)}
-          </ul>
-        </div>
-      )) : (
-        <div className="app-update-changelog-section">
-          <ul>
-            {fallbackItems.map((item) => <AppUpdateChangelogItem key={changelogItemKey(item)} item={item} />)}
-          </ul>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AppUpdateChangelogItem({ item }: { item: ReleaseChangelogCommit }) {
-  return (
-    <li>
-      <span>{item.subject}</span>
-      {item.short_commit ? <small>{item.short_commit}</small> : null}
-    </li>
-  );
-}
-
-function changelogItemKey(item: ReleaseChangelogCommit): string {
-  return item.commit || `${item.short_commit || ''}-${item.subject || ''}`;
 }
 
 function listValue(items?: string[]): string {
@@ -1885,6 +2045,13 @@ function statusClassName(status: string): string {
   return /失败|错误|必须|不能为空|不能|须在|仅支持|无效/.test(status) ? 'notice danger' : 'notice';
 }
 
+function statusToneClassName(status: string): string {
+  if (/失败|错误|必须|不能为空|不能|须在|仅支持|无效/.test(status)) return 'danger';
+  if (/保存中|正在/.test(status)) return 'pending';
+  if (/已保存|已丢弃|完成|已打开/.test(status)) return 'success';
+  return '';
+}
+
 function fieldId(key: string): string {
   return key.replace(/[^a-zA-Z0-9_-]+/g, '-');
 }
@@ -2072,7 +2239,7 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
   },
   {
     title: '交互行为',
-    note: '启动初始表现只控制回复气泡和快捷输入，不会自动打开聊天窗口。',
+    note: '启动初始表现只控制回复气泡和快捷输入，不会自动展开主控台对话。',
     fields: [
       { key: 'live2d_mode.show_reply_bubble', sourceKey: 'show_reply_bubble', label: '显示回复气泡', kind: 'checkbox', wide: true },
       {
@@ -2092,17 +2259,48 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
         label: '点击角色行为',
         kind: 'select',
         options: [
-          { value: 'open_chat', label: '打开/切换聊天窗口' },
+          { value: 'open_chat', label: '打开主控台对话' },
           { value: 'toggle_reply', label: '切换回复气泡' },
           { value: 'focus_stage', label: '仅聚焦角色窗口' },
         ],
       },
       { key: 'live2d_mode.enable_quick_input', sourceKey: 'enable_quick_input', label: '显示快捷输入入口', kind: 'checkbox', wide: true },
-      { key: 'live2d_mode.auto_open_chat_window', sourceKey: 'auto_open_chat_window', label: '启动时打开聊天窗口', kind: 'checkbox', wide: true },
+      { key: 'live2d_mode.auto_open_chat_window', sourceKey: 'auto_open_chat_window', label: '启动时打开主控台对话', kind: 'checkbox', wide: true },
       { key: 'live2d_mode.mouse_follow_enabled', sourceKey: 'mouse_follow_enabled', label: '鼠标跟随', kind: 'checkbox', wide: true },
       { key: 'live2d_mode.idle_motion_group', sourceKey: 'idle_motion_group', label: '待机动作组', kind: 'text' },
       { key: 'live2d_mode.enable_expressions', sourceKey: 'enable_expressions', label: '启用表情系统', kind: 'checkbox', wide: true },
       { key: 'live2d_mode.enable_physics', sourceKey: 'enable_physics', label: '启用物理模拟', kind: 'checkbox', wide: true },
+    ],
+  },
+  {
+    title: '性能与画质',
+    note: '画质预设、帧率、清晰度和透明命中精度会在重启当前 Live2D 模式后完全生效。',
+    fields: [
+      {
+        key: 'live2d_mode.render_quality_preset',
+        sourceKey: 'render_quality_preset',
+        label: '画质预设',
+        kind: 'select',
+        options: [
+          { value: 'battery', label: '省电' },
+          { value: 'balanced', label: '均衡' },
+          { value: 'quality', label: '高清' },
+          { value: 'custom', label: '自定义' },
+        ],
+      },
+      { key: 'live2d_mode.render_fps', sourceKey: 'render_fps', label: '帧率上限', kind: 'number', min: 12, max: 60, integer: true },
+      { key: 'live2d_mode.render_resolution', sourceKey: 'render_resolution', label: '清晰度倍率', kind: 'number', min: 0.5, max: 2, step: '0.05' },
+      {
+        key: 'live2d_mode.hit_region_precision',
+        sourceKey: 'hit_region_precision',
+        label: '透明命中精度',
+        kind: 'select',
+        options: [
+          { value: 'low', label: '低' },
+          { value: 'medium', label: '中' },
+          { value: 'high', label: '高' },
+        ],
+      },
     ],
   },
   {

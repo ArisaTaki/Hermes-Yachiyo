@@ -3,6 +3,7 @@ import { FormEvent, ReactNode, useEffect, useState, type CSSProperties } from 'r
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { apiGet, apiPost, openDesktopMode, openPath, quitApp } from '../lib/bridge';
 import { type AppView, currentParam, navigateTo } from '../lib/view';
+import { Live2DPreviewStage } from './LauncherView';
 
 type DashboardData = {
   app?: { uptime_seconds?: number; version?: string; running?: boolean };
@@ -156,6 +157,13 @@ type LauncherPayload = {
     avatar_url?: string;
     status_label?: string;
     latest_reply?: string;
+    preview_url?: string;
+    scale?: number;
+    position_anchor?: string;
+    render_quality_preset?: string;
+    render_fps?: number;
+    render_resolution?: number;
+    hit_region_precision?: string;
     resource?: {
       available?: boolean;
       state?: string;
@@ -163,6 +171,16 @@ type LauncherPayload = {
       status_label?: string;
       help_text?: string;
       default_assets_root_display?: string;
+      renderer_entry?: string;
+    };
+    renderer?: {
+      enabled?: boolean;
+      model_url?: string;
+      reason?: string;
+      scale?: number;
+      enable_physics?: boolean;
+      expressions?: Array<{ name?: string; file?: string }>;
+      motion_groups?: Record<string, Array<Record<string, unknown>>>;
     };
   };
   proactive?: { enabled?: boolean; has_attention?: boolean; attention_text?: string };
@@ -190,7 +208,7 @@ const NAV_GROUPS: Array<{
   {
     label: '日常桌面',
     items: [
-      { view: 'chat', label: '聊天窗口', icon: '◌' },
+      { view: 'chat', label: '对话', icon: '◌' },
       { view: 'bubble', label: '气泡模式', icon: '◍' },
       { view: 'live2d', label: 'Live2D 模式', icon: '◈' },
       { view: 'proactive-tts', label: 'GPT-SoVITS', icon: '♪' },
@@ -212,10 +230,21 @@ const NAV_GROUPS: Array<{
   },
 ];
 
-const TOOL_CARDS = [
-  { view: 'chat' as AppView, icon: '💬', title: '聊天窗口', detail: '与八千代对话，支持文本和图片输入。', status: '就绪', statusTone: 'ready' },
+type ToolStatusTone = 'ready' | 'pending' | 'error';
+
+type ToolCard = {
+  view: AppView;
+  icon: string;
+  title: string;
+  detail: string;
+  status: string;
+  statusTone: ToolStatusTone;
+};
+
+const TOOL_CARD_DEFS: Array<Omit<ToolCard, 'status' | 'statusTone'> & { status?: string; statusTone?: ToolStatusTone }> = [
+  { view: 'chat' as AppView, icon: '💬', title: '对话', detail: '与八千代对话，支持文本和图片输入。' },
   { view: 'bubble' as AppView, icon: '💭', title: '气泡模式', detail: '桌面悬浮气泡，随时对话，支持拖拽和边缘吸附。', status: '就绪', statusTone: 'ready' },
-  { view: 'live2d' as AppView, icon: '🎭', title: 'Live2D 模式', detail: '虚拟形象互动，口型同步，表情动作。', status: '待导入', statusTone: 'pending' },
+  { view: 'live2d' as AppView, icon: '🎭', title: 'Live2D 模式', detail: '虚拟形象互动，口型同步，表情动作。' },
   { view: 'proactive-tts' as AppView, icon: '🎵', title: 'GPT-SoVITS', detail: '语音合成，让八千代开口说话。', status: '就绪', statusTone: 'ready' },
 ];
 
@@ -490,6 +519,7 @@ function BootLoadingOverlay({ hidden, slow }: { hidden: boolean; slow: boolean }
 
 export function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
+  const [live2dLauncher, setLive2dLauncher] = useState<LauncherPayload | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -497,8 +527,10 @@ export function DashboardPage() {
     async function load() {
       try {
         const payload = await apiGet<DashboardData>('/ui/dashboard');
+        const launcherPayload = await apiGet<LauncherPayload>('/ui/launcher?mode=live2d').catch(() => null);
         if (!disposed) {
           setData(payload);
+          setLive2dLauncher(launcherPayload);
           setError('');
         }
       } catch (err) {
@@ -518,6 +550,7 @@ export function DashboardPage() {
   const workspaceReady = Boolean(data?.workspace?.initialized);
   const activities = recentActivities(data);
   const modelLabel = data?.hermes?.version || (modelReady ? 'Hermes · 文本+视觉' : 'Hermes 待检测');
+  const toolCards = dashboardToolCards(data, live2dLauncher);
 
   return (
     <section className="hy-route-page hy-dashboard-page">
@@ -554,8 +587,13 @@ export function DashboardPage() {
           <button type="button" onClick={() => navigateTo('tools-all')}>查看全部 →</button>
         </div>
         <div className="hy-tools-grid">
-          {TOOL_CARDS.map((tool) => (
-            <button type="button" className="hy-tool-card" key={tool.title} onClick={() => navigateTo(tool.view)}>
+          {toolCards.map((tool) => (
+            <button
+              type="button"
+              className="hy-tool-card"
+              key={tool.title}
+              onClick={() => navigateTo(tool.view)}
+            >
               <span>{tool.icon}</span>
               <strong>{tool.title}</strong>
               <small>{tool.detail}</small>
@@ -578,6 +616,52 @@ export function DashboardPage() {
       </section>
     </section>
   );
+}
+
+function dashboardToolCards(data: DashboardData | null, live2dLauncher: LauncherPayload | null): ToolCard[] {
+  return TOOL_CARD_DEFS.map((tool) => {
+    if (tool.view === 'chat') {
+      return { ...tool, ...chatToolStatus(data) };
+    }
+    if (tool.view === 'live2d') {
+      return { ...tool, ...live2dToolStatus(live2dLauncher) };
+    }
+    if (tool.view === 'bubble') {
+      return {
+        ...tool,
+        status: data?.modes?.current === 'bubble' ? '使用中' : (tool.status || '就绪'),
+        statusTone: tool.statusTone || 'ready',
+      };
+    }
+    return { ...tool, status: tool.status || '就绪', statusTone: tool.statusTone || 'ready' };
+  });
+}
+
+function chatToolStatus(data: DashboardData | null): Pick<ToolCard, 'status' | 'statusTone'> {
+  if (data?.chat?.is_processing) return { status: '处理中', statusTone: 'pending' };
+  if (data?.chat?.recent_sessions?.length) return { status: '就绪', statusTone: 'ready' };
+  return { status: '待开始', statusTone: 'pending' };
+}
+
+function live2dToolStatus(payload: LauncherPayload | null): Pick<ToolCard, 'status' | 'statusTone'> {
+  const resource = payload?.launcher?.resource;
+  if (!payload) return { status: '检测中', statusTone: 'pending' };
+  if (isLive2DResourceReady(resource)) {
+    return { status: resource?.status_label || '已导入', statusTone: 'ready' };
+  }
+  return { status: resource?.status_label || '待导入', statusTone: 'pending' };
+}
+
+function isLive2DResourceReady(resource?: NonNullable<LauncherPayload['launcher']>['resource']): boolean {
+  const state = String(resource?.state || '').toLowerCase();
+  return Boolean(resource?.available || ['ready', 'loaded', 'valid', 'path_valid', 'ok'].includes(state));
+}
+
+function live2dRenderPresetLabel(value?: string): string {
+  if (value === 'battery') return '省电';
+  if (value === 'quality') return '高清';
+  if (value === 'custom') return '自定义';
+  return '均衡';
 }
 
 export function ProviderPage() {
@@ -844,6 +928,14 @@ export function Live2DModePage() {
   }, []);
 
   const resource = data?.launcher?.resource;
+  const renderer = data?.launcher?.renderer;
+  const resourceReady = isLive2DResourceReady(resource);
+  const previewReady = Boolean(resourceReady && renderer?.enabled && renderer?.model_url);
+  const expressionCount = renderer?.expressions?.length || 0;
+  const motionGroups = renderer?.motion_groups || {};
+  const motionGroupCount = Object.keys(motionGroups).length;
+  const motionCount = Object.values(motionGroups).reduce((total, items) => total + (Array.isArray(items) ? items.length : 0), 0);
+  const renderLabel = live2dRenderPresetLabel(data?.launcher?.render_quality_preset);
 
   return (
     <section className="hy-route-page hy-stage-page">
@@ -859,14 +951,18 @@ export function Live2DModePage() {
         </div>
       </header>
       <div className="hy-live2d-layout">
-        <div className="hy-live2d-stage hy-stagger corner-frame">
+        <div className={`hy-live2d-stage hy-stagger corner-frame ${previewReady ? 'has-preview' : ''}`}>
           <div className="corner-frame-inner" />
-          <div className="hy-live2d-placeholder">
-            <div className="hy-live2d-placeholder-icon"><img src={logoUrl} alt="" /></div>
-            <strong>{resource?.display_name || 'Live2D 模型待导入'}</strong>
-            <span>{resource?.status_label || (resource?.available ? '资源已就绪' : '支持 .model3.json 格式')}</span>
-            <button type="button" className="hy-btn hy-btn-primary" onClick={() => navigateTo('settings', { mode: 'live2d' })}>导入 Live2D 模型</button>
-          </div>
+          {previewReady ? (
+            <Live2DPreviewStage data={data} />
+          ) : (
+            <div className="hy-live2d-placeholder">
+              <div className="hy-live2d-placeholder-icon"><img src={logoUrl} alt="" /></div>
+              <strong>{resource?.display_name || 'Live2D 模型待导入'}</strong>
+              <span>{resource?.status_label || (resource?.available ? '资源已就绪' : '支持 .model3.json 格式')}</span>
+              <button type="button" className="hy-btn hy-btn-primary" onClick={() => navigateTo('settings', { mode: 'live2d' })}>导入 Live2D 模型</button>
+            </div>
+          )}
         </div>
         <div className="hy-mode-info hy-stagger">
           <h3>Live2D 模式</h3>
@@ -874,8 +970,10 @@ export function Live2DModePage() {
           <div className="hy-feature-pills">
             {[
               ['🎤', data?.tts?.enabled ? '口型同步' : '口型同步'],
-              ['😊', resource?.available ? '表情动作' : '表情动作'],
+              ['😊', expressionCount ? `${expressionCount} 个表情` : '表情动作'],
+              ['🎞️', motionCount ? `${motionGroupCount} 组动作 · ${motionCount} 条` : '动作摘要'],
               ['🎵', data?.tts?.provider ? '语音合成' : '语音合成'],
+              ['⚙️', `${renderLabel} · ${data?.launcher?.render_fps || 24} FPS`],
               ['🌙', data?.proactive?.enabled ? '月光舞台' : '月光舞台'],
             ].map(([icon, item]) => (
               <span key={item}><i>{icon}</i>{item}</span>
@@ -1149,24 +1247,44 @@ export function WorkspacePage() {
 }
 
 export function ToolsAllPage() {
+  const [live2dLauncher, setLive2dLauncher] = useState<LauncherPayload | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+    apiGet<LauncherPayload>('/ui/launcher?mode=live2d')
+      .then((payload) => {
+        if (!disposed) setLive2dLauncher(payload);
+      })
+      .catch(() => {
+        if (!disposed) setLive2dLauncher(null);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const live2dStatus = live2dToolStatus(live2dLauncher);
   const allTools = [
-    ...TOOL_CARDS,
-    { view: 'provider' as AppView, icon: '🔗', title: '模型配置', detail: '配置 AI 模型提供商和 API Key。', status: '就绪', statusTone: 'ready' },
+    { view: 'bubble' as AppView, icon: '💭', title: '气泡模式', detail: '桌面悬浮气泡，随时对话，支持拖拽和边缘吸附。', status: '就绪', statusTone: 'ready' },
+    { view: 'live2d' as AppView, icon: '🎭', title: 'Live2D 模式', detail: '虚拟形象互动，口型同步，表情动作。', ...live2dStatus },
+    { view: 'proactive-tts' as AppView, icon: '🎵', title: 'GPT-SoVITS', detail: '语音合成，让八千代开口说话。', status: '就绪', statusTone: 'ready' },
     { view: 'resources' as AppView, icon: '📁', title: '资源管理', detail: '管理 Live2D 模型、语音、壁纸等资源文件。', status: '就绪', statusTone: 'ready' },
     { view: 'workspace' as AppView, icon: '📂', title: '工作区', detail: '管理对话记录、项目文件和工作区配置。', status: '已初始化', statusTone: 'ready' },
     { view: 'diagnostics' as AppView, icon: '🔍', title: '诊断工具', detail: '系统状态检测和日志查看。', status: '就绪', statusTone: 'ready' },
+    { view: 'provider' as AppView, icon: '🔗', title: '模型配置', detail: '配置 AI 模型提供商和 API Key。', status: '就绪', statusTone: 'ready' },
+    { view: 'chat' as AppView, icon: '💬', title: '对话', detail: '与八千代对话，支持文本和图片输入。', status: '就绪', statusTone: 'ready' },
   ];
 
   return (
     <section className="hy-route-page">
       <header className="hy-page-header">
+        <button type="button" className="page-back-link" onClick={() => navigateTo('main')}>← 返回主控台</button>
         <div>
-          <span className="hy-eyebrow">Tools</span>
           <h2>桌面工具</h2>
-          <p>所有桌面入口、维护工具和资源配置集中在这里。</p>
+          <p>所有可用的桌面工具和交互模式</p>
         </div>
       </header>
-      <div className="hy-tools-grid expanded">
+      <div className="hy-tools-grid tools-grid-full">
         {allTools.map((tool) => (
           <button type="button" className="hy-tool-card" key={tool.title} onClick={() => navigateTo(tool.view)}>
             <span>{tool.icon}</span>
@@ -1206,20 +1324,31 @@ export function ActivityAllPage() {
       title: command.label || command.command || '诊断命令',
       detail: command.command || 'Hermes diagnostic',
       time: formatShortDateTime(command.cached_at || cache?.updated_at),
+      timestamp: command.cached_at || cache?.updated_at,
     })),
   ];
 
+  const grouped = groupActivitiesByDay(rows);
+
   return (
-    <section className="hy-route-page hy-centered-page">
+    <section className="hy-route-page">
       <header className="hy-page-header">
+        <button type="button" className="page-back-link" onClick={() => navigateTo('main')}>← 返回主控台</button>
         <div>
-          <span className="hy-eyebrow">Activity</span>
           <h2>活动日志</h2>
-          <p>最近会话、运行状态和诊断缓存。</p>
+          <p>所有系统和交互活动的完整记录</p>
         </div>
       </header>
-      <div className="hy-activity-list large">
-        {rows.map((row, index) => <ActivityRow key={`${row.title}-${index}`} {...row} />)}
+      <div className="activity-list-full">
+        {grouped.map((group) => (
+          <div key={group.label}>
+            <div className="activity-day-label">{group.label}</div>
+            {group.items.map((row, index) => <ActivityRow key={`${row.title}-${index}`} {...row} />)}
+          </div>
+        ))}
+        {!grouped.length ? (
+          <div className="inline-empty">暂无活动记录</div>
+        ) : null}
       </div>
     </section>
   );
@@ -1241,13 +1370,13 @@ function StatusCard({ tone, label, value, detail, icon }: { tone: 'success' | 'w
 
 function ActivityRow({ icon, title, detail, time, tone = 'system' }: { icon: string; title: string; detail: string; time: string; tone?: string }) {
   return (
-    <article className={`hy-activity-row hy-activity-row-${tone}`}>
-      <span>{icon}</span>
-      <div>
+    <article className={`activity-item activity-item-${tone}`}>
+      <span className="activity-icon">{icon}</span>
+      <div className="activity-content">
         <strong>{title}</strong>
         <small>{detail}</small>
       </div>
-      <time>{time}</time>
+      <time className="activity-time">{time}</time>
     </article>
   );
 }
@@ -1386,13 +1515,14 @@ function recentActivities(data: DashboardData | null) {
     detail: `${session.message_count || 0} 条消息 · ${session.latest_status || '已同步'}`,
     time: formatShortDateTime(session.updated_at),
     tone: 'chat',
+    timestamp: session.updated_at,
   }));
   if (rows.length) return rows;
   return [
-    { icon: '💬', title: '八千代完成了图片分析任务', detail: '聊天窗口同步完成', time: '2 分钟前', tone: 'chat' },
-    { icon: '🔧', title: '模型配置已更新', detail: data?.hermes?.version || 'Hermes 模型配置', time: '15 分钟前', tone: 'system' },
-    { icon: '📦', title: '工作区备份完成', detail: data?.workspace?.path || '等待初始化', time: '1 小时前', tone: 'system' },
-    { icon: '⚠️', title: 'Live2D 模型资源缺失', detail: '不影响聊天窗口和 Bridge', time: '3 小时前', tone: 'warning' },
+    { icon: '💬', title: '八千代完成了图片分析任务', detail: '主控台对话同步完成', time: '2 分钟前', tone: 'chat', timestamp: '2 分钟前' },
+    { icon: '🔧', title: '模型配置已更新', detail: data?.hermes?.version || 'Hermes 模型配置', time: '15 分钟前', tone: 'system', timestamp: '15 分钟前' },
+    { icon: '📦', title: '工作区备份完成', detail: data?.workspace?.path || '等待初始化', time: '1 小时前', tone: 'system', timestamp: '1 小时前' },
+    { icon: '⚠️', title: 'Live2D 模型资源缺失', detail: '不影响主控台对话和 Bridge', time: '3 小时前', tone: 'warning', timestamp: '3 小时前' },
   ];
 }
 
@@ -1408,8 +1538,47 @@ function formatShortDateTime(value?: string) {
   });
 }
 
+type ActivityRowData = { icon: string; title: string; detail: string; time: string; tone?: string; timestamp?: string };
+
+function groupActivitiesByDay(rows: ActivityRowData[]): Array<{ label: string; items: ActivityRowData[] }> {
+  if (!rows.length) return [];
+
+  const now = new Date();
+  const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const yesterdayDate = new Date(now.getTime() - 86400000);
+  const yesterdayKey = `${yesterdayDate.getFullYear()}-${String(yesterdayDate.getMonth() + 1).padStart(2, '0')}-${String(yesterdayDate.getDate()).padStart(2, '0')}`;
+
+  function dayKey(ts?: string): string {
+    if (!ts) return todayKey;
+    if (/^\d+ (分钟|小时)前$/.test(ts) || ts === '刚刚') return todayKey;
+    const date = new Date(ts);
+    if (Number.isNaN(date.getTime())) return 'other';
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  const groups: Record<string, ActivityRowData[]> = {};
+  for (const row of rows) {
+    const key = dayKey(row.timestamp);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(row);
+  }
+
+  const result: Array<{ label: string; items: ActivityRowData[] }> = [];
+  if (groups[todayKey]) result.push({ label: '今天', items: groups[todayKey] });
+  if (groups[yesterdayKey]) result.push({ label: '昨天', items: groups[yesterdayKey] });
+  for (const [key, items] of Object.entries(groups)) {
+    if (key === todayKey || key === yesterdayKey) continue;
+    result.push({ label: key === 'other' ? '更早' : key, items });
+  }
+  return result;
+}
+
 function routeTitle(view: AppView, settingsMode = ''): string {
   if (view === 'main') return 'Hermes Yachiyo — 主控台';
+  if (view === 'chat') return 'Hermes Yachiyo — 对话';
   if (view === 'provider') return 'Hermes Yachiyo — 模型配置';
   if (view === 'bubble') return 'Hermes Yachiyo — 气泡模式';
   if (view === 'live2d') return 'Hermes Yachiyo — Live2D 模式';
