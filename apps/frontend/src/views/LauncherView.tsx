@@ -7,6 +7,7 @@ export type LauncherPayload = {
   ok?: boolean;
   mode?: 'bubble' | 'live2d';
   chat?: {
+    session_id?: string;
     is_processing?: boolean;
     empty?: boolean;
     status_label?: string;
@@ -241,18 +242,22 @@ function useLauncher(mode: 'bubble' | 'live2d') {
   return { data, refresh };
 }
 
-async function acknowledgeAndOpenChat(mode: 'bubble' | 'live2d') {
-  let sessionId = '';
+async function acknowledgeAndOpenChat(mode: 'bubble' | 'live2d', data: LauncherPayload | null) {
+  let sessionId = data?.proactive?.has_attention ? '' : String(data?.chat?.session_id || '');
   try {
     const result = await apiPost<{ session_id?: string }>('/ui/launcher/ack', { mode });
-    sessionId = result.session_id || '';
+    sessionId = data?.proactive?.has_attention
+      ? result.session_id || ''
+      : String(data?.chat?.session_id || result.session_id || sessionId);
   } catch {}
-  await openAppView('chat', sessionId ? { session_id: sessionId } : {});
+  const params: Record<string, string> | undefined =
+    data?.proactive?.has_attention && sessionId ? { session_id: sessionId } : undefined;
+  await openAppView('chat', params);
 }
 
 async function openLauncherPrimaryTarget(mode: 'bubble' | 'live2d', data: LauncherPayload | null) {
   if (shouldOpenChatFromLauncher(data)) {
-    await acknowledgeAndOpenChat(mode);
+    await acknowledgeAndOpenChat(mode, data);
     return;
   }
   await openAppView('main', { restore: 'last' });
@@ -743,7 +748,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
     }
     resetLive2DExpression(rendererStateRef.current);
     lastStatusExpressionKeyRef.current = '';
-    await openLauncherPrimaryTarget('live2d', data);
+    await acknowledgeAndOpenChat('live2d', data);
   }
 
   async function handleStageClick(event?: MouseEvent<HTMLElement>) {
@@ -854,7 +859,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
           onClick={() => {
             resetLive2DExpression(rendererStateRef.current);
             lastStatusExpressionKeyRef.current = '';
-            if (proactiveAttention) void acknowledgeAndOpenChat('live2d');
+            if (proactiveAttention) void acknowledgeAndOpenChat('live2d', data);
             else setReplyHidden(true);
           }}
         >

@@ -1,7 +1,9 @@
 import { FormEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ClipboardEvent as ReactClipboardEvent,
+  CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
 } from 'react';
 
 import { ImageAttachmentViewer } from '../components/ImageAttachmentViewer';
@@ -99,6 +101,11 @@ const SCROLL_BOTTOM_THRESHOLD = 14;
 const COPY_FEEDBACK_MS = 1500;
 const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MIN_LOADING_MS = 1400;
+const CHAT_SIDEBAR_MIN_WIDTH = 220;
+const CHAT_SIDEBAR_BASE_MAX_WIDTH = 280;
+const CHAT_SIDEBAR_WIDE_MAX_WIDTH = 360;
+const CHAT_WIDE_VIEWPORT_WIDTH = 1500;
 
 export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -112,6 +119,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [notice, setNotice] = useState<ChatNotice | null>(null);
   const [sessionQuery, setSessionQuery] = useState('');
   const [copiedMessageId, setCopiedMessageId] = useState('');
+  const [messagesLoaded, setMessagesLoaded] = useState(false);
+  const [messagesVisible, setMessagesVisible] = useState(false);
+  const [sidebarMaxWidth, setSidebarMaxWidth] = useState(() => responsiveChatSidebarMaxWidth());
+  const [sidebarWidth, setSidebarWidth] = useState(() => responsiveChatSidebarMaxWidth());
   const [, setRenderTick] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -123,8 +134,17 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const stickToBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
   const noticeTimerRef = useRef<number | null>(null);
+  const messagesLoadedRef = useRef(false);
+  const messageLoadTokenRef = useRef(0);
+  const conversationLoadTokenRef = useRef(0);
+  const conversationTransitionRef = useRef(false);
+  const sidebarAutoWidthRef = useRef(true);
 
-  const refreshMessages = useCallback(async () => {
+  const refreshMessages = useCallback(async (options: { allowDuringTransition?: boolean } = {}) => {
+    if (conversationTransitionRef.current && !options.allowDuringTransition) return;
+    const token = ++messageLoadTokenRef.current;
+    const startedAt = Date.now();
+    const shouldHoldLoading = !messagesLoadedRef.current;
     try {
       const payload = await apiGet<MessagesPayload>('/ui/chat/messages?limit=80');
       if (payload.ok === false) throw new Error(payload.error || '读取消息失败');
@@ -132,8 +152,19 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const nextMessages = withResolvedAttachmentUrls(payload.messages || [], baseUrl);
       const processing = Boolean(payload.is_processing);
       const failed = latestFailedMessage(nextMessages);
+      syncRenderStates(nextMessages, renderStateRef.current);
+      const elapsed = Date.now() - startedAt;
+      const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
+      if (shouldHoldLoading && remaining > 0) await new Promise((r) => setTimeout(r, remaining));
+      if (token !== messageLoadTokenRef.current) return;
       setMessages(nextMessages);
       setIsProcessing(processing);
+      await settleMessagesAtBottom(token);
+      if (token === messageLoadTokenRef.current) {
+        messagesLoadedRef.current = true;
+        setMessagesVisible(true);
+        setMessagesLoaded(true);
+      }
       if (processing) {
         setStatus('处理中...');
       } else if (failed) {
@@ -142,6 +173,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         setStatus('就绪');
       }
     } catch (error) {
+      const elapsed = Date.now() - startedAt;
+      const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
+      if (shouldHoldLoading && remaining > 0) await new Promise((r) => setTimeout(r, remaining));
+      if (token !== messageLoadTokenRef.current) return;
+      messagesLoadedRef.current = true;
+      setMessagesLoaded(true);
+      setMessagesVisible(true);
       setStatus(error instanceof Error ? error.message : '读取消息失败');
     }
   }, []);
@@ -195,6 +233,21 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }, EXECUTOR_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [loadExecutor]);
+
+  useEffect(() => {
+    if (embedded) return;
+    const syncResponsiveSidebarWidth = () => {
+      const maxWidth = responsiveChatSidebarMaxWidth();
+      setSidebarMaxWidth(maxWidth);
+      setSidebarWidth((width) => {
+        if (sidebarAutoWidthRef.current) return maxWidth;
+        return Math.min(Math.max(width, CHAT_SIDEBAR_MIN_WIDTH), maxWidth);
+      });
+    };
+    syncResponsiveSidebarWidth();
+    window.addEventListener('resize', syncResponsiveSidebarWidth);
+    return () => window.removeEventListener('resize', syncResponsiveSidebarWidth);
+  }, [embedded]);
 
   useEffect(() => {
     syncRenderStates(messages, renderStateRef.current);
@@ -386,28 +439,44 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
 
   async function deleteSession() {
     if (!window.confirm('删除此对话？此操作不可恢复。')) return;
+    const conversationToken = beginConversationLoading();
     try {
       await apiPost('/ui/chat/session/delete');
+      if (conversationToken !== conversationLoadTokenRef.current) return;
       renderStateRef.current.clear();
       stickToBottomRef.current = true;
       await loadSessions();
-      await refreshMessages();
+      await refreshMessages({ allowDuringTransition: true });
+      if (conversationToken === conversationLoadTokenRef.current) conversationTransitionRef.current = false;
       setStatus('已删除此对话');
     } catch (error) {
+      if (conversationToken !== conversationLoadTokenRef.current) return;
+      conversationTransitionRef.current = false;
+      messagesLoadedRef.current = true;
+      setMessagesLoaded(true);
+      setMessagesVisible(true);
       setStatus(error instanceof Error ? error.message : '删除失败');
     }
   }
 
   async function switchSession(sessionId: string) {
     if (!sessionId || sessionId === sessions?.current_session_id) return;
+    const conversationToken = beginConversationLoading();
     try {
       await apiPost('/ui/chat/sessions/load', { session_id: sessionId });
+      if (conversationToken !== conversationLoadTokenRef.current) return;
       renderStateRef.current.clear();
       stickToBottomRef.current = true;
       await loadSessions();
-      await refreshMessages();
+      await refreshMessages({ allowDuringTransition: true });
+      if (conversationToken === conversationLoadTokenRef.current) conversationTransitionRef.current = false;
       setStatus('已切换会话');
     } catch (error) {
+      if (conversationToken !== conversationLoadTokenRef.current) return;
+      conversationTransitionRef.current = false;
+      messagesLoadedRef.current = true;
+      setMessagesLoaded(true);
+      setMessagesVisible(true);
       setStatus(error instanceof Error ? error.message : '切换失败');
     }
   }
@@ -435,6 +504,58 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     void openExternalUrl(anchor.href);
   }
 
+  function startSidebarResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (embedded) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture can fail if the target is detached during a route switch.
+    }
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      sidebarAutoWidthRef.current = false;
+      const nextWidth = Math.max(
+        CHAT_SIDEBAR_MIN_WIDTH,
+        Math.min(sidebarMaxWidth, startWidth + moveEvent.clientX - startX),
+      );
+      setSidebarWidth(Math.round(nextWidth));
+    };
+
+    const stopResize = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', stopResize);
+    window.addEventListener('pointercancel', stopResize);
+  }
+
+  function handleSidebarResizerKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (embedded) return;
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      sidebarAutoWidthRef.current = false;
+      setSidebarWidth((value) => Math.max(CHAT_SIDEBAR_MIN_WIDTH, value - 12));
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      sidebarAutoWidthRef.current = false;
+      setSidebarWidth((value) => Math.min(sidebarMaxWidth, value + 12));
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      sidebarAutoWidthRef.current = false;
+      setSidebarWidth(CHAT_SIDEBAR_MIN_WIDTH);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      sidebarAutoWidthRef.current = true;
+      setSidebarWidth(sidebarMaxWidth);
+    }
+  }
+
   function showNotice(title: string, detail: string, kind: ChatNotice['kind'] = 'warn') {
     if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
     setNotice({ id: Date.now(), kind, title, detail });
@@ -444,6 +565,50 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   function showImageInputBlocked() {
     showNotice('当前不能发送图片', imageInputUnavailableText(executor), 'warn');
     setStatus('图片未附加');
+  }
+
+  function beginConversationLoading() {
+    const conversationToken = ++conversationLoadTokenRef.current;
+    conversationTransitionRef.current = true;
+    messageLoadTokenRef.current += 1;
+    messagesLoadedRef.current = false;
+    renderStateRef.current.clear();
+    setMessagesLoaded(false);
+    setMessagesVisible(false);
+    setMessages([]);
+    return conversationToken;
+  }
+
+  function settleMessagesAtBottom(token: number) {
+    return new Promise<void>((resolve) => {
+      let frames = 0;
+      let stableFrames = 0;
+      let previousHeight = -1;
+
+      const settle = () => {
+        if (token !== messageLoadTokenRef.current) {
+          resolve();
+          return;
+        }
+        const list = listRef.current;
+        if (list) {
+          const height = list.scrollHeight;
+          stableFrames = height === previousHeight ? stableFrames + 1 : 0;
+          previousHeight = height;
+          stickToBottomRef.current = true;
+          list.scrollTop = height;
+          lastScrollTopRef.current = list.scrollTop;
+        }
+        frames += 1;
+        if (frames >= 8 || stableFrames >= 2) {
+          resolve();
+          return;
+        }
+        window.requestAnimationFrame(settle);
+      };
+
+      window.requestAnimationFrame(settle);
+    });
   }
 
   const sessionItems = sessions?.sessions || [];
@@ -457,6 +622,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     : sessionItems;
   const currentSession = sessionItems.find((session) => session.session_id === sessions?.current_session_id);
   const currentTitle = currentSession ? sessionTitle(currentSession) : '月見八千代';
+  const chatWorkspaceStyle = embedded
+    ? undefined
+    : ({ '--chat-sidebar-width': `${sidebarWidth}px` } as CSSProperties);
 
   return (
     <section className={`${embedded ? '' : 'app-shell '}chat-shell refined-chat-shell open-chat-shell${embedded ? ' embedded-chat-shell' : ''}`}>
@@ -468,7 +636,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         </div>
       ) : null}
 
-      <div className="chat-layout hy-chat-workspace">
+      <div
+        className={`chat-layout hy-chat-workspace${embedded ? '' : ' resizable-chat-workspace'}`}
+        style={chatWorkspaceStyle}
+      >
         <aside className="chat-sidebar hy-chat-sessions" aria-label="会话列表">
           <div className="chat-sidebar-header hy-chat-sessions-head">
             <div className="chat-sidebar-title">会话列表</div>
@@ -506,6 +677,22 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           </div>
         </aside>
 
+        {embedded ? null : (
+          <div
+            className="chat-sidebar-resizer"
+            role="separator"
+            aria-label="调整会话列表宽度"
+            aria-orientation="vertical"
+            aria-valuemin={CHAT_SIDEBAR_MIN_WIDTH}
+            aria-valuemax={sidebarMaxWidth}
+            aria-valuenow={sidebarWidth}
+            tabIndex={0}
+            title="拖动调整会话列表宽度"
+            onKeyDown={handleSidebarResizerKeyDown}
+            onPointerDown={startSidebarResize}
+          />
+        )}
+
         <section className="chat-main hy-chat-mainpane">
           <header className="chat-header">
             <div className="chat-header-info">
@@ -539,16 +726,27 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           </header>
 
           <section className="chat-messages refined-chat-list" ref={listRef} onClick={handleMessageListClick} onScroll={handleScroll}>
-            {messages.length === 0 ? <div className="empty-state">发送消息开始对话</div> : null}
-            {messages.map((message, index) => (
-              <MessageBubble
-                copied={copiedMessageId === message.id}
-                displayContent={displayMessageText(message, renderStateRef.current)}
-                key={message.id || index}
-                message={message}
-                onCopy={() => void copyMessage(message)}
-              />
-            ))}
+            {!messagesLoaded ? (
+              <div className="chat-loading-state">
+                <div className="chat-loading-dots">
+                  <span /><span /><span />
+                </div>
+                <div className="chat-loading-text">正在加载对话…</div>
+              </div>
+            ) : messages.length === 0 ? (
+              <div className="empty-state">发送消息开始对话</div>
+            ) : null}
+            <div style={messagesVisible ? undefined : { visibility: 'hidden' }}>
+              {messages.map((message, index) => (
+                <MessageBubble
+                  copied={copiedMessageId === message.id}
+                  displayContent={displayMessageText(message, renderStateRef.current)}
+                  key={message.id || index}
+                  message={message}
+                  onCopy={() => void copyMessage(message)}
+                />
+              ))}
+            </div>
           </section>
 
           <form className="chat-input-area composer refined-composer" onSubmit={submit}>
@@ -842,6 +1040,13 @@ function shouldContinueTyping(states: Map<string, RenderState>) {
 
 function isNearBottom(container: HTMLDivElement) {
   return container.scrollHeight - container.scrollTop - container.clientHeight <= SCROLL_BOTTOM_THRESHOLD;
+}
+
+function responsiveChatSidebarMaxWidth() {
+  if (typeof window === 'undefined') return CHAT_SIDEBAR_BASE_MAX_WIDTH;
+  return window.innerWidth >= CHAT_WIDE_VIEWPORT_WIDTH
+    ? CHAT_SIDEBAR_WIDE_MAX_WIDTH
+    : CHAT_SIDEBAR_BASE_MAX_WIDTH;
 }
 
 function clipboardImageFiles(data: DataTransfer | null) {

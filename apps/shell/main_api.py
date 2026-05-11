@@ -2475,7 +2475,16 @@ class MainWindowAPI:
         elapsed = round(time.monotonic() - started_at, 2)
         stdout = _compact_command_output(result.stdout)
         stderr = _compact_command_output(result.stderr)
-        if result.returncode == 0 and stdout:
+        combined_output = f"{stdout}\n{stderr}".lower()
+        output_error_indicators = [
+            "429", "rate_limit", "too many requests",
+            "500", "502", "503", "504",
+            "error:", "apierror", "httperror",
+            "connectionerror", "timeouterror",
+        ]
+        has_output_error = any(indicator in combined_output for indicator in output_error_indicators)
+
+        if result.returncode == 0 and stdout and not has_output_error:
             payload = {
                 "ok": True,
                 "success": True,

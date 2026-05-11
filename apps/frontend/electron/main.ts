@@ -1391,10 +1391,55 @@ function createChatWindow(params: Record<string, string> = {}): void {
   });
 }
 
+function navigateMainWindowInPlace(params: Record<string, string>): boolean {
+  if (!mainWindow || mainWindow.isDestroyed() || params.session_id) return false;
+  const route = routeHash(params);
+  mainWindow.webContents.executeJavaScript(
+    `window.history.pushState(null, '', ${JSON.stringify(route)}); window.dispatchEvent(new Event('hermes-route-change'));`,
+  ).catch(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(rendererUrl(params));
+  });
+  return true;
+}
+
+function focusMainWindowAsChat(params: Record<string, string> = {}): boolean {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const route = routeForWindow(mainWindow);
+  const nextParams = { ...params, view: 'chat' };
+  enforceWindowTitle(mainWindow, mainWindowTitle(nextParams));
+  if (route?.view !== 'chat') {
+    if (!navigateMainWindowInPlace(nextParams)) mainWindow.loadURL(rendererUrl(nextParams));
+  } else if (params.session_id && route.params.session_id !== params.session_id) {
+    mainWindow.loadURL(rendererUrl(nextParams));
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  showMacDockIcon();
+  mainWindow.show();
+  mainWindow.moveTop();
+  mainWindow.focus();
+  return true;
+}
+
 function showChatWindow(params: Record<string, string> = {}): void {
   restoreMainWindowIfPolluted();
   restoreModeWindowIfPolluted();
-  showMainWindow({ ...params, view: 'chat' });
+  restoreModeWindowTopPreference();
+  if (focusMainWindowAsChat(params)) return;
+  if (!chatWindow || chatWindow.isDestroyed()) {
+    createChatWindow(params);
+    return;
+  }
+  enforceWindowTitle(chatWindow, mainWindowTitle({ ...params, view: 'chat' }));
+  ensureChatWindowUsableBounds();
+  const route = routeForWindow(chatWindow);
+  if (route?.view !== 'chat' || (params.session_id && route.params.session_id !== params.session_id)) {
+    chatWindow.loadURL(rendererUrl({ ...params, view: 'chat' }));
+  }
+  if (chatWindow.isMinimized()) chatWindow.restore();
+  showMacDockIcon();
+  chatWindow.show();
+  chatWindow.moveTop();
+  chatWindow.focus();
 }
 
 function showMainWindowAtLastRoute(params: Record<string, string> = {}): void {
@@ -1639,6 +1684,11 @@ function applyModeWindowTopPreference(): void {
 
 function suppressModeWindowForMainWindow(): void {
   if (!modeWindow || modeWindow.isDestroyed()) return;
+  if (activeMode === 'live2d' && configuredModeWindowAlwaysOnTop()) {
+    modeWindowTopSuppressed = false;
+    applyModeWindowTopPreference();
+    return;
+  }
   modeWindowTopSuppressed = true;
   applyModeWindowTopPreference();
 }
@@ -1798,6 +1848,12 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
 function setModeWindowPointerInteractive(mode: ModeId, interactive: boolean): boolean {
   if (!modeWindow || modeWindow.isDestroyed() || activeMode !== mode) return false;
   if (mode === 'live2d' && !LIVE2D_POINTER_PASSTHROUGH_ENABLED && !interactive) return true;
+  if (interactive && mode === 'live2d') {
+    restoreModeWindowTopPreference();
+    applyModeWindowTopPreference();
+    if (!modeWindow.isVisible()) modeWindow.showInactive();
+    if (configuredModeWindowAlwaysOnTop(mode)) modeWindow.moveTop();
+  }
   const shouldIgnore = !interactive;
   if (modeWindowIgnoringMouse === shouldIgnore) return true;
   modeWindow.setIgnoreMouseEvents(shouldIgnore, { forward: true });
