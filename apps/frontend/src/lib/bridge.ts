@@ -120,10 +120,16 @@ export type AppUpdateDownloadProgress = {
   percent?: number;
   error?: string;
 };
+export type AvatarImageSelection = {
+  path?: string;
+  data_url?: string;
+  file_name?: string;
+};
 
 declare global {
   interface Window {
     hermesDesktop?: {
+      chooseAvatarImage?: () => Promise<AvatarImageSelection | string | null>;
       chooseLive2DArchive?: () => Promise<string | null>;
       chooseLive2DModelDirectory?: () => Promise<string | null>;
       checkAppUpdate?: () => Promise<AppUpdateCheckResult>;
@@ -264,6 +270,7 @@ function isAppView(value: string): value is AppView {
     'tools',
     'tools-all',
     'activity-all',
+    'app-update',
     'proactive-tts',
     'bubble',
     'bubble-menu',
@@ -307,11 +314,22 @@ export async function chooseLive2DModelDirectory(): Promise<string | null> {
   return window.hermesDesktop.chooseLive2DModelDirectory();
 }
 
+export async function chooseAvatarImage(): Promise<AvatarImageSelection | string | null> {
+  if (!window.hermesDesktop?.chooseAvatarImage) {
+    throw new Error('当前环境没有桌面图片选择器入口');
+  }
+  return window.hermesDesktop.chooseAvatarImage();
+}
+
 export async function chooseLive2DArchive(): Promise<string | null> {
   if (!window.hermesDesktop?.chooseLive2DArchive) {
     throw new Error('当前环境没有桌面文件选择器入口，请在页面中输入 ZIP 路径');
   }
   return window.hermesDesktop.chooseLive2DArchive();
+}
+
+export function hasDesktopAvatarPicker(): boolean {
+  return Boolean(window.hermesDesktop?.chooseAvatarImage);
 }
 
 export function hasDesktopFilePicker(): boolean {

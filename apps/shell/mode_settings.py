@@ -64,6 +64,7 @@ _TOP_LEVEL_FIELDS: dict[str, type] = {
     "bridge_host": str,
     "bridge_port": int,
     "tray_enabled": bool,
+    "start_minimized": bool,
 }
 
 _MODE_FIELDS: dict[str, dict[str, type]] = {
@@ -124,8 +125,15 @@ _MODE_FIELDS: dict[str, dict[str, type]] = {
         "proactive_trigger_probability": float,
     },
     "assistant": {
+        "agent_name": str,
+        "agent_nickname": str,
+        "agent_avatar_path": str,
         "persona_prompt": str,
         "user_address": str,
+        "user_name": str,
+        "user_avatar_path": str,
+        "user_profile": str,
+        "user_preferences": str,
     },
     "tts": {
         "enabled": bool,
@@ -183,7 +191,7 @@ def _coerce_numeric(expected: type, value: Any) -> Any:
 
 
 def _validate_field(key: str, value: Any) -> str | None:
-    if key == "display_mode" and value not in {"bubble", "live2d"}:
+    if key == "display_mode" and value not in {"none", "bubble", "live2d"}:
         return f"无效的显示模式: {value}"
     if key == "bridge_port" and not (1024 <= value <= 65535):
         return "bridge_port 须在 1024-65535 之间"

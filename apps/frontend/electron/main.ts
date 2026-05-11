@@ -45,6 +45,7 @@ const POSITION_SAVE_DEBOUNCE_MS = 260;
 const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
 const TRANSPARENT_WINDOW_BACKGROUND = '#00000000';
 const MAX_LAUNCHER_SHAPE_RECTS = 10000;
+const MAX_AVATAR_IMAGE_BYTES = 8 * 1024 * 1024;
 type IconKind = 'dock' | 'tray' | 'window';
 
 type AppView =
@@ -59,11 +60,13 @@ type AppView =
   | 'tools'
   | 'tools-all'
   | 'activity-all'
+  | 'app-update'
   | 'proactive-tts'
   | 'bubble'
   | 'bubble-menu'
   | 'live2d';
 type ModeId = 'bubble' | 'live2d';
+type DisplayModeId = ModeId | 'none';
 type InstallerTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup' | 'update-hermes' | 'update-hermes-backup';
 
 type ModeSettings = {
@@ -188,6 +191,12 @@ type AppUpdateDownloadProgress = {
   total_bytes?: number;
   percent?: number;
   error?: string;
+};
+
+type AvatarImageSelection = {
+  path: string;
+  data_url: string;
+  file_name: string;
 };
 
 let backendProcess: ChildProcessWithoutNullStreams | null = null;
@@ -1484,6 +1493,7 @@ function normalizeView(value: unknown): AppView {
     'tools',
     'tools-all',
     'activity-all',
+    'app-update',
     'proactive-tts',
     'bubble',
     'bubble-menu',
@@ -1503,6 +1513,16 @@ function normalizeParams(value: unknown): Record<string, string> {
 
 function normalizeMode(value: unknown): ModeId {
   return value === 'live2d' ? 'live2d' : 'bubble';
+}
+
+function normalizeDisplayMode(value: unknown): DisplayModeId {
+  if (value === 'none') return 'none';
+  return normalizeMode(value);
+}
+
+function normalizePreferredDisplayMode(value: unknown): DisplayModeId | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  return normalizeDisplayMode(value);
 }
 
 function routeFromUrl(rawUrl: string): { view: AppView; params: Record<string, string> } | null {
@@ -2044,10 +2064,32 @@ function openLive2DResourceSettings(settings: UiSettings | null | undefined): vo
   );
 }
 
-async function openConfiguredDesktopMode(preferredMode?: ModeId, settingsOverride?: UiSettings | null): Promise<void> {
+function closeDesktopModeWindow(): void {
+  if (!modeWindow || modeWindow.isDestroyed()) {
+    activeMode = null;
+    activeModeConfig = {};
+    activeModeConfigSignature = '';
+    return;
+  }
+  const windowToClose = modeWindow;
+  modeWindow = null;
+  activeMode = null;
+  activeModeConfig = {};
+  activeModeConfigSignature = '';
+  modeWindowIgnoringMouse = false;
+  modeWindowShapeApplied = false;
+  modeWindowTopSuppressed = false;
+  windowToClose.close();
+}
+
+async function openConfiguredDesktopMode(preferredMode?: DisplayModeId, settingsOverride?: UiSettings | null): Promise<void> {
   const settings = settingsOverride || await waitForUiSettings();
   if (settings) lastUiSettings = settings;
-  const mode = preferredMode || normalizeMode(settings?.display?.current_mode);
+  const mode = preferredMode || normalizeDisplayMode(settings?.display?.current_mode);
+  if (mode === 'none') {
+    closeDesktopModeWindow();
+    return;
+  }
   if (mode === 'live2d' && !live2dResourceReady(settings)) {
     if (preferredMode === 'live2d') {
       openLive2DResourceSettings(settings);
@@ -2124,6 +2166,30 @@ async function showOpenDialogForSender(
     : await dialog.showOpenDialog(options);
   if (result.canceled) return null;
   return result.filePaths[0] || null;
+}
+
+function imageMimeTypeForPath(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  return 'application/octet-stream';
+}
+
+async function readAvatarImageSelection(filePath: string | null): Promise<AvatarImageSelection | null> {
+  if (!filePath) return null;
+  const stats = await fs.promises.stat(filePath);
+  if (!stats.isFile()) throw new Error('请选择图片文件');
+  if (stats.size > MAX_AVATAR_IMAGE_BYTES) throw new Error('头像图片不能超过 8 MB');
+  const data = await fs.promises.readFile(filePath);
+  const mimeType = imageMimeTypeForPath(filePath);
+  if (!mimeType.startsWith('image/')) throw new Error('仅支持 PNG、JPG、WEBP 或 GIF 图片');
+  return {
+    path: filePath,
+    file_name: path.basename(filePath),
+    data_url: `data:${mimeType};base64,${data.toString('base64')}`,
+  };
 }
 
 function normalizeTerminalTask(value: unknown): InstallerTerminalTask | null {
@@ -2259,6 +2325,17 @@ ipcMain.handle('hermes:restartBackend', (_event, options: unknown) => {
 ipcMain.handle('hermes:copyText', (_event, value: unknown) => {
   clipboard.writeText(typeof value === 'string' ? value : '');
 });
+ipcMain.handle('hermes:chooseAvatarImage', async (event) => {
+  const selectedPath = await showOpenDialogForSender(event, {
+    title: '选择头像图片',
+    defaultPath: app.getPath('pictures') || app.getPath('home'),
+    properties: ['openFile'],
+    filters: [
+      { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] },
+    ],
+  });
+  return readAvatarImageSelection(selectedPath);
+});
 ipcMain.handle('hermes:chooseLive2DModelDirectory', (event) => showOpenDialogForSender(event, {
   title: '选择 Live2D 模型目录',
   defaultPath: app.getPath('home'),
@@ -2287,7 +2364,7 @@ ipcMain.handle('hermes:openExternalUrl', async (_event, value: unknown) => {
 ipcMain.handle('hermes:openView', (_event, view: unknown, params: unknown) => {
   openAppView(normalizeView(view), normalizeParams(params));
 });
-ipcMain.handle('hermes:openDesktopMode', (_event, mode: unknown) => openConfiguredDesktopMode(normalizeMode(mode)));
+ipcMain.handle('hermes:openDesktopMode', (_event, mode: unknown) => openConfiguredDesktopMode(normalizePreferredDisplayMode(mode)));
 ipcMain.handle('hermes:moveLauncherWindow', moveLauncherWindow);
 ipcMain.handle('hermes:getLauncherPointerState', (_event, mode: unknown) => launcherPointerState(mode));
 ipcMain.handle('hermes:terminalStart', startInstallerTerminal);

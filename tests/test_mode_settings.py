@@ -273,6 +273,11 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
             "bubble_mode.proactive_trigger_probability": 0.45,
             "assistant.persona_prompt": "你是八千代。",
             "assistant.user_address": "老师",
+            "assistant.agent_name": "月見八千代",
+            "assistant.agent_nickname": "月夜",
+            "assistant.user_name": "彩P",
+            "assistant.user_profile": "常用中文沟通",
+            "assistant.user_preferences": "回答保持简洁",
             "tts.provider": "command",
             "tts.command": "say {text}",
             "tts.voice": "kyoko",
@@ -304,6 +309,11 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     assert config.bubble_mode.proactive_trigger_probability == 0.45
     assert config.assistant.persona_prompt == "你是八千代。"
     assert config.assistant.user_address == "老师"
+    assert config.assistant.agent_name == "月見八千代"
+    assert config.assistant.agent_nickname == "月夜"
+    assert config.assistant.user_name == "彩P"
+    assert config.assistant.user_profile == "常用中文沟通"
+    assert config.assistant.user_preferences == "回答保持简洁"
     assert config.tts.provider == "command"
     assert config.tts.command == "say {text}"
     assert config.tts.voice == "kyoko"
@@ -322,6 +332,32 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     assert result["mode_settings"]["bubble"]["config"]["position_x_percent"] == 0.75
     assert result["mode_settings"]["bubble"]["config"]["proactive_trigger_probability"] == 0.45
     assert "assistant" not in result["mode_settings"]["bubble"]["config"]
+
+
+def test_apply_settings_changes_updates_start_minimized(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    config = AppConfig()
+
+    result = apply_settings_changes(config, {"start_minimized": True})
+
+    assert result["ok"] is True
+    assert config.start_minimized is True
+    assert result["applied"]["start_minimized"] is True
+    assert result["effects"]["has_restart_app"] is True
+
+
+def test_apply_settings_changes_accepts_no_display_mode(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    config = AppConfig(display_mode="bubble")
+
+    result = apply_settings_changes(config, {"display_mode": "none"})
+
+    assert result["ok"] is True
+    assert config.display_mode == "none"
+    assert result["applied"]["display_mode"] == "none"
+    assert result["effects"]["has_restart_mode"] is True
 
 
 def test_apply_settings_changes_rejects_invalid_single_field(tmp_path, monkeypatch):
@@ -541,6 +577,17 @@ def test_display_settings_fall_back_to_bubble_when_live2d_assets_missing(monkeyp
 
     assert payload["current_mode"] == "bubble"
     assert payload["configured_mode"] == "live2d"
+
+
+def test_display_settings_exposes_no_display_mode(monkeypatch, tmp_path):
+    _patch_no_live2d_assets(monkeypatch, tmp_path)
+    config = AppConfig(display_mode="none")
+
+    payload = build_display_settings(config)
+
+    assert payload["current_mode"] == "none"
+    assert payload["configured_mode"] == "none"
+    assert "none" in {item["id"] for item in payload["available_modes"]}
 
 
 def test_load_config_reads_legacy_live2d_block(tmp_path, monkeypatch):

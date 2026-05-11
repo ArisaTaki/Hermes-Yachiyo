@@ -10,6 +10,7 @@ export type AppView =
   | 'tools'
   | 'tools-all'
   | 'activity-all'
+  | 'app-update'
   | 'proactive-tts'
   | 'bubble'
   | 'bubble-menu'
@@ -80,6 +81,7 @@ function isAppView(value: string): value is AppView {
     'tools',
     'tools-all',
     'activity-all',
+    'app-update',
     'proactive-tts',
     'bubble',
     'bubble-menu',

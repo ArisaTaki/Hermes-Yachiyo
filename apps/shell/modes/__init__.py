@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 class DisplayMode(StrEnum):
     """显示模式枚举"""
 
+    NONE = "none"        # 不显示常驻表现态
     BUBBLE = "bubble"    # 轻量常驻聊天模式
     LIVE2D = "live2d"    # 角色聊天壳
 

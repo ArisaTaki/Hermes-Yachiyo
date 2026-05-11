@@ -18,6 +18,7 @@ import {
 } from './views/OpenDesignView';
 import { ProactiveTtsSettingsView } from './views/ProactiveTtsSettingsView';
 import { ToolCenterView } from './views/ToolCenterView';
+import { AppUpdateView } from './views/AppUpdateView';
 import { ROUTE_CHANGE_EVENT, currentParam, currentView } from './lib/view';
 
 export function App() {
@@ -47,8 +48,9 @@ export function App() {
   else if (view === 'settings') page = <ModeSettingsView />;
   else if (view === 'installer') page = <InstallerView />;
   else if (view === 'diagnostics') page = <DiagnosticsView />;
-  else if (view === 'tools') page = <ToolCenterView />;
+  else if (view === 'tools') page = currentParam('tool') ? <ToolCenterView /> : <DiagnosticsView />;
   else if (view === 'proactive-tts') page = <ProactiveTtsSettingsView />;
+  else if (view === 'app-update') page = <AppUpdateView />;
   else if (view === 'provider') page = <ProviderPage />;
   else if (view === 'bubble') page = <BubbleModePage />;
   else if (view === 'live2d') page = <Live2DModePage />;

@@ -31,7 +31,7 @@ class EffectType(StrEnum):
 _FIELD_POLICIES: dict[str, tuple[EffectType, str]] = {
     # 顶层字段
     "display_mode":    (EffectType.REQUIRES_MODE_RESTART,
-                        "显示模式已保存，表现态将切换到新模式"),
+                        "显示模式已保存，常驻表现态将按新偏好刷新"),
     "bridge_enabled":  (EffectType.REQUIRES_BRIDGE_RESTART,
                         "Bridge 开关变更需重启 Bridge 后生效"),
     "bridge_host":     (EffectType.REQUIRES_BRIDGE_RESTART,
@@ -40,6 +40,8 @@ _FIELD_POLICIES: dict[str, tuple[EffectType, str]] = {
                         "Bridge 端口变更需重启 Bridge 后生效"),
     "tray_enabled":    (EffectType.REQUIRES_APP_RESTART,
                         "托盘设置将在下次启动时生效"),
+    "start_minimized": (EffectType.REQUIRES_APP_RESTART,
+                        "启动时最小化设置将在下次启动时生效"),
     # Bubble mode
     "bubble_mode.width":                (EffectType.REQUIRES_MODE_RESTART,
                                          "Bubble 模式尺寸将在重启该模式后生效"),
