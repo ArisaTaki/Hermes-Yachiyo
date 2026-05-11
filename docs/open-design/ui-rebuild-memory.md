@@ -44,10 +44,12 @@
 - Black frame hardening (current QA): desktop mode windows now start hidden until ready-to-show, repaint transparent background with rgba alpha, invalidate macOS transparent-window artifacts after load/resize, and Live2D Pixi explicitly clears WebGL with alpha 0 while capping the ticker at 30fps. This is intended to remove persistent black rectangles without changing launcher behavior.
 - Tools-all prototype: card order changed to Bubble/Live2D/GPT/Resources/Workspace/Diagnostics/Provider/Main Console; subtitle changed to "所有可用的桌面工具和交互模式".
 - Activity-all prototype: subtitle changed to "所有系统和交互活动的完整记录".
+- Launcher/chat UX fixes: ordinary desktop-mode clicks no longer pass `session_id` or reload an already-open chat route; `showChatWindow()` reuses the existing main window when it is on a non-chat route by switching the hash in place; existing standalone chat windows are focused without `loadURL` when the target session is unchanged; long chat loads pre-sync assistant render state, wait for message layout height to settle, keep the scroll pinned to the bottom, then release the loading state.
+- Chat wide-window responsive pass: at >=1500px the session column auto-expands from 280px to 360px unless the user has manually dragged it smaller; message rows actively expand across the pane, assistant/system bubbles fill the expanded row, user bubbles align farther right, composer padding expands with the viewport, and inline markdown code can wrap long local paths without forcing chat-level horizontal scroll.
 
 ## Current Focus
 
-- Black frame fixed, Tools-all/Activity-all prototype aligned. Next: chat route consolidation (pending analysis) and final QA.
+- Black frame fixed, Tools-all/Activity-all prototype aligned, launcher-to-chat route consolidation is in place, and chat wide-window responsiveness has a first pass. Next: manual QA for desktop-mode clicks from dashboard/chat/bubble/live2d, long-session loading smoothness, and chat layout at normal/wide window sizes.
 
 ## Remaining Major Slices
 
@@ -163,6 +165,9 @@
 - `npm run build` passes after the Settings split slice. Vite still emits only the known large chunk warning.
 - `npm run build` passes after the Settings real data slice. Vite still emits only the known large chunk warning.
 - `npm run build` passes after the Settings data mapping fix slice. Vite still emits only the known large chunk warning.
+- `npm --prefix apps/frontend run build` passes after the launcher/chat UX fix slice. Vite still emits only the known large chunk warning.
+- `npm --prefix apps/frontend run build` passes after the chat wide-window responsive slice. Vite still emits only the known large chunk warning.
+- `npm --prefix apps/frontend run build` passes after the Python capability backfill slice. Vite still emits only the known large chunk warning.
 
 ## Notes For Next Agent
 
@@ -170,5 +175,6 @@
 - Avoid reverting existing dirty files in `docs/open-design`; the new `moxqc2d6-*` files are the active references.
 - Keep updates incremental. After each slice, update this file with completed items, caveats, and validation.
 - Settings page strategy: default `#/settings` is prototype layout + real data mirror (no savebar); real save at `#/settings?mode=system`; provider save at `#/provider`.
-- Default page controls: language/theme/fontSize/animations use local draft state; tray toggle navigates to mode=system; provider select shows real options but changes only local draft.
-- Real data sources: `/ui/settings` for app.version/tray_enabled; `/ui/hermes/config` for model.provider/provider_options/api_key; `/ui/hermes/connection-test` (POST) for connection test; `checkAppUpdate()` for update check.
+- Default page controls: language/theme/fontSize/animations use local draft state; tray toggle navigates to mode=system; provider select shows real options but changes only local draft; assistant Prompt card now saves through `/assistant/profile`.
+- Real data sources: `/ui/settings` for app.version/tray_enabled; `/assistant/profile` and `PATCH /assistant/profile` for assistant Prompt; `/ui/hermes/config` for text/Vision model config; `/ui/hermes/connection-test` and `/ui/hermes/image-connection-test` for connection tests; `checkAppUpdate()` for update check.
+- Python capability backfill slice added visible entries for assistant Prompt, Vision config/testing, proactive observation settings/testing, runtime status, tasks, assistant intent, local probes, Hermes environment, and real Workspace/backup links. It intentionally does not add fake import/export/clear conversation actions because no Python API exists yet.

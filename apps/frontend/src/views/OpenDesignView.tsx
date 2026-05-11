@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useEffect, useState, type CSSProperties } from 'react';
+import { createContext, FormEvent, ReactNode, useCallback, useContext, useEffect, useRef, useState, type CSSProperties } from 'react';
 
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { apiGet, apiPost, openDesktopMode, openPath, quitApp } from '../lib/bridge';
@@ -101,6 +101,11 @@ type HermesConfigForm = {
   model: string;
   base_url: string;
   api_key: string;
+  image_input_mode: string;
+  vision_provider: string;
+  vision_model: string;
+  vision_base_url: string;
+  vision_api_key: string;
 };
 
 type HermesConnectionTestResult = {
@@ -275,9 +280,31 @@ const PARTICLES = Array.from({ length: 80 }, (_, index) => {
 });
 
 let bridgeBootReady = false;
+let bootDashboardCache: DashboardData | null = null;
+let bootLauncherCache: LauncherPayload | null = null;
+let bootDashboardReady = false;
+
+const PageLoadingContext = createContext<((loading: boolean) => void) | null>(null);
+
+export function usePageLoading(loading: boolean) {
+  const setPageLoading = useContext(PageLoadingContext);
+  const loadingRef = useRef(loading);
+  useEffect(() => {
+    loadingRef.current = loading;
+    setPageLoading?.(loading);
+  }, [loading, setPageLoading]);
+  useEffect(() => {
+    return () => { setPageLoading?.(false); };
+  }, [setPageLoading]);
+}
+
+export function signalDashboardReady() {
+  bootDashboardReady = true;
+}
 
 export function OpenDesignShell({ activeView, children }: { activeView: AppView; children: ReactNode }) {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [pageLoadingCount, setPageLoadingCount] = useState(0);
   const [tweaksOpen, setTweaksOpen] = useState(false);
   const [accent, setAccent] = useState('pink');
   const [particleDensity, setParticleDensity] = useState(35);
@@ -287,12 +314,31 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
   const [particlesEnabled, setParticlesEnabled] = useState(true);
   const [glowEnabled, setGlowEnabled] = useState(true);
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; type: 'info' | 'success' | 'warning' | 'error' }>>([]);
-  const [bootPhase, setBootPhase] = useState<'checking' | 'loading' | 'ready'>(() => (bridgeBootReady ? 'ready' : 'checking'));
+  const [bootPhase, setBootPhase] = useState<'loading' | 'ready'>(() => (bridgeBootReady ? 'ready' : 'loading'));
   const [bootSlow, setBootSlow] = useState(false);
   const settingsMode = activeView === 'settings' ? currentParam('mode') : '';
   const activeLabel = routeTitle(activeView, settingsMode);
   const loadingHidden = bootPhase !== 'loading';
   const accentLabel = TWEAK_ACCENTS.find((item) => item.value === accent)?.label || '八千代粉';
+  const [shimmerActive, setShimmerActive] = useState(false);
+  const shimmerActiveRef = useRef(false);
+  const shimmerKey = useRef(0);
+
+  const handlePageLoading = useCallback((loading: boolean) => {
+    setPageLoadingCount((prev) => {
+      const next = loading ? prev + 1 : Math.max(0, prev - 1);
+      if (loading && !shimmerActiveRef.current) {
+        shimmerKey.current += 1;
+        shimmerActiveRef.current = true;
+        setShimmerActive(true);
+      }
+      if (next === 0 && shimmerActiveRef.current) {
+        shimmerActiveRef.current = false;
+        setShimmerActive(false);
+      }
+      return next;
+    });
+  }, []);
   const shellClasses = [
     'hy-shell',
     `hy-accent-${accent}`,
@@ -309,24 +355,25 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
     if (bridgeBootReady) return undefined;
     let disposed = false;
     let retryTimer = 0;
-    const showLoadingTimer = window.setTimeout(() => {
-      if (!disposed && !bridgeBootReady) setBootPhase('loading');
-    }, 260);
     const showSlowTimer = window.setTimeout(() => {
       if (!disposed && !bridgeBootReady) setBootSlow(true);
     }, 7_500);
 
     async function probeBridge() {
       try {
-        const data = await apiGet<DashboardData>('/ui/dashboard');
+        const [data, launcher] = await Promise.all([
+          apiGet<DashboardData>('/ui/dashboard'),
+          apiGet<LauncherPayload>('/ui/launcher?mode=live2d').catch(() => null),
+        ]);
         if (disposed) return;
+        bootDashboardCache = data;
+        bootLauncherCache = launcher;
         bridgeBootReady = true;
         setDashboard(data);
         setBootSlow(false);
         setBootPhase('ready');
       } catch {
         if (disposed) return;
-        setBootPhase('loading');
         retryTimer = window.setTimeout(() => void probeBridge(), 650);
       }
     }
@@ -335,7 +382,6 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
 
     return () => {
       disposed = true;
-      window.clearTimeout(showLoadingTimer);
       window.clearTimeout(showSlowTimer);
       if (retryTimer) window.clearTimeout(retryTimer);
     };
@@ -376,7 +422,7 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
           <span className={particle.className} key={particle.id} style={particle.style} />
         ))}
       </div>
-      <div className="hy-shimmer-sweep" key={activeView} />
+      <div className="hy-shimmer-sweep" key={shimmerKey.current} style={shimmerActive ? undefined : { display: 'none' }} />
       <BootLoadingOverlay hidden={loadingHidden} slow={bootSlow} />
 
       <header className="hy-titlebar">
@@ -494,7 +540,9 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
       ) : null}
 
       <main className="hy-content">
-        {children}
+        <PageLoadingContext.Provider value={handlePageLoading}>
+          {children}
+        </PageLoadingContext.Provider>
       </main>
     </div>
   );
@@ -518,29 +566,63 @@ function BootLoadingOverlay({ hidden, slow }: { hidden: boolean; slow: boolean }
 }
 
 export function DashboardPage() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [live2dLauncher, setLive2dLauncher] = useState<LauncherPayload | null>(null);
+  const [data, setData] = useState<DashboardData | null>(bootDashboardCache);
+  const [live2dLauncher, setLive2dLauncher] = useState<LauncherPayload | null>(bootLauncherCache);
   const [error, setError] = useState('');
+  const [initialLoading, setInitialLoading] = useState(!bootDashboardCache);
+  const dataRef = useRef<DashboardData | null>(bootDashboardCache);
+  usePageLoading(initialLoading);
 
   useEffect(() => {
     let disposed = false;
+    let retryTimer = 0;
+
+    function scheduleBridgeRetry() {
+      if (retryTimer) return;
+      retryTimer = window.setTimeout(() => {
+        retryTimer = 0;
+        void load();
+      }, 650);
+    }
+
     async function load() {
       try {
         const payload = await apiGet<DashboardData>('/ui/dashboard');
         const launcherPayload = await apiGet<LauncherPayload>('/ui/launcher?mode=live2d').catch(() => null);
         if (!disposed) {
+          if (retryTimer) {
+            window.clearTimeout(retryTimer);
+            retryTimer = 0;
+          }
+          dataRef.current = payload;
           setData(payload);
           setLive2dLauncher(launcherPayload);
           setError('');
+          setInitialLoading(false);
+          signalDashboardReady();
         }
       } catch (err) {
-        if (!disposed) setError(err instanceof Error ? err.message : '无法读取主控台状态');
+        if (!disposed) {
+          const message = err instanceof Error ? err.message : '无法读取主控台状态';
+          if (isBridgeUnavailableMessage(message)) {
+            if (!dataRef.current) {
+              setError('');
+              setInitialLoading(true);
+              scheduleBridgeRetry();
+            }
+            return;
+          }
+          setError(message);
+          setInitialLoading(false);
+          signalDashboardReady();
+        }
       }
     }
     void load();
     const timer = window.setInterval(() => void load(), 8000);
     return () => {
       disposed = true;
+      if (retryTimer) window.clearTimeout(retryTimer);
       window.clearInterval(timer);
     };
   }, []);
@@ -548,13 +630,14 @@ export function DashboardPage() {
   const bridge = bridgeState(data);
   const modelReady = Boolean(data?.hermes?.ready || data?.hermes?.command_exists);
   const workspaceReady = Boolean(data?.workspace?.initialized);
+  const dataLoaded = data !== null;
   const activities = recentActivities(data);
   const modelLabel = data?.hermes?.version || (modelReady ? 'Hermes · 文本+视觉' : 'Hermes 待检测');
   const toolCards = dashboardToolCards(data, live2dLauncher);
 
   return (
     <section className="hy-route-page hy-dashboard-page">
-      {error ? <div className="notice danger">{error}</div> : null}
+      {error && !dataLoaded ? <div className="notice danger">{error}</div> : null}
       <section className="hy-kv-hero corner-frame">
         <div className="corner-frame-inner" />
         <div className="hy-kv-copy">
@@ -577,8 +660,8 @@ export function DashboardPage() {
 
       <section className="hy-status-grid hy-stagger">
         <StatusCard tone="success" label="Bridge 状态" value={bridge} detail={data?.bridge?.url || '127.0.0.1 本机桥接'} icon="🌉" />
-        <StatusCard tone={modelReady ? 'info' : 'warning'} label="模型连接" value={modelReady ? '已连接' : '待配置'} detail={hermesReadinessLabel(data?.hermes?.readiness_level)} icon="🤖" />
-        <StatusCard tone={workspaceReady ? 'success' : 'warning'} label="工作区" value={workspaceReady ? '已初始化' : '待初始化'} detail={data?.workspace?.path || '~/Hermes-Yachiyo/workspace'} icon="📁" />
+        <StatusCard tone={!dataLoaded ? 'info' : modelReady ? 'info' : 'warning'} label="模型连接" value={!dataLoaded ? '加载中' : modelReady ? '已连接' : '待配置'} detail={!dataLoaded ? '正在读取状态' : hermesReadinessLabel(data?.hermes?.readiness_level)} icon="🤖" />
+        <StatusCard tone={!dataLoaded ? 'info' : workspaceReady ? 'success' : 'warning'} label="工作区" value={!dataLoaded ? '加载中' : workspaceReady ? '已初始化' : '待初始化'} detail={data?.workspace?.path || '~/Hermes-Yachiyo/workspace'} icon="📁" />
       </section>
 
       <section className="hy-section hy-stagger">
@@ -670,6 +753,9 @@ export function ProviderPage() {
   const [status, setStatus] = useState('正在读取模型配置...');
   const [busy, setBusy] = useState('');
   const [testResult, setTestResult] = useState<HermesConnectionTestResult | null>(null);
+  const [imageTestResult, setImageTestResult] = useState<HermesConnectionTestResult | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
+  usePageLoading(initialLoading || !!busy);
 
   useEffect(() => {
     let disposed = false;
@@ -680,9 +766,13 @@ export function ProviderPage() {
           setConfig(payload);
           setForm(formFromHermesConfig(payload));
           setStatus(payload.ok === false ? payload.error || '读取配置失败' : '');
+          setInitialLoading(false);
         }
       } catch (err) {
-        if (!disposed) setStatus(err instanceof Error ? err.message : '读取配置失败');
+        if (!disposed) {
+          setStatus(err instanceof Error ? err.message : '读取配置失败');
+          setInitialLoading(false);
+        }
       }
     }
     void load();
@@ -693,33 +783,67 @@ export function ProviderPage() {
 
   const provider = config?.provider_options?.find((option) => option.id === form.provider);
   const modelOptions = uniqueOptions([form.model, provider?.default_model, ...(provider?.models || [])]);
+  const visionProvider = config?.provider_options?.find((option) => option.id === form.vision_provider);
+  const visionModelOptions = uniqueOptions([form.vision_model, visionProvider?.default_model, ...(visionProvider?.models || [])]);
   const apiKeyLabel = provider?.api_key_name || config?.api_key?.name || 'API Key';
 
-  async function saveAndTest(event: FormEvent) {
-    event.preventDefault();
+  async function persistHermesConfig() {
     if (!form.provider.trim() || !form.model.trim()) {
-      setStatus('Provider 和模型名称不能为空');
-      return;
+      throw new Error('Provider 和模型名称不能为空');
     }
+    const result = await apiPost<{ ok?: boolean; error?: string; configuration?: HermesVisualConfig }>('/ui/hermes/config', form);
+    if (result.ok === false) throw new Error(result.error || '保存配置失败');
+    if (result.configuration) {
+      setConfig(result.configuration);
+      setForm(formFromHermesConfig(result.configuration));
+    }
+  }
+
+  async function saveConfig(event: FormEvent) {
+    event.preventDefault();
     setBusy('save');
     setTestResult(null);
+    setImageTestResult(null);
     setStatus('正在保存配置...');
     try {
-      const result = await apiPost<{ ok?: boolean; error?: string; configuration?: HermesVisualConfig }>('/ui/hermes/config', {
-        ...form,
-        image_input_mode: 'text',
-      });
-      if (result.ok === false) throw new Error(result.error || '保存配置失败');
-      if (result.configuration) {
-        setConfig(result.configuration);
-        setForm(formFromHermesConfig(result.configuration));
-      }
-      setStatus('配置已保存，正在测试连接...');
+      await persistHermesConfig();
+      setStatus('模型配置已保存');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '保存配置失败');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function runTextConnectionTest() {
+    if (busy) return;
+    setBusy('text-test');
+    setTestResult(null);
+    setStatus('正在保存配置并测试文本模型...');
+    try {
+      await persistHermesConfig();
       const test = await apiPost<HermesConnectionTestResult>('/ui/hermes/connection-test');
       setTestResult(test);
       setStatus(test.success ? test.message || '模型连接测试通过' : test.error || '模型连接测试失败');
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : '保存并测试失败');
+      setStatus(err instanceof Error ? err.message : '文本模型连接测试失败');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function runImageConnectionTest() {
+    if (busy) return;
+    setBusy('image-test');
+    setImageTestResult(null);
+    setStatus('正在保存配置并测试图片链路...');
+    try {
+      await persistHermesConfig();
+      const test = await apiPost<HermesConnectionTestResult>('/ui/hermes/image-connection-test');
+      setImageTestResult(test);
+      setStatus(test.success ? test.message || '图片链路测试通过' : test.error || '图片链路测试失败');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '图片链路测试失败');
     } finally {
       setBusy('');
     }
@@ -739,7 +863,7 @@ export function ProviderPage() {
       {status ? <div className={/失败|错误|无法|不能为空/.test(status) ? 'notice danger' : 'notice'}>{status}</div> : null}
 
       <section className="hy-provider-settings">
-        <form className="hy-settings-section hy-stagger" onSubmit={saveAndTest}>
+        <form className="hy-settings-section hy-stagger" onSubmit={saveConfig}>
           <h3>提供商</h3>
           <div className="hy-settings-card">
             <label className="hy-settings-item">
@@ -780,61 +904,83 @@ export function ProviderPage() {
               </span>
               <input className="hy-input" value={form.base_url} placeholder={provider?.base_url || 'https://api.openai.com/v1'} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, base_url: event.target.value }))} />
             </label>
+            <label className="hy-settings-item">
+              <span>
+                <strong>图片输入模式</strong>
+                <small>{config?.image_input?.reason || config?.image_input?.label || '选择图片如何进入 Hermes'}</small>
+              </span>
+              <select className="hy-select" value={form.image_input_mode} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, image_input_mode: event.target.value }))}>
+                <option value="text">文本描述 / 禁用视觉</option>
+                <option value="vision">Vision 模型识图</option>
+                <option value="auto">自动选择</option>
+              </select>
+            </label>
+            <label className="hy-settings-item">
+              <span>
+                <strong>Vision Provider</strong>
+                <small>{config?.vision?.api_key_configured ? '视觉密钥已配置，留空则不修改' : '可与文本模型使用不同 provider'}</small>
+              </span>
+              <select className="hy-select" value={form.vision_provider} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, vision_provider: event.target.value }))}>
+                <option value="">跟随文本模型</option>
+                {config?.provider_options?.map((option) => (
+                  <option key={option.id} value={option.id}>{providerLabel(option)}</option>
+                ))}
+              </select>
+            </label>
+            <label className="hy-settings-item">
+              <span>
+                <strong>Vision 模型</strong>
+                <small>支持图片理解的模型名称</small>
+              </span>
+              {visionModelOptions.length ? (
+                <select className="hy-select" value={form.vision_model} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, vision_model: event.target.value }))}>
+                  <option value="">跟随 Provider 默认</option>
+                  {visionModelOptions.map((model) => <option value={model} key={model}>{model}</option>)}
+                </select>
+              ) : (
+                <input className="hy-input" value={form.vision_model} placeholder="例如 gpt-4o-mini" disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, vision_model: event.target.value }))} />
+              )}
+            </label>
+            <label className="hy-settings-item">
+              <span>
+                <strong>Vision Base URL</strong>
+                <small>{config?.vision?.base_url || '留空则跟随 provider 默认地址'}</small>
+              </span>
+              <input className="hy-input" value={form.vision_base_url} placeholder={visionProvider?.base_url || form.base_url || 'https://api.openai.com/v1'} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, vision_base_url: event.target.value }))} />
+            </label>
+            <label className="hy-settings-item">
+              <span>
+                <strong>Vision API Key</strong>
+                <small>{config?.vision?.api_key_configured ? '已配置，留空则不修改' : '密钥仅存储在本地'}</small>
+              </span>
+              <input className="hy-input" type="password" value={form.vision_api_key} placeholder={config?.vision?.api_key_configured ? 'sk-••••••••••••••••' : '可选，留空跟随文本密钥'} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, vision_api_key: event.target.value }))} />
+            </label>
             <div className="hy-settings-item">
               <span>
                 <strong>连接测试</strong>
-                <small>保存配置并测试模型服务连接状态</small>
+                <small>保存配置后分别测试文本模型或图片链路</small>
               </span>
-              <button type="submit" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)}>{busy ? '测试中...' : '测试连接'}</button>
+              <div className="hy-action-row">
+                <button type="submit" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)}>{busy === 'save' ? '保存中...' : '保存'}</button>
+                <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={() => void runTextConnectionTest()}>{busy === 'text-test' ? '测试中...' : '测试文本'}</button>
+                <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(busy)} onClick={() => void runImageConnectionTest()}>{busy === 'image-test' ? '测试中...' : '测试图片'}</button>
+              </div>
             </div>
           </div>
           {testResult ? <ConnectionResult result={testResult} /> : null}
+          {imageTestResult ? <ConnectionResult result={imageTestResult} /> : null}
         </form>
 
         <section className="hy-settings-section hy-stagger">
           <h3>TTS 语音合成</h3>
           <div className="hy-settings-card">
             <div className="hy-settings-item">
-              <span><strong>TTS 引擎</strong><small>语音合成引擎</small></span>
-              <select className="hy-select" defaultValue="gpt-sovits">
-                <option value="gpt-sovits">GPT-SoVITS</option>
-                <option value="openai">OpenAI TTS</option>
-                <option value="edge">Edge TTS</option>
-              </select>
+              <span><strong>语音链路</strong><small>主动关怀语音、GPT-SoVITS 服务和音色包在专门页面配置</small></span>
+              <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('proactive-tts')}>打开语音设置</button>
             </div>
             <div className="hy-settings-item">
-              <span><strong>API 地址</strong><small>本地 GPT-SoVITS 服务地址</small></span>
-              <input className="hy-input" value="http://127.0.0.1:9880" readOnly />
-            </div>
-            <div className="hy-settings-item">
-              <span><strong>默认音色</strong><small>八千代默认使用的音色</small></span>
-              <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('proactive-tts')}>配置语音</button>
-            </div>
-          </div>
-        </section>
-
-        <section className="hy-settings-section hy-stagger">
-          <h3>RTX 4060 优化</h3>
-          <div className="hy-settings-card">
-            <div className="hy-settings-item">
-              <span><strong>GPU 加速</strong><small>使用 RTX 4060 加速推理</small></span>
-              <div className="hy-toggle active" aria-hidden />
-            </div>
-            <div className="hy-settings-item">
-              <span><strong>显存限制</strong><small>最大显存使用量</small></span>
-              <select className="hy-select" defaultValue="8">
-                <option value="4">4 GB</option>
-                <option value="6">6 GB</option>
-                <option value="8">8 GB</option>
-              </select>
-            </div>
-            <div className="hy-settings-item">
-              <span><strong>精度</strong><small>推理精度</small></span>
-              <select className="hy-select" defaultValue="fp16">
-                <option value="fp16">fp16</option>
-                <option value="bf16">bf16</option>
-                <option value="auto">自动</option>
-              </select>
+              <span><strong>说明</strong><small>这里不展示没有后端支持的 GPU 伪开关；模型推理参数以 Hermes 配置为准。</small></span>
+              <span className="hy-inline-muted">真实入口</span>
             </div>
           </div>
         </section>
@@ -1160,6 +1306,15 @@ export function WorkspacePage() {
     }
   }
 
+  async function openResourcesDir() {
+    try {
+      await openPath(resourcesPath);
+      setStatus(`已打开资源目录：${resourcesPath}`);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '打开资源目录失败');
+    }
+  }
+
   async function createBackup() {
     if (backupBusy) return;
     setBackupBusy(true);
@@ -1177,10 +1332,6 @@ export function WorkspacePage() {
     }
   }
 
-  function unavailableWorkspaceAction(label: string) {
-    setStatus(`${label}入口尚未接入当前前端，本次没有修改本地数据`);
-  }
-
   return (
     <section className="hy-route-page workspace-page settings-layout">
       <header className="settings-header hy-stagger">
@@ -1191,22 +1342,22 @@ export function WorkspacePage() {
       {status ? <div className={/失败|错误|无法/.test(status) ? 'notice danger' : 'notice'}>{status}</div> : null}
 
       <section className="settings-section hy-stagger">
-        <div className="settings-section-title">对话记录</div>
+        <div className="settings-section-title">对话与备份</div>
         <div className="settings-card">
           <WorkspaceSettingItem
-            label="导出对话"
-            description="导出所有对话记录为 JSON 文件"
-            action={<button type="button" className="btn btn--ghost" onClick={() => unavailableWorkspaceAction('导出对话')}>导出</button>}
+            label="会话列表"
+            description="进入真实聊天会话列表，不在这里伪造导入/导出能力"
+            action={<button type="button" className="btn btn--ghost" onClick={() => navigateTo('chat')}>打开</button>}
           />
           <WorkspaceSettingItem
-            label="导入对话"
-            description="从 JSON 文件导入对话记录"
-            action={<button type="button" className="btn btn--ghost" onClick={() => unavailableWorkspaceAction('导入对话')}>导入</button>}
+            label="立即备份"
+            description={latestBackup}
+            action={<button type="button" className="btn btn--primary" disabled={backupBusy} onClick={() => void createBackup()}>{backupBusy ? '备份中...' : '创建备份'}</button>}
           />
           <WorkspaceSettingItem
-            label="清空对话"
-            description="删除所有对话记录（不可恢复）"
-            action={<button type="button" className="btn btn--ghost workspace-danger-btn" onClick={() => unavailableWorkspaceAction('清空对话')}>清空</button>}
+            label="系统备份管理"
+            description="恢复、删除备份等高风险操作在系统设置页处理"
+            action={<button type="button" className="btn btn--ghost" onClick={() => navigateTo('settings', { mode: 'system' })}>进入</button>}
           />
         </div>
       </section>
@@ -1224,7 +1375,7 @@ export function WorkspacePage() {
             label="资源目录"
             description={resourcesPath}
             mono
-            action={<button type="button" className="btn btn--ghost" onClick={() => setStatus(`资源目录：${resourcesPath}`)}>查看</button>}
+            action={<button type="button" className="btn btn--ghost" onClick={() => void openResourcesDir()}>打开</button>}
           />
           <WorkspaceSettingItem
             label="备份工作区"
@@ -1458,9 +1609,10 @@ function InfoPanel({ title, rows, action }: { title: string; rows: Array<[string
 
 function ConnectionResult({ result }: { result: HermesConnectionTestResult }) {
   const preview = result.output_preview || result.stderr_preview || '';
+  const success = result.success ?? result.ok;
   return (
-    <div className={`hy-connection-result ${result.success ? 'success' : 'danger'}`}>
-      <strong>{result.success ? result.message || '连接测试通过' : result.error || '连接测试失败'}</strong>
+    <div className={`hy-connection-result ${success ? 'success' : 'danger'}`}>
+      <strong>{success ? result.message || '连接测试通过' : result.error || result.message || '连接测试失败'}</strong>
       <span>{result.elapsed_seconds !== undefined ? `${result.elapsed_seconds}s` : '—'}</span>
       {preview ? <pre>{preview}</pre> : null}
     </div>
@@ -1468,7 +1620,17 @@ function ConnectionResult({ result }: { result: HermesConnectionTestResult }) {
 }
 
 function emptyHermesForm(): HermesConfigForm {
-  return { provider: '', model: '', base_url: '', api_key: '' };
+  return {
+    provider: '',
+    model: '',
+    base_url: '',
+    api_key: '',
+    image_input_mode: 'text',
+    vision_provider: '',
+    vision_model: '',
+    vision_base_url: '',
+    vision_api_key: '',
+  };
 }
 
 function formFromHermesConfig(config: HermesVisualConfig | null): HermesConfigForm {
@@ -1477,11 +1639,20 @@ function formFromHermesConfig(config: HermesVisualConfig | null): HermesConfigFo
     model: config?.model?.default || '',
     base_url: config?.model?.base_url || '',
     api_key: '',
+    image_input_mode: config?.image_input?.mode || 'text',
+    vision_provider: config?.vision?.provider || '',
+    vision_model: config?.vision?.model || '',
+    vision_base_url: config?.vision?.base_url || '',
+    vision_api_key: '',
   };
 }
 
 function bridgeState(data: DashboardData | null): string {
   return data?.bridge?.state || data?.bridge?.status || data?.bridge?.running || '—';
+}
+
+function isBridgeUnavailableMessage(message: string): boolean {
+  return /无法连接本地 Bridge|本地 Bridge 正在启动|Failed to fetch|fetch failed|NetworkError|Load failed/i.test(message);
 }
 
 function hermesReadinessLabel(level?: string): string {

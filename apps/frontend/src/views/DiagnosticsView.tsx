@@ -53,6 +53,58 @@ type DashboardStatus = {
   workspace?: { initialized?: boolean; path?: string };
 };
 
+type RuntimeStatus = {
+  service?: string;
+  version?: string;
+  uptime_seconds?: number;
+  task_counts?: Record<string, number>;
+  hermes_ready?: boolean;
+};
+
+type TaskInfo = {
+  task_id: string;
+  description: string;
+  task_type: string;
+  status: string;
+  risk_level: string;
+  created_at: string;
+  updated_at: string;
+  result?: string | null;
+  error?: string | null;
+  chat_session_id?: string | null;
+};
+
+type TaskListResponse = {
+  tasks?: TaskInfo[];
+  total?: number;
+};
+
+type TaskResponse = {
+  task?: TaskInfo;
+};
+
+type AssistantIntentResult = {
+  ok?: boolean;
+  action?: string;
+  task_id?: string | null;
+  message?: string;
+};
+
+type ScreenshotProbe = {
+  image_base64?: string;
+  format?: string;
+  width?: number;
+  height?: number;
+  captured_at?: string;
+};
+
+type ActiveWindowProbe = {
+  title?: string;
+  app_name?: string;
+  pid?: number | null;
+  queried_at?: string;
+};
+
 type DiagnosticOverviewItem = {
   label: string;
   detail: string;
@@ -88,6 +140,14 @@ export function DiagnosticsView() {
   const [result, setResult] = useState<DiagnosticResult | null>(null);
   const [diagnosticCache, setDiagnosticCache] = useState<DiagnosticCache | null>(null);
   const [overview, setOverview] = useState<DashboardStatus | null>(null);
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null);
+  const [tasks, setTasks] = useState<TaskInfo[]>([]);
+  const [taskDraft, setTaskDraft] = useState({ description: '', task_type: 'general', risk_level: 'low' });
+  const [intentText, setIntentText] = useState('');
+  const [intentResult, setIntentResult] = useState<AssistantIntentResult | null>(null);
+  const [screenProbe, setScreenProbe] = useState<ScreenshotProbe | null>(null);
+  const [activeWindowProbe, setActiveWindowProbe] = useState<ActiveWindowProbe | null>(null);
+  const [runtimeBusy, setRuntimeBusy] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const lastAutoRunRef = useRef('');
@@ -117,6 +177,14 @@ export function DiagnosticsView() {
       .catch(() => {
         if (!disposed) setOverview(null);
       });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    void loadRuntimeSnapshot(() => disposed);
     return () => {
       disposed = true;
     };
@@ -161,6 +229,111 @@ export function DiagnosticsView() {
     if (!text) return;
     await copyText(text);
     setStatus('诊断输出已复制');
+  }
+
+  async function loadRuntimeSnapshot(isDisposed: () => boolean = () => false) {
+    setRuntimeBusy((current) => current || 'refresh');
+    try {
+      const [runtimeResult, tasksResult] = await Promise.allSettled([
+        apiGet<RuntimeStatus>('/status'),
+        apiGet<TaskListResponse>('/tasks'),
+      ]);
+      if (isDisposed()) return;
+      if (runtimeResult.status === 'fulfilled') setRuntimeStatus(runtimeResult.value);
+      if (tasksResult.status === 'fulfilled') setTasks(tasksResult.value.tasks || []);
+    } finally {
+      if (!isDisposed()) setRuntimeBusy((current) => (current === 'refresh' ? '' : current));
+    }
+  }
+
+  async function createTask() {
+    if (!taskDraft.description.trim() || runtimeBusy) return;
+    setRuntimeBusy('create-task');
+    setStatus('正在创建低风险任务...');
+    try {
+      const result = await apiPost<TaskResponse>('/tasks', {
+        description: taskDraft.description.trim(),
+        task_type: taskDraft.task_type,
+        risk_level: taskDraft.risk_level,
+      });
+      if (result.task) setTasks((current) => [result.task as TaskInfo, ...current.filter((task) => task.task_id !== result.task?.task_id)]);
+      setTaskDraft((current) => ({ ...current, description: '' }));
+      setStatus('任务已创建');
+      void loadRuntimeSnapshot();
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '创建任务失败');
+    } finally {
+      setRuntimeBusy('');
+    }
+  }
+
+  async function cancelTask(taskId: string) {
+    if (runtimeBusy) return;
+    setRuntimeBusy(`cancel-${taskId}`);
+    setStatus('正在取消任务...');
+    try {
+      const result = await apiPost<TaskResponse>(`/tasks/${encodeURIComponent(taskId)}/cancel`);
+      if (result.task) setTasks((current) => current.map((task) => task.task_id === taskId ? result.task as TaskInfo : task));
+      setStatus('任务已取消');
+      void loadRuntimeSnapshot();
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '取消任务失败');
+    } finally {
+      setRuntimeBusy('');
+    }
+  }
+
+  async function runAssistantIntent(dryRun: boolean) {
+    const text = intentText.trim();
+    if (!text || runtimeBusy) return;
+    setRuntimeBusy(dryRun ? 'intent-dry-run' : 'intent-create');
+    setIntentResult(null);
+    setStatus(dryRun ? '正在分析助手意图...' : '正在通过助手意图创建低风险任务...');
+    try {
+      const result = await apiPost<AssistantIntentResult>('/assistant/intent', {
+        text,
+        source: 'desktop-diagnostics',
+        sender_id: 'desktop',
+        dry_run: dryRun,
+      });
+      setIntentResult(result);
+      setStatus(result.ok ? result.message || '助手意图已完成' : result.message || '助手意图未执行');
+      if (!dryRun) void loadRuntimeSnapshot();
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '助手意图测试失败');
+    } finally {
+      setRuntimeBusy('');
+    }
+  }
+
+  async function probeScreen() {
+    if (runtimeBusy) return;
+    setRuntimeBusy('screen');
+    setStatus('正在获取当前屏幕摘要...');
+    try {
+      const result = await apiGet<ScreenshotProbe>('/screen/current');
+      setScreenProbe(result);
+      setStatus(`已获取屏幕截图摘要：${result.width || '—'}×${result.height || '—'}`);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '截图探测失败');
+    } finally {
+      setRuntimeBusy('');
+    }
+  }
+
+  async function probeActiveWindow() {
+    if (runtimeBusy) return;
+    setRuntimeBusy('active-window');
+    setStatus('正在读取活动窗口...');
+    try {
+      const result = await apiGet<ActiveWindowProbe>('/system/active-window');
+      setActiveWindowProbe(result);
+      setStatus(`当前活动窗口：${result.app_name || '—'} — ${result.title || '无标题'}`);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '活动窗口探测失败');
+    } finally {
+      setRuntimeBusy('');
+    }
   }
 
   return (
@@ -209,6 +382,156 @@ export function DiagnosticsView() {
             <small>{action.description}</small>
           </button>
         ))}
+      </section>
+
+      <section className="panel diagnostic-result-panel">
+        <div className="section-heading-row">
+          <div>
+            <h2>运行状态</h2>
+            <p className="section-caption">读取 /status 与 /tasks，显示 Bridge Runtime、Hermes ready 和任务计数。</p>
+          </div>
+          <button type="button" disabled={Boolean(runtimeBusy)} onClick={() => void loadRuntimeSnapshot()}>
+            {runtimeBusy === 'refresh' ? '刷新中...' : '刷新'}
+          </button>
+        </div>
+        <div className="diagnostic-result-meta">
+          <span>服务：{runtimeStatus?.service || '—'}</span>
+          <span>版本：{runtimeStatus?.version || '—'}</span>
+          <span>Uptime：{formatDuration(runtimeStatus?.uptime_seconds)}</span>
+          <span>Hermes：{runtimeStatus?.hermes_ready ? 'ready' : 'not ready'}</span>
+          <span>任务：{formatTaskCounts(runtimeStatus?.task_counts)}</span>
+        </div>
+      </section>
+
+      <section className="panel diagnostic-result-panel">
+        <div className="section-heading-row">
+          <div>
+            <h2>任务队列</h2>
+            <p className="section-caption">只创建默认低风险任务；pending / running 任务可以取消。</p>
+          </div>
+          <span>{tasks.length} 项</span>
+        </div>
+        <div className="hermes-config-form-grid">
+          <label className="settings-field wide" htmlFor="diagnostics-task-description">
+            <span>任务描述</span>
+            <input
+              id="diagnostics-task-description"
+              value={taskDraft.description}
+              maxLength={500}
+              placeholder="例如：检查当前运行状态"
+              disabled={Boolean(runtimeBusy)}
+              onChange={(event) => setTaskDraft((current) => ({ ...current, description: event.target.value }))}
+            />
+          </label>
+          <label className="settings-field" htmlFor="diagnostics-task-type">
+            <span>任务类型</span>
+            <select
+              id="diagnostics-task-type"
+              value={taskDraft.task_type}
+              disabled={Boolean(runtimeBusy)}
+              onChange={(event) => setTaskDraft((current) => ({ ...current, task_type: event.target.value }))}
+            >
+              <option value="general">general</option>
+              <option value="status_query">status_query</option>
+              <option value="screenshot">screenshot</option>
+              <option value="active_window">active_window</option>
+            </select>
+          </label>
+          <label className="settings-field" htmlFor="diagnostics-task-risk">
+            <span>风险等级</span>
+            <select
+              id="diagnostics-task-risk"
+              value={taskDraft.risk_level}
+              disabled={Boolean(runtimeBusy)}
+              onChange={(event) => setTaskDraft((current) => ({ ...current, risk_level: event.target.value }))}
+            >
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+            </select>
+          </label>
+          <div className="settings-savebar wide-form-note">
+            <span>不提供 high 风险快捷创建入口。</span>
+            <button type="button" className="primary-action" disabled={Boolean(runtimeBusy) || !taskDraft.description.trim()} onClick={() => void createTask()}>
+              {runtimeBusy === 'create-task' ? '创建中...' : '创建任务'}
+            </button>
+          </div>
+        </div>
+        <div className="diagnostic-task-list">
+          {tasks.slice(0, 10).map((task) => (
+            <article className="diagnostic-task-row" key={task.task_id}>
+              <div>
+                <strong>{task.description}</strong>
+                <small>{task.task_type} · {task.risk_level} · {formatShortDateTime(task.updated_at)}</small>
+                {task.result || task.error ? <p>{task.error || task.result}</p> : null}
+              </div>
+              <div className="diagnostic-task-actions">
+                <span className={task.status === 'completed' ? 'status-pill ok' : 'status-pill warn'}>{task.status}</span>
+                {task.status === 'pending' || task.status === 'running' ? (
+                  <button type="button" disabled={Boolean(runtimeBusy)} onClick={() => void cancelTask(task.task_id)}>
+                    {runtimeBusy === `cancel-${task.task_id}` ? '取消中...' : '取消'}
+                  </button>
+                ) : null}
+              </div>
+            </article>
+          ))}
+          {!tasks.length ? <div className="empty-state inline-empty">暂无任务</div> : null}
+        </div>
+      </section>
+
+      <section className="panel diagnostic-result-panel">
+        <div className="section-heading-row">
+          <div>
+            <h2>助手意图测试</h2>
+            <p className="section-caption">默认先 dry-run；执行按钮会调用 /assistant/intent 创建低风险任务。</p>
+          </div>
+        </div>
+        <div className="hermes-config-form-grid">
+          <label className="settings-field wide" htmlFor="diagnostics-intent-text">
+            <span>输入文本</span>
+            <input
+              id="diagnostics-intent-text"
+              value={intentText}
+              maxLength={1000}
+              placeholder="例如：帮我检查当前系统状态"
+              disabled={Boolean(runtimeBusy)}
+              onChange={(event) => setIntentText(event.target.value)}
+            />
+          </label>
+          <div className="settings-savebar wide-form-note">
+            <span>{intentResult ? `${intentResult.action || 'intent'}：${intentResult.message || '完成'}` : '不会自动执行高风险动作。'}</span>
+            <button type="button" disabled={Boolean(runtimeBusy) || !intentText.trim()} onClick={() => void runAssistantIntent(true)}>
+              {runtimeBusy === 'intent-dry-run' ? '分析中...' : 'Dry-run'}
+            </button>
+            <button type="button" className="primary-action" disabled={Boolean(runtimeBusy) || !intentText.trim()} onClick={() => void runAssistantIntent(false)}>
+              {runtimeBusy === 'intent-create' ? '执行中...' : '创建低风险任务'}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel diagnostic-result-panel">
+        <div className="section-heading-row">
+          <div>
+            <h2>本地能力探测</h2>
+            <p className="section-caption">手动调用截图与活动窗口接口；截图只显示本地缩略预览和尺寸。</p>
+          </div>
+          <div className="diagnostic-result-actions">
+            <button type="button" disabled={Boolean(runtimeBusy)} onClick={() => void probeScreen()}>{runtimeBusy === 'screen' ? '探测中...' : '截图摘要'}</button>
+            <button type="button" disabled={Boolean(runtimeBusy)} onClick={() => void probeActiveWindow()}>{runtimeBusy === 'active-window' ? '探测中...' : '活动窗口'}</button>
+          </div>
+        </div>
+        <div className="diagnostic-probe-grid">
+          <article className="diagnostic-probe-card">
+            <strong>屏幕截图</strong>
+            <span>{screenProbe ? `${screenProbe.width || '—'}×${screenProbe.height || '—'} · ${screenProbe.format || 'png'} · ${formatShortDateTime(screenProbe.captured_at)}` : '未探测'}</span>
+            {screenProbe?.image_base64 ? <img src={`data:image/${screenProbe.format || 'png'};base64,${screenProbe.image_base64}`} alt="当前屏幕缩略图" /> : null}
+          </article>
+          <article className="diagnostic-probe-card">
+            <strong>活动窗口</strong>
+            <span>{activeWindowProbe ? `${activeWindowProbe.app_name || '—'} · ${activeWindowProbe.title || '无标题'}` : '未探测'}</span>
+            <small>{activeWindowProbe?.pid ? `pid ${activeWindowProbe.pid}` : ''}{activeWindowProbe?.queried_at ? ` · ${formatShortDateTime(activeWindowProbe.queried_at)}` : ''}</small>
+          </article>
+        </div>
       </section>
 
       <section className="panel diagnostic-result-panel">
@@ -344,4 +667,22 @@ function formatShortDateTime(value?: string) {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function formatDuration(value?: number) {
+  if (!Number.isFinite(Number(value))) return '—';
+  const seconds = Math.max(0, Math.floor(Number(value)));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  if (hours) return `${hours}h ${minutes}m`;
+  if (minutes) return `${minutes}m ${rest}s`;
+  return `${rest}s`;
+}
+
+function formatTaskCounts(counts?: Record<string, number>) {
+  if (!counts) return '—';
+  const parts = ['pending', 'running', 'completed', 'failed', 'cancelled']
+    .map((key) => `${key}=${Number(counts[key] || 0)}`);
+  return parts.join(' · ');
 }

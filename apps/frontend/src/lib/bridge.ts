@@ -199,6 +199,21 @@ export async function apiPost<T = ApiRecord>(path: string, body?: unknown): Prom
   return parseResponse<T>(response);
 }
 
+export async function apiPatch<T = ApiRecord>(path: string, body?: unknown): Promise<T> {
+  const baseUrl = await bridgeUrl();
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new Error(`无法连接本地 Bridge：${baseUrl}`);
+  }
+  return parseResponse<T>(response);
+}
+
 export async function openAppView(
   view: string,
   params: Record<string, string> = {},

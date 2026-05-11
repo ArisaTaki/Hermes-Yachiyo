@@ -8,6 +8,7 @@ import {
   type ReleaseChangelog,
   type ReleaseChangelogCommit,
   apiGet,
+  apiPatch,
   apiPost,
   checkAppUpdate,
   chooseLive2DArchive,
@@ -108,6 +109,16 @@ type GeneralSettingsPayload = {
   workspace?: { path?: string; initialized?: boolean; created_at?: string; dirs?: Record<string, string> };
 };
 
+type AssistantProfilePayload = {
+  ok?: boolean;
+  persona_prompt?: string;
+  user_address?: string;
+  memory_enabled?: boolean;
+  memory_scope?: string;
+  prompt_order?: string[];
+  message?: string;
+};
+
 type StatusRecord = {
   status?: string;
   label?: string;
@@ -178,6 +189,10 @@ export function ModeSettingsView() {
 
 function ReferenceSettingsHome() {
   const [payload, setPayload] = useState<GeneralSettingsPayload | null>(null);
+  const [assistantProfile, setAssistantProfile] = useState<AssistantProfilePayload | null>(null);
+  const [assistantDraft, setAssistantDraft] = useState({ user_address: '', persona_prompt: '' });
+  const [assistantSaving, setAssistantSaving] = useState(false);
+  const [assistantStatus, setAssistantStatus] = useState('');
   const [hermesConfig, setHermesConfig] = useState<{
     model?: { provider?: string };
     provider_options?: Array<{ id: string; label?: string; api_key_configured?: boolean; auth_type?: string }>;
@@ -205,16 +220,55 @@ function ReferenceSettingsHome() {
     void Promise.allSettled([
       apiGet<GeneralSettingsPayload>('/ui/settings'),
       apiGet<{ model?: { provider?: string }; provider_options?: Array<{ id: string; label?: string; api_key_configured?: boolean; auth_type?: string }>; api_key?: { configured?: boolean; display?: string } }>('/ui/hermes/config'),
-    ]).then(([settingsResult, configResult]) => {
+      apiGet<AssistantProfilePayload>('/assistant/profile'),
+    ]).then(([settingsResult, configResult, profileResult]) => {
       if (disposed) return;
       if (settingsResult.status === 'fulfilled') setPayload(settingsResult.value);
       if (configResult.status === 'fulfilled') {
         setHermesConfig(configResult.value);
         setProviderDraft(configResult.value.model?.provider || '');
       }
+      if (profileResult.status === 'fulfilled') {
+        setAssistantProfile(profileResult.value);
+        setAssistantDraft({
+          user_address: profileResult.value.user_address || '',
+          persona_prompt: profileResult.value.persona_prompt || '',
+        });
+      }
     });
     return () => { disposed = true; };
   }, []);
+
+  async function saveAssistantProfile() {
+    if (assistantSaving) return;
+    setAssistantSaving(true);
+    setAssistantStatus('正在保存助手资料...');
+    try {
+      const result = await apiPatch<AssistantProfilePayload>('/assistant/profile', {
+        user_address: assistantDraft.user_address,
+        persona_prompt: assistantDraft.persona_prompt,
+      });
+      if (result.ok === false) throw new Error(result.message || '保存助手资料失败');
+      setAssistantProfile(result);
+      setAssistantDraft({
+        user_address: result.user_address || '',
+        persona_prompt: result.persona_prompt || '',
+      });
+      setPayload((current) => current ? {
+        ...current,
+        assistant: {
+          ...(current.assistant || {}),
+          user_address: result.user_address || '',
+          persona_prompt: result.persona_prompt || '',
+        },
+      } : current);
+      setAssistantStatus(result.message || '助手资料已保存');
+    } catch (err) {
+      setAssistantStatus(err instanceof Error ? err.message : '保存助手资料失败');
+    } finally {
+      setAssistantSaving(false);
+    }
+  }
 
   async function runConnectionTest() {
     if (connectionTesting) return;
@@ -305,6 +359,61 @@ function ReferenceSettingsHome() {
             <option value="normal">标准</option>
             <option value="large">大</option>
           </select>
+        </SettingsItem>
+      </SettingsSection>
+
+      <SettingsSection title="助手与 Prompt">
+        <SettingsItem
+          label="称呼"
+          description="写入 /assistant/profile 的 user_address，系统设置页会同步显示"
+        >
+          <input
+            className="settings-input"
+            value={assistantDraft.user_address}
+            maxLength={80}
+            placeholder="例如：彩叶"
+            disabled={assistantSaving}
+            onChange={(event) => {
+              setAssistantDraft((current) => ({ ...current, user_address: event.target.value }));
+              if (assistantStatus) setAssistantStatus('');
+            }}
+          />
+        </SettingsItem>
+        <SettingsItem
+          label="人格 Prompt"
+          description="共享助手资料，不改变后端 executor 注入逻辑"
+        >
+          <textarea
+            className="settings-textarea compact"
+            value={assistantDraft.persona_prompt}
+            maxLength={4000}
+            rows={4}
+            placeholder="输入八千代的人格、语气和边界设定"
+            disabled={assistantSaving}
+            onChange={(event) => {
+              setAssistantDraft((current) => ({ ...current, persona_prompt: event.target.value }));
+              if (assistantStatus) setAssistantStatus('');
+            }}
+          />
+        </SettingsItem>
+        <SettingsItem
+          label="Prompt 顺序"
+          description={(assistantProfile?.prompt_order || []).join(' → ') || 'persona → user_address → relevant_memory → current_session → request'}
+        >
+          <SettingsActionButton
+            loading={assistantSaving}
+            onClick={() => void saveAssistantProfile()}
+          >
+            {assistantSaving ? '保存中…' : '保存'}
+          </SettingsActionButton>
+        </SettingsItem>
+        <SettingsItem
+          label="记忆范围"
+          description={`${assistantProfile?.memory_enabled ? '已启用' : '暂未启用'} · ${assistantProfile?.memory_scope || 'local_only'}`}
+        >
+          <span className={`status-pill ${/失败|错误/.test(assistantStatus) ? 'warn' : assistantStatus ? 'ok' : 'warn'}`}>
+            {assistantStatus || '读取自 Bridge'}
+          </span>
         </SettingsItem>
       </SettingsSection>
 
@@ -2209,6 +2318,16 @@ const BUBBLE_FIELD_SECTIONS: ModeFieldSection[] = [
       { key: 'bubble_mode.opacity', sourceKey: 'opacity', label: '透明度', kind: 'number', min: 0.2, max: 1, step: '0.01' },
     ],
   },
+  {
+    title: '主动关怀',
+    note: '这些字段只影响气泡模式；统一开关可以在 GPT-SoVITS 页面同步写入 Bubble 和 Live2D。',
+    fields: [
+      { key: 'bubble_mode.proactive_enabled', sourceKey: 'proactive_enabled', label: '启用主动关怀', kind: 'checkbox', wide: true },
+      { key: 'bubble_mode.proactive_desktop_watch_enabled', sourceKey: 'proactive_desktop_watch_enabled', label: '启用桌面观察', kind: 'checkbox', wide: true },
+      { key: 'bubble_mode.proactive_interval_seconds', sourceKey: 'proactive_interval_seconds', label: '触发间隔秒', kind: 'number', min: 300, max: 3600, integer: true },
+      { key: 'bubble_mode.proactive_trigger_probability', sourceKey: 'proactive_trigger_probability', label: '触发概率', kind: 'percent', min: 0, max: 100, step: '1' },
+    ],
+  },
 ];
 
 const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
@@ -2314,6 +2433,16 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
         kind: 'expressionRules',
         wide: true,
       },
+    ],
+  },
+  {
+    title: '主动关怀',
+    note: '这些字段只影响 Live2D 模式；桌面观察权限和立即测试可在 GPT-SoVITS 页面执行。',
+    fields: [
+      { key: 'live2d_mode.proactive_enabled', sourceKey: 'proactive_enabled', label: '启用主动关怀', kind: 'checkbox', wide: true },
+      { key: 'live2d_mode.proactive_desktop_watch_enabled', sourceKey: 'proactive_desktop_watch_enabled', label: '启用桌面观察', kind: 'checkbox', wide: true },
+      { key: 'live2d_mode.proactive_interval_seconds', sourceKey: 'proactive_interval_seconds', label: '触发间隔秒', kind: 'number', min: 300, max: 3600, integer: true },
+      { key: 'live2d_mode.proactive_trigger_probability', sourceKey: 'proactive_trigger_probability', label: '触发概率', kind: 'percent', min: 0, max: 100, step: '1' },
     ],
   },
 ];

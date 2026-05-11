@@ -22,9 +22,24 @@ import {
 type SettingsData = {
   tts?: TtsSettings;
   mode_settings?: {
-    live2d?: { config?: { tts?: TtsSettings } };
-    bubble?: { config?: { tts?: TtsSettings } };
+    live2d?: { config?: ModeProactiveSettings & { tts?: TtsSettings } };
+    bubble?: { config?: ModeProactiveSettings & { tts?: TtsSettings } };
   };
+};
+
+type ModeProactiveSettings = {
+  proactive_enabled?: boolean;
+  proactive_desktop_watch_enabled?: boolean;
+  proactive_interval_seconds?: number;
+  proactive_trigger_probability?: number;
+};
+
+type ProactiveForm = {
+  enabled: boolean;
+  desktop_watch_enabled: boolean;
+  interval_seconds: string;
+  trigger_probability_percent: string;
+  target_mode: 'live2d' | 'bubble';
 };
 
 type SettingsUpdateResult = {
@@ -103,9 +118,25 @@ type TtsVoiceImportResult = SettingsUpdateResult & {
   message?: string;
 };
 
+type ProactiveActionResult = {
+  ok?: boolean;
+  allowed?: boolean;
+  success?: boolean;
+  error?: string;
+  message?: string;
+  mode?: string;
+  prompt?: string;
+  response?: string;
+};
+
+const MIN_PROACTIVE_INTERVAL_SECONDS = 300;
+
 export function ProactiveTtsSettingsView() {
   const [form, setForm] = useState<TtsForm>(emptyTtsForm());
   const [savedForm, setSavedForm] = useState<TtsForm>(emptyTtsForm());
+  const [proactiveForm, setProactiveForm] = useState<ProactiveForm>(emptyProactiveForm());
+  const [savedProactiveForm, setSavedProactiveForm] = useState<ProactiveForm>(emptyProactiveForm());
+  const [proactiveResult, setProactiveResult] = useState<ProactiveActionResult | null>(null);
   const [testText, setTestText] = useState('八千代语音测试成功。主动关怀播报已经可以正常调用。');
   const [testResult, setTestResult] = useState<TtsTestResult | null>(null);
   const [runtimeStatus, setRuntimeStatus] = useState<TtsRuntimeStatus | null>(null);
@@ -125,9 +156,12 @@ export function ProactiveTtsSettingsView() {
       try {
         const data = await apiGet<SettingsData>('/ui/settings');
         const next = formFromTtsSettings(ttsFromSettings(data));
+        const nextProactive = formFromProactiveSettings(proactiveFromSettings(data));
         if (!disposed) {
           setForm(next);
           setSavedForm(next);
+          setProactiveForm(nextProactive);
+          setSavedProactiveForm(nextProactive);
           setStatus('');
         }
       } catch (err) {
@@ -198,6 +232,86 @@ export function ProactiveTtsSettingsView() {
     });
     setTestResult(null);
     if (status && /保存|TTS|语音/.test(status)) setStatus('');
+  }
+
+  function updateProactiveField(field: keyof ProactiveForm, value: string | boolean) {
+    setProactiveForm((current) => ({ ...current, [field]: value }));
+    setProactiveResult(null);
+    if (status && /主动关怀|权限|测试/.test(status)) setStatus('');
+  }
+
+  async function saveProactiveSettings() {
+    if (interactionBusy) return;
+    setBusyAction('proactive-save');
+    setProactiveResult(null);
+    setStatus('正在保存主动关怀设置...');
+    try {
+      const interval = normalizeProactiveInterval(proactiveForm.interval_seconds);
+      const probability = clampProbability(Number(proactiveForm.trigger_probability_percent) / 100);
+      const enabled = Boolean(proactiveForm.enabled);
+      const desktopWatch = Boolean(proactiveForm.desktop_watch_enabled);
+      const result = await apiPost<SettingsUpdateResult>('/ui/settings', {
+        changes: {
+          'bubble_mode.proactive_enabled': enabled,
+          'bubble_mode.proactive_desktop_watch_enabled': desktopWatch,
+          'bubble_mode.proactive_interval_seconds': interval,
+          'bubble_mode.proactive_trigger_probability': probability,
+          'live2d_mode.proactive_enabled': enabled,
+          'live2d_mode.proactive_desktop_watch_enabled': desktopWatch,
+          'live2d_mode.proactive_interval_seconds': interval,
+          'live2d_mode.proactive_trigger_probability': probability,
+        },
+      });
+      if (result.ok === false) throw new Error(result.error || '保存主动关怀设置失败');
+      const next = result.app_state
+        ? formFromProactiveSettings(proactiveFromSettings(result.app_state))
+        : {
+          ...proactiveForm,
+          interval_seconds: String(interval),
+          trigger_probability_percent: String(Math.round(probability * 100)),
+        };
+      setProactiveForm(next);
+      setSavedProactiveForm(next);
+      setStatus('主动关怀设置已保存');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '保存主动关怀设置失败');
+    } finally {
+      setBusyAction('');
+    }
+  }
+
+  async function checkScreenPermission() {
+    if (interactionBusy) return;
+    setBusyAction('proactive-permission');
+    setProactiveResult(null);
+    setStatus('正在检查屏幕录制权限...');
+    try {
+      const result = await apiPost<ProactiveActionResult>('/ui/proactive/screen-permission/check', { open_settings: true });
+      setProactiveResult(result);
+      setStatus(result.allowed || result.ok ? result.message || '屏幕观察权限可用' : result.error || result.message || '屏幕观察权限未就绪');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '检查屏幕权限失败');
+    } finally {
+      setBusyAction('');
+    }
+  }
+
+  async function runProactiveTest() {
+    if (interactionBusy) return;
+    setBusyAction('proactive-test');
+    setProactiveResult(null);
+    setStatus('正在触发主动关怀测试...');
+    try {
+      const result = await apiPost<ProactiveActionResult>('/ui/proactive/test', {
+        mode: proactiveForm.target_mode || 'live2d',
+      });
+      setProactiveResult(result);
+      setStatus(result.success || result.ok ? result.message || '主动关怀测试已触发' : result.error || result.message || '主动关怀测试失败');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '主动关怀测试失败');
+    } finally {
+      setBusyAction('');
+    }
   }
 
   async function persistSettings(successMessage: string): Promise<TtsForm> {
@@ -473,6 +587,7 @@ export function ProactiveTtsSettingsView() {
   const enabled = Boolean(form.enabled && provider !== 'none');
   const isGsvProvider = provider === 'gpt-sovits';
   const isDirty = JSON.stringify(form) !== JSON.stringify(savedForm);
+  const proactiveDirty = JSON.stringify(proactiveForm) !== JSON.stringify(savedProactiveForm);
   const filePickerAvailable = hasDesktopFilePicker();
   const busy = Boolean(busyAction);
   const interactionBusy = busy || loading || resourceBusy;
@@ -501,6 +616,109 @@ export function ProactiveTtsSettingsView() {
       ) : null}
 
       <section className="dashboard-workbench single-column">
+        <article className="panel">
+          <div className="section-heading-row">
+            <div>
+              <h2>主动关怀</h2>
+              <p className="section-caption">
+                统一控制 Bubble 与 Live2D 的主动观察触发；具体单模式细节也可以在对应模式设置页单独微调。
+              </p>
+            </div>
+            <span>{loading ? '读取中' : proactiveForm.enabled ? '已启用' : '已关闭'}</span>
+          </div>
+
+          <div className="tts-settings-form">
+            <div className="hermes-config-form-grid">
+              <label className="settings-check wide" htmlFor="proactive-enabled-page">
+                <input
+                  id="proactive-enabled-page"
+                  type="checkbox"
+                  checked={proactiveForm.enabled}
+                  disabled={interactionBusy}
+                  onChange={(event) => updateProactiveField('enabled', event.target.checked)}
+                />
+                <span>启用主动关怀</span>
+              </label>
+              <label className="settings-check wide" htmlFor="proactive-desktop-watch-page">
+                <input
+                  id="proactive-desktop-watch-page"
+                  type="checkbox"
+                  checked={proactiveForm.desktop_watch_enabled}
+                  disabled={interactionBusy}
+                  onChange={(event) => updateProactiveField('desktop_watch_enabled', event.target.checked)}
+                />
+                <span>允许桌面观察触发</span>
+              </label>
+              <label className="settings-field" htmlFor="proactive-interval-page">
+                <span>触发间隔秒</span>
+                <input
+                  id="proactive-interval-page"
+                  type="number"
+                  min={MIN_PROACTIVE_INTERVAL_SECONDS}
+                  max={3600}
+                  value={proactiveForm.interval_seconds}
+                  disabled={interactionBusy}
+                  onChange={(event) => updateProactiveField('interval_seconds', event.target.value)}
+                />
+              </label>
+              <label className="settings-field" htmlFor="proactive-probability-page">
+                <span>触发概率 %</span>
+                <input
+                  id="proactive-probability-page"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={proactiveForm.trigger_probability_percent}
+                  disabled={interactionBusy}
+                  onChange={(event) => updateProactiveField('trigger_probability_percent', event.target.value)}
+                />
+              </label>
+              <label className="settings-field" htmlFor="proactive-target-mode-page">
+                <span>立即测试目标</span>
+                <select
+                  id="proactive-target-mode-page"
+                  value={proactiveForm.target_mode}
+                  disabled={interactionBusy}
+                  onChange={(event) => updateProactiveField('target_mode', event.target.value as ProactiveForm['target_mode'])}
+                >
+                  <option value="live2d">Live2D</option>
+                  <option value="bubble">Bubble</option>
+                </select>
+              </label>
+              <p className="capability-note wide-form-note">
+                保存会同时写入 bubble_mode 与 live2d_mode 的 proactive 字段；不会修改 TTS Provider 或其它模式行为。
+              </p>
+            </div>
+
+            {proactiveResult ? (
+              <div className={`hermes-test-result ${proactiveResult.success || proactiveResult.ok || proactiveResult.allowed ? 'success' : 'danger'}`}>
+                <strong>{proactiveResult.error || proactiveResult.message || (proactiveResult.allowed ? '权限可用' : '主动关怀已触发')}</strong>
+                <span>{proactiveResult.mode || proactiveForm.target_mode}</span>
+                {proactiveResult.response || proactiveResult.prompt ? <pre>{proactiveResult.response || proactiveResult.prompt}</pre> : null}
+              </div>
+            ) : null}
+
+            <div className="settings-savebar">
+              <span>{proactiveDirty ? '有未保存的主动关怀设置' : '主动关怀设置已同步'}</span>
+              <button type="button" disabled={interactionBusy} onClick={() => void checkScreenPermission()}>
+                {busyAction === 'proactive-permission' ? '检查中...' : '检查屏幕权限'}
+              </button>
+              <button type="button" disabled={interactionBusy} onClick={() => void runProactiveTest()}>
+                {busyAction === 'proactive-test' ? '测试中...' : '立即测试'}
+              </button>
+              <button
+                type="button"
+                className={busyAction === 'proactive-save' ? 'primary-action loading-button' : 'primary-action'}
+                disabled={interactionBusy || !proactiveDirty}
+                onClick={() => void saveProactiveSettings()}
+              >
+                {busyAction === 'proactive-save' ? '保存中...' : '保存主动关怀'}
+              </button>
+            </div>
+          </div>
+        </article>
+
         <article className="panel">
           <div className="section-heading-row">
             <div>
@@ -995,6 +1213,52 @@ export function ProactiveTtsSettingsView() {
 
 function ttsFromSettings(settings: SettingsData | null): TtsSettings | undefined {
   return settings?.tts || settings?.mode_settings?.live2d?.config?.tts || settings?.mode_settings?.bubble?.config?.tts;
+}
+
+function emptyProactiveForm(): ProactiveForm {
+  return {
+    enabled: false,
+    desktop_watch_enabled: false,
+    interval_seconds: String(MIN_PROACTIVE_INTERVAL_SECONDS),
+    trigger_probability_percent: '60',
+    target_mode: 'live2d',
+  };
+}
+
+function proactiveFromSettings(settings: SettingsData | null): ModeProactiveSettings | undefined {
+  const bubble = settings?.mode_settings?.bubble?.config;
+  const live2d = settings?.mode_settings?.live2d?.config;
+  if (!bubble && !live2d) return undefined;
+  return {
+    proactive_enabled: Boolean(bubble?.proactive_enabled || live2d?.proactive_enabled),
+    proactive_desktop_watch_enabled: Boolean(
+      bubble?.proactive_desktop_watch_enabled || live2d?.proactive_desktop_watch_enabled,
+    ),
+    proactive_interval_seconds: Number(live2d?.proactive_interval_seconds || bubble?.proactive_interval_seconds || MIN_PROACTIVE_INTERVAL_SECONDS),
+    proactive_trigger_probability: Number(live2d?.proactive_trigger_probability ?? bubble?.proactive_trigger_probability ?? 0.6),
+  };
+}
+
+function formFromProactiveSettings(settings: ModeProactiveSettings | undefined): ProactiveForm {
+  const probability = clampProbability(Number(settings?.proactive_trigger_probability ?? 0.6));
+  return {
+    enabled: Boolean(settings?.proactive_enabled),
+    desktop_watch_enabled: Boolean(settings?.proactive_desktop_watch_enabled),
+    interval_seconds: String(normalizeProactiveInterval(settings?.proactive_interval_seconds || MIN_PROACTIVE_INTERVAL_SECONDS)),
+    trigger_probability_percent: String(Math.round(probability * 100)),
+    target_mode: 'live2d',
+  };
+}
+
+function normalizeProactiveInterval(value: string | number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return MIN_PROACTIVE_INTERVAL_SECONDS;
+  return Math.max(MIN_PROACTIVE_INTERVAL_SECONDS, Math.min(3600, Math.round(parsed)));
+}
+
+function clampProbability(value: number): number {
+  if (!Number.isFinite(value)) return 0.6;
+  return Math.max(0, Math.min(1, value));
 }
 
 function shouldShowRuntimeStatus(status: TtsRuntimeStatus | null): status is TtsRuntimeStatus {
