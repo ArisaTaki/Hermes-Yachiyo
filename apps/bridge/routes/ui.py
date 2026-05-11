@@ -943,12 +943,11 @@ async def acknowledge_launcher(request: LauncherAckRequest) -> dict[str, Any]:
     tracker.acknowledge(chat)
     service = _launcher_proactive_services.get((mode_id, id(runtime)))
     session_id = str(chat.get("session_id") or "")
-    source = "chat"
-    if service is not None and getattr(service, "_attention_task_id", None):
-        service.acknowledge()
+    if service is not None:
+        if getattr(service, "_attention_task_id", None):
+            service.acknowledge()
         session_id = service.session_id
-        source = "proactive"
-    return {"ok": True, "mode": mode_id, "session_id": session_id, "source": source}
+    return {"ok": True, "mode": mode_id, "session_id": session_id}
 
 
 @router.post("/proactive/test")
