@@ -595,28 +595,47 @@ export function ProactiveTtsSettingsView() {
   const externalGsvAgent = firstExternalGsvLaunchAgent(serviceStatus);
 
   return (
-    <main className="app-shell">
-      <header className="topbar dashboard-topbar">
+    <section className="hy-route-page hy-tts-page">
+      <header className="hy-page-header hy-tts-page-header hy-stagger">
         <div>
-          <h1>主动关怀语音</h1>
-          <p>只在主动桌面观察触发关怀提醒时播报；普通聊天回复不会自动转语音。</p>
-        </div>
-        <div className="topbar-actions">
-          <button type="button" onClick={() => navigateTo('main')}>返回主控台</button>
-          <button type="button" onClick={() => void openAppView('tools')}>工具中心</button>
+          <span className="hy-eyebrow">GPT-SoVITS · Voice Core</span>
+          <h2>语音中枢</h2>
+          <p>配置八千代主动关怀播报链路、音色资源与本地 GPT-SoVITS 服务。普通聊天回复仍保持文本，不会自动转语音。</p>
+          <div className="hy-tts-hero-actions">
+            <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('diagnostics')}>诊断工具</button>
+          </div>
         </div>
       </header>
 
-      {status ? <div className={`notice ${/失败|错误/.test(status) ? 'danger' : ''}`}>{status}</div> : null}
+      <section className="hy-tts-status-grid hy-stagger" aria-label="语音状态">
+        <article className={proactiveForm.enabled ? 'hy-tts-status-card ready' : 'hy-tts-status-card muted'}>
+          <span>主动关怀</span>
+          <strong>{loading ? '读取中' : proactiveForm.enabled ? '已启用' : '已关闭'}</strong>
+          <small>{proactiveForm.desktop_watch_enabled ? '允许桌面观察触发' : '仅手动测试触发'}</small>
+        </article>
+        <article className={enabled ? 'hy-tts-status-card ready' : 'hy-tts-status-card muted'}>
+          <span>TTS Provider</span>
+          <strong>{enabled ? ttsProviderLabel(provider) : 'Text Only'}</strong>
+          <small>{isDirty ? '有未保存更改' : '设置已同步'}</small>
+        </article>
+        <article className={isGsvProvider && serviceStatus?.reachable ? 'hy-tts-status-card ready' : isGsvProvider ? 'hy-tts-status-card pending' : 'hy-tts-status-card muted'}>
+          <span>本地服务</span>
+          <strong>{isGsvProvider ? (serviceStatus?.reachable ? 'API 可达' : '待连接') : '未启用'}</strong>
+          <small>{isGsvProvider ? gsvServiceStatusText(serviceStatus) : '选择 GPT-SoVITS 后显示运行时状态'}</small>
+        </article>
+      </section>
+
+      {status ? <div className={`notice hy-tts-notice hy-stagger ${/失败|错误/.test(status) ? 'danger' : ''}`}>{status}</div> : null}
       {shouldShowRuntimeStatus(runtimeStatus) ? (
-        <div className={`notice ${ttsRuntimeStatusTone(runtimeStatus)}`}>
+        <div className={`notice hy-tts-notice hy-stagger ${ttsRuntimeStatusTone(runtimeStatus)}`}>
           <strong>{ttsRuntimeStatusTitle(runtimeStatus)}</strong>
           <span>{ttsRuntimeStatusDetail(runtimeStatus)}</span>
         </div>
       ) : null}
 
-      <section className="dashboard-workbench single-column">
-        <article className="panel">
+      <section className="hy-tts-stack">
+        <article className="hy-tts-card corner-frame hy-stagger">
+          <div className="corner-frame-inner" />
           <div className="section-heading-row">
             <div>
               <h2>主动关怀</h2>
@@ -624,11 +643,11 @@ export function ProactiveTtsSettingsView() {
                 统一控制 Bubble 与 Live2D 的主动观察触发；具体单模式细节也可以在对应模式设置页单独微调。
               </p>
             </div>
-            <span>{loading ? '读取中' : proactiveForm.enabled ? '已启用' : '已关闭'}</span>
+            <span className={proactiveForm.enabled ? 'hy-tts-pill active' : 'hy-tts-pill'}>{loading ? '读取中' : proactiveForm.enabled ? '已启用' : '已关闭'}</span>
           </div>
 
-          <div className="tts-settings-form">
-            <div className="hermes-config-form-grid">
+          <div className="tts-settings-form hy-tts-form">
+            <div className="hermes-config-form-grid hy-tts-form-grid">
               <label className="settings-check wide" htmlFor="proactive-enabled-page">
                 <input
                   id="proactive-enabled-page"
@@ -699,17 +718,17 @@ export function ProactiveTtsSettingsView() {
               </div>
             ) : null}
 
-            <div className="settings-savebar">
+            <div className="settings-savebar hy-tts-savebar">
               <span>{proactiveDirty ? '有未保存的主动关怀设置' : '主动关怀设置已同步'}</span>
-              <button type="button" disabled={interactionBusy} onClick={() => void checkScreenPermission()}>
+              <button type="button" className="hy-btn hy-btn-ghost" disabled={interactionBusy} onClick={() => void checkScreenPermission()}>
                 {busyAction === 'proactive-permission' ? '检查中...' : '检查屏幕权限'}
               </button>
-              <button type="button" disabled={interactionBusy} onClick={() => void runProactiveTest()}>
+              <button type="button" className="hy-btn hy-btn-ghost" disabled={interactionBusy} onClick={() => void runProactiveTest()}>
                 {busyAction === 'proactive-test' ? '测试中...' : '立即测试'}
               </button>
               <button
                 type="button"
-                className={busyAction === 'proactive-save' ? 'primary-action loading-button' : 'primary-action'}
+                className={busyAction === 'proactive-save' ? 'hy-btn hy-btn-primary loading-button' : 'hy-btn hy-btn-primary'}
                 disabled={interactionBusy || !proactiveDirty}
                 onClick={() => void saveProactiveSettings()}
               >
@@ -719,7 +738,8 @@ export function ProactiveTtsSettingsView() {
           </div>
         </article>
 
-        <article className="panel">
+        <article className="hy-tts-card corner-frame hy-stagger">
+          <div className="corner-frame-inner" />
           <div className="section-heading-row">
             <div>
               <h2>语音开关</h2>
@@ -727,17 +747,17 @@ export function ProactiveTtsSettingsView() {
                 这里配置的是 Yachiyo 主动关怀播报链路；Tools 里的“文本转语音”是 Hermes Agent 自己的工具能力，二者互不覆盖。
               </p>
             </div>
-            <span>{loading ? '读取中' : enabled ? `已启用：${ttsProviderLabel(provider)}` : '只发文本'}</span>
+            <span className={enabled ? 'hy-tts-pill active' : 'hy-tts-pill'}>{loading ? '读取中' : enabled ? `已启用：${ttsProviderLabel(provider)}` : '只发文本'}</span>
           </div>
 
           <form
-            className="tts-settings-form"
+            className="tts-settings-form hy-tts-form"
             onSubmit={(event) => {
               event.preventDefault();
               void saveSettings();
             }}
           >
-            <div className="hermes-config-form-grid">
+            <div className="hermes-config-form-grid hy-tts-form-grid">
               <label className="settings-check wide" htmlFor="proactive-tts-enabled">
                 <input
                   id="proactive-tts-enabled"
@@ -1185,12 +1205,12 @@ export function ProactiveTtsSettingsView() {
               </div>
             ) : null}
 
-            <div className="settings-savebar">
+            <div className="settings-savebar hy-tts-savebar">
               <span>{isDirty ? '有未保存的语音设置' : enabled ? '语音设置已同步' : '主动关怀将只发送文字'}</span>
-              <button type="button" disabled={interactionBusy || !isDirty} onClick={resetDraft}>重置草稿</button>
+              <button type="button" className="hy-btn hy-btn-ghost" disabled={interactionBusy || !isDirty} onClick={resetDraft}>重置草稿</button>
               <button
                 type="button"
-                className={busyAction === 'test' ? 'loading-button' : undefined}
+                className={busyAction === 'test' ? 'hy-btn hy-btn-ghost loading-button' : 'hy-btn hy-btn-ghost'}
                 disabled={interactionBusy || provider === 'none'}
                 onClick={() => void saveAndTestSettings()}
               >
@@ -1198,7 +1218,7 @@ export function ProactiveTtsSettingsView() {
               </button>
               <button
                 type="submit"
-                className={busyAction === 'save' ? 'primary-action loading-button' : 'primary-action'}
+                className={busyAction === 'save' ? 'hy-btn hy-btn-primary loading-button' : 'hy-btn hy-btn-primary'}
                 disabled={interactionBusy}
               >
                 {busyAction === 'save' ? '保存中...' : '保存语音设置'}
@@ -1207,7 +1227,7 @@ export function ProactiveTtsSettingsView() {
           </form>
         </article>
       </section>
-    </main>
+    </section>
   );
 }
 

@@ -4,6 +4,7 @@ import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
+  ReactNode,
 } from 'react';
 
 import { ImageAttachmentViewer } from '../components/ImageAttachmentViewer';
@@ -76,6 +77,14 @@ type ExecutorPayload = {
   image_input?: ImageInputPayload;
 };
 
+type AssistantProfilePayload = {
+  ok?: boolean;
+  agent_name?: string;
+  agent_nickname?: string;
+  agent_avatar_url?: string;
+  user_avatar_url?: string;
+};
+
 type RenderState = {
   shown: string;
   target: string;
@@ -116,6 +125,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [isSending, setIsSending] = useState(false);
   const [sessions, setSessions] = useState<SessionsPayload | null>(null);
   const [executor, setExecutor] = useState<ExecutorPayload | null>(null);
+  const [assistantProfile, setAssistantProfile] = useState<AssistantProfilePayload | null>(null);
+  const [assistantProfileLoading, setAssistantProfileLoading] = useState(true);
   const [notice, setNotice] = useState<ChatNotice | null>(null);
   const [sessionQuery, setSessionQuery] = useState('');
   const [copiedMessageId, setCopiedMessageId] = useState('');
@@ -202,6 +213,18 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
   }, []);
 
+  const loadAssistantProfile = useCallback(async () => {
+    try {
+      const profile = await apiGet<AssistantProfilePayload>('/assistant/profile');
+      if (profile.ok === false) throw new Error('读取助手资料失败');
+      setAssistantProfile(profile);
+    } catch {
+      setAssistantProfile(null);
+    } finally {
+      setAssistantProfileLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const requestedSessionId = currentParam('session_id').trim();
     void (async () => {
@@ -218,8 +241,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       await refreshMessages();
       await loadSessions();
       await loadExecutor();
+      await loadAssistantProfile();
     })();
-  }, [loadExecutor, loadSessions, refreshMessages]);
+  }, [loadAssistantProfile, loadExecutor, loadSessions, refreshMessages]);
 
   useEffect(() => {
     const interval = isProcessing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
@@ -233,6 +257,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }, EXECUTOR_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [loadExecutor]);
+
+  useEffect(() => {
+    const refreshProfile = () => void loadAssistantProfile();
+    window.addEventListener('hermes-assistant-profile-updated', refreshProfile);
+    return () => window.removeEventListener('hermes-assistant-profile-updated', refreshProfile);
+  }, [loadAssistantProfile]);
 
   useEffect(() => {
     if (embedded) return;
@@ -621,7 +651,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       })
     : sessionItems;
   const currentSession = sessionItems.find((session) => session.session_id === sessions?.current_session_id);
-  const currentTitle = currentSession ? sessionTitle(currentSession) : '月見八千代';
+  const currentTitle = currentSession ? sessionTitle(currentSession) : (assistantProfile?.agent_name || '月見八千代');
   const chatWorkspaceStyle = embedded
     ? undefined
     : ({ '--chat-sidebar-width': `${sidebarWidth}px` } as CSSProperties);
@@ -660,7 +690,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 key={session.session_id}
                 onClick={() => void switchSession(session.session_id)}
               >
-                <span className="chat-item-avatar">🌙</span>
+                <span className="chat-item-avatar">{avatarNode(assistantProfile?.agent_avatar_url, assistantProfile?.agent_name || 'Yachiyo', '月', assistantProfileLoading)}</span>
                 <span className="chat-item-info">
                   <strong className="chat-item-name">{sessionTitle(session)}</strong>
                   <span className="chat-item-preview">{sessionPreview(session)}</span>
@@ -696,7 +726,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         <section className="chat-main hy-chat-mainpane">
           <header className="chat-header">
             <div className="chat-header-info">
-              <div className="chat-header-avatar">🌙</div>
+              <div className="chat-header-avatar">{avatarNode(assistantProfile?.agent_avatar_url, assistantProfile?.agent_name || 'Yachiyo', '月', assistantProfileLoading)}</div>
               <div>
                 <div className="chat-header-name">{currentTitle}</div>
                 <div className="chat-header-status">
@@ -739,6 +769,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             <div style={messagesVisible ? undefined : { visibility: 'hidden' }}>
               {messages.map((message, index) => (
                 <MessageBubble
+                  assistantProfile={assistantProfile}
+                  assistantProfileLoading={assistantProfileLoading}
                   copied={copiedMessageId === message.id}
                   displayContent={displayMessageText(message, renderStateRef.current)}
                   key={message.id || index}
@@ -826,7 +858,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   );
 }
 
-function MessageBubble({ copied, displayContent, message, onCopy }: {
+function MessageBubble({ assistantProfile, assistantProfileLoading, copied, displayContent, message, onCopy }: {
+  assistantProfile: AssistantProfilePayload | null;
+  assistantProfileLoading: boolean;
   copied: boolean;
   displayContent: string;
   message: ChatMessage;
@@ -843,7 +877,7 @@ function MessageBubble({ copied, displayContent, message, onCopy }: {
   const isProcessingEmpty = role === 'assistant' && message.status === 'processing' && !displayContent;
   return (
     <article className={`message message--${messageVisualRole(role)} refined-message ${role} ${statusClass}`}>
-      <div className="message-avatar">{messageAvatar(role)}</div>
+      <div className="message-avatar">{messageAvatar(role, assistantProfile, assistantProfileLoading)}</div>
       <div className="message-stack">
         <div className="message-bubble">
           {isProcessingEmpty ? (
@@ -930,9 +964,14 @@ function messageVisualRole(role: string) {
   return 'system';
 }
 
-function messageAvatar(role: string) {
-  if (role === 'user') return '👤';
-  if (role === 'assistant') return '🌙';
+function avatarNode(url: string | undefined, label: string, fallback: string, loading = false): ReactNode {
+  if (loading) return <span className="chat-avatar-loading" aria-hidden="true" />;
+  return url ? <img src={url} alt={label} /> : fallback;
+}
+
+function messageAvatar(role: string, profile: AssistantProfilePayload | null, profileLoading = false) {
+  if (role === 'user') return avatarNode(profile?.user_avatar_url, '你', '你', profileLoading);
+  if (role === 'assistant') return avatarNode(profile?.agent_avatar_url, profile?.agent_name || 'Yachiyo', '月', profileLoading);
   return 'i';
 }
 

@@ -1,7 +1,7 @@
 import { createContext, FormEvent, ReactNode, useCallback, useContext, useEffect, useRef, useState, type CSSProperties } from 'react';
 
 import logoUrl from '../../../../docs/open-design/logo.png';
-import { apiGet, apiPost, openDesktopMode, openPath, quitApp } from '../lib/bridge';
+import { apiGet, apiPost, checkAppUpdate, openDesktopMode, openExternalUrl, openPath, quitApp } from '../lib/bridge';
 import { type AppView, currentParam, navigateTo } from '../lib/view';
 import { Live2DPreviewStage } from './LauncherView';
 
@@ -20,6 +20,11 @@ type DashboardData = {
       latest_status?: string;
       updated_at?: string;
     }>;
+  };
+  assistant?: {
+    agent_name?: string;
+    agent_nickname?: string;
+    agent_avatar_url?: string;
   };
   hermes?: {
     status?: string;
@@ -318,6 +323,9 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
   const [bootSlow, setBootSlow] = useState(false);
   const settingsMode = activeView === 'settings' ? currentParam('mode') : '';
   const activeLabel = routeTitle(activeView, settingsMode);
+  const agentName = dashboard?.assistant?.agent_name?.trim() || '月見八千代';
+  const agentNickname = dashboard?.assistant?.agent_nickname?.trim() || agentName;
+  const agentAvatarUrl = dashboard?.assistant?.agent_avatar_url || logoUrl;
   const loadingHidden = bootPhase !== 'loading';
   const accentLabel = TWEAK_ACCENTS.find((item) => item.value === accent)?.label || '八千代粉';
   const [shimmerActive, setShimmerActive] = useState(false);
@@ -402,12 +410,45 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
     };
   }, [activeView]);
 
+  useEffect(() => {
+    let disposed = false;
+    const refreshDashboard = () => {
+      apiGet<DashboardData>('/ui/dashboard')
+        .then((data) => {
+          if (!disposed) setDashboard(data);
+        })
+        .catch(() => {
+          if (!disposed) setDashboard(null);
+        });
+    };
+    window.addEventListener('hermes-assistant-profile-updated', refreshDashboard);
+    return () => {
+      disposed = true;
+      window.removeEventListener('hermes-assistant-profile-updated', refreshDashboard);
+    };
+  }, []);
+
   function showToast(message: string, type: 'info' | 'success' | 'warning' | 'error' = 'info') {
     const id = Date.now() + Math.floor(Math.random() * 1000);
     setToasts((current) => [...current, { id, message, type }].slice(-4));
     window.setTimeout(() => {
       setToasts((current) => current.filter((toast) => toast.id !== id));
     }, 2700);
+  }
+
+  async function checkForAppUpdate() {
+    showToast('正在检查应用更新...', 'info');
+    try {
+      const result = await checkAppUpdate();
+      if (result.update_available) {
+        showToast(result.reason || '发现可用更新', 'success');
+        navigateTo('app-update');
+        return;
+      }
+      showToast(result.error || result.reason || '当前已是最新版本', result.ok === false ? 'warning' : 'info');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : '检查更新失败', 'error');
+    }
   }
 
   return (
@@ -452,11 +493,11 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
 
         <section className="hy-character">
           <div className="hy-avatar-ring">
-            <img src={logoUrl} alt="月見八千代" />
+            <img src={agentAvatarUrl} alt={agentName} />
           </div>
           <div>
-            <strong>月見八千代</strong>
-            <span><i />{dashboard?.chat?.is_processing ? '正在处理' : '月夜待机中'}</span>
+            <strong>{agentName}</strong>
+            <span><i />{dashboard?.chat?.is_processing ? `${agentNickname}处理中` : `${agentNickname}待机中`}</span>
           </div>
         </section>
 
@@ -485,8 +526,8 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
         </nav>
 
         <footer className="hy-sidebar-footer">
-          <button type="button" onClick={() => showToast('当前版本 v0.3.0，已是最新版本', 'info')}>检查更新</button>
-          <button type="button" onClick={() => showToast('帮助文档：github.com/kuguya-AI-app-develop/Hermes-Yachiyo/wiki', 'info')}>帮助</button>
+          <button type="button" onClick={() => void checkForAppUpdate()}>检查更新</button>
+          <button type="button" onClick={() => void openExternalUrl('https://www.hermes-yachiyo.dev/guide/')}>帮助</button>
         </footer>
       </aside>
 
@@ -1421,7 +1462,7 @@ export function ToolsAllPage() {
     { view: 'proactive-tts' as AppView, icon: '🎵', title: 'GPT-SoVITS', detail: '语音合成，让八千代开口说话。', status: '就绪', statusTone: 'ready' },
     { view: 'resources' as AppView, icon: '📁', title: '资源管理', detail: '管理 Live2D 模型、语音、壁纸等资源文件。', status: '就绪', statusTone: 'ready' },
     { view: 'workspace' as AppView, icon: '📂', title: '工作区', detail: '管理对话记录、项目文件和工作区配置。', status: '已初始化', statusTone: 'ready' },
-    { view: 'diagnostics' as AppView, icon: '🔍', title: '诊断工具', detail: '系统状态检测和日志查看。', status: '就绪', statusTone: 'ready' },
+    { view: 'diagnostics' as AppView, icon: '🔍', title: '诊断工具', detail: '系统检测、日志查看和工具能力入口。', status: '就绪', statusTone: 'ready' },
     { view: 'provider' as AppView, icon: '🔗', title: '模型配置', detail: '配置 AI 模型提供商和 API Key。', status: '就绪', statusTone: 'ready' },
     { view: 'chat' as AppView, icon: '💬', title: '对话', detail: '与八千代对话，支持文本和图片输入。', status: '就绪', statusTone: 'ready' },
   ];
@@ -1757,6 +1798,7 @@ function routeTitle(view: AppView, settingsMode = ''): string {
   if (view === 'workspace') return 'Hermes Yachiyo — 工作区';
   if (view === 'tools-all') return 'Hermes Yachiyo — 桌面工具';
   if (view === 'activity-all') return 'Hermes Yachiyo — 活动日志';
+  if (view === 'app-update') return 'Hermes Yachiyo — 应用更新';
   if (view === 'settings' && settingsMode === 'live2d') return 'Hermes Yachiyo — Live2D 设置';
   if (view === 'settings' && settingsMode === 'bubble') return 'Hermes Yachiyo — 气泡设置';
   return 'Hermes Yachiyo';

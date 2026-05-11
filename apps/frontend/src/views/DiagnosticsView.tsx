@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { apiGet, apiPost, copyText, openAppView } from '../lib/bridge';
-import { currentParam } from '../lib/view';
+import { apiGet, apiPost, copyText } from '../lib/bridge';
+import { currentParam, navigateTo } from '../lib/view';
 
 type DiagnosticAction = {
   id: string;
@@ -27,11 +27,15 @@ type DiagnosticResult = {
   cached_at?: string;
   stale?: boolean;
   diagnostic_cache?: DiagnosticCache;
-  doctor_summary?: {
-    readiness_level?: string;
-    limited_tools?: string[];
-    doctor_issues_count?: number;
-  };
+  doctor_summary?: DoctorSummary;
+};
+
+type DoctorSummary = {
+  readiness_level?: string;
+  available_tools?: string[];
+  limited_tools?: string[];
+  limited_tool_details?: Record<string, string>;
+  doctor_issues_count?: number;
 };
 
 type DiagnosticCache = {
@@ -48,9 +52,26 @@ type DashboardStatus = {
     command_exists?: boolean;
     readiness_level?: string;
     platform?: string;
+    available_tools?: string[];
+    limited_tools?: string[];
+    limited_tool_details?: Record<string, string>;
     doctor_issues_count?: number;
   };
   workspace?: { initialized?: boolean; path?: string };
+};
+
+type SettingsOverviewPayload = {
+  tts?: {
+    enabled?: boolean;
+    provider?: string;
+    gsv_base_url?: string;
+  };
+  mode_settings?: Record<string, {
+    id?: string;
+    title?: string;
+    summary?: string;
+    config?: Record<string, unknown>;
+  }>;
 };
 
 type RuntimeStatus = {
@@ -111,6 +132,67 @@ type DiagnosticOverviewItem = {
   status: 'passed' | 'warning' | 'error';
 };
 
+type HermesToolCatalogItem = {
+  id: string;
+  label: string;
+  category: string;
+  description: string;
+  requirement?: string;
+  aliases?: string[];
+  planned?: boolean;
+};
+
+type ToolStatus = {
+  kind: 'ready' | 'limited' | 'pending' | 'planned';
+  label: string;
+  detail: string;
+};
+
+type ToolConfigField = {
+  key: string;
+  label: string;
+  kind: 'text' | 'password' | 'select' | 'combo' | 'checkbox';
+  configured?: boolean;
+  value?: string | boolean;
+  visible_when?: {
+    field?: string;
+    equals?: string;
+    in?: string[];
+  };
+};
+
+type ToolConfigItem = {
+  id: string;
+  title: string;
+  summary?: string;
+  fields: ToolConfigField[];
+  configured_count?: number;
+  configurable?: boolean;
+};
+
+type HermesToolsetItem = {
+  id: string;
+  canonical_id?: string;
+  label?: string;
+  enabled?: boolean;
+};
+
+type ToolConfigPayload = {
+  ok?: boolean;
+  command_exists?: boolean;
+  needs_env_refresh?: boolean;
+  hermes_toolsets?: HermesToolsetItem[];
+  tools?: ToolConfigItem[];
+};
+
+type DiagnosticToolCard = {
+  item: HermesToolCatalogItem;
+  status: ToolStatus;
+  config?: ToolConfigItem;
+  enabledByToolsList: boolean;
+  configuredCount: { configured: number; total: number };
+};
+
 const DIAGNOSTIC_ACTIONS: DiagnosticAction[] = [
   {
     id: 'config-check',
@@ -132,16 +214,188 @@ const DIAGNOSTIC_ACTIONS: DiagnosticAction[] = [
   },
 ];
 
+const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
+  {
+    id: 'web',
+    label: '联网与网页读取',
+    category: '信息检索',
+    description: '搜索、读取网页内容并把结果交给 Hermes 推理。',
+    requirement: '需要 Hermes web/search 工具可用',
+    aliases: ['search'],
+  },
+  {
+    id: 'browser',
+    label: '浏览器自动化',
+    category: '信息检索',
+    description: '通过浏览器会话访问需要交互的页面。',
+    requirement: '需要 Hermes browser 工具可用',
+  },
+  {
+    id: 'browser-cdp',
+    label: '浏览器 CDP 高级控制',
+    category: '信息检索',
+    description: '连接本机 Chrome 调试端口，启用 CDP 级高级浏览器操作。',
+    requirement: '需要 browser.cdp_url 或本机 Chrome 调试端口',
+  },
+  {
+    id: 'image_gen',
+    label: '图片生成',
+    category: '多模态',
+    description: '调用图片生成 provider 产出图片资产。',
+    requirement: '需要图片生成 provider 和密钥',
+  },
+  {
+    id: 'tts',
+    label: 'Hermes 文本转语音',
+    category: '多模态',
+    description: 'Hermes Agent 自己暴露的文本转音频工具；不等同于 Yachiyo 主动关怀的 GPT-SoVITS 播报配置。',
+    requirement: '需要 Hermes tts 工具集启用',
+  },
+  {
+    id: 'terminal',
+    label: '终端执行',
+    category: '本地工作',
+    description: '在 Hermes 允许范围内执行命令和读取结果。',
+    requirement: '需要 Hermes 本地执行权限',
+  },
+  {
+    id: 'file',
+    label: '文件读写',
+    category: '本地工作',
+    description: '读取、生成和修改本地工作文件。',
+    requirement: '需要 Hermes 文件工具权限',
+  },
+  {
+    id: 'skills',
+    label: '技能加载',
+    category: '本地工作',
+    description: '加载 Hermes 或项目内定义的技能工作流。',
+    requirement: '需要技能目录或插件可读取',
+  },
+  {
+    id: 'code_execution',
+    label: '代码执行',
+    category: '本地工作',
+    description: '运行受控代码片段，处理数据或验证逻辑。',
+    requirement: '需要 Hermes 代码执行环境',
+  },
+  {
+    id: 'memory',
+    label: '记忆',
+    category: '长期上下文',
+    description: '读取和维护 Hermes 记忆信息。',
+    requirement: '需要 memory 工具集启用',
+  },
+  {
+    id: 'session_search',
+    label: '会话检索',
+    category: '长期上下文',
+    description: '检索历史会话，帮助跨会话延续上下文。',
+    requirement: '需要会话索引可用',
+  },
+  {
+    id: 'todo',
+    label: '任务清单',
+    category: '长期上下文',
+    description: '维护 Hermes 内部的待办与计划状态。',
+    requirement: '需要 todo 工具集启用',
+  },
+  {
+    id: 'cronjob',
+    label: '定时任务',
+    category: '自动化',
+    description: '创建或管理 Hermes 侧的定时自动化。',
+    requirement: '需要 cronjob 工具集配置',
+  },
+  {
+    id: 'clarify',
+    label: '澄清问题',
+    category: '自动化',
+    description: '让 Hermes 在缺少关键信息时向用户提问。',
+    requirement: '需要 clarify 工具集启用',
+  },
+  {
+    id: 'delegation',
+    label: '任务委派',
+    category: '自动化',
+    description: '让 Hermes 将任务拆分给子 agent 或协作流程。',
+    requirement: '需要 delegation 工具集启用',
+  },
+  {
+    id: 'messaging',
+    label: '消息通知',
+    category: '外部服务',
+    description: '向外部消息渠道发送通知或结果。',
+    requirement: '需要 webhook、token 或服务地址',
+  },
+  {
+    id: 'discord',
+    label: 'Discord',
+    category: '外部服务',
+    description: '连接 Discord 用户或频道工作流。',
+    requirement: '需要 Discord 凭据',
+    aliases: ['discord_admin'],
+  },
+  {
+    id: 'homeassistant',
+    label: 'Home Assistant',
+    category: '外部服务',
+    description: '连接家庭自动化设备和场景。',
+    requirement: '需要 Home Assistant 地址和 token',
+  },
+  {
+    id: 'spotify',
+    label: 'Spotify',
+    category: '外部服务',
+    description: '读取或控制 Spotify 相关工作流。',
+    requirement: '需要 Spotify 授权',
+  },
+  {
+    id: 'yuanbao',
+    label: '腾讯元宝',
+    category: '第三方扩展',
+    description: '连接 Hermes 的元宝扩展能力。',
+    requirement: '需要 hermes-yuanbao 配置',
+    aliases: ['hermes-yuanbao'],
+  },
+  {
+    id: 'moa',
+    label: 'MoA',
+    category: '第三方扩展',
+    description: '使用 Hermes 的多模型协作能力。',
+    requirement: '需要实验工具或额外 provider 配置',
+  },
+  {
+    id: 'rl',
+    label: 'RL',
+    category: '第三方扩展',
+    description: '连接 Hermes 实验性强化学习相关能力。',
+    requirement: '需要实验工具开关或额外依赖',
+  },
+  {
+    id: 'local-app-control',
+    label: 'Yachiyo 本机应用控制',
+    category: 'Yachiyo 规划',
+    description: '未来可把音乐、快捷指令和窗口控制做成 Yachiyo 原生能力。',
+    requirement: '当前仅展示规划，不启用调用',
+    planned: true,
+  },
+];
+
+const HIDDEN_HERMES_TOOLS = new Set(['vision', 'vision_analyze']);
+
 export function DiagnosticsView() {
   const initialCommand = normalizeDiagnosticCommand(currentParam('command'));
-  const returnTarget = normalizeReturnTarget(currentParam('return_to'));
-  const returnLabel = returnTarget === 'tools' ? '回到工具中心' : '返回主控台';
   const [selectedCommand, setSelectedCommand] = useState(initialCommand || DIAGNOSTIC_ACTIONS[0].command);
   const [result, setResult] = useState<DiagnosticResult | null>(null);
   const [diagnosticCache, setDiagnosticCache] = useState<DiagnosticCache | null>(null);
   const [overview, setOverview] = useState<DashboardStatus | null>(null);
+  const [settingsOverview, setSettingsOverview] = useState<SettingsOverviewPayload | null>(null);
+  const [overviewLoading, setOverviewLoading] = useState(true);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus | null>(null);
   const [tasks, setTasks] = useState<TaskInfo[]>([]);
+  const [toolConfig, setToolConfig] = useState<ToolConfigPayload | null>(null);
+  const [toolsLoading, setToolsLoading] = useState(true);
   const [taskDraft, setTaskDraft] = useState({ description: '', task_type: 'general', risk_level: 'low' });
   const [intentText, setIntentText] = useState('');
   const [intentResult, setIntentResult] = useState<AssistantIntentResult | null>(null);
@@ -156,6 +410,21 @@ export function DiagnosticsView() {
     () => DIAGNOSTIC_ACTIONS.find((action) => action.command === selectedCommand) || DIAGNOSTIC_ACTIONS[0],
     [selectedCommand],
   );
+  const toolConfigById = useMemo(() => {
+    const map = new Map<string, ToolConfigItem>();
+    (toolConfig?.tools || []).forEach((tool) => map.set(canonicalToolName(tool.id), tool));
+    return map;
+  }, [toolConfig]);
+  const toolCards = useMemo(() => {
+    const doctorState = diagnosticDoctorState(overview, diagnosticCache);
+    return HERMES_TOOL_CATALOG
+      .filter((item) => !isHiddenHermesTool(item.id))
+      .map((item) => diagnosticToolCardFor(item, doctorState, toolConfig?.hermes_toolsets || [], toolConfigById));
+  }, [diagnosticCache, overview, toolConfig?.hermes_toolsets, toolConfigById]);
+  const attentionToolCount = toolCards.filter((card) => card.status.kind === 'limited' || !card.enabledByToolsList).length;
+  const configuredToolCount = toolCards.filter((card) => card.config).length;
+  const initialLoading = overviewLoading || toolsLoading || (runtimeBusy === 'refresh' && !runtimeStatus);
+  const loadingActive = initialLoading || busy || Boolean(runtimeBusy);
 
   useEffect(() => {
     if (!initialCommand || lastAutoRunRef.current === initialCommand) return;
@@ -170,12 +439,30 @@ export function DiagnosticsView() {
 
   useEffect(() => {
     let disposed = false;
+    setOverviewLoading(true);
     apiGet<DashboardStatus>('/ui/dashboard')
       .then((payload) => {
         if (!disposed) setOverview(payload);
       })
       .catch(() => {
         if (!disposed) setOverview(null);
+      })
+      .finally(() => {
+        if (!disposed) setOverviewLoading(false);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    apiGet<SettingsOverviewPayload>('/ui/settings')
+      .then((payload) => {
+        if (!disposed) setSettingsOverview(payload);
+      })
+      .catch(() => {
+        if (!disposed) setSettingsOverview(null);
       });
     return () => {
       disposed = true;
@@ -185,6 +472,14 @@ export function DiagnosticsView() {
   useEffect(() => {
     let disposed = false;
     void loadRuntimeSnapshot(() => disposed);
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    void refreshToolConfig(() => disposed);
     return () => {
       disposed = true;
     };
@@ -215,6 +510,7 @@ export function DiagnosticsView() {
       setResult(payload);
       if (payload.diagnostic_cache) setDiagnosticCache(payload.diagnostic_cache);
       setStatus(payload.success ? payload.message || `${action.label} 完成` : payload.error || `${action.label} 失败`);
+      void refreshToolConfig();
     } catch (err) {
       setResult(null);
       setStatus(err instanceof Error ? err.message : `${action.label} 失败`);
@@ -243,6 +539,18 @@ export function DiagnosticsView() {
       if (tasksResult.status === 'fulfilled') setTasks(tasksResult.value.tasks || []);
     } finally {
       if (!isDisposed()) setRuntimeBusy((current) => (current === 'refresh' ? '' : current));
+    }
+  }
+
+  async function refreshToolConfig(isDisposed: () => boolean = () => false) {
+    setToolsLoading(true);
+    try {
+      const payload = await apiGet<ToolConfigPayload>('/ui/hermes/tools/config');
+      if (!isDisposed()) setToolConfig(payload);
+    } catch {
+      if (!isDisposed()) setToolConfig(null);
+    } finally {
+      if (!isDisposed()) setToolsLoading(false);
     }
   }
 
@@ -337,29 +645,37 @@ export function DiagnosticsView() {
   }
 
   return (
-    <main className="app-shell diagnostics-shell">
-      <header className="topbar dashboard-topbar">
+    <section className="hy-route-page hy-diagnostics-page">
+      <header className="hy-page-header hy-diagnostics-header hy-stagger">
         <div>
-          <h1>Hermes 诊断工具</h1>
-          <p>配置检查、Doctor 和凭据状态在这里直接运行并展示结果。</p>
+          <span className="hy-eyebrow">Diagnostics · Hermes Tools</span>
+          <h2>诊断工具</h2>
+          <p>配置检查、Doctor、Hermes 工具盘点、运行时任务和本地能力探测统一在这里处理。</p>
         </div>
-        <div className="topbar-actions">
-          <button type="button" onClick={() => void openAppView(returnTarget)}>{returnLabel}</button>
+        <div className="hy-action-row">
           <button
-            className="primary-action"
+            className="hy-btn hy-btn-primary"
             type="button"
             disabled={busy}
             onClick={() => void runDiagnostic()}
           >
             {busy ? '运行中...' : '重新运行'}
           </button>
+          <button type="button" className="hy-btn hy-btn-ghost" disabled={loadingActive} onClick={() => void refreshToolConfig()}>
+            {toolsLoading ? '同步中...' : '同步工具'}
+          </button>
         </div>
       </header>
 
+      <DiagnosticLoadingStrip
+        active={loadingActive}
+        label={diagnosticLoadingLabel({ initialLoading, busy, runtimeBusy, toolsLoading })}
+      />
+
       {status ? <div className={diagnosticNoticeClass(status)}>{status}</div> : null}
 
-      <section className="hy-diagnostic-grid" aria-label="系统检测">
-        {diagnosticOverviewItems(overview, diagnosticCache).map((item) => (
+      <section className="hy-diagnostic-grid hy-stagger" aria-label="系统检测">
+        {diagnosticOverviewItems(overview, diagnosticCache, settingsOverview).map((item) => (
           <article className={`hy-diagnostic-check ${item.status}`} key={item.label}>
             <span>{item.label}</span>
             <strong>{diagnosticStatusLabel(item.status)}</strong>
@@ -368,11 +684,11 @@ export function DiagnosticsView() {
         ))}
       </section>
 
-      <section className="diagnostic-command-grid" aria-label="诊断命令">
+      <section className="hy-diagnostics-command-grid hy-stagger" aria-label="诊断命令">
         {DIAGNOSTIC_ACTIONS.map((action) => (
           <button
             type="button"
-            className={action.command === selectedAction.command ? 'diagnostic-command-card selected' : 'diagnostic-command-card'}
+            className={action.command === selectedAction.command ? 'hy-diagnostics-command-card selected' : 'hy-diagnostics-command-card'}
             disabled={busy}
             key={action.id}
             onClick={() => void runDiagnostic(action.command)}
@@ -384,13 +700,45 @@ export function DiagnosticsView() {
         ))}
       </section>
 
-      <section className="panel diagnostic-result-panel">
+      <section className="hy-diagnostics-card hy-diagnostics-tools hy-stagger">
+        <div className="section-heading-row">
+          <div>
+            <h2>Hermes 工具盘点</h2>
+            <p className="section-caption">旧工具中心的 Hermes 工具清单收回到这里；Doctor 会标记受限项，可配置工具仍能进入独立配置。</p>
+          </div>
+          <StatusPill active={!attentionToolCount && !toolsLoading} label={toolsLoading ? '同步中' : `${attentionToolCount} 个需处理`} />
+        </div>
+        <div className="hy-diagnostics-tool-summary" aria-label="工具统计">
+          <span>工具目录：{toolCards.length}</span>
+          <span>配置入口：{configuredToolCount}</span>
+          <span>Doctor：{diagnosticCache?.stale ? '需重检' : diagnosticDoctorState(overview, diagnosticCache).checked ? '已读取' : '待运行'}</span>
+        </div>
+        {toolsLoading ? (
+          <div className="hy-diagnostics-tool-grid" aria-label="工具加载中">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <article className="hy-diagnostics-tool-card skeleton" key={index}>
+                <span />
+                <strong />
+                <p />
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="hy-diagnostics-tool-grid" aria-label="Hermes 工具">
+            {toolCards.map((card) => (
+              <DiagnosticToolCardView card={card} key={card.item.id} />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="hy-diagnostics-card diagnostic-result-panel hy-stagger">
         <div className="section-heading-row">
           <div>
             <h2>运行状态</h2>
             <p className="section-caption">读取 /status 与 /tasks，显示 Bridge Runtime、Hermes ready 和任务计数。</p>
           </div>
-          <button type="button" disabled={Boolean(runtimeBusy)} onClick={() => void loadRuntimeSnapshot()}>
+          <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(runtimeBusy)} onClick={() => void loadRuntimeSnapshot()}>
             {runtimeBusy === 'refresh' ? '刷新中...' : '刷新'}
           </button>
         </div>
@@ -403,7 +751,7 @@ export function DiagnosticsView() {
         </div>
       </section>
 
-      <section className="panel diagnostic-result-panel">
+      <section className="hy-diagnostics-card diagnostic-result-panel hy-stagger">
         <div className="section-heading-row">
           <div>
             <h2>任务队列</h2>
@@ -451,7 +799,7 @@ export function DiagnosticsView() {
           </label>
           <div className="settings-savebar wide-form-note">
             <span>不提供 high 风险快捷创建入口。</span>
-            <button type="button" className="primary-action" disabled={Boolean(runtimeBusy) || !taskDraft.description.trim()} onClick={() => void createTask()}>
+            <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(runtimeBusy) || !taskDraft.description.trim()} onClick={() => void createTask()}>
               {runtimeBusy === 'create-task' ? '创建中...' : '创建任务'}
             </button>
           </div>
@@ -467,7 +815,7 @@ export function DiagnosticsView() {
               <div className="diagnostic-task-actions">
                 <span className={task.status === 'completed' ? 'status-pill ok' : 'status-pill warn'}>{task.status}</span>
                 {task.status === 'pending' || task.status === 'running' ? (
-                  <button type="button" disabled={Boolean(runtimeBusy)} onClick={() => void cancelTask(task.task_id)}>
+                  <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(runtimeBusy)} onClick={() => void cancelTask(task.task_id)}>
                     {runtimeBusy === `cancel-${task.task_id}` ? '取消中...' : '取消'}
                   </button>
                 ) : null}
@@ -478,7 +826,7 @@ export function DiagnosticsView() {
         </div>
       </section>
 
-      <section className="panel diagnostic-result-panel">
+      <section className="hy-diagnostics-card diagnostic-result-panel hy-stagger">
         <div className="section-heading-row">
           <div>
             <h2>助手意图测试</h2>
@@ -499,25 +847,25 @@ export function DiagnosticsView() {
           </label>
           <div className="settings-savebar wide-form-note">
             <span>{intentResult ? `${intentResult.action || 'intent'}：${intentResult.message || '完成'}` : '不会自动执行高风险动作。'}</span>
-            <button type="button" disabled={Boolean(runtimeBusy) || !intentText.trim()} onClick={() => void runAssistantIntent(true)}>
+            <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(runtimeBusy) || !intentText.trim()} onClick={() => void runAssistantIntent(true)}>
               {runtimeBusy === 'intent-dry-run' ? '分析中...' : 'Dry-run'}
             </button>
-            <button type="button" className="primary-action" disabled={Boolean(runtimeBusy) || !intentText.trim()} onClick={() => void runAssistantIntent(false)}>
+            <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(runtimeBusy) || !intentText.trim()} onClick={() => void runAssistantIntent(false)}>
               {runtimeBusy === 'intent-create' ? '执行中...' : '创建低风险任务'}
             </button>
           </div>
         </div>
       </section>
 
-      <section className="panel diagnostic-result-panel">
+      <section className="hy-diagnostics-card diagnostic-result-panel hy-stagger">
         <div className="section-heading-row">
           <div>
             <h2>本地能力探测</h2>
             <p className="section-caption">手动调用截图与活动窗口接口；截图只显示本地缩略预览和尺寸。</p>
           </div>
           <div className="diagnostic-result-actions">
-            <button type="button" disabled={Boolean(runtimeBusy)} onClick={() => void probeScreen()}>{runtimeBusy === 'screen' ? '探测中...' : '截图摘要'}</button>
-            <button type="button" disabled={Boolean(runtimeBusy)} onClick={() => void probeActiveWindow()}>{runtimeBusy === 'active-window' ? '探测中...' : '活动窗口'}</button>
+            <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(runtimeBusy)} onClick={() => void probeScreen()}>{runtimeBusy === 'screen' ? '探测中...' : '截图摘要'}</button>
+            <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(runtimeBusy)} onClick={() => void probeActiveWindow()}>{runtimeBusy === 'active-window' ? '探测中...' : '活动窗口'}</button>
           </div>
         </div>
         <div className="diagnostic-probe-grid">
@@ -534,7 +882,7 @@ export function DiagnosticsView() {
         </div>
       </section>
 
-      <section className="panel diagnostic-result-panel">
+      <section className="hy-diagnostics-card diagnostic-result-panel hy-stagger">
         <div className="section-heading-row">
           <div>
             <h2>{result?.label || selectedAction.label}</h2>
@@ -550,16 +898,11 @@ export function DiagnosticsView() {
         </div>
         <pre className="diagnostic-output">{diagnosticOutput(result, busy)}</pre>
         <div className="diagnostic-result-actions">
-          <button type="button" disabled={!result || busy} onClick={() => void copyOutput()}>复制输出</button>
-          <button type="button" onClick={() => void openAppView(returnTarget)}>{returnLabel}</button>
+          <button type="button" className="hy-btn hy-btn-ghost" disabled={!result || busy} onClick={() => void copyOutput()}>复制输出</button>
         </div>
       </section>
-    </main>
+    </section>
   );
-}
-
-function normalizeReturnTarget(value: string): 'main' | 'tools' {
-  return value === 'tools' ? 'tools' : 'main';
 }
 
 function normalizeDiagnosticCommand(value: string): string {
@@ -595,9 +938,244 @@ function StatusPill({ active, label }: { active: boolean; label: string }) {
   return <span className={active ? 'status-pill ok' : 'status-pill warn'}>{label}</span>;
 }
 
+function DiagnosticLoadingStrip({ active, label }: { active: boolean; label: string }) {
+  return (
+    <div className={active ? 'hy-diagnostics-loading active hy-stagger' : 'hy-diagnostics-loading hy-stagger'} role="status" aria-live="polite">
+      <span className="hy-diagnostics-loading-dot" aria-hidden="true" />
+      <strong>{label}</strong>
+      <div className="hy-diagnostics-loading-track" aria-hidden="true">
+        <span />
+      </div>
+    </div>
+  );
+}
+
+function DiagnosticToolCardView({ card }: { card: DiagnosticToolCard }) {
+  const { item, status, config, configuredCount } = card;
+  const cardClass = `hy-diagnostics-tool-card ${status.kind}${card.enabledByToolsList ? '' : ' disabled'}`;
+  return (
+    <article className={cardClass}>
+      <div className="hy-diagnostics-tool-head">
+        <span>{item.category}</span>
+        <strong className={`hy-diagnostics-tool-pill ${status.kind}`}>{status.label}</strong>
+      </div>
+      <h3>{item.label}</h3>
+      <p>{item.description}</p>
+      <small>{status.detail || item.requirement}</small>
+      {config || item.id === 'tts' ? (
+        <div className="hy-diagnostics-tool-actions">
+          {config ? (
+            <>
+              <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('tools', { tool: config.id })}>
+                配置
+              </button>
+              <span>{configuredCount.configured}/{configuredCount.total} 已配置</span>
+            </>
+          ) : (
+            <>
+              <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('proactive-tts')}>
+                主动关怀语音
+              </button>
+              <span>Yachiyo 播报入口</span>
+            </>
+          )}
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function diagnosticLoadingLabel({
+  initialLoading,
+  busy,
+  runtimeBusy,
+  toolsLoading,
+}: {
+  initialLoading: boolean;
+  busy: boolean;
+  runtimeBusy: string;
+  toolsLoading: boolean;
+}) {
+  if (busy) return '正在运行 Hermes 诊断命令';
+  if (runtimeBusy === 'refresh') return '正在刷新运行时状态';
+  if (runtimeBusy) return '正在执行本地探测任务';
+  if (toolsLoading) return '正在同步 Hermes 工具清单';
+  if (initialLoading) return '正在整理诊断状态';
+  return '诊断状态已同步';
+}
+
+type DiagnosticDoctorState = {
+  checked: boolean;
+  cacheStale: boolean;
+  hermes?: DashboardStatus['hermes'];
+  availableTools: string[];
+  limitedTools: string[];
+  limitedToolDetails: Record<string, string>;
+};
+
+function diagnosticDoctorState(data: DashboardStatus | null, cache: DiagnosticCache | null): DiagnosticDoctorState {
+  const hermes = data?.hermes;
+  const cacheStale = Boolean(cache?.stale);
+  const doctorSummary = cacheStale ? undefined : cache?.commands?.doctor?.doctor_summary;
+  const rawLimitedTools = doctorSummary ? doctorSummary.limited_tools || [] : hermes?.limited_tools || [];
+  const rawAvailableTools = doctorSummary?.available_tools?.length ? doctorSummary.available_tools : hermes?.available_tools || [];
+  const rawLimitedDetails = doctorSummary ? doctorSummary.limited_tool_details || {} : hermes?.limited_tool_details || {};
+  const limitedToolDetails = Object.fromEntries(
+    Object.entries(rawLimitedDetails).filter(([tool]) => !isHiddenHermesTool(tool)),
+  );
+  const checked = Boolean(
+    !cacheStale
+    && (
+      doctorSummary
+      || rawAvailableTools.length
+      || rawLimitedTools.length
+      || (hermes?.readiness_level && hermes.readiness_level !== 'unknown')
+    ),
+  );
+
+  return {
+    checked,
+    cacheStale,
+    hermes,
+    availableTools: rawAvailableTools.filter((tool) => !isHiddenHermesTool(tool)),
+    limitedTools: rawLimitedTools.filter((tool) => !isHiddenHermesTool(tool)),
+    limitedToolDetails,
+  };
+}
+
+function diagnosticToolCardFor(
+  item: HermesToolCatalogItem,
+  state: DiagnosticDoctorState,
+  hermesToolsets: HermesToolsetItem[],
+  configById: Map<string, ToolConfigItem>,
+): DiagnosticToolCard {
+  const config = configForCatalogItem(item, configById);
+  const enabledByToolsList = toolsetEnabledForItem(item, hermesToolsets);
+  const status = enabledByToolsList
+    ? toolStatusFor(item, state)
+    : {
+        kind: 'limited' as const,
+        label: '未启用',
+        detail: 'Hermes tools list 显示此工具组当前已禁用。',
+      };
+  return {
+    item,
+    status,
+    config,
+    enabledByToolsList,
+    configuredCount: config ? configuredCountForTool(config) : { configured: 0, total: 0 },
+  };
+}
+
+function toolStatusFor(item: HermesToolCatalogItem, state: DiagnosticDoctorState): ToolStatus {
+  if (item.planned) {
+    return {
+      kind: 'planned',
+      label: '规划中',
+      detail: '当前只展示方向，不启用本机工具调用。',
+    };
+  }
+  if (isToolLimited(item, state.limitedTools)) {
+    return {
+      kind: 'limited',
+      label: '受限',
+      detail: limitedDetailFor(item, state.limitedToolDetails) || 'Doctor 已标记该工具不可用或缺少配置。',
+    };
+  }
+  if (state.cacheStale || !state.hermes?.command_exists || !state.checked) {
+    return {
+      kind: 'pending',
+      label: '待检测',
+      detail: '运行 Doctor 后会显示更准确的工具状态。',
+    };
+  }
+  if (isToolAvailable(item, state.availableTools)) {
+    return {
+      kind: 'ready',
+      label: '可用',
+      detail: 'Doctor 已确认该工具可用。',
+    };
+  }
+  if (!state.availableTools.length && state.hermes.ready && state.hermes.readiness_level && state.hermes.readiness_level !== 'unknown') {
+    return {
+      kind: 'ready',
+      label: '可用',
+      detail: '最近一次 Doctor 没有报告该工具受限。',
+    };
+  }
+  return {
+    kind: 'pending',
+    label: '待检测',
+    detail: '当前 Doctor 输出未包含该工具的可用性结论。',
+  };
+}
+
+function toolsetEnabledForItem(item: HermesToolCatalogItem, toolsets?: HermesToolsetItem[]): boolean {
+  if (!toolsets?.length) return true;
+  const records = new Map(toolsets.map((toolset) => [canonicalToolName(toolset.canonical_id || toolset.id), toolset]));
+  if (item.id === 'browser-cdp') return records.get('browser')?.enabled !== false;
+  const match = toolNameAliases(item)
+    .map((alias) => records.get(canonicalToolName(alias)))
+    .find(Boolean);
+  return match?.enabled !== false;
+}
+
+function configForCatalogItem(item: HermesToolCatalogItem, configById: Map<string, ToolConfigItem>): ToolConfigItem | undefined {
+  return toolNameAliases(item)
+    .map((alias) => configById.get(canonicalToolName(alias)))
+    .find(Boolean);
+}
+
+function configuredCountForTool(tool: ToolConfigItem): { configured: number; total: number } {
+  const visibleFields = tool.fields.filter((field) => fieldIsVisibleWithSavedValues(field, tool.fields));
+  return {
+    configured: tool.configured_count ?? visibleFields.filter((field) => field.configured).length,
+    total: visibleFields.length,
+  };
+}
+
+function fieldIsVisibleWithSavedValues(field: ToolConfigField, fields: ToolConfigField[]): boolean {
+  const condition = field.visible_when;
+  if (!condition?.field) return true;
+  const source = fields.find((item) => item.key === condition.field);
+  const current = String(source?.value ?? '').trim();
+  if (condition.equals !== undefined) return current === String(condition.equals);
+  if (Array.isArray(condition.in)) return condition.in.map(String).includes(current);
+  return true;
+}
+
+function isToolLimited(item: HermesToolCatalogItem, limitedTools?: string[]): boolean {
+  const limited = new Set((limitedTools || []).map(canonicalToolName));
+  return toolNameAliases(item).some((alias) => limited.has(canonicalToolName(alias)));
+}
+
+function isToolAvailable(item: HermesToolCatalogItem, availableTools?: string[]): boolean {
+  const available = new Set((availableTools || []).map(canonicalToolName));
+  return toolNameAliases(item).some((alias) => available.has(canonicalToolName(alias)));
+}
+
+function limitedDetailFor(item: HermesToolCatalogItem, details: Record<string, string>): string {
+  const aliases = new Set(toolNameAliases(item).map(canonicalToolName));
+  const match = Object.entries(details || {}).find(([key]) => aliases.has(canonicalToolName(key)));
+  return match?.[1] || '';
+}
+
+function isHiddenHermesTool(tool: string | undefined): boolean {
+  return Boolean(tool && HIDDEN_HERMES_TOOLS.has(canonicalToolName(tool)));
+}
+
+function toolNameAliases(item: HermesToolCatalogItem): string[] {
+  return [item.id, ...(item.aliases || [])];
+}
+
+function canonicalToolName(value: string): string {
+  return value.trim().toLowerCase().replace(/_/g, '-');
+}
+
 function diagnosticOverviewItems(
   data: DashboardStatus | null,
   cache: DiagnosticCache | null,
+  settings: SettingsOverviewPayload | null,
 ): DiagnosticOverviewItem[] {
   const bridge = data?.bridge?.state || data?.bridge?.status || data?.bridge?.running || '';
   const bridgeOk = /running|listening|ready|ok/i.test(bridge);
@@ -606,6 +1184,8 @@ function diagnosticOverviewItems(
   const workspaceReady = Boolean(data?.workspace?.initialized);
   const doctorIssues = Number(data?.hermes?.doctor_issues_count || 0);
   const hasDoctorCache = Boolean(cache?.commands?.doctor);
+  const live2d = live2dDiagnosticStatus(settings);
+  const tts = ttsDiagnosticStatus(settings);
 
   return [
     {
@@ -640,15 +1220,64 @@ function diagnosticOverviewItems(
     },
     {
       label: 'Live2D',
-      status: workspaceReady ? 'warning' : 'error',
-      detail: workspaceReady ? '资源状态在 Live2D 页查看' : '需要工作区',
+      status: live2d.status,
+      detail: live2d.detail,
     },
     {
       label: 'TTS',
-      status: workspaceReady ? 'warning' : 'error',
-      detail: workspaceReady ? '语音状态在 GPT-SoVITS 页查看' : '需要工作区',
+      status: tts.status,
+      detail: tts.detail,
     },
   ];
+}
+
+function live2dDiagnosticStatus(settings: SettingsOverviewPayload | null): DiagnosticOverviewItem {
+  const config = asPlainRecord(settings?.mode_settings?.live2d?.config);
+  const resource = asPlainRecord(config.resource);
+  const state = stringValue(config.model_state || resource.state);
+  const detail = stringValue(resource.status_label || config.status_label || settings?.mode_settings?.live2d?.summary);
+  if (state === 'path_valid' || state === 'loaded') {
+    return { label: 'Live2D', status: 'passed', detail: detail || '资源已就绪' };
+  }
+  if (state === 'path_invalid' || state === 'path_not_live2d') {
+    return { label: 'Live2D', status: 'error', detail: detail || '模型路径不可用' };
+  }
+  if (state === 'not_configured') {
+    return { label: 'Live2D', status: 'warning', detail: detail || '尚未导入 Live2D 资源' };
+  }
+  return { label: 'Live2D', status: settings ? 'warning' : 'error', detail: settings ? '等待资源状态' : '等待设置数据' };
+}
+
+function ttsDiagnosticStatus(settings: SettingsOverviewPayload | null): DiagnosticOverviewItem {
+  const tts = settings?.tts;
+  if (!settings) return { label: 'TTS', status: 'error', detail: '等待设置数据' };
+  if (!tts?.enabled || !tts.provider || tts.provider === 'none') {
+    return { label: 'TTS', status: 'warning', detail: '主动关怀语音未启用' };
+  }
+  const provider = ttsProviderDiagnosticLabel(tts.provider);
+  if (tts.provider === 'gpt-sovits') {
+    return {
+      label: 'TTS',
+      status: 'passed',
+      detail: tts.gsv_base_url ? `${provider} · ${tts.gsv_base_url}` : provider,
+    };
+  }
+  return { label: 'TTS', status: 'passed', detail: provider };
+}
+
+function ttsProviderDiagnosticLabel(provider: string): string {
+  if (provider === 'gpt-sovits') return 'GPT-SoVITS 本地服务';
+  if (provider === 'http') return 'HTTP POST';
+  if (provider === 'command') return '本地命令';
+  return provider || '未知 Provider';
+}
+
+function asPlainRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringValue(value: unknown): string {
+  return value === undefined || value === null ? '' : String(value);
 }
 
 function diagnosticStatusLabel(status: DiagnosticOverviewItem['status']): string {

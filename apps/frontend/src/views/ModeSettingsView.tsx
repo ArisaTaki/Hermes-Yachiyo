@@ -1,28 +1,22 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import type { ChangeEvent } from 'react';
 
 import {
-  type AppUpdateCheckResult,
-  type AppUpdateDownloadResult,
-  type AppUpdateDownloadProgress,
-  type AppUpdateInfo,
-  type ReleaseChangelog,
-  type ReleaseChangelogCommit,
   apiGet,
   apiPatch,
   apiPost,
   checkAppUpdate,
+  chooseAvatarImage,
   chooseLive2DArchive,
   chooseLive2DModelDirectory,
-  downloadAppUpdate,
-  getAppUpdateInfo,
+  hasDesktopAvatarPicker,
   hasDesktopFilePicker,
-  installAppUpdate,
-  onAppUpdateDownloadProgress,
   openExternalUrl,
   openDesktopMode,
   openPath,
   removeAppBundleAndQuit,
   restartDesktopBridge,
+  type AvatarImageSelection,
 } from '../lib/bridge';
 import { currentParam, navigateTo } from '../lib/view';
 
@@ -80,7 +74,19 @@ type Live2DResourceActionResult = SettingsUpdateResult & {
 
 type GeneralSettingsPayload = {
   app?: { version?: string; log_level?: string; start_minimized?: boolean; tray_enabled?: boolean };
-  assistant?: { persona_prompt?: string; user_address?: string };
+  assistant?: {
+    agent_name?: string;
+    agent_nickname?: string;
+    agent_avatar_path?: string;
+    agent_avatar_url?: string;
+    persona_prompt?: string;
+    user_address?: string;
+    user_name?: string;
+    user_avatar_path?: string;
+    user_avatar_url?: string;
+    user_profile?: string;
+    user_preferences?: string;
+  };
   backup?: { auto_cleanup_enabled?: boolean; retention_count?: number };
   bridge?: {
     state?: string;
@@ -92,7 +98,11 @@ type GeneralSettingsPayload = {
     drift_details?: string[];
     boot_config?: { enabled?: boolean; host?: string; port?: number; url?: string };
   };
-  display?: { current_mode?: string; available_modes?: Array<{ id: string; name?: string; label?: string; description?: string }> };
+  display?: {
+    current_mode?: string;
+    configured_mode?: string;
+    available_modes?: Array<{ id: string; name?: string; label?: string; description?: string }>;
+  };
   hermes?: {
     status?: string;
     version?: string;
@@ -111,8 +121,17 @@ type GeneralSettingsPayload = {
 
 type AssistantProfilePayload = {
   ok?: boolean;
+  agent_name?: string;
+  agent_nickname?: string;
+  agent_avatar_path?: string;
+  agent_avatar_url?: string;
   persona_prompt?: string;
   user_address?: string;
+  user_name?: string;
+  user_avatar_path?: string;
+  user_avatar_url?: string;
+  user_profile?: string;
+  user_preferences?: string;
   memory_enabled?: boolean;
   memory_scope?: string;
   prompt_order?: string[];
@@ -176,9 +195,31 @@ type GeneralSettingsForm = {
   bridge_host: string;
   bridge_port: string;
   display_mode: string;
+  start_minimized: boolean;
   tray_enabled: boolean;
   backup_auto_cleanup_enabled: boolean;
   backup_retention_count: string;
+};
+
+type AssistantDraft = {
+  agent_name: string;
+  agent_nickname: string;
+  agent_avatar_path: string;
+  persona_prompt: string;
+  user_address: string;
+  user_name: string;
+  user_avatar_path: string;
+  user_profile: string;
+  user_preferences: string;
+};
+type AvatarTarget = 'agent' | 'user';
+type AvatarEditorState = {
+  target: AvatarTarget;
+  dataUrl: string;
+  fileName: string;
+  zoom: number;
+  offsetX: number;
+  offsetY: number;
 };
 
 export function ModeSettingsView() {
@@ -187,27 +228,96 @@ export function ModeSettingsView() {
   return mode ? <SpecificModeSettingsView mode={mode} /> : <ReferenceSettingsHome />;
 }
 
+function emptyAssistantDraft(): AssistantDraft {
+  return {
+    agent_name: '月見八千代',
+    agent_nickname: '月夜',
+    agent_avatar_path: '',
+    persona_prompt: '',
+    user_address: '',
+    user_name: '',
+    user_avatar_path: '',
+    user_profile: '',
+    user_preferences: '',
+  };
+}
+
+function assistantDraftFromProfile(profile?: AssistantProfilePayload | null): AssistantDraft {
+  return {
+    agent_name: profile?.agent_name || '月見八千代',
+    agent_nickname: profile?.agent_nickname || '月夜',
+    agent_avatar_path: profile?.agent_avatar_path || '',
+    persona_prompt: profile?.persona_prompt || '',
+    user_address: profile?.user_address || '',
+    user_name: profile?.user_name || '',
+    user_avatar_path: profile?.user_avatar_path || '',
+    user_profile: profile?.user_profile || '',
+    user_preferences: profile?.user_preferences || '',
+  };
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('读取图片失败'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('头像图片无法预览'));
+    image.src = src;
+  });
+}
+
+async function cropAvatarDataUrl(editor: AvatarEditorState): Promise<string> {
+  const image = await loadImageElement(editor.dataUrl);
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('当前环境无法裁剪头像');
+  const naturalWidth = image.naturalWidth || image.width;
+  const naturalHeight = image.naturalHeight || image.height;
+  if (!naturalWidth || !naturalHeight) throw new Error('头像图片尺寸无效');
+  const baseScale = Math.max(size / naturalWidth, size / naturalHeight);
+  const scale = baseScale * Math.max(1, editor.zoom);
+  const drawWidth = naturalWidth * scale;
+  const drawHeight = naturalHeight * scale;
+  const drawX = (size - drawWidth) / 2 + editor.offsetX * size;
+  const drawY = (size - drawHeight) / 2 + editor.offsetY * size;
+  context.clearRect(0, 0, size, size);
+  context.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+  return canvas.toDataURL('image/png');
+}
+
 function ReferenceSettingsHome() {
   const [payload, setPayload] = useState<GeneralSettingsPayload | null>(null);
   const [assistantProfile, setAssistantProfile] = useState<AssistantProfilePayload | null>(null);
-  const [assistantDraft, setAssistantDraft] = useState({ user_address: '', persona_prompt: '' });
+  const [assistantDraft, setAssistantDraft] = useState<AssistantDraft>(() => emptyAssistantDraft());
   const [assistantSaving, setAssistantSaving] = useState(false);
+  const [avatarImporting, setAvatarImporting] = useState<AvatarTarget | ''>('');
+  const [avatarEditor, setAvatarEditor] = useState<AvatarEditorState | null>(null);
   const [assistantStatus, setAssistantStatus] = useState('');
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [modelLoading, setModelLoading] = useState(true);
+  const [assistantLoading, setAssistantLoading] = useState(true);
   const [hermesConfig, setHermesConfig] = useState<{
     model?: { provider?: string };
     provider_options?: Array<{ id: string; label?: string; api_key_configured?: boolean; auth_type?: string }>;
     api_key?: { configured?: boolean; display?: string };
   } | null>(null);
-  const [startupEnabled, setStartupEnabled] = useState(true);
-  const [animationsEnabled, setAnimationsEnabled] = useState(true);
-  const [language, setLanguage] = useState('zh-CN');
-  const [theme, setTheme] = useState('dark');
-  const [fontSize, setFontSize] = useState('normal');
-  const [providerDraft, setProviderDraft] = useState('');
   const [connectionTestResult, setConnectionTestResult] = useState<{ success?: boolean; ok?: boolean; error?: string; message?: string } | null>(null);
   const [connectionTesting, setConnectionTesting] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateResult, setUpdateResult] = useState<{ checked?: boolean; update_available?: boolean; reason?: string } | null>(null);
+  const agentAvatarFileRef = useRef<HTMLInputElement>(null);
+  const userAvatarFileRef = useRef<HTMLInputElement>(null);
 
   const FALLBACK_PROVIDER_OPTIONS: Array<{ id: string; label: string; api_key_configured?: boolean }> = [
     { id: 'openai', label: 'OpenAI' },
@@ -226,15 +336,14 @@ function ReferenceSettingsHome() {
       if (settingsResult.status === 'fulfilled') setPayload(settingsResult.value);
       if (configResult.status === 'fulfilled') {
         setHermesConfig(configResult.value);
-        setProviderDraft(configResult.value.model?.provider || '');
       }
       if (profileResult.status === 'fulfilled') {
         setAssistantProfile(profileResult.value);
-        setAssistantDraft({
-          user_address: profileResult.value.user_address || '',
-          persona_prompt: profileResult.value.persona_prompt || '',
-        });
+        setAssistantDraft(assistantDraftFromProfile(profileResult.value));
       }
+      setSettingsLoading(false);
+      setModelLoading(false);
+      setAssistantLoading(false);
     });
     return () => { disposed = true; };
   }, []);
@@ -245,28 +354,156 @@ function ReferenceSettingsHome() {
     setAssistantStatus('正在保存助手资料...');
     try {
       const result = await apiPatch<AssistantProfilePayload>('/assistant/profile', {
+        agent_name: assistantDraft.agent_name,
+        agent_nickname: assistantDraft.agent_nickname,
+        agent_avatar_path: assistantDraft.agent_avatar_path,
         user_address: assistantDraft.user_address,
+        user_name: assistantDraft.user_name,
+        user_avatar_path: assistantDraft.user_avatar_path,
+        user_profile: assistantDraft.user_profile,
+        user_preferences: assistantDraft.user_preferences,
         persona_prompt: assistantDraft.persona_prompt,
       });
       if (result.ok === false) throw new Error(result.message || '保存助手资料失败');
       setAssistantProfile(result);
-      setAssistantDraft({
-        user_address: result.user_address || '',
-        persona_prompt: result.persona_prompt || '',
-      });
+      setAssistantDraft(assistantDraftFromProfile(result));
       setPayload((current) => current ? {
         ...current,
         assistant: {
           ...(current.assistant || {}),
+          agent_name: result.agent_name || '',
+          agent_nickname: result.agent_nickname || '',
+          agent_avatar_path: result.agent_avatar_path || '',
+          agent_avatar_url: result.agent_avatar_url || '',
           user_address: result.user_address || '',
+          user_name: result.user_name || '',
+          user_avatar_path: result.user_avatar_path || '',
+          user_avatar_url: result.user_avatar_url || '',
+          user_profile: result.user_profile || '',
+          user_preferences: result.user_preferences || '',
           persona_prompt: result.persona_prompt || '',
         },
       } : current);
       setAssistantStatus(result.message || '助手资料已保存');
+      window.dispatchEvent(new CustomEvent('hermes-assistant-profile-updated'));
     } catch (err) {
       setAssistantStatus(err instanceof Error ? err.message : '保存助手资料失败');
     } finally {
       setAssistantSaving(false);
+    }
+  }
+
+  function applyImportedAvatar(target: AvatarTarget, result: AssistantProfilePayload) {
+    setAssistantProfile(result);
+    setAssistantDraft((current) => ({
+      ...current,
+      agent_avatar_path: target === 'agent' ? result.agent_avatar_path || '' : current.agent_avatar_path,
+      user_avatar_path: target === 'user' ? result.user_avatar_path || '' : current.user_avatar_path,
+    }));
+    setPayload((current) => current ? {
+      ...current,
+      assistant: {
+        ...(current.assistant || {}),
+        agent_avatar_path: result.agent_avatar_path || current.assistant?.agent_avatar_path || '',
+        agent_avatar_url: result.agent_avatar_url || current.assistant?.agent_avatar_url || '',
+        user_avatar_path: result.user_avatar_path || current.assistant?.user_avatar_path || '',
+        user_avatar_url: result.user_avatar_url || current.assistant?.user_avatar_url || '',
+      },
+    } : current);
+    setAssistantStatus(result.message || '头像已更新');
+    window.dispatchEvent(new CustomEvent('hermes-assistant-profile-updated'));
+  }
+
+  function openAvatarEditor(target: AvatarTarget, selection: AvatarImageSelection) {
+    if (!selection.data_url) {
+      setAssistantStatus('头像预览读取失败，请重新选择图片');
+      return;
+    }
+    setAvatarEditor({
+      target,
+      dataUrl: selection.data_url,
+      fileName: selection.file_name || `${target}-avatar.png`,
+      zoom: 1,
+      offsetX: 0,
+      offsetY: 0,
+    });
+    setAssistantStatus('');
+  }
+
+  async function importAvatarFromPath(target: AvatarTarget) {
+    if (avatarImporting || assistantSaving) return;
+    if (!hasDesktopAvatarPicker()) {
+      (target === 'agent' ? agentAvatarFileRef : userAvatarFileRef).current?.click();
+      return;
+    }
+    setAssistantStatus('正在读取头像图片...');
+    try {
+      const selectedPath = await chooseAvatarImage();
+      if (!selectedPath) {
+        setAssistantStatus('已取消选择头像');
+        return;
+      }
+      if (typeof selectedPath === 'string') {
+        setAvatarImporting(target);
+        const result = await apiPost<AssistantProfilePayload>('/assistant/profile/avatar/import', { target, path: selectedPath });
+        applyImportedAvatar(target, result);
+        setAvatarImporting('');
+        setAssistantStatus('头像已更新；重启应用后可使用裁剪预览');
+        return;
+      }
+      openAvatarEditor(target, selectedPath);
+    } catch (err) {
+      setAvatarImporting('');
+      setAssistantStatus(err instanceof Error ? err.message : '读取头像失败');
+    }
+  }
+
+  async function importAvatarFromFile(target: AvatarTarget, event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file || avatarImporting || assistantSaving) return;
+    if (!file.type.startsWith('image/')) {
+      setAssistantStatus('请选择图片文件');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setAssistantStatus('头像图片不能超过 5 MB');
+      return;
+    }
+    setAssistantStatus('正在读取头像图片...');
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      openAvatarEditor(target, {
+        data_url: dataUrl,
+        file_name: file.name,
+      });
+    } catch (err) {
+      setAssistantStatus(err instanceof Error ? err.message : '读取图片失败');
+    }
+  }
+
+  function updateAvatarEditor(changes: Partial<AvatarEditorState>) {
+    setAvatarEditor((current) => current ? { ...current, ...changes } : current);
+  }
+
+  async function applyAvatarEditor() {
+    if (!avatarEditor || avatarImporting || assistantSaving) return;
+    setAvatarImporting(avatarEditor.target);
+    setAssistantStatus(avatarEditor.target === 'agent' ? '正在应用 Agent 头像...' : '正在应用用户头像...');
+    try {
+      const croppedDataUrl = await cropAvatarDataUrl(avatarEditor);
+      const result = await apiPost<AssistantProfilePayload>('/assistant/profile/avatar/import', {
+        target: avatarEditor.target,
+        data_url: croppedDataUrl,
+        file_name: avatarEditor.fileName || `${avatarEditor.target}-avatar.png`,
+      });
+      if (result.ok === false) throw new Error(result.message || '导入头像失败');
+      applyImportedAvatar(avatarEditor.target, result);
+      setAvatarEditor(null);
+    } catch (err) {
+      setAssistantStatus(err instanceof Error ? err.message : '应用头像失败');
+    } finally {
+      setAvatarImporting('');
     }
   }
 
@@ -294,6 +531,9 @@ function ReferenceSettingsHome() {
         setUpdateResult({ checked: true, update_available: false, reason: result.error || result.reason || '当前环境不支持应用更新' });
       } else {
         setUpdateResult({ checked: true, update_available: result.update_available, reason: result.reason });
+        if (result.update_available) {
+          window.setTimeout(() => navigateTo('app-update'), 250);
+        }
       }
     } catch (err) {
       setUpdateResult({ checked: true, update_available: false, reason: err instanceof Error ? err.message : '检查更新失败' });
@@ -304,13 +544,13 @@ function ReferenceSettingsHome() {
 
   const appVersion = payload?.app?.version || '0.1.0';
   const trayEnabled = payload?.app?.tray_enabled !== false;
+  const startMinimized = Boolean(payload?.app?.start_minimized);
   const providerOptions = hermesConfig?.provider_options?.length ? hermesConfig.provider_options : FALLBACK_PROVIDER_OPTIONS;
   const realProvider = hermesConfig?.model?.provider || '';
-  const currentProvider = providerDraft || realProvider || providerOptions[0]?.id || 'openai';
+  const currentProvider = realProvider || providerOptions[0]?.id || 'openai';
   const currentProviderOption = providerOptions.find((opt) => opt.id === currentProvider);
   const apiKeyConfigured = currentProviderOption?.api_key_configured ?? hermesConfig?.api_key?.configured ?? false;
   const apiKeyDisplay = hermesConfig?.api_key?.display || '';
-  const providerDraftDirty = providerDraft && realProvider && providerDraft !== realProvider;
 
   const connectionTestOk = connectionTestResult?.success ?? connectionTestResult?.ok;
   const connectionTestMessage = connectionTestResult?.error || connectionTestResult?.message || '连接失败，请检查模型配置';
@@ -327,125 +567,237 @@ function ReferenceSettingsHome() {
       </div>
 
       <SettingsSection title="通用">
-        <SettingsItem label="开机自启" description="系统启动时自动运行 Hermes Yachiyo">
-          <SettingsToggle checked={startupEnabled} onChange={setStartupEnabled} />
-        </SettingsItem>
-        <SettingsItem label="最小化到托盘" description={trayEnabled ? '已启用，前往系统设置可修改' : '已禁用，前往系统设置可修改'}>
-          <SettingsToggle checked={trayEnabled} onChange={() => navigateTo('settings', { mode: 'system' })} />
-        </SettingsItem>
-        <SettingsItem label="语言" description="界面显示语言">
-          <select className="settings-select" value={language} onChange={(e) => setLanguage(e.target.value)}>
-            <option value="zh-CN">简体中文</option>
-            <option value="en">English</option>
-            <option value="ja">日本語</option>
-          </select>
-        </SettingsItem>
-      </SettingsSection>
-
-      <SettingsSection title="外观">
-        <SettingsItem label="主题" description="选择界面主题风格">
-          <select className="settings-select" value={theme} onChange={(e) => setTheme(e.target.value)}>
-            <option value="dark">月夜深蓝</option>
-            <option value="light">极简白</option>
-            <option value="system">跟随系统</option>
-          </select>
-        </SettingsItem>
-        <SettingsItem label="动画效果" description="启用粒子、流光、呼吸等动画">
-          <SettingsToggle checked={animationsEnabled} onChange={setAnimationsEnabled} />
-        </SettingsItem>
-        <SettingsItem label="字体大小" description="调整界面文字大小">
-          <select className="settings-select" value={fontSize} onChange={(e) => setFontSize(e.target.value)}>
-            <option value="small">小</option>
-            <option value="normal">标准</option>
-            <option value="large">大</option>
-          </select>
-        </SettingsItem>
-      </SettingsSection>
-
-      <SettingsSection title="助手与 Prompt">
-        <SettingsItem
-          label="称呼"
-          description="写入 /assistant/profile 的 user_address，系统设置页会同步显示"
-        >
-          <input
-            className="settings-input"
-            value={assistantDraft.user_address}
-            maxLength={80}
-            placeholder="例如：彩叶"
-            disabled={assistantSaving}
-            onChange={(event) => {
-              setAssistantDraft((current) => ({ ...current, user_address: event.target.value }));
-              if (assistantStatus) setAssistantStatus('');
-            }}
-          />
-        </SettingsItem>
-        <SettingsItem
-          label="人格 Prompt"
-          description="共享助手资料，不改变后端 executor 注入逻辑"
-        >
-          <textarea
-            className="settings-textarea compact"
-            value={assistantDraft.persona_prompt}
-            maxLength={4000}
-            rows={4}
-            placeholder="输入八千代的人格、语气和边界设定"
-            disabled={assistantSaving}
-            onChange={(event) => {
-              setAssistantDraft((current) => ({ ...current, persona_prompt: event.target.value }));
-              if (assistantStatus) setAssistantStatus('');
-            }}
-          />
-        </SettingsItem>
-        <SettingsItem
-          label="Prompt 顺序"
-          description={(assistantProfile?.prompt_order || []).join(' → ') || 'persona → user_address → relevant_memory → current_session → request'}
-        >
-          <SettingsActionButton
-            loading={assistantSaving}
-            onClick={() => void saveAssistantProfile()}
-          >
-            {assistantSaving ? '保存中…' : '保存'}
+        <SettingsItem label="高级设置" description={settingsLoading ? '正在读取系统偏好...' : `启动${startMinimized ? '最小化' : '显示窗口'} · 托盘${trayEnabled ? '已启用' : '已禁用'} · Bridge 与维护`}>
+          <SettingsActionButton disabled={settingsLoading} loading={settingsLoading} onClick={() => navigateTo('settings', { mode: 'system' })}>
+            {settingsLoading ? '读取中…' : '打开'}
           </SettingsActionButton>
         </SettingsItem>
-        <SettingsItem
-          label="记忆范围"
-          description={`${assistantProfile?.memory_enabled ? '已启用' : '暂未启用'} · ${assistantProfile?.memory_scope || 'local_only'}`}
-        >
-          <span className={`status-pill ${/失败|错误/.test(assistantStatus) ? 'warn' : assistantStatus ? 'ok' : 'warn'}`}>
-            {assistantStatus || '读取自 Bridge'}
-          </span>
-        </SettingsItem>
+      </SettingsSection>
+
+      <SettingsSection title="Agent 与 Prompt">
+        {assistantLoading ? (
+          <SettingsLoadingRows count={5} />
+        ) : (
+          <>
+            <SettingsItem
+              label="Agent 信息"
+              description="侧边栏、待机状态和对话头像使用这里的资料"
+              wide
+            >
+              <div className="settings-profile-grid">
+                <label>
+                  <span>全称</span>
+                  <input
+                    className="settings-input"
+                    value={assistantDraft.agent_name}
+                    maxLength={80}
+                    placeholder="月見八千代"
+                    disabled={assistantSaving}
+                    onChange={(event) => {
+                      setAssistantDraft((current) => ({ ...current, agent_name: event.target.value }));
+                      if (assistantStatus) setAssistantStatus('');
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>昵称</span>
+                  <input
+                    className="settings-input"
+                    value={assistantDraft.agent_nickname}
+                    maxLength={40}
+                    placeholder="月夜"
+                    disabled={assistantSaving}
+                    onChange={(event) => {
+                      setAssistantDraft((current) => ({ ...current, agent_nickname: event.target.value }));
+                      if (assistantStatus) setAssistantStatus('');
+                    }}
+                  />
+                </label>
+                <label className="settings-profile-grid-wide">
+                  <span>头像</span>
+                  <div className="settings-avatar-field">
+                    <span className="settings-avatar-preview">
+                      {assistantProfile?.agent_avatar_url ? <img src={assistantProfile.agent_avatar_url} alt="" /> : '月'}
+                    </span>
+                    <div className="settings-avatar-actions">
+                      <SettingsActionButton
+                        disabled={assistantSaving || Boolean(avatarImporting)}
+                        loading={avatarImporting === 'agent'}
+                        onClick={() => void importAvatarFromPath('agent')}
+                      >
+                        {avatarImporting === 'agent' ? '导入中…' : '选择图片'}
+                      </SettingsActionButton>
+                      <span>{assistantDraft.agent_avatar_path ? '已导入自定义头像' : '使用默认头像'}</span>
+                    </div>
+                    <input
+                      ref={agentAvatarFileRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      hidden
+                      onChange={(event) => void importAvatarFromFile('agent', event)}
+                    />
+                  </div>
+                </label>
+              </div>
+            </SettingsItem>
+            <SettingsItem
+              label="人格 Prompt"
+              description="用于塑造 Agent 的语气、边界与任务优先级"
+              wide
+            >
+              <textarea
+                className="settings-textarea settings-persona-textarea"
+                value={assistantDraft.persona_prompt}
+                maxLength={12000}
+                rows={12}
+                placeholder="输入八千代的人格、语气和边界设定"
+                disabled={assistantSaving}
+                onChange={(event) => {
+                  setAssistantDraft((current) => ({ ...current, persona_prompt: event.target.value }));
+                  if (assistantStatus) setAssistantStatus('');
+                }}
+              />
+            </SettingsItem>
+            <SettingsItem
+              label="用户资料"
+              description="除头像外会写入 Prompt，影响后续回复"
+              wide
+            >
+              <div className="settings-profile-grid">
+                <label>
+                  <span>称呼</span>
+                  <input
+                    className="settings-input"
+                    value={assistantDraft.user_address}
+                    maxLength={80}
+                    placeholder="例如：彩叶"
+                    disabled={assistantSaving}
+                    onChange={(event) => {
+                      setAssistantDraft((current) => ({ ...current, user_address: event.target.value }));
+                      if (assistantStatus) setAssistantStatus('');
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>用户名称</span>
+                  <input
+                    className="settings-input"
+                    value={assistantDraft.user_name}
+                    maxLength={80}
+                    placeholder="可选"
+                    disabled={assistantSaving}
+                    onChange={(event) => {
+                      setAssistantDraft((current) => ({ ...current, user_name: event.target.value }));
+                      if (assistantStatus) setAssistantStatus('');
+                    }}
+                  />
+                </label>
+                <label className="settings-profile-grid-wide">
+                  <span>用户头像</span>
+                  <div className="settings-avatar-field">
+                    <span className="settings-avatar-preview user">
+                      {assistantProfile?.user_avatar_url ? <img src={assistantProfile.user_avatar_url} alt="" /> : '你'}
+                    </span>
+                    <div className="settings-avatar-actions">
+                      <SettingsActionButton
+                        disabled={assistantSaving || Boolean(avatarImporting)}
+                        loading={avatarImporting === 'user'}
+                        onClick={() => void importAvatarFromPath('user')}
+                      >
+                        {avatarImporting === 'user' ? '导入中…' : '选择图片'}
+                      </SettingsActionButton>
+                      <span>{assistantDraft.user_avatar_path ? '已导入自定义头像' : '未设置用户头像'}</span>
+                    </div>
+                    <input
+                      ref={userAvatarFileRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      hidden
+                      onChange={(event) => void importAvatarFromFile('user', event)}
+                    />
+                  </div>
+                </label>
+                <label className="settings-profile-grid-wide">
+                  <span>基本信息</span>
+                  <textarea
+                    className="settings-textarea"
+                    value={assistantDraft.user_profile}
+                    maxLength={2000}
+                    rows={4}
+                    placeholder="例如：职业、常用语言、工作习惯"
+                    disabled={assistantSaving}
+                    onChange={(event) => {
+                      setAssistantDraft((current) => ({ ...current, user_profile: event.target.value }));
+                      if (assistantStatus) setAssistantStatus('');
+                    }}
+                  />
+                </label>
+                <label className="settings-profile-grid-wide">
+                  <span>偏好</span>
+                  <textarea
+                    className="settings-textarea"
+                    value={assistantDraft.user_preferences}
+                    maxLength={2000}
+                    rows={4}
+                    placeholder="例如：回答风格、代码偏好、提醒方式"
+                    disabled={assistantSaving}
+                    onChange={(event) => {
+                      setAssistantDraft((current) => ({ ...current, user_preferences: event.target.value }));
+                      if (assistantStatus) setAssistantStatus('');
+                    }}
+                  />
+                </label>
+              </div>
+            </SettingsItem>
+            <SettingsItem
+              label="资料同步"
+              description={`记忆范围：${assistantProfile?.memory_enabled ? '已启用' : '暂未启用'} · ${assistantProfile?.memory_scope || 'local_only'}`}
+            >
+              <span className={`status-pill ${/失败|错误/.test(assistantStatus) ? 'warn' : assistantStatus ? 'ok' : 'warn'}`}>
+                {assistantStatus || '读取自 Bridge'}
+              </span>
+              <SettingsActionButton
+                loading={assistantSaving}
+                onClick={() => void saveAssistantProfile()}
+              >
+                {assistantSaving ? '保存中…' : '保存资料'}
+              </SettingsActionButton>
+            </SettingsItem>
+          </>
+        )}
       </SettingsSection>
 
       <SettingsSection title="模型">
-        <SettingsItem label="模型提供商" description={providerDraftDirty ? '已切换，前往模型配置可保存' : '选择 AI 模型服务'}>
-          <select className="settings-select" value={currentProvider} onChange={(e) => setProviderDraft(e.target.value)}>
-            {providerOptions.map((opt) => (
-              <option key={opt.id} value={opt.id}>{opt.label || opt.id}</option>
-            ))}
-          </select>
-        </SettingsItem>
-        <SettingsItem label="API Key" description={apiKeyConfigured ? `已配置${apiKeyDisplay ? `：${apiKeyDisplay}` : ''}` : '未配置，前往模型配置可设置'}>
-          <SettingsActionButton onClick={() => navigateTo('provider')}>{apiKeyConfigured ? '查看' : '配置'}</SettingsActionButton>
-        </SettingsItem>
-        <SettingsItem
-          label="连接测试"
-          description={connectionTestResult ? (connectionTestOk ? '连接正常' : `连接失败：${connectionTestMessage}`) : '测试模型服务连接状态'}
-        >
-          <SettingsActionButton
-            loading={connectionTesting}
-            onClick={() => void runConnectionTest()}
-          >
-            {connectionTesting ? '测试中…' : '测试连接'}
-          </SettingsActionButton>
-        </SettingsItem>
+        {modelLoading ? (
+          <SettingsLoadingRows count={3} />
+        ) : (
+          <>
+            <SettingsItem label="模型提供商" description={currentProviderOption?.label || currentProvider || '未读取到模型配置'}>
+              <SettingsActionButton onClick={() => navigateTo('provider')}>打开模型配置</SettingsActionButton>
+            </SettingsItem>
+            <SettingsItem label="API Key" description={apiKeyConfigured ? `已配置${apiKeyDisplay ? `：${apiKeyDisplay}` : ''}` : '未配置，前往模型配置可设置'}>
+              <SettingsActionButton onClick={() => navigateTo('provider')}>{apiKeyConfigured ? '查看' : '配置'}</SettingsActionButton>
+            </SettingsItem>
+            <SettingsItem
+              label="连接测试"
+              description={connectionTestResult ? (connectionTestOk ? '连接正常' : `连接失败：${connectionTestMessage}`) : '测试模型服务连接状态'}
+            >
+              <SettingsActionButton
+                loading={connectionTesting}
+                onClick={() => void runConnectionTest()}
+              >
+                {connectionTesting ? '测试中…' : '测试连接'}
+              </SettingsActionButton>
+            </SettingsItem>
+          </>
+        )}
       </SettingsSection>
 
       <SettingsSection title="关于">
         <SettingsItem label="版本" description={updateDescription}>
           <SettingsActionButton
             loading={updateChecking}
-            onClick={() => void runUpdateCheck()}
+            onClick={() => updateResult?.update_available ? navigateTo('app-update') : void runUpdateCheck()}
           >
             {updateChecking ? '检查中…' : updateResult?.update_available ? '前往更新' : '检查更新'}
           </SettingsActionButton>
@@ -454,7 +806,97 @@ function ReferenceSettingsHome() {
           <SettingsActionButton onClick={() => void openExternalUrl('https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo')}>打开</SettingsActionButton>
         </SettingsItem>
       </SettingsSection>
+
+      {avatarEditor ? (
+        <AvatarEditorModal
+          editor={avatarEditor}
+          importing={avatarImporting === avatarEditor.target}
+          onApply={() => void applyAvatarEditor()}
+          onClose={() => setAvatarEditor(null)}
+          onUpdate={updateAvatarEditor}
+        />
+      ) : null}
     </main>
+  );
+}
+
+function AvatarEditorModal({
+  editor,
+  importing,
+  onApply,
+  onClose,
+  onUpdate,
+}: {
+  editor: AvatarEditorState;
+  importing: boolean;
+  onApply: () => void;
+  onClose: () => void;
+  onUpdate: (changes: Partial<AvatarEditorState>) => void;
+}) {
+  const targetLabel = editor.target === 'agent' ? 'Agent 头像' : '用户头像';
+  const imageStyle = {
+    transform: `translate(-50%, -50%) translate(${editor.offsetX * 220}px, ${editor.offsetY * 220}px) scale(${editor.zoom})`,
+  };
+  return (
+    <div className="avatar-editor-backdrop" role="presentation">
+      <section className="avatar-editor-modal" role="dialog" aria-modal="true" aria-label={`${targetLabel}裁剪`}>
+        <div className="avatar-editor-head">
+          <div>
+            <strong>{targetLabel}</strong>
+            <span>预览裁剪结果，确认后会立即应用到界面和配置。</span>
+          </div>
+          <button type="button" className="avatar-editor-close" aria-label="关闭头像裁剪" onClick={onClose}>×</button>
+        </div>
+        <div className="avatar-editor-body">
+          <div className="avatar-crop-stage">
+            <div className="avatar-crop-frame">
+              <img src={editor.dataUrl} alt="" style={imageStyle} />
+            </div>
+          </div>
+          <div className="avatar-editor-controls">
+            <label>
+              <span>缩放</span>
+              <input
+                type="range"
+                min="1"
+                max="3"
+                step="0.01"
+                value={editor.zoom}
+                onChange={(event) => onUpdate({ zoom: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              <span>水平位置</span>
+              <input
+                type="range"
+                min="-0.45"
+                max="0.45"
+                step="0.01"
+                value={editor.offsetX}
+                onChange={(event) => onUpdate({ offsetX: Number(event.target.value) })}
+              />
+            </label>
+            <label>
+              <span>垂直位置</span>
+              <input
+                type="range"
+                min="-0.45"
+                max="0.45"
+                step="0.01"
+                value={editor.offsetY}
+                onChange={(event) => onUpdate({ offsetY: Number(event.target.value) })}
+              />
+            </label>
+          </div>
+        </div>
+        <div className="avatar-editor-actions">
+          <SettingsActionButton disabled={importing} onClick={onClose}>取消</SettingsActionButton>
+          <SettingsActionButton variant="primary" loading={importing} onClick={onApply}>
+            {importing ? '应用中…' : '应用头像'}
+          </SettingsActionButton>
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -543,7 +985,7 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
         setStatus(result.restart_scheduled ? '已保存，正在重启应用…' : `已保存${hint}`);
       }
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : '保存失败');
+      setStatus(settingsSaveErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -1028,6 +1470,22 @@ function SettingsSection({ title, children }: { title: string; children: React.R
   );
 }
 
+function SettingsLoadingRows({ count = 2 }: { count?: number }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, index) => (
+        <div className="settings-item settings-item-loading" aria-hidden="true" key={index}>
+          <div className="settings-item-info">
+            <div className="settings-skeleton-line title" />
+            <div className="settings-skeleton-line detail" />
+          </div>
+          <div className="settings-skeleton-control" />
+        </div>
+      ))}
+    </>
+  );
+}
+
 function SettingsItem({
   label,
   description,
@@ -1105,11 +1563,6 @@ function SystemSettingsView() {
   const [backupStatus, setBackupStatus] = useState<BackupStatus | null>(null);
   const [backupManagerOpen, setBackupManagerOpen] = useState(false);
   const [backupAction, setBackupAction] = useState('');
-  const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateInfo | null>(null);
-  const [appUpdateCheck, setAppUpdateCheck] = useState<AppUpdateCheckResult | null>(null);
-  const [appUpdateDownload, setAppUpdateDownload] = useState<AppUpdateDownloadResult | null>(null);
-  const [appUpdateProgress, setAppUpdateProgress] = useState<AppUpdateDownloadProgress | null>(null);
-  const [appUpdateAction, setAppUpdateAction] = useState('');
   const [uninstallScope, setUninstallScope] = useState('yachiyo_only');
   const [uninstallKeepConfig, setUninstallKeepConfig] = useState(true);
   const [uninstallGptSovits, setUninstallGptSovits] = useState(false);
@@ -1126,13 +1579,6 @@ function SystemSettingsView() {
   const uninstallConfirmPhrase = uninstallPreview?.confirm_phrase || 'UNINSTALL';
   const uninstallConfirmValid = uninstallConfirmText.trim() === uninstallConfirmPhrase;
   const backupBusy = Boolean(backupAction);
-  const appUpdateBusy = Boolean(appUpdateAction);
-  const appUpdateCurrent = appUpdateCheck?.current || appUpdateInfo?.current;
-  const appUpdateLatest = appUpdateCheck?.latest || appUpdateDownload?.latest || appUpdateInfo?.downloaded_update?.latest;
-  const appUpdateChangelog = appUpdateLatest?.changelog || appUpdateDownload?.latest?.changelog || appUpdateInfo?.downloaded_update?.latest?.changelog;
-  const appUpdateSupported = Boolean(appUpdateCheck?.supported ?? appUpdateInfo?.supported);
-  const appUpdateDownloaded = appUpdateDownload?.ok ? appUpdateDownload : appUpdateInfo?.downloaded_update;
-  const appUpdateDownloadedPath = appUpdateDownloaded?.path || appUpdateInfo?.downloaded_dmg_path || '';
 
   useEffect(() => {
     let disposed = false;
@@ -1166,35 +1612,6 @@ function SystemSettingsView() {
       disposed = true;
     };
   }, []);
-
-  useEffect(() => {
-    let disposed = false;
-    async function loadAppUpdateInfo() {
-      try {
-        const info = await getAppUpdateInfo();
-        if (disposed) return;
-        setAppUpdateInfo(info);
-        if (info.downloaded_update?.ok) setAppUpdateDownload(info.downloaded_update);
-        const result = await checkAppUpdate();
-        if (disposed) return;
-        setAppUpdateCheck(result);
-        setAppUpdateInfo(result);
-        if (result.downloaded_update?.ok) setAppUpdateDownload(result.downloaded_update);
-      } catch (err) {
-        if (!disposed) {
-          setAppUpdateInfo({ supported: false, packaged: false, error: err instanceof Error ? err.message : '读取应用更新信息失败' });
-        }
-      }
-    }
-    void loadAppUpdateInfo();
-    return () => {
-      disposed = true;
-    };
-  }, []);
-
-  useEffect(() => onAppUpdateDownloadProgress((progress) => {
-    setAppUpdateProgress(progress);
-  }), []);
 
   useEffect(() => {
     let disposed = false;
@@ -1235,6 +1652,9 @@ function SystemSettingsView() {
       return;
     }
     setForm((current) => ({ ...current, display_mode: modeId }));
+    setStatus(modeId === configuredDisplayMode(payload)
+      ? `当前已选择 ${modeLabel(modeId)}`
+      : `已选择 ${modeLabel(modeId)}，保存后生效`);
   }
 
   async function submitSettings(event: FormEvent) {
@@ -1270,7 +1690,7 @@ function SystemSettingsView() {
       if (result.mode_switch_scheduled || typeof nextChanges.display_mode === 'string') {
         const targetMode = String(result.target_display_mode || nextChanges.display_mode || data.display?.current_mode || 'bubble');
         await openDesktopMode(targetMode);
-        setStatus(`已保存，表现态已切换到 ${modeLabel(targetMode)}`);
+        setStatus(targetMode === 'none' ? '已保存，已关闭常驻表现态' : `已保存，表现态已切换到 ${modeLabel(targetMode)}`);
       } else if (result.effects?.has_restart_bridge) {
         setStatus('已保存；Bridge 配置需要点击“应用配置并重启 Bridge”后生效');
       } else if (result.effects?.has_restart_app) {
@@ -1279,7 +1699,7 @@ function SystemSettingsView() {
         setStatus(result.effects?.hint ? `已保存，${result.effects.hint}` : '已保存');
       }
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : '保存失败');
+      setStatus(settingsSaveErrorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -1335,65 +1755,6 @@ function SystemSettingsView() {
       setStatus(err instanceof Error ? err.message : 'Bridge 重启失败');
     } finally {
       setBridgeRestarting(false);
-    }
-  }
-
-  async function runAppUpdateCheck(showMessage = true) {
-    if (appUpdateAction) return;
-    setAppUpdateAction('check');
-    if (showMessage) setStatus('正在检查应用更新…');
-    try {
-      const result = await checkAppUpdate();
-      setAppUpdateCheck(result);
-      setAppUpdateInfo(result);
-      setAppUpdateDownload(result.downloaded_update?.ok ? result.downloaded_update : null);
-      if (showMessage) {
-        if (result.ok === false) throw new Error(result.error || '检查应用更新失败');
-        setStatus(result.update_available ? result.reason || '发现可用更新' : result.reason || '当前已是最新版本');
-      }
-    } catch (err) {
-      if (showMessage) setStatus(err instanceof Error ? err.message : '检查应用更新失败');
-    } finally {
-      setAppUpdateAction('');
-    }
-  }
-
-  async function runAppUpdateDownload() {
-    if (appUpdateAction) return;
-    setAppUpdateAction('download');
-    setAppUpdateProgress({ status: 'starting', file_name: appUpdateLatest?.dmg_name });
-    setStatus('正在下载应用更新…');
-    try {
-      const result = await downloadAppUpdate();
-      setAppUpdateDownload(result);
-      if (!result.ok) throw new Error(result.error || '下载应用更新失败');
-      const info = await getAppUpdateInfo();
-      setAppUpdateInfo(info);
-      setAppUpdateProgress({ status: 'completed', file_name: result.file_name, percent: 100 });
-      setStatus(result.verified ? '更新已下载并通过校验，可安装并重启' : '更新已下载，可安装并重启；当前元数据未提供 SHA256 校验值');
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : '下载应用更新失败');
-    } finally {
-      setAppUpdateAction('');
-    }
-  }
-
-  async function runAppUpdateInstall() {
-    if (appUpdateAction) return;
-    const dmgPath = appUpdateDownload?.path || appUpdateInfo?.downloaded_dmg_path || '';
-    if (!dmgPath) {
-      setStatus('请先下载应用更新');
-      return;
-    }
-    if (!window.confirm('将退出 Hermes-Yachiyo，用已下载的 DMG 覆盖当前应用，然后重新打开。继续吗？')) return;
-    setAppUpdateAction('install');
-    setStatus('正在准备安装更新，应用将退出并重新打开…');
-    try {
-      const result = await installAppUpdate(dmgPath);
-      if (!result.success) throw new Error(result.error || '启动更新安装失败');
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : '启动更新安装失败');
-      setAppUpdateAction('');
     }
   }
 
@@ -1506,7 +1867,7 @@ function SystemSettingsView() {
   return (
     <main className="app-shell settings-page">
       <div className="settings-page-header">
-        <button type="button" className="page-back-link" onClick={() => navigateTo('settings')}>← 返回设置</button>
+        <button type="button" className="page-back-link" onClick={() => navigateTo('settings', {}, ['mode', 'reason'])}>← 返回设置</button>
         <div className="settings-page-title">系统设置</div>
         <div className="settings-page-subtitle">高级配置和系统维护</div>
       </div>
@@ -1515,28 +1876,28 @@ function SystemSettingsView() {
 
       <form onSubmit={submitSettings} noValidate>
         <SettingsSection title="通用">
+          <SettingsItem label="启动时最小化" description="下次启动应用时先进入后台，不主动弹出主窗口">
+            <SettingsToggle
+              checked={form.start_minimized}
+              onChange={(next) => setForm((current) => ({ ...current, start_minimized: next }))}
+            />
+          </SettingsItem>
           <SettingsItem label="最小化到托盘" description="关闭窗口时最小化到系统托盘">
             <SettingsToggle
               checked={form.tray_enabled}
               onChange={(next) => setForm((current) => ({ ...current, tray_enabled: next }))}
             />
           </SettingsItem>
-          <SettingsItem label="语言" description="界面显示语言">
-            <select className="settings-select" value="zh-CN" onChange={() => {}}>
-              <option value="zh-CN">简体中文</option>
-              <option value="en">English</option>
-              <option value="ja">日本語</option>
-            </select>
-          </SettingsItem>
         </SettingsSection>
 
         <SettingsSection title="显示模式">
-          <SettingsItem label="显示模式" description={form.display_mode === payload?.display?.current_mode ? '当前表现态' : '待切换'}>
+          <SettingsItem label="常驻表现态" description={displayModeDescription(form.display_mode, payload)}>
             <div className="segmented-list">
-              {(payload?.display?.available_modes || []).map((item) => (
+              {displayModeOptions(payload).map((item) => (
                 <button
                   className={item.id === form.display_mode ? 'selected' : ''}
                   type="button"
+                  aria-pressed={item.id === form.display_mode}
                   key={item.id}
                   onClick={() => void selectDisplayMode(item.id)}
                 >
@@ -1544,24 +1905,6 @@ function SystemSettingsView() {
                 </button>
               ))}
             </div>
-          </SettingsItem>
-        </SettingsSection>
-
-        <SettingsSection title="助手">
-          <SettingsItem label="助手称呼" description="用户对助手的称呼方式">
-            <input
-              className="settings-input"
-              value={form.user_address}
-              onChange={(event) => setForm((current) => ({ ...current, user_address: event.target.value }))}
-            />
-          </SettingsItem>
-          <SettingsItem label="助手人设" description="定义助手的性格和行为风格" wide>
-            <textarea
-              className="settings-textarea"
-              rows={6}
-              value={form.persona_prompt}
-              onChange={(event) => setForm((current) => ({ ...current, persona_prompt: event.target.value }))}
-            />
           </SettingsItem>
         </SettingsSection>
 
@@ -1697,37 +2040,9 @@ function SystemSettingsView() {
         </SettingsSection>
 
         <SettingsSection title="更新">
-          <SettingsItem label="应用版本" description={`Hermes Yachiyo v${payload?.app?.version || '0.1.0'}`}>
-            <SettingsActionButton
-              disabled={appUpdateBusy || !appUpdateSupported}
-              loading={appUpdateAction === 'check'}
-              onClick={() => void runAppUpdateCheck()}
-            >
-              {appUpdateAction === 'check' ? '检查中…' : '检查更新'}
-            </SettingsActionButton>
+          <SettingsItem label="应用更新" description={`Hermes Yachiyo v${payload?.app?.version || '0.1.0'} · 下载进度和版本差异在更新页处理`}>
+            <SettingsActionButton onClick={() => navigateTo('app-update')}>打开更新页</SettingsActionButton>
           </SettingsItem>
-          {appUpdateDownloadedPath ? (
-            <SettingsItem label="安装更新" description={appUpdateStatusLabel(appUpdateInfo, appUpdateCheck)}>
-              <SettingsActionButton
-                variant="primary"
-                disabled={appUpdateBusy}
-                loading={appUpdateAction === 'install'}
-                onClick={() => void runAppUpdateInstall()}
-              >
-                {appUpdateAction === 'install' ? '准备中…' : '安装并重启'}
-              </SettingsActionButton>
-            </SettingsItem>
-          ) : appUpdateCheck?.update_available ? (
-            <SettingsItem label="下载更新" description={appUpdateStatusLabel(appUpdateInfo, appUpdateCheck)}>
-              <SettingsActionButton
-                disabled={appUpdateBusy || !appUpdateSupported}
-                loading={appUpdateAction === 'download'}
-                onClick={() => void runAppUpdateDownload()}
-              >
-                {appUpdateAction === 'download' ? appUpdateDownloadButtonLabel(appUpdateProgress) : '下载更新'}
-              </SettingsActionButton>
-            </SettingsItem>
-          ) : null}
         </SettingsSection>
 
         <SettingsSection title="卸载">
@@ -1800,19 +2115,6 @@ function SystemSettingsView() {
           </div>
         </SettingsSection>
 
-        <SettingsSection title="模式配置">
-          <div style={{ padding: '4px 0' }}>
-            <div className="mode-summary-list">
-              {Object.entries(payload?.mode_settings || {}).map(([modeId, item]) => (
-                <button type="button" key={modeId} onClick={() => navigateTo('settings', { mode: modeId })}>
-                  <strong>{item.title || modeId}</strong>
-                  <span>{item.summary || '—'}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </SettingsSection>
-
         <div className="settings-savebar">
           <span>{hasChanges ? `${pendingCount} 项待保存` : '设置已同步'}</span>
           <SettingsActionButton
@@ -1829,74 +2131,8 @@ function SystemSettingsView() {
   );
 }
 
-function listValue(items?: string[]): string {
-  return items?.length ? items.join('、') : '—';
-}
-
-function appUpdateChannelLabel(channel?: string, branch?: string): string {
-  if (channel === 'stable' || branch === 'main') return '正式版 / main';
-  if (channel === 'experimental' || branch === 'develop') return '开发版 / develop';
-  return channel || branch || '—';
-}
-
-function appUpdateBuildLabel(version?: string, buildNumber?: number, shortCommit?: string): string {
-  const parts = [
-    version || '',
-    buildNumber !== undefined ? `#${buildNumber}` : '',
-    shortCommit || '',
-  ].filter(Boolean);
-  return parts.length ? parts.join(' / ') : '—';
-}
-
-function appUpdateStatusLabel(info: AppUpdateInfo | null, check: AppUpdateCheckResult | null): string {
-  if (info?.downloaded_update?.ok || check?.downloaded_update?.ok) return '已下载';
-  if (check?.ok === false) return '检查失败';
-  if (check?.update_available) return '有更新';
-  if (check?.ok) return '已是最新';
-  if (info?.supported === false) return info.packaged ? '不可更新' : '开发环境';
-  return '待检查';
-}
-
-function appUpdateVerificationLabel(download: AppUpdateDownloadResult | null): string {
-  if (!download) return '—';
-  if (download.ok === false) return '失败';
-  return download.verified ? 'SHA256 已通过' : '未提供 SHA256';
-}
-
-function appUpdateProgressLabel(
-  progress: AppUpdateDownloadProgress | null,
-  download: AppUpdateDownloadResult | undefined,
-): string {
-  if (download?.ok) return '已下载';
-  if (!progress) return '—';
-  if (progress.status === 'verifying') return '校验中';
-  if (progress.status === 'completed') return '100%';
-  if (progress.status === 'failed') return progress.error || '失败';
-  if (typeof progress.percent === 'number') return `${progress.percent.toFixed(progress.percent % 1 ? 1 : 0)}%`;
-  if (progress.received_bytes) return formatByteCount(progress.received_bytes);
-  if (progress.status === 'starting') return '准备下载';
-  return '下载中';
-}
-
-function appUpdateDownloadButtonLabel(progress: AppUpdateDownloadProgress | null): string {
-  if (progress?.status === 'verifying') return '校验中...';
-  if (typeof progress?.percent === 'number') return `下载中 ${progress.percent.toFixed(0)}%`;
-  return '下载中...';
-}
-
-function formatByteCount(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let size = value;
-  let unit = 0;
-  while (size >= 1024 && unit < units.length - 1) {
-    size /= 1024;
-    unit += 1;
-  }
-  return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
-}
-
 function modeLabel(mode: string) {
+  if (mode === 'none') return '不显示表现态';
   return mode === 'live2d' ? 'Live2D' : 'Bubble';
 }
 
@@ -1942,6 +2178,7 @@ function emptyGeneralSettingsForm(): GeneralSettingsForm {
     bridge_host: '127.0.0.1',
     bridge_port: '8420',
     display_mode: 'bubble',
+    start_minimized: false,
     tray_enabled: true,
     backup_auto_cleanup_enabled: true,
     backup_retention_count: '10',
@@ -1955,11 +2192,32 @@ function formFromGeneralSettings(payload: GeneralSettingsPayload): GeneralSettin
     bridge_enabled: payload.bridge?.enabled !== false,
     bridge_host: payload.bridge?.host || '127.0.0.1',
     bridge_port: String(payload.bridge?.port || 8420),
-    display_mode: payload.display?.current_mode || 'bubble',
+    display_mode: configuredDisplayMode(payload),
+    start_minimized: Boolean(payload.app?.start_minimized),
     tray_enabled: payload.app?.tray_enabled !== false,
     backup_auto_cleanup_enabled: payload.backup?.auto_cleanup_enabled !== false,
     backup_retention_count: String(payload.backup?.retention_count || 10),
   };
+}
+
+function configuredDisplayMode(payload: GeneralSettingsPayload | null): string {
+  return payload?.display?.configured_mode || payload?.display?.current_mode || 'bubble';
+}
+
+function displayModeDescription(mode: string, payload: GeneralSettingsPayload | null): string {
+  const configured = configuredDisplayMode(payload);
+  if (mode === 'none') return configured === 'none' ? '关闭常驻 Bubble / Live2D，仅保留主控台' : '保存后关闭常驻表现态';
+  if (mode === 'live2d') return mode === configured ? '当前常驻 Live2D' : '保存后切换到 Live2D';
+  return mode === configured ? '当前常驻 Bubble' : '保存后切换到 Bubble';
+}
+
+function displayModeOptions(payload: GeneralSettingsPayload | null): Array<{ id: string; name?: string; label?: string; description?: string }> {
+  const options = payload?.display?.available_modes || [];
+  if (options.some((item) => item.id === 'none')) return options;
+  return [
+    { id: 'none', name: '不显示表现态', description: '不打开常驻 Bubble 或 Live2D，只保留主控台' },
+    ...options,
+  ];
 }
 
 function countGeneralSettingsPendingChanges(
@@ -1973,7 +2231,8 @@ function countGeneralSettingsPendingChanges(
   if ((payload.bridge?.enabled !== false) !== form.bridge_enabled) count += 1;
   if ((payload.bridge?.host || '127.0.0.1') !== form.bridge_host.trim()) count += 1;
   if (String(payload.bridge?.port || 8420) !== form.bridge_port.trim()) count += 1;
-  if ((payload.display?.current_mode || 'bubble') !== form.display_mode) count += 1;
+  if (configuredDisplayMode(payload) !== form.display_mode) count += 1;
+  if (Boolean(payload.app?.start_minimized) !== form.start_minimized) count += 1;
   if ((payload.app?.tray_enabled !== false) !== form.tray_enabled) count += 1;
   if ((payload.backup?.auto_cleanup_enabled !== false) !== form.backup_auto_cleanup_enabled) count += 1;
   if (String(payload.backup?.retention_count || 10) !== form.backup_retention_count.trim()) count += 1;
@@ -2005,8 +2264,11 @@ function buildGeneralSettingsChanges(
   if (Number.isFinite(bridgePort) && bridgePort !== currentPort) {
     changes.bridge_port = bridgePort;
   }
-  if ((payload.display?.current_mode || 'bubble') !== form.display_mode) {
+  if (configuredDisplayMode(payload) !== form.display_mode) {
     changes.display_mode = form.display_mode;
+  }
+  if (Boolean(payload.app?.start_minimized) !== form.start_minimized) {
+    changes.start_minimized = form.start_minimized;
   }
   if ((payload.app?.tray_enabled !== false) !== form.tray_enabled) {
     changes.tray_enabled = form.tray_enabled;
@@ -2152,6 +2414,14 @@ function rangeError(spec: ModeFieldSpec): string {
 
 function statusClassName(status: string): string {
   return /失败|错误|必须|不能为空|不能|须在|仅支持|无效/.test(status) ? 'notice danger' : 'notice';
+}
+
+function settingsSaveErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : '保存失败';
+  if (message.includes('start_minimized') || message.includes('tray_enabled')) {
+    return 'Bridge 还在运行旧设置模型，请重启 Bridge 或应用后再保存系统启动设置';
+  }
+  return message;
 }
 
 function statusToneClassName(status: string): string {
