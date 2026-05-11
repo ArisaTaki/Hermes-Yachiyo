@@ -290,16 +290,20 @@ def format_persona_description(
     persona_prompt: str = "",
     user_address: str = "",
     environment_context: str = "",
+    profile_context: str = "",
 ) -> str:
     """按共享助手资料包装用户请求，资料为空时保持原始描述。"""
     persona = (persona_prompt or "").strip()
     address = (user_address or "").strip()
     environment = (environment_context or "").strip()
-    if not environment and not persona and not address:
+    profile = (profile_context or "").strip()
+    if not environment and not persona and not address and not profile:
         return description
     parts: list[str] = []
     if environment:
         parts.append(environment)
+    if profile:
+        parts.append(profile)
     if persona:
         parts.append(f"[人设设定]\n{persona}")
     if address:
@@ -1035,12 +1039,14 @@ class HermesExecutor(ExecutionStrategy):
         chat_session: Optional["ChatSession"] = None,
         persona_prompt_getter: Optional[Callable[[], str]] = None,
         user_address_getter: Optional[Callable[[], str]] = None,
+        profile_context_getter: Optional[Callable[[], str]] = None,
     ) -> None:
         self._fallback = fallback_to_simulated
         self._sim = SimulatedExecutor()
         self._chat_session = chat_session
         self._persona_prompt_getter = persona_prompt_getter
         self._user_address_getter = user_address_getter
+        self._profile_context_getter = profile_context_getter
 
     def set_chat_session(self, chat_session: Optional["ChatSession"]) -> None:
         """更新后续任务使用的聊天会话引用。"""
@@ -1084,11 +1090,18 @@ class HermesExecutor(ExecutionStrategy):
                 user_address = self._user_address_getter()
             except Exception:
                 logger.debug("读取用户称呼失败", exc_info=True)
+        profile_context = ""
+        if self._profile_context_getter is not None:
+            try:
+                profile_context = self._profile_context_getter()
+            except Exception:
+                logger.debug("读取助手/用户资料失败", exc_info=True)
         description = format_persona_description(
             task.description,
             persona_prompt,
             user_address,
             format_environment_context(),
+            profile_context,
         )
         chat_session = self._chat_session_for_task(task)
         hermes_sid = None
@@ -1182,6 +1195,7 @@ def select_executor(runtime: "HermesRuntime | None" = None) -> ExecutionStrategy
                 chat_session=runtime.chat_session,
                 persona_prompt_getter=lambda: runtime.config.assistant.persona_prompt,
                 user_address_getter=lambda: runtime.config.assistant.user_address,
+                profile_context_getter=lambda: runtime.config.assistant.prompt_profile_context(),
             )
         logger.info(
             "select_executor: Hermes 报告就绪但命令不可用，回退 SimulatedExecutor"
