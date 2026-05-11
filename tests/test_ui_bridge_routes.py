@@ -783,10 +783,18 @@ async def test_launcher_live2d_payload_includes_preview_and_renderer(monkeypatch
     assert launcher["scale"] == 0.6
     assert launcher["position_anchor"] == "right_bottom"
     assert launcher["mouse_follow_enabled"] is True
+    assert launcher["render_quality_preset"] == "balanced"
+    assert launcher["render_fps"] == 24
+    assert launcher["render_resolution"] == 1.25
+    assert launcher["hit_region_precision"] == "medium"
     assert launcher["resource"]["state"] == "not_configured"
     assert "GitHub Releases" in launcher["resource"]["help_text"]
     assert launcher["renderer"]["enabled"] is False
     assert launcher["renderer"]["model_url"] == ""
+    assert launcher["renderer"]["render_quality_preset"] == "balanced"
+    assert launcher["renderer"]["render_fps"] == 24
+    assert launcher["renderer"]["render_resolution"] == 1.25
+    assert launcher["renderer"]["hit_region_precision"] == "medium"
 
 
 @pytest.mark.asyncio

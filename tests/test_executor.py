@@ -178,6 +178,18 @@ class TestHermesExecutor:
         assert "你是八千代。" in wrapped
         assert "请称呼用户为：老师" in wrapped
 
+    def test_format_persona_description_wraps_profile_context(self):
+        wrapped = format_persona_description(
+            "帮我总结",
+            "你是八千代。",
+            "老师",
+            profile_context="[用户资料]\n偏好：回答简洁",
+        )
+
+        assert wrapped.index("[用户资料]") < wrapped.index("[人设设定]")
+        assert "偏好：回答简洁" in wrapped
+        assert wrapped.endswith("帮我总结")
+
     def test_format_environment_context_includes_local_time_period(self):
         local_tz = datetime.now().astimezone().tzinfo
         now = datetime(2026, 4, 27, 15, 20, tzinfo=local_tz)

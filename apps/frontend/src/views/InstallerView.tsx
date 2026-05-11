@@ -10,13 +10,12 @@ import {
   killDesktopTerminal,
   onDesktopTerminalData,
   onDesktopTerminalExit,
-  openAppView,
-  openDesktopMode,
   resizeDesktopTerminal,
   startDesktopTerminal,
   writeDesktopTerminal,
   type DesktopTerminalTask,
 } from '../lib/bridge';
+import { usePageLoading } from './OpenDesignView';
 
 type InstallInfo = {
   status?: string;
@@ -123,6 +122,20 @@ type HermesConnectionTestResult = {
   connection_validation?: HermesConnectionValidation;
 };
 
+type HermesEnvironmentInfo = {
+  current_hermes_home?: string;
+  default_hermes_home?: string;
+  yachiyo_workspace?: string;
+  hermes_home_env_set?: boolean;
+};
+
+type HermesSetupEnvironmentResult = {
+  success?: boolean;
+  hermes_home?: string;
+  message?: string;
+  restart_required?: boolean;
+};
+
 type HermesVisualConfig = {
   ok?: boolean;
   error?: string;
@@ -199,6 +212,8 @@ export function InstallerView() {
   const [logLines, setLogLines] = useState<string[]>([]);
   const [busy, setBusy] = useState('');
   const [configStatus, setConfigStatus] = useState('');
+  const [environmentInfo, setEnvironmentInfo] = useState<HermesEnvironmentInfo | null>(null);
+  const [environmentStatus, setEnvironmentStatus] = useState('');
   const [hermesConfig, setHermesConfig] = useState<HermesVisualConfig | null>(null);
   const [configForm, setConfigForm] = useState<HermesConfigForm>(emptyHermesConfigForm());
   const [hermesTestResult, setHermesTestResult] = useState<HermesConnectionTestResult | null>(null);
@@ -220,6 +235,7 @@ export function InstallerView() {
   const terminalTaskRef = useRef<DesktopTerminalTask | null>(null);
   const actionsPanelRef = useRef<HTMLElement | null>(null);
   const configPanelRef = useRef<HTMLElement | null>(null);
+  usePageLoading(busy === 'recheck');
 
   const loadHermesConfig = useCallback(async (options: { forceFormSync?: boolean } = {}) => {
     if (hermesConfigLoadingRef.current) return null;
@@ -256,16 +272,29 @@ export function InstallerView() {
     }
   }, []);
 
+  const loadHermesEnvironment = useCallback(async () => {
+    try {
+      const data = await apiGet<HermesEnvironmentInfo>('/hermes/environment');
+      setEnvironmentInfo(data);
+      setEnvironmentStatus('');
+      return data;
+    } catch (error) {
+      setEnvironmentStatus(error instanceof Error ? error.message : '读取 Hermes 环境失败');
+      return null;
+    }
+  }, []);
+
   const loadInstallerSnapshot = useCallback(async () => {
     const data = await loadInstallInfo();
     setBridgeBooting(false);
     setBusy((current) => (current === 'bridge' ? '' : current));
     if (data.install_info?.status === 'installed_not_initialized') void loadBackupStatus();
     if (data.install_info?.command_exists) void loadHermesConfig({ forceFormSync: true });
+    void loadHermesEnvironment();
     const progress = await apiGet<InstallProgress>('/ui/installer/install/progress');
     applyInstallProgress(progress, true);
     return data;
-  }, [loadBackupStatus, loadHermesConfig, loadInstallInfo]);
+  }, [loadBackupStatus, loadHermesConfig, loadHermesEnvironment, loadInstallInfo]);
 
   useEffect(() => {
     let disposed = false;
@@ -468,13 +497,6 @@ export function InstallerView() {
     window.requestAnimationFrame(() => {
       actionsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
-  }
-
-  async function enterMainWithBubble() {
-    await openAppView('main');
-    window.setTimeout(() => {
-      void openDesktopMode('bubble');
-    }, 250);
   }
 
   async function startEmbeddedTerminal(task: DesktopTerminalTask) {
@@ -696,7 +718,6 @@ export function InstallerView() {
     if (result.ready) {
       setSetupAttention(false);
       setStatus(`Hermes 已就绪${envRefreshNote(result)}`);
-      window.setTimeout(() => void enterMainWithBubble(), 600);
     } else if (result.needs_init || latest.install_info?.status === 'installed_not_initialized') {
       setSetupAttention(false);
       setStatus(`Hermes 配置已保存，下一步初始化 Yachiyo 工作空间${envRefreshNote(result)}`);
@@ -768,7 +789,6 @@ export function InstallerView() {
       if (result.ready) {
         setSetupAttention(false);
         setStatus(`Hermes 已就绪${envRefreshNote(result)}`);
-        window.setTimeout(() => void enterMainWithBubble(), 600);
       } else if (needsInitialization) {
         setSetupAttention(false);
         if (options.afterInstall) {
@@ -788,6 +808,25 @@ export function InstallerView() {
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '重新检测失败');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function setupHermesEnvironment() {
+    if (busy) return;
+    const confirmed = window.confirm('将自动设置 HERMES_HOME 等本机环境配置，可能需要重启应用或终端后生效。继续吗？');
+    if (!confirmed) return;
+    setBusy('environment');
+    setEnvironmentStatus('正在自动设置 Hermes 环境...');
+    try {
+      const result = await apiPost<HermesSetupEnvironmentResult>('/hermes/setup', { auto_setup: true });
+      if (!result.success) throw new Error(result.message || 'Hermes 环境设置失败');
+      setEnvironmentStatus(`${result.message || 'Hermes 环境已设置'}${result.restart_required ? '，需要重启后完全生效' : ''}`);
+      await loadHermesEnvironment();
+      await recheckStatus();
+    } catch (error) {
+      setEnvironmentStatus(error instanceof Error ? error.message : 'Hermes 环境设置失败');
     } finally {
       setBusy('');
     }
@@ -849,15 +888,36 @@ export function InstallerView() {
     && !ready
     && ['installed_needs_setup', 'setup_in_progress', 'installed_not_initialized'].includes(statusValue),
   );
+  const installerSteps = [
+    {
+      label: '欢迎',
+      detail: '启动 Hermes-Yachiyo',
+      state: 'done',
+    },
+    {
+      label: '依赖检查',
+      detail: installInfo?.platform || '检测 macOS 基础环境',
+      state: installInfo?.command_exists || ready ? 'done' : 'current',
+    },
+    {
+      label: '模型配置',
+      detail: hermesConfig?.connection_validation?.verified ? '连接已验证' : '配置 Provider 与模型',
+      state: ready || hermesConfig?.connection_validation?.verified ? 'done' : installInfo?.command_exists ? 'current' : 'pending',
+    },
+    {
+      label: '完成',
+      detail: ready ? '主控台可用' : '等待工作区初始化',
+      state: ready ? 'done' : 'pending',
+    },
+  ];
 
   return (
-    <main className="app-shell installer-shell">
-      <header className="topbar">
+    <main className="app-shell installer-shell hy-installer-route">
+      <header className="topbar hy-installer-header hy-stagger">
         <div>
           <h1>{title}</h1>
           <p>{installerSubtitle(statusValue, installInfo)}</p>
         </div>
-        {ready ? <button type="button" onClick={() => void enterMainWithBubble()}>进入主控台</button> : null}
       </header>
 
       <InstallerProgressBanner
@@ -869,7 +929,20 @@ export function InstallerView() {
         statusValue={statusValue}
       />
 
-      <section className="settings-grid expanded-settings-grid">
+      <section className="hy-installer-steps hy-stagger" aria-label="安装步骤">
+        {installerSteps.map((step, index) => (
+          <div className="hy-installer-step-segment" key={step.label}>
+            <article className={`hy-installer-step ${step.state}`}>
+              <span className="hy-installer-step-number">{step.state === 'done' ? '✓' : index + 1}</span>
+              <strong>{step.label}</strong>
+              <small>{step.detail}</small>
+            </article>
+            {index < installerSteps.length - 1 ? <i className={step.state === 'done' ? 'hy-installer-step-connector done' : 'hy-installer-step-connector'} aria-hidden /> : null}
+          </div>
+        ))}
+      </section>
+
+      <section className="settings-grid expanded-settings-grid hy-installer-status-grid hy-stagger">
         <article className="panel setting-card">
           <span>安装状态</span>
           <strong>{installStatusLabel(statusValue)}</strong>
@@ -887,9 +960,17 @@ export function InstallerView() {
         </article>
       </section>
 
+      <HermesEnvironmentPanel
+        busy={busy}
+        environment={environmentInfo}
+        status={environmentStatus}
+        onRefresh={loadHermesEnvironment}
+        onSetup={setupHermesEnvironment}
+      />
+
       {installInfo?.error_message ? <div className="notice danger">{installInfo.error_message}</div> : null}
 
-      <section className="settings-detail-grid">
+      <section className="settings-detail-grid hy-installer-content hy-stagger">
         <article className="panel settings-section">
           <div className="section-heading-row">
             <h2>引导步骤</h2>
@@ -922,7 +1003,6 @@ export function InstallerView() {
             onRecheck={recheckStatus}
             onRefreshBackup={loadBackupStatus}
             onStartInstall={() => startEmbeddedTerminal('install-hermes')}
-            onEnterMain={enterMainWithBubble}
           />
         </article>
       </section>
@@ -956,6 +1036,59 @@ export function InstallerView() {
       {backupStatus ? <BackupImportPanel status={backupStatus} /> : null}
       {logLines.length || installProgress?.running ? <InstallLog lines={logLines} progress={installProgress} /> : null}
     </main>
+  );
+}
+
+function HermesEnvironmentPanel({
+  busy,
+  environment,
+  status,
+  onRefresh,
+  onSetup,
+}: {
+  busy: string;
+  environment: HermesEnvironmentInfo | null;
+  status: string;
+  onRefresh: () => Promise<HermesEnvironmentInfo | null>;
+  onSetup: () => Promise<void>;
+}) {
+  const disabled = Boolean(busy);
+  return (
+    <section className="panel settings-section hy-installer-environment">
+      <div className="section-heading-row">
+        <div>
+          <h2>Hermes 环境</h2>
+          <p className="section-caption">直接读取 /hermes/environment，展示 HERMES_HOME、默认路径和 Yachiyo workspace。</p>
+        </div>
+        <div className="settings-action-strip">
+          <button type="button" disabled={disabled} onClick={() => void onRefresh()}>{busy === 'environment-refresh' ? '刷新中...' : '刷新'}</button>
+          <button type="button" className="primary-action" disabled={disabled} onClick={() => void onSetup()}>
+            {busy === 'environment' ? '设置中...' : '自动设置环境'}
+          </button>
+        </div>
+      </div>
+      {status ? <div className={installerNoticeClass(status)}>{status}</div> : null}
+      <div className="settings-meta-list">
+        <div className="settings-meta-row">
+          <span>当前 HERMES_HOME</span>
+          <strong>{environment?.current_hermes_home || '—'}</strong>
+        </div>
+        <div className="settings-meta-row">
+          <span>默认 HERMES_HOME</span>
+          <strong>{environment?.default_hermes_home || '—'}</strong>
+        </div>
+        <div className="settings-meta-row">
+          <span>Yachiyo workspace</span>
+          <strong>{environment?.yachiyo_workspace || '—'}</strong>
+        </div>
+        <div className="settings-meta-row">
+          <span>环境变量</span>
+          <strong className={environment?.hermes_home_env_set ? 'ok' : 'warn'}>
+            {environment?.hermes_home_env_set ? 'HERMES_HOME 已设置' : '未检测到 HERMES_HOME'}
+          </strong>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1008,7 +1141,6 @@ function InstallerActions({
   onRecheck,
   onRefreshBackup,
   onStartInstall,
-  onEnterMain,
 }: {
   backupStatus: InstallerBackupStatus | null;
   busy: string;
@@ -1026,7 +1158,6 @@ function InstallerActions({
   onRecheck: () => Promise<void>;
   onRefreshBackup: () => Promise<void>;
   onStartInstall: () => Promise<void>;
-  onEnterMain: () => Promise<void>;
 }) {
   const disabled = Boolean(busy && busy !== 'install');
   const recheckDisabled = Boolean(busy && busy !== 'install');
@@ -1034,8 +1165,7 @@ function InstallerActions({
   if (ready) {
     return (
       <div className="settings-action-strip">
-        <button type="button" className="primary-action" onClick={() => void onEnterMain()}>进入主控台</button>
-        <button type="button" onClick={() => void onRecheck()} disabled={recheckDisabled}>重新检测</button>
+        <button type="button" className={recheckClass} onClick={() => void onRecheck()} disabled={recheckDisabled}>重新检测</button>
       </div>
     );
   }

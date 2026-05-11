@@ -233,6 +233,9 @@ type DashboardData = {
   };
 };
 
+type Phase3DetailTab = 'install' | 'provider' | 'uninstall';
+type Phase3PreviewMode = 'chat' | 'bubble' | 'live2d';
+
 const BACKGROUND_VALIDATION_MIN_INTERVAL_MS = 30 * 60 * 1000;
 const BACKGROUND_VALIDATION_REFRESH_AFTER_MS = 12 * 60 * 60 * 1000;
 const MIN_PROACTIVE_INTERVAL_SECONDS = 300;
@@ -259,6 +262,8 @@ export function MainView() {
   const [configForm, setConfigForm] = useState<HermesConfigForm>(emptyHermesConfigForm());
   const [proactiveForm, setProactiveForm] = useState<ProactiveForm>(emptyProactiveForm());
   const [ttsForm, setTtsForm] = useState<TtsForm>(emptyTtsForm());
+  const [activeDetail, setActiveDetail] = useState<Phase3DetailTab>('install');
+  const [previewMode, setPreviewMode] = useState<Phase3PreviewMode>('chat');
   const busyActionRef = useRef('');
   const configFormDirtyRef = useRef(false);
   const proactiveFormDirtyRef = useRef(false);
@@ -617,7 +622,7 @@ export function MainView() {
       if (result.ok === false || result.status === 'blocked' || result.status === 'failed') {
         throw new Error(result.error || result.message || '主动关怀测试触发失败');
       }
-      setActionStatus(result.message || '已立即安排主动桌面观察；稍后可在对话窗口查看结果');
+      setActionStatus(result.message || '已立即安排主动桌面观察；稍后可在主控台对话查看结果');
       await refreshDashboardData();
     } catch (err) {
       setActionStatus(err instanceof Error ? err.message : '主动关怀测试触发失败');
@@ -754,138 +759,390 @@ export function MainView() {
   }
 
   const currentMode = data?.modes?.current || 'bubble';
+  const bridgeLabel = bridgeState(data);
+  const providerVerified = Boolean(
+    hermesTestResult?.success
+    || hermesConfig?.connection_validation?.verified
+    || hermesConfig?.connection_validation?.success,
+  );
+  const imageReady = Boolean(
+    hermesImageTestResult?.success
+    || hermesConfig?.image_connection_validation?.verified
+    || hermesConfig?.image_input?.can_attach_images,
+  );
+  const workspaceReady = Boolean(data?.workspace?.initialized);
+  const setupSteps = [
+    {
+      number: '01',
+      title: 'macOS 基础',
+      detail: data?.hermes?.platform || '等待 Hermes Doctor 回传平台与 shell 环境。',
+      state: data?.hermes?.platform ? 'done' : 'pending',
+    },
+    {
+      number: '02',
+      title: 'Hermes Agent',
+      detail: data?.hermes?.version ? `已检测 ${data.hermes.version}` : hermesInstallStatusLabel(data?.hermes?.status),
+      state: data?.hermes?.command_exists ? 'done' : 'active',
+    },
+    {
+      number: '03',
+      title: '模型供应商',
+      detail: providerVerified ? '模型连接已验证，可进入聊天和图像链路。' : 'Provider、模型、Base URL、API Key 和连接测试。',
+      state: providerVerified ? 'done' : data?.hermes?.command_exists ? 'active' : 'pending',
+    },
+    {
+      number: '04',
+      title: '本地工作区',
+      detail: data?.workspace?.path || '~/.hermes/yachiyo/ 资源、附件、日志和备份目录。',
+      state: workspaceReady ? 'done' : 'pending',
+    },
+    {
+      number: '05',
+      title: '首条消息',
+      detail: data?.chat?.status_label || '打开主控台对话，再同步到气泡或 Live2D。',
+      state: data?.chat?.recent_sessions?.length ? 'done' : 'pending',
+    },
+  ];
+  const modePreviewCopy = {
+    chat: {
+      title: '聊天交接',
+      body: data?.chat?.status_label || '主控台对话保留完整上下文、Markdown、附件和停止任务控制。',
+      stage: '主控台对话是完整会话入口，气泡和 Live2D 只同步状态与最新回复。',
+    },
+    bubble: {
+      title: '气泡模式',
+      body: '桌面边缘入口，展示未读、处理中、失败和快速消息状态。',
+      stage: '气泡是轻量桌面入口，不是第二套会话。',
+    },
+    live2d: {
+      title: 'Live2D 模式',
+      body: imageReady ? '资源链路已具备基础状态，可进入角色表现态。' : '导入资源 ZIP 后加载动态模型；未就绪时保留静态占位和设置入口。',
+      stage: 'Live2D 舞台展示模型加载、关照消息和 TTS 就绪度，但不做重动画背景。',
+    },
+  } satisfies Record<Phase3PreviewMode, { title: string; body: string; stage: string }>;
+  const activePreview = modePreviewCopy[previewMode];
+
   return (
-    <main className="app-shell dashboard-shell">
-      <header className="topbar dashboard-topbar">
-        <div>
-          <h1>Hermes-Yachiyo</h1>
-          <p>{data?.hermes?.ready ? 'Hermes 已就绪，桌面 Agent 可以使用' : '完成 Hermes 配置后开始使用桌面 Agent'}</p>
-        </div>
-        <div className="topbar-actions">
-          <button className="primary-action" type="button" onClick={() => void openAppView('chat')}>打开对话</button>
-          <button type="button" onClick={() => openDesktopMode(currentMode)}>打开表现态</button>
-          <button className="ghost-button" type="button" onClick={quitApp}>退出</button>
-        </div>
-      </header>
+    <main className="app-shell dashboard-shell phase3-workbench-shell">
+      <div className="phase3-stage">
+        <section className="phase3-window" aria-label="Hermes-Yachiyo Phase 3 中文工作台">
+          <header className="phase3-titlebar">
+            <div className="phase3-traffic" aria-hidden>
+              <span className="phase3-dot red" />
+              <span className="phase3-dot yellow" />
+              <span className="phase3-dot green" />
+            </div>
+            <p className="phase3-window-title">Hermes-Yachiyo Phase 3 UI 重设计 - 月下桌面 Agent 工作台</p>
+            <div className="phase3-title-actions">
+              <button type="button" className="phase3-command" onClick={() => void openAppView('tools')}>
+                搜索命令、设置或工具
+              </button>
+              <button type="button" onClick={() => void openAppView('diagnostics')}>运行诊断</button>
+              <button type="button" className="ghost-button" onClick={quitApp}>退出</button>
+            </div>
+          </header>
 
-      {error ? <div className="notice danger">{error}</div> : null}
-      {actionStatus ? <div className={statusNoticeClass(actionStatus)}>{actionStatus}</div> : null}
+          <div className="phase3-app-grid">
+            <aside className="phase3-sidebar" aria-label="工作台导航">
+              <section className="phase3-brand-block">
+                <div className="phase3-brand-row">
+                  <div className="phase3-mark">HY</div>
+                  <div>
+                    <h1>Hermes-Yachiyo</h1>
+                    <p>本地个人 Agent 工作台</p>
+                  </div>
+                </div>
+                <div className="phase3-local-pill"><span />默认仅在本机运行</div>
+              </section>
 
-      <section className="dashboard-status-strip" aria-label="状态概览">
-        <StatusTile label="Hermes" value={data?.hermes?.status || '读取中'} detail={hermesDetail(data)} active={Boolean(data?.hermes?.ready)} />
-        <StatusTile label="Workspace" value={data?.workspace?.initialized ? '已初始化' : '未初始化'} detail={data?.workspace?.path || '—'} active={Boolean(data?.workspace?.initialized)} />
-        <StatusTile label="Bridge" value={bridgeState(data)} detail={data?.bridge?.url || '—'} active={bridgeState(data) === 'running'} />
-        <StatusTile label="任务" value={`${data?.tasks?.running ?? 0} 运行中`} detail={`${data?.tasks?.pending ?? 0} 等待 / ${data?.tasks?.completed ?? 0} 完成`} active={!data?.tasks?.running} />
-      </section>
+              <nav className="phase3-nav" aria-label="主要区域">
+                <Phase3NavSection title="首次启动" />
+                <Phase3NavButton active code="01" title="安装运行手册" meta="5" />
+                <Phase3NavButton code="02" title="模型与供应商" meta={providerVerified ? 'ok' : '4'} onClick={() => setActiveDetail('provider')} />
+                <Phase3NavButton code="03" title="工作区初始化" meta={workspaceReady ? 'ok' : '~/.h'} onClick={() => void openAppView('installer')} />
 
-      <section className="control-hub" aria-label="常用入口">
-        <ControlHubButton
-          title="对话"
-          detail={data?.chat?.status_label || conversationCountLabel(data?.chat?.recent_sessions)}
-          action="打开对话窗口"
-          primary
-          onClick={() => void openAppView('chat')}
-        />
-        <ControlHubGroup
-          title="桌面表现"
-          detail={`当前：${modeName(data)}`}
-          primaryAction="打开角色"
-          secondaryAction="配置表现态"
-          onPrimary={() => openDesktopMode(currentMode)}
-          onSecondary={() => void openAppView('settings', { mode: currentMode })}
-        />
-        <ControlHubButton
-          title="应用维护"
-          detail="Bridge、备份、卸载和应用选项"
-          action="打开应用设置"
-          onClick={() => void openAppView('settings')}
-        />
-        <ControlHubButton
-          title="工具中心"
-          detail={toolCenterDetail(data?.hermes)}
-          action="查看工具状态"
-          onClick={() => void openAppView('tools')}
-        />
-      </section>
+                <Phase3NavSection title="日常桌面" />
+                <Phase3NavButton code="CW" title="主控台对话" meta={conversationCountLabel(data?.chat?.recent_sessions)} onClick={() => void openAppView('main', { focus: 'chat' })} />
+                <Phase3NavButton code="BU" title="气泡模式" meta="edge" onClick={() => openDesktopMode('bubble')} />
+                <Phase3NavButton code="L2" title="Live2D 模式" meta="zip" onClick={() => openDesktopMode('live2d')} />
+                <Phase3NavButton code="PC" title="主动关照" meta="tts" onClick={() => navigateTo('proactive-tts')} />
 
-      <section className="dashboard-workbench">
-        <div className="dashboard-main-column">
-          <article className="panel dashboard-card" id="hermes-config">
-            <div className="section-heading-row">
-              <div>
-                <h2>Hermes 配置中心</h2>
-                <p className="section-caption">Provider、模型、Base URL、API Key 和连接测试集中在这里。</p>
+                <Phase3NavSection title="维护与安全" />
+                <Phase3NavButton code="TL" title="工具" meta={toolCenterDetail(data?.hermes)} onClick={() => void openAppView('tools')} />
+                <Phase3NavButton code="DX" title="诊断" meta={data?.hermes?.doctor_issues_count ? String(data.hermes.doctor_issues_count) : '10'} onClick={() => void openAppView('diagnostics')} />
+                <Phase3NavButton code="BR" title="备份 / 恢复" meta="safe" onClick={() => navigateTo('settings', { mode: 'system' })} />
+                <Phase3NavButton code="UN" title="卸载预览" meta="dry" onClick={() => setActiveDetail('uninstall')} />
+              </nav>
+
+              <section className="phase3-sidebar-footer">
+                <div>工作区目标路径</div>
+                <p>{data?.workspace?.path || '~/.hermes/yachiyo/'}<br />assets/live2d/<br />attachments/ logs/ backups/</p>
+              </section>
+            </aside>
+
+            <section className="phase3-main" aria-label="中文设计方向画布">
+              <div className="phase3-main-inner">
+                {error ? <div className="notice danger">{error}</div> : null}
+                {actionStatus ? <div className={statusNoticeClass(actionStatus)}>{actionStatus}</div> : null}
+
+                <section className="phase3-page-head">
+                  <div>
+                    <span className="phase3-eyebrow">Phase 3 direction / desktop-first agent OS</span>
+                    <h1>一张月光下的本地 Agent 工作台：安装、配置、初始化、陪伴使用。</h1>
+                    <p>
+                      把 Hermes-Yachiyo 定位为 macOS 桌面上的 Hermes Agent 控制室：
+                      先完成运行时安装、模型供应商验证和本地工作区初始化，再进入主控台对话、
+                      气泡模式、Live2D 模式、主动关照、TTS / GPT-SoVITS 资源、工具、诊断、备份恢复与卸载预览。
+                    </p>
+                  </div>
+                  <div className="phase3-head-metrics" aria-label="原型指标">
+                    <Phase3Metric value={data?.hermes?.doctor_issues_count ? String(data.hermes.doctor_issues_count) : '3'} label="详情状态" />
+                    <Phase3Metric value="9" label="首批 IA 区域" />
+                    <Phase3Metric value={data?.hermes?.limited_tools?.length ? String(data.hermes.limited_tools.length) : '22'} label="工具组可见" />
+                    <Phase3Metric value={data?.bridge?.url ? '127.0.0.1' : '127.0.0.1'} label="本机桥接立场" />
+                  </div>
+                </section>
+
+                <section className="phase3-strategy-grid" aria-label="Phase 3 中文方向总览">
+                  <Phase3StrategyCard title="1. 产品定位" body="macOS 本地优先的个人 Agent 工作台，不是 SaaS 落地页，也不是通用聊天机器人。Yachiyo 负责桌面外壳、资源、关照、设置和安全维护。" />
+                  <Phase3StrategyCard title="2. 主要用户流" items={['安装 Hermes Agent', '配置模型供应商与默认模型', '初始化本地工作区', '首条消息后切换气泡或 Live2D']} />
+                  <Phase3StrategyCard title="3. 信息架构" body="安装、供应商、工作区、会话、桌面模式、关照与语音、工具、诊断、维护。" />
+                  <Phase3StrategyCard title="4. 组件方向" items={['本机状态胶囊', '安装步骤卡', '供应商字段组', '资源导入行', '诊断发现项']} />
+                  <Phase3StrategyCard title="5. 视觉 Token" body="月黑背景、半透明层级面板、Hermes 青绿表示可用 / 本机，紫色只用于当前选择和关键操作。" />
+                  <Phase3StrategyCard title="6. 优先重设计" items={['首次安装与运行手册', '供应商配置', '聊天与模式切换', '资源管理与诊断']} />
+                </section>
+
+                <section className="phase3-workbench" aria-label="首次启动工作台">
+                  <article className="phase3-panel">
+                    <header className="phase3-panel-header">
+                      <div>
+                        <h2>首次启动运行手册</h2>
+                        <p>在用户打开聊天、气泡或 Live2D 前，把每一层可用性讲清楚。</p>
+                      </div>
+                      <div className="phase3-button-row">
+                        <button type="button" className="primary-action" onClick={() => void openAppView('installer')}>安装 Hermes Agent</button>
+                        <button type="button" onClick={() => setActiveDetail('provider')}>配置供应商</button>
+                      </div>
+                    </header>
+
+                    <div className="phase3-setup-body">
+                      <div className="phase3-stepper" aria-label="首次启动步骤">
+                        {setupSteps.map((step) => <Phase3Step key={step.number} {...step} />)}
+                      </div>
+
+                      <div className="phase3-install-grid">
+                        <div className="phase3-terminal" aria-label="安装输出预览">
+                          <div className="phase3-terminal-top">
+                            <span>install-hermes-agent</span>
+                            <span>{data?.hermes?.ready ? 'ready' : 'waiting'}</span>
+                          </div>
+                          <div className="phase3-terminal-lines">
+                            <div><span>$</span> checking macOS command line tools</div>
+                            <div><b>{data?.hermes?.platform ? 'ready' : 'pending'}</b> git, python3, shell environment</div>
+                            <div><span>$</span> resolving Hermes Agent channel main-latest</div>
+                            <div><b>{data?.hermes?.command_exists ? 'detected' : 'missing'}</b> user-scoped Hermes runtime</div>
+                            <div><span>$</span> hermes setup --yachiyo-workspace</div>
+                            <div><b>{workspaceReady ? 'done' : 'next'}</b> 保存供应商并执行连接测试</div>
+                            <div><span>$</span> bridge target {data?.bridge?.url || 'will bind to 127.0.0.1:8420'}</div>
+                          </div>
+                        </div>
+
+                        <div className="phase3-setup-card">
+                          <h3>可用性契约</h3>
+                          <p>
+                            应用不应该只给一个笼统的“已就绪”。它需要逐层说明：
+                            Hermes 命令、Hermes setup、供应商连接、本地工作区、Bridge、
+                            桌面模式资源和 Doctor 诊断分别处在什么状态。
+                          </p>
+                          <ul className="phase3-check-list">
+                            <Phase3CheckRow ok={Boolean(data?.hermes?.command_exists)} label="Hermes 命令已检测" code={data?.hermes?.version || '—'} />
+                            <Phase3CheckRow ok={providerVerified} warn label="供应商连接测试" code={hermesConfig?.model?.base_url || '/v1'} />
+                            <Phase3CheckRow ok={workspaceReady} label="工作区路径可写" code={data?.workspace?.path || '~/.hermes'} />
+                            <Phase3CheckRow ok={imageReady} warn label="Live2D / 图片资源链路" code={imageReady ? 'ready' : '.model3.json'} />
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+
+                  <aside className="phase3-status-column" aria-label="本地状态卡片">
+                    <Phase3StatusCard tone={data?.hermes?.command_exists ? 'good' : undefined} label="Hermes Agent" value={data?.hermes?.command_exists ? '已检测' : '未检测'} body="命令路径和 setup 完成度拆开呈现，方便定位问题。" />
+                    <Phase3StatusCard tone={workspaceReady ? 'good' : undefined} label="工作区" value={workspaceReady ? '本机' : '待初始化'} body="聊天、资源、附件、日志和备份都落在用户自己的路径下。" />
+                    <Phase3StatusCard label="Bridge" value={bridgeLabel} body="暴露本机传输状态，但不要让端口号成为产品概念。" />
+                    <Phase3StatusCard tone={data?.hermes?.doctor_issues_count ? 'warn' : undefined} label="Doctor" value={data?.hermes?.doctor_issues_count ? `${data.hermes.doctor_issues_count} 项受限` : '等待检查'} body="受限工具不应阻塞聊天、气泡或 Live2D 的基础使用。" />
+                  </aside>
+                </section>
+
+                <section className="phase3-panel" aria-label="聊天与桌面模式预览">
+                  <header className="phase3-panel-header">
+                    <div>
+                      <h2>主控台对话、气泡模式、Live2D 共享同一条会话链</h2>
+                      <p>每种桌面模式都是入口，不是另起一个聊天机器人。</p>
+                    </div>
+                    <div className="phase3-segmented" role="tablist" aria-label="模式预览">
+                      {(['chat', 'bubble', 'live2d'] as Phase3PreviewMode[]).map((mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          className={previewMode === mode ? 'active' : ''}
+                          onClick={() => setPreviewMode(mode)}
+                        >
+                          {mode === 'chat' ? '聊天' : mode === 'bubble' ? '气泡' : 'Live2D'}
+                        </button>
+                      ))}
+                    </div>
+                  </header>
+                  <div className="phase3-mode-preview">
+                    <div className="phase3-mini-window">
+                      <div className="phase3-mini-titlebar">
+                        <span className="phase3-dot red" />
+                        <span className="phase3-dot yellow" />
+                        <span className="phase3-dot green" />
+                        <span>Hermes-Yachiyo 主控台对话</span>
+                      </div>
+                      <div className="phase3-chat-area">
+                        <div className="phase3-bubble agent">Yachiyo 已准备好。Hermes Agent {data?.hermes?.command_exists ? '已安装' : '仍需安装'}，供应商连接{providerVerified ? '已测试' : '还需要测试'}。</div>
+                        <div className="phase3-bubble user">初始化工作区，并把气泡固定在桌面边缘。</div>
+                        <div className="phase3-bubble agent">工作区{workspaceReady ? `位于 ${data?.workspace?.path}` : '将创建在 ~/.hermes/yachiyo/'}。气泡会同步未读、运行中、失败和最近回复状态。</div>
+                        <button type="button" className="phase3-composer" onClick={() => void openAppView('main', { focus: 'chat' })}>输入消息、粘贴图片，或停止当前任务...</button>
+                      </div>
+                    </div>
+                    <div className="phase3-mode-canvas">
+                      <div className="phase3-moon-grid" />
+                      <div className="phase3-live2d-stage">
+                        <div>{activePreview.stage}</div>
+                      </div>
+                      <div className="phase3-desktop-bubble">
+                        <strong>{activePreview.title}</strong>
+                        <p>{activePreview.body}</p>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="phase3-panel" aria-label="信息架构地图">
+                  <header className="phase3-panel-header">
+                    <div>
+                      <h2>Phase 3 信息架构</h2>
+                      <p>按用户意图组织：准备、对话、人格化桌面、资源、诊断和维护。</p>
+                    </div>
+                  </header>
+                  <div className="phase3-ia-map">
+                    <Phase3IaNode primary title="首页 / 运行手册" body="首次启动清单、本机状态、启动聊天、模式切换和下一步行动。" />
+                    <Phase3IaNode title="供应商" body="供应商、模型、Base URL、API Key、图像路由和连接测试历史。" />
+                    <Phase3IaNode title="工作区" body="本地路径、聊天数据库、附件、日志、资源文件夹和备份目标。" />
+                    <Phase3IaNode title="会话" body="主控台对话、Markdown 回复、图片附件、停止任务、会话摘要。" />
+                    <Phase3IaNode title="桌面模式" body="气泡、Live2D、共享会话状态、窗口行为、透明度、置顶与边缘吸附。" />
+                    <Phase3IaNode title="关照与语音" body="主动观察、屏幕录制权限、TTS 供应商、GPT-SoVITS 服务状态。" />
+                    <Phase3IaNode title="工具与诊断" body="Hermes 工具组、受限状态、CDP 端点、配置检查、鉴权列表与发现项。" />
+                    <Phase3IaNode title="维护" body="更新、备份、恢复、卸载预演、删除范围和确认短语。" />
+                  </div>
+                </section>
               </div>
-              <StatusPill active={Boolean(data?.hermes?.ready)} label={data?.hermes?.ready ? '基础就绪' : '待检查'} />
-            </div>
-            <HermesConfigCenter
-              hermes={data?.hermes}
-              config={hermesConfig}
-              form={configForm}
-              busyAction={busyAction}
-              testResult={hermesTestResult}
-              imageTestResult={hermesImageTestResult}
-              proactiveForm={proactiveForm}
-              ttsForm={ttsForm}
-              onConfigChange={updateHermesConfigField}
-              onProactiveChange={updateProactiveField}
-              onProactiveEnableRequest={requestEnableProactive}
-              onTtsChange={updateTtsField}
-              onRecheck={recheckHermes}
-              onSaveConfig={saveAndTestHermesConfig}
-              onSaveImageConfig={saveAndTestHermesImageConnection}
-              onSaveProactive={saveProactiveSettings}
-              onTestProactive={saveAndTestProactiveNow}
-            />
-          </article>
+            </section>
 
-          <article className="panel chat-overview-panel" id="conversation-center">
-            <div className="section-heading-row">
-              <div>
-                <h2>会话中心</h2>
-                <p className="section-caption">最近对话和摘要；完整收发消息请进入对话窗口。</p>
+            <aside className="phase3-inspector" aria-label="详情状态">
+              <header className="phase3-inspector-head">
+                <h2>详情态原型</h2>
+                <p>先把工程需要落地的界面做清楚：安装器、供应商配置、卸载预览。</p>
+              </header>
+              <div className="phase3-inspector-body">
+                <div className="phase3-detail-tabs" role="tablist" aria-label="详情状态切换">
+                  <button type="button" className={activeDetail === 'install' ? 'active' : ''} onClick={() => setActiveDetail('install')}>安装</button>
+                  <button type="button" className={activeDetail === 'provider' ? 'active' : ''} onClick={() => setActiveDetail('provider')}>供应商</button>
+                  <button type="button" className={activeDetail === 'uninstall' ? 'active' : ''} onClick={() => setActiveDetail('uninstall')}>卸载</button>
+                </div>
+
+                {activeDetail === 'install' ? (
+                  <section className="phase3-detail-panel active">
+                    <div className="phase3-detail-card">
+                      <h3>安装弹窗方向</h3>
+                      <p>一个面板负责环境检查、一键安装、实时输出、重试，以及“为什么被阻塞”的解释。</p>
+                      <div className="phase3-resource-list">
+                        <Phase3ResourceRow title="macOS 工具" detail={data?.hermes?.platform || 'git / python3 / shell'} tag={data?.hermes?.platform ? '就绪' : '等待'} tone={data?.hermes?.platform ? 'good' : undefined} />
+                        <Phase3ResourceRow title="Hermes Agent" detail="用户级安装" tag={data?.hermes?.command_exists ? '已检测' : '未检测'} tone={data?.hermes?.command_exists ? 'good' : 'warn'} />
+                        <Phase3ResourceRow title="Bridge" detail={data?.bridge?.url || '127.0.0.1:8420'} tag={bridgeLabel === 'running' ? '运行中' : '等待'} tone={bridgeLabel === 'running' ? 'good' : undefined} />
+                      </div>
+                    </div>
+                    <div className="phase3-detail-card">
+                      <h3>工程说明</h3>
+                      <p>拆分“已安装 Hermes”、“setup 完成”、“供应商已测试”和“工作区已初始化”，不要压成一个绿色状态。</p>
+                      <div className="phase3-detail-actions">
+                        <button type="button" className="primary-action" onClick={() => void openAppView('installer')}>打开安装器</button>
+                        <button type="button" onClick={() => void recheckHermes()}>重新检测</button>
+                      </div>
+                    </div>
+                  </section>
+                ) : null}
+
+                {activeDetail === 'provider' ? (
+                  <section className="phase3-detail-panel active">
+                    <div className="phase3-detail-card">
+                      <h3>模型 / 供应商配置</h3>
+                      <p>密钥只显示是否存在，不显示明文；连接测试结果要能回到首次启动手册。</p>
+                    </div>
+                    <div className="phase3-live-config-card">
+                      <HermesConfigCenter
+                        hermes={data?.hermes}
+                        config={hermesConfig}
+                        form={configForm}
+                        busyAction={busyAction}
+                        testResult={hermesTestResult}
+                        imageTestResult={hermesImageTestResult}
+                        proactiveForm={proactiveForm}
+                        ttsForm={ttsForm}
+                        onConfigChange={updateHermesConfigField}
+                        onProactiveChange={updateProactiveField}
+                        onProactiveEnableRequest={requestEnableProactive}
+                        onTtsChange={updateTtsField}
+                        onRecheck={recheckHermes}
+                        onSaveConfig={saveAndTestHermesConfig}
+                        onSaveImageConfig={saveAndTestHermesImageConnection}
+                        onSaveProactive={saveProactiveSettings}
+                        onTestProactive={saveAndTestProactiveNow}
+                      />
+                    </div>
+                  </section>
+                ) : null}
+
+                {activeDetail === 'uninstall' ? (
+                  <section className="phase3-detail-panel active">
+                    <div className="phase3-detail-card phase3-danger-zone">
+                      <h3>卸载预览</h3>
+                      <p>任何破坏性操作前先生成 dry-run 删除清单。要求确认短语，并清楚展示删除范围。</p>
+                      <div className="phase3-tool-list">
+                        <Phase3ResourceRow title="Yachiyo 工作区" detail={data?.workspace?.path || '~/.hermes/yachiyo/'} tag="删除" tone="warn" />
+                        <Phase3ResourceRow title="应用配置" detail="settings 与 bridge cache" tag="可选" />
+                        <Phase3ResourceRow title="GPT-SoVITS 服务" detail="LaunchAgent 与本地配置" tag="可选" />
+                        <Phase3ResourceRow title=".app 包" detail="/Applications best effort" tag="可能需手动" tone="warn" />
+                      </div>
+                      <div className="phase3-confirm-box"><code>输入 UNINSTALL</code><span>预演</span></div>
+                    </div>
+                  </section>
+                ) : null}
+
+                <div className="phase3-detail-card">
+                  <h3>资源管理方向</h3>
+                  <div className="phase3-resource-list">
+                    <Phase3ResourceRow title="Live2D ZIP" detail="assets/live2d/" tag={imageReady ? '就绪' : '缺失'} tone={imageReady ? 'good' : 'warn'} />
+                    <Phase3ResourceRow title="GPT-SoVITS 声音包" detail="yachiyo-gpt-sovits-v4.zip" tag="可导入" />
+                    <Phase3ResourceRow title="本地 TTS API" detail="127.0.0.1:9880" tag={ttsForm.enabled ? '启用' : '离线'} tone={ttsForm.enabled ? 'good' : undefined} />
+                  </div>
+                </div>
+
+                <div className="phase3-detail-card">
+                  <h3>工具与诊断</h3>
+                  <div className="phase3-tool-list">
+                    <Phase3ResourceRow title="浏览器 CDP" detail="127.0.0.1:9222" tag="受限" tone="warn" />
+                    <Phase3ResourceRow title="Web 供应商" detail="Firecrawl / Exa / Tavily" tag="需要 Key" />
+                    <Phase3ResourceRow title="Doctor 命令" detail="config check / auth list" tag="安全" tone="good" />
+                  </div>
+                </div>
               </div>
-              <span>{conversationCountLabel(data?.chat?.recent_sessions, data?.chat?.status_label)}</span>
-            </div>
-            <ConversationList sessions={data?.chat?.recent_sessions || []} />
-            <button type="button" className="wide-action" onClick={() => void openAppView('chat')}>打开完整对话窗口</button>
-          </article>
-        </div>
-
-        <aside className="dashboard-side-column" aria-label="系统信息">
-          <article className="panel dashboard-card">
-            <div className="section-heading-row">
-              <h2>运行状态</h2>
-              <StatusPill active={Boolean(data?.app?.running)} label={data?.app?.running ? '运行中' : '未运行'} />
-            </div>
-            <InfoList rows={[
-              ['运行时间', formatUptime(data?.app?.uptime_seconds)],
-              ['Yachiyo 版本', data?.app?.version],
-              ['Bridge', bridgeState(data)],
-              ['配置漂移', data?.bridge?.config_dirty ? listOrDash(data?.bridge?.drift_details) : '无'],
-            ]} />
-          </article>
-
-          <article className="panel dashboard-card">
-            <div className="section-heading-row">
-              <h2>工作空间</h2>
-              <StatusPill active={Boolean(data?.workspace?.initialized)} label={data?.workspace?.initialized ? '已初始化' : '未初始化'} />
-            </div>
-            <InfoList rows={[
-              ['路径', data?.workspace?.path],
-              ['创建时间', formatDateTime(data?.workspace?.created_at)],
-            ]} />
-          </article>
-
-          <article className="panel dashboard-card">
-            <div className="section-heading-row">
-              <h2>集成服务</h2>
-            </div>
-            <IntegrationBlock title="AstrBot / QQ" item={data?.integrations?.astrbot} />
-            <IntegrationBlock title="Hapi / Codex" item={data?.integrations?.hapi} />
-          </article>
-        </aside>
-      </section>
+            </aside>
+          </div>
+        </section>
+      </div>
     </main>
   );
 }
@@ -1220,51 +1477,164 @@ function StatusTile({
   );
 }
 
-function ControlHubButton({
+function Phase3NavSection({ title }: { title: string }) {
+  return <div className="phase3-nav-section">{title}</div>;
+}
+
+function Phase3NavButton({
+  active,
+  code,
   title,
-  detail,
-  action,
-  primary,
+  meta,
   onClick,
 }: {
+  active?: boolean;
+  code: string;
   title: string;
-  detail: string;
-  action: string;
-  primary?: boolean;
-  onClick: () => void;
+  meta?: string;
+  onClick?: () => void;
 }) {
   return (
-    <button className={primary ? 'control-hub-card primary' : 'control-hub-card'} type="button" onClick={onClick}>
+    <button
+      type="button"
+      className={active ? 'phase3-nav-item active' : 'phase3-nav-item'}
+      aria-current={active ? 'page' : undefined}
+      onClick={onClick}
+    >
+      <span className="phase3-glyph">{code}</span>
       <span>{title}</span>
-      <strong>{action}</strong>
-      <small>{detail}</small>
+      <span className="phase3-count">{meta || '—'}</span>
     </button>
   );
 }
 
-function ControlHubGroup({
+function Phase3Metric({ value, label }: { value: string; label: string }) {
+  return (
+    <div className="phase3-metric">
+      <strong>{value}</strong>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function Phase3StrategyCard({
+  title,
+  body,
+  items,
+}: {
+  title: string;
+  body?: string;
+  items?: string[];
+}) {
+  return (
+    <article className="phase3-strategy-card">
+      <h2>{title}</h2>
+      {body ? <p>{body}</p> : null}
+      {items?.length ? (
+        <ul>
+          {items.map((item) => <li key={item}>{item}</li>)}
+        </ul>
+      ) : null}
+    </article>
+  );
+}
+
+function Phase3Step({
+  number,
   title,
   detail,
-  primaryAction,
-  secondaryAction,
-  onPrimary,
-  onSecondary,
+  state,
+}: {
+  number: string;
+  title: string;
+  detail: string;
+  state: string;
+}) {
+  return (
+    <div className={`phase3-step ${state}`}>
+      <span>{number}</span>
+      <strong>{title}</strong>
+      <small>{detail}</small>
+    </div>
+  );
+}
+
+function Phase3CheckRow({
+  ok,
+  warn,
+  label,
+  code,
+}: {
+  ok: boolean;
+  warn?: boolean;
+  label: string;
+  code: string;
+}) {
+  const dotClass = ok ? 'phase3-status-dot' : warn ? 'phase3-status-dot warn' : 'phase3-status-dot muted';
+  return (
+    <li>
+      <span className={dotClass} />
+      <span>{label}</span>
+      <code>{code}</code>
+    </li>
+  );
+}
+
+function Phase3StatusCard({
+  tone,
+  label,
+  value,
+  body,
+}: {
+  tone?: 'good' | 'warn';
+  label: string;
+  value: string;
+  body: string;
+}) {
+  return (
+    <div className={tone ? `phase3-status-card ${tone}` : 'phase3-status-card'}>
+      <div>{label}</div>
+      <strong>{value}</strong>
+      <p>{body}</p>
+    </div>
+  );
+}
+
+function Phase3IaNode({
+  primary,
+  title,
+  body,
+}: {
+  primary?: boolean;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className={primary ? 'phase3-ia-node primary' : 'phase3-ia-node'}>
+      <h3>{title}</h3>
+      <p>{body}</p>
+    </div>
+  );
+}
+
+function Phase3ResourceRow({
+  title,
+  detail,
+  tag,
+  tone,
 }: {
   title: string;
   detail: string;
-  primaryAction: string;
-  secondaryAction: string;
-  onPrimary: () => void;
-  onSecondary: () => void;
+  tag: string;
+  tone?: 'good' | 'warn';
 }) {
   return (
-    <div className="control-hub-card grouped">
-      <span>{title}</span>
-      <strong>{detail}</strong>
-      <div className="control-hub-actions">
-        <button type="button" className="primary-action" onClick={onPrimary}>{primaryAction}</button>
-        <button type="button" onClick={onSecondary}>{secondaryAction}</button>
+    <div className="phase3-resource-row">
+      <div>
+        <strong>{title}</strong>
+        <span>{detail}</span>
       </div>
+      <span className={tone ? `phase3-tag ${tone}` : 'phase3-tag'}>{tag}</span>
     </div>
   );
 }
@@ -1688,7 +2058,7 @@ function HermesConnectionResult({ result }: { result: HermesConnectionTestResult
 
 function ConversationList({ sessions }: { sessions: ChatSession[] }) {
   if (!sessions.length) {
-    return <div className="empty-state inline-empty">暂无对话。打开聊天窗口开始完整对话。</div>;
+    return <div className="empty-state inline-empty">暂无对话。打开主控台对话开始完整对话。</div>;
   }
   return (
     <div className="conversation-list">
@@ -1697,7 +2067,7 @@ function ConversationList({ sessions }: { sessions: ChatSession[] }) {
           className={session.is_current ? 'conversation-card current' : 'conversation-card'}
           key={session.session_id || session.title}
           type="button"
-          onClick={() => void openAppView('chat')}
+          onClick={() => void openAppView('main', { focus: 'chat' })}
         >
           <span className="conversation-main-row">
             <strong>{session.title || '新对话'}</strong>

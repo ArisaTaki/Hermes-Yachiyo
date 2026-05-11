@@ -124,7 +124,7 @@ def test_dashboard_data_includes_chat_overview_and_modes(tmp_path, monkeypatch):
         data = api.get_dashboard_data()
 
         assert data["modes"]["current"] == "bubble"
-        assert {item["id"] for item in data["modes"]["items"]} == {"bubble", "live2d"}
+        assert {item["id"] for item in data["modes"]["items"]} == {"none", "bubble", "live2d"}
         assert data["hermes"]["command_exists"] is True
         assert {item["id"] for item in data["hermes"]["configuration_actions"]} >= {
             "setup",
@@ -1322,6 +1322,29 @@ def test_display_mode_change_schedules_mode_switch(tmp_path, monkeypatch):
         assert result["effects"]["has_restart_mode"] is True
         assert result["effects"]["has_restart_app"] is False
         assert config.display_mode == "live2d"
+    finally:
+        store.close()
+
+
+def test_display_mode_change_can_disable_persistent_mode(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    try:
+        monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+        monkeypatch.setattr(
+            "apps.shell.main_api.get_integration_snapshot",
+            lambda config, boot: _fake_snapshot(),
+        )
+
+        config = AppConfig(display_mode="bubble")
+        api = MainWindowAPI(runtime, config)
+        result = api.update_settings({"display_mode": "none"})
+
+        assert result["ok"] is True
+        assert result["mode_switch_scheduled"] is True
+        assert result["target_display_mode"] == "none"
+        assert config.display_mode == "none"
     finally:
         store.close()
 

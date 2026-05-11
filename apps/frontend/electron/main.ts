@@ -32,9 +32,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const FRONTEND_DEV_URL = process.env.HERMES_YACHIYO_FRONTEND_DEV_URL || 'http://127.0.0.1:5174';
+const BRIDGE_URL_ENV = 'HERMES_YACHIYO_BRIDGE_URL';
 const DEV_BRIDGE_URL = 'http://127.0.0.1:8420';
 const PACKAGED_BRIDGE_URL = 'http://127.0.0.1:18420';
-let bridgeUrl = process.env.HERMES_YACHIYO_BRIDGE_URL || (app.isPackaged ? PACKAGED_BRIDGE_URL : DEV_BRIDGE_URL);
+let bridgeUrl = initialBridgeUrl();
 const APP_BUILD_METADATA_FILE = 'hermes-yachiyo-build.json';
 const DEFAULT_UPDATE_REPOSITORY = 'kuguya-AI-app-develop/Hermes-Yachiyo';
 const BRIDGE_SETTINGS_RETRIES = 40;
@@ -42,11 +43,30 @@ const BRIDGE_SETTINGS_RETRY_MS = 250;
 const BUBBLE_SCREEN_MARGIN = 24;
 const POSITION_SAVE_DEBOUNCE_MS = 260;
 const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
+const TRANSPARENT_WINDOW_BACKGROUND = '#00000000';
 const MAX_LAUNCHER_SHAPE_RECTS = 10000;
+const MAX_AVATAR_IMAGE_BYTES = 8 * 1024 * 1024;
 type IconKind = 'dock' | 'tray' | 'window';
 
-type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'tools' | 'proactive-tts' | 'bubble' | 'bubble-menu' | 'live2d';
+type AppView =
+  | 'main'
+  | 'chat'
+  | 'settings'
+  | 'installer'
+  | 'provider'
+  | 'resources'
+  | 'workspace'
+  | 'diagnostics'
+  | 'tools'
+  | 'tools-all'
+  | 'activity-all'
+  | 'app-update'
+  | 'proactive-tts'
+  | 'bubble'
+  | 'bubble-menu'
+  | 'live2d';
 type ModeId = 'bubble' | 'live2d';
+type DisplayModeId = ModeId | 'none';
 type InstallerTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup' | 'update-hermes' | 'update-hermes-backup';
 
 type ModeSettings = {
@@ -171,6 +191,12 @@ type AppUpdateDownloadProgress = {
   total_bytes?: number;
   percent?: number;
   error?: string;
+};
+
+type AvatarImageSelection = {
+  path: string;
+  data_url: string;
+  file_name: string;
 };
 
 let backendProcess: ChildProcessWithoutNullStreams | null = null;
@@ -737,6 +763,9 @@ function enforceWindowTitle(targetWindow: BrowserWindow, title: string): void {
 function mainWindowTitle(params: Record<string, string> = {}): string {
   const view = normalizeView(params.view);
   if (view === 'installer') return 'Hermes-Yachiyo 安装向导';
+  if (view === 'provider') return 'Hermes-Yachiyo 模型配置';
+  if (view === 'resources') return 'Hermes-Yachiyo 资源管理';
+  if (view === 'workspace') return 'Hermes-Yachiyo 工作区';
   if (view === 'settings') return params.mode === 'live2d'
     ? 'Hermes-Yachiyo Live2D 设置'
     : params.mode === 'bubble'
@@ -744,7 +773,10 @@ function mainWindowTitle(params: Record<string, string> = {}): string {
       : 'Hermes-Yachiyo 应用设置';
   if (view === 'diagnostics') return 'Hermes-Yachiyo 诊断工具';
   if (view === 'tools') return 'Hermes-Yachiyo 工具中心';
+  if (view === 'tools-all') return 'Hermes-Yachiyo 桌面工具';
+  if (view === 'activity-all') return 'Hermes-Yachiyo 活动日志';
   if (view === 'proactive-tts') return 'Hermes-Yachiyo 主动关怀语音';
+  if (view === 'chat') return 'Hermes-Yachiyo 对话';
   return 'Hermes-Yachiyo 主控台';
 }
 
@@ -887,9 +919,18 @@ function ensureNodePtySpawnHelperExecutable(): void {
 }
 
 function packagedBackendPath(): string | null {
-  if (!app.isPackaged) return null;
   const binaryName = process.platform === 'win32' ? 'hermes-yachiyo-backend.exe' : 'hermes-yachiyo-backend';
-  return path.join(process.resourcesPath, 'backend', binaryName);
+  const candidate = path.join(process.resourcesPath, 'backend', binaryName);
+  return app.isPackaged && fs.existsSync(candidate) ? candidate : null;
+}
+
+function initialBridgeUrl(): string {
+  const envBridgeUrl = normalizeBridgeUrl(process.env[BRIDGE_URL_ENV]);
+  if (packagedBackendPath()) return envBridgeUrl || PACKAGED_BRIDGE_URL;
+  if (!envBridgeUrl) return DEV_BRIDGE_URL;
+  const endpoint = bridgeEndpoint(envBridgeUrl);
+  if (endpoint?.port === 18420) return DEV_BRIDGE_URL;
+  return envBridgeUrl;
 }
 
 function bridgeEndpoint(url: string): { host: string; port: number } | null {
@@ -950,7 +991,7 @@ function allocateLocalBridgeUrl(host: string): Promise<string> {
 }
 
 async function prepareBridgeUrlForPackagedBackend(): Promise<void> {
-  if (!app.isPackaged || process.env.HERMES_YACHIYO_BRIDGE_URL) return;
+  if (!packagedBackendPath() || process.env[BRIDGE_URL_ENV]) return;
   const endpoint = bridgeEndpoint(bridgeUrl);
   if (!endpoint || !isLocalBridgeHost(endpoint.host)) return;
 
@@ -975,7 +1016,7 @@ function startBackend(): void {
       ...process.env,
       PYTHONPATH: projectRoot(),
       HERMES_YACHIYO_DESKTOP_BACKEND: '1',
-      HERMES_YACHIYO_BRIDGE_URL: bridgeUrl,
+      [BRIDGE_URL_ENV]: bridgeUrl,
     },
   });
 
@@ -1082,7 +1123,7 @@ async function restartBackendProcess(targetBridgeUrl?: unknown): Promise<{ succe
 function rendererUrl(params: Record<string, string> = {}): string {
   const query = new URLSearchParams({ bridge: bridgeUrl });
   Object.entries(params)
-    .filter(([key]) => key !== 'view' && key !== 'mode')
+    .filter(([key]) => key !== 'view' && key !== 'mode' && key !== 'restore')
     .forEach(([key, value]) => query.set(key, value));
   const route = routeHash(params);
   if (!app.isPackaged) return `${FRONTEND_DEV_URL}?${query.toString()}${route}`;
@@ -1103,6 +1144,43 @@ function mainWindowBounds(settings: UiSettings | null = lastUiSettings): { width
     width: Math.round(clamp(numberFromConfig(windowMode.width, 1120), 860, 1920)),
     height: Math.round(clamp(numberFromConfig(windowMode.height, 760), 580, 1400)),
   };
+}
+
+function chatWindowBounds(settings: UiSettings | null = lastUiSettings, workArea: Rectangle = screen.getPrimaryDisplay().workArea): { width: number; height: number } {
+  const base = mainWindowBounds(settings);
+  const maxWidth = Math.max(860, Math.min(1440, workArea.width));
+  const maxHeight = Math.max(580, Math.min(1000, workArea.height));
+  return {
+    width: Math.round(clamp(Math.max(base.width, 1120), 860, maxWidth)),
+    height: Math.round(clamp(Math.max(base.height, 760), 580, maxHeight)),
+  };
+}
+
+function chatWindowMinSize(settings: UiSettings | null = lastUiSettings, workArea: Rectangle = screen.getPrimaryDisplay().workArea): { width: number; height: number } {
+  const bounds = chatWindowBounds(settings, workArea);
+  return {
+    width: Math.min(1080, bounds.width),
+    height: Math.min(720, bounds.height),
+  };
+}
+
+function ensureChatWindowUsableBounds(settings: UiSettings | null = lastUiSettings): void {
+  if (!chatWindow || chatWindow.isDestroyed()) return;
+  const current = chatWindow.getBounds();
+  const workArea = screen.getDisplayMatching(current).workArea;
+  const target = chatWindowBounds(settings, workArea);
+  const minimum = chatWindowMinSize(settings, workArea);
+  chatWindow.setMinimumSize(minimum.width, minimum.height);
+  if (current.width >= minimum.width && current.height >= minimum.height) return;
+  const width = Math.max(current.width, target.width);
+  const height = Math.max(current.height, target.height);
+  const x = width >= workArea.width
+    ? workArea.x
+    : Math.round(clamp(current.x, workArea.x, workArea.x + workArea.width - width));
+  const y = height >= workArea.height
+    ? workArea.y
+    : Math.round(clamp(current.y, workArea.y, workArea.y + workArea.height - height));
+  chatWindow.setBounds({ x, y, width, height }, false);
 }
 
 function createMainWindow(
@@ -1130,7 +1208,13 @@ function createMainWindow(
     minWidth: 860,
     minHeight: 580,
     show: false,
-    backgroundColor: '#0e1117',
+    backgroundColor: '#060913',
+    ...(process.platform === 'darwin'
+      ? {
+          titleBarStyle: 'hiddenInset' as const,
+          trafficLightPosition: { x: 16, y: 18 },
+        }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -1163,10 +1247,6 @@ function showMainWindow(
   settings: UiSettings | null = lastUiSettings,
   options: MainWindowOptions = {},
 ): void {
-  if (normalizeView(params.view) === 'chat') {
-    showChatWindow(params);
-    return;
-  }
   if (!mainWindow || mainWindow.isDestroyed()) {
     createMainWindow(params, settings, options);
     return;
@@ -1264,7 +1344,7 @@ function routeForWindow(targetWindow: BrowserWindow | null): { view: AppView; pa
 
 function mainActivationRouteParams(route: { view: AppView; params: Record<string, string> } | null): Record<string, string> {
   if (!route) return { view: 'main' };
-  if (route.view === 'chat' || route.view === 'bubble' || route.view === 'bubble-menu' || route.view === 'live2d') {
+  if (route.view === 'bubble' || route.view === 'bubble-menu' || route.view === 'live2d') {
     return { view: 'main' };
   }
   return { ...route.params, view: route.view };
@@ -1273,7 +1353,7 @@ function mainActivationRouteParams(route: { view: AppView; params: Record<string
 function restoreMainWindowIfPolluted(): void {
   const route = routeForWindow(mainWindow);
   if (!route) return;
-  if (route.view === 'chat' || route.view === 'bubble' || route.view === 'bubble-menu' || route.view === 'live2d') {
+  if (route.view === 'bubble' || route.view === 'bubble-menu' || route.view === 'live2d') {
     mainWindow?.loadURL(rendererUrl({ view: 'main' }));
   }
 }
@@ -1283,19 +1363,26 @@ function restoreModeWindowIfPolluted(): void {
   const route = routeForWindow(modeWindow);
   if (!route) return;
   if (route.view !== activeMode && !(activeMode === 'bubble' && route.view === 'bubble-menu')) {
-    modeWindow.loadURL(rendererUrl({ view: activeMode }));
+    modeWindow.loadURL(rendererUrl({ view: activeMode, surface: 'desktop' }));
   }
 }
 
 function createChatWindow(params: Record<string, string> = {}): void {
+  const bounds = chatWindowBounds();
+  const minimum = chatWindowMinSize();
   chatWindow = new BrowserWindow({
     title: 'Hermes-Yachiyo 对话',
-    width: 520,
-    height: 680,
+    ...bounds,
     icon: appIconPath('window'),
-    minWidth: 420,
-    minHeight: 560,
-    backgroundColor: '#121622',
+    minWidth: minimum.width,
+    minHeight: minimum.height,
+    backgroundColor: '#060913',
+    ...(process.platform === 'darwin'
+      ? {
+          titleBarStyle: 'hiddenInset' as const,
+          trafficLightPosition: { x: 16, y: 18 },
+        }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -1313,29 +1400,73 @@ function createChatWindow(params: Record<string, string> = {}): void {
   });
 }
 
+function navigateMainWindowInPlace(params: Record<string, string>): boolean {
+  if (!mainWindow || mainWindow.isDestroyed() || params.session_id) return false;
+  const route = routeHash(params);
+  mainWindow.webContents.executeJavaScript(
+    `window.history.pushState(null, '', ${JSON.stringify(route)}); window.dispatchEvent(new Event('hermes-route-change'));`,
+  ).catch(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(rendererUrl(params));
+  });
+  return true;
+}
+
+function focusMainWindowAsChat(params: Record<string, string> = {}): boolean {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const route = routeForWindow(mainWindow);
+  const nextParams = { ...params, view: 'chat' };
+  enforceWindowTitle(mainWindow, mainWindowTitle(nextParams));
+  if (route?.view !== 'chat') {
+    if (!navigateMainWindowInPlace(nextParams)) mainWindow.loadURL(rendererUrl(nextParams));
+  } else if (params.session_id && route.params.session_id !== params.session_id) {
+    mainWindow.loadURL(rendererUrl(nextParams));
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  showMacDockIcon();
+  mainWindow.show();
+  mainWindow.moveTop();
+  mainWindow.focus();
+  return true;
+}
+
 function showChatWindow(params: Record<string, string> = {}): void {
   restoreMainWindowIfPolluted();
   restoreModeWindowIfPolluted();
-  if (!chatWindow) {
+  restoreModeWindowTopPreference();
+  if (focusMainWindowAsChat(params)) return;
+  if (!chatWindow || chatWindow.isDestroyed()) {
     createChatWindow(params);
     return;
   }
+  enforceWindowTitle(chatWindow, mainWindowTitle({ ...params, view: 'chat' }));
+  ensureChatWindowUsableBounds();
   const route = routeForWindow(chatWindow);
-  const requestedSessionId = params.session_id || '';
-  if (
-    route?.view !== 'chat'
-    || (requestedSessionId && route.params.session_id !== requestedSessionId)
-  ) {
+  if (route?.view !== 'chat' || (params.session_id && route.params.session_id !== params.session_id)) {
     chatWindow.loadURL(rendererUrl({ ...params, view: 'chat' }));
   }
+  if (chatWindow.isMinimized()) chatWindow.restore();
   showMacDockIcon();
   chatWindow.show();
+  chatWindow.moveTop();
   chatWindow.focus();
+}
+
+function showMainWindowAtLastRoute(params: Record<string, string> = {}): void {
+  restoreMainWindowIfPolluted();
+  restoreModeWindowIfPolluted();
+  const cleanParams = { ...params };
+  delete cleanParams.restore;
+  const route = routeForWindow(mainWindow);
+  showMainWindow({ ...mainActivationRouteParams(route), ...cleanParams });
 }
 
 function openAppView(view: AppView, params: Record<string, string> = {}): void {
   if (view === 'chat') {
     showChatWindow(params);
+    return;
+  }
+  if (view === 'main' && params.restore === 'last') {
+    showMainWindowAtLastRoute(params);
     return;
   }
   if (view === 'bubble' || view === 'bubble-menu' || view === 'live2d') {
@@ -1350,7 +1481,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeView(value: unknown): AppView {
-  const views: AppView[] = ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'proactive-tts', 'bubble', 'bubble-menu', 'live2d'];
+  const views: AppView[] = [
+    'main',
+    'chat',
+    'settings',
+    'installer',
+    'provider',
+    'resources',
+    'workspace',
+    'diagnostics',
+    'tools',
+    'tools-all',
+    'activity-all',
+    'app-update',
+    'proactive-tts',
+    'bubble',
+    'bubble-menu',
+    'live2d',
+  ];
   return typeof value === 'string' && views.includes(value as AppView) ? (value as AppView) : 'main';
 }
 
@@ -1365,6 +1513,16 @@ function normalizeParams(value: unknown): Record<string, string> {
 
 function normalizeMode(value: unknown): ModeId {
   return value === 'live2d' ? 'live2d' : 'bubble';
+}
+
+function normalizeDisplayMode(value: unknown): DisplayModeId {
+  if (value === 'none') return 'none';
+  return normalizeMode(value);
+}
+
+function normalizePreferredDisplayMode(value: unknown): DisplayModeId | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  return normalizeDisplayMode(value);
 }
 
 function routeFromUrl(rawUrl: string): { view: AppView; params: Record<string, string> } | null {
@@ -1383,7 +1541,8 @@ function routeFromUrl(rawUrl: string): { view: AppView; params: Record<string, s
     if (view === 'settings' && rawMode) params.mode = rawMode;
     return { view, params };
   }
-  return { view: normalizeView(parsed.searchParams.get('view')), params };
+  const view = normalizeView(parsed.searchParams.get('view'));
+  return { view, params };
 }
 
 function redirectDesktopModeNavigation(targetUrl: string, launcherMode: ModeId): boolean {
@@ -1545,6 +1704,11 @@ function applyModeWindowTopPreference(): void {
 
 function suppressModeWindowForMainWindow(): void {
   if (!modeWindow || modeWindow.isDestroyed()) return;
+  if (activeMode === 'live2d' && configuredModeWindowAlwaysOnTop()) {
+    modeWindowTopSuppressed = false;
+    applyModeWindowTopPreference();
+    return;
+  }
   modeWindowTopSuppressed = true;
   applyModeWindowTopPreference();
 }
@@ -1553,6 +1717,28 @@ function restoreModeWindowTopPreference(): void {
   if (!modeWindowTopSuppressed) return;
   modeWindowTopSuppressed = false;
   applyModeWindowTopPreference();
+}
+
+function repaintTransparentModeWindow(targetWindow: BrowserWindow): void {
+  if (targetWindow.isDestroyed()) return;
+  targetWindow.setBackgroundColor(TRANSPARENT_WINDOW_BACKGROUND);
+  if (process.platform === 'darwin') {
+    try {
+      targetWindow.invalidateShadow();
+    } catch {}
+  }
+}
+
+function showTransparentModeWindowWhenReady(targetWindow: BrowserWindow): void {
+  let shown = false;
+  const show = () => {
+    if (shown || targetWindow.isDestroyed()) return;
+    shown = true;
+    repaintTransparentModeWindow(targetWindow);
+    targetWindow.showInactive();
+  };
+  targetWindow.once('ready-to-show', show);
+  setTimeout(show, 1200);
 }
 
 function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> = {}): void {
@@ -1565,16 +1751,22 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
       const bounds = desktopModeBounds(mode, config);
       suppressModeWindowPositionSave();
       modeWindow.setBounds(bounds, false);
+      repaintTransparentModeWindow(modeWindow);
+      setModeWindowPointerInteractive(mode, false);
+      modeWindowShapeApplied = false;
       applyModeWindowTopPreference();
       if (mode === 'live2d') {
         modeWindow.setVisibleOnAllWorkspaces(booleanFromConfig(config.show_on_all_spaces, true), { visibleOnFullScreen: true });
       }
-      modeWindow.loadURL(rendererUrl({ view: mode }));
+      modeWindow.loadURL(rendererUrl({ view: mode, surface: 'desktop' }));
     }
     const route = routeForWindow(modeWindow);
     if (route?.view !== mode && !(mode === 'bubble' && route?.view === 'bubble-menu')) {
-      modeWindow.loadURL(rendererUrl({ view: mode }));
+      modeWindow.loadURL(rendererUrl({ view: mode, surface: 'desktop' }));
     }
+    repaintTransparentModeWindow(modeWindow);
+    setModeWindowPointerInteractive(mode, false);
+    modeWindowShapeApplied = false;
     modeWindow.show();
     modeWindow.focus();
     return;
@@ -1612,15 +1804,19 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     resizable: mode === 'live2d',
     movable: true,
     skipTaskbar: true,
+    show: false,
+    paintWhenInitiallyHidden: true,
     alwaysOnTop,
     hasShadow: false,
-    backgroundColor: '#00000000',
+    backgroundColor: TRANSPARENT_WINDOW_BACKGROUND,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+  repaintTransparentModeWindow(createdModeWindow);
+  showTransparentModeWindowWhenReady(createdModeWindow);
   modeWindow = createdModeWindow;
   enforceWindowTitle(createdModeWindow, modeWindowTitle(mode));
 
@@ -1628,7 +1824,12 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     createdModeWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   }
   applyModeWindowTopPreference();
-  createdModeWindow.loadURL(rendererUrl({ view: mode }));
+  createdModeWindow.loadURL(rendererUrl({ view: mode, surface: 'desktop' }));
+  createdModeWindow.webContents.on('did-start-loading', () => {
+    modeWindowShapeApplied = false;
+    setModeWindowPointerInteractive(mode, false);
+  });
+  createdModeWindow.webContents.on('did-finish-load', () => repaintTransparentModeWindow(createdModeWindow));
   createdModeWindow.webContents.on('will-navigate', (event, targetUrl) => {
     if (redirectDesktopModeNavigation(targetUrl, mode)) event.preventDefault();
   });
@@ -1636,12 +1837,17 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     if (redirectDesktopModeNavigation(url, mode)) return { action: 'deny' };
     return { action: 'allow' };
   });
-  if (mode === 'live2d' && LIVE2D_POINTER_PASSTHROUGH_ENABLED) {
-    setTimeout(() => setModeWindowPointerInteractive('live2d', false), 260);
+  if ((mode === 'live2d' || mode === 'bubble') && LIVE2D_POINTER_PASSTHROUGH_ENABLED) {
+    setTimeout(() => setModeWindowPointerInteractive(mode, false), 260);
   }
   createdModeWindow.on('focus', restoreModeWindowTopPreference);
   createdModeWindow.on('move', () => scheduleModeWindowPositionSave(mode, config));
-  createdModeWindow.on('resize', () => scheduleModeWindowPositionSave(mode, config));
+  createdModeWindow.on('resize', () => {
+    repaintTransparentModeWindow(createdModeWindow);
+    modeWindowShapeApplied = false;
+    setModeWindowPointerInteractive(mode, false);
+    scheduleModeWindowPositionSave(mode, config);
+  });
   createdModeWindow.on('closed', () => {
     if (modeWindow !== createdModeWindow) return;
     if (positionSaveTimer) {
@@ -1662,6 +1868,12 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
 function setModeWindowPointerInteractive(mode: ModeId, interactive: boolean): boolean {
   if (!modeWindow || modeWindow.isDestroyed() || activeMode !== mode) return false;
   if (mode === 'live2d' && !LIVE2D_POINTER_PASSTHROUGH_ENABLED && !interactive) return true;
+  if (interactive && mode === 'live2d') {
+    restoreModeWindowTopPreference();
+    applyModeWindowTopPreference();
+    if (!modeWindow.isVisible()) modeWindow.showInactive();
+    if (configuredModeWindowAlwaysOnTop(mode)) modeWindow.moveTop();
+  }
   const shouldIgnore = !interactive;
   if (modeWindowIgnoringMouse === shouldIgnore) return true;
   modeWindow.setIgnoreMouseEvents(shouldIgnore, { forward: true });
@@ -1674,14 +1886,14 @@ function setModeWindowHitRegions(mode: ModeId, rawRegions: unknown): boolean {
   const bounds = modeWindow.getBounds();
   const shapePayload = normalizeLauncherShapePayload(rawRegions, bounds);
   const shapeRects = normalizeLauncherShapeRects(shapePayload.regions, bounds, shapePayload.scaleX, shapePayload.scaleY);
-  if (!shapeRects.length) return false;
+  if (!shapeRects.length) {
+    modeWindowShapeApplied = false;
+    setModeWindowPointerInteractive(mode, false);
+    return false;
+  }
   try {
     modeWindow.setShape(shapeRects);
     modeWindowShapeApplied = true;
-    if (modeWindowIgnoringMouse) {
-      modeWindow.setIgnoreMouseEvents(false);
-      modeWindowIgnoringMouse = false;
-    }
     return true;
   } catch (error) {
     modeWindowShapeApplied = false;
@@ -1852,10 +2064,32 @@ function openLive2DResourceSettings(settings: UiSettings | null | undefined): vo
   );
 }
 
-async function openConfiguredDesktopMode(preferredMode?: ModeId, settingsOverride?: UiSettings | null): Promise<void> {
+function closeDesktopModeWindow(): void {
+  if (!modeWindow || modeWindow.isDestroyed()) {
+    activeMode = null;
+    activeModeConfig = {};
+    activeModeConfigSignature = '';
+    return;
+  }
+  const windowToClose = modeWindow;
+  modeWindow = null;
+  activeMode = null;
+  activeModeConfig = {};
+  activeModeConfigSignature = '';
+  modeWindowIgnoringMouse = false;
+  modeWindowShapeApplied = false;
+  modeWindowTopSuppressed = false;
+  windowToClose.close();
+}
+
+async function openConfiguredDesktopMode(preferredMode?: DisplayModeId, settingsOverride?: UiSettings | null): Promise<void> {
   const settings = settingsOverride || await waitForUiSettings();
   if (settings) lastUiSettings = settings;
-  const mode = preferredMode || normalizeMode(settings?.display?.current_mode);
+  const mode = preferredMode || normalizeDisplayMode(settings?.display?.current_mode);
+  if (mode === 'none') {
+    closeDesktopModeWindow();
+    return;
+  }
   if (mode === 'live2d' && !live2dResourceReady(settings)) {
     if (preferredMode === 'live2d') {
       openLive2DResourceSettings(settings);
@@ -1932,6 +2166,30 @@ async function showOpenDialogForSender(
     : await dialog.showOpenDialog(options);
   if (result.canceled) return null;
   return result.filePaths[0] || null;
+}
+
+function imageMimeTypeForPath(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  return 'application/octet-stream';
+}
+
+async function readAvatarImageSelection(filePath: string | null): Promise<AvatarImageSelection | null> {
+  if (!filePath) return null;
+  const stats = await fs.promises.stat(filePath);
+  if (!stats.isFile()) throw new Error('请选择图片文件');
+  if (stats.size > MAX_AVATAR_IMAGE_BYTES) throw new Error('头像图片不能超过 8 MB');
+  const data = await fs.promises.readFile(filePath);
+  const mimeType = imageMimeTypeForPath(filePath);
+  if (!mimeType.startsWith('image/')) throw new Error('仅支持 PNG、JPG、WEBP 或 GIF 图片');
+  return {
+    path: filePath,
+    file_name: path.basename(filePath),
+    data_url: `data:${mimeType};base64,${data.toString('base64')}`,
+  };
 }
 
 function normalizeTerminalTask(value: unknown): InstallerTerminalTask | null {
@@ -2067,6 +2325,17 @@ ipcMain.handle('hermes:restartBackend', (_event, options: unknown) => {
 ipcMain.handle('hermes:copyText', (_event, value: unknown) => {
   clipboard.writeText(typeof value === 'string' ? value : '');
 });
+ipcMain.handle('hermes:chooseAvatarImage', async (event) => {
+  const selectedPath = await showOpenDialogForSender(event, {
+    title: '选择头像图片',
+    defaultPath: app.getPath('pictures') || app.getPath('home'),
+    properties: ['openFile'],
+    filters: [
+      { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] },
+    ],
+  });
+  return readAvatarImageSelection(selectedPath);
+});
 ipcMain.handle('hermes:chooseLive2DModelDirectory', (event) => showOpenDialogForSender(event, {
   title: '选择 Live2D 模型目录',
   defaultPath: app.getPath('home'),
@@ -2095,7 +2364,7 @@ ipcMain.handle('hermes:openExternalUrl', async (_event, value: unknown) => {
 ipcMain.handle('hermes:openView', (_event, view: unknown, params: unknown) => {
   openAppView(normalizeView(view), normalizeParams(params));
 });
-ipcMain.handle('hermes:openDesktopMode', (_event, mode: unknown) => openConfiguredDesktopMode(normalizeMode(mode)));
+ipcMain.handle('hermes:openDesktopMode', (_event, mode: unknown) => openConfiguredDesktopMode(normalizePreferredDisplayMode(mode)));
 ipcMain.handle('hermes:moveLauncherWindow', moveLauncherWindow);
 ipcMain.handle('hermes:getLauncherPointerState', (_event, mode: unknown) => launcherPointerState(mode));
 ipcMain.handle('hermes:terminalStart', startInstallerTerminal);
@@ -2135,7 +2404,7 @@ ipcMain.handle('hermes:openLauncherMenu', (event, mode: unknown) => {
   const targetWindow = BrowserWindow.fromWebContents(event.sender) || undefined;
   const menu = Menu.buildFromTemplate([
     { label: '打开对话', click: () => showChatWindow() },
-    { label: '主控台', click: () => showMainWindow({ view: 'main' }) },
+    { label: '主控台', click: () => showMainWindowAtLastRoute({ restore: 'last' }) },
     { label: `${modeId === 'live2d' ? 'Live2D' : 'Bubble'} 设置`, click: () => showMainWindow({ view: 'settings', mode: modeId }) },
     { type: 'separator' },
     { label: '重新打开表现态', click: () => void openConfiguredDesktopMode(modeId) },
@@ -2156,17 +2425,18 @@ app.whenReady().then(() => {
   void (async () => {
     await prepareBridgeUrlForPackagedBackend();
     startBackend();
+    createMainWindow({ view: 'main' }, lastUiSettings, { focusOnReady: false });
     const installInfo = await waitForInstallInfo();
     lastInstallReady = installReady(installInfo);
     if (!lastInstallReady) {
-      createMainWindow({ view: 'installer' });
+      showMainWindow({ view: 'installer' }, lastUiSettings, { focusOnReady: false });
       return;
     }
     hasEnteredMainExperience = true;
     const settings = await waitForUiSettings();
     if (settings) lastUiSettings = settings;
     configureTray(settings);
-    showMainWindow({}, settings, { respectStartMinimized: true, focusOnReady: false });
+    showMainWindow({}, settings, { focusOnReady: false });
     await openConfiguredDesktopMode(undefined, settings);
     if (settings?.window_mode?.open_chat_on_start) showChatWindow();
   })();

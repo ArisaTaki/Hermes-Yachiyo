@@ -12,6 +12,14 @@ import signal
 import sys
 from urllib.parse import urlparse
 
+DEV_BRIDGE_HOST = "127.0.0.1"
+DEV_BRIDGE_PORT = 8420
+PACKAGED_BRIDGE_PORT = 18420
+
+
+def _running_from_packaged_backend() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
 
 def _bridge_endpoint_from_env(config: object) -> tuple[str, int]:
     bridge_url = os.getenv("HERMES_YACHIYO_BRIDGE_URL", "").strip()
@@ -22,14 +30,16 @@ def _bridge_endpoint_from_env(config: object) -> tuple[str, int]:
         except ValueError:
             port = None
         if parsed.scheme == "http" and parsed.hostname and port:
+            if port == PACKAGED_BRIDGE_PORT and not _running_from_packaged_backend():
+                return DEV_BRIDGE_HOST, DEV_BRIDGE_PORT
             return parsed.hostname, port
         logging.getLogger(__name__).warning(
             "忽略无效 HERMES_YACHIYO_BRIDGE_URL=%r，使用保存的 Bridge 配置",
             bridge_url,
         )
     return (
-        str(getattr(config, "bridge_host", "127.0.0.1")),
-        int(getattr(config, "bridge_port", 8420)),
+        str(getattr(config, "bridge_host", DEV_BRIDGE_HOST)),
+        int(getattr(config, "bridge_port", DEV_BRIDGE_PORT)),
     )
 
 

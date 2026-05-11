@@ -9,3 +9,10 @@ def test_legacy_window_display_mode_resolves_to_bubble():
     config.display_mode = "window"  # type: ignore[assignment]
 
     assert resolve_display_mode(config) == DisplayMode.BUBBLE
+
+
+def test_none_display_mode_resolves_to_none():
+    config = AppConfig()
+    config.display_mode = "none"
+
+    assert resolve_display_mode(config) == DisplayMode.NONE

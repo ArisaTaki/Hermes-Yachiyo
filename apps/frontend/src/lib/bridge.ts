@@ -120,10 +120,16 @@ export type AppUpdateDownloadProgress = {
   percent?: number;
   error?: string;
 };
+export type AvatarImageSelection = {
+  path?: string;
+  data_url?: string;
+  file_name?: string;
+};
 
 declare global {
   interface Window {
     hermesDesktop?: {
+      chooseAvatarImage?: () => Promise<AvatarImageSelection | string | null>;
       chooseLive2DArchive?: () => Promise<string | null>;
       chooseLive2DModelDirectory?: () => Promise<string | null>;
       checkAppUpdate?: () => Promise<AppUpdateCheckResult>;
@@ -199,6 +205,21 @@ export async function apiPost<T = ApiRecord>(path: string, body?: unknown): Prom
   return parseResponse<T>(response);
 }
 
+export async function apiPatch<T = ApiRecord>(path: string, body?: unknown): Promise<T> {
+  const baseUrl = await bridgeUrl();
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new Error(`无法连接本地 Bridge：${baseUrl}`);
+  }
+  return parseResponse<T>(response);
+}
+
 export async function openAppView(
   view: string,
   params: Record<string, string> = {},
@@ -222,7 +243,7 @@ function appViewUrl(view: string, params: Record<string, string> = {}): string {
   const route = isAppView(view) ? routePath(view, params) : routePath('main');
   const query = new URLSearchParams(window.location.search);
   Object.entries(params)
-    .filter(([key]) => key !== 'view' && key !== 'mode')
+    .filter(([key]) => key !== 'view' && key !== 'mode' && key !== 'restore')
     .forEach(([key, value]) => {
       if (value) query.set(key, value);
       else query.delete(key);
@@ -237,7 +258,24 @@ function isLauncherView(): boolean {
 }
 
 function isAppView(value: string): value is AppView {
-  return ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'proactive-tts', 'bubble', 'bubble-menu', 'live2d'].includes(value);
+  return [
+    'main',
+    'chat',
+    'settings',
+    'installer',
+    'provider',
+    'resources',
+    'workspace',
+    'diagnostics',
+    'tools',
+    'tools-all',
+    'activity-all',
+    'app-update',
+    'proactive-tts',
+    'bubble',
+    'bubble-menu',
+    'live2d',
+  ].includes(value);
 }
 
 export async function openDesktopMode(mode?: string): Promise<void> {
@@ -276,11 +314,22 @@ export async function chooseLive2DModelDirectory(): Promise<string | null> {
   return window.hermesDesktop.chooseLive2DModelDirectory();
 }
 
+export async function chooseAvatarImage(): Promise<AvatarImageSelection | string | null> {
+  if (!window.hermesDesktop?.chooseAvatarImage) {
+    throw new Error('当前环境没有桌面图片选择器入口');
+  }
+  return window.hermesDesktop.chooseAvatarImage();
+}
+
 export async function chooseLive2DArchive(): Promise<string | null> {
   if (!window.hermesDesktop?.chooseLive2DArchive) {
     throw new Error('当前环境没有桌面文件选择器入口，请在页面中输入 ZIP 路径');
   }
   return window.hermesDesktop.chooseLive2DArchive();
+}
+
+export function hasDesktopAvatarPicker(): boolean {
+  return Boolean(window.hermesDesktop?.chooseAvatarImage);
 }
 
 export function hasDesktopFilePicker(): boolean {

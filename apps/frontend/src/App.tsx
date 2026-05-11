@@ -4,11 +4,22 @@ import { ChatView } from './views/ChatView';
 import { DiagnosticsView } from './views/DiagnosticsView';
 import { InstallerView } from './views/InstallerView';
 import { LauncherView } from './views/LauncherView';
-import { MainView } from './views/MainView';
 import { ModeSettingsView } from './views/ModeSettingsView';
+import {
+  ActivityAllPage,
+  BubbleModePage,
+  DashboardPage,
+  Live2DModePage,
+  OpenDesignShell,
+  ProviderPage,
+  ResourcesPage,
+  ToolsAllPage,
+  WorkspacePage,
+} from './views/OpenDesignView';
 import { ProactiveTtsSettingsView } from './views/ProactiveTtsSettingsView';
 import { ToolCenterView } from './views/ToolCenterView';
-import { ROUTE_CHANGE_EVENT, currentView } from './lib/view';
+import { AppUpdateView } from './views/AppUpdateView';
+import { ROUTE_CHANGE_EVENT, currentParam, currentView } from './lib/view';
 
 export function App() {
   const [, setRouteVersion] = useState(0);
@@ -26,13 +37,27 @@ export function App() {
   }, []);
 
   const view = currentView();
+  const surface = currentParam('surface');
 
-  if (view === 'chat') return <ChatView />;
-  if (view === 'settings') return <ModeSettingsView />;
-  if (view === 'installer') return <InstallerView />;
-  if (view === 'diagnostics') return <DiagnosticsView />;
-  if (view === 'tools') return <ToolCenterView />;
-  if (view === 'proactive-tts') return <ProactiveTtsSettingsView />;
-  if (view === 'bubble' || view === 'bubble-menu' || view === 'live2d') return <LauncherView view={view} />;
-  return <MainView />;
+  if (view === 'bubble-menu' || ((view === 'bubble' || view === 'live2d') && surface === 'desktop')) {
+    return <LauncherView view={view} />;
+  }
+
+  let page = <DashboardPage />;
+  if (view === 'chat') page = <ChatView />;
+  else if (view === 'settings') page = <ModeSettingsView />;
+  else if (view === 'installer') page = <InstallerView />;
+  else if (view === 'diagnostics') page = <DiagnosticsView />;
+  else if (view === 'tools') page = currentParam('tool') ? <ToolCenterView /> : <DiagnosticsView />;
+  else if (view === 'proactive-tts') page = <ProactiveTtsSettingsView />;
+  else if (view === 'app-update') page = <AppUpdateView />;
+  else if (view === 'provider') page = <ProviderPage />;
+  else if (view === 'bubble') page = <BubbleModePage />;
+  else if (view === 'live2d') page = <Live2DModePage />;
+  else if (view === 'resources') page = <ResourcesPage />;
+  else if (view === 'workspace') page = <WorkspacePage />;
+  else if (view === 'tools-all') page = <ToolsAllPage />;
+  else if (view === 'activity-all') page = <ActivityAllPage />;
+
+  return <OpenDesignShell activeView={view}>{page}</OpenDesignShell>;
 }

@@ -118,22 +118,40 @@ class AssistantIntentResponse(BaseModel):
 class AssistantProfilePatchRequest(BaseModel):
     """PATCH /assistant/profile 请求。"""
 
-    persona_prompt: str | None = Field(default=None, max_length=4000)
+    agent_name: str | None = Field(default=None, max_length=80)
+    agent_nickname: str | None = Field(default=None, max_length=40)
+    agent_avatar_path: str | None = Field(default=None, max_length=1000)
+    persona_prompt: str | None = Field(default=None, max_length=12000)
     user_address: str | None = Field(default=None, max_length=80)
+    user_name: str | None = Field(default=None, max_length=80)
+    user_avatar_path: str | None = Field(default=None, max_length=1000)
+    user_profile: str | None = Field(default=None, max_length=2000)
+    user_preferences: str | None = Field(default=None, max_length=2000)
 
 
 class AssistantProfileResponse(BaseModel):
     """GET/PATCH /assistant/profile 响应。"""
 
     ok: bool = True
+    agent_name: str = ""
+    agent_nickname: str = ""
+    agent_avatar_path: str = ""
+    agent_avatar_url: str = ""
     persona_prompt: str = ""
     user_address: str = ""
+    user_name: str = ""
+    user_avatar_path: str = ""
+    user_avatar_url: str = ""
+    user_profile: str = ""
+    user_preferences: str = ""
     memory_enabled: bool = False
     memory_scope: str = "local_only"
     prompt_order: list[str] = Field(
         default_factory=lambda: [
+            "agent_profile",
             "persona",
             "user_address",
+            "user_profile",
             "relevant_memory",
             "current_session",
             "request",

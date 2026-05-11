@@ -1,4 +1,20 @@
-export type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'tools' | 'proactive-tts' | 'bubble' | 'bubble-menu' | 'live2d';
+export type AppView =
+  | 'main'
+  | 'chat'
+  | 'settings'
+  | 'installer'
+  | 'provider'
+  | 'resources'
+  | 'workspace'
+  | 'diagnostics'
+  | 'tools'
+  | 'tools-all'
+  | 'activity-all'
+  | 'app-update'
+  | 'proactive-tts'
+  | 'bubble'
+  | 'bubble-menu'
+  | 'live2d';
 
 type RouteState = {
   view: AppView;
@@ -53,7 +69,24 @@ export function routePath(view: AppView, params: Record<string, string> = {}): s
 }
 
 function isAppView(value: string): value is AppView {
-  return ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'proactive-tts', 'bubble', 'bubble-menu', 'live2d'].includes(value);
+  return [
+    'main',
+    'chat',
+    'settings',
+    'installer',
+    'provider',
+    'resources',
+    'workspace',
+    'diagnostics',
+    'tools',
+    'tools-all',
+    'activity-all',
+    'app-update',
+    'proactive-tts',
+    'bubble',
+    'bubble-menu',
+    'live2d',
+  ].includes(value);
 }
 
 function routeFromHash(hash: string): RouteState | null {

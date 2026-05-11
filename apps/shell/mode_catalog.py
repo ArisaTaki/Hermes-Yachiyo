@@ -1,6 +1,7 @@
 """显示模式元数据定义。
 
 显示模式只负责桌面常驻入口：
+- none: 不显示常驻入口
 - bubble: 轻量常驻聊天模式
 - live2d: 角色聊天壳
 
@@ -38,6 +39,14 @@ class ModeDescriptor:
 
 
 _MODE_CATALOG: dict[str, ModeDescriptor] = {
+    "none": ModeDescriptor(
+        id="none",
+        name="不显示表现态",
+        icon="",
+        description="不打开常驻 Bubble 或 Live2D，只在需要时显示主控台",
+        settings_title="表现态关闭",
+        settings_description="关闭常驻桌面入口，仅保留主控台窗口。",
+    ),
     "bubble": ModeDescriptor(
         id="bubble",
         name="Bubble 模式",

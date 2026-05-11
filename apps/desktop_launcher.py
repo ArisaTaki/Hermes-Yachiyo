@@ -9,12 +9,15 @@ import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 NODE_VERSION = "v20.19.0"
 MIN_NODE_VERSION = (20, 19, 0)
 REQUIRED_FRONTEND_BINS = ("concurrently", "electron", "tsc", "vite")
 FRONTEND_DEV_URL = "http://127.0.0.1:5174"
-BRIDGE_SETTINGS_URL = "http://127.0.0.1:8420/ui/settings"
+BRIDGE_URL_ENV = "HERMES_YACHIYO_BRIDGE_URL"
+DEV_BRIDGE_URL = "http://127.0.0.1:8420"
+PACKAGED_BRIDGE_URL = "http://127.0.0.1:18420"
 
 
 def _node_bin_dir() -> Path | None:
@@ -99,8 +102,44 @@ def _frontend_dev_server_ready() -> bool:
     return _local_http_ready(FRONTEND_DEV_URL)
 
 
-def _bridge_server_ready() -> bool:
-    return _local_http_ready(BRIDGE_SETTINGS_URL)
+def _normalize_bridge_url(value: str | None) -> str | None:
+    if not value or not value.strip():
+        return None
+    parsed = urlparse(value.strip())
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if parsed.scheme != "http" or not parsed.hostname or port is None:
+        return None
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"http://{host}:{port}"
+
+
+def _is_packaged_default_bridge_url(value: str) -> bool:
+    parsed = urlparse(value)
+    return parsed.scheme == "http" and parsed.port == 18420
+
+
+def _development_bridge_url(env: dict[str, str]) -> str:
+    configured = _normalize_bridge_url(env.get(BRIDGE_URL_ENV))
+    if configured and not _is_packaged_default_bridge_url(configured):
+        return configured
+    return DEV_BRIDGE_URL
+
+
+def _prepare_development_bridge_env(env: dict[str, str]) -> None:
+    env[BRIDGE_URL_ENV] = _development_bridge_url(env)
+
+
+def _bridge_settings_url(bridge_url: str = DEV_BRIDGE_URL) -> str:
+    return f"{bridge_url.rstrip('/')}/ui/settings"
+
+
+def _bridge_server_ready(bridge_url: str = DEV_BRIDGE_URL) -> bool:
+    return _local_http_ready(_bridge_settings_url(bridge_url))
 
 
 def _frontend_bin(frontend_dir: Path, name: str) -> Path:
@@ -180,6 +219,7 @@ def main() -> None:
     frontend_dir = project_root / "apps" / "frontend"
     node_bin = _node_bin_dir()
     env = {**os.environ, "HERMES_YACHIYO_PYTHON": sys.executable}
+    _prepare_development_bridge_env(env)
     if node_bin is not None:
         env["PATH"] = f"{node_bin}{os.pathsep}{env.get('PATH', '')}"
     _ensure_node_version(env)
@@ -187,8 +227,9 @@ def main() -> None:
     _ensure_frontend_dependencies(project_root, frontend_dir, env)
     if _frontend_dev_server_ready():
         print(f"[desktop] Reusing existing frontend dev server at {FRONTEND_DEV_URL}.")
-        if _bridge_server_ready():
-            print("[desktop] Reusing existing Python Bridge at http://127.0.0.1:8420.")
+        bridge_url = env[BRIDGE_URL_ENV]
+        if _bridge_server_ready(bridge_url):
+            print(f"[desktop] Reusing existing Python Bridge at {bridge_url}.")
             env["HERMES_YACHIYO_SKIP_BACKEND"] = "1"
         _run_electron_against_existing_vite(project_root, frontend_dir, env)
         return

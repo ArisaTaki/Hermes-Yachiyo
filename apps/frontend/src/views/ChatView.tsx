@@ -1,7 +1,10 @@
 import { FormEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from 'react';
 import type {
   ClipboardEvent as ReactClipboardEvent,
+  CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
 } from 'react';
 
 import { ImageAttachmentViewer } from '../components/ImageAttachmentViewer';
@@ -74,9 +77,21 @@ type ExecutorPayload = {
   image_input?: ImageInputPayload;
 };
 
+type AssistantProfilePayload = {
+  ok?: boolean;
+  agent_name?: string;
+  agent_nickname?: string;
+  agent_avatar_url?: string;
+  user_avatar_url?: string;
+};
+
 type RenderState = {
   shown: string;
   target: string;
+};
+
+type ChatViewProps = {
+  embedded?: boolean;
 };
 
 type ChatNotice = {
@@ -95,8 +110,13 @@ const SCROLL_BOTTOM_THRESHOLD = 14;
 const COPY_FEEDBACK_MS = 1500;
 const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MIN_LOADING_MS = 1400;
+const CHAT_SIDEBAR_MIN_WIDTH = 220;
+const CHAT_SIDEBAR_BASE_MAX_WIDTH = 280;
+const CHAT_SIDEBAR_WIDE_MAX_WIDTH = 360;
+const CHAT_WIDE_VIEWPORT_WIDTH = 1500;
 
-export function ChatView() {
+export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -105,8 +125,15 @@ export function ChatView() {
   const [isSending, setIsSending] = useState(false);
   const [sessions, setSessions] = useState<SessionsPayload | null>(null);
   const [executor, setExecutor] = useState<ExecutorPayload | null>(null);
+  const [assistantProfile, setAssistantProfile] = useState<AssistantProfilePayload | null>(null);
+  const [assistantProfileLoading, setAssistantProfileLoading] = useState(true);
   const [notice, setNotice] = useState<ChatNotice | null>(null);
+  const [sessionQuery, setSessionQuery] = useState('');
   const [copiedMessageId, setCopiedMessageId] = useState('');
+  const [messagesLoaded, setMessagesLoaded] = useState(false);
+  const [messagesVisible, setMessagesVisible] = useState(false);
+  const [sidebarMaxWidth, setSidebarMaxWidth] = useState(() => responsiveChatSidebarMaxWidth());
+  const [sidebarWidth, setSidebarWidth] = useState(() => responsiveChatSidebarMaxWidth());
   const [, setRenderTick] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -118,8 +145,17 @@ export function ChatView() {
   const stickToBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
   const noticeTimerRef = useRef<number | null>(null);
+  const messagesLoadedRef = useRef(false);
+  const messageLoadTokenRef = useRef(0);
+  const conversationLoadTokenRef = useRef(0);
+  const conversationTransitionRef = useRef(false);
+  const sidebarAutoWidthRef = useRef(true);
 
-  const refreshMessages = useCallback(async () => {
+  const refreshMessages = useCallback(async (options: { allowDuringTransition?: boolean } = {}) => {
+    if (conversationTransitionRef.current && !options.allowDuringTransition) return;
+    const token = ++messageLoadTokenRef.current;
+    const startedAt = Date.now();
+    const shouldHoldLoading = !messagesLoadedRef.current;
     try {
       const payload = await apiGet<MessagesPayload>('/ui/chat/messages?limit=80');
       if (payload.ok === false) throw new Error(payload.error || '读取消息失败');
@@ -127,8 +163,19 @@ export function ChatView() {
       const nextMessages = withResolvedAttachmentUrls(payload.messages || [], baseUrl);
       const processing = Boolean(payload.is_processing);
       const failed = latestFailedMessage(nextMessages);
+      syncRenderStates(nextMessages, renderStateRef.current);
+      const elapsed = Date.now() - startedAt;
+      const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
+      if (shouldHoldLoading && remaining > 0) await new Promise((r) => setTimeout(r, remaining));
+      if (token !== messageLoadTokenRef.current) return;
       setMessages(nextMessages);
       setIsProcessing(processing);
+      await settleMessagesAtBottom(token);
+      if (token === messageLoadTokenRef.current) {
+        messagesLoadedRef.current = true;
+        setMessagesVisible(true);
+        setMessagesLoaded(true);
+      }
       if (processing) {
         setStatus('处理中...');
       } else if (failed) {
@@ -137,6 +184,13 @@ export function ChatView() {
         setStatus('就绪');
       }
     } catch (error) {
+      const elapsed = Date.now() - startedAt;
+      const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
+      if (shouldHoldLoading && remaining > 0) await new Promise((r) => setTimeout(r, remaining));
+      if (token !== messageLoadTokenRef.current) return;
+      messagesLoadedRef.current = true;
+      setMessagesLoaded(true);
+      setMessagesVisible(true);
       setStatus(error instanceof Error ? error.message : '读取消息失败');
     }
   }, []);
@@ -159,6 +213,18 @@ export function ChatView() {
     }
   }, []);
 
+  const loadAssistantProfile = useCallback(async () => {
+    try {
+      const profile = await apiGet<AssistantProfilePayload>('/assistant/profile');
+      if (profile.ok === false) throw new Error('读取助手资料失败');
+      setAssistantProfile(profile);
+    } catch {
+      setAssistantProfile(null);
+    } finally {
+      setAssistantProfileLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const requestedSessionId = currentParam('session_id').trim();
     void (async () => {
@@ -175,8 +241,9 @@ export function ChatView() {
       await refreshMessages();
       await loadSessions();
       await loadExecutor();
+      await loadAssistantProfile();
     })();
-  }, [loadExecutor, loadSessions, refreshMessages]);
+  }, [loadAssistantProfile, loadExecutor, loadSessions, refreshMessages]);
 
   useEffect(() => {
     const interval = isProcessing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
@@ -190,6 +257,27 @@ export function ChatView() {
     }, EXECUTOR_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [loadExecutor]);
+
+  useEffect(() => {
+    const refreshProfile = () => void loadAssistantProfile();
+    window.addEventListener('hermes-assistant-profile-updated', refreshProfile);
+    return () => window.removeEventListener('hermes-assistant-profile-updated', refreshProfile);
+  }, [loadAssistantProfile]);
+
+  useEffect(() => {
+    if (embedded) return;
+    const syncResponsiveSidebarWidth = () => {
+      const maxWidth = responsiveChatSidebarMaxWidth();
+      setSidebarMaxWidth(maxWidth);
+      setSidebarWidth((width) => {
+        if (sidebarAutoWidthRef.current) return maxWidth;
+        return Math.min(Math.max(width, CHAT_SIDEBAR_MIN_WIDTH), maxWidth);
+      });
+    };
+    syncResponsiveSidebarWidth();
+    window.addEventListener('resize', syncResponsiveSidebarWidth);
+    return () => window.removeEventListener('resize', syncResponsiveSidebarWidth);
+  }, [embedded]);
 
   useEffect(() => {
     syncRenderStates(messages, renderStateRef.current);
@@ -381,28 +469,44 @@ export function ChatView() {
 
   async function deleteSession() {
     if (!window.confirm('删除此对话？此操作不可恢复。')) return;
+    const conversationToken = beginConversationLoading();
     try {
       await apiPost('/ui/chat/session/delete');
+      if (conversationToken !== conversationLoadTokenRef.current) return;
       renderStateRef.current.clear();
       stickToBottomRef.current = true;
       await loadSessions();
-      await refreshMessages();
+      await refreshMessages({ allowDuringTransition: true });
+      if (conversationToken === conversationLoadTokenRef.current) conversationTransitionRef.current = false;
       setStatus('已删除此对话');
     } catch (error) {
+      if (conversationToken !== conversationLoadTokenRef.current) return;
+      conversationTransitionRef.current = false;
+      messagesLoadedRef.current = true;
+      setMessagesLoaded(true);
+      setMessagesVisible(true);
       setStatus(error instanceof Error ? error.message : '删除失败');
     }
   }
 
   async function switchSession(sessionId: string) {
     if (!sessionId || sessionId === sessions?.current_session_id) return;
+    const conversationToken = beginConversationLoading();
     try {
       await apiPost('/ui/chat/sessions/load', { session_id: sessionId });
+      if (conversationToken !== conversationLoadTokenRef.current) return;
       renderStateRef.current.clear();
       stickToBottomRef.current = true;
       await loadSessions();
-      await refreshMessages();
+      await refreshMessages({ allowDuringTransition: true });
+      if (conversationToken === conversationLoadTokenRef.current) conversationTransitionRef.current = false;
       setStatus('已切换会话');
     } catch (error) {
+      if (conversationToken !== conversationLoadTokenRef.current) return;
+      conversationTransitionRef.current = false;
+      messagesLoadedRef.current = true;
+      setMessagesLoaded(true);
+      setMessagesVisible(true);
       setStatus(error instanceof Error ? error.message : '切换失败');
     }
   }
@@ -430,6 +534,58 @@ export function ChatView() {
     void openExternalUrl(anchor.href);
   }
 
+  function startSidebarResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (embedded) return;
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture can fail if the target is detached during a route switch.
+    }
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      sidebarAutoWidthRef.current = false;
+      const nextWidth = Math.max(
+        CHAT_SIDEBAR_MIN_WIDTH,
+        Math.min(sidebarMaxWidth, startWidth + moveEvent.clientX - startX),
+      );
+      setSidebarWidth(Math.round(nextWidth));
+    };
+
+    const stopResize = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', stopResize);
+    window.addEventListener('pointercancel', stopResize);
+  }
+
+  function handleSidebarResizerKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (embedded) return;
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      sidebarAutoWidthRef.current = false;
+      setSidebarWidth((value) => Math.max(CHAT_SIDEBAR_MIN_WIDTH, value - 12));
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      sidebarAutoWidthRef.current = false;
+      setSidebarWidth((value) => Math.min(sidebarMaxWidth, value + 12));
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      sidebarAutoWidthRef.current = false;
+      setSidebarWidth(CHAT_SIDEBAR_MIN_WIDTH);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      sidebarAutoWidthRef.current = true;
+      setSidebarWidth(sidebarMaxWidth);
+    }
+  }
+
   function showNotice(title: string, detail: string, kind: ChatNotice['kind'] = 'warn') {
     if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
     setNotice({ id: Date.now(), kind, title, detail });
@@ -441,8 +597,67 @@ export function ChatView() {
     setStatus('图片未附加');
   }
 
+  function beginConversationLoading() {
+    const conversationToken = ++conversationLoadTokenRef.current;
+    conversationTransitionRef.current = true;
+    messageLoadTokenRef.current += 1;
+    messagesLoadedRef.current = false;
+    renderStateRef.current.clear();
+    setMessagesLoaded(false);
+    setMessagesVisible(false);
+    setMessages([]);
+    return conversationToken;
+  }
+
+  function settleMessagesAtBottom(token: number) {
+    return new Promise<void>((resolve) => {
+      let frames = 0;
+      let stableFrames = 0;
+      let previousHeight = -1;
+
+      const settle = () => {
+        if (token !== messageLoadTokenRef.current) {
+          resolve();
+          return;
+        }
+        const list = listRef.current;
+        if (list) {
+          const height = list.scrollHeight;
+          stableFrames = height === previousHeight ? stableFrames + 1 : 0;
+          previousHeight = height;
+          stickToBottomRef.current = true;
+          list.scrollTop = height;
+          lastScrollTopRef.current = list.scrollTop;
+        }
+        frames += 1;
+        if (frames >= 8 || stableFrames >= 2) {
+          resolve();
+          return;
+        }
+        window.requestAnimationFrame(settle);
+      };
+
+      window.requestAnimationFrame(settle);
+    });
+  }
+
+  const sessionItems = sessions?.sessions || [];
+  const normalizedSessionQuery = sessionQuery.trim().toLowerCase();
+  const visibleSessions = normalizedSessionQuery
+    ? sessionItems.filter((session) => {
+        const title = sessionTitle(session).toLowerCase();
+        return title.includes(normalizedSessionQuery)
+          || session.session_id.toLowerCase().includes(normalizedSessionQuery);
+      })
+    : sessionItems;
+  const currentSession = sessionItems.find((session) => session.session_id === sessions?.current_session_id);
+  const currentTitle = currentSession ? sessionTitle(currentSession) : (assistantProfile?.agent_name || '月見八千代');
+  const chatWorkspaceStyle = embedded
+    ? undefined
+    : ({ '--chat-sidebar-width': `${sidebarWidth}px` } as CSSProperties);
+
   return (
-    <main className="app-shell chat-shell refined-chat-shell">
+    <section className={`${embedded ? '' : 'app-shell '}chat-shell refined-chat-shell open-chat-shell${embedded ? ' embedded-chat-shell' : ''}`}>
       {notice ? (
         <div className={`chat-toast ${notice.kind}`} role="status">
           <strong>{notice.title}</strong>
@@ -450,111 +665,202 @@ export function ChatView() {
           <button type="button" aria-label="关闭提示" onClick={() => setNotice(null)}>×</button>
         </div>
       ) : null}
-      <header className="chat-topbar">
-        <div className="chat-title-block">
-          <h1>Yachiyo</h1>
-          <p>本地会话</p>
-        </div>
-        <div className="chat-toolbar">
-          <select
-            className="session-select"
-            value={sessions?.current_session_id || ''}
-            onChange={(event) => void switchSession(event.target.value)}
-            disabled={!sessions?.sessions?.length}
-            title="切换会话"
-          >
-            {sessions?.sessions?.length ? sessions.sessions.map((session) => (
-              <option key={session.session_id} value={session.session_id}>
-                {sessionLabel(session)}
-              </option>
-            )) : <option value="">无对话</option>}
-          </select>
-          <span className="executor-badge">{executorLabel(executor)}</span>
-          <button type="button" className="ghost-button" onClick={() => void openAppView('main')}>主控台</button>
-          <button type="button" className="ghost-button" onClick={() => void cancelProcessing()} disabled={!isProcessing}>停止</button>
-          <button type="button" className="ghost-button" onClick={() => void clearSession()}>新对话</button>
-          <button type="button" className="ghost-button danger-action" onClick={() => void deleteSession()} disabled={!sessions?.sessions?.length}>删除</button>
-        </div>
-      </header>
 
-      <section className="chat-list refined-chat-list" ref={listRef} onClick={handleMessageListClick} onScroll={handleScroll}>
-        {messages.length === 0 ? <div className="empty-state">发送消息开始对话</div> : null}
-        {messages.map((message, index) => (
-          <MessageBubble
-            copied={copiedMessageId === message.id}
-            displayContent={displayMessageText(message, renderStateRef.current)}
-            key={message.id || index}
-            message={message}
-            onCopy={() => void copyMessage(message)}
+      <div
+        className={`chat-layout hy-chat-workspace${embedded ? '' : ' resizable-chat-workspace'}`}
+        style={chatWorkspaceStyle}
+      >
+        <aside className="chat-sidebar hy-chat-sessions" aria-label="会话列表">
+          <div className="chat-sidebar-header hy-chat-sessions-head">
+            <div className="chat-sidebar-title">会话列表</div>
+            <input
+              type="search"
+              className="chat-search"
+              value={sessionQuery}
+              onChange={(event) => setSessionQuery(event.target.value)}
+              placeholder="搜索会话..."
+              aria-label="搜索会话"
+            />
+          </div>
+          <div className="chat-list hy-chat-session-list">
+            {visibleSessions.length ? visibleSessions.map((session) => (
+              <button
+                type="button"
+                className={`chat-item ${session.session_id === sessions?.current_session_id ? 'active' : ''}`}
+                key={session.session_id}
+                onClick={() => void switchSession(session.session_id)}
+              >
+                <span className="chat-item-avatar">{avatarNode(assistantProfile?.agent_avatar_url, assistantProfile?.agent_name || 'Yachiyo', '月', assistantProfileLoading)}</span>
+                <span className="chat-item-info">
+                  <strong className="chat-item-name">{sessionTitle(session)}</strong>
+                  <span className="chat-item-preview">{sessionPreview(session)}</span>
+                </span>
+                <span className="chat-item-time">
+                  {session.session_id === sessions?.current_session_id ? '当前' : `${session.message_count || 0} 条`}
+                </span>
+              </button>
+            )) : (
+              <div className="empty-state inline-empty">
+                {sessionItems.length ? '无匹配会话' : '暂无对话'}
+              </div>
+            )}
+          </div>
+        </aside>
+
+        {embedded ? null : (
+          <div
+            className="chat-sidebar-resizer"
+            role="separator"
+            aria-label="调整会话列表宽度"
+            aria-orientation="vertical"
+            aria-valuemin={CHAT_SIDEBAR_MIN_WIDTH}
+            aria-valuemax={sidebarMaxWidth}
+            aria-valuenow={sidebarWidth}
+            tabIndex={0}
+            title="拖动调整会话列表宽度"
+            onKeyDown={handleSidebarResizerKeyDown}
+            onPointerDown={startSidebarResize}
           />
-        ))}
-      </section>
+        )}
 
-      <form className="composer refined-composer" onSubmit={submit}>
-        <div className="composer-body">
-          {attachments.length ? (
-            <div className="composer-attachments" aria-label="已附加图片">
-              {attachments.map((attachment) => (
-                <figure className="composer-attachment" key={attachment.id}>
-                  <img src={attachment.data_url} alt={attachment.name} />
-                  <figcaption>{attachment.name}</figcaption>
-                  <button
-                    type="button"
-                    aria-label={`移除 ${attachment.name}`}
-                    onClick={() => removeAttachment(attachment.id)}
-                  >
-                    ×
-                  </button>
-                </figure>
+        <section className="chat-main hy-chat-mainpane">
+          <header className="chat-header">
+            <div className="chat-header-info">
+              <div className="chat-header-avatar">{avatarNode(assistantProfile?.agent_avatar_url, assistantProfile?.agent_name || 'Yachiyo', '月', assistantProfileLoading)}</div>
+              <div>
+                <div className="chat-header-name">{currentTitle}</div>
+                <div className="chat-header-status">
+                  <div className={`status-dot ${isProcessing ? 'processing' : 'completed'}`} />
+                  <span>{isProcessing ? '处理中 · 本机 Bridge' : `${status} · ${executorLabel(executor)}`}</span>
+                </div>
+              </div>
+            </div>
+            <div className="chat-header-actions">
+              {embedded ? null : (
+                <button type="button" className="chat-action-btn" title="主控台" aria-label="打开主控台" onClick={() => void openAppView('main')}>⌂</button>
+              )}
+              <button
+                type="button"
+                className="chat-action-btn"
+                title={imageInputHelpText(executor)}
+                aria-label="附加图片"
+                disabled={isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                🖼
+              </button>
+              <button type="button" className="chat-action-btn" title="停止生成" aria-label="停止生成" onClick={() => void cancelProcessing()} disabled={!isProcessing}>■</button>
+              <button type="button" className="chat-action-btn" title="新对话" aria-label="新对话" onClick={() => void clearSession()}>＋</button>
+              <button type="button" className="chat-action-btn danger-action" title="删除对话" aria-label="删除对话" onClick={() => void deleteSession()} disabled={!sessions?.sessions?.length}>×</button>
+            </div>
+          </header>
+
+          <section className="chat-messages refined-chat-list" ref={listRef} onClick={handleMessageListClick} onScroll={handleScroll}>
+            {!messagesLoaded ? (
+              <div className="chat-loading-state">
+                <div className="chat-loading-dots">
+                  <span /><span /><span />
+                </div>
+                <div className="chat-loading-text">正在加载对话…</div>
+              </div>
+            ) : messages.length === 0 ? (
+              <div className="empty-state">发送消息开始对话</div>
+            ) : null}
+            <div style={messagesVisible ? undefined : { visibility: 'hidden' }}>
+              {messages.map((message, index) => (
+                <MessageBubble
+                  assistantProfile={assistantProfile}
+                  assistantProfileLoading={assistantProfileLoading}
+                  copied={copiedMessageId === message.id}
+                  displayContent={displayMessageText(message, renderStateRef.current)}
+                  key={message.id || index}
+                  message={message}
+                  onCopy={() => void copyMessage(message)}
+                />
               ))}
             </div>
-          ) : null}
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onCompositionEnd={() => {
-              composerComposingRef.current = false;
-            }}
-            onCompositionStart={() => {
-              composerComposingRef.current = true;
-            }}
-            onKeyDown={handleComposerKeyDown}
-            onPaste={(event) => void handlePaste(event)}
-            placeholder="输入消息，或直接粘贴图片..."
-            disabled={isSending}
-            rows={1}
-          />
-        </div>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          hidden
-          onChange={(event) => {
-            const files = Array.from(event.target.files || []);
-            event.target.value = '';
-            void addImageFiles(files);
-          }}
-        />
-        <button
-          type="button"
-          className="composer-attach-button"
-          disabled={isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS}
-          title={imageInputHelpText(executor)}
-          onClick={() => fileInputRef.current?.click()}
-        >
-          图片
-        </button>
-        <button type="submit" disabled={isSending || (!input.trim() && attachments.length === 0)}>发送</button>
-      </form>
-      <footer className="status-line refined-status-line">{status}</footer>
-    </main>
+          </section>
+
+          <form className="chat-input-area composer refined-composer" onSubmit={submit}>
+            <div className="chat-input-wrapper">
+              <div className="composer-body">
+                {attachments.length ? (
+                  <div className="composer-attachments" aria-label="已附加图片">
+                    {attachments.map((attachment) => (
+                      <figure className="composer-attachment" key={attachment.id}>
+                        <img src={attachment.data_url} alt={attachment.name} />
+                        <figcaption>{attachment.name}</figcaption>
+                        <button
+                          type="button"
+                          aria-label={`移除 ${attachment.name}`}
+                          onClick={() => removeAttachment(attachment.id)}
+                        >
+                          ×
+                        </button>
+                      </figure>
+                    ))}
+                  </div>
+                ) : null}
+                <textarea
+                  className="chat-input"
+                  ref={inputRef}
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onCompositionEnd={() => {
+                    composerComposingRef.current = false;
+                  }}
+                  onCompositionStart={() => {
+                    composerComposingRef.current = true;
+                  }}
+                  onKeyDown={handleComposerKeyDown}
+                  onPaste={(event) => void handlePaste(event)}
+                  placeholder="输入消息..."
+                  disabled={isSending}
+                  rows={1}
+                />
+              </div>
+              <button
+                type="button"
+                className="chat-attach-btn"
+                disabled={isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS}
+                title={imageInputHelpText(executor)}
+                aria-label="附加图片"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                🖼
+              </button>
+              <button
+                type="submit"
+                className="chat-send-btn neon-glow"
+                disabled={isSending || (!input.trim() && attachments.length === 0)}
+                aria-label="发送消息"
+              >
+                ↑
+              </button>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(event) => {
+                const files = Array.from(event.target.files || []);
+                event.target.value = '';
+                void addImageFiles(files);
+              }}
+            />
+          </form>
+          <footer className="status-line refined-status-line">{status}</footer>
+        </section>
+      </div>
+    </section>
   );
 }
 
-function MessageBubble({ copied, displayContent, message, onCopy }: {
+function MessageBubble({ assistantProfile, assistantProfileLoading, copied, displayContent, message, onCopy }: {
+  assistantProfile: AssistantProfilePayload | null;
+  assistantProfileLoading: boolean;
   copied: boolean;
   displayContent: string;
   message: ChatMessage;
@@ -570,40 +876,45 @@ function MessageBubble({ copied, displayContent, message, onCopy }: {
         : '';
   const isProcessingEmpty = role === 'assistant' && message.status === 'processing' && !displayContent;
   return (
-    <article className={`chat-bubble refined-message ${role} ${statusClass}`}>
-      <div className="message-header">
-        <span>{roleLabel(role)}{message.status === 'pending' ? ' · 等待中' : ''}</span>
-        <button
-          className={`message-copy-button ${copied ? 'copied' : ''}`}
-          type="button"
-          title={copied ? '已复制' : '复制内容'}
-          aria-label={copied ? '已复制' : '复制内容'}
-          onClick={onCopy}
-        >
-          {copied ? '✓' : '⧉'}
-        </button>
-      </div>
-      {isProcessingEmpty ? (
-        <TypingIndicator />
-      ) : (
-        <div className="message-content markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(displayContent) }} />
-      )}
-      {message.attachments?.length ? (
-        <div className="message-attachments">
-          {message.attachments.map((attachment) => (
-            <ImageAttachmentViewer attachment={attachment} key={attachment.id || attachment.name} />
-          ))}
+    <article className={`message message--${messageVisualRole(role)} refined-message ${role} ${statusClass}`}>
+      <div className="message-avatar">{messageAvatar(role, assistantProfile, assistantProfileLoading)}</div>
+      <div className="message-stack">
+        <div className="message-bubble">
+          {isProcessingEmpty ? (
+            <TypingIndicator />
+          ) : (
+            <div className="message-content markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(displayContent) }} />
+          )}
+          {message.attachments?.length ? (
+            <div className="message-attachments">
+              {message.attachments.map((attachment) => (
+                <ImageAttachmentViewer attachment={attachment} key={attachment.id || attachment.name} />
+              ))}
+            </div>
+          ) : null}
+          {message.error ? <div className="message-error">{message.error}</div> : null}
         </div>
-      ) : null}
-      {message.error ? <div className="message-error">{message.error}</div> : null}
+        <div className="message-time">
+          <span>{messageMetaText(role, message.status)}</span>
+          <button
+            className={`message-copy-button ${copied ? 'copied' : ''}`}
+            type="button"
+            title={copied ? '已复制' : '复制内容'}
+            aria-label={copied ? '已复制' : '复制内容'}
+            onClick={onCopy}
+          >
+            {copied ? '✓' : '⧉'}
+          </button>
+        </div>
+      </div>
     </article>
   );
 }
 
 function TypingIndicator() {
   return (
-    <span className="typing-indicator" aria-label="处理中">
-      <span>.</span><span>.</span><span>.</span>
+    <span className="typing-indicator loading-dots" aria-label="处理中">
+      <span className="loading-dot" /><span className="loading-dot" /><span className="loading-dot" />
     </span>
   );
 }
@@ -647,6 +958,34 @@ function roleLabel(role: string) {
   return '系统';
 }
 
+function messageVisualRole(role: string) {
+  if (role === 'user') return 'user';
+  if (role === 'assistant') return 'agent';
+  return 'system';
+}
+
+function avatarNode(url: string | undefined, label: string, fallback: string, loading = false): ReactNode {
+  if (loading) return <span className="chat-avatar-loading" aria-hidden="true" />;
+  return url ? <img src={url} alt={label} /> : fallback;
+}
+
+function messageAvatar(role: string, profile: AssistantProfilePayload | null, profileLoading = false) {
+  if (role === 'user') return avatarNode(profile?.user_avatar_url, '你', '你', profileLoading);
+  if (role === 'assistant') return avatarNode(profile?.agent_avatar_url, profile?.agent_name || 'Yachiyo', '月', profileLoading);
+  return 'i';
+}
+
+function messageMetaText(role: string, status?: string) {
+  const statusText = status === 'pending'
+    ? ' · 等待中'
+    : status === 'processing'
+      ? ' · 输入中'
+      : status === 'failed'
+        ? ' · 失败'
+        : '';
+  return `${roleLabel(role)}${statusText}`;
+}
+
 function executorLabel(executor: ExecutorPayload | null) {
   if (!executor?.available) return '—';
   return executor.executor === 'HermesExecutor' ? 'Hermes' : '模拟';
@@ -667,9 +1006,13 @@ function imageInputHelpText(executor: ExecutorPayload | null) {
   return imageInput.reason || imageInput.label || '附加图片';
 }
 
-function sessionLabel(session: SessionItem) {
-  const title = session.title || session.session_id.slice(0, 8);
-  return `${title} (${session.message_count || 0})`;
+function sessionTitle(session: SessionItem) {
+  return session.title || session.session_id.slice(0, 8);
+}
+
+function sessionPreview(session: SessionItem) {
+  if (!session.message_count) return '新的月夜会话';
+  return `共 ${session.message_count} 条消息`;
 }
 
 function withResolvedAttachmentUrls(messages: ChatMessage[], baseUrl: string): ChatMessage[] {
@@ -736,6 +1079,13 @@ function shouldContinueTyping(states: Map<string, RenderState>) {
 
 function isNearBottom(container: HTMLDivElement) {
   return container.scrollHeight - container.scrollTop - container.clientHeight <= SCROLL_BOTTOM_THRESHOLD;
+}
+
+function responsiveChatSidebarMaxWidth() {
+  if (typeof window === 'undefined') return CHAT_SIDEBAR_BASE_MAX_WIDTH;
+  return window.innerWidth >= CHAT_WIDE_VIEWPORT_WIDTH
+    ? CHAT_SIDEBAR_WIDE_MAX_WIDTH
+    : CHAT_SIDEBAR_BASE_MAX_WIDTH;
 }
 
 function clipboardImageFiles(data: DataTransfer | null) {

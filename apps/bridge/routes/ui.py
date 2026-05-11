@@ -567,14 +567,27 @@ def _clamp_float(value: float, lower: float, upper: float) -> float:
     return min(max(value, lower), upper)
 
 
-def _bubble_avatar_url(config: Any) -> str:
-    avatar_path = Path(str(getattr(config, "avatar_path", "") or DEFAULT_BUBBLE_AVATAR_PATH)).expanduser()
+def _avatar_url_from_path(path_value: str, *, fallback: bool = True) -> str:
+    raw_path = str(path_value or "").strip()
+    if not raw_path and not fallback:
+        return ""
+    avatar_path = Path(raw_path or str(DEFAULT_BUBBLE_AVATAR_PATH)).expanduser()
     if not avatar_path.exists():
+        if not fallback:
+            return ""
         avatar_path = DEFAULT_BUBBLE_AVATAR_PATH
     try:
         return data_uri(avatar_path)
     except Exception:
-        return data_uri(DEFAULT_BUBBLE_AVATAR_PATH)
+        return data_uri(DEFAULT_BUBBLE_AVATAR_PATH) if fallback else ""
+
+
+def _bubble_avatar_url(config: Any) -> str:
+    assistant = getattr(config, "assistant", None)
+    avatar_path = getattr(assistant, "agent_avatar_path", "") if assistant is not None else ""
+    if not avatar_path:
+        avatar_path = getattr(config, "avatar_path", "")
+    return _avatar_url_from_path(str(avatar_path or ""), fallback=True)
 
 
 def _launcher_proactive_service(runtime: Any, mode_id: str, mode_config: Any) -> ProactiveDesktopService:
@@ -694,6 +707,10 @@ def _live2d_renderer_payload(app_config: Any, resource: dict[str, Any]) -> dict[
         "reason": reason,
         "scale": getattr(live2d, "scale", 1.0),
         "mouse_follow_enabled": getattr(live2d, "mouse_follow_enabled", True),
+        "render_quality_preset": getattr(live2d, "render_quality_preset", "balanced"),
+        "render_fps": getattr(live2d, "render_fps", 24),
+        "render_resolution": getattr(live2d, "render_resolution", 1.25),
+        "hit_region_precision": getattr(live2d, "hit_region_precision", "medium"),
         "idle_motion_group": getattr(live2d, "idle_motion_group", "Idle"),
         "enable_expressions": getattr(live2d, "enable_expressions", False),
         "enable_physics": getattr(live2d, "enable_physics", False),
@@ -849,6 +866,10 @@ async def get_launcher_view(mode: str = "bubble") -> dict[str, Any]:
             "position_anchor": getattr(live2d_config, "position_anchor", "right_bottom"),
             "scale": getattr(live2d_config, "scale", 1.0),
             "mouse_follow_enabled": getattr(live2d_config, "mouse_follow_enabled", True),
+            "render_quality_preset": getattr(live2d_config, "render_quality_preset", "balanced"),
+            "render_fps": getattr(live2d_config, "render_fps", 24),
+            "render_resolution": getattr(live2d_config, "render_resolution", 1.25),
+            "hit_region_precision": getattr(live2d_config, "hit_region_precision", "medium"),
             "preview_url": _live2d_preview_url(live2d_config),
             "resource": resource,
             "renderer": _live2d_renderer_payload(runtime.config, resource),
@@ -863,7 +884,7 @@ async def get_launcher_view(mode: str = "bubble") -> dict[str, Any]:
             "show_unread_dot": bubble_config.show_unread_dot,
             "auto_hide": bubble_config.auto_hide,
             "opacity": bubble_config.opacity,
-            "avatar_url": _bubble_avatar_url(bubble_config),
+            "avatar_url": _bubble_avatar_url(runtime.config),
             "suppress_status_dot": False,
         }
 
@@ -921,14 +942,13 @@ async def acknowledge_launcher(request: LauncherAckRequest) -> dict[str, Any]:
     tracker = _launcher_notifications.setdefault(mode_id, LauncherNotificationTracker())
     tracker.acknowledge(chat)
     service = _launcher_proactive_services.get((mode_id, id(runtime)))
-    session_id = ""
-    if service is not None:
+    session_id = str(chat.get("session_id") or "")
+    source = "chat"
+    if service is not None and getattr(service, "_attention_task_id", None):
         service.acknowledge()
         session_id = service.session_id
-    else:
-        chat_session = get_proactive_chat_session(runtime)
-        session_id = str(getattr(chat_session, "session_id", "") or "")
-    return {"ok": True, "mode": mode_id, "session_id": session_id}
+        source = "proactive"
+    return {"ok": True, "mode": mode_id, "session_id": session_id, "source": source}
 
 
 @router.post("/proactive/test")

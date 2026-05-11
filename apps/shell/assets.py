@@ -44,6 +44,11 @@ def get_user_tts_assets_dir() -> Path:
     return get_yachiyo_workspace_dir() / "assets" / "tts"
 
 
+def get_user_avatar_assets_dir() -> Path:
+    """Return the default user-scoped avatar import directory."""
+    return get_yachiyo_workspace_dir() / "assets" / "avatars"
+
+
 def iter_live2d_candidate_dirs(root: str | Path | None = None) -> Iterator[Path]:
     """Yield candidate directories under the user asset root for auto discovery."""
     resolved_root = Path(root or get_user_live2d_assets_dir()).expanduser()

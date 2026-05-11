@@ -13,6 +13,28 @@ def test_bridge_endpoint_prefers_electron_env_url(monkeypatch):
     assert endpoint == ("127.0.0.1", 49321)
 
 
+def test_bridge_endpoint_rejects_packaged_default_in_source_backend(monkeypatch):
+    monkeypatch.setenv("HERMES_YACHIYO_BRIDGE_URL", "http://127.0.0.1:18420")
+    monkeypatch.setattr("apps.desktop_backend.app._running_from_packaged_backend", lambda: False)
+
+    endpoint = _bridge_endpoint_from_env(
+        SimpleNamespace(bridge_host="127.0.0.1", bridge_port=8420)
+    )
+
+    assert endpoint == ("127.0.0.1", 8420)
+
+
+def test_bridge_endpoint_allows_packaged_default_in_frozen_backend(monkeypatch):
+    monkeypatch.setenv("HERMES_YACHIYO_BRIDGE_URL", "http://127.0.0.1:18420")
+    monkeypatch.setattr("apps.desktop_backend.app._running_from_packaged_backend", lambda: True)
+
+    endpoint = _bridge_endpoint_from_env(
+        SimpleNamespace(bridge_host="127.0.0.1", bridge_port=8420)
+    )
+
+    assert endpoint == ("127.0.0.1", 18420)
+
+
 def test_bridge_endpoint_falls_back_to_config_for_invalid_env_url(monkeypatch):
     monkeypatch.setenv("HERMES_YACHIYO_BRIDGE_URL", "http://127.0.0.1:not-a-port")
 
