@@ -29,6 +29,8 @@ extraResources:
     to: backend/hermes-yachiyo-backend
   - from: ../../assets
     to: assets
+    filter:
+      - icon.png
 
 asarUnpack:
   - node_modules/node-pty/prebuilds/darwin-arm64/**

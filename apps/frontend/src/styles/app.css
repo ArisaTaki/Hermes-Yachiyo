@@ -10149,8 +10149,18 @@ body.electron-window .hy-traffic {
   margin: 0 auto;
 }
 
+.app-update-heading-stack {
+  min-width: 0;
+}
+
+.app-update-header .page-back-link {
+  display: flex;
+  width: max-content;
+  margin: 0 0 14px;
+}
+
 .app-update-header .hy-eyebrow {
-  margin-top: 8px;
+  margin-top: 0;
 }
 
 .app-update-header h2 {

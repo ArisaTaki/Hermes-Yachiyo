@@ -11,7 +11,6 @@ import {
   ToolsAllPage,
   WorkspacePage,
 } from './views/OpenDesignView';
-import { LauncherView } from './views/LauncherView';
 import { ROUTE_CHANGE_EVENT, currentParam, currentView } from './lib/view';
 
 const ChatView = lazy(() => import('./views/ChatView').then((module) => ({ default: module.ChatView })));
@@ -32,6 +31,9 @@ const ToolCenterView = lazy(() =>
 );
 const AppUpdateView = lazy(() =>
   import('./views/AppUpdateView').then((module) => ({ default: module.AppUpdateView })),
+);
+const LauncherView = lazy(() =>
+  import('./views/LauncherView').then((module) => ({ default: module.LauncherView })),
 );
 
 function RouteLoadingFallback() {
@@ -66,7 +68,11 @@ export function App() {
   const surface = currentParam('surface');
 
   if (view === 'bubble-menu' || ((view === 'bubble' || view === 'live2d') && surface === 'desktop')) {
-    return <LauncherView view={view} />;
+    return (
+      <Suspense fallback={null}>
+        <LauncherView view={view} />
+      </Suspense>
+    );
   }
 
   let page: ReactNode = <DashboardPage />;
@@ -85,20 +91,23 @@ export function App() {
   else if (view === 'tools-all') page = <ToolsAllPage />;
   else if (view === 'activity-all') page = <ActivityAllPage />;
 
-  const live2dKeepAlive = live2dVisited ? (
-    <div
-      key="live2d-keepalive"
-      className={view === 'live2d' ? 'hy-keepalive-page' : 'hy-keepalive-page is-hidden'}
-      aria-hidden={view !== 'live2d'}
-    >
-      <Live2DModePage active={view === 'live2d'} />
-    </div>
-  ) : null;
+  const shouldMountLive2d = live2dVisited || view === 'live2d';
 
   return (
     <OpenDesignShell activeView={view}>
-      <Suspense fallback={<RouteLoadingFallback />}>{view === 'live2d' ? live2dKeepAlive : page}</Suspense>
-      {view !== 'live2d' ? live2dKeepAlive : null}
+      {view !== 'live2d' ? (
+        <Suspense fallback={<RouteLoadingFallback />}>{page}</Suspense>
+      ) : null}
+      {shouldMountLive2d ? (
+        <Suspense fallback={view === 'live2d' ? <RouteLoadingFallback /> : null}>
+          <div
+            className={view === 'live2d' ? 'hy-keepalive-page' : 'hy-keepalive-page is-hidden'}
+            aria-hidden={view !== 'live2d'}
+          >
+            <Live2DModePage active={view === 'live2d'} />
+          </div>
+        </Suspense>
+      ) : null}
     </OpenDesignShell>
   );
 }

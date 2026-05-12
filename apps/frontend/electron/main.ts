@@ -188,15 +188,24 @@ type AppUpdateDownloadResult = {
   verified?: boolean;
   latest?: LatestReleaseMetadata;
   error?: string;
+  cancelled?: boolean;
 };
 
 type AppUpdateDownloadProgress = {
-  status: 'starting' | 'downloading' | 'verifying' | 'completed' | 'failed';
+  status: 'starting' | 'downloading' | 'verifying' | 'completed' | 'failed' | 'cancelled';
   file_name?: string;
   received_bytes?: number;
   total_bytes?: number;
   percent?: number;
   error?: string;
+};
+
+type AppUpdateDownloadTask = {
+  controller: AbortController;
+  destination?: string;
+  tmpDestination?: string;
+  fileName?: string;
+  onProgress?: (progress: AppUpdateDownloadProgress) => void;
 };
 
 type AvatarImageSelection = {
@@ -223,6 +232,9 @@ let lastUiSettings: UiSettings | null = null;
 let hasEnteredMainExperience = false;
 let backendRestartPromise: Promise<{ success: boolean; bridgeUrl?: string; error?: string }> | null = null;
 let lastDownloadedAppUpdate: AppUpdateDownloadResult | null = null;
+let activeAppUpdateDownload: AppUpdateDownloadTask | null = null;
+let appUpdateQuitConfirmed = false;
+const appUpdateCloseConfirmedWindows = new WeakSet<BrowserWindow>();
 const enforcedWindowTitles = new WeakMap<BrowserWindow, string>();
 const titleHandlersInstalled = new WeakSet<BrowserWindow>();
 const terminalSessions = new Map<string, {
@@ -405,6 +417,66 @@ function clearDownloadedAppUpdate(): void {
   } catch {}
 }
 
+class AppUpdateDownloadCancelledError extends Error {
+  constructor(message = '应用更新下载已取消') {
+    super(message);
+    this.name = 'AppUpdateDownloadCancelledError';
+  }
+}
+
+function isAppUpdateDownloadCancelledError(error: unknown): boolean {
+  return error instanceof AppUpdateDownloadCancelledError
+    || (error instanceof Error && error.name === 'AbortError');
+}
+
+function cleanupActiveAppUpdateDownloadFiles(task: AppUpdateDownloadTask): void {
+  if (task.tmpDestination) {
+    try {
+      fs.rmSync(task.tmpDestination, { force: true });
+    } catch {}
+  }
+  if (task.destination) {
+    try {
+      fs.rmSync(task.destination, { force: true });
+    } catch {}
+  }
+  clearDownloadedAppUpdate();
+}
+
+function cancelActiveAppUpdateDownload(reason = '应用更新下载已取消'): { ok: boolean; cancelled: boolean; error?: string } {
+  const task = activeAppUpdateDownload;
+  if (!task) return { ok: true, cancelled: false };
+  cleanupActiveAppUpdateDownloadFiles(task);
+  task.onProgress?.({
+    status: 'cancelled',
+    file_name: task.fileName,
+    received_bytes: 0,
+    percent: 0,
+    error: reason,
+  });
+  task.controller.abort(new AppUpdateDownloadCancelledError(reason));
+  return { ok: true, cancelled: true, error: reason };
+}
+
+function confirmCancelAppUpdateDownload(parentWindow: BrowserWindow | null, actionLabel: string): boolean {
+  if (!activeAppUpdateDownload) return true;
+  const options = {
+    type: 'warning' as const,
+    buttons: ['继续下载', actionLabel],
+    defaultId: 0,
+    cancelId: 0,
+    title: '应用更新正在下载',
+    message: '应用更新仍在下载中',
+    detail: '离开或退出会取消本次下载，并清空当前进度；下次启动会重新检查更新。',
+  };
+  const choice = parentWindow
+    ? dialog.showMessageBoxSync(parentWindow, options)
+    : dialog.showMessageBoxSync(options);
+  if (choice !== 1) return false;
+  cancelActiveAppUpdateDownload(`${actionLabel}，已取消本次更新下载`);
+  return true;
+}
+
 function appUpdateInfo(): AppUpdateInfo {
   const current = readAppBuildMetadata();
   const appBundlePath = currentAppBundlePath() || undefined;
@@ -508,9 +580,14 @@ function downloadFile(
   url: string,
   destination: string,
   onProgress?: (progress: AppUpdateDownloadProgress) => void,
+  signal?: AbortSignal,
   redirects = 5,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new AppUpdateDownloadCancelledError());
+      return;
+    }
     let parsed: URL;
     try {
       parsed = new URL(url);
@@ -519,24 +596,52 @@ function downloadFile(
       return;
     }
     const tmpDestination = `${destination}.part`;
+    let settled = false;
+    let request: ReturnType<typeof httpRequest> | null = null;
+    let output: fs.WriteStream | null = null;
+    const finish = (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', abortDownload);
+      if (error) {
+        fs.rm(tmpDestination, { force: true }, () => reject(error));
+        return;
+      }
+      resolve();
+    };
+    const abortDownload = () => {
+      const reason = signal?.reason instanceof Error
+        ? signal.reason
+        : new AppUpdateDownloadCancelledError();
+      request?.destroy(reason);
+      output?.destroy(reason);
+      finish(reason);
+    };
+    signal?.addEventListener('abort', abortDownload, { once: true });
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     onProgress?.({ status: 'starting', file_name: path.basename(destination), received_bytes: 0 });
-    const request = httpRequest(parsed, {
+    request = httpRequest(parsed, {
       headers: {
         Accept: 'application/octet-stream',
         'User-Agent': 'Hermes-Yachiyo-Updater',
       },
     }, (response) => {
+      if (signal?.aborted) {
+        response.destroy(signal.reason instanceof Error ? signal.reason : new AppUpdateDownloadCancelledError());
+        abortDownload();
+        return;
+      }
       const status = response.statusCode || 0;
       const location = response.headers.location;
       if ([301, 302, 303, 307, 308].includes(status) && location && redirects > 0) {
         response.resume();
-        downloadFile(redirectedUrl(location, parsed).toString(), destination, onProgress, redirects - 1).then(resolve, reject);
+        signal?.removeEventListener('abort', abortDownload);
+        downloadFile(redirectedUrl(location, parsed).toString(), destination, onProgress, signal, redirects - 1).then(resolve, reject);
         return;
       }
       if (status < 200 || status >= 300) {
         response.resume();
-        reject(new Error(`DMG 下载失败：HTTP ${status}`));
+        finish(new Error(`DMG 下载失败：HTTP ${status}`));
         return;
       }
       const totalBytes = Number(response.headers['content-length']) || undefined;
@@ -554,14 +659,14 @@ function downloadFile(
           callback(null, chunk);
         },
       });
-      const output = fs.createWriteStream(tmpDestination);
+      output = fs.createWriteStream(tmpDestination);
       pipeline(response, progressStream, output)
         .then(() => fs.promises.rename(tmpDestination, destination))
-        .then(() => resolve(), reject);
+        .then(() => finish(), finish);
     });
-    request.setTimeout(120000, () => request.destroy(new Error('DMG 下载超时')));
+    request.setTimeout(120000, () => request?.destroy(new Error('DMG 下载超时')));
     request.on('error', (error) => {
-      fs.rm(tmpDestination, { force: true }, () => reject(error));
+      finish(error);
     });
   });
 }
@@ -606,6 +711,9 @@ async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
 async function downloadAppUpdate(
   onProgress?: (progress: AppUpdateDownloadProgress) => void,
 ): Promise<AppUpdateDownloadResult> {
+  if (activeAppUpdateDownload) {
+    return { ok: false, error: '已有应用更新下载正在进行' };
+  }
   const check = await checkAppUpdate();
   if (!check.ok || !check.latest) {
     return { ok: false, error: check.error || '无法读取更新元数据' };
@@ -618,10 +726,20 @@ async function downloadAppUpdate(
 
   const fileName = safeDmgFileName(check.latest.dmg_name || downloadUrl, check.current.branch);
   const destination = path.join(updateDownloadsDir(), fileName);
+  const controller = new AbortController();
+  activeAppUpdateDownload = {
+    controller,
+    destination,
+    tmpDestination: `${destination}.part`,
+    fileName,
+    onProgress,
+  };
   try {
-    await downloadFile(downloadUrl, destination, onProgress);
+    await downloadFile(downloadUrl, destination, onProgress, controller.signal);
     onProgress?.({ status: 'verifying', file_name: fileName });
+    if (controller.signal.aborted) throw controller.signal.reason || new AppUpdateDownloadCancelledError();
     const actualSha256 = await sha256File(destination);
+    if (controller.signal.aborted) throw controller.signal.reason || new AppUpdateDownloadCancelledError();
     const expectedSha256 = typeof check.latest.sha256 === 'string' ? check.latest.sha256.trim().toLowerCase() : '';
     if (expectedSha256 && actualSha256.toLowerCase() !== expectedSha256) {
       await fs.promises.rm(destination, { force: true });
@@ -644,16 +762,38 @@ async function downloadAppUpdate(
     onProgress?.({ status: 'completed', file_name: fileName, percent: 100 });
     return lastDownloadedAppUpdate;
   } catch (error) {
+    const cancelled = isAppUpdateDownloadCancelledError(error);
+    if (cancelled) {
+      cleanupActiveAppUpdateDownloadFiles(activeAppUpdateDownload || { controller, destination, tmpDestination: `${destination}.part`, fileName });
+      onProgress?.({
+        status: 'cancelled',
+        file_name: fileName,
+        received_bytes: 0,
+        percent: 0,
+        error: error instanceof Error ? error.message : '应用更新下载已取消',
+      });
+      return {
+        ok: false,
+        latest: check.latest,
+        cancelled: true,
+        error: error instanceof Error ? error.message : '应用更新下载已取消',
+      };
+    }
     onProgress?.({
       status: 'failed',
       file_name: fileName,
       error: error instanceof Error ? error.message : String(error),
     });
+    try {
+      await fs.promises.rm(`${destination}.part`, { force: true });
+    } catch {}
     return {
       ok: false,
       latest: check.latest,
       error: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    if (activeAppUpdateDownload?.controller === controller) activeAppUpdateDownload = null;
   }
 }
 
@@ -719,8 +859,17 @@ function installDownloadedAppUpdate(rawPath: unknown): { success: boolean; appBu
   }
 }
 
-function iconCandidates(kind: IconKind): string[] {
-  return kind === 'tray' ? ['icon.png', 'icon.icns'] : ['icon.icns', 'icon.png'];
+function iconCandidates(kind: IconKind): string[][] {
+  if (kind === 'tray') {
+    return [
+      ['assets', 'icon.png'],
+      ['icon.icns'],
+    ];
+  }
+  return [
+    ['icon.icns'],
+    ['assets', 'icon.png'],
+  ];
 }
 
 function isLoadableIcon(candidate: string): boolean {
@@ -733,8 +882,8 @@ function isLoadableIcon(candidate: string): boolean {
 
 function appIconPath(kind: IconKind = 'window'): string | undefined {
   const preferred = iconCandidates(kind);
-  for (const name of preferred) {
-    const candidate = rootAssetPath('assets', name);
+  for (const segments of preferred) {
+    const candidate = rootAssetPath(...segments);
     if (candidate && isLoadableIcon(candidate)) return candidate;
   }
   const fallback = rootAssetPath('apps', 'shell', 'assets', 'avatars', 'yachiyo-default.jpg');
@@ -781,6 +930,7 @@ function mainWindowTitle(params: Record<string, string> = {}): string {
   if (view === 'tools') return 'Hermes-Yachiyo 工具中心';
   if (view === 'tools-all') return 'Hermes-Yachiyo 桌面工具';
   if (view === 'activity-all') return 'Hermes-Yachiyo 活动日志';
+  if (view === 'app-update') return 'Hermes-Yachiyo 应用更新';
   if (view === 'proactive-tts') return 'Hermes-Yachiyo 主动关怀语音';
   if (view === 'chat') return 'Hermes-Yachiyo 对话';
   return 'Hermes-Yachiyo 主控台';
@@ -1261,6 +1411,15 @@ function createMainWindow(
   mainWindow.on('minimize', restoreModeWindowTopPreference);
   mainWindow.on('hide', restoreModeWindowTopPreference);
   const createdWindow = mainWindow;
+  mainWindow.on('close', (event) => {
+    if (!activeAppUpdateDownload || appUpdateQuitConfirmed || appUpdateCloseConfirmedWindows.has(createdWindow)) return;
+    event.preventDefault();
+    if (!confirmCancelAppUpdateDownload(createdWindow, '关闭并取消更新')) return;
+    appUpdateCloseConfirmedWindows.add(createdWindow);
+    setTimeout(() => {
+      if (!createdWindow.isDestroyed()) createdWindow.close();
+    }, 0);
+  });
   mainWindow.on('closed', () => {
     if (mainWindow === createdWindow) mainWindow = null;
     restoreModeWindowTopPreference();
@@ -2388,9 +2547,21 @@ ipcMain.handle('hermes:restartApp', () => {
 ipcMain.handle('hermes:removeAppBundleAndQuit', () => removeCurrentAppBundleAndQuit());
 ipcMain.handle('hermes:getAppUpdateInfo', () => appUpdateInfo());
 ipcMain.handle('hermes:checkAppUpdate', () => checkAppUpdate());
-ipcMain.handle('hermes:downloadAppUpdate', (event) => downloadAppUpdate((progress) => {
-  if (!event.sender.isDestroyed()) event.sender.send('hermes:appUpdateDownloadProgress', progress);
-}));
+ipcMain.handle('hermes:downloadAppUpdate', async (event) => {
+  const sender = event.sender;
+  const cancelForDestroyedSender = () => {
+    cancelActiveAppUpdateDownload('更新页面已关闭，已取消本次更新下载');
+  };
+  sender.once('destroyed', cancelForDestroyedSender);
+  try {
+    return await downloadAppUpdate((progress) => {
+      if (!sender.isDestroyed()) sender.send('hermes:appUpdateDownloadProgress', progress);
+    });
+  } finally {
+    sender.removeListener('destroyed', cancelForDestroyedSender);
+  }
+});
+ipcMain.handle('hermes:cancelAppUpdateDownload', () => cancelActiveAppUpdateDownload('已取消本次更新下载'));
 ipcMain.handle('hermes:installAppUpdate', (_event, dmgPath: unknown) => installDownloadedAppUpdate(dmgPath));
 ipcMain.handle('hermes:restartBackend', (_event, options: unknown) => {
   const targetBridgeUrl = isRecord(options) ? options.bridgeUrl : undefined;
@@ -2518,7 +2689,14 @@ app.whenReady().then(() => {
   app.on('activate', showMainWindowFromAppActivation);
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  if (activeAppUpdateDownload && !appUpdateQuitConfirmed) {
+    event.preventDefault();
+    if (!confirmCancelAppUpdateDownload(mainWindow, '退出并取消更新')) return;
+    appUpdateQuitConfirmed = true;
+    setTimeout(() => app.quit(), 0);
+    return;
+  }
   cleanupAllTerminalSessions();
   stopBackend();
 });

@@ -16,6 +16,25 @@ DIST_DIR = ROOT / "dist" / "backend"
 BUILD_DIR = ROOT / "build" / "pyinstaller"
 ASSETS_DIR = ROOT / "apps" / "shell" / "assets"
 BRIDGE_SCRIPT = ROOT / "apps" / "core" / "hermes_stream_bridge.py"
+PYINSTALLER_HOOKS_DIR = ROOT / "packaging" / "pyinstaller_hooks"
+PYINSTALLER_EXCLUDED_MODULES = [
+    "gunicorn",
+    "httptools",
+    "uvicorn.loops.auto",
+    "uvicorn.loops.uvloop",
+    "uvicorn.protocols.http.auto",
+    "uvicorn.protocols.http.httptools_impl",
+    "uvicorn.protocols.websockets",
+    "uvicorn.protocols.websockets.auto",
+    "uvicorn.protocols.websockets.websockets_impl",
+    "uvicorn.protocols.websockets.websockets_sansio_impl",
+    "uvicorn.protocols.websockets.wsproto_impl",
+    "uvicorn.workers",
+    "uvloop",
+    "watchfiles",
+    "websockets",
+    "wsproto",
+]
 
 
 def _data_separator() -> str:
@@ -52,16 +71,18 @@ def build_backend(clean: bool = False) -> Path:
         str(BUILD_DIR),
         "--specpath",
         str(BUILD_DIR),
+        "--additional-hooks-dir",
+        str(PYINSTALLER_HOOKS_DIR),
     ]
     for data_arg in data_args:
         command.extend(["--add-data", data_arg])
+    for module_name in PYINSTALLER_EXCLUDED_MODULES:
+        command.extend(["--exclude-module", module_name])
     command.extend([
         "--hidden-import",
-        "uvicorn.loops.auto",
+        "uvicorn.loops.asyncio",
         "--hidden-import",
-        "uvicorn.protocols.http.auto",
-        "--hidden-import",
-        "uvicorn.protocols.websockets.auto",
+        "uvicorn.protocols.http.h11_impl",
         "--hidden-import",
         "uvicorn.lifespan.on",
         str(ENTRYPOINT),

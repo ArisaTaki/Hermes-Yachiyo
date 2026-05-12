@@ -105,6 +105,7 @@ export type AppUpdateDownloadResult = {
   verified?: boolean;
   latest?: LatestReleaseMetadata;
   error?: string;
+  cancelled?: boolean;
 };
 export type AppUpdateInstallResult = {
   success?: boolean;
@@ -129,6 +130,7 @@ export type AvatarImageSelection = {
 declare global {
   interface Window {
     hermesDesktop?: {
+      cancelAppUpdateDownload?: () => Promise<{ ok?: boolean; cancelled?: boolean; error?: string }>;
       chooseAvatarImage?: () => Promise<AvatarImageSelection | string | null>;
       chooseLive2DArchive?: () => Promise<string | null>;
       chooseLive2DModelDirectory?: () => Promise<string | null>;
@@ -440,6 +442,13 @@ export async function downloadAppUpdate(): Promise<AppUpdateDownloadResult> {
     return { ok: false, error: '当前环境不支持应用更新' };
   }
   return window.hermesDesktop.downloadAppUpdate();
+}
+
+export async function cancelAppUpdateDownload(): Promise<{ ok?: boolean; cancelled?: boolean; error?: string }> {
+  if (!window.hermesDesktop?.cancelAppUpdateDownload) {
+    return { ok: false, cancelled: false, error: '当前环境不支持取消应用更新下载' };
+  }
+  return window.hermesDesktop.cancelAppUpdateDownload();
 }
 
 export async function installAppUpdate(dmgPath?: string): Promise<AppUpdateInstallResult> {
