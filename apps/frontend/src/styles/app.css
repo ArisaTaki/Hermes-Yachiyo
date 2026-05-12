@@ -7231,6 +7231,11 @@ body.electron-window .hy-traffic {
   animation-delay: 600ms;
 }
 
+.hy-content .open-chat-shell .chat-bottom-anchor {
+  width: 100%;
+  height: 1px;
+}
+
 @keyframes hy-message-enter {
   from {
     opacity: 0;

@@ -88,6 +88,13 @@ _DESKTOP_SNAPSHOT_REQUEST_RE = re.compile(
 )
 
 
+def _compact_preview(value: Any, limit: int = 72) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
 def _attachment_root() -> Path:
     hermes_home = os.getenv("HERMES_HOME", os.path.expanduser("~/.hermes"))
     root = Path(hermes_home) / "yachiyo" / "attachments"
@@ -682,20 +689,23 @@ class ChatAPI:
         current_session = self._runtime.chat_session
         current_session_id = current_session.session_id
         sessions = store.list_sessions(limit=limit)
-        session_items = [
-            {
+        session_items = []
+        for session in sessions:
+            messages = store.load_messages(session.session_id, limit=240)
+            session_items.append({
                 "session_id": session.session_id,
                 "title": session.title,
                 "created_at": session.created_at,
-                "updated_at": self._session_updated_at(session.session_id, session.created_at),
+                "updated_at": self._session_updated_at(session.session_id, session.created_at, messages=messages),
                 "message_count": session.message_count,
                 "is_processing": self._session_is_processing(session.session_id),
                 "latest_activity": self._latest_activity_for_session(session.session_id),
-            }
-            for session in sessions
-        ]
+                "latest_message_preview": self._session_latest_user_turn(messages),
+                "latest_message_status": self._session_latest_status(messages),
+            })
         if not any(item["session_id"] == current_session_id for item in session_items):
             stored_current = store.get_session(current_session_id)
+            current_messages = store.load_messages(current_session_id, limit=240)
             session_items.insert(
                 0,
                 {
@@ -705,10 +715,13 @@ class ChatAPI:
                     "updated_at": self._session_updated_at(
                         current_session_id,
                         stored_current.created_at if stored_current else "",
+                        messages=current_messages,
                     ),
                     "message_count": stored_current.message_count if stored_current else 0,
                     "is_processing": self._session_is_processing(current_session_id),
                     "latest_activity": self._latest_activity_for_session(current_session_id),
+                    "latest_message_preview": self._session_latest_user_turn(current_messages),
+                    "latest_message_status": self._session_latest_status(current_messages),
                 },
             )
         return {
@@ -785,7 +798,7 @@ class ChatAPI:
             store = get_activity_store()
             return {
                 task_id: [event.to_dict() for event in events]
-                for task_id, events in store.latest_by_task(ids, limit_per_task=limit_per_task).items()
+                for task_id, events in store.latest_by_task(ids, limit_per_task=limit_per_task, key_only=True).items()
             }
         except Exception:
             logger.debug("读取任务活动事件失败", exc_info=True)
@@ -793,7 +806,7 @@ class ChatAPI:
 
     def _latest_activity_for_session(self, session_id: str) -> dict[str, Any]:
         try:
-            events = get_activity_store().list_events(session_id=session_id, limit=1)
+            events = get_activity_store().list_events(session_id=session_id, limit=1, key_only=True)
             return events[0].to_dict() if events else {}
         except Exception:
             logger.debug("读取会话最新活动失败", exc_info=True)
@@ -805,27 +818,35 @@ class ChatAPI:
                 continue
             if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
                 return True
-        from apps.core.chat_store import get_chat_store
-
-        try:
-            for msg in get_chat_store().load_messages(session_id, limit=240):
-                if msg.status in (MessageStatus.PENDING.value, MessageStatus.PROCESSING.value):
-                    return True
-        except Exception:
-            logger.debug("读取会话处理中状态失败", exc_info=True)
         return False
 
-    def _session_updated_at(self, session_id: str, fallback: str = "") -> str:
+    def _session_updated_at(self, session_id: str, fallback: str = "", messages: list[Any] | None = None) -> str:
         from apps.core.chat_store import get_chat_store
 
         try:
-            messages = get_chat_store().load_messages(session_id, limit=240)
+            messages = messages if messages is not None else get_chat_store().load_messages(session_id, limit=240)
         except Exception:
             return fallback
         latest = messages[-1].created_at if messages else fallback
         activity = self._latest_activity_for_session(session_id)
         activity_time = str(activity.get("created_at") or "")
         return max([value for value in (latest, activity_time, fallback) if value] or [""])
+
+    def _session_latest_user_turn(self, messages: list[Any]) -> str:
+        for msg in reversed(messages):
+            if getattr(msg, "role", "") == MessageRole.USER.value and str(getattr(msg, "content", "") or "").strip():
+                return _compact_preview(getattr(msg, "content", ""))
+        for msg in reversed(messages):
+            if str(getattr(msg, "content", "") or "").strip():
+                return _compact_preview(getattr(msg, "content", ""))
+        return ""
+
+    def _session_latest_status(self, messages: list[Any]) -> str:
+        for msg in reversed(messages):
+            status = str(getattr(msg, "status", "") or "")
+            if status:
+                return status
+        return ""
 
     def delete_current_session(self) -> Dict[str, Any]:
         """删除当前会话，并切换到剩余最近会话或新建空会话。"""
@@ -905,7 +926,17 @@ class ChatAPI:
             task = self._state.get_task(task_id)
             if task is not None and task.status == TaskStatus.CANCELLED:
                 try:
-                    get_activity_store().finalize_task_events(task_id, status="cancelled")
+                    activity_store = get_activity_store()
+                    activity_store.finalize_task_events(task_id, status="cancelled")
+                    activity_store.record_event(
+                        session_id=self._session.session_id,
+                        task_id=task_id,
+                        tool_name="hermes",
+                        phase="task_cancelled",
+                        title="Yachiyo 已停止",
+                        detail=getattr(task, "description", "") or "",
+                        status="cancelled",
+                    )
                 except Exception:
                     logger.debug("收尾取消任务活动事件失败: %s", task_id, exc_info=True)
                 error = "任务已取消"

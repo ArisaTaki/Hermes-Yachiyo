@@ -24,6 +24,7 @@ def list_activity_events(
         session_id=str(session_id or "").strip(),
         task_id=str(task_id or "").strip(),
         limit=limit,
+        key_only=True,
     )
     items = [event.to_dict() for event in events]
     tools = sorted({item["tool_name"] for item in items if item.get("tool_name")})

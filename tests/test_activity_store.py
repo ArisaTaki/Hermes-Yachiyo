@@ -55,3 +55,20 @@ def test_activity_store_finalizes_in_flight_task_events(tmp_path):
         assert [event.status for event in events].count("failed") == 1
     finally:
         store.close()
+
+
+def test_activity_store_key_only_filters_noisy_reasoning(tmp_path):
+    db_path = tmp_path / "activity.db"
+    store = ActivityStore(db_path=str(db_path))
+    try:
+        store.record_event(task_id="t1", phase="reasoning", title="Hermes 正在推理", status="running")
+        store.record_event(task_id="t1", phase="reasoning", title="Hermes 已整理推理", status="completed")
+        store.record_event(task_id="t1", phase="tool_progress", title="正在执行终端", status="running")
+        store.record_event(task_id="t1", phase="task_complete", title="Yachiyo 回复完成", status="completed")
+
+        events = store.list_events(task_id="t1", key_only=True)
+
+        assert len(events) == 1
+        assert events[0].phase == "task_complete"
+    finally:
+        store.close()

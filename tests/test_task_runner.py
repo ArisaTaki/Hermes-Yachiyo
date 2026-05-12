@@ -2,7 +2,9 @@ import asyncio
 
 import pytest
 
+import apps.core.activity_store as activity_store_mod
 import apps.core.chat_store as chat_store_mod
+from apps.core.activity_store import ActivityStore
 from apps.core.chat_store import ChatStore
 from apps.core.state import AppState
 from apps.core.task_runner import TaskRunner
@@ -33,7 +35,9 @@ async def test_stop_awaits_in_progress_task_cancellation():
 @pytest.mark.asyncio
 async def test_task_runner_writes_final_reply_to_original_background_session(tmp_path, monkeypatch):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
     monkeypatch.setattr(chat_store_mod, "get_chat_store", lambda: store)
+    monkeypatch.setattr(activity_store_mod, "get_activity_store", lambda: activity_store)
     state = AppState()
     task = state.create_task(
         task_type=TaskType.GENERAL,
@@ -52,5 +56,8 @@ async def test_task_runner_writes_final_reply_to_original_background_session(tmp
         assert assistant.task_id == task.task_id
         assert assistant.status == "completed"
         assert assistant.content == "done:后台任务"
+        activity_titles = [event.title for event in activity_store.latest_for_task(task.task_id, limit=5)]
+        assert "Yachiyo 回复完成" in activity_titles
     finally:
+        activity_store.close()
         store.close()

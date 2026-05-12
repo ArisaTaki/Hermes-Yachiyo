@@ -146,6 +146,7 @@ class TaskRunner:
             # ① 标记 RUNNING（在 executor.run() 开始前，体现"正在处理"）
             self._state.update_task_status(task_id, TaskStatus.RUNNING, progress_label="正在启动 Agent")
             self._sync_task_message(task_id)
+            self._record_task_activity(task_id, "task_start", "Yachiyo 开始处理", "running")
             logger.info("任务开始执行: %s [%s]", task_id, type(self._executor).__name__)
 
             # ② 委托给执行策略（模拟 or Hermes）
@@ -160,6 +161,7 @@ class TaskRunner:
             )
             self._sync_task_message(task_id)
             self._finalize_task_activity(task_id, "completed")
+            self._record_task_activity(task_id, "task_complete", "Yachiyo 回复完成", "completed")
             logger.info("任务已完成: %s", task_id)
 
         except asyncio.CancelledError:
@@ -192,6 +194,7 @@ class TaskRunner:
                 )
                 self._sync_task_message(task_id)
                 self._finalize_task_activity(task_id, "failed")
+                self._record_task_activity(task_id, "task_failed", "Yachiyo 回复失败", "failed")
             except Exception:
                 pass
 
@@ -245,3 +248,23 @@ class TaskRunner:
             get_activity_store().finalize_task_events(task_id, status=status)
         except Exception:
             logger.debug("收尾任务活动事件失败: %s", task_id, exc_info=True)
+
+    def _record_task_activity(self, task_id: str, phase: str, title: str, status: str) -> None:
+        """Record a compact milestone for dashboard activity."""
+        task = self._state.get_task(task_id)
+        if task is None:
+            return
+        try:
+            from apps.core.activity_store import get_activity_store
+
+            get_activity_store().record_event(
+                session_id=str(getattr(task, "chat_session_id", "") or ""),
+                task_id=task_id,
+                tool_name="hermes",
+                phase=phase,
+                title=title,
+                detail=str(getattr(task, "description", "") or ""),
+                status=status,
+            )
+        except Exception:
+            logger.debug("记录任务活动节点失败: %s", task_id, exc_info=True)

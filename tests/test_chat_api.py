@@ -90,6 +90,7 @@ def test_get_messages_and_sessions_include_activity_events(tmp_path, monkeypatch
     api, runtime, store = _make_api(tmp_path)
     activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
     monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
     try:
         result = api.send_message("跑一下脚本")
         task_id = result["task_id"]
@@ -120,8 +121,32 @@ def test_get_messages_and_sessions_include_activity_events(tmp_path, monkeypatch
         assert current["is_processing"] is True
         assert current["latest_activity"]["tool_name"] == "terminal"
         assert current["latest_activity"]["title"] == "正在运行脚本"
+        assert current["latest_message_preview"] == "跑一下脚本"
+        assert current["latest_message_status"] == "processing"
     finally:
         activity_store.close()
+        store.close()
+
+
+def test_list_sessions_ignores_stale_stored_processing_without_live_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
+    try:
+        session_id = runtime.chat_session.session_id
+        runtime.chat_session.add_user_message("已经完成的问题")
+        runtime.chat_session.upsert_assistant_message(
+            task_id="stale-task",
+            content="旧的处理中占位",
+            status=MessageStatus.PROCESSING,
+        )
+
+        sessions = api.list_sessions()["sessions"]
+        current = next(item for item in sessions if item["session_id"] == session_id)
+
+        assert current["is_processing"] is False
+        assert current["latest_message_preview"] == "已经完成的问题"
+        assert current["latest_message_status"] == "processing"
+    finally:
         store.close()
 
 

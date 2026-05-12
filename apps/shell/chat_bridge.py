@@ -21,7 +21,6 @@ import re
 from typing import TYPE_CHECKING, Any, Dict
 
 from apps.core.activity_store import get_activity_store
-from apps.core.chat_session import MessageStatus
 from apps.shell.chat_api import ChatAPI
 from packages.protocol.enums import TaskStatus
 
@@ -149,7 +148,7 @@ def _session_activity(messages: list[Any], fallback: str = "") -> Dict[str, str]
 
 def _latest_activity_for_session(session_id: str) -> dict[str, Any]:
     try:
-        events = get_activity_store().list_events(session_id=session_id, limit=1)
+        events = get_activity_store().list_events(session_id=session_id, limit=1, key_only=True)
         return events[0].to_dict() if events else {}
     except Exception:
         logger.debug("读取最近活动失败: %s", session_id, exc_info=True)
@@ -161,9 +160,6 @@ def _session_is_processing(runtime: "HermesRuntime", session_id: str, messages: 
         if getattr(task, "chat_session_id", None) != session_id:
             continue
         if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
-            return True
-    for message in messages:
-        if _message_field(message, "status") in (MessageStatus.PENDING.value, MessageStatus.PROCESSING.value):
             return True
     return False
 

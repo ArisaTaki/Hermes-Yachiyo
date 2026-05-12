@@ -24,6 +24,17 @@ _DB_FILENAME = "activity.db"
 _DETAIL_MAX_CHARS = 600
 _TITLE_MAX_CHARS = 140
 _METADATA_MAX_CHARS = 4000
+_NOISY_PHASES = ("thinking", "reasoning", "tool_progress")
+_KEY_PHASES = (
+    "task_start",
+    "task_complete",
+    "task_failed",
+    "task_cancelled",
+    "tool_start",
+    "tool_complete",
+    "subagent",
+)
+_TERMINAL_STATUSES = ("completed", "success", "failed", "error", "cancelled")
 _SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(
         r"(?i)\b(api[_-]?key|token|password|passwd|secret|authorization|bearer)\b"
@@ -227,6 +238,7 @@ class ActivityStore:
         tool: str = "",
         session_id: str = "",
         task_id: str = "",
+        key_only: bool = False,
     ) -> list[StoredActivity]:
         clauses: list[str] = []
         args: list[Any] = []
@@ -246,6 +258,17 @@ class ActivityStore:
         if task_id:
             clauses.append("task_id = ?")
             args.append(task_id)
+        if key_only:
+            phase_placeholders = ", ".join("?" for _ in _KEY_PHASES)
+            status_placeholders = ", ".join("?" for _ in _TERMINAL_STATUSES)
+            noisy_placeholders = ", ".join("?" for _ in _NOISY_PHASES)
+            clauses.append(
+                f"(phase IN ({phase_placeholders}) "
+                f"OR (status IN ({status_placeholders}) AND phase NOT IN ({noisy_placeholders})))"
+            )
+            args.extend(_KEY_PHASES)
+            args.extend(_TERMINAL_STATUSES)
+            args.extend(_NOISY_PHASES)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         limit = max(1, min(int(limit or 50), 200))
         with self._lock:
@@ -262,14 +285,20 @@ class ActivityStore:
             ).fetchall()
         return [_activity_from_row(row) for row in rows]
 
-    def latest_for_task(self, task_id: str, limit: int = 5) -> list[StoredActivity]:
-        return self.list_events(task_id=task_id, limit=limit)
+    def latest_for_task(self, task_id: str, limit: int = 5, *, key_only: bool = False) -> list[StoredActivity]:
+        return self.list_events(task_id=task_id, limit=limit, key_only=key_only)
 
-    def latest_by_task(self, task_ids: list[str], limit_per_task: int = 5) -> dict[str, list[StoredActivity]]:
+    def latest_by_task(
+        self,
+        task_ids: list[str],
+        limit_per_task: int = 5,
+        *,
+        key_only: bool = False,
+    ) -> dict[str, list[StoredActivity]]:
         result: dict[str, list[StoredActivity]] = {}
         for task_id in task_ids:
             if task_id:
-                result[task_id] = self.latest_for_task(task_id, limit_per_task)
+                result[task_id] = self.latest_for_task(task_id, limit_per_task, key_only=key_only)
         return result
 
     def finalize_task_events(self, task_id: str, *, status: str = "completed") -> int:
@@ -278,7 +307,7 @@ class ActivityStore:
         if not task_id:
             return 0
         terminal_status = redact_sensitive_text(status or "completed", limit=40)
-        if terminal_status not in {"completed", "success", "failed", "error", "cancelled"}:
+        if terminal_status not in set(_TERMINAL_STATUSES):
             terminal_status = "completed"
         with self._lock:
             cursor = self._get_conn().execute(

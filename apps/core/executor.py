@@ -1195,14 +1195,15 @@ class HermesExecutor(ExecutionStrategy):
                 "duration_seconds": event.get("duration_seconds"),
                 "metadata": event.get("metadata") if isinstance(event.get("metadata"), dict) else {},
             }
+            label = activity_payload["title"] or activity_payload["detail"]
             try:
-                from apps.core.activity_store import get_activity_store
+                if _is_key_activity_event(activity_payload):
+                    from apps.core.activity_store import get_activity_store
 
-                stored = get_activity_store().record_event(**activity_payload)
-                label = stored.title or stored.detail
+                    stored = get_activity_store().record_event(**activity_payload)
+                    label = stored.title or stored.detail
             except Exception:
                 logger.debug("Hermes 活动事件持久化失败", exc_info=True)
-                label = activity_payload["title"] or activity_payload["detail"]
             if label:
                 task.progress_label = label
                 task.progress_updated_at = datetime.now(timezone.utc)
@@ -1285,6 +1286,24 @@ class HermesExecutor(ExecutionStrategy):
         except Exception:
             logger.debug("无法为任务加载指定聊天会话: %s", session_id, exc_info=True)
             return current
+
+
+def _is_key_activity_event(event: dict[str, Any]) -> bool:
+    """Keep the durable activity log to meaningful task/tool milestones."""
+    phase = str(event.get("phase") or "").strip()
+    status = str(event.get("status") or "").strip()
+    tool_name = str(event.get("tool_name") or "").strip()
+    if phase in {"thinking", "reasoning", "tool_progress"}:
+        return False
+    if status in {"completed", "failed", "error", "cancelled"}:
+        return True
+    if phase in {"task_start", "task_complete", "task_failed", "task_cancelled"}:
+        return True
+    if phase == "subagent":
+        return True
+    if phase in {"tool_start", "tool_complete"}:
+        return bool(tool_name)
+    return False
 
 
 # ── 执行器选择工厂 ────────────────────────────────────────────────────────────

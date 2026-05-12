@@ -76,6 +76,8 @@ type SessionItem = {
   message_count?: number;
   is_processing?: boolean;
   latest_activity?: ChatActivityEvent | null;
+  latest_message_preview?: string;
+  latest_message_status?: string;
 };
 
 type SessionsPayload = {
@@ -194,9 +196,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const composerComposingRef = useRef(false);
   const renderStateRef = useRef<Map<string, RenderState>>(new Map());
   const animationFrameRef = useRef<number | null>(null);
+  const scrollFrameRef = useRef<number | null>(null);
   const typewriterLastTsRef = useRef(0);
   const stickToBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
+  const bottomAnchorRef = useRef<HTMLDivElement>(null);
   const noticeTimerRef = useRef<number | null>(null);
   const messagesLoadedRef = useRef(false);
   const messageLoadTokenRef = useRef(0);
@@ -368,11 +372,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }, [messages]);
 
   useEffect(() => {
-    const list = listRef.current;
-    if (!list || !stickToBottomRef.current || isMessageSelectionPaused()) return;
-    list.scrollTo({ top: list.scrollHeight });
-    lastScrollTopRef.current = list.scrollTop;
-  }, [messages]);
+    scrollToConversationBottom();
+  }, [messages, isProcessing]);
 
   useEffect(() => {
     window.localStorage.setItem(COMPOSER_HEIGHT_STORAGE_KEY, String(composerHeight));
@@ -395,6 +396,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   useEffect(() => {
     return () => {
       if (animationFrameRef.current !== null) window.cancelAnimationFrame(animationFrameRef.current);
+      if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current);
       if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
     };
   }, []);
@@ -440,9 +442,24 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
 
     setRenderTick((value) => value + 1);
-    const list = listRef.current;
-    if (list && stickToBottomRef.current && !isMessageSelectionPaused()) list.scrollTo({ top: list.scrollHeight });
+    scrollToConversationBottom();
     animationFrameRef.current = pending ? window.requestAnimationFrame(tickTypewriter) : null;
+  }
+
+  function scrollToConversationBottom(force = false) {
+    if (force) stickToBottomRef.current = true;
+    if (!force && (!stickToBottomRef.current || isMessageSelectionPaused())) return;
+    if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current);
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = window.requestAnimationFrame(() => {
+        scrollFrameRef.current = null;
+        const list = listRef.current;
+        if (!list || (!force && (!stickToBottomRef.current || isMessageSelectionPaused()))) return;
+        list.scrollTop = list.scrollHeight;
+        bottomAnchorRef.current?.scrollIntoView({ block: 'end' });
+        lastScrollTopRef.current = list.scrollTop;
+      });
+    });
   }
 
   function isMessageSelectionPaused() {
@@ -475,6 +492,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setIsProcessing(true);
     setStatus(outgoingAttachments.length ? '发送图片中...' : '发送中...');
     stickToBottomRef.current = true;
+    scrollToConversationBottom(true);
     try {
       const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/chat/messages', {
         text,
@@ -483,6 +501,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       if (result.ok === false) throw new Error(result.error || '发送失败');
       setStatus('等待回复...');
       await refreshMessages();
+      scrollToConversationBottom(true);
       await loadSessions();
     } catch (error) {
       setInput(text);
@@ -945,6 +964,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                   onCopy={() => void copyMessage(message)}
                 />
               ))}
+              <div className="chat-bottom-anchor" ref={bottomAnchorRef} aria-hidden="true" />
             </div>
           </section>
 
@@ -1264,12 +1284,12 @@ function sessionTitle(session: SessionItem) {
 }
 
 function sessionPreview(session: SessionItem) {
-  const latest = session.latest_activity || null;
-  if (session.is_processing && latest) {
-    return `处理中：${compactStatusText(activityLabel(latest) || '正在处理', 48)}`;
-  }
+  const preview = compactStatusText(session.latest_message_preview || sessionTitle(session), 48);
+  if (session.is_processing) return `处理中：${preview || '正在处理'}`;
+  if (session.latest_message_status === 'failed') return `处理失败：${preview || '任务执行失败'}`;
+  if (session.message_count) return `已完成：${preview || sessionTitle(session)}`;
   if (!session.message_count) return '新的月夜会话';
-  return `共 ${session.message_count} 条消息`;
+  return preview;
 }
 
 function latestVisibleActivity(messages: ChatMessage[]) {
