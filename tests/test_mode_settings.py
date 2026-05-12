@@ -726,3 +726,23 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     assert data["tts"]["max_chars"] == 66
     assert data["tts"]["trigger_probability"] == 0.4
     assert data["tts"]["notification_prompt"] == "短提醒"
+
+
+def test_save_config_writes_backup_and_load_config_recovers_from_backup(tmp_path, monkeypatch):
+    _patch_no_live2d_assets(monkeypatch, tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    primary = tmp_path / "config.json"
+    backup = tmp_path / "config.json.bak"
+    primary.write_text(json.dumps({"display_mode": "none"}), encoding="utf-8")
+
+    config = AppConfig(display_mode="live2d")
+    save_config(config)
+
+    assert backup.exists()
+    assert json.loads(backup.read_text(encoding="utf-8"))["display_mode"] == "none"
+
+    primary.write_text("{not json", encoding="utf-8")
+    recovered = load_config()
+
+    assert recovered.display_mode == "none"

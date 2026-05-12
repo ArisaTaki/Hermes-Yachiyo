@@ -337,6 +337,10 @@ class ChatStore:
         """关闭数据库连接"""
         with self._lock:
             if self._conn is not None:
+                try:
+                    self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                except sqlite3.Error:
+                    logger.debug("ChatStore WAL checkpoint failed", exc_info=True)
                 self._conn.close()
                 self._conn = None
 
@@ -358,3 +362,12 @@ def get_chat_store() -> ChatStore:
         if _global_store is None:
             _global_store = ChatStore()
     return _global_store
+
+
+def close_chat_store() -> None:
+    """Close the global ChatStore without creating a new one."""
+    global _global_store
+    with _global_store_lock:
+        if _global_store is not None:
+            _global_store.close()
+            _global_store = None

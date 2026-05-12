@@ -234,6 +234,7 @@ let backendRestartPromise: Promise<{ success: boolean; bridgeUrl?: string; error
 let lastDownloadedAppUpdate: AppUpdateDownloadResult | null = null;
 let activeAppUpdateDownload: AppUpdateDownloadTask | null = null;
 let appUpdateQuitConfirmed = false;
+let backendShutdownBeforeQuit = false;
 const appUpdateCloseConfirmedWindows = new WeakSet<BrowserWindow>();
 const enforcedWindowTitles = new WeakMap<BrowserWindow, string>();
 const titleHandlersInstalled = new WeakSet<BrowserWindow>();
@@ -2698,6 +2699,14 @@ app.on('before-quit', (event) => {
     return;
   }
   cleanupAllTerminalSessions();
+  if (!backendShutdownBeforeQuit && backendProcess) {
+    event.preventDefault();
+    void terminateBackend().finally(() => {
+      backendShutdownBeforeQuit = true;
+      app.quit();
+    });
+    return;
+  }
   stopBackend();
 });
 

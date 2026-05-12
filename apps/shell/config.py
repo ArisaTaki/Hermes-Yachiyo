@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
+import tempfile
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -1172,35 +1175,43 @@ def normalize_display_mode(value: Any) -> DisplayModeValue:
     return "bubble"
 
 
+def _config_backup_file() -> Path:
+    return _CONFIG_FILE.with_name(f"{_CONFIG_FILE.name}.bak")
+
+
 def load_config() -> AppConfig:
     """从磁盘加载配置，不存在则返回默认值"""
-    if _CONFIG_FILE.exists():
-        try:
-            data = json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
-            window_mode = _load_nested_dataclass(data, "window_mode", WindowModeConfig)
-            bubble_mode = _load_nested_dataclass(data, "bubble_mode", BubbleModeConfig)
-            live2d_mode = _load_nested_dataclass(
-                data, "live2d_mode", Live2DModeConfig, legacy_key="live2d"
-            )
-            assistant = _load_nested_dataclass(data, "assistant", AssistantConfig)
-            tts = _load_nested_dataclass(data, "tts", TTSConfig)
-            backup = _load_nested_dataclass(data, "backup", BackupConfig)
-            if "display_mode" in data:
-                data["display_mode"] = normalize_display_mode(data.get("display_mode"))
-            config = AppConfig(
-                **{k: v for k, v in data.items() if k in AppConfig.__dataclass_fields__}
-            )
-            config.window_mode = window_mode
-            config.bubble_mode = bubble_mode
-            config.live2d_mode = live2d_mode
-            config.assistant = assistant
-            config.tts = tts
-            config.backup = backup
-            _apply_default_resource_paths(config)
-            _normalize_config_values(config)
-            return config
-        except Exception:
-            logger.warning("配置文件读取失败，使用默认配置")
+    backup_file = _config_backup_file()
+    for config_path, source_label in ((_CONFIG_FILE, "配置文件"), (backup_file, "配置备份")):
+        if config_path.exists():
+            try:
+                data = json.loads(config_path.read_text(encoding="utf-8"))
+                window_mode = _load_nested_dataclass(data, "window_mode", WindowModeConfig)
+                bubble_mode = _load_nested_dataclass(data, "bubble_mode", BubbleModeConfig)
+                live2d_mode = _load_nested_dataclass(
+                    data, "live2d_mode", Live2DModeConfig, legacy_key="live2d"
+                )
+                assistant = _load_nested_dataclass(data, "assistant", AssistantConfig)
+                tts = _load_nested_dataclass(data, "tts", TTSConfig)
+                backup = _load_nested_dataclass(data, "backup", BackupConfig)
+                if "display_mode" in data:
+                    data["display_mode"] = normalize_display_mode(data.get("display_mode"))
+                config = AppConfig(
+                    **{k: v for k, v in data.items() if k in AppConfig.__dataclass_fields__}
+                )
+                config.window_mode = window_mode
+                config.bubble_mode = bubble_mode
+                config.live2d_mode = live2d_mode
+                config.assistant = assistant
+                config.tts = tts
+                config.backup = backup
+                _apply_default_resource_paths(config)
+                _normalize_config_values(config)
+                if config_path == backup_file:
+                    logger.warning("主配置文件读取失败，已从配置备份恢复")
+                return config
+            except Exception as exc:
+                logger.warning("%s读取失败: %s", source_label, exc)
     config = AppConfig()
     _apply_default_resource_paths(config)
     _normalize_config_values(config)
@@ -1225,7 +1236,34 @@ def _apply_default_resource_paths(config: AppConfig) -> None:
 def save_config(config: AppConfig) -> None:
     """将配置写入磁盘"""
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    _CONFIG_FILE.write_text(
-        json.dumps(asdict(config), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    payload = json.dumps(asdict(config), ensure_ascii=False, indent=2)
+    backup_file = _config_backup_file()
+    if _CONFIG_FILE.exists():
+        try:
+            shutil.copy2(_CONFIG_FILE, backup_file)
+        except OSError:
+            logger.debug("写入配置备份失败", exc_info=True)
+
+    fd, tmp_name = tempfile.mkstemp(prefix=".config.", suffix=".tmp", dir=str(_CONFIG_DIR))
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, _CONFIG_FILE)
+        try:
+            dir_fd = os.open(_CONFIG_DIR, os.O_RDONLY)
+        except OSError:
+            dir_fd = None
+        if dir_fd is not None:
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass

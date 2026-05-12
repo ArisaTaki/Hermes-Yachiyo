@@ -57,6 +57,8 @@ def main() -> None:
 
     from apps.bridge.deps import set_runtime
     from apps.bridge.server import start_bridge, stop_bridge
+    from apps.core.activity_store import close_activity_store
+    from apps.core.chat_store import close_chat_store
     from apps.core.runtime import HermesRuntime
     from apps.installer.hermes_check import check_hermes_installation
     from apps.shell.config import load_config
@@ -73,6 +75,8 @@ def main() -> None:
     def _shutdown(_signum: int, _frame: object) -> None:
         stop_bridge()
         runtime.stop()
+        close_chat_store()
+        close_activity_store()
         raise SystemExit(0)
 
     signal.signal(signal.SIGINT, _shutdown)
@@ -82,6 +86,8 @@ def main() -> None:
         start_bridge(host=bridge_host, port=bridge_port)
     finally:
         runtime.stop()
+        close_chat_store()
+        close_activity_store()
 
 
 if __name__ == "__main__":
