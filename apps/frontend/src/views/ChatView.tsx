@@ -34,6 +34,19 @@ type ChatAttachment = {
   spoken_text?: string;
 };
 
+type ChatActivityEvent = {
+  event_id?: string;
+  session_id?: string;
+  task_id?: string;
+  tool_name?: string;
+  phase?: string;
+  title?: string;
+  detail?: string;
+  status?: string;
+  duration_seconds?: number | null;
+  created_at?: string;
+};
+
 type ChatMessage = {
   id?: string;
   role?: string;
@@ -41,6 +54,10 @@ type ChatMessage = {
   text?: string;
   status?: string;
   error?: string;
+  created_at?: string;
+  task_id?: string;
+  progress_label?: string;
+  activity_events?: ChatActivityEvent[];
   attachments?: ChatAttachment[];
 };
 
@@ -54,7 +71,11 @@ type MessagesPayload = {
 type SessionItem = {
   session_id: string;
   title?: string;
+  created_at?: string;
+  updated_at?: string;
   message_count?: number;
+  is_processing?: boolean;
+  latest_activity?: ChatActivityEvent | null;
 };
 
 type SessionsPayload = {
@@ -199,6 +220,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const failed = latestFailedMessage(nextMessages);
       if (!shouldHoldLoading && isMessageSelectionPaused()) {
         setIsProcessing(processing);
+        setStatus(chatStatusLabel(processing, failed, nextMessages));
         return;
       }
       syncRenderStates(nextMessages, renderStateRef.current);
@@ -217,7 +239,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         setMessagesLoaded(true);
       }
       if (processing) {
-        setStatus('处理中...');
+        setStatus(chatStatusLabel(processing, failed, nextMessages));
       } else if (failed) {
         setStatus(`处理失败：${compactStatusText(messageErrorText(failed))}`);
       } else {
@@ -786,6 +808,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     : sessionItems;
   const currentSession = sessionItems.find((session) => session.session_id === sessions?.current_session_id);
   const currentTitle = currentSession ? sessionTitle(currentSession) : (assistantProfile?.agent_name || '月見八千代');
+  const headerActivity = latestVisibleActivity(messages);
   const chatWorkspaceStyle = embedded
     ? undefined
     : ({ '--chat-sidebar-width': `${sidebarWidth}px` } as CSSProperties);
@@ -833,7 +856,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                   <span className="chat-item-preview">{sessionPreview(session)}</span>
                 </span>
                 <span className="chat-item-time">
-                  {session.session_id === sessions?.current_session_id ? '当前' : `${session.message_count || 0} 条`}
+                  {session.is_processing ? '处理中' : formatShortTime(session.updated_at || session.created_at)}
                 </span>
               </button>
             )) : (
@@ -868,7 +891,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 <div className="chat-header-name">{currentTitle}</div>
                 <div className="chat-header-status">
                   <div className={`status-dot ${isProcessing ? 'processing' : 'completed'}`} />
-                  <span>{isProcessing ? '处理中 · 本机 Bridge' : `${status} · ${executorLabel(executor)}`}</span>
+                  <span>{isProcessing ? `处理中 · ${compactStatusText(activityLabel(headerActivity) || '本机 Bridge')}` : `${status} · ${executorLabel(executor)}`}</span>
                 </div>
               </div>
             </div>
@@ -1061,8 +1084,13 @@ function MessageBubble({ assistantProfile, assistantProfileLoading, copied, disp
           ) : null}
           {message.error ? <div className="message-error">{message.error}</div> : null}
         </div>
+        <MessageActivityList
+          events={message.activity_events || []}
+          messageStatus={message.status}
+          progressLabel={message.progress_label}
+        />
         <div className="message-time">
-          <span>{messageMetaText(role, message.status)}</span>
+          <span>{messageMetaText(role, message.status, message.created_at)}</span>
           <button
             className={`message-copy-button ${copied ? 'copied' : ''}`}
             type="button"
@@ -1075,6 +1103,33 @@ function MessageBubble({ assistantProfile, assistantProfileLoading, copied, disp
         </div>
       </div>
     </article>
+  );
+}
+
+function MessageActivityList({ events, messageStatus, progressLabel }: {
+  events: ChatActivityEvent[];
+  messageStatus?: string;
+  progressLabel?: string;
+}) {
+  const rows = events.slice(0, 4);
+  const fallback = progressLabel && !rows.length
+    ? [{ title: progressLabel, status: messageStatus || 'running' } as ChatActivityEvent]
+    : [];
+  const visibleRows = rows.length ? rows : fallback;
+  if (!visibleRows.length) return null;
+  return (
+    <div className="message-activity-list" aria-label="执行活动">
+      {visibleRows.map((event, index) => (
+        <div className={`message-activity-row ${activityStatusClass(event.status)}`} key={event.event_id || `${event.title}-${index}`}>
+          <span className="message-activity-icon" aria-hidden="true">{activityStatusIcon(event.status)}</span>
+          <span className="message-activity-text">
+            <strong>{event.title || event.tool_name || 'Hermes 活动'}</strong>
+            {event.detail ? <small>{event.detail}</small> : null}
+          </span>
+          <time>{formatShortTime(event.created_at)}</time>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -1112,6 +1167,15 @@ function compactStatusText(text: string, maxLength = 96) {
   const normalized = String(text || '').replace(/\s+/g, ' ').trim();
   if (!normalized) return '任务执行失败';
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
+}
+
+function chatStatusLabel(processing: boolean, failed: ChatMessage | null, messages: ChatMessage[]) {
+  if (processing) {
+    const latest = latestVisibleActivity(messages);
+    return compactStatusText(activityLabel(latest) || '处理中...');
+  }
+  if (failed) return `处理失败：${compactStatusText(messageErrorText(failed))}`;
+  return '就绪';
 }
 
 function isImeComposing(event: ReactKeyboardEvent<HTMLElement>, fallback = false) {
@@ -1157,7 +1221,7 @@ function messageAvatar(role: string, profile: AssistantProfilePayload | null, pr
   return 'i';
 }
 
-function messageMetaText(role: string, status?: string) {
+function messageMetaText(role: string, status?: string, createdAt?: string) {
   const statusText = status === 'pending'
     ? ' · 等待中'
     : status === 'processing'
@@ -1165,7 +1229,8 @@ function messageMetaText(role: string, status?: string) {
       : status === 'failed'
         ? ' · 失败'
         : '';
-  return `${roleLabel(role)}${statusText}`;
+  const timeText = formatShortTime(createdAt);
+  return `${roleLabel(role)}${timeText !== '—' ? ` · ${timeText}` : ''}${statusText}`;
 }
 
 function executorLabel(executor: ExecutorPayload | null) {
@@ -1193,8 +1258,55 @@ function sessionTitle(session: SessionItem) {
 }
 
 function sessionPreview(session: SessionItem) {
+  const latest = session.latest_activity || null;
+  if (session.is_processing && latest) {
+    return `处理中：${compactStatusText(activityLabel(latest) || '正在处理', 48)}`;
+  }
   if (!session.message_count) return '新的月夜会话';
   return `共 ${session.message_count} 条消息`;
+}
+
+function latestVisibleActivity(messages: ChatMessage[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const events = messages[index]?.activity_events || [];
+    if (events.length) return events[0];
+    if (messages[index]?.progress_label) {
+      return {
+        title: messages[index]?.progress_label,
+        status: messages[index]?.status,
+        created_at: messages[index]?.created_at,
+      } as ChatActivityEvent;
+    }
+  }
+  return null;
+}
+
+function activityLabel(event?: ChatActivityEvent | null) {
+  if (!event) return '';
+  return String(event.title || event.detail || event.tool_name || '').trim();
+}
+
+function activityStatusClass(status?: string) {
+  if (status === 'completed' || status === 'success') return 'completed';
+  if (status === 'failed' || status === 'error') return 'failed';
+  if (status === 'progress' || status === 'running') return 'running';
+  return 'status';
+}
+
+function activityStatusIcon(status?: string) {
+  if (status === 'completed' || status === 'success') return '✓';
+  if (status === 'failed' || status === 'error') return '!';
+  return '';
+}
+
+function formatShortTime(value?: string) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function clampComposerHeight(value: number) {

@@ -13,6 +13,7 @@ const Live2DPreviewStage = lazy(() =>
 type DashboardData = {
   app?: { uptime_seconds?: number; version?: string; running?: boolean };
   bridge?: { state?: string; status?: string; running?: string; url?: string; config_dirty?: boolean };
+  activities?: ActivityEvent[];
   chat?: {
     status_label?: string;
     is_processing?: boolean;
@@ -49,6 +50,28 @@ type DashboardData = {
   modes?: { current?: string; items?: Array<{ id: string; name?: string; label?: string; description?: string }> };
   tasks?: { pending?: number; running?: number; completed?: number };
   workspace?: { path?: string; initialized?: boolean; created_at?: string; dirs?: Record<string, string> };
+};
+
+type ActivityEvent = {
+  event_id?: string;
+  session_id?: string;
+  task_id?: string;
+  tool_name?: string;
+  phase?: string;
+  title?: string;
+  detail?: string;
+  status?: string;
+  duration_seconds?: number | null;
+  created_at?: string;
+  metadata?: Record<string, unknown>;
+};
+
+type ActivityPayload = {
+  ok?: boolean;
+  error?: string;
+  events?: ActivityEvent[];
+  tools?: string[];
+  total?: number;
 };
 
 type StatusRecord = {
@@ -729,9 +752,11 @@ export function DashboardPage() {
           <button type="button" onClick={() => navigateTo('activity-all')}>查看全部 →</button>
         </div>
         <div className="hy-activity-list">
-          {activities.map((activity) => (
+          {activities.length ? activities.map((activity) => (
             <ActivityRow key={`${activity.title}-${activity.time}`} {...activity} />
-          ))}
+          )) : (
+            <div className="inline-empty">暂无活动记录</div>
+          )}
         </div>
       </section>
     </section>
@@ -1546,31 +1571,71 @@ export function ToolsAllPage() {
 export function ActivityAllPage() {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [cache, setCache] = useState<DiagnosticCache | null>(null);
+  const [activity, setActivity] = useState<ActivityPayload | null>(null);
+  const [activityError, setActivityError] = useState('');
+  const [activityQuery, setActivityQuery] = useState('');
+  const [activityStatus, setActivityStatus] = useState('');
+  const [activityTool, setActivityTool] = useState('');
+  const [availableTools, setAvailableTools] = useState<string[]>([]);
 
   useEffect(() => {
     let disposed = false;
     void Promise.allSettled([
       apiGet<DashboardData>('/ui/dashboard'),
       apiGet<DiagnosticCache>('/ui/hermes/diagnostics/cache'),
-    ]).then(([dashboardResult, cacheResult]) => {
+      apiGet<ActivityPayload>('/ui/activity?limit=100'),
+    ]).then(([dashboardResult, cacheResult, activityResult]) => {
       if (disposed) return;
       setDashboard(dashboardResult.status === 'fulfilled' ? dashboardResult.value : null);
       setCache(cacheResult.status === 'fulfilled' ? cacheResult.value : null);
+      if (activityResult.status === 'fulfilled') {
+        setActivity(activityResult.value);
+        setAvailableTools(activityResult.value.tools || []);
+      }
     });
     return () => {
       disposed = true;
     };
   }, []);
 
+  useEffect(() => {
+    let disposed = false;
+    const query = new URLSearchParams();
+    query.set('limit', '100');
+    if (activityQuery.trim()) query.set('query', activityQuery.trim());
+    if (activityStatus) query.set('status', activityStatus);
+    if (activityTool) query.set('tool', activityTool);
+    apiGet<ActivityPayload>(`/ui/activity?${query.toString()}`)
+      .then((payload) => {
+        if (disposed) return;
+        if (payload.ok === false) throw new Error(payload.error || '读取活动失败');
+        setActivity(payload);
+        setActivityError('');
+        if (!activityQuery.trim() && !activityStatus && !activityTool) {
+          setAvailableTools(payload.tools || []);
+        }
+      })
+      .catch((error) => {
+        if (disposed) return;
+        setActivity(null);
+        setActivityError(error instanceof Error ? error.message : '读取活动失败');
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [activityQuery, activityStatus, activityTool]);
+
+  const showDiagnosticRows = !activityQuery.trim() && !activityStatus && !activityTool;
   const rows = [
-    ...recentActivities(dashboard),
-    ...Object.values(cache?.commands || {}).map((command) => ({
+    ...(activity?.events || []).map((event) => activityEventRow(event, true)),
+    ...(showDiagnosticRows && !activity?.events?.length ? recentActivities(dashboard) : []),
+    ...(showDiagnosticRows ? Object.values(cache?.commands || {}).map((command) => ({
       icon: command.success ? '✓' : '!',
       title: command.label || command.command || '诊断命令',
       detail: command.command || 'Hermes diagnostic',
       time: formatShortDateTime(command.cached_at || cache?.updated_at),
       timestamp: command.cached_at || cache?.updated_at,
-    })),
+    })) : []),
   ];
 
   const grouped = groupActivitiesByDay(rows);
@@ -1581,9 +1646,34 @@ export function ActivityAllPage() {
         <button type="button" className="page-back-link" onClick={() => navigateTo('main')}>← 返回主控台</button>
         <div>
           <h2>活动日志</h2>
-          <p>所有系统和交互活动的完整记录</p>
+          <p>Agent、脚本、工具调用与系统活动的完整记录</p>
         </div>
       </header>
+      <div className="activity-filter-bar">
+        <input
+          type="search"
+          value={activityQuery}
+          onChange={(event) => setActivityQuery(event.target.value)}
+          placeholder="搜索活动、工具或摘要"
+          aria-label="搜索活动"
+        />
+        <select value={activityStatus} onChange={(event) => setActivityStatus(event.target.value)} aria-label="按状态筛选">
+          <option value="">全部状态</option>
+          <option value="running">运行中</option>
+          <option value="progress">进度</option>
+          <option value="completed">已完成</option>
+          <option value="success">成功</option>
+          <option value="failed">失败</option>
+          <option value="error">错误</option>
+        </select>
+        <select value={activityTool} onChange={(event) => setActivityTool(event.target.value)} aria-label="按工具筛选">
+          <option value="">全部工具</option>
+          {availableTools.map((tool) => (
+            <option value={tool} key={tool}>{tool}</option>
+          ))}
+        </select>
+      </div>
+      {activityError ? <div className="notice danger">{activityError}</div> : null}
       <div className="activity-list-full">
         {grouped.map((group) => (
           <div key={group.label}>
@@ -1613,15 +1703,28 @@ function StatusCard({ tone, label, value, detail, icon }: { tone: 'success' | 'w
   );
 }
 
-function ActivityRow({ icon, title, detail, time, tone = 'system' }: { icon: string; title: string; detail: string; time: string; tone?: string }) {
-  return (
-    <article className={`activity-item activity-item-${tone}`}>
+function ActivityRow({ icon, title, detail, time, tone = 'system', sessionId }: ActivityRowData) {
+  const className = `activity-item activity-item-${tone}${sessionId ? ' activity-item-clickable' : ''}`;
+  const content = (
+    <>
       <span className="activity-icon">{icon}</span>
       <div className="activity-content">
         <strong>{title}</strong>
         <small>{detail}</small>
       </div>
       <time className="activity-time">{time}</time>
+    </>
+  );
+  if (sessionId) {
+    return (
+      <button type="button" className={className} onClick={() => navigateTo('chat', { session_id: sessionId })}>
+        {content}
+      </button>
+    );
+  }
+  return (
+    <article className={className}>
+      {content}
     </article>
   );
 }
@@ -1829,6 +1932,8 @@ function uniqueOptions(values: Array<string | undefined>): string[] {
 }
 
 function recentActivities(data: DashboardData | null) {
+  const activityRows = (data?.activities || []).slice(0, 6).map((event) => activityEventRow(event, false));
+  if (activityRows.length) return activityRows;
   const sessions = data?.chat?.recent_sessions || [];
   const rows = sessions.slice(0, 5).map((session) => ({
     icon: session.latest_role === 'user' ? '💬' : '🌙',
@@ -1839,12 +1944,7 @@ function recentActivities(data: DashboardData | null) {
     timestamp: session.updated_at,
   }));
   if (rows.length) return rows;
-  return [
-    { icon: '💬', title: '八千代完成了图片分析任务', detail: '主控台对话同步完成', time: '2 分钟前', tone: 'chat', timestamp: '2 分钟前' },
-    { icon: '🔧', title: '模型配置已更新', detail: data?.hermes?.version || 'Hermes 模型配置', time: '15 分钟前', tone: 'system', timestamp: '15 分钟前' },
-    { icon: '📦', title: '工作区备份完成', detail: data?.workspace?.path || '等待初始化', time: '1 小时前', tone: 'system', timestamp: '1 小时前' },
-    { icon: '⚠️', title: 'Live2D 模型资源缺失', detail: '不影响主控台对话和 Bridge', time: '3 小时前', tone: 'warning', timestamp: '3 小时前' },
-  ];
+  return [];
 }
 
 function formatShortDateTime(value?: string) {
@@ -1859,7 +1959,70 @@ function formatShortDateTime(value?: string) {
   });
 }
 
-type ActivityRowData = { icon: string; title: string; detail: string; time: string; tone?: string; timestamp?: string };
+function formatFullDateTime(value?: string) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function activityEventRow(event: ActivityEvent, fullTime: boolean): ActivityRowData {
+  return {
+    icon: activityIcon(event),
+    title: event.title || event.tool_name || 'Hermes 活动',
+    detail: activityDetail(event),
+    time: fullTime ? formatFullDateTime(event.created_at) : formatShortDateTime(event.created_at),
+    tone: activityTone(event.status),
+    timestamp: event.created_at,
+    sessionId: event.session_id,
+  };
+}
+
+function activityDetail(event: ActivityEvent) {
+  const parts = [
+    event.tool_name || '',
+    activityStatusLabel(event.status),
+    typeof event.duration_seconds === 'number' ? `${event.duration_seconds.toFixed(1)}s` : '',
+    event.detail || '',
+  ].filter(Boolean);
+  return parts.join(' · ') || '已记录安全摘要';
+}
+
+function activityIcon(event: ActivityEvent) {
+  const tool = String(event.tool_name || '').toLowerCase();
+  if (tool.includes('browser')) return '⌕';
+  if (tool.includes('file') || tool.includes('read') || tool.includes('write')) return '▣';
+  if (tool.includes('search')) return '⌘';
+  if (tool.includes('script') || tool.includes('shell') || tool.includes('terminal')) return '>';
+  if (event.status === 'failed' || event.status === 'error') return '!';
+  if (event.status === 'completed' || event.status === 'success') return '✓';
+  return '•';
+}
+
+function activityTone(status?: string) {
+  if (status === 'failed' || status === 'error') return 'warning';
+  if (status === 'running' || status === 'progress') return 'chat';
+  return 'system';
+}
+
+function activityStatusLabel(status?: string) {
+  if (status === 'running') return '运行中';
+  if (status === 'progress') return '进度';
+  if (status === 'completed') return '已完成';
+  if (status === 'success') return '成功';
+  if (status === 'failed') return '失败';
+  if (status === 'error') return '错误';
+  return status || '';
+}
+
+type ActivityRowData = { icon: string; title: string; detail: string; time: string; tone?: string; timestamp?: string; sessionId?: string };
 
 function groupActivitiesByDay(rows: ActivityRowData[]): Array<{ label: string; items: ActivityRowData[] }> {
   if (!rows.length) return [];

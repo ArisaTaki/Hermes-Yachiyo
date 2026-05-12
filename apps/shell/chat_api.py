@@ -29,6 +29,7 @@ from apps.core.chat_session import (
     MessageRole,
     MessageStatus,
 )
+from apps.core.activity_store import get_activity_store
 from apps.core.special_sessions import is_proactive_chat_session
 from apps.locald.screenshot import capture_screenshot_to_file
 from apps.shell.hermes_capabilities import get_current_hermes_image_input_capability
@@ -402,11 +403,12 @@ class ChatAPI:
 
             messages = self._session.get_messages(limit)
             sorted_msgs = self._sort_messages_by_task(messages)
-            return {
-                "ok": True,
-                "session_id": self._session.session_id,
-                "is_processing": self._session.is_processing(),
-                "messages": [
+            task_ids = [m.task_id for m in sorted_msgs if m.task_id]
+            activity_by_task = self._activity_events_by_task(task_ids, limit_per_task=5)
+            serialized_messages = []
+            for m in sorted_msgs:
+                show_activity = m.role == MessageRole.ASSISTANT
+                serialized_messages.append(
                     {
                         "id": m.message_id,
                         "role": m.role.value,
@@ -416,9 +418,15 @@ class ChatAPI:
                         "error": m.error,
                         "created_at": m.created_at.isoformat(),
                         "attachments": self._serialize_attachments(m.attachments),
+                        "progress_label": self._task_progress_label(m.task_id) if show_activity else "",
+                        "activity_events": activity_by_task.get(m.task_id or "", []) if show_activity else [],
                     }
-                    for m in sorted_msgs
-                ],
+                )
+            return {
+                "ok": True,
+                "session_id": self._session.session_id,
+                "is_processing": self._session.is_processing(),
+                "messages": serialized_messages,
             }
 
         except Exception as exc:
@@ -679,7 +687,10 @@ class ChatAPI:
                 "session_id": session.session_id,
                 "title": session.title,
                 "created_at": session.created_at,
+                "updated_at": self._session_updated_at(session.session_id, session.created_at),
                 "message_count": session.message_count,
+                "is_processing": self._session_is_processing(session.session_id),
+                "latest_activity": self._latest_activity_for_session(session.session_id),
             }
             for session in sessions
         ]
@@ -691,7 +702,13 @@ class ChatAPI:
                     "session_id": current_session_id,
                     "title": (stored_current.title if stored_current else "") or "新对话",
                     "created_at": stored_current.created_at if stored_current else "",
+                    "updated_at": self._session_updated_at(
+                        current_session_id,
+                        stored_current.created_at if stored_current else "",
+                    ),
                     "message_count": stored_current.message_count if stored_current else 0,
+                    "is_processing": self._session_is_processing(current_session_id),
+                    "latest_activity": self._latest_activity_for_session(current_session_id),
                 },
             )
         return {
@@ -747,6 +764,62 @@ class ChatAPI:
         except Exception as exc:
             logger.error("取消当前会话任务失败: %s", exc)
             return {"ok": False, "error": str(exc)}
+
+    def _task_progress_label(self, task_id: str | None) -> str:
+        if not task_id:
+            return ""
+        task = self._state.get_task(task_id)
+        return str(getattr(task, "progress_label", "") or "") if task is not None else ""
+
+    def _activity_events_by_task(self, task_ids: list[str | None], limit_per_task: int = 5) -> dict[str, list[dict[str, Any]]]:
+        ids = [task_id for task_id in task_ids if task_id]
+        if not ids:
+            return {}
+        try:
+            store = get_activity_store()
+            return {
+                task_id: [event.to_dict() for event in events]
+                for task_id, events in store.latest_by_task(ids, limit_per_task=limit_per_task).items()
+            }
+        except Exception:
+            logger.debug("读取任务活动事件失败", exc_info=True)
+            return {}
+
+    def _latest_activity_for_session(self, session_id: str) -> dict[str, Any]:
+        try:
+            events = get_activity_store().list_events(session_id=session_id, limit=1)
+            return events[0].to_dict() if events else {}
+        except Exception:
+            logger.debug("读取会话最新活动失败", exc_info=True)
+            return {}
+
+    def _session_is_processing(self, session_id: str) -> bool:
+        for task in self._state.list_tasks():
+            if getattr(task, "chat_session_id", None) != session_id:
+                continue
+            if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+                return True
+        from apps.core.chat_store import get_chat_store
+
+        try:
+            for msg in get_chat_store().load_messages(session_id, limit=240):
+                if msg.status in (MessageStatus.PENDING.value, MessageStatus.PROCESSING.value):
+                    return True
+        except Exception:
+            logger.debug("读取会话处理中状态失败", exc_info=True)
+        return False
+
+    def _session_updated_at(self, session_id: str, fallback: str = "") -> str:
+        from apps.core.chat_store import get_chat_store
+
+        try:
+            messages = get_chat_store().load_messages(session_id, limit=240)
+        except Exception:
+            return fallback
+        latest = messages[-1].created_at if messages else fallback
+        activity = self._latest_activity_for_session(session_id)
+        activity_time = str(activity.get("created_at") or "")
+        return max([value for value in (latest, activity_time, fallback) if value] or [""])
 
     def delete_current_session(self) -> Dict[str, Any]:
         """删除当前会话，并切换到剩余最近会话或新建空会话。"""

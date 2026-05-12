@@ -301,6 +301,35 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_activity_route_forwards_filters(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        ui,
+        "list_activity_events",
+        lambda **kwargs: calls.append(kwargs) or {"ok": True, "events": []},
+    )
+
+    result = await ui.get_activity_events(
+        query="script",
+        status="running",
+        tool="terminal",
+        session_id="s1",
+        task_id="t1",
+        limit=25,
+    )
+
+    assert result == {"ok": True, "events": []}
+    assert calls == [{
+        "query": "script",
+        "status": "running",
+        "tool": "terminal",
+        "session_id": "s1",
+        "task_id": "t1",
+        "limit": 25,
+    }]
+
+
+@pytest.mark.asyncio
 async def test_installer_routes_use_legacy_installer_api(monkeypatch):
     calls = []
 

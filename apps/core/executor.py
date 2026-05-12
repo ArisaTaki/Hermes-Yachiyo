@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -563,6 +563,16 @@ def _emit_stream_update(on_update: Callable[[str], None], content: str) -> None:
         logger.debug("Hermes 流式内容回写失败", exc_info=True)
 
 
+def _emit_activity_update(on_activity: Callable[[dict[str, Any]], None] | None, event: dict[str, Any]) -> None:
+    """Forward one structured activity event to the caller without breaking streaming."""
+    if on_activity is None:
+        return
+    try:
+        on_activity(event)
+    except Exception:
+        logger.debug("Hermes 活动事件回写失败", exc_info=True)
+
+
 async def _terminate_process(proc: asyncio.subprocess.Process) -> None:
     """取消/超时时终止子进程并回收管道资源。"""
     if proc.returncode is not None:
@@ -582,6 +592,7 @@ async def _consume_stream_bridge(
     proc: asyncio.subprocess.Process,
     payload: dict[str, Any],
     on_update: Callable[[str], None],
+    on_activity: Callable[[dict[str, Any]], None] | None = None,
 ) -> HermesInvokeResult:
     """消费 bridge 的 delta/done/error 事件并转换为 HermesInvokeResult。"""
     assert proc.stdin is not None
@@ -668,6 +679,8 @@ async def _consume_stream_bridge(
             elif event_type == "boundary":
                 # 流内边界标记，不含有效内容，直接忽略
                 pass
+            elif event_type == "activity":
+                _emit_activity_update(on_activity, event)
             elif event_type is not None:
                 # 未知事件类型：不崩溃，仅记录 debug 日志
                 logger.debug("忽略未知 bridge 事件类型: %s", event_type)
@@ -729,6 +742,7 @@ async def _invoke_hermes_stream_bridge(
     description: str,
     hermes_session_id: Optional[str],
     on_update: Callable[[str], None],
+    on_activity: Callable[[dict[str, Any]], None] | None = None,
     image_paths: Optional[list[str]] = None,
 ) -> HermesInvokeResult:
     """通过 Hermes agent callback 层获取真实 token 流，避免 CLI 终端 UI 噪声。"""
@@ -782,7 +796,7 @@ async def _invoke_hermes_stream_bridge(
 
     try:
         return await asyncio.wait_for(
-            _consume_stream_bridge(proc, payload, on_update),
+            _consume_stream_bridge(proc, payload, on_update, on_activity),
             timeout=_EXEC_TIMEOUT,
         )
     except asyncio.CancelledError:
@@ -818,6 +832,7 @@ async def invoke_hermes_cli(
     description: str,
     hermes_session_id: Optional[str] = None,
     on_update: Optional[Callable[[str], None]] = None,
+    on_activity: Optional[Callable[[dict[str, Any]], None]] = None,
     image_paths: Optional[list[str]] = None,
 ) -> HermesInvokeResult:
     """向 Hermes Agent 发起一次 CLI 调用，返回结构化结果。
@@ -848,6 +863,7 @@ async def invoke_hermes_cli(
             description,
             hermes_session_id,
             on_update,
+            on_activity=on_activity,
             image_paths=image_paths,
         )
         logger.info(
@@ -866,6 +882,7 @@ async def invoke_hermes_cli(
             description,
             hermes_session_id=hermes_session_id,
             on_update=None,
+            on_activity=on_activity,
             image_paths=image_paths,
         )
 
@@ -885,17 +902,38 @@ async def invoke_hermes_cli(
             stderr=asyncio.subprocess.PIPE,
         )
     except FileNotFoundError:
+        _emit_activity_update(on_activity, {
+            "tool_name": "hermes_cli",
+            "phase": "status",
+            "title": "Hermes 命令未找到",
+            "detail": "请确认 Hermes Agent 已正确安装",
+            "status": "failed",
+        })
         return HermesInvokeResult(
             success=False,
             returncode=-1,
             error_message="hermes 命令未找到，请确认 Hermes Agent 已正确安装",
         )
     except Exception as exc:
+        _emit_activity_update(on_activity, {
+            "tool_name": "hermes_cli",
+            "phase": "status",
+            "title": "Hermes 进程启动失败",
+            "detail": str(exc),
+            "status": "failed",
+        })
         return HermesInvokeResult(
             success=False,
             returncode=-1,
             error_message=f"启动 hermes 进程失败: {exc}",
         )
+    _emit_activity_update(on_activity, {
+        "tool_name": "hermes_cli",
+        "phase": "status",
+        "title": "Hermes CLI 已启动",
+        "detail": "正在执行非流式 Hermes 调用",
+        "status": "running",
+    })
 
     # ② 等待结束，带超时
     try:
@@ -913,6 +951,14 @@ async def invoke_hermes_cli(
             "[Hermes CLI] 执行超时: elapsed=%.2fs",
             time.monotonic() - started_at,
         )
+        _emit_activity_update(on_activity, {
+            "tool_name": "hermes_cli",
+            "phase": "status",
+            "title": "Hermes CLI 执行超时",
+            "detail": _format_exec_timeout(_EXEC_TIMEOUT),
+            "status": "failed",
+            "duration_seconds": time.monotonic() - started_at,
+        })
         return HermesInvokeResult(
             success=False,
             returncode=-1,
@@ -928,6 +974,14 @@ async def invoke_hermes_cli(
             err_msg = "Hermes 命令调用失败，请检查 Hermes Agent 版本是否兼容"
         else:
             err_msg = f"Hermes 执行失败（exit={rc}）"
+        _emit_activity_update(on_activity, {
+            "tool_name": "hermes_cli",
+            "phase": "status",
+            "title": "Hermes CLI 执行失败",
+            "detail": stderr or err_msg,
+            "status": "failed",
+            "duration_seconds": time.monotonic() - started_at,
+        })
         return HermesInvokeResult(
             success=False,
             stdout=_sanitize_hermes_response(stdout),
@@ -946,6 +1000,14 @@ async def invoke_hermes_cli(
         len(stdout),
         len(stderr),
     )
+    _emit_activity_update(on_activity, {
+        "tool_name": "hermes_cli",
+        "phase": "status",
+        "title": "Hermes CLI 执行完成",
+        "detail": content[:180] if content else "",
+        "status": "completed",
+        "duration_seconds": time.monotonic() - started_at,
+    })
 
     return HermesInvokeResult(
         success=True,
@@ -1120,11 +1182,52 @@ class HermesExecutor(ExecutionStrategy):
                 status=MessageStatus.PROCESSING,
             )
 
+        def on_activity(event: dict[str, Any]) -> None:
+            session_id = str(getattr(task, "chat_session_id", "") or getattr(chat_session, "session_id", "") or "")
+            activity_payload = {
+                "session_id": session_id,
+                "task_id": task.task_id,
+                "tool_name": str(event.get("tool_name") or ""),
+                "phase": str(event.get("phase") or "activity"),
+                "title": str(event.get("title") or "Hermes 正在处理"),
+                "detail": str(event.get("detail") or ""),
+                "status": str(event.get("status") or "running"),
+                "duration_seconds": event.get("duration_seconds"),
+                "metadata": event.get("metadata") if isinstance(event.get("metadata"), dict) else {},
+            }
+            try:
+                from apps.core.activity_store import get_activity_store
+
+                stored = get_activity_store().record_event(**activity_payload)
+                label = stored.title or stored.detail
+            except Exception:
+                logger.debug("Hermes 活动事件持久化失败", exc_info=True)
+                label = activity_payload["title"] or activity_payload["detail"]
+            if label:
+                task.progress_label = label
+                task.progress_updated_at = datetime.now(timezone.utc)
+                task.updated_at = task.progress_updated_at
+            if chat_session is not None:
+                try:
+                    from apps.core.chat_session import MessageStatus
+
+                    assistant = chat_session.get_assistant_message_for_task(task.task_id)
+                    chat_session.upsert_assistant_message(
+                        task_id=task.task_id,
+                        content=assistant.content if assistant is not None else "",
+                        status=MessageStatus.PROCESSING,
+                        error=assistant.error if assistant is not None else None,
+                        attachments=assistant.attachments if assistant is not None else None,
+                    )
+                except Exception:
+                    logger.debug("Hermes 活动占位消息更新失败", exc_info=True)
+
         started_at = time.monotonic()
         invoke_result = await invoke_hermes_cli(
             description,
             hermes_session_id=hermes_sid,
             on_update=on_update if chat_session is not None else None,
+            on_activity=on_activity,
             image_paths=image_paths,
         )
         elapsed = time.monotonic() - started_at

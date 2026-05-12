@@ -45,6 +45,8 @@ class TaskInfo(BaseModel):
     error: str | None = None
     attachments: list[dict] = Field(default_factory=list)
     chat_session_id: str | None = None
+    progress_label: str | None = None
+    progress_updated_at: datetime | None = None
 
 
 class TaskGetResponse(BaseModel):

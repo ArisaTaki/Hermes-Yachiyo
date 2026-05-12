@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from apps.bridge.deps import get_runtime
 from apps.core.chat_session import MessageStatus
 from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri, find_live2d_preview_path
+from apps.shell.activity_api import list_activity_events
 from apps.shell.chat_api import (
     ChatAPI,
     allocate_chat_attachment_path,
@@ -561,6 +562,25 @@ async def load_chat_session(request: LoadChatSessionRequest) -> dict[str, Any]:
 @router.get("/chat/executor")
 async def get_chat_executor() -> dict[str, Any]:
     return ChatAPI(get_runtime()).get_executor_info()
+
+
+@router.get("/activity")
+async def get_activity_events(
+    query: str = "",
+    status: str = "",
+    tool: str = "",
+    session_id: str = "",
+    task_id: str = "",
+    limit: int = 50,
+) -> dict[str, Any]:
+    return list_activity_events(
+        query=query,
+        status=status,
+        tool=tool,
+        session_id=session_id,
+        task_id=task_id,
+        limit=limit,
+    )
 
 
 def _clamp_float(value: float, lower: float, upper: float) -> float:

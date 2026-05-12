@@ -34,6 +34,7 @@ from apps.installer.workspace_init import get_workspace_status
 from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri
 from apps.shell.chat_api import ChatAPI
 from apps.shell.chat_bridge import ChatBridge
+from apps.shell.activity_api import list_activity_events
 from apps.shell.config import ModelSummary
 from apps.shell.effect_policy import build_effects_summary
 from apps.shell.hermes_capabilities import (
@@ -2055,6 +2056,7 @@ class MainWindowAPI:
                     summary_count=self._config.window_mode.recent_messages_limit,
                     session_limit=self._config.window_mode.recent_sessions_limit,
                 ),
+                "activities": list_activity_events(limit=8).get("events", []),
             }
         except Exception as e:
             logger.error("获取仪表盘数据失败: %s", e)

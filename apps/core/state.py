@@ -100,6 +100,7 @@ class AppState:
         status: TaskStatus,
         result: str | None = None,
         error: str | None = None,
+        progress_label: str | None = None,
     ) -> TaskInfo:
         """更新任务状态。供执行器或外部调用者推进任务生命周期。
 
@@ -129,6 +130,9 @@ class AppState:
                 task.result = result
             if error is not None:
                 task.error = error
+            if progress_label is not None:
+                task.progress_label = str(progress_label or "").strip() or None
+                task.progress_updated_at = task.updated_at
         if status == TaskStatus.FAILED and task.error:
             logger.info(
                 "任务状态已更新: %s → %s | error=%s",
@@ -139,3 +143,17 @@ class AppState:
         else:
             logger.info("任务状态已更新: %s → %s", task_id, status.value)
         return task
+
+    def update_task_progress(self, task_id: str, label: str) -> TaskInfo | None:
+        """Update the lightweight user-visible progress label for an active task."""
+        label = str(label or "").strip()
+        if not label:
+            return self.get_task(task_id)
+        with self._lock:
+            task = self._tasks.get(task_id)
+            if task is None:
+                return None
+            task.progress_label = label
+            task.progress_updated_at = _now()
+            task.updated_at = task.progress_updated_at
+            return task

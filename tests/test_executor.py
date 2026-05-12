@@ -675,6 +675,29 @@ class TestConsumeStreamBridgeRobustness:
         assert result.stdout == "full response"
 
     @pytest.mark.asyncio
+    async def test_activity_event_is_forwarded_without_affecting_tokens(self):
+        """activity 事件应独立转发，不污染 assistant token 流。"""
+        lines = [
+            json.dumps({"type": "delta", "delta": "hello"}),
+            json.dumps({"type": "activity", "phase": "tool_start", "tool_name": "terminal", "title": "正在运行脚本"}),
+            json.dumps({"type": "done", "response": "hello", "session_id": "s-activity"}),
+        ]
+        proc = self._make_proc_from_lines(lines)
+        updates = []
+        activities = []
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            updates.append,
+            activities.append,
+        )
+
+        assert result.success is True
+        assert updates == ["hello"]
+        assert activities == [{"type": "activity", "phase": "tool_start", "tool_name": "terminal", "title": "正在运行脚本"}]
+
+    @pytest.mark.asyncio
     async def test_done_event_without_streaming_yields_final_response(self):
         """只有 done 事件（无 delta），应降级为最终完整回复，不失败。"""
         lines = [

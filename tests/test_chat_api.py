@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from apps.core.activity_store import ActivityStore
 from apps.core.chat_session import ChatMessage, ChatSession, MessageRole, MessageStatus
 from apps.core.chat_store import ChatStore
 import apps.core.chat_store as _store_mod
@@ -73,6 +74,45 @@ def test_send_message_creates_task_and_links_user_message(tmp_path):
         assert user.status == MessageStatus.PENDING
         assert api.get_session_info()["is_processing"] is True
     finally:
+        store.close()
+
+
+def test_get_messages_and_sessions_include_activity_events(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    try:
+        result = api.send_message("跑一下脚本")
+        task_id = result["task_id"]
+        activity_store.record_event(
+            session_id=runtime.chat_session.session_id,
+            task_id=task_id,
+            tool_name="terminal",
+            phase="tool_start",
+            title="正在运行脚本",
+            detail="python build.py",
+            status="running",
+        )
+        runtime.chat_session.upsert_assistant_message(
+            task_id=task_id,
+            content="",
+            status=MessageStatus.PROCESSING,
+        )
+
+        messages = api.get_messages()["messages"]
+        user = messages[0]
+        assistant = messages[1]
+        assert user["progress_label"] == ""
+        assert user["activity_events"] == []
+        assert assistant["activity_events"][0]["title"] == "正在运行脚本"
+
+        sessions = api.list_sessions()["sessions"]
+        current = next(item for item in sessions if item["session_id"] == runtime.chat_session.session_id)
+        assert current["is_processing"] is True
+        assert current["latest_activity"]["tool_name"] == "terminal"
+        assert current["latest_activity"]["title"] == "正在运行脚本"
+    finally:
+        activity_store.close()
         store.close()
 
 

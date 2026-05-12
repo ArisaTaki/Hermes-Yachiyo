@@ -144,7 +144,7 @@ class TaskRunner:
 
         try:
             # ① 标记 RUNNING（在 executor.run() 开始前，体现"正在处理"）
-            self._state.update_task_status(task_id, TaskStatus.RUNNING)
+            self._state.update_task_status(task_id, TaskStatus.RUNNING, progress_label="正在启动 Agent")
             self._sync_task_message(task_id)
             logger.info("任务开始执行: %s [%s]", task_id, type(self._executor).__name__)
 
@@ -152,7 +152,12 @@ class TaskRunner:
             result = await self._executor.run(task)
 
             # ③ 标记 COMPLETED
-            self._state.update_task_status(task_id, TaskStatus.COMPLETED, result=result)
+            self._state.update_task_status(
+                task_id,
+                TaskStatus.COMPLETED,
+                result=result,
+                progress_label="已完成",
+            )
             self._sync_task_message(task_id)
             logger.info("任务已完成: %s", task_id)
 
@@ -182,6 +187,7 @@ class TaskRunner:
                     task_id,
                     TaskStatus.FAILED,
                     error=error_str,
+                    progress_label="执行失败",
                 )
                 self._sync_task_message(task_id)
             except Exception:
