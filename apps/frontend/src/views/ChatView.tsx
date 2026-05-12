@@ -911,7 +911,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 <div className="chat-header-name">{currentTitle}</div>
                 <div className="chat-header-status">
                   <div className={`status-dot ${isProcessing ? 'processing' : 'completed'}`} />
-                  <span>{isProcessing ? `处理中 · ${compactStatusText(activityLabel(headerActivity) || '本机 Bridge')}` : `${status} · ${executorLabel(executor)}`}</span>
+                  <span>{isProcessing ? (headerActivity ? `处理中 · ${compactStatusText(activityLabel(headerActivity))}` : '处理中') : `${status} · ${executorLabel(executor)}`}</span>
                 </div>
               </div>
             </div>

@@ -86,6 +86,7 @@ _DESKTOP_SNAPSHOT_REQUEST_RE = re.compile(
     r")",
     re.IGNORECASE | re.DOTALL,
 )
+_CHAT_VISIBLE_ACTIVITY_PHASES = {"tool_start", "tool_complete"}
 
 
 def _compact_preview(value: Any, limit: int = 72) -> str:
@@ -93,6 +94,12 @@ def _compact_preview(value: Any, limit: int = 72) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3].rstrip() + "..."
+
+
+def _is_chat_visible_activity(event: dict[str, Any]) -> bool:
+    phase = str(event.get("phase") or "")
+    tool_name = str(event.get("tool_name") or "")
+    return phase in _CHAT_VISIBLE_ACTIVITY_PHASES and bool(tool_name)
 
 
 def _attachment_root() -> Path:
@@ -415,6 +422,7 @@ class ChatAPI:
             serialized_messages = []
             for m in sorted_msgs:
                 show_activity = m.role == MessageRole.ASSISTANT
+                activity_events = activity_by_task.get(m.task_id or "", []) if show_activity else []
                 serialized_messages.append(
                     {
                         "id": m.message_id,
@@ -425,8 +433,8 @@ class ChatAPI:
                         "error": m.error,
                         "created_at": m.created_at.isoformat(),
                         "attachments": self._serialize_attachments(m.attachments),
-                        "progress_label": self._task_progress_label(m.task_id) if show_activity else "",
-                        "activity_events": activity_by_task.get(m.task_id or "", []) if show_activity else [],
+                        "progress_label": self._task_progress_label(m.task_id) if activity_events else "",
+                        "activity_events": activity_events,
                     }
                 )
             return {
@@ -796,10 +804,16 @@ class ChatAPI:
             return {}
         try:
             store = get_activity_store()
-            return {
-                task_id: [event.to_dict() for event in events]
-                for task_id, events in store.latest_by_task(ids, limit_per_task=limit_per_task, key_only=True).items()
-            }
+            result: dict[str, list[dict[str, Any]]] = {}
+            for task_id, events in store.latest_by_task(ids, limit_per_task=limit_per_task, key_only=True).items():
+                visible = [
+                    event_dict
+                    for event in events
+                    if _is_chat_visible_activity(event_dict := event.to_dict())
+                ]
+                if visible:
+                    result[task_id] = visible
+            return result
         except Exception:
             logger.debug("读取任务活动事件失败", exc_info=True)
             return {}

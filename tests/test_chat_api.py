@@ -128,6 +128,47 @@ def test_get_messages_and_sessions_include_activity_events(tmp_path, monkeypatch
         store.close()
 
 
+def test_get_messages_hides_internal_reasoning_activity(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    try:
+        result = api.send_message("普通回复")
+        task_id = result["task_id"]
+        runtime.state.update_task_progress(task_id, "Hermes 正在推理")
+        activity_store.record_event(
+            session_id=runtime.chat_session.session_id,
+            task_id=task_id,
+            tool_name="",
+            phase="reasoning",
+            title="Hermes 正在推理",
+            detail="内部思考片段",
+            status="running",
+        )
+        activity_store.record_event(
+            session_id=runtime.chat_session.session_id,
+            task_id=task_id,
+            tool_name="hermes",
+            phase="task_start",
+            title="Yachiyo 开始处理",
+            detail="普通回复",
+            status="running",
+        )
+        runtime.chat_session.upsert_assistant_message(
+            task_id=task_id,
+            content="",
+            status=MessageStatus.PROCESSING,
+        )
+
+        assistant = api.get_messages()["messages"][1]
+
+        assert assistant["activity_events"] == []
+        assert assistant["progress_label"] == ""
+    finally:
+        activity_store.close()
+        store.close()
+
+
 def test_list_sessions_ignores_stale_stored_processing_without_live_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
