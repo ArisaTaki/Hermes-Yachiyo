@@ -38,6 +38,7 @@ export function AppUpdateView() {
   const progressPercent = downloadProgressPercent(progress, downloaded);
   const channelLabel = latest?.channel || latest?.branch || current?.channel || current?.branch || '—';
   const versionRows = useMemo(() => updateVersionRows(current, latest), [current, latest]);
+  const isDownloading = action === 'download';
 
   useEffect(() => {
     let disposed = false;
@@ -169,9 +170,13 @@ export function AppUpdateView() {
             <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(action)} onClick={() => void runInstall()}>
               {action === 'install' ? '准备中...' : '安装并重启'}
             </button>
+          ) : isDownloading ? (
+            <span className="app-update-action-state" role="status" aria-live="polite">
+              {downloadStatusLabel(progress)}
+            </span>
           ) : (
             <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(action) || !supported || !updateAvailable} onClick={() => void runDownload()}>
-              {action === 'download' ? downloadButtonLabel(progress) : '下载更新'}
+              下载更新
             </button>
           )}
         </div>
@@ -314,9 +319,9 @@ function downloadProgressLabel(progress: AppUpdateDownloadProgress | null, downl
   return '下载中';
 }
 
-function downloadButtonLabel(progress: AppUpdateDownloadProgress | null) {
+function downloadStatusLabel(progress: AppUpdateDownloadProgress | null) {
   if (progress?.status === 'verifying') return '校验中...';
-  if (typeof progress?.percent === 'number') return `下载中 ${progress.percent.toFixed(0)}%`;
+  if (progress?.status === 'starting') return '准备下载...';
   return '下载中...';
 }
 

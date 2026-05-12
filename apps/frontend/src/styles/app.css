@@ -11274,7 +11274,8 @@ body.electron-window .hy-traffic {
   border: 1px solid var(--hy-border-soft);
   border-radius: var(--hy-radius-panel);
   background:
-    radial-gradient(ellipse 52% 90% at 100% 0%, oklch(75% 0.095 205 / 0.06), transparent 64%),
+    radial-gradient(ellipse 52% 90% at 100% 0%, var(--hy-accent-wash), transparent 64%),
+    radial-gradient(ellipse 42% 72% at 0% 0%, oklch(66% 0.12 188 / 0.045), transparent 62%),
     color-mix(in oklch, var(--hy-surface) 90%, transparent);
   box-shadow: 0 18px 42px rgb(0 0 0 / 0.2);
 }
@@ -11322,7 +11323,7 @@ body.electron-window .hy-traffic {
   border-color: oklch(82% 0.135 76 / 0.28);
   background:
     radial-gradient(ellipse 46% 88% at 100% 0%, oklch(82% 0.135 76 / 0.1), transparent 60%),
-    radial-gradient(ellipse 44% 70% at 12% 0%, oklch(72% 0.14 350 / 0.07), transparent 62%),
+    radial-gradient(ellipse 44% 70% at 12% 0%, var(--hy-accent-wash), transparent 62%),
     color-mix(in oklch, var(--hy-surface) 90%, transparent);
 }
 
@@ -11357,6 +11358,68 @@ body.electron-window .hy-traffic {
 
 .app-update-actions {
   flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  min-width: 140px;
+}
+
+.app-update-page .hy-btn {
+  transition:
+    background var(--hy-dur-fast) var(--hy-ease-out),
+    border-color var(--hy-dur-fast) var(--hy-ease-out),
+    color var(--hy-dur-fast) var(--hy-ease-out),
+    transform var(--hy-dur-fast) var(--hy-ease-out),
+    box-shadow var(--hy-dur-fast) var(--hy-ease-out);
+}
+
+.app-update-page .hy-btn-ghost:hover:not(:disabled) {
+  border-color: oklch(75% 0.095 205 / 0.28);
+  background: oklch(75% 0.095 205 / 0.08);
+  color: var(--hy-fg);
+  transform: translateY(-1px);
+}
+
+.app-update-page .hy-btn:disabled {
+  opacity: 0.64;
+  transform: none;
+  box-shadow: none;
+}
+
+.app-update-page .hy-btn-primary:disabled {
+  background:
+    linear-gradient(135deg, oklch(78% 0.145 76 / 0.42), oklch(66% 0.12 188 / 0.34)),
+    oklch(255 0 0 / 0.045);
+  color: oklch(12% 0.028 258 / 0.72);
+}
+
+.app-update-action-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 116px;
+  min-height: 36px;
+  padding: 8px 14px;
+  border: 1px solid oklch(75% 0.095 205 / 0.28);
+  border-radius: var(--hy-radius-control);
+  background:
+    linear-gradient(135deg, oklch(75% 0.095 205 / 0.12), oklch(66% 0.12 188 / 0.1)),
+    oklch(255 0 0 / 0.035);
+  color: var(--hy-cyan);
+  font-size: 13px;
+  font-weight: 590;
+  pointer-events: none;
+  user-select: none;
+}
+
+.app-update-action-state::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 14px currentColor;
+  animation: hy-dot-pulse 1.4s ease-in-out infinite;
 }
 
 .app-update-grid {
@@ -11372,7 +11435,10 @@ body.electron-window .hy-traffic {
   padding: 16px;
   border: 1px solid var(--hy-border-soft);
   border-radius: var(--hy-radius-card);
-  background: var(--hy-surface);
+  background:
+    radial-gradient(ellipse 68% 100% at 100% 0%, oklch(75% 0.095 205 / 0.045), transparent 64%),
+    color-mix(in oklch, var(--hy-surface) 92%, transparent);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 0.14);
 }
 
 .app-update-card strong {
