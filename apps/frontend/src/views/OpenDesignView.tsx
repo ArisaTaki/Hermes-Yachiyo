@@ -59,10 +59,13 @@ type HermesProviderOption = {
   label?: string;
   base_url?: string;
   default_model?: string;
+  default_vision_model?: string;
   models?: string[];
+  vision_models?: string[];
   api_key_name?: string;
   api_key_configured?: boolean;
   auth_type?: string;
+  source?: string;
 };
 
 type HermesVisualConfig = {
@@ -210,38 +213,38 @@ const NAV_GROUPS: Array<{
   label: string;
   items: Array<{ view: AppView; label: string; icon: string; badge?: string; mode?: string }>;
 }> = [
-  {
-    label: '初始化',
-    items: [
-      { view: 'main', label: '主控台', icon: '◇' },
-      { view: 'installer', label: '安装器', icon: '▣' },
-      { view: 'provider', label: '模型配置', icon: '⌁' },
-    ],
-  },
-  {
-    label: '日常桌面',
-    items: [
-      { view: 'chat', label: '对话', icon: '◌' },
-      { view: 'bubble', label: '气泡模式', icon: '◍' },
-      { view: 'live2d', label: 'Live2D 模式', icon: '◈' },
-      { view: 'proactive-tts', label: 'GPT-SoVITS', icon: '♪' },
-    ],
-  },
-  {
-    label: '资源',
-    items: [
-      { view: 'resources', label: '资源管理', icon: '▤' },
-      { view: 'workspace', label: '工作区', icon: '▥' },
-    ],
-  },
-  {
-    label: '维护',
-    items: [
-      { view: 'diagnostics', label: '诊断工具', icon: '⌕' },
-      { view: 'settings', label: '设置', icon: '⚙' },
-    ],
-  },
-];
+    {
+      label: '初始化',
+      items: [
+        { view: 'main', label: '主控台', icon: '◇' },
+        { view: 'installer', label: '安装器', icon: '▣' },
+        { view: 'provider', label: '模型配置', icon: '⌁' },
+      ],
+    },
+    {
+      label: '日常桌面',
+      items: [
+        { view: 'chat', label: '对话', icon: '◌' },
+        { view: 'bubble', label: '气泡模式', icon: '◍' },
+        { view: 'live2d', label: 'Live2D 模式', icon: '◈' },
+        { view: 'proactive-tts', label: 'GPT-SoVITS', icon: '♪' },
+      ],
+    },
+    {
+      label: '资源',
+      items: [
+        { view: 'resources', label: '资源管理', icon: '▤' },
+        { view: 'workspace', label: '工作区', icon: '▥' },
+      ],
+    },
+    {
+      label: '维护',
+      items: [
+        { view: 'diagnostics', label: '诊断工具', icon: '⌕' },
+        { view: 'settings', label: '设置', icon: '⚙' },
+      ],
+    },
+  ];
 
 type ToolStatusTone = 'ready' | 'pending' | 'error';
 
@@ -277,11 +280,11 @@ const PARTICLES = Array.from({ length: 80 }, (_, index) => {
     className: `hy-moon-particle ${modes[index % modes.length]}`,
     style: {
       '--particle-x': `${(index * 29) % 100}%`,
-      '--particle-size': `${0.8 + (index % 7) * 0.42}px`,
+      '--particle-size': `${1.1 + (index % 7) * 0.5}px`,
       '--particle-delay': `${(index % 12) * -0.95}s`,
       '--particle-duration': `${7 + (index % 10)}s`,
       '--particle-drift': `${index % 2 ? '-' : ''}${36 + (index % 6) * 20}px`,
-      '--particle-opacity': `${0.08 + (index % 5) * 0.045}`,
+      '--particle-opacity': `${0.12 + (index % 5) * 0.055}`,
       '--particle-color': `var(--hy-particle-${colors[index % colors.length]})`,
     } as CSSProperties,
   };
@@ -365,9 +368,11 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
     glowEnabled ? 'hy-glow-on' : '',
   ].filter(Boolean).join(' ');
   const moonlightFactor = moonlightIntensity / 100;
+  const normalizedMoonlight = Math.max(moonlightFactor, 0);
   const shellStyle = {
-    '--hy-moonlight-opacity': String(Math.min(Math.max(moonlightFactor, 0), 1)),
-    '--hy-moon-brightness': String(0.88 + Math.max(moonlightFactor, 0) * 0.35),
+    '--hy-moonlight-opacity': String(Math.min(normalizedMoonlight, 1)),
+    '--hy-kv-moon-opacity': String(Math.min(normalizedMoonlight, 1)),
+    '--hy-kv-moon-brightness': String(0.72 + normalizedMoonlight * 0.34),
     '--hy-anim-factor': String(100 / Math.max(animationSpeed, 1)),
     '--hy-font-size-base': `${fontSize}px`,
   } as CSSProperties;
@@ -482,7 +487,6 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
           <span className={particle.className} key={particle.id} style={particle.style} />
         ))}
       </div>
-      <span className="hy-moon-orb" aria-hidden />
       <div className="hy-shimmer-sweep" key={shimmerKey.current} style={shimmerActive ? undefined : { display: 'none' }} />
       <BootLoadingOverlay hidden={loadingHidden} slow={bootSlow} />
 
@@ -705,8 +709,7 @@ export function DashboardPage() {
   return (
     <section className="hy-route-page hy-dashboard-page">
       {error && !dataLoaded ? <div className="notice danger">{error}</div> : null}
-      <section className="hy-kv-hero corner-frame">
-        <div className="corner-frame-inner" />
+      <section className="hy-kv-hero">
         <div className="hy-kv-copy">
           <span className="hy-eyebrow">月夜見 · 管理员在线</span>
           <h1>月見八千代<br />正在守望你的世界</h1>
@@ -848,11 +851,30 @@ export function ProviderPage() {
     };
   }, []);
 
-  const provider = config?.provider_options?.find((option) => option.id === form.provider);
-  const modelOptions = uniqueOptions([form.model, provider?.default_model, ...(provider?.models || [])]);
-  const visionProvider = config?.provider_options?.find((option) => option.id === form.vision_provider);
-  const visionModelOptions = uniqueOptions([form.vision_model, visionProvider?.default_model, ...(visionProvider?.models || [])]);
+  const providerOptions = config?.provider_options || [];
+  const provider = providerOptionById(config, form.provider);
+  const visionProvider = form.vision_provider ? providerOptionById(config, form.vision_provider) : undefined;
+  const effectiveVisionProvider = visionProvider || provider;
+  const modelOptions = textModelOptions(provider, form.model);
+  const visionModelOptions = visionModelSelectOptions(effectiveVisionProvider, form.vision_model);
   const apiKeyLabel = provider?.api_key_name || config?.api_key?.name || 'API Key';
+  const apiKeyConfigured = provider?.api_key_configured ?? config?.api_key?.configured;
+  const visionApiKeyLabel = visionProvider?.api_key_name || provider?.api_key_name || config?.api_key?.name || 'Vision API Key';
+  const visionApiKeyConfigured = visionProvider?.api_key_configured ?? config?.vision?.api_key_configured;
+
+  function updateTextProvider(providerId: string) {
+    setTestResult(null);
+    setImageTestResult(null);
+    setForm((current) => {
+      const next = applyTextProviderPreset(config, current, providerId);
+      return current.vision_provider ? next : { ...next, vision_model: '', vision_base_url: '', vision_api_key: '' };
+    });
+  }
+
+  function updateVisionProvider(providerId: string) {
+    setImageTestResult(null);
+    setForm((current) => applyVisionProviderPreset(config, current, providerId));
+  }
 
   async function persistHermesConfig() {
     if (!form.provider.trim() || !form.model.trim()) {
@@ -930,112 +952,140 @@ export function ProviderPage() {
       {status ? <div className={/失败|错误|无法|不能为空/.test(status) ? 'notice danger' : 'notice'}>{status}</div> : null}
 
       <section className="hy-provider-settings">
-        <form className="hy-settings-section hy-stagger" onSubmit={saveConfig}>
-          <h3>提供商</h3>
-          <div className="hy-settings-card">
-            <label className="hy-settings-item">
-              <span>
-                <strong>模型提供商</strong>
-                <small>选择 AI 模型服务</small>
-              </span>
-              <select className="hy-select" value={form.provider} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, provider: event.target.value }))}>
-                {config?.provider_options?.length ? config.provider_options.map((option) => (
-                  <option key={option.id} value={option.id}>{providerLabel(option)}</option>
-                )) : <option value={form.provider}>{form.provider || '读取中'}</option>}
-              </select>
-            </label>
-            <label className="hy-settings-item">
-              <span>
-                <strong>{apiKeyLabel}</strong>
-                <small>{provider?.api_key_configured || config?.api_key?.configured ? '已配置，留空则不修改' : '密钥仅存储在本地'}</small>
-              </span>
-              <input className="hy-input" type="password" value={form.api_key} placeholder={provider?.api_key_configured || config?.api_key?.configured ? 'sk-••••••••••••••••' : `输入 ${apiKeyLabel}`} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, api_key: event.target.value }))} />
-            </label>
-            <label className="hy-settings-item">
-              <span>
-                <strong>模型</strong>
-                <small>当前使用的模型</small>
-              </span>
-              {modelOptions.length ? (
-                <select className="hy-select" value={form.model} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, model: event.target.value }))}>
-                  {modelOptions.map((model) => <option value={model} key={model}>{model}</option>)}
+        <form className="hy-provider-form-sections hy-stagger" onSubmit={saveConfig}>
+          <section className="hy-settings-section">
+            <div className="hy-settings-card">
+              <div className="hy-settings-item">
+                <span>
+                  <strong>保存全部配置</strong>
+                  <small>写入文本与 Vision provider、模型、Base URL 和密钥变更</small>
+                </span>
+                <button type="submit" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)}>{busy === 'save' ? '保存中...' : '保存配置'}</button>
+              </div>
+            </div>
+          </section>
+          <section className="hy-settings-section">
+            <div className="hy-section-title-row">
+              <h3>文本提供商</h3>
+              <span>Text Model</span>
+            </div>
+            <div className="hy-settings-card">
+              <label className="hy-settings-item">
+                <span>
+                  <strong>模型提供商</strong>
+                  <small>{provider?.base_url || '切换后自动应用厂商默认模型和 Base URL'}</small>
+                </span>
+                <select className="hy-select" value={form.provider} disabled={Boolean(busy)} onChange={(event) => updateTextProvider(event.target.value)}>
+                  {providerOptions.length ? providerOptions.map((option) => (
+                    <option key={option.id} value={option.id}>{providerLabel(option)}</option>
+                  )) : <option value={form.provider}>{form.provider || '读取中'}</option>}
                 </select>
-              ) : (
-                <input className="hy-input" value={form.model} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, model: event.target.value }))} />
-              )}
-            </label>
-            <label className="hy-settings-item">
-              <span>
-                <strong>Base URL</strong>
-                <small>{config?.config_path || 'Hermes 配置路径待读取'}</small>
-              </span>
-              <input className="hy-input" value={form.base_url} placeholder={provider?.base_url || 'https://api.openai.com/v1'} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, base_url: event.target.value }))} />
-            </label>
-            <label className="hy-settings-item">
-              <span>
-                <strong>图片输入模式</strong>
-                <small>{config?.image_input?.reason || config?.image_input?.label || '选择图片如何进入 Hermes'}</small>
-              </span>
-              <select className="hy-select" value={form.image_input_mode} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, image_input_mode: event.target.value }))}>
-                <option value="text">文本描述 / 禁用视觉</option>
-                <option value="vision">Vision 模型识图</option>
-                <option value="auto">自动选择</option>
-              </select>
-            </label>
-            <label className="hy-settings-item">
-              <span>
-                <strong>Vision Provider</strong>
-                <small>{config?.vision?.api_key_configured ? '视觉密钥已配置，留空则不修改' : '可与文本模型使用不同 provider'}</small>
-              </span>
-              <select className="hy-select" value={form.vision_provider} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, vision_provider: event.target.value }))}>
-                <option value="">跟随文本模型</option>
-                {config?.provider_options?.map((option) => (
-                  <option key={option.id} value={option.id}>{providerLabel(option)}</option>
-                ))}
-              </select>
-            </label>
-            <label className="hy-settings-item">
-              <span>
-                <strong>Vision 模型</strong>
-                <small>支持图片理解的模型名称</small>
-              </span>
-              {visionModelOptions.length ? (
-                <select className="hy-select" value={form.vision_model} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, vision_model: event.target.value }))}>
-                  <option value="">跟随 Provider 默认</option>
-                  {visionModelOptions.map((model) => <option value={model} key={model}>{model}</option>)}
-                </select>
-              ) : (
-                <input className="hy-input" value={form.vision_model} placeholder="例如 gpt-4o-mini" disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, vision_model: event.target.value }))} />
-              )}
-            </label>
-            <label className="hy-settings-item">
-              <span>
-                <strong>Vision Base URL</strong>
-                <small>{config?.vision?.base_url || '留空则跟随 provider 默认地址'}</small>
-              </span>
-              <input className="hy-input" value={form.vision_base_url} placeholder={visionProvider?.base_url || form.base_url || 'https://api.openai.com/v1'} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, vision_base_url: event.target.value }))} />
-            </label>
-            <label className="hy-settings-item">
-              <span>
-                <strong>Vision API Key</strong>
-                <small>{config?.vision?.api_key_configured ? '已配置，留空则不修改' : '密钥仅存储在本地'}</small>
-              </span>
-              <input className="hy-input" type="password" value={form.vision_api_key} placeholder={config?.vision?.api_key_configured ? 'sk-••••••••••••••••' : '可选，留空跟随文本密钥'} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, vision_api_key: event.target.value }))} />
-            </label>
-            <div className="hy-settings-item">
-              <span>
-                <strong>连接测试</strong>
-                <small>保存配置后分别测试文本模型或图片链路</small>
-              </span>
-              <div className="hy-action-row">
-                <button type="submit" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)}>{busy === 'save' ? '保存中...' : '保存'}</button>
+              </label>
+              <label className="hy-settings-item">
+                <span>
+                  <strong>模型</strong>
+                  <small>{provider?.default_model ? `默认 ${provider.default_model}` : '当前使用的文本模型'}</small>
+                </span>
+                {modelOptions.length ? (
+                  <select className="hy-select" value={form.model} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, model: event.target.value }))}>
+                    {modelOptions.map((model) => <option value={model} key={model}>{model}</option>)}
+                  </select>
+                ) : (
+                  <input className="hy-input" value={form.model} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, model: event.target.value }))} />
+                )}
+              </label>
+              <label className="hy-settings-item">
+                <span>
+                  <strong>Base URL</strong>
+                  <small>{config?.config_path || 'Hermes 配置路径待读取'}</small>
+                </span>
+                <input className="hy-input" value={form.base_url} placeholder={provider?.base_url || 'https://api.openai.com/v1'} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, base_url: event.target.value }))} />
+              </label>
+              <label className="hy-settings-item">
+                <span>
+                  <strong>{apiKeyLabel}</strong>
+                  <small>{apiKeyConfigured ? '已配置，留空则不修改' : '密钥仅存储在本地'}</small>
+                </span>
+                <input className="hy-input" type="password" value={form.api_key} placeholder={apiKeyConfigured ? 'sk-••••••••••••••••' : `输入 ${apiKeyLabel}`} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, api_key: event.target.value }))} />
+              </label>
+              <div className="hy-settings-item">
+                <span>
+                  <strong>文本连接测试</strong>
+                  <small>保存当前文本配置后调用 `/ui/hermes/connection-test`</small>
+                </span>
                 <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={() => void runTextConnectionTest()}>{busy === 'text-test' ? '测试中...' : '测试文本'}</button>
+              </div>
+            </div>
+            {testResult ? <ConnectionResult result={testResult} /> : null}
+          </section>
+
+          <section className="hy-settings-section">
+            <div className="hy-section-title-row">
+              <h3>Vision 提供商</h3>
+              <span>Image Understanding</span>
+            </div>
+            <div className="hy-settings-card">
+              <label className="hy-settings-item">
+                <span>
+                  <strong>图片输入模式</strong>
+                  <small>{config?.image_input?.reason || config?.image_input?.label || '选择图片如何进入 Hermes'}</small>
+                </span>
+                <select className="hy-select" value={form.image_input_mode} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, image_input_mode: event.target.value }))}>
+                  <option value="text">文本描述 / 禁用视觉</option>
+                  <option value="vision">Vision 模型识图</option>
+                  <option value="auto">自动选择</option>
+                </select>
+              </label>
+              <label className="hy-settings-item">
+                <span>
+                  <strong>Vision Provider</strong>
+                  <small>{visionProvider?.base_url || (form.vision_provider ? '切换后自动应用视觉模型预设' : '跟随文本提供商的预设')}</small>
+                </span>
+                <select className="hy-select" value={form.vision_provider} disabled={Boolean(busy)} onChange={(event) => updateVisionProvider(event.target.value)}>
+                  <option value="">跟随文本模型</option>
+                  {providerOptions.map((option) => (
+                    <option key={option.id} value={option.id}>{providerLabel(option)}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="hy-settings-item">
+                <span>
+                  <strong>Vision 模型</strong>
+                  <small>{effectiveVisionProvider?.default_vision_model || effectiveVisionProvider?.default_model || '支持图片理解的模型名称'}</small>
+                </span>
+                {visionModelOptions.length ? (
+                  <select className="hy-select" value={form.vision_model} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, vision_model: event.target.value }))}>
+                    <option value="">跟随 Provider 默认</option>
+                    {visionModelOptions.map((model) => <option value={model} key={model}>{model}</option>)}
+                  </select>
+                ) : (
+                  <input className="hy-input" value={form.vision_model} placeholder="例如 gpt-4o-mini" disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, vision_model: event.target.value }))} />
+                )}
+              </label>
+              <label className="hy-settings-item">
+                <span>
+                  <strong>Vision Base URL</strong>
+                  <small>{form.vision_provider ? '切换 Vision Provider 时自动填入厂商默认地址' : '留空则跟随文本模型 Base URL'}</small>
+                </span>
+                <input className="hy-input" value={form.vision_base_url} placeholder={effectiveVisionProvider?.base_url || form.base_url || 'https://api.openai.com/v1'} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, vision_base_url: event.target.value }))} />
+              </label>
+              <label className="hy-settings-item">
+                <span>
+                  <strong>{visionApiKeyLabel}</strong>
+                  <small>{visionApiKeyConfigured ? '已配置，留空则不修改' : '可与文本密钥分开配置'}</small>
+                </span>
+                <input className="hy-input" type="password" value={form.vision_api_key} placeholder={visionApiKeyConfigured ? 'sk-••••••••••••••••' : `输入 ${visionApiKeyLabel}`} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, vision_api_key: event.target.value }))} />
+              </label>
+              <div className="hy-settings-item">
+                <span>
+                  <strong>Vision 连接测试</strong>
+                  <small>保存当前视觉配置后调用 `/ui/hermes/image-connection-test`</small>
+                </span>
                 <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(busy)} onClick={() => void runImageConnectionTest()}>{busy === 'image-test' ? '测试中...' : '测试图片'}</button>
               </div>
             </div>
-          </div>
-          {testResult ? <ConnectionResult result={testResult} /> : null}
-          {imageTestResult ? <ConnectionResult result={imageTestResult} /> : null}
+            {imageTestResult ? <ConnectionResult result={imageTestResult} /> : null}
+          </section>
         </form>
 
         <section className="hy-settings-section hy-stagger">
@@ -1044,10 +1094,6 @@ export function ProviderPage() {
             <div className="hy-settings-item">
               <span><strong>语音链路</strong><small>主动关怀语音、GPT-SoVITS 服务和音色包在专门页面配置</small></span>
               <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('proactive-tts')}>打开语音设置</button>
-            </div>
-            <div className="hy-settings-item">
-              <span><strong>说明</strong><small>这里不展示没有后端支持的 GPU 伪开关；模型推理参数以 Hermes 配置为准。</small></span>
-              <span className="hy-inline-muted">真实入口</span>
             </div>
           </div>
         </section>
@@ -1713,15 +1759,71 @@ function emptyHermesForm(): HermesConfigForm {
 }
 
 function formFromHermesConfig(config: HermesVisualConfig | null): HermesConfigForm {
+  const providerId = config?.model?.provider || config?.provider_options?.[0]?.id || '';
+  const provider = providerOptionById(config, providerId);
+  const visionProviderId = config?.vision?.provider || '';
+  const visionProvider = providerOptionById(config, visionProviderId);
   return {
-    provider: config?.model?.provider || config?.provider_options?.find((option) => option.id)?.id || '',
-    model: config?.model?.default || '',
-    base_url: config?.model?.base_url || '',
+    provider: providerId,
+    model: config?.model?.default || defaultTextModel(provider),
+    base_url: config?.model?.base_url || provider?.base_url || '',
     api_key: '',
     image_input_mode: config?.image_input?.mode || 'text',
-    vision_provider: config?.vision?.provider || '',
-    vision_model: config?.vision?.model || '',
-    vision_base_url: config?.vision?.base_url || '',
+    vision_provider: visionProviderId,
+    vision_model: config?.vision?.model || (visionProviderId ? defaultVisionModel(visionProvider) : ''),
+    vision_base_url: config?.vision?.base_url || (visionProviderId ? visionProvider?.base_url || '' : ''),
+    vision_api_key: '',
+  };
+}
+
+function providerOptionById(config: HermesVisualConfig | null, provider: string): HermesProviderOption | undefined {
+  return config?.provider_options?.find((option) => option.id === provider);
+}
+
+function defaultTextModel(option: HermesProviderOption | undefined): string {
+  return option?.default_model || option?.models?.[0] || '';
+}
+
+function defaultVisionModel(option: HermesProviderOption | undefined): string {
+  return option?.default_vision_model || option?.vision_models?.[0] || option?.default_model || option?.models?.[0] || '';
+}
+
+function textModelOptions(option: HermesProviderOption | undefined, currentModel: string): string[] {
+  return uniqueOptions([currentModel, defaultTextModel(option), ...(option?.models || [])]);
+}
+
+function visionModelSelectOptions(option: HermesProviderOption | undefined, currentModel: string): string[] {
+  const models = option?.vision_models?.length ? option.vision_models : option?.models || [];
+  return uniqueOptions([currentModel, defaultVisionModel(option), ...models]);
+}
+
+function applyTextProviderPreset(config: HermesVisualConfig | null, current: HermesConfigForm, providerId: string): HermesConfigForm {
+  const option = providerOptionById(config, providerId);
+  return {
+    ...current,
+    provider: providerId,
+    model: defaultTextModel(option),
+    base_url: option?.base_url || '',
+    api_key: '',
+  };
+}
+
+function applyVisionProviderPreset(config: HermesVisualConfig | null, current: HermesConfigForm, providerId: string): HermesConfigForm {
+  if (!providerId) {
+    return {
+      ...current,
+      vision_provider: '',
+      vision_model: '',
+      vision_base_url: '',
+      vision_api_key: '',
+    };
+  }
+  const option = providerOptionById(config, providerId);
+  return {
+    ...current,
+    vision_provider: providerId,
+    vision_model: defaultVisionModel(option),
+    vision_base_url: option?.base_url || '',
     vision_api_key: '',
   };
 }

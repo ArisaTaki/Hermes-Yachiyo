@@ -64,6 +64,7 @@ body.desktop-mode-body,
 body.desktop-mode-body #root {
   background: transparent !important;
   overflow: hidden;
+  scrollbar-gutter: auto;
 }
 
 button,
@@ -3450,20 +3451,19 @@ button:hover {
   0%,
   100% {
     border-color: rgba(236, 177, 39, 0.9);
-    box-shadow: 0 0 0 0 rgba(249, 199, 78, 0.26);
+    box-shadow: none;
   }
 
   50% {
     border-color: rgba(255, 219, 112, 1);
-    box-shadow: 0 0 0 10px rgba(249, 199, 78, 0.12);
+    box-shadow: none;
   }
 }
 
 .bubble-launcher {
   position: relative;
-  width: calc(min(100vw, 100vh) - 8px);
-  height: calc(min(100vw, 100vh) - 8px);
-  aspect-ratio: 1;
+  width: calc(100vw - 8px);
+  height: calc(100vh - 8px);
   max-width: 100%;
   max-height: 100%;
   min-width: 0;
@@ -3482,7 +3482,7 @@ button:hover {
   -webkit-backdrop-filter: none;
   appearance: none;
   -webkit-appearance: none;
-  transition: transform 120ms ease, border-color 120ms ease;
+  transition: transform 120ms ease, border-color 120ms ease, opacity 120ms ease;
 }
 
 .bubble-launcher:hover {
@@ -3513,8 +3513,7 @@ button:hover {
   border-radius: 50%;
   overflow: hidden;
   background-image: var(--bubble-avatar);
-  background-size: contain;
-  background-repeat: no-repeat;
+  background-size: cover;
   background-position: center center;
   border: 1px solid rgba(255, 244, 203, 0.86);
   box-shadow: none;
@@ -4068,7 +4067,7 @@ button:hover {
 
 .phase3-app-grid {
   display: grid;
-  grid-template-columns: 292px minmax(0, 1fr) 386px;
+  grid-template-columns: 292px minmax(0, 1fr) 340px;
   min-height: calc(min(980px, calc(100vh - 48px)) - 52px);
 }
 
@@ -4464,8 +4463,9 @@ button:hover {
 .phase3-install-grid,
 .phase3-mode-preview {
   display: grid;
-  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 14px;
+  min-width: 0;
 }
 
 .phase3-terminal {
@@ -4642,6 +4642,8 @@ button:hover {
 
 .phase3-mode-canvas {
   position: relative;
+  min-width: 0;
+  overflow: visible;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.012)), #080b12;
 }
 
@@ -5226,6 +5228,9 @@ button:hover {
   --hy-particle-pink: oklch(72% 0.14 350);
   --hy-particle-silver: oklch(88% 0.008 250);
   --hy-accent: var(--hy-eye-pink);
+  --hy-accent-wash: color-mix(in oklch, var(--hy-accent) 12%, transparent);
+  --hy-accent-glow: color-mix(in oklch, var(--hy-accent) 26%, transparent);
+  --hy-accent-border: color-mix(in oklch, var(--hy-accent) 42%, transparent);
   --hy-gradient-yachiyo: linear-gradient(135deg, var(--hy-gold), var(--hy-teal) 58%, var(--hy-cyan));
   --hy-gradient-hair: linear-gradient(135deg, var(--hy-silver), var(--hy-accent) 72%);
   --hy-gradient-cosmic: linear-gradient(135deg, var(--hy-accent), var(--hy-violet) 40%, var(--hy-teal) 70%, var(--hy-cyan));
@@ -5240,7 +5245,8 @@ button:hover {
   --hy-font-mono: "SF Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --hy-font-size-base: 13px;
   --hy-moonlight-opacity: 1;
-  --hy-moon-brightness: 1.23;
+  --hy-kv-moon-opacity: 1;
+  --hy-kv-moon-brightness: 1.06;
   --hy-anim-factor: 1;
 }
 
@@ -5379,53 +5385,14 @@ html.desktop-mode-root body.electron-window #root {
 .hy-moonlight-bg::after {
   content: "";
   position: absolute;
-  top: 72px;
-  right: 78px;
-  width: 108px;
-  height: 108px;
+  top: calc(6% + 30px);
+  right: calc(8% + 60px);
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
-  background: radial-gradient(circle, oklch(82% 0.135 76 / 0.1), transparent 68%);
-  filter: blur(10px) brightness(var(--hy-moon-brightness));
+  background: radial-gradient(circle, oklch(72% 0.14 350 / 0.08), transparent 70%);
+  filter: blur(2px);
   animation: hy-star-twinkle calc(4s * var(--hy-anim-factor)) ease-in-out infinite;
-}
-
-.hy-moon-orb {
-  position: fixed;
-  top: 76px;
-  right: 76px;
-  z-index: 12;
-  width: 58px;
-  height: 58px;
-  border-radius: 50%;
-  pointer-events: none;
-  opacity: var(--hy-moonlight-opacity);
-  filter: brightness(var(--hy-moon-brightness));
-  animation: hy-moon-pulse calc(4.6s * var(--hy-anim-factor)) ease-in-out infinite;
-}
-
-.hy-moon-orb::before,
-.hy-moon-orb::after {
-  content: "";
-  position: absolute;
-  border-radius: 50%;
-}
-
-.hy-moon-orb::before {
-  inset: 8px;
-  background:
-    radial-gradient(circle at 35% 32%, oklch(98% 0.018 92 / 0.95), transparent 20%),
-    linear-gradient(135deg, oklch(94% 0.05 88), var(--hy-gold) 58%, oklch(75% 0.095 205 / 0.72));
-  box-shadow:
-    0 0 18px oklch(82% 0.135 76 / 0.32),
-    0 0 46px oklch(72% 0.14 350 / 0.16);
-}
-
-.hy-moon-orb::after {
-  inset: 4px 1px 2px 16px;
-  background:
-    radial-gradient(circle at 30% 18%, oklch(72% 0.14 350 / 0.04), transparent 26%),
-    var(--hy-bg-deep);
-  box-shadow: inset 8px 0 14px oklch(10.5% 0.025 260 / 0.48);
 }
 
 .hy-moon-particle {
@@ -5435,9 +5402,10 @@ html.desktop-mode-root body.electron-window #root {
   width: var(--particle-size);
   height: var(--particle-size);
   border-radius: 999px;
-  background: var(--particle-color);
+  color: var(--particle-color);
+  background: radial-gradient(circle, currentColor, transparent 72%);
   opacity: 0;
-  box-shadow: 0 0 12px currentColor;
+  box-shadow: 0 0 14px currentColor;
   animation: hy-moon-drift calc(var(--particle-duration) * var(--hy-anim-factor)) linear infinite;
   animation-delay: var(--particle-delay);
 }
@@ -5458,9 +5426,6 @@ html.desktop-mode-root body.electron-window #root {
 .hy-shell:not(.hy-glow-on) .hy-loading-logo,
 .hy-shell:not(.hy-glow-on) .hy-floating-bubble,
 .hy-shell:not(.hy-glow-on) .hy-live2d-placeholder-icon,
-.hy-shell:not(.hy-glow-on) .hy-moon-orb,
-.hy-shell:not(.hy-glow-on) .hy-moon-orb::before,
-.hy-shell:not(.hy-glow-on) .hy-moon-orb::after,
 .hy-shell:not(.hy-glow-on) .hy-moonlight-bg::after {
   animation: none;
   box-shadow: none;
@@ -6088,7 +6053,7 @@ body.electron-window .hy-traffic {
   overflow-x: hidden;
   overflow-y: auto;
   background:
-    radial-gradient(ellipse 80% 48% at 54% 8%, oklch(72% 0.14 350 / 0.035), transparent 58%),
+    radial-gradient(ellipse 80% 48% at 54% 8%, var(--hy-accent-wash), transparent 58%),
     radial-gradient(ellipse 42% 36% at 88% 84%, oklch(66% 0.12 188 / 0.045), transparent 64%),
     linear-gradient(180deg, oklch(10.5% 0.025 260 / 0.3), var(--hy-bg-deep));
 }
@@ -6197,7 +6162,7 @@ body.electron-window .hy-traffic {
   align-items: center;
   gap: 8px;
   margin-bottom: 10px;
-  color: var(--hy-eye-pink);
+  color: var(--hy-accent);
   font-size: 11px;
   font-weight: 510;
   letter-spacing: 1.4px;
@@ -6221,13 +6186,13 @@ body.electron-window .hy-traffic {
   overflow: hidden;
   border-bottom: 1px solid var(--hy-border-soft);
   background:
-    radial-gradient(ellipse 60% 100% at 85% 20%, oklch(72% 0.14 350 / 0.08), transparent 50%),
+    radial-gradient(ellipse 60% 100% at 85% 20%, var(--hy-accent-wash), transparent 50%),
     radial-gradient(ellipse 40% 80% at 95% 60%, oklch(78% 0.115 190 / 0.06), transparent 50%),
     radial-gradient(ellipse 80% 60% at 50% 100%, oklch(65% 0.155 310 / 0.04), transparent 60%),
     linear-gradient(180deg, oklch(12% 0.028 258 / 0.72), oklch(11.5% 0.025 258 / 0.46));
 }
 
-.hy-kv-hero::after {
+.hy-kv-hero::before {
   content: "";
   position: absolute;
   top: -20px;
@@ -6235,8 +6200,13 @@ body.electron-window .hy-traffic {
   width: 140px;
   height: 140px;
   border-radius: 50%;
-  background: radial-gradient(circle at 35% 35%, oklch(95% 0.005 80 / 0.08), oklch(88% 0.008 250 / 0.04) 50%, transparent 72%);
-  box-shadow: 0 0 80px oklch(88% 0.008 250 / 0.06), inset -12px -8px 24px oklch(10% 0.025 260 / 0.2);
+  background:
+    radial-gradient(circle at 35% 35%, oklch(95% 0.005 80 / 0.08), oklch(88% 0.008 250 / 0.04) 50%, transparent 72%);
+  box-shadow:
+    0 0 80px oklch(88% 0.008 250 / 0.06),
+    inset -12px -8px 24px oklch(10% 0.025 260 / 0.2);
+  filter: brightness(var(--hy-kv-moon-brightness));
+  opacity: var(--hy-kv-moon-opacity);
   pointer-events: none;
 }
 
@@ -7817,8 +7787,8 @@ body.electron-window .hy-traffic {
 }
 
 .hy-tweak-toggle.on {
-  border-color: oklch(75% 0.095 205 / 0.26);
-  background: oklch(75% 0.095 205 / 0.12);
+  border-color: var(--hy-accent-border);
+  background: var(--hy-accent-wash);
 }
 
 .hy-tweak-toggle.on::after {
@@ -8946,8 +8916,20 @@ body.electron-window .hy-traffic {
   gap: 32px;
 }
 
+.hy-provider-form-sections {
+  display: grid;
+  gap: 32px;
+}
+
 .hy-settings-section {
   display: grid;
+  gap: 12px;
+}
+
+.hy-section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
 }
 
@@ -8956,6 +8938,17 @@ body.electron-window .hy-traffic {
   color: var(--hy-fg);
   font-size: 18px;
   font-weight: 590;
+}
+
+.hy-section-title-row>span {
+  flex: 0 0 auto;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  padding: 4px 9px;
+  color: var(--hy-faint);
+  font-size: 11px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
 }
 
 .hy-settings-card {

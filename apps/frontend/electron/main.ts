@@ -41,11 +41,15 @@ const DEFAULT_UPDATE_REPOSITORY = 'kuguya-AI-app-develop/Hermes-Yachiyo';
 const BRIDGE_SETTINGS_RETRIES = 40;
 const BRIDGE_SETTINGS_RETRY_MS = 250;
 const BUBBLE_SCREEN_MARGIN = 24;
+const BUBBLE_MIN_WINDOW_SIZE = 112;
+const BUBBLE_DEFAULT_WINDOW_SIZE = 112;
+const BUBBLE_MAX_WINDOW_SIZE = 192;
 const POSITION_SAVE_DEBOUNCE_MS = 260;
 const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
 const TRANSPARENT_WINDOW_BACKGROUND = '#00000000';
 const MIN_APP_WINDOW_WIDTH = 1250;
 const MIN_APP_WINDOW_HEIGHT = 860;
+const UI_RENDER_REVISION = 'open-design-v4-moon-bubble-scrollbar-gutter-v3-20260512';
 const MAX_LAUNCHER_SHAPE_RECTS = 10000;
 const MAX_AVATAR_IMAGE_BYTES = 8 * 1024 * 1024;
 type IconKind = 'dock' | 'tray' | 'window';
@@ -1124,6 +1128,7 @@ async function restartBackendProcess(targetBridgeUrl?: unknown): Promise<{ succe
 
 function rendererUrl(params: Record<string, string> = {}): string {
   const query = new URLSearchParams({ bridge: bridgeUrl });
+  query.set('_hy_ui_rev', UI_RENDER_REVISION);
   Object.entries(params)
     .filter(([key]) => key !== 'view' && key !== 'mode' && key !== 'restore')
     .forEach(([key, value]) => query.set(key, value));
@@ -1622,7 +1627,7 @@ function boundsChanged(first: Rectangle, second: Rectangle): boolean {
 
 function squareBubbleBounds(bounds: Rectangle): Rectangle {
   const workArea = workAreaForBounds(bounds);
-  const size = Math.round(clamp(Math.max(bounds.width, bounds.height), 80, 192));
+  const size = Math.round(clamp(Math.max(bounds.width, bounds.height), BUBBLE_MIN_WINDOW_SIZE, BUBBLE_MAX_WINDOW_SIZE));
   const x = Math.round(clamp(bounds.x, workArea.x, workArea.x + Math.max(0, workArea.width - size)));
   const y = Math.round(clamp(bounds.y, workArea.y, workArea.y + Math.max(0, workArea.height - size)));
   return { ...bounds, x, y, width: size, height: size };
@@ -1713,9 +1718,12 @@ function desktopModeBounds(mode: ModeId, config: Record<string, unknown>) {
 
   const display = screen.getPrimaryDisplay().workArea;
   const size = Math.round(clamp(
-    Math.max(numberFromConfig(config.width, 112), numberFromConfig(config.height, 112)),
-    80,
-    192,
+    Math.max(
+      numberFromConfig(config.width, BUBBLE_DEFAULT_WINDOW_SIZE),
+      numberFromConfig(config.height, BUBBLE_DEFAULT_WINDOW_SIZE),
+    ),
+    BUBBLE_MIN_WINDOW_SIZE,
+    BUBBLE_MAX_WINDOW_SIZE,
   ));
   const xPercent = clamp(numberFromConfig(config.position_x_percent, 1), 0, 1);
   const yPercent = clamp(numberFromConfig(config.position_y_percent, 1), 0, 1);
@@ -1784,17 +1792,8 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
   showMacDockIcon();
   if (modeWindow && !modeWindow.isDestroyed() && activeMode === mode) {
     const nextSignature = modeConfigSignature(config);
+    let rendererReloaded = false;
     activeModeConfig = config;
-    if (mode === 'bubble') {
-      const currentBounds = modeWindow.getBounds();
-      const squaredBounds = squareBubbleBounds(currentBounds);
-      if (boundsChanged(currentBounds, squaredBounds)) {
-        suppressModeWindowPositionSave();
-        modeWindow.setBounds(squaredBounds, false);
-        repaintTransparentModeWindow(modeWindow);
-        modeWindowShapeApplied = false;
-      }
-    }
     if (nextSignature !== activeModeConfigSignature) {
       activeModeConfigSignature = nextSignature;
       const bounds = desktopModeBounds(mode, config);
@@ -1808,10 +1807,25 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
         modeWindow.setVisibleOnAllWorkspaces(booleanFromConfig(config.show_on_all_spaces, true), { visibleOnFullScreen: true });
       }
       modeWindow.loadURL(rendererUrl({ view: mode, surface: 'desktop' }));
+      rendererReloaded = true;
+    }
+    if (mode === 'bubble') {
+      const currentBounds = modeWindow.getBounds();
+      const squaredBounds = squareBubbleBounds(currentBounds);
+      if (boundsChanged(currentBounds, squaredBounds)) {
+        suppressModeWindowPositionSave();
+        modeWindow.setBounds(squaredBounds, false);
+        repaintTransparentModeWindow(modeWindow);
+        modeWindowShapeApplied = false;
+      }
     }
     const route = routeForWindow(modeWindow);
     if (route?.view !== mode && !(mode === 'bubble' && route?.view === 'bubble-menu')) {
       modeWindow.loadURL(rendererUrl({ view: mode, surface: 'desktop' }));
+      rendererReloaded = true;
+    } else if (mode === 'bubble' && !rendererReloaded) {
+      modeWindow.loadURL(rendererUrl({ view: mode, surface: 'desktop', launcher_reload: `${Date.now()}` }));
+      rendererReloaded = true;
     }
     repaintTransparentModeWindow(modeWindow);
     setModeWindowPointerInteractive(mode, false);
@@ -1932,22 +1946,15 @@ function setModeWindowPointerInteractive(mode: ModeId, interactive: boolean): bo
 
 function setModeWindowHitRegions(mode: ModeId, rawRegions: unknown): boolean {
   if (!modeWindow || modeWindow.isDestroyed() || activeMode !== mode) return false;
-  let bounds = modeWindow.getBounds();
+  const bounds = modeWindow.getBounds();
   if (mode === 'bubble') {
-    const squared = squareBubbleBounds(bounds);
-    if (boundsChanged(bounds, squared)) {
-      suppressModeWindowPositionSave();
-      modeWindow.setBounds(squared, false);
-      repaintTransparentModeWindow(modeWindow);
-      bounds = squared;
-    }
     try {
       modeWindow.setShape([{ x: 0, y: 0, width: bounds.width, height: bounds.height }]);
-      modeWindowShapeApplied = false;
+      modeWindowShapeApplied = true;
       return true;
     } catch (error) {
       modeWindowShapeApplied = false;
-      console.warn('[desktop] setShape failed for bubble full bounds.', error);
+      console.warn('[desktop] setShape failed; falling back to pointer passthrough polling.', error);
       return false;
     }
   }

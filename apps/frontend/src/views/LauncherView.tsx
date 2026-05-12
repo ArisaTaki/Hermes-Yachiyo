@@ -1,5 +1,6 @@
 import { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 
+import logoUrl from '../../../../docs/open-design/logo.png';
 import { apiGet, apiPost, bridgeUrl, getLauncherPointerState, moveLauncherWindow, openAppView, openLauncherMenu, setLauncherHitRegions, setLauncherPointerInteractive, type LauncherHitRegionRect } from '../lib/bridge';
 import type { AppView } from '../lib/view';
 
@@ -309,9 +310,10 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
   const ariaLabel = displayMode === 'icon'
     ? 'Yachiyo Bubble'
     : `Yachiyo Bubble - ${hasAttention ? '有新消息' : statusLabel}`;
+  const avatarUrl = launcher.avatar_url || logoUrl;
   const style = {
     opacity: idleHidden ? Math.max(0.24, opacity * 0.52) : opacity,
-    '--bubble-avatar': `url(${launcher.avatar_url || ''})`,
+    '--bubble-avatar': `url("${avatarUrl.replace(/"/g, '\\"')}")`,
   } as CSSProperties;
 
   useEffect(() => {
