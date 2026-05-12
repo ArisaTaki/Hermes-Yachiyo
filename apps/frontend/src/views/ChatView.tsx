@@ -179,6 +179,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const conversationTransitionRef = useRef(false);
   const sidebarAutoWidthRef = useRef(true);
   const assistantProfileSeedRef = useRef(assistantProfileSeed);
+  const messageTextSelectingRef = useRef(false);
 
   const refreshMessages = useCallback(async (options: { allowDuringTransition?: boolean } = {}) => {
     if (conversationTransitionRef.current && !options.allowDuringTransition) return;
@@ -192,6 +193,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const nextMessages = withResolvedAttachmentUrls(payload.messages || [], baseUrl);
       const processing = Boolean(payload.is_processing);
       const failed = latestFailedMessage(nextMessages);
+      if (!shouldHoldLoading && isMessageSelectionPaused()) {
+        setIsProcessing(processing);
+        return;
+      }
       syncRenderStates(nextMessages, renderStateRef.current);
       const elapsed = Date.now() - startedAt;
       const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
@@ -338,10 +343,24 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
 
   useEffect(() => {
     const list = listRef.current;
-    if (!list || !stickToBottomRef.current) return;
+    if (!list || !stickToBottomRef.current || isMessageSelectionPaused()) return;
     list.scrollTo({ top: list.scrollHeight });
     lastScrollTopRef.current = list.scrollTop;
   }, [messages]);
+
+  useEffect(() => {
+    const stopSelecting = () => {
+      window.setTimeout(() => {
+        messageTextSelectingRef.current = false;
+      }, 120);
+    };
+    window.addEventListener('pointerup', stopSelecting);
+    window.addEventListener('pointercancel', stopSelecting);
+    return () => {
+      window.removeEventListener('pointerup', stopSelecting);
+      window.removeEventListener('pointercancel', stopSelecting);
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -392,8 +411,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
 
     setRenderTick((value) => value + 1);
     const list = listRef.current;
-    if (list && stickToBottomRef.current) list.scrollTo({ top: list.scrollHeight });
+    if (list && stickToBottomRef.current && !isMessageSelectionPaused()) list.scrollTo({ top: list.scrollHeight });
     animationFrameRef.current = pending ? window.requestAnimationFrame(tickTypewriter) : null;
+  }
+
+  function isMessageSelectionPaused() {
+    return messageTextSelectingRef.current || isMessageTextSelectionActive(listRef.current);
   }
 
   function handleScroll() {
@@ -585,6 +608,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     if (!anchor) return;
     event.preventDefault();
     void openExternalUrl(anchor.href);
+  }
+
+  function handleMessagePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target?.closest('.message-content')) return;
+    messageTextSelectingRef.current = true;
+    stickToBottomRef.current = false;
   }
 
   function startSidebarResize(event: ReactPointerEvent<HTMLDivElement>) {
@@ -815,6 +845,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             className={`chat-messages refined-chat-list${conversationLoading ? ' is-loading-conversation' : ''}`}
             ref={listRef}
             onClick={handleMessageListClick}
+            onPointerDown={handleMessagePointerDown}
             onScroll={handleScroll}
           >
             {!messagesLoaded ? (
@@ -1099,6 +1130,20 @@ function sessionTitle(session: SessionItem) {
 function sessionPreview(session: SessionItem) {
   if (!session.message_count) return '新的月夜会话';
   return `共 ${session.message_count} 条消息`;
+}
+
+function isMessageTextSelectionActive(root: HTMLElement | null) {
+  if (typeof window === 'undefined') return false;
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed) return false;
+  return selectionNodeInMessageContent(selection.anchorNode, root)
+    || selectionNodeInMessageContent(selection.focusNode, root);
+}
+
+function selectionNodeInMessageContent(node: Node | null, root: HTMLElement | null) {
+  if (!node || !root) return false;
+  const element = node instanceof Element ? node : node.parentElement;
+  return Boolean(element && root.contains(element) && element.closest('.message-content'));
 }
 
 function withResolvedAttachmentUrls(messages: ChatMessage[], baseUrl: string): ChatMessage[] {

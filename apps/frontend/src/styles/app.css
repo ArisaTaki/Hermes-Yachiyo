@@ -761,8 +761,8 @@ button:hover {
   font-size: 14px;
   line-height: 1.54;
   word-break: break-word;
-  user-select: text;
-  -webkit-user-select: text;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .refined-message.user {
@@ -825,6 +825,15 @@ button:hover {
   border-radius: 5px;
   color: #aeb8c8;
   background: rgba(255, 255, 255, 0.055);
+}
+
+.message-avatar,
+.message-time,
+.message-copy-button,
+.message-bubble,
+.message-stack {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .message-copy-button:hover {
