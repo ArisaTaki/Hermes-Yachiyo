@@ -1,10 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
 
-import { ChatView } from './views/ChatView';
-import { DiagnosticsView } from './views/DiagnosticsView';
-import { InstallerView } from './views/InstallerView';
-import { LauncherView } from './views/LauncherView';
-import { ModeSettingsView } from './views/ModeSettingsView';
 import {
   ActivityAllPage,
   BubbleModePage,
@@ -16,10 +11,36 @@ import {
   ToolsAllPage,
   WorkspacePage,
 } from './views/OpenDesignView';
-import { ProactiveTtsSettingsView } from './views/ProactiveTtsSettingsView';
-import { ToolCenterView } from './views/ToolCenterView';
-import { AppUpdateView } from './views/AppUpdateView';
+import { LauncherView } from './views/LauncherView';
 import { ROUTE_CHANGE_EVENT, currentParam, currentView } from './lib/view';
+
+const ChatView = lazy(() => import('./views/ChatView').then((module) => ({ default: module.ChatView })));
+const DiagnosticsView = lazy(() =>
+  import('./views/DiagnosticsView').then((module) => ({ default: module.DiagnosticsView })),
+);
+const InstallerView = lazy(() =>
+  import('./views/InstallerView').then((module) => ({ default: module.InstallerView })),
+);
+const ModeSettingsView = lazy(() =>
+  import('./views/ModeSettingsView').then((module) => ({ default: module.ModeSettingsView })),
+);
+const ProactiveTtsSettingsView = lazy(() =>
+  import('./views/ProactiveTtsSettingsView').then((module) => ({ default: module.ProactiveTtsSettingsView })),
+);
+const ToolCenterView = lazy(() =>
+  import('./views/ToolCenterView').then((module) => ({ default: module.ToolCenterView })),
+);
+const AppUpdateView = lazy(() =>
+  import('./views/AppUpdateView').then((module) => ({ default: module.AppUpdateView })),
+);
+
+function RouteLoadingFallback() {
+  return (
+    <div className="hy-route-page hy-route-loading" aria-live="polite">
+      正在加载界面...
+    </div>
+  );
+}
 
 export function App() {
   const view = currentView();
@@ -76,7 +97,7 @@ export function App() {
 
   return (
     <OpenDesignShell activeView={view}>
-      {view === 'live2d' ? live2dKeepAlive : page}
+      <Suspense fallback={<RouteLoadingFallback />}>{view === 'live2d' ? live2dKeepAlive : page}</Suspense>
       {view !== 'live2d' ? live2dKeepAlive : null}
     </OpenDesignShell>
   );
