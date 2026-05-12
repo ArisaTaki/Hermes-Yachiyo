@@ -285,6 +285,8 @@ let bootDashboardCache: DashboardData | null = null;
 let bootLauncherCache: LauncherPayload | null = null;
 let bootDashboardReady = false;
 
+const DASHBOARD_ACTIVITY_POLL_INTERVAL_MS = 1500;
+
 const PageLoadingContext = createContext<((loading: boolean) => void) | null>(null);
 
 export function usePageLoading(loading: boolean) {
@@ -628,6 +630,7 @@ function BootLoadingOverlay({ hidden, slow }: { hidden: boolean; slow: boolean }
 
 export function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(bootDashboardCache);
+  const [recentActivityEvents, setRecentActivityEvents] = useState<ActivityEvent[] | null>(bootDashboardCache?.activities || null);
   const [live2dLauncher, setLive2dLauncher] = useState<LauncherPayload | null>(bootLauncherCache);
   const [error, setError] = useState('');
   const [initialLoading, setInitialLoading] = useState(!bootDashboardCache);
@@ -657,6 +660,7 @@ export function DashboardPage() {
           }
           dataRef.current = payload;
           setData(payload);
+          setRecentActivityEvents(payload.activities || []);
           setLive2dLauncher(launcherPayload);
           setError('');
           setInitialLoading(false);
@@ -688,11 +692,32 @@ export function DashboardPage() {
     };
   }, []);
 
+  useEffect(() => {
+    let disposed = false;
+    async function loadActivities() {
+      try {
+        const payload = await apiGet<ActivityPayload>('/ui/activity?limit=8');
+        if (!disposed && payload.ok !== false) {
+          setRecentActivityEvents(payload.events || []);
+        }
+      } catch {
+        // Keep the last successful dashboard/activity payload visible.
+      }
+    }
+    void loadActivities();
+    const timer = window.setInterval(() => void loadActivities(), DASHBOARD_ACTIVITY_POLL_INTERVAL_MS);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
   const bridge = bridgeState(data);
   const modelReady = Boolean(data?.hermes?.ready || data?.hermes?.command_exists);
   const workspaceReady = Boolean(data?.workspace?.initialized);
   const dataLoaded = data !== null;
-  const activities = recentActivities(data);
+  const activityData = data ? { ...data, activities: recentActivityEvents ?? data.activities } : data;
+  const activities = recentActivities(activityData);
   const modelLabel = data?.hermes?.version || (modelReady ? 'Hermes · 文本+视觉' : 'Hermes 待检测');
   const toolCards = dashboardToolCards(data, live2dLauncher);
 
@@ -1932,7 +1957,10 @@ function uniqueOptions(values: Array<string | undefined>): string[] {
 }
 
 function recentActivities(data: DashboardData | null) {
-  const activityRows = (data?.activities || []).slice(0, 6).map((event) => activityEventRow(event, false));
+  const activityRows = (data?.activities || [])
+    .map((event) => activityEventRow(event, false))
+    .sort((a, b) => timestampMs(b.timestamp) - timestampMs(a.timestamp))
+    .slice(0, 6);
   if (activityRows.length) return activityRows;
   const sessions = data?.chat?.recent_sessions || [];
   const rows = sessions.slice(0, 5).map((session) => ({
@@ -1945,6 +1973,12 @@ function recentActivities(data: DashboardData | null) {
   }));
   if (rows.length) return rows;
   return [];
+}
+
+function timestampMs(value?: string) {
+  if (!value) return 0;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
 }
 
 function formatShortDateTime(value?: string) {

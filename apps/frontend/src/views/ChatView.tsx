@@ -209,6 +209,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const sidebarAutoWidthRef = useRef(true);
   const assistantProfileSeedRef = useRef(assistantProfileSeed);
   const messageTextSelectingRef = useRef(false);
+  const isProcessingRef = useRef(false);
+  const loadSessionsRef = useRef<() => Promise<void>>(async () => undefined);
 
   const refreshMessages = useCallback(async (options: { allowDuringTransition?: boolean } = {}) => {
     if (conversationTransitionRef.current && !options.allowDuringTransition) return;
@@ -221,10 +223,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const baseUrl = await bridgeUrl();
       const nextMessages = withResolvedAttachmentUrls(payload.messages || [], baseUrl);
       const processing = Boolean(payload.is_processing);
+      const processingChanged = processing !== isProcessingRef.current;
+      isProcessingRef.current = processing;
       const failed = latestFailedMessage(nextMessages);
       if (!shouldHoldLoading && isMessageSelectionPaused()) {
         setIsProcessing(processing);
         setStatus(chatStatusLabel(processing, failed, nextMessages));
+        if (processingChanged) void loadSessionsRef.current();
         return;
       }
       syncRenderStates(nextMessages, renderStateRef.current);
@@ -249,6 +254,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       } else {
         setStatus('就绪');
       }
+      if (processingChanged) void loadSessionsRef.current();
     } catch (error) {
       const elapsed = Date.now() - startedAt;
       const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
@@ -272,6 +278,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setSessionsLoaded(true);
     }
   }, []);
+
+  useEffect(() => {
+    loadSessionsRef.current = loadSessions;
+  }, [loadSessions]);
 
   const loadExecutor = useCallback(async () => {
     try {
@@ -330,6 +340,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     const timer = window.setInterval(refreshMessages, interval);
     return () => window.clearInterval(timer);
   }, [isProcessing, refreshMessages]);
+
+  useEffect(() => {
+    if (!isProcessing) return undefined;
+    const timer = window.setInterval(() => void loadSessions(), ACTIVE_POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [isProcessing, loadSessions]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -489,6 +505,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setInput('');
     setAttachments([]);
     setIsSending(true);
+    isProcessingRef.current = true;
     setIsProcessing(true);
     setStatus(outgoingAttachments.length ? '发送图片中...' : '发送中...');
     stickToBottomRef.current = true;
@@ -507,6 +524,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setInput(text);
       setAttachments(outgoingAttachments);
       setStatus(error instanceof Error ? error.message : '发送失败');
+      isProcessingRef.current = false;
       setIsProcessing(false);
     } finally {
       setIsSending(false);
@@ -612,6 +630,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       await apiPost('/ui/chat/session/clear');
       renderStateRef.current.clear();
       setMessages([]);
+      isProcessingRef.current = false;
       setIsProcessing(false);
       setStatus('新对话已创建');
       await loadSessions();
@@ -626,6 +645,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const result = await apiPost<MessagesPayload & { cancelled_tasks?: number }>('/ui/chat/session/cancel');
       if (result.ok === false) throw new Error(result.error || '取消失败');
       setMessages(result.messages || []);
+      isProcessingRef.current = Boolean(result.is_processing);
       setIsProcessing(Boolean(result.is_processing));
       setStatus(result.cancelled_tasks ? `已取消 ${result.cancelled_tasks} 个任务` : '没有可取消任务');
       await loadSessions();
