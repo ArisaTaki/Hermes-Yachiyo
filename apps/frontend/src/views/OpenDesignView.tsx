@@ -1,10 +1,14 @@
-import { createContext, FormEvent, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { Suspense, createContext, lazy, FormEvent, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { AssistantProfileSeedContext, type AssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiGet, apiPost, checkAppUpdate, openDesktopMode, openExternalUrl, openPath, quitApp } from '../lib/bridge';
 import { type AppView, currentParam, navigateTo } from '../lib/view';
-import { Live2DPreviewStage } from './LauncherView';
+import type { LauncherPayload } from './launcherTypes';
+
+const Live2DPreviewStage = lazy(() =>
+  import('./Live2DPreviewStage').then((module) => ({ default: module.Live2DPreviewStage })),
+);
 
 type DashboardData = {
   app?: { uptime_seconds?: number; version?: string; running?: boolean };
@@ -162,43 +166,6 @@ type ResourceFile = {
   categories: string[];
   actionLabel?: string;
   onAction?: () => void;
-};
-
-type LauncherPayload = {
-  ok?: boolean;
-  chat?: { status_label?: string; latest_reply?: string; is_processing?: boolean };
-  launcher?: {
-    avatar_url?: string;
-    status_label?: string;
-    latest_reply?: string;
-    preview_url?: string;
-    scale?: number;
-    position_anchor?: string;
-    render_quality_preset?: string;
-    render_fps?: number;
-    render_resolution?: number;
-    hit_region_precision?: string;
-    resource?: {
-      available?: boolean;
-      state?: string;
-      display_name?: string;
-      status_label?: string;
-      help_text?: string;
-      default_assets_root_display?: string;
-      renderer_entry?: string;
-    };
-    renderer?: {
-      enabled?: boolean;
-      model_url?: string;
-      reason?: string;
-      scale?: number;
-      enable_physics?: boolean;
-      expressions?: Array<{ name?: string; file?: string }>;
-      motion_groups?: Record<string, Array<Record<string, unknown>>>;
-    };
-  };
-  proactive?: { enabled?: boolean; has_attention?: boolean; attention_text?: string };
-  tts?: { enabled?: boolean; provider?: string; ok?: boolean; message?: string; error?: string };
 };
 
 const launcherPayloadCache: Partial<Record<'bubble' | 'live2d', LauncherPayload>> = {};
@@ -1225,7 +1192,9 @@ export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
         <div className={`hy-live2d-stage hy-stagger corner-frame ${previewReady ? 'has-preview' : ''}`}>
           <div className="corner-frame-inner" />
           {previewReady ? (
-            <Live2DPreviewStage data={data} active={active} />
+            <Suspense fallback={<div className="live2d-stage live2d-preview-stage"><div className="live2d-loading">Live2D 预览加载中...</div></div>}>
+              <Live2DPreviewStage data={data} active={active} />
+            </Suspense>
           ) : (
             <div className="hy-live2d-placeholder">
               <div className="hy-live2d-placeholder-icon"><img src={logoUrl} alt="" /></div>

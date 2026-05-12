@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   type AppUpdateCheckResult,
@@ -7,6 +7,7 @@ import {
   type AppUpdateInfo,
   type LatestReleaseMetadata,
   type ReleaseChangelog,
+  cancelAppUpdateDownload,
   checkAppUpdate,
   downloadAppUpdate,
   getAppUpdateInfo,
@@ -26,6 +27,8 @@ export function AppUpdateView() {
   const [progress, setProgress] = useState<AppUpdateDownloadProgress | null>(null);
   const [action, setAction] = useState<UpdateAction>('check');
   const [status, setStatus] = useState('正在检查应用更新...');
+  const mountedRef = useRef(true);
+  const downloadingRef = useRef(false);
 
   usePageLoading(action === 'check' && !check && !info);
 
@@ -41,6 +44,31 @@ export function AppUpdateView() {
   const isDownloading = action === 'download';
 
   useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    downloadingRef.current = isDownloading;
+  }, [isDownloading]);
+
+  useEffect(() => {
+    const guard = (nextView: string) => {
+      if (!downloadingRef.current || nextView === 'app-update') return true;
+      const shouldLeave = window.confirm('应用更新仍在下载中。离开更新页会取消本次下载并清空进度，下次启动将重新检查更新。继续离开吗？');
+      if (shouldLeave) void cancelAppUpdateDownload();
+      return shouldLeave;
+    };
+    window.hermesRouteLeaveGuard = guard;
+    return () => {
+      if (window.hermesRouteLeaveGuard === guard) delete window.hermesRouteLeaveGuard;
+      if (downloadingRef.current) void cancelAppUpdateDownload();
+    };
+  }, []);
+
+  useEffect(() => {
     let disposed = false;
     async function loadUpdateState() {
       setAction('check');
@@ -54,6 +82,7 @@ export function AppUpdateView() {
         setCheck(result);
         setInfo(result);
         setDownload(result.downloaded_update?.ok ? result.downloaded_update : nextInfo.downloaded_update || null);
+        setProgress(null);
         if (result.ok === false) {
           setStatus(result.error || '检查更新失败');
         } else if (result.update_available) {
@@ -77,7 +106,15 @@ export function AppUpdateView() {
   }, []);
 
   useEffect(() => onAppUpdateDownloadProgress((payload) => {
+    if (!mountedRef.current) return;
     setProgress(payload);
+    if (payload.status === 'cancelled') {
+      setDownload(null);
+      setProgress(null);
+      setAction('');
+      setStatus(payload.error || '已取消本次更新下载');
+      return;
+    }
     if (payload.status === 'failed') setStatus(payload.error || '下载更新失败');
   }), []);
 
@@ -90,6 +127,7 @@ export function AppUpdateView() {
       setCheck(result);
       setInfo(result);
       setDownload(result.downloaded_update?.ok ? result.downloaded_update : null);
+      setProgress(null);
       if (result.ok === false) throw new Error(result.error || '检查更新失败');
       setStatus(result.update_available ? result.reason || '发现可用更新' : result.reason || '当前已是最新版本');
     } catch (err) {
@@ -106,16 +144,27 @@ export function AppUpdateView() {
     setStatus('正在下载应用更新...');
     try {
       const result = await downloadAppUpdate();
+      if (!mountedRef.current) return;
       setDownload(result);
-      if (!result.ok) throw new Error(result.error || '下载应用更新失败');
+      if (!result.ok) {
+        if (result.cancelled) {
+          setDownload(null);
+          setProgress(null);
+          setStatus(result.error || '已取消本次更新下载');
+          return;
+        }
+        throw new Error(result.error || '下载应用更新失败');
+      }
       const nextInfo = await getAppUpdateInfo();
+      if (!mountedRef.current) return;
       setInfo(nextInfo);
       setProgress({ status: 'completed', file_name: result.file_name, percent: 100 });
       setStatus(result.verified ? '更新已下载并通过校验，可安装并重启' : '更新已下载，可安装并重启；当前元数据未提供 SHA256 校验值');
     } catch (err) {
+      if (!mountedRef.current) return;
       setStatus(err instanceof Error ? err.message : '下载应用更新失败');
     } finally {
-      setAction('');
+      if (mountedRef.current) setAction('');
     }
   }
 
@@ -141,8 +190,8 @@ export function AppUpdateView() {
   return (
     <section className="hy-route-page app-update-page">
       <header className="hy-page-header app-update-header hy-stagger">
-        <div>
-          <button type="button" className="page-back-link" onClick={() => navigateTo('settings')}>← 返回设置</button>
+        <div className="app-update-heading-stack">
+          <button type="button" className="page-back-link app-update-back-link" onClick={() => navigateTo('settings')}>← 返回设置</button>
           <span className="hy-eyebrow">Update Channel · {channelLabel}</span>
           <h2>应用更新</h2>
           <p>检查 Hermes Yachiyo 桌面应用版本差距，下载 DMG，并在校验后安装重启。</p>

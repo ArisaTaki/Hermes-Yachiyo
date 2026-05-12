@@ -31,7 +31,7 @@ class EffectType(StrEnum):
 _FIELD_POLICIES: dict[str, tuple[EffectType, str]] = {
     # 顶层字段
     "display_mode":    (EffectType.REQUIRES_MODE_RESTART,
-                        "显示模式已保存，常驻表现态将按新偏好刷新"),
+                        "显示模式已保存，常驻表现态将按新偏好切换刷新"),
     "bridge_enabled":  (EffectType.REQUIRES_BRIDGE_RESTART,
                         "Bridge 开关变更需重启 Bridge 后生效"),
     "bridge_host":     (EffectType.REQUIRES_BRIDGE_RESTART,

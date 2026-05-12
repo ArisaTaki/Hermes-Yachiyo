@@ -1,96 +1,28 @@
 import { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 
 import logoUrl from '../../../../docs/open-design/logo.png';
-import { apiGet, apiPost, bridgeUrl, getLauncherPointerState, moveLauncherWindow, openAppView, openLauncherMenu, setLauncherHitRegions, setLauncherPointerInteractive, type LauncherHitRegionRect } from '../lib/bridge';
+import { apiGet, apiPost, getLauncherPointerState, moveLauncherWindow, openAppView, openLauncherMenu, setLauncherHitRegions, setLauncherPointerInteractive, type LauncherHitRegionRect } from '../lib/bridge';
 import type { AppView } from '../lib/view';
-
-export type LauncherPayload = {
-  ok?: boolean;
-  mode?: 'bubble' | 'live2d';
-  chat?: {
-    session_id?: string;
-    is_processing?: boolean;
-    empty?: boolean;
-    status_label?: string;
-    latest_reply?: string;
-    latest_reply_full?: string;
-  };
-  notification?: {
-    has_unread?: boolean;
-    latest_message?: { status?: string; content?: string };
-  };
-  tts?: {
-    enabled?: boolean;
-    provider?: string;
-    ok?: boolean;
-    message?: string;
-    error?: string;
-  };
-  proactive?: {
-    enabled?: boolean;
-    has_attention?: boolean;
-    session_id?: string;
-    message?: string;
-    result?: string;
-    attention_text?: string;
-    attention_source?: string;
-    error?: string;
-  };
-  launcher?: {
-    has_attention?: boolean;
-    latest_status?: string;
-    status_label?: string;
-    latest_reply?: string;
-    latest_reply_full?: string;
-    avatar_url?: string;
-    default_display?: string;
-    expand_trigger?: string;
-    show_unread_dot?: boolean;
-    auto_hide?: boolean;
-    opacity?: number;
-    suppress_status_dot?: boolean;
-    show_reply_bubble?: boolean;
-    enable_quick_input?: boolean;
-    click_action?: string;
-    default_open_behavior?: string;
-    position_anchor?: string;
-    preview_url?: string;
-    scale?: number;
-    mouse_follow_enabled?: boolean;
-    render_quality_preset?: string;
-    render_fps?: number;
-    render_resolution?: number;
-    hit_region_precision?: string;
-    renderer?: {
-      enabled?: boolean;
-      model_url?: string;
-      reason?: string;
-      idle_motion_group?: string;
-      enable_expressions?: boolean;
-      enable_physics?: boolean;
-      expression_mappings?: Record<string, string>;
-      expression_keywords?: Record<string, string>;
-      expressions?: Array<{ name?: string; file?: string }>;
-      motion_groups?: Record<string, Array<Record<string, unknown>>>;
-    };
-    resource?: {
-      available?: boolean;
-      state?: string;
-      display_name?: string;
-      status_label?: string;
-      help_text?: string;
-      renderer_entry?: string;
-    };
-  };
-};
+import {
+  LIVE2D_DEFAULT_RENDER_FPS,
+  destroyLive2DRenderer,
+  ensureLive2DRenderer,
+  live2DPreviewModelIsWarm,
+  live2dObjectPosition,
+  live2dRenderSettings,
+  live2dTransformOrigin,
+  markLive2DPreviewModelWarm,
+  normalizeLive2DPositionAnchor,
+  type Live2DRenderSettings,
+  type Live2DRendererState,
+} from './Live2DPreviewStage';
+import type { LauncherPayload } from './launcherTypes';
 
 const ACTIVE_POLL_INTERVAL_MS = 1200;
 const IDLE_POLL_INTERVAL_MS = 5000;
 const CLICK_DRAG_THRESHOLD_PX = 6;
 const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
 const LIVE2D_GLOBAL_POINTER_POLL_MS = 120;
-const LIVE2D_DEFAULT_RENDER_FPS = 24;
-const LIVE2D_DEFAULT_RENDER_RESOLUTION = 1.25;
 const LIVE2D_MOUSE_FOLLOW_SMOOTH_MS = 86;
 const LIVE2D_MOUSE_FOLLOW_DEADZONE_PX = 0.65;
 const LIVE2D_POINTER_FOCUS_MOVE_PX = 2.5;
@@ -111,12 +43,6 @@ type PointerLike = {
   stopPropagation: () => void;
 };
 
-type Live2DRenderSettings = {
-  fps: number;
-  resolution: number;
-  hitRegionPrecision: 'low' | 'medium' | 'high';
-};
-
 type Live2DShapeLimits = {
   maxRects: number;
   maxCols: number;
@@ -132,27 +58,6 @@ type LauncherDragState = {
   startY: number;
 };
 
-type Live2DGlobalWindow = typeof window & {
-  PIXI?: any;
-  Live2DCubismCore?: unknown;
-  Live2DModel?: any;
-  process?: { env?: Record<string, string> };
-};
-
-type Live2DRendererState = {
-  app?: any;
-  model?: any;
-  modelKey?: string;
-  modelUrl?: string;
-  loadToken: number;
-};
-
-const live2DPreviewModelWarmCache = new Set<string>();
-
-function live2DPreviewModelIsWarm(modelUrl?: string): boolean {
-  return Boolean(modelUrl && live2DPreviewModelWarmCache.has(modelUrl));
-}
-
 type Live2DFocusState = {
   active: boolean;
   currentX: number;
@@ -160,19 +65,6 @@ type Live2DFocusState = {
   lastFrameAt: number;
   targetX: number;
   targetY: number;
-};
-
-type Live2DRuntimeScript = {
-  id: string;
-  source?: string;
-  url: string;
-};
-
-type Live2DRuntimePayload = {
-  ok?: boolean;
-  ready?: boolean;
-  error?: string;
-  scripts?: Live2DRuntimeScript[];
 };
 
 type Live2DHitRegion = {
@@ -192,14 +84,6 @@ type Live2DPointerPollingState = {
   x: number;
   y: number;
 };
-
-const LIVE2D_RUNTIME_CDN_SCRIPTS: Live2DRuntimeScript[] = [
-  { id: 'pixi_js', source: 'cdn', url: 'https://cdn.jsdelivr.net/npm/pixi.js@6/dist/browser/pixi.min.js' },
-  { id: 'live2d_cubism_core', source: 'cdn', url: 'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js' },
-  { id: 'pixi_live2d_display', source: 'cdn', url: 'https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.5.0-beta/dist/cubism4.min.js' },
-];
-
-let live2dRuntimePromise: Promise<void> | null = null;
 
 export function LauncherView({ view }: { view: AppView }) {
   const mode = view === 'live2d' ? 'live2d' : 'bubble';
@@ -567,7 +451,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
       },
       onReady: (value) => {
         if (!disposed) {
-          if (value && renderer?.model_url) live2DPreviewModelWarmCache.add(renderer.model_url);
+          if (value) markLive2DPreviewModelWarm(renderer?.model_url);
           setRendererReady(value);
         }
       },
@@ -903,97 +787,6 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   );
 }
 
-export function Live2DPreviewStage({ active = true, data }: { active?: boolean; data: LauncherPayload | null }) {
-  const launcher = data?.launcher || {};
-  const renderer = launcher.renderer;
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const characterRef = useRef<HTMLDivElement | null>(null);
-  const rendererStateRef = useRef<Live2DRendererState>({ loadToken: 0 });
-  const [rendererLoading, setRendererLoading] = useState(false);
-  const [rendererReady, setRendererReady] = useState(false);
-  const [rendererError, setRendererError] = useState('');
-  const positionAnchor = normalizeLive2DPositionAnchor(launcher.position_anchor);
-  const renderSettings = live2dRenderSettings(launcher);
-  const previewRenderSettings = {
-    ...renderSettings,
-    resolution: Math.max(renderSettings.resolution, 2),
-  };
-  const previewRendererScale = 1;
-  const previewStyle = {
-    '--live2d-object-position': live2dObjectPosition(positionAnchor),
-    '--live2d-transform-origin': live2dTransformOrigin(positionAnchor),
-  } as CSSProperties;
-
-  useEffect(() => {
-    let disposed = false;
-    void ensureLive2DRenderer({
-      canvas: canvasRef.current,
-      character: characterRef.current,
-      renderer,
-      renderSettings: previewRenderSettings,
-      scale: previewRendererScale,
-      positionAnchor,
-      state: rendererStateRef.current,
-      onError: (value) => {
-        if (!disposed) setRendererError(value);
-      },
-      onLoading: (value) => {
-        if (!disposed) setRendererLoading(value);
-      },
-      onReady: (value) => {
-        if (!disposed) setRendererReady(value);
-      },
-    });
-    return () => {
-      disposed = true;
-    };
-  }, [renderer?.enabled, renderer?.model_url, renderer?.reason, renderer?.enable_physics, launcher.scale, positionAnchor, previewRenderSettings.fps, previewRenderSettings.resolution]);
-
-  useEffect(() => {
-    const rendererState = rendererStateRef.current;
-    return () => destroyLive2DRenderer(rendererState);
-  }, []);
-
-  useEffect(() => {
-    if (!active || !rendererReady) return;
-    let frame = 0;
-    const updatePreviewFit = () => {
-      if (frame) window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        frame = 0;
-        fitLive2DPreviewModel(rendererStateRef.current, characterRef.current, positionAnchor, previewRendererScale);
-      });
-    };
-    updatePreviewFit();
-    const timers = [120, 360, 820].map((delay) => window.setTimeout(updatePreviewFit, delay));
-    window.addEventListener('resize', updatePreviewFit);
-    return () => {
-      if (frame) window.cancelAnimationFrame(frame);
-      timers.forEach((timer) => window.clearTimeout(timer));
-      window.removeEventListener('resize', updatePreviewFit);
-    };
-  }, [active, rendererReady, renderer?.model_url, positionAnchor, previewRenderSettings.resolution, previewRendererScale]);
-
-  return (
-    <div className="live2d-stage live2d-preview-stage" style={previewStyle} aria-label="Live2D 模型预览">
-      <div ref={characterRef} className={`live2d-character ${rendererReady ? 'renderer-ready' : ''}`}>
-        <canvas ref={canvasRef} className={`live2d-canvas ${rendererReady ? 'active' : ''}`} aria-hidden="true" />
-        {launcher.preview_url ? (
-          <img
-            className={`live2d-preview-fallback ${rendererReady ? 'hidden' : ''}`}
-            src={launcher.preview_url}
-            alt=""
-          />
-        ) : null}
-      </div>
-      {rendererLoading ? <div className="live2d-loading">Live2D 模型加载中...</div> : null}
-      {rendererError || (!rendererReady ? renderer?.reason : '') ? (
-        <div className="live2d-error">{rendererError || renderer?.reason || 'Live2D 模型暂不可预览'}</div>
-      ) : null}
-    </div>
-  );
-}
-
 function pointerPoint(event: PointerLike) {
   return {
     x: Number.isFinite(event.screenX) ? event.screenX : event.clientX,
@@ -1067,24 +860,6 @@ function live2dCharacterClass(
   return classes.join(' ');
 }
 
-function normalizeLive2DPositionAnchor(value: unknown): 'left-bottom' | 'right-bottom' | 'custom' {
-  if (value === 'left_bottom') return 'left-bottom';
-  if (value === 'custom') return 'custom';
-  return 'right-bottom';
-}
-
-function live2dObjectPosition(anchor: 'left-bottom' | 'right-bottom' | 'custom') {
-  if (anchor === 'left-bottom') return 'left bottom';
-  if (anchor === 'right-bottom') return 'right bottom';
-  return 'center bottom';
-}
-
-function live2dTransformOrigin(anchor: 'left-bottom' | 'right-bottom' | 'custom') {
-  if (anchor === 'left-bottom') return 'left bottom';
-  if (anchor === 'right-bottom') return 'right bottom';
-  return 'center bottom';
-}
-
 function live2dStageTitle(
   resource: NonNullable<LauncherPayload['launcher']>['resource'],
   launcher: NonNullable<LauncherPayload['launcher']>,
@@ -1108,29 +883,8 @@ function live2dClickActionLabel(value?: string) {
   return '打开主控台对话';
 }
 
-function live2dRenderSettings(
-  launcher: NonNullable<LauncherPayload['launcher']>,
-): Live2DRenderSettings {
-  const preset = String(launcher.render_quality_preset || 'balanced');
-  const presetValues: Record<string, Live2DRenderSettings> = {
-    battery: { fps: 15, resolution: 0.75, hitRegionPrecision: 'low' },
-    balanced: { fps: 24, resolution: 1.25, hitRegionPrecision: 'medium' },
-    quality: { fps: 30, resolution: 1.5, hitRegionPrecision: 'high' },
-  };
-  if (preset !== 'custom' && presetValues[preset]) return presetValues[preset];
-  return {
-    fps: clampInteger(Number(launcher.render_fps || LIVE2D_DEFAULT_RENDER_FPS), 12, 60),
-    resolution: clampValue(Number(launcher.render_resolution || LIVE2D_DEFAULT_RENDER_RESOLUTION), 0.5, 2.0),
-    hitRegionPrecision: live2dHitRegionPrecision(launcher.hit_region_precision),
-  };
-}
-
 function clampInteger(value: number, min: number, max: number) {
   return Math.round(clampValue(Number.isFinite(value) ? value : min, min, max));
-}
-
-function live2dHitRegionPrecision(value: unknown): Live2DRenderSettings['hitRegionPrecision'] {
-  return value === 'low' || value === 'high' ? value : 'medium';
 }
 
 function live2dStatusExpressionKey({
@@ -1161,327 +915,6 @@ function live2dReplyCue({
   if (status === 'failed') return { label: '回复失败，点击打开主控台对话', symbol: '!', tone: 'failed' };
   if (proactiveAttention) return { label: '新的主动关怀，点击打开主控台对话', symbol: '!', tone: 'proactive-cue' };
   return { label: '新的回复，点击隐藏提示', symbol: '!', tone: 'message-cue' };
-}
-
-async function ensureLive2DRenderer({
-  canvas,
-  character,
-  renderSettings,
-  renderer,
-  scale,
-  positionAnchor,
-  state,
-  onError,
-  onLoading,
-  onReady,
-}: {
-  canvas: HTMLCanvasElement | null;
-  character: HTMLDivElement | null;
-  renderSettings: Live2DRenderSettings;
-  renderer: NonNullable<LauncherPayload['launcher']>['renderer'];
-  scale?: number;
-  positionAnchor: 'left-bottom' | 'right-bottom' | 'custom';
-  state: Live2DRendererState;
-  onError: (value: string) => void;
-  onLoading: (value: boolean) => void;
-  onReady: (value: boolean) => void;
-}) {
-  if (!renderer?.enabled || !renderer.model_url) {
-    destroyLive2DRenderer(state);
-    onLoading(false);
-    onReady(false);
-    onError('');
-    return;
-  }
-  if (!canvas || !character) {
-    onLoading(false);
-    onReady(false);
-    onError('Live2D 舞台尚未就绪，已回退到静态预览');
-    return;
-  }
-  const modelKey = [
-    renderer.model_url,
-    `physics:${renderer.enable_physics === true ? '1' : '0'}`,
-    `fps:${renderSettings.fps}`,
-    `resolution:${renderSettings.resolution}`,
-  ].join('|');
-
-  try {
-    await ensureLive2DRuntimeScripts(renderSettings.fps);
-    if (!rendererAvailable()) {
-      throw new Error(`Live2D 渲染依赖未加载，已回退到静态预览 ${rendererDiagnostics()}`);
-    }
-
-    if (state.model && state.modelUrl === renderer.model_url && state.modelKey === modelKey) {
-      fitLive2DModel(state, character, scale, positionAnchor);
-      onLoading(false);
-      onReady(true);
-      onError('');
-      return;
-    }
-
-    const loadToken = state.loadToken + 1;
-    state.loadToken = loadToken;
-    onLoading(true);
-    onReady(false);
-    onError('');
-    destroyLive2DRenderer(state, { keepApp: true, keepToken: true });
-
-    const app = ensurePixiApp(state, canvas, character, renderSettings);
-    const Live2DModelCtor = getLive2DModelCtor();
-    if (!Live2DModelCtor || typeof Live2DModelCtor.from !== 'function') {
-      throw new Error('Live2DModel.from 不可用');
-    }
-    const model = await Live2DModelCtor.from(renderer.model_url, { autoFocus: false, autoHitTest: false });
-    if (state.loadToken !== loadToken) {
-      if (model && typeof model.destroy === 'function') model.destroy();
-      return;
-    }
-    state.model = model;
-    state.modelKey = modelKey;
-    state.modelUrl = renderer.model_url;
-    state.model.interactive = false;
-    app.stage.addChild(model);
-    fitLive2DModel(state, character, scale, positionAnchor);
-    onReady(true);
-    onError('');
-  } catch (error) {
-    destroyLive2DRenderer(state);
-    onReady(false);
-    onError(`Live2D 模型加载失败，已回退到静态预览\n${formatRendererError(error)}`);
-  } finally {
-    onLoading(false);
-  }
-}
-
-function installLive2DRuntimeEnvShim() {
-  const globalWindow = window as Live2DGlobalWindow;
-  globalWindow.process = globalWindow.process || {};
-  globalWindow.process.env = globalWindow.process.env || {};
-  if (!globalWindow.process.env.NODE_ENV) globalWindow.process.env.NODE_ENV = 'production';
-}
-
-async function ensureLive2DRuntimeScripts(renderFps = LIVE2D_DEFAULT_RENDER_FPS) {
-  installLive2DRuntimeEnvShim();
-  if (rendererAvailable()) {
-    configurePixiForElectronLive2D(renderFps);
-    return;
-  }
-  if (!live2dRuntimePromise) {
-    live2dRuntimePromise = loadLive2DRuntimeScripts().catch((error) => {
-      live2dRuntimePromise = null;
-      throw error;
-    });
-  }
-  await live2dRuntimePromise;
-  configurePixiForElectronLive2D(renderFps);
-}
-
-function configurePixiForElectronLive2D(renderFps = LIVE2D_DEFAULT_RENDER_FPS) {
-  const globalWindow = window as Live2DGlobalWindow;
-  const PIXI = globalWindow.PIXI;
-  if (!PIXI?.settings) return;
-  try {
-    PIXI.settings.FAIL_IF_MAJOR_PERFORMANCE_CAVEAT = false;
-    if (PIXI.ENV?.WEBGL !== undefined) PIXI.settings.PREFER_ENV = PIXI.ENV.WEBGL;
-  } catch {}
-  try {
-    if (PIXI.Ticker?.shared) {
-      PIXI.Ticker.shared.maxFPS = renderFps;
-      PIXI.Ticker.shared.minFPS = 0;
-    }
-  } catch {}
-}
-
-async function loadLive2DRuntimeScripts() {
-  const scripts = await getLive2DRuntimeScripts();
-  for (const script of scripts) {
-    await loadClassicScript(script);
-  }
-}
-
-async function getLive2DRuntimeScripts(): Promise<Live2DRuntimeScript[]> {
-  try {
-    const baseUrl = await bridgeUrl();
-    const payload = await apiGet<Live2DRuntimePayload>('/live2d/runtime');
-    const scripts = payload.scripts?.length ? payload.scripts : LIVE2D_RUNTIME_CDN_SCRIPTS;
-    return scripts.map((script) => ({
-      ...script,
-      url: resolveLive2DScriptUrl(script.url, baseUrl),
-    }));
-  } catch {
-    return LIVE2D_RUNTIME_CDN_SCRIPTS;
-  }
-}
-
-function resolveLive2DScriptUrl(value: string, baseUrl: string) {
-  if (/^https?:\/\//i.test(value)) return value;
-  return new URL(value, `${baseUrl}/`).toString();
-}
-
-function loadClassicScript(script: Live2DRuntimeScript) {
-  if (document.querySelector(`script[data-hermes-live2d="${script.id}"][data-loaded="1"]`)) {
-    return Promise.resolve();
-  }
-  return new Promise<void>((resolve, reject) => {
-    const node = document.createElement('script');
-    node.src = script.url;
-    node.async = false;
-    node.dataset.hermesLive2d = script.id;
-    node.onload = () => {
-      node.dataset.loaded = '1';
-      resolve();
-    };
-    node.onerror = () => reject(new Error(`Live2D runtime script failed: ${script.id}`));
-    document.head.appendChild(node);
-  });
-}
-
-function rendererAvailable() {
-  const globalWindow = window as Live2DGlobalWindow;
-  return Boolean(
-    globalWindow.PIXI
-      && globalWindow.PIXI.Application
-      && globalWindow.PIXI.live2d
-      && getLive2DModelCtor()
-      && globalWindow.Live2DCubismCore,
-  );
-}
-
-function getLive2DModelCtor() {
-  const globalWindow = window as Live2DGlobalWindow;
-  const live2dNamespace = globalWindow.PIXI?.live2d;
-  return live2dNamespace?.Live2DModel
-    || live2dNamespace?.default?.Live2DModel
-    || globalWindow.PIXI?.Live2DModel
-    || globalWindow.Live2DModel
-    || null;
-}
-
-function rendererDiagnostics() {
-  const globalWindow = window as Live2DGlobalWindow;
-  const diagnostics = {
-    hasPixi: Boolean(globalWindow.PIXI),
-    hasPixiApplication: Boolean(globalWindow.PIXI?.Application),
-    hasPixiLive2D: Boolean(globalWindow.PIXI?.live2d),
-    hasLive2DModel: Boolean(getLive2DModelCtor()),
-    hasCubismCore: Boolean(globalWindow.Live2DCubismCore),
-  };
-  return Object.entries(diagnostics)
-    .map(([key, value]) => `${key}=${value ? '1' : '0'}`)
-    .join(' ');
-}
-
-function ensurePixiApp(
-  state: Live2DRendererState,
-  canvas: HTMLCanvasElement,
-  character: HTMLDivElement,
-  renderSettings: Live2DRenderSettings,
-) {
-  if (state.app) {
-    configureTransparentPixiRenderer(state.app, canvas, renderSettings.fps);
-    return state.app;
-  }
-  const globalWindow = window as Live2DGlobalWindow;
-  state.app = new globalWindow.PIXI.Application({
-    view: canvas,
-    autoStart: true,
-    transparent: true,
-    backgroundAlpha: 0,
-    backgroundColor: 0x000000,
-    antialias: false,
-    autoDensity: true,
-    clearBeforeRender: true,
-    preserveDrawingBuffer: false,
-    resizeTo: character,
-    resolution: clampValue(renderSettings.resolution, 0.5, 2.0),
-    useContextAlpha: true,
-  });
-  configureTransparentPixiRenderer(state.app, canvas, renderSettings.fps);
-  return state.app;
-}
-
-function configureTransparentPixiRenderer(app: any, canvas: HTMLCanvasElement, renderFps = LIVE2D_DEFAULT_RENDER_FPS) {
-  canvas.style.background = 'transparent';
-  try {
-    app.renderer.background.alpha = 0;
-  } catch {}
-  try {
-    app.renderer.backgroundColor = 0x000000;
-  } catch {}
-  try {
-    app.renderer.transparent = true;
-  } catch {}
-  try {
-    app.renderer.gl.clearColor(0, 0, 0, 0);
-    app.renderer.gl.clear(app.renderer.gl.COLOR_BUFFER_BIT);
-  } catch {}
-  try {
-    app.ticker.maxFPS = renderFps;
-    app.ticker.minFPS = 0;
-  } catch {}
-}
-
-function fitLive2DModel(
-  state: Live2DRendererState,
-  character: HTMLDivElement,
-  scale?: number,
-  positionAnchor: 'left-bottom' | 'right-bottom' | 'custom' = 'custom',
-) {
-  if (!state.model || !state.app) return;
-  const width = Math.max(character.clientWidth, 1);
-  const height = Math.max(character.clientHeight, 1);
-  state.app.renderer.resize(width, height);
-  const bounds = typeof state.model.getLocalBounds === 'function'
-    ? state.model.getLocalBounds()
-    : { width: 0, height: 0 };
-  if (!bounds.width || !bounds.height) return;
-  const fitScale = Math.min(width / bounds.width, height / bounds.height) * 0.92;
-  const finalScale = fitScale * Math.max(0.4, Math.min(2.0, Number(scale || 1)));
-  const horizontalAnchor = positionAnchor === 'left-bottom'
-    ? 0
-    : positionAnchor === 'right-bottom'
-      ? 1
-      : 0.5;
-  if (state.model.anchor?.set) state.model.anchor.set(horizontalAnchor, 1.0);
-  if (state.model.scale?.set) state.model.scale.set(finalScale);
-  state.model.x = positionAnchor === 'left-bottom'
-    ? 0
-    : positionAnchor === 'right-bottom'
-      ? width
-      : width / 2;
-  state.model.y = height;
-}
-
-function fitLive2DPreviewModel(
-  state: Live2DRendererState,
-  character: HTMLDivElement | null,
-  positionAnchor: 'left-bottom' | 'right-bottom' | 'custom',
-  scale = 1,
-) {
-  if (!state.model || !state.app || !character) return;
-  fitLive2DModel(state, character, scale, positionAnchor);
-  try {
-    state.app.renderer.render(state.app.stage);
-  } catch {}
-}
-
-function destroyLive2DRenderer(
-  state: Live2DRendererState,
-  options: { keepApp?: boolean; keepToken?: boolean } = {},
-) {
-  if (!options.keepToken) state.loadToken += 1;
-  if (state.model && state.app?.stage && typeof state.app.stage.removeChild === 'function') {
-    state.app.stage.removeChild(state.model);
-  }
-  if (state.model && typeof state.model.destroy === 'function') state.model.destroy();
-  state.model = undefined;
-  state.modelKey = '';
-  state.modelUrl = '';
-  if (!options.keepApp && state.app && typeof state.app.destroy === 'function') {
-    state.app.destroy(false, { children: true, texture: false, baseTexture: false });
-  }
-  if (!options.keepApp) state.app = undefined;
 }
 
 function focusLive2DRenderer(
@@ -1871,20 +1304,6 @@ function live2dExpressionCallCandidates(name: string) {
   const withoutJson = fileName.replace(/\.json$/i, '');
   const withoutExp = withoutJson.replace(/\.exp3$/i, '');
   return Array.from(new Set([raw, fileName, withoutJson, withoutExp].filter(Boolean)));
-}
-
-function formatRendererError(error: unknown) {
-  const detail = error instanceof Error && error.message ? error.message : String(error || 'unknown error');
-  if (/checkMaxIfStatementsInShader|invalid value of ['"`]?0['"`]?/i.test(detail)) {
-    return '当前 WebGL 环境没有返回可用的 shader 条件分支上限，已回退静态预览。请重新打开 Live2D；如果只在启用物理时出现，先关闭物理模拟再试。';
-  }
-  return compactRendererDetail(detail);
-}
-
-function compactRendererDetail(value: string, limit = 240) {
-  const text = value.replace(/\s+/g, ' ').trim();
-  if (text.length > limit) return `${text.slice(0, limit - 1)}…`;
-  return text || 'unknown error';
 }
 
 function reportLive2DRegions({

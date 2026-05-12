@@ -21,6 +21,12 @@ type RouteState = {
   params: Record<string, string>;
 };
 
+declare global {
+  interface Window {
+    hermesRouteLeaveGuard?: (nextView: AppView) => boolean;
+  }
+}
+
 export const ROUTE_CHANGE_EVENT = 'hermes-route-change';
 
 export function currentView(): AppView {
@@ -48,6 +54,7 @@ export function navigateTo(
   extraParams: Record<string, string> = {},
   removeParams: string[] = [],
 ) {
+  if (window.hermesRouteLeaveGuard && !window.hermesRouteLeaveGuard(view)) return;
   const current = currentRoute().params;
   const nextParams = { ...current };
   removeParams.forEach((name) => delete nextParams[name]);
