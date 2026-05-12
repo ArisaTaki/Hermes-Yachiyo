@@ -1,6 +1,7 @@
-import { createContext, FormEvent, ReactNode, useCallback, useContext, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { createContext, FormEvent, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 import logoUrl from '../../../../docs/open-design/logo.png';
+import { AssistantProfileSeedContext, type AssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiGet, apiPost, checkAppUpdate, openDesktopMode, openExternalUrl, openPath, quitApp } from '../lib/bridge';
 import { type AppView, currentParam, navigateTo } from '../lib/view';
 import { Live2DPreviewStage } from './LauncherView';
@@ -197,6 +198,8 @@ type LauncherPayload = {
   tts?: { enabled?: boolean; provider?: string; ok?: boolean; message?: string; error?: string };
 };
 
+const launcherPayloadCache: Partial<Record<'bubble' | 'live2d', LauncherPayload>> = {};
+
 type DiagnosticCache = {
   stale?: boolean;
   updated_at?: string;
@@ -321,11 +324,19 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; type: 'info' | 'success' | 'warning' | 'error' }>>([]);
   const [bootPhase, setBootPhase] = useState<'loading' | 'ready'>(() => (bridgeBootReady ? 'ready' : 'loading'));
   const [bootSlow, setBootSlow] = useState(false);
+  const [routeSettling, setRouteSettling] = useState(true);
   const settingsMode = activeView === 'settings' ? currentParam('mode') : '';
   const activeLabel = routeTitle(activeView, settingsMode);
   const agentName = dashboard?.assistant?.agent_name?.trim() || '月見八千代';
   const agentNickname = dashboard?.assistant?.agent_nickname?.trim() || agentName;
   const agentAvatarUrl = dashboard?.assistant?.agent_avatar_url || logoUrl;
+  const assistantProfileSeed = useMemo<AssistantProfileSeed | null>(() => (
+    dashboard?.assistant ? {
+      agent_name: dashboard.assistant.agent_name,
+      agent_nickname: dashboard.assistant.agent_nickname,
+      agent_avatar_url: dashboard.assistant.agent_avatar_url,
+    } : null
+  ), [dashboard?.assistant?.agent_avatar_url, dashboard?.assistant?.agent_name, dashboard?.assistant?.agent_nickname]);
   const loadingHidden = bootPhase !== 'loading';
   const accentLabel = TWEAK_ACCENTS.find((item) => item.value === accent)?.label || '八千代粉';
   const [shimmerActive, setShimmerActive] = useState(false);
@@ -351,13 +362,21 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
     'hy-shell',
     `hy-accent-${accent}`,
     particlesEnabled ? '' : 'hy-particles-off',
-    glowEnabled ? '' : 'hy-glow-on',
+    glowEnabled ? 'hy-glow-on' : '',
   ].filter(Boolean).join(' ');
+  const moonlightFactor = moonlightIntensity / 100;
   const shellStyle = {
-    '--hy-moonlight-opacity': String(moonlightIntensity / 100),
+    '--hy-moonlight-opacity': String(Math.min(Math.max(moonlightFactor, 0), 1)),
+    '--hy-moon-brightness': String(0.88 + Math.max(moonlightFactor, 0) * 0.35),
     '--hy-anim-factor': String(100 / Math.max(animationSpeed, 1)),
     '--hy-font-size-base': `${fontSize}px`,
   } as CSSProperties;
+
+  useEffect(() => {
+    setRouteSettling(true);
+    const timer = window.setTimeout(() => setRouteSettling(false), 560);
+    return () => window.clearTimeout(timer);
+  }, [activeView, settingsMode]);
 
   useEffect(() => {
     if (bridgeBootReady) return undefined;
@@ -463,6 +482,7 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
           <span className={particle.className} key={particle.id} style={particle.style} />
         ))}
       </div>
+      <span className="hy-moon-orb" aria-hidden />
       <div className="hy-shimmer-sweep" key={shimmerKey.current} style={shimmerActive ? undefined : { display: 'none' }} />
       <BootLoadingOverlay hidden={loadingHidden} slow={bootSlow} />
 
@@ -580,10 +600,16 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
         </aside>
       ) : null}
 
-      <main className="hy-content">
-        <PageLoadingContext.Provider value={handlePageLoading}>
-          {children}
-        </PageLoadingContext.Provider>
+      <main className={[
+        'hy-content',
+        pageLoadingCount > 0 ? 'is-loading-page' : '',
+        routeSettling ? 'is-route-settling' : '',
+      ].filter(Boolean).join(' ')}>
+        <AssistantProfileSeedContext.Provider value={assistantProfileSeed}>
+          <PageLoadingContext.Provider value={handlePageLoading}>
+            {children}
+          </PageLoadingContext.Provider>
+        </AssistantProfileSeedContext.Provider>
       </main>
     </div>
   );
@@ -1031,16 +1057,22 @@ export function ProviderPage() {
 }
 
 export function BubbleModePage() {
-  const [data, setData] = useState<LauncherPayload | null>(null);
+  const [data, setData] = useState<LauncherPayload | null>(() => launcherPayloadCache.bubble || null);
+  const [loading, setLoading] = useState(() => !launcherPayloadCache.bubble);
+  usePageLoading(loading && !data);
 
   useEffect(() => {
     let disposed = false;
     apiGet<LauncherPayload>('/ui/launcher?mode=bubble')
       .then((payload) => {
+        launcherPayloadCache.bubble = payload;
         if (!disposed) setData(payload);
       })
       .catch(() => {
-        if (!disposed) setData(null);
+        if (!disposed && !launcherPayloadCache.bubble) setData(null);
+      })
+      .finally(() => {
+        if (!disposed) setLoading(false);
       });
     return () => {
       disposed = true;
@@ -1097,17 +1129,23 @@ export function BubbleModePage() {
   );
 }
 
-export function Live2DModePage() {
-  const [data, setData] = useState<LauncherPayload | null>(null);
+export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
+  const [data, setData] = useState<LauncherPayload | null>(() => launcherPayloadCache.live2d || null);
+  const [loading, setLoading] = useState(() => !launcherPayloadCache.live2d);
+  usePageLoading(active && loading && !data);
 
   useEffect(() => {
     let disposed = false;
     apiGet<LauncherPayload>('/ui/launcher?mode=live2d')
       .then((payload) => {
+        launcherPayloadCache.live2d = payload;
         if (!disposed) setData(payload);
       })
       .catch(() => {
-        if (!disposed) setData(null);
+        if (!disposed && !launcherPayloadCache.live2d) setData(null);
+      })
+      .finally(() => {
+        if (!disposed) setLoading(false);
       });
     return () => {
       disposed = true;
@@ -1141,7 +1179,7 @@ export function Live2DModePage() {
         <div className={`hy-live2d-stage hy-stagger corner-frame ${previewReady ? 'has-preview' : ''}`}>
           <div className="corner-frame-inner" />
           {previewReady ? (
-            <Live2DPreviewStage data={data} />
+            <Live2DPreviewStage data={data} active={active} />
           ) : (
             <div className="hy-live2d-placeholder">
               <div className="hy-live2d-placeholder-icon"><img src={logoUrl} alt="" /></div>

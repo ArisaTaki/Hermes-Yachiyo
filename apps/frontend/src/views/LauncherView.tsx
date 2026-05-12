@@ -146,6 +146,12 @@ type Live2DRendererState = {
   loadToken: number;
 };
 
+const live2DPreviewModelWarmCache = new Set<string>();
+
+function live2DPreviewModelIsWarm(modelUrl?: string): boolean {
+  return Boolean(modelUrl && live2DPreviewModelWarmCache.has(modelUrl));
+}
+
 type Live2DFocusState = {
   active: boolean;
   currentX: number;
@@ -555,10 +561,13 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
         if (!disposed) setRendererError(value);
       },
       onLoading: (value) => {
-        if (!disposed) setRendererLoading(value);
+        if (!disposed) setRendererLoading(value && !live2DPreviewModelIsWarm(renderer?.model_url));
       },
       onReady: (value) => {
-        if (!disposed) setRendererReady(value);
+        if (!disposed) {
+          if (value && renderer?.model_url) live2DPreviewModelWarmCache.add(renderer.model_url);
+          setRendererReady(value);
+        }
       },
     });
     return () => {
@@ -892,7 +901,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   );
 }
 
-export function Live2DPreviewStage({ data }: { data: LauncherPayload | null }) {
+export function Live2DPreviewStage({ active = true, data }: { active?: boolean; data: LauncherPayload | null }) {
   const launcher = data?.launcher || {};
   const renderer = launcher.renderer;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -944,7 +953,7 @@ export function Live2DPreviewStage({ data }: { data: LauncherPayload | null }) {
   }, []);
 
   useEffect(() => {
-    if (!rendererReady) return;
+    if (!active || !rendererReady) return;
     let frame = 0;
     const updatePreviewFit = () => {
       if (frame) window.cancelAnimationFrame(frame);
@@ -961,7 +970,7 @@ export function Live2DPreviewStage({ data }: { data: LauncherPayload | null }) {
       timers.forEach((timer) => window.clearTimeout(timer));
       window.removeEventListener('resize', updatePreviewFit);
     };
-  }, [rendererReady, renderer?.model_url, positionAnchor, previewRenderSettings.resolution, previewRendererScale]);
+  }, [active, rendererReady, renderer?.model_url, positionAnchor, previewRenderSettings.resolution, previewRendererScale]);
 
   return (
     <div className="live2d-stage live2d-preview-stage" style={previewStyle} aria-label="Live2D 模型预览">

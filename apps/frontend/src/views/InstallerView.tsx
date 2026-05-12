@@ -122,20 +122,6 @@ type HermesConnectionTestResult = {
   connection_validation?: HermesConnectionValidation;
 };
 
-type HermesEnvironmentInfo = {
-  current_hermes_home?: string;
-  default_hermes_home?: string;
-  yachiyo_workspace?: string;
-  hermes_home_env_set?: boolean;
-};
-
-type HermesSetupEnvironmentResult = {
-  success?: boolean;
-  hermes_home?: string;
-  message?: string;
-  restart_required?: boolean;
-};
-
 type HermesVisualConfig = {
   ok?: boolean;
   error?: string;
@@ -212,8 +198,6 @@ export function InstallerView() {
   const [logLines, setLogLines] = useState<string[]>([]);
   const [busy, setBusy] = useState('');
   const [configStatus, setConfigStatus] = useState('');
-  const [environmentInfo, setEnvironmentInfo] = useState<HermesEnvironmentInfo | null>(null);
-  const [environmentStatus, setEnvironmentStatus] = useState('');
   const [hermesConfig, setHermesConfig] = useState<HermesVisualConfig | null>(null);
   const [configForm, setConfigForm] = useState<HermesConfigForm>(emptyHermesConfigForm());
   const [hermesTestResult, setHermesTestResult] = useState<HermesConnectionTestResult | null>(null);
@@ -272,29 +256,16 @@ export function InstallerView() {
     }
   }, []);
 
-  const loadHermesEnvironment = useCallback(async () => {
-    try {
-      const data = await apiGet<HermesEnvironmentInfo>('/hermes/environment');
-      setEnvironmentInfo(data);
-      setEnvironmentStatus('');
-      return data;
-    } catch (error) {
-      setEnvironmentStatus(error instanceof Error ? error.message : '读取 Hermes 环境失败');
-      return null;
-    }
-  }, []);
-
   const loadInstallerSnapshot = useCallback(async () => {
     const data = await loadInstallInfo();
     setBridgeBooting(false);
     setBusy((current) => (current === 'bridge' ? '' : current));
     if (data.install_info?.status === 'installed_not_initialized') void loadBackupStatus();
     if (data.install_info?.command_exists) void loadHermesConfig({ forceFormSync: true });
-    void loadHermesEnvironment();
     const progress = await apiGet<InstallProgress>('/ui/installer/install/progress');
     applyInstallProgress(progress, true);
     return data;
-  }, [loadBackupStatus, loadHermesConfig, loadHermesEnvironment, loadInstallInfo]);
+  }, [loadBackupStatus, loadHermesConfig, loadInstallInfo]);
 
   useEffect(() => {
     let disposed = false;
@@ -813,25 +784,6 @@ export function InstallerView() {
     }
   }
 
-  async function setupHermesEnvironment() {
-    if (busy) return;
-    const confirmed = window.confirm('将自动设置 HERMES_HOME 等本机环境配置，可能需要重启应用或终端后生效。继续吗？');
-    if (!confirmed) return;
-    setBusy('environment');
-    setEnvironmentStatus('正在自动设置 Hermes 环境...');
-    try {
-      const result = await apiPost<HermesSetupEnvironmentResult>('/hermes/setup', { auto_setup: true });
-      if (!result.success) throw new Error(result.message || 'Hermes 环境设置失败');
-      setEnvironmentStatus(`${result.message || 'Hermes 环境已设置'}${result.restart_required ? '，需要重启后完全生效' : ''}`);
-      await loadHermesEnvironment();
-      await recheckStatus();
-    } catch (error) {
-      setEnvironmentStatus(error instanceof Error ? error.message : 'Hermes 环境设置失败');
-    } finally {
-      setBusy('');
-    }
-  }
-
   function shouldWarnBeforeWorkspaceInit(): boolean {
     const provider = configForm.provider.trim() || hermesConfig?.model?.provider || '';
     const model = configForm.model.trim() || hermesConfig?.model?.default || '';
@@ -912,10 +864,11 @@ export function InstallerView() {
   ];
 
   return (
-    <main className="app-shell installer-shell hy-installer-route">
-      <header className="topbar hy-installer-header hy-stagger">
+    <main className="hy-route-page hy-installer-route">
+      <header className="hy-page-header hy-installer-header hy-stagger">
         <div>
-          <h1>{title}</h1>
+          <span className="hy-eyebrow">Installer</span>
+          <h2>{title}</h2>
           <p>{installerSubtitle(statusValue, installInfo)}</p>
         </div>
       </header>
@@ -942,70 +895,58 @@ export function InstallerView() {
         ))}
       </section>
 
-      <section className="settings-grid expanded-settings-grid hy-installer-status-grid hy-stagger">
-        <article className="panel setting-card">
-          <span>安装状态</span>
-          <strong>{installStatusLabel(statusValue)}</strong>
-          <small>{installInfo?.platform || '—'}</small>
-        </article>
-        <article className="panel setting-card">
-          <span>Hermes 命令</span>
-          <strong>{installInfo?.command_exists ? '已检测到' : '未检测到'}</strong>
-          <small>{installInfo?.version_info?.version || '—'}</small>
-        </article>
-        <article className="panel setting-card">
-          <span>Hermes Home</span>
-          <strong>{installInfo?.hermes_home || '—'}</strong>
-          <small>{formatDateTime(installInfo?.checked_at)}</small>
-        </article>
-      </section>
-
-      <HermesEnvironmentPanel
-        busy={busy}
-        environment={environmentInfo}
-        status={environmentStatus}
-        onRefresh={loadHermesEnvironment}
-        onSetup={setupHermesEnvironment}
-      />
-
       {installInfo?.error_message ? <div className="notice danger">{installInfo.error_message}</div> : null}
 
-      <section className="settings-detail-grid hy-installer-content hy-stagger">
-        <article className="panel settings-section">
-          <div className="section-heading-row">
-            <h2>引导步骤</h2>
-            <span>{installStatusLabel(statusValue)}</span>
+      {ready ? (
+        <section className="hy-installer-ready-panel hy-stagger corner-frame">
+          <div className="corner-frame-inner" />
+          <span className="hy-eyebrow">Ready</span>
+          <h3>Hermes Agent 与 Yachiyo 工作区可用</h3>
+          <p>安装器已完成引导。后续模型、语音、Live2D 和主动关怀配置请在对应新版页面维护。</p>
+          <div className="hy-installer-ready-meta">
+            <span>{installInfo?.version_info?.version || 'Hermes 已检测'}</span>
+            <span>{installInfo?.platform || '本机环境'}</span>
+            <span>{installInfo?.hermes_home || 'HERMES_HOME 已就绪'}</span>
           </div>
-          <GuidanceList actions={payload?.install_guidance?.actions || []} suggestions={installInfo?.suggestions || []} />
-        </article>
+        </section>
+      ) : (
+        <section className="settings-detail-grid hy-installer-content hy-stagger">
+          <article className="panel settings-section">
+            <div className="section-heading-row">
+              <h2>引导步骤</h2>
+              <span>{installStatusLabel(statusValue)}</span>
+            </div>
+            <GuidanceList actions={payload?.install_guidance?.actions || []} suggestions={installInfo?.suggestions || []} />
+          </article>
 
-        <article className="panel settings-section" ref={actionsPanelRef}>
-          <div className="section-heading-row">
-            <h2>操作</h2>
-            <span className={`process-badge ${busy ? 'active' : setupAttention ? 'attention' : ''}`}>
-              {operationLabel(busy, setupAttention)}
-            </span>
-          </div>
-          <InstallerActions
-            backupStatus={backupStatus}
-            busy={busy}
-            canInitialize={Boolean(payload?.install_guidance?.can_initialize)}
-            installRunning={Boolean(installProgress?.running || terminalSession?.task === 'install-hermes')}
-            isMacOS={isMacOS}
-            ready={ready}
-            recheckAttention={setupAttention || installProgress?.success === false}
-            setupRunning={setupRunning || statusValue === 'setup_in_progress'}
-            statusValue={statusValue}
-            onImportBackup={importBackup}
-            onInitializeWorkspace={initializeWorkspace}
-            onOpenSetupTerminal={() => startEmbeddedTerminal('hermes-setup')}
-            onPrepareMacTools={() => startEmbeddedTerminal('mac-prerequisites')}
-            onRecheck={recheckStatus}
-            onRefreshBackup={loadBackupStatus}
-            onStartInstall={() => startEmbeddedTerminal('install-hermes')}
-          />
-        </article>
-      </section>
+          <article className="panel settings-section" ref={actionsPanelRef}>
+            <div className="section-heading-row">
+              <h2>操作</h2>
+              <span className={`process-badge ${busy ? 'active' : setupAttention ? 'attention' : ''}`}>
+                {operationLabel(busy, setupAttention)}
+              </span>
+            </div>
+            <InstallerActions
+              backupStatus={backupStatus}
+              busy={busy}
+              canInitialize={Boolean(payload?.install_guidance?.can_initialize)}
+              installRunning={Boolean(installProgress?.running || terminalSession?.task === 'install-hermes')}
+              isMacOS={isMacOS}
+              ready={ready}
+              recheckAttention={setupAttention || installProgress?.success === false}
+              setupRunning={setupRunning || statusValue === 'setup_in_progress'}
+              statusValue={statusValue}
+              onImportBackup={importBackup}
+              onInitializeWorkspace={initializeWorkspace}
+              onOpenSetupTerminal={() => startEmbeddedTerminal('hermes-setup')}
+              onPrepareMacTools={() => startEmbeddedTerminal('mac-prerequisites')}
+              onRecheck={recheckStatus}
+              onRefreshBackup={loadBackupStatus}
+              onStartInstall={() => startEmbeddedTerminal('install-hermes')}
+            />
+          </article>
+        </section>
+      )}
 
       {showVisualConfig ? (
         <InstallerHermesConfigPanel
@@ -1033,62 +974,9 @@ export function InstallerView() {
         />
       ) : null}
 
-      {backupStatus ? <BackupImportPanel status={backupStatus} /> : null}
-      {logLines.length || installProgress?.running ? <InstallLog lines={logLines} progress={installProgress} /> : null}
+      {!ready && backupStatus ? <BackupImportPanel status={backupStatus} /> : null}
+      {!ready && (logLines.length || installProgress?.running) ? <InstallLog lines={logLines} progress={installProgress} /> : null}
     </main>
-  );
-}
-
-function HermesEnvironmentPanel({
-  busy,
-  environment,
-  status,
-  onRefresh,
-  onSetup,
-}: {
-  busy: string;
-  environment: HermesEnvironmentInfo | null;
-  status: string;
-  onRefresh: () => Promise<HermesEnvironmentInfo | null>;
-  onSetup: () => Promise<void>;
-}) {
-  const disabled = Boolean(busy);
-  return (
-    <section className="panel settings-section hy-installer-environment">
-      <div className="section-heading-row">
-        <div>
-          <h2>Hermes 环境</h2>
-          <p className="section-caption">直接读取 /hermes/environment，展示 HERMES_HOME、默认路径和 Yachiyo workspace。</p>
-        </div>
-        <div className="settings-action-strip">
-          <button type="button" disabled={disabled} onClick={() => void onRefresh()}>{busy === 'environment-refresh' ? '刷新中...' : '刷新'}</button>
-          <button type="button" className="primary-action" disabled={disabled} onClick={() => void onSetup()}>
-            {busy === 'environment' ? '设置中...' : '自动设置环境'}
-          </button>
-        </div>
-      </div>
-      {status ? <div className={installerNoticeClass(status)}>{status}</div> : null}
-      <div className="settings-meta-list">
-        <div className="settings-meta-row">
-          <span>当前 HERMES_HOME</span>
-          <strong>{environment?.current_hermes_home || '—'}</strong>
-        </div>
-        <div className="settings-meta-row">
-          <span>默认 HERMES_HOME</span>
-          <strong>{environment?.default_hermes_home || '—'}</strong>
-        </div>
-        <div className="settings-meta-row">
-          <span>Yachiyo workspace</span>
-          <strong>{environment?.yachiyo_workspace || '—'}</strong>
-        </div>
-        <div className="settings-meta-row">
-          <span>环境变量</span>
-          <strong className={environment?.hermes_home_env_set ? 'ok' : 'warn'}>
-            {environment?.hermes_home_env_set ? 'HERMES_HOME 已设置' : '未检测到 HERMES_HOME'}
-          </strong>
-        </div>
-      </div>
-    </section>
   );
 }
 

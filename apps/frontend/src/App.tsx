@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 
 import { ChatView } from './views/ChatView';
 import { DiagnosticsView } from './views/DiagnosticsView';
@@ -22,7 +22,9 @@ import { AppUpdateView } from './views/AppUpdateView';
 import { ROUTE_CHANGE_EVENT, currentParam, currentView } from './lib/view';
 
 export function App() {
+  const view = currentView();
   const [, setRouteVersion] = useState(0);
+  const [live2dVisited, setLive2dVisited] = useState(() => view === 'live2d');
 
   useEffect(() => {
     const refreshRoute = () => setRouteVersion((version) => version + 1);
@@ -36,14 +38,17 @@ export function App() {
     };
   }, []);
 
-  const view = currentView();
+  useEffect(() => {
+    if (view === 'live2d') setLive2dVisited(true);
+  }, [view]);
+
   const surface = currentParam('surface');
 
   if (view === 'bubble-menu' || ((view === 'bubble' || view === 'live2d') && surface === 'desktop')) {
     return <LauncherView view={view} />;
   }
 
-  let page = <DashboardPage />;
+  let page: ReactNode = <DashboardPage />;
   if (view === 'chat') page = <ChatView />;
   else if (view === 'settings') page = <ModeSettingsView />;
   else if (view === 'installer') page = <InstallerView />;
@@ -53,11 +58,26 @@ export function App() {
   else if (view === 'app-update') page = <AppUpdateView />;
   else if (view === 'provider') page = <ProviderPage />;
   else if (view === 'bubble') page = <BubbleModePage />;
-  else if (view === 'live2d') page = <Live2DModePage />;
+  else if (view === 'live2d') page = null;
   else if (view === 'resources') page = <ResourcesPage />;
   else if (view === 'workspace') page = <WorkspacePage />;
   else if (view === 'tools-all') page = <ToolsAllPage />;
   else if (view === 'activity-all') page = <ActivityAllPage />;
 
-  return <OpenDesignShell activeView={view}>{page}</OpenDesignShell>;
+  const live2dKeepAlive = live2dVisited ? (
+    <div
+      key="live2d-keepalive"
+      className={view === 'live2d' ? 'hy-keepalive-page' : 'hy-keepalive-page is-hidden'}
+      aria-hidden={view !== 'live2d'}
+    >
+      <Live2DModePage active={view === 'live2d'} />
+    </div>
+  ) : null;
+
+  return (
+    <OpenDesignShell activeView={view}>
+      {view === 'live2d' ? live2dKeepAlive : page}
+      {view !== 'live2d' ? live2dKeepAlive : null}
+    </OpenDesignShell>
+  );
 }

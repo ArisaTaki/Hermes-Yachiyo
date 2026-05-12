@@ -8,6 +8,8 @@ import type {
 } from 'react';
 
 import { ImageAttachmentViewer } from '../components/ImageAttachmentViewer';
+import logoUrl from '../../../../docs/open-design/logo.png';
+import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiGet, apiPost, bridgeUrl, copyText, openAppView, openExternalUrl } from '../lib/bridge';
 import { currentParam } from '../lib/view';
 
@@ -101,6 +103,29 @@ type ChatNotice = {
   detail: string;
 };
 
+let cachedAssistantProfile: AssistantProfilePayload | null = null;
+
+function profileFromSeed(seed: AssistantProfileSeed | null): AssistantProfilePayload | null {
+  if (!seed?.agent_avatar_url && !seed?.agent_name && !seed?.agent_nickname && !seed?.user_avatar_url) return null;
+  return {
+    agent_name: seed.agent_name,
+    agent_nickname: seed.agent_nickname,
+    agent_avatar_url: seed.agent_avatar_url,
+    user_avatar_url: seed.user_avatar_url,
+  };
+}
+
+function mergeAssistantProfileSeed(current: AssistantProfilePayload | null, seed: AssistantProfilePayload): AssistantProfilePayload {
+  return {
+    ...seed,
+    ...(current || {}),
+    agent_name: current?.agent_name || seed.agent_name,
+    agent_nickname: current?.agent_nickname || seed.agent_nickname,
+    agent_avatar_url: current?.agent_avatar_url || seed.agent_avatar_url,
+    user_avatar_url: current?.user_avatar_url || seed.user_avatar_url,
+  };
+}
+
 const ACTIVE_POLL_INTERVAL_MS = 500;
 const IDLE_POLL_INTERVAL_MS = 3000;
 const EXECUTOR_POLL_INTERVAL_MS = 3000;
@@ -117,6 +142,7 @@ const CHAT_SIDEBAR_WIDE_MAX_WIDTH = 360;
 const CHAT_WIDE_VIEWPORT_WIDTH = 1500;
 
 export function ChatView({ embedded = false }: ChatViewProps = {}) {
+  const assistantProfileSeed = useAssistantProfileSeed();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -124,14 +150,16 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [sessions, setSessions] = useState<SessionsPayload | null>(null);
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [executor, setExecutor] = useState<ExecutorPayload | null>(null);
-  const [assistantProfile, setAssistantProfile] = useState<AssistantProfilePayload | null>(null);
-  const [assistantProfileLoading, setAssistantProfileLoading] = useState(true);
+  const [assistantProfile, setAssistantProfile] = useState<AssistantProfilePayload | null>(() => cachedAssistantProfile || profileFromSeed(assistantProfileSeed));
+  const [assistantProfileLoading, setAssistantProfileLoading] = useState(() => !(cachedAssistantProfile || profileFromSeed(assistantProfileSeed)));
   const [notice, setNotice] = useState<ChatNotice | null>(null);
   const [sessionQuery, setSessionQuery] = useState('');
   const [copiedMessageId, setCopiedMessageId] = useState('');
   const [messagesLoaded, setMessagesLoaded] = useState(false);
   const [messagesVisible, setMessagesVisible] = useState(false);
+  const [chatBootstrapped, setChatBootstrapped] = useState(false);
   const [sidebarMaxWidth, setSidebarMaxWidth] = useState(() => responsiveChatSidebarMaxWidth());
   const [sidebarWidth, setSidebarWidth] = useState(() => responsiveChatSidebarMaxWidth());
   const [, setRenderTick] = useState(0);
@@ -150,6 +178,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const conversationLoadTokenRef = useRef(0);
   const conversationTransitionRef = useRef(false);
   const sidebarAutoWidthRef = useRef(true);
+  const assistantProfileSeedRef = useRef(assistantProfileSeed);
 
   const refreshMessages = useCallback(async (options: { allowDuringTransition?: boolean } = {}) => {
     if (conversationTransitionRef.current && !options.allowDuringTransition) return;
@@ -170,7 +199,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       if (token !== messageLoadTokenRef.current) return;
       setMessages(nextMessages);
       setIsProcessing(processing);
-      await settleMessagesAtBottom(token);
+      if (shouldHoldLoading) {
+        await settleMessagesAtBottom(token);
+      }
       if (token === messageLoadTokenRef.current) {
         messagesLoadedRef.current = true;
         setMessagesVisible(true);
@@ -202,6 +233,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setSessions(payload);
     } catch {
       setSessions(null);
+    } finally {
+      setSessionsLoaded(true);
     }
   }, []);
 
@@ -217,17 +250,32 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     try {
       const profile = await apiGet<AssistantProfilePayload>('/assistant/profile');
       if (profile.ok === false) throw new Error('读取助手资料失败');
+      cachedAssistantProfile = profile;
       setAssistantProfile(profile);
     } catch {
-      setAssistantProfile(null);
+      const fallback = cachedAssistantProfile || profileFromSeed(assistantProfileSeedRef.current);
+      setAssistantProfile(fallback);
     } finally {
       setAssistantProfileLoading(false);
     }
   }, []);
 
   useEffect(() => {
+    assistantProfileSeedRef.current = assistantProfileSeed;
+    const seededProfile = profileFromSeed(assistantProfileSeed);
+    if (!seededProfile) return;
+    setAssistantProfile((current) => {
+      const merged = mergeAssistantProfileSeed(current, seededProfile);
+      cachedAssistantProfile = merged;
+      return merged;
+    });
+    setAssistantProfileLoading(false);
+  }, [assistantProfileSeed]);
+
+  useEffect(() => {
     const requestedSessionId = currentParam('session_id').trim();
     void (async () => {
+      await Promise.all([loadAssistantProfile(), loadExecutor()]);
       if (requestedSessionId) {
         try {
           const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/chat/sessions/load', {
@@ -238,10 +286,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           setStatus(error instanceof Error ? error.message : '切换会话失败');
         }
       }
-      await refreshMessages();
-      await loadSessions();
-      await loadExecutor();
-      await loadAssistantProfile();
+      await Promise.all([refreshMessages(), loadSessions()]);
     })();
   }, [loadAssistantProfile, loadExecutor, loadSessions, refreshMessages]);
 
@@ -263,6 +308,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     window.addEventListener('hermes-assistant-profile-updated', refreshProfile);
     return () => window.removeEventListener('hermes-assistant-profile-updated', refreshProfile);
   }, [loadAssistantProfile]);
+
+  useEffect(() => {
+    if (embedded || chatBootstrapped) return;
+    if (messagesLoaded && sessionsLoaded && messagesVisible && !assistantProfileLoading) {
+      setChatBootstrapped(true);
+    }
+  }, [assistantProfileLoading, chatBootstrapped, embedded, messagesLoaded, messagesVisible, sessionsLoaded]);
 
   useEffect(() => {
     if (embedded) return;
@@ -492,6 +544,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   async function switchSession(sessionId: string) {
     if (!sessionId || sessionId === sessions?.current_session_id) return;
     const conversationToken = beginConversationLoading();
+    setStatus('正在切换会话...');
     try {
       await apiPost('/ui/chat/sessions/load', { session_id: sessionId });
       if (conversationToken !== conversationLoadTokenRef.current) return;
@@ -602,10 +655,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     conversationTransitionRef.current = true;
     messageLoadTokenRef.current += 1;
     messagesLoadedRef.current = false;
-    renderStateRef.current.clear();
     setMessagesLoaded(false);
     setMessagesVisible(false);
-    setMessages([]);
     return conversationToken;
   }
 
@@ -614,6 +665,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       let frames = 0;
       let stableFrames = 0;
       let previousHeight = -1;
+      const minFrames = 4;
+      const maxFrames = 24;
+      const requiredStableFrames = 4;
 
       const settle = () => {
         if (token !== messageLoadTokenRef.current) {
@@ -630,7 +684,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           lastScrollTopRef.current = list.scrollTop;
         }
         frames += 1;
-        if (frames >= 8 || stableFrames >= 2) {
+        if (frames >= maxFrames || (frames >= minFrames && stableFrames >= requiredStableFrames)) {
           resolve();
           return;
         }
@@ -655,9 +709,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const chatWorkspaceStyle = embedded
     ? undefined
     : ({ '--chat-sidebar-width': `${sidebarWidth}px` } as CSSProperties);
+  const initialChatLoading = !embedded && !chatBootstrapped;
+  const conversationLoading = !messagesLoaded;
 
   return (
-    <section className={`${embedded ? '' : 'app-shell '}chat-shell refined-chat-shell open-chat-shell${embedded ? ' embedded-chat-shell' : ''}`}>
+    <section className={`${embedded ? '' : 'app-shell '}chat-shell refined-chat-shell open-chat-shell${embedded ? ' embedded-chat-shell' : ''}${initialChatLoading ? ' is-initializing-chat' : ''}`}>
       {notice ? (
         <div className={`chat-toast ${notice.kind}`} role="status">
           <strong>{notice.title}</strong>
@@ -755,7 +811,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             </div>
           </header>
 
-          <section className="chat-messages refined-chat-list" ref={listRef} onClick={handleMessageListClick} onScroll={handleScroll}>
+          <section
+            className={`chat-messages refined-chat-list${conversationLoading ? ' is-loading-conversation' : ''}`}
+            ref={listRef}
+            onClick={handleMessageListClick}
+            onScroll={handleScroll}
+          >
             {!messagesLoaded ? (
               <div className="chat-loading-state">
                 <div className="chat-loading-dots">
@@ -766,7 +827,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             ) : messages.length === 0 ? (
               <div className="empty-state">发送消息开始对话</div>
             ) : null}
-            <div style={messagesVisible ? undefined : { visibility: 'hidden' }}>
+            <div className={`chat-messages-content${messagesVisible ? '' : ' is-hidden'}`}>
               {messages.map((message, index) => (
                 <MessageBubble
                   assistantProfile={assistantProfile}
@@ -853,6 +914,16 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           </form>
           <footer className="status-line refined-status-line">{status}</footer>
         </section>
+      </div>
+
+      <div
+        className={`chat-readiness-overlay${initialChatLoading ? ' is-visible' : ''}`}
+        aria-hidden={!initialChatLoading}
+      >
+        <ChatFullPageLoading
+          avatarUrl={assistantProfile?.agent_avatar_url}
+          label={assistantProfile?.agent_name || '月見八千代'}
+        />
       </div>
     </section>
   );
@@ -967,6 +1038,21 @@ function messageVisualRole(role: string) {
 function avatarNode(url: string | undefined, label: string, fallback: string, loading = false): ReactNode {
   if (loading) return <span className="chat-avatar-loading" aria-hidden="true" />;
   return url ? <img src={url} alt={label} /> : fallback;
+}
+
+function ChatFullPageLoading({ avatarUrl, label }: { avatarUrl?: string; label: string }) {
+  return (
+    <div className="chat-full-page-loading" role="status" aria-live="polite">
+      <div className="chat-full-page-avatar">
+        <img src={avatarUrl || logoUrl} alt="" />
+      </div>
+      <div className="chat-loading-dots">
+        <span /><span /><span />
+      </div>
+      <strong>{label}</strong>
+      <span>正在准备对话...</span>
+    </div>
+  );
 }
 
 function messageAvatar(role: string, profile: AssistantProfilePayload | null, profileLoading = false) {

@@ -44,6 +44,8 @@ const BUBBLE_SCREEN_MARGIN = 24;
 const POSITION_SAVE_DEBOUNCE_MS = 260;
 const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
 const TRANSPARENT_WINDOW_BACKGROUND = '#00000000';
+const MIN_APP_WINDOW_WIDTH = 1250;
+const MIN_APP_WINDOW_HEIGHT = 860;
 const MAX_LAUNCHER_SHAPE_RECTS = 10000;
 const MAX_AVATAR_IMAGE_BYTES = 8 * 1024 * 1024;
 type IconKind = 'dock' | 'tray' | 'window';
@@ -1141,27 +1143,45 @@ function routeHash(params: Record<string, string> = {}): string {
 function mainWindowBounds(settings: UiSettings | null = lastUiSettings): { width: number; height: number } {
   const windowMode = settings?.window_mode || {};
   return {
-    width: Math.round(clamp(numberFromConfig(windowMode.width, 1120), 860, 1920)),
-    height: Math.round(clamp(numberFromConfig(windowMode.height, 760), 580, 1400)),
+    width: Math.round(clamp(numberFromConfig(windowMode.width, MIN_APP_WINDOW_WIDTH), MIN_APP_WINDOW_WIDTH, 1920)),
+    height: Math.round(clamp(numberFromConfig(windowMode.height, MIN_APP_WINDOW_HEIGHT), MIN_APP_WINDOW_HEIGHT, 1400)),
   };
 }
 
 function chatWindowBounds(settings: UiSettings | null = lastUiSettings, workArea: Rectangle = screen.getPrimaryDisplay().workArea): { width: number; height: number } {
   const base = mainWindowBounds(settings);
-  const maxWidth = Math.max(860, Math.min(1440, workArea.width));
-  const maxHeight = Math.max(580, Math.min(1000, workArea.height));
+  const maxWidth = Math.max(MIN_APP_WINDOW_WIDTH, Math.min(1440, workArea.width));
+  const maxHeight = Math.max(MIN_APP_WINDOW_HEIGHT, Math.min(1000, workArea.height));
   return {
-    width: Math.round(clamp(Math.max(base.width, 1120), 860, maxWidth)),
-    height: Math.round(clamp(Math.max(base.height, 760), 580, maxHeight)),
+    width: Math.round(clamp(Math.max(base.width, MIN_APP_WINDOW_WIDTH), MIN_APP_WINDOW_WIDTH, maxWidth)),
+    height: Math.round(clamp(Math.max(base.height, MIN_APP_WINDOW_HEIGHT), MIN_APP_WINDOW_HEIGHT, maxHeight)),
   };
 }
 
 function chatWindowMinSize(settings: UiSettings | null = lastUiSettings, workArea: Rectangle = screen.getPrimaryDisplay().workArea): { width: number; height: number } {
   const bounds = chatWindowBounds(settings, workArea);
   return {
-    width: Math.min(1080, bounds.width),
-    height: Math.min(720, bounds.height),
+    width: Math.min(MIN_APP_WINDOW_WIDTH, bounds.width),
+    height: Math.min(MIN_APP_WINDOW_HEIGHT, bounds.height),
   };
+}
+
+function ensureMainWindowUsableBounds(settings: UiSettings | null = lastUiSettings): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const current = mainWindow.getBounds();
+  const workArea = screen.getDisplayMatching(current).workArea;
+  const target = mainWindowBounds(settings);
+  mainWindow.setMinimumSize(MIN_APP_WINDOW_WIDTH, MIN_APP_WINDOW_HEIGHT);
+  if (current.width >= MIN_APP_WINDOW_WIDTH && current.height >= MIN_APP_WINDOW_HEIGHT) return;
+  const width = Math.max(current.width, target.width);
+  const height = Math.max(current.height, target.height);
+  const x = width >= workArea.width
+    ? workArea.x
+    : Math.round(clamp(current.x, workArea.x, workArea.x + workArea.width - width));
+  const y = height >= workArea.height
+    ? workArea.y
+    : Math.round(clamp(current.y, workArea.y, workArea.y + workArea.height - height));
+  mainWindow.setBounds({ x, y, width, height }, false);
 }
 
 function ensureChatWindowUsableBounds(settings: UiSettings | null = lastUiSettings): void {
@@ -1205,8 +1225,8 @@ function createMainWindow(
     title,
     ...bounds,
     icon: appIconPath('window'),
-    minWidth: 860,
-    minHeight: 580,
+    minWidth: MIN_APP_WINDOW_WIDTH,
+    minHeight: MIN_APP_WINDOW_HEIGHT,
     show: false,
     backgroundColor: '#060913',
     ...(process.platform === 'darwin'
@@ -1257,6 +1277,7 @@ function showMainWindow(
     configureTray(settings || lastUiSettings);
   }
   enforceWindowTitle(mainWindow, mainWindowTitle(params));
+  ensureMainWindowUsableBounds(settings);
   mainWindow.loadURL(rendererUrl({ view: 'main', ...params }));
   if (mainWindow.isMinimized()) mainWindow.restore();
   const startHidden = Boolean(options.respectStartMinimized && settings?.app?.start_minimized);
@@ -1599,6 +1620,14 @@ function boundsChanged(first: Rectangle, second: Rectangle): boolean {
   return first.x !== second.x || first.y !== second.y || first.width !== second.width || first.height !== second.height;
 }
 
+function squareBubbleBounds(bounds: Rectangle): Rectangle {
+  const workArea = workAreaForBounds(bounds);
+  const size = Math.round(clamp(Math.max(bounds.width, bounds.height), 80, 192));
+  const x = Math.round(clamp(bounds.x, workArea.x, workArea.x + Math.max(0, workArea.width - size)));
+  const y = Math.round(clamp(bounds.y, workArea.y, workArea.y + Math.max(0, workArea.height - size)));
+  return { ...bounds, x, y, width: size, height: size };
+}
+
 async function saveLauncherPosition(mode: ModeId, bounds: Rectangle): Promise<void> {
   const workArea = workAreaForBounds(bounds);
   try {
@@ -1631,6 +1660,13 @@ function scheduleModeWindowPositionSave(mode: ModeId, config: Record<string, unk
   positionSaveTimer = setTimeout(() => {
     if (!modeWindow || modeWindow.isDestroyed() || activeMode !== mode) return;
     let bounds = modeWindow.getBounds();
+    if (mode === 'bubble') {
+      const squared = squareBubbleBounds(bounds);
+      if (boundsChanged(bounds, squared)) {
+        modeWindow.setBounds(squared, false);
+        bounds = squared;
+      }
+    }
     if (mode === 'bubble' && booleanFromConfig(config.edge_snap, true)) {
       const snapped = snapBubbleBounds(bounds);
       if (boundsChanged(bounds, snapped)) {
@@ -1676,14 +1712,17 @@ function desktopModeBounds(mode: ModeId, config: Record<string, unknown>) {
   }
 
   const display = screen.getPrimaryDisplay().workArea;
-  const width = Math.round(clamp(numberFromConfig(config.width, 112), 80, 192));
-  const height = Math.round(clamp(numberFromConfig(config.height, 112), 80, 192));
+  const size = Math.round(clamp(
+    Math.max(numberFromConfig(config.width, 112), numberFromConfig(config.height, 112)),
+    80,
+    192,
+  ));
   const xPercent = clamp(numberFromConfig(config.position_x_percent, 1), 0, 1);
   const yPercent = clamp(numberFromConfig(config.position_y_percent, 1), 0, 1);
   const margin = 24;
-  const x = Math.round(display.x + margin + (display.width - width - margin * 2) * xPercent);
-  const y = Math.round(display.y + margin + (display.height - height - margin * 2) * yPercent);
-  return { width, height, x, y };
+  const x = Math.round(display.x + margin + (display.width - size - margin * 2) * xPercent);
+  const y = Math.round(display.y + margin + (display.height - size - margin * 2) * yPercent);
+  return { width: size, height: size, x, y };
 }
 
 function modeConfigSignature(config: Record<string, unknown>): string {
@@ -1746,6 +1785,16 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
   if (modeWindow && !modeWindow.isDestroyed() && activeMode === mode) {
     const nextSignature = modeConfigSignature(config);
     activeModeConfig = config;
+    if (mode === 'bubble') {
+      const currentBounds = modeWindow.getBounds();
+      const squaredBounds = squareBubbleBounds(currentBounds);
+      if (boundsChanged(currentBounds, squaredBounds)) {
+        suppressModeWindowPositionSave();
+        modeWindow.setBounds(squaredBounds, false);
+        repaintTransparentModeWindow(modeWindow);
+        modeWindowShapeApplied = false;
+      }
+    }
     if (nextSignature !== activeModeConfigSignature) {
       activeModeConfigSignature = nextSignature;
       const bounds = desktopModeBounds(mode, config);
@@ -1883,7 +1932,25 @@ function setModeWindowPointerInteractive(mode: ModeId, interactive: boolean): bo
 
 function setModeWindowHitRegions(mode: ModeId, rawRegions: unknown): boolean {
   if (!modeWindow || modeWindow.isDestroyed() || activeMode !== mode) return false;
-  const bounds = modeWindow.getBounds();
+  let bounds = modeWindow.getBounds();
+  if (mode === 'bubble') {
+    const squared = squareBubbleBounds(bounds);
+    if (boundsChanged(bounds, squared)) {
+      suppressModeWindowPositionSave();
+      modeWindow.setBounds(squared, false);
+      repaintTransparentModeWindow(modeWindow);
+      bounds = squared;
+    }
+    try {
+      modeWindow.setShape([{ x: 0, y: 0, width: bounds.width, height: bounds.height }]);
+      modeWindowShapeApplied = false;
+      return true;
+    } catch (error) {
+      modeWindowShapeApplied = false;
+      console.warn('[desktop] setShape failed for bubble full bounds.', error);
+      return false;
+    }
+  }
   const shapePayload = normalizeLauncherShapePayload(rawRegions, bounds);
   const shapeRects = normalizeLauncherShapeRects(shapePayload.regions, bounds, shapePayload.scaleX, shapePayload.scaleY);
   if (!shapeRects.length) {
