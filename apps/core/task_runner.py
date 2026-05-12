@@ -159,6 +159,7 @@ class TaskRunner:
                 progress_label="已完成",
             )
             self._sync_task_message(task_id)
+            self._finalize_task_activity(task_id, "completed")
             logger.info("任务已完成: %s", task_id)
 
         except asyncio.CancelledError:
@@ -190,6 +191,7 @@ class TaskRunner:
                     progress_label="执行失败",
                 )
                 self._sync_task_message(task_id)
+                self._finalize_task_activity(task_id, "failed")
             except Exception:
                 pass
 
@@ -204,7 +206,11 @@ class TaskRunner:
             from apps.core.chat_store import get_chat_store
 
             session = ChatSession(session_id=session_id)
-            session.attach_store(get_chat_store(), load_existing=True)
+            session.attach_store(
+                get_chat_store(),
+                load_existing=True,
+                fail_active_messages=False,
+            )
             if task.status == TaskStatus.COMPLETED:
                 session.upsert_assistant_message(
                     task_id=task.task_id,
@@ -230,3 +236,12 @@ class TaskRunner:
                 )
         except Exception:
             logger.debug("同步任务消息失败: %s", task_id, exc_info=True)
+
+    def _finalize_task_activity(self, task_id: str, status: str) -> None:
+        """Mark in-flight activity rows terminal once the owning task finishes."""
+        try:
+            from apps.core.activity_store import get_activity_store
+
+            get_activity_store().finalize_task_events(task_id, status=status)
+        except Exception:
+            logger.debug("收尾任务活动事件失败: %s", task_id, exc_info=True)

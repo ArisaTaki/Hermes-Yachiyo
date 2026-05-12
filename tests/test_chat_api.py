@@ -31,7 +31,16 @@ class _RuntimeStub:
 
     def switch_session(self, session_id: str) -> None:
         self.chat_session = ChatSession(session_id=session_id)
-        self.chat_session.attach_store(self.store, load_existing=True)
+        self.chat_session.attach_store(
+            self.store,
+            load_existing=True,
+            fail_active_messages=False,
+        )
+
+    def start_new_session(self) -> str:
+        self.chat_session = ChatSession()
+        self.chat_session.attach_store(self.store, load_existing=False)
+        return self.chat_session.session_id
 
 
 def _make_api(tmp_path):
@@ -395,30 +404,38 @@ def test_cancelled_task_marks_user_failed_and_adds_cancel_reply(tmp_path):
         store.close()
 
 
-def test_clear_session_cancels_active_task_and_persists_cancel(tmp_path):
+def test_clear_session_starts_new_session_and_preserves_active_task(tmp_path):
     api, runtime, store = _make_api(tmp_path)
     try:
         result = api.send_message("清空前仍在执行")
         task_id = result["task_id"]
         old_session_id = runtime.chat_session.session_id
         runtime.state.update_task_status(task_id, TaskStatus.RUNNING)
+        old_session_object = runtime.chat_session
 
         cleared = api.clear_session()
 
         assert cleared["ok"] is True
-        assert cleared["cancelled_tasks"] == 1
+        assert cleared["cancelled_tasks"] == 0
         assert cleared["session_id"] != old_session_id
-        assert runtime.state.get_task(task_id).status == TaskStatus.CANCELLED
-        assert runtime.cancelled_runner_tasks == [task_id]
+        assert runtime.state.get_task(task_id).status == TaskStatus.RUNNING
+        assert runtime.cancelled_runner_tasks == []
+        assert runtime.chat_session is not old_session_object
+        assert old_session_object.session_id == old_session_id
         assert api.get_messages()["messages"] == []
 
         old_messages = store.load_messages(old_session_id)
         assert len(old_messages) == 2
-        assert old_messages[0].status == "failed"
-        assert old_messages[0].error == "任务已取消"
+        assert old_messages[0].status == "processing"
+        assert old_messages[0].error is None
         assert old_messages[1].role == "assistant"
-        assert old_messages[1].status == "failed"
-        assert old_messages[1].error == "任务已取消"
+        assert old_messages[1].status == "processing"
+        assert old_messages[1].error is None
+
+        old_session_object.upsert_assistant_message(task_id, "旧任务完成", MessageStatus.COMPLETED)
+        old_messages = store.load_messages(old_session_id)
+        assert old_messages[1].content == "旧任务完成"
+        assert old_messages[1].status == "completed"
     finally:
         store.close()
 

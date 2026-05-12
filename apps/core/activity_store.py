@@ -272,6 +272,27 @@ class ActivityStore:
                 result[task_id] = self.latest_for_task(task_id, limit_per_task)
         return result
 
+    def finalize_task_events(self, task_id: str, *, status: str = "completed") -> int:
+        """Move all non-terminal activity rows for a task into a terminal state."""
+        task_id = redact_sensitive_text(task_id, limit=80)
+        if not task_id:
+            return 0
+        terminal_status = redact_sensitive_text(status or "completed", limit=40)
+        if terminal_status not in {"completed", "success", "failed", "error", "cancelled"}:
+            terminal_status = "completed"
+        with self._lock:
+            cursor = self._get_conn().execute(
+                """
+                UPDATE activity_events
+                SET status = ?
+                WHERE task_id = ?
+                  AND status NOT IN ('completed', 'success', 'failed', 'error', 'cancelled')
+                """,
+                (terminal_status, task_id),
+            )
+            self._get_conn().commit()
+            return int(cursor.rowcount or 0)
+
     def close(self) -> None:
         with self._lock:
             if self._conn is not None:

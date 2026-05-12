@@ -733,16 +733,22 @@ class ChatAPI:
             return {"ok": False, "error": str(exc)}
 
     def clear_session(self) -> Dict[str, Any]:
-        """清空会话"""
+        """创建新会话；旧会话的后台任务继续写回原 session。"""
         try:
             self._sync_task_status_to_messages()
-            cancelled_count = self._cancel_active_session_tasks()
-            self._session.clear()
-            logger.info("会话已清空，已取消旧会话任务数=%d", cancelled_count)
+            previous_session_id = self._session.session_id
+            start_new_session = getattr(self._runtime, "start_new_session", None)
+            if callable(start_new_session):
+                session_id = start_new_session()
+            else:
+                self._session.clear()
+                session_id = self._session.session_id
+            logger.info("新会话已创建: %s -> %s", previous_session_id, session_id)
             return {
                 "ok": True,
-                "session_id": self._session.session_id,
-                "cancelled_tasks": cancelled_count,
+                "session_id": session_id,
+                "previous_session_id": previous_session_id,
+                "cancelled_tasks": 0,
             }
         except Exception as exc:
             logger.error("清空会话失败: %s", exc)
@@ -898,6 +904,10 @@ class ChatAPI:
 
             task = self._state.get_task(task_id)
             if task is not None and task.status == TaskStatus.CANCELLED:
+                try:
+                    get_activity_store().finalize_task_events(task_id, status="cancelled")
+                except Exception:
+                    logger.debug("收尾取消任务活动事件失败: %s", task_id, exc_info=True)
                 error = "任务已取消"
                 self._session.upsert_assistant_message(
                     task_id=task_id,

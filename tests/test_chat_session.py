@@ -91,6 +91,31 @@ def test_chat_session_marks_orphaned_processing_messages_failed(tmp_path):
         store.close()
 
 
+def test_chat_session_can_preserve_active_messages_during_live_switch(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        store.create_session("s1")
+        store.save_message(StoredMessage(
+            message_id="m1",
+            session_id="s1",
+            role="assistant",
+            content="正在执行",
+            status="processing",
+            task_id="t1",
+            error=None,
+            created_at="2026-01-01T00:00:00+00:00",
+        ))
+
+        restored = ChatSession(session_id="s1")
+        restored.attach_store(store, fail_active_messages=False)
+
+        assert restored.messages[0].status == MessageStatus.PROCESSING
+        assert restored.messages[0].error is None
+        assert store.load_messages("s1")[0].status == "processing"
+    finally:
+        store.close()
+
+
 def test_upsert_assistant_message_idempotent(tmp_path):
     """多次 upsert 同一 task_id 不产生重复消息"""
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
@@ -361,6 +386,34 @@ def test_switch_chat_session(tmp_path):
             switched2 = _cs_mod.switch_chat_session("s2")
             assert switched2.session_id == "s2"
             assert switched2.message_count() == 2
+        finally:
+            _store_mod.get_chat_store = original
+    finally:
+        store.close()
+
+
+def test_switch_chat_session_preserves_live_processing_messages(tmp_path):
+    """同进程切换会话时不应误判为应用重启。"""
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        store.create_session("s1")
+        store.save_message(StoredMessage(
+            message_id="m1",
+            session_id="s1",
+            role="assistant",
+            content="Hermes 正在推理",
+            status="processing",
+            task_id="t1",
+            error=None,
+            created_at="2026-01-01T00:00:00+00:00",
+        ))
+
+        original = _store_mod.get_chat_store
+        _store_mod.get_chat_store = lambda: store
+        try:
+            switched = _cs_mod.switch_chat_session("s1")
+            assert switched.messages[0].status == MessageStatus.PROCESSING
+            assert store.load_messages("s1")[0].status == "processing"
         finally:
             _store_mod.get_chat_store = original
     finally:

@@ -37,3 +37,21 @@ def test_activity_store_persists_searches_and_redacts(tmp_path):
 def test_redact_sensitive_text_handles_inline_tokens():
     assert redact_sensitive_text("token=abc123456 password:secret123") == "token=[redacted] password=[redacted]"
     assert redact_sensitive_text("sk-abc1234567890") == "[redacted]"
+
+
+def test_activity_store_finalizes_in_flight_task_events(tmp_path):
+    db_path = tmp_path / "activity.db"
+    store = ActivityStore(db_path=str(db_path))
+    try:
+        store.record_event(task_id="t1", title="Hermes 正在推理", status="running")
+        store.record_event(task_id="t1", title="Hermes 正在整理推理", status="progress")
+        store.record_event(task_id="t1", title="已失败的旧事件", status="failed")
+
+        updated = store.finalize_task_events("t1", status="completed")
+        events = store.latest_for_task("t1", limit=10)
+
+        assert updated == 2
+        assert [event.status for event in events].count("completed") == 2
+        assert [event.status for event in events].count("failed") == 1
+    finally:
+        store.close()

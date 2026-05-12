@@ -77,19 +77,24 @@ class ChatSession:
     _store: Optional["ChatStore"] = field(default=None, repr=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
-    def attach_store(self, store: "ChatStore", load_existing: bool = True) -> None:
+    def attach_store(
+        self,
+        store: "ChatStore",
+        load_existing: bool = True,
+        fail_active_messages: bool = True,
+    ) -> None:
         """绑定持久化层，并创建/加载会话。"""
         with self._lock:
             self._store = store
             store.create_session(self.session_id)
             if load_existing:
-                self._load_messages_from_store()
+                self._load_messages_from_store(fail_active_messages=fail_active_messages)
                 # 恢复 hermes_session_id
                 stored_session = store.get_session(self.session_id)
                 if stored_session and stored_session.hermes_session_id:
                     self.hermes_session_id = stored_session.hermes_session_id
 
-    def _load_messages_from_store(self) -> None:
+    def _load_messages_from_store(self, *, fail_active_messages: bool = True) -> None:
         """从持久化层恢复当前会话消息。"""
         if self._store is None:
             return
@@ -106,7 +111,7 @@ class ChatSession:
 
             error = stored.error
             attachments = _parse_attachments_json(stored.attachments_json)
-            if status in (MessageStatus.PENDING, MessageStatus.PROCESSING):
+            if fail_active_messages and status in (MessageStatus.PENDING, MessageStatus.PROCESSING):
                 status = MessageStatus.FAILED
                 error = error or "应用已重启，原任务状态不可恢复"
                 self._store.update_message_status(stored.message_id, status.value, error)
@@ -494,7 +499,11 @@ def switch_chat_session(session_id: str) -> ChatSession:
     from apps.core.chat_store import get_chat_store
     with _global_session_lock:
         session = ChatSession(session_id=session_id)
-        session.attach_store(get_chat_store(), load_existing=True)
+        session.attach_store(
+            get_chat_store(),
+            load_existing=True,
+            fail_active_messages=False,
+        )
         _global_session = session
     logger.info("切换到会话: %s (messages=%d)", session_id, session.message_count())
     return session

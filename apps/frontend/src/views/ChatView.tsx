@@ -463,7 +463,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   async function submit(event: FormEvent) {
     event.preventDefault();
     const text = input.trim();
-    if ((!text && attachments.length === 0) || isSending) return;
+    if ((!text && attachments.length === 0) || isSending || isProcessing) return;
     if (attachments.length > 0 && !canAttachImages(executor)) {
       showImageInputBlocked();
       return;
@@ -509,6 +509,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
     if (isImeComposing(event, composerComposingRef.current)) return;
     event.preventDefault();
+    if (isProcessing) return;
     event.currentTarget.form?.requestSubmit();
   }
 
@@ -1010,12 +1011,14 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 🖼
               </button>
               <button
-                type="submit"
-                className="chat-send-btn neon-glow"
-                disabled={isSending || (!input.trim() && attachments.length === 0)}
-                aria-label="发送消息"
+                type={isProcessing ? 'button' : 'submit'}
+                className={`chat-send-btn neon-glow${isProcessing ? ' is-stop' : ''}`}
+                disabled={isProcessing ? false : isSending || (!input.trim() && attachments.length === 0)}
+                aria-label={isProcessing ? '停止生成' : '发送消息'}
+                title={isProcessing ? '停止生成' : '发送消息'}
+                onClick={isProcessing ? () => void cancelProcessing() : undefined}
               >
-                ↑
+                {isProcessing ? '■' : '↑'}
               </button>
             </div>
             <input
@@ -1119,16 +1122,19 @@ function MessageActivityList({ events, messageStatus, progressLabel }: {
   if (!visibleRows.length) return null;
   return (
     <div className="message-activity-list" aria-label="执行活动">
-      {visibleRows.map((event, index) => (
-        <div className={`message-activity-row ${activityStatusClass(event.status)}`} key={event.event_id || `${event.title}-${index}`}>
-          <span className="message-activity-icon" aria-hidden="true">{activityStatusIcon(event.status)}</span>
-          <span className="message-activity-text">
-            <strong>{event.title || event.tool_name || 'Hermes 活动'}</strong>
-            {event.detail ? <small>{event.detail}</small> : null}
-          </span>
-          <time>{formatShortTime(event.created_at)}</time>
-        </div>
-      ))}
+      {visibleRows.map((event, index) => {
+        const displayStatus = activityDisplayStatus(event.status, messageStatus);
+        return (
+          <div className={`message-activity-row ${activityStatusClass(displayStatus)}`} key={event.event_id || `${event.title}-${index}`}>
+            <span className="message-activity-icon" aria-hidden="true">{activityStatusIcon(displayStatus)}</span>
+            <span className="message-activity-text">
+              <strong>{event.title || event.tool_name || 'Hermes 活动'}</strong>
+              {event.detail ? <small>{event.detail}</small> : null}
+            </span>
+            <time>{formatShortTime(event.created_at)}</time>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1297,6 +1303,16 @@ function activityStatusIcon(status?: string) {
   if (status === 'completed' || status === 'success') return '✓';
   if (status === 'failed' || status === 'error') return '!';
   return '';
+}
+
+function activityDisplayStatus(eventStatus?: string, messageStatus?: string) {
+  if (
+    (messageStatus === 'completed' || messageStatus === 'failed')
+    && (!eventStatus || eventStatus === 'running' || eventStatus === 'progress' || eventStatus === 'status')
+  ) {
+    return messageStatus;
+  }
+  return eventStatus;
 }
 
 function formatShortTime(value?: string) {

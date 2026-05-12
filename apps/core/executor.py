@@ -1276,7 +1276,11 @@ class HermesExecutor(ExecutionStrategy):
             from apps.core.chat_store import get_chat_store
 
             session = ChatSession(session_id=session_id)
-            session.attach_store(get_chat_store(), load_existing=True)
+            session.attach_store(
+                get_chat_store(),
+                load_existing=True,
+                fail_active_messages=False,
+            )
             return session
         except Exception:
             logger.debug("无法为任务加载指定聊天会话: %s", session_id, exc_info=True)

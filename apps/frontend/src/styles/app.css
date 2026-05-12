@@ -7595,6 +7595,13 @@ body.electron-window .hy-traffic {
   color: var(--hy-bg-deep);
 }
 
+.hy-content .open-chat-shell .chat-send-btn.is-stop {
+  border: 1px solid oklch(74% 0.14 350 / 0.32);
+  background: oklch(74% 0.14 350 / 0.14);
+  color: var(--hy-fg);
+  font-size: 11px;
+}
+
 .hy-content .open-chat-shell .chat-attach-btn:hover:not(:disabled),
 .hy-content .open-chat-shell .chat-send-btn:hover:not(:disabled) {
   transform: scale(1.05);
@@ -7602,6 +7609,10 @@ body.electron-window .hy-traffic {
 
 .hy-content .open-chat-shell .chat-send-btn:hover:not(:disabled) {
   box-shadow: 0 0 16px oklch(72% 0.14 350 / 0.3), 0 0 32px oklch(82% 0.135 76 / 0.15);
+}
+
+.hy-content .open-chat-shell .chat-send-btn.is-stop:hover:not(:disabled) {
+  box-shadow: 0 0 16px oklch(74% 0.14 350 / 0.24);
 }
 
 .hy-content .open-chat-shell .chat-attach-btn:disabled,
