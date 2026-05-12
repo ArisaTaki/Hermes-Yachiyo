@@ -7417,6 +7417,7 @@ body.electron-window .hy-traffic {
 }
 
 .hy-content .open-chat-shell .chat-input-wrapper {
+  position: relative;
   display: flex;
   align-items: flex-end;
   gap: 12px;
@@ -7440,8 +7441,8 @@ body.electron-window .hy-traffic {
 }
 
 .hy-content .open-chat-shell .composer textarea.chat-input {
-  min-height: 24px;
-  max-height: 120px;
+  min-height: 48px;
+  max-height: 260px;
   padding: 0;
   border: 0;
   border-radius: 0;
@@ -7452,6 +7453,33 @@ body.electron-window .hy-traffic {
   font-size: 14px;
   line-height: 1.5;
   resize: none;
+}
+
+.hy-content .open-chat-shell .composer-resize-handle {
+  position: absolute;
+  left: 16px;
+  right: 88px;
+  bottom: 5px;
+  height: 10px;
+  cursor: ns-resize;
+  border-radius: 999px;
+}
+
+.hy-content .open-chat-shell .composer-resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 34px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--hy-border-soft);
+  transform: translateX(-50%);
+}
+
+.hy-content .open-chat-shell .composer-resize-handle:focus-visible::after,
+.hy-content .open-chat-shell .composer-resize-handle:hover::after {
+  background: oklch(66% 0.12 188 / 0.5);
 }
 
 .hy-content .open-chat-shell .composer textarea.chat-input::placeholder {

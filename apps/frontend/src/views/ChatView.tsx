@@ -140,6 +140,9 @@ const CHAT_SIDEBAR_MIN_WIDTH = 220;
 const CHAT_SIDEBAR_BASE_MAX_WIDTH = 280;
 const CHAT_SIDEBAR_WIDE_MAX_WIDTH = 360;
 const CHAT_WIDE_VIEWPORT_WIDTH = 1500;
+const COMPOSER_MIN_HEIGHT = 48;
+const COMPOSER_MAX_HEIGHT = 260;
+const COMPOSER_HEIGHT_STORAGE_KEY = 'hermes.chat.composerHeight';
 
 export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const assistantProfileSeed = useAssistantProfileSeed();
@@ -162,6 +165,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [chatBootstrapped, setChatBootstrapped] = useState(false);
   const [sidebarMaxWidth, setSidebarMaxWidth] = useState(() => responsiveChatSidebarMaxWidth());
   const [sidebarWidth, setSidebarWidth] = useState(() => responsiveChatSidebarMaxWidth());
+  const [composerHeight, setComposerHeight] = useState(() => storedComposerHeight());
   const [, setRenderTick] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -349,6 +353,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }, [messages]);
 
   useEffect(() => {
+    window.localStorage.setItem(COMPOSER_HEIGHT_STORAGE_KEY, String(composerHeight));
+  }, [composerHeight]);
+
+  useEffect(() => {
     const stopSelecting = () => {
       window.setTimeout(() => {
         messageTextSelectingRef.current = false;
@@ -480,6 +488,48 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     if (isImeComposing(event, composerComposingRef.current)) return;
     event.preventDefault();
     event.currentTarget.form?.requestSubmit();
+  }
+
+  function startComposerResize(event: ReactPointerEvent<HTMLDivElement>) {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = composerHeight;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Pointer capture can fail if the handle is detached during route changes.
+    }
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const nextHeight = startHeight + moveEvent.clientY - startY;
+      setComposerHeight(clampComposerHeight(nextHeight));
+    };
+
+    const stopResize = () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', stopResize);
+    window.addEventListener('pointercancel', stopResize);
+  }
+
+  function handleComposerResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setComposerHeight((value) => clampComposerHeight(value - 12));
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setComposerHeight((value) => clampComposerHeight(value + 12));
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      setComposerHeight(COMPOSER_MIN_HEIGHT);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      setComposerHeight(COMPOSER_MAX_HEIGHT);
+    }
   }
 
   async function addImageFiles(files: File[]) {
@@ -739,6 +789,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const chatWorkspaceStyle = embedded
     ? undefined
     : ({ '--chat-sidebar-width': `${sidebarWidth}px` } as CSSProperties);
+  const composerInputStyle = { height: `${composerHeight}px` } as CSSProperties;
   const initialChatLoading = !embedded && !chatBootstrapped;
   const conversationLoading = !messagesLoaded;
 
@@ -909,8 +960,22 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                   placeholder="输入消息..."
                   disabled={isSending}
                   rows={1}
+                  style={composerInputStyle}
                 />
               </div>
+              <div
+                className="composer-resize-handle"
+                role="separator"
+                aria-label="调整输入框高度"
+                aria-orientation="horizontal"
+                aria-valuemin={COMPOSER_MIN_HEIGHT}
+                aria-valuemax={COMPOSER_MAX_HEIGHT}
+                aria-valuenow={composerHeight}
+                tabIndex={0}
+                title="拖动或用方向键调整输入框高度"
+                onKeyDown={handleComposerResizeKeyDown}
+                onPointerDown={startComposerResize}
+              />
               <button
                 type="button"
                 className="chat-attach-btn"
@@ -1130,6 +1195,17 @@ function sessionTitle(session: SessionItem) {
 function sessionPreview(session: SessionItem) {
   if (!session.message_count) return '新的月夜会话';
   return `共 ${session.message_count} 条消息`;
+}
+
+function clampComposerHeight(value: number) {
+  return Math.max(COMPOSER_MIN_HEIGHT, Math.min(COMPOSER_MAX_HEIGHT, Math.round(value)));
+}
+
+function storedComposerHeight() {
+  if (typeof window === 'undefined') return COMPOSER_MIN_HEIGHT;
+  const stored = Number(window.localStorage.getItem(COMPOSER_HEIGHT_STORAGE_KEY));
+  if (!Number.isFinite(stored)) return COMPOSER_MIN_HEIGHT;
+  return clampComposerHeight(stored);
 }
 
 function isMessageTextSelectionActive(root: HTMLElement | null) {
