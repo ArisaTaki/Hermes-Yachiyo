@@ -1731,7 +1731,7 @@ export function ActivityAllPage() {
             type="search"
             value={activityQuery}
             onChange={(event) => setActivityQuery(event.target.value)}
-            placeholder="搜索活动、工具或摘要"
+            placeholder="搜索日志、Session ID、任务 ID、工具或详情"
             aria-label="搜索活动"
           />
           <select value={activityStatus} onChange={(event) => setActivityStatus(event.target.value)} aria-label="按状态筛选">
@@ -1781,6 +1781,7 @@ export function ActivityAllPage() {
                 selectable={Boolean(row.eventId)}
                 selected={Boolean(row.eventId && selectedActivityIds.has(row.eventId))}
                 onSelectionChange={toggleActivitySelection}
+                highlightQuery={activityQuery}
               />
             ))}
           </div>
@@ -2036,18 +2037,20 @@ function ActivityRow({
   selectable = false,
   selected = false,
   onSelectionChange,
+  highlightQuery = '',
 }: ActivityRowData & {
   selectable?: boolean;
   selected?: boolean;
   onSelectionChange?: (eventId: string, selected: boolean) => void;
+  highlightQuery?: string;
 }) {
   const className = `activity-item activity-item-${tone}${eventId ? ' activity-item-clickable' : ''}`;
   const content = (
     <>
       <span className="activity-icon">{icon}</span>
       <div className="activity-content">
-        <strong>{title}</strong>
-        <small>{detail}</small>
+        <strong><HighlightedInline text={title} query={highlightQuery} /></strong>
+        <small><HighlightedInline text={detail} query={highlightQuery} /></small>
         {phase ? <em>{activityPhaseLabel(phase)}</em> : null}
       </div>
       <time className="activity-time">{time}</time>
@@ -2081,6 +2084,22 @@ function ActivityRow({
     <article className={className}>
       {content}
     </article>
+  );
+}
+
+function HighlightedInline({ text, query }: { text: string; query: string }) {
+  const needle = query.trim();
+  if (!needle) return <>{text}</>;
+  const lowerText = text.toLowerCase();
+  const lowerNeedle = needle.toLowerCase();
+  const index = lowerText.indexOf(lowerNeedle);
+  if (index < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, index)}
+      <mark>{text.slice(index, index + needle.length)}</mark>
+      {text.slice(index + needle.length)}
+    </>
   );
 }
 
@@ -2346,6 +2365,7 @@ function activityDetail(event: ActivityEvent) {
     event.tool_name || '',
     activityPhaseLabel(event.phase),
     activityStatusLabel(event.status),
+    event.session_id ? `Session ${event.session_id}` : '',
     typeof event.duration_seconds === 'number' ? `${event.duration_seconds.toFixed(1)}s` : '',
     event.detail || '',
   ].filter(Boolean);

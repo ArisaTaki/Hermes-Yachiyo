@@ -67,6 +67,17 @@ type MessagesPayload = {
   error?: string;
   is_processing?: boolean;
   messages?: ChatMessage[];
+  anchor_message_id?: string;
+};
+
+type SessionSearchMatch = {
+  kind?: string;
+  query?: string;
+  message_id?: string;
+  role?: string;
+  snippet?: string;
+  created_at?: string;
+  match_count?: number;
 };
 
 type SessionItem = {
@@ -79,6 +90,7 @@ type SessionItem = {
   latest_activity?: ChatActivityEvent | null;
   latest_message_preview?: string;
   latest_message_status?: string;
+  search_match?: SessionSearchMatch | null;
 };
 
 type SessionsPayload = {
@@ -183,7 +195,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [assistantProfileLoading, setAssistantProfileLoading] = useState(() => !(cachedAssistantProfile || profileFromSeed(assistantProfileSeed)));
   const [notice, setNotice] = useState<ChatNotice | null>(null);
   const [sessionQuery, setSessionQuery] = useState('');
+  const [debouncedSessionQuery, setDebouncedSessionQuery] = useState('');
   const [copiedMessageId, setCopiedMessageId] = useState('');
+  const [copiedSessionId, setCopiedSessionId] = useState('');
+  const [highlightedMessageId, setHighlightedMessageId] = useState('');
   const [messagesLoaded, setMessagesLoaded] = useState(false);
   const [messagesVisible, setMessagesVisible] = useState(false);
   const [chatBootstrapped, setChatBootstrapped] = useState(false);
@@ -209,22 +224,33 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const conversationTransitionRef = useRef(false);
   const assistantProfileSeedRef = useRef(assistantProfileSeed);
   const messageTextSelectingRef = useRef(false);
+  const messageNodeRefs = useRef<Map<string, HTMLElement>>(new Map());
   const isProcessingRef = useRef(false);
+  const pendingReplyScrollRef = useRef(false);
+  const pendingReplyTaskIdRef = useRef('');
   const loadSessionsRef = useRef<() => Promise<void>>(async () => undefined);
 
-  const refreshMessages = useCallback(async (options: { allowDuringTransition?: boolean } = {}) => {
+  const refreshMessages = useCallback(async (options: { allowDuringTransition?: boolean; anchorMessageId?: string } = {}) => {
     if (conversationTransitionRef.current && !options.allowDuringTransition) return;
     const token = ++messageLoadTokenRef.current;
     const startedAt = Date.now();
     const shouldHoldLoading = !messagesLoadedRef.current;
+    const anchorMessageId = (options.anchorMessageId || '').trim();
+    if (anchorMessageId) setHighlightedMessageId(anchorMessageId);
     try {
-      const payload = await apiGet<MessagesPayload>('/ui/chat/messages?limit=80');
+      const query = new URLSearchParams();
+      query.set('limit', anchorMessageId ? '220' : '80');
+      if (anchorMessageId) query.set('anchor_message_id', anchorMessageId);
+      const payload = await apiGet<MessagesPayload>(`/ui/chat/messages?${query.toString()}`);
       if (payload.ok === false) throw new Error(payload.error || '读取消息失败');
       const baseUrl = await bridgeUrl();
       const nextMessages = withResolvedAttachmentUrls(payload.messages || [], baseUrl);
       const processing = Boolean(payload.is_processing);
       const processingChanged = processing !== isProcessingRef.current;
       isProcessingRef.current = processing;
+      if (anchorMessageId && !nextMessages.some((message) => message.id === anchorMessageId)) {
+        setHighlightedMessageId('');
+      }
       const failed = latestFailedMessage(nextMessages);
       if (!shouldHoldLoading && isMessageSelectionPaused()) {
         setIsProcessing(processing);
@@ -239,6 +265,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       if (token !== messageLoadTokenRef.current) return;
       setMessages(nextMessages);
       setIsProcessing(processing);
+      if (shouldTriggerPendingReplyScroll(nextMessages)) {
+        pendingReplyScrollRef.current = false;
+        pendingReplyTaskIdRef.current = '';
+        scrollToConversationBottom(true);
+      }
       if (shouldHoldLoading) {
         await settleMessagesAtBottom(token);
       }
@@ -269,7 +300,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
 
   const loadSessions = useCallback(async () => {
     try {
-      const payload = await apiGet<SessionsPayload>('/ui/chat/sessions?limit=20');
+      const query = new URLSearchParams();
+      query.set('limit', debouncedSessionQuery ? '80' : '20');
+      if (debouncedSessionQuery) query.set('query', debouncedSessionQuery);
+      const payload = await apiGet<SessionsPayload>(`/ui/chat/sessions?${query.toString()}`);
       if (payload.ok === false) throw new Error('读取会话失败');
       setSessions(payload);
     } catch {
@@ -277,10 +311,14 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     } finally {
       setSessionsLoaded(true);
     }
-  }, []);
+  }, [debouncedSessionQuery]);
 
   useEffect(() => {
     loadSessionsRef.current = loadSessions;
+  }, [loadSessions]);
+
+  useEffect(() => {
+    void loadSessions();
   }, [loadSessions]);
 
   const loadExecutor = useCallback(async () => {
@@ -316,6 +354,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     });
     setAssistantProfileLoading(false);
   }, [assistantProfileSeed]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSessionQuery(sessionQuery.trim());
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [sessionQuery]);
 
   useEffect(() => {
     const requestedSessionId = currentParam('session_id').trim();
@@ -389,8 +434,26 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }, [messages]);
 
   useEffect(() => {
+    if (highlightedMessageId) return;
     scrollToConversationBottom();
-  }, [messages, isProcessing]);
+  }, [messages, isProcessing, highlightedMessageId]);
+
+  useEffect(() => {
+    if (!highlightedMessageId || !messagesVisible) return undefined;
+    const messageExists = messages.some((message) => message.id === highlightedMessageId);
+    if (!messageExists) return undefined;
+    const scrollTimer = window.setTimeout(() => {
+      const node = messageNodeRefs.current.get(highlightedMessageId);
+      if (!node) return;
+      stickToBottomRef.current = false;
+      node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+    const clearTimer = window.setTimeout(() => setHighlightedMessageId(''), 3600);
+    return () => {
+      window.clearTimeout(scrollTimer);
+      window.clearTimeout(clearTimer);
+    };
+  }, [highlightedMessageId, messages, messagesVisible]);
 
   useEffect(() => {
     window.localStorage.setItem(COMPOSER_HEIGHT_STORAGE_KEY, String(composerHeight));
@@ -507,22 +570,28 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setAttachments([]);
     setIsSending(true);
     isProcessingRef.current = true;
+    pendingReplyScrollRef.current = true;
+    pendingReplyTaskIdRef.current = '';
     setIsProcessing(true);
     setStatus(outgoingAttachments.length ? '发送图片中...' : '发送中...');
     stickToBottomRef.current = true;
-    scrollToConversationBottom(true);
+    focusComposerSoon();
     try {
-      const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/chat/messages', {
+      const result = await apiPost<{ ok?: boolean; error?: string; task_id?: string }>('/ui/chat/messages', {
         text,
         attachments: outgoingAttachments,
       });
       if (result.ok === false) throw new Error(result.error || '发送失败');
+      const taskId = String(result.task_id || '');
+      pendingReplyTaskIdRef.current = taskId;
+      if (!taskId) pendingReplyScrollRef.current = false;
       setStatus('等待回复...');
       void loadSessions();
       await refreshMessages();
-      scrollToConversationBottom(true);
       await loadSessions();
     } catch (error) {
+      pendingReplyScrollRef.current = false;
+      pendingReplyTaskIdRef.current = '';
       setInput(text);
       setAttachments(outgoingAttachments);
       setStatus(error instanceof Error ? error.message : '发送失败');
@@ -530,6 +599,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setIsProcessing(false);
     } finally {
       setIsSending(false);
+      focusComposerSoon();
     }
   }
 
@@ -629,6 +699,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
 
   async function clearSession() {
     try {
+      pendingReplyScrollRef.current = false;
+      pendingReplyTaskIdRef.current = '';
       await apiPost('/ui/chat/session/clear');
       renderStateRef.current.clear();
       setMessages([]);
@@ -644,6 +716,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   async function cancelProcessing() {
     if (!isProcessing) return;
     try {
+      pendingReplyScrollRef.current = false;
+      pendingReplyTaskIdRef.current = '';
       const result = await apiPost<MessagesPayload & { cancelled_tasks?: number }>('/ui/chat/session/cancel');
       if (result.ok === false) throw new Error(result.error || '取消失败');
       setMessages(result.messages || []);
@@ -678,8 +752,15 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
   }
 
-  async function switchSession(sessionId: string) {
-    if (!sessionId || sessionId === sessions?.current_session_id) return;
+  async function switchSession(sessionId: string, anchorMessageId = '') {
+    if (!sessionId) return;
+    if (sessionId === sessions?.current_session_id) {
+      if (anchorMessageId) {
+        await refreshMessages({ allowDuringTransition: true, anchorMessageId });
+        setStatus('已定位到匹配消息');
+      }
+      return;
+    }
     const conversationToken = beginConversationLoading();
     setStatus('正在切换会话...');
     try {
@@ -688,9 +769,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       renderStateRef.current.clear();
       stickToBottomRef.current = true;
       await loadSessions();
-      await refreshMessages({ allowDuringTransition: true });
+      await refreshMessages({ allowDuringTransition: true, anchorMessageId });
       if (conversationToken === conversationLoadTokenRef.current) conversationTransitionRef.current = false;
-      setStatus('已切换会话');
+      setStatus(anchorMessageId ? '已定位到匹配消息' : '已切换会话');
     } catch (error) {
       if (conversationToken !== conversationLoadTokenRef.current) return;
       conversationTransitionRef.current = false;
@@ -715,6 +796,28 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     } catch {
       setStatus('复制失败');
     }
+  }
+
+  async function copySessionId(sessionId: string, event?: ReactMouseEvent<HTMLElement>) {
+    event?.stopPropagation();
+    if (!sessionId) {
+      setStatus('没有可复制的 Session ID');
+      return;
+    }
+    try {
+      await copyText(sessionId);
+      setCopiedSessionId(sessionId);
+      setStatus('已复制 Session ID');
+      window.setTimeout(() => setCopiedSessionId(''), COPY_FEEDBACK_MS);
+    } catch {
+      setStatus('复制 Session ID 失败');
+    }
+  }
+
+  function registerMessageNode(messageId: string | undefined, node: HTMLElement | null) {
+    if (!messageId) return;
+    if (node) messageNodeRefs.current.set(messageId, node);
+    else messageNodeRefs.current.delete(messageId);
   }
 
   function handleMessageListClick(event: ReactMouseEvent<HTMLDivElement>) {
@@ -789,8 +892,31 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setStatus('图片未附加');
   }
 
+  function focusComposerSoon() {
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus({ preventScroll: true });
+    });
+  }
+
+  function shouldTriggerPendingReplyScroll(nextMessages: ChatMessage[]) {
+    if (!pendingReplyScrollRef.current) return false;
+    const taskId = pendingReplyTaskIdRef.current;
+    if (!taskId) return false;
+    return nextMessages.some((message) => (
+      message.role === 'assistant'
+      && message.task_id === taskId
+      && (
+        message.status === 'processing'
+        || Boolean(messageText(message).trim())
+        || Boolean(message.activity_events?.length)
+      )
+    ));
+  }
+
   function beginConversationLoading() {
     const conversationToken = ++conversationLoadTokenRef.current;
+    pendingReplyScrollRef.current = false;
+    pendingReplyTaskIdRef.current = '';
     conversationTransitionRef.current = true;
     messageLoadTokenRef.current += 1;
     messagesLoadedRef.current = false;
@@ -835,15 +961,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }
 
   const sessionItems = sessions?.sessions || [];
-  const normalizedSessionQuery = sessionQuery.trim().toLowerCase();
-  const visibleSessions = normalizedSessionQuery
-    ? sessionItems.filter((session) => {
-        const title = sessionTitle(session).toLowerCase();
-        return title.includes(normalizedSessionQuery)
-          || session.session_id.toLowerCase().includes(normalizedSessionQuery);
-      })
-    : sessionItems;
+  const normalizedSessionQuery = debouncedSessionQuery.trim();
+  const visibleSessions = sessionItems;
   const currentSession = sessionItems.find((session) => session.session_id === sessions?.current_session_id);
+  const currentSessionId = sessions?.current_session_id || '';
   const currentTitle = currentSession
     ? sessionTitle(currentSession)
     : firstUserMessageTitle(messages) || assistantProfile?.agent_name || '月見八千代';
@@ -880,6 +1001,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
               placeholder="搜索会话..."
               aria-label="搜索会话"
             />
+            {normalizedSessionQuery ? (
+              <div className="chat-search-meta">
+                {sessionsLoaded ? `找到 ${visibleSessions.length} 个相关会话` : '正在搜索...'}
+              </div>
+            ) : null}
           </div>
           <div className="chat-list hy-chat-session-list">
             {visibleSessions.length ? visibleSessions.map((session) => (
@@ -887,15 +1013,19 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 type="button"
                 className={`chat-item ${session.session_id === sessions?.current_session_id ? 'active' : ''}`}
                 key={session.session_id}
-                onClick={() => void switchSession(session.session_id)}
+                onClick={() => void switchSession(session.session_id, session.search_match?.message_id || '')}
               >
                 <span className="chat-item-avatar">{avatarNode(assistantProfile?.agent_avatar_url, assistantProfile?.agent_name || 'Yachiyo', '月', assistantProfileLoading)}</span>
                 <span className="chat-item-info">
                   <strong className="chat-item-name">{sessionTitle(session)}</strong>
-                  <span className="chat-item-preview">{sessionPreview(session)}</span>
+                  <span className={session.search_match ? 'chat-item-preview search-hit' : 'chat-item-preview'}>
+                    <HighlightedText text={sessionPreview(session)} query={normalizedSessionQuery} />
+                  </span>
                 </span>
-                <span className="chat-item-time">
-                  {session.is_processing ? '处理中' : formatShortTime(session.updated_at || session.created_at)}
+                <span className="chat-item-side">
+                  <span className="chat-item-time">
+                    {session.is_processing ? '处理中' : formatShortTime(session.updated_at || session.created_at)}
+                  </span>
                 </span>
               </button>
             )) : (
@@ -940,6 +1070,16 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                   <UiIcon name="home" />
                 </button>
               )}
+              <button
+                type="button"
+                className={`chat-action-btn ${copiedSessionId === currentSessionId ? 'copied' : ''}`}
+                title={currentSessionId ? `复制 Session ID：${currentSessionId}` : '复制 Session ID'}
+                aria-label="复制当前会话 Session ID"
+                disabled={!currentSessionId}
+                onClick={(event) => void copySessionId(currentSessionId, event)}
+              >
+                <UiIcon name={copiedSessionId === currentSessionId ? 'check' : 'copy'} />
+              </button>
               <button
                 type="button"
                 className="chat-action-btn"
@@ -987,8 +1127,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                   copied={copiedMessageId === message.id}
                   displayContent={displayMessageText(message, renderStateRef.current)}
                   key={message.id || index}
+                  highlighted={message.id === highlightedMessageId}
                   message={message}
                   onCopy={() => void copyMessage(message)}
+                  registerMessageNode={registerMessageNode}
                 />
               ))}
               <div className="chat-bottom-anchor" ref={bottomAnchorRef} aria-hidden="true" />
@@ -1029,7 +1171,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                   onKeyDown={handleComposerKeyDown}
                   onPaste={(event) => void handlePaste(event)}
                   placeholder="输入消息..."
-                  disabled={isSending}
+                  aria-disabled={isSending}
+                  readOnly={isSending}
                   rows={1}
                   style={composerInputStyle}
                 />
@@ -1098,13 +1241,15 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   );
 }
 
-function MessageBubble({ assistantProfile, assistantProfileLoading, copied, displayContent, message, onCopy }: {
+function MessageBubble({ assistantProfile, assistantProfileLoading, copied, displayContent, highlighted, message, onCopy, registerMessageNode }: {
   assistantProfile: AssistantProfilePayload | null;
   assistantProfileLoading: boolean;
   copied: boolean;
   displayContent: string;
+  highlighted: boolean;
   message: ChatMessage;
   onCopy: () => void;
+  registerMessageNode: (messageId: string | undefined, node: HTMLElement | null) => void;
 }) {
   const role = message.role || 'system';
   const statusClass = message.status === 'failed'
@@ -1116,7 +1261,11 @@ function MessageBubble({ assistantProfile, assistantProfileLoading, copied, disp
         : '';
   const isProcessingEmpty = role === 'assistant' && message.status === 'processing' && !displayContent;
   return (
-    <article className={`message message--${messageVisualRole(role)} refined-message ${role} ${statusClass}`}>
+    <article
+      className={`message message--${messageVisualRole(role)} refined-message ${role} ${statusClass}${highlighted ? ' search-highlighted' : ''}`}
+      data-message-id={message.id || ''}
+      ref={(node) => registerMessageNode(message.id, node)}
+    >
       <div className="message-avatar">{messageAvatar(role, assistantProfile, assistantProfileLoading)}</div>
       <div className="message-stack">
         <div className="message-bubble">
@@ -1191,6 +1340,25 @@ function TypingIndicator() {
     <span className="typing-indicator loading-dots" aria-label="处理中">
       <span className="loading-dot" /><span className="loading-dot" /><span className="loading-dot" />
     </span>
+  );
+}
+
+function HighlightedText({ text, query }: { text: string; query: string }) {
+  const needle = query.trim();
+  if (!needle) return <>{text}</>;
+  const lowerText = text.toLowerCase();
+  const lowerNeedle = needle.toLowerCase();
+  const index = lowerText.indexOf(lowerNeedle);
+  if (index < 0) return <>{text}</>;
+  const before = text.slice(0, index);
+  const match = text.slice(index, index + needle.length);
+  const after = text.slice(index + needle.length);
+  return (
+    <>
+      {before}
+      <mark>{match}</mark>
+      {after}
+    </>
   );
 }
 
@@ -1315,6 +1483,18 @@ function sessionTitle(session: SessionItem) {
 }
 
 function sessionPreview(session: SessionItem) {
+  if (session.search_match?.snippet) {
+    const role = session.search_match.role === 'user'
+      ? '你'
+      : session.search_match.role === 'assistant'
+        ? 'Yachiyo'
+        : '消息';
+    const count = session.search_match.match_count && session.search_match.match_count > 1
+      ? ` · ${session.search_match.match_count} 处`
+      : '';
+    return `${role}：${compactStatusText(session.search_match.snippet, 56)}${count}`;
+  }
+  if (session.search_match?.kind === 'session') return session.search_match.snippet || '会话信息匹配';
   const preview = compactStatusText(session.latest_message_preview || sessionTitle(session), 48);
   if (session.is_processing) return `处理中：${preview || '正在处理'}`;
   if (session.latest_message_status === 'failed') return `处理失败：${preview || '任务执行失败'}`;
