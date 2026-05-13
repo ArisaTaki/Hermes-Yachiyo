@@ -24,11 +24,15 @@ from apps.core.executor import (
     _parse_hermes_title,
     _read_exec_timeout,
     _resolve_hermes_python,
+    _build_session_title_prompt,
+    _sanitize_generated_session_title,
+    _should_refresh_generated_title,
     resolve_hermes_stream_bridge_script,
     format_persona_description,
 )
 import apps.core.executor as executor_mod
 import apps.core.hermes_stream_bridge as bridge_mod
+from apps.core.chat_session import ChatSession, MessageStatus
 from packages.protocol.enums import RiskLevel, TaskStatus, TaskType
 from packages.protocol.schemas import TaskInfo
 from datetime import datetime, timezone
@@ -327,6 +331,63 @@ class TestParseHermesOutput:
         assert r.hermes_session_id == "sess_123"
         assert r.hermes_title == "Test title"
         assert r.output == "ok"
+
+    def test_generated_title_is_sanitized_and_limited(self):
+        assert _sanitize_generated_session_title("标题：潮汕牛肉饭。") == "潮汕牛肉饭"
+        assert _sanitize_generated_session_title("“重复播放 Ray 版本”") == "重复播放 Ray 版本"
+        assert len(_sanitize_generated_session_title("这是一个非常非常非常非常非常长的标题需要被截断")) <= 28
+
+    def test_generated_title_refresh_is_periodic(self, monkeypatch):
+        monkeypatch.setenv("HERMES_YACHIYO_TITLE_GENERATION", "1")
+        monkeypatch.setenv("HERMES_YACHIYO_TITLE_INTERVAL_TURNS", "2")
+        session = ChatSession(session_id="title-test")
+
+        session.add_user_message("第一轮")
+        assert _should_refresh_generated_title(session) is False
+
+        session.upsert_assistant_message("t1", "回复", MessageStatus.COMPLETED)
+        assert _should_refresh_generated_title(session) is False
+
+        session.add_user_message("第二轮")
+        assert _should_refresh_generated_title(session) is False
+
+        session.upsert_assistant_message("t2", "回复", MessageStatus.COMPLETED)
+        assert _should_refresh_generated_title(session) is True
+
+    def test_generated_title_refresh_counts_pending_completed_reply(self, monkeypatch):
+        monkeypatch.setenv("HERMES_YACHIYO_TITLE_GENERATION", "1")
+        monkeypatch.setenv("HERMES_YACHIYO_TITLE_INTERVAL_TURNS", "2")
+        session = ChatSession(session_id="title-test")
+        session.add_user_message("第一轮")
+        session.upsert_assistant_message("t1", "回复", MessageStatus.COMPLETED)
+        session.add_user_message("第二轮")
+
+        assert _should_refresh_generated_title(session, assistant_text="第二轮回复") is True
+
+    def test_generated_title_refresh_waits_for_interval_by_default(self, monkeypatch):
+        monkeypatch.delenv("HERMES_YACHIYO_TITLE_GENERATION", raising=False)
+        monkeypatch.delenv("HERMES_YACHIYO_TITLE_INTERVAL_TURNS", raising=False)
+        monkeypatch.delenv("HERMES_YACHIYO_TITLE_INTERVAL_MESSAGES", raising=False)
+        session = ChatSession(session_id="title-test")
+        session.add_user_message("第一轮")
+        session.upsert_assistant_message("t1", "回复", MessageStatus.COMPLETED)
+        session.add_user_message("第二轮")
+        session.upsert_assistant_message("t2", "回复", MessageStatus.COMPLETED)
+
+        assert _should_refresh_generated_title(session) is False
+
+    def test_generated_title_prompt_uses_current_title_and_recent_context(self, monkeypatch):
+        monkeypatch.setenv("HERMES_YACHIYO_TITLE_CONTEXT_MESSAGES", "4")
+        session = ChatSession(session_id="title-test")
+        session.add_user_message("第一句打招呼")
+        session.upsert_assistant_message("t1", "第一轮回复", MessageStatus.COMPLETED)
+        session.add_user_message("继续聊 V2EX 热门帖子")
+
+        prompt = _build_session_title_prompt(session, assistant_text="找到一些帖子")
+
+        assert "第一条用户消息：\n第一句打招呼" in prompt
+        assert "用户: 继续聊 V2EX 热门帖子" in prompt
+        assert "Yachiyo: 找到一些帖子" in prompt
 
 
 class TestHermesStreamBridgeHelpers:

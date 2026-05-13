@@ -718,7 +718,7 @@ class ChatAPI:
             messages = store.load_messages(session.session_id, limit=240)
             session_items.append({
                 "session_id": session.session_id,
-                "title": session.title,
+                "title": self._session_title(session.title, messages),
                 "created_at": session.created_at,
                 "updated_at": self._session_updated_at(session.session_id, session.created_at, messages=messages),
                 "message_count": session.message_count,
@@ -730,11 +730,12 @@ class ChatAPI:
         if not any(item["session_id"] == current_session_id for item in session_items):
             stored_current = store.get_session(current_session_id)
             current_messages = store.load_messages(current_session_id, limit=240)
+            current_title = self._session_title(stored_current.title if stored_current else "", current_messages)
             session_items.insert(
                 0,
                 {
                     "session_id": current_session_id,
-                    "title": (stored_current.title if stored_current else "") or "新对话",
+                    "title": current_title or "新对话",
                     "created_at": stored_current.created_at if stored_current else "",
                     "updated_at": self._session_updated_at(
                         current_session_id,
@@ -753,6 +754,24 @@ class ChatAPI:
             "current_session_id": current_session_id,
             "sessions": session_items,
         }
+
+    @staticmethod
+    def _session_title(stored_title: str, messages: list[Any]) -> str:
+        from apps.core.chat_store import make_session_title
+
+        title = (stored_title or "").strip()
+        if title and not ChatAPI._looks_like_session_id_title(title):
+            return title
+        for msg in messages:
+            if getattr(msg, "role", "") == MessageRole.USER.value:
+                generated = make_session_title(str(getattr(msg, "content", "") or ""))
+                if generated:
+                    return generated
+        return ""
+
+    @staticmethod
+    def _looks_like_session_id_title(value: str) -> bool:
+        return bool(re.fullmatch(r"[a-f0-9]{8,32}", (value or "").strip(), flags=re.IGNORECASE))
 
     def load_session(self, session_id: str) -> Dict[str, Any]:
         """切换到指定历史会话。"""

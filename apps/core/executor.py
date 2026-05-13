@@ -24,10 +24,15 @@ import sys
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from packages.protocol.schemas import TaskInfo
 from apps.core.special_sessions import is_proactive_chat_session
+from apps.core.title_generator import (
+    build_session_title_prompt as build_direct_session_title_prompt,
+    generate_title_with_direct_api,
+)
 
 if TYPE_CHECKING:
     from apps.core.chat_session import ChatSession
@@ -115,6 +120,16 @@ _ATTACHED_IMAGE_GUARD = (
     "不要调用桌面截图、活动窗口、浏览器视觉或其它实时桌面观察工具来替代附加图片，"
     "除非用户明确要求你操作当前电脑或重新观察屏幕。"
 )
+_TITLE_GENERATION_ENABLED_ENV = "HERMES_YACHIYO_TITLE_GENERATION"
+_TITLE_CONTEXT_MESSAGES_ENV = "HERMES_YACHIYO_TITLE_CONTEXT_MESSAGES"
+_TITLE_INTERVAL_TURNS_ENV = "HERMES_YACHIYO_TITLE_INTERVAL_TURNS"
+_TITLE_INTERVAL_MESSAGES_ENV = "HERMES_YACHIYO_TITLE_INTERVAL_MESSAGES"
+_TITLE_TIMEOUT_ENV = "HERMES_YACHIYO_TITLE_TIMEOUT_SECONDS"
+_DEFAULT_TITLE_CONTEXT_MESSAGES = 8
+_DEFAULT_TITLE_INTERVAL_TURNS = 4
+_DEFAULT_TITLE_TIMEOUT_SECONDS = 8.0
+_GENERATED_TITLE_MAX_CHARS = 28
+_TITLE_REFRESH_TASKS: dict[str, asyncio.Task[None]] = {}
 
 
 def resolve_hermes_stream_bridge_script() -> Path:
@@ -379,6 +394,218 @@ def format_environment_context(now: Optional[datetime] = None) -> str:
         f"（{timezone_label}，{weekday}，{period}）\n"
         "请结合当前时间、日期与时段理解问候、计划和相对时间表达。"
     )
+
+
+def _read_title_int_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("%s=%r 不是有效整数，使用默认值 %d", name, raw, default)
+        return default
+    return max(minimum, min(value, maximum))
+
+
+def _read_title_timeout() -> float:
+    raw = os.getenv(_TITLE_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return _DEFAULT_TITLE_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("%s=%r 不是有效数字，使用默认值 %.0fs", _TITLE_TIMEOUT_ENV, raw, _DEFAULT_TITLE_TIMEOUT_SECONDS)
+        return _DEFAULT_TITLE_TIMEOUT_SECONDS
+    return max(3.0, min(value, 90.0))
+
+
+def _session_title_generation_enabled() -> bool:
+    raw = os.getenv(_TITLE_GENERATION_ENABLED_ENV, "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _read_title_interval_turns() -> int:
+    raw = os.getenv(_TITLE_INTERVAL_TURNS_ENV, "").strip()
+    if not raw:
+        raw = os.getenv(_TITLE_INTERVAL_MESSAGES_ENV, "").strip()
+    if not raw:
+        return _DEFAULT_TITLE_INTERVAL_TURNS
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("%s=%r 不是有效整数，使用默认值 %d", _TITLE_INTERVAL_TURNS_ENV, raw, _DEFAULT_TITLE_INTERVAL_TURNS)
+        return _DEFAULT_TITLE_INTERVAL_TURNS
+    return max(1, min(value, 20))
+
+
+def _completed_assistant_turn_count(chat_session: "ChatSession", *, include_pending_completion: bool = False) -> int:
+    count = 1 if include_pending_completion else 0
+    for message in chat_session.get_all_messages():
+        role_value = getattr(getattr(message, "role", ""), "value", getattr(message, "role", ""))
+        status_value = getattr(getattr(message, "status", ""), "value", getattr(message, "status", ""))
+        if role_value == "assistant" and status_value == "completed":
+            count += 1
+    return count
+
+
+def _should_refresh_generated_title(chat_session: "ChatSession", *, assistant_text: str = "") -> bool:
+    if not _session_title_generation_enabled():
+        return False
+    turn_count = _completed_assistant_turn_count(
+        chat_session,
+        include_pending_completion=bool((assistant_text or "").strip()),
+    )
+    interval = _read_title_interval_turns()
+    return turn_count >= interval and turn_count % interval == 0
+
+
+def _build_session_title_prompt(
+    chat_session: "ChatSession",
+    *,
+    assistant_text: str = "",
+) -> str:
+    context_limit = _read_title_int_env(
+        _TITLE_CONTEXT_MESSAGES_ENV,
+        _DEFAULT_TITLE_CONTEXT_MESSAGES,
+        minimum=2,
+        maximum=24,
+    )
+    messages = chat_session.get_all_messages()
+    assistant_text = assistant_text.strip()
+    if assistant_text and not _message_list_already_ends_with_assistant_text(messages, assistant_text):
+        messages = [
+            *messages,
+            SimpleNamespace(role="assistant", content=assistant_text),
+        ]
+    return build_direct_session_title_prompt(
+        messages,
+        current_title=_current_session_title(chat_session),
+        context_limit=context_limit,
+    )
+
+
+def _message_list_already_ends_with_assistant_text(messages: list[Any], assistant_text: str) -> bool:
+    for message in reversed(messages):
+        role_value = getattr(getattr(message, "role", ""), "value", getattr(message, "role", ""))
+        if role_value not in {"user", "assistant"}:
+            continue
+        return role_value == "assistant" and str(getattr(message, "content", "") or "").strip() == assistant_text
+    return False
+
+
+def _current_session_title(chat_session: "ChatSession") -> str:
+    store = getattr(chat_session, "_store", None)
+    if store is None:
+        return ""
+    try:
+        stored = store.get_session(chat_session.session_id)
+    except Exception:
+        logger.debug("读取当前会话标题失败", exc_info=True)
+        return ""
+    return str(getattr(stored, "title", "") or "") if stored is not None else ""
+
+
+def _sanitize_generated_session_title(value: str | None) -> str:
+    title = _ANSI_RE.sub("", value or "")
+    title = re.sub(r"^(?:标题|会话标题)\s*[:：]\s*", "", title.strip(), flags=re.IGNORECASE)
+    title = title.strip(" \t\r\n\"'“”‘’`*_#：:。.!！?？")
+    title = re.sub(r"\s+", " ", title)
+    title = title.splitlines()[0].strip() if title else ""
+    if not title:
+        return ""
+    if len(title) > _GENERATED_TITLE_MAX_CHARS:
+        title = title[:_GENERATED_TITLE_MAX_CHARS].rstrip()
+    return title.strip(" \t\r\n\"'“”‘’`*_#：:。.!！?？")
+
+
+async def _generate_session_title(prompt: str) -> str:
+    """Generate a compact chat title with direct model API, then Hermes CLI fallback."""
+    title = await generate_title_with_direct_api(prompt, timeout=_read_title_timeout())
+    if title:
+        return _sanitize_generated_session_title(title)
+    return await _generate_session_title_with_hermes_cli(prompt)
+
+
+async def _generate_session_title_with_hermes_cli(prompt: str) -> str:
+    """Generate a compact chat title through an isolated Hermes tool query."""
+    if not shutil.which(_HERMES_CMD[0]):
+        return ""
+    cmd = [
+        *_HERMES_CMD,
+        prompt,
+        "-Q",
+        "--source",
+        "tool",
+        "--max-turns",
+        "1",
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=_utf8_subprocess_env(),
+        )
+    except Exception:
+        logger.debug("启动会话标题生成失败", exc_info=True)
+        return ""
+    try:
+        stdout_bytes, _stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=_read_title_timeout())
+    except asyncio.TimeoutError:
+        await _terminate_process(proc)
+        logger.debug("会话标题生成超时")
+        return ""
+    except asyncio.CancelledError:
+        await _terminate_process(proc)
+        raise
+    if proc.returncode not in (0, None):
+        logger.debug("会话标题生成失败: exit=%s", proc.returncode)
+        return ""
+    content, _session_id = _parse_hermes_output(stdout_bytes.decode(errors="replace"))
+    return _sanitize_generated_session_title(content)
+
+
+async def _refresh_session_title_from_recent_messages(
+    chat_session: "ChatSession",
+    *,
+    assistant_text: str = "",
+) -> None:
+    if is_proactive_chat_session(chat_session.session_id):
+        return
+    prompt = _build_session_title_prompt(chat_session, assistant_text=assistant_text)
+    title = await _generate_session_title(prompt)
+    if title:
+        chat_session.set_session_title(title)
+
+
+def _schedule_session_title_refresh(
+    chat_session: "ChatSession | None",
+    *,
+    assistant_text: str = "",
+) -> None:
+    if chat_session is None or not _should_refresh_generated_title(chat_session, assistant_text=assistant_text):
+        return
+    existing = _TITLE_REFRESH_TASKS.get(chat_session.session_id)
+    if existing is not None and not existing.done():
+        return
+    task = asyncio.create_task(
+        _refresh_session_title_from_recent_messages(chat_session, assistant_text=assistant_text),
+        name=f"chat-title-{chat_session.session_id}",
+    )
+    _TITLE_REFRESH_TASKS[chat_session.session_id] = task
+
+    def _log_title_task(done: asyncio.Task[None]) -> None:
+        if _TITLE_REFRESH_TASKS.get(chat_session.session_id) is done:
+            _TITLE_REFRESH_TASKS.pop(chat_session.session_id, None)
+        try:
+            done.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.debug("会话标题生成任务失败", exc_info=True)
+
+    task.add_done_callback(_log_title_task)
 
 
 def _clean_hermes_line(line: str, strip_stream_padding: bool = False) -> Optional[str]:
@@ -1282,12 +1509,10 @@ class HermesExecutor(ExecutionStrategy):
             # 记录 session_id 以便后续 --resume
             if invoke_result.hermes_session_id and chat_session is not None:
                 chat_session.set_hermes_session_id(invoke_result.hermes_session_id)
-            if (
-                invoke_result.hermes_title
-                and chat_session is not None
-                and not is_proactive_chat_session(chat_session.session_id)
-            ):
-                chat_session.set_session_title(invoke_result.hermes_title)
+            _schedule_session_title_refresh(
+                chat_session,
+                assistant_text=invoke_result.output,
+            )
             return invoke_result.output
 
         # 失败：结构化日志 + 结构化异常

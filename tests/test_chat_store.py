@@ -2,7 +2,7 @@
 
 import pytest
 
-from apps.core.chat_store import ChatStore, StoredMessage
+from apps.core.chat_store import ChatStore, StoredMessage, make_session_title
 
 
 @pytest.fixture
@@ -191,3 +191,7 @@ class TestChatStore:
         sessions = store.list_sessions()
 
         assert sessions[0].title == "请帮我总结这个项目的功能点"
+
+    def test_make_session_title_uses_first_user_sentence(self):
+        assert make_session_title("中午好，我点了一份潮汕牛肉饭哦") == "中午好，我点了一份潮汕牛肉饭哦"
+        assert make_session_title("能否帮我打开v2ex？然后看一下热门帖子") == "能否帮我打开v2ex？"

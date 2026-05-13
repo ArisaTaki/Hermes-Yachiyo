@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 _DB_FILENAME = "chat.db"
 _SESSION_TITLE_MAX_CHARS = 36
+_TITLE_SENTENCE_BOUNDARY_RE = re.compile(r"[。.!！?？\n\r]")
 
 
 def _get_db_path() -> str:
@@ -39,10 +41,20 @@ def _get_db_path() -> str:
 
 def make_session_title(content: str, max_chars: int = _SESSION_TITLE_MAX_CHARS) -> str:
     """从首条用户消息生成会话列表标题。"""
-    title = " ".join((content or "").split())
+    title = _first_user_sentence_title(content)
     if len(title) <= max_chars:
         return title
     return title[: max_chars - 3].rstrip() + "..."
+
+
+def _first_user_sentence_title(content: str) -> str:
+    title = " ".join((content or "").split()).strip()
+    if not title:
+        return ""
+    boundary = _TITLE_SENTENCE_BOUNDARY_RE.search(title)
+    if boundary and boundary.start() > 0:
+        title = title[:boundary.end()]
+    return title.strip(" \t\r\n\"'“”‘’`*_#")
 
 
 @dataclass
