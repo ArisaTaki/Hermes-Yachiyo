@@ -32,6 +32,7 @@ from apps.core.special_sessions import is_proactive_chat_session
 from apps.core.title_generator import (
     build_session_title_prompt as build_direct_session_title_prompt,
     generate_title_with_direct_api,
+    looks_like_title_prompt_echo,
 )
 
 if TYPE_CHECKING:
@@ -129,16 +130,6 @@ _DEFAULT_TITLE_CONTEXT_MESSAGES = 8
 _DEFAULT_TITLE_INTERVAL_TURNS = 4
 _DEFAULT_TITLE_TIMEOUT_SECONDS = 8.0
 _GENERATED_TITLE_MAX_CHARS = 28
-_TITLE_PROMPT_ECHO_MARKERS = (
-    "请为这段持续对话生成",
-    "会话列表标题",
-    "第一条用户消息",
-    "最近对话",
-    "当前标题",
-    "只输出标题",
-    "用户要求为这段",
-    "要求包括",
-)
 _TITLE_REFRESH_TASKS: dict[str, asyncio.Task[None]] = {}
 
 
@@ -466,6 +457,8 @@ def _should_refresh_generated_title(chat_session: "ChatSession", *, assistant_te
         chat_session,
         include_pending_completion=bool((assistant_text or "").strip()),
     )
+    if turn_count >= 1 and looks_like_title_prompt_echo(_stored_session_title(chat_session)):
+        return True
     interval = _read_title_interval_turns()
     return turn_count >= interval and turn_count % interval == 0
 
@@ -505,6 +498,13 @@ def _message_list_already_ends_with_assistant_text(messages: list[Any], assistan
 
 
 def _current_session_title(chat_session: "ChatSession") -> str:
+    title = _stored_session_title(chat_session)
+    if looks_like_title_prompt_echo(title):
+        return ""
+    return title
+
+
+def _stored_session_title(chat_session: "ChatSession") -> str:
     store = getattr(chat_session, "_store", None)
     if store is None:
         return ""
@@ -516,6 +516,19 @@ def _current_session_title(chat_session: "ChatSession") -> str:
     return str(getattr(stored, "title", "") or "") if stored is not None else ""
 
 
+def _first_user_session_title(chat_session: "ChatSession") -> str:
+    from apps.core.chat_store import make_session_title
+
+    for message in chat_session.get_all_messages():
+        role_value = getattr(getattr(message, "role", ""), "value", getattr(message, "role", ""))
+        if role_value != "user":
+            continue
+        title = make_session_title(str(getattr(message, "content", "") or ""))
+        if title:
+            return title
+    return ""
+
+
 def _sanitize_generated_session_title(value: str | None) -> str:
     title = _ANSI_RE.sub("", value or "")
     title = re.sub(r"^(?:标题|会话标题)\s*[:：]\s*", "", title.strip(), flags=re.IGNORECASE)
@@ -524,20 +537,11 @@ def _sanitize_generated_session_title(value: str | None) -> str:
     title = title.splitlines()[0].strip() if title else ""
     if not title:
         return ""
-    if _looks_like_title_prompt_echo(title):
+    if looks_like_title_prompt_echo(title):
         return ""
     if len(title) > _GENERATED_TITLE_MAX_CHARS:
         title = title[:_GENERATED_TITLE_MAX_CHARS].rstrip()
     return title.strip(" \t\r\n\"'“”‘’`*_#：:。.!！?？")
-
-
-def _looks_like_title_prompt_echo(title: str) -> bool:
-    normalized = re.sub(r"\s+", "", title or "")
-    if not normalized:
-        return False
-    if any(marker.replace(" ", "") in normalized for marker in _TITLE_PROMPT_ECHO_MARKERS):
-        return True
-    return normalized.startswith(("首先用户要求", "首先，用户要求", "用户要求"))
 
 
 async def _generate_session_title(prompt: str) -> str:
@@ -601,6 +605,11 @@ async def _refresh_session_title_from_recent_messages(
     title = await _generate_session_title(prompt)
     if title:
         chat_session.set_session_title(title)
+        return
+    if looks_like_title_prompt_echo(_stored_session_title(chat_session)):
+        fallback_title = _first_user_session_title(chat_session)
+        if fallback_title:
+            chat_session.set_session_title(fallback_title)
 
 
 def _schedule_session_title_refresh(

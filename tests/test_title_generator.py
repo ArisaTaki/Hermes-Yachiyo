@@ -3,6 +3,7 @@
 from apps.core.title_generator import (
     _chat_completions_url,
     _extract_chat_completion_text,
+    looks_like_title_prompt_echo,
     resolve_title_llm_config,
 )
 
@@ -57,3 +58,9 @@ def test_extract_chat_completion_text_reads_message_content():
 def test_chat_completions_url_uses_openai_compatible_endpoint():
     assert _chat_completions_url("https://api.example.com/v1") == "https://api.example.com/v1/chat/completions"
     assert _chat_completions_url("https://api.example.com/v1/chat/completions") == "https://api.example.com/v1/chat/completions"
+
+
+def test_looks_like_title_prompt_echo_detects_prompt_summaries():
+    assert looks_like_title_prompt_echo("首先，用户要求为这段持续对话生成一个会话列表标题。") is True
+    assert looks_like_title_prompt_echo("当前标题：早安闲聊\n最近对话：测试") is True
+    assert looks_like_title_prompt_echo("Chrome 登录态确认") is False

@@ -104,6 +104,16 @@ _OPENROUTER_MODEL_PREFIXES = (
     "qwen/",
     "x-ai/",
 )
+_TITLE_PROMPT_ECHO_MARKERS = (
+    "请为这段持续对话生成",
+    "会话列表标题",
+    "第一条用户消息",
+    "最近对话",
+    "当前标题",
+    "只输出标题",
+    "用户要求为这段",
+    "要求包括",
+)
 _TITLE_PROMPT_TEMPLATE = """\
 请为这段持续对话生成一个会话列表标题。
 
@@ -132,6 +142,15 @@ class TitleLLMConfig:
     base_url: str
     api_key: str = ""
     api_key_name: str = ""
+
+
+def looks_like_title_prompt_echo(value: str | None) -> bool:
+    normalized = re.sub(r"\s+", "", value or "")
+    if not normalized:
+        return False
+    if any(marker.replace(" ", "") in normalized for marker in _TITLE_PROMPT_ECHO_MARKERS):
+        return True
+    return normalized.startswith(("首先用户要求", "首先，用户要求", "用户要求"))
 
 
 def build_session_title_prompt(

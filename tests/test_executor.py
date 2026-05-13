@@ -33,6 +33,7 @@ from apps.core.executor import (
 import apps.core.executor as executor_mod
 import apps.core.hermes_stream_bridge as bridge_mod
 from apps.core.chat_session import ChatSession, MessageStatus
+from apps.core.chat_store import ChatStore
 from packages.protocol.enums import RiskLevel, TaskStatus, TaskType
 from packages.protocol.schemas import TaskInfo
 from datetime import datetime, timezone
@@ -389,6 +390,21 @@ class TestParseHermesOutput:
 
         assert _should_refresh_generated_title(session) is False
 
+    def test_generated_title_refresh_repairs_prompt_echo_before_interval(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("HERMES_YACHIYO_TITLE_GENERATION", raising=False)
+        monkeypatch.delenv("HERMES_YACHIYO_TITLE_INTERVAL_TURNS", raising=False)
+        monkeypatch.delenv("HERMES_YACHIYO_TITLE_INTERVAL_MESSAGES", raising=False)
+        store = ChatStore(db_path=str(tmp_path / "chat.db"))
+        try:
+            session = ChatSession(session_id="title-test")
+            session.attach_store(store, load_existing=False)
+            session.add_user_message("第一轮")
+            store.update_session_title("title-test", "首先，用户要求为这段持续对话生成一个会话列表标题。")
+
+            assert _should_refresh_generated_title(session, assistant_text="第一轮回复") is True
+        finally:
+            store.close()
+
     def test_generated_title_prompt_uses_current_title_and_recent_context(self, monkeypatch):
         monkeypatch.setenv("HERMES_YACHIYO_TITLE_CONTEXT_MESSAGES", "4")
         session = ChatSession(session_id="title-test")
@@ -401,6 +417,42 @@ class TestParseHermesOutput:
         assert "第一条用户消息：\n第一句打招呼" in prompt
         assert "用户: 继续聊 V2EX 热门帖子" in prompt
         assert "Yachiyo: 找到一些帖子" in prompt
+
+    def test_generated_title_prompt_ignores_prompt_echo_current_title(self, tmp_path):
+        store = ChatStore(db_path=str(tmp_path / "chat.db"))
+        try:
+            session = ChatSession(session_id="title-test")
+            session.attach_store(store, load_existing=False)
+            session.add_user_message("帮我确认 Chrome 登录态")
+            store.update_session_title("title-test", "首先，用户要求为这段持续对话生成一个会话列表标题。")
+
+            prompt = _build_session_title_prompt(session, assistant_text="已经进入后台")
+
+            assert "当前标题：\n暂无" in prompt
+            assert "第一条用户消息：\n帮我确认 Chrome 登录态" in prompt
+        finally:
+            store.close()
+
+    @pytest.mark.asyncio
+    async def test_generated_title_refresh_falls_back_from_prompt_echo_title(self, tmp_path, monkeypatch):
+        async def fake_generate(_prompt):
+            return ""
+
+        monkeypatch.setattr(executor_mod, "_generate_session_title", fake_generate)
+        store = ChatStore(db_path=str(tmp_path / "chat.db"))
+        try:
+            session = ChatSession(session_id="title-test")
+            session.attach_store(store, load_existing=False)
+            session.add_user_message("帮我确认 Chrome 登录态")
+            store.update_session_title("title-test", "首先，用户要求为这段持续对话生成一个会话列表标题。")
+
+            await executor_mod._refresh_session_title_from_recent_messages(session, assistant_text="已经进入后台")
+
+            stored = store.get_session("title-test")
+            assert stored is not None
+            assert stored.title == "帮我确认 Chrome 登录态"
+        finally:
+            store.close()
 
 
 class TestHermesStreamBridgeHelpers:

@@ -5,6 +5,7 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 from apps.core.activity_store import ActivityStore
 from apps.core.chat_session import ChatMessage, ChatSession, MessageRole, MessageStatus
@@ -190,6 +191,15 @@ def test_list_sessions_ignores_stale_stored_processing_without_live_task(tmp_pat
         assert current["latest_message_status"] == "processing"
     finally:
         store.close()
+
+
+def test_session_title_ignores_prompt_echo_stored_title():
+    messages = [
+        SimpleNamespace(role=MessageRole.USER.value, content="测试1"),
+        SimpleNamespace(role=MessageRole.ASSISTANT.value, content="收到"),
+    ]
+
+    assert ChatAPI._session_title("首先，用户要求为这段持续对话生成一个会话列表标题。", messages) == "测试1"
 
 
 def test_list_sessions_search_includes_message_match(tmp_path, monkeypatch):

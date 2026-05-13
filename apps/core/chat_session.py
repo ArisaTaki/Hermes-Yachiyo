@@ -526,6 +526,11 @@ class ChatSession:
         title = (title or "").strip()
         if not title:
             return
+        from apps.core.title_generator import looks_like_title_prompt_echo
+
+        if looks_like_title_prompt_echo(title):
+            logger.warning("忽略疑似标题生成提示词回显的会话标题: %s", title[:80])
+            return
         with self._lock:
             if self._store is not None:
                 self._store.update_session_title(self.session_id, title)

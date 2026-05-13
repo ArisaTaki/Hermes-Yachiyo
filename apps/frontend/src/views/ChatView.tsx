@@ -1494,7 +1494,7 @@ function imageInputHelpText(executor: ExecutorPayload | null) {
 
 function sessionTitle(session: SessionItem) {
   const title = (session.title || '').trim();
-  if (title && !looksLikeSessionIdTitle(title, session.session_id)) return title;
+  if (title && !looksLikeSessionIdTitle(title, session.session_id) && !looksLikeTitlePromptEcho(title)) return title;
   const preview = (session.latest_message_preview || '').trim();
   if (preview) return compactStatusText(preview, 36);
   return '新对话';
@@ -1529,6 +1529,22 @@ function firstUserMessageTitle(messages: ChatMessage[]) {
 function looksLikeSessionIdTitle(title: string, sessionId: string) {
   const value = title.trim();
   return value === sessionId.slice(0, 8) || /^[a-f0-9]{8,32}$/i.test(value);
+}
+
+function looksLikeTitlePromptEcho(title: string) {
+  const normalized = title.replace(/\s+/g, '');
+  if (!normalized) return false;
+  const markers = [
+    '请为这段持续对话生成',
+    '会话列表标题',
+    '第一条用户消息',
+    '最近对话',
+    '当前标题',
+    '只输出标题',
+    '用户要求为这段',
+    '要求包括',
+  ];
+  return markers.some((marker) => normalized.includes(marker)) || /^(首先用户要求|首先，用户要求|用户要求)/.test(normalized);
 }
 
 function latestVisibleActivity(messages: ChatMessage[]) {

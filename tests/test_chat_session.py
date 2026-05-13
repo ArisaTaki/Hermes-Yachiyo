@@ -426,6 +426,22 @@ def test_set_session_title_overrides_summary_title(tmp_path):
         store.close()
 
 
+def test_set_session_title_ignores_prompt_echo_title(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        session = ChatSession(session_id="s1")
+        session.attach_store(store, load_existing=False)
+
+        session.add_user_message("请帮我看看这个项目")
+        session.set_session_title("首先，用户要求为这段持续对话生成一个会话列表标题。")
+
+        stored = store.get_session("s1")
+        assert stored is not None
+        assert stored.title == "请帮我看看这个项目"
+    finally:
+        store.close()
+
+
 def test_get_assistant_message_for_task(tmp_path):
     """可按 task_id 取回已存在的 assistant 消息。"""
     store = ChatStore(db_path=str(tmp_path / "chat.db"))

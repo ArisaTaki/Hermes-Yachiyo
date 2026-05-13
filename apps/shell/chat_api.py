@@ -880,9 +880,10 @@ class ChatAPI:
     @staticmethod
     def _session_title(stored_title: str, messages: list[Any]) -> str:
         from apps.core.chat_store import make_session_title
+        from apps.core.title_generator import looks_like_title_prompt_echo
 
         title = (stored_title or "").strip()
-        if title and not ChatAPI._looks_like_session_id_title(title):
+        if title and not ChatAPI._looks_like_session_id_title(title) and not looks_like_title_prompt_echo(title):
             return title
         for msg in messages:
             if getattr(msg, "role", "") == MessageRole.USER.value:
