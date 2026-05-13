@@ -376,6 +376,56 @@ def test_user_implicit_current_activity_request_does_not_attach_desktop_snapshot
         store.close()
 
 
+def test_design_feedback_with_plain_screen_word_does_not_attach_desktop_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        chat_api_mod,
+        "capture_screenshot_to_file",
+        lambda _target_path: (_ for _ in ()).throw(AssertionError("should not capture")),
+    )
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        text = (
+            '我看了一下当前桌面，class="plan-dropdown-item" 的显示有问题，'
+            "plan 的名字的显示区域被挤压到显示不出来文字，需要修改成能够显示每个 plan 的名字。\n\n"
+            "除功能以外，设计风格想要麻烦再出一版新的设计看一下。要求：\n"
+            "1. 仅对画面元素和 UI 进行调整，保持现有功能 100% 不变。\n"
+            "2. 风格修改为多巴胺风格，通过高饱和度、鲜艳明亮的色彩搭配以营造愉悦、快乐情绪和氛围的风格\n"
+            "3. 请不要覆盖原文件，生成一个新的 html 文件"
+        )
+
+        result = api.send_message(text)
+
+        assert result["ok"] is True
+        assert result["attachments"] == []
+        task = runtime.state.get_task(result["task_id"])
+        assert task is not None
+        assert task.attachments == []
+        assert task.description == text.strip()
+    finally:
+        store.close()
+
+
+def test_explicit_agent_desktop_request_still_attaches_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    captures = []
+
+    def fake_capture(target_path: Path):
+        captures.append(target_path)
+        target_path.write_bytes(b"fake-explicit-screen-png")
+        return {"width": 1920, "height": 1080, "size": target_path.stat().st_size}
+
+    monkeypatch.setattr(chat_api_mod, "capture_screenshot_to_file", fake_capture)
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        result = api.send_message("请你看一下当前桌面，帮我判断窗口里有什么问题")
+
+        assert result["ok"] is True
+        assert len(captures) == 1
+        assert result["attachments"][0]["source"] == "user_requested_desktop_snapshot"
+    finally:
+        store.close()
+
+
 def test_plain_message_does_not_attach_desktop_snapshot(tmp_path, monkeypatch):
     monkeypatch.setattr(
         chat_api_mod,
