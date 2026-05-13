@@ -76,21 +76,6 @@ _SECRET_PATTERNS = (
 )
 _TOOL_CALL_SNIPPET_RE = re.compile(r"<tool_call\b.*?</tool_call>", re.IGNORECASE | re.DOTALL)
 _TOOL_CALL_TAIL_RE = re.compile(r"<tool_call\b.*", re.IGNORECASE | re.DOTALL)
-_IMAGE_TOOL_CONTEXT_RE = re.compile(
-    r"(当前|现在|刚刚|这里|这边|页面|网页|网站|浏览器|chrome|cdp|窗口|后台|登录|地址|url|链接|分类页|文章|内容|显示|"
-    r"current|page|browser|chrome|cdp|window|tab|site|website|login|admin|url|content|display)",
-    re.IGNORECASE,
-)
-_IMAGE_TOOL_ACTION_RE = re.compile(
-    r"(检查|查一下|看一下|看看|确认|打开|点击|刷新|进入|操作|控制|继续|修复|解决|执行|运行|调用|测试|发布|编辑|读取|写入|上传|下载|"
-    r"check|inspect|look|open|click|refresh|enter|navigate|operate|control|continue|fix|run|execute|call|test|edit|read|write|upload|download)",
-    re.IGNORECASE,
-)
-_IMAGE_TOOL_PROBLEM_RE = re.compile(
-    r"(没看到|看不到|没有看到|不显示|没显示|显示不出来|空白|失败|报错|问题|为什么|卡住|没有回复|没回复|"
-    r"not visible|can't see|cannot see|missing|blank|failed|error|problem|why|stuck|no reply)",
-    re.IGNORECASE,
-)
 _FAILURE_DETAIL_KEYS = (
     "error",
     "error_message",
@@ -100,10 +85,9 @@ _FAILURE_DETAIL_KEYS = (
     "details",
 )
 _ATTACHED_IMAGE_GUARD = (
-    "本轮用户已经附加图片。请优先且尽量只根据这些附加图片回答；"
+    "本轮用户已经附加图片。请先依据这些附加图片理解用户问题；"
     "不要沿用历史消息里对旧图片的描述来回答本轮图片；"
-    "不要调用桌面截图、活动窗口、浏览器视觉或其它实时桌面观察工具来替代附加图片，"
-    "除非用户明确要求你操作当前电脑或重新观察屏幕。"
+    "如果完成任务需要调用浏览器、桌面、文件、终端或其它 Agent 工具，可以继续调用。"
 )
 _XIAOMI_NATIVE_IMAGE_MODELS = {
     "mimo-v2.5",
@@ -499,17 +483,6 @@ def _collect_image_paths(payload: dict[str, Any]) -> list[Path]:
     return images
 
 
-def _image_turn_should_keep_agent_tools(description: str) -> bool:
-    """Allow tools for screenshot-backed troubleshooting, not pure image reading."""
-    text = re.sub(r"\s+", " ", str(description or "")).strip()
-    if not text:
-        return False
-    has_context = bool(_IMAGE_TOOL_CONTEXT_RE.search(text))
-    has_action = bool(_IMAGE_TOOL_ACTION_RE.search(text))
-    has_problem = bool(_IMAGE_TOOL_PROBLEM_RE.search(text))
-    return has_context and (has_action or has_problem)
-
-
 def _with_attached_image_guard(
     description: str,
     image_paths: list[Path],
@@ -519,16 +492,9 @@ def _with_attached_image_guard(
     if not image_paths:
         return description
     count = len(image_paths)
-    guard = _ATTACHED_IMAGE_GUARD
-    if allow_agent_tools:
-        guard = (
-            "本轮用户已经附加图片。请先依据这些附加图片理解用户问题；"
-            "如果用户是在排查当前页面、浏览器、文件或电脑状态，可以继续调用相应工具核对和处理。"
-            "不要沿用历史消息里对旧图片的描述来回答本轮图片。"
-        )
     return (
         "[Yachiyo 附件图片上下文]\n"
-        f"{guard}\n"
+        f"{_ATTACHED_IMAGE_GUARD}\n"
         f"附加图片数量：{count}\n\n"
         f"{description}"
     )
@@ -1105,7 +1071,7 @@ def _route_images(
     description: str,
     image_paths: list[Path],
     *,
-    allow_agent_tools: bool = False,
+    allow_agent_tools: bool = True,
 ) -> Any:
     if not image_paths:
         return description
@@ -1126,22 +1092,8 @@ def _disable_agent_tools_for_image_turn(
     *,
     allow_tools: bool = False,
 ):
-    if not image_paths or agent is None or allow_tools:
-        yield
-        return
-    original_tools = getattr(agent, "tools", None)
-    original_valid_tool_names = getattr(agent, "valid_tool_names", None)
-    try:
-        if hasattr(agent, "tools"):
-            agent.tools = []
-        if hasattr(agent, "valid_tool_names"):
-            agent.valid_tool_names = set()
-        yield
-    finally:
-        if hasattr(agent, "tools"):
-            agent.tools = original_tools
-        if hasattr(agent, "valid_tool_names"):
-            agent.valid_tool_names = original_valid_tool_names
+    """Legacy context manager kept as a no-op so image turns can use Agent tools."""
+    yield
 
 
 def _debug_route(route: Any) -> None:
@@ -1321,13 +1273,12 @@ def _run(payload: dict[str, Any]) -> int:
         cli.agent.suppress_status_output = True
         _wire_agent_activity_callbacks(cli.agent)
         _emit_activity("status", title="Hermes Agent 已启动", status="running")
-        allow_image_tools = _image_turn_should_keep_agent_tools(description)
         try:
             description_for_agent = _route_images(
                 cli,
                 description,
                 image_paths,
-                allow_agent_tools=allow_image_tools,
+                allow_agent_tools=True,
             )
         except ImagePreprocessError as exc:
             _emit("error", message=f"图片预分析失败：{exc}")
@@ -1345,7 +1296,7 @@ def _run(payload: dict[str, Any]) -> int:
         with _disable_agent_tools_for_image_turn(
             cli.agent,
             image_paths,
-            allow_tools=allow_image_tools,
+            allow_tools=True,
         ):
             result = cli.agent.run_conversation(
                 user_message=description_for_agent,
