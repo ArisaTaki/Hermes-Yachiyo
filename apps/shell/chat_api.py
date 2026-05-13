@@ -795,7 +795,7 @@ class ChatAPI:
         """取消当前会话中仍在等待/执行的任务，但保留会话历史。"""
         try:
             self._sync_task_status_to_messages()
-            cancelled_count = self._cancel_active_session_tasks()
+            cancelled_count = self._cancel_active_session_tasks("用户停止生成")
             messages = self.get_messages()
             return {
                 "ok": True,
@@ -882,7 +882,7 @@ class ChatAPI:
         """删除当前会话，并切换到剩余最近会话或新建空会话。"""
         try:
             self._sync_task_status_to_messages()
-            cancelled_count = self._cancel_active_session_tasks()
+            cancelled_count = self._cancel_active_session_tasks("删除会话前取消仍在执行的任务")
             deleted_session_id = self._session.session_id
 
             from apps.core.chat_store import get_chat_store
@@ -921,7 +921,7 @@ class ChatAPI:
             logger.error("删除当前会话失败: %s", exc)
             return {"ok": False, "error": str(exc)}
 
-    def _cancel_active_session_tasks(self) -> int:
+    def _cancel_active_session_tasks(self, reason: str) -> int:
         """取消当前会话中仍在等待/执行的任务，并持久化取消提示。"""
         active_task_ids: list[str] = []
         seen: set[str] = set()
@@ -933,6 +933,9 @@ class ChatAPI:
                 continue
             if not msg.task_id or msg.task_id in seen:
                 continue
+            task = self._state.get_task(msg.task_id)
+            if task is None or task.status not in (TaskStatus.PENDING, TaskStatus.RUNNING):
+                continue
             seen.add(msg.task_id)
             active_task_ids.append(msg.task_id)
 
@@ -941,6 +944,7 @@ class ChatAPI:
             task = self._state.get_task(task_id)
             if task is None:
                 continue
+            did_cancel = False
             if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
                 try:
                     self._state.cancel_task(task_id)
@@ -950,11 +954,12 @@ class ChatAPI:
                     if callable(cancel_runner_task):
                         cancel_runner_task(task_id)
                     cancelled += 1
+                    did_cancel = True
                 except (KeyError, ValueError):
                     logger.debug("任务取消跳过: %s", task_id, exc_info=True)
 
             task = self._state.get_task(task_id)
-            if task is not None and task.status == TaskStatus.CANCELLED:
+            if did_cancel and task is not None and task.status == TaskStatus.CANCELLED:
                 try:
                     activity_store = get_activity_store()
                     activity_store.finalize_task_events(task_id, status="cancelled")
@@ -964,7 +969,7 @@ class ChatAPI:
                         tool_name="hermes",
                         phase="task_cancelled",
                         title="Yachiyo 已停止",
-                        detail=getattr(task, "description", "") or "",
+                        detail=reason,
                         status="cancelled",
                     )
                 except Exception:

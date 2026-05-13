@@ -548,8 +548,58 @@ def test_delete_current_session_removes_session_and_cancels_active_task(tmp_path
         assert store.get_session(old_session_id) is None
         assert store.load_messages(old_session_id) == []
         assert api.get_messages()["messages"] == []
+        events = activity_store.list_events(task_id=task_id, limit=5, key_only=False)
+        cancel_events = [event for event in events if event.phase == "task_cancelled"]
+        assert len(cancel_events) == 1
+        assert cancel_events[0].detail == "删除会话前取消仍在执行的任务"
+        assert "删除前仍在执行" not in cancel_events[0].detail
     finally:
         _store_mod.get_chat_store = original_get_store
+        activity_store.close()
+        store.close()
+
+
+def test_cancel_current_tasks_records_neutral_activity_detail(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    try:
+        result = api.send_message("删除这张图")
+        task_id = result["task_id"]
+        runtime.state.update_task_status(task_id, TaskStatus.RUNNING)
+
+        cancelled = api.cancel_current_tasks()
+
+        assert cancelled["ok"] is True
+        assert cancelled["cancelled_tasks"] == 1
+        events = activity_store.list_events(task_id=task_id, limit=5, key_only=False)
+        cancel_events = [event for event in events if event.phase == "task_cancelled"]
+        assert len(cancel_events) == 1
+        assert cancel_events[0].detail == "用户停止生成"
+        assert "删除这张图" not in cancel_events[0].detail
+    finally:
+        activity_store.close()
+        store.close()
+
+
+def test_cancel_current_tasks_does_not_log_already_cancelled_stale_message(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(api, "_sync_task_status_to_messages", lambda: None)
+    try:
+        result = api.send_message("已经取消但消息状态还没刷新")
+        task_id = result["task_id"]
+        runtime.state.cancel_task(task_id)
+
+        cancelled = api.cancel_current_tasks()
+
+        assert cancelled["ok"] is True
+        assert cancelled["cancelled_tasks"] == 0
+        events = activity_store.list_events(task_id=task_id, limit=5, key_only=False)
+        assert [event for event in events if event.phase == "task_cancelled"] == []
+        assert runtime.cancelled_runner_tasks == []
+    finally:
         activity_store.close()
         store.close()
 
