@@ -216,6 +216,33 @@ _STREAM_BRIDGE_FALLBACK_MARKERS = (
     "cannot import",
 )
 
+
+def _utf8_subprocess_env() -> dict[str, str]:
+    """Return a child-process environment that keeps tool output UTF-8.
+
+    GUI-launched macOS apps can inherit a sparse locale.  Python subprocesses
+    using text=True then decode tools such as osascript with ASCII/C locale,
+    which corrupts Japanese and other non-ASCII text before it reaches chat.
+    """
+    env = dict(os.environ)
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+
+    preferred_lang = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+    preferred_ctype = "UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+
+    def is_broken_locale(value: str | None) -> bool:
+        normalized = (value or "").strip().lower()
+        return normalized in {"", "c", "posix", "ascii", "us-ascii"}
+
+    if is_broken_locale(env.get("LC_ALL")):
+        env.pop("LC_ALL", None)
+    if is_broken_locale(env.get("LANG")):
+        env["LANG"] = preferred_lang
+    if is_broken_locale(env.get("LC_CTYPE")):
+        env["LC_CTYPE"] = preferred_ctype
+    return env
+
 # bridge 内部原始异常模式 → 用户友好描述
 # 这些异常由 hermes_stream_bridge.py 的 main() 捕获后以 "ExcType: msg" 格式输出，
 # 在显示给用户前需要转换为可读提示。
@@ -774,6 +801,7 @@ async def _invoke_hermes_stream_bridge(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=os.getcwd(),
+            env=_utf8_subprocess_env(),
         )
     except FileNotFoundError:
         return HermesInvokeResult(
@@ -900,6 +928,7 @@ async def invoke_hermes_cli(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=_utf8_subprocess_env(),
         )
     except FileNotFoundError:
         _emit_activity_update(on_activity, {
@@ -1029,7 +1058,10 @@ def probe_hermes_available() -> bool:
             ["hermes", "--version"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=_PROBE_TIMEOUT,
+            env=_utf8_subprocess_env(),
         )
         if result.returncode != 0:
             logger.warning(

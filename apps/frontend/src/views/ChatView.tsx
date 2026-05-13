@@ -561,7 +561,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
-      const nextHeight = startHeight + moveEvent.clientY - startY;
+      const nextHeight = startHeight + startY - moveEvent.clientY;
       setComposerHeight(clampComposerHeight(nextHeight));
     };
 
@@ -579,10 +579,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   function handleComposerResizeKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
     if (event.key === 'ArrowUp') {
       event.preventDefault();
-      setComposerHeight((value) => clampComposerHeight(value - 12));
+      setComposerHeight((value) => clampComposerHeight(value + 12));
     } else if (event.key === 'ArrowDown') {
       event.preventDefault();
-      setComposerHeight((value) => clampComposerHeight(value + 12));
+      setComposerHeight((value) => clampComposerHeight(value - 12));
     } else if (event.key === 'Home') {
       event.preventDefault();
       setComposerHeight(COMPOSER_MIN_HEIGHT);

@@ -19,6 +19,7 @@ import contextlib
 import io
 import inspect
 import json
+import locale
 import os
 from pathlib import Path
 import re
@@ -29,6 +30,33 @@ from typing import Any, Optional
 from urllib.parse import urlparse
 
 
+def _configure_utf8_stdio() -> None:
+    """Keep bridge NDJSON and tool output text in UTF-8.
+
+    The bridge may run under a GUI-launched app with no useful locale.  Pinning
+    stdio and locale here protects both our event stream and Python tools
+    imported by Hermes that rely on the process' default text encoding.
+    """
+    os.environ["PYTHONUTF8"] = "1"
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    if (os.environ.get("LC_ALL") or "").strip().lower() in {"c", "posix", "ascii", "us-ascii"}:
+        os.environ.pop("LC_ALL", None)
+    if (os.environ.get("LANG") or "").strip().lower() in {"", "c", "posix", "ascii", "us-ascii"}:
+        os.environ["LANG"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+    if (os.environ.get("LC_CTYPE") or "").strip().lower() in {"", "c", "posix", "ascii", "us-ascii"}:
+        os.environ["LC_CTYPE"] = "UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+    try:
+        locale.setlocale(locale.LC_CTYPE, "")
+    except Exception:
+        pass
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_configure_utf8_stdio()
 _EVENT_STDOUT = sys.stdout
 _DEBUG_ROUTE_ENV = "HERMES_YACHIYO_DEBUG_ROUTE"
 _DEBUG_ROUTE_TRUE_VALUES = {"1", "true", "yes", "on", "debug"}

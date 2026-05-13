@@ -330,6 +330,34 @@ class TestParseHermesOutput:
 
 
 class TestHermesStreamBridgeHelpers:
+    def test_utf8_subprocess_env_repairs_sparse_gui_locale(self, monkeypatch):
+        monkeypatch.setenv("LC_ALL", "C")
+        monkeypatch.setenv("LANG", "C")
+        monkeypatch.delenv("LC_CTYPE", raising=False)
+        monkeypatch.setattr(executor_mod.sys, "platform", "darwin")
+
+        env = executor_mod._utf8_subprocess_env()
+
+        assert env["PYTHONUTF8"] == "1"
+        assert env["PYTHONIOENCODING"] == "utf-8"
+        assert env["LANG"] == "en_US.UTF-8"
+        assert env["LC_CTYPE"] == "UTF-8"
+        assert "LC_ALL" not in env
+
+    def test_stream_bridge_repairs_sparse_gui_locale(self, monkeypatch):
+        monkeypatch.setenv("LC_ALL", "C")
+        monkeypatch.setenv("LANG", "C")
+        monkeypatch.delenv("LC_CTYPE", raising=False)
+        monkeypatch.setattr(bridge_mod.sys, "platform", "darwin")
+
+        bridge_mod._configure_utf8_stdio()
+
+        assert bridge_mod.os.environ["PYTHONUTF8"] == "1"
+        assert bridge_mod.os.environ["PYTHONIOENCODING"] == "utf-8"
+        assert bridge_mod.os.environ["LANG"] == "en_US.UTF-8"
+        assert bridge_mod.os.environ["LC_CTYPE"] == "UTF-8"
+        assert "LC_ALL" not in bridge_mod.os.environ
+
     def test_parse_bridge_event(self):
         event = _parse_bridge_event('{"type":"delta","delta":"hi"}')
         assert event == {"type": "delta", "delta": "hi"}
@@ -421,6 +449,8 @@ class TestHermesStreamBridgeHelpers:
 
         async def fake_create_subprocess_exec(*cmd, **kwargs):
             calls.append(cmd)
+            assert kwargs["env"]["PYTHONIOENCODING"] == "utf-8"
+            assert kwargs["env"]["PYTHONUTF8"] == "1"
             return FakeProcess()
 
         monkeypatch.setattr(
@@ -451,6 +481,30 @@ class TestHermesStreamBridgeHelpers:
         assert "--image" in calls[0]
         assert str(image_path) in calls[0]
         assert updates == []
+
+    @pytest.mark.asyncio
+    async def test_stream_bridge_uses_utf8_environment(self, monkeypatch, tmp_path):
+        bridge_script = tmp_path / "hermes_stream_bridge.py"
+        bridge_script.write_text("# bridge", encoding="utf-8")
+        captured_kwargs = {}
+
+        async def fake_create_subprocess_exec(*_cmd, **kwargs):
+            captured_kwargs.update(kwargs)
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(executor_mod, "_resolve_hermes_python", lambda: sys.executable)
+        monkeypatch.setattr(executor_mod, "_BRIDGE_SCRIPT", bridge_script)
+        monkeypatch.setattr(
+            executor_mod.asyncio,
+            "create_subprocess_exec",
+            fake_create_subprocess_exec,
+        )
+
+        result = await executor_mod._invoke_hermes_stream_bridge("hello", None, lambda _: None)
+
+        assert result.success is False
+        assert captured_kwargs["env"]["PYTHONIOENCODING"] == "utf-8"
+        assert captured_kwargs["env"]["PYTHONUTF8"] == "1"
 
     @pytest.mark.asyncio
     async def test_invoke_does_not_fallback_for_task_level_stream_failure(
