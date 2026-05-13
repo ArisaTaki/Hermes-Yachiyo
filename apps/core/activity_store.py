@@ -57,6 +57,8 @@ _SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\b(gh[pousr]_[A-Za-z0-9_]{12,})\b"),
     re.compile(r"\b(xox[baprs]-[A-Za-z0-9\-]{12,})\b"),
 )
+_TOOL_CALL_SNIPPET_RE = re.compile(r"<tool_call\b.*?</tool_call>", re.IGNORECASE | re.DOTALL)
+_TOOL_CALL_TAIL_RE = re.compile(r"<tool_call\b.*", re.IGNORECASE | re.DOTALL)
 
 
 def _now() -> str:
@@ -84,12 +86,20 @@ def _read_int_env(name: str, default: int, *, minimum: int, maximum: int) -> int
 
 def redact_sensitive_text(value: Any, *, limit: int = _DETAIL_MAX_CHARS) -> str:
     text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    text = _redact_tool_call_markup(text)
     text = re.sub(r"\s+", " ", text)
     for pattern in _SECRET_PATTERNS:
         text = pattern.sub(lambda match: f"{match.group(1)}=[redacted]" if match.lastindex and match.lastindex > 1 else "[redacted]", text)
     if len(text) > limit:
         text = text[: limit - 1].rstrip() + "…"
     return text
+
+
+def _redact_tool_call_markup(text: str) -> str:
+    if "<tool_call" not in text.lower():
+        return text
+    text = _TOOL_CALL_SNIPPET_RE.sub("[工具调用草稿已隐藏]", text)
+    return _TOOL_CALL_TAIL_RE.sub("[工具调用草稿已隐藏]", text)
 
 
 def _sanitize_metadata(value: Any, *, depth: int = 0) -> Any:

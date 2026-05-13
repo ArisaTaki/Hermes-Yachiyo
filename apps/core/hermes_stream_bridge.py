@@ -74,6 +74,23 @@ _SECRET_PATTERNS = (
     re.compile(r"\b(gh[pousr]_[A-Za-z0-9_]{12,})\b"),
     re.compile(r"\b(xox[baprs]-[A-Za-z0-9\-]{12,})\b"),
 )
+_TOOL_CALL_SNIPPET_RE = re.compile(r"<tool_call\b.*?</tool_call>", re.IGNORECASE | re.DOTALL)
+_TOOL_CALL_TAIL_RE = re.compile(r"<tool_call\b.*", re.IGNORECASE | re.DOTALL)
+_IMAGE_TOOL_CONTEXT_RE = re.compile(
+    r"(当前|现在|刚刚|这里|这边|页面|网页|网站|浏览器|chrome|cdp|窗口|后台|登录|地址|url|链接|分类页|文章|内容|显示|"
+    r"current|page|browser|chrome|cdp|window|tab|site|website|login|admin|url|content|display)",
+    re.IGNORECASE,
+)
+_IMAGE_TOOL_ACTION_RE = re.compile(
+    r"(检查|查一下|看一下|看看|确认|打开|点击|刷新|进入|操作|控制|继续|修复|解决|执行|运行|调用|测试|发布|编辑|读取|写入|上传|下载|"
+    r"check|inspect|look|open|click|refresh|enter|navigate|operate|control|continue|fix|run|execute|call|test|edit|read|write|upload|download)",
+    re.IGNORECASE,
+)
+_IMAGE_TOOL_PROBLEM_RE = re.compile(
+    r"(没看到|看不到|没有看到|不显示|没显示|显示不出来|空白|失败|报错|问题|为什么|卡住|没有回复|没回复|"
+    r"not visible|can't see|cannot see|missing|blank|failed|error|problem|why|stuck|no reply)",
+    re.IGNORECASE,
+)
 _FAILURE_DETAIL_KEYS = (
     "error",
     "error_message",
@@ -178,12 +195,21 @@ def _emit(event_type: str, **payload: Any) -> None:
 
 def _redact_activity_text(value: Any, *, limit: int = _ACTIVITY_DETAIL_MAX_CHARS) -> str:
     text = _detail_text(value, drop_empty_literals=False)
+    text = _redact_tool_call_markup(text)
     text = re.sub(r"\s+", " ", text).strip()
     for pattern in _SECRET_PATTERNS:
         text = pattern.sub(lambda match: f"{match.group(1)}=[redacted]" if match.lastindex and match.lastindex > 1 else "[redacted]", text)
     if len(text) > limit:
         text = text[: limit - 1].rstrip() + "…"
     return text
+
+
+def _redact_tool_call_markup(text: str) -> str:
+    """Hide raw model-side tool call drafts from user-facing activity text."""
+    if "<tool_call" not in text.lower():
+        return text
+    text = _TOOL_CALL_SNIPPET_RE.sub("[工具调用草稿已隐藏]", text)
+    return _TOOL_CALL_TAIL_RE.sub("[工具调用草稿已隐藏]", text)
 
 
 def _activity_duration(seconds: float | None) -> str:
@@ -473,13 +499,36 @@ def _collect_image_paths(payload: dict[str, Any]) -> list[Path]:
     return images
 
 
-def _with_attached_image_guard(description: str, image_paths: list[Path]) -> str:
+def _image_turn_should_keep_agent_tools(description: str) -> bool:
+    """Allow tools for screenshot-backed troubleshooting, not pure image reading."""
+    text = re.sub(r"\s+", " ", str(description or "")).strip()
+    if not text:
+        return False
+    has_context = bool(_IMAGE_TOOL_CONTEXT_RE.search(text))
+    has_action = bool(_IMAGE_TOOL_ACTION_RE.search(text))
+    has_problem = bool(_IMAGE_TOOL_PROBLEM_RE.search(text))
+    return has_context and (has_action or has_problem)
+
+
+def _with_attached_image_guard(
+    description: str,
+    image_paths: list[Path],
+    *,
+    allow_agent_tools: bool = False,
+) -> str:
     if not image_paths:
         return description
     count = len(image_paths)
+    guard = _ATTACHED_IMAGE_GUARD
+    if allow_agent_tools:
+        guard = (
+            "本轮用户已经附加图片。请先依据这些附加图片理解用户问题；"
+            "如果用户是在排查当前页面、浏览器、文件或电脑状态，可以继续调用相应工具核对和处理。"
+            "不要沿用历史消息里对旧图片的描述来回答本轮图片。"
+        )
     return (
         "[Yachiyo 附件图片上下文]\n"
-        f"{_ATTACHED_IMAGE_GUARD}\n"
+        f"{guard}\n"
         f"附加图片数量：{count}\n\n"
         f"{description}"
     )
@@ -1051,18 +1100,33 @@ def _preprocess_images_with_vision(description: str, image_paths: list[Path]) ->
     return "\n\n".join(parts + [description])
 
 
-def _route_images(cli: Any, description: str, image_paths: list[Path]) -> Any:
+def _route_images(
+    cli: Any,
+    description: str,
+    image_paths: list[Path],
+    *,
+    allow_agent_tools: bool = False,
+) -> Any:
     if not image_paths:
         return description
-    guarded_description = _with_attached_image_guard(description, image_paths)
+    guarded_description = _with_attached_image_guard(
+        description,
+        image_paths,
+        allow_agent_tools=allow_agent_tools,
+    )
     if _is_debug_route_enabled():
         print("[yachiyo-debug] image route=yachiyo_vision_text", file=sys.stderr, flush=True)
     return _preprocess_images_with_vision(guarded_description, image_paths)
 
 
 @contextlib.contextmanager
-def _disable_agent_tools_for_image_turn(agent: Any, image_paths: list[Path]):
-    if not image_paths or agent is None:
+def _disable_agent_tools_for_image_turn(
+    agent: Any,
+    image_paths: list[Path],
+    *,
+    allow_tools: bool = False,
+):
+    if not image_paths or agent is None or allow_tools:
         yield
         return
     original_tools = getattr(agent, "tools", None)
@@ -1257,8 +1321,14 @@ def _run(payload: dict[str, Any]) -> int:
         cli.agent.suppress_status_output = True
         _wire_agent_activity_callbacks(cli.agent)
         _emit_activity("status", title="Hermes Agent 已启动", status="running")
+        allow_image_tools = _image_turn_should_keep_agent_tools(description)
         try:
-            description_for_agent = _route_images(cli, description, image_paths)
+            description_for_agent = _route_images(
+                cli,
+                description,
+                image_paths,
+                allow_agent_tools=allow_image_tools,
+            )
         except ImagePreprocessError as exc:
             _emit("error", message=f"图片预分析失败：{exc}")
             return 1
@@ -1272,7 +1342,11 @@ def _run(payload: dict[str, Any]) -> int:
             if delta:
                 _emit("delta", delta=delta)
 
-        with _disable_agent_tools_for_image_turn(cli.agent, image_paths):
+        with _disable_agent_tools_for_image_turn(
+            cli.agent,
+            image_paths,
+            allow_tools=allow_image_tools,
+        ):
             result = cli.agent.run_conversation(
                 user_message=description_for_agent,
                 conversation_history=cli.conversation_history,

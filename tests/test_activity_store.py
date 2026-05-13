@@ -44,6 +44,19 @@ def test_redact_sensitive_text_handles_inline_tokens():
     assert redact_sensitive_text("sk-abc1234567890") == "[redacted]"
 
 
+def test_redact_sensitive_text_hides_raw_tool_call_drafts():
+    text = (
+        "我检查一下 <tool_call><function=browser_cdp>"
+        "<parameter=method>Runtime.evaluate</parameter></function></tool_call>"
+    )
+
+    redacted = redact_sensitive_text(text)
+
+    assert "tool_call" not in redacted
+    assert "browser_cdp" not in redacted
+    assert "工具调用草稿已隐藏" in redacted
+
+
 def test_activity_store_finalizes_in_flight_task_events(tmp_path):
     db_path = tmp_path / "activity.db"
     store = ActivityStore(db_path=str(db_path))

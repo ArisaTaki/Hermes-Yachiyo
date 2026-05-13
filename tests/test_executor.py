@@ -1490,7 +1490,7 @@ class TestHermesStreamBridgeImageRouting:
         assert result == "辅助视觉结果"
         assert captured["model"] == "mimo-v2.5"
 
-    def test_image_turn_temporarily_disables_agent_tools(self, tmp_path):
+    def test_image_turn_disables_agent_tools_for_pure_image_request(self, tmp_path):
         image = tmp_path / "screen.png"
         image.write_bytes(b"png")
         agent = types.SimpleNamespace(
@@ -1504,6 +1504,47 @@ class TestHermesStreamBridgeImageRouting:
 
         assert agent.tools == [{"function": {"name": "terminal"}}]
         assert agent.valid_tool_names == {"terminal", "vision_analyze"}
+
+    def test_image_turn_keeps_agent_tools_for_current_page_troubleshooting(self, tmp_path):
+        image = tmp_path / "screen.png"
+        image.write_bytes(b"png")
+        agent = types.SimpleNamespace(
+            tools=[{"function": {"name": "browser_cdp"}}],
+            valid_tool_names={"browser_cdp"},
+        )
+
+        keep_tools = bridge_mod._image_turn_should_keep_agent_tools("这里没看到内容？帮我检查当前页面。")
+
+        with bridge_mod._disable_agent_tools_for_image_turn(agent, [image], allow_tools=keep_tools):
+            assert agent.tools == [{"function": {"name": "browser_cdp"}}]
+            assert agent.valid_tool_names == {"browser_cdp"}
+
+        assert keep_tools is True
+
+    def test_attached_image_guard_relaxes_tool_policy_for_current_page_debugging(self, tmp_path):
+        image = tmp_path / "screen.png"
+        image.write_bytes(b"png")
+
+        guarded = bridge_mod._with_attached_image_guard(
+            "这里没看到内容？",
+            [image],
+            allow_agent_tools=True,
+        )
+
+        assert "可以继续调用相应工具核对和处理" in guarded
+        assert "不要调用桌面截图" not in guarded
+
+    def test_activity_text_hides_raw_tool_call_drafts(self):
+        text = (
+            "让我检查 <tool_call><function=browser_cdp>"
+            "<parameter=method>Runtime.evaluate</parameter></function></tool_call>"
+        )
+
+        redacted = bridge_mod._redact_activity_text(text)
+
+        assert "tool_call" not in redacted
+        assert "browser_cdp" not in redacted
+        assert "工具调用草稿已隐藏" in redacted
 
 
 class TestBuildInitAgentKwargs:
