@@ -336,6 +336,19 @@ class TestParseHermesOutput:
         assert _sanitize_generated_session_title("标题：潮汕牛肉饭。") == "潮汕牛肉饭"
         assert _sanitize_generated_session_title("“重复播放 Ray 版本”") == "重复播放 Ray 版本"
         assert len(_sanitize_generated_session_title("这是一个非常非常非常非常非常长的标题需要被截断")) <= 28
+        assert _sanitize_generated_session_title("首先，用户要求为这段持续对话生成一个会话列表标题。") == ""
+
+    @pytest.mark.asyncio
+    async def test_generated_title_uses_direct_api_without_hermes_cli_fallback(self, monkeypatch):
+        async def fake_direct_api(_prompt, *, timeout):
+            assert timeout > 0
+            return ""
+
+        monkeypatch.setattr(executor_mod, "generate_title_with_direct_api", fake_direct_api)
+        monkeypatch.setattr(executor_mod.shutil, "which", lambda _cmd: "/bin/hermes")
+        monkeypatch.setattr(executor_mod, "_generate_session_title_with_hermes_cli", lambda _prompt: "不应调用")
+
+        assert await executor_mod._generate_session_title("生成标题") == ""
 
     def test_generated_title_refresh_is_periodic(self, monkeypatch):
         monkeypatch.setenv("HERMES_YACHIYO_TITLE_GENERATION", "1")

@@ -129,6 +129,16 @@ _DEFAULT_TITLE_CONTEXT_MESSAGES = 8
 _DEFAULT_TITLE_INTERVAL_TURNS = 4
 _DEFAULT_TITLE_TIMEOUT_SECONDS = 8.0
 _GENERATED_TITLE_MAX_CHARS = 28
+_TITLE_PROMPT_ECHO_MARKERS = (
+    "请为这段持续对话生成",
+    "会话列表标题",
+    "第一条用户消息",
+    "最近对话",
+    "当前标题",
+    "只输出标题",
+    "用户要求为这段",
+    "要求包括",
+)
 _TITLE_REFRESH_TASKS: dict[str, asyncio.Task[None]] = {}
 
 
@@ -514,17 +524,31 @@ def _sanitize_generated_session_title(value: str | None) -> str:
     title = title.splitlines()[0].strip() if title else ""
     if not title:
         return ""
+    if _looks_like_title_prompt_echo(title):
+        return ""
     if len(title) > _GENERATED_TITLE_MAX_CHARS:
         title = title[:_GENERATED_TITLE_MAX_CHARS].rstrip()
     return title.strip(" \t\r\n\"'“”‘’`*_#：:。.!！?？")
 
 
+def _looks_like_title_prompt_echo(title: str) -> bool:
+    normalized = re.sub(r"\s+", "", title or "")
+    if not normalized:
+        return False
+    if any(marker.replace(" ", "") in normalized for marker in _TITLE_PROMPT_ECHO_MARKERS):
+        return True
+    return normalized.startswith(("首先用户要求", "首先，用户要求", "用户要求"))
+
+
 async def _generate_session_title(prompt: str) -> str:
-    """Generate a compact chat title with direct model API, then Hermes CLI fallback."""
+    """Generate a compact chat title with direct model API.
+
+    Do not fall back to `hermes chat` here: when the model config is unavailable
+    or Hermes is busy, the CLI can summarize the title-generation prompt itself
+    and accidentally write that prompt into the session title.
+    """
     title = await generate_title_with_direct_api(prompt, timeout=_read_title_timeout())
-    if title:
-        return _sanitize_generated_session_title(title)
-    return await _generate_session_title_with_hermes_cli(prompt)
+    return _sanitize_generated_session_title(title)
 
 
 async def _generate_session_title_with_hermes_cli(prompt: str) -> str:
