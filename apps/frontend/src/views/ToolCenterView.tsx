@@ -443,7 +443,6 @@ export function ToolCenterView() {
 
   const selectedToolId = currentParam('tool');
   const selectedToolConfig = selectedToolId ? toolConfigById.get(canonicalToolName(selectedToolId)) : undefined;
-  const selectedVisibleFields = selectedToolConfig ? visibleFieldsForTool(selectedToolConfig, configDraft) : [];
   const hasUnsavedChanges = Boolean(
     selectedToolConfig
     && draftToolId === selectedToolConfig.id
@@ -987,22 +986,11 @@ export function ToolCenterView() {
           <div className="topbar-actions">
             <button type="button" onClick={() => requestNavigation({ type: 'overview' })}>返回工具概览</button>
             <button type="button" onClick={() => requestNavigation({ type: 'main' })}>主控台</button>
-            {selectedVisibleFields.length ? (
-              <button
-                type="button"
-                className="primary-action"
-                disabled={configBusy || !hasUnsavedChanges}
-                onClick={() => void saveSelectedToolConfig()}
-              >
-                {configBusy ? '保存中...' : hasUnsavedChanges ? '保存配置' : '已保存'}
-              </button>
-            ) : null}
           </div>
         </header>
 
-        {error ? <div className="notice danger">{error}</div> : null}
-        {actionStatus ? <div className={/失败|错误|无法|未通过/.test(actionStatus) ? 'notice danger' : 'notice'}>{actionStatus}</div> : null}
-        {hasUnsavedChanges ? <div className="notice warn">当前配置有未保存更改。</div> : null}
+        {error ? <div className="tool-center-status danger">{error}</div> : null}
+        {actionStatus ? <div className={/失败|错误|无法|未通过/.test(actionStatus) ? 'tool-center-status danger' : 'tool-center-status'}>{actionStatus}</div> : null}
 
         {selectedToolLoading ? (
           <ToolConfigLoadingPanel catalogItem={selectedCatalogItem} />
@@ -1344,6 +1332,13 @@ function ToolConfigPanel({
           {dirty ? '未保存' : `${configuredCount}/${visibleFields.length} 已配置`}
         </span>
       </div>
+
+      {dirty ? (
+        <div className="tool-config-unsaved-strip" role="status" aria-live="polite">
+          <strong>未保存更改</strong>
+          <span>保存后生效；“保存并测试”会先写入当前配置。</span>
+        </div>
+      ) : null}
 
       {visibleFields.length ? (
         <div className="tool-config-grid">
