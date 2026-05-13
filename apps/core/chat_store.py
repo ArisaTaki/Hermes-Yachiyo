@@ -302,6 +302,55 @@ class ChatStore:
             )
             conn.commit()
 
+    def load_assistant_messages_by_task(
+        self, session_id: str, task_id: str
+    ) -> List[StoredMessage]:
+        """加载某个任务对应的 assistant 消息，用于跨实例 upsert 去重。"""
+        if not session_id or not task_id:
+            return []
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                """
+                SELECT message_id, session_id, role, content, status, task_id, error,
+                       created_at, attachments_json
+                FROM chat_messages
+                WHERE session_id = ?
+                  AND task_id = ?
+                  AND role = 'assistant'
+                ORDER BY created_at ASC, message_id ASC
+                """,
+                (session_id, task_id),
+            ).fetchall()
+        return [
+            StoredMessage(
+                message_id=r["message_id"],
+                session_id=r["session_id"],
+                role=r["role"],
+                content=r["content"],
+                status=r["status"],
+                task_id=r["task_id"],
+                error=r["error"],
+                created_at=r["created_at"],
+                attachments_json=r["attachments_json"] or "[]",
+            )
+            for r in rows
+        ]
+
+    def delete_messages(self, message_ids: list[str]) -> int:
+        """按 message_id 批量删除消息，返回删除数量。"""
+        ids = [message_id for message_id in message_ids if message_id]
+        if not ids:
+            return 0
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.executemany(
+                "DELETE FROM chat_messages WHERE message_id = ?",
+                [(message_id,) for message_id in ids],
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0)
+
     def load_messages(
         self, session_id: str, limit: int = 100
     ) -> List[StoredMessage]:

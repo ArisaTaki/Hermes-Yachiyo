@@ -222,6 +222,21 @@ export async function apiPatch<T = ApiRecord>(path: string, body?: unknown): Pro
   return parseResponse<T>(response);
 }
 
+export async function apiDelete<T = ApiRecord>(path: string, body?: unknown): Promise<T> {
+  const baseUrl = await bridgeUrl();
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      method: 'DELETE',
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new Error(`无法连接本地 Bridge：${baseUrl}`);
+  }
+  return parseResponse<T>(response);
+}
+
 export async function openAppView(
   view: string,
   params: Record<string, string> = {},
@@ -272,6 +287,7 @@ function isAppView(value: string): value is AppView {
     'tools',
     'tools-all',
     'activity-all',
+    'activity-detail',
     'app-update',
     'proactive-tts',
     'bubble',

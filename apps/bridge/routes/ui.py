@@ -14,7 +14,12 @@ from pydantic import BaseModel, Field
 from apps.bridge.deps import get_runtime
 from apps.core.chat_session import MessageStatus
 from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri, find_live2d_preview_path
-from apps.shell.activity_api import list_activity_events
+from apps.shell.activity_api import (
+    delete_activity_event,
+    delete_activity_events,
+    get_activity_event_detail,
+    list_activity_events,
+)
 from apps.shell.chat_api import (
     ChatAPI,
     allocate_chat_attachment_path,
@@ -80,6 +85,10 @@ class LauncherPositionRequest(BaseModel):
 
 class LoadChatSessionRequest(BaseModel):
     session_id: str
+
+
+class DeleteActivityEventsRequest(BaseModel):
+    event_ids: list[str] = Field(default_factory=list)
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -569,6 +578,7 @@ async def get_activity_events(
     query: str = "",
     status: str = "",
     tool: str = "",
+    phase: str = "",
     session_id: str = "",
     task_id: str = "",
     limit: int = 50,
@@ -577,10 +587,26 @@ async def get_activity_events(
         query=query,
         status=status,
         tool=tool,
+        phase=phase,
         session_id=session_id,
         task_id=task_id,
         limit=limit,
     )
+
+
+@router.get("/activity/{event_id}")
+async def get_activity_event(event_id: str, limit: int = 200) -> dict[str, Any]:
+    return get_activity_event_detail(event_id, limit=limit)
+
+
+@router.delete("/activity")
+async def delete_activity_events_route(request: DeleteActivityEventsRequest) -> dict[str, Any]:
+    return delete_activity_events(request.event_ids)
+
+
+@router.delete("/activity/{event_id}")
+async def delete_activity(event_id: str) -> dict[str, Any]:
+    return delete_activity_event(event_id)
 
 
 def _clamp_float(value: float, lower: float, upper: float) -> float:

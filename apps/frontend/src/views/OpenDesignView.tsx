@@ -2,7 +2,7 @@ import { Suspense, createContext, lazy, FormEvent, ReactNode, useCallback, useCo
 
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { AssistantProfileSeedContext, type AssistantProfileSeed } from '../lib/assistantProfileSeed';
-import { apiGet, apiPost, checkAppUpdate, openDesktopMode, openExternalUrl, openPath, quitApp } from '../lib/bridge';
+import { apiDelete, apiGet, apiPost, checkAppUpdate, openDesktopMode, openExternalUrl, openPath, quitApp } from '../lib/bridge';
 import { type AppView, currentParam, navigateTo } from '../lib/view';
 import type { LauncherPayload } from './launcherTypes';
 
@@ -61,6 +61,7 @@ type ActivityEvent = {
   title?: string;
   detail?: string;
   status?: string;
+  raw_status?: string;
   duration_seconds?: number | null;
   created_at?: string;
   metadata?: Record<string, unknown>;
@@ -71,6 +72,17 @@ type ActivityPayload = {
   error?: string;
   events?: ActivityEvent[];
   tools?: string[];
+  phases?: string[];
+  statuses?: string[];
+  total?: number;
+};
+
+type ActivityDetailPayload = {
+  ok?: boolean;
+  error?: string;
+  event?: ActivityEvent | null;
+  trace?: ActivityEvent[];
+  scope?: string;
   total?: number;
 };
 
@@ -193,12 +205,6 @@ type ResourceFile = {
 
 const launcherPayloadCache: Partial<Record<'bubble' | 'live2d', LauncherPayload>> = {};
 
-type DiagnosticCache = {
-  stale?: boolean;
-  updated_at?: string;
-  commands?: Record<string, { success?: boolean; label?: string; command?: string; cached_at?: string; elapsed_seconds?: number }>;
-};
-
 const NAV_GROUPS: Array<{
   label: string;
   items: Array<{ view: AppView; label: string; icon: string; badge?: string; mode?: string }>;
@@ -279,6 +285,7 @@ const PARTICLES = Array.from({ length: 80 }, (_, index) => {
     } as CSSProperties,
   };
 });
+const ACTIVITY_LOG_CHANGED_EVENT = 'hermes-activity-log-changed';
 
 let bridgeBootReady = false;
 let bootDashboardCache: DashboardData | null = null;
@@ -705,9 +712,12 @@ export function DashboardPage() {
       }
     }
     void loadActivities();
+    const refreshActivities = () => void loadActivities();
     const timer = window.setInterval(() => void loadActivities(), DASHBOARD_ACTIVITY_POLL_INTERVAL_MS);
+    window.addEventListener(ACTIVITY_LOG_CHANGED_EVENT, refreshActivities);
     return () => {
       disposed = true;
+      window.removeEventListener(ACTIVITY_LOG_CHANGED_EVENT, refreshActivities);
       window.clearInterval(timer);
     };
   }, []);
@@ -1594,52 +1604,42 @@ export function ToolsAllPage() {
 }
 
 export function ActivityAllPage() {
-  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
-  const [cache, setCache] = useState<DiagnosticCache | null>(null);
   const [activity, setActivity] = useState<ActivityPayload | null>(null);
+  const [activityLoading, setActivityLoading] = useState(true);
   const [activityError, setActivityError] = useState('');
   const [activityQuery, setActivityQuery] = useState('');
   const [activityStatus, setActivityStatus] = useState('');
-  const [activityTool, setActivityTool] = useState('');
-  const [availableTools, setAvailableTools] = useState<string[]>([]);
+  const [activityPhase, setActivityPhase] = useState('');
+  const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
+  const [availablePhases, setAvailablePhases] = useState<string[]>([]);
+  const [selectedActivityIds, setSelectedActivityIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
-  useEffect(() => {
-    let disposed = false;
-    void Promise.allSettled([
-      apiGet<DashboardData>('/ui/dashboard'),
-      apiGet<DiagnosticCache>('/ui/hermes/diagnostics/cache'),
-      apiGet<ActivityPayload>('/ui/activity?limit=100'),
-    ]).then(([dashboardResult, cacheResult, activityResult]) => {
-      if (disposed) return;
-      setDashboard(dashboardResult.status === 'fulfilled' ? dashboardResult.value : null);
-      setCache(cacheResult.status === 'fulfilled' ? cacheResult.value : null);
-      if (activityResult.status === 'fulfilled') {
-        setActivity(activityResult.value);
-        setAvailableTools(activityResult.value.tools || []);
-      }
-    });
-    return () => {
-      disposed = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let disposed = false;
+  async function reloadActivityList(shouldApply: () => boolean = () => true) {
+    setActivityLoading(true);
     const query = new URLSearchParams();
     query.set('limit', '100');
     if (activityQuery.trim()) query.set('query', activityQuery.trim());
     if (activityStatus) query.set('status', activityStatus);
-    if (activityTool) query.set('tool', activityTool);
-    apiGet<ActivityPayload>(`/ui/activity?${query.toString()}`)
-      .then((payload) => {
-        if (disposed) return;
-        if (payload.ok === false) throw new Error(payload.error || '读取活动失败');
-        setActivity(payload);
-        setActivityError('');
-        if (!activityQuery.trim() && !activityStatus && !activityTool) {
-          setAvailableTools(payload.tools || []);
-        }
-      })
+    if (activityPhase) query.set('phase', activityPhase);
+    try {
+      const payload = await apiGet<ActivityPayload>(`/ui/activity?${query.toString()}`);
+      if (!shouldApply()) return;
+      if (payload.ok === false) throw new Error(payload.error || '读取活动失败');
+      setActivity(payload);
+      setActivityError('');
+      if (!activityQuery.trim() && !activityStatus && !activityPhase) {
+        setAvailableStatuses(payload.statuses || []);
+        setAvailablePhases(payload.phases || []);
+      }
+    } finally {
+      if (shouldApply()) setActivityLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let disposed = false;
+    reloadActivityList(() => !disposed)
       .catch((error) => {
         if (disposed) return;
         setActivity(null);
@@ -1648,22 +1648,68 @@ export function ActivityAllPage() {
     return () => {
       disposed = true;
     };
-  }, [activityQuery, activityStatus, activityTool]);
+  }, [activityQuery, activityStatus, activityPhase]);
 
-  const showDiagnosticRows = !activityQuery.trim() && !activityStatus && !activityTool;
-  const rows = [
+  usePageLoading(activityLoading && !activity);
+
+  const rows: ActivityRowData[] = [
     ...(activity?.events || []).map((event) => activityEventRow(event, true)),
-    ...(showDiagnosticRows && !activity?.events?.length ? recentActivities(dashboard) : []),
-    ...(showDiagnosticRows ? Object.values(cache?.commands || {}).map((command) => ({
-      icon: command.success ? '✓' : '!',
-      title: command.label || command.command || '诊断命令',
-      detail: command.command || 'Hermes diagnostic',
-      time: formatShortDateTime(command.cached_at || cache?.updated_at),
-      timestamp: command.cached_at || cache?.updated_at,
-    })) : []),
   ];
 
+  const selectableActivityIds = rows
+    .map((row) => row.eventId || '')
+    .filter(Boolean);
+  const selectableActivityKey = selectableActivityIds.join('|');
+  const selectedCount = selectedActivityIds.size;
+  const allVisibleSelected = selectableActivityIds.length > 0
+    && selectableActivityIds.every((eventId) => selectedActivityIds.has(eventId));
   const grouped = groupActivitiesByDay(rows);
+
+  useEffect(() => {
+    const validIds = new Set(selectableActivityIds);
+    setSelectedActivityIds((current) => {
+      const next = new Set([...current].filter((eventId) => validIds.has(eventId)));
+      return next.size === current.size ? current : next;
+    });
+  }, [selectableActivityKey]);
+
+  function toggleActivitySelection(eventId: string, selected: boolean) {
+    setSelectedActivityIds((current) => {
+      const next = new Set(current);
+      if (selected) next.add(eventId);
+      else next.delete(eventId);
+      return next;
+    });
+  }
+
+  function toggleSelectAllVisible() {
+    setSelectedActivityIds((current) => {
+      if (allVisibleSelected) return new Set();
+      const next = new Set(current);
+      selectableActivityIds.forEach((eventId) => next.add(eventId));
+      return next;
+    });
+  }
+
+  async function deleteSelectedActivities() {
+    const ids = [...selectedActivityIds];
+    if (!ids.length || bulkDeleting) return;
+    if (!window.confirm(`删除选中的 ${ids.length} 条活动日志？此操作不可恢复。`)) return;
+    setBulkDeleting(true);
+    try {
+      const result = await apiDelete<{ ok?: boolean; error?: string; deleted?: number }>('/ui/activity', {
+        event_ids: ids,
+      });
+      if (result.ok === false) throw new Error(result.error || '删除活动日志失败');
+      setSelectedActivityIds(new Set());
+      window.dispatchEvent(new Event(ACTIVITY_LOG_CHANGED_EVENT));
+      await reloadActivityList();
+    } catch (deleteError) {
+      setActivityError(deleteError instanceof Error ? deleteError.message : '删除活动日志失败');
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
 
   return (
     <section className="hy-route-page">
@@ -1674,43 +1720,289 @@ export function ActivityAllPage() {
           <p>Agent、脚本、工具调用与系统活动的完整记录</p>
         </div>
       </header>
-      <div className="activity-filter-bar">
-        <input
-          type="search"
-          value={activityQuery}
-          onChange={(event) => setActivityQuery(event.target.value)}
-          placeholder="搜索活动、工具或摘要"
-          aria-label="搜索活动"
-        />
-        <select value={activityStatus} onChange={(event) => setActivityStatus(event.target.value)} aria-label="按状态筛选">
-          <option value="">全部状态</option>
-          <option value="running">运行中</option>
-          <option value="progress">进度</option>
-          <option value="completed">已完成</option>
-          <option value="success">成功</option>
-          <option value="failed">失败</option>
-          <option value="error">错误</option>
-        </select>
-        <select value={activityTool} onChange={(event) => setActivityTool(event.target.value)} aria-label="按工具筛选">
-          <option value="">全部工具</option>
-          {availableTools.map((tool) => (
-            <option value={tool} key={tool}>{tool}</option>
-          ))}
-        </select>
+      <div className="activity-controls">
+        <div className="activity-filter-bar">
+          <input
+            type="search"
+            value={activityQuery}
+            onChange={(event) => setActivityQuery(event.target.value)}
+            placeholder="搜索活动、工具或摘要"
+            aria-label="搜索活动"
+          />
+          <select value={activityStatus} onChange={(event) => setActivityStatus(event.target.value)} aria-label="按状态筛选">
+            <option value="">全部状态</option>
+            {availableStatuses.map((status) => (
+              <option value={status} key={status}>{activityStatusLabel(status)}</option>
+            ))}
+          </select>
+          <select value={activityPhase} onChange={(event) => setActivityPhase(event.target.value)} aria-label="按类型筛选">
+            <option value="">全部类型</option>
+            {availablePhases.map((phase) => (
+              <option value={phase} key={phase}>{activityPhaseLabel(phase)}</option>
+            ))}
+          </select>
+        </div>
+        <div className="activity-bulk-bar">
+          <button
+            type="button"
+            className="hy-btn hy-btn-ghost"
+            disabled={!selectableActivityIds.length}
+            onClick={toggleSelectAllVisible}
+          >
+            {allVisibleSelected ? '取消全选' : '全选当前结果'}
+          </button>
+          <span>{selectedCount ? `已选择 ${selectedCount} 条` : `当前可选 ${selectableActivityIds.length} 条`}</span>
+          <button
+            type="button"
+            className="hy-btn activity-danger-btn"
+            disabled={!selectedCount || bulkDeleting}
+            onClick={() => void deleteSelectedActivities()}
+          >
+            {bulkDeleting ? '删除中...' : '删除选中日志'}
+          </button>
+        </div>
       </div>
       {activityError ? <div className="notice danger">{activityError}</div> : null}
       <div className="activity-list-full">
-        {grouped.map((group) => (
+        {activityLoading ? (
+          <ActivityListSkeleton />
+        ) : grouped.map((group) => (
           <div key={group.label}>
             <div className="activity-day-label">{group.label}</div>
-            {group.items.map((row, index) => <ActivityRow key={`${row.title}-${index}`} {...row} />)}
+            {group.items.map((row, index) => (
+              <ActivityRow
+                key={row.eventId || `${row.title}-${index}`}
+                {...row}
+                selectable={Boolean(row.eventId)}
+                selected={Boolean(row.eventId && selectedActivityIds.has(row.eventId))}
+                onSelectionChange={toggleActivitySelection}
+              />
+            ))}
           </div>
         ))}
-        {!grouped.length ? (
+        {!activityLoading && !grouped.length ? (
           <div className="inline-empty">暂无活动记录</div>
         ) : null}
       </div>
     </section>
+  );
+}
+
+export function ActivityDetailPage() {
+  const eventId = currentParam('event_id').trim();
+  const [payload, setPayload] = useState<ActivityDetailPayload | null>(null);
+  const [error, setError] = useState('');
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    if (!eventId) {
+      setPayload(null);
+      setError('缺少活动日志 ID');
+      return undefined;
+    }
+    let disposed = false;
+    apiGet<ActivityDetailPayload>(`/ui/activity/${encodeURIComponent(eventId)}?limit=200`)
+      .then((result) => {
+        if (disposed) return;
+        if (result.ok === false) throw new Error(result.error || '读取活动详情失败');
+        setPayload(result);
+        setError('');
+      })
+      .catch((fetchError) => {
+        if (disposed) return;
+        setPayload(null);
+        setError(fetchError instanceof Error ? fetchError.message : '读取活动详情失败');
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [eventId]);
+
+  const event = payload?.event || null;
+  const trace = payload?.trace || [];
+  const metadataText = formatMetadata(event?.metadata);
+  const detailLoading = !error && !payload;
+  usePageLoading(detailLoading);
+
+  function returnFromActivityDetail() {
+    if (window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+    navigateTo('activity-all');
+  }
+
+  async function deleteCurrentEvent() {
+    if (!eventId || deleting) return;
+    if (!window.confirm('删除这条活动日志？此操作不可恢复。')) return;
+    setDeleting(true);
+    try {
+      const result = await apiDelete<{ ok?: boolean; error?: string }>(`/ui/activity/${encodeURIComponent(eventId)}`);
+      if (result.ok === false) throw new Error(result.error || '删除活动日志失败');
+      window.dispatchEvent(new Event(ACTIVITY_LOG_CHANGED_EVENT));
+      returnFromActivityDetail();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : '删除活动日志失败');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <section className="hy-route-page activity-detail-page">
+      <header className="hy-page-header activity-detail-header">
+        <div className="activity-detail-titlebar">
+          <button type="button" className="page-back-link" onClick={returnFromActivityDetail}>← 返回上一页</button>
+          {detailLoading ? (
+            <div className="activity-detail-title-skeleton" aria-hidden="true">
+              <span />
+              <i />
+            </div>
+          ) : (
+            <div>
+              <h2>{event?.title || '活动详情'}</h2>
+              <p>{event ? activityDetail(event) : '查看单条日志与同任务完整过程'}</p>
+            </div>
+          )}
+        </div>
+        {event ? (
+          <button
+            type="button"
+            className="hy-btn hy-btn-ghost activity-delete-btn danger-action"
+            disabled={deleting}
+            onClick={() => void deleteCurrentEvent()}
+          >
+            {deleting ? '删除中...' : '删除日志'}
+          </button>
+        ) : null}
+      </header>
+
+      {error ? <div className="notice danger">{error}</div> : null}
+      {detailLoading ? <ActivityDetailSkeleton /> : null}
+
+      {event ? (
+        <>
+          <section className="activity-detail-summary">
+            <div>
+              <span>状态</span>
+              <strong>{activityStatusLabel(event.status) || '未标记'}</strong>
+            </div>
+            <div>
+              <span>类型</span>
+              <strong>{activityPhaseLabel(event.phase)}</strong>
+            </div>
+            <div>
+              <span>工具</span>
+              <strong>{event.tool_name || 'Hermes'}</strong>
+            </div>
+            <div>
+              <span>时间</span>
+              <strong>{formatFullDateTime(event.created_at)}</strong>
+            </div>
+          </section>
+
+          <section className="activity-detail-body">
+            <h3>详细内容</h3>
+            <dl>
+              <div>
+                <dt>事件 ID</dt>
+                <dd>{event.event_id || eventId}</dd>
+              </div>
+              <div>
+                <dt>任务 ID</dt>
+                <dd>{event.task_id || '无'}</dd>
+              </div>
+              <div>
+                <dt>会话 ID</dt>
+                <dd>{event.session_id || '无'}</dd>
+              </div>
+              <div>
+                <dt>摘要</dt>
+                <dd>{event.detail || '无详细摘要'}</dd>
+              </div>
+            </dl>
+            {metadataText ? (
+              <pre className="activity-metadata">{metadataText}</pre>
+            ) : null}
+          </section>
+
+          <section className="activity-detail-body">
+            <h3>完整过程</h3>
+            <div className="activity-trace-list">
+              {trace.length ? trace.map((item) => (
+                <article className={`activity-trace-row activity-item-${activityTone(item.status)}`} key={item.event_id || `${item.created_at}-${item.title}`}>
+                  <span className="activity-icon">{activityIcon(item)}</span>
+                  <div className="activity-content">
+                    <strong>{item.title || item.tool_name || 'Hermes 活动'}</strong>
+                    <small>{activityDetail(item)}</small>
+                    <em>{activityPhaseLabel(item.phase)}</em>
+                  </div>
+                  <time className="activity-time">{formatFullDateTime(item.created_at)}</time>
+                </article>
+              )) : (
+                <div className="inline-empty">暂无同任务过程</div>
+              )}
+            </div>
+          </section>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function ActivityListSkeleton() {
+  return (
+    <div className="activity-list-skeleton" aria-label="正在加载活动日志">
+      <div className="activity-day-label skeleton-label" />
+      {Array.from({ length: 6 }).map((_, index) => (
+        <article className="activity-item activity-skeleton-row" key={index}>
+          <span className="activity-skeleton-checkbox" />
+          <span className="activity-icon activity-skeleton-block" />
+          <div className="activity-content">
+            <span className="activity-skeleton-line title" />
+            <span className="activity-skeleton-line detail" />
+            <span className="activity-skeleton-line tag" />
+          </div>
+          <span className="activity-skeleton-time" />
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function ActivityDetailSkeleton() {
+  return (
+    <>
+      <section className="activity-detail-summary activity-detail-summary-skeleton" aria-label="正在加载日志摘要">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div key={index}>
+            <span className="activity-skeleton-line label" />
+            <strong className="activity-skeleton-line value" />
+          </div>
+        ))}
+      </section>
+      <section className="activity-detail-body activity-detail-body-skeleton" aria-label="正在加载日志详情">
+        <span className="activity-skeleton-line heading" />
+        <span className="activity-skeleton-line detail long" />
+        <span className="activity-skeleton-line detail" />
+        <span className="activity-skeleton-line detail short" />
+      </section>
+      <section className="activity-detail-body activity-detail-body-skeleton" aria-label="正在加载完整过程">
+        <span className="activity-skeleton-line heading" />
+        <div className="activity-trace-list">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <article className="activity-trace-row activity-skeleton-row" key={index}>
+              <span className="activity-icon activity-skeleton-block" />
+              <div className="activity-content">
+                <span className="activity-skeleton-line title" />
+                <span className="activity-skeleton-line detail" />
+              </div>
+              <span className="activity-skeleton-time" />
+            </article>
+          ))}
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -1728,21 +2020,54 @@ function StatusCard({ tone, label, value, detail, icon }: { tone: 'success' | 'w
   );
 }
 
-function ActivityRow({ icon, title, detail, time, tone = 'system', sessionId }: ActivityRowData) {
-  const className = `activity-item activity-item-${tone}${sessionId ? ' activity-item-clickable' : ''}`;
+function ActivityRow({
+  icon,
+  title,
+  detail,
+  time,
+  tone = 'system',
+  eventId,
+  phase,
+  selectable = false,
+  selected = false,
+  onSelectionChange,
+}: ActivityRowData & {
+  selectable?: boolean;
+  selected?: boolean;
+  onSelectionChange?: (eventId: string, selected: boolean) => void;
+}) {
+  const className = `activity-item activity-item-${tone}${eventId ? ' activity-item-clickable' : ''}`;
   const content = (
     <>
       <span className="activity-icon">{icon}</span>
       <div className="activity-content">
         <strong>{title}</strong>
         <small>{detail}</small>
+        {phase ? <em>{activityPhaseLabel(phase)}</em> : null}
       </div>
       <time className="activity-time">{time}</time>
     </>
   );
-  if (sessionId) {
+  if (eventId && selectable) {
     return (
-      <button type="button" className={className} onClick={() => navigateTo('chat', { session_id: sessionId })}>
+      <article className={className}>
+        <label className="activity-select">
+          <input
+            type="checkbox"
+            checked={selected}
+            aria-label={`选择日志：${title}`}
+            onChange={(event) => onSelectionChange?.(eventId, event.target.checked)}
+          />
+        </label>
+        <button type="button" className="activity-row-main" onClick={() => navigateTo('activity-detail', { event_id: eventId })}>
+          {content}
+        </button>
+      </article>
+    );
+  }
+  if (eventId) {
+    return (
+      <button type="button" className={className} onClick={() => navigateTo('activity-detail', { event_id: eventId })}>
         {content}
       </button>
     );
@@ -1961,18 +2286,7 @@ function recentActivities(data: DashboardData | null) {
     .map((event) => activityEventRow(event, false))
     .sort((a, b) => timestampMs(b.timestamp) - timestampMs(a.timestamp))
     .slice(0, 6);
-  if (activityRows.length) return activityRows;
-  const sessions = data?.chat?.recent_sessions || [];
-  const rows = sessions.slice(0, 5).map((session) => ({
-    icon: session.latest_role === 'user' ? '💬' : '🌙',
-    title: session.title || '新对话',
-    detail: `${session.message_count || 0} 条消息 · ${session.latest_status || '已同步'}`,
-    time: formatShortDateTime(session.updated_at),
-    tone: 'chat',
-    timestamp: session.updated_at,
-  }));
-  if (rows.length) return rows;
-  return [];
+  return activityRows;
 }
 
 function timestampMs(value?: string) {
@@ -2015,13 +2329,17 @@ function activityEventRow(event: ActivityEvent, fullTime: boolean): ActivityRowD
     time: fullTime ? formatFullDateTime(event.created_at) : formatShortDateTime(event.created_at),
     tone: activityTone(event.status),
     timestamp: event.created_at,
+    eventId: event.event_id,
     sessionId: event.session_id,
+    taskId: event.task_id,
+    phase: event.phase,
   };
 }
 
 function activityDetail(event: ActivityEvent) {
   const parts = [
     event.tool_name || '',
+    activityPhaseLabel(event.phase),
     activityStatusLabel(event.status),
     typeof event.duration_seconds === 'number' ? `${event.duration_seconds.toFixed(1)}s` : '',
     event.detail || '',
@@ -2035,28 +2353,62 @@ function activityIcon(event: ActivityEvent) {
   if (tool.includes('file') || tool.includes('read') || tool.includes('write')) return '▣';
   if (tool.includes('search')) return '⌘';
   if (tool.includes('script') || tool.includes('shell') || tool.includes('terminal')) return '>';
-  if (event.status === 'failed' || event.status === 'error') return '!';
-  if (event.status === 'completed' || event.status === 'success') return '✓';
+  if (event.status === 'failed') return '!';
+  if (event.status === 'cancelled') return '×';
+  if (event.status === 'completed') return '✓';
   return '•';
 }
 
 function activityTone(status?: string) {
-  if (status === 'failed' || status === 'error') return 'warning';
-  if (status === 'running' || status === 'progress') return 'chat';
+  if (status === 'failed' || status === 'cancelled') return 'warning';
+  if (status === 'running') return 'chat';
   return 'system';
 }
 
 function activityStatusLabel(status?: string) {
   if (status === 'running') return '运行中';
-  if (status === 'progress') return '进度';
   if (status === 'completed') return '已完成';
-  if (status === 'success') return '成功';
   if (status === 'failed') return '失败';
-  if (status === 'error') return '错误';
+  if (status === 'cancelled') return '已取消';
   return status || '';
 }
 
-type ActivityRowData = { icon: string; title: string; detail: string; time: string; tone?: string; timestamp?: string; sessionId?: string };
+function activityPhaseLabel(phase?: string) {
+  if (phase === 'task_start') return '任务开始';
+  if (phase === 'task_complete') return '任务完成';
+  if (phase === 'task_failed') return '任务失败';
+  if (phase === 'task_cancelled') return '任务取消';
+  if (phase === 'tool_start') return '工具开始';
+  if (phase === 'tool_complete') return '工具完成';
+  if (phase === 'tool_progress') return '工具进度';
+  if (phase === 'reasoning') return '推理';
+  if (phase === 'thinking') return '思考';
+  if (phase === 'subagent') return '子 Agent';
+  if (phase === 'status') return '状态';
+  return phase || '活动';
+}
+
+function formatMetadata(metadata?: Record<string, unknown>) {
+  if (!metadata || !Object.keys(metadata).length) return '';
+  try {
+    return JSON.stringify(metadata, null, 2);
+  } catch {
+    return '';
+  }
+}
+
+type ActivityRowData = {
+  icon: string;
+  title: string;
+  detail: string;
+  time: string;
+  tone?: string;
+  timestamp?: string;
+  eventId?: string;
+  sessionId?: string;
+  taskId?: string;
+  phase?: string;
+};
 
 function groupActivitiesByDay(rows: ActivityRowData[]): Array<{ label: string; items: ActivityRowData[] }> {
   if (!rows.length) return [];
@@ -2104,6 +2456,7 @@ function routeTitle(view: AppView, settingsMode = ''): string {
   if (view === 'workspace') return 'Hermes Yachiyo — 工作区';
   if (view === 'tools-all') return 'Hermes Yachiyo — 桌面工具';
   if (view === 'activity-all') return 'Hermes Yachiyo — 活动日志';
+  if (view === 'activity-detail') return 'Hermes Yachiyo — 活动详情';
   if (view === 'app-update') return 'Hermes Yachiyo — 应用更新';
   if (view === 'settings' && settingsMode === 'live2d') return 'Hermes Yachiyo — Live2D 设置';
   if (view === 'settings' && settingsMode === 'bubble') return 'Hermes Yachiyo — 气泡设置';

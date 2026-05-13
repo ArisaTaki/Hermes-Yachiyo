@@ -35,6 +35,12 @@ _KEY_PHASES = (
     "subagent",
 )
 _TERMINAL_STATUSES = ("completed", "success", "failed", "error", "cancelled")
+_STATUS_FILTER_ALIASES = {
+    "running": ("running", "progress", "pending"),
+    "completed": ("completed", "success"),
+    "failed": ("failed", "error"),
+    "cancelled": ("cancelled",),
+}
 _SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(
         r"(?i)\b(api[_-]?key|token|password|passwd|secret|authorization|bearer)\b"
@@ -236,6 +242,7 @@ class ActivityStore:
         query: str = "",
         status: str = "",
         tool: str = "",
+        phase: str = "",
         session_id: str = "",
         task_id: str = "",
         key_only: bool = False,
@@ -247,11 +254,20 @@ class ActivityStore:
             needle = f"%{query}%"
             args.extend([needle, needle, needle])
         if status:
-            clauses.append("status = ?")
-            args.append(status)
+            status_values = _STATUS_FILTER_ALIASES.get(status, (status,))
+            if len(status_values) == 1:
+                clauses.append("status = ?")
+                args.append(status_values[0])
+            else:
+                placeholders = ", ".join("?" for _ in status_values)
+                clauses.append(f"status IN ({placeholders})")
+                args.extend(status_values)
         if tool:
             clauses.append("tool_name = ?")
             args.append(tool)
+        if phase:
+            clauses.append("phase = ?")
+            args.append(phase)
         if session_id:
             clauses.append("session_id = ?")
             args.append(session_id)
@@ -287,6 +303,49 @@ class ActivityStore:
 
     def latest_for_task(self, task_id: str, limit: int = 5, *, key_only: bool = False) -> list[StoredActivity]:
         return self.list_events(task_id=task_id, limit=limit, key_only=key_only)
+
+    def get_event(self, event_id: str) -> StoredActivity | None:
+        event_id = redact_sensitive_text(event_id, limit=80)
+        if not event_id:
+            return None
+        with self._lock:
+            row = self._get_conn().execute(
+                """
+                SELECT event_id, session_id, task_id, tool_name, phase, title, detail, status,
+                       duration_seconds, created_at, metadata_json
+                FROM activity_events
+                WHERE event_id = ?
+                LIMIT 1
+                """,
+                (event_id,),
+            ).fetchone()
+        return _activity_from_row(row) if row is not None else None
+
+    def delete_event(self, event_id: str) -> bool:
+        event_id = redact_sensitive_text(event_id, limit=80)
+        if not event_id:
+            return False
+        with self._lock:
+            cursor = self._get_conn().execute(
+                "DELETE FROM activity_events WHERE event_id = ?",
+                (event_id,),
+            )
+            self._get_conn().commit()
+            return int(cursor.rowcount or 0) > 0
+
+    def delete_events(self, event_ids: list[str]) -> int:
+        ids = [redact_sensitive_text(event_id, limit=80) for event_id in event_ids if event_id]
+        unique_ids = sorted(set(event_id for event_id in ids if event_id))
+        if not unique_ids:
+            return 0
+        placeholders = ", ".join("?" for _ in unique_ids)
+        with self._lock:
+            cursor = self._get_conn().execute(
+                f"DELETE FROM activity_events WHERE event_id IN ({placeholders})",
+                unique_ids,
+            )
+            self._get_conn().commit()
+            return int(cursor.rowcount or 0)
 
     def latest_by_task(
         self,

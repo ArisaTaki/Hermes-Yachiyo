@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
 
 import {
   ActivityAllPage,
+  ActivityDetailPage,
   BubbleModePage,
   DashboardPage,
   Live2DModePage,
@@ -90,6 +91,7 @@ export function App() {
   else if (view === 'workspace') page = <WorkspacePage />;
   else if (view === 'tools-all') page = <ToolsAllPage />;
   else if (view === 'activity-all') page = <ActivityAllPage />;
+  else if (view === 'activity-detail') page = <ActivityDetailPage />;
 
   const shouldMountLive2d = live2dVisited || view === 'live2d';
 

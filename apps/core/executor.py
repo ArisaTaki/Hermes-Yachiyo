@@ -1183,7 +1183,11 @@ class HermesExecutor(ExecutionStrategy):
             )
 
         def on_activity(event: dict[str, Any]) -> None:
-            session_id = str(getattr(task, "chat_session_id", "") or getattr(chat_session, "session_id", "") or "")
+            session_id = str(
+                getattr(task, "chat_session_id", "")
+                or getattr(chat_session, "session_id", "")
+                or ""
+            )
             activity_payload = {
                 "session_id": session_id,
                 "task_id": task.task_id,
@@ -1193,14 +1197,16 @@ class HermesExecutor(ExecutionStrategy):
                 "detail": str(event.get("detail") or ""),
                 "status": str(event.get("status") or "running"),
                 "duration_seconds": event.get("duration_seconds"),
-                "metadata": event.get("metadata") if isinstance(event.get("metadata"), dict) else {},
+                "metadata": event.get("metadata")
+                if isinstance(event.get("metadata"), dict)
+                else {},
             }
             label = activity_payload["title"] or activity_payload["detail"]
             try:
-                if _is_key_activity_event(activity_payload):
-                    from apps.core.activity_store import get_activity_store
+                from apps.core.activity_store import get_activity_store
 
-                    stored = get_activity_store().record_event(**activity_payload)
+                stored = get_activity_store().record_event(**activity_payload)
+                if _is_key_activity_event(activity_payload):
                     label = stored.title or stored.detail
             except Exception:
                 logger.debug("Hermes 活动事件持久化失败", exc_info=True)

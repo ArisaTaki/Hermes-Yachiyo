@@ -10,6 +10,7 @@ export type AppView =
   | 'tools'
   | 'tools-all'
   | 'activity-all'
+  | 'activity-detail'
   | 'app-update'
   | 'proactive-tts'
   | 'bubble'
@@ -72,6 +73,7 @@ export function routePath(view: AppView, params: Record<string, string> = {}): s
   if (view === 'main') return '#/';
   if (view === 'settings' && params.mode) return `#/settings/${encodeURIComponent(params.mode)}`;
   if (view === 'tools' && params.tool) return `#/tools/${encodeURIComponent(params.tool)}`;
+  if (view === 'activity-detail' && params.event_id) return `#/activity-detail/${encodeURIComponent(params.event_id)}`;
   return `#/${encodeURIComponent(view)}`;
 }
 
@@ -88,6 +90,7 @@ function isAppView(value: string): value is AppView {
     'tools',
     'tools-all',
     'activity-all',
+    'activity-detail',
     'app-update',
     'proactive-tts',
     'bubble',
@@ -104,5 +107,6 @@ function routeFromHash(hash: string): RouteState | null {
   if (!isAppView(rawView)) return { view: 'main', params: {} };
   if (rawView === 'settings' && rawMode) return { view: 'settings', params: { mode: rawMode } };
   if (rawView === 'tools' && rawMode) return { view: 'tools', params: { tool: rawMode } };
+  if (rawView === 'activity-detail' && rawMode) return { view: 'activity-detail', params: { event_id: rawMode } };
   return { view: rawView, params: {} };
 }

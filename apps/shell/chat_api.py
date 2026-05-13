@@ -464,11 +464,14 @@ class ChatAPI:
 
         # 建立 task_id → assistant 消息的映射。只有同页存在 user
         # 消息的 task 才做配对重排；主动关怀这类 assistant-only
-        # 消息保持原本时间线位置。
+        # 消息保持原本时间线位置。若历史库里已经有重复 assistant，
+        # 只取最可信的一条，避免 UI 再把脏数据渲染成重复回复。
         assistant_by_task: dict[str, ChatMessage] = {}
         for msg in messages:
             if msg.role == MessageRole.ASSISTANT and msg.task_id in user_task_ids:
-                assistant_by_task[msg.task_id] = msg
+                current = assistant_by_task.get(msg.task_id)
+                if current is None or ChatAPI._prefer_assistant_for_sort(msg, current):
+                    assistant_by_task[msg.task_id] = msg
 
         result: list[ChatMessage] = []
         inserted_assistant_ids: set[str] = set()
@@ -485,16 +488,27 @@ class ChatAPI:
                     result.append(assistant)
                     inserted_assistant_ids.add(assistant.message_id)
 
-        # 兜底：分页/limit 截断时 user 可能不在当前列表，不能丢弃这些 assistant。
-        for msg in messages:
-            if (
-                msg.role == MessageRole.ASSISTANT
-                and msg.task_id in user_task_ids
-                and msg.message_id not in inserted_assistant_ids
-            ):
+        # 兜底：分页/limit 截断时 user 可能不在当前列表，
+        # 不能丢弃这条 canonical assistant。
+        for msg in assistant_by_task.values():
+            if msg.message_id not in inserted_assistant_ids:
                 result.append(msg)
 
         return result
+
+    @staticmethod
+    def _prefer_assistant_for_sort(candidate: ChatMessage, current: ChatMessage) -> bool:
+        status_rank = {
+            MessageStatus.COMPLETED: 0,
+            MessageStatus.FAILED: 1,
+            MessageStatus.PROCESSING: 2,
+            MessageStatus.PENDING: 3,
+        }
+        candidate_rank = status_rank.get(candidate.status, 9)
+        current_rank = status_rank.get(current.status, 9)
+        if candidate_rank != current_rank:
+            return candidate_rank < current_rank
+        return candidate.created_at > current.created_at
 
     def get_attachment_file(self, attachment_id: str) -> Dict[str, Any]:
         """返回聊天附件文件信息，供 HTTP 路由发送预览图。"""
@@ -628,6 +642,8 @@ class ChatAPI:
 
             task = self._state.get_task(msg.task_id)
             if task is None:
+                if msg.status in (MessageStatus.PENDING, MessageStatus.PROCESSING):
+                    self._session.mark_message_failed(msg.message_id, "任务状态不可恢复")
                 continue
             synced_task_ids.add(msg.task_id)
 

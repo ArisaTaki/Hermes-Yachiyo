@@ -54,12 +54,13 @@ def _chat_message(
     role: MessageRole,
     content: str = "",
     task_id: str | None = None,
+    status: MessageStatus = MessageStatus.COMPLETED,
 ) -> ChatMessage:
     return ChatMessage(
         message_id=message_id,
         role=role,
         content=content,
-        status=MessageStatus.COMPLETED,
+        status=status,
         created_at=datetime.now(timezone.utc),
         task_id=task_id,
     )
@@ -203,6 +204,22 @@ def test_sort_messages_keeps_assistant_only_task_in_timeline():
         "user",
         "assistant",
     ]
+
+
+def test_sort_messages_dedupes_repeated_assistant_for_same_user_task():
+    user = _chat_message("user", MessageRole.USER, "早上好", task_id="t1")
+    completed = _chat_message("assistant-done", MessageRole.ASSISTANT, "早上好呀", task_id="t1")
+    stale_processing = _chat_message(
+        "assistant-stale",
+        MessageRole.ASSISTANT,
+        "早上好呀",
+        task_id="t1",
+        status=MessageStatus.PROCESSING,
+    )
+
+    sorted_messages = ChatAPI._sort_messages_by_task([user, completed, stale_processing])
+
+    assert [message.message_id for message in sorted_messages] == ["user", "assistant-done"]
 
 
 def test_send_message_accepts_pasted_image_attachment(tmp_path, monkeypatch):
@@ -506,8 +523,10 @@ def test_clear_session_starts_new_session_and_preserves_active_task(tmp_path):
         store.close()
 
 
-def test_delete_current_session_removes_session_and_cancels_active_task(tmp_path):
+def test_delete_current_session_removes_session_and_cancels_active_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
     original_get_store = _store_mod.get_chat_store
     _store_mod.get_chat_store = lambda: store
     try:
@@ -531,6 +550,7 @@ def test_delete_current_session_removes_session_and_cancels_active_task(tmp_path
         assert api.get_messages()["messages"] == []
     finally:
         _store_mod.get_chat_store = original_get_store
+        activity_store.close()
         store.close()
 
 

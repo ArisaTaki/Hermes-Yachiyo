@@ -145,6 +145,92 @@ def test_upsert_assistant_message_idempotent(tmp_path):
         store.close()
 
 
+def test_upsert_reuses_persisted_assistant_across_session_instances(tmp_path):
+    """跨实例流式写入不会创建第二条 assistant。"""
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        foreground = ChatSession(session_id="s1")
+        foreground.attach_store(store, load_existing=False)
+        user_id = foreground.add_user_message("跨实例流式")
+        foreground.link_message_to_task(user_id, "t1")
+
+        background = ChatSession(session_id="s1")
+        background.attach_store(store, load_existing=True, fail_active_messages=False)
+        placeholder_id = background.upsert_assistant_message("t1", "", MessageStatus.PROCESSING)
+
+        streaming_id = foreground.upsert_assistant_message(
+            "t1",
+            "部分输出",
+            MessageStatus.PROCESSING,
+        )
+        completed_id = foreground.upsert_assistant_message(
+            "t1",
+            "最终结果",
+            MessageStatus.COMPLETED,
+        )
+
+        db_msgs = store.load_messages("s1")
+        assistant_msgs = [m for m in db_msgs if m.role == "assistant" and m.task_id == "t1"]
+        assert placeholder_id == streaming_id == completed_id
+        assert len(assistant_msgs) == 1
+        assert assistant_msgs[0].content == "最终结果"
+        assert assistant_msgs[0].status == "completed"
+        assert foreground.is_processing() is False
+    finally:
+        store.close()
+
+
+def test_session_load_dedupes_stale_processing_assistant(tmp_path):
+    """兼容旧库里同 task 同时存在 completed 和 processing 的脏数据。"""
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        store.create_session("s1")
+        store.save_message(StoredMessage(
+            message_id="user",
+            session_id="s1",
+            role="user",
+            content="早上好",
+            status="completed",
+            task_id="t1",
+            error=None,
+            created_at="2026-01-01T00:00:00+00:00",
+        ))
+        store.save_message(StoredMessage(
+            message_id="assistant-done",
+            session_id="s1",
+            role="assistant",
+            content="早上好呀",
+            status="completed",
+            task_id="t1",
+            error=None,
+            created_at="2026-01-01T00:00:01+00:00",
+        ))
+        store.save_message(StoredMessage(
+            message_id="assistant-stale",
+            session_id="s1",
+            role="assistant",
+            content="早上好呀",
+            status="processing",
+            task_id="t1",
+            error=None,
+            created_at="2026-01-01T00:00:02+00:00",
+        ))
+
+        restored = ChatSession(session_id="s1")
+        restored.attach_store(store, load_existing=True, fail_active_messages=False)
+
+        assistant_msgs = [m for m in restored.messages if m.role == MessageRole.ASSISTANT]
+        db_assistant_msgs = [m for m in store.load_messages("s1") if m.role == "assistant"]
+        assert len(assistant_msgs) == 1
+        assert assistant_msgs[0].message_id == "assistant-done"
+        assert assistant_msgs[0].status == MessageStatus.COMPLETED
+        assert len(db_assistant_msgs) == 1
+        assert db_assistant_msgs[0].message_id == "assistant-done"
+        assert restored.is_processing() is False
+    finally:
+        store.close()
+
+
 def test_upsert_assistant_message_can_attach_cached_audio(tmp_path):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     try:
