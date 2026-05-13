@@ -51,7 +51,7 @@ def _ensure_bridge_mocks() -> None:
 
             return wrap
 
-        get = post = patch = options = _decorator
+        get = post = patch = delete = options = _decorator
 
     class _MockFastAPI:
         def __init__(self, **kw):

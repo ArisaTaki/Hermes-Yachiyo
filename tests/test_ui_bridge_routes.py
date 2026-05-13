@@ -323,6 +323,7 @@ async def test_activity_route_forwards_filters(monkeypatch):
         "query": "script",
         "status": "running",
         "tool": "terminal",
+        "phase": "",
         "session_id": "s1",
         "task_id": "t1",
         "limit": 25,
