@@ -119,6 +119,13 @@ button.loading-button::before {
   animation: button-spin 0.8s linear infinite;
 }
 
+.ui-icon {
+  display: block;
+  width: 1em;
+  height: 1em;
+  flex: 0 0 auto;
+}
+
 @keyframes button-spin {
   to {
     transform: rotate(360deg);
@@ -1401,7 +1408,9 @@ button:hover {
 }
 
 .chat-messages-content {
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   gap: 16px;
   min-height: 0;
   transition: opacity 180ms var(--hy-ease-out);
@@ -4071,6 +4080,7 @@ button:hover {
   .tool-center-summary,
   .tool-action-row,
   .tool-config-grid,
+  .tool-config-skeleton-grid,
   .tool-grid {
     grid-template-columns: 1fr;
   }
@@ -4675,11 +4685,37 @@ body.electron-window .hy-traffic {
   white-space: nowrap;
 }
 
+.hy-titlebar-mark,
+.hy-brand-mark {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.hy-titlebar-mark {
+  width: 24px;
+  height: 24px;
+}
+
 .hy-titlebar-logo {
   width: 20px;
   height: 20px;
   border-radius: 50%;
   object-fit: cover;
+}
+
+.hy-titlebar-mark .ui-icon {
+  position: absolute;
+  right: -4px;
+  bottom: -3px;
+  width: 11px;
+  height: 11px;
+  padding: 1px;
+  border-radius: 999px;
+  background: oklch(12% 0.028 258 / 0.92);
+  color: var(--hy-gold);
+  filter: drop-shadow(0 0 6px oklch(82% 0.135 76 / 0.38));
 }
 
 .hy-titlebar-actions {
@@ -4743,12 +4779,36 @@ body.electron-window .hy-traffic {
   text-align: left;
 }
 
+.hy-brand-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 70% 20%, oklch(82% 0.135 76 / 0.26), transparent 38%),
+    linear-gradient(135deg, oklch(72% 0.14 350 / 0.28), oklch(75% 0.095 205 / 0.2));
+  box-shadow:
+    inset 0 0 0 1px oklch(100% 0 0 / 0.08),
+    0 0 22px oklch(72% 0.14 350 / 0.16);
+}
+
 .hy-brand-logo {
   width: 36px;
   height: 36px;
-  border-radius: 50%;
+  border-radius: 12px;
   object-fit: cover;
-  box-shadow: 0 0 18px oklch(75% 0.095 205 / 0.18);
+}
+
+.hy-brand-mark .ui-icon {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 17px;
+  height: 17px;
+  padding: 3px;
+  border: 1px solid oklch(75% 0.095 205 / 0.22);
+  border-radius: 999px;
+  background: oklch(12% 0.028 258 / 0.96);
+  color: var(--hy-gold);
 }
 
 .hy-brand span {
@@ -4901,10 +4961,27 @@ body.electron-window .hy-traffic {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
-  opacity: 0.78;
+  width: 22px;
+  height: 22px;
+  border: 1px solid oklch(75% 0.095 205 / 0.1);
+  border-radius: 7px;
+  background: oklch(75% 0.095 205 / 0.055);
+  color: var(--hy-muted);
+  opacity: 0.9;
   font-size: 14px;
+  transition: 180ms var(--hy-ease-out);
+}
+
+.hy-nav-icon .ui-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.hy-nav-item:hover .hy-nav-icon,
+.hy-nav-item.active .hy-nav-icon {
+  border-color: oklch(72% 0.14 350 / 0.22);
+  background: oklch(72% 0.14 350 / 0.1);
+  color: var(--hy-accent);
 }
 
 .hy-nav-item em {
@@ -5283,6 +5360,11 @@ body.electron-window .hy-traffic {
   font-style: normal;
 }
 
+.hy-status-card header i .ui-icon {
+  width: 18px;
+  height: 18px;
+}
+
 .hy-status-card strong {
   display: block;
   margin-bottom: 4px;
@@ -5404,6 +5486,11 @@ body.electron-window .hy-traffic {
   background: oklch(75% 0.095 205 / 0.08);
   color: var(--hy-cyan);
   font-size: 18px;
+}
+
+.hy-tool-card span .ui-icon {
+  width: 20px;
+  height: 20px;
 }
 
 .hy-tool-card strong {
@@ -7137,6 +7224,11 @@ body.electron-window .hy-traffic {
   color: oklch(74% 0.14 350);
 }
 
+.hy-content .open-chat-shell .chat-action-btn .ui-icon {
+  width: 16px;
+  height: 16px;
+}
+
 .hy-content .open-chat-shell .chat-messages {
   position: relative;
   display: flex;
@@ -7144,7 +7236,7 @@ body.electron-window .hy-traffic {
   gap: 16px;
   min-height: 0;
   overflow-y: auto;
-  padding: 24px;
+  padding: 24px clamp(18px, 2.8vw, 40px);
   background:
     linear-gradient(180deg, oklch(10.5% 0.025 260 / 0.42), transparent 30%),
     transparent;
@@ -7166,45 +7258,14 @@ body.electron-window .hy-traffic {
 
 .hy-content .open-chat-shell .message {
   display: flex;
+  flex: 0 1 auto;
   gap: 12px;
-  max-width: min(80%, 720px);
+  width: fit-content;
+  max-width: min(760px, calc(100% - 52px));
+  min-width: 0;
   opacity: 0;
   transform: translateY(12px);
   animation: hy-message-enter 400ms var(--hy-ease-out) both;
-}
-
-@media (min-width: 1500px) {
-  .hy-content .open-chat-shell .chat-messages {
-    gap: 18px;
-    padding: 30px clamp(32px, 4vw, 72px);
-  }
-
-  .hy-content .open-chat-shell .message {
-    width: min(88%, 1280px);
-    max-width: none;
-  }
-
-  .hy-content .open-chat-shell .message--system {
-    width: min(76%, 1040px);
-    max-width: none;
-  }
-
-  .hy-content .open-chat-shell .message-stack {
-    flex: 1;
-  }
-
-  .hy-content .open-chat-shell .message--agent .message-bubble,
-  .hy-content .open-chat-shell .message--system .message-bubble {
-    width: 100%;
-  }
-
-  .hy-content .open-chat-shell .message-bubble {
-    padding: 14px 18px;
-  }
-
-  .hy-content .open-chat-shell .chat-input-area.refined-composer {
-    padding: 18px clamp(32px, 4vw, 72px);
-  }
 }
 
 .hy-content .open-chat-shell .message:nth-child(1) {
@@ -7250,16 +7311,22 @@ body.electron-window .hy-traffic {
 
 .hy-content .open-chat-shell .message--agent {
   align-self: flex-start;
+  justify-self: start;
+  margin-right: auto;
 }
 
 .hy-content .open-chat-shell .message--user {
   align-self: flex-end;
+  justify-self: end;
   flex-direction: row-reverse;
+  max-width: min(560px, calc(100% - 52px));
+  margin-left: auto;
 }
 
 .hy-content .open-chat-shell .message--system {
   align-self: center;
-  max-width: min(78%, 620px);
+  justify-self: center;
+  max-width: min(640px, calc(100% - 52px));
 }
 
 .hy-content .open-chat-shell .message-avatar {
@@ -7293,6 +7360,7 @@ body.electron-window .hy-traffic {
 .hy-content .open-chat-shell .message-stack {
   display: grid;
   gap: 4px;
+  max-width: 100%;
   min-width: 0;
 }
 
@@ -7301,6 +7369,7 @@ body.electron-window .hy-traffic {
 }
 
 .hy-content .open-chat-shell .message-bubble {
+  width: fit-content;
   max-width: 100%;
   padding: 12px 16px;
   border-radius: 16px;
@@ -7371,6 +7440,11 @@ body.electron-window .hy-traffic {
 .hy-content .open-chat-shell .message-copy-button.copied {
   border-color: oklch(66% 0.12 188 / 0.32);
   color: var(--hy-teal);
+}
+
+.hy-content .open-chat-shell .message-copy-button .ui-icon {
+  width: 13px;
+  height: 13px;
 }
 
 .hy-content .open-chat-shell .message-activity-list {
@@ -7497,7 +7571,7 @@ body.electron-window .hy-traffic {
 
 .hy-content .open-chat-shell .chat-input-area.refined-composer {
   display: block;
-  padding: 16px 24px;
+  padding: 16px clamp(18px, 2.8vw, 40px);
   border-top: 1px solid var(--hy-border-soft);
   background: var(--hy-surface);
 }
@@ -7605,6 +7679,12 @@ body.electron-window .hy-traffic {
   background: oklch(74% 0.14 350 / 0.14);
   color: var(--hy-fg);
   font-size: 11px;
+}
+
+.hy-content .open-chat-shell .chat-attach-btn .ui-icon,
+.hy-content .open-chat-shell .chat-send-btn .ui-icon {
+  width: 17px;
+  height: 17px;
 }
 
 .hy-content .open-chat-shell .chat-attach-btn:hover:not(:disabled),
@@ -8341,6 +8421,141 @@ body.electron-window .hy-traffic {
 .hy-content .tool-card span,
 .hy-content .tool-card small {
   color: var(--hy-subtle);
+}
+
+.hy-content .tool-config-panel {
+  gap: 16px;
+  border: 1px solid var(--hy-border-soft);
+  background:
+    radial-gradient(ellipse 48% 120% at 100% 0%, oklch(72% 0.14 350 / 0.055), transparent 58%),
+    linear-gradient(180deg, color-mix(in oklch, var(--hy-surface) 92%, transparent), oklch(9.5% 0.024 260 / 0.7));
+  padding: 18px;
+}
+
+.hy-content .tool-config-panel.empty {
+  min-height: 260px;
+  align-content: start;
+  border-style: solid;
+  border-color: oklch(75% 0.095 205 / 0.18);
+  background:
+    radial-gradient(ellipse 46% 100% at 0% 0%, oklch(75% 0.095 205 / 0.055), transparent 62%),
+    oklch(10% 0.025 260 / 0.7);
+}
+
+.hy-content .tool-config-panel.empty strong,
+.hy-content .tool-config-empty strong,
+.hy-content .tool-config-head strong,
+.hy-content .tool-config-test-head strong,
+.hy-content .tool-config-test-row span {
+  color: var(--hy-fg);
+}
+
+.hy-content .tool-config-panel.empty span,
+.hy-content .tool-config-empty span,
+.hy-content .tool-config-head span,
+.hy-content .tool-config-field small,
+.hy-content .tool-config-test-head span,
+.hy-content .tool-config-test-row small,
+.hy-content .tool-config-meta span {
+  color: var(--hy-subtle);
+}
+
+.hy-content .tool-config-empty,
+.hy-content .tool-config-test-result,
+.hy-content .tool-config-test-row {
+  border-color: var(--hy-border-soft);
+  background: oklch(255 0 0 / 0.035);
+}
+
+.hy-content .tool-config-count,
+.hy-content .tool-config-meta span {
+  border-color: oklch(75% 0.095 205 / 0.16);
+  background: oklch(75% 0.095 205 / 0.045);
+  color: var(--hy-muted);
+}
+
+.hy-content .tool-config-loading {
+  min-height: 340px;
+  align-content: start;
+}
+
+.tool-config-loading-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tool-config-loading-head div {
+  display: grid;
+  gap: 4px;
+}
+
+.tool-config-loading-head strong {
+  color: var(--hy-fg);
+  font-size: 15px;
+  font-weight: 590;
+}
+
+.tool-config-loading-head span {
+  color: var(--hy-subtle);
+  font-size: 12px;
+}
+
+.tool-config-loading-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid oklch(75% 0.095 205 / 0.18);
+  border-radius: var(--hy-radius-control);
+  background: oklch(75% 0.095 205 / 0.08);
+  color: var(--hy-cyan);
+}
+
+.tool-config-loading-icon .ui-icon {
+  width: 20px;
+  height: 20px;
+  animation: hy-settings-spin 1.4s linear infinite;
+}
+
+.tool-config-skeleton-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding-top: 6px;
+}
+
+.tool-config-skeleton-line {
+  position: relative;
+  height: 42px;
+  overflow: hidden;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: var(--hy-radius-control);
+  background: oklch(255 0 0 / 0.04);
+}
+
+.tool-config-skeleton-line.title {
+  height: 56px;
+}
+
+.tool-config-skeleton-line.wide {
+  grid-column: 1 / -1;
+  height: 76px;
+}
+
+.tool-config-skeleton-line::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, oklch(255 0 0 / 0.08), transparent);
+  transform: translateX(-100%);
+  animation: hy-skeleton-sheen 1300ms cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+@keyframes hy-settings-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .hy-content .diagnostic-command-card.selected,

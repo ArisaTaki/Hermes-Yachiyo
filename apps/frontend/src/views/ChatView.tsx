@@ -8,6 +8,7 @@ import type {
 } from 'react';
 
 import { ImageAttachmentViewer } from '../components/ImageAttachmentViewer';
+import { UiIcon } from '../components/UiIcon';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiGet, apiPost, bridgeUrl, copyText, openAppView, openExternalUrl } from '../lib/bridge';
@@ -187,7 +188,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [messagesVisible, setMessagesVisible] = useState(false);
   const [chatBootstrapped, setChatBootstrapped] = useState(false);
   const [sidebarMaxWidth, setSidebarMaxWidth] = useState(() => responsiveChatSidebarMaxWidth());
-  const [sidebarWidth, setSidebarWidth] = useState(() => responsiveChatSidebarMaxWidth());
+  const [sidebarWidth, setSidebarWidth] = useState(CHAT_SIDEBAR_BASE_MAX_WIDTH);
   const [composerHeight, setComposerHeight] = useState(() => storedComposerHeight());
   const [, setRenderTick] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -206,7 +207,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const messageLoadTokenRef = useRef(0);
   const conversationLoadTokenRef = useRef(0);
   const conversationTransitionRef = useRef(false);
-  const sidebarAutoWidthRef = useRef(true);
   const assistantProfileSeedRef = useRef(assistantProfileSeed);
   const messageTextSelectingRef = useRef(false);
   const isProcessingRef = useRef(false);
@@ -342,8 +342,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }, [isProcessing, refreshMessages]);
 
   useEffect(() => {
-    if (!isProcessing) return undefined;
-    const timer = window.setInterval(() => void loadSessions(), ACTIVE_POLL_INTERVAL_MS);
+    const timer = window.setInterval(
+      () => void loadSessions(),
+      isProcessing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS,
+    );
     return () => window.clearInterval(timer);
   }, [isProcessing, loadSessions]);
 
@@ -373,7 +375,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const maxWidth = responsiveChatSidebarMaxWidth();
       setSidebarMaxWidth(maxWidth);
       setSidebarWidth((width) => {
-        if (sidebarAutoWidthRef.current) return maxWidth;
         return Math.min(Math.max(width, CHAT_SIDEBAR_MIN_WIDTH), maxWidth);
       });
     };
@@ -517,6 +518,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       });
       if (result.ok === false) throw new Error(result.error || '发送失败');
       setStatus('等待回复...');
+      void loadSessions();
       await refreshMessages();
       scrollToConversationBottom(true);
       await loadSessions();
@@ -741,7 +743,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
 
     const handlePointerMove = (moveEvent: PointerEvent) => {
-      sidebarAutoWidthRef.current = false;
       const nextWidth = Math.max(
         CHAT_SIDEBAR_MIN_WIDTH,
         Math.min(sidebarMaxWidth, startWidth + moveEvent.clientX - startX),
@@ -764,19 +765,15 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     if (embedded) return;
     if (event.key === 'ArrowLeft') {
       event.preventDefault();
-      sidebarAutoWidthRef.current = false;
       setSidebarWidth((value) => Math.max(CHAT_SIDEBAR_MIN_WIDTH, value - 12));
     } else if (event.key === 'ArrowRight') {
       event.preventDefault();
-      sidebarAutoWidthRef.current = false;
       setSidebarWidth((value) => Math.min(sidebarMaxWidth, value + 12));
     } else if (event.key === 'Home') {
       event.preventDefault();
-      sidebarAutoWidthRef.current = false;
       setSidebarWidth(CHAT_SIDEBAR_MIN_WIDTH);
     } else if (event.key === 'End') {
       event.preventDefault();
-      sidebarAutoWidthRef.current = true;
       setSidebarWidth(sidebarMaxWidth);
     }
   }
@@ -847,7 +844,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       })
     : sessionItems;
   const currentSession = sessionItems.find((session) => session.session_id === sessions?.current_session_id);
-  const currentTitle = currentSession ? sessionTitle(currentSession) : (assistantProfile?.agent_name || '月見八千代');
+  const currentTitle = currentSession
+    ? sessionTitle(currentSession)
+    : firstUserMessageTitle(messages) || assistantProfile?.agent_name || '月見八千代';
   const headerActivity = latestVisibleActivity(messages);
   const chatWorkspaceStyle = embedded
     ? undefined
@@ -937,7 +936,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             </div>
             <div className="chat-header-actions">
               {embedded ? null : (
-                <button type="button" className="chat-action-btn" title="主控台" aria-label="打开主控台" onClick={() => void openAppView('main')}>⌂</button>
+                <button type="button" className="chat-action-btn" title="主控台" aria-label="打开主控台" onClick={() => void openAppView('main')}>
+                  <UiIcon name="home" />
+                </button>
               )}
               <button
                 type="button"
@@ -947,11 +948,17 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 disabled={isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS}
                 onClick={() => fileInputRef.current?.click()}
               >
-                🖼
+                <UiIcon name="image" />
               </button>
-              <button type="button" className="chat-action-btn" title="停止生成" aria-label="停止生成" onClick={() => void cancelProcessing()} disabled={!isProcessing}>■</button>
-              <button type="button" className="chat-action-btn" title="新对话" aria-label="新对话" onClick={() => void clearSession()}>＋</button>
-              <button type="button" className="chat-action-btn danger-action" title="删除对话" aria-label="删除对话" onClick={() => void deleteSession()} disabled={!sessions?.sessions?.length}>×</button>
+              <button type="button" className="chat-action-btn" title="停止生成" aria-label="停止生成" onClick={() => void cancelProcessing()} disabled={!isProcessing}>
+                <UiIcon name="stop" />
+              </button>
+              <button type="button" className="chat-action-btn" title="新对话" aria-label="新对话" onClick={() => void clearSession()}>
+                <UiIcon name="plus" />
+              </button>
+              <button type="button" className="chat-action-btn danger-action" title="删除对话" aria-label="删除对话" onClick={() => void deleteSession()} disabled={!sessions?.sessions?.length}>
+                <UiIcon name="close" />
+              </button>
             </div>
           </header>
 
@@ -1048,7 +1055,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 aria-label="附加图片"
                 onClick={() => fileInputRef.current?.click()}
               >
-                🖼
+                <UiIcon name="image" />
               </button>
               <button
                 type={isProcessing ? 'button' : 'submit'}
@@ -1058,7 +1065,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 title={isProcessing ? '停止生成' : '发送消息'}
                 onClick={isProcessing ? () => void cancelProcessing() : undefined}
               >
-                {isProcessing ? '■' : '↑'}
+                <UiIcon name={isProcessing ? 'stop' : 'send'} />
               </button>
             </div>
             <input
@@ -1141,7 +1148,7 @@ function MessageBubble({ assistantProfile, assistantProfileLoading, copied, disp
             aria-label={copied ? '已复制' : '复制内容'}
             onClick={onCopy}
           >
-            {copied ? '✓' : '⧉'}
+            <UiIcon name={copied ? 'check' : 'copy'} />
           </button>
         </div>
       </div>
@@ -1300,7 +1307,11 @@ function imageInputHelpText(executor: ExecutorPayload | null) {
 }
 
 function sessionTitle(session: SessionItem) {
-  return session.title || session.session_id.slice(0, 8);
+  const title = (session.title || '').trim();
+  if (title && !looksLikeSessionIdTitle(title, session.session_id)) return title;
+  const preview = (session.latest_message_preview || '').trim();
+  if (preview) return compactStatusText(preview, 36);
+  return '新对话';
 }
 
 function sessionPreview(session: SessionItem) {
@@ -1310,6 +1321,16 @@ function sessionPreview(session: SessionItem) {
   if (session.message_count) return `已完成：${preview || sessionTitle(session)}`;
   if (!session.message_count) return '新的月夜会话';
   return preview;
+}
+
+function firstUserMessageTitle(messages: ChatMessage[]) {
+  const firstUser = messages.find((message) => message.role === 'user' && messageText(message).trim());
+  return firstUser ? compactStatusText(messageText(firstUser), 36) : '';
+}
+
+function looksLikeSessionIdTitle(title: string, sessionId: string) {
+  const value = title.trim();
+  return value === sessionId.slice(0, 8) || /^[a-f0-9]{8,32}$/i.test(value);
 }
 
 function latestVisibleActivity(messages: ChatMessage[]) {

@@ -1,6 +1,7 @@
 import { Suspense, createContext, lazy, FormEvent, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 
 import logoUrl from '../../../../docs/open-design/logo.png';
+import { UiIcon, type UiIconName } from '../components/UiIcon';
 import { AssistantProfileSeedContext, type AssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiDelete, apiGet, apiPost, checkAppUpdate, openDesktopMode, openExternalUrl, openPath, quitApp } from '../lib/bridge';
 import { type AppView, currentParam, navigateTo } from '../lib/view';
@@ -207,37 +208,37 @@ const launcherPayloadCache: Partial<Record<'bubble' | 'live2d', LauncherPayload>
 
 const NAV_GROUPS: Array<{
   label: string;
-  items: Array<{ view: AppView; label: string; icon: string; badge?: string; mode?: string }>;
+  items: Array<{ view: AppView; label: string; icon: UiIconName; badge?: string; mode?: string }>;
 }> = [
     {
       label: '初始化',
       items: [
-        { view: 'main', label: '主控台', icon: '◇' },
-        { view: 'installer', label: '安装器', icon: '▣' },
-        { view: 'provider', label: '模型配置', icon: '⌁' },
+        { view: 'main', label: '主控台', icon: 'dashboard' },
+        { view: 'installer', label: '安装器', icon: 'installer' },
+        { view: 'provider', label: '模型配置', icon: 'provider' },
       ],
     },
     {
       label: '日常桌面',
       items: [
-        { view: 'chat', label: '对话', icon: '◌' },
-        { view: 'bubble', label: '气泡模式', icon: '◍' },
-        { view: 'live2d', label: 'Live2D 模式', icon: '◈' },
-        { view: 'proactive-tts', label: 'GPT-SoVITS', icon: '♪' },
+        { view: 'chat', label: '对话', icon: 'chat' },
+        { view: 'bubble', label: '气泡模式', icon: 'bubble' },
+        { view: 'live2d', label: 'Live2D 模式', icon: 'live2d' },
+        { view: 'proactive-tts', label: 'GPT-SoVITS', icon: 'voice' },
       ],
     },
     {
       label: '资源',
       items: [
-        { view: 'resources', label: '资源管理', icon: '▤' },
-        { view: 'workspace', label: '工作区', icon: '▥' },
+        { view: 'resources', label: '资源管理', icon: 'resources' },
+        { view: 'workspace', label: '工作区', icon: 'workspace' },
       ],
     },
     {
       label: '维护',
       items: [
-        { view: 'diagnostics', label: '诊断工具', icon: '⌕' },
-        { view: 'settings', label: '设置', icon: '⚙' },
+        { view: 'diagnostics', label: '诊断工具', icon: 'diagnostics' },
+        { view: 'settings', label: '设置', icon: 'settings' },
       ],
     },
   ];
@@ -246,7 +247,7 @@ type ToolStatusTone = 'ready' | 'pending' | 'error';
 
 type ToolCard = {
   view: AppView;
-  icon: string;
+  icon: UiIconName;
   title: string;
   detail: string;
   status: string;
@@ -254,10 +255,10 @@ type ToolCard = {
 };
 
 const TOOL_CARD_DEFS: Array<Omit<ToolCard, 'status' | 'statusTone'> & { status?: string; statusTone?: ToolStatusTone }> = [
-  { view: 'chat' as AppView, icon: '💬', title: '对话', detail: '与八千代对话，支持文本和图片输入。' },
-  { view: 'bubble' as AppView, icon: '💭', title: '气泡模式', detail: '桌面悬浮气泡，随时对话，支持拖拽和边缘吸附。', status: '就绪', statusTone: 'ready' },
-  { view: 'live2d' as AppView, icon: '🎭', title: 'Live2D 模式', detail: '虚拟形象互动，口型同步，表情动作。' },
-  { view: 'proactive-tts' as AppView, icon: '🎵', title: 'GPT-SoVITS', detail: '语音合成，让八千代开口说话。', status: '就绪', statusTone: 'ready' },
+  { view: 'chat' as AppView, icon: 'chat', title: '对话', detail: '与八千代对话，支持文本和图片输入。' },
+  { view: 'bubble' as AppView, icon: 'bubble', title: '气泡模式', detail: '桌面悬浮气泡，随时对话，支持拖拽和边缘吸附。', status: '就绪', statusTone: 'ready' },
+  { view: 'live2d' as AppView, icon: 'live2d', title: 'Live2D 模式', detail: '虚拟形象互动，口型同步，表情动作。' },
+  { view: 'proactive-tts' as AppView, icon: 'voice', title: 'GPT-SoVITS', detail: '语音合成，让八千代开口说话。', status: '就绪', statusTone: 'ready' },
 ];
 
 const TWEAK_ACCENTS = [
@@ -496,20 +497,24 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
           <span className="maximize" />
         </div>
         <div className="hy-titlebar-center">
-          <img src={logoUrl} alt="" className="hy-titlebar-logo" />
+          <span className="hy-titlebar-mark" aria-hidden="true">
+            <img src={logoUrl} alt="" className="hy-titlebar-logo" />
+          </span>
           <span>{activeLabel}</span>
         </div>
         <div className="hy-titlebar-actions">
-          <button type="button" className={tweaksOpen ? 'hy-icon-btn active' : 'hy-icon-btn'} onClick={() => setTweaksOpen((value) => !value)} title="视觉调试">⚙</button>
-          <button type="button" className="hy-icon-btn" onClick={() => navigateTo('diagnostics')} title="诊断">⌕</button>
-          <button type="button" className="hy-icon-btn" onClick={quitApp} title="退出">×</button>
+          <button type="button" className={tweaksOpen ? 'hy-icon-btn active' : 'hy-icon-btn'} onClick={() => setTweaksOpen((value) => !value)} title="视觉调试"><UiIcon name="settings" /></button>
+          <button type="button" className="hy-icon-btn" onClick={() => navigateTo('diagnostics')} title="诊断"><UiIcon name="diagnostics" /></button>
+          <button type="button" className="hy-icon-btn" onClick={quitApp} title="退出"><UiIcon name="close" /></button>
         </div>
       </header>
 
       <aside className="hy-sidebar">
         <div className="hy-sidebar-header">
           <button type="button" className="hy-brand" onClick={() => navigateTo('main')} aria-label="返回主控台">
-            <img src={logoUrl} alt="" className="hy-brand-logo" />
+            <span className="hy-brand-mark" aria-hidden="true">
+              <img src={logoUrl} alt="" className="hy-brand-logo" />
+            </span>
             <span>Hermes Yachiyo</span>
           </button>
         </div>
@@ -538,7 +543,7 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
                     key={`${group.label}-${item.view}`}
                     onClick={() => navigateTo(item.view)}
                   >
-                    <span className="hy-nav-icon">{item.icon}</span>
+                    <span className="hy-nav-icon"><UiIcon name={item.icon} /></span>
                     <span>{item.label}</span>
                     {navBadge(item.view, dashboard) ? <em>{navBadge(item.view, dashboard)}</em> : null}
                   </button>
@@ -754,9 +759,9 @@ export function DashboardPage() {
       </header>
 
       <section className="hy-status-grid hy-stagger">
-        <StatusCard tone="success" label="Bridge 状态" value={bridge} detail={data?.bridge?.url || '127.0.0.1 本机桥接'} icon="🌉" />
-        <StatusCard tone={!dataLoaded ? 'info' : modelReady ? 'info' : 'warning'} label="模型连接" value={!dataLoaded ? '加载中' : modelReady ? '已连接' : '待配置'} detail={!dataLoaded ? '正在读取状态' : hermesReadinessLabel(data?.hermes?.readiness_level)} icon="🤖" />
-        <StatusCard tone={!dataLoaded ? 'info' : workspaceReady ? 'success' : 'warning'} label="工作区" value={!dataLoaded ? '加载中' : workspaceReady ? '已初始化' : '待初始化'} detail={data?.workspace?.path || '~/Hermes-Yachiyo/workspace'} icon="📁" />
+        <StatusCard tone="success" label="Bridge 状态" value={bridge} detail={data?.bridge?.url || '127.0.0.1 本机桥接'} icon="activity" />
+        <StatusCard tone={!dataLoaded ? 'info' : modelReady ? 'info' : 'warning'} label="模型连接" value={!dataLoaded ? '加载中' : modelReady ? '已连接' : '待配置'} detail={!dataLoaded ? '正在读取状态' : hermesReadinessLabel(data?.hermes?.readiness_level)} icon="model" />
+        <StatusCard tone={!dataLoaded ? 'info' : workspaceReady ? 'success' : 'warning'} label="工作区" value={!dataLoaded ? '加载中' : workspaceReady ? '已初始化' : '待初始化'} detail={data?.workspace?.path || '~/Hermes-Yachiyo/workspace'} icon="folder" />
       </section>
 
       <section className="hy-section hy-stagger">
@@ -772,7 +777,7 @@ export function DashboardPage() {
               key={tool.title}
               onClick={() => navigateTo(tool.view)}
             >
-              <span>{tool.icon}</span>
+              <span><UiIcon name={tool.icon} /></span>
               <strong>{tool.title}</strong>
               <small>{tool.detail}</small>
               <em className={`hy-tool-status hy-tool-status-${tool.statusTone}`}><i />{tool.status}</em>
@@ -1570,14 +1575,14 @@ export function ToolsAllPage() {
 
   const live2dStatus = live2dToolStatus(live2dLauncher);
   const allTools = [
-    { view: 'bubble' as AppView, icon: '💭', title: '气泡模式', detail: '桌面悬浮气泡，随时对话，支持拖拽和边缘吸附。', status: '就绪', statusTone: 'ready' },
-    { view: 'live2d' as AppView, icon: '🎭', title: 'Live2D 模式', detail: '虚拟形象互动，口型同步，表情动作。', ...live2dStatus },
-    { view: 'proactive-tts' as AppView, icon: '🎵', title: 'GPT-SoVITS', detail: '语音合成，让八千代开口说话。', status: '就绪', statusTone: 'ready' },
-    { view: 'resources' as AppView, icon: '📁', title: '资源管理', detail: '管理 Live2D 模型、语音、壁纸等资源文件。', status: '就绪', statusTone: 'ready' },
-    { view: 'workspace' as AppView, icon: '📂', title: '工作区', detail: '管理对话记录、项目文件和工作区配置。', status: '已初始化', statusTone: 'ready' },
-    { view: 'diagnostics' as AppView, icon: '🔍', title: '诊断工具', detail: '系统检测、日志查看和工具能力入口。', status: '就绪', statusTone: 'ready' },
-    { view: 'provider' as AppView, icon: '🔗', title: '模型配置', detail: '配置 AI 模型提供商和 API Key。', status: '就绪', statusTone: 'ready' },
-    { view: 'chat' as AppView, icon: '💬', title: '对话', detail: '与八千代对话，支持文本和图片输入。', status: '就绪', statusTone: 'ready' },
+    { view: 'bubble' as AppView, icon: 'bubble' as UiIconName, title: '气泡模式', detail: '桌面悬浮气泡，随时对话，支持拖拽和边缘吸附。', status: '就绪', statusTone: 'ready' },
+    { view: 'live2d' as AppView, icon: 'live2d' as UiIconName, title: 'Live2D 模式', detail: '虚拟形象互动，口型同步，表情动作。', ...live2dStatus },
+    { view: 'proactive-tts' as AppView, icon: 'voice' as UiIconName, title: 'GPT-SoVITS', detail: '语音合成，让八千代开口说话。', status: '就绪', statusTone: 'ready' },
+    { view: 'resources' as AppView, icon: 'resources' as UiIconName, title: '资源管理', detail: '管理 Live2D 模型、语音、壁纸等资源文件。', status: '就绪', statusTone: 'ready' },
+    { view: 'workspace' as AppView, icon: 'workspace' as UiIconName, title: '工作区', detail: '管理对话记录、项目文件和工作区配置。', status: '已初始化', statusTone: 'ready' },
+    { view: 'diagnostics' as AppView, icon: 'diagnostics' as UiIconName, title: '诊断工具', detail: '系统检测、日志查看和工具能力入口。', status: '就绪', statusTone: 'ready' },
+    { view: 'provider' as AppView, icon: 'provider' as UiIconName, title: '模型配置', detail: '配置 AI 模型提供商和 API Key。', status: '就绪', statusTone: 'ready' },
+    { view: 'chat' as AppView, icon: 'chat' as UiIconName, title: '对话', detail: '与八千代对话，支持文本和图片输入。', status: '就绪', statusTone: 'ready' },
   ];
 
   return (
@@ -1592,7 +1597,7 @@ export function ToolsAllPage() {
       <div className="hy-tools-grid tools-grid-full">
         {allTools.map((tool) => (
           <button type="button" className="hy-tool-card" key={tool.title} onClick={() => navigateTo(tool.view)}>
-            <span>{tool.icon}</span>
+            <span><UiIcon name={tool.icon} /></span>
             <strong>{tool.title}</strong>
             <small>{tool.detail}</small>
             <em className={`hy-tool-status hy-tool-status-${tool.statusTone}`}><i />{tool.status}</em>
@@ -2006,13 +2011,13 @@ function ActivityDetailSkeleton() {
   );
 }
 
-function StatusCard({ tone, label, value, detail, icon }: { tone: 'success' | 'warning' | 'info'; label: string; value: string; detail: string; icon: string }) {
+function StatusCard({ tone, label, value, detail, icon }: { tone: 'success' | 'warning' | 'info'; label: string; value: string; detail: string; icon: UiIconName }) {
   return (
     <article className={`hy-status-card hy-status-card-${tone} corner-frame`}>
       <div className="corner-frame-inner" />
       <header>
         <span>{label}</span>
-        <i>{icon}</i>
+        <i><UiIcon name={icon} /></i>
       </header>
       <strong>{value}</strong>
       <p>{detail}</p>

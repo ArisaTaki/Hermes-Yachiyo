@@ -17,6 +17,7 @@ import {
   type DesktopTerminalTask,
 } from '../lib/bridge';
 import { currentParam, navigateTo } from '../lib/view';
+import { UiIcon } from '../components/UiIcon';
 
 type HermesStatus = {
   status?: string;
@@ -378,6 +379,7 @@ export function ToolCenterView() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [diagnosticCache, setDiagnosticCache] = useState<DiagnosticCache | null>(null);
   const [toolConfig, setToolConfig] = useState<ToolConfigPayload | null>(null);
+  const [toolConfigLoaded, setToolConfigLoaded] = useState(false);
   const [draftToolId, setDraftToolId] = useState('');
   const [configDraft, setConfigDraft] = useState<Record<string, ConfigFieldValue>>({});
   const [savedDraftSnapshot, setSavedDraftSnapshot] = useState('');
@@ -415,10 +417,14 @@ export function ToolCenterView() {
           setData(payload);
           setDiagnosticCache(cache);
           setToolConfig(config);
+          setToolConfigLoaded(true);
           setError('');
         }
       } catch (err) {
-        if (!disposed) setError(err instanceof Error ? err.message : '读取工具中心失败');
+        if (!disposed) {
+          setToolConfigLoaded(true);
+          setError(err instanceof Error ? err.message : '读取工具中心失败');
+        }
       }
     }
     refresh();
@@ -943,6 +949,7 @@ export function ToolCenterView() {
   const selectedCatalogItem = selectedToolId
     ? visibleToolCatalog.find((item) => toolNameAliases(item).some((alias) => canonicalToolName(alias) === canonicalToolName(selectedToolId)))
     : undefined;
+  const selectedToolLoading = Boolean(selectedToolId && !toolConfigLoaded);
   const attentionItems = attentionItemsForTools(
     visibleToolCatalog,
     limitedToolNames,
@@ -997,7 +1004,9 @@ export function ToolCenterView() {
         {actionStatus ? <div className={/失败|错误|无法|未通过/.test(actionStatus) ? 'notice danger' : 'notice'}>{actionStatus}</div> : null}
         {hasUnsavedChanges ? <div className="notice warn">当前配置有未保存更改。</div> : null}
 
-        {selectedToolConfig ? (
+        {selectedToolLoading ? (
+          <ToolConfigLoadingPanel catalogItem={selectedCatalogItem} />
+        ) : selectedToolConfig ? (
           <ToolConfigPanel
             tool={selectedToolConfig}
             catalogItem={selectedCatalogItem}
@@ -1260,6 +1269,29 @@ function ToolCategoryList({
         </section>
       ))}
     </div>
+  );
+}
+
+function ToolConfigLoadingPanel({ catalogItem }: { catalogItem?: HermesToolCatalogItem }) {
+  return (
+    <section className="tool-config-panel tool-config-loading" aria-busy="true">
+      <div className="tool-config-loading-head">
+        <span className="tool-config-loading-icon">
+          <UiIcon name="settings" />
+        </span>
+        <div>
+          <strong>正在读取工具配置</strong>
+          <span>{catalogItem?.label ? `准备 ${catalogItem.label} 的配置项` : '正在同步 Hermes 工具配置。'}</span>
+        </div>
+      </div>
+      <div className="tool-config-skeleton-grid" aria-hidden="true">
+        <span className="tool-config-skeleton-line title" />
+        <span className="tool-config-skeleton-line title" />
+        <span className="tool-config-skeleton-line" />
+        <span className="tool-config-skeleton-line" />
+        <span className="tool-config-skeleton-line wide" />
+      </div>
+    </section>
   );
 }
 
