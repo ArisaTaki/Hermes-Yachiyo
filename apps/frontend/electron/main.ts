@@ -38,6 +38,35 @@ const PACKAGED_BRIDGE_URL = 'http://127.0.0.1:18420';
 let bridgeUrl = initialBridgeUrl();
 const APP_BUILD_METADATA_FILE = 'hermes-yachiyo-build.json';
 const DEFAULT_UPDATE_REPOSITORY = 'kuguya-AI-app-develop/Hermes-Yachiyo';
+const GITHUB_COMPARE_COMMIT_LIMIT = 100;
+const CHANGELOG_CATEGORY_ORDER = [
+  '新增/改进',
+  '修复',
+  '工程/发布',
+  '文档',
+  '测试',
+  '重构/优化',
+  '其他',
+];
+const CHANGELOG_CATEGORY_BY_KIND: Record<string, string> = {
+  add: '新增/改进',
+  feat: '新增/改进',
+  feature: '新增/改进',
+  fix: '修复',
+  hotfix: '修复',
+  bugfix: '修复',
+  ci: '工程/发布',
+  build: '工程/发布',
+  chore: '工程/发布',
+  release: '工程/发布',
+  docs: '文档',
+  doc: '文档',
+  test: '测试',
+  tests: '测试',
+  refactor: '重构/优化',
+  perf: '重构/优化',
+  style: '重构/优化',
+};
 const BRIDGE_SETTINGS_RETRIES = 40;
 const BRIDGE_SETTINGS_RETRY_MS = 250;
 const BUBBLE_SCREEN_MARGIN = 24;
@@ -139,6 +168,24 @@ type ReleaseChangelog = {
   commits?: ReleaseChangelogCommit[];
   sections?: ReleaseChangelogSection[];
   summary?: string[];
+};
+
+type GitHubCompareCommit = {
+  sha?: string;
+  html_url?: string;
+  commit?: {
+    author?: {
+      name?: string;
+      date?: string;
+    };
+    message?: string;
+  };
+};
+
+type GitHubCompareResponse = {
+  html_url?: string;
+  total_commits?: number;
+  commits?: GitHubCompareCommit[];
 };
 
 type LatestReleaseMetadata = {
@@ -577,6 +624,150 @@ function fetchJson<T>(url: string, redirects = 5): Promise<T> {
   });
 }
 
+function updateMetadataString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function meaningfulUpdateRef(value: unknown): string {
+  const ref = updateMetadataString(value);
+  if (!ref || ref === 'dev' || ref === 'unknown') return '';
+  return ref;
+}
+
+function shortUpdateRef(value: unknown): string {
+  const ref = meaningfulUpdateRef(value);
+  return ref.length > 7 ? ref.slice(0, 7) : ref;
+}
+
+function normalizeGitHubRepository(value: unknown): string {
+  const repository = updateMetadataString(value) || DEFAULT_UPDATE_REPOSITORY;
+  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) ? repository : DEFAULT_UPDATE_REPOSITORY;
+}
+
+function githubCompareUrl(repository: string, baseRef: string, headRef: string): string {
+  return `https://github.com/${repository}/compare/${encodeURIComponent(baseRef)}...${encodeURIComponent(headRef)}`;
+}
+
+function githubCompareApiUrl(repository: string, baseRef: string, headRef: string): string {
+  return `https://api.github.com/repos/${repository}/compare/${encodeURIComponent(baseRef)}...${encodeURIComponent(headRef)}?per_page=${GITHUB_COMPARE_COMMIT_LIMIT}`;
+}
+
+function currentBuildChangelogLabel(current: AppBuildMetadata): string {
+  const parts = [
+    updateMetadataString(current.version),
+    current.build_number !== undefined ? `#${current.build_number}` : '',
+    updateMetadataString(current.short_commit) || shortUpdateRef(current.commit),
+  ].filter(Boolean);
+  return parts.length ? parts.join(' / ') : '当前安装版本';
+}
+
+function latestBuildChangelogLabel(latest: LatestReleaseMetadata, headRef: string): string {
+  const parts = [
+    updateMetadataString(latest.version) || updateMetadataString(latest.tag),
+    numericBuildNumber(latest.build_number ?? latest.run_number) !== undefined
+      ? `#${numericBuildNumber(latest.build_number ?? latest.run_number)}`
+      : '',
+    updateMetadataString(latest.short_commit) || shortUpdateRef(headRef),
+  ].filter(Boolean);
+  return updateMetadataString(latest.tag) || (parts.length ? parts.join(' / ') : '最新版本');
+}
+
+function changelogCategory(subject: string): string {
+  const match = subject.trim().match(/^([A-Za-z]+)(?:\([^)]+\))?[：:]/);
+  if (!match) return '其他';
+  return CHANGELOG_CATEGORY_BY_KIND[match[1].toLowerCase()] || '其他';
+}
+
+function releaseCommitFromGitHub(item: GitHubCompareCommit): ReleaseChangelogCommit | null {
+  const commit = meaningfulUpdateRef(item.sha);
+  const message = updateMetadataString(item.commit?.message);
+  const subject = updateMetadataString(message.split(/\r?\n/, 1)[0]) || shortUpdateRef(commit);
+  if (!commit && !subject) return null;
+  return {
+    commit: commit || undefined,
+    short_commit: shortUpdateRef(commit) || undefined,
+    author: updateMetadataString(item.commit?.author?.name) || undefined,
+    authored_at: updateMetadataString(item.commit?.author?.date) || undefined,
+    subject: subject || undefined,
+    category: changelogCategory(subject),
+    url: updateMetadataString(item.html_url) || null,
+  };
+}
+
+function buildChangelogSections(commits: ReleaseChangelogCommit[]): ReleaseChangelogSection[] {
+  const grouped = new Map<string, ReleaseChangelogCommit[]>(
+    CHANGELOG_CATEGORY_ORDER.map((category) => [category, []]),
+  );
+  for (const commit of commits) {
+    const category = updateMetadataString(commit.category) || '其他';
+    const items = grouped.get(category) || [];
+    items.push({
+      commit: commit.commit,
+      short_commit: commit.short_commit,
+      subject: commit.subject,
+      url: commit.url,
+    });
+    grouped.set(category, items);
+  }
+  return CHANGELOG_CATEGORY_ORDER
+    .map((title) => ({ title, items: grouped.get(title) || [] }))
+    .filter((section) => section.items.length > 0);
+}
+
+async function buildCurrentInstallChangelog(
+  current: AppBuildMetadata,
+  latest: LatestReleaseMetadata,
+): Promise<ReleaseChangelog | null> {
+  const repository = normalizeGitHubRepository(current.repository);
+  const baseRef = meaningfulUpdateRef(current.commit) || meaningfulUpdateRef(current.short_commit);
+  const headRef = meaningfulUpdateRef(latest.commit)
+    || meaningfulUpdateRef(latest.tag)
+    || meaningfulUpdateRef(latest.changelog?.current_tag)
+    || meaningfulUpdateRef(latest.short_commit);
+  if (!baseRef || !headRef || baseRef === headRef) return null;
+
+  const compare = await fetchJson<GitHubCompareResponse>(
+    cacheBustedUrl(githubCompareApiUrl(repository, baseRef, headRef)),
+  );
+  const commits = (Array.isArray(compare.commits) ? compare.commits : [])
+    .slice()
+    .reverse()
+    .map(releaseCommitFromGitHub)
+    .filter((commit): commit is ReleaseChangelogCommit => Boolean(commit));
+  const totalCommits = Number.isFinite(compare.total_commits)
+    ? Math.max(0, Math.trunc(compare.total_commits as number))
+    : commits.length;
+  if (totalCommits <= 0 && commits.length === 0) return null;
+
+  const compareUrl = updateMetadataString(compare.html_url) || githubCompareUrl(repository, baseRef, headRef);
+  return {
+    generated_from: 'github_compare_current_install',
+    previous_tag: currentBuildChangelogLabel(current),
+    previous_commit: baseRef,
+    current_tag: latestBuildChangelogLabel(latest, headRef),
+    compare_url: compareUrl,
+    commit_count: totalCommits || commits.length,
+    commits,
+    sections: buildChangelogSections(commits),
+    summary: commits.slice(0, 8).map((commit) => commit.subject || commit.short_commit || '').filter(Boolean),
+  };
+}
+
+async function latestWithCurrentInstallChangelog(
+  current: AppBuildMetadata,
+  latest: LatestReleaseMetadata,
+  updateAvailable: boolean,
+): Promise<LatestReleaseMetadata> {
+  if (!updateAvailable) return latest;
+  try {
+    const changelog = await buildCurrentInstallChangelog(current, latest);
+    return changelog ? { ...latest, changelog } : latest;
+  } catch (error) {
+    console.warn('[updater] failed to build current install changelog:', error);
+    return latest;
+  }
+}
+
 function downloadFile(
   url: string,
   destination: string,
@@ -685,8 +876,9 @@ function sha256File(filePath: string): Promise<string> {
 async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   const info = appUpdateInfo();
   try {
-    const latest = await fetchJson<LatestReleaseMetadata>(cacheBustedUrl(info.latest_json_url));
-    const decision = updateAvailableReason(info.current, latest);
+    const latestMetadata = await fetchJson<LatestReleaseMetadata>(cacheBustedUrl(info.latest_json_url));
+    const decision = updateAvailableReason(info.current, latestMetadata);
+    const latest = await latestWithCurrentInstallChangelog(info.current, latestMetadata, decision.available);
     const downloadedUpdate = downloadedUpdateMatchesLatest(info.downloaded_update, latest)
       ? info.downloaded_update
       : undefined;
