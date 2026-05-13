@@ -2497,7 +2497,6 @@ function isNavActive(activeView: AppView, settingsMode: string, itemView: AppVie
 
 function navBadge(view: AppView, data: DashboardData | null): string {
   if (view === 'diagnostics' && data?.hermes?.doctor_issues_count) return String(data.hermes.doctor_issues_count);
-  if (view === 'chat' && data?.chat?.recent_sessions?.length) return String(data.chat.recent_sessions.length);
   if (view === 'workspace' && data?.workspace?.initialized) return 'ok';
   if (view === 'provider' && data?.hermes?.ready) return 'ok';
   return '';
