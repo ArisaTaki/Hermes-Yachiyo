@@ -1,5 +1,7 @@
+from datetime import datetime, timedelta, timezone
+
 import apps.shell.activity_api as activity_api_mod
-from apps.core.activity_store import ActivityStore, redact_sensitive_text
+from apps.core.activity_store import ActivityRetentionPolicy, ActivityStore, redact_sensitive_text
 
 
 def test_activity_store_persists_searches_and_redacts(tmp_path):
@@ -73,6 +75,154 @@ def test_activity_store_key_only_filters_noisy_reasoning(tmp_path):
         assert events[0].phase == "task_complete"
     finally:
         store.close()
+
+
+def test_activity_store_retention_keeps_key_and_trace_budgets_separate(tmp_path):
+    db_path = tmp_path / "activity.db"
+    policy = ActivityRetentionPolicy(
+        key_event_limit=2,
+        trace_event_limit=3,
+        key_retention_days=90,
+        trace_retention_days=30,
+        cleanup_interval_writes=0,
+    )
+    store = ActivityStore(db_path=str(db_path), retention_policy=policy)
+    base_time = datetime.now(timezone.utc)
+    try:
+        for index in range(5):
+            store.record_event(
+                task_id="trace",
+                phase="reasoning",
+                title=f"trace {index}",
+                status="running",
+                created_at=(base_time + timedelta(seconds=index)).isoformat(),
+            )
+        for index in range(4):
+            store.record_event(
+                task_id="key",
+                phase="task_complete",
+                title=f"key {index}",
+                status="completed",
+                created_at=(base_time + timedelta(minutes=1, seconds=index)).isoformat(),
+            )
+
+        result = store.prune_retention()
+        events = store.list_events(limit=20, key_only=False)
+
+        assert result["deleted"] == 4
+        assert [event.title for event in events if event.task_id == "key"] == ["key 3", "key 2"]
+        assert [event.title for event in events if event.task_id == "trace"] == ["trace 4", "trace 3", "trace 2"]
+        assert result["total"] == 5
+        assert result["used_bytes"] > 0
+    finally:
+        store.close()
+
+
+def test_activity_store_retention_removes_old_trace_before_key_events(tmp_path):
+    db_path = tmp_path / "activity.db"
+    policy = ActivityRetentionPolicy(
+        key_event_limit=100,
+        trace_event_limit=100,
+        key_retention_days=90,
+        trace_retention_days=30,
+        cleanup_interval_writes=0,
+    )
+    store = ActivityStore(db_path=str(db_path), retention_policy=policy)
+    now = datetime.now(timezone.utc)
+    try:
+        old_trace = store.record_event(
+            task_id="t1",
+            phase="reasoning",
+            title="旧详细过程",
+            status="running",
+            created_at=(now - timedelta(days=31)).isoformat(),
+        )
+        old_but_kept_key = store.record_event(
+            task_id="t2",
+            phase="task_failed",
+            title="仍需保留的失败任务",
+            status="failed",
+            created_at=(now - timedelta(days=60)).isoformat(),
+        )
+        too_old_key = store.record_event(
+            task_id="t3",
+            phase="task_complete",
+            title="过期关键事件",
+            status="completed",
+            created_at=(now - timedelta(days=91)).isoformat(),
+        )
+
+        result = store.prune_retention()
+        remaining_ids = {event.event_id for event in store.list_events(limit=20, key_only=False)}
+
+        assert result["deleted"] == 2
+        assert old_trace.event_id not in remaining_ids
+        assert too_old_key.event_id not in remaining_ids
+        assert old_but_kept_key.event_id in remaining_ids
+    finally:
+        store.close()
+
+
+def test_activity_store_auto_prunes_after_write_interval(tmp_path):
+    db_path = tmp_path / "activity.db"
+    policy = ActivityRetentionPolicy(
+        key_event_limit=100,
+        trace_event_limit=1,
+        key_retention_days=90,
+        trace_retention_days=30,
+        cleanup_interval_writes=2,
+    )
+    store = ActivityStore(db_path=str(db_path), retention_policy=policy)
+    base_time = datetime.now(timezone.utc)
+    try:
+        store.record_event(
+            task_id="trace",
+            phase="reasoning",
+            title="trace 1",
+            status="running",
+            created_at=(base_time + timedelta(seconds=1)).isoformat(),
+        )
+        store.record_event(
+            task_id="trace",
+            phase="reasoning",
+            title="trace 2",
+            status="running",
+            created_at=(base_time + timedelta(seconds=2)).isoformat(),
+        )
+
+        events = store.list_events(task_id="trace", limit=10, key_only=False)
+
+        assert [event.title for event in events] == ["trace 2"]
+    finally:
+        store.close()
+
+
+def test_activity_store_prunes_on_startup(tmp_path):
+    db_path = tmp_path / "activity.db"
+    policy = ActivityRetentionPolicy(
+        key_event_limit=100,
+        trace_event_limit=100,
+        key_retention_days=90,
+        trace_retention_days=30,
+        cleanup_interval_writes=0,
+    )
+    store = ActivityStore(db_path=str(db_path), retention_policy=policy)
+    try:
+        store.record_event(
+            task_id="trace",
+            phase="reasoning",
+            title="启动时应清理",
+            status="running",
+            created_at=(datetime.now(timezone.utc) - timedelta(days=31)).isoformat(),
+        )
+    finally:
+        store.close()
+
+    reopened = ActivityStore(db_path=str(db_path), retention_policy=policy)
+    try:
+        assert reopened.list_events(limit=10, key_only=False) == []
+    finally:
+        reopened.close()
 
 
 def test_activity_detail_returns_unfiltered_task_trace(tmp_path, monkeypatch):

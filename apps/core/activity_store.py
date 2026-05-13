@@ -14,7 +14,7 @@ import re
 import sqlite3
 import threading
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
@@ -41,6 +41,13 @@ _STATUS_FILTER_ALIASES = {
     "failed": ("failed", "error"),
     "cancelled": ("cancelled",),
 }
+_DEFAULT_KEY_RETENTION_COUNT = 10_000
+_DEFAULT_TRACE_RETENTION_COUNT = 50_000
+_DEFAULT_KEY_RETENTION_DAYS = 90
+_DEFAULT_TRACE_RETENTION_DAYS = 30
+_DEFAULT_MAX_DB_BYTES = 50 * 1024 * 1024
+_DEFAULT_CLEANUP_INTERVAL_WRITES = 500
+_SIZE_CLEANUP_BATCH = 1000
 _SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(
         r"(?i)\b(api[_-]?key|token|password|passwd|secret|authorization|bearer)\b"
@@ -61,6 +68,18 @@ def _get_db_path() -> str:
     yachiyo_dir = os.path.join(hermes_home, "yachiyo")
     os.makedirs(yachiyo_dir, exist_ok=True)
     return os.path.join(yachiyo_dir, _DB_FILENAME)
+
+
+def _read_int_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("%s=%r 不是有效整数，使用默认值 %d", name, raw, default)
+        return default
+    return max(minimum, min(value, maximum))
 
 
 def redact_sensitive_text(value: Any, *, limit: int = _DETAIL_MAX_CHARS) -> str:
@@ -136,14 +155,74 @@ class StoredActivity:
         }
 
 
+@dataclass(frozen=True)
+class ActivityRetentionPolicy:
+    key_event_limit: int = _DEFAULT_KEY_RETENTION_COUNT
+    trace_event_limit: int = _DEFAULT_TRACE_RETENTION_COUNT
+    key_retention_days: int = _DEFAULT_KEY_RETENTION_DAYS
+    trace_retention_days: int = _DEFAULT_TRACE_RETENTION_DAYS
+    max_db_bytes: int = _DEFAULT_MAX_DB_BYTES
+    cleanup_interval_writes: int = _DEFAULT_CLEANUP_INTERVAL_WRITES
+
+    @classmethod
+    def from_env(cls) -> "ActivityRetentionPolicy":
+        return cls(
+            key_event_limit=_read_int_env(
+                "HERMES_ACTIVITY_KEY_LIMIT",
+                _DEFAULT_KEY_RETENTION_COUNT,
+                minimum=100,
+                maximum=200_000,
+            ),
+            trace_event_limit=_read_int_env(
+                "HERMES_ACTIVITY_TRACE_LIMIT",
+                _DEFAULT_TRACE_RETENTION_COUNT,
+                minimum=100,
+                maximum=1_000_000,
+            ),
+            key_retention_days=_read_int_env(
+                "HERMES_ACTIVITY_KEY_DAYS",
+                _DEFAULT_KEY_RETENTION_DAYS,
+                minimum=1,
+                maximum=3650,
+            ),
+            trace_retention_days=_read_int_env(
+                "HERMES_ACTIVITY_TRACE_DAYS",
+                _DEFAULT_TRACE_RETENTION_DAYS,
+                minimum=1,
+                maximum=3650,
+            ),
+            max_db_bytes=_read_int_env(
+                "HERMES_ACTIVITY_MAX_MB",
+                _DEFAULT_MAX_DB_BYTES // (1024 * 1024),
+                minimum=1,
+                maximum=4096,
+            )
+            * 1024
+            * 1024,
+            cleanup_interval_writes=_read_int_env(
+                "HERMES_ACTIVITY_CLEANUP_INTERVAL",
+                _DEFAULT_CLEANUP_INTERVAL_WRITES,
+                minimum=0,
+                maximum=100_000,
+            ),
+        )
+
+
 class ActivityStore:
     """SQLite-backed activity event log."""
 
-    def __init__(self, db_path: str | None = None) -> None:
+    def __init__(
+        self,
+        db_path: str | None = None,
+        retention_policy: ActivityRetentionPolicy | None = None,
+    ) -> None:
         self._db_path = db_path or _get_db_path()
+        self._retention_policy = retention_policy or ActivityRetentionPolicy.from_env()
+        self._writes_since_cleanup = 0
         self._conn: sqlite3.Connection | None = None
         self._lock = threading.RLock()
         self._init_db()
+        self.prune_retention()
 
     def _get_conn(self) -> sqlite3.Connection:
         if self._conn is None:
@@ -176,6 +255,8 @@ class ActivityStore:
                     ON activity_events(session_id, task_id, created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_activity_tool_status
                     ON activity_events(tool_name, status, created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_activity_phase_status
+                    ON activity_events(phase, status, created_at DESC);
                 """
             )
             conn.commit()
@@ -233,6 +314,13 @@ class ActivityStore:
                 ),
             )
             conn.commit()
+            self._writes_since_cleanup += 1
+            if (
+                self._retention_policy.cleanup_interval_writes > 0
+                and self._writes_since_cleanup >= self._retention_policy.cleanup_interval_writes
+            ):
+                self._writes_since_cleanup = 0
+                self.prune_retention()
         return event
 
     def list_events(
@@ -347,6 +435,55 @@ class ActivityStore:
             self._get_conn().commit()
             return int(cursor.rowcount or 0)
 
+    def prune_retention(
+        self,
+        policy: ActivityRetentionPolicy | None = None,
+    ) -> dict[str, int]:
+        """Apply count, age, and soft-size retention to stored activity events."""
+        active_policy = policy or self._retention_policy
+        deleted = 0
+        with self._lock:
+            conn = self._get_conn()
+            key_condition, key_args = _retention_key_condition_sql()
+            now = datetime.now(timezone.utc)
+            key_cutoff = (now - timedelta(days=active_policy.key_retention_days)).isoformat()
+            trace_cutoff = (now - timedelta(days=active_policy.trace_retention_days)).isoformat()
+
+            deleted += _delete_matching(
+                conn,
+                f"NOT ({key_condition}) AND created_at < ?",
+                (*key_args, trace_cutoff),
+            )
+            deleted += _delete_matching(
+                conn,
+                f"({key_condition}) AND created_at < ?",
+                (*key_args, key_cutoff),
+            )
+            deleted += _delete_over_limit(
+                conn,
+                key=False,
+                keep=active_policy.trace_event_limit,
+            )
+            deleted += _delete_over_limit(
+                conn,
+                key=True,
+                keep=active_policy.key_event_limit,
+            )
+            deleted += _enforce_soft_size_limit(conn, active_policy.max_db_bytes)
+            if deleted:
+                conn.commit()
+                try:
+                    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                except sqlite3.Error:
+                    logger.debug("ActivityStore retention WAL checkpoint failed", exc_info=True)
+            else:
+                conn.commit()
+            return {
+                "deleted": deleted,
+                "total": _count_events(conn),
+                "used_bytes": _database_used_bytes(conn),
+            }
+
     def latest_by_task(
         self,
         task_ids: list[str],
@@ -390,6 +527,104 @@ class ActivityStore:
                     logger.debug("ActivityStore WAL checkpoint failed", exc_info=True)
                 self._conn.close()
                 self._conn = None
+
+
+def _retention_key_condition_sql() -> tuple[str, tuple[str, ...]]:
+    phase_placeholders = ", ".join("?" for _ in _KEY_PHASES)
+    status_placeholders = ", ".join("?" for _ in _TERMINAL_STATUSES)
+    noisy_placeholders = ", ".join("?" for _ in _NOISY_PHASES)
+    return (
+        f"(phase IN ({phase_placeholders}) "
+        f"OR (status IN ({status_placeholders}) AND phase NOT IN ({noisy_placeholders})))",
+        (*_KEY_PHASES, *_TERMINAL_STATUSES, *_NOISY_PHASES),
+    )
+
+
+def _delete_matching(conn: sqlite3.Connection, where: str, args: tuple[Any, ...]) -> int:
+    cursor = conn.execute(f"DELETE FROM activity_events WHERE {where}", args)
+    return int(cursor.rowcount or 0)
+
+
+def _delete_rows(conn: sqlite3.Connection, rowids: list[int]) -> int:
+    if not rowids:
+        return 0
+    deleted = 0
+    for start in range(0, len(rowids), 500):
+        chunk = rowids[start:start + 500]
+        placeholders = ", ".join("?" for _ in chunk)
+        cursor = conn.execute(
+            f"DELETE FROM activity_events WHERE rowid IN ({placeholders})",
+            chunk,
+        )
+        deleted += int(cursor.rowcount or 0)
+    return deleted
+
+
+def _delete_over_limit(conn: sqlite3.Connection, *, key: bool, keep: int) -> int:
+    keep = max(0, int(keep or 0))
+    key_condition, key_args = _retention_key_condition_sql()
+    predicate = f"({key_condition})" if key else f"NOT ({key_condition})"
+    rows = conn.execute(
+        f"""
+        SELECT rowid
+        FROM activity_events
+        WHERE {predicate}
+        ORDER BY created_at DESC, rowid DESC
+        LIMIT -1 OFFSET ?
+        """,
+        (*key_args, keep),
+    ).fetchall()
+    return _delete_rows(conn, [int(row["rowid"]) for row in rows])
+
+
+def _delete_oldest_batch(conn: sqlite3.Connection, *, key: bool, limit: int) -> int:
+    key_condition, key_args = _retention_key_condition_sql()
+    predicate = f"({key_condition})" if key else f"NOT ({key_condition})"
+    rows = conn.execute(
+        f"""
+        SELECT rowid
+        FROM activity_events
+        WHERE {predicate}
+        ORDER BY created_at ASC, rowid ASC
+        LIMIT ?
+        """,
+        (*key_args, max(1, limit)),
+    ).fetchall()
+    return _delete_rows(conn, [int(row["rowid"]) for row in rows])
+
+
+def _database_used_bytes(conn: sqlite3.Connection) -> int:
+    try:
+        page_size = int(conn.execute("PRAGMA page_size").fetchone()[0])
+        page_count = int(conn.execute("PRAGMA page_count").fetchone()[0])
+        freelist_count = int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+        return max(0, page_count - freelist_count) * page_size
+    except sqlite3.Error:
+        return 0
+
+
+def _enforce_soft_size_limit(conn: sqlite3.Connection, max_db_bytes: int) -> int:
+    max_db_bytes = max(0, int(max_db_bytes or 0))
+    if max_db_bytes <= 0:
+        return 0
+    deleted = 0
+    rounds = 0
+    while _database_used_bytes(conn) > max_db_bytes and rounds < 100:
+        rounds += 1
+        batch_deleted = _delete_oldest_batch(conn, key=False, limit=_SIZE_CLEANUP_BATCH)
+        if not batch_deleted:
+            batch_deleted = _delete_oldest_batch(conn, key=True, limit=_SIZE_CLEANUP_BATCH)
+        if not batch_deleted:
+            break
+        deleted += batch_deleted
+    return deleted
+
+
+def _count_events(conn: sqlite3.Connection) -> int:
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM activity_events").fetchone()[0])
+    except sqlite3.Error:
+        return 0
 
 
 def _activity_from_row(row: sqlite3.Row) -> StoredActivity:
