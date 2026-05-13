@@ -228,6 +228,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const isProcessingRef = useRef(false);
   const pendingReplyScrollRef = useRef(false);
   const pendingReplyTaskIdRef = useRef('');
+  const highlightedScrollTargetRef = useRef('');
+  const highlightClearTimerRef = useRef<number | null>(null);
   const loadSessionsRef = useRef<() => Promise<void>>(async () => undefined);
 
   const refreshMessages = useCallback(async (options: { allowDuringTransition?: boolean; anchorMessageId?: string } = {}) => {
@@ -236,7 +238,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     const startedAt = Date.now();
     const shouldHoldLoading = !messagesLoadedRef.current;
     const anchorMessageId = (options.anchorMessageId || '').trim();
-    if (anchorMessageId) setHighlightedMessageId(anchorMessageId);
     try {
       const query = new URLSearchParams();
       query.set('limit', anchorMessageId ? '220' : '80');
@@ -248,9 +249,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const processing = Boolean(payload.is_processing);
       const processingChanged = processing !== isProcessingRef.current;
       isProcessingRef.current = processing;
-      if (anchorMessageId && !nextMessages.some((message) => message.id === anchorMessageId)) {
-        setHighlightedMessageId('');
-      }
       const failed = latestFailedMessage(nextMessages);
       if (!shouldHoldLoading && isMessageSelectionPaused()) {
         setIsProcessing(processing);
@@ -263,6 +261,15 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
       if (shouldHoldLoading && remaining > 0) await new Promise((r) => setTimeout(r, remaining));
       if (token !== messageLoadTokenRef.current) return;
+      if (anchorMessageId) {
+        const anchorFound = nextMessages.some((message) => message.id === anchorMessageId);
+        if (highlightClearTimerRef.current !== null) {
+          window.clearTimeout(highlightClearTimerRef.current);
+          highlightClearTimerRef.current = null;
+        }
+        highlightedScrollTargetRef.current = anchorFound ? anchorMessageId : '';
+        setHighlightedMessageId(anchorFound ? anchorMessageId : '');
+      }
       setMessages(nextMessages);
       setIsProcessing(processing);
       if (shouldTriggerPendingReplyScroll(nextMessages)) {
@@ -442,16 +449,21 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     if (!highlightedMessageId || !messagesVisible) return undefined;
     const messageExists = messages.some((message) => message.id === highlightedMessageId);
     if (!messageExists) return undefined;
+    if (highlightedScrollTargetRef.current !== highlightedMessageId) return undefined;
     const scrollTimer = window.setTimeout(() => {
       const node = messageNodeRefs.current.get(highlightedMessageId);
       if (!node) return;
       stickToBottomRef.current = false;
+      highlightedScrollTargetRef.current = '';
       node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (highlightClearTimerRef.current !== null) window.clearTimeout(highlightClearTimerRef.current);
+      highlightClearTimerRef.current = window.setTimeout(() => {
+        setHighlightedMessageId((current) => (current === highlightedMessageId ? '' : current));
+        highlightClearTimerRef.current = null;
+      }, 1800);
     }, 80);
-    const clearTimer = window.setTimeout(() => setHighlightedMessageId(''), 3600);
     return () => {
       window.clearTimeout(scrollTimer);
-      window.clearTimeout(clearTimer);
     };
   }, [highlightedMessageId, messages, messagesVisible]);
 
@@ -478,6 +490,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       if (animationFrameRef.current !== null) window.cancelAnimationFrame(animationFrameRef.current);
       if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current);
       if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+      if (highlightClearTimerRef.current !== null) window.clearTimeout(highlightClearTimerRef.current);
     };
   }, []);
 
@@ -917,6 +930,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     const conversationToken = ++conversationLoadTokenRef.current;
     pendingReplyScrollRef.current = false;
     pendingReplyTaskIdRef.current = '';
+    highlightedScrollTargetRef.current = '';
+    if (highlightClearTimerRef.current !== null) {
+      window.clearTimeout(highlightClearTimerRef.current);
+      highlightClearTimerRef.current = null;
+    }
     conversationTransitionRef.current = true;
     messageLoadTokenRef.current += 1;
     messagesLoadedRef.current = false;
