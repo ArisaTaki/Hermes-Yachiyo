@@ -338,9 +338,12 @@ class ActivityStore:
         clauses: list[str] = []
         args: list[Any] = []
         if query:
-            clauses.append("(title LIKE ? OR detail LIKE ? OR tool_name LIKE ?)")
+            clauses.append(
+                "(title LIKE ? OR detail LIKE ? OR tool_name LIKE ? OR phase LIKE ? "
+                "OR session_id LIKE ? OR task_id LIKE ? OR metadata_json LIKE ?)"
+            )
             needle = f"%{query}%"
-            args.extend([needle, needle, needle])
+            args.extend([needle, needle, needle, needle, needle, needle, needle])
         if status:
             status_values = _STATUS_FILTER_ALIASES.get(status, (status,))
             if len(status_values) == 1:

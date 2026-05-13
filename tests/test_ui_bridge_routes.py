@@ -250,8 +250,8 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         def __init__(self, received_runtime):
             assert received_runtime is runtime
 
-        def get_messages(self, limit):
-            return {"messages": [], "limit": limit}
+        def get_messages(self, limit, anchor_message_id=""):
+            return {"messages": [], "limit": limit, "anchor_message_id": anchor_message_id}
 
         def send_message(self, text, attachments=None):
             return {"ok": True, "text": text, "attachments": attachments or []}
@@ -268,8 +268,8 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         def delete_current_session(self):
             return {"ok": True, "deleted": True}
 
-        def list_sessions(self, limit):
-            return {"sessions": [], "limit": limit}
+        def list_sessions(self, limit, query=""):
+            return {"sessions": [], "limit": limit, "query": query}
 
         def load_session(self, session_id):
             return {"ok": True, "session_id": session_id}
@@ -279,7 +279,11 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
 
     monkeypatch.setattr(ui, "ChatAPI", FakeChatAPI)
 
-    assert await ui.get_chat_messages(limit=12) == {"messages": [], "limit": 12}
+    assert await ui.get_chat_messages(limit=12, anchor_message_id="m1") == {
+        "messages": [],
+        "limit": 12,
+        "anchor_message_id": "m1",
+    }
     assert await ui.send_chat_message(ui.SendChatMessageRequest(text="hello")) == {
         "ok": True,
         "text": "hello",
@@ -289,7 +293,11 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
     assert await ui.clear_chat_session() == {"ok": True}
     assert await ui.cancel_chat_session_tasks() == {"ok": True, "cancelled_tasks": 1}
     assert await ui.delete_chat_session() == {"ok": True, "deleted": True}
-    assert await ui.list_chat_sessions(limit=3) == {"sessions": [], "limit": 3}
+    assert await ui.list_chat_sessions(limit=3, query="聊天") == {
+        "sessions": [],
+        "limit": 3,
+        "query": "聊天",
+    }
     assert await ui.load_chat_session(ui.LoadChatSessionRequest(session_id="s2")) == {
         "ok": True,
         "session_id": "s2",

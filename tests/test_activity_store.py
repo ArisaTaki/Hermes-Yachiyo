@@ -23,6 +23,8 @@ def test_activity_store_persists_searches_and_redacts(tmp_path):
         assert event.detail == "OPENAI_API_KEY=[redacted] command finished"
         assert event.to_dict()["metadata"]["token"] == "[redacted]"
         assert store.list_events(query="脚本")[0].task_id == "t1"
+        assert store.list_events(query="s1")[0].event_id == event.event_id
+        assert store.list_events(query="value")[0].event_id == event.event_id
         assert store.list_events(status="completed", tool="terminal")[0].session_id == "s1"
     finally:
         store.close()

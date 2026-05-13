@@ -14,11 +14,13 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 import logging
 import os
 import re
 import shutil
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List
 from uuid import uuid4
@@ -69,15 +71,6 @@ _DESKTOP_SNAPSHOT_REQUEST_RE = re.compile(
     r"(?:桌面|屏幕|当前窗口|窗口|画面|截图|截屏)"
     r".{0,18}(?:看|看看|查看|瞧|识别|分析|读|读取|有什么|是什么|情况|状态|能看到|能看见|看得到)"
     r"|"
-    r"(?:看|看看|瞧|瞅|观察|识别|分析)"
-    r".{0,18}(?:我|这边|这儿|这里)"
-    r".{0,18}(?:现在|当前|正在)?"
-    r".{0,8}(?:在)?(?:做什么|干什么|干嘛|忙什么|弄什么)"
-    r"|"
-    r"(?:我|这边|这儿|这里)"
-    r".{0,18}(?:现在|当前|正在)"
-    r".{0,8}(?:在)?(?:做什么|干什么|干嘛|忙什么|弄什么)"
-    r"|"
     r"(?:look|see|view|read|analy[sz]e|inspect|screenshot|screen shot)"
     r".{0,24}(?:screen|desktop|window|screenshot)"
     r"|"
@@ -94,6 +87,27 @@ def _compact_preview(value: Any, limit: int = 72) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3].rstrip() + "..."
+
+
+def _search_snippet(value: str, query: str, *, limit: int = 96) -> str:
+    text = " ".join(str(value or "").split())
+    needle = " ".join(str(query or "").split()).strip()
+    if not text:
+        return ""
+    if not needle:
+        return _compact_preview(text, limit)
+    index = text.lower().find(needle.lower())
+    if index < 0:
+        return _compact_preview(text, limit)
+    side = max(12, (limit - len(needle)) // 2)
+    start = max(0, index - side)
+    end = min(len(text), index + len(needle) + side)
+    snippet = text[start:end].strip()
+    if start > 0:
+        snippet = f"...{snippet}"
+    if end < len(text):
+        snippet = f"{snippet}..."
+    return snippet
 
 
 def _is_chat_visible_activity(event: dict[str, Any]) -> bool:
@@ -397,7 +411,7 @@ class ChatAPI:
             )
             return task_description, saved_attachments
 
-    def get_messages(self, limit: int = 50) -> Dict[str, Any]:
+    def get_messages(self, limit: int = 50, anchor_message_id: str = "") -> Dict[str, Any]:
         """获取消息列表，同时同步任务状态到消息
 
         此方法会检查每条 user 消息关联的任务状态：
@@ -415,38 +429,98 @@ class ChatAPI:
             # 同步任务状态到消息
             self._sync_task_status_to_messages()
 
-            messages = self._session.get_messages(limit)
+            anchor_message_id = str(anchor_message_id or "").strip()
+            if anchor_message_id:
+                messages = self._load_messages_around_anchor(anchor_message_id, limit=limit)
+                anchor_found = any(m.message_id == anchor_message_id for m in messages)
+                if not anchor_found:
+                    messages = self._session.get_messages(limit)
+            else:
+                messages = self._session.get_messages(limit)
             sorted_msgs = self._sort_messages_by_task(messages)
             task_ids = [m.task_id for m in sorted_msgs if m.task_id]
             activity_by_task = self._activity_events_by_task(task_ids, limit_per_task=5)
-            serialized_messages = []
-            for m in sorted_msgs:
-                show_activity = m.role == MessageRole.ASSISTANT
-                activity_events = activity_by_task.get(m.task_id or "", []) if show_activity else []
-                serialized_messages.append(
-                    {
-                        "id": m.message_id,
-                        "role": m.role.value,
-                        "content": m.content,
-                        "status": m.status.value,
-                        "task_id": m.task_id,
-                        "error": m.error,
-                        "created_at": m.created_at.isoformat(),
-                        "attachments": self._serialize_attachments(m.attachments),
-                        "progress_label": self._task_progress_label(m.task_id) if activity_events else "",
-                        "activity_events": activity_events,
-                    }
-                )
+            serialized_messages = self._serialize_chat_messages(sorted_msgs, activity_by_task)
             return {
                 "ok": True,
                 "session_id": self._session.session_id,
                 "is_processing": self._session.is_processing(),
                 "messages": serialized_messages,
+                "anchor_message_id": anchor_message_id,
             }
 
         except Exception as exc:
             logger.error("获取消息列表失败: %s", exc)
             return {"ok": False, "error": str(exc), "messages": []}
+
+    def _load_messages_around_anchor(self, message_id: str, *, limit: int) -> list[ChatMessage]:
+        from apps.core.chat_store import get_chat_store
+
+        context = max(20, min(int(limit or 80), 400))
+        before = max(10, int(context * 0.65))
+        after = max(10, context - before - 1)
+        stored_messages = get_chat_store().load_messages_around(
+            self._session.session_id,
+            message_id,
+            before=before,
+            after=after,
+        )
+        return self._stored_messages_to_chat_messages(stored_messages)
+
+    def _stored_messages_to_chat_messages(self, stored_messages: list[Any]) -> list[ChatMessage]:
+        messages: list[ChatMessage] = []
+        for stored in stored_messages:
+            try:
+                role = MessageRole(str(getattr(stored, "role", "")))
+                status = MessageStatus(str(getattr(stored, "status", "")))
+                created_at = datetime.fromisoformat(str(getattr(stored, "created_at", "")))
+            except ValueError:
+                logger.debug("跳过无法序列化的聊天消息: %s", getattr(stored, "message_id", ""), exc_info=True)
+                continue
+            attachments_json = str(getattr(stored, "attachments_json", "") or "[]")
+            try:
+                parsed_attachments = json.loads(attachments_json)
+                attachments = parsed_attachments if isinstance(parsed_attachments, list) else []
+            except json.JSONDecodeError:
+                attachments = []
+            messages.append(
+                ChatMessage(
+                    message_id=str(getattr(stored, "message_id", "")),
+                    role=role,
+                    content=str(getattr(stored, "content", "") or ""),
+                    status=status,
+                    created_at=created_at,
+                    task_id=getattr(stored, "task_id", None),
+                    error=getattr(stored, "error", None),
+                    attachments=attachments,
+                )
+            )
+        return messages
+
+    def _serialize_chat_messages(
+        self,
+        messages: list[ChatMessage],
+        activity_by_task: dict[str, list[dict[str, Any]]],
+    ) -> list[dict[str, Any]]:
+        serialized_messages = []
+        for m in messages:
+            show_activity = m.role == MessageRole.ASSISTANT
+            activity_events = activity_by_task.get(m.task_id or "", []) if show_activity else []
+            serialized_messages.append(
+                {
+                    "id": m.message_id,
+                    "role": m.role.value,
+                    "content": m.content,
+                    "status": m.status.value,
+                    "task_id": m.task_id,
+                    "error": m.error,
+                    "created_at": m.created_at.isoformat(),
+                    "attachments": self._serialize_attachments(m.attachments),
+                    "progress_label": self._task_progress_label(m.task_id) if activity_events else "",
+                    "activity_events": activity_events,
+                }
+            )
+        return serialized_messages
 
     @staticmethod
     def _sort_messages_by_task(messages: List[ChatMessage]) -> List[ChatMessage]:
@@ -705,17 +779,25 @@ class ChatAPI:
             return {"executor": "none", "available": False, "image_input": image_input}
         return {"executor": runner.executor.name, "available": True, "image_input": image_input}
 
-    def list_sessions(self, limit: int = 20) -> Dict[str, Any]:
+    def list_sessions(self, limit: int = 20, query: str = "") -> Dict[str, Any]:
         """列出最近会话，包含当前空白会话。"""
         from apps.core.chat_store import get_chat_store
 
         store = get_chat_store()
+        normalized_query = " ".join(str(query or "").split()).strip()
         current_session = self._runtime.chat_session
         current_session_id = current_session.session_id
-        sessions = store.list_sessions(limit=limit)
+        search_results = store.search_sessions(normalized_query, limit=max(limit, 50)) if normalized_query else []
+        sessions = [] if normalized_query else store.list_sessions(limit=limit)
         session_items = []
-        for session in sessions:
+        iterable_sessions = [result.session for result in search_results] if normalized_query else sessions
+        search_by_session = {
+            result.session.session_id: result
+            for result in search_results
+        }
+        for session in iterable_sessions:
             messages = store.load_messages(session.session_id, limit=240)
+            search_result = search_by_session.get(session.session_id)
             session_items.append({
                 "session_id": session.session_id,
                 "title": self._session_title(session.title, messages),
@@ -726,8 +808,9 @@ class ChatAPI:
                 "latest_activity": self._latest_activity_for_session(session.session_id),
                 "latest_message_preview": self._session_latest_user_turn(messages),
                 "latest_message_status": self._session_latest_status(messages),
+                "search_match": self._session_search_match(search_result, normalized_query),
             })
-        if not any(item["session_id"] == current_session_id for item in session_items):
+        if not normalized_query and not any(item["session_id"] == current_session_id for item in session_items):
             stored_current = store.get_session(current_session_id)
             current_messages = store.load_messages(current_session_id, limit=240)
             current_title = self._session_title(stored_current.title if stored_current else "", current_messages)
@@ -747,12 +830,37 @@ class ChatAPI:
                     "latest_activity": self._latest_activity_for_session(current_session_id),
                     "latest_message_preview": self._session_latest_user_turn(current_messages),
                     "latest_message_status": self._session_latest_status(current_messages),
+                    "search_match": None,
                 },
             )
         return {
             "ok": True,
             "current_session_id": current_session_id,
             "sessions": session_items,
+            "query": normalized_query,
+        }
+
+    @staticmethod
+    def _session_search_match(search_result: Any, query: str) -> dict[str, Any] | None:
+        if search_result is None or not query:
+            return None
+        snippet = _search_snippet(str(getattr(search_result, "match_content", "") or ""), query)
+        match_message_id = getattr(search_result, "match_message_id", None)
+        if not snippet and not match_message_id:
+            return {
+                "kind": "session",
+                "query": query,
+                "snippet": "会话标题或 Session ID 匹配",
+                "match_count": int(getattr(search_result, "match_count", 0) or 0),
+            }
+        return {
+            "kind": "message" if match_message_id else "session",
+            "query": query,
+            "message_id": match_message_id,
+            "role": getattr(search_result, "match_role", "") or "",
+            "snippet": snippet,
+            "created_at": getattr(search_result, "match_created_at", "") or "",
+            "match_count": int(getattr(search_result, "match_count", 0) or 0),
         }
 
     @staticmethod

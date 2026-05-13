@@ -8,7 +8,7 @@ from pathlib import Path
 
 from apps.core.activity_store import ActivityStore
 from apps.core.chat_session import ChatMessage, ChatSession, MessageRole, MessageStatus
-from apps.core.chat_store import ChatStore
+from apps.core.chat_store import ChatStore, StoredMessage
 import apps.core.chat_store as _store_mod
 from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID
 from apps.core.state import AppState
@@ -192,6 +192,47 @@ def test_list_sessions_ignores_stale_stored_processing_without_live_task(tmp_pat
         store.close()
 
 
+def test_list_sessions_search_includes_message_match(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
+    try:
+        session_id = runtime.chat_session.session_id
+        runtime.chat_session.add_user_message("这里有聊天搜索关键词")
+
+        sessions = api.list_sessions(query="聊天")["sessions"]
+
+        assert len(sessions) == 1
+        assert sessions[0]["session_id"] == session_id
+        assert sessions[0]["search_match"]["message_id"]
+        assert "聊天" in sessions[0]["search_match"]["snippet"]
+    finally:
+        store.close()
+
+
+def test_get_messages_can_load_around_search_anchor(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
+    try:
+        session_id = runtime.chat_session.session_id
+        for index in range(6):
+            store.save_message(StoredMessage(
+                message_id=f"m{index}",
+                session_id=session_id,
+                role="user",
+                content=f"消息 {index}",
+                status="completed",
+                task_id=None,
+                error=None,
+                created_at=f"2026-01-01T00:00:0{index}+00:00",
+            ))
+
+        messages = api.get_messages(limit=3, anchor_message_id="m3")["messages"]
+
+        assert "m3" in [message["id"] for message in messages]
+    finally:
+        store.close()
+
+
 def test_sort_messages_keeps_assistant_only_task_in_timeline():
     proactive = _chat_message("proactive", MessageRole.ASSISTANT, "主动提醒", task_id="tp")
     user = _chat_message("user", MessageRole.USER, "收到", task_id="tu")
@@ -310,7 +351,7 @@ def test_user_requested_desktop_snapshot_attaches_in_normal_chat(tmp_path, monke
         store.close()
 
 
-def test_user_implicit_current_activity_request_attaches_desktop_snapshot(tmp_path, monkeypatch):
+def test_user_implicit_current_activity_request_does_not_attach_desktop_snapshot(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
     captures = []
 
@@ -325,12 +366,12 @@ def test_user_implicit_current_activity_request_attaches_desktop_snapshot(tmp_pa
         result = api.send_message("你能看看我现在在做什么不")
 
         assert result["ok"] is True
-        assert len(captures) == 1
-        assert result["attachments"][0]["source"] == "user_requested_desktop_snapshot"
+        assert captures == []
+        assert result["attachments"] == []
         task = runtime.state.get_task(result["task_id"])
         assert task is not None
-        assert task.attachments[0]["source"] == "user_requested_desktop_snapshot"
-        assert "附加当前桌面截图" in task.description
+        assert task.attachments == []
+        assert task.description == "你能看看我现在在做什么不"
     finally:
         store.close()
 

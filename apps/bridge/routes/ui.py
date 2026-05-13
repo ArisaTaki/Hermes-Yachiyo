@@ -516,8 +516,8 @@ async def import_live2d_archive_path(request: Live2DResourcePathRequest) -> dict
 
 
 @router.get("/chat/messages")
-async def get_chat_messages(limit: int = 80) -> dict[str, Any]:
-    return ChatAPI(get_runtime()).get_messages(limit)
+async def get_chat_messages(limit: int = 80, anchor_message_id: str = "") -> dict[str, Any]:
+    return ChatAPI(get_runtime()).get_messages(limit, anchor_message_id=anchor_message_id)
 
 
 @router.post("/chat/messages")
@@ -559,8 +559,8 @@ async def delete_chat_session() -> dict[str, Any]:
 
 
 @router.get("/chat/sessions")
-async def list_chat_sessions(limit: int = 20) -> dict[str, Any]:
-    return ChatAPI(get_runtime()).list_sessions(limit)
+async def list_chat_sessions(limit: int = 20, query: str = "") -> dict[str, Any]:
+    return ChatAPI(get_runtime()).list_sessions(limit, query=query)
 
 
 @router.post("/chat/sessions/load")

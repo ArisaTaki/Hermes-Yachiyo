@@ -192,6 +192,55 @@ class TestChatStore:
 
         assert sessions[0].title == "请帮我总结这个项目的功能点"
 
+    def test_search_sessions_matches_message_content(self, store: ChatStore):
+        store.create_session("s1", title="普通标题")
+        store.save_message(StoredMessage(
+            message_id="m1",
+            session_id="s1",
+            role="user",
+            content="这里提到了聊天记录搜索",
+            status="completed",
+            task_id=None,
+            error=None,
+            created_at="2026-01-01T00:00:00+00:00",
+        ))
+        store.create_session("s2", title="无关标题")
+        store.save_message(StoredMessage(
+            message_id="m2",
+            session_id="s2",
+            role="user",
+            content="没有命中",
+            status="completed",
+            task_id=None,
+            error=None,
+            created_at="2026-01-01T00:00:01+00:00",
+        ))
+
+        results = store.search_sessions("聊天")
+
+        assert [item.session.session_id for item in results] == ["s1"]
+        assert results[0].match_message_id == "m1"
+        assert results[0].match_content == "这里提到了聊天记录搜索"
+        assert results[0].match_count == 1
+
+    def test_load_messages_around_returns_anchor_context(self, store: ChatStore):
+        store.create_session("s1")
+        for index in range(5):
+            store.save_message(StoredMessage(
+                message_id=f"m{index}",
+                session_id="s1",
+                role="user",
+                content=f"消息 {index}",
+                status="completed",
+                task_id=None,
+                error=None,
+                created_at=f"2026-01-01T00:00:0{index}+00:00",
+            ))
+
+        messages = store.load_messages_around("s1", "m2", before=1, after=1)
+
+        assert [message.message_id for message in messages] == ["m1", "m2", "m3"]
+
     def test_make_session_title_uses_first_user_sentence(self):
         assert make_session_title("中午好，我点了一份潮汕牛肉饭哦") == "中午好，我点了一份潮汕牛肉饭哦"
         assert make_session_title("能否帮我打开v2ex？然后看一下热门帖子") == "能否帮我打开v2ex？"
