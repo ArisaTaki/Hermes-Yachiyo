@@ -1153,9 +1153,9 @@ export function ProviderPage() {
                   <small>{config?.image_input?.reason || config?.image_input?.label || '选择图片如何进入 Hermes'}</small>
                 </span>
                 <select className="hy-select" value={form.image_input_mode} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, image_input_mode: event.target.value }))}>
-                  <option value="text">文本描述 / 禁用视觉</option>
-                  <option value="vision">Vision 模型识图</option>
                   <option value="auto">自动选择</option>
+                  <option value="text">Vision 模型识图</option>
+                  <option value="native">原生图片输入（兼容）</option>
                 </select>
               </label>
               <label className="hy-settings-item">
@@ -2286,7 +2286,7 @@ function emptyHermesForm(): HermesConfigForm {
     model: '',
     base_url: '',
     api_key: '',
-    image_input_mode: 'text',
+    image_input_mode: 'auto',
     vision_provider: '',
     vision_model: '',
     vision_base_url: '',
@@ -2304,12 +2304,19 @@ function formFromHermesConfig(config: HermesVisualConfig | null): HermesConfigFo
     model: config?.model?.default || defaultTextModel(provider),
     base_url: config?.model?.base_url || provider?.base_url || '',
     api_key: '',
-    image_input_mode: config?.image_input?.mode || 'text',
+    image_input_mode: normalizeImageInputMode(config?.image_input?.mode),
     vision_provider: visionProviderId,
     vision_model: config?.vision?.model || (visionProviderId ? defaultVisionModel(visionProvider) : ''),
     vision_base_url: config?.vision?.base_url || (visionProviderId ? visionProvider?.base_url || '' : ''),
     vision_api_key: '',
   };
+}
+
+function normalizeImageInputMode(mode?: string): string {
+  const normalized = String(mode || 'auto').trim().toLowerCase();
+  if (normalized === 'vision' || normalized === 'yachiyo_vision') return 'text';
+  if (normalized === 'auto' || normalized === 'native' || normalized === 'text') return normalized;
+  return 'auto';
 }
 
 function providerOptionById(config: HermesVisualConfig | null, provider: string): HermesProviderOption | undefined {

@@ -75,6 +75,11 @@ _HERMES_IMAGE_CONNECTION_CACHE_SCHEMA = 1
 _HERMES_IMAGE_CONNECTION_CACHE_FILE = "hermes_image_connection.json"
 _HERMES_DIAGNOSTIC_CACHE_SCHEMA = 1
 _HERMES_DIAGNOSTIC_CACHE_FILE = "hermes_diagnostics.json"
+_HERMES_IMAGE_INPUT_MODES = {"auto", "native", "text"}
+_HERMES_IMAGE_INPUT_MODE_ALIASES = {
+    "vision": "text",
+    "yachiyo_vision": "text",
+}
 _ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _SECRET_REDACTIONS = (
     re.compile(r"(?i)(api[_-]?key|token|secret|password)(\s*[:=]\s*)([^\s,;]+)"),
@@ -1387,6 +1392,12 @@ def _effective_provider_id(provider: str, base_url: str = "", model: str = "") -
         infer_effective_hermes_provider(provider, base_url, model)
         or (provider or "").strip().lower()
     )
+
+
+def _normalize_image_input_mode(mode: Any) -> str:
+    normalized = str(mode or "auto").strip().lower()
+    normalized = _HERMES_IMAGE_INPUT_MODE_ALIASES.get(normalized, normalized)
+    return normalized if normalized in _HERMES_IMAGE_INPUT_MODES else "auto"
 
 
 def _provider_options(
@@ -2788,7 +2799,7 @@ class MainWindowAPI:
         model = str(changes.get("model") or "").strip()
         base_url = str(changes.get("base_url") or "").strip()
         api_key = str(changes.get("api_key") or "").strip()
-        image_input_mode = str(changes.get("image_input_mode") or "text").strip().lower()
+        image_input_mode = _normalize_image_input_mode(changes.get("image_input_mode"))
         vision_provider = str(changes.get("vision_provider") or "").strip()
         vision_model = str(changes.get("vision_model") or "").strip()
         vision_base_url = str(changes.get("vision_base_url") or "").strip()
@@ -2801,13 +2812,11 @@ class MainWindowAPI:
             key in changes
             for key in ("vision_provider", "vision_model", "vision_base_url", "vision_api_key")
         )
-        if "image_input_mode" in changes or has_vision_changes:
-            image_input_mode = "text"
         if has_vision_changes and "image_input_mode" in changes and image_input_mode == "text" and not (
             vision_provider or provider
         ):
             return {"ok": False, "error": "vision 预分析需要可用的 Provider"}
-        if image_input_mode == "text":
+        if has_vision_changes:
             vision_provider_for_model = _effective_provider_id(
                 vision_provider or provider,
                 vision_base_url or base_url,
