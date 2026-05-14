@@ -14,6 +14,8 @@ apps/frontend/node_modules/
 apps/frontend/dist/
 apps/frontend/dist-electron/
 apps/frontend/*.tsbuildinfo
+apps/frontend/bin/
+apps/frontend/lib/
 
 # IDE
 .idea/
