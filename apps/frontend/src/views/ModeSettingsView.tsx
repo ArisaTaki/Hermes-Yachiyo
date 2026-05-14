@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
+import { createPortal } from 'react-dom';
 
 import {
   apiGet,
@@ -558,6 +559,18 @@ function ReferenceSettingsHome() {
   const updateDescription = updateResult?.checked
     ? (updateResult.update_available ? (updateResult.reason || '发现可用更新') : (updateResult.reason || '当前已是最新版本'))
     : `Hermes Yachiyo v${appVersion}`;
+  const avatarEditorModal = avatarEditor ? (
+    <AvatarEditorModal
+      editor={avatarEditor}
+      importing={avatarImporting === avatarEditor.target}
+      onApply={() => void applyAvatarEditor()}
+      onClose={() => setAvatarEditor(null)}
+      onUpdate={updateAvatarEditor}
+    />
+  ) : null;
+  const avatarEditorPortalTarget = typeof document !== 'undefined'
+    ? document.querySelector('.hy-shell') || document.body
+    : null;
 
   return (
     <main className="app-shell settings-page">
@@ -807,15 +820,9 @@ function ReferenceSettingsHome() {
         </SettingsItem>
       </SettingsSection>
 
-      {avatarEditor ? (
-        <AvatarEditorModal
-          editor={avatarEditor}
-          importing={avatarImporting === avatarEditor.target}
-          onApply={() => void applyAvatarEditor()}
-          onClose={() => setAvatarEditor(null)}
-          onUpdate={updateAvatarEditor}
-        />
-      ) : null}
+      {avatarEditorModal && avatarEditorPortalTarget
+        ? createPortal(avatarEditorModal, avatarEditorPortalTarget)
+        : avatarEditorModal}
     </main>
   );
 }
