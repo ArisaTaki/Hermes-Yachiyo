@@ -603,7 +603,8 @@ class TestHermesStreamBridgeHelpers:
         assert len(calls) == 1
         assert calls[0][:3] == tuple(_HERMES_CMD)
         assert any("hello" in part for part in calls[0])
-        assert any("不要调用桌面截图" in part for part in calls[0])
+        assert any("可以继续调用" in part for part in calls[0])
+        assert not any("不要调用桌面截图" in part for part in calls[0])
         assert "--image" in calls[0]
         assert str(image_path) in calls[0]
         assert updates == []
@@ -1066,7 +1067,8 @@ class TestHermesStreamBridgeImageRouting:
         routed = bridge_mod._route_images(FakeCli(), "看图", [image])
 
         assert routed.startswith("vision::[Yachiyo 附件图片上下文]")
-        assert "不要调用桌面截图" in routed
+        assert "可以继续调用" in routed
+        assert "不要调用桌面截图" not in routed
         assert "看图::1" in routed
 
     def test_xiaomi_pro_auto_uses_vision_preprocessor(self, monkeypatch, tmp_path):
@@ -1191,7 +1193,8 @@ class TestHermesStreamBridgeImageRouting:
         routed = bridge_mod._route_images(FakeCli(), "看图", [image])
 
         assert routed.startswith("vision::[Yachiyo 附件图片上下文]")
-        assert "不要调用桌面截图" in routed
+        assert "可以继续调用" in routed
+        assert "不要调用桌面截图" not in routed
         assert "看图::1" in routed
 
     def test_text_mode_overrides_native_decision_for_text_provider(self, monkeypatch, tmp_path):
@@ -1490,7 +1493,7 @@ class TestHermesStreamBridgeImageRouting:
         assert result == "辅助视觉结果"
         assert captured["model"] == "mimo-v2.5"
 
-    def test_image_turn_disables_agent_tools_for_pure_image_request(self, tmp_path):
+    def test_image_turn_preserves_agent_tools_for_pure_image_request(self, tmp_path):
         image = tmp_path / "screen.png"
         image.write_bytes(b"png")
         agent = types.SimpleNamespace(
@@ -1499,13 +1502,13 @@ class TestHermesStreamBridgeImageRouting:
         )
 
         with bridge_mod._disable_agent_tools_for_image_turn(agent, [image]):
-            assert agent.tools == []
-            assert agent.valid_tool_names == set()
+            assert agent.tools == [{"function": {"name": "terminal"}}]
+            assert agent.valid_tool_names == {"terminal", "vision_analyze"}
 
         assert agent.tools == [{"function": {"name": "terminal"}}]
         assert agent.valid_tool_names == {"terminal", "vision_analyze"}
 
-    def test_image_turn_keeps_agent_tools_for_current_page_troubleshooting(self, tmp_path):
+    def test_image_turn_preserves_agent_tools_for_screenshot_policy_request(self, tmp_path):
         image = tmp_path / "screen.png"
         image.write_bytes(b"png")
         agent = types.SimpleNamespace(
@@ -1513,26 +1516,22 @@ class TestHermesStreamBridgeImageRouting:
             valid_tool_names={"browser_cdp"},
         )
 
-        keep_tools = bridge_mod._image_turn_should_keep_agent_tools("这里没看到内容？帮我检查当前页面。")
-
-        with bridge_mod._disable_agent_tools_for_image_turn(agent, [image], allow_tools=keep_tools):
+        with bridge_mod._disable_agent_tools_for_image_turn(agent, [image]):
             assert agent.tools == [{"function": {"name": "browser_cdp"}}]
             assert agent.valid_tool_names == {"browser_cdp"}
 
-        assert keep_tools is True
-
-    def test_attached_image_guard_relaxes_tool_policy_for_current_page_debugging(self, tmp_path):
+    def test_attached_image_guard_allows_agent_tools(self, tmp_path):
         image = tmp_path / "screen.png"
         image.write_bytes(b"png")
 
         guarded = bridge_mod._with_attached_image_guard(
-            "这里没看到内容？",
+            "不要截除了 hermes-yachiyo 以外的图，现在思考对策。",
             [image],
-            allow_agent_tools=True,
         )
 
-        assert "可以继续调用相应工具核对和处理" in guarded
+        assert "可以继续调用" in guarded
         assert "不要调用桌面截图" not in guarded
+        assert "hermes-yachiyo" in guarded
 
     def test_activity_text_hides_raw_tool_call_drafts(self):
         text = (

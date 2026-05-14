@@ -117,9 +117,9 @@ _STREAM_UPDATE_INTERVAL: float = 0.05
 _ERROR_DETAIL_MAX_CHARS = 500
 _ERROR_DETAIL_MAX_LINES = 12
 _ATTACHED_IMAGE_GUARD = (
-    "本轮用户已经附加图片。请优先且尽量只根据这些附加图片回答；"
-    "不要调用桌面截图、活动窗口、浏览器视觉或其它实时桌面观察工具来替代附加图片，"
-    "除非用户明确要求你操作当前电脑或重新观察屏幕。"
+    "本轮用户已经附加图片。请先依据这些附加图片理解用户问题；"
+    "不要沿用历史消息里对旧图片的描述来回答本轮图片；"
+    "如果完成任务需要调用浏览器、桌面、文件、终端或其它 Agent 工具，可以继续调用。"
 )
 _TITLE_GENERATION_ENABLED_ENV = "HERMES_YACHIYO_TITLE_GENERATION"
 _TITLE_CONTEXT_MESSAGES_ENV = "HERMES_YACHIYO_TITLE_CONTEXT_MESSAGES"
