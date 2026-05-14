@@ -19,20 +19,63 @@ import contextlib
 import io
 import inspect
 import json
+import locale
 import os
 from pathlib import Path
+import re
 import sys
+import time
 import traceback
 from typing import Any, Optional
 from urllib.parse import urlparse
 
 
+def _configure_utf8_stdio() -> None:
+    """Keep bridge NDJSON and tool output text in UTF-8.
+
+    The bridge may run under a GUI-launched app with no useful locale.  Pinning
+    stdio and locale here protects both our event stream and Python tools
+    imported by Hermes that rely on the process' default text encoding.
+    """
+    os.environ["PYTHONUTF8"] = "1"
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    if (os.environ.get("LC_ALL") or "").strip().lower() in {"c", "posix", "ascii", "us-ascii"}:
+        os.environ.pop("LC_ALL", None)
+    if (os.environ.get("LANG") or "").strip().lower() in {"", "c", "posix", "ascii", "us-ascii"}:
+        os.environ["LANG"] = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+    if (os.environ.get("LC_CTYPE") or "").strip().lower() in {"", "c", "posix", "ascii", "us-ascii"}:
+        os.environ["LC_CTYPE"] = "UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+    try:
+        locale.setlocale(locale.LC_CTYPE, "")
+    except Exception:
+        pass
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_configure_utf8_stdio()
 _EVENT_STDOUT = sys.stdout
 _DEBUG_ROUTE_ENV = "HERMES_YACHIYO_DEBUG_ROUTE"
 _DEBUG_ROUTE_TRUE_VALUES = {"1", "true", "yes", "on", "debug"}
 _MAX_IMAGE_DATA_URL_BYTES = 20_000_000
 _RESIZE_IMAGE_TARGET_BYTES = 5_000_000
 _EMPTY_DETAIL_VALUES = {"", "none", "null"}
+_ACTIVITY_DETAIL_MAX_CHARS = 520
+_ACTIVITY_TITLE_MAX_CHARS = 120
+_SECRET_PATTERNS = (
+    re.compile(
+        r"(?i)\b(api[_-]?key|token|password|passwd|secret|authorization|bearer)\b"
+        r"\s*[:=]\s*([^\s,;\"']{6,})"
+    ),
+    re.compile(r"\b(sk-[A-Za-z0-9_\-]{8,})\b"),
+    re.compile(r"\b(gh[pousr]_[A-Za-z0-9_]{12,})\b"),
+    re.compile(r"\b(xox[baprs]-[A-Za-z0-9\-]{12,})\b"),
+)
+_TOOL_CALL_SNIPPET_RE = re.compile(r"<tool_call\b.*?</tool_call>", re.IGNORECASE | re.DOTALL)
+_TOOL_CALL_TAIL_RE = re.compile(r"<tool_call\b.*", re.IGNORECASE | re.DOTALL)
 _FAILURE_DETAIL_KEYS = (
     "error",
     "error_message",
@@ -42,10 +85,9 @@ _FAILURE_DETAIL_KEYS = (
     "details",
 )
 _ATTACHED_IMAGE_GUARD = (
-    "本轮用户已经附加图片。请优先且尽量只根据这些附加图片回答；"
+    "本轮用户已经附加图片。请先依据这些附加图片理解用户问题；"
     "不要沿用历史消息里对旧图片的描述来回答本轮图片；"
-    "不要调用桌面截图、活动窗口、浏览器视觉或其它实时桌面观察工具来替代附加图片，"
-    "除非用户明确要求你操作当前电脑或重新观察屏幕。"
+    "如果完成任务需要调用浏览器、桌面、文件、终端或其它 Agent 工具，可以继续调用。"
 )
 _XIAOMI_NATIVE_IMAGE_MODELS = {
     "mimo-v2.5",
@@ -135,6 +177,226 @@ def _emit(event_type: str, **payload: Any) -> None:
     _EVENT_STDOUT.flush()
 
 
+def _redact_activity_text(value: Any, *, limit: int = _ACTIVITY_DETAIL_MAX_CHARS) -> str:
+    text = _detail_text(value, drop_empty_literals=False)
+    text = _redact_tool_call_markup(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub(lambda match: f"{match.group(1)}=[redacted]" if match.lastindex and match.lastindex > 1 else "[redacted]", text)
+    if len(text) > limit:
+        text = text[: limit - 1].rstrip() + "…"
+    return text
+
+
+def _redact_tool_call_markup(text: str) -> str:
+    """Hide raw model-side tool call drafts from user-facing activity text."""
+    if "<tool_call" not in text.lower():
+        return text
+    text = _TOOL_CALL_SNIPPET_RE.sub("[工具调用草稿已隐藏]", text)
+    return _TOOL_CALL_TAIL_RE.sub("[工具调用草稿已隐藏]", text)
+
+
+def _activity_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return ""
+    if seconds < 10:
+        return f"{seconds:.1f}s"
+    if seconds < 60:
+        return f"{round(seconds)}s"
+    minutes, secs = divmod(int(round(seconds)), 60)
+    return f"{minutes}m {secs}s" if secs else f"{minutes}m"
+
+
+def _tool_preview(name: str, args: Any) -> str:
+    if not isinstance(args, dict):
+        return ""
+    try:
+        from agent.display import build_tool_preview
+
+        return _redact_activity_text(build_tool_preview(name, args, max_len=160) or "")
+    except Exception:
+        try:
+            return _redact_activity_text(json.dumps(args, ensure_ascii=False), limit=180)
+        except TypeError:
+            return _redact_activity_text(args, limit=180)
+
+
+def _tool_display_name(name: str) -> str:
+    value = str(name or "").strip()
+    labels = {
+        "terminal": "终端",
+        "run_shell_command": "终端",
+        "bash": "终端",
+        "python": "脚本",
+        "code_execution": "脚本",
+        "read_file": "读取文件",
+        "write_file": "写入文件",
+        "edit_file": "编辑文件",
+        "patch": "编辑文件",
+        "web_search": "网页搜索",
+        "web_extract": "网页读取",
+        "browser": "浏览器",
+        "browser_cdp": "浏览器",
+        "todo": "任务清单",
+    }
+    return labels.get(value, value.replace("_", " ") or "Hermes 工具")
+
+
+def _tool_summary(name: str, result: Any, duration_s: float | None) -> str:
+    detail = ""
+    try:
+        data = json.loads(result) if isinstance(result, str) else result
+    except Exception:
+        data = None
+    if isinstance(data, dict):
+        if name == "web_search":
+            items = data.get("data", {}).get("web") if isinstance(data.get("data"), dict) else None
+            if isinstance(items, list):
+                detail = f"完成 {len(items)} 次搜索"
+        elif name == "web_extract":
+            items = data.get("results") or (data.get("data", {}).get("results") if isinstance(data.get("data"), dict) else None)
+            if isinstance(items, list):
+                detail = f"读取 {len(items)} 个页面"
+        if not detail and data.get("fallback_warning"):
+            detail = str(data.get("fallback_warning") or "")
+        if not detail and data.get("success") is False:
+            detail = str(data.get("error") or data.get("message") or "工具返回失败")
+    if not detail:
+        detail = _redact_activity_text(result, limit=200)
+    duration = _activity_duration(duration_s)
+    if duration:
+        detail = f"{detail} · {duration}" if detail else duration
+    return _redact_activity_text(detail, limit=220)
+
+
+def _emit_activity(
+    phase: str,
+    *,
+    title: str,
+    detail: Any = "",
+    status: str = "running",
+    tool_name: str = "",
+    tool_call_id: str = "",
+    duration_seconds: float | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    payload: dict[str, Any] = {
+        "phase": _redact_activity_text(phase, limit=60),
+        "title": _redact_activity_text(title, limit=_ACTIVITY_TITLE_MAX_CHARS),
+        "detail": _redact_activity_text(detail),
+        "status": _redact_activity_text(status or "running", limit=40),
+        "tool_name": _redact_activity_text(tool_name, limit=80),
+        "tool_call_id": _redact_activity_text(tool_call_id, limit=80),
+    }
+    if duration_seconds is not None:
+        payload["duration_seconds"] = duration_seconds
+    if metadata:
+        payload["metadata"] = metadata
+    _emit("activity", **payload)
+
+
+def _wire_agent_activity_callbacks(agent: Any) -> None:
+    """Attach Hermes agent callbacks when the installed Hermes version supports them."""
+    tool_started_at: dict[str, float] = {}
+
+    def on_tool_start(tool_call_id: Any, name: Any, args: Any) -> None:
+        call_id = str(tool_call_id or "")
+        tool_name = str(name or "")
+        if call_id:
+            tool_started_at[call_id] = time.time()
+        label = _tool_display_name(tool_name)
+        _emit_activity(
+            "tool_start",
+            title=f"正在调用{label}",
+            detail=_tool_preview(tool_name, args),
+            status="running",
+            tool_name=tool_name,
+            tool_call_id=call_id,
+        )
+
+    def on_tool_complete(tool_call_id: Any, name: Any, args: Any, result: Any) -> None:
+        call_id = str(tool_call_id or "")
+        tool_name = str(name or "")
+        started_at = tool_started_at.pop(call_id, None)
+        duration = time.time() - started_at if started_at else None
+        status = "failed" if _tool_result_failed(result) else "completed"
+        label = _tool_display_name(tool_name)
+        _emit_activity(
+            "tool_complete",
+            title=f"{label}调用完成" if status == "completed" else f"{label}调用失败",
+            detail=_tool_summary(tool_name, result, duration),
+            status=status,
+            tool_name=tool_name,
+            tool_call_id=call_id,
+            duration_seconds=duration,
+        )
+
+    def on_tool_progress(event_type: Any, name: Any = None, preview: Any = None, args: Any = None, **kwargs: Any) -> None:
+        event = str(event_type or "tool_progress")
+        tool_name = str(name or kwargs.get("tool_name") or "")
+        label = _tool_display_name(tool_name)
+        if event == "reasoning.available":
+            _emit_activity("reasoning", title="Hermes 正在整理推理", detail=preview, status="running", tool_name=tool_name)
+            return
+        if event.startswith("subagent."):
+            summary = kwargs.get("summary") or kwargs.get("goal") or preview or event
+            status = str(kwargs.get("status") or ("completed" if event.endswith(".complete") else "running"))
+            _emit_activity("subagent", title="子 Agent 活动", detail=summary, status=status, tool_name=tool_name, metadata={"event": event})
+            return
+        _emit_activity(
+            "tool_progress",
+            title=f"正在执行{label}",
+            detail=preview or _tool_preview(tool_name, args),
+            status="running",
+            tool_name=tool_name,
+            metadata={"event": event},
+        )
+
+    def on_status(kind: Any, text: Any = None) -> None:
+        body = text if text is not None else kind
+        title = _redact_activity_text(body, limit=_ACTIVITY_TITLE_MAX_CHARS)
+        if title:
+            _emit_activity("status", title=title, detail="", status="running", metadata={"kind": str(kind or "status")})
+
+    def on_thinking(text: Any) -> None:
+        value = _redact_activity_text(text, limit=160)
+        if value:
+            _emit_activity("thinking", title="Hermes 正在思考", detail=value, status="running")
+
+    def on_reasoning(text: Any) -> None:
+        value = _redact_activity_text(text, limit=160)
+        if value:
+            _emit_activity("reasoning", title="Hermes 正在推理", detail=value, status="running")
+
+    callbacks = {
+        "tool_start_callback": on_tool_start,
+        "tool_complete_callback": on_tool_complete,
+        "tool_progress_callback": on_tool_progress,
+        "status_callback": on_status,
+        "thinking_callback": on_thinking,
+        "reasoning_callback": on_reasoning,
+    }
+    for attr, callback in callbacks.items():
+        try:
+            setattr(agent, attr, callback)
+        except Exception:
+            pass
+
+
+def _tool_result_failed(result: Any) -> bool:
+    try:
+        data = json.loads(result) if isinstance(result, str) else result
+    except Exception:
+        data = None
+    if isinstance(data, dict):
+        if data.get("success") is False or data.get("ok") is False:
+            return True
+        if data.get("error") and not data.get("success", True):
+            return True
+    text = str(result or "").lower()
+    return any(marker in text for marker in ("traceback", "error:", "exception:", "failed"))
+
+
 def _read_payload() -> dict[str, Any]:
     raw = sys.stdin.read().strip()
     if not raw:
@@ -221,7 +483,12 @@ def _collect_image_paths(payload: dict[str, Any]) -> list[Path]:
     return images
 
 
-def _with_attached_image_guard(description: str, image_paths: list[Path]) -> str:
+def _with_attached_image_guard(
+    description: str,
+    image_paths: list[Path],
+    *,
+    allow_agent_tools: bool = False,
+) -> str:
     if not image_paths:
         return description
     count = len(image_paths)
@@ -799,33 +1066,34 @@ def _preprocess_images_with_vision(description: str, image_paths: list[Path]) ->
     return "\n\n".join(parts + [description])
 
 
-def _route_images(cli: Any, description: str, image_paths: list[Path]) -> Any:
+def _route_images(
+    cli: Any,
+    description: str,
+    image_paths: list[Path],
+    *,
+    allow_agent_tools: bool = True,
+) -> Any:
     if not image_paths:
         return description
-    guarded_description = _with_attached_image_guard(description, image_paths)
+    guarded_description = _with_attached_image_guard(
+        description,
+        image_paths,
+        allow_agent_tools=allow_agent_tools,
+    )
     if _is_debug_route_enabled():
         print("[yachiyo-debug] image route=yachiyo_vision_text", file=sys.stderr, flush=True)
     return _preprocess_images_with_vision(guarded_description, image_paths)
 
 
 @contextlib.contextmanager
-def _disable_agent_tools_for_image_turn(agent: Any, image_paths: list[Path]):
-    if not image_paths or agent is None:
-        yield
-        return
-    original_tools = getattr(agent, "tools", None)
-    original_valid_tool_names = getattr(agent, "valid_tool_names", None)
-    try:
-        if hasattr(agent, "tools"):
-            agent.tools = []
-        if hasattr(agent, "valid_tool_names"):
-            agent.valid_tool_names = set()
-        yield
-    finally:
-        if hasattr(agent, "tools"):
-            agent.tools = original_tools
-        if hasattr(agent, "valid_tool_names"):
-            agent.valid_tool_names = original_valid_tool_names
+def _disable_agent_tools_for_image_turn(
+    agent: Any,
+    image_paths: list[Path],
+    *,
+    allow_tools: bool = False,
+):
+    """Legacy context manager kept as a no-op so image turns can use Agent tools."""
+    yield
 
 
 def _debug_route(route: Any) -> None:
@@ -1003,8 +1271,15 @@ def _run(payload: dict[str, Any]) -> int:
 
         cli.agent.quiet_mode = True
         cli.agent.suppress_status_output = True
+        _wire_agent_activity_callbacks(cli.agent)
+        _emit_activity("status", title="Hermes Agent 已启动", status="running")
         try:
-            description_for_agent = _route_images(cli, description, image_paths)
+            description_for_agent = _route_images(
+                cli,
+                description,
+                image_paths,
+                allow_agent_tools=True,
+            )
         except ImagePreprocessError as exc:
             _emit("error", message=f"图片预分析失败：{exc}")
             return 1
@@ -1018,7 +1293,11 @@ def _run(payload: dict[str, Any]) -> int:
             if delta:
                 _emit("delta", delta=delta)
 
-        with _disable_agent_tools_for_image_turn(cli.agent, image_paths):
+        with _disable_agent_tools_for_image_turn(
+            cli.agent,
+            image_paths,
+            allow_tools=True,
+        ):
             result = cli.agent.run_conversation(
                 user_message=description_for_agent,
                 conversation_history=cli.conversation_history,

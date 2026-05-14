@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shutil
+import tempfile
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -26,12 +29,14 @@ _CONFIG_FILE = _CONFIG_DIR / "config.json"
 
 # 合法的 display_mode 值，与 DisplayMode 枚举保持同步。
 # 主控台不再是 display mode；旧配置中的 "window" 会迁移到 "bubble"。
-DisplayModeValue = Literal["bubble", "live2d"]
+DisplayModeValue = Literal["none", "bubble", "live2d"]
 BubbleDisplayValue = Literal["icon", "summary", "recent_reply"]
 BubbleExpandTriggerValue = Literal["click"]
 Live2DClickActionValue = Literal["focus_stage", "open_chat", "toggle_reply"]
 Live2DDefaultOpenValue = Literal["stage", "reply_bubble", "chat_input"]
 Live2DPositionAnchorValue = Literal["left_bottom", "right_bottom", "custom"]
+Live2DRenderQualityPresetValue = Literal["battery", "balanced", "quality", "custom"]
+Live2DHitRegionPrecisionValue = Literal["low", "medium", "high"]
 TTSProviderValue = Literal["none", "http", "command", "gpt-sovits"]
 
 DEFAULT_TTS_NOTIFICATION_PROMPT = (
@@ -304,6 +309,8 @@ DEFAULT_ASSISTANT_PERSONA_PROMPT = """<Role>Hermes-Yachiyo Agent</Role>
 以月见八千代的声音，帮助用户把事情完成。
 </rule>"""
 DEFAULT_ASSISTANT_USER_ADDRESS = "彩叶"
+DEFAULT_ASSISTANT_AGENT_NAME = "月見八千代"
+DEFAULT_ASSISTANT_AGENT_NICKNAME = "月夜"
 
 
 class ModelState(StrEnum):
@@ -661,8 +668,38 @@ class BubbleModeConfig:
 class AssistantConfig:
     """共享助手配置。"""
 
+    agent_name: str = DEFAULT_ASSISTANT_AGENT_NAME
+    agent_nickname: str = DEFAULT_ASSISTANT_AGENT_NICKNAME
+    agent_avatar_path: str = str(DEFAULT_BUBBLE_AVATAR_PATH)
     persona_prompt: str = DEFAULT_ASSISTANT_PERSONA_PROMPT
     user_address: str = DEFAULT_ASSISTANT_USER_ADDRESS
+    user_name: str = ""
+    user_avatar_path: str = ""
+    user_profile: str = ""
+    user_preferences: str = ""
+
+    def prompt_profile_context(self) -> str:
+        """Build profile context injected into Hermes prompts."""
+        agent_lines: list[str] = []
+        if self.agent_name.strip():
+            agent_lines.append(f"全称：{self.agent_name.strip()}")
+        if self.agent_nickname.strip():
+            agent_lines.append(f"昵称：{self.agent_nickname.strip()}")
+
+        user_lines: list[str] = []
+        if self.user_name.strip():
+            user_lines.append(f"用户名称：{self.user_name.strip()}")
+        if self.user_profile.strip():
+            user_lines.append(f"基本信息：{self.user_profile.strip()}")
+        if self.user_preferences.strip():
+            user_lines.append(f"偏好：{self.user_preferences.strip()}")
+
+        parts: list[str] = []
+        if agent_lines:
+            parts.append("[Agent 资料]\n" + "\n".join(agent_lines))
+        if user_lines:
+            parts.append("[用户资料]\n" + "\n".join(user_lines))
+        return "\n\n".join(parts)
 
 
 @dataclass
@@ -735,6 +772,10 @@ class Live2DModeConfig:
     auto_open_chat_window: bool = False
     enable_quick_input: bool = True
     mouse_follow_enabled: bool = True
+    render_quality_preset: Live2DRenderQualityPresetValue = "balanced"
+    render_fps: int = 24
+    render_resolution: float = 1.25
+    hit_region_precision: Live2DHitRegionPrecisionValue = "medium"
     idle_motion_group: str = "Idle"   # 待机动作组名（Live2D Cubism 约定）
     enable_expressions: bool = False  # 是否启用表情系统（等待渲染器支持）
     enable_physics: bool = False      # 是否启用物理模拟（等待渲染器支持）
@@ -1063,8 +1104,15 @@ def _normalize_config_values(config: AppConfig) -> None:
         1.0,
         0.6,
     )
+    config.assistant.agent_name = str(config.assistant.agent_name or DEFAULT_ASSISTANT_AGENT_NAME)
+    config.assistant.agent_nickname = str(config.assistant.agent_nickname or DEFAULT_ASSISTANT_AGENT_NICKNAME)
+    config.assistant.agent_avatar_path = str(config.assistant.agent_avatar_path or DEFAULT_BUBBLE_AVATAR_PATH)
     config.assistant.persona_prompt = str(config.assistant.persona_prompt or "")
     config.assistant.user_address = str(config.assistant.user_address or "")
+    config.assistant.user_name = str(config.assistant.user_name or "")
+    config.assistant.user_avatar_path = str(config.assistant.user_avatar_path or "")
+    config.assistant.user_profile = str(config.assistant.user_profile or "")
+    config.assistant.user_preferences = str(config.assistant.user_preferences or "")
     config.tts.provider = cast(TTSProviderValue, _normalize_literal(
         config.tts.provider,
         {"none", "http", "command", "gpt-sovits"},
@@ -1118,6 +1166,8 @@ def _normalize_config_values(config: AppConfig) -> None:
 
 def normalize_display_mode(value: Any) -> DisplayModeValue:
     """规范化 display mode，兼容旧版 window 配置。"""
+    if value == "none":
+        return "none"
     if value == "live2d":
         return "live2d"
     if value not in (None, "", "bubble", "window"):
@@ -1125,35 +1175,43 @@ def normalize_display_mode(value: Any) -> DisplayModeValue:
     return "bubble"
 
 
+def _config_backup_file() -> Path:
+    return _CONFIG_FILE.with_name(f"{_CONFIG_FILE.name}.bak")
+
+
 def load_config() -> AppConfig:
     """从磁盘加载配置，不存在则返回默认值"""
-    if _CONFIG_FILE.exists():
-        try:
-            data = json.loads(_CONFIG_FILE.read_text(encoding="utf-8"))
-            window_mode = _load_nested_dataclass(data, "window_mode", WindowModeConfig)
-            bubble_mode = _load_nested_dataclass(data, "bubble_mode", BubbleModeConfig)
-            live2d_mode = _load_nested_dataclass(
-                data, "live2d_mode", Live2DModeConfig, legacy_key="live2d"
-            )
-            assistant = _load_nested_dataclass(data, "assistant", AssistantConfig)
-            tts = _load_nested_dataclass(data, "tts", TTSConfig)
-            backup = _load_nested_dataclass(data, "backup", BackupConfig)
-            if "display_mode" in data:
-                data["display_mode"] = normalize_display_mode(data.get("display_mode"))
-            config = AppConfig(
-                **{k: v for k, v in data.items() if k in AppConfig.__dataclass_fields__}
-            )
-            config.window_mode = window_mode
-            config.bubble_mode = bubble_mode
-            config.live2d_mode = live2d_mode
-            config.assistant = assistant
-            config.tts = tts
-            config.backup = backup
-            _apply_default_resource_paths(config)
-            _normalize_config_values(config)
-            return config
-        except Exception:
-            logger.warning("配置文件读取失败，使用默认配置")
+    backup_file = _config_backup_file()
+    for config_path, source_label in ((_CONFIG_FILE, "配置文件"), (backup_file, "配置备份")):
+        if config_path.exists():
+            try:
+                data = json.loads(config_path.read_text(encoding="utf-8"))
+                window_mode = _load_nested_dataclass(data, "window_mode", WindowModeConfig)
+                bubble_mode = _load_nested_dataclass(data, "bubble_mode", BubbleModeConfig)
+                live2d_mode = _load_nested_dataclass(
+                    data, "live2d_mode", Live2DModeConfig, legacy_key="live2d"
+                )
+                assistant = _load_nested_dataclass(data, "assistant", AssistantConfig)
+                tts = _load_nested_dataclass(data, "tts", TTSConfig)
+                backup = _load_nested_dataclass(data, "backup", BackupConfig)
+                if "display_mode" in data:
+                    data["display_mode"] = normalize_display_mode(data.get("display_mode"))
+                config = AppConfig(
+                    **{k: v for k, v in data.items() if k in AppConfig.__dataclass_fields__}
+                )
+                config.window_mode = window_mode
+                config.bubble_mode = bubble_mode
+                config.live2d_mode = live2d_mode
+                config.assistant = assistant
+                config.tts = tts
+                config.backup = backup
+                _apply_default_resource_paths(config)
+                _normalize_config_values(config)
+                if config_path == backup_file:
+                    logger.warning("主配置文件读取失败，已从配置备份恢复")
+                return config
+            except Exception as exc:
+                logger.warning("%s读取失败: %s", source_label, exc)
     config = AppConfig()
     _apply_default_resource_paths(config)
     _normalize_config_values(config)
@@ -1178,7 +1236,34 @@ def _apply_default_resource_paths(config: AppConfig) -> None:
 def save_config(config: AppConfig) -> None:
     """将配置写入磁盘"""
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    _CONFIG_FILE.write_text(
-        json.dumps(asdict(config), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    payload = json.dumps(asdict(config), ensure_ascii=False, indent=2)
+    backup_file = _config_backup_file()
+    if _CONFIG_FILE.exists():
+        try:
+            shutil.copy2(_CONFIG_FILE, backup_file)
+        except OSError:
+            logger.debug("写入配置备份失败", exc_info=True)
+
+    fd, tmp_name = tempfile.mkstemp(prefix=".config.", suffix=".tmp", dir=str(_CONFIG_DIR))
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, _CONFIG_FILE)
+        try:
+            dir_fd = os.open(_CONFIG_DIR, os.O_RDONLY)
+        except OSError:
+            dir_fd = None
+        if dir_fd is not None:
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass

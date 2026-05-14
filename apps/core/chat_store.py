@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sqlite3
 import threading
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 _DB_FILENAME = "chat.db"
 _SESSION_TITLE_MAX_CHARS = 36
+_TITLE_SENTENCE_BOUNDARY_RE = re.compile(r"[。.!！?？\n\r]")
 
 
 def _get_db_path() -> str:
@@ -39,10 +41,24 @@ def _get_db_path() -> str:
 
 def make_session_title(content: str, max_chars: int = _SESSION_TITLE_MAX_CHARS) -> str:
     """从首条用户消息生成会话列表标题。"""
-    title = " ".join((content or "").split())
+    title = _first_user_sentence_title(content)
     if len(title) <= max_chars:
         return title
     return title[: max_chars - 3].rstrip() + "..."
+
+
+def _first_user_sentence_title(content: str) -> str:
+    title = " ".join((content or "").split()).strip()
+    if not title:
+        return ""
+    boundary = _TITLE_SENTENCE_BOUNDARY_RE.search(title)
+    if boundary and boundary.start() > 0:
+        title = title[:boundary.end()]
+    return title.strip(" \t\r\n\"'“”‘’`*_#")
+
+
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 @dataclass
@@ -53,6 +69,17 @@ class StoredSession:
     created_at: str  # ISO 格式
     message_count: int = 0
     hermes_session_id: Optional[str] = None
+
+
+@dataclass
+class StoredSessionSearchResult:
+    """会话搜索结果，包含第一条命中的消息上下文。"""
+    session: StoredSession
+    match_message_id: Optional[str] = None
+    match_role: str = ""
+    match_content: str = ""
+    match_created_at: str = ""
+    match_count: int = 0
 
 
 @dataclass
@@ -170,6 +197,91 @@ class ChatStore:
                 created_at=r["created_at"],
                 message_count=r["message_count"],
                 hermes_session_id=r["hermes_session_id"],
+            )
+            for r in rows
+        ]
+
+    def search_sessions(self, query: str, limit: int = 50) -> List[StoredSessionSearchResult]:
+        """按标题、会话 ID、Hermes ID 或消息内容搜索会话。"""
+        normalized_query = " ".join((query or "").split()).strip()
+        if not normalized_query:
+            return [
+                StoredSessionSearchResult(session=session)
+                for session in self.list_sessions(limit=limit)
+            ]
+        like = f"%{_escape_like(normalized_query)}%"
+        limit = max(1, min(int(limit or 50), 200))
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                """
+                WITH visible_sessions AS (
+                    SELECT s.session_id, s.title, s.created_at, s.hermes_session_id,
+                           MAX(m.created_at) AS last_message_at,
+                           (
+                               SELECT um.content
+                               FROM chat_messages um
+                               WHERE um.session_id = s.session_id
+                                 AND um.role = 'user'
+                               ORDER BY um.created_at ASC
+                               LIMIT 1
+                           ) AS first_user_content,
+                           COUNT(m.message_id) AS message_count
+                    FROM chat_sessions s
+                    LEFT JOIN chat_messages m ON m.session_id = s.session_id
+                    GROUP BY s.session_id
+                    HAVING COUNT(m.message_id) > 0
+                )
+                SELECT vs.session_id, vs.title, vs.created_at, vs.hermes_session_id,
+                       vs.first_user_content, vs.message_count, vs.last_message_at,
+                       mm.message_id AS match_message_id,
+                       mm.role AS match_role,
+                       mm.content AS match_content,
+                       mm.created_at AS match_created_at,
+                       (
+                           SELECT COUNT(*)
+                           FROM chat_messages mc
+                           WHERE mc.session_id = vs.session_id
+                             AND mc.content LIKE ? ESCAPE '\\'
+                       ) AS match_count
+                FROM visible_sessions vs
+                LEFT JOIN chat_messages mm ON mm.message_id = (
+                    SELECT m2.message_id
+                    FROM chat_messages m2
+                    WHERE m2.session_id = vs.session_id
+                      AND m2.content LIKE ? ESCAPE '\\'
+                    ORDER BY m2.created_at DESC, m2.message_id DESC
+                    LIMIT 1
+                )
+                WHERE vs.session_id LIKE ? ESCAPE '\\'
+                   OR COALESCE(vs.title, '') LIKE ? ESCAPE '\\'
+                   OR COALESCE(vs.hermes_session_id, '') LIKE ? ESCAPE '\\'
+                   OR EXISTS (
+                       SELECT 1
+                       FROM chat_messages mx
+                       WHERE mx.session_id = vs.session_id
+                         AND mx.content LIKE ? ESCAPE '\\'
+                   )
+                ORDER BY COALESCE(mm.created_at, vs.last_message_at, vs.created_at) DESC,
+                         vs.created_at DESC
+                LIMIT ?
+                """,
+                (like, like, like, like, like, like, limit),
+            ).fetchall()
+        return [
+            StoredSessionSearchResult(
+                session=StoredSession(
+                    session_id=r["session_id"],
+                    title=r["title"] or make_session_title(r["first_user_content"] or ""),
+                    created_at=r["created_at"],
+                    message_count=r["message_count"],
+                    hermes_session_id=r["hermes_session_id"],
+                ),
+                match_message_id=r["match_message_id"],
+                match_role=r["match_role"] or "",
+                match_content=r["match_content"] or "",
+                match_created_at=r["match_created_at"] or "",
+                match_count=int(r["match_count"] or 0),
             )
             for r in rows
         ]
@@ -302,6 +414,55 @@ class ChatStore:
             )
             conn.commit()
 
+    def load_assistant_messages_by_task(
+        self, session_id: str, task_id: str
+    ) -> List[StoredMessage]:
+        """加载某个任务对应的 assistant 消息，用于跨实例 upsert 去重。"""
+        if not session_id or not task_id:
+            return []
+        with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                """
+                SELECT message_id, session_id, role, content, status, task_id, error,
+                       created_at, attachments_json
+                FROM chat_messages
+                WHERE session_id = ?
+                  AND task_id = ?
+                  AND role = 'assistant'
+                ORDER BY created_at ASC, message_id ASC
+                """,
+                (session_id, task_id),
+            ).fetchall()
+        return [
+            StoredMessage(
+                message_id=r["message_id"],
+                session_id=r["session_id"],
+                role=r["role"],
+                content=r["content"],
+                status=r["status"],
+                task_id=r["task_id"],
+                error=r["error"],
+                created_at=r["created_at"],
+                attachments_json=r["attachments_json"] or "[]",
+            )
+            for r in rows
+        ]
+
+    def delete_messages(self, message_ids: list[str]) -> int:
+        """按 message_id 批量删除消息，返回删除数量。"""
+        ids = [message_id for message_id in message_ids if message_id]
+        if not ids:
+            return 0
+        with self._lock:
+            conn = self._get_conn()
+            cursor = conn.executemany(
+                "DELETE FROM chat_messages WHERE message_id = ?",
+                [(message_id,) for message_id in ids],
+            )
+            conn.commit()
+            return int(cursor.rowcount or 0)
+
     def load_messages(
         self, session_id: str, limit: int = 100
     ) -> List[StoredMessage]:
@@ -333,10 +494,84 @@ class ChatStore:
             for r in rows
         ]
 
+    def load_messages_around(
+        self,
+        session_id: str,
+        message_id: str,
+        *,
+        before: int = 80,
+        after: int = 40,
+    ) -> List[StoredMessage]:
+        """加载某条消息附近的上下文，按时间正序返回。"""
+        session_id = (session_id or "").strip()
+        message_id = (message_id or "").strip()
+        if not session_id or not message_id:
+            return []
+        before = max(0, min(int(before or 0), 400))
+        after = max(0, min(int(after or 0), 400))
+        with self._lock:
+            conn = self._get_conn()
+            anchor = conn.execute(
+                """
+                SELECT rowid
+                FROM chat_messages
+                WHERE session_id = ?
+                  AND message_id = ?
+                LIMIT 1
+                """,
+                (session_id, message_id),
+            ).fetchone()
+            if anchor is None:
+                return []
+            anchor_rowid = int(anchor["rowid"])
+            before_rows = conn.execute(
+                """
+                SELECT message_id, session_id, role, content, status, task_id, error,
+                       created_at, attachments_json
+                FROM chat_messages
+                WHERE session_id = ?
+                  AND rowid <= ?
+                ORDER BY rowid DESC
+                LIMIT ?
+                """,
+                (session_id, anchor_rowid, before + 1),
+            ).fetchall()
+            after_rows = conn.execute(
+                """
+                SELECT message_id, session_id, role, content, status, task_id, error,
+                       created_at, attachments_json
+                FROM chat_messages
+                WHERE session_id = ?
+                  AND rowid > ?
+                ORDER BY rowid ASC
+                LIMIT ?
+                """,
+                (session_id, anchor_rowid, after),
+            ).fetchall()
+        rows = list(reversed(before_rows)) + list(after_rows)
+        return [
+            StoredMessage(
+                message_id=r["message_id"],
+                session_id=r["session_id"],
+                role=r["role"],
+                content=r["content"],
+                status=r["status"],
+                task_id=r["task_id"],
+                error=r["error"],
+                created_at=r["created_at"],
+                attachments_json=r["attachments_json"] or "[]",
+            )
+            for r in rows
+        ]
+
     def close(self) -> None:
         """关闭数据库连接"""
         with self._lock:
             if self._conn is not None:
+                try:
+                    self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                except sqlite3.Error:
+                    logger.debug("ChatStore WAL checkpoint failed", exc_info=True)
                 self._conn.close()
                 self._conn = None
 
@@ -358,3 +593,12 @@ def get_chat_store() -> ChatStore:
         if _global_store is None:
             _global_store = ChatStore()
     return _global_store
+
+
+def close_chat_store() -> None:
+    """Close the global ChatStore without creating a new one."""
+    global _global_store
+    with _global_store_lock:
+        if _global_store is not None:
+            _global_store.close()
+            _global_store = None

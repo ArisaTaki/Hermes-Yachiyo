@@ -82,6 +82,14 @@ class TestAppStateUpdateStatus:
         assert result.status == TaskStatus.COMPLETED
         assert result.result == "done"
 
+    def test_update_progress_label(self, app_state):
+        task = app_state.create_task("progress")
+        result = app_state.update_task_progress(task.task_id, "正在运行脚本")
+
+        assert result is not None
+        assert result.progress_label == "正在运行脚本"
+        assert result.progress_updated_at is not None
+
     def test_running_to_failed_with_error(self, app_state):
         task = app_state.create_task("fail")
         app_state.update_task_status(task.task_id, TaskStatus.RUNNING)

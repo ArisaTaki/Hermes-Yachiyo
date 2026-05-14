@@ -8,9 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import apps.shell.live2d_resources as live2d_resources
-import apps.shell.config as config_mod
 import apps.locald.screenshot as screenshot_mod
+import apps.shell.config as config_mod
+import apps.shell.live2d_resources as live2d_resources
 from apps.bridge.routes import ui
 from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID
 from apps.shell.config import AppConfig
@@ -250,8 +250,8 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         def __init__(self, received_runtime):
             assert received_runtime is runtime
 
-        def get_messages(self, limit):
-            return {"messages": [], "limit": limit}
+        def get_messages(self, limit, anchor_message_id=""):
+            return {"messages": [], "limit": limit, "anchor_message_id": anchor_message_id}
 
         def send_message(self, text, attachments=None):
             return {"ok": True, "text": text, "attachments": attachments or []}
@@ -268,8 +268,8 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         def delete_current_session(self):
             return {"ok": True, "deleted": True}
 
-        def list_sessions(self, limit):
-            return {"sessions": [], "limit": limit}
+        def list_sessions(self, limit, query=""):
+            return {"sessions": [], "limit": limit, "query": query}
 
         def load_session(self, session_id):
             return {"ok": True, "session_id": session_id}
@@ -279,7 +279,11 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
 
     monkeypatch.setattr(ui, "ChatAPI", FakeChatAPI)
 
-    assert await ui.get_chat_messages(limit=12) == {"messages": [], "limit": 12}
+    assert await ui.get_chat_messages(limit=12, anchor_message_id="m1") == {
+        "messages": [],
+        "limit": 12,
+        "anchor_message_id": "m1",
+    }
     assert await ui.send_chat_message(ui.SendChatMessageRequest(text="hello")) == {
         "ok": True,
         "text": "hello",
@@ -289,7 +293,11 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
     assert await ui.clear_chat_session() == {"ok": True}
     assert await ui.cancel_chat_session_tasks() == {"ok": True, "cancelled_tasks": 1}
     assert await ui.delete_chat_session() == {"ok": True, "deleted": True}
-    assert await ui.list_chat_sessions(limit=3) == {"sessions": [], "limit": 3}
+    assert await ui.list_chat_sessions(limit=3, query="聊天") == {
+        "sessions": [],
+        "limit": 3,
+        "query": "聊天",
+    }
     assert await ui.load_chat_session(ui.LoadChatSessionRequest(session_id="s2")) == {
         "ok": True,
         "session_id": "s2",
@@ -298,6 +306,36 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         "executor": "HermesExecutor",
         "available": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_activity_route_forwards_filters(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        ui,
+        "list_activity_events",
+        lambda **kwargs: calls.append(kwargs) or {"ok": True, "events": []},
+    )
+
+    result = await ui.get_activity_events(
+        query="script",
+        status="running",
+        tool="terminal",
+        session_id="s1",
+        task_id="t1",
+        limit=25,
+    )
+
+    assert result == {"ok": True, "events": []}
+    assert calls == [{
+        "query": "script",
+        "status": "running",
+        "tool": "terminal",
+        "phase": "",
+        "session_id": "s1",
+        "task_id": "t1",
+        "limit": 25,
+    }]
 
 
 @pytest.mark.asyncio
@@ -721,6 +759,11 @@ async def test_gpt_sovits_service_routes_use_runtime_config(monkeypatch):
     )
     monkeypatch.setattr(
         ui,
+        "adopt_gpt_sovits_launch_agent",
+        lambda received_config: calls.append(("adopt", received_config)) or {"ok": True},
+    )
+    monkeypatch.setattr(
+        ui,
         "uninstall_gpt_sovits_launch_agent",
         lambda received_config: calls.append(("uninstall", received_config)) or {"ok": True},
     )
@@ -734,6 +777,7 @@ async def test_gpt_sovits_service_routes_use_runtime_config(monkeypatch):
         )
     ) == {"workdir_exists": True}
     assert await ui.install_tts_gpt_sovits_service() == {"ok": True}
+    assert await ui.adopt_tts_gpt_sovits_service() == {"ok": True}
     assert await ui.uninstall_tts_gpt_sovits_service() == {"ok": True}
     assert calls == [
         ("status", config),
@@ -746,6 +790,7 @@ async def test_gpt_sovits_service_routes_use_runtime_config(monkeypatch):
             },
         ),
         ("install", config),
+        ("adopt", config),
         ("uninstall", config),
     ]
 
@@ -776,10 +821,18 @@ async def test_launcher_live2d_payload_includes_preview_and_renderer(monkeypatch
     assert launcher["scale"] == 0.6
     assert launcher["position_anchor"] == "right_bottom"
     assert launcher["mouse_follow_enabled"] is True
+    assert launcher["render_quality_preset"] == "balanced"
+    assert launcher["render_fps"] == 24
+    assert launcher["render_resolution"] == 1.25
+    assert launcher["hit_region_precision"] == "medium"
     assert launcher["resource"]["state"] == "not_configured"
     assert "GitHub Releases" in launcher["resource"]["help_text"]
     assert launcher["renderer"]["enabled"] is False
     assert launcher["renderer"]["model_url"] == ""
+    assert launcher["renderer"]["render_quality_preset"] == "balanced"
+    assert launcher["renderer"]["render_fps"] == 24
+    assert launcher["renderer"]["render_resolution"] == 1.25
+    assert launcher["renderer"]["hit_region_precision"] == "medium"
 
 
 @pytest.mark.asyncio

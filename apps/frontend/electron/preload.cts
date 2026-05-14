@@ -10,11 +10,14 @@ type AppUpdateDownloadProgress = {
   percent?: number;
   error?: string;
 };
+type AvatarImageSelection = { path?: string; data_url?: string; file_name?: string };
 
 contextBridge.exposeInMainWorld('hermesDesktop', {
+  chooseAvatarImage: () => ipcRenderer.invoke('hermes:chooseAvatarImage') as Promise<AvatarImageSelection | null>,
   chooseLive2DArchive: () => ipcRenderer.invoke('hermes:chooseLive2DArchive') as Promise<string | null>,
   chooseLive2DModelDirectory: () => ipcRenderer.invoke('hermes:chooseLive2DModelDirectory') as Promise<string | null>,
   copyText: (text: string) => ipcRenderer.invoke('hermes:copyText', text) as Promise<void>,
+  cancelAppUpdateDownload: () => ipcRenderer.invoke('hermes:cancelAppUpdateDownload') as Promise<unknown>,
   checkAppUpdate: () => ipcRenderer.invoke('hermes:checkAppUpdate') as Promise<unknown>,
   downloadAppUpdate: () => ipcRenderer.invoke('hermes:downloadAppUpdate') as Promise<unknown>,
   getAppUpdateInfo: () => ipcRenderer.invoke('hermes:getAppUpdateInfo') as Promise<unknown>,

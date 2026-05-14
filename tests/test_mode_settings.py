@@ -53,6 +53,10 @@ def test_app_config_has_separate_mode_models(monkeypatch, tmp_path):
     assert config.live2d_mode.model_name == ""
     assert config.live2d_mode.model_path == ""
     assert config.live2d_mode.mouse_follow_enabled is True
+    assert config.live2d_mode.render_quality_preset == "balanced"
+    assert config.live2d_mode.render_fps == 24
+    assert config.live2d_mode.render_resolution == 1.25
+    assert config.live2d_mode.hit_region_precision == "medium"
     assert config.live2d_mode.expression_keywords == {}
     assert config.live2d_mode.proactive_enabled is False
     assert config.live2d_mode.proactive_trigger_probability == 0.6
@@ -269,6 +273,11 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
             "bubble_mode.proactive_trigger_probability": 0.45,
             "assistant.persona_prompt": "你是八千代。",
             "assistant.user_address": "老师",
+            "assistant.agent_name": "月見八千代",
+            "assistant.agent_nickname": "月夜",
+            "assistant.user_name": "彩P",
+            "assistant.user_profile": "常用中文沟通",
+            "assistant.user_preferences": "回答保持简洁",
             "tts.provider": "command",
             "tts.command": "say {text}",
             "tts.voice": "kyoko",
@@ -300,6 +309,11 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     assert config.bubble_mode.proactive_trigger_probability == 0.45
     assert config.assistant.persona_prompt == "你是八千代。"
     assert config.assistant.user_address == "老师"
+    assert config.assistant.agent_name == "月見八千代"
+    assert config.assistant.agent_nickname == "月夜"
+    assert config.assistant.user_name == "彩P"
+    assert config.assistant.user_profile == "常用中文沟通"
+    assert config.assistant.user_preferences == "回答保持简洁"
     assert config.tts.provider == "command"
     assert config.tts.command == "say {text}"
     assert config.tts.voice == "kyoko"
@@ -318,6 +332,32 @@ def test_apply_settings_changes_updates_bubble_mode(tmp_path, monkeypatch):
     assert result["mode_settings"]["bubble"]["config"]["position_x_percent"] == 0.75
     assert result["mode_settings"]["bubble"]["config"]["proactive_trigger_probability"] == 0.45
     assert "assistant" not in result["mode_settings"]["bubble"]["config"]
+
+
+def test_apply_settings_changes_updates_start_minimized(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    config = AppConfig()
+
+    result = apply_settings_changes(config, {"start_minimized": True})
+
+    assert result["ok"] is True
+    assert config.start_minimized is True
+    assert result["applied"]["start_minimized"] is True
+    assert result["effects"]["has_restart_app"] is True
+
+
+def test_apply_settings_changes_accepts_no_display_mode(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    config = AppConfig(display_mode="bubble")
+
+    result = apply_settings_changes(config, {"display_mode": "none"})
+
+    assert result["ok"] is True
+    assert config.display_mode == "none"
+    assert result["applied"]["display_mode"] == "none"
+    assert result["effects"]["has_restart_mode"] is True
 
 
 def test_apply_settings_changes_rejects_invalid_single_field(tmp_path, monkeypatch):
@@ -407,6 +447,22 @@ def test_apply_settings_changes_rejects_invalid_new_fields(tmp_path, monkeypatch
     assert "tts.provider" in result["error"]
 
 
+def test_apply_settings_changes_rejects_invalid_live2d_render_fields(tmp_path, monkeypatch):
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    config = AppConfig()
+
+    for field, value in [
+        ("live2d_mode.render_quality_preset", "ultra"),
+        ("live2d_mode.render_fps", 10),
+        ("live2d_mode.render_resolution", 2.5),
+        ("live2d_mode.hit_region_precision", "pixel"),
+    ]:
+        result = apply_settings_changes(config, {field: value})
+        assert result["ok"] is False
+        assert field.split(".", 1)[1] in result["error"]
+
+
 def test_apply_settings_changes_supports_legacy_live2d_prefix(tmp_path, monkeypatch):
     monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
     monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
@@ -419,6 +475,10 @@ def test_apply_settings_changes_supports_legacy_live2d_prefix(tmp_path, monkeypa
             "live2d.window_on_top": False,
             "live2d.scale": 1.25,
             "live2d.mouse_follow_enabled": False,
+            "live2d.render_quality_preset": "custom",
+            "live2d.render_fps": 30,
+            "live2d.render_resolution": 1.5,
+            "live2d.hit_region_precision": "high",
         },
     )
 
@@ -427,6 +487,10 @@ def test_apply_settings_changes_supports_legacy_live2d_prefix(tmp_path, monkeypa
     assert config.live2d_mode.window_on_top is False
     assert config.live2d_mode.scale == 1.25
     assert config.live2d_mode.mouse_follow_enabled is False
+    assert config.live2d_mode.render_quality_preset == "custom"
+    assert config.live2d_mode.render_fps == 30
+    assert config.live2d_mode.render_resolution == 1.5
+    assert config.live2d_mode.hit_region_precision == "high"
 
 
 def test_apply_settings_changes_updates_live2d_expression_keywords(tmp_path, monkeypatch):
@@ -473,6 +537,10 @@ def test_serialize_mode_settings_returns_separate_sections(monkeypatch, tmp_path
     assert payload["live2d"]["config"]["model_path_display"] == ""
     assert payload["live2d"]["config"]["position_anchor"] == "right_bottom"
     assert payload["live2d"]["config"]["scale"] == 0.6
+    assert payload["live2d"]["config"]["render_quality_preset"] == "balanced"
+    assert payload["live2d"]["config"]["render_fps"] == 24
+    assert payload["live2d"]["config"]["render_resolution"] == 1.25
+    assert payload["live2d"]["config"]["hit_region_precision"] == "medium"
     assert payload["live2d"]["config"]["resource"]["releases_url"] == LIVE2D_RELEASES_URL
     assert payload["live2d"]["config"]["resource"]["state"] == "not_configured"
     assert "assistant" not in payload["bubble"]["config"]
@@ -492,6 +560,10 @@ def test_serialize_mode_window_data_returns_mode_part_only(monkeypatch, tmp_path
     assert payload["mode"]["id"] == "live2d"
     assert payload["settings"]["config"]["scale"] == 1.2
     assert payload["settings"]["config"]["mouse_follow_enabled"] is True
+    assert payload["settings"]["config"]["render_quality_preset"] == "balanced"
+    assert payload["settings"]["config"]["render_fps"] == 24
+    assert payload["settings"]["config"]["render_resolution"] == 1.25
+    assert payload["settings"]["config"]["hit_region_precision"] == "medium"
     assert payload["settings"]["config"]["show_on_all_spaces"] is True
     assert payload["settings"]["config"]["show_reply_bubble"] is True
     assert payload["settings"]["config"]["enable_quick_input"] is True
@@ -505,6 +577,17 @@ def test_display_settings_fall_back_to_bubble_when_live2d_assets_missing(monkeyp
 
     assert payload["current_mode"] == "bubble"
     assert payload["configured_mode"] == "live2d"
+
+
+def test_display_settings_exposes_no_display_mode(monkeypatch, tmp_path):
+    _patch_no_live2d_assets(monkeypatch, tmp_path)
+    config = AppConfig(display_mode="none")
+
+    payload = build_display_settings(config)
+
+    assert payload["current_mode"] == "none"
+    assert payload["configured_mode"] == "none"
+    assert "none" in {item["id"] for item in payload["available_modes"]}
 
 
 def test_load_config_reads_legacy_live2d_block(tmp_path, monkeypatch):
@@ -609,6 +692,10 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     config.live2d_mode.scale = 1.4
     config.live2d_mode.show_on_all_spaces = False
     config.live2d_mode.mouse_follow_enabled = False
+    config.live2d_mode.render_quality_preset = "custom"
+    config.live2d_mode.render_fps = 18
+    config.live2d_mode.render_resolution = 0.75
+    config.live2d_mode.hit_region_precision = "low"
     config.assistant.persona_prompt = "你是八千代。"
     config.assistant.user_address = "老师"
     config.tts.enabled = True
@@ -627,6 +714,10 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     assert data["live2d_mode"]["scale"] == 1.4
     assert data["live2d_mode"]["show_on_all_spaces"] is False
     assert data["live2d_mode"]["mouse_follow_enabled"] is False
+    assert data["live2d_mode"]["render_quality_preset"] == "custom"
+    assert data["live2d_mode"]["render_fps"] == 18
+    assert data["live2d_mode"]["render_resolution"] == 0.75
+    assert data["live2d_mode"]["hit_region_precision"] == "low"
     assert data["assistant"]["persona_prompt"] == "你是八千代。"
     assert data["assistant"]["user_address"] == "老师"
     assert data["tts"]["enabled"] is True
@@ -635,3 +726,23 @@ def test_save_config_persists_mode_blocks(tmp_path, monkeypatch):
     assert data["tts"]["max_chars"] == 66
     assert data["tts"]["trigger_probability"] == 0.4
     assert data["tts"]["notification_prompt"] == "短提醒"
+
+
+def test_save_config_writes_backup_and_load_config_recovers_from_backup(tmp_path, monkeypatch):
+    _patch_no_live2d_assets(monkeypatch, tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(config_mod, "_CONFIG_FILE", tmp_path / "config.json")
+    primary = tmp_path / "config.json"
+    backup = tmp_path / "config.json.bak"
+    primary.write_text(json.dumps({"display_mode": "none"}), encoding="utf-8")
+
+    config = AppConfig(display_mode="live2d")
+    save_config(config)
+
+    assert backup.exists()
+    assert json.loads(backup.read_text(encoding="utf-8"))["display_mode"] == "none"
+
+    primary.write_text("{not json", encoding="utf-8")
+    recovered = load_config()
+
+    assert recovered.display_mode == "none"

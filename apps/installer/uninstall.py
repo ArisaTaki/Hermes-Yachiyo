@@ -363,11 +363,14 @@ def build_uninstall_plan(
                 safe_check=_is_safe_gpt_sovits_launch_agent,
             )
         )
-        for index, workdir in enumerate(_discover_gpt_sovits_workdir_paths(app_config_data), start=1):
+        for index, workdir in enumerate(
+            _discover_gpt_sovits_workdir_paths(app_config_data),
+            start=1,
+        ):
             targets.append(
                 _make_target(
                     target_id=f"gpt_sovits_workdir_{index}",
-                    label="GPT-SoVITS 本地服务目录",
+                    label="GPT-SoVITS 服务目录（含基础模型）",
                     path=workdir,
                     kind="directory",
                     safe_check=_is_safe_gpt_sovits_workdir,
@@ -384,7 +387,11 @@ def build_uninstall_plan(
         if target.exists and not target.removable:
             warnings.append(f"{target.label} 将跳过：{target.reason}")
     if not include_gpt_sovits and _gpt_sovits_installed(app_config_data):
-        warnings.append("检测到 GPT-SoVITS 本地服务；当前未选择卸载，将保留服务目录与开机自启配置。")
+        warnings.append(
+            "检测到 GPT-SoVITS 本地服务；当前未选择卸载，将保留服务目录与开机自启配置。"
+        )
+    if include_gpt_sovits:
+        warnings.append("将删除 GPT-SoVITS 服务目录，包括已下载的基础预训练模型和运行环境。")
 
     backup_root_path = _backup_root(backup_root)
     return UninstallPlan(
@@ -487,7 +494,9 @@ def execute_uninstall(
             if target.id == "gpt_sovits_launch_agent":
                 service_result = gpt_sovits_service.uninstall_gpt_sovits_launch_agent()
                 if service_result.get("ok") is False:
-                    raise RuntimeError(str(service_result.get("error") or "停止 GPT-SoVITS 后台服务失败"))
+                    raise RuntimeError(
+                        str(service_result.get("error") or "停止 GPT-SoVITS 后台服务失败")
+                    )
             elif target.id.startswith("gpt_sovits_workdir_"):
                 gpt_sovits_service.uninstall_gpt_sovits_launch_agent()
                 _remove_path(path)

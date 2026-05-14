@@ -10,8 +10,8 @@ from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError
 
-import apps.shell.tts as tts_mod
 import apps.shell.gpt_sovits_service as gsv_service
+import apps.shell.tts as tts_mod
 import apps.shell.tts_resources as tts_resources
 from apps.shell.config import TTSConfig
 from apps.shell.tts import TTSService, prepare_tts_text
@@ -199,7 +199,10 @@ def test_tts_command_invocation_uses_shortened_notification_text(monkeypatch):
 
 
 def test_prepare_tts_text_strips_code_and_limits_length():
-    text = "```python\nprint('hello')\n```\n请看这个链接：https://example.com/path 后面还有很多内容需要截断"
+    text = (
+        "```python\nprint('hello')\n```\n"
+        "请看这个链接：https://example.com/path 后面还有很多内容需要截断"
+    )
 
     prepared = prepare_tts_text(text, max_chars=30)
 
@@ -283,7 +286,13 @@ def test_gpt_sovits_service_status_reports_local_requirements(monkeypatch, tmp_p
     workdir.mkdir()
     monkeypatch.setattr(gsv_service, "_launch_agent_path", lambda: tmp_path / "agent.plist")
     monkeypatch.setattr(gsv_service, "_launch_agent_running", lambda: False)
-    monkeypatch.setattr(gsv_service, "_service_reachable", lambda _url: {"ok": False, "error": "connection refused"})
+    monkeypatch.setattr(gsv_service, "_service_process_status", lambda _url: {"running": False})
+    monkeypatch.setattr(gsv_service, "_related_launch_agents", lambda _workdir: [])
+    monkeypatch.setattr(
+        gsv_service,
+        "_service_reachable",
+        lambda _url: {"ok": False, "error": "connection refused"},
+    )
     monkeypatch.setattr(gsv_service, "_python_package_available", lambda _workdir, package: False)
 
     status = gsv_service.get_gpt_sovits_service_status(
@@ -295,6 +304,8 @@ def test_gpt_sovits_service_status_reports_local_requirements(monkeypatch, tmp_p
     assert status["reachable"] is False
     assert status["launch_agent_installed"] is False
     assert status["tools"]["torchcodec"] is False
+    assert status["models"]["s1v3"] is False
+    assert "s1v3" in status["missing_model_files"]
 
 
 def test_gpt_sovits_service_status_uses_unsaved_draft_and_expands_env(monkeypatch, tmp_path):
@@ -303,8 +314,28 @@ def test_gpt_sovits_service_status_uses_unsaved_draft_and_expands_env(monkeypatc
     monkeypatch.setenv("GSV_TEST_ROOT", str(tmp_path))
     monkeypatch.setattr(gsv_service, "_launch_agent_path", lambda: tmp_path / "agent.plist")
     monkeypatch.setattr(gsv_service, "_launch_agent_running", lambda: False)
+    monkeypatch.setattr(
+        gsv_service,
+        "_service_process_status",
+        lambda _url: {"running": True, "pid": 123, "ppid": 1, "port": 9880},
+    )
+    monkeypatch.setattr(
+        gsv_service,
+        "_related_launch_agents",
+        lambda _workdir: [
+            {
+                "label": "com.example.gsv-api",
+                "running": True,
+                "managed_by_hermes": False,
+            }
+        ],
+    )
     monkeypatch.setattr(gsv_service, "_service_reachable", lambda _url: {"ok": True})
-    monkeypatch.setattr(gsv_service, "_python_package_available", lambda _workdir, package: package == "torchcodec")
+    monkeypatch.setattr(
+        gsv_service,
+        "_python_package_available",
+        lambda _workdir, package: package == "torchcodec",
+    )
 
     status = gsv_service.get_gpt_sovits_service_status_for_values(
         base_url="http://127.0.0.1:9880",
@@ -317,6 +348,40 @@ def test_gpt_sovits_service_status_uses_unsaved_draft_and_expands_env(monkeypatc
     assert status["workdir"] == str(workdir)
     assert status["command_configured"] is True
     assert status["tools"]["torchcodec"] is True
+    assert status["api_process"]["pid"] == 123
+    assert status["related_launch_agents"][0]["label"] == "com.example.gsv-api"
+
+
+def test_gpt_sovits_service_status_reports_pretrained_model_files(monkeypatch, tmp_path):
+    workdir = tmp_path / "GPT-SoVITS"
+    pretrained = workdir / "GPT_SoVITS" / "pretrained_models"
+    (pretrained / "gsv-v4-pretrained").mkdir(parents=True)
+    (pretrained / "chinese-roberta-wwm-ext-large").mkdir(parents=True)
+    (pretrained / "chinese-hubert-base").mkdir(parents=True)
+    (workdir / "GPT_SoVITS" / "text" / "G2PWModel").mkdir(parents=True)
+    (pretrained / "s1v3.ckpt").write_bytes(b"gpt")
+    (pretrained / "gsv-v4-pretrained" / "s2Gv4.pth").write_bytes(b"sovits")
+    (pretrained / "gsv-v4-pretrained" / "vocoder.pth").write_bytes(b"vocoder")
+    (pretrained / "chinese-roberta-wwm-ext-large" / "model.safetensors").write_bytes(b"bert")
+    (pretrained / "chinese-hubert-base" / "pytorch_model.bin").write_bytes(b"hubert")
+    (workdir / "GPT_SoVITS" / "text" / "G2PWModel" / "g2pW.onnx").write_bytes(b"g2pw")
+    monkeypatch.setattr(gsv_service, "_launch_agent_path", lambda: tmp_path / "agent.plist")
+    monkeypatch.setattr(gsv_service, "_launch_agent_running", lambda: False)
+    monkeypatch.setattr(gsv_service, "_service_process_status", lambda _url: {"running": False})
+    monkeypatch.setattr(gsv_service, "_related_launch_agents", lambda _workdir: [])
+    monkeypatch.setattr(
+        gsv_service,
+        "_service_reachable",
+        lambda _url: {"ok": False, "error": "connection refused"},
+    )
+    monkeypatch.setattr(gsv_service, "_python_package_available", lambda _workdir, package: True)
+
+    status = gsv_service.get_gpt_sovits_service_status(
+        TTSConfig(gsv_service_workdir=str(workdir), gsv_service_command="python api_v2.py")
+    )
+
+    assert all(status["models"].values())
+    assert status["missing_model_files"] == []
 
 
 def test_gpt_sovits_launch_agent_install_validates_workdir(monkeypatch):
@@ -347,7 +412,13 @@ def test_gpt_sovits_launch_agent_install_writes_plist(monkeypatch, tmp_path):
     monkeypatch.setattr(gsv_service, "_log_path", lambda kind: tmp_path / f"gsv-{kind}.log")
     monkeypatch.setattr(gsv_service, "_service_reachable", lambda _url: {"ok": True})
     monkeypatch.setattr(gsv_service, "_launch_agent_running", lambda: True)
-    monkeypatch.setattr(gsv_service, "_launchctl", lambda args, *, check: launchctl_calls.append(args) or _Result())
+    monkeypatch.setattr(gsv_service, "_service_process_status", lambda _url: {"running": False})
+    monkeypatch.setattr(gsv_service, "_related_launch_agents", lambda _workdir: [])
+    monkeypatch.setattr(
+        gsv_service,
+        "_launchctl",
+        lambda args, *, check: launchctl_calls.append(args) or _Result(),
+    )
 
     result = gsv_service.install_gpt_sovits_launch_agent(
         TTSConfig(gsv_service_workdir=str(workdir), gsv_service_command="python api_v2.py -p 9880")
@@ -360,6 +431,77 @@ def test_gpt_sovits_launch_agent_install_writes_plist(monkeypatch, tmp_path):
     assert "brew shellenv" in shell_command
     assert "source .venv/bin/activate" in shell_command
     assert any(call[0] == "bootstrap" for call in launchctl_calls)
+
+
+def test_gpt_sovits_launch_agent_adopt_disables_external_user_agent(monkeypatch, tmp_path):
+    workdir = tmp_path / "GPT-SoVITS"
+    workdir.mkdir()
+    external_plist = tmp_path / "LaunchAgents" / "com.example.gsv-api.plist"
+    external_plist.parent.mkdir()
+    external_plist.write_bytes(
+        plistlib.dumps(
+            {
+                "Label": "com.example.gsv-api",
+                "ProgramArguments": ["python", "api_v2.py", "-p", "9880"],
+                "WorkingDirectory": str(workdir),
+            }
+        )
+    )
+    hermes_plist = tmp_path / "LaunchAgents" / "com.hermes-yachiyo.gpt-sovits.plist"
+    launchctl_calls = []
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(gsv_service.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(gsv_service, "_launch_agent_path", lambda: hermes_plist)
+    monkeypatch.setattr(gsv_service, "_launchctl_domain", lambda: "gui/501")
+    monkeypatch.setattr(gsv_service, "_log_path", lambda kind: tmp_path / f"gsv-{kind}.log")
+    monkeypatch.setattr(gsv_service, "_is_user_launch_agent_path", lambda _path: True)
+    monkeypatch.setattr(gsv_service, "_service_reachable", lambda _url: {"ok": True})
+    monkeypatch.setattr(gsv_service, "_launch_agent_running", lambda: True)
+    monkeypatch.setattr(gsv_service, "_service_process_status", lambda _url: {"running": False})
+    monkeypatch.setattr(
+        gsv_service,
+        "_related_launch_agents",
+        lambda _workdir: [
+            {
+                "label": "com.example.gsv-api",
+                "path": str(external_plist),
+                "path_display": str(external_plist),
+                "managed_by_hermes": False,
+                "running": True,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        gsv_service,
+        "_launchctl",
+        lambda args, *, check: launchctl_calls.append(args) or _Result(),
+    )
+
+    result = gsv_service.adopt_gpt_sovits_launch_agent(
+        TTSConfig(
+            gsv_base_url="http://127.0.0.1:9880",
+            gsv_service_workdir=str(workdir),
+            gsv_service_command="python api_v2.py -p 9880",
+        )
+    )
+
+    assert result["ok"] is True
+    assert "交由 Hermes-Yachiyo 管理" in result["message"]
+    assert external_plist.exists() is False
+    disabled_path = external_plist.with_name(f"{external_plist.name}.hermes-yachiyo-disabled")
+    assert disabled_path.exists()
+    assert hermes_plist.exists()
+    assert result["disabled_launch_agents"][0]["label"] == "com.example.gsv-api"
+    assert any(
+        call[:1] == ["bootout"] and "com.example.gsv-api" in call[-1]
+        for call in launchctl_calls
+    )
+    assert any(call[0] == "bootstrap" and str(hermes_plist) in call for call in launchctl_calls)
 
 
 def test_tts_http_posts_text_voice_and_timeout(monkeypatch):
@@ -462,7 +604,11 @@ def test_tts_gpt_sovits_can_cache_audio_without_playback(tmp_path, monkeypatch):
         return _FakeHTTPResponse()
 
     monkeypatch.setattr(tts_mod, "urlopen", fake_urlopen)
-    monkeypatch.setattr(tts_mod.subprocess, "run", lambda *args, **kwargs: played.append((args, kwargs)))
+    monkeypatch.setattr(
+        tts_mod.subprocess,
+        "run",
+        lambda *args, **kwargs: played.append((args, kwargs)),
+    )
     service = TTSService(
         TTSConfig(
             enabled=True,

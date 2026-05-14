@@ -32,21 +32,76 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const FRONTEND_DEV_URL = process.env.HERMES_YACHIYO_FRONTEND_DEV_URL || 'http://127.0.0.1:5174';
+const BRIDGE_URL_ENV = 'HERMES_YACHIYO_BRIDGE_URL';
 const DEV_BRIDGE_URL = 'http://127.0.0.1:8420';
 const PACKAGED_BRIDGE_URL = 'http://127.0.0.1:18420';
-let bridgeUrl = process.env.HERMES_YACHIYO_BRIDGE_URL || (app.isPackaged ? PACKAGED_BRIDGE_URL : DEV_BRIDGE_URL);
+let bridgeUrl = initialBridgeUrl();
 const APP_BUILD_METADATA_FILE = 'hermes-yachiyo-build.json';
 const DEFAULT_UPDATE_REPOSITORY = 'kuguya-AI-app-develop/Hermes-Yachiyo';
+const GITHUB_COMPARE_COMMIT_LIMIT = 100;
+const CHANGELOG_CATEGORY_ORDER = [
+  '新增/改进',
+  '修复',
+  '工程/发布',
+  '文档',
+  '测试',
+  '重构/优化',
+  '其他',
+];
+const CHANGELOG_CATEGORY_BY_KIND: Record<string, string> = {
+  add: '新增/改进',
+  feat: '新增/改进',
+  feature: '新增/改进',
+  fix: '修复',
+  hotfix: '修复',
+  bugfix: '修复',
+  ci: '工程/发布',
+  build: '工程/发布',
+  chore: '工程/发布',
+  release: '工程/发布',
+  docs: '文档',
+  doc: '文档',
+  test: '测试',
+  tests: '测试',
+  refactor: '重构/优化',
+  perf: '重构/优化',
+  style: '重构/优化',
+};
 const BRIDGE_SETTINGS_RETRIES = 40;
 const BRIDGE_SETTINGS_RETRY_MS = 250;
 const BUBBLE_SCREEN_MARGIN = 24;
+const BUBBLE_MIN_WINDOW_SIZE = 112;
+const BUBBLE_DEFAULT_WINDOW_SIZE = 112;
+const BUBBLE_MAX_WINDOW_SIZE = 192;
 const POSITION_SAVE_DEBOUNCE_MS = 260;
 const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
+const TRANSPARENT_WINDOW_BACKGROUND = '#00000000';
+const MIN_APP_WINDOW_WIDTH = 1250;
+const MIN_APP_WINDOW_HEIGHT = 860;
+const UI_RENDER_REVISION = 'open-design-v4-moon-bubble-scrollbar-gutter-v3-20260512';
 const MAX_LAUNCHER_SHAPE_RECTS = 10000;
+const MAX_AVATAR_IMAGE_BYTES = 8 * 1024 * 1024;
 type IconKind = 'dock' | 'tray' | 'window';
 
-type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'tools' | 'proactive-tts' | 'bubble' | 'bubble-menu' | 'live2d';
+type AppView =
+  | 'main'
+  | 'chat'
+  | 'settings'
+  | 'installer'
+  | 'provider'
+  | 'resources'
+  | 'workspace'
+  | 'diagnostics'
+  | 'tools'
+  | 'tools-all'
+  | 'activity-all'
+  | 'app-update'
+  | 'proactive-tts'
+  | 'bubble'
+  | 'bubble-menu'
+  | 'live2d';
 type ModeId = 'bubble' | 'live2d';
+type DisplayModeId = ModeId | 'none';
 type InstallerTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup' | 'update-hermes' | 'update-hermes-backup';
 
 type ModeSettings = {
@@ -115,6 +170,24 @@ type ReleaseChangelog = {
   summary?: string[];
 };
 
+type GitHubCompareCommit = {
+  sha?: string;
+  html_url?: string;
+  commit?: {
+    author?: {
+      name?: string;
+      date?: string;
+    };
+    message?: string;
+  };
+};
+
+type GitHubCompareResponse = {
+  html_url?: string;
+  total_commits?: number;
+  commits?: GitHubCompareCommit[];
+};
+
 type LatestReleaseMetadata = {
   name?: string;
   channel?: string;
@@ -162,15 +235,30 @@ type AppUpdateDownloadResult = {
   verified?: boolean;
   latest?: LatestReleaseMetadata;
   error?: string;
+  cancelled?: boolean;
 };
 
 type AppUpdateDownloadProgress = {
-  status: 'starting' | 'downloading' | 'verifying' | 'completed' | 'failed';
+  status: 'starting' | 'downloading' | 'verifying' | 'completed' | 'failed' | 'cancelled';
   file_name?: string;
   received_bytes?: number;
   total_bytes?: number;
   percent?: number;
   error?: string;
+};
+
+type AppUpdateDownloadTask = {
+  controller: AbortController;
+  destination?: string;
+  tmpDestination?: string;
+  fileName?: string;
+  onProgress?: (progress: AppUpdateDownloadProgress) => void;
+};
+
+type AvatarImageSelection = {
+  path: string;
+  data_url: string;
+  file_name: string;
 };
 
 let backendProcess: ChildProcessWithoutNullStreams | null = null;
@@ -191,6 +279,10 @@ let lastUiSettings: UiSettings | null = null;
 let hasEnteredMainExperience = false;
 let backendRestartPromise: Promise<{ success: boolean; bridgeUrl?: string; error?: string }> | null = null;
 let lastDownloadedAppUpdate: AppUpdateDownloadResult | null = null;
+let activeAppUpdateDownload: AppUpdateDownloadTask | null = null;
+let appUpdateQuitConfirmed = false;
+let backendShutdownBeforeQuit = false;
+const appUpdateCloseConfirmedWindows = new WeakSet<BrowserWindow>();
 const enforcedWindowTitles = new WeakMap<BrowserWindow, string>();
 const titleHandlersInstalled = new WeakSet<BrowserWindow>();
 const terminalSessions = new Map<string, {
@@ -373,6 +465,66 @@ function clearDownloadedAppUpdate(): void {
   } catch {}
 }
 
+class AppUpdateDownloadCancelledError extends Error {
+  constructor(message = '应用更新下载已取消') {
+    super(message);
+    this.name = 'AppUpdateDownloadCancelledError';
+  }
+}
+
+function isAppUpdateDownloadCancelledError(error: unknown): boolean {
+  return error instanceof AppUpdateDownloadCancelledError
+    || (error instanceof Error && error.name === 'AbortError');
+}
+
+function cleanupActiveAppUpdateDownloadFiles(task: AppUpdateDownloadTask): void {
+  if (task.tmpDestination) {
+    try {
+      fs.rmSync(task.tmpDestination, { force: true });
+    } catch {}
+  }
+  if (task.destination) {
+    try {
+      fs.rmSync(task.destination, { force: true });
+    } catch {}
+  }
+  clearDownloadedAppUpdate();
+}
+
+function cancelActiveAppUpdateDownload(reason = '应用更新下载已取消'): { ok: boolean; cancelled: boolean; error?: string } {
+  const task = activeAppUpdateDownload;
+  if (!task) return { ok: true, cancelled: false };
+  cleanupActiveAppUpdateDownloadFiles(task);
+  task.onProgress?.({
+    status: 'cancelled',
+    file_name: task.fileName,
+    received_bytes: 0,
+    percent: 0,
+    error: reason,
+  });
+  task.controller.abort(new AppUpdateDownloadCancelledError(reason));
+  return { ok: true, cancelled: true, error: reason };
+}
+
+function confirmCancelAppUpdateDownload(parentWindow: BrowserWindow | null, actionLabel: string): boolean {
+  if (!activeAppUpdateDownload) return true;
+  const options = {
+    type: 'warning' as const,
+    buttons: ['继续下载', actionLabel],
+    defaultId: 0,
+    cancelId: 0,
+    title: '应用更新正在下载',
+    message: '应用更新仍在下载中',
+    detail: '离开或退出会取消本次下载，并清空当前进度；下次启动会重新检查更新。',
+  };
+  const choice = parentWindow
+    ? dialog.showMessageBoxSync(parentWindow, options)
+    : dialog.showMessageBoxSync(options);
+  if (choice !== 1) return false;
+  cancelActiveAppUpdateDownload(`${actionLabel}，已取消本次更新下载`);
+  return true;
+}
+
 function appUpdateInfo(): AppUpdateInfo {
   const current = readAppBuildMetadata();
   const appBundlePath = currentAppBundlePath() || undefined;
@@ -472,13 +624,162 @@ function fetchJson<T>(url: string, redirects = 5): Promise<T> {
   });
 }
 
+function updateMetadataString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function meaningfulUpdateRef(value: unknown): string {
+  const ref = updateMetadataString(value);
+  if (!ref || ref === 'dev' || ref === 'unknown') return '';
+  return ref;
+}
+
+function shortUpdateRef(value: unknown): string {
+  const ref = meaningfulUpdateRef(value);
+  return ref.length > 7 ? ref.slice(0, 7) : ref;
+}
+
+function normalizeGitHubRepository(value: unknown): string {
+  const repository = updateMetadataString(value) || DEFAULT_UPDATE_REPOSITORY;
+  return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository) ? repository : DEFAULT_UPDATE_REPOSITORY;
+}
+
+function githubCompareUrl(repository: string, baseRef: string, headRef: string): string {
+  return `https://github.com/${repository}/compare/${encodeURIComponent(baseRef)}...${encodeURIComponent(headRef)}`;
+}
+
+function githubCompareApiUrl(repository: string, baseRef: string, headRef: string): string {
+  return `https://api.github.com/repos/${repository}/compare/${encodeURIComponent(baseRef)}...${encodeURIComponent(headRef)}?per_page=${GITHUB_COMPARE_COMMIT_LIMIT}`;
+}
+
+function currentBuildChangelogLabel(current: AppBuildMetadata): string {
+  const parts = [
+    updateMetadataString(current.version),
+    current.build_number !== undefined ? `#${current.build_number}` : '',
+    updateMetadataString(current.short_commit) || shortUpdateRef(current.commit),
+  ].filter(Boolean);
+  return parts.length ? parts.join(' / ') : '当前安装版本';
+}
+
+function latestBuildChangelogLabel(latest: LatestReleaseMetadata, headRef: string): string {
+  const parts = [
+    updateMetadataString(latest.version) || updateMetadataString(latest.tag),
+    numericBuildNumber(latest.build_number ?? latest.run_number) !== undefined
+      ? `#${numericBuildNumber(latest.build_number ?? latest.run_number)}`
+      : '',
+    updateMetadataString(latest.short_commit) || shortUpdateRef(headRef),
+  ].filter(Boolean);
+  return updateMetadataString(latest.tag) || (parts.length ? parts.join(' / ') : '最新版本');
+}
+
+function changelogCategory(subject: string): string {
+  const match = subject.trim().match(/^([A-Za-z]+)(?:\([^)]+\))?[：:]/);
+  if (!match) return '其他';
+  return CHANGELOG_CATEGORY_BY_KIND[match[1].toLowerCase()] || '其他';
+}
+
+function releaseCommitFromGitHub(item: GitHubCompareCommit): ReleaseChangelogCommit | null {
+  const commit = meaningfulUpdateRef(item.sha);
+  const message = updateMetadataString(item.commit?.message);
+  const subject = updateMetadataString(message.split(/\r?\n/, 1)[0]) || shortUpdateRef(commit);
+  if (!commit && !subject) return null;
+  return {
+    commit: commit || undefined,
+    short_commit: shortUpdateRef(commit) || undefined,
+    author: updateMetadataString(item.commit?.author?.name) || undefined,
+    authored_at: updateMetadataString(item.commit?.author?.date) || undefined,
+    subject: subject || undefined,
+    category: changelogCategory(subject),
+    url: updateMetadataString(item.html_url) || null,
+  };
+}
+
+function buildChangelogSections(commits: ReleaseChangelogCommit[]): ReleaseChangelogSection[] {
+  const grouped = new Map<string, ReleaseChangelogCommit[]>(
+    CHANGELOG_CATEGORY_ORDER.map((category) => [category, []]),
+  );
+  for (const commit of commits) {
+    const category = updateMetadataString(commit.category) || '其他';
+    const items = grouped.get(category) || [];
+    items.push({
+      commit: commit.commit,
+      short_commit: commit.short_commit,
+      subject: commit.subject,
+      url: commit.url,
+    });
+    grouped.set(category, items);
+  }
+  return CHANGELOG_CATEGORY_ORDER
+    .map((title) => ({ title, items: grouped.get(title) || [] }))
+    .filter((section) => section.items.length > 0);
+}
+
+async function buildCurrentInstallChangelog(
+  current: AppBuildMetadata,
+  latest: LatestReleaseMetadata,
+): Promise<ReleaseChangelog | null> {
+  const repository = normalizeGitHubRepository(current.repository);
+  const baseRef = meaningfulUpdateRef(current.commit) || meaningfulUpdateRef(current.short_commit);
+  const headRef = meaningfulUpdateRef(latest.commit)
+    || meaningfulUpdateRef(latest.tag)
+    || meaningfulUpdateRef(latest.changelog?.current_tag)
+    || meaningfulUpdateRef(latest.short_commit);
+  if (!baseRef || !headRef || baseRef === headRef) return null;
+
+  const compare = await fetchJson<GitHubCompareResponse>(
+    cacheBustedUrl(githubCompareApiUrl(repository, baseRef, headRef)),
+  );
+  const commits = (Array.isArray(compare.commits) ? compare.commits : [])
+    .slice()
+    .reverse()
+    .map(releaseCommitFromGitHub)
+    .filter((commit): commit is ReleaseChangelogCommit => Boolean(commit));
+  const totalCommits = Number.isFinite(compare.total_commits)
+    ? Math.max(0, Math.trunc(compare.total_commits as number))
+    : commits.length;
+  if (totalCommits <= 0 && commits.length === 0) return null;
+
+  const compareUrl = updateMetadataString(compare.html_url) || githubCompareUrl(repository, baseRef, headRef);
+  return {
+    generated_from: 'github_compare_current_install',
+    previous_tag: currentBuildChangelogLabel(current),
+    previous_commit: baseRef,
+    current_tag: latestBuildChangelogLabel(latest, headRef),
+    compare_url: compareUrl,
+    commit_count: totalCommits || commits.length,
+    commits,
+    sections: buildChangelogSections(commits),
+    summary: commits.slice(0, 8).map((commit) => commit.subject || commit.short_commit || '').filter(Boolean),
+  };
+}
+
+async function latestWithCurrentInstallChangelog(
+  current: AppBuildMetadata,
+  latest: LatestReleaseMetadata,
+  updateAvailable: boolean,
+): Promise<LatestReleaseMetadata> {
+  if (!updateAvailable) return latest;
+  try {
+    const changelog = await buildCurrentInstallChangelog(current, latest);
+    return changelog ? { ...latest, changelog } : latest;
+  } catch (error) {
+    console.warn('[updater] failed to build current install changelog:', error);
+    return latest;
+  }
+}
+
 function downloadFile(
   url: string,
   destination: string,
   onProgress?: (progress: AppUpdateDownloadProgress) => void,
+  signal?: AbortSignal,
   redirects = 5,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new AppUpdateDownloadCancelledError());
+      return;
+    }
     let parsed: URL;
     try {
       parsed = new URL(url);
@@ -487,24 +788,52 @@ function downloadFile(
       return;
     }
     const tmpDestination = `${destination}.part`;
+    let settled = false;
+    let request: ReturnType<typeof httpRequest> | null = null;
+    let output: fs.WriteStream | null = null;
+    const finish = (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener('abort', abortDownload);
+      if (error) {
+        fs.rm(tmpDestination, { force: true }, () => reject(error));
+        return;
+      }
+      resolve();
+    };
+    const abortDownload = () => {
+      const reason = signal?.reason instanceof Error
+        ? signal.reason
+        : new AppUpdateDownloadCancelledError();
+      request?.destroy(reason);
+      output?.destroy(reason);
+      finish(reason);
+    };
+    signal?.addEventListener('abort', abortDownload, { once: true });
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     onProgress?.({ status: 'starting', file_name: path.basename(destination), received_bytes: 0 });
-    const request = httpRequest(parsed, {
+    request = httpRequest(parsed, {
       headers: {
         Accept: 'application/octet-stream',
         'User-Agent': 'Hermes-Yachiyo-Updater',
       },
     }, (response) => {
+      if (signal?.aborted) {
+        response.destroy(signal.reason instanceof Error ? signal.reason : new AppUpdateDownloadCancelledError());
+        abortDownload();
+        return;
+      }
       const status = response.statusCode || 0;
       const location = response.headers.location;
       if ([301, 302, 303, 307, 308].includes(status) && location && redirects > 0) {
         response.resume();
-        downloadFile(redirectedUrl(location, parsed).toString(), destination, onProgress, redirects - 1).then(resolve, reject);
+        signal?.removeEventListener('abort', abortDownload);
+        downloadFile(redirectedUrl(location, parsed).toString(), destination, onProgress, signal, redirects - 1).then(resolve, reject);
         return;
       }
       if (status < 200 || status >= 300) {
         response.resume();
-        reject(new Error(`DMG 下载失败：HTTP ${status}`));
+        finish(new Error(`DMG 下载失败：HTTP ${status}`));
         return;
       }
       const totalBytes = Number(response.headers['content-length']) || undefined;
@@ -522,14 +851,14 @@ function downloadFile(
           callback(null, chunk);
         },
       });
-      const output = fs.createWriteStream(tmpDestination);
+      output = fs.createWriteStream(tmpDestination);
       pipeline(response, progressStream, output)
         .then(() => fs.promises.rename(tmpDestination, destination))
-        .then(() => resolve(), reject);
+        .then(() => finish(), finish);
     });
-    request.setTimeout(120000, () => request.destroy(new Error('DMG 下载超时')));
+    request.setTimeout(120000, () => request?.destroy(new Error('DMG 下载超时')));
     request.on('error', (error) => {
-      fs.rm(tmpDestination, { force: true }, () => reject(error));
+      finish(error);
     });
   });
 }
@@ -547,8 +876,9 @@ function sha256File(filePath: string): Promise<string> {
 async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   const info = appUpdateInfo();
   try {
-    const latest = await fetchJson<LatestReleaseMetadata>(cacheBustedUrl(info.latest_json_url));
-    const decision = updateAvailableReason(info.current, latest);
+    const latestMetadata = await fetchJson<LatestReleaseMetadata>(cacheBustedUrl(info.latest_json_url));
+    const decision = updateAvailableReason(info.current, latestMetadata);
+    const latest = await latestWithCurrentInstallChangelog(info.current, latestMetadata, decision.available);
     const downloadedUpdate = downloadedUpdateMatchesLatest(info.downloaded_update, latest)
       ? info.downloaded_update
       : undefined;
@@ -574,6 +904,9 @@ async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
 async function downloadAppUpdate(
   onProgress?: (progress: AppUpdateDownloadProgress) => void,
 ): Promise<AppUpdateDownloadResult> {
+  if (activeAppUpdateDownload) {
+    return { ok: false, error: '已有应用更新下载正在进行' };
+  }
   const check = await checkAppUpdate();
   if (!check.ok || !check.latest) {
     return { ok: false, error: check.error || '无法读取更新元数据' };
@@ -586,10 +919,20 @@ async function downloadAppUpdate(
 
   const fileName = safeDmgFileName(check.latest.dmg_name || downloadUrl, check.current.branch);
   const destination = path.join(updateDownloadsDir(), fileName);
+  const controller = new AbortController();
+  activeAppUpdateDownload = {
+    controller,
+    destination,
+    tmpDestination: `${destination}.part`,
+    fileName,
+    onProgress,
+  };
   try {
-    await downloadFile(downloadUrl, destination, onProgress);
+    await downloadFile(downloadUrl, destination, onProgress, controller.signal);
     onProgress?.({ status: 'verifying', file_name: fileName });
+    if (controller.signal.aborted) throw controller.signal.reason || new AppUpdateDownloadCancelledError();
     const actualSha256 = await sha256File(destination);
+    if (controller.signal.aborted) throw controller.signal.reason || new AppUpdateDownloadCancelledError();
     const expectedSha256 = typeof check.latest.sha256 === 'string' ? check.latest.sha256.trim().toLowerCase() : '';
     if (expectedSha256 && actualSha256.toLowerCase() !== expectedSha256) {
       await fs.promises.rm(destination, { force: true });
@@ -612,16 +955,38 @@ async function downloadAppUpdate(
     onProgress?.({ status: 'completed', file_name: fileName, percent: 100 });
     return lastDownloadedAppUpdate;
   } catch (error) {
+    const cancelled = isAppUpdateDownloadCancelledError(error);
+    if (cancelled) {
+      cleanupActiveAppUpdateDownloadFiles(activeAppUpdateDownload || { controller, destination, tmpDestination: `${destination}.part`, fileName });
+      onProgress?.({
+        status: 'cancelled',
+        file_name: fileName,
+        received_bytes: 0,
+        percent: 0,
+        error: error instanceof Error ? error.message : '应用更新下载已取消',
+      });
+      return {
+        ok: false,
+        latest: check.latest,
+        cancelled: true,
+        error: error instanceof Error ? error.message : '应用更新下载已取消',
+      };
+    }
     onProgress?.({
       status: 'failed',
       file_name: fileName,
       error: error instanceof Error ? error.message : String(error),
     });
+    try {
+      await fs.promises.rm(`${destination}.part`, { force: true });
+    } catch {}
     return {
       ok: false,
       latest: check.latest,
       error: error instanceof Error ? error.message : String(error),
     };
+  } finally {
+    if (activeAppUpdateDownload?.controller === controller) activeAppUpdateDownload = null;
   }
 }
 
@@ -687,8 +1052,17 @@ function installDownloadedAppUpdate(rawPath: unknown): { success: boolean; appBu
   }
 }
 
-function iconCandidates(kind: IconKind): string[] {
-  return kind === 'tray' ? ['icon.png', 'icon.icns'] : ['icon.icns', 'icon.png'];
+function iconCandidates(kind: IconKind): string[][] {
+  if (kind === 'tray') {
+    return [
+      ['assets', 'icon.png'],
+      ['icon.icns'],
+    ];
+  }
+  return [
+    ['icon.icns'],
+    ['assets', 'icon.png'],
+  ];
 }
 
 function isLoadableIcon(candidate: string): boolean {
@@ -701,8 +1075,8 @@ function isLoadableIcon(candidate: string): boolean {
 
 function appIconPath(kind: IconKind = 'window'): string | undefined {
   const preferred = iconCandidates(kind);
-  for (const name of preferred) {
-    const candidate = rootAssetPath('assets', name);
+  for (const segments of preferred) {
+    const candidate = rootAssetPath(...segments);
     if (candidate && isLoadableIcon(candidate)) return candidate;
   }
   const fallback = rootAssetPath('apps', 'shell', 'assets', 'avatars', 'yachiyo-default.jpg');
@@ -737,6 +1111,9 @@ function enforceWindowTitle(targetWindow: BrowserWindow, title: string): void {
 function mainWindowTitle(params: Record<string, string> = {}): string {
   const view = normalizeView(params.view);
   if (view === 'installer') return 'Hermes-Yachiyo 安装向导';
+  if (view === 'provider') return 'Hermes-Yachiyo 模型配置';
+  if (view === 'resources') return 'Hermes-Yachiyo 资源管理';
+  if (view === 'workspace') return 'Hermes-Yachiyo 工作区';
   if (view === 'settings') return params.mode === 'live2d'
     ? 'Hermes-Yachiyo Live2D 设置'
     : params.mode === 'bubble'
@@ -744,7 +1121,11 @@ function mainWindowTitle(params: Record<string, string> = {}): string {
       : 'Hermes-Yachiyo 应用设置';
   if (view === 'diagnostics') return 'Hermes-Yachiyo 诊断工具';
   if (view === 'tools') return 'Hermes-Yachiyo 工具中心';
+  if (view === 'tools-all') return 'Hermes-Yachiyo 桌面工具';
+  if (view === 'activity-all') return 'Hermes-Yachiyo 活动日志';
+  if (view === 'app-update') return 'Hermes-Yachiyo 应用更新';
   if (view === 'proactive-tts') return 'Hermes-Yachiyo 主动关怀语音';
+  if (view === 'chat') return 'Hermes-Yachiyo 对话';
   return 'Hermes-Yachiyo 主控台';
 }
 
@@ -887,9 +1268,18 @@ function ensureNodePtySpawnHelperExecutable(): void {
 }
 
 function packagedBackendPath(): string | null {
-  if (!app.isPackaged) return null;
   const binaryName = process.platform === 'win32' ? 'hermes-yachiyo-backend.exe' : 'hermes-yachiyo-backend';
-  return path.join(process.resourcesPath, 'backend', binaryName);
+  const candidate = path.join(process.resourcesPath, 'backend', binaryName);
+  return app.isPackaged && fs.existsSync(candidate) ? candidate : null;
+}
+
+function initialBridgeUrl(): string {
+  const envBridgeUrl = normalizeBridgeUrl(process.env[BRIDGE_URL_ENV]);
+  if (packagedBackendPath()) return envBridgeUrl || PACKAGED_BRIDGE_URL;
+  if (!envBridgeUrl) return DEV_BRIDGE_URL;
+  const endpoint = bridgeEndpoint(envBridgeUrl);
+  if (endpoint?.port === 18420) return DEV_BRIDGE_URL;
+  return envBridgeUrl;
 }
 
 function bridgeEndpoint(url: string): { host: string; port: number } | null {
@@ -950,7 +1340,7 @@ function allocateLocalBridgeUrl(host: string): Promise<string> {
 }
 
 async function prepareBridgeUrlForPackagedBackend(): Promise<void> {
-  if (!app.isPackaged || process.env.HERMES_YACHIYO_BRIDGE_URL) return;
+  if (!packagedBackendPath() || process.env[BRIDGE_URL_ENV]) return;
   const endpoint = bridgeEndpoint(bridgeUrl);
   if (!endpoint || !isLocalBridgeHost(endpoint.host)) return;
 
@@ -975,7 +1365,7 @@ function startBackend(): void {
       ...process.env,
       PYTHONPATH: projectRoot(),
       HERMES_YACHIYO_DESKTOP_BACKEND: '1',
-      HERMES_YACHIYO_BRIDGE_URL: bridgeUrl,
+      [BRIDGE_URL_ENV]: bridgeUrl,
     },
   });
 
@@ -1081,8 +1471,9 @@ async function restartBackendProcess(targetBridgeUrl?: unknown): Promise<{ succe
 
 function rendererUrl(params: Record<string, string> = {}): string {
   const query = new URLSearchParams({ bridge: bridgeUrl });
+  query.set('_hy_ui_rev', UI_RENDER_REVISION);
   Object.entries(params)
-    .filter(([key]) => key !== 'view' && key !== 'mode')
+    .filter(([key]) => key !== 'view' && key !== 'mode' && key !== 'restore')
     .forEach(([key, value]) => query.set(key, value));
   const route = routeHash(params);
   if (!app.isPackaged) return `${FRONTEND_DEV_URL}?${query.toString()}${route}`;
@@ -1100,9 +1491,64 @@ function routeHash(params: Record<string, string> = {}): string {
 function mainWindowBounds(settings: UiSettings | null = lastUiSettings): { width: number; height: number } {
   const windowMode = settings?.window_mode || {};
   return {
-    width: Math.round(clamp(numberFromConfig(windowMode.width, 1120), 860, 1920)),
-    height: Math.round(clamp(numberFromConfig(windowMode.height, 760), 580, 1400)),
+    width: Math.round(clamp(numberFromConfig(windowMode.width, MIN_APP_WINDOW_WIDTH), MIN_APP_WINDOW_WIDTH, 1920)),
+    height: Math.round(clamp(numberFromConfig(windowMode.height, MIN_APP_WINDOW_HEIGHT), MIN_APP_WINDOW_HEIGHT, 1400)),
   };
+}
+
+function chatWindowBounds(settings: UiSettings | null = lastUiSettings, workArea: Rectangle = screen.getPrimaryDisplay().workArea): { width: number; height: number } {
+  const base = mainWindowBounds(settings);
+  const maxWidth = Math.max(MIN_APP_WINDOW_WIDTH, Math.min(1440, workArea.width));
+  const maxHeight = Math.max(MIN_APP_WINDOW_HEIGHT, Math.min(1000, workArea.height));
+  return {
+    width: Math.round(clamp(Math.max(base.width, MIN_APP_WINDOW_WIDTH), MIN_APP_WINDOW_WIDTH, maxWidth)),
+    height: Math.round(clamp(Math.max(base.height, MIN_APP_WINDOW_HEIGHT), MIN_APP_WINDOW_HEIGHT, maxHeight)),
+  };
+}
+
+function chatWindowMinSize(settings: UiSettings | null = lastUiSettings, workArea: Rectangle = screen.getPrimaryDisplay().workArea): { width: number; height: number } {
+  const bounds = chatWindowBounds(settings, workArea);
+  return {
+    width: Math.min(MIN_APP_WINDOW_WIDTH, bounds.width),
+    height: Math.min(MIN_APP_WINDOW_HEIGHT, bounds.height),
+  };
+}
+
+function ensureMainWindowUsableBounds(settings: UiSettings | null = lastUiSettings): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const current = mainWindow.getBounds();
+  const workArea = screen.getDisplayMatching(current).workArea;
+  const target = mainWindowBounds(settings);
+  mainWindow.setMinimumSize(MIN_APP_WINDOW_WIDTH, MIN_APP_WINDOW_HEIGHT);
+  if (current.width >= MIN_APP_WINDOW_WIDTH && current.height >= MIN_APP_WINDOW_HEIGHT) return;
+  const width = Math.max(current.width, target.width);
+  const height = Math.max(current.height, target.height);
+  const x = width >= workArea.width
+    ? workArea.x
+    : Math.round(clamp(current.x, workArea.x, workArea.x + workArea.width - width));
+  const y = height >= workArea.height
+    ? workArea.y
+    : Math.round(clamp(current.y, workArea.y, workArea.y + workArea.height - height));
+  mainWindow.setBounds({ x, y, width, height }, false);
+}
+
+function ensureChatWindowUsableBounds(settings: UiSettings | null = lastUiSettings): void {
+  if (!chatWindow || chatWindow.isDestroyed()) return;
+  const current = chatWindow.getBounds();
+  const workArea = screen.getDisplayMatching(current).workArea;
+  const target = chatWindowBounds(settings, workArea);
+  const minimum = chatWindowMinSize(settings, workArea);
+  chatWindow.setMinimumSize(minimum.width, minimum.height);
+  if (current.width >= minimum.width && current.height >= minimum.height) return;
+  const width = Math.max(current.width, target.width);
+  const height = Math.max(current.height, target.height);
+  const x = width >= workArea.width
+    ? workArea.x
+    : Math.round(clamp(current.x, workArea.x, workArea.x + workArea.width - width));
+  const y = height >= workArea.height
+    ? workArea.y
+    : Math.round(clamp(current.y, workArea.y, workArea.y + workArea.height - height));
+  chatWindow.setBounds({ x, y, width, height }, false);
 }
 
 function createMainWindow(
@@ -1127,10 +1573,16 @@ function createMainWindow(
     title,
     ...bounds,
     icon: appIconPath('window'),
-    minWidth: 860,
-    minHeight: 580,
+    minWidth: MIN_APP_WINDOW_WIDTH,
+    minHeight: MIN_APP_WINDOW_HEIGHT,
     show: false,
-    backgroundColor: '#0e1117',
+    backgroundColor: '#060913',
+    ...(process.platform === 'darwin'
+      ? {
+          titleBarStyle: 'hiddenInset' as const,
+          trafficLightPosition: { x: 16, y: 18 },
+        }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -1152,6 +1604,15 @@ function createMainWindow(
   mainWindow.on('minimize', restoreModeWindowTopPreference);
   mainWindow.on('hide', restoreModeWindowTopPreference);
   const createdWindow = mainWindow;
+  mainWindow.on('close', (event) => {
+    if (!activeAppUpdateDownload || appUpdateQuitConfirmed || appUpdateCloseConfirmedWindows.has(createdWindow)) return;
+    event.preventDefault();
+    if (!confirmCancelAppUpdateDownload(createdWindow, '关闭并取消更新')) return;
+    appUpdateCloseConfirmedWindows.add(createdWindow);
+    setTimeout(() => {
+      if (!createdWindow.isDestroyed()) createdWindow.close();
+    }, 0);
+  });
   mainWindow.on('closed', () => {
     if (mainWindow === createdWindow) mainWindow = null;
     restoreModeWindowTopPreference();
@@ -1163,10 +1624,6 @@ function showMainWindow(
   settings: UiSettings | null = lastUiSettings,
   options: MainWindowOptions = {},
 ): void {
-  if (normalizeView(params.view) === 'chat') {
-    showChatWindow(params);
-    return;
-  }
   if (!mainWindow || mainWindow.isDestroyed()) {
     createMainWindow(params, settings, options);
     return;
@@ -1177,6 +1634,7 @@ function showMainWindow(
     configureTray(settings || lastUiSettings);
   }
   enforceWindowTitle(mainWindow, mainWindowTitle(params));
+  ensureMainWindowUsableBounds(settings);
   mainWindow.loadURL(rendererUrl({ view: 'main', ...params }));
   if (mainWindow.isMinimized()) mainWindow.restore();
   const startHidden = Boolean(options.respectStartMinimized && settings?.app?.start_minimized);
@@ -1264,7 +1722,7 @@ function routeForWindow(targetWindow: BrowserWindow | null): { view: AppView; pa
 
 function mainActivationRouteParams(route: { view: AppView; params: Record<string, string> } | null): Record<string, string> {
   if (!route) return { view: 'main' };
-  if (route.view === 'chat' || route.view === 'bubble' || route.view === 'bubble-menu' || route.view === 'live2d') {
+  if (route.view === 'bubble' || route.view === 'bubble-menu' || route.view === 'live2d') {
     return { view: 'main' };
   }
   return { ...route.params, view: route.view };
@@ -1273,7 +1731,7 @@ function mainActivationRouteParams(route: { view: AppView; params: Record<string
 function restoreMainWindowIfPolluted(): void {
   const route = routeForWindow(mainWindow);
   if (!route) return;
-  if (route.view === 'chat' || route.view === 'bubble' || route.view === 'bubble-menu' || route.view === 'live2d') {
+  if (route.view === 'bubble' || route.view === 'bubble-menu' || route.view === 'live2d') {
     mainWindow?.loadURL(rendererUrl({ view: 'main' }));
   }
 }
@@ -1283,19 +1741,26 @@ function restoreModeWindowIfPolluted(): void {
   const route = routeForWindow(modeWindow);
   if (!route) return;
   if (route.view !== activeMode && !(activeMode === 'bubble' && route.view === 'bubble-menu')) {
-    modeWindow.loadURL(rendererUrl({ view: activeMode }));
+    modeWindow.loadURL(rendererUrl({ view: activeMode, surface: 'desktop' }));
   }
 }
 
 function createChatWindow(params: Record<string, string> = {}): void {
+  const bounds = chatWindowBounds();
+  const minimum = chatWindowMinSize();
   chatWindow = new BrowserWindow({
     title: 'Hermes-Yachiyo 对话',
-    width: 520,
-    height: 680,
+    ...bounds,
     icon: appIconPath('window'),
-    minWidth: 420,
-    minHeight: 560,
-    backgroundColor: '#121622',
+    minWidth: minimum.width,
+    minHeight: minimum.height,
+    backgroundColor: '#060913',
+    ...(process.platform === 'darwin'
+      ? {
+          titleBarStyle: 'hiddenInset' as const,
+          trafficLightPosition: { x: 16, y: 18 },
+        }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -1313,29 +1778,73 @@ function createChatWindow(params: Record<string, string> = {}): void {
   });
 }
 
+function navigateMainWindowInPlace(params: Record<string, string>): boolean {
+  if (!mainWindow || mainWindow.isDestroyed() || params.session_id) return false;
+  const route = routeHash(params);
+  mainWindow.webContents.executeJavaScript(
+    `window.history.pushState(null, '', ${JSON.stringify(route)}); window.dispatchEvent(new Event('hermes-route-change'));`,
+  ).catch(() => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(rendererUrl(params));
+  });
+  return true;
+}
+
+function focusMainWindowAsChat(params: Record<string, string> = {}): boolean {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const route = routeForWindow(mainWindow);
+  const nextParams = { ...params, view: 'chat' };
+  enforceWindowTitle(mainWindow, mainWindowTitle(nextParams));
+  if (route?.view !== 'chat') {
+    if (!navigateMainWindowInPlace(nextParams)) mainWindow.loadURL(rendererUrl(nextParams));
+  } else if (params.session_id && route.params.session_id !== params.session_id) {
+    mainWindow.loadURL(rendererUrl(nextParams));
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  showMacDockIcon();
+  mainWindow.show();
+  mainWindow.moveTop();
+  mainWindow.focus();
+  return true;
+}
+
 function showChatWindow(params: Record<string, string> = {}): void {
   restoreMainWindowIfPolluted();
   restoreModeWindowIfPolluted();
-  if (!chatWindow) {
+  restoreModeWindowTopPreference();
+  if (focusMainWindowAsChat(params)) return;
+  if (!chatWindow || chatWindow.isDestroyed()) {
     createChatWindow(params);
     return;
   }
+  enforceWindowTitle(chatWindow, mainWindowTitle({ ...params, view: 'chat' }));
+  ensureChatWindowUsableBounds();
   const route = routeForWindow(chatWindow);
-  const requestedSessionId = params.session_id || '';
-  if (
-    route?.view !== 'chat'
-    || (requestedSessionId && route.params.session_id !== requestedSessionId)
-  ) {
+  if (route?.view !== 'chat' || (params.session_id && route.params.session_id !== params.session_id)) {
     chatWindow.loadURL(rendererUrl({ ...params, view: 'chat' }));
   }
+  if (chatWindow.isMinimized()) chatWindow.restore();
   showMacDockIcon();
   chatWindow.show();
+  chatWindow.moveTop();
   chatWindow.focus();
+}
+
+function showMainWindowAtLastRoute(params: Record<string, string> = {}): void {
+  restoreMainWindowIfPolluted();
+  restoreModeWindowIfPolluted();
+  const cleanParams = { ...params };
+  delete cleanParams.restore;
+  const route = routeForWindow(mainWindow);
+  showMainWindow({ ...mainActivationRouteParams(route), ...cleanParams });
 }
 
 function openAppView(view: AppView, params: Record<string, string> = {}): void {
   if (view === 'chat') {
     showChatWindow(params);
+    return;
+  }
+  if (view === 'main' && params.restore === 'last') {
+    showMainWindowAtLastRoute(params);
     return;
   }
   if (view === 'bubble' || view === 'bubble-menu' || view === 'live2d') {
@@ -1350,7 +1859,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeView(value: unknown): AppView {
-  const views: AppView[] = ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'proactive-tts', 'bubble', 'bubble-menu', 'live2d'];
+  const views: AppView[] = [
+    'main',
+    'chat',
+    'settings',
+    'installer',
+    'provider',
+    'resources',
+    'workspace',
+    'diagnostics',
+    'tools',
+    'tools-all',
+    'activity-all',
+    'app-update',
+    'proactive-tts',
+    'bubble',
+    'bubble-menu',
+    'live2d',
+  ];
   return typeof value === 'string' && views.includes(value as AppView) ? (value as AppView) : 'main';
 }
 
@@ -1365,6 +1891,16 @@ function normalizeParams(value: unknown): Record<string, string> {
 
 function normalizeMode(value: unknown): ModeId {
   return value === 'live2d' ? 'live2d' : 'bubble';
+}
+
+function normalizeDisplayMode(value: unknown): DisplayModeId {
+  if (value === 'none') return 'none';
+  return normalizeMode(value);
+}
+
+function normalizePreferredDisplayMode(value: unknown): DisplayModeId | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
+  return normalizeDisplayMode(value);
 }
 
 function routeFromUrl(rawUrl: string): { view: AppView; params: Record<string, string> } | null {
@@ -1383,7 +1919,8 @@ function routeFromUrl(rawUrl: string): { view: AppView; params: Record<string, s
     if (view === 'settings' && rawMode) params.mode = rawMode;
     return { view, params };
   }
-  return { view: normalizeView(parsed.searchParams.get('view')), params };
+  const view = normalizeView(parsed.searchParams.get('view'));
+  return { view, params };
 }
 
 function redirectDesktopModeNavigation(targetUrl: string, launcherMode: ModeId): boolean {
@@ -1440,6 +1977,14 @@ function boundsChanged(first: Rectangle, second: Rectangle): boolean {
   return first.x !== second.x || first.y !== second.y || first.width !== second.width || first.height !== second.height;
 }
 
+function squareBubbleBounds(bounds: Rectangle): Rectangle {
+  const workArea = workAreaForBounds(bounds);
+  const size = Math.round(clamp(Math.max(bounds.width, bounds.height), BUBBLE_MIN_WINDOW_SIZE, BUBBLE_MAX_WINDOW_SIZE));
+  const x = Math.round(clamp(bounds.x, workArea.x, workArea.x + Math.max(0, workArea.width - size)));
+  const y = Math.round(clamp(bounds.y, workArea.y, workArea.y + Math.max(0, workArea.height - size)));
+  return { ...bounds, x, y, width: size, height: size };
+}
+
 async function saveLauncherPosition(mode: ModeId, bounds: Rectangle): Promise<void> {
   const workArea = workAreaForBounds(bounds);
   try {
@@ -1472,6 +2017,13 @@ function scheduleModeWindowPositionSave(mode: ModeId, config: Record<string, unk
   positionSaveTimer = setTimeout(() => {
     if (!modeWindow || modeWindow.isDestroyed() || activeMode !== mode) return;
     let bounds = modeWindow.getBounds();
+    if (mode === 'bubble') {
+      const squared = squareBubbleBounds(bounds);
+      if (boundsChanged(bounds, squared)) {
+        modeWindow.setBounds(squared, false);
+        bounds = squared;
+      }
+    }
     if (mode === 'bubble' && booleanFromConfig(config.edge_snap, true)) {
       const snapped = snapBubbleBounds(bounds);
       if (boundsChanged(bounds, snapped)) {
@@ -1517,14 +2069,20 @@ function desktopModeBounds(mode: ModeId, config: Record<string, unknown>) {
   }
 
   const display = screen.getPrimaryDisplay().workArea;
-  const width = Math.round(clamp(numberFromConfig(config.width, 112), 80, 192));
-  const height = Math.round(clamp(numberFromConfig(config.height, 112), 80, 192));
+  const size = Math.round(clamp(
+    Math.max(
+      numberFromConfig(config.width, BUBBLE_DEFAULT_WINDOW_SIZE),
+      numberFromConfig(config.height, BUBBLE_DEFAULT_WINDOW_SIZE),
+    ),
+    BUBBLE_MIN_WINDOW_SIZE,
+    BUBBLE_MAX_WINDOW_SIZE,
+  ));
   const xPercent = clamp(numberFromConfig(config.position_x_percent, 1), 0, 1);
   const yPercent = clamp(numberFromConfig(config.position_y_percent, 1), 0, 1);
   const margin = 24;
-  const x = Math.round(display.x + margin + (display.width - width - margin * 2) * xPercent);
-  const y = Math.round(display.y + margin + (display.height - height - margin * 2) * yPercent);
-  return { width, height, x, y };
+  const x = Math.round(display.x + margin + (display.width - size - margin * 2) * xPercent);
+  const y = Math.round(display.y + margin + (display.height - size - margin * 2) * yPercent);
+  return { width: size, height: size, x, y };
 }
 
 function modeConfigSignature(config: Record<string, unknown>): string {
@@ -1545,6 +2103,11 @@ function applyModeWindowTopPreference(): void {
 
 function suppressModeWindowForMainWindow(): void {
   if (!modeWindow || modeWindow.isDestroyed()) return;
+  if (activeMode === 'live2d' && configuredModeWindowAlwaysOnTop()) {
+    modeWindowTopSuppressed = false;
+    applyModeWindowTopPreference();
+    return;
+  }
   modeWindowTopSuppressed = true;
   applyModeWindowTopPreference();
 }
@@ -1555,26 +2118,70 @@ function restoreModeWindowTopPreference(): void {
   applyModeWindowTopPreference();
 }
 
+function repaintTransparentModeWindow(targetWindow: BrowserWindow): void {
+  if (targetWindow.isDestroyed()) return;
+  targetWindow.setBackgroundColor(TRANSPARENT_WINDOW_BACKGROUND);
+  if (process.platform === 'darwin') {
+    try {
+      targetWindow.invalidateShadow();
+    } catch {}
+  }
+}
+
+function showTransparentModeWindowWhenReady(targetWindow: BrowserWindow): void {
+  let shown = false;
+  const show = () => {
+    if (shown || targetWindow.isDestroyed()) return;
+    shown = true;
+    repaintTransparentModeWindow(targetWindow);
+    targetWindow.showInactive();
+  };
+  targetWindow.once('ready-to-show', show);
+  setTimeout(show, 1200);
+}
+
 function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> = {}): void {
   showMacDockIcon();
   if (modeWindow && !modeWindow.isDestroyed() && activeMode === mode) {
     const nextSignature = modeConfigSignature(config);
+    let rendererReloaded = false;
     activeModeConfig = config;
     if (nextSignature !== activeModeConfigSignature) {
       activeModeConfigSignature = nextSignature;
       const bounds = desktopModeBounds(mode, config);
       suppressModeWindowPositionSave();
       modeWindow.setBounds(bounds, false);
+      repaintTransparentModeWindow(modeWindow);
+      setModeWindowPointerInteractive(mode, false);
+      modeWindowShapeApplied = false;
       applyModeWindowTopPreference();
       if (mode === 'live2d') {
         modeWindow.setVisibleOnAllWorkspaces(booleanFromConfig(config.show_on_all_spaces, true), { visibleOnFullScreen: true });
       }
-      modeWindow.loadURL(rendererUrl({ view: mode }));
+      modeWindow.loadURL(rendererUrl({ view: mode, surface: 'desktop' }));
+      rendererReloaded = true;
+    }
+    if (mode === 'bubble') {
+      const currentBounds = modeWindow.getBounds();
+      const squaredBounds = squareBubbleBounds(currentBounds);
+      if (boundsChanged(currentBounds, squaredBounds)) {
+        suppressModeWindowPositionSave();
+        modeWindow.setBounds(squaredBounds, false);
+        repaintTransparentModeWindow(modeWindow);
+        modeWindowShapeApplied = false;
+      }
     }
     const route = routeForWindow(modeWindow);
     if (route?.view !== mode && !(mode === 'bubble' && route?.view === 'bubble-menu')) {
-      modeWindow.loadURL(rendererUrl({ view: mode }));
+      modeWindow.loadURL(rendererUrl({ view: mode, surface: 'desktop' }));
+      rendererReloaded = true;
+    } else if (mode === 'bubble' && !rendererReloaded) {
+      modeWindow.loadURL(rendererUrl({ view: mode, surface: 'desktop', launcher_reload: `${Date.now()}` }));
+      rendererReloaded = true;
     }
+    repaintTransparentModeWindow(modeWindow);
+    setModeWindowPointerInteractive(mode, false);
+    modeWindowShapeApplied = false;
     modeWindow.show();
     modeWindow.focus();
     return;
@@ -1612,15 +2219,19 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     resizable: mode === 'live2d',
     movable: true,
     skipTaskbar: true,
+    show: false,
+    paintWhenInitiallyHidden: true,
     alwaysOnTop,
     hasShadow: false,
-    backgroundColor: '#00000000',
+    backgroundColor: TRANSPARENT_WINDOW_BACKGROUND,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+  repaintTransparentModeWindow(createdModeWindow);
+  showTransparentModeWindowWhenReady(createdModeWindow);
   modeWindow = createdModeWindow;
   enforceWindowTitle(createdModeWindow, modeWindowTitle(mode));
 
@@ -1628,7 +2239,12 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     createdModeWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   }
   applyModeWindowTopPreference();
-  createdModeWindow.loadURL(rendererUrl({ view: mode }));
+  createdModeWindow.loadURL(rendererUrl({ view: mode, surface: 'desktop' }));
+  createdModeWindow.webContents.on('did-start-loading', () => {
+    modeWindowShapeApplied = false;
+    setModeWindowPointerInteractive(mode, false);
+  });
+  createdModeWindow.webContents.on('did-finish-load', () => repaintTransparentModeWindow(createdModeWindow));
   createdModeWindow.webContents.on('will-navigate', (event, targetUrl) => {
     if (redirectDesktopModeNavigation(targetUrl, mode)) event.preventDefault();
   });
@@ -1636,12 +2252,17 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
     if (redirectDesktopModeNavigation(url, mode)) return { action: 'deny' };
     return { action: 'allow' };
   });
-  if (mode === 'live2d' && LIVE2D_POINTER_PASSTHROUGH_ENABLED) {
-    setTimeout(() => setModeWindowPointerInteractive('live2d', false), 260);
+  if ((mode === 'live2d' || mode === 'bubble') && LIVE2D_POINTER_PASSTHROUGH_ENABLED) {
+    setTimeout(() => setModeWindowPointerInteractive(mode, false), 260);
   }
   createdModeWindow.on('focus', restoreModeWindowTopPreference);
   createdModeWindow.on('move', () => scheduleModeWindowPositionSave(mode, config));
-  createdModeWindow.on('resize', () => scheduleModeWindowPositionSave(mode, config));
+  createdModeWindow.on('resize', () => {
+    repaintTransparentModeWindow(createdModeWindow);
+    modeWindowShapeApplied = false;
+    setModeWindowPointerInteractive(mode, false);
+    scheduleModeWindowPositionSave(mode, config);
+  });
   createdModeWindow.on('closed', () => {
     if (modeWindow !== createdModeWindow) return;
     if (positionSaveTimer) {
@@ -1662,6 +2283,12 @@ function createDesktopModeWindow(mode: ModeId, config: Record<string, unknown> =
 function setModeWindowPointerInteractive(mode: ModeId, interactive: boolean): boolean {
   if (!modeWindow || modeWindow.isDestroyed() || activeMode !== mode) return false;
   if (mode === 'live2d' && !LIVE2D_POINTER_PASSTHROUGH_ENABLED && !interactive) return true;
+  if (interactive && mode === 'live2d') {
+    restoreModeWindowTopPreference();
+    applyModeWindowTopPreference();
+    if (!modeWindow.isVisible()) modeWindow.showInactive();
+    if (configuredModeWindowAlwaysOnTop(mode)) modeWindow.moveTop();
+  }
   const shouldIgnore = !interactive;
   if (modeWindowIgnoringMouse === shouldIgnore) return true;
   modeWindow.setIgnoreMouseEvents(shouldIgnore, { forward: true });
@@ -1672,16 +2299,27 @@ function setModeWindowPointerInteractive(mode: ModeId, interactive: boolean): bo
 function setModeWindowHitRegions(mode: ModeId, rawRegions: unknown): boolean {
   if (!modeWindow || modeWindow.isDestroyed() || activeMode !== mode) return false;
   const bounds = modeWindow.getBounds();
+  if (mode === 'bubble') {
+    try {
+      modeWindow.setShape([{ x: 0, y: 0, width: bounds.width, height: bounds.height }]);
+      modeWindowShapeApplied = true;
+      return true;
+    } catch (error) {
+      modeWindowShapeApplied = false;
+      console.warn('[desktop] setShape failed; falling back to pointer passthrough polling.', error);
+      return false;
+    }
+  }
   const shapePayload = normalizeLauncherShapePayload(rawRegions, bounds);
   const shapeRects = normalizeLauncherShapeRects(shapePayload.regions, bounds, shapePayload.scaleX, shapePayload.scaleY);
-  if (!shapeRects.length) return false;
+  if (!shapeRects.length) {
+    modeWindowShapeApplied = false;
+    setModeWindowPointerInteractive(mode, false);
+    return false;
+  }
   try {
     modeWindow.setShape(shapeRects);
     modeWindowShapeApplied = true;
-    if (modeWindowIgnoringMouse) {
-      modeWindow.setIgnoreMouseEvents(false);
-      modeWindowIgnoringMouse = false;
-    }
     return true;
   } catch (error) {
     modeWindowShapeApplied = false;
@@ -1852,10 +2490,32 @@ function openLive2DResourceSettings(settings: UiSettings | null | undefined): vo
   );
 }
 
-async function openConfiguredDesktopMode(preferredMode?: ModeId, settingsOverride?: UiSettings | null): Promise<void> {
+function closeDesktopModeWindow(): void {
+  if (!modeWindow || modeWindow.isDestroyed()) {
+    activeMode = null;
+    activeModeConfig = {};
+    activeModeConfigSignature = '';
+    return;
+  }
+  const windowToClose = modeWindow;
+  modeWindow = null;
+  activeMode = null;
+  activeModeConfig = {};
+  activeModeConfigSignature = '';
+  modeWindowIgnoringMouse = false;
+  modeWindowShapeApplied = false;
+  modeWindowTopSuppressed = false;
+  windowToClose.close();
+}
+
+async function openConfiguredDesktopMode(preferredMode?: DisplayModeId, settingsOverride?: UiSettings | null): Promise<void> {
   const settings = settingsOverride || await waitForUiSettings();
   if (settings) lastUiSettings = settings;
-  const mode = preferredMode || normalizeMode(settings?.display?.current_mode);
+  const mode = preferredMode || normalizeDisplayMode(settings?.display?.current_mode);
+  if (mode === 'none') {
+    closeDesktopModeWindow();
+    return;
+  }
   if (mode === 'live2d' && !live2dResourceReady(settings)) {
     if (preferredMode === 'live2d') {
       openLive2DResourceSettings(settings);
@@ -1932,6 +2592,30 @@ async function showOpenDialogForSender(
     : await dialog.showOpenDialog(options);
   if (result.canceled) return null;
   return result.filePaths[0] || null;
+}
+
+function imageMimeTypeForPath(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  return 'application/octet-stream';
+}
+
+async function readAvatarImageSelection(filePath: string | null): Promise<AvatarImageSelection | null> {
+  if (!filePath) return null;
+  const stats = await fs.promises.stat(filePath);
+  if (!stats.isFile()) throw new Error('请选择图片文件');
+  if (stats.size > MAX_AVATAR_IMAGE_BYTES) throw new Error('头像图片不能超过 8 MB');
+  const data = await fs.promises.readFile(filePath);
+  const mimeType = imageMimeTypeForPath(filePath);
+  if (!mimeType.startsWith('image/')) throw new Error('仅支持 PNG、JPG、WEBP 或 GIF 图片');
+  return {
+    path: filePath,
+    file_name: path.basename(filePath),
+    data_url: `data:${mimeType};base64,${data.toString('base64')}`,
+  };
 }
 
 function normalizeTerminalTask(value: unknown): InstallerTerminalTask | null {
@@ -2056,9 +2740,21 @@ ipcMain.handle('hermes:restartApp', () => {
 ipcMain.handle('hermes:removeAppBundleAndQuit', () => removeCurrentAppBundleAndQuit());
 ipcMain.handle('hermes:getAppUpdateInfo', () => appUpdateInfo());
 ipcMain.handle('hermes:checkAppUpdate', () => checkAppUpdate());
-ipcMain.handle('hermes:downloadAppUpdate', (event) => downloadAppUpdate((progress) => {
-  if (!event.sender.isDestroyed()) event.sender.send('hermes:appUpdateDownloadProgress', progress);
-}));
+ipcMain.handle('hermes:downloadAppUpdate', async (event) => {
+  const sender = event.sender;
+  const cancelForDestroyedSender = () => {
+    cancelActiveAppUpdateDownload('更新页面已关闭，已取消本次更新下载');
+  };
+  sender.once('destroyed', cancelForDestroyedSender);
+  try {
+    return await downloadAppUpdate((progress) => {
+      if (!sender.isDestroyed()) sender.send('hermes:appUpdateDownloadProgress', progress);
+    });
+  } finally {
+    sender.removeListener('destroyed', cancelForDestroyedSender);
+  }
+});
+ipcMain.handle('hermes:cancelAppUpdateDownload', () => cancelActiveAppUpdateDownload('已取消本次更新下载'));
 ipcMain.handle('hermes:installAppUpdate', (_event, dmgPath: unknown) => installDownloadedAppUpdate(dmgPath));
 ipcMain.handle('hermes:restartBackend', (_event, options: unknown) => {
   const targetBridgeUrl = isRecord(options) ? options.bridgeUrl : undefined;
@@ -2066,6 +2762,17 @@ ipcMain.handle('hermes:restartBackend', (_event, options: unknown) => {
 });
 ipcMain.handle('hermes:copyText', (_event, value: unknown) => {
   clipboard.writeText(typeof value === 'string' ? value : '');
+});
+ipcMain.handle('hermes:chooseAvatarImage', async (event) => {
+  const selectedPath = await showOpenDialogForSender(event, {
+    title: '选择头像图片',
+    defaultPath: app.getPath('pictures') || app.getPath('home'),
+    properties: ['openFile'],
+    filters: [
+      { name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] },
+    ],
+  });
+  return readAvatarImageSelection(selectedPath);
 });
 ipcMain.handle('hermes:chooseLive2DModelDirectory', (event) => showOpenDialogForSender(event, {
   title: '选择 Live2D 模型目录',
@@ -2095,7 +2802,7 @@ ipcMain.handle('hermes:openExternalUrl', async (_event, value: unknown) => {
 ipcMain.handle('hermes:openView', (_event, view: unknown, params: unknown) => {
   openAppView(normalizeView(view), normalizeParams(params));
 });
-ipcMain.handle('hermes:openDesktopMode', (_event, mode: unknown) => openConfiguredDesktopMode(normalizeMode(mode)));
+ipcMain.handle('hermes:openDesktopMode', (_event, mode: unknown) => openConfiguredDesktopMode(normalizePreferredDisplayMode(mode)));
 ipcMain.handle('hermes:moveLauncherWindow', moveLauncherWindow);
 ipcMain.handle('hermes:getLauncherPointerState', (_event, mode: unknown) => launcherPointerState(mode));
 ipcMain.handle('hermes:terminalStart', startInstallerTerminal);
@@ -2135,7 +2842,7 @@ ipcMain.handle('hermes:openLauncherMenu', (event, mode: unknown) => {
   const targetWindow = BrowserWindow.fromWebContents(event.sender) || undefined;
   const menu = Menu.buildFromTemplate([
     { label: '打开对话', click: () => showChatWindow() },
-    { label: '主控台', click: () => showMainWindow({ view: 'main' }) },
+    { label: '主控台', click: () => showMainWindowAtLastRoute({ restore: 'last' }) },
     { label: `${modeId === 'live2d' ? 'Live2D' : 'Bubble'} 设置`, click: () => showMainWindow({ view: 'settings', mode: modeId }) },
     { type: 'separator' },
     { label: '重新打开表现态', click: () => void openConfiguredDesktopMode(modeId) },
@@ -2156,17 +2863,18 @@ app.whenReady().then(() => {
   void (async () => {
     await prepareBridgeUrlForPackagedBackend();
     startBackend();
+    createMainWindow({ view: 'main' }, lastUiSettings, { focusOnReady: false });
     const installInfo = await waitForInstallInfo();
     lastInstallReady = installReady(installInfo);
     if (!lastInstallReady) {
-      createMainWindow({ view: 'installer' });
+      showMainWindow({ view: 'installer' }, lastUiSettings, { focusOnReady: false });
       return;
     }
     hasEnteredMainExperience = true;
     const settings = await waitForUiSettings();
     if (settings) lastUiSettings = settings;
     configureTray(settings);
-    showMainWindow({}, settings, { respectStartMinimized: true, focusOnReady: false });
+    showMainWindow({}, settings, { focusOnReady: false });
     await openConfiguredDesktopMode(undefined, settings);
     if (settings?.window_mode?.open_chat_on_start) showChatWindow();
   })();
@@ -2174,8 +2882,23 @@ app.whenReady().then(() => {
   app.on('activate', showMainWindowFromAppActivation);
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  if (activeAppUpdateDownload && !appUpdateQuitConfirmed) {
+    event.preventDefault();
+    if (!confirmCancelAppUpdateDownload(mainWindow, '退出并取消更新')) return;
+    appUpdateQuitConfirmed = true;
+    setTimeout(() => app.quit(), 0);
+    return;
+  }
   cleanupAllTerminalSessions();
+  if (!backendShutdownBeforeQuit && backendProcess) {
+    event.preventDefault();
+    void terminateBackend().finally(() => {
+      backendShutdownBeforeQuit = true;
+      app.quit();
+    });
+    return;
+  }
   stopBackend();
 });
 

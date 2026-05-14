@@ -14,8 +14,8 @@ Hermes-Yachiyo 是桌面优先的本地个人 Agent 应用。它把 Hermes Agent
 
 - Hermes Agent 会在首次使用时安装或被自动检测。
 - Live2D 模型资源需要导入 ZIP。
-- GPT-SoVITS 八千代语音包需要导入 ZIP。
-- GPT-SoVITS API 服务需要本机已有或由设置页配置启动。
+- GPT-SoVITS 八千代音色包需要导入 ZIP。
+- GPT-SoVITS API 服务需要本机已有，或由设置页部署运行时/基础模型后启动。
 
 ## 2. 首次启动
 
@@ -223,11 +223,11 @@ macOS 可能会要求屏幕录制权限。请到“系统设置 -> 隐私与安�
 - 本地命令 TTS。
 - GPT-SoVITS 本地服务。
 
-八千代 GPT-SoVITS 语音包导入步骤：
+八千代 GPT-SoVITS 音色包导入步骤：
 
 1. 选择 `GPT-SoVITS 本地服务`。
-2. 点击“导入语音包 ZIP”。
-3. 选择语音包 ZIP。
+2. 点击“导入音色包 ZIP”。
+3. 选择音色包 ZIP。
 4. 确认 GPT 权重、SoVITS 权重、参考音频路径已自动填入。
 5. 保存设置。
 6. 点击测试语音。
@@ -325,7 +325,7 @@ Doctor 会检查 Python、依赖、目录结构、命令安装和外部工具。
 
 - 仅删除 Hermes-Yachiyo 配置和工作空间。
 - 是否保留配置快照。
-- 是否同时卸载 GPT-SoVITS LaunchAgent。
+- 是否同时卸载 GPT-SoVITS 服务目录与基础模型。
 
 ![卸载预览](/images/hermes-yachiyo/first-run/43-settings-uninstall-preview.png)
 
@@ -349,7 +349,7 @@ Doctor 会检查 Python、依赖、目录结构、命令安装和外部工具。
 
 ### TTS 没声音
 
-确认语音 Provider 已启用。GPT-SoVITS 语音包导入成功只代表音色路径就绪，还需要本地 API 服务可达。首次加载权重可能需要几十秒。
+确认语音 Provider 已启用。GPT-SoVITS 音色包导入成功只代表八千代音色路径就绪，还需要本地 API 服务和基础预训练模型可达。首次加载权重可能需要几十秒。
 
 如果 GPT-SoVITS 返回 HTTP 400，请检查参考音频路径、文本语言、参考音频语言、切分方式、媒体类型，以及本地 GPT-SoVITS API 版本是否与 Hermes-Yachiyo 的请求格式兼容。
 

@@ -8,10 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from apps.shell.assets import TTS_RELEASES_URL
-from apps.shell.assets import get_user_tts_assets_dir
-from apps.shell.assets import project_display_path
-
+from apps.shell.assets import TTS_RELEASES_URL, get_user_tts_assets_dir, project_display_path
 
 TTS_PRESET_KIND = "hermes-yachiyo-gpt-sovits-voice"
 TTS_PRESET_MANIFEST_NAMES = ("yachiyo-tts-preset.json", "tts-preset.json")
@@ -24,8 +21,14 @@ def get_tts_voice_resource_info() -> dict[str, Any]:
         "default_assets_root_display": project_display_path(assets_root),
         "releases_url": TTS_RELEASES_URL,
         "voice_package_url": TTS_RELEASES_URL,
-        "help_text": "从 Releases 下载八千代 GPT-SoVITS 语音包 ZIP 后导入，Yachiyo 会把模型权重和参考音频路径填入主动关怀 TTS 设置。",
-        "service_help_text": "语音包只包含音色资源；选择 GPT-SoVITS 本地服务时，还需要先启动 GPT-SoVITS API 服务。可以从语音设置页打开部署终端，或填写已有服务目录和启动命令。",
+        "help_text": (
+            "从 Releases 下载八千代 GPT-SoVITS 音色包 ZIP 后导入，"
+            "Yachiyo 会把八千代音色权重和参考音频路径填入主动关怀 TTS 设置。"
+        ),
+        "service_help_text": (
+            "音色包不包含 GPT-SoVITS 基础预训练模型与运行时；"
+            "选择 GPT-SoVITS 本地服务时，还需要先部署或启动 GPT-SoVITS API 服务。"
+        ),
         "service_project_url": "https://github.com/RVC-Boss/GPT-SoVITS",
         "default_service_workdir": str((Path.home() / "AI" / "GPT-SoVITS").expanduser()),
         "default_service_workdir_display": "~/AI/GPT-SoVITS",
@@ -44,7 +47,7 @@ def import_tts_voice_archive_draft(archive_path: Path) -> dict[str, Any]:
     draft_changes = {f"tts.{key}": value for key, value in settings.items()}
     return {
         "ok": True,
-        "message": "语音包已导入，等待保存 TTS 设置",
+        "message": "音色包已导入，等待保存 TTS 设置",
         "imported_path": str(imported_dir),
         "imported_path_display": project_display_path(imported_dir),
         "tts_settings": settings,
@@ -53,10 +56,13 @@ def import_tts_voice_archive_draft(archive_path: Path) -> dict[str, Any]:
     }
 
 
-def import_tts_voice_archive(archive_path: Path, assets_root: Path | None = None) -> tuple[Path, dict[str, Any]]:
+def import_tts_voice_archive(
+    archive_path: Path,
+    assets_root: Path | None = None,
+) -> tuple[Path, dict[str, Any]]:
     resolved_archive = archive_path.expanduser().resolve()
     if not resolved_archive.exists() or not resolved_archive.is_file():
-        raise FileNotFoundError("未找到要导入的语音包 ZIP")
+        raise FileNotFoundError("未找到要导入的音色包 ZIP")
 
     target_root = (assets_root or get_user_tts_assets_dir()).expanduser().resolve()
     target_root.mkdir(parents=True, exist_ok=True)
@@ -65,14 +71,17 @@ def import_tts_voice_archive(archive_path: Path, assets_root: Path | None = None
         try:
             shutil.unpack_archive(str(resolved_archive), tmp_dir)
         except (shutil.ReadError, ValueError) as exc:
-            raise ValueError("所选文件不是可导入的语音包压缩文件") from exc
+            raise ValueError("所选文件不是可导入的音色包压缩文件") from exc
 
         manifest_path = find_tts_voice_manifest(Path(tmp_dir))
         if manifest_path is None:
-            raise ValueError("压缩包内未找到 yachiyo-tts-preset.json")
+            raise ValueError("音色包内未找到 yachiyo-tts-preset.json")
         manifest = read_tts_voice_manifest(manifest_path)
         source_dir = manifest_path.parent
-        target_dir = pick_import_target_dir(target_root, str(manifest.get("slug") or source_dir.name or "yachiyo-gpt-sovits"))
+        target_dir = pick_import_target_dir(
+            target_root,
+            str(manifest.get("slug") or source_dir.name or "yachiyo-gpt-sovits"),
+        )
         shutil.copytree(source_dir, target_dir)
         return target_dir.resolve(), manifest
 
@@ -93,9 +102,9 @@ def read_tts_voice_manifest(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
-        raise ValueError("语音包 manifest 解析失败") from exc
+        raise ValueError("音色包 manifest 解析失败") from exc
     if payload.get("kind") != TTS_PRESET_KIND:
-        raise ValueError("语音包 manifest 类型不匹配")
+        raise ValueError("音色包 manifest 类型不匹配")
     return payload
 
 
@@ -109,13 +118,15 @@ def tts_settings_from_manifest(root: Path, manifest: dict[str, Any]) -> dict[str
             return ""
         path = (root / value).expanduser().resolve()
         if not path.exists():
-            raise FileNotFoundError(f"语音包缺少文件：{value}")
+            raise FileNotFoundError(f"音色包缺少文件：{value}")
         return str(path)
 
     settings: dict[str, Any] = {
         "enabled": True,
         "provider": "gpt-sovits",
-        "gsv_base_url": str(manifest.get("base_url") or params.get("base_url") or "http://127.0.0.1:9880"),
+        "gsv_base_url": str(
+            manifest.get("base_url") or params.get("base_url") or "http://127.0.0.1:9880"
+        ),
         "gsv_service_workdir": str(
             manifest.get("service_workdir")
             or params.get("service_workdir")
@@ -129,10 +140,20 @@ def tts_settings_from_manifest(root: Path, manifest: dict[str, Any]) -> dict[str
         "gsv_gpt_weights_path": rel_path("gpt_weights", "gpt_weights"),
         "gsv_sovits_weights_path": rel_path("sovits_weights", "sovits_weights"),
         "gsv_ref_audio_path": rel_path("ref_audio", "ref_audio"),
-        "gsv_ref_audio_text": str(params.get("ref_audio_text") or manifest.get("ref_audio_text") or ""),
-        "gsv_ref_audio_language": str(params.get("ref_audio_language") or manifest.get("ref_audio_language") or "ja"),
-        "gsv_aux_ref_audio_path": rel_path("aux_ref_audio", "aux_ref_audio") if (files.get("aux_ref_audio") or manifest.get("aux_ref_audio")) else "",
-        "gsv_text_language": str(params.get("text_language") or manifest.get("text_language") or "zh"),
+        "gsv_ref_audio_text": str(
+            params.get("ref_audio_text") or manifest.get("ref_audio_text") or ""
+        ),
+        "gsv_ref_audio_language": str(
+            params.get("ref_audio_language") or manifest.get("ref_audio_language") or "ja"
+        ),
+        "gsv_aux_ref_audio_path": (
+            rel_path("aux_ref_audio", "aux_ref_audio")
+            if (files.get("aux_ref_audio") or manifest.get("aux_ref_audio"))
+            else ""
+        ),
+        "gsv_text_language": str(
+            params.get("text_language") or manifest.get("text_language") or "zh"
+        ),
         "gsv_top_k": int(params.get("top_k", 15)),
         "gsv_top_p": float(params.get("top_p", 1.0)),
         "gsv_temperature": float(params.get("temperature", 1.0)),
@@ -152,7 +173,9 @@ def tts_settings_from_manifest(root: Path, manifest: dict[str, Any]) -> dict[str
 
 
 def pick_import_target_dir(root: Path, name: str) -> Path:
-    safe_name = "".join(ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in name).strip(".-")
+    safe_name = "".join(
+        ch if ch.isalnum() or ch in {"-", "_", "."} else "-" for ch in name
+    ).strip(".-")
     safe_name = safe_name or "yachiyo-gpt-sovits"
     candidate = root / safe_name
     if not candidate.exists():

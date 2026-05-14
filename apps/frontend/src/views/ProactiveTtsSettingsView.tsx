@@ -22,9 +22,24 @@ import {
 type SettingsData = {
   tts?: TtsSettings;
   mode_settings?: {
-    live2d?: { config?: { tts?: TtsSettings } };
-    bubble?: { config?: { tts?: TtsSettings } };
+    live2d?: { config?: ModeProactiveSettings & { tts?: TtsSettings } };
+    bubble?: { config?: ModeProactiveSettings & { tts?: TtsSettings } };
   };
+};
+
+type ModeProactiveSettings = {
+  proactive_enabled?: boolean;
+  proactive_desktop_watch_enabled?: boolean;
+  proactive_interval_seconds?: number;
+  proactive_trigger_probability?: number;
+};
+
+type ProactiveForm = {
+  enabled: boolean;
+  desktop_watch_enabled: boolean;
+  interval_seconds: string;
+  trigger_probability_percent: string;
+  target_mode: 'live2d' | 'bubble';
 };
 
 type SettingsUpdateResult = {
@@ -73,9 +88,25 @@ type GptSovitsServiceStatus = {
   command_configured?: boolean;
   launch_agent_installed?: boolean;
   launch_agent_running?: boolean;
+  api_process?: {
+    running?: boolean;
+    pid?: number;
+    ppid?: number;
+    command?: string;
+    port?: number;
+  };
+  related_launch_agents?: Array<{
+    label?: string;
+    path_display?: string;
+    working_directory?: string;
+    managed_by_hermes?: boolean;
+    running?: boolean;
+  }>;
   platform_supported?: boolean;
   plist_path_display?: string;
   tools?: Record<string, boolean>;
+  models?: Record<string, boolean>;
+  missing_model_files?: string[];
   logs?: { stdout?: string; stderr?: string };
 };
 
@@ -87,9 +118,25 @@ type TtsVoiceImportResult = SettingsUpdateResult & {
   message?: string;
 };
 
+type ProactiveActionResult = {
+  ok?: boolean;
+  allowed?: boolean;
+  success?: boolean;
+  error?: string;
+  message?: string;
+  mode?: string;
+  prompt?: string;
+  response?: string;
+};
+
+const MIN_PROACTIVE_INTERVAL_SECONDS = 300;
+
 export function ProactiveTtsSettingsView() {
   const [form, setForm] = useState<TtsForm>(emptyTtsForm());
   const [savedForm, setSavedForm] = useState<TtsForm>(emptyTtsForm());
+  const [proactiveForm, setProactiveForm] = useState<ProactiveForm>(emptyProactiveForm());
+  const [savedProactiveForm, setSavedProactiveForm] = useState<ProactiveForm>(emptyProactiveForm());
+  const [proactiveResult, setProactiveResult] = useState<ProactiveActionResult | null>(null);
   const [testText, setTestText] = useState('八千代语音测试成功。主动关怀播报已经可以正常调用。');
   const [testResult, setTestResult] = useState<TtsTestResult | null>(null);
   const [runtimeStatus, setRuntimeStatus] = useState<TtsRuntimeStatus | null>(null);
@@ -109,9 +156,12 @@ export function ProactiveTtsSettingsView() {
       try {
         const data = await apiGet<SettingsData>('/ui/settings');
         const next = formFromTtsSettings(ttsFromSettings(data));
+        const nextProactive = formFromProactiveSettings(proactiveFromSettings(data));
         if (!disposed) {
           setForm(next);
           setSavedForm(next);
+          setProactiveForm(nextProactive);
+          setSavedProactiveForm(nextProactive);
           setStatus('');
         }
       } catch (err) {
@@ -184,6 +234,86 @@ export function ProactiveTtsSettingsView() {
     if (status && /保存|TTS|语音/.test(status)) setStatus('');
   }
 
+  function updateProactiveField(field: keyof ProactiveForm, value: string | boolean) {
+    setProactiveForm((current) => ({ ...current, [field]: value }));
+    setProactiveResult(null);
+    if (status && /主动关怀|权限|测试/.test(status)) setStatus('');
+  }
+
+  async function saveProactiveSettings() {
+    if (interactionBusy) return;
+    setBusyAction('proactive-save');
+    setProactiveResult(null);
+    setStatus('正在保存主动关怀设置...');
+    try {
+      const interval = normalizeProactiveInterval(proactiveForm.interval_seconds);
+      const probability = clampProbability(Number(proactiveForm.trigger_probability_percent) / 100);
+      const enabled = Boolean(proactiveForm.enabled);
+      const desktopWatch = Boolean(proactiveForm.desktop_watch_enabled);
+      const result = await apiPost<SettingsUpdateResult>('/ui/settings', {
+        changes: {
+          'bubble_mode.proactive_enabled': enabled,
+          'bubble_mode.proactive_desktop_watch_enabled': desktopWatch,
+          'bubble_mode.proactive_interval_seconds': interval,
+          'bubble_mode.proactive_trigger_probability': probability,
+          'live2d_mode.proactive_enabled': enabled,
+          'live2d_mode.proactive_desktop_watch_enabled': desktopWatch,
+          'live2d_mode.proactive_interval_seconds': interval,
+          'live2d_mode.proactive_trigger_probability': probability,
+        },
+      });
+      if (result.ok === false) throw new Error(result.error || '保存主动关怀设置失败');
+      const next = result.app_state
+        ? formFromProactiveSettings(proactiveFromSettings(result.app_state))
+        : {
+          ...proactiveForm,
+          interval_seconds: String(interval),
+          trigger_probability_percent: String(Math.round(probability * 100)),
+        };
+      setProactiveForm(next);
+      setSavedProactiveForm(next);
+      setStatus('主动关怀设置已保存');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '保存主动关怀设置失败');
+    } finally {
+      setBusyAction('');
+    }
+  }
+
+  async function checkScreenPermission() {
+    if (interactionBusy) return;
+    setBusyAction('proactive-permission');
+    setProactiveResult(null);
+    setStatus('正在检查屏幕录制权限...');
+    try {
+      const result = await apiPost<ProactiveActionResult>('/ui/proactive/screen-permission/check', { open_settings: true });
+      setProactiveResult(result);
+      setStatus(result.allowed || result.ok ? result.message || '屏幕观察权限可用' : result.error || result.message || '屏幕观察权限未就绪');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '检查屏幕权限失败');
+    } finally {
+      setBusyAction('');
+    }
+  }
+
+  async function runProactiveTest() {
+    if (interactionBusy) return;
+    setBusyAction('proactive-test');
+    setProactiveResult(null);
+    setStatus('正在触发主动关怀测试...');
+    try {
+      const result = await apiPost<ProactiveActionResult>('/ui/proactive/test', {
+        mode: proactiveForm.target_mode || 'live2d',
+      });
+      setProactiveResult(result);
+      setStatus(result.success || result.ok ? result.message || '主动关怀测试已触发' : result.error || result.message || '主动关怀测试失败');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '主动关怀测试失败');
+    } finally {
+      setBusyAction('');
+    }
+  }
+
   async function persistSettings(successMessage: string): Promise<TtsForm> {
     const result = await apiPost<SettingsUpdateResult>('/ui/settings', {
       changes: ttsSettingsChanges(form),
@@ -248,17 +378,17 @@ export function ProactiveTtsSettingsView() {
   async function importVoiceArchive() {
     if (busy || loading || resourceBusy) return;
     setResourceBusy(true);
-    setStatus('正在导入八千代语音包...');
+    setStatus('正在导入八千代音色包...');
     try {
       const selectedPath = hasDesktopFilePicker()
         ? await chooseLive2DArchive()
         : manualVoiceArchivePath.trim();
       if (!selectedPath) {
-        setStatus(hasDesktopFilePicker() ? '已取消导入语音包' : '请输入语音包 ZIP 路径');
+        setStatus(hasDesktopFilePicker() ? '已取消导入音色包' : '请输入音色包 ZIP 路径');
         return;
       }
       const result = await apiPost<TtsVoiceImportResult>('/ui/tts/voice-resource/import', { path: selectedPath });
-      if (result.ok === false) throw new Error(result.error || '导入语音包失败');
+      if (result.ok === false) throw new Error(result.error || '导入音色包失败');
       const next = formFromTtsSettings(result.tts_settings || {});
       setForm((current) => ({
         ...current,
@@ -268,9 +398,9 @@ export function ProactiveTtsSettingsView() {
       setVoiceResource(result.resource || voiceResource);
       setTestResult(null);
       const displayPath = result.imported_path_display ? `：${result.imported_path_display}` : '';
-      setStatus(`${result.message || '语音包已导入，等待保存 TTS 设置'}${displayPath}`);
+      setStatus(`${result.message || '音色包已导入，等待保存 TTS 设置'}${displayPath}`);
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : '导入语音包失败');
+      setStatus(err instanceof Error ? err.message : '导入音色包失败');
     } finally {
       setResourceBusy(false);
     }
@@ -279,21 +409,21 @@ export function ProactiveTtsSettingsView() {
   async function openVoiceAssetsDir() {
     const root = voiceResource?.default_assets_root || '';
     if (!root) {
-      setStatus('未找到语音包导入目录');
+      setStatus('未找到音色包导入目录');
       return;
     }
     try {
       await openPath(root);
-      setStatus(`已打开语音包导入目录：${voiceResource?.default_assets_root_display || root}`);
+      setStatus(`已打开音色包导入目录：${voiceResource?.default_assets_root_display || root}`);
     } catch (err) {
-      setStatus(err instanceof Error ? err.message : '打开语音包导入目录失败');
+      setStatus(err instanceof Error ? err.message : '打开音色包导入目录失败');
     }
   }
 
   async function openVoiceReleases() {
     const url = voiceResource?.voice_package_url || voiceResource?.releases_url || '';
     if (!url) {
-      setStatus('未配置语音包下载地址');
+      setStatus('未配置音色包下载地址');
       return;
     }
     await openExternalUrl(url);
@@ -327,6 +457,53 @@ export function ProactiveTtsSettingsView() {
       setStatus(result.message || 'GPT-SoVITS 后台服务已启动，并会随登录自动运行');
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '启动 GPT-SoVITS 后台服务失败');
+    } finally {
+      setBusyAction('');
+    }
+  }
+
+  async function useExistingGsvService() {
+    if (interactionBusy) return;
+    setBusyAction('service-use-existing');
+    setStatus('正在保存现有 GPT-SoVITS 服务配置...');
+    try {
+      const next = await persistSettings('');
+      await refreshGsvServiceStatus(() => false, {
+        base_url: next.gsv_base_url,
+        workdir: next.gsv_service_workdir,
+        command: next.gsv_service_command,
+      });
+      setStatus('已保留现有 GPT-SoVITS 服务，Yachiyo 将复用当前 API，不接管自启。');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '保存现有 GPT-SoVITS 服务配置失败');
+    } finally {
+      setBusyAction('');
+    }
+  }
+
+  async function adoptGsvLaunchAgent() {
+    if (interactionBusy) return;
+    const agent = firstExternalGsvLaunchAgent(serviceStatus);
+    const label = agent?.label || '外部 GPT-SoVITS 服务';
+    const confirmed = window.confirm(
+      `将停用外部 GPT-SoVITS LaunchAgent（${label}），保留服务目录和模型文件，并安装 Hermes-Yachiyo 自己的后台/自启。继续吗？`,
+    );
+    if (!confirmed) return;
+    setBusyAction('service-adopt');
+    setStatus('正在接管 GPT-SoVITS 后台服务...');
+    try {
+      await persistSettings('');
+      const result = await apiPost<{
+        ok?: boolean;
+        error?: string;
+        message?: string;
+        status?: GptSovitsServiceStatus;
+      }>('/ui/tts/gpt-sovits/service/adopt');
+      if (result.ok === false) throw new Error(result.error || '接管 GPT-SoVITS 后台服务失败');
+      setServiceStatus(result.status || null);
+      setStatus(result.message || 'GPT-SoVITS 后台服务已交由 Hermes-Yachiyo 管理');
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : '接管 GPT-SoVITS 后台服务失败');
     } finally {
       setBusyAction('');
     }
@@ -410,33 +587,159 @@ export function ProactiveTtsSettingsView() {
   const enabled = Boolean(form.enabled && provider !== 'none');
   const isGsvProvider = provider === 'gpt-sovits';
   const isDirty = JSON.stringify(form) !== JSON.stringify(savedForm);
+  const proactiveDirty = JSON.stringify(proactiveForm) !== JSON.stringify(savedProactiveForm);
   const filePickerAvailable = hasDesktopFilePicker();
   const busy = Boolean(busyAction);
   const interactionBusy = busy || loading || resourceBusy;
+  const externalGsvServiceDetected = hasExternalGsvService(serviceStatus);
+  const externalGsvAgent = firstExternalGsvLaunchAgent(serviceStatus);
 
   return (
-    <main className="app-shell">
-      <header className="topbar dashboard-topbar">
+    <section className="hy-route-page hy-tts-page">
+      <header className="hy-page-header hy-tts-page-header hy-stagger">
         <div>
-          <h1>主动关怀语音</h1>
-          <p>只在主动桌面观察触发关怀提醒时播报；普通聊天回复不会自动转语音。</p>
-        </div>
-        <div className="topbar-actions">
-          <button type="button" onClick={() => navigateTo('main')}>返回主控台</button>
-          <button type="button" onClick={() => void openAppView('tools')}>工具中心</button>
+          <span className="hy-eyebrow">GPT-SoVITS · Voice Core</span>
+          <h2>语音中枢</h2>
+          <p>配置八千代主动关怀播报链路、音色资源与本地 GPT-SoVITS 服务。普通聊天回复仍保持文本，不会自动转语音。</p>
+          <div className="hy-tts-hero-actions">
+            <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('diagnostics')}>诊断工具</button>
+          </div>
         </div>
       </header>
 
-      {status ? <div className={`notice ${/失败|错误/.test(status) ? 'danger' : ''}`}>{status}</div> : null}
+      <section className="hy-tts-status-grid hy-stagger" aria-label="语音状态">
+        <article className={proactiveForm.enabled ? 'hy-tts-status-card ready' : 'hy-tts-status-card muted'}>
+          <span>主动关怀</span>
+          <strong>{loading ? '读取中' : proactiveForm.enabled ? '已启用' : '已关闭'}</strong>
+          <small>{proactiveForm.desktop_watch_enabled ? '允许桌面观察触发' : '仅手动测试触发'}</small>
+        </article>
+        <article className={enabled ? 'hy-tts-status-card ready' : 'hy-tts-status-card muted'}>
+          <span>TTS Provider</span>
+          <strong>{enabled ? ttsProviderLabel(provider) : 'Text Only'}</strong>
+          <small>{isDirty ? '有未保存更改' : '设置已同步'}</small>
+        </article>
+        <article className={isGsvProvider && serviceStatus?.reachable ? 'hy-tts-status-card ready' : isGsvProvider ? 'hy-tts-status-card pending' : 'hy-tts-status-card muted'}>
+          <span>本地服务</span>
+          <strong>{isGsvProvider ? (serviceStatus?.reachable ? 'API 可达' : '待连接') : '未启用'}</strong>
+          <small>{isGsvProvider ? gsvServiceStatusText(serviceStatus) : '选择 GPT-SoVITS 后显示运行时状态'}</small>
+        </article>
+      </section>
+
+      {status ? <div className={`notice hy-tts-notice hy-stagger ${/失败|错误/.test(status) ? 'danger' : ''}`}>{status}</div> : null}
       {shouldShowRuntimeStatus(runtimeStatus) ? (
-        <div className={`notice ${ttsRuntimeStatusTone(runtimeStatus)}`}>
+        <div className={`notice hy-tts-notice hy-stagger ${ttsRuntimeStatusTone(runtimeStatus)}`}>
           <strong>{ttsRuntimeStatusTitle(runtimeStatus)}</strong>
           <span>{ttsRuntimeStatusDetail(runtimeStatus)}</span>
         </div>
       ) : null}
 
-      <section className="dashboard-workbench single-column">
-        <article className="panel">
+      <section className="hy-tts-stack">
+        <article className="hy-tts-card corner-frame hy-stagger">
+          <div className="corner-frame-inner" />
+          <div className="section-heading-row">
+            <div>
+              <h2>主动关怀</h2>
+              <p className="section-caption">
+                统一控制 Bubble 与 Live2D 的主动观察触发；具体单模式细节也可以在对应模式设置页单独微调。
+              </p>
+            </div>
+            <span className={proactiveForm.enabled ? 'hy-tts-pill active' : 'hy-tts-pill'}>{loading ? '读取中' : proactiveForm.enabled ? '已启用' : '已关闭'}</span>
+          </div>
+
+          <div className="tts-settings-form hy-tts-form">
+            <div className="hermes-config-form-grid hy-tts-form-grid">
+              <label className="settings-check wide" htmlFor="proactive-enabled-page">
+                <input
+                  id="proactive-enabled-page"
+                  type="checkbox"
+                  checked={proactiveForm.enabled}
+                  disabled={interactionBusy}
+                  onChange={(event) => updateProactiveField('enabled', event.target.checked)}
+                />
+                <span>启用主动关怀</span>
+              </label>
+              <label className="settings-check wide" htmlFor="proactive-desktop-watch-page">
+                <input
+                  id="proactive-desktop-watch-page"
+                  type="checkbox"
+                  checked={proactiveForm.desktop_watch_enabled}
+                  disabled={interactionBusy}
+                  onChange={(event) => updateProactiveField('desktop_watch_enabled', event.target.checked)}
+                />
+                <span>允许桌面观察触发</span>
+              </label>
+              <label className="settings-field" htmlFor="proactive-interval-page">
+                <span>触发间隔秒</span>
+                <input
+                  id="proactive-interval-page"
+                  type="number"
+                  min={MIN_PROACTIVE_INTERVAL_SECONDS}
+                  max={3600}
+                  value={proactiveForm.interval_seconds}
+                  disabled={interactionBusy}
+                  onChange={(event) => updateProactiveField('interval_seconds', event.target.value)}
+                />
+              </label>
+              <label className="settings-field" htmlFor="proactive-probability-page">
+                <span>触发概率 %</span>
+                <input
+                  id="proactive-probability-page"
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={proactiveForm.trigger_probability_percent}
+                  disabled={interactionBusy}
+                  onChange={(event) => updateProactiveField('trigger_probability_percent', event.target.value)}
+                />
+              </label>
+              <label className="settings-field" htmlFor="proactive-target-mode-page">
+                <span>立即测试目标</span>
+                <select
+                  id="proactive-target-mode-page"
+                  value={proactiveForm.target_mode}
+                  disabled={interactionBusy}
+                  onChange={(event) => updateProactiveField('target_mode', event.target.value as ProactiveForm['target_mode'])}
+                >
+                  <option value="live2d">Live2D</option>
+                  <option value="bubble">Bubble</option>
+                </select>
+              </label>
+              <p className="capability-note wide-form-note">
+                保存会同时写入 bubble_mode 与 live2d_mode 的 proactive 字段；不会修改 TTS Provider 或其它模式行为。
+              </p>
+            </div>
+
+            {proactiveResult ? (
+              <div className={`hermes-test-result ${proactiveResult.success || proactiveResult.ok || proactiveResult.allowed ? 'success' : 'danger'}`}>
+                <strong>{proactiveResult.error || proactiveResult.message || (proactiveResult.allowed ? '权限可用' : '主动关怀已触发')}</strong>
+                <span>{proactiveResult.mode || proactiveForm.target_mode}</span>
+                {proactiveResult.response || proactiveResult.prompt ? <pre>{proactiveResult.response || proactiveResult.prompt}</pre> : null}
+              </div>
+            ) : null}
+
+            <div className="settings-savebar hy-tts-savebar">
+              <span>{proactiveDirty ? '有未保存的主动关怀设置' : '主动关怀设置已同步'}</span>
+              <button type="button" className="hy-btn hy-btn-ghost" disabled={interactionBusy} onClick={() => void checkScreenPermission()}>
+                {busyAction === 'proactive-permission' ? '检查中...' : '检查屏幕权限'}
+              </button>
+              <button type="button" className="hy-btn hy-btn-ghost" disabled={interactionBusy} onClick={() => void runProactiveTest()}>
+                {busyAction === 'proactive-test' ? '测试中...' : '立即测试'}
+              </button>
+              <button
+                type="button"
+                className={busyAction === 'proactive-save' ? 'hy-btn hy-btn-primary loading-button' : 'hy-btn hy-btn-primary'}
+                disabled={interactionBusy || !proactiveDirty}
+                onClick={() => void saveProactiveSettings()}
+              >
+                {busyAction === 'proactive-save' ? '保存中...' : '保存主动关怀'}
+              </button>
+            </div>
+          </div>
+        </article>
+
+        <article className="hy-tts-card corner-frame hy-stagger">
+          <div className="corner-frame-inner" />
           <div className="section-heading-row">
             <div>
               <h2>语音开关</h2>
@@ -444,17 +747,17 @@ export function ProactiveTtsSettingsView() {
                 这里配置的是 Yachiyo 主动关怀播报链路；Tools 里的“文本转语音”是 Hermes Agent 自己的工具能力，二者互不覆盖。
               </p>
             </div>
-            <span>{loading ? '读取中' : enabled ? `已启用：${ttsProviderLabel(provider)}` : '只发文本'}</span>
+            <span className={enabled ? 'hy-tts-pill active' : 'hy-tts-pill'}>{loading ? '读取中' : enabled ? `已启用：${ttsProviderLabel(provider)}` : '只发文本'}</span>
           </div>
 
           <form
-            className="tts-settings-form"
+            className="tts-settings-form hy-tts-form"
             onSubmit={(event) => {
               event.preventDefault();
               void saveSettings();
             }}
           >
-            <div className="hermes-config-form-grid">
+            <div className="hermes-config-form-grid hy-tts-form-grid">
               <label className="settings-check wide" htmlFor="proactive-tts-enabled">
                 <input
                   id="proactive-tts-enabled"
@@ -539,8 +842,8 @@ export function ProactiveTtsSettingsView() {
                 <>
                   <div className="settings-resource-panel wide">
                     <div>
-                      <strong>八千代语音包</strong>
-                      <p>{voiceResource?.help_text || '可从 Releases 下载八千代 GPT-SoVITS 语音包 ZIP 并导入。'}</p>
+                      <strong>八千代音色包</strong>
+                      <p>{voiceResource?.help_text || '可从 Releases 下载八千代 GPT-SoVITS 音色包 ZIP 并导入。'}</p>
                       <span>默认导入目录：{voiceResource?.default_assets_root_display || '—'}</span>
                     </div>
                     <div className="settings-resource-actions compact-actions">
@@ -550,14 +853,14 @@ export function ProactiveTtsSettingsView() {
                         disabled={interactionBusy}
                         onClick={() => void importVoiceArchive()}
                       >
-                        {resourceBusy ? '导入中...' : filePickerAvailable ? '导入语音包 ZIP' : '按路径导入 ZIP'}
+                        {resourceBusy ? '导入中...' : filePickerAvailable ? '导入音色包 ZIP' : '按路径导入 ZIP'}
                       </button>
                       <button type="button" disabled={interactionBusy} onClick={() => void openVoiceAssetsDir()}>打开导入目录</button>
-                      <button type="button" disabled={interactionBusy || !(voiceResource?.voice_package_url || voiceResource?.releases_url)} onClick={() => void openVoiceReleases()}>下载语音包</button>
+                      <button type="button" disabled={interactionBusy || !(voiceResource?.voice_package_url || voiceResource?.releases_url)} onClick={() => void openVoiceReleases()}>下载音色包</button>
                     </div>
                     {!filePickerAvailable ? (
                       <label className="settings-field wide" htmlFor="tts-voice-archive-path-page">
-                        <span>语音包 ZIP 路径</span>
+                        <span>音色包 ZIP 路径</span>
                         <input
                           id="tts-voice-archive-path-page"
                           value={manualVoiceArchivePath}
@@ -571,7 +874,7 @@ export function ProactiveTtsSettingsView() {
                   <div className="settings-resource-panel wide">
                     <div>
                       <strong>GPT-SoVITS 本地服务</strong>
-                      <p>{voiceResource?.service_help_text || '语音包只负责音色文件；本地 GPT-SoVITS API 服务需要单独运行。'}</p>
+                      <p>{voiceResource?.service_help_text || '音色包不包含 GPT-SoVITS 基础预训练模型与运行时；本地 API 服务需要单独部署并启动。'}</p>
                       <span>{gsvServiceStatusText(serviceStatus)}</span>
                     </div>
                     <div className="settings-resource-actions compact-actions">
@@ -581,7 +884,7 @@ export function ProactiveTtsSettingsView() {
                         disabled={interactionBusy}
                         onClick={() => void openGsvSetupTerminal()}
                       >
-                        {busyAction === 'service-setup' ? '部署中...' : '部署本地依赖'}
+                        {busyAction === 'service-setup' ? '部署中...' : '部署运行时/基础模型'}
                       </button>
                       <button
                         type="button"
@@ -591,14 +894,16 @@ export function ProactiveTtsSettingsView() {
                       >
                         {busyAction === 'service' ? '打开中...' : '打开调试终端'}
                       </button>
-                      <button
-                        type="button"
-                        className={busyAction === 'service-install' ? 'loading-button' : undefined}
-                        disabled={interactionBusy}
-                        onClick={() => void installGsvLaunchAgent()}
-                      >
-                        {busyAction === 'service-install' ? '启动中...' : '启动本地后台/自启'}
-                      </button>
+                      {!externalGsvServiceDetected ? (
+                        <button
+                          type="button"
+                          className={busyAction === 'service-install' ? 'loading-button' : undefined}
+                          disabled={interactionBusy}
+                          onClick={() => void installGsvLaunchAgent()}
+                        >
+                          {busyAction === 'service-install' ? '启动中...' : '启动本地后台/自启'}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         className={busyAction === 'service-uninstall' ? 'loading-button danger-action' : 'danger-action'}
@@ -609,8 +914,32 @@ export function ProactiveTtsSettingsView() {
                       </button>
                       <button type="button" disabled={interactionBusy} onClick={() => void refreshGsvServiceStatus()}>刷新状态</button>
                     </div>
+                    {externalGsvServiceDetected ? (
+                      <div className="settings-resource-fallback">
+                        <p className="settings-note">
+                          检测到外部 GPT-SoVITS 服务：{externalGsvAgent?.label || '未知 LaunchAgent'}。
+                          复用会保留原服务；接管会停用该自启项并改由 Hermes-Yachiyo 管理。
+                        </p>
+                        <button
+                          type="button"
+                          className={busyAction === 'service-use-existing' ? 'loading-button' : undefined}
+                          disabled={interactionBusy}
+                          onClick={() => void useExistingGsvService()}
+                        >
+                          {busyAction === 'service-use-existing' ? '保存中...' : '使用现有服务'}
+                        </button>
+                        <button
+                          type="button"
+                          className={busyAction === 'service-adopt' ? 'loading-button' : undefined}
+                          disabled={interactionBusy}
+                          onClick={() => void adoptGsvLaunchAgent()}
+                        >
+                          {busyAction === 'service-adopt' ? '接管中...' : '交由 Yachiyo 管理'}
+                        </button>
+                      </div>
+                    ) : null}
                     <p className="capability-note wide-form-note">
-                      本地依赖部署只准备 Python 环境；调试终端是前台临时运行；本地后台/自启会使用 macOS LaunchAgent 管理服务。
+                      运行时部署会准备 Python 环境和 GPT-SoVITS 基础预训练模型；调试终端是前台临时运行；本地后台/自启会使用 macOS LaunchAgent 管理服务。
                     </p>
                     <label className="settings-field wide" htmlFor="tts-gsv-service-workdir-page">
                       <span>GPT-SoVITS 服务目录</span>
@@ -643,8 +972,12 @@ export function ProactiveTtsSettingsView() {
                           <strong className={serviceStatus.workdir_exists ? 'ok' : 'warn'}>{serviceStatus.workdir_exists ? serviceStatus.workdir_display || '已配置' : '未配置或不存在'}</strong>
                         </div>
                         <div className="settings-meta-row">
-                          <span>本地自启</span>
-                          <strong>{serviceStatus.launch_agent_installed ? (serviceStatus.launch_agent_running ? '已安装并运行' : '已安装，待启动') : '未安装'}</strong>
+                          <span>API 进程</span>
+                          <strong className={serviceStatus.api_process?.running ? 'ok' : 'warn'}>{formatGsvApiProcess(serviceStatus.api_process)}</strong>
+                        </div>
+                        <div className="settings-meta-row">
+                          <span>自启管理</span>
+                          <strong>{formatGsvLaunchAgentStatus(serviceStatus)}</strong>
                         </div>
                         <div className="settings-meta-row">
                           <span>LaunchAgent</span>
@@ -653,6 +986,10 @@ export function ProactiveTtsSettingsView() {
                         <div className="settings-meta-row">
                           <span>依赖检查</span>
                           <strong>{formatGsvTools(serviceStatus.tools)}</strong>
+                        </div>
+                        <div className="settings-meta-row">
+                          <span>模型检查</span>
+                          <strong>{formatGsvModels(serviceStatus.models)}</strong>
                         </div>
                       </div>
                     ) : null}
@@ -868,12 +1205,12 @@ export function ProactiveTtsSettingsView() {
               </div>
             ) : null}
 
-            <div className="settings-savebar">
+            <div className="settings-savebar hy-tts-savebar">
               <span>{isDirty ? '有未保存的语音设置' : enabled ? '语音设置已同步' : '主动关怀将只发送文字'}</span>
-              <button type="button" disabled={interactionBusy || !isDirty} onClick={resetDraft}>重置草稿</button>
+              <button type="button" className="hy-btn hy-btn-ghost" disabled={interactionBusy || !isDirty} onClick={resetDraft}>重置草稿</button>
               <button
                 type="button"
-                className={busyAction === 'test' ? 'loading-button' : undefined}
+                className={busyAction === 'test' ? 'hy-btn hy-btn-ghost loading-button' : 'hy-btn hy-btn-ghost'}
                 disabled={interactionBusy || provider === 'none'}
                 onClick={() => void saveAndTestSettings()}
               >
@@ -881,7 +1218,7 @@ export function ProactiveTtsSettingsView() {
               </button>
               <button
                 type="submit"
-                className={busyAction === 'save' ? 'primary-action loading-button' : 'primary-action'}
+                className={busyAction === 'save' ? 'hy-btn hy-btn-primary loading-button' : 'hy-btn hy-btn-primary'}
                 disabled={interactionBusy}
               >
                 {busyAction === 'save' ? '保存中...' : '保存语音设置'}
@@ -890,12 +1227,58 @@ export function ProactiveTtsSettingsView() {
           </form>
         </article>
       </section>
-    </main>
+    </section>
   );
 }
 
 function ttsFromSettings(settings: SettingsData | null): TtsSettings | undefined {
   return settings?.tts || settings?.mode_settings?.live2d?.config?.tts || settings?.mode_settings?.bubble?.config?.tts;
+}
+
+function emptyProactiveForm(): ProactiveForm {
+  return {
+    enabled: false,
+    desktop_watch_enabled: false,
+    interval_seconds: String(MIN_PROACTIVE_INTERVAL_SECONDS),
+    trigger_probability_percent: '60',
+    target_mode: 'live2d',
+  };
+}
+
+function proactiveFromSettings(settings: SettingsData | null): ModeProactiveSettings | undefined {
+  const bubble = settings?.mode_settings?.bubble?.config;
+  const live2d = settings?.mode_settings?.live2d?.config;
+  if (!bubble && !live2d) return undefined;
+  return {
+    proactive_enabled: Boolean(bubble?.proactive_enabled || live2d?.proactive_enabled),
+    proactive_desktop_watch_enabled: Boolean(
+      bubble?.proactive_desktop_watch_enabled || live2d?.proactive_desktop_watch_enabled,
+    ),
+    proactive_interval_seconds: Number(live2d?.proactive_interval_seconds || bubble?.proactive_interval_seconds || MIN_PROACTIVE_INTERVAL_SECONDS),
+    proactive_trigger_probability: Number(live2d?.proactive_trigger_probability ?? bubble?.proactive_trigger_probability ?? 0.6),
+  };
+}
+
+function formFromProactiveSettings(settings: ModeProactiveSettings | undefined): ProactiveForm {
+  const probability = clampProbability(Number(settings?.proactive_trigger_probability ?? 0.6));
+  return {
+    enabled: Boolean(settings?.proactive_enabled),
+    desktop_watch_enabled: Boolean(settings?.proactive_desktop_watch_enabled),
+    interval_seconds: String(normalizeProactiveInterval(settings?.proactive_interval_seconds || MIN_PROACTIVE_INTERVAL_SECONDS)),
+    trigger_probability_percent: String(Math.round(probability * 100)),
+    target_mode: 'live2d',
+  };
+}
+
+function normalizeProactiveInterval(value: string | number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return MIN_PROACTIVE_INTERVAL_SECONDS;
+  return Math.max(MIN_PROACTIVE_INTERVAL_SECONDS, Math.min(3600, Math.round(parsed)));
+}
+
+function clampProbability(value: number): number {
+  if (!Number.isFinite(value)) return 0.6;
+  return Math.max(0, Math.min(1, value));
 }
 
 function shouldShowRuntimeStatus(status: TtsRuntimeStatus | null): status is TtsRuntimeStatus {
@@ -933,6 +1316,18 @@ function homePlaceholder(): string {
   return '$HOME';
 }
 
+const GSV_PRETRAINED_MODEL_URLS = [
+  'https://www.modelscope.cn/models/XXXXRT/GPT-SoVITS-Pretrained/resolve/master/pretrained_models.zip',
+  'https://hf-mirror.com/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/pretrained_models.zip',
+  'https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/pretrained_models.zip',
+];
+
+const GSV_G2PW_MODEL_URLS = [
+  'https://www.modelscope.cn/models/XXXXRT/GPT-SoVITS-Pretrained/resolve/master/G2PWModel.zip',
+  'https://hf-mirror.com/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/G2PWModel.zip',
+  'https://huggingface.co/XXXXRT/GPT-SoVITS-Pretrained/resolve/main/G2PWModel.zip',
+];
+
 function buildGsvServiceTerminalCommand(form: TtsForm): string {
   const workdirAssignment = buildShellPathAssignment('WORKDIR', form.gsv_service_workdir.trim());
   const serviceCommand = form.gsv_service_command.trim();
@@ -954,8 +1349,8 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
   const configuredCommand = serviceCommand.trim() || 'python api_v2.py -a 127.0.0.1 -p 9880';
   return [
     'echo "Hermes-Yachiyo GPT-SoVITS 一键部署"',
-    'echo "此流程会克隆 GPT-SoVITS、创建 .venv 并安装依赖；不会直接启动本地 API。"',
-    'echo "下载体积可能较大；脚本会优先准备 Homebrew python@3.11、ffmpeg 与 mecab。"',
+    'echo "此流程会克隆 GPT-SoVITS、创建 .venv、安装依赖并准备预训练模型；不会直接启动本地 API。"',
+    'echo "下载体积可能较大；脚本会优先准备 Homebrew python@3.11、ffmpeg、mecab 与 unzip。"',
     'printf "继续执行部署？[y/N] "',
     'read answer',
     'case "$answer" in [yY]|[yY][eE][sS]) ;; *) echo "已取消。"; exit 1 ;; esac',
@@ -963,15 +1358,17 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
     'if [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi',
     'if [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"; fi',
     'if command -v brew >/dev/null 2>&1; then',
-    '  echo "检查 Homebrew 依赖：git ffmpeg mecab python@3.11"',
+    '  echo "检查 Homebrew 依赖：git ffmpeg mecab python@3.11 unzip"',
     '  brew list git >/dev/null 2>&1 || brew install git',
     '  brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg',
     '  brew list mecab >/dev/null 2>&1 || brew install mecab',
     '  brew list python@3.11 >/dev/null 2>&1 || brew install python@3.11',
+    '  brew list unzip >/dev/null 2>&1 || brew install unzip',
     '  if [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi',
     '  if [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"; fi',
     'fi',
     'if ! command -v git >/dev/null 2>&1; then echo "未找到 git，请先安装 Git。"; exit 1; fi',
+    'if ! command -v unzip >/dev/null 2>&1; then echo "未找到 unzip，请先安装 unzip。"; exit 1; fi',
     'if ! command -v mecab-config >/dev/null 2>&1; then echo "未找到 mecab-config。请先执行：brew install mecab"; exit 1; fi',
     'PYTHON_BIN=""',
     'for candidate in python3.11 /opt/homebrew/bin/python3.11 /usr/local/bin/python3.11; do',
@@ -989,6 +1386,8 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
     '  git clone "$PROJECT_URL" "$WORKDIR"',
     'fi',
     'cd "$WORKDIR"',
+    ...buildGsvPretrainedModelSetupLines(),
+    ...buildGsvG2pwModelSetupLines(),
     'if [ -x .venv/bin/python ]; then',
     '  VENV_VERSION="$(.venv/bin/python -V 2>&1 | awk \'{print $2}\' | cut -d. -f1,2)"',
     '  if [ "$VENV_VERSION" != "3.11" ]; then',
@@ -1016,6 +1415,68 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
   ].join('\n');
 }
 
+function buildGsvPretrainedModelSetupLines(): string[] {
+  const urls = `PRETRAINED_MODEL_URLS=(${GSV_PRETRAINED_MODEL_URLS.map(shellQuote).join(' ')})`;
+  return [
+    'PRETRAINED_DIR="GPT_SoVITS/pretrained_models"',
+    'MISSING_PRETRAINED=0',
+    'for required_model in "$PRETRAINED_DIR/s1v3.ckpt" "$PRETRAINED_DIR/gsv-v4-pretrained/s2Gv4.pth" "$PRETRAINED_DIR/gsv-v4-pretrained/vocoder.pth"; do',
+    '  if [ ! -s "$required_model" ]; then MISSING_PRETRAINED=1; fi',
+    'done',
+    'if [ ! -s "$PRETRAINED_DIR/chinese-roberta-wwm-ext-large/pytorch_model.bin" ] && [ ! -s "$PRETRAINED_DIR/chinese-roberta-wwm-ext-large/model.safetensors" ]; then MISSING_PRETRAINED=1; fi',
+    'if [ ! -s "$PRETRAINED_DIR/chinese-hubert-base/pytorch_model.bin" ] && [ ! -s "$PRETRAINED_DIR/chinese-hubert-base/model.safetensors" ]; then MISSING_PRETRAINED=1; fi',
+    'if [ "$MISSING_PRETRAINED" -eq 1 ]; then',
+    '  echo "检测到 GPT-SoVITS 预训练模型不完整，开始下载 pretrained_models.zip"',
+    urls,
+    '  PRETRAINED_ZIP="$(mktemp "${TMPDIR:-/tmp}/hermes-gsv-pretrained.XXXXXX")"',
+    '  DOWNLOAD_OK=0',
+    '  for PRETRAINED_URL in "${PRETRAINED_MODEL_URLS[@]}"; do',
+    '    echo "下载：$PRETRAINED_URL"',
+    '    if command -v curl >/dev/null 2>&1; then',
+    '      if curl -L --fail --retry 5 --connect-timeout 20 -o "$PRETRAINED_ZIP" "$PRETRAINED_URL"; then DOWNLOAD_OK=1; break; fi',
+    '    else',
+    "      if \"$PYTHON_BIN\" -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' \"$PRETRAINED_URL\" \"$PRETRAINED_ZIP\"; then DOWNLOAD_OK=1; break; fi",
+    '    fi',
+    '  done',
+    '  if [ "$DOWNLOAD_OK" -ne 1 ]; then echo "预训练模型下载失败，请检查网络后重试。"; rm -f "$PRETRAINED_ZIP"; exit 1; fi',
+    '  unzip -q -o "$PRETRAINED_ZIP" -d GPT_SoVITS',
+    '  rm -f "$PRETRAINED_ZIP"',
+    '  echo "GPT-SoVITS 预训练模型已准备完成"',
+    'else',
+    '  echo "GPT-SoVITS 预训练模型已存在，跳过下载"',
+    'fi',
+  ];
+}
+
+function buildGsvG2pwModelSetupLines(): string[] {
+  const urls = `G2PW_MODEL_URLS=(${GSV_G2PW_MODEL_URLS.map(shellQuote).join(' ')})`;
+  return [
+    'G2PW_DIR="GPT_SoVITS/text/G2PWModel"',
+    'if [ ! -s "$G2PW_DIR/g2pW.onnx" ]; then',
+    '  echo "检测到中文 G2PW 模型不完整，开始下载 G2PWModel.zip"',
+    urls,
+    '  G2PW_ZIP="$(mktemp "${TMPDIR:-/tmp}/hermes-gsv-g2pw.XXXXXX")"',
+    '  DOWNLOAD_OK=0',
+    '  for G2PW_URL in "${G2PW_MODEL_URLS[@]}"; do',
+    '    echo "下载：$G2PW_URL"',
+    '    if command -v curl >/dev/null 2>&1; then',
+    '      if curl -L --fail --retry 5 --connect-timeout 20 -o "$G2PW_ZIP" "$G2PW_URL"; then DOWNLOAD_OK=1; break; fi',
+    '    else',
+    "      if \"$PYTHON_BIN\" -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' \"$G2PW_URL\" \"$G2PW_ZIP\"; then DOWNLOAD_OK=1; break; fi",
+    '    fi',
+    '  done',
+    '  if [ "$DOWNLOAD_OK" -ne 1 ]; then echo "G2PW 模型下载失败，请检查网络后重试。"; rm -f "$G2PW_ZIP"; exit 1; fi',
+    '  rm -rf "$G2PW_DIR"',
+    '  unzip -q -o "$G2PW_ZIP" -d GPT_SoVITS/text',
+    '  rm -f "$G2PW_ZIP"',
+    '  if [ ! -s "$G2PW_DIR/g2pW.onnx" ]; then echo "G2PW 模型解压后仍缺少 g2pW.onnx。"; exit 1; fi',
+    '  echo "中文 G2PW 模型已准备完成"',
+    'else',
+    '  echo "中文 G2PW 模型已存在，跳过下载"',
+    'fi',
+  ];
+}
+
 function buildShellPathAssignment(name: string, value: string): string {
   if (value === '$HOME' || value.startsWith('$HOME/')) {
     return `${name}="$HOME${value.slice('$HOME'.length)}"`;
@@ -1028,7 +1489,13 @@ function buildShellPathAssignment(name: string, value: string): string {
 
 function gsvServiceStatusText(status: GptSovitsServiceStatus | null): string {
   if (!status) return '推荐端口：9880；服务启动后再执行保存并测试。';
-  if (status.workdir_exists && status.tools?.torchcodec === false) return '缺少 torchcodec，请重新执行“部署本地依赖”后再测试语音。';
+  if (status.workdir_exists && status.tools?.torchcodec === false) return '缺少 torchcodec，请重新执行“部署运行时/基础模型”后再测试语音。';
+  if (status.workdir_exists && status.missing_model_files?.length) return '缺少 GPT-SoVITS 预训练模型，请重新执行“部署运行时/基础模型”后再测试语音。';
+  if (status.reachable && status.api_process?.running && !status.launch_agent_installed) {
+    const agent = firstExternalGsvLaunchAgent(status);
+    if (agent?.label) return `API 已可达；检测到正在运行的服务进程，由其他 LaunchAgent 管理：${agent.label}。`;
+    return 'API 已可达；检测到正在运行的服务进程，但不是由 Hermes-Yachiyo 后台服务管理。';
+  }
   if (status.reachable) return 'API 已可达；可以保存并测试语音链路。';
   if (!status.workdir_exists) return '请先填写 GPT-SoVITS 服务目录，或先安装 GPT-SoVITS 本体。';
   if (!status.command_configured) return '请先填写服务启动命令。';
@@ -1048,4 +1515,44 @@ function formatGsvTools(tools?: Record<string, boolean>): string {
     ['torchcodec', tools.torchcodec],
   ];
   return items.map(([label, ok]) => `${label} ${ok ? '可用' : '缺失'}`).join(' / ');
+}
+
+function formatGsvApiProcess(process?: GptSovitsServiceStatus['api_process']): string {
+  if (!process?.running) return '未检测到监听进程';
+  const pid = process.pid ? `PID ${process.pid}` : '运行中';
+  const port = process.port ? `:${process.port}` : '';
+  const launchd = process.ppid === 1 ? '，launchd 持有' : '';
+  return `${pid}${port}${launchd}`;
+}
+
+function formatGsvLaunchAgentStatus(status: GptSovitsServiceStatus): string {
+  if (status.launch_agent_installed) {
+    return status.launch_agent_running ? 'Hermes 已安装并运行' : 'Hermes 已安装，待启动';
+  }
+  const agent = firstExternalGsvLaunchAgent(status);
+  if (agent?.label) {
+    return `其他 LaunchAgent：${agent.label}${agent.running ? '（运行中）' : '（未运行）'}`;
+  }
+  return '未安装';
+}
+
+function hasExternalGsvService(status: GptSovitsServiceStatus | null): boolean {
+  return Boolean(status?.api_process?.running && !status.launch_agent_installed && firstExternalGsvLaunchAgent(status));
+}
+
+function firstExternalGsvLaunchAgent(status: GptSovitsServiceStatus | null | undefined) {
+  return status?.related_launch_agents?.find((agent) => !agent.managed_by_hermes);
+}
+
+function formatGsvModels(models?: Record<string, boolean>): string {
+  if (!models || Object.keys(models).length === 0) return '—';
+  const items: Array<[string, boolean | undefined]> = [
+    ['s1v3', models.s1v3],
+    ['s2Gv4', models.s2Gv4],
+    ['vocoder', models.vocoder],
+    ['G2PW', models.g2pw],
+    ['BERT', models.bert],
+    ['CNHuBERT', models.cnhubert],
+  ];
+  return items.map(([label, ok]) => `${label} ${ok ? '就绪' : '缺失'}`).join(' / ');
 }

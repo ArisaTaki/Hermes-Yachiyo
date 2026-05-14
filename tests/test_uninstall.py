@@ -90,6 +90,9 @@ def test_uninstall_plan_can_include_gpt_sovits_service(tmp_path, monkeypatch):
     (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
     workdir = home / "AI" / "GPT-SoVITS"
     (workdir / "GPT_SoVITS").mkdir(parents=True)
+    pretrained_model = workdir / "GPT_SoVITS" / "pretrained_models" / "s1v3.ckpt"
+    pretrained_model.parent.mkdir(parents=True)
+    pretrained_model.write_text("model", encoding="utf-8")
     plist = home / "Library" / "LaunchAgents" / "com.hermes-yachiyo.gpt-sovits.plist"
     plist.parent.mkdir(parents=True)
     plist.write_text("<plist />", encoding="utf-8")
@@ -125,6 +128,9 @@ def test_execute_uninstall_removes_selected_gpt_sovits_service(tmp_path, monkeyp
     (workspace / ".yachiyo_init").write_text("{}", encoding="utf-8")
     workdir = home / "AI" / "GPT-SoVITS"
     (workdir / "GPT_SoVITS").mkdir(parents=True)
+    pretrained_model = workdir / "GPT_SoVITS" / "pretrained_models" / "s1v3.ckpt"
+    pretrained_model.parent.mkdir(parents=True)
+    pretrained_model.write_text("model", encoding="utf-8")
     plist = home / "Library" / "LaunchAgents" / "com.hermes-yachiyo.gpt-sovits.plist"
     plist.parent.mkdir(parents=True)
     plist.write_text("<plist />", encoding="utf-8")
@@ -152,6 +158,7 @@ def test_execute_uninstall_removes_selected_gpt_sovits_service(tmp_path, monkeyp
     removed_paths = {item["path"] for item in result.removed}
     assert result.ok is True
     assert not workdir.exists()
+    assert not pretrained_model.exists()
     assert not plist.exists()
     assert str(workdir) in removed_paths
     assert str(plist) in removed_paths

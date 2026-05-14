@@ -5,41 +5,43 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
-from fastapi import APIRouter
-from fastapi import HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from apps.bridge.deps import get_runtime
 from apps.core.chat_session import MessageStatus
-from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH
-from apps.shell.assets import data_uri
-from apps.shell.assets import find_live2d_preview_path
-from apps.shell.chat_api import ChatAPI
-from apps.shell.chat_api import allocate_chat_attachment_path
-from apps.shell.chat_api import audio_mime_type_for_suffix
-from apps.shell.chat_api import chat_attachment_record
+from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri, find_live2d_preview_path
+from apps.shell.activity_api import (
+    delete_activity_event,
+    delete_activity_events,
+    get_activity_event_detail,
+    list_activity_events,
+)
+from apps.shell.chat_api import (
+    ChatAPI,
+    allocate_chat_attachment_path,
+    audio_mime_type_for_suffix,
+    chat_attachment_record,
+)
 from apps.shell.chat_bridge import ChatBridge
-from apps.shell.gpt_sovits_service import get_gpt_sovits_service_status
-from apps.shell.gpt_sovits_service import get_gpt_sovits_service_status_for_values
-from apps.shell.gpt_sovits_service import install_gpt_sovits_launch_agent
-from apps.shell.gpt_sovits_service import uninstall_gpt_sovits_launch_agent
-from apps.shell.launcher_notifications import LauncherNotificationTracker
-from apps.shell.live2d_resources import import_live2d_archive_draft
-from apps.shell.live2d_resources import prepare_live2d_model_path_draft
-from apps.shell.tts_resources import get_tts_voice_resource_info
-from apps.shell.tts_resources import import_tts_voice_archive_draft
+from apps.shell.gpt_sovits_service import (
+    adopt_gpt_sovits_launch_agent,
+    get_gpt_sovits_service_status,
+    get_gpt_sovits_service_status_for_values,
+    install_gpt_sovits_launch_agent,
+    uninstall_gpt_sovits_launch_agent,
+)
 from apps.shell.installer_api import InstallerWebViewAPI
+from apps.shell.launcher_notifications import LauncherNotificationTracker
+from apps.shell.live2d_resources import import_live2d_archive_draft, prepare_live2d_model_path_draft
 from apps.shell.main_api import MainWindowAPI
-from apps.shell.mode_settings import apply_settings_changes
-from apps.shell.mode_settings import serialize_mode_window_data
-from apps.shell.proactive import ProactiveDesktopService
-from apps.shell.proactive import get_proactive_chat_session
+from apps.shell.mode_settings import apply_settings_changes, serialize_mode_window_data
+from apps.shell.proactive import ProactiveDesktopService, get_proactive_chat_session
 from apps.shell.tts import TTSService
+from apps.shell.tts_resources import get_tts_voice_resource_info, import_tts_voice_archive_draft
 
 router = APIRouter(prefix="/ui", tags=["UI"])
 _launcher_notifications: dict[str, LauncherNotificationTracker] = {}
@@ -83,6 +85,10 @@ class LauncherPositionRequest(BaseModel):
 
 class LoadChatSessionRequest(BaseModel):
     session_id: str
+
+
+class DeleteActivityEventsRequest(BaseModel):
+    event_ids: list[str] = Field(default_factory=list)
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -251,6 +257,12 @@ async def get_tts_gpt_sovits_service_status_for_draft(request: GptSovitsServiceS
 async def install_tts_gpt_sovits_service() -> dict[str, Any]:
     runtime = get_runtime()
     return await asyncio.to_thread(install_gpt_sovits_launch_agent, runtime.config)
+
+
+@router.post("/tts/gpt-sovits/service/adopt")
+async def adopt_tts_gpt_sovits_service() -> dict[str, Any]:
+    runtime = get_runtime()
+    return await asyncio.to_thread(adopt_gpt_sovits_launch_agent, runtime.config)
 
 
 @router.post("/tts/gpt-sovits/service/uninstall")
@@ -504,8 +516,8 @@ async def import_live2d_archive_path(request: Live2DResourcePathRequest) -> dict
 
 
 @router.get("/chat/messages")
-async def get_chat_messages(limit: int = 80) -> dict[str, Any]:
-    return ChatAPI(get_runtime()).get_messages(limit)
+async def get_chat_messages(limit: int = 80, anchor_message_id: str = "") -> dict[str, Any]:
+    return ChatAPI(get_runtime()).get_messages(limit, anchor_message_id=anchor_message_id)
 
 
 @router.post("/chat/messages")
@@ -547,8 +559,8 @@ async def delete_chat_session() -> dict[str, Any]:
 
 
 @router.get("/chat/sessions")
-async def list_chat_sessions(limit: int = 20) -> dict[str, Any]:
-    return ChatAPI(get_runtime()).list_sessions(limit)
+async def list_chat_sessions(limit: int = 20, query: str = "") -> dict[str, Any]:
+    return ChatAPI(get_runtime()).list_sessions(limit, query=query)
 
 
 @router.post("/chat/sessions/load")
@@ -561,18 +573,67 @@ async def get_chat_executor() -> dict[str, Any]:
     return ChatAPI(get_runtime()).get_executor_info()
 
 
+@router.get("/activity")
+async def get_activity_events(
+    query: str = "",
+    status: str = "",
+    tool: str = "",
+    phase: str = "",
+    session_id: str = "",
+    task_id: str = "",
+    limit: int = 50,
+) -> dict[str, Any]:
+    return list_activity_events(
+        query=query,
+        status=status,
+        tool=tool,
+        phase=phase,
+        session_id=session_id,
+        task_id=task_id,
+        limit=limit,
+    )
+
+
+@router.get("/activity/{event_id}")
+async def get_activity_event(event_id: str, limit: int = 200) -> dict[str, Any]:
+    return get_activity_event_detail(event_id, limit=limit)
+
+
+@router.delete("/activity")
+async def delete_activity_events_route(request: DeleteActivityEventsRequest) -> dict[str, Any]:
+    return delete_activity_events(request.event_ids)
+
+
+@router.delete("/activity/{event_id}")
+async def delete_activity(event_id: str) -> dict[str, Any]:
+    return delete_activity_event(event_id)
+
+
 def _clamp_float(value: float, lower: float, upper: float) -> float:
     return min(max(value, lower), upper)
 
 
-def _bubble_avatar_url(config: Any) -> str:
-    avatar_path = Path(str(getattr(config, "avatar_path", "") or DEFAULT_BUBBLE_AVATAR_PATH)).expanduser()
+def _avatar_url_from_path(path_value: str, *, fallback: bool = True) -> str:
+    raw_path = str(path_value or "").strip()
+    if not raw_path and not fallback:
+        return ""
+    avatar_path = Path(raw_path or str(DEFAULT_BUBBLE_AVATAR_PATH)).expanduser()
     if not avatar_path.exists():
+        if not fallback:
+            return ""
         avatar_path = DEFAULT_BUBBLE_AVATAR_PATH
     try:
         return data_uri(avatar_path)
     except Exception:
-        return data_uri(DEFAULT_BUBBLE_AVATAR_PATH)
+        return data_uri(DEFAULT_BUBBLE_AVATAR_PATH) if fallback else ""
+
+
+def _bubble_avatar_url(config: Any) -> str:
+    assistant = getattr(config, "assistant", None)
+    avatar_path = getattr(assistant, "agent_avatar_path", "") if assistant is not None else ""
+    if not avatar_path:
+        avatar_path = getattr(config, "avatar_path", "")
+    return _avatar_url_from_path(str(avatar_path or ""), fallback=True)
 
 
 def _launcher_proactive_service(runtime: Any, mode_id: str, mode_config: Any) -> ProactiveDesktopService:
@@ -692,6 +753,10 @@ def _live2d_renderer_payload(app_config: Any, resource: dict[str, Any]) -> dict[
         "reason": reason,
         "scale": getattr(live2d, "scale", 1.0),
         "mouse_follow_enabled": getattr(live2d, "mouse_follow_enabled", True),
+        "render_quality_preset": getattr(live2d, "render_quality_preset", "balanced"),
+        "render_fps": getattr(live2d, "render_fps", 24),
+        "render_resolution": getattr(live2d, "render_resolution", 1.25),
+        "hit_region_precision": getattr(live2d, "hit_region_precision", "medium"),
         "idle_motion_group": getattr(live2d, "idle_motion_group", "Idle"),
         "enable_expressions": getattr(live2d, "enable_expressions", False),
         "enable_physics": getattr(live2d, "enable_physics", False),
@@ -847,6 +912,10 @@ async def get_launcher_view(mode: str = "bubble") -> dict[str, Any]:
             "position_anchor": getattr(live2d_config, "position_anchor", "right_bottom"),
             "scale": getattr(live2d_config, "scale", 1.0),
             "mouse_follow_enabled": getattr(live2d_config, "mouse_follow_enabled", True),
+            "render_quality_preset": getattr(live2d_config, "render_quality_preset", "balanced"),
+            "render_fps": getattr(live2d_config, "render_fps", 24),
+            "render_resolution": getattr(live2d_config, "render_resolution", 1.25),
+            "hit_region_precision": getattr(live2d_config, "hit_region_precision", "medium"),
             "preview_url": _live2d_preview_url(live2d_config),
             "resource": resource,
             "renderer": _live2d_renderer_payload(runtime.config, resource),
@@ -861,7 +930,7 @@ async def get_launcher_view(mode: str = "bubble") -> dict[str, Any]:
             "show_unread_dot": bubble_config.show_unread_dot,
             "auto_hide": bubble_config.auto_hide,
             "opacity": bubble_config.opacity,
-            "avatar_url": _bubble_avatar_url(bubble_config),
+            "avatar_url": _bubble_avatar_url(runtime.config),
             "suppress_status_dot": False,
         }
 
@@ -919,13 +988,11 @@ async def acknowledge_launcher(request: LauncherAckRequest) -> dict[str, Any]:
     tracker = _launcher_notifications.setdefault(mode_id, LauncherNotificationTracker())
     tracker.acknowledge(chat)
     service = _launcher_proactive_services.get((mode_id, id(runtime)))
-    session_id = ""
+    session_id = str(chat.get("session_id") or "")
     if service is not None:
-        service.acknowledge()
+        if getattr(service, "_attention_task_id", None):
+            service.acknowledge()
         session_id = service.session_id
-    else:
-        chat_session = get_proactive_chat_session(runtime)
-        session_id = str(getattr(chat_session, "session_id", "") or "")
     return {"ok": True, "mode": mode_id, "session_id": session_id}
 
 

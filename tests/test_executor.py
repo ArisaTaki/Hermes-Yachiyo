@@ -24,11 +24,16 @@ from apps.core.executor import (
     _parse_hermes_title,
     _read_exec_timeout,
     _resolve_hermes_python,
+    _build_session_title_prompt,
+    _sanitize_generated_session_title,
+    _should_refresh_generated_title,
     resolve_hermes_stream_bridge_script,
     format_persona_description,
 )
 import apps.core.executor as executor_mod
 import apps.core.hermes_stream_bridge as bridge_mod
+from apps.core.chat_session import ChatSession, MessageStatus
+from apps.core.chat_store import ChatStore
 from packages.protocol.enums import RiskLevel, TaskStatus, TaskType
 from packages.protocol.schemas import TaskInfo
 from datetime import datetime, timezone
@@ -178,6 +183,18 @@ class TestHermesExecutor:
         assert "你是八千代。" in wrapped
         assert "请称呼用户为：老师" in wrapped
 
+    def test_format_persona_description_wraps_profile_context(self):
+        wrapped = format_persona_description(
+            "帮我总结",
+            "你是八千代。",
+            "老师",
+            profile_context="[用户资料]\n偏好：回答简洁",
+        )
+
+        assert wrapped.index("[用户资料]") < wrapped.index("[人设设定]")
+        assert "偏好：回答简洁" in wrapped
+        assert wrapped.endswith("帮我总结")
+
     def test_format_environment_context_includes_local_time_period(self):
         local_tz = datetime.now().astimezone().tzinfo
         now = datetime(2026, 4, 27, 15, 20, tzinfo=local_tz)
@@ -316,8 +333,157 @@ class TestParseHermesOutput:
         assert r.hermes_title == "Test title"
         assert r.output == "ok"
 
+    def test_generated_title_is_sanitized_and_limited(self):
+        assert _sanitize_generated_session_title("标题：潮汕牛肉饭。") == "潮汕牛肉饭"
+        assert _sanitize_generated_session_title("“重复播放 Ray 版本”") == "重复播放 Ray 版本"
+        assert len(_sanitize_generated_session_title("这是一个非常非常非常非常非常长的标题需要被截断")) <= 28
+        assert _sanitize_generated_session_title("首先，用户要求为这段持续对话生成一个会话列表标题。") == ""
+
+    @pytest.mark.asyncio
+    async def test_generated_title_uses_direct_api_without_hermes_cli_fallback(self, monkeypatch):
+        async def fake_direct_api(_prompt, *, timeout):
+            assert timeout > 0
+            return ""
+
+        monkeypatch.setattr(executor_mod, "generate_title_with_direct_api", fake_direct_api)
+        monkeypatch.setattr(executor_mod.shutil, "which", lambda _cmd: "/bin/hermes")
+        monkeypatch.setattr(executor_mod, "_generate_session_title_with_hermes_cli", lambda _prompt: "不应调用")
+
+        assert await executor_mod._generate_session_title("生成标题") == ""
+
+    def test_generated_title_refresh_is_periodic(self, monkeypatch):
+        monkeypatch.setenv("HERMES_YACHIYO_TITLE_GENERATION", "1")
+        monkeypatch.setenv("HERMES_YACHIYO_TITLE_INTERVAL_TURNS", "2")
+        session = ChatSession(session_id="title-test")
+
+        session.add_user_message("第一轮")
+        assert _should_refresh_generated_title(session) is False
+
+        session.upsert_assistant_message("t1", "回复", MessageStatus.COMPLETED)
+        assert _should_refresh_generated_title(session) is False
+
+        session.add_user_message("第二轮")
+        assert _should_refresh_generated_title(session) is False
+
+        session.upsert_assistant_message("t2", "回复", MessageStatus.COMPLETED)
+        assert _should_refresh_generated_title(session) is True
+
+    def test_generated_title_refresh_counts_pending_completed_reply(self, monkeypatch):
+        monkeypatch.setenv("HERMES_YACHIYO_TITLE_GENERATION", "1")
+        monkeypatch.setenv("HERMES_YACHIYO_TITLE_INTERVAL_TURNS", "2")
+        session = ChatSession(session_id="title-test")
+        session.add_user_message("第一轮")
+        session.upsert_assistant_message("t1", "回复", MessageStatus.COMPLETED)
+        session.add_user_message("第二轮")
+
+        assert _should_refresh_generated_title(session, assistant_text="第二轮回复") is True
+
+    def test_generated_title_refresh_waits_for_interval_by_default(self, monkeypatch):
+        monkeypatch.delenv("HERMES_YACHIYO_TITLE_GENERATION", raising=False)
+        monkeypatch.delenv("HERMES_YACHIYO_TITLE_INTERVAL_TURNS", raising=False)
+        monkeypatch.delenv("HERMES_YACHIYO_TITLE_INTERVAL_MESSAGES", raising=False)
+        session = ChatSession(session_id="title-test")
+        session.add_user_message("第一轮")
+        session.upsert_assistant_message("t1", "回复", MessageStatus.COMPLETED)
+        session.add_user_message("第二轮")
+        session.upsert_assistant_message("t2", "回复", MessageStatus.COMPLETED)
+
+        assert _should_refresh_generated_title(session) is False
+
+    def test_generated_title_refresh_repairs_prompt_echo_before_interval(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("HERMES_YACHIYO_TITLE_GENERATION", raising=False)
+        monkeypatch.delenv("HERMES_YACHIYO_TITLE_INTERVAL_TURNS", raising=False)
+        monkeypatch.delenv("HERMES_YACHIYO_TITLE_INTERVAL_MESSAGES", raising=False)
+        store = ChatStore(db_path=str(tmp_path / "chat.db"))
+        try:
+            session = ChatSession(session_id="title-test")
+            session.attach_store(store, load_existing=False)
+            session.add_user_message("第一轮")
+            store.update_session_title("title-test", "首先，用户要求为这段持续对话生成一个会话列表标题。")
+
+            assert _should_refresh_generated_title(session, assistant_text="第一轮回复") is True
+        finally:
+            store.close()
+
+    def test_generated_title_prompt_uses_current_title_and_recent_context(self, monkeypatch):
+        monkeypatch.setenv("HERMES_YACHIYO_TITLE_CONTEXT_MESSAGES", "4")
+        session = ChatSession(session_id="title-test")
+        session.add_user_message("第一句打招呼")
+        session.upsert_assistant_message("t1", "第一轮回复", MessageStatus.COMPLETED)
+        session.add_user_message("继续聊 V2EX 热门帖子")
+
+        prompt = _build_session_title_prompt(session, assistant_text="找到一些帖子")
+
+        assert "第一条用户消息：\n第一句打招呼" in prompt
+        assert "用户: 继续聊 V2EX 热门帖子" in prompt
+        assert "Yachiyo: 找到一些帖子" in prompt
+
+    def test_generated_title_prompt_ignores_prompt_echo_current_title(self, tmp_path):
+        store = ChatStore(db_path=str(tmp_path / "chat.db"))
+        try:
+            session = ChatSession(session_id="title-test")
+            session.attach_store(store, load_existing=False)
+            session.add_user_message("帮我确认 Chrome 登录态")
+            store.update_session_title("title-test", "首先，用户要求为这段持续对话生成一个会话列表标题。")
+
+            prompt = _build_session_title_prompt(session, assistant_text="已经进入后台")
+
+            assert "当前标题：\n暂无" in prompt
+            assert "第一条用户消息：\n帮我确认 Chrome 登录态" in prompt
+        finally:
+            store.close()
+
+    @pytest.mark.asyncio
+    async def test_generated_title_refresh_falls_back_from_prompt_echo_title(self, tmp_path, monkeypatch):
+        async def fake_generate(_prompt):
+            return ""
+
+        monkeypatch.setattr(executor_mod, "_generate_session_title", fake_generate)
+        store = ChatStore(db_path=str(tmp_path / "chat.db"))
+        try:
+            session = ChatSession(session_id="title-test")
+            session.attach_store(store, load_existing=False)
+            session.add_user_message("帮我确认 Chrome 登录态")
+            store.update_session_title("title-test", "首先，用户要求为这段持续对话生成一个会话列表标题。")
+
+            await executor_mod._refresh_session_title_from_recent_messages(session, assistant_text="已经进入后台")
+
+            stored = store.get_session("title-test")
+            assert stored is not None
+            assert stored.title == "帮我确认 Chrome 登录态"
+        finally:
+            store.close()
+
 
 class TestHermesStreamBridgeHelpers:
+    def test_utf8_subprocess_env_repairs_sparse_gui_locale(self, monkeypatch):
+        monkeypatch.setenv("LC_ALL", "C")
+        monkeypatch.setenv("LANG", "C")
+        monkeypatch.delenv("LC_CTYPE", raising=False)
+        monkeypatch.setattr(executor_mod.sys, "platform", "darwin")
+
+        env = executor_mod._utf8_subprocess_env()
+
+        assert env["PYTHONUTF8"] == "1"
+        assert env["PYTHONIOENCODING"] == "utf-8"
+        assert env["LANG"] == "en_US.UTF-8"
+        assert env["LC_CTYPE"] == "UTF-8"
+        assert "LC_ALL" not in env
+
+    def test_stream_bridge_repairs_sparse_gui_locale(self, monkeypatch):
+        monkeypatch.setenv("LC_ALL", "C")
+        monkeypatch.setenv("LANG", "C")
+        monkeypatch.delenv("LC_CTYPE", raising=False)
+        monkeypatch.setattr(bridge_mod.sys, "platform", "darwin")
+
+        bridge_mod._configure_utf8_stdio()
+
+        assert bridge_mod.os.environ["PYTHONUTF8"] == "1"
+        assert bridge_mod.os.environ["PYTHONIOENCODING"] == "utf-8"
+        assert bridge_mod.os.environ["LANG"] == "en_US.UTF-8"
+        assert bridge_mod.os.environ["LC_CTYPE"] == "UTF-8"
+        assert "LC_ALL" not in bridge_mod.os.environ
+
     def test_parse_bridge_event(self):
         event = _parse_bridge_event('{"type":"delta","delta":"hi"}')
         assert event == {"type": "delta", "delta": "hi"}
@@ -409,6 +575,8 @@ class TestHermesStreamBridgeHelpers:
 
         async def fake_create_subprocess_exec(*cmd, **kwargs):
             calls.append(cmd)
+            assert kwargs["env"]["PYTHONIOENCODING"] == "utf-8"
+            assert kwargs["env"]["PYTHONUTF8"] == "1"
             return FakeProcess()
 
         monkeypatch.setattr(
@@ -435,10 +603,35 @@ class TestHermesStreamBridgeHelpers:
         assert len(calls) == 1
         assert calls[0][:3] == tuple(_HERMES_CMD)
         assert any("hello" in part for part in calls[0])
-        assert any("不要调用桌面截图" in part for part in calls[0])
+        assert any("可以继续调用" in part for part in calls[0])
+        assert not any("不要调用桌面截图" in part for part in calls[0])
         assert "--image" in calls[0]
         assert str(image_path) in calls[0]
         assert updates == []
+
+    @pytest.mark.asyncio
+    async def test_stream_bridge_uses_utf8_environment(self, monkeypatch, tmp_path):
+        bridge_script = tmp_path / "hermes_stream_bridge.py"
+        bridge_script.write_text("# bridge", encoding="utf-8")
+        captured_kwargs = {}
+
+        async def fake_create_subprocess_exec(*_cmd, **kwargs):
+            captured_kwargs.update(kwargs)
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(executor_mod, "_resolve_hermes_python", lambda: sys.executable)
+        monkeypatch.setattr(executor_mod, "_BRIDGE_SCRIPT", bridge_script)
+        monkeypatch.setattr(
+            executor_mod.asyncio,
+            "create_subprocess_exec",
+            fake_create_subprocess_exec,
+        )
+
+        result = await executor_mod._invoke_hermes_stream_bridge("hello", None, lambda _: None)
+
+        assert result.success is False
+        assert captured_kwargs["env"]["PYTHONIOENCODING"] == "utf-8"
+        assert captured_kwargs["env"]["PYTHONUTF8"] == "1"
 
     @pytest.mark.asyncio
     async def test_invoke_does_not_fallback_for_task_level_stream_failure(
@@ -663,6 +856,29 @@ class TestConsumeStreamBridgeRobustness:
         assert result.stdout == "full response"
 
     @pytest.mark.asyncio
+    async def test_activity_event_is_forwarded_without_affecting_tokens(self):
+        """activity 事件应独立转发，不污染 assistant token 流。"""
+        lines = [
+            json.dumps({"type": "delta", "delta": "hello"}),
+            json.dumps({"type": "activity", "phase": "tool_start", "tool_name": "terminal", "title": "正在运行脚本"}),
+            json.dumps({"type": "done", "response": "hello", "session_id": "s-activity"}),
+        ]
+        proc = self._make_proc_from_lines(lines)
+        updates = []
+        activities = []
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            updates.append,
+            activities.append,
+        )
+
+        assert result.success is True
+        assert updates == ["hello"]
+        assert activities == [{"type": "activity", "phase": "tool_start", "tool_name": "terminal", "title": "正在运行脚本"}]
+
+    @pytest.mark.asyncio
     async def test_done_event_without_streaming_yields_final_response(self):
         """只有 done 事件（无 delta），应降级为最终完整回复，不失败。"""
         lines = [
@@ -851,7 +1067,8 @@ class TestHermesStreamBridgeImageRouting:
         routed = bridge_mod._route_images(FakeCli(), "看图", [image])
 
         assert routed.startswith("vision::[Yachiyo 附件图片上下文]")
-        assert "不要调用桌面截图" in routed
+        assert "可以继续调用" in routed
+        assert "不要调用桌面截图" not in routed
         assert "看图::1" in routed
 
     def test_xiaomi_pro_auto_uses_vision_preprocessor(self, monkeypatch, tmp_path):
@@ -976,7 +1193,8 @@ class TestHermesStreamBridgeImageRouting:
         routed = bridge_mod._route_images(FakeCli(), "看图", [image])
 
         assert routed.startswith("vision::[Yachiyo 附件图片上下文]")
-        assert "不要调用桌面截图" in routed
+        assert "可以继续调用" in routed
+        assert "不要调用桌面截图" not in routed
         assert "看图::1" in routed
 
     def test_text_mode_overrides_native_decision_for_text_provider(self, monkeypatch, tmp_path):
@@ -1275,7 +1493,7 @@ class TestHermesStreamBridgeImageRouting:
         assert result == "辅助视觉结果"
         assert captured["model"] == "mimo-v2.5"
 
-    def test_image_turn_temporarily_disables_agent_tools(self, tmp_path):
+    def test_image_turn_preserves_agent_tools_for_pure_image_request(self, tmp_path):
         image = tmp_path / "screen.png"
         image.write_bytes(b"png")
         agent = types.SimpleNamespace(
@@ -1284,11 +1502,48 @@ class TestHermesStreamBridgeImageRouting:
         )
 
         with bridge_mod._disable_agent_tools_for_image_turn(agent, [image]):
-            assert agent.tools == []
-            assert agent.valid_tool_names == set()
+            assert agent.tools == [{"function": {"name": "terminal"}}]
+            assert agent.valid_tool_names == {"terminal", "vision_analyze"}
 
         assert agent.tools == [{"function": {"name": "terminal"}}]
         assert agent.valid_tool_names == {"terminal", "vision_analyze"}
+
+    def test_image_turn_preserves_agent_tools_for_screenshot_policy_request(self, tmp_path):
+        image = tmp_path / "screen.png"
+        image.write_bytes(b"png")
+        agent = types.SimpleNamespace(
+            tools=[{"function": {"name": "browser_cdp"}}],
+            valid_tool_names={"browser_cdp"},
+        )
+
+        with bridge_mod._disable_agent_tools_for_image_turn(agent, [image]):
+            assert agent.tools == [{"function": {"name": "browser_cdp"}}]
+            assert agent.valid_tool_names == {"browser_cdp"}
+
+    def test_attached_image_guard_allows_agent_tools(self, tmp_path):
+        image = tmp_path / "screen.png"
+        image.write_bytes(b"png")
+
+        guarded = bridge_mod._with_attached_image_guard(
+            "不要截除了 hermes-yachiyo 以外的图，现在思考对策。",
+            [image],
+        )
+
+        assert "可以继续调用" in guarded
+        assert "不要调用桌面截图" not in guarded
+        assert "hermes-yachiyo" in guarded
+
+    def test_activity_text_hides_raw_tool_call_drafts(self):
+        text = (
+            "让我检查 <tool_call><function=browser_cdp>"
+            "<parameter=method>Runtime.evaluate</parameter></function></tool_call>"
+        )
+
+        redacted = bridge_mod._redact_activity_text(text)
+
+        assert "tool_call" not in redacted
+        assert "browser_cdp" not in redacted
+        assert "工具调用草稿已隐藏" in redacted
 
 
 class TestBuildInitAgentKwargs:

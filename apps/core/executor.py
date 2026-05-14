@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -24,10 +24,16 @@ import sys
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from packages.protocol.schemas import TaskInfo
 from apps.core.special_sessions import is_proactive_chat_session
+from apps.core.title_generator import (
+    build_session_title_prompt as build_direct_session_title_prompt,
+    generate_title_with_direct_api,
+    looks_like_title_prompt_echo,
+)
 
 if TYPE_CHECKING:
     from apps.core.chat_session import ChatSession
@@ -111,10 +117,20 @@ _STREAM_UPDATE_INTERVAL: float = 0.05
 _ERROR_DETAIL_MAX_CHARS = 500
 _ERROR_DETAIL_MAX_LINES = 12
 _ATTACHED_IMAGE_GUARD = (
-    "本轮用户已经附加图片。请优先且尽量只根据这些附加图片回答；"
-    "不要调用桌面截图、活动窗口、浏览器视觉或其它实时桌面观察工具来替代附加图片，"
-    "除非用户明确要求你操作当前电脑或重新观察屏幕。"
+    "本轮用户已经附加图片。请先依据这些附加图片理解用户问题；"
+    "不要沿用历史消息里对旧图片的描述来回答本轮图片；"
+    "如果完成任务需要调用浏览器、桌面、文件、终端或其它 Agent 工具，可以继续调用。"
 )
+_TITLE_GENERATION_ENABLED_ENV = "HERMES_YACHIYO_TITLE_GENERATION"
+_TITLE_CONTEXT_MESSAGES_ENV = "HERMES_YACHIYO_TITLE_CONTEXT_MESSAGES"
+_TITLE_INTERVAL_TURNS_ENV = "HERMES_YACHIYO_TITLE_INTERVAL_TURNS"
+_TITLE_INTERVAL_MESSAGES_ENV = "HERMES_YACHIYO_TITLE_INTERVAL_MESSAGES"
+_TITLE_TIMEOUT_ENV = "HERMES_YACHIYO_TITLE_TIMEOUT_SECONDS"
+_DEFAULT_TITLE_CONTEXT_MESSAGES = 8
+_DEFAULT_TITLE_INTERVAL_TURNS = 4
+_DEFAULT_TITLE_TIMEOUT_SECONDS = 8.0
+_GENERATED_TITLE_MAX_CHARS = 28
+_TITLE_REFRESH_TASKS: dict[str, asyncio.Task[None]] = {}
 
 
 def resolve_hermes_stream_bridge_script() -> Path:
@@ -216,6 +232,33 @@ _STREAM_BRIDGE_FALLBACK_MARKERS = (
     "cannot import",
 )
 
+
+def _utf8_subprocess_env() -> dict[str, str]:
+    """Return a child-process environment that keeps tool output UTF-8.
+
+    GUI-launched macOS apps can inherit a sparse locale.  Python subprocesses
+    using text=True then decode tools such as osascript with ASCII/C locale,
+    which corrupts Japanese and other non-ASCII text before it reaches chat.
+    """
+    env = dict(os.environ)
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+
+    preferred_lang = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+    preferred_ctype = "UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+
+    def is_broken_locale(value: str | None) -> bool:
+        normalized = (value or "").strip().lower()
+        return normalized in {"", "c", "posix", "ascii", "us-ascii"}
+
+    if is_broken_locale(env.get("LC_ALL")):
+        env.pop("LC_ALL", None)
+    if is_broken_locale(env.get("LANG")):
+        env["LANG"] = preferred_lang
+    if is_broken_locale(env.get("LC_CTYPE")):
+        env["LC_CTYPE"] = preferred_ctype
+    return env
+
 # bridge 内部原始异常模式 → 用户友好描述
 # 这些异常由 hermes_stream_bridge.py 的 main() 捕获后以 "ExcType: msg" 格式输出，
 # 在显示给用户前需要转换为可读提示。
@@ -290,16 +333,20 @@ def format_persona_description(
     persona_prompt: str = "",
     user_address: str = "",
     environment_context: str = "",
+    profile_context: str = "",
 ) -> str:
     """按共享助手资料包装用户请求，资料为空时保持原始描述。"""
     persona = (persona_prompt or "").strip()
     address = (user_address or "").strip()
     environment = (environment_context or "").strip()
-    if not environment and not persona and not address:
+    profile = (profile_context or "").strip()
+    if not environment and not persona and not address and not profile:
         return description
     parts: list[str] = []
     if environment:
         parts.append(environment)
+    if profile:
+        parts.append(profile)
     if persona:
         parts.append(f"[人设设定]\n{persona}")
     if address:
@@ -348,6 +395,250 @@ def format_environment_context(now: Optional[datetime] = None) -> str:
         f"（{timezone_label}，{weekday}，{period}）\n"
         "请结合当前时间、日期与时段理解问候、计划和相对时间表达。"
     )
+
+
+def _read_title_int_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("%s=%r 不是有效整数，使用默认值 %d", name, raw, default)
+        return default
+    return max(minimum, min(value, maximum))
+
+
+def _read_title_timeout() -> float:
+    raw = os.getenv(_TITLE_TIMEOUT_ENV, "").strip()
+    if not raw:
+        return _DEFAULT_TITLE_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("%s=%r 不是有效数字，使用默认值 %.0fs", _TITLE_TIMEOUT_ENV, raw, _DEFAULT_TITLE_TIMEOUT_SECONDS)
+        return _DEFAULT_TITLE_TIMEOUT_SECONDS
+    return max(3.0, min(value, 90.0))
+
+
+def _session_title_generation_enabled() -> bool:
+    raw = os.getenv(_TITLE_GENERATION_ENABLED_ENV, "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _read_title_interval_turns() -> int:
+    raw = os.getenv(_TITLE_INTERVAL_TURNS_ENV, "").strip()
+    if not raw:
+        raw = os.getenv(_TITLE_INTERVAL_MESSAGES_ENV, "").strip()
+    if not raw:
+        return _DEFAULT_TITLE_INTERVAL_TURNS
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("%s=%r 不是有效整数，使用默认值 %d", _TITLE_INTERVAL_TURNS_ENV, raw, _DEFAULT_TITLE_INTERVAL_TURNS)
+        return _DEFAULT_TITLE_INTERVAL_TURNS
+    return max(1, min(value, 20))
+
+
+def _completed_assistant_turn_count(chat_session: "ChatSession", *, include_pending_completion: bool = False) -> int:
+    count = 1 if include_pending_completion else 0
+    for message in chat_session.get_all_messages():
+        role_value = getattr(getattr(message, "role", ""), "value", getattr(message, "role", ""))
+        status_value = getattr(getattr(message, "status", ""), "value", getattr(message, "status", ""))
+        if role_value == "assistant" and status_value == "completed":
+            count += 1
+    return count
+
+
+def _should_refresh_generated_title(chat_session: "ChatSession", *, assistant_text: str = "") -> bool:
+    if not _session_title_generation_enabled():
+        return False
+    turn_count = _completed_assistant_turn_count(
+        chat_session,
+        include_pending_completion=bool((assistant_text or "").strip()),
+    )
+    if turn_count >= 1 and looks_like_title_prompt_echo(_stored_session_title(chat_session)):
+        return True
+    interval = _read_title_interval_turns()
+    return turn_count >= interval and turn_count % interval == 0
+
+
+def _build_session_title_prompt(
+    chat_session: "ChatSession",
+    *,
+    assistant_text: str = "",
+) -> str:
+    context_limit = _read_title_int_env(
+        _TITLE_CONTEXT_MESSAGES_ENV,
+        _DEFAULT_TITLE_CONTEXT_MESSAGES,
+        minimum=2,
+        maximum=24,
+    )
+    messages = chat_session.get_all_messages()
+    assistant_text = assistant_text.strip()
+    if assistant_text and not _message_list_already_ends_with_assistant_text(messages, assistant_text):
+        messages = [
+            *messages,
+            SimpleNamespace(role="assistant", content=assistant_text),
+        ]
+    return build_direct_session_title_prompt(
+        messages,
+        current_title=_current_session_title(chat_session),
+        context_limit=context_limit,
+    )
+
+
+def _message_list_already_ends_with_assistant_text(messages: list[Any], assistant_text: str) -> bool:
+    for message in reversed(messages):
+        role_value = getattr(getattr(message, "role", ""), "value", getattr(message, "role", ""))
+        if role_value not in {"user", "assistant"}:
+            continue
+        return role_value == "assistant" and str(getattr(message, "content", "") or "").strip() == assistant_text
+    return False
+
+
+def _current_session_title(chat_session: "ChatSession") -> str:
+    title = _stored_session_title(chat_session)
+    if looks_like_title_prompt_echo(title):
+        return ""
+    return title
+
+
+def _stored_session_title(chat_session: "ChatSession") -> str:
+    store = getattr(chat_session, "_store", None)
+    if store is None:
+        return ""
+    try:
+        stored = store.get_session(chat_session.session_id)
+    except Exception:
+        logger.debug("读取当前会话标题失败", exc_info=True)
+        return ""
+    return str(getattr(stored, "title", "") or "") if stored is not None else ""
+
+
+def _first_user_session_title(chat_session: "ChatSession") -> str:
+    from apps.core.chat_store import make_session_title
+
+    for message in chat_session.get_all_messages():
+        role_value = getattr(getattr(message, "role", ""), "value", getattr(message, "role", ""))
+        if role_value != "user":
+            continue
+        title = make_session_title(str(getattr(message, "content", "") or ""))
+        if title:
+            return title
+    return ""
+
+
+def _sanitize_generated_session_title(value: str | None) -> str:
+    title = _ANSI_RE.sub("", value or "")
+    title = re.sub(r"^(?:标题|会话标题)\s*[:：]\s*", "", title.strip(), flags=re.IGNORECASE)
+    title = title.strip(" \t\r\n\"'“”‘’`*_#：:。.!！?？")
+    title = re.sub(r"\s+", " ", title)
+    title = title.splitlines()[0].strip() if title else ""
+    if not title:
+        return ""
+    if looks_like_title_prompt_echo(title):
+        return ""
+    if len(title) > _GENERATED_TITLE_MAX_CHARS:
+        title = title[:_GENERATED_TITLE_MAX_CHARS].rstrip()
+    return title.strip(" \t\r\n\"'“”‘’`*_#：:。.!！?？")
+
+
+async def _generate_session_title(prompt: str) -> str:
+    """Generate a compact chat title with direct model API.
+
+    Do not fall back to `hermes chat` here: when the model config is unavailable
+    or Hermes is busy, the CLI can summarize the title-generation prompt itself
+    and accidentally write that prompt into the session title.
+    """
+    title = await generate_title_with_direct_api(prompt, timeout=_read_title_timeout())
+    return _sanitize_generated_session_title(title)
+
+
+async def _generate_session_title_with_hermes_cli(prompt: str) -> str:
+    """Generate a compact chat title through an isolated Hermes tool query."""
+    if not shutil.which(_HERMES_CMD[0]):
+        return ""
+    cmd = [
+        *_HERMES_CMD,
+        prompt,
+        "-Q",
+        "--source",
+        "tool",
+        "--max-turns",
+        "1",
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=_utf8_subprocess_env(),
+        )
+    except Exception:
+        logger.debug("启动会话标题生成失败", exc_info=True)
+        return ""
+    try:
+        stdout_bytes, _stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=_read_title_timeout())
+    except asyncio.TimeoutError:
+        await _terminate_process(proc)
+        logger.debug("会话标题生成超时")
+        return ""
+    except asyncio.CancelledError:
+        await _terminate_process(proc)
+        raise
+    if proc.returncode not in (0, None):
+        logger.debug("会话标题生成失败: exit=%s", proc.returncode)
+        return ""
+    content, _session_id = _parse_hermes_output(stdout_bytes.decode(errors="replace"))
+    return _sanitize_generated_session_title(content)
+
+
+async def _refresh_session_title_from_recent_messages(
+    chat_session: "ChatSession",
+    *,
+    assistant_text: str = "",
+) -> None:
+    if is_proactive_chat_session(chat_session.session_id):
+        return
+    prompt = _build_session_title_prompt(chat_session, assistant_text=assistant_text)
+    title = await _generate_session_title(prompt)
+    if title:
+        chat_session.set_session_title(title)
+        return
+    if looks_like_title_prompt_echo(_stored_session_title(chat_session)):
+        fallback_title = _first_user_session_title(chat_session)
+        if fallback_title:
+            chat_session.set_session_title(fallback_title)
+
+
+def _schedule_session_title_refresh(
+    chat_session: "ChatSession | None",
+    *,
+    assistant_text: str = "",
+) -> None:
+    if chat_session is None or not _should_refresh_generated_title(chat_session, assistant_text=assistant_text):
+        return
+    existing = _TITLE_REFRESH_TASKS.get(chat_session.session_id)
+    if existing is not None and not existing.done():
+        return
+    task = asyncio.create_task(
+        _refresh_session_title_from_recent_messages(chat_session, assistant_text=assistant_text),
+        name=f"chat-title-{chat_session.session_id}",
+    )
+    _TITLE_REFRESH_TASKS[chat_session.session_id] = task
+
+    def _log_title_task(done: asyncio.Task[None]) -> None:
+        if _TITLE_REFRESH_TASKS.get(chat_session.session_id) is done:
+            _TITLE_REFRESH_TASKS.pop(chat_session.session_id, None)
+        try:
+            done.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.debug("会话标题生成任务失败", exc_info=True)
+
+    task.add_done_callback(_log_title_task)
 
 
 def _clean_hermes_line(line: str, strip_stream_padding: bool = False) -> Optional[str]:
@@ -559,6 +850,16 @@ def _emit_stream_update(on_update: Callable[[str], None], content: str) -> None:
         logger.debug("Hermes 流式内容回写失败", exc_info=True)
 
 
+def _emit_activity_update(on_activity: Callable[[dict[str, Any]], None] | None, event: dict[str, Any]) -> None:
+    """Forward one structured activity event to the caller without breaking streaming."""
+    if on_activity is None:
+        return
+    try:
+        on_activity(event)
+    except Exception:
+        logger.debug("Hermes 活动事件回写失败", exc_info=True)
+
+
 async def _terminate_process(proc: asyncio.subprocess.Process) -> None:
     """取消/超时时终止子进程并回收管道资源。"""
     if proc.returncode is not None:
@@ -578,6 +879,7 @@ async def _consume_stream_bridge(
     proc: asyncio.subprocess.Process,
     payload: dict[str, Any],
     on_update: Callable[[str], None],
+    on_activity: Callable[[dict[str, Any]], None] | None = None,
 ) -> HermesInvokeResult:
     """消费 bridge 的 delta/done/error 事件并转换为 HermesInvokeResult。"""
     assert proc.stdin is not None
@@ -664,6 +966,8 @@ async def _consume_stream_bridge(
             elif event_type == "boundary":
                 # 流内边界标记，不含有效内容，直接忽略
                 pass
+            elif event_type == "activity":
+                _emit_activity_update(on_activity, event)
             elif event_type is not None:
                 # 未知事件类型：不崩溃，仅记录 debug 日志
                 logger.debug("忽略未知 bridge 事件类型: %s", event_type)
@@ -725,6 +1029,7 @@ async def _invoke_hermes_stream_bridge(
     description: str,
     hermes_session_id: Optional[str],
     on_update: Callable[[str], None],
+    on_activity: Callable[[dict[str, Any]], None] | None = None,
     image_paths: Optional[list[str]] = None,
 ) -> HermesInvokeResult:
     """通过 Hermes agent callback 层获取真实 token 流，避免 CLI 终端 UI 噪声。"""
@@ -756,6 +1061,7 @@ async def _invoke_hermes_stream_bridge(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=os.getcwd(),
+            env=_utf8_subprocess_env(),
         )
     except FileNotFoundError:
         return HermesInvokeResult(
@@ -778,7 +1084,7 @@ async def _invoke_hermes_stream_bridge(
 
     try:
         return await asyncio.wait_for(
-            _consume_stream_bridge(proc, payload, on_update),
+            _consume_stream_bridge(proc, payload, on_update, on_activity),
             timeout=_EXEC_TIMEOUT,
         )
     except asyncio.CancelledError:
@@ -814,6 +1120,7 @@ async def invoke_hermes_cli(
     description: str,
     hermes_session_id: Optional[str] = None,
     on_update: Optional[Callable[[str], None]] = None,
+    on_activity: Optional[Callable[[dict[str, Any]], None]] = None,
     image_paths: Optional[list[str]] = None,
 ) -> HermesInvokeResult:
     """向 Hermes Agent 发起一次 CLI 调用，返回结构化结果。
@@ -844,6 +1151,7 @@ async def invoke_hermes_cli(
             description,
             hermes_session_id,
             on_update,
+            on_activity=on_activity,
             image_paths=image_paths,
         )
         logger.info(
@@ -862,6 +1170,7 @@ async def invoke_hermes_cli(
             description,
             hermes_session_id=hermes_session_id,
             on_update=None,
+            on_activity=on_activity,
             image_paths=image_paths,
         )
 
@@ -879,19 +1188,41 @@ async def invoke_hermes_cli(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=_utf8_subprocess_env(),
         )
     except FileNotFoundError:
+        _emit_activity_update(on_activity, {
+            "tool_name": "hermes_cli",
+            "phase": "status",
+            "title": "Hermes 命令未找到",
+            "detail": "请确认 Hermes Agent 已正确安装",
+            "status": "failed",
+        })
         return HermesInvokeResult(
             success=False,
             returncode=-1,
             error_message="hermes 命令未找到，请确认 Hermes Agent 已正确安装",
         )
     except Exception as exc:
+        _emit_activity_update(on_activity, {
+            "tool_name": "hermes_cli",
+            "phase": "status",
+            "title": "Hermes 进程启动失败",
+            "detail": str(exc),
+            "status": "failed",
+        })
         return HermesInvokeResult(
             success=False,
             returncode=-1,
             error_message=f"启动 hermes 进程失败: {exc}",
         )
+    _emit_activity_update(on_activity, {
+        "tool_name": "hermes_cli",
+        "phase": "status",
+        "title": "Hermes CLI 已启动",
+        "detail": "正在执行非流式 Hermes 调用",
+        "status": "running",
+    })
 
     # ② 等待结束，带超时
     try:
@@ -909,6 +1240,14 @@ async def invoke_hermes_cli(
             "[Hermes CLI] 执行超时: elapsed=%.2fs",
             time.monotonic() - started_at,
         )
+        _emit_activity_update(on_activity, {
+            "tool_name": "hermes_cli",
+            "phase": "status",
+            "title": "Hermes CLI 执行超时",
+            "detail": _format_exec_timeout(_EXEC_TIMEOUT),
+            "status": "failed",
+            "duration_seconds": time.monotonic() - started_at,
+        })
         return HermesInvokeResult(
             success=False,
             returncode=-1,
@@ -924,6 +1263,14 @@ async def invoke_hermes_cli(
             err_msg = "Hermes 命令调用失败，请检查 Hermes Agent 版本是否兼容"
         else:
             err_msg = f"Hermes 执行失败（exit={rc}）"
+        _emit_activity_update(on_activity, {
+            "tool_name": "hermes_cli",
+            "phase": "status",
+            "title": "Hermes CLI 执行失败",
+            "detail": stderr or err_msg,
+            "status": "failed",
+            "duration_seconds": time.monotonic() - started_at,
+        })
         return HermesInvokeResult(
             success=False,
             stdout=_sanitize_hermes_response(stdout),
@@ -942,6 +1289,14 @@ async def invoke_hermes_cli(
         len(stdout),
         len(stderr),
     )
+    _emit_activity_update(on_activity, {
+        "tool_name": "hermes_cli",
+        "phase": "status",
+        "title": "Hermes CLI 执行完成",
+        "detail": content[:180] if content else "",
+        "status": "completed",
+        "duration_seconds": time.monotonic() - started_at,
+    })
 
     return HermesInvokeResult(
         success=True,
@@ -963,7 +1318,10 @@ def probe_hermes_available() -> bool:
             ["hermes", "--version"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=_PROBE_TIMEOUT,
+            env=_utf8_subprocess_env(),
         )
         if result.returncode != 0:
             logger.warning(
@@ -1035,12 +1393,14 @@ class HermesExecutor(ExecutionStrategy):
         chat_session: Optional["ChatSession"] = None,
         persona_prompt_getter: Optional[Callable[[], str]] = None,
         user_address_getter: Optional[Callable[[], str]] = None,
+        profile_context_getter: Optional[Callable[[], str]] = None,
     ) -> None:
         self._fallback = fallback_to_simulated
         self._sim = SimulatedExecutor()
         self._chat_session = chat_session
         self._persona_prompt_getter = persona_prompt_getter
         self._user_address_getter = user_address_getter
+        self._profile_context_getter = profile_context_getter
 
     def set_chat_session(self, chat_session: Optional["ChatSession"]) -> None:
         """更新后续任务使用的聊天会话引用。"""
@@ -1084,11 +1444,18 @@ class HermesExecutor(ExecutionStrategy):
                 user_address = self._user_address_getter()
             except Exception:
                 logger.debug("读取用户称呼失败", exc_info=True)
+        profile_context = ""
+        if self._profile_context_getter is not None:
+            try:
+                profile_context = self._profile_context_getter()
+            except Exception:
+                logger.debug("读取助手/用户资料失败", exc_info=True)
         description = format_persona_description(
             task.description,
             persona_prompt,
             user_address,
             format_environment_context(),
+            profile_context,
         )
         chat_session = self._chat_session_for_task(task)
         hermes_sid = None
@@ -1107,11 +1474,59 @@ class HermesExecutor(ExecutionStrategy):
                 status=MessageStatus.PROCESSING,
             )
 
+        def on_activity(event: dict[str, Any]) -> None:
+            session_id = str(
+                getattr(task, "chat_session_id", "")
+                or getattr(chat_session, "session_id", "")
+                or ""
+            )
+            activity_payload = {
+                "session_id": session_id,
+                "task_id": task.task_id,
+                "tool_name": str(event.get("tool_name") or ""),
+                "phase": str(event.get("phase") or "activity"),
+                "title": str(event.get("title") or "Hermes 正在处理"),
+                "detail": str(event.get("detail") or ""),
+                "status": str(event.get("status") or "running"),
+                "duration_seconds": event.get("duration_seconds"),
+                "metadata": event.get("metadata")
+                if isinstance(event.get("metadata"), dict)
+                else {},
+            }
+            label = activity_payload["title"] or activity_payload["detail"]
+            try:
+                from apps.core.activity_store import get_activity_store
+
+                stored = get_activity_store().record_event(**activity_payload)
+                if _is_key_activity_event(activity_payload):
+                    label = stored.title or stored.detail
+            except Exception:
+                logger.debug("Hermes 活动事件持久化失败", exc_info=True)
+            if label:
+                task.progress_label = label
+                task.progress_updated_at = datetime.now(timezone.utc)
+                task.updated_at = task.progress_updated_at
+            if chat_session is not None:
+                try:
+                    from apps.core.chat_session import MessageStatus
+
+                    assistant = chat_session.get_assistant_message_for_task(task.task_id)
+                    chat_session.upsert_assistant_message(
+                        task_id=task.task_id,
+                        content=assistant.content if assistant is not None else "",
+                        status=MessageStatus.PROCESSING,
+                        error=assistant.error if assistant is not None else None,
+                        attachments=assistant.attachments if assistant is not None else None,
+                    )
+                except Exception:
+                    logger.debug("Hermes 活动占位消息更新失败", exc_info=True)
+
         started_at = time.monotonic()
         invoke_result = await invoke_hermes_cli(
             description,
             hermes_session_id=hermes_sid,
             on_update=on_update if chat_session is not None else None,
+            on_activity=on_activity,
             image_paths=image_paths,
         )
         elapsed = time.monotonic() - started_at
@@ -1127,12 +1542,10 @@ class HermesExecutor(ExecutionStrategy):
             # 记录 session_id 以便后续 --resume
             if invoke_result.hermes_session_id and chat_session is not None:
                 chat_session.set_hermes_session_id(invoke_result.hermes_session_id)
-            if (
-                invoke_result.hermes_title
-                and chat_session is not None
-                and not is_proactive_chat_session(chat_session.session_id)
-            ):
-                chat_session.set_session_title(invoke_result.hermes_title)
+            _schedule_session_title_refresh(
+                chat_session,
+                assistant_text=invoke_result.output,
+            )
             return invoke_result.output
 
         # 失败：结构化日志 + 结构化异常
@@ -1160,11 +1573,33 @@ class HermesExecutor(ExecutionStrategy):
             from apps.core.chat_store import get_chat_store
 
             session = ChatSession(session_id=session_id)
-            session.attach_store(get_chat_store(), load_existing=True)
+            session.attach_store(
+                get_chat_store(),
+                load_existing=True,
+                fail_active_messages=False,
+            )
             return session
         except Exception:
             logger.debug("无法为任务加载指定聊天会话: %s", session_id, exc_info=True)
             return current
+
+
+def _is_key_activity_event(event: dict[str, Any]) -> bool:
+    """Keep the durable activity log to meaningful task/tool milestones."""
+    phase = str(event.get("phase") or "").strip()
+    status = str(event.get("status") or "").strip()
+    tool_name = str(event.get("tool_name") or "").strip()
+    if phase in {"thinking", "reasoning", "tool_progress"}:
+        return False
+    if status in {"completed", "failed", "error", "cancelled"}:
+        return True
+    if phase in {"task_start", "task_complete", "task_failed", "task_cancelled"}:
+        return True
+    if phase == "subagent":
+        return True
+    if phase in {"tool_start", "tool_complete"}:
+        return bool(tool_name)
+    return False
 
 
 # ── 执行器选择工厂 ────────────────────────────────────────────────────────────
@@ -1182,6 +1617,7 @@ def select_executor(runtime: "HermesRuntime | None" = None) -> ExecutionStrategy
                 chat_session=runtime.chat_session,
                 persona_prompt_getter=lambda: runtime.config.assistant.persona_prompt,
                 user_address_getter=lambda: runtime.config.assistant.user_address,
+                profile_context_getter=lambda: runtime.config.assistant.prompt_profile_context(),
             )
         logger.info(
             "select_executor: Hermes 报告就绪但命令不可用，回退 SimulatedExecutor"

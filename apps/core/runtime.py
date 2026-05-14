@@ -353,6 +353,14 @@ class HermesRuntime:
         self._chat_session = switch_chat_session(session_id)
         self._sync_executor_chat_session(self._chat_session)
 
+    def start_new_session(self) -> str:
+        """创建新的空会话，旧会话对象保持给后台任务继续写回。"""
+        from apps.core.chat_session import reset_chat_session
+
+        self._chat_session = reset_chat_session()
+        self._sync_executor_chat_session(self._chat_session)
+        return self._chat_session.session_id
+
     def _sync_executor_chat_session(self, chat_session: ChatSession) -> None:
         """通过执行器公开接口同步 chat_session。"""
         if self._task_runner is not None:

@@ -1,0 +1,203 @@
+# Hermes Yachiyo UI Rebuild Memory
+
+> This file records the open-design UI reconstruction progress so work can continue from another machine.
+
+## Ground Rules
+
+- Source of truth: `docs/open-design/moxqc2d6-design-reference.html`.
+- Supporting spec: `docs/open-design/moxqc2d6-hermes-yachiyo-codex-spec.md`.
+- Visual assets: `docs/open-design/logo.png`, `docs/open-design/bg-reference.png`.
+- Priority: one-to-one visual, motion, and interaction fidelity to the prototype HTML.
+- Scope: frontend reconstruction only. Do not change backend behavior, Bridge API contracts, model configuration semantics, or desktop mode functionality.
+- Existing functions must keep working. Prefer styling, layout, and wrapper changes over business logic changes.
+
+## Completed Slices
+
+- Open-design shell: dark Electron window background, titlebar, sidebar, moonlight background, particles, shimmer sweep, route shell.
+- Startup loading: opens early while Bridge prepares, uses prototype-style splash, no longer completes early before Bridge is ready.
+- Dashboard: prototype-style KV hero, role copy, status cards, tool cards with status rows, activity list, staggered entry.
+- Bubble mode: prototype-style 320x480 bubble preview, floating bubble, right-side feature pills.
+- Live2D mode: prototype-style 400x500 stage, import placeholder, right-side feature pills.
+- Tweaks panel: accent swatches, particle density, moonlight intensity, animation speed, font size, particle toggle, glow toggle.
+- Toasts: prototype-style temporary notifications for shell actions.
+- Diagnostics: system check grid added and shell overflow fixed.
+- Provider: prototype-style settings sections for provider, TTS, and RTX/GPU optimization while preserving real save/test behavior.
+- Installer: prototype-style four-step horizontal indicator and more prototype-aligned initializer layout while preserving install, setup terminal, backup, config, and workspace actions.
+- Chat page: prototype-style two-column layout, session search/list, chat header, message avatars/bubbles, typing dots, and circular composer controls while preserving existing sessions, send, stop, delete, copy, and image attachment behavior.
+- Resources page: prototype-style header, segmented category tabs, stat cards, resource rows, hover glow, and local tab filtering while preserving existing Live2D/TTS resource data reads and navigation actions.
+- Window sizing fix: chat windows opened from desktop presentation modes now use a main-window-sized layout and existing old small chat windows are expanded before showing, preventing open-design shell compression.
+- Workspace page: prototype-style settings sections for conversation actions, workspace paths, project file rows, hover glow, and backup action while preserving existing workspace/open-path/backup endpoints. Export/import/clear are intentionally status-only placeholders because no safe existing frontend behavior was available for them in this slice.
+- Settings page: prototype-style settings-layout with 720px centered container, four grouped sections (通用/外观与表现态/模型与连接/关于与维护), settings-card/settings-item/settings-toggle hover indicator strip, and unified SpecificModeSettingsView header/card/control style while preserving all existing settings save, backup, update, bridge restart, and uninstall behavior.
+- Settings backup strategy restore: backup_auto_cleanup_enabled toggle and backup_retention_count input restored in the 关于与维护 section, preserving existing 1-100 validation and payload fields.
+- Tools-all page: back link to 主控台, 8 tool cards with 220px min grid, real navigation preserved.
+- Activity-all page: back link to 主控台, activities grouped by 今天/昨天/更早 with activity-day-label, fallback copy when no data.
+- Global QA pre-fix: activity grouping now uses raw timestamp instead of parsing display text; relative times (e.g. "2 分钟前") correctly bucket into "今天"; all new Settings/Tools/Activity styles migrated to --hy-* design tokens; removed unused SettingsSelect component; save buttons now use type="submit" instead of document.querySelector hack.
+- Diagnostics timestamp fix: activity-all diagnostics rows now include raw timestamp field for proper day grouping.
+- CSS scope fix: hover indicator strip and hover background now scoped to `.settings-page .settings-item` to avoid affecting Workspace page.
+- Activity dayKey fix: `dayKey()` now returns computed `todayKey` instead of literal "today" for relative times and missing timestamps.
+- Settings split: GeneralSettingsView split into ReferenceSettingsHome (prototype layout + real data mirror, no savebar) and SystemSettingsView (real functionality at mode=system); MainView backup button navigates to settings?mode=system.
+- Settings real data: ReferenceSettingsHome loads /ui/settings and /ui/hermes/config; connection test calls POST /ui/hermes/connection-test; update check reuses checkAppUpdate() with proper error display.
+- Settings data mapping: hermesConfig uses model.provider, provider_options[] with id/label/api_key_configured, api_key.configured/display; provider select falls back to OpenAI/Anthropic/本地模型 when config fails.
+- Tools-all/Activity-all header fix: removed English eyebrow, back link now outside header div, matches prototype structure.
+- Activity-all visual fix: activity rows now use lightweight activity-item style instead of hy-activity-row card style.
+- Black frame fix (completed by user): 4-point fix chain — main.tsx pre-adds desktop-mode-root/desktop-mode-body + inline transparent; app.css transparent chain for html/body/#root/launcher/canvas; LauncherView.tsx Live2D PIXI transparent flags + canvas fallback; main.ts setBackgroundColor('#00000000'). Verified: git diff --check, npm run build.
+- Black frame hardening (current QA): desktop mode windows now start hidden until ready-to-show, repaint transparent background with rgba alpha, invalidate macOS transparent-window artifacts after load/resize, and Live2D Pixi explicitly clears WebGL with alpha 0 while capping the ticker at 30fps. This is intended to remove persistent black rectangles without changing launcher behavior.
+- Tools-all prototype: card order changed to Bubble/Live2D/GPT/Resources/Workspace/Diagnostics/Provider/Main Console; subtitle changed to "所有可用的桌面工具和交互模式".
+- Activity-all prototype: subtitle changed to "所有系统和交互活动的完整记录".
+- Launcher/chat UX fixes: ordinary desktop-mode clicks no longer pass `session_id` or reload an already-open chat route; `showChatWindow()` reuses the existing main window when it is on a non-chat route by switching the hash in place; existing standalone chat windows are focused without `loadURL` when the target session is unchanged; long chat loads pre-sync assistant render state, wait for message layout height to settle, keep the scroll pinned to the bottom, then release the loading state.
+- Chat wide-window responsive pass: at >=1500px the session column auto-expands from 280px to 360px unless the user has manually dragged it smaller; message rows actively expand across the pane, assistant/system bubbles fill the expanded row, user bubbles align farther right, composer padding expands with the viewport, and inline markdown code can wrap long local paths without forcing chat-level horizontal scroll.
+
+## Current Focus
+
+- Black frame fixed, Tools-all/Activity-all prototype aligned, launcher-to-chat route consolidation is in place, and chat wide-window responsiveness has a first pass. Next: manual QA for desktop-mode clicks from dashboard/chat/bubble/live2d, long-session loading smoothness, and chat layout at normal/wide window sizes.
+
+## Remaining Major Slices
+
+- Global QA: desktop and narrow widths, no white flash, no unwanted horizontal scroll, loading behavior with and without Bridge.
+
+## Global QA Parity Checklist
+
+### Shell / Titlebar / Sidebar
+- [ ] Dark Electron window background matches prototype
+- [ ] Traffic lights (close/minimize/maximize) positioned correctly
+- [ ] Sidebar width 260px, scrolls independently
+- [ ] Sidebar nav items have hover/active states
+- [ ] Moonlight background particles animate correctly
+- [ ] Shimmer sweep animation on load
+
+### Loading
+- [ ] Loading overlay shows early while Bridge prepares
+- [ ] Logo breathes, text pulses, bar fills
+- [ ] Loading hides smoothly when ready
+
+### Dashboard
+- [ ] KV hero section with role copy
+- [ ] 3 status cards in grid
+- [ ] Tool cards with status rows
+- [ ] Activity list with staggered entry
+- [ ] Navigation badges update
+
+### Provider
+- [ ] Settings sections for provider, TTS, RTX/GPU
+- [ ] Real save/test behavior preserved
+
+### Installer
+- [ ] Four-step horizontal indicator
+- [ ] Step status (completed/active/pending)
+- [ ] Install, setup terminal, backup, config actions
+
+### Chat
+- [ ] Two-column layout (sessions + chat)
+- [ ] Session search/list
+- [ ] Message avatars/bubbles
+- [ ] Typing dots animation
+- [ ] Circular composer controls
+
+### Bubble
+- [ ] 320x480 preview
+- [ ] Floating bubble
+- [ ] Right-side feature pills
+
+### Live2D
+- [ ] 400x500 stage
+- [ ] Import placeholder
+- [ ] Right-side feature pills
+
+### Resources
+- [ ] Header with segmented tabs
+- [ ] Stat cards
+- [ ] Resource rows with hover glow
+- [ ] Local tab filtering
+
+### Workspace
+- [ ] Settings sections for conversation, paths, files
+- [ ] Hover glow on items
+- [ ] Backup action works
+
+### Diagnostics
+- [ ] System check grid
+- [ ] Command results display
+
+### Settings
+- [ ] 720px centered container
+- [ ] Four grouped sections
+- [ ] Settings cards with items
+- [ ] Toggle switches work
+- [ ] Save bar with pending count
+- [ ] Hover indicator strip (scoped to settings-page)
+
+### Tools-all
+- [ ] Back link to 主控台
+- [ ] 8 tool cards with 220px min grid
+- [ ] Navigation works
+
+### Activity-all
+- [ ] Back link to 主控台
+- [ ] Activities grouped by 今天/昨天/更早
+- [ ] Day labels display correctly
+- [ ] Fallback copy when no data
+
+### Cross-cutting
+- [ ] No horizontal scroll at 1440x900
+- [ ] No horizontal scroll at 390x844
+- [ ] No white flash on route change
+- [ ] Long text doesn't break layout
+- [ ] Buttons don't overflow
+
+## Verification History
+
+- `npm run build` passes as of the Dashboard/Bubble/Live2D/Tweaks slice. Vite emits only the known large chunk warning.
+- Browser smoke test passed with a temporary mock Bridge for Dashboard, Bubble, Live2D, Tweaks, and loading-ready behavior.
+- `npm run build` passes after the Installer/Provider slice. Vite still emits only the known large chunk warning.
+- Browser smoke test passed with a temporary mock Bridge for Provider settings cards and Installer step/status/config panels.
+- `npm run build` passes after the Chat page slice. Vite still emits only the known large chunk warning.
+- Browser smoke test passed with a temporary mock Bridge for Chat: 3 sessions, 5 messages, search field, composer, send button enabled state, and no console errors.
+- `npm run build` passes after the Resources page slice. Vite still emits only the known large chunk warning.
+- Browser smoke test passed with a temporary mock Bridge for Resources: 5 tabs, 3 stat cards, Live2D tab filters to 2 rows, and no console errors.
+- `npm run build` passes after the presentation-mode chat window sizing fix. Vite still emits only the known large chunk warning.
+- `npm run build` passes after the Workspace page slice. Vite still emits only the known large chunk warning.
+- Browser smoke test passed with a temporary mock Bridge for Workspace: 3 settings sections, 2 cards, 6 file rows, backup action refreshes the latest backup path, and no console errors.
+- `npm run build` passes after the Settings page slice. Vite still emits only the known large chunk warning.
+- `npm run build` passes after the Settings backup restore + tools-all/activity-all slices. Vite still emits only the known large chunk warning.
+- `npm run build` passes after the Global QA pre-fix slice. Vite still emits only the known large chunk warning.
+- `npm run build` passes after the Prototype Parity QA slice. Vite still emits only the known large chunk warning.
+- `npm run build` passes after the Settings final 1:1 slice. Vite still emits only the known large chunk warning.
+- `npm run build` passes after the Settings split slice. Vite still emits only the known large chunk warning.
+- `npm run build` passes after the Settings real data slice. Vite still emits only the known large chunk warning.
+- `npm run build` passes after the Settings data mapping fix slice. Vite still emits only the known large chunk warning.
+- `npm --prefix apps/frontend run build` passes after the launcher/chat UX fix slice. Vite still emits only the known large chunk warning.
+- `npm --prefix apps/frontend run build` passes after the chat wide-window responsive slice. Vite still emits only the known large chunk warning.
+- `npm --prefix apps/frontend run build` passes after the Python capability backfill slice. Vite still emits only the known large chunk warning.
+- `npm --prefix apps/frontend run build` passes after the installer/token consistency and route loading-cache polish slice. Vite still emits only the known large chunk warning.
+- `npm --prefix apps/frontend run build` passes after the Bubble crop + quick tweaks + moonlight resource fix slice. Vite still emits only the known large chunk warning.
+- `npm --prefix apps/frontend run build` passes after the Bubble cache/reload + exact KV moon follow-up. Vite still emits only the known large chunk warning.
+- `npm --prefix apps/frontend run build` passes after the Bubble inset/min-window follow-up. Vite still emits only the known large chunk warning.
+- `npm --prefix apps/frontend run build` passes after the Bubble develop-geometry follow-up. Vite still emits only the known large chunk warning.
+- `npm --prefix apps/frontend run build` passes after the Bubble scrollbar-gutter exclusion follow-up. Vite still emits only the known large chunk warning.
+- `npm --prefix apps/frontend run build` passes after the Provider text/Vision split and preset switching slice. Vite still emits only the known large chunk warning.
+- `npm --prefix apps/frontend run build` passes after the App Update downloading-state polish slice. Vite still emits only the known large chunk warning.
+- `npm --prefix apps/frontend run build` passes after the first frontend slimming slice. The old `MainView` route implementation and unused `phase3-*` CSS were removed, `/ui/...` endpoint coverage was checked before deletion, and heavy pages now build as route chunks instead of one large UI bundle.
+- `npm --prefix apps/frontend run build` passes after the Electron package slimming slice. A macOS dir build with backend resources disabled also passes; `app.asar.unpacked/node_modules` is down to about 444KB and no longer carries Windows `node-pty` prebuilds, `.pdb`, source trees, tests, or sourcemaps.
+- Bubble launcher follow-up identified the current-branch-only crop as the global `scrollbar-gutter: stable` reservation leaking into tiny desktop-mode renderer windows. Desktop mode now resets scrollbar gutters to `auto`, and Bubble CSS is back to the develop-style gold ring/background portrait with unread shadow removed; Electron still clamps Bubble windows to a square 112-192px range with a 112px default.
+
+## Notes For Next Agent
+
+- The branch is intentionally experimental and not ready to merge.
+- Avoid reverting existing dirty files in `docs/open-design`; the new `moxqc2d6-*` files are the active references.
+- Keep updates incremental. After each slice, update this file with completed items, caveats, and validation.
+- Settings page strategy: default `#/settings` is prototype layout + real data mirror (no savebar); real save at `#/settings?mode=system`; provider save at `#/provider`.
+- Default page controls: language/theme/fontSize/animations use local draft state; tray toggle navigates to mode=system; provider select shows real options but changes only local draft; assistant Prompt card now saves through `/assistant/profile`.
+- Real data sources: `/ui/settings` for app.version/tray_enabled; `/assistant/profile` and `PATCH /assistant/profile` for assistant Prompt; `/ui/hermes/config` for text/Vision model config; `/ui/hermes/connection-test` and `/ui/hermes/image-connection-test` for connection tests; `checkAppUpdate()` for update check.
+- Python capability backfill slice added visible entries for assistant Prompt, Vision config/testing, proactive observation settings/testing, runtime status, tasks, assistant intent, local probes, Hermes environment, and real Workspace/backup links. It intentionally does not add fake import/export/clear conversation actions because no Python API exists yet.
+- Installer polish slice moved the installer off the old topbar-heavy surface into the open-design route/header system, removed the production-noisy Hermes environment auto-setup/refresh card, applied project-gradient title treatment to installer/provider headers, added chat readiness loading gated on assistant profile/session/message readiness, cached Bubble/Live2D launcher payloads to prevent default-avatar/placeholder flashes, and keeps the Live2D settings preview mounted after first visit so the model does not reload on every route entry.
+- Chat loading refinement keeps the chat layout mounted during initial readiness loading, uses a fading overlay instead of replacing the whole view, restricts Session switches to in-pane loading, preserves the previous message DOM until replacement data is ready, and waits for a longer stable bottom-scroll window before revealing long histories.
+- Chat avatar/scrollbar polish shares the OpenDesignShell dashboard assistant seed with ChatView so first-start readiness loading can use the configured agent avatar before `/assistant/profile` resolves, and applies stable scrollbar gutters to app/page/chat scroll containers to reduce layout shifts when scrollbars appear.
+- Chat scrollbar follow-up hides page/message scrollbars while initial route loading, chat readiness loading, or Session switch loading is active; `refreshMessages()` now only force-settles to bottom during initial/conversation loads, so routine polling no longer pulls the user back to the newest message while they are reading history.
+- Window/launcher polish sets the main/chat minimum window size to 1250x860, normalizes Bubble desktop-mode bounds to a square using the larger saved dimension, repairs already-open Bubble windows that still have old non-square bounds, keeps Bubble `setShape` at full square bounds to avoid clipping the visible avatar, makes the Bubble launcher content square with `min(100vw, 100vh)`, and hides page/internal scrollbars during route settling so other pages do not flash scrollbars during their entrance/loading phase.
+- Bubble crop + quick tweaks follow-up changes the Bubble portrait rendering from `cover` to `contain` so configured non-square avatars are not visually cut off, fixes the quick tweak accent override order, fixes the inverted glow class, wires moonlight strength/animation/font controls into shell tokens, and adds a visible top-right crescent moon layer matching the open-design moonlight direction.
+- Exact KV moon follow-up removes the accidental hero `corner-frame` pseudo-element conflict and restores the prototype-style `hy-kv-hero::before` 140px subtle moon sphere. The moonlight slider now drives that hero moon's opacity/brightness; theme accent drives active nav, hero washes, gradients, sliders/toggles, and accent borders; particle density controls the count of the drifting `hy-moon-particle` dots, which were enlarged slightly for visibility. Bubble mode now renders the avatar as an actual contained image with viewport padding, and existing Bubble renderer windows are cache-busted/reloaded when reopened.
+- Bubble crop root cause note: do not apply global scrollbar-gutter rules to `desktop-mode-root` / `desktop-mode-body`; the reserved gutter consumes too much of the tiny Bubble window and visually cuts the right side. Keep the develop-style `background-image` portrait path unless the asset pipeline starts producing precomposed circular icons with transparent padding.
+- Provider page now treats text provider and Vision provider as separate first-class sections. Provider switching must apply backend `provider_options` presets immediately (`default_model` / `default_vision_model`, model lists, and `base_url`) instead of keeping stale values from the previously selected provider; text and image connection tests stay in their respective sections.
+- App Update page downloading state is intentionally non-interactive: while downloading, the hero action area shows a stable status pill instead of a disabled primary button with changing percentage text. Keep progress percentages in the download panel, not inside the hero action control.
+- Slimming slice note: before deleting old UI code, compare endpoints used by the old `MainView` with the rest of `apps/frontend/src`; the removed old view had no `/ui/...` endpoint that was absent from the new open-design pages. Route-level lazy loading currently splits Chat, Installer, Diagnostics, ToolCenter, Prompt/Mode settings, GPT-SoVITS/proactive settings, and App Update. `OpenDesignView.tsx` and `LauncherView.tsx` are still the next biggest candidates because Live2D preview reuse keeps launcher/rendering code on the main route path.
+- Package slimming note: keep `apps/frontend/electron-builder.yml` explicit about runtime files. Do not reintroduce `node_modules/**`; macOS only needs the built UI, compiled Electron main/preload, package metadata, and the minimal `node-pty` runtime/native files. Full DMG size will still be dominated by Electron Framework and the packaged Python backend.

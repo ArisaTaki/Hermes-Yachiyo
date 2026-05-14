@@ -144,14 +144,24 @@ class TaskRunner:
 
         try:
             # ① 标记 RUNNING（在 executor.run() 开始前，体现"正在处理"）
-            self._state.update_task_status(task_id, TaskStatus.RUNNING)
+            self._state.update_task_status(task_id, TaskStatus.RUNNING, progress_label="正在启动 Agent")
+            self._sync_task_message(task_id)
+            self._record_task_activity(task_id, "task_start", "Yachiyo 开始处理", "running")
             logger.info("任务开始执行: %s [%s]", task_id, type(self._executor).__name__)
 
             # ② 委托给执行策略（模拟 or Hermes）
             result = await self._executor.run(task)
 
             # ③ 标记 COMPLETED
-            self._state.update_task_status(task_id, TaskStatus.COMPLETED, result=result)
+            self._state.update_task_status(
+                task_id,
+                TaskStatus.COMPLETED,
+                result=result,
+                progress_label="已完成",
+            )
+            self._sync_task_message(task_id)
+            self._finalize_task_activity(task_id, "completed")
+            self._record_task_activity(task_id, "task_complete", "Yachiyo 回复完成", "completed")
             logger.info("任务已完成: %s", task_id)
 
         except asyncio.CancelledError:
@@ -180,6 +190,81 @@ class TaskRunner:
                     task_id,
                     TaskStatus.FAILED,
                     error=error_str,
+                    progress_label="执行失败",
                 )
+                self._sync_task_message(task_id)
+                self._finalize_task_activity(task_id, "failed")
+                self._record_task_activity(task_id, "task_failed", "Yachiyo 回复失败", "failed")
             except Exception:
                 pass
+
+    def _sync_task_message(self, task_id: str) -> None:
+        """将任务状态写回创建它的聊天会话，支持后台会话继续执行。"""
+        task = self._state.get_task(task_id)
+        session_id = str(getattr(task, "chat_session_id", "") or "") if task is not None else ""
+        if task is None or not session_id:
+            return
+        try:
+            from apps.core.chat_session import ChatSession, MessageStatus
+            from apps.core.chat_store import get_chat_store
+
+            session = ChatSession(session_id=session_id)
+            session.attach_store(
+                get_chat_store(),
+                load_existing=True,
+                fail_active_messages=False,
+            )
+            if task.status == TaskStatus.COMPLETED:
+                session.upsert_assistant_message(
+                    task_id=task.task_id,
+                    content=task.result or "[任务已完成，无输出]",
+                    status=MessageStatus.COMPLETED,
+                )
+            elif task.status == TaskStatus.FAILED:
+                error = task.error or "任务执行失败"
+                session.upsert_assistant_message(
+                    task_id=task.task_id,
+                    content=f"❌ {error}",
+                    status=MessageStatus.FAILED,
+                    error=error,
+                )
+            elif task.status == TaskStatus.RUNNING:
+                assistant = session.get_assistant_message_for_task(task.task_id)
+                session.upsert_assistant_message(
+                    task_id=task.task_id,
+                    content=assistant.content if assistant is not None else "",
+                    status=MessageStatus.PROCESSING,
+                    error=assistant.error if assistant is not None else None,
+                    attachments=assistant.attachments if assistant is not None else None,
+                )
+        except Exception:
+            logger.debug("同步任务消息失败: %s", task_id, exc_info=True)
+
+    def _finalize_task_activity(self, task_id: str, status: str) -> None:
+        """Mark in-flight activity rows terminal once the owning task finishes."""
+        try:
+            from apps.core.activity_store import get_activity_store
+
+            get_activity_store().finalize_task_events(task_id, status=status)
+        except Exception:
+            logger.debug("收尾任务活动事件失败: %s", task_id, exc_info=True)
+
+    def _record_task_activity(self, task_id: str, phase: str, title: str, status: str) -> None:
+        """Record a compact milestone for dashboard activity."""
+        task = self._state.get_task(task_id)
+        if task is None:
+            return
+        try:
+            from apps.core.activity_store import get_activity_store
+
+            get_activity_store().record_event(
+                session_id=str(getattr(task, "chat_session_id", "") or ""),
+                task_id=task_id,
+                tool_name="hermes",
+                phase=phase,
+                title=title,
+                detail=str(getattr(task, "description", "") or ""),
+                status=status,
+            )
+        except Exception:
+            logger.debug("记录任务活动节点失败: %s", task_id, exc_info=True)

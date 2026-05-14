@@ -5,9 +5,11 @@ import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
+from apps.core.activity_store import ActivityStore
 from apps.core.chat_session import ChatMessage, ChatSession, MessageRole, MessageStatus
-from apps.core.chat_store import ChatStore
+from apps.core.chat_store import ChatStore, StoredMessage
 import apps.core.chat_store as _store_mod
 from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID
 from apps.core.state import AppState
@@ -30,7 +32,16 @@ class _RuntimeStub:
 
     def switch_session(self, session_id: str) -> None:
         self.chat_session = ChatSession(session_id=session_id)
-        self.chat_session.attach_store(self.store, load_existing=True)
+        self.chat_session.attach_store(
+            self.store,
+            load_existing=True,
+            fail_active_messages=False,
+        )
+
+    def start_new_session(self) -> str:
+        self.chat_session = ChatSession()
+        self.chat_session.attach_store(self.store, load_existing=False)
+        return self.chat_session.session_id
 
 
 def _make_api(tmp_path):
@@ -44,12 +55,13 @@ def _chat_message(
     role: MessageRole,
     content: str = "",
     task_id: str | None = None,
+    status: MessageStatus = MessageStatus.COMPLETED,
 ) -> ChatMessage:
     return ChatMessage(
         message_id=message_id,
         role=role,
         content=content,
-        status=MessageStatus.COMPLETED,
+        status=status,
         created_at=datetime.now(timezone.utc),
         task_id=task_id,
     )
@@ -76,6 +88,161 @@ def test_send_message_creates_task_and_links_user_message(tmp_path):
         store.close()
 
 
+def test_get_messages_and_sessions_include_activity_events(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
+    try:
+        result = api.send_message("跑一下脚本")
+        task_id = result["task_id"]
+        activity_store.record_event(
+            session_id=runtime.chat_session.session_id,
+            task_id=task_id,
+            tool_name="terminal",
+            phase="tool_start",
+            title="正在运行脚本",
+            detail="python build.py",
+            status="running",
+        )
+        runtime.chat_session.upsert_assistant_message(
+            task_id=task_id,
+            content="",
+            status=MessageStatus.PROCESSING,
+        )
+
+        messages = api.get_messages()["messages"]
+        user = messages[0]
+        assistant = messages[1]
+        assert user["progress_label"] == ""
+        assert user["activity_events"] == []
+        assert assistant["activity_events"][0]["title"] == "正在运行脚本"
+
+        sessions = api.list_sessions()["sessions"]
+        current = next(item for item in sessions if item["session_id"] == runtime.chat_session.session_id)
+        assert current["is_processing"] is True
+        assert current["latest_activity"]["tool_name"] == "terminal"
+        assert current["latest_activity"]["title"] == "正在运行脚本"
+        assert current["latest_message_preview"] == "跑一下脚本"
+        assert current["latest_message_status"] == "processing"
+    finally:
+        activity_store.close()
+        store.close()
+
+
+def test_get_messages_hides_internal_reasoning_activity(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    try:
+        result = api.send_message("普通回复")
+        task_id = result["task_id"]
+        runtime.state.update_task_progress(task_id, "Hermes 正在推理")
+        activity_store.record_event(
+            session_id=runtime.chat_session.session_id,
+            task_id=task_id,
+            tool_name="",
+            phase="reasoning",
+            title="Hermes 正在推理",
+            detail="内部思考片段",
+            status="running",
+        )
+        activity_store.record_event(
+            session_id=runtime.chat_session.session_id,
+            task_id=task_id,
+            tool_name="hermes",
+            phase="task_start",
+            title="Yachiyo 开始处理",
+            detail="普通回复",
+            status="running",
+        )
+        runtime.chat_session.upsert_assistant_message(
+            task_id=task_id,
+            content="",
+            status=MessageStatus.PROCESSING,
+        )
+
+        assistant = api.get_messages()["messages"][1]
+
+        assert assistant["activity_events"] == []
+        assert assistant["progress_label"] == ""
+    finally:
+        activity_store.close()
+        store.close()
+
+
+def test_list_sessions_ignores_stale_stored_processing_without_live_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
+    try:
+        session_id = runtime.chat_session.session_id
+        runtime.chat_session.add_user_message("已经完成的问题")
+        runtime.chat_session.upsert_assistant_message(
+            task_id="stale-task",
+            content="旧的处理中占位",
+            status=MessageStatus.PROCESSING,
+        )
+
+        sessions = api.list_sessions()["sessions"]
+        current = next(item for item in sessions if item["session_id"] == session_id)
+
+        assert current["is_processing"] is False
+        assert current["latest_message_preview"] == "已经完成的问题"
+        assert current["latest_message_status"] == "processing"
+    finally:
+        store.close()
+
+
+def test_session_title_ignores_prompt_echo_stored_title():
+    messages = [
+        SimpleNamespace(role=MessageRole.USER.value, content="测试1"),
+        SimpleNamespace(role=MessageRole.ASSISTANT.value, content="收到"),
+    ]
+
+    assert ChatAPI._session_title("首先，用户要求为这段持续对话生成一个会话列表标题。", messages) == "测试1"
+
+
+def test_list_sessions_search_includes_message_match(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
+    try:
+        session_id = runtime.chat_session.session_id
+        runtime.chat_session.add_user_message("这里有聊天搜索关键词")
+
+        sessions = api.list_sessions(query="聊天")["sessions"]
+
+        assert len(sessions) == 1
+        assert sessions[0]["session_id"] == session_id
+        assert sessions[0]["search_match"]["message_id"]
+        assert "聊天" in sessions[0]["search_match"]["snippet"]
+    finally:
+        store.close()
+
+
+def test_get_messages_can_load_around_search_anchor(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
+    try:
+        session_id = runtime.chat_session.session_id
+        for index in range(6):
+            store.save_message(StoredMessage(
+                message_id=f"m{index}",
+                session_id=session_id,
+                role="user",
+                content=f"消息 {index}",
+                status="completed",
+                task_id=None,
+                error=None,
+                created_at=f"2026-01-01T00:00:0{index}+00:00",
+            ))
+
+        messages = api.get_messages(limit=3, anchor_message_id="m3")["messages"]
+
+        assert "m3" in [message["id"] for message in messages]
+    finally:
+        store.close()
+
+
 def test_sort_messages_keeps_assistant_only_task_in_timeline():
     proactive = _chat_message("proactive", MessageRole.ASSISTANT, "主动提醒", task_id="tp")
     user = _chat_message("user", MessageRole.USER, "收到", task_id="tu")
@@ -88,6 +255,22 @@ def test_sort_messages_keeps_assistant_only_task_in_timeline():
         "user",
         "assistant",
     ]
+
+
+def test_sort_messages_dedupes_repeated_assistant_for_same_user_task():
+    user = _chat_message("user", MessageRole.USER, "早上好", task_id="t1")
+    completed = _chat_message("assistant-done", MessageRole.ASSISTANT, "早上好呀", task_id="t1")
+    stale_processing = _chat_message(
+        "assistant-stale",
+        MessageRole.ASSISTANT,
+        "早上好呀",
+        task_id="t1",
+        status=MessageStatus.PROCESSING,
+    )
+
+    sorted_messages = ChatAPI._sort_messages_by_task([user, completed, stale_processing])
+
+    assert [message.message_id for message in sorted_messages] == ["user", "assistant-done"]
 
 
 def test_send_message_accepts_pasted_image_attachment(tmp_path, monkeypatch):
@@ -178,7 +361,7 @@ def test_user_requested_desktop_snapshot_attaches_in_normal_chat(tmp_path, monke
         store.close()
 
 
-def test_user_implicit_current_activity_request_attaches_desktop_snapshot(tmp_path, monkeypatch):
+def test_user_implicit_current_activity_request_does_not_attach_desktop_snapshot(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
     captures = []
 
@@ -193,12 +376,62 @@ def test_user_implicit_current_activity_request_attaches_desktop_snapshot(tmp_pa
         result = api.send_message("你能看看我现在在做什么不")
 
         assert result["ok"] is True
-        assert len(captures) == 1
-        assert result["attachments"][0]["source"] == "user_requested_desktop_snapshot"
+        assert captures == []
+        assert result["attachments"] == []
         task = runtime.state.get_task(result["task_id"])
         assert task is not None
-        assert task.attachments[0]["source"] == "user_requested_desktop_snapshot"
-        assert "附加当前桌面截图" in task.description
+        assert task.attachments == []
+        assert task.description == "你能看看我现在在做什么不"
+    finally:
+        store.close()
+
+
+def test_design_feedback_with_plain_screen_word_does_not_attach_desktop_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        chat_api_mod,
+        "capture_screenshot_to_file",
+        lambda _target_path: (_ for _ in ()).throw(AssertionError("should not capture")),
+    )
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        text = (
+            '我看了一下当前桌面，class="plan-dropdown-item" 的显示有问题，'
+            "plan 的名字的显示区域被挤压到显示不出来文字，需要修改成能够显示每个 plan 的名字。\n\n"
+            "除功能以外，设计风格想要麻烦再出一版新的设计看一下。要求：\n"
+            "1. 仅对画面元素和 UI 进行调整，保持现有功能 100% 不变。\n"
+            "2. 风格修改为多巴胺风格，通过高饱和度、鲜艳明亮的色彩搭配以营造愉悦、快乐情绪和氛围的风格\n"
+            "3. 请不要覆盖原文件，生成一个新的 html 文件"
+        )
+
+        result = api.send_message(text)
+
+        assert result["ok"] is True
+        assert result["attachments"] == []
+        task = runtime.state.get_task(result["task_id"])
+        assert task is not None
+        assert task.attachments == []
+        assert task.description == text.strip()
+    finally:
+        store.close()
+
+
+def test_explicit_agent_desktop_request_still_attaches_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    captures = []
+
+    def fake_capture(target_path: Path):
+        captures.append(target_path)
+        target_path.write_bytes(b"fake-explicit-screen-png")
+        return {"width": 1920, "height": 1080, "size": target_path.stat().st_size}
+
+    monkeypatch.setattr(chat_api_mod, "capture_screenshot_to_file", fake_capture)
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        result = api.send_message("请你看一下当前桌面，帮我判断窗口里有什么问题")
+
+        assert result["ok"] is True
+        assert len(captures) == 1
+        assert result["attachments"][0]["source"] == "user_requested_desktop_snapshot"
     finally:
         store.close()
 
@@ -355,36 +588,46 @@ def test_cancelled_task_marks_user_failed_and_adds_cancel_reply(tmp_path):
         store.close()
 
 
-def test_clear_session_cancels_active_task_and_persists_cancel(tmp_path):
+def test_clear_session_starts_new_session_and_preserves_active_task(tmp_path):
     api, runtime, store = _make_api(tmp_path)
     try:
         result = api.send_message("清空前仍在执行")
         task_id = result["task_id"]
         old_session_id = runtime.chat_session.session_id
         runtime.state.update_task_status(task_id, TaskStatus.RUNNING)
+        old_session_object = runtime.chat_session
 
         cleared = api.clear_session()
 
         assert cleared["ok"] is True
-        assert cleared["cancelled_tasks"] == 1
+        assert cleared["cancelled_tasks"] == 0
         assert cleared["session_id"] != old_session_id
-        assert runtime.state.get_task(task_id).status == TaskStatus.CANCELLED
-        assert runtime.cancelled_runner_tasks == [task_id]
+        assert runtime.state.get_task(task_id).status == TaskStatus.RUNNING
+        assert runtime.cancelled_runner_tasks == []
+        assert runtime.chat_session is not old_session_object
+        assert old_session_object.session_id == old_session_id
         assert api.get_messages()["messages"] == []
 
         old_messages = store.load_messages(old_session_id)
         assert len(old_messages) == 2
-        assert old_messages[0].status == "failed"
-        assert old_messages[0].error == "任务已取消"
+        assert old_messages[0].status == "processing"
+        assert old_messages[0].error is None
         assert old_messages[1].role == "assistant"
-        assert old_messages[1].status == "failed"
-        assert old_messages[1].error == "任务已取消"
+        assert old_messages[1].status == "processing"
+        assert old_messages[1].error is None
+
+        old_session_object.upsert_assistant_message(task_id, "旧任务完成", MessageStatus.COMPLETED)
+        old_messages = store.load_messages(old_session_id)
+        assert old_messages[1].content == "旧任务完成"
+        assert old_messages[1].status == "completed"
     finally:
         store.close()
 
 
-def test_delete_current_session_removes_session_and_cancels_active_task(tmp_path):
+def test_delete_current_session_removes_session_and_cancels_active_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
     original_get_store = _store_mod.get_chat_store
     _store_mod.get_chat_store = lambda: store
     try:
@@ -406,8 +649,59 @@ def test_delete_current_session_removes_session_and_cancels_active_task(tmp_path
         assert store.get_session(old_session_id) is None
         assert store.load_messages(old_session_id) == []
         assert api.get_messages()["messages"] == []
+        events = activity_store.list_events(task_id=task_id, limit=5, key_only=False)
+        cancel_events = [event for event in events if event.phase == "task_cancelled"]
+        assert len(cancel_events) == 1
+        assert cancel_events[0].detail == "删除会话前取消仍在执行的任务"
+        assert "删除前仍在执行" not in cancel_events[0].detail
     finally:
         _store_mod.get_chat_store = original_get_store
+        activity_store.close()
+        store.close()
+
+
+def test_cancel_current_tasks_records_neutral_activity_detail(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    try:
+        result = api.send_message("删除这张图")
+        task_id = result["task_id"]
+        runtime.state.update_task_status(task_id, TaskStatus.RUNNING)
+
+        cancelled = api.cancel_current_tasks()
+
+        assert cancelled["ok"] is True
+        assert cancelled["cancelled_tasks"] == 1
+        events = activity_store.list_events(task_id=task_id, limit=5, key_only=False)
+        cancel_events = [event for event in events if event.phase == "task_cancelled"]
+        assert len(cancel_events) == 1
+        assert cancel_events[0].detail == "用户停止生成"
+        assert "删除这张图" not in cancel_events[0].detail
+    finally:
+        activity_store.close()
+        store.close()
+
+
+def test_cancel_current_tasks_does_not_log_already_cancelled_stale_message(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(api, "_sync_task_status_to_messages", lambda: None)
+    try:
+        result = api.send_message("已经取消但消息状态还没刷新")
+        task_id = result["task_id"]
+        runtime.state.cancel_task(task_id)
+
+        cancelled = api.cancel_current_tasks()
+
+        assert cancelled["ok"] is True
+        assert cancelled["cancelled_tasks"] == 0
+        events = activity_store.list_events(task_id=task_id, limit=5, key_only=False)
+        assert [event for event in events if event.phase == "task_cancelled"] == []
+        assert runtime.cancelled_runner_tasks == []
+    finally:
+        activity_store.close()
         store.close()
 
 

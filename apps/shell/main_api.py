@@ -31,8 +31,10 @@ import apps.shell.config as shell_config
 from apps.installer.hermes_check import locate_hermes_binary
 from apps.installer.hermes_check import parse_hermes_doctor_output
 from apps.installer.workspace_init import get_workspace_status
+from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri
 from apps.shell.chat_api import ChatAPI
 from apps.shell.chat_bridge import ChatBridge
+from apps.shell.activity_api import list_activity_events
 from apps.shell.config import ModelSummary
 from apps.shell.effect_policy import build_effects_summary
 from apps.shell.hermes_capabilities import (
@@ -1945,6 +1947,38 @@ def _toolset_delta(before: list[dict[str, Any]], after: list[dict[str, Any]]) ->
     }
 
 
+def _avatar_data_uri(path_value: str, *, fallback: bool = True) -> str:
+    raw_path = str(path_value or "").strip()
+    if not raw_path and not fallback:
+        return ""
+    avatar_path = Path(raw_path or str(DEFAULT_BUBBLE_AVATAR_PATH)).expanduser()
+    if not avatar_path.exists():
+        if not fallback:
+            return ""
+        avatar_path = DEFAULT_BUBBLE_AVATAR_PATH
+    try:
+        return data_uri(avatar_path)
+    except Exception:
+        return data_uri(DEFAULT_BUBBLE_AVATAR_PATH) if fallback else ""
+
+
+def _assistant_settings_payload(config: "AppConfig") -> dict[str, Any]:
+    assistant = config.assistant
+    return {
+        "agent_name": assistant.agent_name,
+        "agent_nickname": assistant.agent_nickname,
+        "agent_avatar_path": assistant.agent_avatar_path,
+        "agent_avatar_url": _avatar_data_uri(assistant.agent_avatar_path, fallback=True),
+        "persona_prompt": assistant.persona_prompt,
+        "user_address": assistant.user_address,
+        "user_name": assistant.user_name,
+        "user_avatar_path": assistant.user_avatar_path,
+        "user_avatar_url": _avatar_data_uri(assistant.user_avatar_path, fallback=False),
+        "user_profile": assistant.user_profile,
+        "user_preferences": assistant.user_preferences,
+    }
+
+
 class MainWindowAPI:
     """Control Center 主控台 API。"""
 
@@ -2013,10 +2047,16 @@ class MainWindowAPI:
                     "current": effective_display_mode(self._config),
                     "items": list_mode_options(),
                 },
+                "assistant": {
+                    "agent_name": self._config.assistant.agent_name,
+                    "agent_nickname": self._config.assistant.agent_nickname,
+                    "agent_avatar_url": _avatar_data_uri(self._config.assistant.agent_avatar_path, fallback=True),
+                },
                 "chat": self._chat_bridge.get_conversation_overview(
                     summary_count=self._config.window_mode.recent_messages_limit,
                     session_limit=self._config.window_mode.recent_sessions_limit,
                 ),
+                "activities": list_activity_events(limit=8).get("events", []),
             }
         except Exception as e:
             logger.error("获取仪表盘数据失败: %s", e)
@@ -2055,10 +2095,7 @@ class MainWindowAPI:
                     **build_display_settings(self._config),
                 },
                 "mode_settings": serialize_mode_settings(self._config),
-                "assistant": {
-                    "persona_prompt": self._config.assistant.persona_prompt,
-                    "user_address": self._config.assistant.user_address,
-                },
+                "assistant": _assistant_settings_payload(self._config),
                 "tts": {
                     "enabled": self._config.tts.enabled,
                     "provider": self._config.tts.provider,
@@ -2151,10 +2188,7 @@ class MainWindowAPI:
         return {
             "display_mode": effective_display_mode(self._config),
             "mode_settings": serialize_mode_settings(self._config),
-            "assistant": {
-                "persona_prompt": self._config.assistant.persona_prompt,
-                "user_address": self._config.assistant.user_address,
-            },
+            "assistant": _assistant_settings_payload(self._config),
             "tts": {
                 "enabled": self._config.tts.enabled,
                 "provider": self._config.tts.provider,
@@ -2475,7 +2509,16 @@ class MainWindowAPI:
         elapsed = round(time.monotonic() - started_at, 2)
         stdout = _compact_command_output(result.stdout)
         stderr = _compact_command_output(result.stderr)
-        if result.returncode == 0 and stdout:
+        combined_output = f"{stdout}\n{stderr}".lower()
+        output_error_indicators = [
+            "429", "rate_limit", "too many requests",
+            "500", "502", "503", "504",
+            "error:", "apierror", "httperror",
+            "connectionerror", "timeouterror",
+        ]
+        has_output_error = any(indicator in combined_output for indicator in output_error_indicators)
+
+        if result.returncode == 0 and stdout and not has_output_error:
             payload = {
                 "ok": True,
                 "success": True,

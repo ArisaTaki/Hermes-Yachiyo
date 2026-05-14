@@ -52,16 +52,23 @@ class LauncherNotificationTracker:
 
     def __init__(self) -> None:
         self._initialized = False
+        self._session_id = ""
         self._last_seen_marker = ""
         self._unread_marker = ""
 
     def update(self, chat: dict[str, Any], *, external_attention: bool = False) -> dict[str, Any]:
         latest = latest_notifiable_message(chat)
         marker = str((latest or {}).get("marker") or "")
+        session_id = str(chat.get("session_id") or "")
 
         if not self._initialized:
             self._initialized = True
+            self._session_id = session_id
             self._last_seen_marker = marker
+        elif session_id and session_id != self._session_id:
+            self._session_id = session_id
+            self._last_seen_marker = marker
+            self._unread_marker = ""
         elif marker and marker != self._last_seen_marker:
             self._unread_marker = marker
 
@@ -84,6 +91,9 @@ class LauncherNotificationTracker:
     def acknowledge(self, chat: dict[str, Any] | None = None) -> None:
         latest = latest_notifiable_message(chat or {}) if chat is not None else None
         marker = str((latest or {}).get("marker") or self._unread_marker or "")
+        session_id = str((chat or {}).get("session_id") or "")
+        if session_id:
+            self._session_id = session_id
         if marker:
             self._last_seen_marker = marker
         self._unread_marker = ""

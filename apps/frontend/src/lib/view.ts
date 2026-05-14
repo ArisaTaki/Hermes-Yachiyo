@@ -1,9 +1,32 @@
-export type AppView = 'main' | 'chat' | 'settings' | 'installer' | 'diagnostics' | 'tools' | 'proactive-tts' | 'bubble' | 'bubble-menu' | 'live2d';
+export type AppView =
+  | 'main'
+  | 'chat'
+  | 'settings'
+  | 'installer'
+  | 'provider'
+  | 'resources'
+  | 'workspace'
+  | 'diagnostics'
+  | 'tools'
+  | 'tools-all'
+  | 'activity-all'
+  | 'activity-detail'
+  | 'app-update'
+  | 'proactive-tts'
+  | 'bubble'
+  | 'bubble-menu'
+  | 'live2d';
 
 type RouteState = {
   view: AppView;
   params: Record<string, string>;
 };
+
+declare global {
+  interface Window {
+    hermesRouteLeaveGuard?: (nextView: AppView) => boolean;
+  }
+}
 
 export const ROUTE_CHANGE_EVENT = 'hermes-route-change';
 
@@ -32,6 +55,7 @@ export function navigateTo(
   extraParams: Record<string, string> = {},
   removeParams: string[] = [],
 ) {
+  if (window.hermesRouteLeaveGuard && !window.hermesRouteLeaveGuard(view)) return;
   const current = currentRoute().params;
   const nextParams = { ...current };
   removeParams.forEach((name) => delete nextParams[name]);
@@ -49,11 +73,30 @@ export function routePath(view: AppView, params: Record<string, string> = {}): s
   if (view === 'main') return '#/';
   if (view === 'settings' && params.mode) return `#/settings/${encodeURIComponent(params.mode)}`;
   if (view === 'tools' && params.tool) return `#/tools/${encodeURIComponent(params.tool)}`;
+  if (view === 'activity-detail' && params.event_id) return `#/activity-detail/${encodeURIComponent(params.event_id)}`;
   return `#/${encodeURIComponent(view)}`;
 }
 
 function isAppView(value: string): value is AppView {
-  return ['main', 'chat', 'settings', 'installer', 'diagnostics', 'tools', 'proactive-tts', 'bubble', 'bubble-menu', 'live2d'].includes(value);
+  return [
+    'main',
+    'chat',
+    'settings',
+    'installer',
+    'provider',
+    'resources',
+    'workspace',
+    'diagnostics',
+    'tools',
+    'tools-all',
+    'activity-all',
+    'activity-detail',
+    'app-update',
+    'proactive-tts',
+    'bubble',
+    'bubble-menu',
+    'live2d',
+  ].includes(value);
 }
 
 function routeFromHash(hash: string): RouteState | null {
@@ -64,5 +107,6 @@ function routeFromHash(hash: string): RouteState | null {
   if (!isAppView(rawView)) return { view: 'main', params: {} };
   if (rawView === 'settings' && rawMode) return { view: 'settings', params: { mode: rawMode } };
   if (rawView === 'tools' && rawMode) return { view: 'tools', params: { tool: rawMode } };
+  if (rawView === 'activity-detail' && rawMode) return { view: 'activity-detail', params: { event_id: rawMode } };
   return { view: rawView, params: {} };
 }

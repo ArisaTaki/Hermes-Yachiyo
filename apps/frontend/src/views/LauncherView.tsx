@@ -1,90 +1,31 @@
 import { CSSProperties, FormEvent, KeyboardEvent, MouseEvent, PointerEvent, useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 
-import { apiGet, apiPost, bridgeUrl, getLauncherPointerState, moveLauncherWindow, openAppView, openLauncherMenu, setLauncherHitRegions, setLauncherPointerInteractive, type LauncherHitRegionRect } from '../lib/bridge';
+import logoUrl from '../../../../docs/open-design/logo.png';
+import { apiGet, apiPost, getLauncherPointerState, moveLauncherWindow, openAppView, openLauncherMenu, setLauncherHitRegions, setLauncherPointerInteractive, type LauncherHitRegionRect } from '../lib/bridge';
 import type { AppView } from '../lib/view';
-
-type LauncherPayload = {
-  ok?: boolean;
-  mode?: 'bubble' | 'live2d';
-  chat?: {
-    is_processing?: boolean;
-    empty?: boolean;
-    status_label?: string;
-    latest_reply?: string;
-    latest_reply_full?: string;
-  };
-  notification?: {
-    has_unread?: boolean;
-    latest_message?: { status?: string; content?: string };
-  };
-  tts?: {
-    enabled?: boolean;
-    provider?: string;
-    ok?: boolean;
-    message?: string;
-    error?: string;
-  };
-  proactive?: {
-    enabled?: boolean;
-    has_attention?: boolean;
-    session_id?: string;
-    message?: string;
-    result?: string;
-    attention_text?: string;
-    attention_source?: string;
-    error?: string;
-  };
-  launcher?: {
-    has_attention?: boolean;
-    latest_status?: string;
-    status_label?: string;
-    latest_reply?: string;
-    latest_reply_full?: string;
-    avatar_url?: string;
-    default_display?: string;
-    expand_trigger?: string;
-    show_unread_dot?: boolean;
-    auto_hide?: boolean;
-    opacity?: number;
-    suppress_status_dot?: boolean;
-    show_reply_bubble?: boolean;
-    enable_quick_input?: boolean;
-    click_action?: string;
-    default_open_behavior?: string;
-    position_anchor?: string;
-    preview_url?: string;
-    scale?: number;
-    mouse_follow_enabled?: boolean;
-    renderer?: {
-      enabled?: boolean;
-      model_url?: string;
-      reason?: string;
-      idle_motion_group?: string;
-      enable_expressions?: boolean;
-      enable_physics?: boolean;
-      expression_mappings?: Record<string, string>;
-      expression_keywords?: Record<string, string>;
-      expressions?: Array<{ name?: string; file?: string }>;
-      motion_groups?: Record<string, Array<Record<string, unknown>>>;
-    };
-    resource?: {
-      available?: boolean;
-      state?: string;
-      display_name?: string;
-      status_label?: string;
-      help_text?: string;
-      renderer_entry?: string;
-    };
-  };
-};
+import {
+  LIVE2D_DEFAULT_RENDER_FPS,
+  destroyLive2DRenderer,
+  ensureLive2DRenderer,
+  live2DPreviewModelIsWarm,
+  live2dObjectPosition,
+  live2dRenderSettings,
+  live2dTransformOrigin,
+  markLive2DPreviewModelWarm,
+  normalizeLive2DPositionAnchor,
+  type Live2DRenderSettings,
+  type Live2DRendererState,
+} from './Live2DPreviewStage';
+import type { LauncherPayload } from './launcherTypes';
 
 const ACTIVE_POLL_INTERVAL_MS = 1200;
 const IDLE_POLL_INTERVAL_MS = 5000;
 const CLICK_DRAG_THRESHOLD_PX = 6;
 const LIVE2D_POINTER_PASSTHROUGH_ENABLED = true;
-const LIVE2D_GLOBAL_POINTER_POLL_MS = 40;
+const LIVE2D_GLOBAL_POINTER_POLL_MS = 120;
 const LIVE2D_MOUSE_FOLLOW_SMOOTH_MS = 86;
 const LIVE2D_MOUSE_FOLLOW_DEADZONE_PX = 0.65;
+const LIVE2D_POINTER_FOCUS_MOVE_PX = 2.5;
 const LIVE2D_SHAPE_PADDING_PX = 1;
 const LIVE2D_MAX_SHAPE_RECTS = 6000;
 const LIVE2D_SHAPE_MAX_COLS = 88;
@@ -102,27 +43,19 @@ type PointerLike = {
   stopPropagation: () => void;
 };
 
+type Live2DShapeLimits = {
+  maxRects: number;
+  maxCols: number;
+  maxRows: number;
+  ellipseSlices: number;
+};
+
 type LauncherDragState = {
   dragging: boolean;
   lastX: number;
   lastY: number;
   startX: number;
   startY: number;
-};
-
-type Live2DGlobalWindow = typeof window & {
-  PIXI?: any;
-  Live2DCubismCore?: unknown;
-  Live2DModel?: any;
-  process?: { env?: Record<string, string> };
-};
-
-type Live2DRendererState = {
-  app?: any;
-  model?: any;
-  modelKey?: string;
-  modelUrl?: string;
-  loadToken: number;
 };
 
 type Live2DFocusState = {
@@ -132,19 +65,6 @@ type Live2DFocusState = {
   lastFrameAt: number;
   targetX: number;
   targetY: number;
-};
-
-type Live2DRuntimeScript = {
-  id: string;
-  source?: string;
-  url: string;
-};
-
-type Live2DRuntimePayload = {
-  ok?: boolean;
-  ready?: boolean;
-  error?: string;
-  scripts?: Live2DRuntimeScript[];
 };
 
 type Live2DHitRegion = {
@@ -158,21 +78,30 @@ type Live2DHitRegion = {
   mask?: string;
 };
 
-const LIVE2D_RUNTIME_CDN_SCRIPTS: Live2DRuntimeScript[] = [
-  { id: 'pixi_js', source: 'cdn', url: 'https://cdn.jsdelivr.net/npm/pixi.js@6/dist/browser/pixi.min.js' },
-  { id: 'live2d_cubism_core', source: 'cdn', url: 'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js' },
-  { id: 'pixi_live2d_display', source: 'cdn', url: 'https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.5.0-beta/dist/cubism4.min.js' },
-];
-
-let live2dRuntimePromise: Promise<void> | null = null;
+type Live2DPointerPollingState = {
+  inside: boolean | null;
+  interactive: boolean | null;
+  x: number;
+  y: number;
+};
 
 export function LauncherView({ view }: { view: AppView }) {
   const mode = view === 'live2d' ? 'live2d' : 'bubble';
   const launcher = useLauncher(mode);
 
   useEffect(() => {
+    document.documentElement.classList.add('desktop-mode-root');
     document.body.classList.add('desktop-mode-body');
-    return () => document.body.classList.remove('desktop-mode-body');
+    const previousHtmlBackground = document.documentElement.style.background;
+    const previousBodyBackground = document.body.style.background;
+    document.documentElement.style.background = 'transparent';
+    document.body.style.background = 'transparent';
+    return () => {
+      document.documentElement.classList.remove('desktop-mode-root');
+      document.body.classList.remove('desktop-mode-body');
+      document.documentElement.style.background = previousHtmlBackground;
+      document.body.style.background = previousBodyBackground;
+    };
   }, []);
 
   if (mode === 'live2d') return <Live2DLauncher data={launcher.data} refresh={launcher.refresh} />;
@@ -204,13 +133,29 @@ function useLauncher(mode: 'bubble' | 'live2d') {
   return { data, refresh };
 }
 
-async function acknowledgeAndOpenChat(mode: 'bubble' | 'live2d') {
-  let sessionId = '';
+async function acknowledgeAndOpenChat(mode: 'bubble' | 'live2d', data: LauncherPayload | null) {
+  let sessionId = data?.proactive?.has_attention ? '' : String(data?.chat?.session_id || '');
   try {
     const result = await apiPost<{ session_id?: string }>('/ui/launcher/ack', { mode });
-    sessionId = result.session_id || '';
+    sessionId = data?.proactive?.has_attention
+      ? result.session_id || ''
+      : String(data?.chat?.session_id || result.session_id || sessionId);
   } catch {}
-  await openAppView('chat', sessionId ? { session_id: sessionId } : {});
+  const params: Record<string, string> | undefined =
+    data?.proactive?.has_attention && sessionId ? { session_id: sessionId } : undefined;
+  await openAppView('chat', params);
+}
+
+async function openLauncherPrimaryTarget(mode: 'bubble' | 'live2d', data: LauncherPayload | null) {
+  if (shouldOpenChatFromLauncher(data)) {
+    await acknowledgeAndOpenChat(mode, data);
+    return;
+  }
+  await openAppView('main', { restore: 'last' });
+}
+
+function shouldOpenChatFromLauncher(data: LauncherPayload | null) {
+  return Boolean(data?.proactive?.has_attention || data?.notification?.has_unread);
 }
 
 function openSettings(mode: 'bubble' | 'live2d') {
@@ -225,8 +170,16 @@ function handleContextMenu(event: MouseEvent, mode: 'bubble' | 'live2d') {
 function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
   const launcher = data?.launcher || {};
   const proactive = data?.proactive || {};
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
   const dragStateRef = useRef<LauncherDragState | null>(null);
   const clickSuppressedRef = useRef(false);
+  const hitRegionsRef = useRef<Live2DHitRegion[]>([]);
+  const pointerPollingRef = useRef<Live2DPointerPollingState>({
+    inside: null,
+    interactive: null,
+    x: Number.NaN,
+    y: Number.NaN,
+  });
   const status = launcher.latest_status || (data?.chat?.is_processing ? 'processing' : 'empty');
   const showDot = launcher.show_unread_dot !== false && !launcher.suppress_status_dot;
   const proactiveAttention = Boolean(proactive.has_attention);
@@ -241,10 +194,58 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
   const ariaLabel = displayMode === 'icon'
     ? 'Yachiyo Bubble'
     : `Yachiyo Bubble - ${hasAttention ? '有新消息' : statusLabel}`;
+  const avatarUrl = launcher.avatar_url || logoUrl;
   const style = {
     opacity: idleHidden ? Math.max(0.24, opacity * 0.52) : opacity,
-    '--bubble-avatar': `url(${launcher.avatar_url || ''})`,
+    '--bubble-avatar': `url("${avatarUrl.replace(/"/g, '\\"')}")`,
   } as CSSProperties;
+
+  useEffect(() => {
+    let frame = 0;
+    const report = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        const region = elementRegion(buttonRef.current);
+        const regions = region ? [region] : [];
+        hitRegionsRef.current = regions;
+        const rects = live2dShapeRects(null, regions, 'medium');
+        if (rects.length) {
+          void setLauncherHitRegions('bubble', rects);
+        } else {
+          void setLauncherPointerInteractive('bubble', false);
+        }
+      });
+    };
+    report();
+    const timers = [80, 180, 360].map((delay) => window.setTimeout(report, delay));
+    window.addEventListener('resize', report);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      timers.forEach((timer) => window.clearTimeout(timer));
+      window.removeEventListener('resize', report);
+      void setLauncherPointerInteractive('bubble', true);
+    };
+  }, [launcher.avatar_url, displayMode, idleHidden]);
+
+  useEffect(() => {
+    let pending = false;
+    const refresh = () => {
+      if (pending) return;
+      pending = true;
+      void refreshLauncherPointerInteractivity({
+        mode: 'bubble',
+        hitRegion: null,
+        pointerState: pointerPollingRef,
+        uiRegions: hitRegionsRef.current,
+      }).finally(() => {
+        pending = false;
+      });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, LIVE2D_GLOBAL_POINTER_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, []);
 
   function clearPointerState() {
     dragStateRef.current = null;
@@ -255,6 +256,7 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
       clearPointerState();
       return;
     }
+    void setLauncherPointerInteractive('bubble', true);
     event.currentTarget.setPointerCapture(event.pointerId);
     dragStateRef.current = newDragState(event);
     clickSuppressedRef.current = false;
@@ -270,6 +272,14 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
     }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     clearPointerState();
+    window.setTimeout(() => {
+      void refreshLauncherPointerInteractivity({
+        mode: 'bubble',
+        hitRegion: null,
+        pointerState: pointerPollingRef,
+        uiRegions: hitRegionsRef.current,
+      });
+    }, 40);
   }
 
   function handleClick(event: MouseEvent<HTMLButtonElement>) {
@@ -282,12 +292,13 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
       return;
     }
     clickSuppressedRef.current = false;
-    void acknowledgeAndOpenChat('bubble');
+    void openLauncherPrimaryTarget('bubble', data);
   }
 
   return (
     <main className="launcher-shell bubble-shell" onContextMenu={(event) => handleContextMenu(event, 'bubble')}>
       <button
+        ref={buttonRef}
         className={`bubble-launcher ${hasAttention ? 'has-unread' : ''} ${proactiveAttention ? 'has-proactive' : ''} ${idleHidden ? 'auto-hidden' : ''}`}
         style={style}
         type="button"
@@ -338,7 +349,7 @@ function bubbleTitle(
   const titleParts = [
     displayMode === 'icon'
       ? 'Yachiyo - 头像图标'
-      : `Yachiyo - ${hasAttention ? '有新消息，点击查看' : (statusLabel || '点击展开对话')}`,
+      : `Yachiyo - ${hasAttention ? '有新消息，点击查看' : (statusLabel || '点击展开主控台对话')}`,
   ];
   if (proactive.error) titleParts.push(`主动关怀：${proactive.error}`);
   else if (proactive.has_attention) titleParts.push(`主动关怀：${proactive.attention_text || proactive.message || '有新的观察结果'}`);
@@ -363,6 +374,12 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   const shapeAppliedRef = useRef(false);
   const shapeSignatureRef = useRef('');
   const rendererStateRef = useRef<Live2DRendererState>({ loadToken: 0 });
+  const pointerPollingRef = useRef<Live2DPointerPollingState>({
+    inside: null,
+    interactive: null,
+    x: Number.NaN,
+    y: Number.NaN,
+  });
   const focusStateRef = useRef<Live2DFocusState>({
     active: false,
     currentX: 0,
@@ -400,6 +417,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   const showReply = Boolean(launcher.show_reply_bubble !== false && (proactiveAttention || !replyHidden) && replyText && !isProcessing);
   const stageTitle = live2dStageTitle(resource, launcher, data, hasAttention, proactiveAttention);
   const positionAnchor = normalizeLive2DPositionAnchor(launcher.position_anchor);
+  const renderSettings = live2dRenderSettings(launcher);
   const characterClass = live2dCharacterClass(data, hasAttention, proactiveAttention, unreadStatus, rendererReady);
   const hintKey = [resource?.state || '', resource?.status_label || '', resource?.help_text || '', resource?.renderer_entry || ''].join('|');
   const hintTone = resource?.state === 'path_valid' || resource?.state === 'loaded' ? 'ok' : 'warn';
@@ -421,6 +439,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
       canvas: canvasRef.current,
       character: characterRef.current,
       renderer,
+      renderSettings,
       scale: launcher.scale,
       positionAnchor,
       state: rendererStateRef.current,
@@ -428,16 +447,19 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
         if (!disposed) setRendererError(value);
       },
       onLoading: (value) => {
-        if (!disposed) setRendererLoading(value);
+        if (!disposed) setRendererLoading(value && !live2DPreviewModelIsWarm(renderer?.model_url));
       },
       onReady: (value) => {
-        if (!disposed) setRendererReady(value);
+        if (!disposed) {
+          if (value) markLive2DPreviewModelWarm(renderer?.model_url);
+          setRendererReady(value);
+        }
       },
     });
     return () => {
       disposed = true;
     };
-  }, [renderer?.enabled, renderer?.model_url, renderer?.reason, renderer?.enable_physics, launcher.scale, positionAnchor]);
+  }, [renderer?.enabled, renderer?.model_url, renderer?.reason, renderer?.enable_physics, launcher.scale, positionAnchor, renderSettings.fps, renderSettings.resolution]);
 
   useEffect(() => {
     const rendererState = rendererStateRef.current;
@@ -459,12 +481,14 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
           character: characterRef.current,
           preview: previewRef.current,
           quickInput: quickInputRef.current,
+          rendererState: rendererStateRef.current,
           rendererReady,
           reply: replyRef.current,
           resourceHint: resourceHintRef.current,
           hitRegionRef,
           shapeAppliedRef,
           shapeSignatureRef,
+          hitRegionPrecision: renderSettings.hitRegionPrecision,
           uiRegionsRef,
         });
       });
@@ -477,7 +501,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
       timers.forEach((timer) => window.clearTimeout(timer));
       window.removeEventListener('resize', scheduleReport);
     };
-  }, [rendererReady, rendererLoading, renderer?.model_url, launcher.preview_url, launcher.scale, positionAnchor, showReply, quickInputVisible, showResourceHint, dismissedHintKey]);
+  }, [rendererReady, rendererLoading, renderer?.model_url, launcher.preview_url, launcher.scale, positionAnchor, showReply, quickInputVisible, showResourceHint, dismissedHintKey, renderSettings.hitRegionPrecision]);
 
   useEffect(() => {
     return () => {
@@ -494,8 +518,8 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   useEffect(() => {
     if (!rendererReady || launcher.mouse_follow_enabled === false) return;
     focusStateRef.current.active = false;
-    return startLive2DFocusLoop(rendererStateRef.current, focusStateRef);
-  }, [rendererReady, launcher.mouse_follow_enabled]);
+    return startLive2DFocusLoop(rendererStateRef.current, focusStateRef, renderSettings.fps);
+  }, [rendererReady, launcher.mouse_follow_enabled, renderSettings.fps]);
 
   useEffect(() => {
     let pending = false;
@@ -507,6 +531,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
         focusState: focusStateRef,
         followMouse: launcher.mouse_follow_enabled !== false,
         hitRegion: hitRegionRef.current,
+        pointerState: pointerPollingRef,
         uiRegions: uiRegionsRef.current,
       }).finally(() => {
         pending = false;
@@ -548,7 +573,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   function handleWindowPointerDown(event: PointerEvent<HTMLElement>) {
     pointerActivationRef.current = false;
     if (event.button === 2 || live2dInteractiveTarget(event.target)) return;
-    if (LIVE2D_POINTER_PASSTHROUGH_ENABLED && !shapeAppliedRef.current && !live2dPointerInteractive(event.clientX, event.clientY, hitRegionRef.current, uiRegionsRef.current)) {
+    if (LIVE2D_POINTER_PASSTHROUGH_ENABLED && !live2dPointerInteractive(event.clientX, event.clientY, hitRegionRef.current, uiRegionsRef.current)) {
       void setLauncherPointerInteractive('live2d', false);
       return;
     }
@@ -618,7 +643,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
     }
     resetLive2DExpression(rendererStateRef.current);
     lastStatusExpressionKeyRef.current = '';
-    await acknowledgeAndOpenChat('live2d');
+    await acknowledgeAndOpenChat('live2d', data);
   }
 
   async function handleStageClick(event?: MouseEvent<HTMLElement>) {
@@ -628,7 +653,6 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
     }
     if (
       LIVE2D_POINTER_PASSTHROUGH_ENABLED
-      && !shapeAppliedRef.current
       && event
       && !live2dPointerInteractive(event.clientX, event.clientY, hitRegionRef.current, uiRegionsRef.current)
     ) {
@@ -689,12 +713,14 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
                 character: characterRef.current,
                 preview: previewRef.current,
                 quickInput: quickInputRef.current,
+                rendererState: rendererStateRef.current,
                 rendererReady,
                 reply: replyRef.current,
                 resourceHint: resourceHintRef.current,
                 hitRegionRef,
                 shapeAppliedRef,
                 shapeSignatureRef,
+                hitRegionPrecision: renderSettings.hitRegionPrecision,
                 uiRegionsRef,
               })}
             />
@@ -728,7 +754,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
           onClick={() => {
             resetLive2DExpression(rendererStateRef.current);
             lastStatusExpressionKeyRef.current = '';
-            if (proactiveAttention) void acknowledgeAndOpenChat('live2d');
+            if (proactiveAttention) void acknowledgeAndOpenChat('live2d', data);
             else setReplyHidden(true);
           }}
         >
@@ -834,24 +860,6 @@ function live2dCharacterClass(
   return classes.join(' ');
 }
 
-function normalizeLive2DPositionAnchor(value: unknown): 'left-bottom' | 'right-bottom' | 'custom' {
-  if (value === 'left_bottom') return 'left-bottom';
-  if (value === 'custom') return 'custom';
-  return 'right-bottom';
-}
-
-function live2dObjectPosition(anchor: 'left-bottom' | 'right-bottom' | 'custom') {
-  if (anchor === 'left-bottom') return 'left bottom';
-  if (anchor === 'right-bottom') return 'right bottom';
-  return 'center bottom';
-}
-
-function live2dTransformOrigin(anchor: 'left-bottom' | 'right-bottom' | 'custom') {
-  if (anchor === 'left-bottom') return 'left bottom';
-  if (anchor === 'right-bottom') return 'right bottom';
-  return 'center bottom';
-}
-
 function live2dStageTitle(
   resource: NonNullable<LauncherPayload['launcher']>['resource'],
   launcher: NonNullable<LauncherPayload['launcher']>,
@@ -866,7 +874,17 @@ function live2dStageTitle(
       : hasAttention
         ? '，有新消息'
         : '';
-  return `${resource?.status_label || 'Yachiyo Live2D'}${messageHint}，点击行为：${launcher.click_action || 'open_chat'}`;
+  return `${resource?.status_label || 'Yachiyo Live2D'}${messageHint}，点击行为：${live2dClickActionLabel(launcher.click_action)}`;
+}
+
+function live2dClickActionLabel(value?: string) {
+  if (value === 'toggle_reply') return '切换回复气泡';
+  if (value === 'focus_stage') return '聚焦角色窗口';
+  return '打开主控台对话';
+}
+
+function clampInteger(value: number, min: number, max: number) {
+  return Math.round(clampValue(Number.isFinite(value) ? value : min, min, max));
 }
 
 function live2dStatusExpressionKey({
@@ -894,274 +912,9 @@ function live2dReplyCue({
   proactiveAttention: boolean;
   status: string;
 }) {
-  if (status === 'failed') return { label: '回复失败，点击打开对话', symbol: '!', tone: 'failed' };
-  if (proactiveAttention) return { label: '新的主动关怀，点击打开对话', symbol: '!', tone: 'proactive-cue' };
+  if (status === 'failed') return { label: '回复失败，点击打开主控台对话', symbol: '!', tone: 'failed' };
+  if (proactiveAttention) return { label: '新的主动关怀，点击打开主控台对话', symbol: '!', tone: 'proactive-cue' };
   return { label: '新的回复，点击隐藏提示', symbol: '!', tone: 'message-cue' };
-}
-
-async function ensureLive2DRenderer({
-  canvas,
-  character,
-  renderer,
-  scale,
-  positionAnchor,
-  state,
-  onError,
-  onLoading,
-  onReady,
-}: {
-  canvas: HTMLCanvasElement | null;
-  character: HTMLDivElement | null;
-  renderer: NonNullable<LauncherPayload['launcher']>['renderer'];
-  scale?: number;
-  positionAnchor: 'left-bottom' | 'right-bottom' | 'custom';
-  state: Live2DRendererState;
-  onError: (value: string) => void;
-  onLoading: (value: boolean) => void;
-  onReady: (value: boolean) => void;
-}) {
-  if (!renderer?.enabled || !renderer.model_url) {
-    destroyLive2DRenderer(state);
-    onLoading(false);
-    onReady(false);
-    onError('');
-    return;
-  }
-  if (!canvas || !character) {
-    onLoading(false);
-    onReady(false);
-    onError('Live2D 舞台尚未就绪，已回退到静态预览');
-    return;
-  }
-  const modelKey = `${renderer.model_url}|physics:${renderer.enable_physics === true ? '1' : '0'}`;
-
-  try {
-    await ensureLive2DRuntimeScripts();
-    if (!rendererAvailable()) {
-      throw new Error(`Live2D 渲染依赖未加载，已回退到静态预览 ${rendererDiagnostics()}`);
-    }
-
-    if (state.model && state.modelUrl === renderer.model_url && state.modelKey === modelKey) {
-      fitLive2DModel(state, character, scale, positionAnchor);
-      onLoading(false);
-      onReady(true);
-      onError('');
-      return;
-    }
-
-    const loadToken = state.loadToken + 1;
-    state.loadToken = loadToken;
-    onLoading(true);
-    onReady(false);
-    onError('');
-    destroyLive2DRenderer(state, { keepApp: true, keepToken: true });
-
-    const app = ensurePixiApp(state, canvas, character);
-    const Live2DModelCtor = getLive2DModelCtor();
-    if (!Live2DModelCtor || typeof Live2DModelCtor.from !== 'function') {
-      throw new Error('Live2DModel.from 不可用');
-    }
-    const model = await Live2DModelCtor.from(renderer.model_url, { autoInteract: false });
-    if (state.loadToken !== loadToken) {
-      if (model && typeof model.destroy === 'function') model.destroy();
-      return;
-    }
-    state.model = model;
-    state.modelKey = modelKey;
-    state.modelUrl = renderer.model_url;
-    state.model.interactive = false;
-    app.stage.addChild(model);
-    fitLive2DModel(state, character, scale, positionAnchor);
-    onReady(true);
-    onError('');
-  } catch (error) {
-    destroyLive2DRenderer(state);
-    onReady(false);
-    onError(`Live2D 模型加载失败，已回退到静态预览\n${formatRendererError(error)}`);
-  } finally {
-    onLoading(false);
-  }
-}
-
-function installLive2DRuntimeEnvShim() {
-  const globalWindow = window as Live2DGlobalWindow;
-  globalWindow.process = globalWindow.process || {};
-  globalWindow.process.env = globalWindow.process.env || {};
-  if (!globalWindow.process.env.NODE_ENV) globalWindow.process.env.NODE_ENV = 'production';
-}
-
-async function ensureLive2DRuntimeScripts() {
-  installLive2DRuntimeEnvShim();
-  if (rendererAvailable()) {
-    configurePixiForElectronLive2D();
-    return;
-  }
-  if (!live2dRuntimePromise) {
-    live2dRuntimePromise = loadLive2DRuntimeScripts().catch((error) => {
-      live2dRuntimePromise = null;
-      throw error;
-    });
-  }
-  await live2dRuntimePromise;
-  configurePixiForElectronLive2D();
-}
-
-function configurePixiForElectronLive2D() {
-  const globalWindow = window as Live2DGlobalWindow;
-  const PIXI = globalWindow.PIXI;
-  if (!PIXI?.settings) return;
-  try {
-    PIXI.settings.FAIL_IF_MAJOR_PERFORMANCE_CAVEAT = false;
-    if (PIXI.ENV?.WEBGL !== undefined) PIXI.settings.PREFER_ENV = PIXI.ENV.WEBGL;
-  } catch {}
-}
-
-async function loadLive2DRuntimeScripts() {
-  const scripts = await getLive2DRuntimeScripts();
-  for (const script of scripts) {
-    await loadClassicScript(script);
-  }
-}
-
-async function getLive2DRuntimeScripts(): Promise<Live2DRuntimeScript[]> {
-  try {
-    const baseUrl = await bridgeUrl();
-    const payload = await apiGet<Live2DRuntimePayload>('/live2d/runtime');
-    const scripts = payload.scripts?.length ? payload.scripts : LIVE2D_RUNTIME_CDN_SCRIPTS;
-    return scripts.map((script) => ({
-      ...script,
-      url: resolveLive2DScriptUrl(script.url, baseUrl),
-    }));
-  } catch {
-    return LIVE2D_RUNTIME_CDN_SCRIPTS;
-  }
-}
-
-function resolveLive2DScriptUrl(value: string, baseUrl: string) {
-  if (/^https?:\/\//i.test(value)) return value;
-  return new URL(value, `${baseUrl}/`).toString();
-}
-
-function loadClassicScript(script: Live2DRuntimeScript) {
-  if (document.querySelector(`script[data-hermes-live2d="${script.id}"][data-loaded="1"]`)) {
-    return Promise.resolve();
-  }
-  return new Promise<void>((resolve, reject) => {
-    const node = document.createElement('script');
-    node.src = script.url;
-    node.async = false;
-    node.dataset.hermesLive2d = script.id;
-    node.onload = () => {
-      node.dataset.loaded = '1';
-      resolve();
-    };
-    node.onerror = () => reject(new Error(`Live2D runtime script failed: ${script.id}`));
-    document.head.appendChild(node);
-  });
-}
-
-function rendererAvailable() {
-  const globalWindow = window as Live2DGlobalWindow;
-  return Boolean(
-    globalWindow.PIXI
-      && globalWindow.PIXI.Application
-      && globalWindow.PIXI.live2d
-      && getLive2DModelCtor()
-      && globalWindow.Live2DCubismCore,
-  );
-}
-
-function getLive2DModelCtor() {
-  const globalWindow = window as Live2DGlobalWindow;
-  const live2dNamespace = globalWindow.PIXI?.live2d;
-  return live2dNamespace?.Live2DModel
-    || live2dNamespace?.default?.Live2DModel
-    || globalWindow.PIXI?.Live2DModel
-    || globalWindow.Live2DModel
-    || null;
-}
-
-function rendererDiagnostics() {
-  const globalWindow = window as Live2DGlobalWindow;
-  const diagnostics = {
-    hasPixi: Boolean(globalWindow.PIXI),
-    hasPixiApplication: Boolean(globalWindow.PIXI?.Application),
-    hasPixiLive2D: Boolean(globalWindow.PIXI?.live2d),
-    hasLive2DModel: Boolean(getLive2DModelCtor()),
-    hasCubismCore: Boolean(globalWindow.Live2DCubismCore),
-  };
-  return Object.entries(diagnostics)
-    .map(([key, value]) => `${key}=${value ? '1' : '0'}`)
-    .join(' ');
-}
-
-function ensurePixiApp(
-  state: Live2DRendererState,
-  canvas: HTMLCanvasElement,
-  character: HTMLDivElement,
-) {
-  if (state.app) return state.app;
-  const globalWindow = window as Live2DGlobalWindow;
-  state.app = new globalWindow.PIXI.Application({
-    view: canvas,
-    autoStart: true,
-    backgroundAlpha: 0,
-    antialias: true,
-    autoDensity: true,
-    preserveDrawingBuffer: true,
-    resizeTo: character,
-    resolution: window.devicePixelRatio || 1,
-  });
-  return state.app;
-}
-
-function fitLive2DModel(
-  state: Live2DRendererState,
-  character: HTMLDivElement,
-  scale?: number,
-  positionAnchor: 'left-bottom' | 'right-bottom' | 'custom' = 'custom',
-) {
-  if (!state.model || !state.app) return;
-  const width = Math.max(character.clientWidth, 1);
-  const height = Math.max(character.clientHeight, 1);
-  state.app.renderer.resize(width, height);
-  const bounds = typeof state.model.getLocalBounds === 'function'
-    ? state.model.getLocalBounds()
-    : { width: 0, height: 0 };
-  if (!bounds.width || !bounds.height) return;
-  const fitScale = Math.min(width / bounds.width, height / bounds.height) * 0.92;
-  const finalScale = fitScale * Math.max(0.4, Math.min(2.0, Number(scale || 1)));
-  const horizontalAnchor = positionAnchor === 'left-bottom'
-    ? 0
-    : positionAnchor === 'right-bottom'
-      ? 1
-      : 0.5;
-  if (state.model.anchor?.set) state.model.anchor.set(horizontalAnchor, 1.0);
-  if (state.model.scale?.set) state.model.scale.set(finalScale);
-  state.model.x = positionAnchor === 'left-bottom'
-    ? 0
-    : positionAnchor === 'right-bottom'
-      ? width
-      : width / 2;
-  state.model.y = height;
-}
-
-function destroyLive2DRenderer(
-  state: Live2DRendererState,
-  options: { keepApp?: boolean; keepToken?: boolean } = {},
-) {
-  if (!options.keepToken) state.loadToken += 1;
-  if (state.model && state.app?.stage && typeof state.app.stage.removeChild === 'function') {
-    state.app.stage.removeChild(state.model);
-  }
-  if (state.model && typeof state.model.destroy === 'function') state.model.destroy();
-  state.model = undefined;
-  state.modelKey = '';
-  state.modelUrl = '';
-  if (!options.keepApp && state.app && typeof state.app.destroy === 'function') {
-    state.app.destroy(false, { children: true, texture: false, baseTexture: false });
-  }
-  if (!options.keepApp) state.app = undefined;
 }
 
 function focusLive2DRenderer(
@@ -1226,10 +979,10 @@ function setLive2DFocusTarget(
 function startLive2DFocusLoop(
   state: Live2DRendererState,
   focusStateRef: MutableRefObject<Live2DFocusState>,
+  renderFps = LIVE2D_DEFAULT_RENDER_FPS,
 ) {
-  let frame = 0;
-  const tick = (timestamp: number) => {
-    frame = window.requestAnimationFrame(tick);
+  const tick = () => {
+    const timestamp = window.performance.now();
     const focusState = focusStateRef.current;
     if (!focusState.active || !state.model) {
       focusState.lastFrameAt = timestamp;
@@ -1243,15 +996,17 @@ function startLive2DFocusLoop(
     if (Math.hypot(dx, dy) <= LIVE2D_MOUSE_FOLLOW_DEADZONE_PX) {
       focusState.currentX = focusState.targetX;
       focusState.currentY = focusState.targetY;
+      focusState.active = false;
       return;
     }
     focusState.currentX += dx * alpha;
     focusState.currentY += dy * alpha;
     focusLive2DRenderer(state, focusState.currentX, focusState.currentY, false);
   };
-  frame = window.requestAnimationFrame(tick);
+  tick();
+  const timer = window.setInterval(tick, Math.max(16, Math.round(1000 / clampInteger(renderFps, 12, 60))));
   return () => {
-    window.cancelAnimationFrame(frame);
+    window.clearInterval(timer);
   };
 }
 
@@ -1264,21 +1019,58 @@ async function refreshGlobalPointerState({
   focusState,
   followMouse,
   hitRegion,
+  pointerState,
   uiRegions,
 }: {
   character: HTMLDivElement | null;
   focusState: MutableRefObject<Live2DFocusState>;
   followMouse: boolean;
   hitRegion: Live2DHitRegion | null;
+  pointerState: MutableRefObject<Live2DPointerPollingState>;
   uiRegions: Live2DHitRegion[];
 }) {
-  const pointer = await getLauncherPointerState('live2d');
-  if (!pointer.ok) return;
-  const localX = scaleLauncherPointerCoordinate(Number(pointer.x || 0), Number(pointer.width || 0), window.innerWidth);
-  const localY = scaleLauncherPointerCoordinate(Number(pointer.y || 0), Number(pointer.height || 0), window.innerHeight);
-  const interactive = Boolean(pointer.inside) && live2dPointerInteractive(localX, localY, hitRegion, uiRegions);
-  void setLauncherPointerInteractive('live2d', LIVE2D_POINTER_PASSTHROUGH_ENABLED ? interactive : true);
-  if (followMouse) setLive2DFocusTargetFromWindowPoint(focusState, character, localX, localY);
+  const pointer = await refreshLauncherPointerInteractivity({
+    mode: 'live2d',
+    hitRegion,
+    pointerState,
+    uiRegions,
+  });
+  if (!pointer) return;
+  const state = pointerState.current;
+  const moved = !Number.isFinite(state.x)
+    || Math.hypot(pointer.localX - state.x, pointer.localY - state.y) >= LIVE2D_POINTER_FOCUS_MOVE_PX;
+  const inside = Boolean(pointer.inside);
+  if (followMouse && (moved || state.inside !== inside)) {
+    setLive2DFocusTargetFromWindowPoint(focusState, character, pointer.localX, pointer.localY);
+  }
+  state.x = pointer.localX;
+  state.y = pointer.localY;
+  state.inside = inside;
+}
+
+async function refreshLauncherPointerInteractivity({
+  hitRegion,
+  mode,
+  pointerState,
+  uiRegions,
+}: {
+  hitRegion: Live2DHitRegion | null;
+  mode: 'bubble' | 'live2d';
+  pointerState: MutableRefObject<Live2DPointerPollingState>;
+  uiRegions: Live2DHitRegion[];
+}): Promise<{ inside: boolean; localX: number; localY: number } | null> {
+  const source = await getLauncherPointerState(mode);
+  if (!source.ok) return null;
+  const localX = scaleLauncherPointerCoordinate(Number(source.x || 0), Number(source.width || 0), window.innerWidth);
+  const localY = scaleLauncherPointerCoordinate(Number(source.y || 0), Number(source.height || 0), window.innerHeight);
+  const interactive = Boolean(source.inside) && live2dPointerInteractive(localX, localY, hitRegion, uiRegions);
+  const state = pointerState.current;
+  const nextInteractive = LIVE2D_POINTER_PASSTHROUGH_ENABLED ? interactive : true;
+  if (state.interactive !== nextInteractive) {
+    state.interactive = nextInteractive;
+    void setLauncherPointerInteractive(mode, nextInteractive);
+  }
+  return { inside: Boolean(source.inside), localX, localY };
 }
 
 function scaleLauncherPointerCoordinate(value: number, sourceSize: number, targetSize: number) {
@@ -1514,55 +1306,79 @@ function live2dExpressionCallCandidates(name: string) {
   return Array.from(new Set([raw, fileName, withoutJson, withoutExp].filter(Boolean)));
 }
 
-function formatRendererError(error: unknown) {
-  const detail = error instanceof Error && error.message ? error.message : String(error || 'unknown error');
-  if (/checkMaxIfStatementsInShader|invalid value of ['"`]?0['"`]?/i.test(detail)) {
-    return '当前 WebGL 环境没有返回可用的 shader 条件分支上限，已回退静态预览。请重新打开 Live2D；如果只在启用物理时出现，先关闭物理模拟再试。';
-  }
-  return compactRendererDetail(detail);
-}
-
-function compactRendererDetail(value: string, limit = 240) {
-  const text = value.replace(/\s+/g, ' ').trim();
-  if (text.length > limit) return `${text.slice(0, limit - 1)}…`;
-  return text || 'unknown error';
-}
-
 function reportLive2DRegions({
   canvas,
   character,
   preview,
   quickInput,
+  rendererState,
   rendererReady,
   reply,
   resourceHint,
   hitRegionRef,
   shapeAppliedRef,
   shapeSignatureRef,
+  hitRegionPrecision,
   uiRegionsRef,
 }: {
   canvas: HTMLCanvasElement | null;
   character: HTMLDivElement | null;
   preview: HTMLImageElement | null;
   quickInput: HTMLFormElement | null;
+  rendererState: Live2DRendererState;
   rendererReady: boolean;
   reply: HTMLButtonElement | null;
   resourceHint: HTMLDivElement | null;
   hitRegionRef: MutableRefObject<Live2DHitRegion | null>;
   shapeAppliedRef: MutableRefObject<boolean>;
   shapeSignatureRef: MutableRefObject<string>;
+  hitRegionPrecision: Live2DRenderSettings['hitRegionPrecision'];
   uiRegionsRef: MutableRefObject<Live2DHitRegion[]>;
 }) {
-  const canvasRegion = rendererReady && canvas ? live2DCanvasHitRegion(canvas) : null;
+  const canvasOpaqueBackground = updateLive2DCanvasBackgroundState(canvas, rendererReady);
+  const canvasRegion = rendererReady && canvas && !canvasOpaqueBackground ? live2DCanvasHitRegion(canvas) : null;
+  const rendererRegion = rendererReady ? live2DRendererBoundsRegion(rendererState, canvas) : null;
   const previewRegion = preview ? live2DPreviewHitRegion(preview) : null;
-  const hitRegion = canvasRegion || previewRegion || null;
+  const hitRegion = canvasRegion || rendererRegion || previewRegion || null;
   positionLive2DReply(reply, hitRegion);
   const uiRegions = [resourceHint, reply, quickInput]
     .map((element) => elementRegion(element))
     .filter((region): region is Live2DHitRegion => Boolean(region));
   hitRegionRef.current = hitRegion;
   uiRegionsRef.current = uiRegions;
-  syncLive2DHitRegions(hitRegion, uiRegions, shapeAppliedRef, shapeSignatureRef);
+  syncLive2DHitRegions(hitRegion, uiRegions, shapeAppliedRef, shapeSignatureRef, hitRegionPrecision);
+}
+
+function updateLive2DCanvasBackgroundState(canvas: HTMLCanvasElement | null, rendererReady: boolean) {
+  if (!canvas) return false;
+  if (!rendererReady || canvas.width <= 1 || canvas.height <= 1) {
+    canvas.classList.remove('opaque-background');
+    return false;
+  }
+  try {
+    const sampleCanvas = document.createElement('canvas');
+    sampleCanvas.width = 3;
+    sampleCanvas.height = 3;
+    const context = sampleCanvas.getContext('2d', { willReadFrequently: true });
+    if (!context) return;
+    context.clearRect(0, 0, 3, 3);
+    context.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, 3, 3);
+    const data = context.getImageData(0, 0, 3, 3).data;
+    const sampleIndexes = [0, 2, 6, 8];
+    const opaqueDarkCorners = sampleIndexes.every((index) => {
+      const offset = index * 4;
+      const red = data[offset] || 0;
+      const green = data[offset + 1] || 0;
+      const blue = data[offset + 2] || 0;
+      const alpha = data[offset + 3] || 0;
+      return alpha > 220 && red < 28 && green < 32 && blue < 40;
+    });
+    canvas.classList.toggle('opaque-background', opaqueDarkCorners);
+    return opaqueDarkCorners;
+  } catch {
+    canvas.classList.remove('opaque-background');
+    return false;
+  }
 }
 
 function positionLive2DReply(reply: HTMLButtonElement | null, hitRegion: Live2DHitRegion | null) {
@@ -1591,13 +1407,15 @@ function syncLive2DHitRegions(
   uiRegions: Live2DHitRegion[],
   shapeAppliedRef: MutableRefObject<boolean>,
   shapeSignatureRef: MutableRefObject<string>,
+  hitRegionPrecision: Live2DRenderSettings['hitRegionPrecision'],
 ) {
-  const shapeRects = live2dShapeRects(hitRegion, uiRegions);
+  const shapeRects = live2dShapeRects(hitRegion, uiRegions, hitRegionPrecision);
   const signature = shapeRectSignature(shapeRects);
   if (signature === shapeSignatureRef.current) return;
   shapeSignatureRef.current = signature;
   if (!shapeRects.length) {
     shapeAppliedRef.current = false;
+    void setLauncherPointerInteractive('live2d', false);
     return;
   }
   void setLauncherHitRegions('live2d', shapeRects).then((applied) => {
@@ -1612,22 +1430,49 @@ function syncLive2DHitRegions(
 function live2dShapeRects(
   hitRegion: Live2DHitRegion | null,
   uiRegions: Live2DHitRegion[],
+  hitRegionPrecision: Live2DRenderSettings['hitRegionPrecision'] = 'medium',
 ): LauncherHitRegionRect[] {
+  const limits = live2dShapeLimits(hitRegionPrecision);
   const rects = [
-    ...(hitRegion ? shapeRectsFromRegion(hitRegion, LIVE2D_SHAPE_PADDING_PX) : []),
-    ...uiRegions.flatMap((region) => shapeRectsFromRegion(region, LIVE2D_SHAPE_PADDING_PX)),
+    ...(hitRegion ? shapeRectsFromRegion(hitRegion, LIVE2D_SHAPE_PADDING_PX, limits) : []),
+    ...uiRegions.flatMap((region) => shapeRectsFromRegion(region, LIVE2D_SHAPE_PADDING_PX, limits)),
   ];
-  return mergeVerticalShapeRects(rects).slice(0, LIVE2D_MAX_SHAPE_RECTS);
+  return mergeVerticalShapeRects(rects).slice(0, limits.maxRects);
 }
 
-function shapeRectsFromRegion(region: Live2DHitRegion, padding: number): LauncherHitRegionRect[] {
-  if (region.kind === 'alpha_mask') return alphaMaskShapeRects(region, padding);
-  if (region.kind === 'ellipse') return ellipseShapeRects(region, padding);
+function live2dShapeLimits(precision: Live2DRenderSettings['hitRegionPrecision']): Live2DShapeLimits {
+  if (precision === 'low') {
+    return {
+      maxRects: 2400,
+      maxCols: 56,
+      maxRows: 84,
+      ellipseSlices: 18,
+    };
+  }
+  if (precision === 'high') {
+    return {
+      maxRects: Math.min(10000, Math.round(LIVE2D_MAX_SHAPE_RECTS * 1.5)),
+      maxCols: 128,
+      maxRows: 192,
+      ellipseSlices: 42,
+    };
+  }
+  return {
+    maxRects: LIVE2D_MAX_SHAPE_RECTS,
+    maxCols: LIVE2D_SHAPE_MAX_COLS,
+    maxRows: LIVE2D_SHAPE_MAX_ROWS,
+    ellipseSlices: 28,
+  };
+}
+
+function shapeRectsFromRegion(region: Live2DHitRegion, padding: number, limits: Live2DShapeLimits): LauncherHitRegionRect[] {
+  if (region.kind === 'alpha_mask') return alphaMaskShapeRects(region, padding, limits);
+  if (region.kind === 'ellipse') return ellipseShapeRects(region, padding, limits);
   const rect = shapeRectFromNormalizedBounds(normalizedRegionBounds(region), padding);
   return rect ? [rect] : [];
 }
 
-function alphaMaskShapeRects(region: Live2DHitRegion, padding: number): LauncherHitRegionRect[] {
+function alphaMaskShapeRects(region: Live2DHitRegion, padding: number, limits: Live2DShapeLimits): LauncherHitRegionRect[] {
   const cols = Math.max(1, Math.round(Number(region.cols || 0)));
   const rows = Math.max(1, Math.round(Number(region.rows || 0)));
   const mask = String(region.mask || '');
@@ -1637,8 +1482,8 @@ function alphaMaskShapeRects(region: Live2DHitRegion, padding: number): Launcher
   }
 
   const bounds = normalizedRegionBounds(region);
-  const shapeCols = Math.min(cols, LIVE2D_SHAPE_MAX_COLS);
-  const shapeRows = Math.min(rows, LIVE2D_SHAPE_MAX_ROWS);
+  const shapeCols = Math.min(cols, limits.maxCols);
+  const shapeRows = Math.min(rows, limits.maxRows);
   const cellWidth = bounds.width / shapeCols;
   const cellHeight = bounds.height / shapeRows;
   const rects: LauncherHitRegionRect[] = [];
@@ -1683,9 +1528,9 @@ function alphaMaskCellHasPixels(
   return false;
 }
 
-function ellipseShapeRects(region: Live2DHitRegion, padding: number): LauncherHitRegionRect[] {
+function ellipseShapeRects(region: Live2DHitRegion, padding: number, limits: Live2DShapeLimits): LauncherHitRegionRect[] {
   const bounds = normalizedRegionBounds(region);
-  const slices = 28;
+  const slices = limits.ellipseSlices;
   const rects: LauncherHitRegionRect[] = [];
   for (let row = 0; row < slices; row += 1) {
     const y = (((row + 0.5) / slices) * 2) - 1;
@@ -1779,6 +1624,32 @@ function live2DCanvasHitRegion(canvas: HTMLCanvasElement) {
   });
 }
 
+function live2DRendererBoundsRegion(state: Live2DRendererState, canvas: HTMLCanvasElement | null): Live2DHitRegion | null {
+  if (!state.model || !state.app || !canvas || typeof state.model.getBounds !== 'function') return null;
+  try {
+    const bounds = state.model.getBounds();
+    const canvasRect = canvas.getBoundingClientRect();
+    const screen = state.app.renderer?.screen || {};
+    const screenWidth = Math.max(Number(screen.width || canvas.clientWidth || canvasRect.width || 1), 1);
+    const screenHeight = Math.max(Number(screen.height || canvas.clientHeight || canvasRect.height || 1), 1);
+    const rawLeft = Number(bounds.x ?? bounds.left ?? 0);
+    const rawTop = Number(bounds.y ?? bounds.top ?? 0);
+    const rawWidth = Number(bounds.width ?? ((bounds.right || 0) - rawLeft));
+    const rawHeight = Number(bounds.height ?? ((bounds.bottom || 0) - rawTop));
+    if (!Number.isFinite(rawLeft) || !Number.isFinite(rawTop) || rawWidth <= 1 || rawHeight <= 1) return null;
+    const scaleX = canvasRect.width / screenWidth;
+    const scaleY = canvasRect.height / screenHeight;
+    const left = clampValue(canvasRect.left + (rawLeft * scaleX), canvasRect.left, canvasRect.right);
+    const top = clampValue(canvasRect.top + (rawTop * scaleY), canvasRect.top, canvasRect.bottom);
+    const right = clampValue(canvasRect.left + ((rawLeft + rawWidth) * scaleX), canvasRect.left, canvasRect.right);
+    const bottom = clampValue(canvasRect.top + ((rawTop + rawHeight) * scaleY), canvasRect.top, canvasRect.bottom);
+    if (right - left <= 1 || bottom - top <= 1) return null;
+    return normalizedRegionFromRect(DOMRect.fromRect({ x: left, y: top, width: right - left, height: bottom - top }), 'rect');
+  } catch {
+    return null;
+  }
+}
+
 function live2DPreviewHitRegion(preview: HTMLImageElement) {
   const rect = containedImageRect(preview);
   return buildAlphaMaskRegion({
@@ -1788,7 +1659,7 @@ function live2DPreviewHitRegion(preview: HTMLImageElement) {
       const naturalHeight = Number(preview.naturalHeight || rows || 1);
       context.drawImage(preview, 0, 0, naturalWidth, naturalHeight, 0, 0, cols, rows);
     },
-  });
+  }) || normalizedRegionFromRect(rect, 'rect');
 }
 
 function elementRegion(element: Element | null) {

@@ -153,6 +153,10 @@ def start_bridge(host: str = "127.0.0.1", port: int = 8420) -> None:
         port=port,
         log_level="info",
         access_log=_bridge_access_log_enabled(),
+        loop="asyncio",
+        http="h11",
+        ws="none",
+        lifespan="on",
     )
     _server = uvicorn.Server(config)
     _state = "running"

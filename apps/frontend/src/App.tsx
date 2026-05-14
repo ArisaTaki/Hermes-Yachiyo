@@ -1,17 +1,54 @@
-import { useEffect, useState } from 'react';
+import { Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
 
-import { ChatView } from './views/ChatView';
-import { DiagnosticsView } from './views/DiagnosticsView';
-import { InstallerView } from './views/InstallerView';
-import { LauncherView } from './views/LauncherView';
-import { MainView } from './views/MainView';
-import { ModeSettingsView } from './views/ModeSettingsView';
-import { ProactiveTtsSettingsView } from './views/ProactiveTtsSettingsView';
-import { ToolCenterView } from './views/ToolCenterView';
-import { ROUTE_CHANGE_EVENT, currentView } from './lib/view';
+import {
+  ActivityAllPage,
+  ActivityDetailPage,
+  BubbleModePage,
+  DashboardPage,
+  Live2DModePage,
+  OpenDesignShell,
+  ProviderPage,
+  ResourcesPage,
+  ToolsAllPage,
+  WorkspacePage,
+} from './views/OpenDesignView';
+import { ROUTE_CHANGE_EVENT, currentParam, currentView } from './lib/view';
+
+const ChatView = lazy(() => import('./views/ChatView').then((module) => ({ default: module.ChatView })));
+const DiagnosticsView = lazy(() =>
+  import('./views/DiagnosticsView').then((module) => ({ default: module.DiagnosticsView })),
+);
+const InstallerView = lazy(() =>
+  import('./views/InstallerView').then((module) => ({ default: module.InstallerView })),
+);
+const ModeSettingsView = lazy(() =>
+  import('./views/ModeSettingsView').then((module) => ({ default: module.ModeSettingsView })),
+);
+const ProactiveTtsSettingsView = lazy(() =>
+  import('./views/ProactiveTtsSettingsView').then((module) => ({ default: module.ProactiveTtsSettingsView })),
+);
+const ToolCenterView = lazy(() =>
+  import('./views/ToolCenterView').then((module) => ({ default: module.ToolCenterView })),
+);
+const AppUpdateView = lazy(() =>
+  import('./views/AppUpdateView').then((module) => ({ default: module.AppUpdateView })),
+);
+const LauncherView = lazy(() =>
+  import('./views/LauncherView').then((module) => ({ default: module.LauncherView })),
+);
+
+function RouteLoadingFallback() {
+  return (
+    <div className="hy-route-page hy-route-loading" aria-live="polite">
+      正在加载界面...
+    </div>
+  );
+}
 
 export function App() {
+  const view = currentView();
   const [, setRouteVersion] = useState(0);
+  const [live2dVisited, setLive2dVisited] = useState(() => view === 'live2d');
 
   useEffect(() => {
     const refreshRoute = () => setRouteVersion((version) => version + 1);
@@ -25,14 +62,54 @@ export function App() {
     };
   }, []);
 
-  const view = currentView();
+  useEffect(() => {
+    if (view === 'live2d') setLive2dVisited(true);
+  }, [view]);
 
-  if (view === 'chat') return <ChatView />;
-  if (view === 'settings') return <ModeSettingsView />;
-  if (view === 'installer') return <InstallerView />;
-  if (view === 'diagnostics') return <DiagnosticsView />;
-  if (view === 'tools') return <ToolCenterView />;
-  if (view === 'proactive-tts') return <ProactiveTtsSettingsView />;
-  if (view === 'bubble' || view === 'bubble-menu' || view === 'live2d') return <LauncherView view={view} />;
-  return <MainView />;
+  const surface = currentParam('surface');
+
+  if (view === 'bubble-menu' || ((view === 'bubble' || view === 'live2d') && surface === 'desktop')) {
+    return (
+      <Suspense fallback={null}>
+        <LauncherView view={view} />
+      </Suspense>
+    );
+  }
+
+  let page: ReactNode = <DashboardPage />;
+  if (view === 'chat') page = <ChatView />;
+  else if (view === 'settings') page = <ModeSettingsView />;
+  else if (view === 'installer') page = <InstallerView />;
+  else if (view === 'diagnostics') page = <DiagnosticsView />;
+  else if (view === 'tools') page = currentParam('tool') ? <ToolCenterView /> : <DiagnosticsView />;
+  else if (view === 'proactive-tts') page = <ProactiveTtsSettingsView />;
+  else if (view === 'app-update') page = <AppUpdateView />;
+  else if (view === 'provider') page = <ProviderPage />;
+  else if (view === 'bubble') page = <BubbleModePage />;
+  else if (view === 'live2d') page = null;
+  else if (view === 'resources') page = <ResourcesPage />;
+  else if (view === 'workspace') page = <WorkspacePage />;
+  else if (view === 'tools-all') page = <ToolsAllPage />;
+  else if (view === 'activity-all') page = <ActivityAllPage />;
+  else if (view === 'activity-detail') page = <ActivityDetailPage />;
+
+  const shouldMountLive2d = live2dVisited || view === 'live2d';
+
+  return (
+    <OpenDesignShell activeView={view}>
+      {view !== 'live2d' ? (
+        <Suspense fallback={<RouteLoadingFallback />}>{page}</Suspense>
+      ) : null}
+      {shouldMountLive2d ? (
+        <Suspense fallback={view === 'live2d' ? <RouteLoadingFallback /> : null}>
+          <div
+            className={view === 'live2d' ? 'hy-keepalive-page' : 'hy-keepalive-page is-hidden'}
+            aria-hidden={view !== 'live2d'}
+          >
+            <Live2DModePage active={view === 'live2d'} />
+          </div>
+        </Suspense>
+      ) : null}
+    </OpenDesignShell>
+  );
 }

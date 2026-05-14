@@ -77,19 +77,24 @@ class ChatSession:
     _store: Optional["ChatStore"] = field(default=None, repr=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
-    def attach_store(self, store: "ChatStore", load_existing: bool = True) -> None:
+    def attach_store(
+        self,
+        store: "ChatStore",
+        load_existing: bool = True,
+        fail_active_messages: bool = True,
+    ) -> None:
         """绑定持久化层，并创建/加载会话。"""
         with self._lock:
             self._store = store
             store.create_session(self.session_id)
             if load_existing:
-                self._load_messages_from_store()
+                self._load_messages_from_store(fail_active_messages=fail_active_messages)
                 # 恢复 hermes_session_id
                 stored_session = store.get_session(self.session_id)
                 if stored_session and stored_session.hermes_session_id:
                     self.hermes_session_id = stored_session.hermes_session_id
 
-    def _load_messages_from_store(self) -> None:
+    def _load_messages_from_store(self, *, fail_active_messages: bool = True) -> None:
         """从持久化层恢复当前会话消息。"""
         if self._store is None:
             return
@@ -106,7 +111,7 @@ class ChatSession:
 
             error = stored.error
             attachments = _parse_attachments_json(stored.attachments_json)
-            if status in (MessageStatus.PENDING, MessageStatus.PROCESSING):
+            if fail_active_messages and status in (MessageStatus.PENDING, MessageStatus.PROCESSING):
                 status = MessageStatus.FAILED
                 error = error or "应用已重启，原任务状态不可恢复"
                 self._store.update_message_status(stored.message_id, status.value, error)
@@ -123,6 +128,7 @@ class ChatSession:
             ))
 
         self.messages = restored
+        self._dedupe_assistant_messages_locked()
         self._pending_message_id = None
 
     def _persist_message(self, msg: ChatMessage) -> None:
@@ -247,19 +253,19 @@ class ChatSession:
         线程安全：check + create/update 在同一把锁内完成。
         """
         with self._lock:
-            # ① 查找已有的 assistant 消息
-            existing: Optional[ChatMessage] = None
-            for msg in self.messages:
-                if msg.role == MessageRole.ASSISTANT and msg.task_id == task_id:
-                    existing = msg
-                    break
+            candidates = self._assistant_candidates_for_task_locked(task_id)
+            existing = self._select_assistant_candidate(candidates, status)
 
             if existing is not None:
-                # 不允许从终态回退到 PROCESSING
+                self._drop_duplicate_assistant_messages_locked(task_id, existing.message_id)
+                # 不允许从终态回退到 PROCESSING。跨实例写回时，旧会话对象
+                # 可能在最终消息已落库后继续收到 activity/streaming 回调。
                 if (
                     existing.status in (MessageStatus.COMPLETED, MessageStatus.FAILED)
                     and status == MessageStatus.PROCESSING
                 ):
+                    self._sync_user_status_for_task_locked(task_id, existing.status, existing.error)
+                    self._pending_message_id = self._find_active_message_id_locked()
                     return existing.message_id
                 existing.content = content
                 existing.status = status
@@ -273,7 +279,6 @@ class ChatSession:
                     msg_id, task_id, status.value,
                 )
             else:
-                # ② 不存在，创建新消息
                 msg_id = uuid4().hex[:12]
                 new_msg = ChatMessage(
                     message_id=msg_id,
@@ -292,17 +297,122 @@ class ChatSession:
                     msg_id, task_id, status.value,
                 )
 
-            # ③ 同步更新关联 user 消息状态
-            for m in self.messages:
-                if m.task_id == task_id and m.role == MessageRole.USER:
-                    m.status = status
-                    if status == MessageStatus.FAILED and error:
-                        m.error = error
-                    self._persist_message(m)
-                    break
-
+            self._sync_user_status_for_task_locked(task_id, status, error)
             self._pending_message_id = self._find_active_message_id_locked()
             return msg_id
+
+    def _assistant_candidates_for_task_locked(self, task_id: str) -> list[ChatMessage]:
+        """Return in-memory + persisted assistant candidates for one task.
+
+        `upsert_assistant_message()` may run concurrently from multiple
+        ChatSession instances. The store lookup makes the idempotency boundary
+        the persisted session/task pair instead of the current Python object.
+        """
+        candidates = [
+            msg
+            for msg in self.messages
+            if msg.role == MessageRole.ASSISTANT and msg.task_id == task_id
+        ]
+        seen_ids = {msg.message_id for msg in candidates}
+        loader = getattr(self._store, "load_assistant_messages_by_task", None)
+        if not callable(loader):
+            return candidates
+        try:
+            stored_messages = loader(self.session_id, task_id)
+        except Exception:
+            logger.debug("加载持久化 assistant 消息失败: task=%s", task_id, exc_info=True)
+            return candidates
+
+        added = False
+        for stored in stored_messages:
+            if stored.message_id in seen_ids:
+                continue
+            try:
+                msg = _chat_message_from_stored(stored, fail_active_message=False)
+            except ValueError:
+                logger.warning("跳过无法恢复的 assistant 消息: %s", stored.message_id)
+                continue
+            candidates.append(msg)
+            self.messages.append(msg)
+            seen_ids.add(msg.message_id)
+            added = True
+        if added:
+            self.messages.sort(key=lambda msg: msg.created_at)
+        return candidates
+
+    @staticmethod
+    def _select_assistant_candidate(
+        candidates: list[ChatMessage],
+        incoming_status: MessageStatus,
+    ) -> Optional[ChatMessage]:
+        if not candidates:
+            return None
+        terminal = [
+            msg
+            for msg in candidates
+            if msg.status in (MessageStatus.COMPLETED, MessageStatus.FAILED)
+        ]
+        if terminal:
+            return sorted(terminal, key=lambda msg: msg.created_at, reverse=True)[0]
+        if incoming_status in (MessageStatus.COMPLETED, MessageStatus.FAILED):
+            return sorted(candidates, key=lambda msg: msg.created_at)[0]
+        return sorted(candidates, key=lambda msg: msg.created_at)[0]
+
+    def _drop_duplicate_assistant_messages_locked(self, task_id: str, keep_message_id: str) -> None:
+        duplicate_ids: list[str] = []
+        next_messages: list[ChatMessage] = []
+        for msg in self.messages:
+            if (
+                msg.role == MessageRole.ASSISTANT
+                and msg.task_id == task_id
+                and msg.message_id != keep_message_id
+            ):
+                duplicate_ids.append(msg.message_id)
+                continue
+            next_messages.append(msg)
+        if duplicate_ids:
+            self.messages = next_messages
+            deleter = getattr(self._store, "delete_messages", None)
+            if callable(deleter):
+                try:
+                    deleter(sorted(set(duplicate_ids)))
+                except Exception:
+                    logger.debug(
+                        "删除重复 assistant 消息失败: %s",
+                        duplicate_ids,
+                        exc_info=True,
+                    )
+
+    def _dedupe_assistant_messages_locked(self) -> None:
+        by_task: dict[str, list[ChatMessage]] = {}
+        for msg in self.messages:
+            if msg.role == MessageRole.ASSISTANT and msg.task_id:
+                by_task.setdefault(msg.task_id, []).append(msg)
+
+        for task_id, candidates in by_task.items():
+            if len(candidates) <= 1:
+                continue
+            keep = self._select_assistant_candidate(candidates, MessageStatus.COMPLETED)
+            if keep is None:
+                continue
+            self._drop_duplicate_assistant_messages_locked(task_id, keep.message_id)
+            self._sync_user_status_for_task_locked(task_id, keep.status, keep.error)
+
+    def _sync_user_status_for_task_locked(
+        self,
+        task_id: str,
+        status: MessageStatus,
+        error: Optional[str],
+    ) -> None:
+        for msg in self.messages:
+            if msg.task_id == task_id and msg.role == MessageRole.USER:
+                msg.status = status
+                if status == MessageStatus.FAILED and error:
+                    msg.error = error
+                elif status != MessageStatus.FAILED:
+                    msg.error = None
+                self._persist_message(msg)
+                break
     
     def add_system_message(self, content: str) -> str:
         """添加系统消息（提示、状态更新等）"""
@@ -416,6 +526,11 @@ class ChatSession:
         title = (title or "").strip()
         if not title:
             return
+        from apps.core.title_generator import looks_like_title_prompt_echo
+
+        if looks_like_title_prompt_echo(title):
+            logger.warning("忽略疑似标题生成提示词回显的会话标题: %s", title[:80])
+            return
         with self._lock:
             if self._store is not None:
                 self._store.update_session_title(self.session_id, title)
@@ -494,10 +609,33 @@ def switch_chat_session(session_id: str) -> ChatSession:
     from apps.core.chat_store import get_chat_store
     with _global_session_lock:
         session = ChatSession(session_id=session_id)
-        session.attach_store(get_chat_store(), load_existing=True)
+        session.attach_store(
+            get_chat_store(),
+            load_existing=True,
+            fail_active_messages=False,
+        )
         _global_session = session
     logger.info("切换到会话: %s (messages=%d)", session_id, session.message_count())
     return session
+
+
+def _chat_message_from_stored(stored, *, fail_active_message: bool = True) -> ChatMessage:
+    role = MessageRole(stored.role)
+    status = MessageStatus(stored.status)
+    error = stored.error
+    if fail_active_message and status in (MessageStatus.PENDING, MessageStatus.PROCESSING):
+        status = MessageStatus.FAILED
+        error = error or "应用已重启，原任务状态不可恢复"
+    return ChatMessage(
+        message_id=stored.message_id,
+        role=role,
+        content=stored.content,
+        status=status,
+        created_at=datetime.fromisoformat(stored.created_at),
+        task_id=stored.task_id,
+        error=error,
+        attachments=_parse_attachments_json(stored.attachments_json),
+    )
 
 
 def _parse_attachments_json(value: str | None) -> list[dict]:

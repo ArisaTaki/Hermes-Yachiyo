@@ -9,16 +9,32 @@ files:
   - dist/**
   - dist-electron/**
   - package.json
-  - node_modules/**
+  - node_modules/node-pty/package.json
+  - node_modules/node-pty/LICENSE
+  - node_modules/node-pty/lib/**
+  - node_modules/node-pty/prebuilds/darwin-arm64/**
+  - node_modules/node-pty/prebuilds/darwin-x64/**
+  - node_modules/node-addon-api/**
+  - '!node_modules/node-pty/prebuilds/win32*/**'
+  - '!node_modules/node-pty/deps/**'
+  - '!node_modules/node-pty/src/**'
+  - '!node_modules/node-pty/third_party/**'
+  - '!node_modules/node-pty/scripts/**'
+  - '!node_modules/node-pty/typings/**'
+  - '!node_modules/node-pty/**/*.map'
+  - '!node_modules/node-pty/**/*.test.js'
 
 extraResources:
   - from: ../../dist/backend/hermes-yachiyo-backend
     to: backend/hermes-yachiyo-backend
   - from: ../../assets
     to: assets
+    filter:
+      - icon.png
 
 asarUnpack:
-  - node_modules/node-pty/**
+  - node_modules/node-pty/prebuilds/darwin-arm64/**
+  - node_modules/node-pty/prebuilds/darwin-x64/**
 
 mac:
   icon: ../../assets/icon.icns

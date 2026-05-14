@@ -17,6 +17,7 @@ import {
   type DesktopTerminalTask,
 } from '../lib/bridge';
 import { currentParam, navigateTo } from '../lib/view';
+import { UiIcon } from '../components/UiIcon';
 
 type HermesStatus = {
   status?: string;
@@ -378,6 +379,7 @@ export function ToolCenterView() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [diagnosticCache, setDiagnosticCache] = useState<DiagnosticCache | null>(null);
   const [toolConfig, setToolConfig] = useState<ToolConfigPayload | null>(null);
+  const [toolConfigLoaded, setToolConfigLoaded] = useState(false);
   const [draftToolId, setDraftToolId] = useState('');
   const [configDraft, setConfigDraft] = useState<Record<string, ConfigFieldValue>>({});
   const [savedDraftSnapshot, setSavedDraftSnapshot] = useState('');
@@ -415,10 +417,14 @@ export function ToolCenterView() {
           setData(payload);
           setDiagnosticCache(cache);
           setToolConfig(config);
+          setToolConfigLoaded(true);
           setError('');
         }
       } catch (err) {
-        if (!disposed) setError(err instanceof Error ? err.message : '读取工具中心失败');
+        if (!disposed) {
+          setToolConfigLoaded(true);
+          setError(err instanceof Error ? err.message : '读取工具中心失败');
+        }
       }
     }
     refresh();
@@ -437,7 +443,6 @@ export function ToolCenterView() {
 
   const selectedToolId = currentParam('tool');
   const selectedToolConfig = selectedToolId ? toolConfigById.get(canonicalToolName(selectedToolId)) : undefined;
-  const selectedVisibleFields = selectedToolConfig ? visibleFieldsForTool(selectedToolConfig, configDraft) : [];
   const hasUnsavedChanges = Boolean(
     selectedToolConfig
     && draftToolId === selectedToolConfig.id
@@ -943,6 +948,7 @@ export function ToolCenterView() {
   const selectedCatalogItem = selectedToolId
     ? visibleToolCatalog.find((item) => toolNameAliases(item).some((alias) => canonicalToolName(alias) === canonicalToolName(selectedToolId)))
     : undefined;
+  const selectedToolLoading = Boolean(selectedToolId && !toolConfigLoaded);
   const attentionItems = attentionItemsForTools(
     visibleToolCatalog,
     limitedToolNames,
@@ -980,24 +986,15 @@ export function ToolCenterView() {
           <div className="topbar-actions">
             <button type="button" onClick={() => requestNavigation({ type: 'overview' })}>返回工具概览</button>
             <button type="button" onClick={() => requestNavigation({ type: 'main' })}>主控台</button>
-            {selectedVisibleFields.length ? (
-              <button
-                type="button"
-                className="primary-action"
-                disabled={configBusy || !hasUnsavedChanges}
-                onClick={() => void saveSelectedToolConfig()}
-              >
-                {configBusy ? '保存中...' : hasUnsavedChanges ? '保存配置' : '已保存'}
-              </button>
-            ) : null}
           </div>
         </header>
 
-        {error ? <div className="notice danger">{error}</div> : null}
-        {actionStatus ? <div className={/失败|错误|无法|未通过/.test(actionStatus) ? 'notice danger' : 'notice'}>{actionStatus}</div> : null}
-        {hasUnsavedChanges ? <div className="notice warn">当前配置有未保存更改。</div> : null}
+        {error ? <div className="tool-center-status danger">{error}</div> : null}
+        {actionStatus ? <div className={/失败|错误|无法|未通过/.test(actionStatus) ? 'tool-center-status danger' : 'tool-center-status'}>{actionStatus}</div> : null}
 
-        {selectedToolConfig ? (
+        {selectedToolLoading ? (
+          <ToolConfigLoadingPanel catalogItem={selectedCatalogItem} />
+        ) : selectedToolConfig ? (
           <ToolConfigPanel
             tool={selectedToolConfig}
             catalogItem={selectedCatalogItem}
@@ -1263,6 +1260,29 @@ function ToolCategoryList({
   );
 }
 
+function ToolConfigLoadingPanel({ catalogItem }: { catalogItem?: HermesToolCatalogItem }) {
+  return (
+    <section className="tool-config-panel tool-config-loading" aria-busy="true">
+      <div className="tool-config-loading-head">
+        <span className="tool-config-loading-icon">
+          <UiIcon name="settings" />
+        </span>
+        <div>
+          <strong>正在读取工具配置</strong>
+          <span>{catalogItem?.label ? `准备 ${catalogItem.label} 的配置项` : '正在同步 Hermes 工具配置。'}</span>
+        </div>
+      </div>
+      <div className="tool-config-skeleton-grid" aria-hidden="true">
+        <span className="tool-config-skeleton-line title" />
+        <span className="tool-config-skeleton-line title" />
+        <span className="tool-config-skeleton-line" />
+        <span className="tool-config-skeleton-line" />
+        <span className="tool-config-skeleton-line wide" />
+      </div>
+    </section>
+  );
+}
+
 function ToolConfigPanel({
   tool,
   catalogItem,
@@ -1312,6 +1332,13 @@ function ToolConfigPanel({
           {dirty ? '未保存' : `${configuredCount}/${visibleFields.length} 已配置`}
         </span>
       </div>
+
+      {dirty ? (
+        <div className="tool-config-unsaved-strip" role="status" aria-live="polite">
+          <strong>未保存更改</strong>
+          <span>保存后生效；“保存并测试”会先写入当前配置。</span>
+        </div>
+      ) : null}
 
       {visibleFields.length ? (
         <div className="tool-config-grid">

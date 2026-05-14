@@ -64,6 +64,8 @@ class TestTaskInfo:
         assert t.task_id == "abc123"
         assert t.result is None
         assert t.error is None
+        assert t.progress_label is None
+        assert t.progress_updated_at is None
 
     def test_with_result_and_error(self):
         now = datetime.now(timezone.utc)

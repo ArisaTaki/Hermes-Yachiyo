@@ -20,7 +20,9 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any, Dict
 
+from apps.core.activity_store import get_activity_store
 from apps.shell.chat_api import ChatAPI
+from packages.protocol.enums import TaskStatus
 
 if TYPE_CHECKING:
     from apps.core.runtime import HermesRuntime
@@ -142,6 +144,31 @@ def _session_activity(messages: list[Any], fallback: str = "") -> Dict[str, str]
         "latest_status": str(_message_field(latest, "status") or ""),
         "updated_at": str(_message_field(latest, "created_at") or fallback),
     }
+
+
+def _latest_activity_for_session(session_id: str) -> dict[str, Any]:
+    try:
+        events = get_activity_store().list_events(session_id=session_id, limit=1, key_only=True)
+        return events[0].to_dict() if events else {}
+    except Exception:
+        logger.debug("读取最近活动失败: %s", session_id, exc_info=True)
+        return {}
+
+
+def _session_is_processing(runtime: "HermesRuntime", session_id: str, messages: list[Any]) -> bool:
+    for task in runtime.state.list_tasks():
+        if getattr(task, "chat_session_id", None) != session_id:
+            continue
+        if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+            return True
+    return False
+
+
+def _session_updated_at(session_id: str, messages: list[Any], fallback: str = "") -> str:
+    activity = _latest_activity_for_session(session_id)
+    activity_time = str(activity.get("created_at") or "")
+    latest_message_time = str(_message_field(_latest_message(messages), "created_at") or "")
+    return max([value for value in (latest_message_time, activity_time, fallback) if value] or [""])
 
 
 def _latest_notifiable_assistant_message(messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -304,31 +331,39 @@ class ChatBridge:
             items = []
             for item in sessions:
                 messages = store.load_messages(item.session_id, limit=240)
+                latest_activity = _latest_activity_for_session(item.session_id)
                 items.append(
                     {
                         "session_id": item.session_id,
                         "title": item.title or "新对话",
                         "created_at": item.created_at,
+                        "updated_at": _session_updated_at(item.session_id, messages, item.created_at),
                         "message_count": item.message_count,
                         "is_current": item.session_id == current_session_id,
+                        "is_processing": _session_is_processing(self._runtime, item.session_id, messages),
+                        "latest_activity": latest_activity,
                         "summary": _session_summary(messages),
-                        **_session_activity(messages, item.created_at),
+                        **_session_activity(messages, _session_updated_at(item.session_id, messages, item.created_at)),
                     }
                 )
             if not any(item["session_id"] == current_session_id for item in items):
                 stored_current = store.get_session(current_session_id)
                 current_messages = store.load_messages(current_session_id, limit=240)
                 created_at = stored_current.created_at if stored_current else ""
+                latest_activity = _latest_activity_for_session(current_session_id)
                 items.insert(
                     0,
                     {
                         "session_id": current_session_id,
                         "title": (stored_current.title if stored_current else "") or "当前会话",
                         "created_at": created_at,
+                        "updated_at": _session_updated_at(current_session_id, current_messages, created_at),
                         "message_count": stored_current.message_count if stored_current else len(current_messages),
                         "is_current": True,
+                        "is_processing": _session_is_processing(self._runtime, current_session_id, current_messages),
+                        "latest_activity": latest_activity,
                         "summary": _session_summary(current_messages),
-                        **_session_activity(current_messages, created_at),
+                        **_session_activity(current_messages, _session_updated_at(current_session_id, current_messages, created_at)),
                     },
                 )
             return {
