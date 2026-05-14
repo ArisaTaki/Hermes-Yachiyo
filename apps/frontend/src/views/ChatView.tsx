@@ -140,6 +140,21 @@ type ChatNotice = {
 };
 
 let cachedAssistantProfile: AssistantProfilePayload | null = null;
+let retainedComposerDraft = {
+  input: '',
+  attachments: [] as PendingAttachment[],
+};
+
+function retainComposerDraft(input: string, attachments: PendingAttachment[]) {
+  retainedComposerDraft = {
+    input,
+    attachments: [...attachments],
+  };
+}
+
+function clearRetainedComposerDraft() {
+  retainComposerDraft('', []);
+}
 
 function profileFromSeed(seed: AssistantProfileSeed | null): AssistantProfilePayload | null {
   if (!seed?.agent_avatar_url && !seed?.agent_name && !seed?.agent_nickname && !seed?.user_avatar_url) return null;
@@ -186,8 +201,8 @@ const CODE_CHECK_ICON_HTML = '<svg aria-hidden="true" viewBox="0 0 24 24" fill="
 export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const assistantProfileSeed = useAssistantProfileSeed();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState('');
-  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [input, setInput] = useState(() => retainedComposerDraft.input);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>(() => [...retainedComposerDraft.attachments]);
   const [status, setStatus] = useState('就绪');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -478,6 +493,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }, [composerHeight]);
 
   useEffect(() => {
+    retainComposerDraft(input, attachments);
+  }, [attachments, input]);
+
+  useEffect(() => {
     const stopSelecting = () => {
       window.setTimeout(() => {
         messageTextSelectingRef.current = false;
@@ -586,6 +605,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       return;
     }
     const outgoingAttachments = attachments;
+    clearRetainedComposerDraft();
     setInput('');
     setAttachments([]);
     setIsSending(true);
@@ -612,6 +632,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     } catch (error) {
       pendingReplyScrollRef.current = false;
       pendingReplyTaskIdRef.current = '';
+      retainComposerDraft(text, outgoingAttachments);
       setInput(text);
       setAttachments(outgoingAttachments);
       setStatus(error instanceof Error ? error.message : '发送失败');
