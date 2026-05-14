@@ -169,6 +169,7 @@ const TYPE_BASE_CHARS_PER_SECOND = 85;
 const TYPE_MAX_CHARS_PER_SECOND = 360;
 const SCROLL_BOTTOM_THRESHOLD = 14;
 const COPY_FEEDBACK_MS = 1500;
+const CODE_COPY_FEEDBACK_MS = 2600;
 const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 const MIN_LOADING_MS = 1400;
@@ -179,6 +180,8 @@ const CHAT_WIDE_VIEWPORT_WIDTH = 1500;
 const COMPOSER_MIN_HEIGHT = 48;
 const COMPOSER_MAX_HEIGHT = 260;
 const COMPOSER_HEIGHT_STORAGE_KEY = 'hermes.chat.composerHeight';
+const CODE_COPY_ICON_HTML = '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"></path></svg>';
+const CODE_CHECK_ICON_HTML = '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.2 4.2L19 7"></path></svg>';
 
 export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const assistantProfileSeed = useAssistantProfileSeed();
@@ -197,7 +200,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [sessionQuery, setSessionQuery] = useState('');
   const [debouncedSessionQuery, setDebouncedSessionQuery] = useState('');
   const [copiedMessageId, setCopiedMessageId] = useState('');
+  const [copiedCodeBlockKey, setCopiedCodeBlockKey] = useState('');
   const [copiedSessionId, setCopiedSessionId] = useState('');
+  const [retryingMessageId, setRetryingMessageId] = useState('');
   const [highlightedMessageId, setHighlightedMessageId] = useState('');
   const [messagesLoaded, setMessagesLoaded] = useState(false);
   const [messagesVisible, setMessagesVisible] = useState(false);
@@ -218,6 +223,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const lastScrollTopRef = useRef(0);
   const bottomAnchorRef = useRef<HTMLDivElement>(null);
   const noticeTimerRef = useRef<number | null>(null);
+  const codeCopyTimerRef = useRef<number | null>(null);
   const messagesLoadedRef = useRef(false);
   const messageLoadTokenRef = useRef(0);
   const conversationLoadTokenRef = useRef(0);
@@ -490,6 +496,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       if (animationFrameRef.current !== null) window.cancelAnimationFrame(animationFrameRef.current);
       if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current);
       if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
+      if (codeCopyTimerRef.current !== null) window.clearTimeout(codeCopyTimerRef.current);
       if (highlightClearTimerRef.current !== null) window.clearTimeout(highlightClearTimerRef.current);
     };
   }, []);
@@ -811,6 +818,64 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
   }
 
+  async function retryMessage(message: ChatMessage) {
+    if (!message.id || isSending || isProcessing || retryingMessageId) return;
+    setRetryingMessageId(message.id);
+    setStatus('正在重试...');
+    isProcessingRef.current = true;
+    pendingReplyScrollRef.current = true;
+    pendingReplyTaskIdRef.current = '';
+    setIsProcessing(true);
+    stickToBottomRef.current = true;
+    try {
+      const result = await apiPost<{ ok?: boolean; error?: string; task_id?: string }>('/ui/chat/messages/retry', {
+        message_id: message.id,
+      });
+      if (result.ok === false) throw new Error(result.error || '重试失败');
+      const taskId = String(result.task_id || '');
+      pendingReplyTaskIdRef.current = taskId;
+      if (!taskId) pendingReplyScrollRef.current = false;
+      setStatus('已重新发送，等待回复...');
+      void loadSessions();
+      await refreshMessages();
+      await loadSessions();
+    } catch (error) {
+      pendingReplyScrollRef.current = false;
+      pendingReplyTaskIdRef.current = '';
+      isProcessingRef.current = false;
+      setIsProcessing(false);
+      setStatus(error instanceof Error ? error.message : '重试失败');
+    } finally {
+      setRetryingMessageId('');
+      focusComposerSoon();
+    }
+  }
+
+  async function copyCodeBlock(button: HTMLButtonElement) {
+    const block = button.closest('.markdown-code-block');
+    const messageNode = button.closest('[data-message-id]') as HTMLElement | null;
+    const code = block?.querySelector('code');
+    const content = code?.textContent || '';
+    if (!content) {
+      setStatus('没有可复制代码');
+      return;
+    }
+    const blockIndex = block?.getAttribute('data-code-index') || '0';
+    const codeBlockKey = codeBlockStateKey(messageNode?.dataset.messageId || '', blockIndex);
+    try {
+      await copyText(content);
+      setCopiedCodeBlockKey(codeBlockKey);
+      setStatus('已复制代码');
+      if (codeCopyTimerRef.current !== null) window.clearTimeout(codeCopyTimerRef.current);
+      codeCopyTimerRef.current = window.setTimeout(() => {
+        setCopiedCodeBlockKey((current) => (current === codeBlockKey ? '' : current));
+        codeCopyTimerRef.current = null;
+      }, CODE_COPY_FEEDBACK_MS);
+    } catch {
+      setStatus('复制代码失败');
+    }
+  }
+
   async function copySessionId(sessionId: string, event?: ReactMouseEvent<HTMLElement>) {
     event?.stopPropagation();
     if (!sessionId) {
@@ -834,7 +899,15 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }
 
   function handleMessageListClick(event: ReactMouseEvent<HTMLDivElement>) {
-    const anchor = (event.target instanceof Element ? event.target.closest('a[href]') : null) as HTMLAnchorElement | null;
+    const target = event.target instanceof Element ? event.target : null;
+    const codeCopyButton = target?.closest('[data-code-copy]') as HTMLButtonElement | null;
+    if (codeCopyButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      void copyCodeBlock(codeCopyButton);
+      return;
+    }
+    const anchor = (target?.closest('a[href]') || null) as HTMLAnchorElement | null;
     if (!anchor) return;
     event.preventDefault();
     void openExternalUrl(anchor.href);
@@ -842,6 +915,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
 
   function handleMessagePointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('[data-code-copy], .message-copy-button, .message-retry-button')) return;
     if (!target?.closest('.message-content')) return;
     messageTextSelectingRef.current = true;
     stickToBottomRef.current = false;
@@ -1147,7 +1221,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                   key={message.id || index}
                   highlighted={message.id === highlightedMessageId}
                   message={message}
+                  copiedCodeBlockKey={copiedCodeBlockKey}
+                  retryDisabled={isSending || isProcessing || Boolean(retryingMessageId)}
+                  retrying={retryingMessageId === message.id}
+                  showRetry={isRetryableMessage(message, messages)}
                   onCopy={() => void copyMessage(message)}
+                  onRetry={() => void retryMessage(message)}
                   registerMessageNode={registerMessageNode}
                 />
               ))}
@@ -1259,14 +1338,19 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   );
 }
 
-function MessageBubble({ assistantProfile, assistantProfileLoading, copied, displayContent, highlighted, message, onCopy, registerMessageNode }: {
+function MessageBubble({ assistantProfile, assistantProfileLoading, copied, copiedCodeBlockKey, displayContent, highlighted, message, retryDisabled, retrying, showRetry, onCopy, onRetry, registerMessageNode }: {
   assistantProfile: AssistantProfilePayload | null;
   assistantProfileLoading: boolean;
   copied: boolean;
+  copiedCodeBlockKey: string;
   displayContent: string;
   highlighted: boolean;
   message: ChatMessage;
+  retryDisabled: boolean;
+  retrying: boolean;
+  showRetry: boolean;
   onCopy: () => void;
+  onRetry: () => void;
   registerMessageNode: (messageId: string | undefined, node: HTMLElement | null) => void;
 }) {
   const role = message.role || 'system';
@@ -1290,7 +1374,7 @@ function MessageBubble({ assistantProfile, assistantProfileLoading, copied, disp
           {isProcessingEmpty ? (
             <TypingIndicator />
           ) : (
-            <div className="message-content markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(displayContent) }} />
+            <div className="message-content markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(displayContent, message.id || '', copiedCodeBlockKey) }} />
           )}
           {message.attachments?.length ? (
             <div className="message-attachments">
@@ -1308,6 +1392,18 @@ function MessageBubble({ assistantProfile, assistantProfileLoading, copied, disp
         />
         <div className="message-time">
           <span>{messageMetaText(role, message.status, message.created_at)}</span>
+          {showRetry ? (
+            <button
+              className={`message-retry-button ${retrying ? 'retrying' : ''}`}
+              type="button"
+              title={retrying ? '重试中' : '重试这条失败消息'}
+              aria-label={retrying ? '重试中' : '重试这条失败消息'}
+              disabled={retryDisabled}
+              onClick={onRetry}
+            >
+              <UiIcon name="retry" />
+            </button>
+          ) : null}
           <button
             className={`message-copy-button ${copied ? 'copied' : ''}`}
             type="button"
@@ -1400,6 +1496,17 @@ function latestFailedMessage(messages: ChatMessage[]) {
     }
   }
   return null;
+}
+
+function isRetryableMessage(message: ChatMessage, messages: ChatMessage[]) {
+  if (message.status !== 'failed' || !message.id) return false;
+  if (message.role === 'assistant') return true;
+  if (message.role !== 'user') return false;
+  if (!message.task_id) return true;
+  return !messages.some((candidate) => (
+    candidate.role === 'assistant'
+    && candidate.task_id === message.task_id
+  ));
 }
 
 function compactStatusText(text: string, maxLength = 96) {
@@ -1763,7 +1870,11 @@ function escapeHtml(text: string) {
     .replace(/'/g, '&#039;');
 }
 
-function renderMarkdown(text: string) {
+function codeBlockStateKey(messageId: string, blockIndex: string) {
+  return `${messageId || 'message'}:${blockIndex}`;
+}
+
+function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
   const source = String(text || '').replace(/\r\n/g, '\n');
   if (!source) return '';
 
@@ -1773,6 +1884,8 @@ function renderMarkdown(text: string) {
   let listType: 'ul' | 'ol' | null = null;
   let inCode = false;
   let codeLines: string[] = [];
+  let codeLanguage = '';
+  let codeBlockIndex = 0;
 
   function flushParagraph() {
     if (paragraph.length === 0) return;
@@ -1794,9 +1907,18 @@ function renderMarkdown(text: string) {
   }
 
   function flushCode() {
-    html += `<pre><code>${escapeHtml(codeLines.join('\n'))}</code></pre>`;
+    const code = codeLines.join('\n');
+    const language = codeLanguage || detectCodeLanguage(code);
+    const blockIndex = String(codeBlockIndex);
+    const copied = copiedCodeBlockKey === codeBlockStateKey(messageId, blockIndex);
+    const languageLabel = language ? `<span class="markdown-code-lang">${escapeHtml(language)}</span>` : '<span class="markdown-code-lang">text</span>';
+    const copyButtonLabel = copied ? '已复制' : '复制代码';
+    const copyButtonIcon = copied ? CODE_CHECK_ICON_HTML : CODE_COPY_ICON_HTML;
+    html += `<div class="markdown-code-block" data-code-index="${blockIndex}">${languageLabel}<button type="button" class="markdown-code-copy${copied ? ' copied' : ''}" data-code-copy aria-label="${copyButtonLabel}" title="${copyButtonLabel}">${copyButtonIcon}</button><pre><code class="${language ? `language-${escapeHtml(language)}` : ''}">${renderHighlightedCode(code, language)}</code></pre></div>`;
     codeLines = [];
+    codeLanguage = '';
     inCode = false;
+    codeBlockIndex += 1;
   }
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -1809,6 +1931,7 @@ function renderMarkdown(text: string) {
         closeList();
         inCode = true;
         codeLines = [];
+        codeLanguage = normalizeFenceLanguage(line);
       }
       continue;
     }
@@ -1882,6 +2005,166 @@ function renderMarkdown(text: string) {
   flushParagraph();
   closeList();
   return html;
+}
+
+function normalizeFenceLanguage(fenceLine: string) {
+  const raw = fenceLine.trim().slice(3).trim().split(/\s+/)[0] || '';
+  return normalizeCodeLanguage(raw);
+}
+
+function normalizeCodeLanguage(language: string) {
+  const value = String(language || '').trim().toLowerCase().replace(/[^a-z0-9+#.-]/g, '');
+  const aliases: Record<string, string> = {
+    cjs: 'javascript',
+    js: 'javascript',
+    jsx: 'javascript',
+    mjs: 'javascript',
+    node: 'javascript',
+    ts: 'typescript',
+    tsx: 'typescript',
+    py: 'python',
+    sh: 'bash',
+    shell: 'bash',
+    zsh: 'bash',
+    yml: 'yaml',
+  };
+  return aliases[value] || value;
+}
+
+function detectCodeLanguage(code: string) {
+  const trimmed = code.trim();
+  if (!trimmed) return '';
+  if ((trimmed.startsWith('{') || trimmed.startsWith('['))) {
+    try {
+      JSON.parse(trimmed);
+      return 'json';
+    } catch {
+      // Keep looking for a better lightweight guess.
+    }
+  }
+  if (/\bfunc\s+\w+\s*\(|\bpackage\s+main\b|:=/.test(trimmed)) return 'go';
+  if (/\b(def|class|from|import)\s+\w+|__name__/.test(trimmed)) return 'python';
+  if (/\b(const|let|var|function|interface|type)\s+\w+|=>/.test(trimmed)) return 'typescript';
+  if (/^\s*(#!|npm\s|pnpm\s|yarn\s|curl\s|git\s)/m.test(trimmed)) return 'bash';
+  if (/^\s*[\w.-]+\s*:\s+\S/m.test(trimmed)) return 'yaml';
+  return '';
+}
+
+function renderHighlightedCode(code: string, language: string) {
+  const normalizedLanguage = normalizeCodeLanguage(language) || detectCodeLanguage(code);
+  const keywords = codeKeywordsForLanguage(normalizedLanguage);
+  let html = '';
+  let index = 0;
+
+  while (index < code.length) {
+    const char = code[index];
+    const next = code[index + 1];
+
+    if (char === '/' && next === '*') {
+      const end = code.indexOf('*/', index + 2);
+      const stop = end >= 0 ? end + 2 : code.length;
+      html += syntaxSpan('comment', code.slice(index, stop));
+      index = stop;
+      continue;
+    }
+
+    if (char === '/' && next === '/') {
+      const end = code.indexOf('\n', index + 2);
+      const stop = end >= 0 ? end : code.length;
+      html += syntaxSpan('comment', code.slice(index, stop));
+      index = stop;
+      continue;
+    }
+
+    if (char === '#' && (normalizedLanguage === 'python' || normalizedLanguage === 'bash' || normalizedLanguage === 'yaml')) {
+      const end = code.indexOf('\n', index + 1);
+      const stop = end >= 0 ? end : code.length;
+      html += syntaxSpan('comment', code.slice(index, stop));
+      index = stop;
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === '`') {
+      const stop = quotedStringEnd(code, index, char);
+      const token = code.slice(index, stop);
+      const after = nextNonWhitespaceIndex(code, stop);
+      const className = code[after] === ':' ? 'property' : 'string';
+      html += syntaxSpan(className, token);
+      index = stop;
+      continue;
+    }
+
+    const numberMatch = code.slice(index).match(/^(?:0x[\da-fA-F]+|\d+(?:\.\d+)?(?:e[+-]?\d+)?)/);
+    if (numberMatch) {
+      html += syntaxSpan('number', numberMatch[0]);
+      index += numberMatch[0].length;
+      continue;
+    }
+
+    const identifierMatch = code.slice(index).match(/^[A-Za-z_$][\w$]*/);
+    if (identifierMatch) {
+      const word = identifierMatch[0];
+      const after = nextNonWhitespaceIndex(code, index + word.length);
+      if (keywords.has(word)) {
+        html += syntaxSpan('keyword', word);
+      } else if (code[after] === '(') {
+        html += syntaxSpan('function', word);
+      } else {
+        html += escapeHtml(word);
+      }
+      index += word.length;
+      continue;
+    }
+
+    if (/[\[\]{}().,:;]/.test(char)) {
+      html += syntaxSpan('punctuation', char);
+      index += 1;
+      continue;
+    }
+
+    html += escapeHtml(char);
+    index += 1;
+  }
+
+  return html;
+}
+
+function codeKeywordsForLanguage(language: string) {
+  const common = ['false', 'null', 'true'];
+  const byLanguage: Record<string, string[]> = {
+    bash: ['case', 'do', 'done', 'elif', 'else', 'esac', 'export', 'fi', 'for', 'function', 'if', 'in', 'local', 'then', 'while'],
+    go: ['break', 'case', 'chan', 'const', 'continue', 'defer', 'default', 'else', 'fallthrough', 'for', 'func', 'go', 'if', 'import', 'interface', 'map', 'nil', 'package', 'range', 'return', 'select', 'struct', 'switch', 'type', 'var'],
+    javascript: ['async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'default', 'else', 'export', 'extends', 'finally', 'for', 'from', 'function', 'if', 'import', 'let', 'new', 'return', 'switch', 'this', 'throw', 'try', 'typeof', 'var', 'while'],
+    json: common,
+    python: ['and', 'as', 'async', 'await', 'break', 'class', 'continue', 'def', 'elif', 'else', 'except', 'False', 'finally', 'for', 'from', 'if', 'import', 'in', 'is', 'None', 'not', 'or', 'pass', 'return', 'True', 'try', 'while', 'with', 'yield'],
+    typescript: ['async', 'await', 'break', 'case', 'catch', 'class', 'const', 'continue', 'default', 'else', 'export', 'extends', 'finally', 'for', 'from', 'function', 'if', 'implements', 'import', 'interface', 'let', 'new', 'private', 'protected', 'public', 'readonly', 'return', 'switch', 'this', 'throw', 'try', 'type', 'typeof', 'var', 'while'],
+    yaml: ['false', 'null', 'true'],
+  };
+  return new Set([...(byLanguage[language] || []), ...common]);
+}
+
+function quotedStringEnd(code: string, start: number, quote: string) {
+  let index = start + 1;
+  while (index < code.length) {
+    const char = code[index];
+    if (char === '\\') {
+      index += 2;
+      continue;
+    }
+    if (char === quote) return index + 1;
+    index += 1;
+  }
+  return code.length;
+}
+
+function nextNonWhitespaceIndex(code: string, start: number) {
+  let index = start;
+  while (index < code.length && /\s/.test(code[index])) index += 1;
+  return index;
+}
+
+function syntaxSpan(kind: string, value: string) {
+  return `<span class="syntax-${kind}">${escapeHtml(value)}</span>`;
 }
 
 function isMarkdownTableHeader(headerLine: string, separatorLine: string) {

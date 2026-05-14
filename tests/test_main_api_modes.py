@@ -695,6 +695,94 @@ def test_update_hermes_configuration_writes_openrouter_key_for_auto_provider(tmp
         store.close()
 
 
+def test_update_hermes_configuration_preserves_image_input_mode(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    calls = []
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+
+        def fake_run(argv, **_kwargs):
+            calls.append(argv)
+            if argv[1:3] == ["config", "set"]:
+                return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            if argv[-1] == "path":
+                return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
+            if argv[-1] == "env-path":
+                return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv[-2:] == ["tools", "list"]:
+                return SimpleNamespace(returncode=0, stdout="  ✓ enabled  browser  Browser\n", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.update_hermes_configuration(
+            {
+                "provider": "xiaomi",
+                "model": "mimo-v2.5",
+                "base_url": "https://api.xiaomimimo.com/v1",
+                "image_input_mode": "auto",
+            }
+        )
+
+        assert result["ok"] is True
+        set_calls = [call for call in calls if call[1:3] == ["config", "set"]]
+        image_mode_call = next(call for call in set_calls if call[3] == "agent.image_input_mode")
+        assert image_mode_call[4] == "auto"
+    finally:
+        store.close()
+
+
+def test_update_hermes_configuration_accepts_vision_mode_alias(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    calls = []
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    try:
+        monkeypatch.setattr(
+            "apps.shell.main_api.locate_hermes_binary",
+            lambda: ("/bin/hermes", False),
+        )
+
+        def fake_run(argv, **_kwargs):
+            calls.append(argv)
+            if argv[1:3] == ["config", "set"]:
+                return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            if argv[-1] == "path":
+                return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
+            if argv[-1] == "env-path":
+                return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv[-2:] == ["tools", "list"]:
+                return SimpleNamespace(returncode=0, stdout="  ✓ enabled  browser  Browser\n", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.update_hermes_configuration(
+            {
+                "provider": "xiaomi",
+                "model": "mimo-v2.5",
+                "base_url": "https://api.xiaomimimo.com/v1",
+                "image_input_mode": "vision",
+            }
+        )
+
+        assert result["ok"] is True
+        set_calls = [call for call in calls if call[1:3] == ["config", "set"]]
+        image_mode_call = next(call for call in set_calls if call[3] == "agent.image_input_mode")
+        assert image_mode_call[4] == "text"
+    finally:
+        store.close()
+
+
 def test_update_hermes_configuration_writes_vision_chain_settings(tmp_path, monkeypatch):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _RuntimeStub(store)

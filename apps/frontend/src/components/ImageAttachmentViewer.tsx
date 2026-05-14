@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 export type ImageAttachment = {
   id?: string;
@@ -27,6 +28,34 @@ function ImagePreviewAttachment({ attachment }: Props) {
   const name = attachment.name || '图片';
   const sizeText = formatBytes(attachment.size);
   const canPreview = Boolean(attachment.url) && !failed;
+  const viewer = open && canPreview ? (
+    <div
+      className="image-viewer-backdrop"
+      role="presentation"
+      onClick={() => setOpen(false)}
+    >
+      <section
+        className="image-viewer-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={name}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="image-viewer-toolbar">
+          <div>
+            <h2>{name}</h2>
+            <p>{attachment.mime_type || 'image'} · {sizeText}</p>
+          </div>
+          <div className="image-viewer-actions">
+            <button type="button" onClick={() => setOpen(false)}>关闭</button>
+          </div>
+        </header>
+        <div className="image-viewer-stage">
+          <img src={attachment.url} alt={name} />
+        </div>
+      </section>
+    </div>
+  ) : null;
 
   useEffect(() => {
     if (!open) return undefined;
@@ -58,34 +87,7 @@ function ImagePreviewAttachment({ attachment }: Props) {
         <span>{name}</span>
       </button>
 
-      {open && canPreview ? (
-        <div
-          className="image-viewer-backdrop"
-          role="presentation"
-          onClick={() => setOpen(false)}
-        >
-          <section
-            className="image-viewer-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-label={name}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <header className="image-viewer-toolbar">
-              <div>
-                <h2>{name}</h2>
-                <p>{attachment.mime_type || 'image'} · {sizeText}</p>
-              </div>
-              <div className="image-viewer-actions">
-                <button type="button" onClick={() => setOpen(false)}>关闭</button>
-              </div>
-            </header>
-            <div className="image-viewer-stage">
-              <img src={attachment.url} alt={name} />
-            </div>
-          </section>
-        </div>
-      ) : null}
+      {viewer && typeof document !== 'undefined' ? createPortal(viewer, document.body) : viewer}
     </>
   );
 }

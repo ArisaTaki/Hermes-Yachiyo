@@ -134,7 +134,7 @@ def build_hermes_image_input_capability(
         )
         or (provider or "").strip().lower()
     )
-    mode = "text"
+    mode = str(image_config.get("mode") or "auto")
     explicit_aux_vision = bool(image_config["auxiliary_vision_configured"])
     supports_vision = lookup_model_supports_vision(effective_provider, model)
     if not effective_provider or not model:
@@ -279,7 +279,7 @@ def read_hermes_image_input_config(config_path: Path) -> dict[str, Any]:
     vision_api_key = values.get(("auxiliary", "vision", "api_key"), "").strip()
     explicit = bool((vision_provider and vision_provider != "auto") or vision_model or vision_base_url or vision_api_key)
     return {
-        "mode": "text",
+        "mode": mode,
         "stored_mode": mode,
         "auxiliary_vision_configured": explicit,
         "auxiliary_vision_provider": vision_provider,

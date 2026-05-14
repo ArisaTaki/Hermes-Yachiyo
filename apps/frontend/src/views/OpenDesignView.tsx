@@ -1,4 +1,4 @@
-import { Suspense, createContext, lazy, FormEvent, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { Suspense, createContext, lazy, FormEvent, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type PointerEvent as ReactPointerEvent } from 'react';
 
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { UiIcon, type UiIconName } from '../components/UiIcon';
@@ -245,6 +245,12 @@ const NAV_GROUPS: Array<{
 
 type ToolStatusTone = 'ready' | 'pending' | 'error';
 
+type SidebarTooltip = {
+  text: string;
+  top: number;
+  left: number;
+};
+
 type ToolCard = {
   view: AppView;
   icon: UiIconName;
@@ -287,6 +293,7 @@ const PARTICLES = Array.from({ length: 80 }, (_, index) => {
   };
 });
 const ACTIVITY_LOG_CHANGED_EVENT = 'hermes-activity-log-changed';
+const SIDEBAR_COLLAPSED_STORAGE_KEY = 'hermes.shell.sidebarCollapsed';
 
 let bridgeBootReady = false;
 let bootDashboardCache: DashboardData | null = null;
@@ -313,6 +320,11 @@ export function signalDashboardReady() {
   bootDashboardReady = true;
 }
 
+function storedSidebarCollapsed() {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === '1';
+}
+
 export function OpenDesignShell({ activeView, children }: { activeView: AppView; children: ReactNode }) {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [pageLoadingCount, setPageLoadingCount] = useState(0);
@@ -324,6 +336,9 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
   const [fontSize, setFontSize] = useState(13);
   const [particlesEnabled, setParticlesEnabled] = useState(true);
   const [glowEnabled, setGlowEnabled] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => storedSidebarCollapsed());
+  const [sidebarSwitching, setSidebarSwitching] = useState(false);
+  const [sidebarTooltip, setSidebarTooltip] = useState<SidebarTooltip | null>(null);
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; type: 'info' | 'success' | 'warning' | 'error' }>>([]);
   const [bootPhase, setBootPhase] = useState<'loading' | 'ready'>(() => (bridgeBootReady ? 'ready' : 'loading'));
   const [bootSlow, setBootSlow] = useState(false);
@@ -345,6 +360,7 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
   const [shimmerActive, setShimmerActive] = useState(false);
   const shimmerActiveRef = useRef(false);
   const shimmerKey = useRef(0);
+  const sidebarSwitchTimerRef = useRef<number | null>(null);
 
   const handlePageLoading = useCallback((loading: boolean) => {
     setPageLoadingCount((prev) => {
@@ -366,6 +382,8 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
     `hy-accent-${accent}`,
     particlesEnabled ? '' : 'hy-particles-off',
     glowEnabled ? 'hy-glow-on' : '',
+    sidebarCollapsed ? 'hy-sidebar-collapsed' : '',
+    sidebarSwitching ? 'hy-sidebar-switching' : '',
   ].filter(Boolean).join(' ');
   const moonlightFactor = moonlightIntensity / 100;
   const normalizedMoonlight = Math.max(moonlightFactor, 0);
@@ -382,6 +400,17 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
     const timer = window.setTimeout(() => setRouteSettling(false), 560);
     return () => window.clearTimeout(timer);
   }, [activeView, settingsMode]);
+
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, sidebarCollapsed ? '1' : '0');
+    setSidebarTooltip(null);
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    return () => {
+      if (sidebarSwitchTimerRef.current !== null) window.clearTimeout(sidebarSwitchTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (bridgeBootReady) return undefined;
@@ -460,6 +489,37 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
     }, 2700);
   }
 
+  function toggleSidebar() {
+    if (sidebarSwitchTimerRef.current !== null) window.clearTimeout(sidebarSwitchTimerRef.current);
+    setSidebarTooltip(null);
+    setSidebarSwitching(true);
+    setSidebarCollapsed((value) => !value);
+    sidebarSwitchTimerRef.current = window.setTimeout(() => {
+      setSidebarSwitching(false);
+      sidebarSwitchTimerRef.current = null;
+    }, 420);
+  }
+
+  function showSidebarTooltip(text: string, target: HTMLElement) {
+    if (!sidebarCollapsed) return;
+    const rect = target.getBoundingClientRect();
+    setSidebarTooltip({
+      text,
+      top: Math.round(rect.top + rect.height / 2),
+      left: Math.round(rect.right + 12),
+    });
+  }
+
+  function sidebarTooltipProps(text: string) {
+    return {
+      'data-tooltip': text,
+      onBlur: () => setSidebarTooltip(null),
+      onFocus: (event: ReactFocusEvent<HTMLElement>) => showSidebarTooltip(text, event.currentTarget),
+      onPointerEnter: (event: ReactPointerEvent<HTMLElement>) => showSidebarTooltip(text, event.currentTarget),
+      onPointerLeave: () => setSidebarTooltip(null),
+    };
+  }
+
   async function checkForAppUpdate() {
     showToast('正在检查应用更新...', 'info');
     try {
@@ -482,6 +542,15 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
           <div className={`hy-toast hy-toast-${toast.type}`} key={toast.id}>{toast.message}</div>
         ))}
       </div>
+      {sidebarTooltip ? (
+        <div
+          className="hy-sidebar-tooltip"
+          role="tooltip"
+          style={{ left: `${sidebarTooltip.left}px`, top: `${sidebarTooltip.top}px` }}
+        >
+          {sidebarTooltip.text}
+        </div>
+      ) : null}
       <div className="hy-moonlight-bg" aria-hidden>
         {PARTICLES.slice(0, particleDensity).map((particle) => (
           <span className={particle.className} key={particle.id} style={particle.style} />
@@ -511,15 +580,28 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
 
       <aside className="hy-sidebar">
         <div className="hy-sidebar-header">
-          <button type="button" className="hy-brand" onClick={() => navigateTo('main')} aria-label="返回主控台">
-            <span className="hy-brand-mark" aria-hidden="true">
-              <img src={logoUrl} alt="" className="hy-brand-logo" />
-            </span>
-            <span>Hermes Yachiyo</span>
-          </button>
+          <div className="hy-sidebar-header-row">
+            <button type="button" className="hy-brand" onClick={() => navigateTo('main')} aria-label="返回主控台" title="返回主控台" {...sidebarTooltipProps('返回主控台')}>
+              <span className="hy-brand-mark" aria-hidden="true">
+                <img src={logoUrl} alt="" className="hy-brand-logo" />
+              </span>
+              <span>Hermes Yachiyo</span>
+            </button>
+            <button
+              type="button"
+              className="hy-sidebar-toggle"
+              aria-label={sidebarCollapsed ? '展开菜单栏' : '收起菜单栏'}
+              aria-pressed={sidebarCollapsed}
+              title={sidebarCollapsed ? '展开菜单栏' : '收起菜单栏'}
+              onClick={toggleSidebar}
+              {...sidebarTooltipProps(sidebarCollapsed ? '展开菜单栏' : '收起菜单栏')}
+            >
+              <UiIcon name="sidebar" />
+            </button>
+          </div>
         </div>
 
-        <section className="hy-character">
+        <section className="hy-character" {...sidebarTooltipProps(`${agentName} · ${dashboard?.chat?.is_processing ? '处理中' : '待机中'}`)}>
           <div className="hy-avatar-ring">
             <img src={agentAvatarUrl} alt={agentName} />
           </div>
@@ -542,6 +624,8 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
                     aria-current={active ? 'page' : undefined}
                     key={`${group.label}-${item.view}`}
                     onClick={() => navigateTo(item.view)}
+                    title={item.label}
+                    {...sidebarTooltipProps(item.label)}
                   >
                     <span className="hy-nav-icon"><UiIcon name={item.icon} /></span>
                     <span>{item.label}</span>
@@ -554,8 +638,14 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
         </nav>
 
         <footer className="hy-sidebar-footer">
-          <button type="button" onClick={() => void checkForAppUpdate()}>检查更新</button>
-          <button type="button" onClick={() => void openExternalUrl('https://www.hermes-yachiyo.dev/guide/')}>帮助</button>
+          <button type="button" onClick={() => void checkForAppUpdate()} title="检查更新" aria-label="检查更新" {...sidebarTooltipProps('检查更新')}>
+            <UiIcon name="retry" />
+            <span>检查更新</span>
+          </button>
+          <button type="button" onClick={() => void openExternalUrl('https://www.hermes-yachiyo.dev/guide/')} title="帮助" aria-label="帮助" {...sidebarTooltipProps('帮助')}>
+            <UiIcon name="help" />
+            <span>帮助</span>
+          </button>
         </footer>
       </aside>
 
@@ -1063,9 +1153,9 @@ export function ProviderPage() {
                   <small>{config?.image_input?.reason || config?.image_input?.label || '选择图片如何进入 Hermes'}</small>
                 </span>
                 <select className="hy-select" value={form.image_input_mode} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, image_input_mode: event.target.value }))}>
-                  <option value="text">文本描述 / 禁用视觉</option>
-                  <option value="vision">Vision 模型识图</option>
                   <option value="auto">自动选择</option>
+                  <option value="text">Vision 模型识图</option>
+                  <option value="native">原生图片输入（兼容）</option>
                 </select>
               </label>
               <label className="hy-settings-item">
@@ -2196,7 +2286,7 @@ function emptyHermesForm(): HermesConfigForm {
     model: '',
     base_url: '',
     api_key: '',
-    image_input_mode: 'text',
+    image_input_mode: 'auto',
     vision_provider: '',
     vision_model: '',
     vision_base_url: '',
@@ -2214,12 +2304,19 @@ function formFromHermesConfig(config: HermesVisualConfig | null): HermesConfigFo
     model: config?.model?.default || defaultTextModel(provider),
     base_url: config?.model?.base_url || provider?.base_url || '',
     api_key: '',
-    image_input_mode: config?.image_input?.mode || 'text',
+    image_input_mode: normalizeImageInputMode(config?.image_input?.mode),
     vision_provider: visionProviderId,
     vision_model: config?.vision?.model || (visionProviderId ? defaultVisionModel(visionProvider) : ''),
     vision_base_url: config?.vision?.base_url || (visionProviderId ? visionProvider?.base_url || '' : ''),
     vision_api_key: '',
   };
+}
+
+function normalizeImageInputMode(mode?: string): string {
+  const normalized = String(mode || 'auto').trim().toLowerCase();
+  if (normalized === 'vision' || normalized === 'yachiyo_vision') return 'text';
+  if (normalized === 'auto' || normalized === 'native' || normalized === 'text') return normalized;
+  return 'auto';
 }
 
 function providerOptionById(config: HermesVisualConfig | null, provider: string): HermesProviderOption | undefined {
