@@ -15,6 +15,9 @@ import {
 import { ROUTE_CHANGE_EVENT, currentParam, currentView } from './lib/view';
 
 const ChatView = lazy(() => import('./views/ChatView').then((module) => ({ default: module.ChatView })));
+const CodingJobsView = lazy(() =>
+  import('./views/CodingJobsView').then((module) => ({ default: module.CodingJobsView })),
+);
 const DiagnosticsView = lazy(() =>
   import('./views/DiagnosticsView').then((module) => ({ default: module.DiagnosticsView })),
 );
@@ -78,6 +81,7 @@ export function App() {
 
   let page: ReactNode = <DashboardPage />;
   if (view === 'chat') page = <ChatView />;
+  else if (view === 'coding') page = <CodingJobsView />;
   else if (view === 'settings') page = <ModeSettingsView />;
   else if (view === 'installer') page = <InstallerView />;
   else if (view === 'diagnostics') page = <DiagnosticsView />;

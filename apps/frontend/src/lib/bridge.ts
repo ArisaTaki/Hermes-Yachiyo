@@ -278,6 +278,7 @@ function isAppView(value: string): value is AppView {
   return [
     'main',
     'chat',
+    'coding',
     'settings',
     'installer',
     'provider',
