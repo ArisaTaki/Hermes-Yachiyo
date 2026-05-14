@@ -12,6 +12,7 @@ import { UiIcon } from '../components/UiIcon';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiGet, apiPost, bridgeUrl, copyText, openAppView, openExternalUrl } from '../lib/bridge';
+import { CODING_REPO_STORAGE_KEY, clearSeededCodingDraft, createCodingJob, seedCodingDraftFromChat } from '../lib/coding';
 import { currentParam } from '../lib/view';
 
 type PendingAttachment = {
@@ -590,11 +591,31 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     stickToBottomRef.current = true;
     focusComposerSoon();
     try {
-      const result = await apiPost<{ ok?: boolean; error?: string; task_id?: string }>('/ui/chat/messages', {
+      const result = await apiPost<{
+        ok?: boolean;
+        error?: string;
+        task_id?: string;
+        coding_command?: boolean;
+        coding_job_id?: string;
+        needs_config?: boolean;
+      }>('/ui/chat/messages', {
         text,
         attachments: outgoingAttachments,
       });
       if (result.ok === false) throw new Error(result.error || '发送失败');
+      if (result.coding_command) {
+        pendingReplyTaskIdRef.current = '';
+        pendingReplyScrollRef.current = false;
+        setStatus(result.coding_job_id ? 'Coding Job 已创建，等待审批。' : result.error || 'Coding 指令已处理。');
+        await refreshMessages();
+        await loadSessions();
+        if (result.coding_job_id) {
+          await openAppView('coding', { job: result.coding_job_id });
+        } else if (result.needs_config) {
+          await openAppView('coding', { tab: 'defaults' });
+        }
+        return;
+      }
       const taskId = String(result.task_id || '');
       pendingReplyTaskIdRef.current = taskId;
       if (!taskId) pendingReplyScrollRef.current = false;
@@ -610,6 +631,41 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setStatus(error instanceof Error ? error.message : '发送失败');
       isProcessingRef.current = false;
       setIsProcessing(false);
+    } finally {
+      setIsSending(false);
+      focusComposerSoon();
+    }
+  }
+
+  async function createCodingDraft() {
+    const text = input.trim();
+    if (!text || isSending || isProcessing) return;
+    const repoPath = window.localStorage.getItem(CODING_REPO_STORAGE_KEY) || '';
+    if (!repoPath.trim()) {
+      seedCodingDraftFromChat(text);
+      await openAppView('coding');
+      return;
+    }
+
+    setIsSending(true);
+    setStatus('正在创建 Coding Job...');
+    try {
+      const created = await createCodingJob({
+        user_request: text,
+        repo_path: repoPath.trim(),
+        task_type: 'custom',
+        writable_scopes: ['.'],
+        design_mode: 'none',
+        preferred_provider: 'local_claude_code',
+        review_strategy: 'codex_if_available',
+      });
+      clearSeededCodingDraft();
+      setInput('');
+      setStatus(created.status === 'blocked' ? 'Coding Job 已创建，等待处理 blocker。' : 'Coding Job 已创建，等待审批。');
+      await openAppView('coding', { job: created.job_id });
+    } catch (error) {
+      seedCodingDraftFromChat(text);
+      setStatus(error instanceof Error ? error.message : '创建 Coding Job 失败');
     } finally {
       setIsSending(false);
       focusComposerSoon();
@@ -1217,6 +1273,16 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 onClick={() => fileInputRef.current?.click()}
               >
                 <UiIcon name="image" />
+              </button>
+              <button
+                type="button"
+                className="chat-attach-btn"
+                disabled={isSending || isProcessing || !input.trim()}
+                title="转为 Coding Job"
+                aria-label="转为 Coding Job"
+                onClick={() => void createCodingDraft()}
+              >
+                <UiIcon name="model" />
               </button>
               <button
                 type={isProcessing ? 'button' : 'submit'}

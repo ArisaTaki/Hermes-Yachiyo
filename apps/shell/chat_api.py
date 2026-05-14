@@ -34,6 +34,7 @@ from apps.core.chat_session import (
 from apps.core.activity_store import get_activity_store
 from apps.core.special_sessions import is_proactive_chat_session
 from apps.locald.screenshot import capture_screenshot_to_file
+from apps.shell.coding_execution import get_coding_execution_service, parse_start_code_command
 from apps.shell.hermes_capabilities import get_current_hermes_image_input_capability
 from packages.protocol.enums import TaskStatus, TaskType
 
@@ -288,6 +289,10 @@ class ChatAPI:
             return {"ok": False, "error": "消息内容不能为空"}
 
         try:
+            coding_command = self._handle_start_code_command(text, raw_attachments)
+            if coding_command is not None:
+                return coding_command
+
             if raw_attachments and self._should_enforce_image_capability():
                 image_input = get_current_hermes_image_input_capability()
                 if image_input.get("can_attach_images") is False:
@@ -356,6 +361,66 @@ class ChatAPI:
         except Exception as exc:
             logger.error("发送消息失败: %s", exc)
             return {"ok": False, "error": str(exc)}
+
+    def _handle_start_code_command(self, text: str, raw_attachments: list[dict]) -> Dict[str, Any] | None:
+        if parse_start_code_command(text, {}) is None:
+            return None
+        message_id = self._session.add_user_message(text, [])
+        pseudo_task_id = f"coding:{uuid4().hex[:10]}"
+        self._session.link_message_to_task(message_id, pseudo_task_id)
+        if raw_attachments:
+            content = "Coding workflow 指令暂不支持附件。请把需求写在 /start-code 正文里，或先在普通对话中整理需求。"
+            assistant_id = self._session.add_assistant_message(content, task_id=pseudo_task_id)
+            return {
+                "ok": True,
+                "coding_command": True,
+                "message_id": message_id,
+                "assistant_message_id": assistant_id,
+                "task_id": "",
+                "status": "completed",
+                "needs_config": False,
+                "error": content,
+            }
+
+        service = get_coding_execution_service()
+        result = service.create_job_from_start_code(text)
+        if result is None:
+            return None
+        if result.get("ok") is not True:
+            content = str(result.get("error") or "Coding Job 创建失败")
+            assistant_id = self._session.add_assistant_message(content, task_id=pseudo_task_id)
+            return {
+                "ok": True,
+                "coding_command": True,
+                "message_id": message_id,
+                "assistant_message_id": assistant_id,
+                "task_id": "",
+                "status": "completed",
+                "needs_config": bool(result.get("needs_config")),
+                "error": content,
+            }
+
+        job = result["job"]
+        content = (
+            "Coding Job 已创建，等待审批。\n\n"
+            f"- Job: `{job['job_id']}`\n"
+            f"- Status: `{job['status']}`\n"
+            f"- Repo: `{job['repo_path']}`\n"
+            f"- Branch: `{job['branch_name']}`\n\n"
+            "我已经打开 Coding 页面；真实 provider 执行仍需要你在页面里审批。"
+        )
+        assistant_id = self._session.add_assistant_message(content, task_id=pseudo_task_id)
+        return {
+            "ok": True,
+            "coding_command": True,
+            "message_id": message_id,
+            "assistant_message_id": assistant_id,
+            "task_id": "",
+            "status": "completed",
+            "coding_job_id": job["job_id"],
+            "coding_job_status": job["status"],
+            "needs_config": False,
+        }
 
     def _should_enforce_image_capability(self) -> bool:
         runner = getattr(self._runtime, "task_runner", None)

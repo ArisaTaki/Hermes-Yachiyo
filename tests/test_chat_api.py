@@ -14,6 +14,7 @@ import apps.core.chat_store as _store_mod
 from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID
 from apps.core.state import AppState
 import apps.shell.chat_api as chat_api_mod
+from apps.shell.coding_execution import CodingExecutionService
 from apps.shell.chat_api import ChatAPI
 from packages.protocol.enums import TaskStatus
 
@@ -48,6 +49,19 @@ def _make_api(tmp_path):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _RuntimeStub(store)
     return ChatAPI(runtime), runtime, store
+
+
+def _init_git_repo(path: Path) -> Path:
+    import subprocess
+
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init"], cwd=path, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=path, check=True)
+    (path / "README.md").write_text("hello\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=path, check=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=path, check=True, stdout=subprocess.DEVNULL)
+    return path
 
 
 def _chat_message(
@@ -85,6 +99,56 @@ def test_send_message_creates_task_and_links_user_message(tmp_path):
         assert user.status == MessageStatus.PENDING
         assert api.get_session_info()["is_processing"] is True
     finally:
+        store.close()
+
+
+def test_start_code_command_creates_coding_job_without_general_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    repo = _init_git_repo(tmp_path / "repo")
+    service = CodingExecutionService(
+        db_path=tmp_path / "coding.db",
+        workspace_dir=tmp_path / "coding-workspace",
+    )
+    service.update_config(
+        {
+            "default_repo_path": str(repo),
+            "default_provider": "mock",
+            "default_review_strategy": "manual_only",
+        }
+    )
+    monkeypatch.setattr(chat_api_mod, "get_coding_execution_service", lambda: service)
+    try:
+        result = api.send_message("/start-code --scope . 修改一个小 UI 文案")
+        assert result["ok"] is True
+        assert result["coding_command"] is True
+        assert result["coding_job_id"]
+        assert runtime.state.list_tasks() == []
+        job = service.get_job(result["coding_job_id"])
+        assert job["status"] == "awaiting_approval"
+        messages = runtime.chat_session.get_messages()
+        assert messages[0].status == MessageStatus.COMPLETED
+        assert messages[1].role == MessageRole.ASSISTANT
+    finally:
+        service.close()
+        store.close()
+
+
+def test_start_code_command_guides_to_defaults_when_repo_missing(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = CodingExecutionService(
+        db_path=tmp_path / "coding.db",
+        workspace_dir=tmp_path / "coding-workspace",
+    )
+    monkeypatch.setattr(chat_api_mod, "get_coding_execution_service", lambda: service)
+    try:
+        result = api.send_message("/start-code 修改一个小 UI 文案")
+        assert result["ok"] is True
+        assert result["coding_command"] is True
+        assert result["needs_config"] is True
+        assert "repo path" in result["error"]
+        assert runtime.state.list_tasks() == []
+    finally:
+        service.close()
         store.close()
 
 
