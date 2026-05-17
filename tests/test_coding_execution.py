@@ -165,6 +165,7 @@ def test_provider_env_config_is_redacted_and_testable(tmp_path: Path, monkeypatc
             {
                 "claude_credential_mode": "api_env",
                 "anthropic_base_url": "https://gateway.example.com",
+                "anthropic_model": "mimo-v2.5-pro",
                 "anthropic_api_key": "test-secret-key",
             }
         )
@@ -178,9 +179,12 @@ def test_provider_env_config_is_redacted_and_testable(tmp_path: Path, monkeypatc
         assert result["credential_mode"] == "api_env"
         assert result["isolated_auth"] is True
         assert result["api_key_configured"] is True
+        assert result["model"] == "mimo-v2.5-pro"
+        assert result["model_configured"] is True
         assert "ANTHROPIC_API_KEY" in result["env_keys"]
         status = service.health_check_provider("local_claude_code")
         assert status["auth_required"] is False
+        assert status["capabilities"]["anthropic_model"] == "mimo-v2.5-pro"
         assert "API Env" in status["auth_hint"]
         isolated_env = service._provider_env("local_claude_code", job_id="job123")
         assert isolated_env["HOME"].endswith("runs/coding/job123/provider-auth/local_claude_code/home")
@@ -290,6 +294,216 @@ def test_codex_review_health_reads_version_from_fake_cli(tmp_path: Path, monkeyp
         assert status["display_name"] == "Codex CLI"
         assert status["version"] == "codex-cli 9.9.9"
         assert status["capabilities"]["review_uncommitted"] is True
+    finally:
+        service.close()
+
+
+def test_codex_api_env_reports_chat_only_gateway_not_cli_compatible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:  # noqa: N802
+            if self.path != "/v1/models":
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"data":[{"id":"mimo-v2.5-pro"}]}')
+
+        def do_POST(self) -> None:  # noqa: N802
+            if self.path == "/v1/chat/completions":
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"choices":[{"message":{"content":"pong"}}]}')
+                return
+            if self.path == "/v1/responses":
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error":{"message":"not found"}}')
+                return
+            self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    codex = bin_dir / "codex"
+    _write_executable(
+        codex,
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then echo 'codex-cli 0.128.0'; exit 0; fi\n"
+        "if [ \"$1\" = \"--help\" ]; then echo 'Usage: codex app-server review'; exit 0; fi\n"
+        "if [ \"$1\" = \"review\" ]; then echo 'Run a code review --uncommitted --base --commit'; exit 0; fi\n"
+        "echo 'Codex CLI'; exit 0\n",
+    )
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    service = _service(tmp_path)
+    try:
+        service.update_config(
+            {
+                "codex_credential_mode": "api_env",
+                "codex_base_url": f"http://127.0.0.1:{server.server_address[1]}/v1",
+                "codex_model": "mimo-v2.5-pro",
+                "codex_api_key": "test-secret-key",
+            }
+        )
+        status = service.health_check_provider("codex_review")
+        assert status["availability"] == "available"
+        assert status["capabilities"]["app_server_command"] is True
+        assert status["capabilities"]["app_server_version_ready"] is False
+
+        result = service.test_provider_config("codex_review")
+        assert result["available"] is True
+        assert result["success"] is False
+        assert result["api_compatibility"]["models"] is True
+        assert result["api_compatibility"]["chat_completions"] is True
+        assert result["api_compatibility"]["responses"] is False
+        assert result["api_compatibility"]["codex_cli_compatible"] is False
+        assert any(check["label"] == "Responses API" and check["status"] == "fail" for check in result["checks"])
+        assert "Responses API" in result["message"]
+    finally:
+        service.close()
+        server.shutdown()
+
+
+def test_claude_provider_command_uses_configured_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    claude = bin_dir / "claude"
+    _write_executable(
+        claude,
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then echo 'claude fake 1.0'; exit 0; fi\n"
+        "if [ \"$1\" = \"--help\" ]; then echo 'Usage: claude -p --bare --output-format --model'; exit 0; fi\n"
+        "echo ok\n",
+    )
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    service = _service(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_run_command(
+        job_id: str,
+        argv: list[str],
+        *,
+        cwd: Path,
+        timeout_seconds: int,
+        env: dict[str, str] | None = None,
+    ) -> CommandResult:
+        captured["argv"] = argv
+        captured["cwd"] = cwd
+        captured["env"] = env or {}
+        return CommandResult(returncode=0, stdout="provider ok")
+
+    monkeypatch.setattr(service, "_run_command", fake_run_command)
+    try:
+        service.update_config(
+            {
+                "claude_credential_mode": "api_env",
+                "anthropic_base_url": "https://gateway.example.com/anthropic",
+                "anthropic_model": "mimo-v2.5-pro",
+                "anthropic_api_key": "test-key",
+            }
+        )
+        result = service._run_provider(
+            "job123",
+            {
+                "repo_path": str(repo),
+                "user_request": "make a tiny change",
+                "task_type": "custom",
+                "writable_scopes": ["."],
+                "branch_name": "ai/coding/job123",
+            },
+            "local_claude_code",
+        )
+        assert result.ok
+        argv = captured["argv"]
+        assert isinstance(argv, list)
+        assert "--model" in argv
+        assert argv[argv.index("--model") + 1] == "mimo-v2.5-pro"
+        env = captured["env"]
+        assert isinstance(env, dict)
+        assert env["ANTHROPIC_BASE_URL"] == "https://gateway.example.com/anthropic"
+        assert env["ANTHROPIC_API_KEY"] == "test-key"
+        assert str(captured["cwd"]) == str(repo)
+    finally:
+        service.close()
+
+
+def test_codex_review_command_uses_base_url_config_and_valid_uncommitted_args(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _init_repo(tmp_path / "repo")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    codex = bin_dir / "codex"
+    _write_executable(
+        codex,
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then echo 'codex-cli 9.9.9'; exit 0; fi\n"
+        "if [ \"$1\" = \"review\" ] || [ \"$3\" = \"review\" ]; then echo 'Run a code review non-interactively --uncommitted --base --commit'; exit 0; fi\n"
+        "echo 'Codex CLI'; exit 0\n",
+    )
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+    service = _service(tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_run_command(
+        job_id: str,
+        argv: list[str],
+        *,
+        cwd: Path,
+        timeout_seconds: int,
+        env: dict[str, str] | None = None,
+    ) -> CommandResult:
+        captured["job_id"] = job_id
+        captured["argv"] = argv
+        captured["cwd"] = cwd
+        captured["env"] = env or {}
+        return CommandResult(returncode=0, stdout="review ok")
+
+    monkeypatch.setattr(service, "_run_command", fake_run_command)
+    try:
+        service.update_config(
+            {
+                "codex_credential_mode": "api_env",
+                "codex_base_url": "https://gateway.example.com/v1",
+                "codex_model": "mimo-v2.5-pro",
+                "codex_api_key": "test-secret-key",
+            }
+        )
+        review = service._run_review(
+            "job123",
+            {
+                "repo_path": str(repo),
+                "review_strategy": "codex_if_available",
+                "changed_files": ["README.md"],
+            },
+        )
+        assert "review ok" in review
+        assert captured["argv"] == [
+            str(codex),
+            "-c",
+            'openai_base_url="https://gateway.example.com/v1"',
+            "-m",
+            "mimo-v2.5-pro",
+            "review",
+            "--uncommitted",
+        ]
+        env = captured["env"]
+        assert isinstance(env, dict)
+        assert env["OPENAI_BASE_URL"] == "https://gateway.example.com/v1"
+        assert env["OPENAI_API_KEY"] == "test-secret-key"
+        assert str(captured["cwd"]) == str(repo)
     finally:
         service.close()
 

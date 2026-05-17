@@ -119,10 +119,12 @@ export type CodingConfig = {
   opendesign_auto_start?: boolean;
   claude_credential_mode?: string;
   anthropic_base_url?: string;
+  anthropic_model?: string;
   anthropic_api_key?: string;
   anthropic_api_key_configured?: boolean;
   codex_credential_mode?: string;
   codex_base_url?: string;
+  codex_model?: string;
   codex_api_key?: string;
   codex_api_key_configured?: boolean;
   config_path?: string;
@@ -130,6 +132,7 @@ export type CodingConfig = {
 
 export type CodingProviderConfigTest = {
   ok?: boolean;
+  success?: boolean;
   provider_id: string;
   available?: boolean;
   status?: CodingProviderStatus;
@@ -137,7 +140,11 @@ export type CodingProviderConfigTest = {
   isolated_auth?: boolean;
   api_key_configured?: boolean;
   base_url_configured?: boolean;
+  model?: string;
+  model_configured?: boolean;
   env_keys?: string[];
+  checks?: Array<{ label: string; status: 'pass' | 'warn' | 'fail' | string; detail?: string }>;
+  api_compatibility?: Record<string, unknown> | null;
   message?: string;
   error?: string;
 };

@@ -1919,11 +1919,12 @@ def _doctor_status_for_tool(summary: dict[str, Any], tool_id: str) -> tuple[str,
 def _parse_hermes_version_output(output: str) -> dict[str, Any]:
     text = _ANSI_RE.sub("", output or "")
     first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
-    version_match = re.search(r"Hermes Agent\s+v?([0-9][^\s]*)", text)
+    version_match = re.search(r"Hermes Agent\s+v?([0-9][^\s(]*)\s*(?:\(([^)]+)\))?", text)
     behind_match = re.search(r"(\d+)\s+commits?\s+behind", text, re.I)
     return {
         "summary": first_line,
         "version": version_match.group(1) if version_match else "",
+        "release_date": version_match.group(2).strip() if version_match and version_match.group(2) else "",
         "update_available": bool(re.search(r"update available", text, re.I) or behind_match),
         "behind_commits": int(behind_match.group(1)) if behind_match else 0,
     }
@@ -2021,6 +2022,7 @@ class MainWindowAPI:
                 "hermes": {
                     "status": hermes_info.get("install_status", "unknown"),
                     "version": hermes_info.get("version"),
+                    "release_date": hermes_info.get("release_date"),
                     "platform": hermes_info.get("platform", "unknown"),
                     "command_exists": hermes_info.get("command_exists", False),
                     "hermes_home": hermes_info.get("hermes_home", ""),
@@ -2074,6 +2076,7 @@ class MainWindowAPI:
                 "hermes": {
                     "status": hermes_info.get("install_status", "unknown"),
                     "version": hermes_info.get("version"),
+                    "release_date": hermes_info.get("release_date"),
                     "platform": hermes_info.get("platform", "unknown"),
                     "command_exists": hermes_info.get("command_exists", False),
                     "hermes_home": hermes_info.get("hermes_home", ""),
@@ -3185,6 +3188,7 @@ class MainWindowAPI:
             "update_available": bool(parsed["update_available"]),
             "behind_commits": int(parsed["behind_commits"]),
             "version": parsed["version"],
+            "release_date": parsed.get("release_date", ""),
             "summary": parsed["summary"],
             "version_output": version_output,
             "check_output": check_output,

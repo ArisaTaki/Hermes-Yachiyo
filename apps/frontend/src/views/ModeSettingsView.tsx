@@ -802,6 +802,9 @@ function ReferenceSettingsHome() {
             {updateChecking ? '检查中…' : updateResult?.update_available ? '前往更新' : '检查更新'}
           </SettingsActionButton>
         </SettingsItem>
+        <SettingsItem label="Hermes Agent 更新" description="更新 Hermes 后会刷新工具清单、Doctor 结果和 Yachiyo 的工具配置入口">
+          <SettingsActionButton onClick={() => navigateTo('tools')}>打开工具中心</SettingsActionButton>
+        </SettingsItem>
         <SettingsItem label="项目主页" description="github.com/kuguya-AI-app-develop/Hermes-Yachiyo">
           <SettingsActionButton onClick={() => void openExternalUrl('https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo')}>打开</SettingsActionButton>
         </SettingsItem>
@@ -2042,6 +2045,9 @@ function SystemSettingsView() {
         <SettingsSection title="更新">
           <SettingsItem label="应用更新" description={`Hermes Yachiyo v${payload?.app?.version || '0.1.0'} · 下载进度和版本差异在更新页处理`}>
             <SettingsActionButton onClick={() => navigateTo('app-update')}>打开更新页</SettingsActionButton>
+          </SettingsItem>
+          <SettingsItem label="Hermes Agent 更新" description="Hermes 自身功能、toolset 和 provider 能力在工具中心更新并重新同步">
+            <SettingsActionButton onClick={() => navigateTo('tools')}>打开工具中心</SettingsActionButton>
           </SettingsItem>
         </SettingsSection>
 

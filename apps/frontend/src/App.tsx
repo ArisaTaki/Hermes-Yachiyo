@@ -85,7 +85,7 @@ export function App() {
   else if (view === 'settings') page = <ModeSettingsView />;
   else if (view === 'installer') page = <InstallerView />;
   else if (view === 'diagnostics') page = <DiagnosticsView />;
-  else if (view === 'tools') page = currentParam('tool') ? <ToolCenterView /> : <DiagnosticsView />;
+  else if (view === 'tools') page = <ToolCenterView />;
   else if (view === 'proactive-tts') page = <ProactiveTtsSettingsView />;
   else if (view === 'app-update') page = <AppUpdateView />;
   else if (view === 'provider') page = <ProviderPage />;

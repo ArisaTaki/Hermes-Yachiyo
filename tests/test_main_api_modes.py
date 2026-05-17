@@ -1052,6 +1052,7 @@ def test_check_hermes_update_reports_available_update(tmp_path, monkeypatch):
         assert result["update_available"] is True
         assert result["behind_commits"] == 190
         assert result["version"] == "0.11.0"
+        assert result["release_date"] == "2026.4.23"
     finally:
         store.close()
 

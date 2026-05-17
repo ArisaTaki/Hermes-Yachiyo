@@ -44,9 +44,11 @@ class UpdateCodingConfigRequest(BaseModel):
     opendesign_auto_start: bool | None = None
     claude_credential_mode: str | None = Field(default=None, max_length=40)
     anthropic_base_url: str | None = Field(default=None, max_length=2000)
+    anthropic_model: str | None = Field(default=None, max_length=200)
     anthropic_api_key: str | None = Field(default=None, max_length=4000)
     codex_credential_mode: str | None = Field(default=None, max_length=40)
     codex_base_url: str | None = Field(default=None, max_length=2000)
+    codex_model: str | None = Field(default=None, max_length=200)
     codex_api_key: str | None = Field(default=None, max_length=4000)
 
 

@@ -238,7 +238,8 @@ const NAV_GROUPS: Array<{
     {
       label: '维护',
       items: [
-        { view: 'diagnostics', label: '诊断工具', icon: 'diagnostics' },
+        { view: 'tools', label: '能力中心', icon: 'resources' },
+        { view: 'diagnostics', label: '诊断详情', icon: 'diagnostics' },
         { view: 'settings', label: '设置', icon: 'settings' },
       ],
     },
@@ -1581,7 +1582,7 @@ export function ToolsAllPage() {
     { view: 'proactive-tts' as AppView, icon: 'voice' as UiIconName, title: 'GPT-SoVITS', detail: '语音合成，让八千代开口说话。', status: '就绪', statusTone: 'ready' },
     { view: 'resources' as AppView, icon: 'resources' as UiIconName, title: '资源管理', detail: '管理 Live2D 模型、语音、壁纸等资源文件。', status: '就绪', statusTone: 'ready' },
     { view: 'workspace' as AppView, icon: 'workspace' as UiIconName, title: '工作区', detail: '管理对话记录、项目文件和工作区配置。', status: '已初始化', statusTone: 'ready' },
-    { view: 'diagnostics' as AppView, icon: 'diagnostics' as UiIconName, title: '诊断工具', detail: '系统检测、日志查看和工具能力入口。', status: '就绪', statusTone: 'ready' },
+    { view: 'diagnostics' as AppView, icon: 'diagnostics' as UiIconName, title: '诊断详情', detail: 'Doctor 输出、运行时日志和本地能力探测。', status: '就绪', statusTone: 'ready' },
     { view: 'provider' as AppView, icon: 'provider' as UiIconName, title: '模型配置', detail: '配置 AI 模型提供商和 API Key。', status: '就绪', statusTone: 'ready' },
     { view: 'chat' as AppView, icon: 'chat' as UiIconName, title: '对话', detail: '与八千代对话，支持文本和图片输入。', status: '就绪', statusTone: 'ready' },
   ];

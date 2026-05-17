@@ -39,6 +39,7 @@ _CLI_TIMEOUT_SECONDS = int(os.getenv("HERMES_YACHIYO_CODING_CLI_TIMEOUT_SECONDS"
 _REVIEW_TIMEOUT_SECONDS = int(os.getenv("HERMES_YACHIYO_CODING_REVIEW_TIMEOUT_SECONDS", "600"))
 _INSTALL_TIMEOUT_SECONDS = int(os.getenv("HERMES_YACHIYO_CODING_INSTALL_TIMEOUT_SECONDS", "900"))
 _PROVIDER_HEALTH_TIMEOUT_SECONDS = 8.0
+_PROVIDER_API_TEST_TIMEOUT_SECONDS = 14.0
 _VALID_JOB_STATUSES = {
     "draft",
     "planning",
@@ -93,9 +94,11 @@ _DEFAULT_CODING_CONFIG: dict[str, Any] = {
     "opendesign_auto_start": False,
     "claude_credential_mode": "cli_login",
     "anthropic_base_url": "",
+    "anthropic_model": "",
     "anthropic_api_key": "",
     "codex_credential_mode": "cli_login",
     "codex_base_url": "",
+    "codex_model": "",
     "codex_api_key": "",
 }
 
@@ -147,6 +150,10 @@ def _default_config_path() -> Path:
 
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _toml_string(value: Any) -> str:
+    return json.dumps(str(value or ""))
 
 
 def _loads(value: str | None, default: Any) -> Any:
@@ -233,10 +240,12 @@ def _sanitize_config(value: dict[str, Any] | None) -> dict[str, Any]:
     claude_mode = str(config.get("claude_credential_mode") or "cli_login").strip()
     config["claude_credential_mode"] = claude_mode if claude_mode in _CREDENTIAL_MODES else "cli_login"
     config["anthropic_base_url"] = str(config.get("anthropic_base_url") or "").strip()
+    config["anthropic_model"] = str(config.get("anthropic_model") or "").strip()
     config["anthropic_api_key"] = str(config.get("anthropic_api_key") or "").strip()
     codex_mode = str(config.get("codex_credential_mode") or "cli_login").strip()
     config["codex_credential_mode"] = codex_mode if codex_mode in _CREDENTIAL_MODES else "cli_login"
     config["codex_base_url"] = str(config.get("codex_base_url") or "").strip()
+    config["codex_model"] = str(config.get("codex_model") or "").strip()
     config["codex_api_key"] = str(config.get("codex_api_key") or "").strip()
     return config
 
@@ -504,6 +513,76 @@ def _provider_actions(provider_id: str, installed: bool) -> list[dict[str, Any]]
         ]
         return actions
     return []
+
+
+def _parse_semver(value: str) -> tuple[int, int, int] | None:
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", value or "")
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())  # type: ignore[return-value]
+
+
+def _version_at_least(value: str, minimum: str) -> bool:
+    parsed = _parse_semver(value)
+    required = _parse_semver(minimum)
+    if not parsed or not required:
+        return False
+    return parsed >= required
+
+
+def _api_url(base_url: str, suffix: str) -> str:
+    base = (base_url or "").strip().rstrip("/")
+    return f"{base}/{suffix.lstrip('/')}"
+
+
+def _json_api_request(
+    url: str,
+    *,
+    method: str = "POST",
+    headers: dict[str, str] | None = None,
+    body: dict[str, Any] | None = None,
+    timeout: float = _PROVIDER_API_TEST_TIMEOUT_SECONDS,
+) -> dict[str, Any]:
+    payload = json.dumps(body or {}).encode("utf-8") if body is not None else None
+    request_headers = {"Accept": "application/json", **(headers or {})}
+    if payload is not None:
+        request_headers["Content-Type"] = "application/json"
+    request = urllib.request.Request(url, data=payload, headers=request_headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read(4096).decode("utf-8", errors="replace")
+            return {
+                "ok": 200 <= int(response.status) < 300,
+                "status": int(response.status),
+                "detail": _compact(_redact_text(raw), limit=280),
+            }
+    except urllib.error.HTTPError as exc:
+        try:
+            raw = exc.read(4096).decode("utf-8", errors="replace")
+        except OSError:
+            raw = ""
+        return {
+            "ok": False,
+            "status": int(exc.code),
+            "detail": _compact(_redact_text(raw), limit=280) or exc.reason,
+        }
+    except urllib.error.URLError as exc:
+        return {"ok": False, "status": 0, "detail": _compact(str(exc.reason), limit=280)}
+    except (OSError, TimeoutError) as exc:
+        return {"ok": False, "status": 0, "detail": _compact(str(exc), limit=280)}
+
+
+def _api_check(label: str, result: dict[str, Any], *, warn_on_fail: bool = False) -> dict[str, str]:
+    status = "pass" if result.get("ok") else "warn" if warn_on_fail else "fail"
+    http_status = result.get("status")
+    detail = str(result.get("detail") or "")
+    if http_status:
+        detail = f"HTTP {http_status}" + (f" · {detail}" if detail else "")
+    return {"label": label, "status": status, "detail": detail or ("通过" if status == "pass" else "未通过")}
+
+
+def _skipped_api_check(label: str, detail: str) -> dict[str, str]:
+    return {"label": label, "status": "warn", "detail": detail}
 
 
 def _provider_action_spec(provider_id: str, action: str, executable_path: str = "") -> ProviderActionSpec:
@@ -1001,6 +1080,7 @@ class CodingExecutionService:
                     "isolated_auth": use_api_env,
                     "anthropic_env_configured": env_configured,
                     "anthropic_base_url_configured": bool(config.get("anthropic_base_url")),
+                    "anthropic_model": str(config.get("anthropic_model") or ""),
                 },
             )
         version = self._probe_version([path, "--version"])
@@ -1030,6 +1110,7 @@ class CodingExecutionService:
                     "bare": "--bare" in help_text,
                     "anthropic_env_configured": env_configured,
                     "anthropic_base_url_configured": bool(config.get("anthropic_base_url")),
+                    "anthropic_model": str(config.get("anthropic_model") or ""),
                 },
             )
         if use_api_env and not env_configured:
@@ -1056,6 +1137,7 @@ class CodingExecutionService:
                     "bare": "--bare" in help_text,
                     "anthropic_env_configured": False,
                     "anthropic_base_url_configured": bool(config.get("anthropic_base_url")),
+                    "anthropic_model": str(config.get("anthropic_model") or ""),
                 },
             )
         auth_status = None
@@ -1087,6 +1169,7 @@ class CodingExecutionService:
                         "bare": "--bare" in help_text,
                         "anthropic_env_configured": env_configured,
                         "anthropic_base_url_configured": bool(config.get("anthropic_base_url")),
+                        "anthropic_model": str(config.get("anthropic_model") or ""),
                         "auth_status": auth_status,
                     },
                 )
@@ -1114,6 +1197,7 @@ class CodingExecutionService:
                 "bare": "--bare" in help_text,
                 "anthropic_env_configured": env_configured,
                 "anthropic_base_url_configured": bool(config.get("anthropic_base_url")),
+                "anthropic_model": str(config.get("anthropic_model") or ""),
                 "auth_status": auth_status or {"checked": False, "logged_in": False},
             },
         )
@@ -1145,11 +1229,23 @@ class CodingExecutionService:
                     "isolated_auth": use_api_env,
                     "codex_env_configured": env_configured,
                     "codex_base_url_configured": bool(config.get("codex_base_url")),
+                    "codex_model": str(config.get("codex_model") or ""),
+                    "app_server_command": False,
+                    "app_server_min_version": "0.130.0",
+                    "app_server_version_ready": False,
+                    "app_server_runtime_ready": False,
+                    "app_server_status": "未检测到 Codex CLI",
+                    "api_responses_required": True,
                 },
             )
         version = self._probe_version([path, "--version"])
+        main_help = self._probe_help([path, "--help"])
         help_text = self._probe_help([path, "review", "--help"])
         review_uncommitted = "--uncommitted" in help_text
+        app_server_command = "app-server" in main_help
+        app_server_min_version = "0.130.0"
+        app_server_version_ready = _version_at_least(version, app_server_min_version)
+        app_server_runtime_ready = app_server_command and app_server_version_ready
         availability = "available" if review_uncommitted else "misconfigured"
         blocking_reason = "" if review_uncommitted else "当前 Codex CLI 未暴露 review --uncommitted 能力。"
         auth_status = None
@@ -1184,7 +1280,20 @@ class CodingExecutionService:
                 "isolated_auth": use_api_env,
                 "codex_env_configured": env_configured,
                 "codex_base_url_configured": bool(config.get("codex_base_url")),
+                "codex_model": str(config.get("codex_model") or ""),
                 "auth_status": auth_status or {"checked": False, "logged_in": False},
+                "app_server_command": app_server_command,
+                "app_server_min_version": app_server_min_version,
+                "app_server_version_ready": app_server_version_ready,
+                "app_server_runtime_ready": app_server_runtime_ready,
+                "app_server_status": (
+                    "ready"
+                    if app_server_runtime_ready
+                    else f"需要 Codex CLI {app_server_min_version}+ 并完成 codex login"
+                    if app_server_command
+                    else "当前 Codex CLI 未暴露 app-server 命令"
+                ),
+                "api_responses_required": True,
             },
         )
 
@@ -1216,6 +1325,103 @@ class CodingExecutionService:
             "logged_in": result.returncode == 0,
             "returncode": result.returncode,
             "summary": _compact(output, limit=240),
+        }
+
+    def _test_claude_api_env(self, config: dict[str, Any]) -> dict[str, Any]:
+        checks: list[dict[str, str]] = []
+        api_key = str(config.get("anthropic_api_key") or "").strip()
+        base_url = str(config.get("anthropic_base_url") or "https://api.anthropic.com").strip().rstrip("/")
+        model = str(config.get("anthropic_model") or "").strip()
+        if not api_key:
+            return {
+                "success": False,
+                "checks": [{"label": "ANTHROPIC_API_KEY", "status": "fail", "detail": "未配置"}],
+            }
+        checks.append({"label": "ANTHROPIC_API_KEY", "status": "pass", "detail": "已配置"})
+        if not model:
+            checks.append(_skipped_api_check("Anthropic Messages", "请先填写模型名，再执行真实 API 测试"))
+            return {"success": True, "checks": checks}
+        result = _json_api_request(
+            _api_url(base_url, "/v1/messages"),
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            body={
+                "model": model,
+                "max_tokens": 8,
+                "messages": [{"role": "user", "content": "reply only: pong"}],
+            },
+        )
+        checks.append(_api_check("Anthropic Messages", result))
+        return {
+            "success": bool(result.get("ok")),
+            "base_url": base_url,
+            "model": model,
+            "checks": checks,
+        }
+
+    def _test_codex_api_env(self, config: dict[str, Any]) -> dict[str, Any]:
+        checks: list[dict[str, str]] = []
+        api_key = str(config.get("codex_api_key") or "").strip()
+        base_url = str(config.get("codex_base_url") or "https://api.openai.com/v1").strip().rstrip("/")
+        model = str(config.get("codex_model") or "").strip()
+        if not api_key:
+            return {
+                "success": False,
+                "models": False,
+                "chat_completions": False,
+                "responses": False,
+                "codex_cli_compatible": False,
+                "checks": [{"label": "OPENAI_API_KEY", "status": "fail", "detail": "未配置"}],
+            }
+        headers = {"Authorization": f"Bearer {api_key}"}
+        checks.append({"label": "OPENAI_API_KEY", "status": "pass", "detail": "已配置"})
+        models = _json_api_request(_api_url(base_url, "/models"), method="GET", headers=headers)
+        checks.append(_api_check("OpenAI /models", models, warn_on_fail=True))
+
+        chat_ok = False
+        responses_ok = False
+        if model:
+            chat = _json_api_request(
+                _api_url(base_url, "/chat/completions"),
+                headers=headers,
+                body={
+                    "model": model,
+                    "max_tokens": 8,
+                    "messages": [{"role": "user", "content": "reply only: pong"}],
+                },
+            )
+            chat_ok = bool(chat.get("ok"))
+            checks.append(_api_check("Chat Completions", chat, warn_on_fail=True))
+            responses = _json_api_request(
+                _api_url(base_url, "/responses"),
+                headers=headers,
+                body={"model": model, "input": "reply only: pong", "max_output_tokens": 8},
+            )
+            responses_ok = bool(responses.get("ok"))
+            checks.append(_api_check("Responses API", responses))
+        else:
+            checks.append(_skipped_api_check("Chat Completions", "请先填写模型名，再执行真实 API 测试"))
+            checks.append(_skipped_api_check("Responses API", "请先填写模型名；Codex CLI 需要 Responses API"))
+
+        codex_cli_compatible = bool(responses_ok)
+        checks.append(
+            {
+                "label": "Codex CLI API 兼容性",
+                "status": "pass" if codex_cli_compatible else "fail",
+                "detail": "Responses API 可用" if codex_cli_compatible else "当前网关不满足 Codex CLI 的 Responses API 要求",
+            }
+        )
+        return {
+            "success": codex_cli_compatible,
+            "base_url": base_url,
+            "model": model,
+            "models": bool(models.get("ok")),
+            "chat_completions": chat_ok,
+            "responses": responses_ok,
+            "codex_cli_compatible": codex_cli_compatible,
+            "checks": checks,
         }
 
     def _detect_opendesign_install(self, config: dict[str, Any], *, deep: bool = False) -> dict[str, Any]:
@@ -1632,22 +1838,39 @@ class CodingExecutionService:
                 env = self._provider_env("local_claude_code")
             except CodingExecutionError:
                 env = {}
+            api_test = self._test_claude_api_env(config) if credential_mode == "api_env" else {"success": True, "checks": []}
+            cli_available = status["availability"] == "available"
+            success = bool(cli_available and (credential_mode != "api_env" or api_test.get("success")))
             return {
                 "ok": True,
+                "success": success,
                 "provider_id": provider_id,
-                "available": status["availability"] == "available",
+                "available": cli_available,
                 "status": status,
                 "credential_mode": credential_mode,
                 "isolated_auth": credential_mode == "api_env",
                 "api_key_configured": configured,
                 "base_url_configured": bool(config.get("anthropic_base_url")),
+                "model": str(config.get("anthropic_model") or ""),
+                "model_configured": bool(config.get("anthropic_model")),
                 "env_keys": sorted(key for key in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY") if env.get(key)),
+                "checks": [
+                    {
+                        "label": "Claude Code CLI",
+                        "status": "pass" if cli_available else "fail",
+                        "detail": status.get("version") or status.get("blocking_reason") or "",
+                    },
+                    *api_test.get("checks", []),
+                ],
+                "api_compatibility": api_test if credential_mode == "api_env" else None,
                 "message": (
-                    "Claude Code CLI 可用；API Env 模式会注入 ANTHROPIC_* 并隔离本机登录态。"
-                    if credential_mode == "api_env"
+                    "Claude Code CLI 和 Anthropic API Env 测试通过。"
+                    if credential_mode == "api_env" and success
+                    else "Claude Code CLI 可用；API Env 模式会注入 ANTHROPIC_* 并隔离本机登录态。"
+                    if credential_mode == "api_env" and cli_available
                     else "Claude Code CLI 可用；CLI Login 模式会使用本机登录态，不注入 Yachiyo 保存的 API Key。"
                 )
-                if status["availability"] == "available"
+                if cli_available
                 else status.get("blocking_reason") or "Claude Code CLI 不可用",
             }
         configured = bool(config.get("codex_api_key"))
@@ -1656,22 +1879,39 @@ class CodingExecutionService:
             env = self._provider_env("codex_review")
         except CodingExecutionError:
             env = {}
+        api_test = self._test_codex_api_env(config) if credential_mode == "api_env" else {"success": True, "checks": []}
+        cli_available = status["availability"] == "available"
+        success = bool(cli_available and (credential_mode != "api_env" or api_test.get("success")))
         return {
             "ok": True,
+            "success": success,
             "provider_id": provider_id,
-            "available": status["availability"] == "available",
+            "available": cli_available,
             "status": status,
             "credential_mode": credential_mode,
             "isolated_auth": credential_mode == "api_env",
             "api_key_configured": configured,
             "base_url_configured": bool(config.get("codex_base_url")),
+            "model": str(config.get("codex_model") or ""),
+            "model_configured": bool(config.get("codex_model")),
             "env_keys": sorted(key for key in ("OPENAI_BASE_URL", "OPENAI_API_KEY") if env.get(key)),
+            "checks": [
+                {
+                    "label": "Codex CLI",
+                    "status": "pass" if cli_available else "fail",
+                    "detail": status.get("version") or status.get("blocking_reason") or "",
+                },
+                *api_test.get("checks", []),
+            ],
+            "api_compatibility": api_test if credential_mode == "api_env" else None,
             "message": (
-                "Codex CLI review 能力可用；API Env 模式会注入 OPENAI_* 并隔离本机登录态。"
-                if credential_mode == "api_env"
+                "Codex CLI API Env 测试通过；该 API 满足 Responses API 要求。"
+                if credential_mode == "api_env" and success
+                else "API Key 可访问，但当前网关不满足 Codex CLI 的 Responses API 要求。"
+                if credential_mode == "api_env" and cli_available
                 else "Codex CLI review 能力可用；CLI Login 模式会使用本机登录态，不注入 Yachiyo 保存的 API Key。"
             )
-            if status["availability"] == "available"
+            if cli_available
             else status.get("blocking_reason") or "Codex CLI 不可用",
         }
 
@@ -2521,6 +2761,10 @@ class CodingExecutionService:
             cmd.append("--bare")
         if status.get("capabilities", {}).get("output_format"):
             cmd.extend(["--output-format", "text"])
+        config = self._read_config_private()
+        model = str(config.get("anthropic_model") or "").strip()
+        if model:
+            cmd.extend(["--model", model])
         cmd.append(prompt)
         self._write_run_file(
             job_id,
@@ -2534,6 +2778,7 @@ class CodingExecutionService:
                     "env_keys": ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY"]
                     if status.get("capabilities", {}).get("credential_mode") == "api_env"
                     else [],
+                    "model": model,
                 }
             ),
         )
@@ -2561,7 +2806,8 @@ class CodingExecutionService:
                 "Focus on correctness, regressions, maintainability, tests, and security. "
                 "Return concise findings first."
             )
-            cmd = [str(executable), "review", "--uncommitted", prompt]
+            config = self._read_config_private()
+            cmd = [str(executable), *self._codex_cli_config_args(config), "review", "--uncommitted"]
             self._write_run_file(
                 job_id,
                 "review-command.json",
@@ -2574,6 +2820,7 @@ class CodingExecutionService:
                         "env_keys": ["OPENAI_BASE_URL", "OPENAI_API_KEY"]
                         if codex.get("capabilities", {}).get("credential_mode") == "api_env"
                         else [],
+                        "instructions": prompt,
                     }
                 ),
             )
@@ -2591,6 +2838,17 @@ class CodingExecutionService:
             fallback_reason = result.stderr or result.stdout or "Codex review unavailable, fallback required."
             return self._manual_review_text(job, f"Codex review fallback: {_compact(fallback_reason, limit=500)}")
         return self._manual_review_text(job, "Manual review selected or no agent review provider available.")
+
+    def _codex_cli_config_args(self, config: dict[str, Any] | None = None) -> list[str]:
+        config = config or self._read_config_private()
+        args: list[str] = []
+        base_url = str(config.get("codex_base_url") or "").strip()
+        if config.get("codex_credential_mode") == "api_env" and base_url:
+            args.extend(["-c", f"openai_base_url={_toml_string(base_url)}"])
+        model = str(config.get("codex_model") or "").strip()
+        if model:
+            args.extend(["-m", model])
+        return args
 
     def _provider_prompt(self, job: dict[str, Any]) -> str:
         return (

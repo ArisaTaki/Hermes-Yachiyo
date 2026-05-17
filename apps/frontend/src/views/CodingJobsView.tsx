@@ -17,6 +17,7 @@ import {
   type CodingConfig,
   type CodingJob,
   type CodingProviderAction,
+  type CodingProviderConfigTest,
   type CodingProviderInstall,
   type CodingProviderStatus,
 } from '../lib/coding';
@@ -43,9 +44,11 @@ type DefaultsForm = {
   opendesign_auto_start: boolean;
   claude_credential_mode: string;
   anthropic_base_url: string;
+  anthropic_model: string;
   anthropic_api_key: string;
   codex_credential_mode: string;
   codex_base_url: string;
+  codex_model: string;
   codex_api_key: string;
 };
 
@@ -63,9 +66,11 @@ const DEFAULTS_FORM: DefaultsForm = {
   opendesign_auto_start: false,
   claude_credential_mode: 'cli_login',
   anthropic_base_url: '',
+  anthropic_model: '',
   anthropic_api_key: '',
   codex_credential_mode: 'cli_login',
   codex_base_url: '',
+  codex_model: '',
   codex_api_key: '',
 };
 
@@ -85,6 +90,7 @@ export function CodingJobsView() {
   const [defaultsForm, setDefaultsForm] = useState<DefaultsForm>(DEFAULTS_FORM);
   const [openDesignMode, setOpenDesignMode] = useState<OpenDesignMode>('existing');
   const [openDesignModeTouched, setOpenDesignModeTouched] = useState(false);
+  const [providerTestResults, setProviderTestResults] = useState<Record<string, CodingProviderConfigTest>>({});
 
   useEffect(() => {
     let disposed = false;
@@ -160,7 +166,8 @@ export function CodingJobsView() {
         });
         return next;
       });
-      if (updates.some((item) => item.status !== 'running')) await refreshProviders(true);
+      const finished = updates.filter((item) => item.status !== 'running');
+      if (finished.length) await refreshProviders(true, providerInstallCompletionMessage(finished));
     }, 1200);
     return () => window.clearInterval(timer);
   }, [installs]);
@@ -195,14 +202,14 @@ export function CodingJobsView() {
     return nextConfig;
   }
 
-  async function refreshProviders(force = false) {
+  async function refreshProviders(force = false, successMessage = 'Provider 状态已刷新。') {
     if (!force && providerOperationLocked) return;
     setBusy('providers');
     setError('');
     setStatus('正在重新检测 provider...');
     try {
       await reloadProvidersAndConfig();
-      setStatus('Provider 状态已刷新。');
+      setStatus(successMessage);
     } catch (err) {
       setError(err instanceof Error ? err.message : '重新检测 provider 失败');
       setStatus('');
@@ -247,12 +254,14 @@ export function CodingJobsView() {
         payload = {
           claude_credential_mode: defaultsForm.claude_credential_mode,
           anthropic_base_url: defaultsForm.anthropic_base_url,
+          anthropic_model: defaultsForm.anthropic_model,
           anthropic_api_key: defaultsForm.anthropic_api_key || (config?.anthropic_api_key_configured ? '[configured]' : ''),
         };
       } else if (providerId === 'codex_review') {
         payload = {
           codex_credential_mode: defaultsForm.codex_credential_mode,
           codex_base_url: defaultsForm.codex_base_url,
+          codex_model: defaultsForm.codex_model,
           codex_api_key: defaultsForm.codex_api_key || (config?.codex_api_key_configured ? '[configured]' : ''),
         };
       } else if (providerId === 'opendesign') {
@@ -271,8 +280,9 @@ export function CodingJobsView() {
       await reloadProvidersAndConfig();
       if (providerId === 'local_claude_code' || providerId === 'codex_review' || providerId === 'opendesign') {
         const result = await testCodingProviderConfig(providerId);
+        setProviderTestResults((current) => ({ ...current, [providerId]: result }));
         await reloadProvidersAndConfig();
-        setStatus(result.message || (result.available ? 'Provider 配置可用。' : 'Provider 配置不可用。'));
+        setStatus(result.message || ((result.success ?? result.available) ? 'Provider 配置可用。' : 'Provider 配置不可用。'));
       } else {
         setStatus('Provider 配置已保存。');
       }
@@ -329,7 +339,7 @@ export function CodingJobsView() {
     try {
       const install = await installCodingProvider(provider.id, action.id);
       setInstalls((current) => ({ ...current, [install.install_id]: install }));
-      if (install.status !== 'running') await refreshProviders(true);
+      if (install.status !== 'running') await refreshProviders(true, providerInstallCompletionMessage([install]));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'provider 动作失败');
     } finally {
@@ -371,7 +381,7 @@ export function CodingJobsView() {
         <button type="button" className="page-back-link" onClick={() => navigateTo('main')}>← 返回主控台</button>
         <div>
           <h1>Coding</h1>
-          <p>配置 Claude Code、OpenDesign 与 Codex CLI，通过 /start-code 创建受控任务，并在审批后执行、review、收集产物。</p>
+          <p>围绕 /start-code 创建受控任务、审批执行和产物查看；Claude、Codex、OpenDesign 只作为环境建议和兼容检测显示。</p>
         </div>
       </header>
 
@@ -389,7 +399,10 @@ export function CodingJobsView() {
       {activeTab === 'providers' ? (
         <section className="coding-panel">
           <div className="section-heading-row">
-            <h2>Providers</h2>
+            <div>
+              <h2>环境建议</h2>
+              <p className="coding-panel-note">Yachiyo 不接管第三方 CLI 的安装、登录或密钥；这里只检测现状、解释影响，并保留兼容测试入口。</p>
+            </div>
             <button type="button" className="hy-btn hy-btn-ghost" disabled={providerOperationLocked} onClick={() => void refreshProviders()}>
               {busy === 'providers' ? '检测中...' : '重新检测'}
             </button>
@@ -407,6 +420,7 @@ export function CodingJobsView() {
                   busy={busy}
                   locked={providerOperationLocked}
                   install={Object.values(installs).find((item) => item.provider_id === provider.id)}
+                  testResult={providerTestResults[provider.id]}
                   onAction={(action) => void runProviderAction(provider, action)}
                   onConfigChange={updateDefaults}
                   onSaveAndTest={(providerId) => void saveAndTestProviderConfig(providerId)}
@@ -448,7 +462,7 @@ export function CodingJobsView() {
             <CodingLoadingSkeleton rows={2} />
           ) : (
             <form className="coding-form" onSubmit={saveDefaults}>
-              <p className="coding-panel-note">Defaults 只作为 /start-code 未显式传参时的兜底值。Claude、Codex、OpenDesign 的安装、登录和 API 配置在 Providers 里完成。</p>
+              <p className="coding-panel-note">Defaults 只作为 /start-code 未显式传参时的兜底值。第三方 CLI 的权威安装、登录和 provider 配置请走官方或 Hermes 流程。</p>
               <label>
                 <span>Default Repo Path</span>
                 <input className="hy-input" value={defaultsForm.default_repo_path} onChange={(event) => updateDefaults('default_repo_path', event.target.value)} placeholder="/path/to/git/repo" />
@@ -610,8 +624,8 @@ function OpenDesignPanel({
     <section className="coding-panel coding-opendesign-panel">
       <div className="section-heading-row">
         <div>
-          <h2>OpenDesign</h2>
-          <p className="coding-panel-note">OpenDesign 是本地 web app + daemon。Yachiyo 只保存 daemon 连接信息，或管理一份专属源码目录并后台启动服务。</p>
+          <h2>OpenDesign 建议</h2>
+          <p className="coding-panel-note">OpenDesign 是外部设计工具。Yachiyo 默认只检测 daemon/WebUI 状态，并说明它会怎样影响设计工作流。</p>
         </div>
         <button type="button" className="hy-btn hy-btn-ghost" disabled={locked} onClick={onRefresh}>
           {busy === 'providers' ? '检测中...' : '重新检测'}
@@ -641,79 +655,94 @@ function OpenDesignPanel({
             </div>
           </div>
 
-          <div className="coding-mode-switch" role="tablist" aria-label="OpenDesign setup mode">
-            <button type="button" className={mode === 'existing' ? 'active' : ''} disabled={locked} onClick={() => onModeChange('existing')}>
-              本机已有 OpenDesign
-            </button>
-            <button type="button" className={mode === 'managed' ? 'active' : ''} disabled={locked} onClick={() => onModeChange('managed')}>
-              安装到 Yachiyo 管辖目录
-            </button>
+          <div className="coding-provider-recommendation">
+            <strong>推荐用法</strong>
+            <p>通过本机或官方项目入口启动 OpenDesign；Yachiyo 读取连接状态，把设计产物纳入 /start-code 的上下文，但不把安装维护放到主路径。</p>
+            <div className="coding-provider-recommendation-actions">
+              {openWebAction ? (
+                <button type="button" className="hy-btn hy-btn-ghost" disabled={locked || openWebAction.available === false} onClick={() => onAction(openWebAction, mode)}>
+                  打开 WebUI
+                </button>
+              ) : null}
+            </div>
           </div>
 
-          {mode === 'existing' ? (
-            <div className="coding-opendesign-layout">
-              <div className="coding-provider-config">
-                <h3>手动连接</h3>
-                <small>适用于你已经自己启动了 OpenDesign。这里只需要保存 daemon 地址并测试 `/api/health`。</small>
-                <label>
-                  <span>Daemon URL</span>
-                  <input className="hy-input" value={configForm.opendesign_daemon_url} disabled={locked} onChange={(event) => onConfigChange('opendesign_daemon_url', event.target.value)} placeholder="http://127.0.0.1:57824" />
-                </label>
-                <label>
-                  <span>WebUI URL（可选）</span>
-                  <input className="hy-input" value={configForm.opendesign_web_url} disabled={locked} onChange={(event) => onConfigChange('opendesign_web_url', event.target.value)} placeholder="http://127.0.0.1:57828" />
-                </label>
-                <div className="coding-provider-config-actions">
-                  <button type="button" className="hy-btn hy-btn-primary" disabled={locked || saveTestBusy} onClick={onSaveAndTest}>
-                    {saveTestBusy ? '保存并测试中...' : '保存并测试连接'}
-                  </button>
-                  {openWebAction ? (
-                    <button type="button" className="hy-btn hy-btn-ghost" disabled={locked || openWebAction.available === false} onClick={() => onAction(openWebAction, mode)}>
-                      打开 WebUI
+          <details className="coding-provider-advanced coding-opendesign-advanced">
+            <summary>兼容调试：连接已有 OpenDesign 或使用 Yachiyo 管辖目录</summary>
+            <div className="coding-mode-switch" role="tablist" aria-label="OpenDesign setup mode">
+              <button type="button" className={mode === 'existing' ? 'active' : ''} disabled={locked} onClick={() => onModeChange('existing')}>
+                本机已有 OpenDesign
+              </button>
+              <button type="button" className={mode === 'managed' ? 'active' : ''} disabled={locked} onClick={() => onModeChange('managed')}>
+                安装到 Yachiyo 管辖目录
+              </button>
+            </div>
+
+            {mode === 'existing' ? (
+              <div className="coding-opendesign-layout">
+                <div className="coding-provider-config">
+                  <h3>手动连接</h3>
+                  <small>适用于你已经自己启动了 OpenDesign。这里只需要保存 daemon 地址并测试 `/api/health`。</small>
+                  <label>
+                    <span>Daemon URL</span>
+                    <input className="hy-input" value={configForm.opendesign_daemon_url} disabled={locked} onChange={(event) => onConfigChange('opendesign_daemon_url', event.target.value)} placeholder="http://127.0.0.1:57824" />
+                  </label>
+                  <label>
+                    <span>WebUI URL（可选）</span>
+                    <input className="hy-input" value={configForm.opendesign_web_url} disabled={locked} onChange={(event) => onConfigChange('opendesign_web_url', event.target.value)} placeholder="http://127.0.0.1:57828" />
+                  </label>
+                  <div className="coding-provider-config-actions">
+                    <button type="button" className="hy-btn hy-btn-primary" disabled={locked || saveTestBusy} onClick={onSaveAndTest}>
+                      {saveTestBusy ? '保存并测试中...' : '保存并测试连接'}
                     </button>
-                  ) : null}
+                    {openWebAction ? (
+                      <button type="button" className="hy-btn hy-btn-ghost" disabled={locked || openWebAction.available === false} onClick={() => onAction(openWebAction, mode)}>
+                        打开 WebUI
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
 
-              <div className="coding-opendesign-summary">
-                <h3>检测结果</h3>
-                <div className="coding-provider-checks">
-                  <div className="coding-provider-check-row"><span>Daemon Health</span><small>{capabilities.daemon_reachable ? '可连接' : provider.blocking_reason || '未连接'}</small></div>
-                  <div className="coding-provider-check-row"><span>版本</span><small>{provider.version || '未知'}</small></div>
-                  <div className="coding-provider-check-row"><span>配置文件</span><code>{config?.config_path || 'coding-config.json'}</code></div>
+                <div className="coding-opendesign-summary">
+                  <h3>检测结果</h3>
+                  <div className="coding-provider-checks">
+                    <div className="coding-provider-check-row"><span>Daemon Health</span><small>{capabilities.daemon_reachable ? '可连接' : provider.blocking_reason || '未连接'}</small></div>
+                    <div className="coding-provider-check-row"><span>版本</span><small>{provider.version || '未知'}</small></div>
+                    <div className="coding-provider-check-row"><span>配置文件</span><code>{config?.config_path || 'coding-config.json'}</code></div>
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : (
-            <div className="coding-opendesign-layout">
-              <div className="coding-provider-config">
-                <h3>Yachiyo 管辖服务</h3>
-                <small>找不到本机项目时，安装到 Yachiyo 工作区；之后由 Yachiyo 后台运行 `pnpm tools-dev run web`，并从启动日志更新 Daemon/WebUI 地址。</small>
-                <div className="coding-provider-checks">
-                  <div className="coding-provider-check-row"><span>管辖目录</span><code>{managedPath || '~/.hermes/yachiyo/external/open-design'}</code></div>
-                  <div className="coding-provider-check-row"><span>已安装</span><small>{managedInstalled ? '是' : '否'}</small></div>
-                  <div className="coding-provider-check-row"><span>扫描</span><small>{foundCount} found / {scanCandidates.length || 0} checked</small></div>
+            ) : (
+              <div className="coding-opendesign-layout">
+                <div className="coding-provider-config">
+                  <h3>Yachiyo 管辖服务</h3>
+                  <small>兼容入口仍保留；若使用它，Yachiyo 会在工作区管理一份 OpenDesign 源码目录并后台启动服务。</small>
+                  <div className="coding-provider-checks">
+                    <div className="coding-provider-check-row"><span>管辖目录</span><code>{managedPath || '~/.hermes/yachiyo/external/open-design'}</code></div>
+                    <div className="coding-provider-check-row"><span>已安装</span><small>{managedInstalled ? '是' : '否'}</small></div>
+                    <div className="coding-provider-check-row"><span>扫描</span><small>{foundCount} found / {scanCandidates.length || 0} checked</small></div>
+                  </div>
+                  <div className="coding-provider-config-actions">
+                    {scanAction ? <button type="button" className="hy-btn hy-btn-ghost" disabled={locked || scanAction.available === false} onClick={() => onAction(scanAction, mode)}>检查本机项目</button> : null}
+                    {installAction ? <button type="button" className="hy-btn hy-btn-ghost" disabled={locked || installAction.available === false} onClick={() => onAction(installAction, mode)}>安装到管辖目录</button> : null}
+                    {startAction ? <button type="button" className="hy-btn hy-btn-primary" disabled={locked || startAction.available === false} onClick={() => onAction(startAction, mode)}>一键安装依赖并启动</button> : null}
+                    <button type="button" className="hy-btn hy-btn-ghost" disabled={locked || saveTestBusy} onClick={onSaveAndTest}>{saveTestBusy ? '测试中...' : '测试连接'}</button>
+                    {openWebAction ? <button type="button" className="hy-btn hy-btn-ghost" disabled={locked || openWebAction.available === false} onClick={() => onAction(openWebAction, mode)}>打开 WebUI</button> : null}
+                    {upgradeAction ? <button type="button" className="hy-btn hy-btn-ghost" disabled={locked || upgradeAction.available === false} onClick={() => onAction(upgradeAction, mode)}>检查版本并升级</button> : null}
+                  </div>
                 </div>
-                <div className="coding-provider-config-actions">
-                  {scanAction ? <button type="button" className="hy-btn hy-btn-ghost" disabled={locked || scanAction.available === false} onClick={() => onAction(scanAction, mode)}>检查本机项目</button> : null}
-                  {installAction ? <button type="button" className="hy-btn hy-btn-ghost" disabled={locked || installAction.available === false} onClick={() => onAction(installAction, mode)}>安装到管辖目录</button> : null}
-                  {startAction ? <button type="button" className="hy-btn hy-btn-primary" disabled={locked || startAction.available === false} onClick={() => onAction(startAction, mode)}>一键安装依赖并启动</button> : null}
-                  <button type="button" className="hy-btn hy-btn-ghost" disabled={locked || saveTestBusy} onClick={onSaveAndTest}>{saveTestBusy ? '测试中...' : '测试连接'}</button>
-                  {openWebAction ? <button type="button" className="hy-btn hy-btn-ghost" disabled={locked || openWebAction.available === false} onClick={() => onAction(openWebAction, mode)}>打开 WebUI</button> : null}
-                  {upgradeAction ? <button type="button" className="hy-btn hy-btn-ghost" disabled={locked || upgradeAction.available === false} onClick={() => onAction(upgradeAction, mode)}>检查版本并升级</button> : null}
-                </div>
-              </div>
 
-              <div className="coding-opendesign-summary">
-                <h3>服务地址</h3>
-                <div className="coding-provider-checks">
-                  <div className="coding-provider-check-row"><span>Daemon URL</span><code>{daemonUrl || '启动后自动更新'}</code></div>
-                  <div className="coding-provider-check-row"><span>WebUI URL</span><code>{webUrl || '启动后自动更新'}</code></div>
-                  <div className="coding-provider-check-row"><span>健康检查</span><small>{capabilities.daemon_reachable ? '可连接' : '未连接'}</small></div>
+                <div className="coding-opendesign-summary">
+                  <h3>服务地址</h3>
+                  <div className="coding-provider-checks">
+                    <div className="coding-provider-check-row"><span>Daemon URL</span><code>{daemonUrl || '启动后自动更新'}</code></div>
+                    <div className="coding-provider-check-row"><span>WebUI URL</span><code>{webUrl || '启动后自动更新'}</code></div>
+                    <div className="coding-provider-check-row"><span>健康检查</span><small>{capabilities.daemon_reachable ? '可连接' : '未连接'}</small></div>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </details>
 
           {install ? (
             <details className="coding-install-log coding-opendesign-log" open>
@@ -734,6 +763,7 @@ function ProviderCard({
   busy,
   locked,
   install,
+  testResult,
   onAction,
   onConfigChange,
   onSaveAndTest,
@@ -744,6 +774,7 @@ function ProviderCard({
   busy: string;
   locked: boolean;
   install?: CodingProviderInstall;
+  testResult?: CodingProviderConfigTest;
   onAction: (action: CodingProviderAction) => void;
   onConfigChange: (key: keyof DefaultsForm, value: string | boolean) => void;
   onSaveAndTest: (providerId: string) => void;
@@ -773,97 +804,172 @@ function ProviderCard({
       {provider.blocking_reason ? <p>{provider.blocking_reason}</p> : null}
       {provider.install_hint ? <p>{provider.install_hint}</p> : null}
       {provider.auth_hint && !isClaude && !isCodex ? <p>{provider.auth_hint}</p> : null}
-      {provider.id === 'local_claude_code' ? (
-        <div className="coding-provider-config">
-          <h3>Credential Mode</h3>
-          <CredentialModeSelect
-            value={configForm.claude_credential_mode}
-            onChange={(value) => onConfigChange('claude_credential_mode', value)}
-            disabled={locked}
-          />
-          {credentialMode === 'api_env' ? (
-            <ApiEnvPanel
-              baseLabel="ANTHROPIC_BASE_URL"
-              baseValue={configForm.anthropic_base_url}
-              keyLabel="ANTHROPIC_API_KEY"
-              keyValue={configForm.anthropic_api_key}
-              apiConfigured={apiConfigured}
-              keyPlaceholder={config?.anthropic_api_key_configured ? '已配置，留空不覆盖' : 'your_key'}
-              onBaseChange={(value) => onConfigChange('anthropic_base_url', value)}
-              onKeyChange={(value) => onConfigChange('anthropic_api_key', value)}
-              onSaveAndTest={() => onSaveAndTest(provider.id)}
-              busy={saveTestBusy}
+      <ProviderRecommendationPanel provider={provider} />
+      {isCodex ? <CodexRuntimePanel provider={provider} /> : null}
+      <details className="coding-provider-advanced">
+        <summary>兼容调试：登录/API Env 与 CLI 操作</summary>
+        {provider.id === 'local_claude_code' ? (
+          <div className="coding-provider-config">
+            <h3>Credential Mode</h3>
+            <CredentialModeSelect
+              value={configForm.claude_credential_mode}
+              onChange={(value) => onConfigChange('claude_credential_mode', value)}
               disabled={locked}
-              note="只注入这里保存的 ANTHROPIC_*，并使用隔离 HOME，避免读取本机 Claude 登录态。"
             />
-          ) : (
-            <CliLoginPanel
-              provider={provider}
-              authAction={authAction}
-              modeDirty={modeDirty}
-              onAction={onAction}
-              onSaveAndTest={() => onSaveAndTest(provider.id)}
-              busy={saveTestBusy}
+            {credentialMode === 'api_env' ? (
+              <ApiEnvPanel
+                baseLabel="ANTHROPIC_BASE_URL"
+                baseValue={configForm.anthropic_base_url}
+                modelLabel="Model"
+                modelValue={configForm.anthropic_model}
+                keyLabel="ANTHROPIC_API_KEY"
+                keyValue={configForm.anthropic_api_key}
+                apiConfigured={apiConfigured}
+                keyPlaceholder={config?.anthropic_api_key_configured ? '已配置，留空不覆盖' : 'your_key'}
+                onBaseChange={(value) => onConfigChange('anthropic_base_url', value)}
+                onModelChange={(value) => onConfigChange('anthropic_model', value)}
+                onKeyChange={(value) => onConfigChange('anthropic_api_key', value)}
+                onSaveAndTest={() => onSaveAndTest(provider.id)}
+                busy={saveTestBusy}
+                disabled={locked}
+                note="兼容测试入口：只注入这里保存的 ANTHROPIC_*，并使用隔离 HOME；自定义网关通常还需要显式模型名。"
+              />
+            ) : (
+              <CliLoginPanel
+                provider={provider}
+                authAction={authAction}
+                modeDirty={modeDirty}
+                onAction={onAction}
+                onSaveAndTest={() => onSaveAndTest(provider.id)}
+                busy={saveTestBusy}
+                disabled={locked}
+                note="兼容测试入口：使用本机 Claude Code 登录态；不会注入 Yachiyo 保存的 Anthropic API Key。"
+              />
+            )}
+          </div>
+        ) : null}
+        {provider.id === 'codex_review' ? (
+          <div className="coding-provider-config">
+            <h3>Credential Mode</h3>
+            <CredentialModeSelect
+              value={configForm.codex_credential_mode}
+              onChange={(value) => onConfigChange('codex_credential_mode', value)}
               disabled={locked}
-              note="使用本机 Claude Code 登录态；不会注入 Yachiyo 保存的 Anthropic API Key。"
             />
-          )}
-        </div>
-      ) : null}
-      {provider.id === 'codex_review' ? (
-        <div className="coding-provider-config">
-          <h3>Credential Mode</h3>
-          <CredentialModeSelect
-            value={configForm.codex_credential_mode}
-            onChange={(value) => onConfigChange('codex_credential_mode', value)}
-            disabled={locked}
-          />
-          {credentialMode === 'api_env' ? (
-            <ApiEnvPanel
-              baseLabel="OPENAI_BASE_URL"
-              baseValue={configForm.codex_base_url}
-              keyLabel="OPENAI_API_KEY"
-              keyValue={configForm.codex_api_key}
-              apiConfigured={apiConfigured}
-              keyPlaceholder={config?.codex_api_key_configured ? '已配置，留空不覆盖' : 'your_key'}
-              onBaseChange={(value) => onConfigChange('codex_base_url', value)}
-              onKeyChange={(value) => onConfigChange('codex_api_key', value)}
-              onSaveAndTest={() => onSaveAndTest(provider.id)}
-              busy={saveTestBusy}
-              disabled={locked}
-              note="只注入这里保存的 OPENAI_*，并使用隔离 HOME，避免读取本机 Codex 登录态。"
-            />
-          ) : (
-            <CliLoginPanel
-              provider={provider}
-              authAction={authAction}
-              modeDirty={modeDirty}
-              onAction={onAction}
-              onSaveAndTest={() => onSaveAndTest(provider.id)}
-              busy={saveTestBusy}
-              disabled={locked}
-              note="使用本机 Codex 登录态；不会注入 Yachiyo 保存的 OpenAI API Key。"
-            />
-          )}
-        </div>
-      ) : null}
-      {commonActions.length ? (
-        <div className="coding-provider-actions">
-          {commonActions.map((action) => (
-            <button key={action.id} type="button" className="hy-btn hy-btn-ghost" disabled={locked || action.available === false || install?.status === 'running'} onClick={() => onAction(action)}>
-              {providerActionLabel(action)}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      {install ? (
-        <details className="coding-install-log" open={install.status === 'running'}>
-          <summary>{install.action} · {install.status}</summary>
-          <pre>{(install.lines || []).slice(-16).join('\n') || install.error || install.command_preview || ''}</pre>
-        </details>
-      ) : null}
+            {credentialMode === 'api_env' ? (
+              <ApiEnvPanel
+                baseLabel="OPENAI_BASE_URL"
+                baseValue={configForm.codex_base_url}
+                modelLabel="Model"
+                modelValue={configForm.codex_model}
+                keyLabel="OPENAI_API_KEY"
+                keyValue={configForm.codex_api_key}
+                apiConfigured={apiConfigured}
+                keyPlaceholder={config?.codex_api_key_configured ? '已配置，留空不覆盖' : 'your_key'}
+                onBaseChange={(value) => onConfigChange('codex_base_url', value)}
+                onModelChange={(value) => onConfigChange('codex_model', value)}
+                onKeyChange={(value) => onConfigChange('codex_api_key', value)}
+                onSaveAndTest={() => onSaveAndTest(provider.id)}
+                busy={saveTestBusy}
+                disabled={locked}
+                note="兼容测试入口：Codex CLI 0.128+ 需要 Responses API；Chat Completions-only 网关即使填了 Key 也无法跑通。"
+              />
+            ) : (
+              <CliLoginPanel
+                provider={provider}
+                authAction={authAction}
+                modeDirty={modeDirty}
+                onAction={onAction}
+                onSaveAndTest={() => onSaveAndTest(provider.id)}
+                busy={saveTestBusy}
+                disabled={locked}
+                note="兼容测试入口：使用本机 Codex 登录态；不会注入 Yachiyo 保存的 OpenAI API Key。"
+              />
+            )}
+          </div>
+        ) : null}
+        {commonActions.length ? (
+          <div className="coding-provider-actions">
+            {commonActions.map((action) => (
+              <button key={action.id} type="button" className="hy-btn hy-btn-ghost" disabled={locked || action.available === false || install?.status === 'running'} onClick={() => onAction(action)}>
+                {providerActionLabel(action)}
+              </button>
+            ))}
+          </div>
+        ) : null}
+        {install ? (
+          <details className="coding-install-log" open={install.status === 'running'}>
+            <summary>{install.action} · {install.status}</summary>
+            <pre>{(install.lines || []).slice(-16).join('\n') || install.error || install.command_preview || ''}</pre>
+          </details>
+        ) : null}
+      </details>
+      {testResult ? <ProviderTestResultPanel result={testResult} /> : null}
     </article>
   );
+}
+
+function ProviderRecommendationPanel({ provider }: { provider: CodingProviderStatus }) {
+  const copy = providerRecommendationCopy(provider);
+  const authStatus = provider.capabilities?.auth_status as { logged_in?: boolean; summary?: string } | undefined;
+  return (
+    <div className="coding-provider-recommendation">
+      <strong>{copy.title}</strong>
+      <p>{copy.summary}</p>
+      <div className="coding-provider-checks">
+        <div className="coding-provider-check-row">
+          <span>检测状态</span>
+          <StatusPill status={provider.availability} />
+        </div>
+        <div className="coding-provider-check-row">
+          <span>下一步</span>
+          <small>{copy.nextStep}</small>
+        </div>
+        <div className="coding-provider-check-row">
+          <span>缺失影响</span>
+          <small>{copy.impact}</small>
+        </div>
+        {provider.executable_path ? (
+          <div className="coding-provider-check-row">
+            <span>命令路径</span>
+            <code>{provider.executable_path}</code>
+          </div>
+        ) : null}
+        {authStatus?.summary ? (
+          <div className="coding-provider-check-row">
+            <span>登录态</span>
+            <small>{authStatus.summary}</small>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function providerRecommendationCopy(provider: CodingProviderStatus) {
+  if (provider.id === 'local_claude_code') {
+    return {
+      title: 'Claude Code CLI 推荐',
+      summary: '可作为 /start-code 的本机执行器，但安装、升级、登录和 provider 密钥仍由 Claude Code 官方流程或 Hermes 权威配置处理。',
+      nextStep: provider.executable_path ? '确认登录态后即可用于 coding job；需要更多调试时展开兼容入口。' : '按 Claude Code 官方流程安装并登录，再回到这里重新检测。',
+      impact: '缺失时 /start-code 无法自动选择 Claude Code 执行器。',
+    };
+  }
+  if (provider.id === 'codex_review') {
+    const runtimeReady = Boolean(provider.capabilities?.app_server_runtime_ready);
+    return {
+      title: 'Codex Review / Runtime 推荐',
+      summary: 'Codex 在这里更适合作为 review 或 Hermes Codex Runtime 的前置环境；Yachiyo 不承诺直接修好第三方 API 网关。',
+      nextStep: runtimeReady ? 'Codex CLI、login 和 Hermes Runtime 前置条件已满足。' : '安装 Codex CLI 0.130.0+，完成 codex login，并确认 Hermes App-Server Runtime 能力。',
+      impact: 'Runtime 未满足时仍可保留人工 review，但不要把它理解成 Yachiyo 可直接接管 Codex。',
+    };
+  }
+  return {
+    title: provider.display_name || provider.id,
+    summary: provider.blocking_reason || '这个工具作为外部环境建议展示。',
+    nextStep: provider.install_hint || '按官方入口完成安装、登录或启动后重新检测。',
+    impact: '缺失时相关外部增强能力会降级，不影响 Yachiyo 自有桌面体验。',
+  };
 }
 
 function providerActionLabel(action: CodingProviderAction) {
@@ -871,9 +977,63 @@ function providerActionLabel(action: CodingProviderAction) {
   return action.label;
 }
 
+function providerInstallCompletionMessage(items: CodingProviderInstall[]): string {
+  const latest = items[items.length - 1];
+  if (!latest) return 'Provider 状态已刷新。';
+  const output = `${latest.error || ''}\n${(latest.lines || []).join('\n')}`;
+  if (latest.status === 'failed') return latest.error || `${latest.provider_id} ${latest.action} 失败。`;
+  if (/restart\s+codex|please\s+restart\s+codex/i.test(output)) {
+    return 'Codex 更新命令已完成，并已重新读取 CLI 状态；Codex 提示需要重启当前 Codex 会话后新版本才会完全生效。';
+  }
+  if (latest.action === 'upgrade') return `${latest.provider_id} 更新命令已完成，Provider 状态已重新检测。`;
+  return `${latest.provider_id} ${latest.action} 已完成，Provider 状态已重新检测。`;
+}
+
+function CodexRuntimePanel({ provider }: { provider: CodingProviderStatus }) {
+  const capabilities = provider.capabilities || {};
+  const runtimeReady = Boolean(capabilities.app_server_runtime_ready);
+  const appServerCommand = Boolean(capabilities.app_server_command);
+  const minVersion = String(capabilities.app_server_min_version || '0.130.0');
+  const statusText = String(capabilities.app_server_status || '');
+  return (
+    <div className={runtimeReady ? 'coding-provider-runtime ready' : 'coding-provider-runtime'}>
+      <div>
+        <strong>Hermes Codex Runtime</strong>
+        <span>{runtimeReady ? '前置条件满足' : appServerCommand ? `建议升级到 ${minVersion}+` : '等待 Codex app-server 能力'}</span>
+      </div>
+      <small>{statusText || 'Hermes Runtime 路线会使用 Codex 登录态和 app-server，而不是 Chat Completions-only API。'}</small>
+    </div>
+  );
+}
+
+function ProviderTestResultPanel({ result }: { result: CodingProviderConfigTest }) {
+  const status = (result.success ?? result.available) ? 'pass' : 'fail';
+  return (
+    <div className={`coding-provider-test-result ${status}`}>
+      <div className="coding-provider-test-head">
+        <strong>{result.message || result.error || 'Provider 测试结果'}</strong>
+        <span>{status === 'pass' ? '通过' : '需处理'}</span>
+      </div>
+      {result.checks?.length ? (
+        <div className="coding-provider-test-list">
+          {result.checks.map((check, index) => (
+            <div className={`coding-provider-test-row ${check.status}`} key={`${check.label}-${index}`}>
+              <span>{check.label}</span>
+              <strong>{check.status === 'pass' ? '通过' : check.status === 'warn' ? '可选' : '失败'}</strong>
+              {check.detail ? <small>{check.detail}</small> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function ApiEnvPanel({
   baseLabel,
   baseValue,
+  modelLabel,
+  modelValue,
   keyLabel,
   keyValue,
   apiConfigured,
@@ -882,11 +1042,14 @@ function ApiEnvPanel({
   busy,
   disabled,
   onBaseChange,
+  onModelChange,
   onKeyChange,
   onSaveAndTest,
 }: {
   baseLabel: string;
   baseValue: string;
+  modelLabel: string;
+  modelValue: string;
   keyLabel: string;
   keyValue: string;
   apiConfigured: boolean;
@@ -895,6 +1058,7 @@ function ApiEnvPanel({
   busy: boolean;
   disabled: boolean;
   onBaseChange: (value: string) => void;
+  onModelChange: (value: string) => void;
   onKeyChange: (value: string) => void;
   onSaveAndTest: () => void;
 }) {
@@ -905,6 +1069,10 @@ function ApiEnvPanel({
       <label>
         <span>{baseLabel}</span>
         <input className="hy-input" value={baseValue} disabled={disabled} onChange={(event) => onBaseChange(event.target.value)} placeholder="https://your-gateway.example.com" />
+      </label>
+      <label>
+        <span>{modelLabel}</span>
+        <input className="hy-input" value={modelValue} disabled={disabled} onChange={(event) => onModelChange(event.target.value)} placeholder="mimo-v2.5-pro" />
       </label>
       <label>
         <span>{keyLabel}</span>
@@ -997,8 +1165,8 @@ function CredentialModeSelect({ value, onChange, disabled = false }: { value: st
     <label>
       <span>Mode</span>
       <select className="hy-select" value={value || 'cli_login'} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
-        <option value="api_env">API Env (isolated)</option>
         <option value="cli_login">CLI Login</option>
+        <option value="api_env">API Env (isolated)</option>
       </select>
     </label>
   );
@@ -1047,9 +1215,11 @@ function configToForm(config: CodingConfig): DefaultsForm {
     opendesign_auto_start: Boolean(config.opendesign_auto_start),
     claude_credential_mode: config.claude_credential_mode || 'cli_login',
     anthropic_base_url: config.anthropic_base_url || '',
+    anthropic_model: config.anthropic_model || '',
     anthropic_api_key: '',
     codex_credential_mode: config.codex_credential_mode || 'cli_login',
     codex_base_url: config.codex_base_url || '',
+    codex_model: config.codex_model || '',
     codex_api_key: '',
   };
 }
@@ -1059,7 +1229,7 @@ function splitScopes(value: string) {
 }
 
 function tabLabel(tab: CodingTab) {
-  if (tab === 'providers') return 'Providers';
+  if (tab === 'providers') return '环境建议';
   if (tab === 'opendesign') return 'OpenDesign';
   if (tab === 'defaults') return 'Defaults';
   return 'Job Detail';

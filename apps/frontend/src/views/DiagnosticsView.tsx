@@ -648,11 +648,14 @@ export function DiagnosticsView() {
     <section className="hy-route-page hy-diagnostics-page">
       <header className="hy-page-header hy-diagnostics-header hy-stagger">
         <div>
-          <span className="hy-eyebrow">Diagnostics · Hermes Tools</span>
-          <h2>诊断工具</h2>
-          <p>配置检查、Doctor、Hermes 工具盘点、运行时任务和本地能力探测统一在这里处理。</p>
+          <span className="hy-eyebrow">Diagnostics · Raw Output</span>
+          <h2>诊断详情</h2>
+          <p>查看 Doctor 原始输出、运行时任务、本地能力探测和排障日志；工作链路与基础设施状态统一在能力中心查看。</p>
         </div>
         <div className="hy-action-row">
+          <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('tools')}>
+            打开能力中心
+          </button>
           <button
             className="hy-btn hy-btn-primary"
             type="button"
@@ -703,8 +706,8 @@ export function DiagnosticsView() {
       <section className="hy-diagnostics-card hy-diagnostics-tools hy-stagger">
         <div className="section-heading-row">
           <div>
-            <h2>Hermes 工具盘点</h2>
-            <p className="section-caption">旧工具中心的 Hermes 工具清单收回到这里；Doctor 会标记受限项，可配置工具仍能进入独立配置。</p>
+            <h2>工具配置入口</h2>
+            <p className="section-caption">Hermes 更新、Doctor 摘要和工具清单入口已经下沉到能力中心的基础设施区；这里保留 raw output 和排障详情。</p>
           </div>
           <StatusPill active={!attentionToolCount && !toolsLoading} label={toolsLoading ? '同步中' : `${attentionToolCount} 个需处理`} />
         </div>
@@ -713,23 +716,20 @@ export function DiagnosticsView() {
           <span>配置入口：{configuredToolCount}</span>
           <span>Doctor：{diagnosticCache?.stale ? '需重检' : diagnosticDoctorState(overview, diagnosticCache).checked ? '已读取' : '待运行'}</span>
         </div>
-        {toolsLoading ? (
-          <div className="hy-diagnostics-tool-grid" aria-label="工具加载中">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <article className="hy-diagnostics-tool-card skeleton" key={index}>
-                <span />
-                <strong />
-                <p />
-              </article>
-            ))}
-          </div>
-        ) : (
-          <div className="hy-diagnostics-tool-grid" aria-label="Hermes 工具">
-            {toolCards.map((card) => (
-              <DiagnosticToolCardView card={card} key={card.item.id} />
-            ))}
-          </div>
-        )}
+        <div className="hy-diagnostics-routing-grid">
+          <article className="hy-diagnostics-route-card">
+            <strong>能力中心</strong>
+            <span>Hermes 更新、工具清单同步、Provider 配置、Codex/Claude/OpenDesign 安装与 API 测试。</span>
+            <button type="button" className="hy-btn hy-btn-primary" onClick={() => navigateTo('tools')}>打开能力中心</button>
+          </article>
+          <article className="hy-diagnostics-route-card">
+            <strong>诊断详情</strong>
+            <span>Doctor raw output、配置检查、Bridge runtime、任务队列和本地探测仍在这里。</span>
+            <button type="button" className="hy-btn hy-btn-ghost" disabled={busy} onClick={() => void runDiagnostic('hermes doctor')}>
+              {busy ? '运行中...' : '运行 Doctor'}
+            </button>
+          </article>
+        </div>
       </section>
 
       <section className="hy-diagnostics-card diagnostic-result-panel hy-stagger">
