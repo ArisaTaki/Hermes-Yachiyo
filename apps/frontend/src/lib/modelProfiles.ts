@@ -68,6 +68,25 @@ export type ModelSourceRequest = {
   enabled?: boolean;
 };
 
+export type RemoteModelInfo = {
+  id: string;
+  canonical_slug?: string;
+  context_length?: number;
+  default_parameters?: Record<string, unknown>;
+  description?: string;
+  input_modalities?: string[];
+  is_free?: boolean;
+  is_moderated?: boolean;
+  max_completion_tokens?: number;
+  modality?: string;
+  name?: string;
+  owned_by?: string;
+  output_modalities?: string[];
+  pricing?: Record<string, string | number | null | undefined>;
+  provider_key?: string;
+  supported_parameters?: string[];
+};
+
 export async function listModelProfiles(): Promise<ModelProfilesPayload> {
   return apiGet('/ui/model-profiles');
 }
@@ -97,6 +116,15 @@ export async function testModelSource(sourceId: string, model?: string): Promise
   source?: ModelSource;
 }> {
   return apiPost(`/ui/model-sources/${encodeURIComponent(sourceId)}/test`, model ? { model } : {});
+}
+
+export async function fetchModelSourceModels(sourceId: string): Promise<{
+  ok?: boolean;
+  models?: RemoteModelInfo[];
+  count?: number;
+  source?: ModelSource;
+}> {
+  return apiPost(`/ui/model-sources/${encodeURIComponent(sourceId)}/models/fetch`);
 }
 
 export async function createModelProfile(request: ModelProfileRequest): Promise<ModelProfile> {
