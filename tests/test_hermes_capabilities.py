@@ -60,6 +60,17 @@ def test_separate_vision_config_enables_text_pipeline(tmp_path):
     assert capability["requires_vision_pipeline"] is True
 
 
+def test_capability_reports_stored_image_input_mode(tmp_path):
+    capability = build_hermes_image_input_capability(
+        provider="xiaomi",
+        model="mimo-v2.5",
+        config_path=_config(tmp_path, "agent:\n  image_input_mode: native\n"),
+    )
+
+    assert capability["mode"] == "native"
+    assert capability["route"] == "vision_text"
+
+
 def test_auto_mode_uses_separate_vision_when_explicitly_configured(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "apps.shell.hermes_capabilities._load_models_dev_cache",

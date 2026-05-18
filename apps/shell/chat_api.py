@@ -32,6 +32,7 @@ from apps.core.chat_session import (
     MessageStatus,
 )
 from apps.core.activity_store import get_activity_store
+from apps.core.executor import user_task_unavailable_reason
 from apps.core.special_sessions import is_proactive_chat_session
 from apps.locald.screenshot import capture_screenshot_to_file
 from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
@@ -299,6 +300,10 @@ class ChatAPI:
             if runnable_command is not None:
                 return runnable_command
 
+            unavailable_reason = user_task_unavailable_reason(self._runtime)
+            if unavailable_reason:
+                return {"ok": False, "error": unavailable_reason}
+
             if raw_attachments and self._should_enforce_image_capability():
                 image_input = get_current_hermes_image_input_capability()
                 if image_input.get("can_attach_images") is False:
@@ -453,6 +458,111 @@ class ChatAPI:
         return {
             **response,
         }
+
+    def retry_message(self, message_id: str) -> Dict[str, Any]:
+        """重新发送当前会话中的失败消息，复用已保存的附件文件。"""
+        message_id = str(message_id or "").strip()
+        if not message_id:
+            return {"ok": False, "error": "message_id 不能为空"}
+
+        try:
+            self._sync_task_status_to_messages()
+            source = self._find_retry_source_message(message_id)
+            if source is None:
+                return {"ok": False, "error": "没有找到可重试的失败消息"}
+
+            saved_attachments = [dict(attachment) for attachment in source.attachments or []]
+            missing_attachments = self._missing_retry_attachments(saved_attachments)
+            if missing_attachments:
+                return {
+                    "ok": False,
+                    "error": f"附件缓存不存在，无法重试：{', '.join(missing_attachments)}",
+                }
+
+            if saved_attachments and self._should_enforce_image_capability():
+                image_input = get_current_hermes_image_input_capability()
+                if image_input.get("can_attach_images") is False:
+                    return {
+                        "ok": False,
+                        "error": str(image_input.get("reason") or "当前 Hermes 模型暂不支持图片输入"),
+                        "image_input": image_input,
+                    }
+
+            text = (source.content or "").strip()
+            if not text and saved_attachments:
+                text = "请识别并分析这张图片。"
+            if not text:
+                return {"ok": False, "error": "原消息内容为空，无法重试"}
+
+            unavailable_reason = user_task_unavailable_reason(self._runtime)
+            if unavailable_reason:
+                return {"ok": False, "error": unavailable_reason}
+
+            new_message_id = self._session.add_user_message(text, saved_attachments)
+            task = self._state.create_task(
+                task_type=TaskType.GENERAL,
+                description=text,
+                attachments=saved_attachments,
+                chat_session_id=self._session.session_id,
+            )
+            self._session.link_message_to_task(new_message_id, task.task_id)
+
+            logger.info(
+                "消息已重试: source_message_id=%s, message_id=%s, task_id=%s, attachments=%d",
+                message_id,
+                new_message_id,
+                task.task_id,
+                len(saved_attachments),
+            )
+            return {
+                "ok": True,
+                "message_id": new_message_id,
+                "source_message_id": message_id,
+                "task_id": task.task_id,
+                "status": "pending",
+                "attachments": self._serialize_attachments(saved_attachments),
+            }
+        except Exception as exc:
+            logger.error("重试消息失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
+    def _find_retry_source_message(self, message_id: str) -> ChatMessage | None:
+        messages = self._session.get_all_messages()
+        target_index = next(
+            (index for index, msg in enumerate(messages) if msg.message_id == message_id),
+            -1,
+        )
+        if target_index < 0:
+            return None
+
+        target = messages[target_index]
+        if target.status != MessageStatus.FAILED:
+            return None
+        if target.role == MessageRole.USER:
+            return target
+
+        if target.task_id:
+            for msg in reversed(messages[:target_index]):
+                if msg.role == MessageRole.USER and msg.task_id == target.task_id:
+                    return msg
+
+        for msg in reversed(messages[:target_index]):
+            if msg.role == MessageRole.USER:
+                return msg
+        return None
+
+    @staticmethod
+    def _missing_retry_attachments(attachments: list[dict]) -> list[str]:
+        missing: list[str] = []
+        for attachment in attachments:
+            if not isinstance(attachment, dict):
+                continue
+            if str(attachment.get("kind") or "image") == "audio":
+                continue
+            path = Path(str(attachment.get("path") or ""))
+            if not path or not path.exists() or not path.is_file():
+                missing.append(str(attachment.get("name") or attachment.get("id") or "image"))
+        return missing
 
     def _should_enforce_image_capability(self) -> bool:
         runner = getattr(self._runtime, "task_runner", None)
@@ -885,10 +995,24 @@ class ChatAPI:
 
     def get_executor_info(self) -> Dict[str, Any]:
         image_input = get_current_hermes_image_input_capability()
-        runner = self._runtime.task_runner
+        runner = getattr(self._runtime, "task_runner", None)
         if runner is None:
-            return {"executor": "none", "available": False, "image_input": image_input}
-        return {"executor": runner.executor.name, "available": True, "image_input": image_input}
+            return {
+                "executor": "none",
+                "available": False,
+                "image_input": image_input,
+                "reason": user_task_unavailable_reason(self._runtime),
+            }
+        executor_name = runner.executor.name
+        available = executor_name == "HermesExecutor"
+        payload = {
+            "executor": executor_name,
+            "available": available,
+            "image_input": image_input,
+        }
+        if not available:
+            payload["reason"] = user_task_unavailable_reason(self._runtime)
+        return payload
 
     def list_sessions(self, limit: int = 20, query: str = "") -> Dict[str, Any]:
         """列出最近会话，包含当前空白会话。"""

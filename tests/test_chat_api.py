@@ -643,6 +643,36 @@ def test_failed_task_marks_user_failed_and_adds_error_reply(tmp_path):
         store.close()
 
 
+def test_retry_failed_message_reuses_saved_image_attachments(tmp_path, monkeypatch):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-home"))
+    monkeypatch.setenv("HERMES_YACHIYO_BRIDGE_URL", "http://127.0.0.1:9999")
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        data_url = "data:image/png;base64," + base64.b64encode(b"fake-png").decode("ascii")
+        sent = api.send_message("再看一下这张图", attachments=[{"name": "screen.png", "data_url": data_url}])
+        original_task = runtime.state.get_task(sent["task_id"])
+        assert original_task is not None
+        original_path = original_task.attachments[0]["path"]
+        runtime.state.update_task_status(sent["task_id"], TaskStatus.RUNNING)
+        runtime.state.update_task_status(sent["task_id"], TaskStatus.FAILED, error="vision failed")
+        failed_messages = api.get_messages()["messages"]
+
+        retry = api.retry_message(failed_messages[1]["id"])
+
+        assert retry["ok"] is True
+        retried_task = runtime.state.get_task(retry["task_id"])
+        assert retried_task is not None
+        assert retried_task.description == "再看一下这张图"
+        assert retried_task.attachments[0]["path"] == original_path
+        assert retried_task.chat_session_id == runtime.chat_session.session_id
+        retried_user = runtime.chat_session.get_messages()[-1]
+        assert retried_user.content == "再看一下这张图"
+        assert retried_user.attachments[0]["path"] == original_path
+        assert retried_user.status == MessageStatus.PENDING
+    finally:
+        store.close()
+
+
 def test_cancelled_task_marks_user_failed_and_adds_cancel_reply(tmp_path):
     api, runtime, store = _make_api(tmp_path)
     try:

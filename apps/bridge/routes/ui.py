@@ -58,6 +58,10 @@ class SendChatMessageRequest(BaseModel):
     runnable_id: str = ""
 
 
+class RetryChatMessageRequest(BaseModel):
+    message_id: str
+
+
 class LauncherAckRequest(BaseModel):
     mode: str = "bubble"
 
@@ -524,6 +528,11 @@ async def get_chat_messages(limit: int = 80, anchor_message_id: str = "") -> dic
 @router.post("/chat/messages")
 async def send_chat_message(request: SendChatMessageRequest) -> dict[str, Any]:
     return ChatAPI(get_runtime()).send_message(request.text, request.attachments, runnable_id=request.runnable_id)
+
+
+@router.post("/chat/messages/retry")
+async def retry_chat_message(request: RetryChatMessageRequest) -> dict[str, Any]:
+    return ChatAPI(get_runtime()).retry_message(request.message_id)
 
 
 @router.get("/chat/attachments/{attachment_id}")

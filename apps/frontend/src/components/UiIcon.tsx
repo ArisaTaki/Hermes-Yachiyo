@@ -10,6 +10,7 @@ export type UiIconName =
   | 'dashboard'
   | 'diagnostics'
   | 'folder'
+  | 'help'
   | 'home'
   | 'image'
   | 'installer'
@@ -19,8 +20,10 @@ export type UiIconName =
   | 'plus'
   | 'provider'
   | 'resources'
+  | 'retry'
   | 'send'
   | 'settings'
+  | 'sidebar'
   | 'sparkle'
   | 'stop'
   | 'voice'
@@ -110,6 +113,13 @@ const ICON_PATHS: Record<UiIconName, ReactNode> = {
       <path d="M3 10h18" />
     </>
   ),
+  help: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M9.7 9.4a2.4 2.4 0 0 1 4.6 1c0 1.8-2.3 2-2.3 3.6" />
+      <path d="M12 17h.1" />
+    </>
+  ),
   home: (
     <>
       <path d="m4 11 8-7 8 7" />
@@ -185,6 +195,14 @@ const ICON_PATHS: Record<UiIconName, ReactNode> = {
       <path d="M17 3.5v16" />
     </>
   ),
+  retry: (
+    <>
+      <path d="M20 7v5h-5" />
+      <path d="M4 17v-5h5" />
+      <path d="M18.2 9A7 7 0 0 0 6.1 6.8L4 9" />
+      <path d="M5.8 15A7 7 0 0 0 17.9 17.2L20 15" />
+    </>
+  ),
   send: (
     <>
       <path d="M12 19V5" />
@@ -195,6 +213,13 @@ const ICON_PATHS: Record<UiIconName, ReactNode> = {
     <>
       <path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z" />
       <path d="M18.2 9.2 20 7.9l-2-3.5-2.1.9a7.8 7.8 0 0 0-1.7-1L14 2h-4l-.3 2.3a7.8 7.8 0 0 0-1.7 1l-2.1-.9-2 3.5 1.9 1.3a7.4 7.4 0 0 0 0 1.7L3.9 12.2l2 3.5 2.1-.9c.5.4 1.1.8 1.7 1l.3 2.2h4l.3-2.2c.6-.2 1.2-.6 1.7-1l2.1.9 2-3.5-1.9-1.3a7.4 7.4 0 0 0 0-1.7Z" />
+    </>
+  ),
+  sidebar: (
+    <>
+      <rect x="4" y="4" width="16" height="16" rx="2.5" />
+      <path d="M9 4v16" />
+      <path d="m14.5 9.5 2.5 2.5-2.5 2.5" />
     </>
   ),
   sparkle: (

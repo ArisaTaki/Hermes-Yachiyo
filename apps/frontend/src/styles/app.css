@@ -822,7 +822,8 @@ button:hover {
   font-size: 12px;
 }
 
-.message-copy-button {
+.message-copy-button,
+.message-retry-button {
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
@@ -837,20 +838,39 @@ button:hover {
 .message-avatar,
 .message-time,
 .message-copy-button,
+.message-retry-button,
 .message-bubble,
 .message-stack {
   user-select: none;
   -webkit-user-select: none;
 }
 
-.message-copy-button:hover {
+.message-copy-button:hover,
+.message-retry-button:hover:not(:disabled) {
   color: #dce6fa;
 }
 
-.message-copy-button.copied {
+.message-copy-button.copied,
+.message-retry-button.retrying {
   color: #9cd9c3;
   border-color: rgba(86, 197, 157, 0.42);
   background: rgba(86, 197, 157, 0.13);
+}
+
+.message-retry-button {
+  border: 1px solid rgba(249, 199, 78, 0.24);
+  background: rgba(249, 199, 78, 0.1);
+  color: #f0c97a;
+}
+
+.message-retry-button:hover:not(:disabled) {
+  border-color: rgba(249, 199, 78, 0.5);
+  background: rgba(249, 199, 78, 0.18);
+  color: #ffe0a3;
+}
+
+.message-retry-button.retrying .ui-icon {
+  animation: button-spin 0.9s linear infinite;
 }
 
 .message-content,
@@ -963,10 +983,11 @@ button:hover {
 .image-viewer-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 80;
+  z-index: 1200;
   display: grid;
   place-items: center;
-  padding: 28px;
+  overflow: hidden;
+  padding: clamp(10px, 3vmin, 28px);
   background: rgba(3, 6, 12, 0.72);
   backdrop-filter: blur(10px);
 }
@@ -974,8 +995,8 @@ button:hover {
 .image-viewer-modal {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  width: min(1100px, 100%);
-  max-height: min(82vh, 820px);
+  width: min(1100px, 96vw);
+  max-height: min(900px, calc(100dvh - 20px));
   overflow: hidden;
   border: 1px solid rgba(130, 151, 184, 0.34);
   border-radius: 8px;
@@ -1021,7 +1042,7 @@ button:hover {
   display: grid;
   place-items: center;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 16px;
   background: #080c14;
 }
@@ -1029,7 +1050,7 @@ button:hover {
 .image-viewer-stage img {
   display: block;
   max-width: 100%;
-  max-height: calc(82vh - 96px);
+  max-height: calc(100dvh - 118px);
   object-fit: contain;
   border-radius: 6px;
 }
@@ -1107,18 +1128,112 @@ button:hover {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
   margin: 0.45em 0 0.85em;
-  overflow-x: auto;
+  overflow-x: hidden;
   padding: 8px 10px;
-  white-space: pre;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .markdown pre code {
   background: transparent;
   border: 0;
   display: block;
-  overflow-wrap: normal;
+  overflow-wrap: anywhere;
   padding: 0;
-  white-space: pre;
+  white-space: pre-wrap;
+}
+
+.markdown-code-block {
+  position: relative;
+  max-width: 100%;
+  margin: 0.45em 0 0.85em;
+}
+
+.markdown-code-block:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-code-block pre {
+  margin: 0;
+  padding-top: 38px;
+}
+
+.markdown-code-lang {
+  position: absolute;
+  top: 11px;
+  left: 12px;
+  z-index: 1;
+  color: #7f8a9d;
+  font-family: var(--hy-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11px;
+  line-height: 1;
+  text-transform: uppercase;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.markdown-code-copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  background: rgba(16, 21, 31, 0.46);
+  color: #aeb8c8;
+  line-height: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.markdown-code-copy:hover,
+.markdown-code-copy.copied {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  color: #dce6fa;
+}
+
+.markdown-code-copy.copied {
+  background: rgba(255, 255, 255, 0.13);
+  color: #d9efe7;
+}
+
+.markdown-code-copy svg {
+  width: 17px;
+  height: 17px;
+}
+
+.syntax-comment {
+  color: #778399;
+}
+
+.syntax-function {
+  color: #8fc5ff;
+}
+
+.syntax-keyword {
+  color: #e6a3d5;
+}
+
+.syntax-number {
+  color: #f0c97a;
+}
+
+.syntax-property {
+  color: #89d8c5;
+}
+
+.syntax-punctuation {
+  color: #8994a6;
+}
+
+.syntax-string {
+  color: #a9d38d;
 }
 
 .markdown blockquote {
@@ -1181,10 +1296,12 @@ button:hover {
 }
 
 .message-error {
+  max-width: 100%;
   margin-top: 6px;
   color: #ffb1b7;
   font-size: 12px;
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
   word-break: break-word;
 }
 
@@ -4861,6 +4978,7 @@ html.desktop-mode-root body.electron-window #root {
   background: var(--hy-gradient-shimmer);
   background-size: 220% 100%;
   animation: hy-shimmer calc(1.4s * var(--hy-anim-factor)) linear infinite;
+  transition: left 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 @keyframes hy-shimmer {
@@ -5022,19 +5140,37 @@ body.electron-window .hy-traffic {
   display: flex;
   flex-direction: column;
   width: 260px;
+  overflow-x: hidden;
   overflow-y: auto;
   border-right: 1px solid var(--hy-border-soft);
   background: oklch(12% 0.028 258 / 0.96);
+  transition:
+    width 280ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 240ms var(--hy-ease-out),
+    background 240ms var(--hy-ease-out);
+  will-change: width;
 }
 
 .hy-sidebar-header {
   padding: 20px 16px 12px;
   border-bottom: 1px solid var(--hy-line);
+  transition: padding 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.hy-sidebar-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  transition: gap 220ms var(--hy-ease-out);
 }
 
 .hy-brand {
+  position: relative;
   display: flex;
   align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
   width: 100%;
   gap: 10px;
   padding: 0;
@@ -5042,6 +5178,9 @@ body.electron-window .hy-traffic {
   background: transparent;
   color: inherit;
   text-align: left;
+  transition:
+    justify-content 220ms var(--hy-ease-out),
+    transform 220ms var(--hy-ease-out);
 }
 
 .hy-brand-mark {
@@ -5085,6 +5224,41 @@ body.electron-window .hy-traffic {
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
+  transition:
+    max-width 240ms var(--hy-ease-out),
+    opacity 180ms var(--hy-ease-out),
+    transform 220ms var(--hy-ease-out);
+}
+
+.hy-sidebar-toggle {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: var(--hy-radius-control);
+  background: transparent;
+  color: var(--hy-subtle);
+  transition:
+    background var(--hy-dur-fast) var(--hy-ease-out),
+    border-color var(--hy-dur-fast) var(--hy-ease-out),
+    color var(--hy-dur-fast) var(--hy-ease-out),
+    transform 220ms var(--hy-ease-out);
+}
+
+.hy-sidebar-toggle:hover {
+  border-color: oklch(75% 0.095 205 / 0.24);
+  background: oklch(75% 0.095 205 / 0.06);
+  color: var(--hy-fg);
+}
+
+.hy-sidebar-toggle .ui-icon {
+  width: 16px;
+  height: 16px;
+  transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .hy-character {
@@ -5093,6 +5267,17 @@ body.electron-window .hy-traffic {
   gap: 12px;
   padding: 16px;
   border-bottom: 1px solid var(--hy-line);
+  transition:
+    gap 220ms var(--hy-ease-out),
+    padding 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.hy-character>div:not(.hy-avatar-ring) {
+  overflow: hidden;
+  transition:
+    max-width 240ms var(--hy-ease-out),
+    opacity 180ms var(--hy-ease-out),
+    transform 220ms var(--hy-ease-out);
 }
 
 .hy-avatar-ring {
@@ -5183,6 +5368,7 @@ body.electron-window .hy-traffic {
   flex: 1;
   padding: 8px;
   overflow-y: auto;
+  transition: padding 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .hy-nav-label {
@@ -5192,6 +5378,10 @@ body.electron-window .hy-traffic {
   font-weight: 510;
   letter-spacing: 0.5px;
   text-transform: uppercase;
+  transition:
+    height 220ms var(--hy-ease-out),
+    opacity 160ms var(--hy-ease-out),
+    padding 220ms var(--hy-ease-out);
 }
 
 .hy-nav-item {
@@ -5207,7 +5397,12 @@ body.electron-window .hy-traffic {
   color: var(--hy-muted);
   font-size: 13px;
   text-align: left;
-  transition: 180ms var(--hy-ease-out);
+  transition:
+    background 180ms var(--hy-ease-out),
+    color 180ms var(--hy-ease-out),
+    gap 220ms var(--hy-ease-out),
+    padding 240ms var(--hy-ease-out),
+    transform 220ms var(--hy-ease-out);
 }
 
 .hy-nav-item:hover {
@@ -5234,7 +5429,13 @@ body.electron-window .hy-traffic {
   color: var(--hy-muted);
   opacity: 0.9;
   font-size: 14px;
-  transition: 180ms var(--hy-ease-out);
+  transition:
+    width 240ms var(--hy-ease-out),
+    height 240ms var(--hy-ease-out),
+    background 180ms var(--hy-ease-out),
+    border-color 180ms var(--hy-ease-out),
+    color 180ms var(--hy-ease-out),
+    transform 220ms var(--hy-ease-out);
 }
 
 .hy-nav-icon .ui-icon {
@@ -5258,6 +5459,10 @@ body.electron-window .hy-traffic {
   font-size: 10px;
   font-style: normal;
   font-weight: 510;
+  transition:
+    max-width 220ms var(--hy-ease-out),
+    opacity 160ms var(--hy-ease-out),
+    transform 220ms var(--hy-ease-out);
 }
 
 .hy-sidebar-footer {
@@ -5265,9 +5470,17 @@ body.electron-window .hy-traffic {
   gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--hy-line);
+  transition:
+    padding 260ms var(--hy-ease-out),
+    gap 220ms var(--hy-ease-out);
 }
 
 .hy-sidebar-footer button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   flex: 1;
   min-height: 32px;
   border: 1px solid var(--hy-border-soft);
@@ -5276,6 +5489,25 @@ body.electron-window .hy-traffic {
   color: var(--hy-subtle);
   font-size: 11px;
   font-weight: 510;
+  transition:
+    background 180ms var(--hy-ease-out),
+    border-color 180ms var(--hy-ease-out),
+    color 180ms var(--hy-ease-out),
+    padding 220ms var(--hy-ease-out);
+}
+
+.hy-sidebar-footer button .ui-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.hy-sidebar-footer button span,
+.hy-nav-item>span:not(.hy-nav-icon) {
+  overflow: hidden;
+  transition:
+    max-width 240ms var(--hy-ease-out),
+    opacity 180ms var(--hy-ease-out),
+    transform 220ms var(--hy-ease-out);
 }
 
 .hy-sidebar-footer button:hover {
@@ -5294,6 +5526,261 @@ body.electron-window .hy-traffic {
     radial-gradient(ellipse 80% 48% at 54% 8%, var(--hy-accent-wash), transparent 58%),
     radial-gradient(ellipse 42% 36% at 88% 84%, oklch(66% 0.12 188 / 0.045), transparent 64%),
     linear-gradient(180deg, oklch(10.5% 0.025 260 / 0.3), var(--hy-bg-deep));
+  transition: left 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-sidebar {
+  width: 72px;
+  align-items: center;
+  overflow-x: hidden;
+  overflow-y: hidden;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-content {
+  left: 72px;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-shimmer-sweep {
+  left: 72px;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-sidebar-header {
+  width: 100%;
+  padding: 10px 0 9px;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-sidebar-header-row {
+  display: grid;
+  justify-items: center;
+  width: 100%;
+  gap: 7px;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-brand {
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  gap: 0;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-brand>span:not(.hy-brand-mark),
+.hy-shell.hy-sidebar-collapsed .hy-character>div:not(.hy-avatar-ring),
+.hy-shell.hy-sidebar-collapsed .hy-nav-item>span:not(.hy-nav-icon),
+.hy-shell.hy-sidebar-collapsed .hy-nav-item em,
+.hy-shell.hy-sidebar-collapsed .hy-sidebar-footer button span {
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-6px);
+  white-space: nowrap;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-nav-label {
+  height: 0;
+  overflow: hidden;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 13px;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-brand-logo {
+  width: 36px;
+  height: 36px;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-sidebar-toggle {
+  width: 40px;
+  height: 40px;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-character {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  justify-content: center;
+  gap: 0;
+  padding: 10px 0;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-avatar-ring {
+  width: 42px;
+  height: 42px;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-nav {
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  flex: 0 0 auto;
+  width: 100%;
+  padding: 8px 0;
+  overflow-x: hidden;
+  overflow-y: hidden;
+  gap: 4px;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-nav-group {
+  display: grid;
+  justify-items: center;
+  width: 100%;
+  gap: 5px;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-nav-item {
+  display: grid;
+  place-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 38px;
+  gap: 0;
+  min-height: 38px;
+  margin: 0 auto;
+  padding: 0;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-nav-item.active {
+  border-left: 0;
+  box-shadow: none;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-nav-item.active::before {
+  position: absolute;
+  top: 5px;
+  bottom: 5px;
+  left: -12px;
+  width: 4px;
+  border-radius: 0 999px 999px 0;
+  background: var(--hy-accent);
+  content: "";
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-nav-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-sidebar-footer {
+  display: grid;
+  grid-template-columns: 1fr;
+  justify-items: center;
+  width: 100%;
+  margin-top: auto;
+  padding: 8px 0 10px;
+  gap: 6px;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-sidebar-footer button {
+  width: 48px;
+  height: 36px;
+  min-height: 36px;
+  flex: 0 0 auto;
+  padding: 0;
+}
+
+.hy-shell.hy-sidebar-collapsed .hy-sidebar-toggle .ui-icon {
+  transform: rotate(180deg);
+}
+
+.hy-shell.hy-sidebar-switching .hy-sidebar {
+  box-shadow:
+    0 0 0 1px oklch(75% 0.095 205 / 0.16),
+    0 0 34px oklch(72% 0.14 350 / 0.13);
+}
+
+.hy-shell.hy-sidebar-switching .hy-sidebar-toggle {
+  animation: hy-sidebar-toggle-pop 420ms var(--hy-ease-out);
+}
+
+.hy-shell.hy-sidebar-switching .hy-brand-mark,
+.hy-shell.hy-sidebar-switching .hy-avatar-ring,
+.hy-shell.hy-sidebar-switching .hy-nav-icon,
+.hy-shell.hy-sidebar-switching .hy-sidebar-footer button .ui-icon {
+  animation: hy-sidebar-icon-pop 420ms var(--hy-ease-out);
+}
+
+.hy-sidebar-tooltip {
+  position: fixed;
+  z-index: 1200;
+  padding: 7px 10px;
+  border: 1px solid oklch(75% 0.095 205 / 0.22);
+  border-radius: 8px;
+  background: oklch(13% 0.03 258 / 0.96);
+  box-shadow:
+    0 10px 28px oklch(0% 0 0 / 0.28),
+    0 0 0 1px oklch(100% 0 0 / 0.04);
+  color: var(--hy-fg);
+  font-size: 12px;
+  font-weight: 510;
+  line-height: 1.2;
+  pointer-events: none;
+  transform: translateY(-50%);
+  animation: hy-sidebar-tooltip-in 140ms var(--hy-ease-out) both;
+  white-space: nowrap;
+}
+
+.hy-sidebar-tooltip::before {
+  position: absolute;
+  top: 50%;
+  left: -5px;
+  width: 8px;
+  height: 8px;
+  border-left: 1px solid oklch(75% 0.095 205 / 0.22);
+  border-bottom: 1px solid oklch(75% 0.095 205 / 0.22);
+  background: oklch(13% 0.03 258 / 0.96);
+  content: "";
+  transform: translateY(-50%) rotate(45deg);
+}
+
+@keyframes hy-sidebar-toggle-pop {
+  0% {
+    transform: scale(0.92);
+  }
+
+  48% {
+    transform: scale(1.08);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes hy-sidebar-icon-pop {
+  0% {
+    transform: scale(0.9);
+  }
+
+  50% {
+    transform: scale(1.08);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes hy-sidebar-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translate(6px, -50%) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(0, -50%) scale(1);
+  }
 }
 
 .hy-route-page {
@@ -7070,7 +7557,7 @@ body.electron-window .hy-traffic {
 }
 
 .hy-content>.open-chat-shell {
-  min-height: 100%;
+  min-height: 0;
   padding: 0;
   grid-template-rows: minmax(0, 1fr);
 }
@@ -7078,6 +7565,7 @@ body.electron-window .hy-traffic {
 .hy-chat-workspace {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
   border: 1px solid var(--hy-border-soft);
   border-radius: var(--hy-radius-panel);
@@ -7089,6 +7577,8 @@ body.electron-window .hy-traffic {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   border-right: 1px solid var(--hy-border-soft);
   background:
     radial-gradient(circle at 38% 8%, oklch(72% 0.14 350 / 0.045), transparent 42%),
@@ -7182,6 +7672,7 @@ body.electron-window .hy-traffic {
 .hy-content .open-chat-shell .hy-chat-workspace {
   height: 100%;
   min-width: 0;
+  min-height: 0;
   border: 0;
   border-radius: 0;
   background: oklch(10.5% 0.025 260 / 0.78);
@@ -7194,6 +7685,8 @@ body.electron-window .hy-traffic {
 .hy-content .open-chat-shell .hy-chat-sessions {
   width: 280px;
   min-width: 220px;
+  min-height: 0;
+  overflow: hidden;
   background:
     radial-gradient(circle at 34% 0%, oklch(72% 0.14 350 / 0.06), transparent 44%),
     var(--hy-surface);
@@ -7285,6 +7778,9 @@ body.electron-window .hy-traffic {
   display: grid;
   align-content: start;
   gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 8px;
   background: transparent;
 }
@@ -7403,6 +7899,8 @@ body.electron-window .hy-traffic {
 
 .hy-content .open-chat-shell .hy-chat-mainpane {
   grid-template-rows: auto minmax(0, 1fr) auto auto;
+  min-height: 0;
+  overflow: hidden;
   background:
     radial-gradient(ellipse 54% 42% at 82% 2%, oklch(75% 0.095 205 / 0.04), transparent 64%),
     var(--hy-bg);
@@ -7414,6 +7912,8 @@ body.electron-window .hy-traffic {
   justify-content: space-between;
   gap: 18px;
   min-height: 65px;
+  min-width: 0;
+  overflow: hidden;
   padding: 16px 24px;
   border-bottom: 1px solid var(--hy-border-soft);
 }
@@ -7422,6 +7922,11 @@ body.electron-window .hy-traffic {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.hy-content .open-chat-shell .chat-header-info>div:last-child {
   min-width: 0;
 }
 
@@ -7477,6 +7982,7 @@ body.electron-window .hy-traffic {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  flex: 0 0 auto;
   flex-wrap: wrap;
 }
 
@@ -7532,6 +8038,7 @@ body.electron-window .hy-traffic {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 24px clamp(18px, 2.8vw, 40px);
   background:
     linear-gradient(180deg, oklch(10.5% 0.025 260 / 0.42), transparent 30%),
@@ -7556,8 +8063,8 @@ body.electron-window .hy-traffic {
   display: flex;
   flex: 0 1 auto;
   gap: 12px;
-  width: fit-content;
-  max-width: min(760px, calc(100% - 52px));
+  width: min(760px, calc(100% - 52px));
+  max-width: calc(100% - 52px);
   min-width: 0;
   opacity: 0;
   transform: translateY(12px);
@@ -7615,14 +8122,16 @@ body.electron-window .hy-traffic {
   align-self: flex-end;
   justify-self: end;
   flex-direction: row-reverse;
-  max-width: min(560px, calc(100% - 52px));
+  width: min(560px, calc(100% - 52px));
+  max-width: calc(100% - 52px);
   margin-left: auto;
 }
 
 .hy-content .open-chat-shell .message--system {
   align-self: center;
   justify-self: center;
-  max-width: min(640px, calc(100% - 52px));
+  width: min(640px, calc(100% - 52px));
+  max-width: calc(100% - 52px);
 }
 
 .hy-content .open-chat-shell .message-avatar {
@@ -7655,9 +8164,11 @@ body.electron-window .hy-traffic {
 
 .hy-content .open-chat-shell .message-stack {
   display: grid;
+  flex: 1 1 auto;
   gap: 4px;
   max-width: 100%;
   min-width: 0;
+  overflow: hidden;
 }
 
 .hy-content .open-chat-shell .message-content,
@@ -7665,6 +8176,7 @@ body.electron-window .hy-traffic {
   max-width: 100%;
   min-width: 0;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .hy-content .open-chat-shell .markdown pre {
@@ -7679,6 +8191,7 @@ body.electron-window .hy-traffic {
   width: fit-content;
   max-width: 100%;
   min-width: 0;
+  overflow: hidden;
   padding: 12px 16px;
   border-radius: 16px;
   color: var(--hy-fg);
@@ -7715,8 +8228,17 @@ body.electron-window .hy-traffic {
 }
 
 .hy-content .open-chat-shell .message.error .message-bubble {
+  width: 100%;
   border-color: oklch(74% 0.14 350 / 0.28);
   background: oklch(72% 0.14 350 / 0.1);
+}
+
+.hy-content .open-chat-shell .message.error .message-content,
+.hy-content .open-chat-shell .message.error .message-error {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .hy-content .open-chat-shell .message.search-highlighted .message-bubble {
@@ -7735,30 +8257,46 @@ body.electron-window .hy-traffic {
   font-size: 10px;
 }
 
-.hy-content .open-chat-shell .message-copy-button {
-  width: 22px;
-  height: 18px;
-  min-width: 22px;
+.hy-content .open-chat-shell .message-copy-button,
+.hy-content .open-chat-shell .message-retry-button {
+  width: 24px;
+  height: 22px;
+  min-width: 24px;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: 7px;
   background: transparent;
   color: var(--hy-faint);
   font-size: 11px;
 }
 
-.hy-content .open-chat-shell .message-copy-button:hover {
+.hy-content .open-chat-shell .message-retry-button {
+  border-color: oklch(82% 0.135 76 / 0.26);
+  background: oklch(82% 0.135 76 / 0.1);
+  color: var(--hy-warning);
+}
+
+.hy-content .open-chat-shell .message-copy-button:hover,
+.hy-content .open-chat-shell .message-retry-button:hover:not(:disabled) {
   border-color: var(--hy-border-soft);
   background: oklch(255 0 0 / 0.04);
   color: var(--hy-fg);
 }
 
-.hy-content .open-chat-shell .message-copy-button.copied {
+.hy-content .open-chat-shell .message-retry-button:hover:not(:disabled) {
+  border-color: oklch(82% 0.135 76 / 0.5);
+  background: oklch(82% 0.135 76 / 0.18);
+  color: oklch(89% 0.105 76);
+}
+
+.hy-content .open-chat-shell .message-copy-button.copied,
+.hy-content .open-chat-shell .message-retry-button.retrying {
   border-color: oklch(66% 0.12 188 / 0.32);
   color: var(--hy-teal);
 }
 
-.hy-content .open-chat-shell .message-copy-button .ui-icon {
+.hy-content .open-chat-shell .message-copy-button .ui-icon,
+.hy-content .open-chat-shell .message-retry-button .ui-icon {
   width: 13px;
   height: 13px;
 }
@@ -8923,6 +9461,15 @@ body.electron-window .hy-traffic {
     left: 220px;
   }
 
+  .hy-shell.hy-sidebar-collapsed .hy-content,
+  .hy-shell.hy-sidebar-collapsed .hy-shimmer-sweep {
+    left: 72px;
+  }
+
+  .hy-shell.hy-sidebar-collapsed .hy-sidebar {
+    width: 72px;
+  }
+
   .hy-status-grid,
   .hy-tools-grid,
   .hy-feature-list,
@@ -9014,6 +9561,26 @@ body.electron-window .hy-traffic {
     max-height: 190px;
     border-right: 0;
     border-bottom: 1px solid var(--hy-border-soft);
+  }
+
+  .hy-shell.hy-sidebar-collapsed .hy-sidebar {
+    width: auto;
+  }
+
+  .hy-shell.hy-sidebar-collapsed .hy-content {
+    left: 0;
+  }
+
+  .hy-shell.hy-sidebar-collapsed .hy-shimmer-sweep {
+    left: 0;
+  }
+
+  .hy-shell.hy-sidebar-collapsed .hy-sidebar-header {
+    padding: 8px;
+  }
+
+  .hy-shell.hy-sidebar-collapsed .hy-sidebar-header-row {
+    flex-direction: row;
   }
 
   .hy-character,
@@ -9417,7 +9984,7 @@ body.electron-window .hy-traffic {
 .avatar-editor-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: 130;
   display: grid;
   place-items: center;
   padding: 24px;
