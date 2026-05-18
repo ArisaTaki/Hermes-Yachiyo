@@ -89,6 +89,24 @@ def test_send_message_creates_task_and_links_user_message(tmp_path):
         store.close()
 
 
+def test_send_message_rejects_when_hermes_unavailable(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+    runtime.task_runner = SimpleNamespace(
+        executor=SimpleNamespace(
+            name="HermesUnavailableExecutor",
+            reason="Hermes Agent 当前不可用",
+        )
+    )
+    try:
+        result = api.send_message("你好")
+
+        assert result == {"ok": False, "error": "Hermes Agent 当前不可用"}
+        assert runtime.state.list_tasks() == []
+        assert runtime.chat_session.get_messages() == []
+    finally:
+        store.close()
+
+
 def test_agent_mention_creates_agent_run_without_general_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = AgentRuntimeService(
@@ -669,6 +687,28 @@ def test_retry_failed_message_reuses_saved_image_attachments(tmp_path, monkeypat
         assert retried_user.content == "再看一下这张图"
         assert retried_user.attachments[0]["path"] == original_path
         assert retried_user.status == MessageStatus.PENDING
+    finally:
+        store.close()
+
+
+def test_retry_failed_message_rejects_when_hermes_unavailable(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        sent = api.send_message("失败任务")
+        runtime.state.update_task_status(sent["task_id"], TaskStatus.RUNNING)
+        runtime.state.update_task_status(sent["task_id"], TaskStatus.FAILED, error="boom")
+        failed_messages = api.get_messages()["messages"]
+        runtime.task_runner = SimpleNamespace(
+            executor=SimpleNamespace(
+                name="HermesUnavailableExecutor",
+                reason="Hermes Agent 当前不可用",
+            )
+        )
+
+        retry = api.retry_message(failed_messages[1]["id"])
+
+        assert retry == {"ok": False, "error": "Hermes Agent 当前不可用"}
+        assert len(runtime.state.list_tasks()) == 1
     finally:
         store.close()
 

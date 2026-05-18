@@ -1,8 +1,9 @@
 """任务执行策略
 
-定义任务执行的抽象接口（ExecutionStrategy），以及两种实现：
+定义任务执行的抽象接口（ExecutionStrategy），以及主要实现：
   - SimulatedExecutor:  MVP 阶段模拟执行（sleep + 占位结果），始终可用
   - HermesExecutor:     Hermes Agent subprocess CLI 真实调用
+  - HermesUnavailableExecutor: Hermes 不可用时明确失败，不生成模拟回复
 
 工厂函数 select_executor(runtime) 根据运行时状态自动选择执行器。
 Hermes 就绪时工厂自动选用 HermesExecutor，无需修改其他代码。
@@ -40,6 +41,11 @@ if TYPE_CHECKING:
     from apps.core.runtime import HermesRuntime
 
 logger = logging.getLogger(__name__)
+
+HERMES_UNAVAILABLE_MESSAGE = (
+    "Hermes Agent 当前不可用，无法处理聊天任务。请在设置中完成 Hermes 安装、"
+    "配置或重新检测后再试。"
+)
 
 
 # ── 自定义异常 ────────────────────────────────────────────────────────────────
@@ -1370,6 +1376,21 @@ class SimulatedExecutor(ExecutionStrategy):
         return f"[模拟结果] {task.description[:80]}"
 
 
+class HermesUnavailableExecutor(ExecutionStrategy):
+    """Hermes 不可用时的用户任务执行器。
+
+    这个执行器只负责让任务进入失败态，避免正常用户链路把模拟回复
+    当成真实 Hermes 结果写回聊天或任务查询。
+    """
+
+    def __init__(self, reason: str | None = None) -> None:
+        self.reason = str(reason or HERMES_UNAVAILABLE_MESSAGE)
+
+    async def run(self, task: TaskInfo) -> str:
+        logger.warning("[HermesUnavailable] 拒绝执行任务: %s | %s", task.task_id, self.reason)
+        raise HermesCallError(self.reason)
+
+
 # ── Hermes 执行器 ─────────────────────────────────────────────────────────────
 
 class HermesExecutor(ExecutionStrategy):
@@ -1608,7 +1629,7 @@ def select_executor(runtime: "HermesRuntime | None" = None) -> ExecutionStrategy
     """根据运行时状态选择最优执行器
 
     1. runtime 已就绪 且 probe_hermes_available() → HermesExecutor（附带 ChatSession）
-    2. 其他 → SimulatedExecutor（安全回退）
+    2. 其他 → HermesUnavailableExecutor（用户可见失败，不模拟成功）
     """
     if runtime is not None and runtime.is_hermes_ready():
         if probe_hermes_available():
@@ -1620,9 +1641,44 @@ def select_executor(runtime: "HermesRuntime | None" = None) -> ExecutionStrategy
                 profile_context_getter=lambda: runtime.config.assistant.prompt_profile_context(),
             )
         logger.info(
-            "select_executor: Hermes 报告就绪但命令不可用，回退 SimulatedExecutor"
+            "select_executor: Hermes 报告就绪但命令不可用，使用 HermesUnavailableExecutor"
+        )
+        return HermesUnavailableExecutor(
+            "Hermes Agent 报告就绪，但 hermes 命令当前不可用。请重新检测或重启应用后再试。"
         )
     else:
-        logger.info("select_executor: Hermes 未就绪，使用 SimulatedExecutor")
+        logger.info("select_executor: Hermes 未就绪，使用 HermesUnavailableExecutor")
 
-    return SimulatedExecutor()
+    return HermesUnavailableExecutor(describe_hermes_unavailable(runtime))
+
+
+def describe_hermes_unavailable(runtime: "HermesRuntime | None" = None) -> str:
+    """返回适合展示给用户的 Hermes 不可用原因。"""
+    if runtime is None:
+        return HERMES_UNAVAILABLE_MESSAGE
+
+    install_info = getattr(runtime, "hermes_install_info", None)
+    error_message = str(getattr(install_info, "error_message", "") or "").strip()
+    if error_message:
+        return f"Hermes Agent 当前不可用：{error_message}。请在设置中完成配置或重新检测后再试。"
+
+    status = str(getattr(install_info, "status", "") or "").strip()
+    if status:
+        return f"Hermes Agent 当前不可用（状态：{status}）。请在设置中完成配置或重新检测后再试。"
+
+    return HERMES_UNAVAILABLE_MESSAGE
+
+
+def user_task_unavailable_reason(runtime: Any) -> str | None:
+    """用户任务入口是否应拒绝创建任务；可用时返回 None。"""
+    if not hasattr(runtime, "task_runner"):
+        return None
+    runner = getattr(runtime, "task_runner", None)
+    executor = getattr(runner, "executor", None)
+    if getattr(executor, "name", "") == "HermesExecutor":
+        return None
+
+    reason = str(getattr(executor, "reason", "") or "").strip()
+    if reason:
+        return reason
+    return describe_hermes_unavailable(runtime)

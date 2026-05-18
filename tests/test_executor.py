@@ -12,6 +12,7 @@ from apps.core.executor import (
     HermesCallError,
     HermesExecutor,
     HermesInvokeResult,
+    HermesUnavailableExecutor,
     SimulatedExecutor,
     _HERMES_CMD,
     _HERMES_FLAGS,
@@ -29,6 +30,9 @@ from apps.core.executor import (
     _should_refresh_generated_title,
     resolve_hermes_stream_bridge_script,
     format_persona_description,
+    describe_hermes_unavailable,
+    select_executor,
+    user_task_unavailable_reason,
 )
 import apps.core.executor as executor_mod
 import apps.core.hermes_stream_bridge as bridge_mod
@@ -144,6 +148,58 @@ class TestSimulatedExecutor:
         finally:
             mod._SIM_RUN_DELAY = original_run
             mod._SIM_COMPLETE_DELAY = original_complete
+
+
+class TestHermesUnavailableExecutor:
+    @pytest.mark.asyncio
+    async def test_run_raises_user_visible_error(self):
+        executor = HermesUnavailableExecutor("Hermes Agent 当前不可用")
+
+        with pytest.raises(HermesCallError, match="Hermes Agent 当前不可用"):
+            await executor.run(_make_task("测试任务"))
+
+    def test_user_task_unavailable_reason_allows_hermes_executor(self):
+        runtime = types.SimpleNamespace(
+            task_runner=types.SimpleNamespace(executor=types.SimpleNamespace(name="HermesExecutor"))
+        )
+
+        assert user_task_unavailable_reason(runtime) is None
+
+    def test_user_task_unavailable_reason_returns_executor_reason(self):
+        runtime = types.SimpleNamespace(
+            task_runner=types.SimpleNamespace(
+                executor=types.SimpleNamespace(
+                    name="HermesUnavailableExecutor",
+                    reason="Hermes Agent 当前不可用",
+                )
+            )
+        )
+
+        assert user_task_unavailable_reason(runtime) == "Hermes Agent 当前不可用"
+
+    def test_describe_hermes_unavailable_uses_install_error(self):
+        runtime = types.SimpleNamespace(
+            hermes_install_info=types.SimpleNamespace(
+                error_message="缺少模型配置",
+                status="not_ready",
+            )
+        )
+
+        assert "缺少模型配置" in describe_hermes_unavailable(runtime)
+
+    def test_select_executor_returns_unavailable_when_runtime_not_ready(self):
+        runtime = types.SimpleNamespace(
+            is_hermes_ready=lambda: False,
+            hermes_install_info=types.SimpleNamespace(
+                error_message="missing hermes",
+                status="not_installed",
+            ),
+        )
+
+        executor = select_executor(runtime)
+
+        assert isinstance(executor, HermesUnavailableExecutor)
+        assert "missing hermes" in executor.reason
 
 
 class TestHermesExecutor:
