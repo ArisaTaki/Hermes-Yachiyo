@@ -9,7 +9,7 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - Agent Studio：用 GUI 创建、编辑、测试和运行 Agent。
 - Skill Library：导入本地 Skill，并挂载到 Agent。
 - Workflow Studio：用可视化节点把多个 Agent 编排成线性可运行流程。
-- Model Profiles：统一保存、测试和复用文本 / Vision / TTS 模型配置。
+- Model Profiles：按服务商源保存、测试和复用文本 / Vision / TTS 配置；不再生成“本地主模型”快照。
 - Chat 入口：普通消息继续走 Hermes Chat；`@Name 需求` 或 Composer 选择器会启动指定 Agent / Workflow。
 
 ## 已实现批次
@@ -69,10 +69,16 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 
 - 新增 `apps/shell/model_profiles.py`。
 - 落地 `~/.hermes/yachiyo/model-profiles.db`。
-- 模型配置页改为 Model Profiles 管理：
-  - 文本模型。
-  - 图片识别模型。
-  - TTS Profile。
+- 模型配置页改为服务商源 + Profile 管理：
+  - 对话模型来自 OpenAI-compatible 服务商源。
+  - 图片识别模型来自支持 `image` 输入的多模态模型。
+  - TTS Profile 来自独立语音来源，不复用 OpenRouter 模型目录。
+- 模型列表不再拼接 Hermes 当前主模型；主模型只是运行链路配置，不作为本地 provider/source 展示。
+- 服务商预设包含 Xiaomi MiMo，并允许 Agent Runtime 引用这类 OpenAI-compatible provider source Profile。
+- 远端模型资料优先使用 `/models` 返回的 OpenRouter-style metadata：
+  - `input_modalities` 包含 `image` 的模型才适合作为 Vision Profile。
+  - 文本模型仍按服务商源登记和测试。
+  - TTS 使用 GPT-SoVITS / HTTP TTS / Command TTS 等语音专用来源。
 - Profile API Key 仅保存在后端；前端只显示 `api_key_configured`。
 - 空 API Key 更新不会覆盖旧密钥。
 - Agent 可选择 `follow_main` 或引用已保存的 `model_profile_id`。
@@ -84,6 +90,11 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - `GET/PATCH/DELETE /ui/model-profiles/{profile_id}`
 - `POST /ui/model-profiles/{profile_id}/test`
 - `PATCH /ui/model-profiles/defaults`
+- `GET/POST /ui/model-sources`
+- `GET/PATCH/DELETE /ui/model-sources/{source_id}`
+- `POST /ui/model-sources/{source_id}/test`
+- `POST /ui/model-sources/{source_id}/models/fetch`
+- `GET/POST /ui/model-sources/{source_id}/models`
 - `GET/POST /ui/agents`
 - `GET/PATCH/DELETE /ui/agents/{agent_id}`
 - `POST /ui/agents/{agent_id}/test-model`
@@ -123,7 +134,7 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - `follow_main` Agent 首版会整理运行上下文并记录产物；后续再接入更完整的 Hermes orchestrator streaming。
 - `profile` Agent 首版支持 OpenAI-compatible Chat Completions 与简单受控工具循环。
 - 旧 `custom_api` Agent 作为兼容路径保留，新增 Agent 默认使用 `follow_main` 或 Model Profile。
-- TTS Profile 首版做统一保存与复用入口，具体语音服务仍由 TTS 专用链路执行。
+- TTS Profile 首版做统一保存与复用入口，具体语音合成、服务检测和连接测试仍由 TTS 专用链路执行。
 - Skill v1 只支持本地目录/ZIP，不做远程 marketplace，也不自动扫描用户全局 skills。
 - 第三方 CLI/daemon 由用户自行管理，不再由 Yachiyo 安装、登录、升级或托管。
 
@@ -134,13 +145,18 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - 后端：
   - Agent CRUD。
   - Model Profile CRUD、密钥脱敏、空 key 不覆盖、默认 Profile 校验。
+  - Model Source CRUD、远端模型列表拉取、OpenRouter metadata 保留。
   - Agent 引用 Model Profile 后可创建 run。
+  - Agent 引用 Xiaomi MiMo 等 OpenAI-compatible provider source Profile 后可创建 run。
   - Skill 导入、ZIP 路径穿越拒绝。
   - Workflow 线性校验。
   - Tool Broker 越界与审批保护。
   - Chat `@Agent` 创建 run 且不创建普通 Hermes task。
 - 前端：
   - Agent Studio 创建/编辑 Agent，挂载 Skill。
+  - Model Providers 不展示本地主模型快照。
+  - Vision 模型列表只登记支持图片输入的多模态模型。
+  - TTS tab 使用独立语音来源，不复用对话模型提供商界面。
   - Skill Library 导入、预览、删除 Skill。
   - Workflow Studio 拖拽、连线、保存、运行。
   - Chat 选择 Agent / Workflow 或输入 `@Name` 能创建 run。
