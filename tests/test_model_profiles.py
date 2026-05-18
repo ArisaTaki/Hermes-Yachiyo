@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from apps.shell.agent_runtime import AgentRuntimeService
@@ -111,6 +113,117 @@ def test_model_profile_test_updates_status(monkeypatch, tmp_path):
         assert result["ok"] is True
         assert tested["status"] == "available"
         assert tested["last_tested_at"]
+    finally:
+        service.close()
+
+
+def test_fetch_source_models_reads_openai_compatible_list(monkeypatch, tmp_path):
+    service = make_profile_service(tmp_path)
+    source = service.create_source(
+        {
+            "name": "DeepSeek",
+            "provider": "deepseek",
+            "base_url": "https://api.deepseek.com",
+            "api_key": "sk-source-secret",
+        }
+    )
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "data": [
+                        {"id": "deepseek-chat", "owned_by": "deepseek"},
+                        {"id": "deepseek-chat", "owned_by": "deepseek"},
+                        {"id": "deepseek-reasoner"},
+                    ]
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        assert timeout == 20
+        assert request.full_url == "https://api.deepseek.com/models"
+        assert request.get_header("Authorization") == "Bearer sk-source-secret"
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+    try:
+        result = service.fetch_source_models(source["source_id"])
+
+        assert result["ok"] is True
+        assert result["count"] == 2
+        assert result["models"] == [
+            {"id": "deepseek-chat", "owned_by": "deepseek", "provider_key": "deepseek"},
+            {"id": "deepseek-reasoner", "owned_by": "", "provider_key": "deepseek"},
+        ]
+        assert "api_key" not in result["source"]
+    finally:
+        service.close()
+
+
+def test_fetch_source_models_preserves_openrouter_metadata(monkeypatch, tmp_path):
+    service = make_profile_service(tmp_path)
+    source = service.create_source(
+        {
+            "name": "OpenRouter",
+            "provider": "openrouter",
+            "base_url": "https://openrouter.ai/api/v1",
+        }
+    )
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "data": [
+                        {
+                            "id": "qwen/qwen3-coder",
+                            "canonical_slug": "qwen/qwen3-coder",
+                            "name": "Qwen: Qwen3 Coder",
+                            "context_length": 262144,
+                            "architecture": {
+                                "modality": "text->text",
+                                "input_modalities": ["text"],
+                                "output_modalities": ["text"],
+                            },
+                            "pricing": {"prompt": "0", "completion": "0"},
+                            "top_provider": {"max_completion_tokens": 65536, "is_moderated": False},
+                            "supported_parameters": ["tools", "structured_outputs"],
+                        }
+                    ]
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        assert timeout == 20
+        assert request.full_url == "https://openrouter.ai/api/v1/models"
+        assert request.get_header("Authorization") is None
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+    try:
+        result = service.fetch_source_models(source["source_id"])
+        model = result["models"][0]
+
+        assert model["provider_key"] == "qwen"
+        assert model["name"] == "Qwen: Qwen3 Coder"
+        assert model["context_length"] == 262144
+        assert model["max_completion_tokens"] == 65536
+        assert model["input_modalities"] == ["text"]
+        assert model["supported_parameters"] == ["tools", "structured_outputs"]
+        assert model["is_free"] is True
     finally:
         service.close()
 

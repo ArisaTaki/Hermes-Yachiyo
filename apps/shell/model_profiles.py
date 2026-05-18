@@ -62,6 +62,86 @@ def _normalize_capability(value: str) -> str:
     return capability
 
 
+_OPENAI_COMPATIBLE_PROVIDER_IDS = {
+    "openai",
+    "openai_compatible",
+    "google_gemini",
+    "gemini",
+    "qwen_dashscope",
+    "dashscope",
+    "minimax",
+    "moonshot",
+    "kimi",
+    "kimi_coding_plan",
+    "openrouter",
+    "xai",
+    "deepseek",
+    "zhipu",
+    "volcengine_doubao",
+    "doubao",
+    "tencent_hunyuan",
+    "hunyuan",
+    "baidu_qianfan",
+    "qianfan",
+    "baichuan",
+    "stepfun",
+    "siliconflow",
+    "modelscope",
+    "sensenova",
+    "groq",
+    "together",
+    "fireworks",
+    "perplexity",
+    "mistral",
+    "nvidia",
+    "302ai",
+    "ollama",
+    "lm_studio",
+    "aihubmix",
+    "ppio",
+    "tokenpony",
+    "compshare",
+    "fastgpt",
+}
+
+
+def _supports_openai_compatible_api(provider: str) -> bool:
+    provider_id = (provider or "openai_compatible").strip().lower()
+    return not provider_id or provider_id in _OPENAI_COMPATIBLE_PROVIDER_IDS
+
+
+def _remote_model_provider_key(model_id: str, owned_by: str, fallback_provider: str) -> str:
+    if "/" in model_id:
+        return model_id.split("/", 1)[0].strip().lstrip("~")
+    if owned_by:
+        return owned_by.strip().lstrip("~")
+    return str(fallback_provider or "openai_compatible").strip().lstrip("~")
+
+
+def _as_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if isinstance(item, str) and item.strip()]
+
+
+def _as_int(value: Any) -> int | None:
+    try:
+        if value is None or value == "":
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _pricing_is_free(pricing: dict[str, Any]) -> bool:
+    if not pricing:
+        return False
+    try:
+        return float(str(pricing.get("prompt", "0") or "0")) == 0 and float(str(pricing.get("completion", "0") or "0")) == 0
+    except ValueError:
+        return False
+
+
 class ModelProfileService:
     """Persistent model profile registry."""
 
@@ -301,7 +381,7 @@ class ModelProfileService:
                 (source_id,),
             ).fetchone()
             model = str(first["model"]) if first is not None else ""
-        if provider != "openai_compatible":
+        if not _supports_openai_compatible_api(provider):
             return self._record_source_test_result(
                 source_id,
                 ok=False,
@@ -362,6 +442,89 @@ class ModelProfileService:
         if extra:
             payload.update(extra)
         return payload
+
+    def fetch_source_models(self, source_id: str) -> dict[str, Any]:
+        source = self.get_source_private(source_id)
+        provider = str(source.get("provider") or "openai_compatible")
+        if not _supports_openai_compatible_api(provider):
+            raise ModelProfileError("当前提供商源暂不支持自动获取模型列表。")
+        base_url = str(source.get("base_url") or "").strip().rstrip("/")
+        if not base_url:
+            raise ModelProfileError("提供商源 Base URL 为空，无法获取模型列表。")
+        models_url = f"{base_url}/models"
+        headers = {"Accept": "application/json"}
+        api_key = str(source.get("api_key") or "").strip()
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        request = urlrequest.Request(models_url, method="GET", headers=headers)
+        try:
+            with urlrequest.urlopen(request, timeout=20) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (urlerror.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            raise ModelProfileError(f"获取模型列表失败：{exc}") from exc
+
+        if isinstance(payload, dict):
+            raw_models = payload.get("data")
+            if raw_models is None:
+                raw_models = payload.get("models")
+        else:
+            raw_models = payload
+        if not isinstance(raw_models, list):
+            raise ModelProfileError("模型列表响应格式无法识别。")
+
+        models: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in raw_models:
+            if isinstance(item, str):
+                model_id = item.strip()
+                owned_by = ""
+                display_name = ""
+                model_info: dict[str, Any] = {}
+            elif isinstance(item, dict):
+                display_name = str(item.get("name") or "").strip()
+                model_id = str(item.get("id") or item.get("model") or display_name or "").strip()
+                owned_by = str(item.get("owned_by") or item.get("owner") or "").strip()
+                architecture = item.get("architecture") if isinstance(item.get("architecture"), dict) else {}
+                top_provider = item.get("top_provider") if isinstance(item.get("top_provider"), dict) else {}
+                pricing = item.get("pricing") if isinstance(item.get("pricing"), dict) else {}
+                context_length = _as_int(item.get("context_length")) or _as_int(top_provider.get("context_length"))
+                max_completion_tokens = _as_int(top_provider.get("max_completion_tokens"))
+                model_info = {
+                    "canonical_slug": str(item.get("canonical_slug") or "").strip(),
+                    "context_length": context_length,
+                    "default_parameters": item.get("default_parameters") if isinstance(item.get("default_parameters"), dict) else {},
+                    "description": str(item.get("description") or "").strip(),
+                    "input_modalities": _as_string_list(architecture.get("input_modalities")),
+                    "is_free": _pricing_is_free(pricing) if pricing else None,
+                    "is_moderated": bool(top_provider.get("is_moderated")) if "is_moderated" in top_provider else None,
+                    "max_completion_tokens": max_completion_tokens,
+                    "modality": str(architecture.get("modality") or "").strip(),
+                    "name": display_name,
+                    "output_modalities": _as_string_list(architecture.get("output_modalities")),
+                    "pricing": pricing,
+                    "supported_parameters": _as_string_list(item.get("supported_parameters")),
+                }
+            else:
+                continue
+            if not model_id or model_id in seen:
+                continue
+            seen.add(model_id)
+            model = {
+                "id": model_id,
+                "owned_by": owned_by,
+                "provider_key": _remote_model_provider_key(model_id, owned_by, provider),
+            }
+            for key, value in model_info.items():
+                if value not in ("", None, [], {}):
+                    model[key] = value
+            models.append(model)
+
+        return {
+            "ok": True,
+            "models": models,
+            "count": len(models),
+            "source": self.get_source(source_id),
+        }
 
     def get_defaults(self) -> dict[str, str]:
         rows = self._conn.execute("SELECT capability, profile_id FROM model_profile_defaults").fetchall()
@@ -489,7 +652,7 @@ class ModelProfileService:
         profile = self.get_profile_private(profile_id)
         capability = str(profile.get("capability") or "chat")
         provider = str(profile.get("provider") or "openai_compatible")
-        if provider != "openai_compatible":
+        if not _supports_openai_compatible_api(provider):
             return self._record_test_result(
                 profile_id,
                 ok=False,

@@ -112,6 +112,16 @@ async def test_model_source(source_id: str, request: ModelSourceTestRequest | No
         raise HTTPException(status_code=404, detail="模型提供商源不存在") from exc
 
 
+@router.post("/model-sources/{source_id}/models/fetch")
+async def fetch_model_source_models(source_id: str) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(get_model_profile_service().fetch_source_models, source_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="模型提供商源不存在") from exc
+    except ModelProfileError as exc:
+        raise _bad_request(exc) from exc
+
+
 @router.get("/model-sources/{source_id}/models")
 async def list_model_source_profiles(source_id: str) -> dict[str, Any]:
     try:
