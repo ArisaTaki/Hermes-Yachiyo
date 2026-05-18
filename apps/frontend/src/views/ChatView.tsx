@@ -1601,8 +1601,8 @@ function messageMetaText(role: string, status?: string, createdAt?: string) {
 }
 
 function executorLabel(executor: ExecutorPayload | null) {
-  if (!executor?.available) return '—';
-  return executor.executor === 'HermesExecutor' ? 'Hermes' : '模拟';
+  if (!executor?.available) return '未就绪';
+  return executor.executor === 'HermesExecutor' ? 'Hermes' : '不可用';
 }
 
 function canAttachImages(executor: ExecutorPayload | null) {

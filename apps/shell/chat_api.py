@@ -32,6 +32,7 @@ from apps.core.chat_session import (
     MessageStatus,
 )
 from apps.core.activity_store import get_activity_store
+from apps.core.executor import user_task_unavailable_reason
 from apps.core.special_sessions import is_proactive_chat_session
 from apps.locald.screenshot import capture_screenshot_to_file
 from apps.shell.hermes_capabilities import get_current_hermes_image_input_capability
@@ -266,7 +267,11 @@ class ChatAPI:
     def _state(self):
         return self._runtime.state
 
-    def send_message(self, text: str, attachments: list[dict] | None = None) -> Dict[str, Any]:
+    def send_message(
+        self,
+        text: str,
+        attachments: list[dict] | None = None,
+    ) -> Dict[str, Any]:
         """发送用户消息并创建对应任务
 
         流程：
@@ -288,6 +293,10 @@ class ChatAPI:
             return {"ok": False, "error": "消息内容不能为空"}
 
         try:
+            unavailable_reason = user_task_unavailable_reason(self._runtime)
+            if unavailable_reason:
+                return {"ok": False, "error": unavailable_reason}
+
             if raw_attachments and self._should_enforce_image_capability():
                 image_input = get_current_hermes_image_input_capability()
                 if image_input.get("can_attach_images") is False:
@@ -391,6 +400,10 @@ class ChatAPI:
                 text = "请识别并分析这张图片。"
             if not text:
                 return {"ok": False, "error": "原消息内容为空，无法重试"}
+
+            unavailable_reason = user_task_unavailable_reason(self._runtime)
+            if unavailable_reason:
+                return {"ok": False, "error": unavailable_reason}
 
             new_message_id = self._session.add_user_message(text, saved_attachments)
             task = self._state.create_task(
@@ -889,10 +902,24 @@ class ChatAPI:
 
     def get_executor_info(self) -> Dict[str, Any]:
         image_input = get_current_hermes_image_input_capability()
-        runner = self._runtime.task_runner
+        runner = getattr(self._runtime, "task_runner", None)
         if runner is None:
-            return {"executor": "none", "available": False, "image_input": image_input}
-        return {"executor": runner.executor.name, "available": True, "image_input": image_input}
+            return {
+                "executor": "none",
+                "available": False,
+                "image_input": image_input,
+                "reason": user_task_unavailable_reason(self._runtime),
+            }
+        executor_name = runner.executor.name
+        available = executor_name == "HermesExecutor"
+        payload = {
+            "executor": executor_name,
+            "available": available,
+            "image_input": image_input,
+        }
+        if not available:
+            payload["reason"] = user_task_unavailable_reason(self._runtime)
+        return payload
 
     def list_sessions(self, limit: int = 20, query: str = "") -> Dict[str, Any]:
         """列出最近会话，包含当前空白会话。"""
