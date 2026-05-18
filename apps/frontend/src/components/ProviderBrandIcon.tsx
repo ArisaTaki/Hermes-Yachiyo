@@ -62,6 +62,10 @@ type ProviderLogo =
       alt: string;
       kind: 'image';
       src: string;
+    }
+  | {
+      kind: 'text';
+      text: string;
     };
 
 const providerBrandLogos: Record<string, ProviderLogo> = {
@@ -83,6 +87,7 @@ const providerBrandLogos: Record<string, ProviderLogo> = {
   bytedance: { Icon: ByteDanceIcon, kind: 'icon' },
   bytedance_seed: { Icon: ByteDanceIcon, kind: 'icon' },
   cohere: { Icon: CohereIcon, kind: 'icon' },
+  command_tts: { kind: 'text', text: 'CMD' },
   compshare: { alt: 'Compshare', kind: 'image', src: '/provider-icons/compshare.ico' },
   dashscope: { Icon: BailianIcon, kind: 'icon' },
   deepseek: { Icon: DeepSeekIcon, kind: 'icon' },
@@ -92,8 +97,10 @@ const providerBrandLogos: Record<string, ProviderLogo> = {
   gemini: { Icon: GeminiIcon, kind: 'icon' },
   google: { Icon: GoogleIcon, kind: 'icon' },
   google_gemini: { Icon: GeminiIcon, kind: 'icon' },
+  gpt_sovits: { kind: 'text', text: 'GSV' },
   groq: { Icon: GroqIcon, kind: 'icon' },
   hunyuan: { Icon: HunyuanIcon, kind: 'icon' },
+  http_tts: { kind: 'text', text: 'HTTP' },
   ibm: { Icon: IBMIcon, kind: 'icon' },
   ibm_granite: { Icon: IBMIcon, kind: 'icon' },
   kimi: { Icon: KimiIcon, kind: 'icon' },
@@ -161,6 +168,10 @@ export function ProviderBrandIcon({
 
   if (logo.kind === 'image') {
     return <img alt="" aria-hidden="true" className={`${className} model-provider-logo-img`} src={logo.src} />;
+  }
+
+  if (logo.kind === 'text') {
+    return <span aria-hidden="true" className={`${className} model-provider-logo-text`}>{logo.text}</span>;
   }
 
   const Icon = logo.Icon;

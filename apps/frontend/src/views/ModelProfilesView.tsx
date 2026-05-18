@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import { ProviderBrandIcon } from '../components/ProviderBrandIcon';
 import { UiIcon } from '../components/UiIcon';
-import { apiGet } from '../lib/bridge';
 import {
   createModelProfile,
   createModelSource,
@@ -21,7 +20,6 @@ import {
   type ModelSource,
   type RemoteModelInfo,
 } from '../lib/modelProfiles';
-import { navigateTo } from '../lib/view';
 
 type SourceDraft = {
   source_id?: string;
@@ -41,52 +39,10 @@ type ModelDraft = {
 };
 
 type ModelSourceView = ModelSource & {
-  readonly?: boolean;
-  source_kind?: 'hermes_main';
-  api_key_name?: string;
   provider_label?: string;
 };
 
-type ModelProfileView = ModelProfile & {
-  readonly?: boolean;
-  source_kind?: 'hermes_main';
-};
-
-type HermesProviderOption = {
-  id: string;
-  label?: string;
-  base_url?: string;
-  default_model?: string;
-  default_vision_model?: string;
-  api_key_name?: string;
-  api_key_configured?: boolean;
-};
-
-type HermesConfigSummary = {
-  ok?: boolean;
-  model?: {
-    provider?: string;
-    raw_provider?: string;
-    default?: string;
-    base_url?: string;
-  };
-  provider_options?: HermesProviderOption[];
-  api_key?: {
-    name?: string;
-    configured?: boolean;
-    display?: string;
-  };
-  vision?: {
-    provider?: string;
-    model?: string;
-    base_url?: string;
-    api_key_name?: string;
-    api_key_configured?: boolean;
-    effective_provider?: string;
-    effective_model?: string;
-    effective_base_url?: string;
-  };
-};
+type ModelProfileView = ModelProfile;
 
 type ProviderPreset = {
   id: string;
@@ -103,10 +59,6 @@ type ModelCatalogGroup = {
   iconProvider?: string;
   models: RemoteModelInfo[];
 };
-
-const HERMES_MAIN_SOURCE_ID = 'hermes-main-source';
-const HERMES_MAIN_CHAT_PROFILE_ID = 'hermes-main-chat-profile';
-const HERMES_MAIN_VISION_PROFILE_ID = 'hermes-main-vision-profile';
 
 const providerPresets: ProviderPreset[] = [
   {
@@ -156,6 +108,14 @@ const providerPresets: ProviderPreset[] = [
     mark: 'MM',
     note: 'MiniMax 国际站 OpenAI-compatible API。',
     modelHints: ['MiniMax-M2.7', 'MiniMax-Text-01'],
+  },
+  {
+    id: 'xiaomi_mimo',
+    label: 'Xiaomi MiMo',
+    baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
+    mark: 'Mi',
+    note: '小米 MiMo OpenAI-compatible 端点，可登记 MiMo 文本与多模态模型。',
+    modelHints: ['mimo-v2.5-pro'],
   },
   {
     id: 'zhipu',
@@ -375,6 +335,35 @@ const providerPresets: ProviderPreset[] = [
   },
 ];
 
+const ttsProviderPresets: ProviderPreset[] = [
+  {
+    id: 'gpt_sovits',
+    label: 'GPT-SoVITS',
+    baseUrl: 'http://127.0.0.1:9880',
+    mark: 'GSV',
+    note: '本地 GPT-SoVITS 服务，语音、参考音频和权重仍在 GPT-SoVITS 设置页管理。',
+    modelHints: ['default-voice'],
+  },
+  {
+    id: 'http_tts',
+    label: 'HTTP TTS Endpoint',
+    baseUrl: 'http://127.0.0.1:9880/tts',
+    mark: 'HTTP',
+    note: '通用 HTTP 语音合成服务，用于登记一个可复用的语音端点或 voice id。',
+    modelHints: ['default'],
+  },
+  {
+    id: 'command_tts',
+    label: 'Command TTS',
+    baseUrl: '',
+    mark: 'CMD',
+    note: '本地命令式 TTS 适配入口；这里登记 profile 名称，具体命令在语音设置链路执行。',
+    modelHints: ['local-command'],
+  },
+];
+
+const allProviderPresets = [...providerPresets, ...ttsProviderPresets];
+
 const capabilityLabels: Record<ModelCapability, string> = {
   chat: '对话',
   vision: '图片转述',
@@ -438,14 +427,42 @@ function statusClass(status?: string): string {
   return '';
 }
 
+function providerPresetsForCapability(capability: ModelCapability): ProviderPreset[] {
+  return capability === 'tts' ? ttsProviderPresets : providerPresets;
+}
+
 function providerPreset(provider: string): ProviderPreset {
-  return providerPresets.find((item) => item.id === provider) || {
+  return allProviderPresets.find((item) => item.id === provider) || {
     id: provider || 'openai_compatible',
     label: provider || 'OpenAI Compatible',
     baseUrl: '',
     mark: 'AI',
     note: '自定义模型提供商源。',
   };
+}
+
+function defaultSourceDraft(capability: ModelCapability): SourceDraft {
+  const preset = providerPresetsForCapability(capability)[0] || providerPresets[0];
+  return {
+    name: '',
+    provider: preset.id,
+    base_url: preset.baseUrl,
+    api_key: '',
+    enabled: true,
+  };
+}
+
+function sourceMatchesCapability(source: ModelSourceView, capability: ModelCapability): boolean {
+  const providerIds = new Set(providerPresetsForCapability(capability).map((preset) => preset.id));
+  if (capability === 'tts') {
+    return providerIds.has(source.provider) || Boolean(source.models?.some((model) => model.capability === 'tts'));
+  }
+  if (providerIds.has(source.provider)) return true;
+  return Boolean(source.models?.some((model) => model.capability === capability));
+}
+
+function sourcesForCapability(sources: ModelSourceView[], capability: ModelCapability): ModelSourceView[] {
+  return sources.filter((source) => sourceMatchesCapability(source, capability));
 }
 
 function providerIconClass(provider: string): string {
@@ -496,8 +513,8 @@ function formatContextLength(contextLength?: number): string {
 
 function catalogModelBadges(model: RemoteModelInfo): string[] {
   const badges: string[] = [];
-  const inputModalities = new Set(model.input_modalities || []);
-  const supportedParameters = new Set(model.supported_parameters || []);
+  const inputModalities = new Set((model.input_modalities || []).map((item) => item.toLowerCase()));
+  const supportedParameters = new Set((model.supported_parameters || []).map((item) => item.toLowerCase()));
   const context = formatContextLength(model.context_length);
   if (model.is_free || model.id.endsWith(':free')) badges.push('免费');
   if (inputModalities.has('image')) badges.push('视觉');
@@ -508,6 +525,30 @@ function catalogModelBadges(model: RemoteModelInfo): string[] {
   if (supportedParameters.has('structured_outputs') || supportedParameters.has('response_format')) badges.push('结构化');
   if (context) badges.push(context);
   return badges.slice(0, 5);
+}
+
+function modelSupportsCapability(model: RemoteModelInfo, capability: ModelCapability): boolean {
+  const input = (model.input_modalities || []).map((item) => item.toLowerCase());
+  const output = (model.output_modalities || []).map((item) => item.toLowerCase());
+  const modality = (model.modality || '').toLowerCase();
+  if (capability === 'vision') {
+    return input.includes('image') || /\bimage\b|vision|multimodal/.test(modality);
+  }
+  if (capability === 'tts') {
+    return output.includes('audio') || /\baudio\b|speech|tts/.test(modality);
+  }
+  return !input.length || input.includes('text') || modality.includes('text');
+}
+
+function capabilityCatalogModels(models: RemoteModelInfo[], capability: ModelCapability): RemoteModelInfo[] {
+  if (capability === 'tts') return [];
+  return models.filter((model) => modelSupportsCapability(model, capability));
+}
+
+function capabilityEmptyModelHint(capability: ModelCapability): string {
+  if (capability === 'vision') return '请先获取远端模型列表，或选择标记为“视觉”的多模态模型。';
+  if (capability === 'tts') return '选择 TTS 提供商后，在这里登记 voice / profile id；实际连接测试走语音设置链路。';
+  return '在上方输入模型 ID 后添加。默认模型会被 Agent Studio 和 Workflow Studio 引用。';
 }
 
 function sourceToDraft(source: ModelSourceView): SourceDraft {
@@ -531,135 +572,24 @@ function modelToDraft(model: ModelProfileView): ModelDraft {
   };
 }
 
-function sourceIsHermesMain(sourceId?: string): boolean {
-  return sourceId === HERMES_MAIN_SOURCE_ID;
-}
-
-function providerOption(config: HermesConfigSummary | null, provider: string): HermesProviderOption | undefined {
-  return config?.provider_options?.find((option) => option.id === provider);
-}
-
-function buildHermesMainSource(config: HermesConfigSummary | null): { source: ModelSourceView; profiles: ModelProfileView[] } | null {
-  if (!config || config.ok === false) return null;
-  const textModel = (config.model?.default || '').trim();
-  const provider = (config.model?.provider || config.model?.raw_provider || 'openai_compatible').trim();
-  const option = providerOption(config, provider);
-  const preset = providerPreset(provider);
-  const providerLabel = option?.label || preset.label || provider || 'OpenAI Compatible';
-  const baseUrl = (config.model?.base_url || option?.base_url || preset.baseUrl || '').trim();
-  const apiKeyName = config.api_key?.name || option?.api_key_name || 'API Key';
-  const apiKeyConfigured = Boolean(config.api_key?.configured || option?.api_key_configured);
-  if (!provider && !textModel && !apiKeyConfigured) return null;
-
-  const now = '';
-  const status = apiKeyConfigured && textModel ? 'available' : 'untested';
-  const source: ModelSourceView = {
-    source_id: HERMES_MAIN_SOURCE_ID,
-    name: '本地主模型',
-    provider: provider || 'openai_compatible',
-    provider_label: providerLabel,
-    base_url: baseUrl,
-    api_key_configured: apiKeyConfigured,
-    api_key_name: apiKeyName,
-    enabled: true,
-    readonly: true,
-    source_kind: 'hermes_main',
-    status,
-    last_tested_at: '',
-    last_error: '',
-    created_at: now,
-    updated_at: now,
-    options: { source: 'hermes_config', api_key_name: apiKeyName, provider_label: providerLabel },
-  };
-  const profiles: ModelProfileView[] = [];
-  if (textModel) {
-    profiles.push({
-      profile_id: HERMES_MAIN_CHAT_PROFILE_ID,
-      source_id: HERMES_MAIN_SOURCE_ID,
-      name: `主模型 / ${textModel}`,
-      capability: 'chat',
-      provider: provider || 'openai_compatible',
-      base_url: baseUrl,
-      model: textModel,
-      api_key_configured: apiKeyConfigured,
-      source_name: source.name,
-      source_provider: source.provider,
-      enabled: true,
-      readonly: true,
-      source_kind: 'hermes_main',
-      status,
-      last_tested_at: '',
-      last_error: '',
-      created_at: now,
-      updated_at: now,
-      options: { source: 'hermes_config' },
-    });
-  }
-
-  const visionModel = (config.vision?.effective_model || config.vision?.model || '').trim();
-  if (visionModel) {
-    const visionProvider = (
-      config.vision?.effective_provider
-      || config.vision?.provider
-      || provider
-      || 'openai_compatible'
-    ).trim();
-    profiles.push({
-      profile_id: HERMES_MAIN_VISION_PROFILE_ID,
-      source_id: HERMES_MAIN_SOURCE_ID,
-      name: `图片模型 / ${visionModel}`,
-      capability: 'vision',
-      provider: visionProvider,
-      base_url: (config.vision?.effective_base_url || config.vision?.base_url || baseUrl).trim(),
-      model: visionModel,
-      api_key_configured: Boolean(config.vision?.api_key_configured || apiKeyConfigured),
-      source_name: source.name,
-      source_provider: source.provider,
-      enabled: true,
-      readonly: true,
-      source_kind: 'hermes_main',
-      status: config.vision?.api_key_configured || apiKeyConfigured ? 'available' : 'untested',
-      last_tested_at: '',
-      last_error: '',
-      created_at: now,
-      updated_at: now,
-      options: { source: 'hermes_config' },
-    });
-  }
-
-  source.models = profiles;
-  return { source, profiles };
-}
-
 async function loadModelProfileData(): Promise<{
   sources: ModelSourceView[];
   profiles: ModelProfileView[];
   defaults: ModelProfileDefaults;
 }> {
-  const [profilePayload, hermesConfig] = await Promise.all([
-    listModelProfiles(),
-    apiGet<HermesConfigSummary>('/ui/hermes/config').catch(() => null),
-  ]);
+  const profilePayload = await listModelProfiles();
   const registrySources = (profilePayload.sources || []) as ModelSourceView[];
   const registryProfiles = (profilePayload.profiles || []) as ModelProfileView[];
-  const hermesMain = buildHermesMainSource(hermesConfig);
-  if (!hermesMain) {
-    return {
-      sources: registrySources,
-      profiles: registryProfiles,
-      defaults: profilePayload.defaults || {},
-    };
-  }
   return {
-    sources: [hermesMain.source, ...registrySources],
-    profiles: [...hermesMain.profiles, ...registryProfiles],
+    sources: registrySources,
+    profiles: registryProfiles,
     defaults: profilePayload.defaults || {},
   };
 }
 
 function defaultModelName(source: SourceDraft, capability: ModelCapability): string {
   const preset = providerPreset(source.provider);
-  if (capability === 'tts') return '';
+  if (capability === 'tts') return preset.modelHints?.[0] || '';
   if (capability === 'vision') {
     if (preset.id === 'openai' || preset.id === 'openai_compatible') return 'gpt-4.1-mini';
     if (preset.id === 'google_gemini') return 'gemini-2.5-flash';
@@ -694,6 +624,10 @@ export function ModelProfilesView() {
     () => sources.find((source) => source.source_id === selectedSourceId) || null,
     [selectedSourceId, sources],
   );
+  const capabilitySources = useMemo(
+    () => sourcesForCapability(sources, activeCapability),
+    [activeCapability, sources],
+  );
   const sourceModels = useMemo(
     () => profiles.filter((profile) => profile.source_id === selectedSourceId),
     [profiles, selectedSourceId],
@@ -704,10 +638,11 @@ export function ModelProfilesView() {
   );
   const visibleCatalogModels = useMemo(() => {
     const query = modelCatalogQuery.trim().toLowerCase();
-    if (!query) return modelCatalog;
-    return modelCatalog
+    const models = capabilityCatalogModels(modelCatalog, activeCapability);
+    if (!query) return models;
+    return models
       .filter((model) => `${model.id} ${model.name || ''} ${model.owned_by || ''} ${model.provider_key || ''}`.toLowerCase().includes(query));
-  }, [modelCatalog, modelCatalogQuery]);
+  }, [activeCapability, modelCatalog, modelCatalogQuery]);
   const modelCatalogGroups = useMemo(() => groupCatalogModels(visibleCatalogModels), [visibleCatalogModels]);
 
   async function refresh(nextSourceId = selectedSourceId, nextModelId = selectedModelId, capability = activeCapability) {
@@ -718,7 +653,8 @@ export function ModelProfilesView() {
     setProfiles(nextProfiles);
     setDefaults(payload.defaults);
 
-    const source = nextSources.find((item) => item.source_id === nextSourceId) || nextSources[0] || null;
+    const nextCapabilitySources = sourcesForCapability(nextSources, capability);
+    const source = nextCapabilitySources.find((item) => item.source_id === nextSourceId) || nextCapabilitySources[0] || null;
     if (source) {
       setSelectedSourceId(source.source_id);
       setSourceDraft(sourceToDraft(source));
@@ -735,8 +671,9 @@ export function ModelProfilesView() {
     } else {
       setSelectedSourceId('');
       setSelectedModelId('');
-      setSourceDraft(emptySourceDraft);
-      setModelDraft({ ...emptyModelDraft, capability });
+      const draft = defaultSourceDraft(capability);
+      setSourceDraft(draft);
+      setModelDraft({ ...emptyModelDraft, capability, model: defaultModelName(draft, capability) });
     }
   }
 
@@ -750,8 +687,9 @@ export function ModelProfilesView() {
         setSources(nextSources);
         setProfiles(nextProfiles);
         setDefaults(payload.defaults);
-        if (nextSources.length) {
-          const source = nextSources[0];
+        const nextCapabilitySources = sourcesForCapability(nextSources, activeCapability);
+        if (nextCapabilitySources.length) {
+          const source = nextCapabilitySources[0];
           setSelectedSourceId(source.source_id);
           setSourceDraft(sourceToDraft(source));
           const firstModel = nextProfiles.find((profile) => profile.source_id === source.source_id && profile.capability === activeCapability);
@@ -761,6 +699,10 @@ export function ModelProfilesView() {
           } else {
             setModelDraft({ ...emptyModelDraft, capability: activeCapability, model: defaultModelName(sourceToDraft(source), activeCapability) });
           }
+        } else {
+          const draft = defaultSourceDraft(activeCapability);
+          setSourceDraft(draft);
+          setModelDraft({ ...emptyModelDraft, capability: activeCapability, model: defaultModelName(draft, activeCapability) });
         }
       })
       .catch((err) => {
@@ -789,10 +731,11 @@ export function ModelProfilesView() {
 
   function createNewSource() {
     if (busy) return;
+    const draft = defaultSourceDraft(activeCapability);
     setSelectedSourceId('');
     setSelectedModelId('');
-    setSourceDraft(emptySourceDraft);
-    setModelDraft({ ...emptyModelDraft, capability: activeCapability });
+    setSourceDraft(draft);
+    setModelDraft({ ...emptyModelDraft, capability: activeCapability, model: defaultModelName(draft, activeCapability) });
     setModelCatalog([]);
     setModelCatalogQuery('');
     setProviderMenuOpen(false);
@@ -824,28 +767,47 @@ export function ModelProfilesView() {
 
   function switchCapability(capability: ModelCapability) {
     setActiveCapability(capability);
-    const firstModel = profiles.find((profile) => profile.source_id === selectedSourceId && profile.capability === capability);
+    const nextCapabilitySources = sourcesForCapability(sources, capability);
+    const source = nextCapabilitySources.find((item) => item.source_id === selectedSourceId) || nextCapabilitySources[0] || null;
+    if (!source) {
+      const draft = defaultSourceDraft(capability);
+      setSelectedSourceId('');
+      setSelectedModelId('');
+      setSourceDraft(draft);
+      setModelDraft({ ...emptyModelDraft, capability, model: defaultModelName(draft, capability) });
+      setModelCatalog([]);
+      setModelCatalogQuery('');
+      setProviderMenuOpen(false);
+      return;
+    }
+    setSelectedSourceId(source.source_id);
+    setSourceDraft(sourceToDraft(source));
+    const firstModel = profiles.find((profile) => profile.source_id === source.source_id && profile.capability === capability);
     setSelectedModelId(firstModel?.profile_id || '');
-    setModelDraft(firstModel ? modelToDraft(firstModel) : { ...emptyModelDraft, capability, model: defaultModelName(sourceDraft, capability) });
+    setModelDraft(firstModel ? modelToDraft(firstModel) : { ...emptyModelDraft, capability, model: defaultModelName(sourceToDraft(source), capability) });
+    setModelCatalog([]);
+    setModelCatalogQuery('');
+    setProviderMenuOpen(false);
   }
 
   function applyProvider(provider: string) {
     const preset = providerPreset(provider);
-    setSourceDraft((current) => ({
-      ...current,
+    const nextDraft = {
+      ...sourceDraft,
       provider,
-      name: current.name || preset.id,
-      base_url: preset.baseUrl || current.base_url,
-    }));
+      name: sourceDraft.name || preset.id,
+      base_url: preset.baseUrl || sourceDraft.base_url,
+    };
+    setSourceDraft(nextDraft);
+    setModelDraft((current) => current.profile_id || current.model
+      ? current
+      : { ...current, model: defaultModelName(nextDraft, current.capability) });
     setModelCatalog([]);
     setModelCatalogQuery('');
     setProviderMenuOpen(false);
   }
 
   async function saveSource(): Promise<ModelSource> {
-    if (sourceIsHermesMain(sourceDraft.source_id)) {
-      throw new Error('本地主模型请在主模型配置中修改');
-    }
     if (!sourceDraft.name.trim()) throw new Error('提供商源名称不能为空');
     const payload = {
       name: sourceDraft.name.trim(),
@@ -876,6 +838,10 @@ export function ModelProfilesView() {
 
   async function runSourceTest() {
     if (busy) return;
+    if (activeCapability === 'tts') {
+      setStatus('TTS 提供商不使用 OpenRouter /models 与 Chat Completions 测试；请在语音设置链路测试实际合成。');
+      return;
+    }
     setBusy('source-test');
     setStatus('正在保存并测试提供商源...');
     try {
@@ -892,8 +858,8 @@ export function ModelProfilesView() {
 
   async function fetchModelsForSource() {
     if (busy) return;
-    if (sourceIsHermesMain(sourceDraft.source_id)) {
-      setStatus('本地主模型来自 Hermes 主配置，不需要单独获取模型列表');
+    if (activeCapability === 'tts') {
+      setStatus('TTS 提供商使用独立语音数据源，不从 OpenRouter 模型列表获取。');
       return;
     }
     setBusy('models-fetch');
@@ -904,7 +870,9 @@ export function ModelProfilesView() {
       const models = result.models || [];
       setModelCatalog(models);
       setModelCatalogQuery('');
-      setStatus(models.length ? `已获取 ${models.length} 个模型，点击模型 ID 可填入下方表单` : '已连接源，但没有读取到模型列表');
+      const usableCount = capabilityCatalogModels(models, activeCapability).length;
+      const suffix = activeCapability === 'vision' ? ' 个支持图片输入的多模态模型' : ' 个可用模型';
+      setStatus(models.length ? `已获取 ${models.length} 个模型，其中 ${usableCount}${suffix}` : '已连接源，但没有读取到模型列表');
       await refresh(saved.source_id, selectedModelId, activeCapability);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '获取模型列表失败');
@@ -922,20 +890,25 @@ export function ModelProfilesView() {
   }
 
   async function saveModel(): Promise<ModelProfile> {
-    if (sourceIsHermesMain(sourceDraft.source_id)) {
-      throw new Error('本地主模型记录为只读快照，请新增独立提供商源后再登记模型');
-    }
     const source = sourceDraft.source_id ? selectedSource : await saveSource();
     const sourceId = source?.source_id || sourceDraft.source_id || '';
     if (!sourceId) throw new Error('请先保存提供商源');
     if (!modelDraft.model.trim()) throw new Error('模型名称不能为空');
     const modelName = modelDraft.model.trim();
+    const catalogMatch = modelCatalog.find((model) => model.id === modelName);
+    if (modelDraft.capability === 'vision' && modelCatalog.length && !catalogMatch) {
+      throw new Error('图片识别模型需要先通过远端模型资料确认多模态能力，请从列表选择带“视觉”标记的模型。');
+    }
+    if (modelDraft.capability === 'vision' && catalogMatch && !modelSupportsCapability(catalogMatch, 'vision')) {
+      throw new Error('图片识别模型必须支持 image 输入，请从远端列表选择带“视觉”标记的多模态模型。');
+    }
     const payload = {
       source_id: sourceId,
       name: modelDraft.name.trim() || `${sourceDraft.name}/${modelName}`,
       capability: modelDraft.capability,
       model: modelName,
       enabled: modelDraft.enabled,
+      options: catalogMatch ? { remote_model: catalogMatch } : {},
     };
     if (modelDraft.profile_id) return updateModelProfile(modelDraft.profile_id, payload);
     return createModelProfile(payload);
@@ -989,7 +962,7 @@ export function ModelProfilesView() {
   }
 
   async function removeSource() {
-    if (!sourceDraft.source_id || sourceIsHermesMain(sourceDraft.source_id) || busy) return;
+    if (!sourceDraft.source_id || busy) return;
     setBusy('source-delete');
     try {
       await deleteModelSource(sourceDraft.source_id);
@@ -1003,10 +976,6 @@ export function ModelProfilesView() {
   }
 
   async function setDefault(profile: ModelProfile) {
-    if (sourceIsHermesMain(profile.source_id)) {
-      setStatus('本地主模型已经由 Hermes 主配置管理，不能设为 Profile 默认项');
-      return;
-    }
     if (busy) return;
     setBusy('default');
     try {
@@ -1020,10 +989,13 @@ export function ModelProfilesView() {
     }
   }
 
-  const selectedIsHermesMain = sourceIsHermesMain(selectedSourceId);
-  const selectedSourceApiConfigured = Boolean(selectedSource?.api_key_configured);
-  const selectedSourceProviderLabel = selectedSource?.provider_label || providerPreset(sourceDraft.provider).label;
-  const sourceCountLabel = sources.length ? `${sources.length}` : '0';
+  const sourceCountLabel = capabilitySources.length ? `${capabilitySources.length}` : '0';
+  const activeProviderPresets = providerPresetsForCapability(activeCapability);
+  const sourceFormHelp = activeCapability === 'tts'
+    ? 'TTS 使用语音服务专用来源；这里登记 provider、endpoint 和 voice/profile 名称，不复用 OpenRouter 模型目录。'
+    : activeCapability === 'vision'
+      ? '图片识别只应登记支持 image 输入的多模态模型；获取远端列表后会自动过滤。'
+      : '对话模型来自服务商源；主模型不在这里生成本地快照。';
 
   return (
     <section className="hy-route-page model-profiles-page">
@@ -1031,9 +1003,8 @@ export function ModelProfilesView() {
         <div>
           <span className="hy-eyebrow">Model Providers</span>
           <h2>模型提供商</h2>
-          <p>先配置模型商源，再在源下面登记模型；Agent、图片识别和 TTS 都引用这里的模型。</p>
+          <p>先配置模型服务商源，再在源下面登记模型；所有模型都来自服务商，不再生成本地主模型快照。</p>
         </div>
-        <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('settings')}>返回设置</button>
       </header>
 
       <div className="model-provider-tabs">
@@ -1065,7 +1036,7 @@ export function ModelProfilesView() {
               </button>
             </div>
             <div className="model-source-list">
-              {sources.map((source) => {
+              {capabilitySources.map((source) => {
                 const preset = providerPreset(source.provider);
                 const configured = Boolean(source.api_key_configured);
                 return (
@@ -1079,24 +1050,21 @@ export function ModelProfilesView() {
                       <ProviderBrandIcon provider={source.provider} />
                     </span>
                     <span className="model-source-main">
-                      <strong>
-                        {source.name}
-                        {source.readonly ? <small>主</small> : null}
-                      </strong>
+                      <strong>{source.name}</strong>
                       <small>{source.base_url || source.provider_label || preset.label}</small>
                     </span>
                     <span className="model-source-badges">
                       <em className={`status-pill ${statusClass(source.status)}`}>{statusLabel(source.status)}</em>
-                      <em className={configured ? 'model-key-pill ok' : 'model-key-pill'}>{configured ? 'API 已配置' : '未配置 API'}</em>
+                      <em className={configured ? 'model-key-pill ok' : 'model-key-pill'}>{configured ? '密钥已配置' : activeCapability === 'tts' ? 'Token 可选' : '未配置 API'}</em>
                     </span>
                   </button>
                 );
               })}
-              {!sources.length ? (
+              {!capabilitySources.length ? (
                 <button type="button" className="model-source-empty-action" disabled={Boolean(busy)} onClick={createNewSource}>
                   <UiIcon name="plus" />
                   <strong>新增提供商源</strong>
-                  <span>创建 OpenAI-compatible / MiniMax / OpenRouter / Ollama 等来源</span>
+                  <span>{activeCapability === 'tts' ? '创建 GPT-SoVITS / HTTP TTS 等语音来源' : '创建 OpenRouter / Xiaomi MiMo / MiniMax 等模型来源'}</span>
                 </button>
               ) : null}
             </div>
@@ -1110,10 +1078,10 @@ export function ModelProfilesView() {
                     <span>选择预设</span>
                     <h3>添加模型提供商源</h3>
                   </div>
-                  <p>预设会自动填入提供商 ID、Base URL 和常用模型 ID。保存 API Key 后可以直接拉取远端模型列表。</p>
+                  <p>{sourceFormHelp}</p>
                 </div>
                 <div className="model-preset-grid">
-                  {providerPresets.map((preset) => (
+                  {activeProviderPresets.map((preset) => (
                     <button
                       type="button"
                       className="model-preset-card"
@@ -1133,132 +1101,116 @@ export function ModelProfilesView() {
               </div>
             ) : (
               <>
-                {selectedIsHermesMain ? (
-                  <section className="model-main-summary">
-                    <div className="model-main-summary-header">
-                      <span className={`model-source-mark ${providerIconClass(sourceDraft.provider)}`}>
-                        <ProviderBrandIcon provider={sourceDraft.provider} />
-                      </span>
-                      <div>
-                        <h3>本地主模型配置</h3>
-                        <p>来自 Hermes 当前文本与图片模型设置，只读展示，不复制或暴露 API Key。</p>
+                <form className="model-source-form" onSubmit={onSaveSource}>
+                  <div className="model-source-config-head">
+                    <span className={`model-source-mark ${providerIconClass(sourceDraft.provider)}`}>
+                      <ProviderBrandIcon provider={sourceDraft.provider} />
+                    </span>
+                    <div>
+                      <h3>{sourceDraft.name || providerPreset(sourceDraft.provider).label}</h3>
+                      <p>{sourceDraft.base_url || providerPreset(sourceDraft.provider).baseUrl || sourceFormHelp}</p>
+                    </div>
+                    <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>
+                      {busy === 'source-save' ? '保存中...' : '保存配置'}
+                    </button>
+                  </div>
+                  <div className="model-inline-note">{sourceFormHelp}</div>
+                  <div className="model-provider-grid">
+                    <label className="model-provider-picker-field">
+                      <span>提供商</span>
+                      <div className="model-provider-picker">
+                        <button
+                          type="button"
+                          className="model-provider-trigger"
+                          disabled={Boolean(busy)}
+                          aria-expanded={providerMenuOpen}
+                          onClick={() => setProviderMenuOpen((open) => !open)}
+                        >
+                          <span className={`model-source-mark ${providerIconClass(sourceDraft.provider)}`}>
+                            <ProviderBrandIcon provider={sourceDraft.provider} />
+                          </span>
+                          <span>{providerPreset(sourceDraft.provider).label}</span>
+                          <span className="model-provider-trigger-caret" aria-hidden="true" />
+                        </button>
+                        {providerMenuOpen ? (
+                          <div className="model-provider-menu" role="listbox">
+                            {activeProviderPresets.map((preset) => (
+                              <button
+                                type="button"
+                                key={preset.id}
+                                className={sourceDraft.provider === preset.id ? 'active' : ''}
+                                disabled={Boolean(busy)}
+                                role="option"
+                                aria-selected={sourceDraft.provider === preset.id}
+                                onClick={() => applyProvider(preset.id)}
+                              >
+                                <span className={`model-source-mark ${providerIconClass(preset.id)}`}>
+                                  <ProviderBrandIcon provider={preset.id} />
+                                </span>
+                                <span>
+                                  <strong>{preset.label}</strong>
+                                  <small>{preset.baseUrl || '本地或自定义语音端点'}</small>
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
-                    </div>
-                    <div className="model-main-summary-grid">
-                      <span><strong>提供商</strong><em>{selectedSourceProviderLabel}</em></span>
-                      <span><strong>Base URL</strong><em>{sourceDraft.base_url || '未配置'}</em></span>
-                      <span><strong>密钥状态</strong><em>{selectedSourceApiConfigured ? `${selectedSource?.api_key_name || 'API Key'} 已配置` : '未配置 API Key'}</em></span>
-                      <span><strong>来源</strong><em>Hermes 主配置</em></span>
-                    </div>
-                    <div className="agent-editor-actions">
-                      <button type="button" className="hy-btn hy-btn-primary" onClick={() => navigateTo('installer')}>编辑主模型</button>
-                      <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={createNewSource}>新增独立源</button>
-                    </div>
-                  </section>
-                ) : (
-                  <form className="model-source-form" onSubmit={onSaveSource}>
-                    <div className="model-source-config-head">
-                      <span className={`model-source-mark ${providerIconClass(sourceDraft.provider)}`}>
-                        <ProviderBrandIcon provider={sourceDraft.provider} />
-                      </span>
-                      <div>
-                        <small>设置</small>
-                        <h3>{sourceDraft.name || providerPreset(sourceDraft.provider).label}</h3>
-                        <p>{sourceDraft.base_url || providerPreset(sourceDraft.provider).baseUrl || '未配置 Base URL'}</p>
-                      </div>
-                      <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>
-                        {busy === 'source-save' ? '保存中...' : '保存配置'}
-                      </button>
-                    </div>
-                    <div className="model-provider-grid">
-                      <label className="model-provider-picker-field">
-                        <span>提供商</span>
-                        <div className="model-provider-picker">
-                          <button
-                            type="button"
-                            className="model-provider-trigger"
-                            disabled={Boolean(busy)}
-                            aria-expanded={providerMenuOpen}
-                            onClick={() => setProviderMenuOpen((open) => !open)}
-                          >
-                            <span className={`model-source-mark ${providerIconClass(sourceDraft.provider)}`}>
-                              <ProviderBrandIcon provider={sourceDraft.provider} />
-                            </span>
-                            <span>{providerPreset(sourceDraft.provider).label}</span>
-                            <span className="model-provider-trigger-caret" aria-hidden="true" />
-                          </button>
-                          {providerMenuOpen ? (
-                            <div className="model-provider-menu" role="listbox">
-                              {providerPresets.map((preset) => (
-                                <button
-                                  type="button"
-                                  key={preset.id}
-                                  className={sourceDraft.provider === preset.id ? 'active' : ''}
-                                  disabled={Boolean(busy)}
-                                  role="option"
-                                  aria-selected={sourceDraft.provider === preset.id}
-                                  onClick={() => applyProvider(preset.id)}
-                                >
-                                  <span className={`model-source-mark ${providerIconClass(preset.id)}`}>
-                                    <ProviderBrandIcon provider={preset.id} />
-                                  </span>
-                                  <span>
-                                    <strong>{preset.label}</strong>
-                                    <small>{preset.baseUrl || '自定义 Azure Endpoint'}</small>
-                                  </span>
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      </label>
-                      <label>
-                        <span>ID</span>
-                        <input className="hy-input" value={sourceDraft.name} disabled={Boolean(busy)} onChange={(event) => setSourceDraft({ ...sourceDraft, name: event.target.value })} placeholder="例如 openrouter / moonshot-work" />
-                      </label>
-                      <label>
-                        <span>Base URL</span>
-                        <input className="hy-input" value={sourceDraft.base_url} disabled={Boolean(busy)} onChange={(event) => setSourceDraft({ ...sourceDraft, base_url: event.target.value })} placeholder={providerPreset(sourceDraft.provider).baseUrl || 'https://api.example.com/v1'} />
-                      </label>
-                      <label>
-                        <span>API Key</span>
-                        <input className="hy-input" type="password" value={sourceDraft.api_key} disabled={Boolean(busy)} onChange={(event) => setSourceDraft({ ...sourceDraft, api_key: event.target.value })} placeholder={selectedSource?.api_key_configured ? '已配置，留空不覆盖' : '仅保存在本机后端'} />
-                      </label>
-                    </div>
-                    <label className="model-profile-toggle">
-                      <input type="checkbox" checked={sourceDraft.enabled} disabled={Boolean(busy)} onChange={(event) => setSourceDraft({ ...sourceDraft, enabled: event.target.checked })} />
-                      <span>启用这个提供商源</span>
                     </label>
-                    <div className="agent-editor-actions">
-                      <button type="submit" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)}>{busy === 'source-save' ? '保存中...' : '保存源'}</button>
-                      <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={() => void fetchModelsForSource()}>{busy === 'models-fetch' ? '获取中...' : '保存并获取模型'}</button>
-                      <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(busy)} onClick={() => void runSourceTest()}>{busy === 'source-test' ? '测试中...' : '保存并测试源'}</button>
-                      {sourceDraft.source_id ? <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={() => void removeSource()}>删除源</button> : null}
-                    </div>
-                  </form>
-                )}
+                    <label>
+                      <span>ID</span>
+                      <input className="hy-input" value={sourceDraft.name} disabled={Boolean(busy)} onChange={(event) => setSourceDraft({ ...sourceDraft, name: event.target.value })} placeholder={activeCapability === 'tts' ? '例如 gpt-sovits-local' : '例如 openrouter / xiaomi-mimo'} />
+                    </label>
+                    <label>
+                      <span>{activeCapability === 'tts' ? 'Endpoint' : 'Base URL'}</span>
+                      <input className="hy-input" value={sourceDraft.base_url} disabled={Boolean(busy)} onChange={(event) => setSourceDraft({ ...sourceDraft, base_url: event.target.value })} placeholder={providerPreset(sourceDraft.provider).baseUrl || (activeCapability === 'tts' ? 'http://127.0.0.1:9880' : 'https://api.example.com/v1')} />
+                    </label>
+                    <label>
+                      <span>{activeCapability === 'tts' ? 'Token / Key' : 'API Key'}</span>
+                      <input className="hy-input" type="password" value={sourceDraft.api_key} disabled={Boolean(busy)} onChange={(event) => setSourceDraft({ ...sourceDraft, api_key: event.target.value })} placeholder={selectedSource?.api_key_configured ? '已配置，留空不覆盖' : '仅保存在本机后端'} />
+                    </label>
+                  </div>
+                  <label className="model-profile-toggle">
+                    <input type="checkbox" checked={sourceDraft.enabled} disabled={Boolean(busy)} onChange={(event) => setSourceDraft({ ...sourceDraft, enabled: event.target.checked })} />
+                    <span>启用这个提供商源</span>
+                  </label>
+                  <div className="agent-editor-actions">
+                    <button type="submit" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)}>{busy === 'source-save' ? '保存中...' : '保存源'}</button>
+                    {activeCapability !== 'tts' ? (
+                      <>
+                        <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={() => void fetchModelsForSource()}>{busy === 'models-fetch' ? '获取中...' : activeCapability === 'vision' ? '获取多模态模型' : '保存并获取模型'}</button>
+                        <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(busy)} onClick={() => void runSourceTest()}>{busy === 'source-test' ? '测试中...' : '保存并测试源'}</button>
+                      </>
+                    ) : null}
+                    {sourceDraft.source_id ? <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={() => void removeSource()}>删除源</button> : null}
+                  </div>
+                </form>
 
                 <section className="model-source-models">
                   <div className="model-panel-title">
                     <h3>{capabilityLabels[activeCapability]}模型</h3>
                     <span>{visibleModels.length} 个</span>
                   </div>
-                  {selectedIsHermesMain ? (
-                    <div className="model-inline-note">本地主模型由 Hermes 主配置管理。新增独立源后，可以为 Agent Studio / Workflow Studio 登记专用模型。</div>
-                  ) : (
-                    <form className="model-inline-form" onSubmit={onSaveModel}>
-                      <input className="hy-input" value={modelDraft.model} disabled={Boolean(busy)} onChange={(event) => setModelDraft({ ...modelDraft, model: event.target.value })} placeholder="模型 ID，例如 gpt-4.1-mini" />
-                      <input className="hy-input" value={modelDraft.name} disabled={Boolean(busy)} onChange={(event) => setModelDraft({ ...modelDraft, name: event.target.value })} placeholder="显示名称，可留空" />
-                      <button type="submit" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)}>{modelDraft.profile_id ? '保存模型' : '添加模型'}</button>
+                  <form className="model-inline-form" onSubmit={onSaveModel}>
+                    <input
+                      className="hy-input"
+                      value={modelDraft.model}
+                      disabled={Boolean(busy)}
+                      onChange={(event) => setModelDraft({ ...modelDraft, model: event.target.value })}
+                      placeholder={activeCapability === 'tts' ? 'voice / profile id，例如 default-voice' : activeCapability === 'vision' ? '多模态模型 ID，例如 openai/gpt-4o-mini' : '模型 ID，例如 gpt-4.1-mini'}
+                    />
+                    <input className="hy-input" value={modelDraft.name} disabled={Boolean(busy)} onChange={(event) => setModelDraft({ ...modelDraft, name: event.target.value })} placeholder="显示名称，可留空" />
+                    <button type="submit" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)}>{modelDraft.profile_id ? '保存模型' : '添加模型'}</button>
+                    {activeCapability !== 'tts' ? (
                       <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(busy)} onClick={() => void runModelTest()}>{busy === 'model-test' ? '测试中...' : '保存并测试'}</button>
-                    </form>
-                  )}
+                    ) : null}
+                  </form>
 
-                  {!selectedIsHermesMain && (modelCatalog.length || busy === 'models-fetch') ? (
+                  {activeCapability !== 'tts' && (modelCatalog.length || busy === 'models-fetch') ? (
                     <div className="model-catalog-panel">
                       <div className="model-catalog-head">
                         <div>
-                          <strong>远端模型列表</strong>
+                          <strong>{activeCapability === 'vision' ? '支持图片输入的远端模型' : '远端模型列表'}</strong>
                           <span>
                             {modelCatalog.length
                               ? `${visibleCatalogModels.length}/${modelCatalog.length} 个模型 · ${modelCatalogGroups.length} 组`
@@ -1316,22 +1268,16 @@ export function ModelProfilesView() {
                           <span>{sourceDraft.name}/{model.model}</span>
                         </button>
                         <em className={`status-pill ${statusClass(model.status)}`}>{statusLabel(model.status)}</em>
-                        {model.readonly ? <small>主模型</small> : defaults[model.capability] === model.profile_id ? <small>默认</small> : null}
-                        {model.readonly ? (
-                          <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('installer')}>编辑</button>
-                        ) : (
-                          <>
-                            <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={() => void setDefault(model)}>设为默认</button>
-                            <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={() => void runModelTest(model.profile_id)}>测试</button>
-                            <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={() => void removeModel(model.profile_id)}>删除</button>
-                          </>
-                        )}
+                        {defaults[model.capability] === model.profile_id ? <small>默认</small> : null}
+                        <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={() => void setDefault(model)}>设为默认</button>
+                        {model.capability !== 'tts' ? <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={() => void runModelTest(model.profile_id)}>测试</button> : null}
+                        <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={() => void removeModel(model.profile_id)}>删除</button>
                       </div>
                     ))}
                     {!visibleModels.length ? (
                       <div className="model-provider-empty compact">
                         <strong>还没有{capabilityLabels[activeCapability]}模型</strong>
-                        <span>在上方输入模型 ID 后添加。默认模型会被 Agent Studio 和 Workflow Studio 引用。</span>
+                        <span>{capabilityEmptyModelHint(activeCapability)}</span>
                       </div>
                     ) : null}
                   </div>

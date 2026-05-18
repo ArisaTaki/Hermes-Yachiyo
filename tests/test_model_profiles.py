@@ -261,3 +261,45 @@ def test_agent_runtime_uses_model_profile(monkeypatch, tmp_path):
     finally:
         runtime.close()
         profile_service.close()
+
+
+def test_agent_runtime_uses_openai_compatible_provider_source_profile(monkeypatch, tmp_path):
+    profile_service = make_profile_service(tmp_path)
+    runtime = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "runtime",
+        seed_templates=False,
+    )
+    source = profile_service.create_source(
+        {
+            "name": "Xiaomi MiMo",
+            "provider": "xiaomi_mimo",
+            "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+            "api_key": "sk-secret",
+        }
+    )
+    profile = profile_service.create_profile(
+        {
+            "source_id": source["source_id"],
+            "name": "MiMo Agent",
+            "capability": "chat",
+            "model": "mimo-v2.5-pro",
+        }
+    )
+    monkeypatch.setattr("apps.shell.agent_runtime.get_model_profile_service", lambda: profile_service)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "MiMo result")
+    try:
+        agent = runtime.create_agent(
+            {
+                "name": "MiMo Profile Agent",
+                "model_mode": "profile",
+                "model_profile_id": profile["profile_id"],
+            }
+        )
+        run = runtime.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Hello"})
+
+        assert run["status"] == "completed"
+        assert run["result"] == "MiMo result"
+    finally:
+        runtime.close()
+        profile_service.close()

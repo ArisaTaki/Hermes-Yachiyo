@@ -18,7 +18,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 from uuid import uuid4
 
-from apps.shell.model_profiles import get_model_profile_service, openai_compatible_chat
+from apps.shell.model_profiles import get_model_profile_service, openai_compatible_chat, supports_openai_compatible_api
 
 
 class AgentRuntimeError(RuntimeError):
@@ -1072,7 +1072,7 @@ class AgentRuntimeService:
                 raise AgentRuntimeError("Agent 引用的模型 Profile 不存在") from exc
             if not profile.get("enabled", True):
                 raise AgentRuntimeError("Agent 引用的模型 Profile 已停用")
-            if str(profile.get("provider") or "openai_compatible") != "openai_compatible":
+            if not supports_openai_compatible_api(str(profile.get("provider") or "openai_compatible")):
                 raise AgentRuntimeError("Agent Runtime 首版仅支持 OpenAI-compatible 模型 Profile")
             if str(profile.get("capability") or "chat") not in {"chat", "vision"}:
                 raise AgentRuntimeError("Agent 运行需要 chat 或 vision 模型 Profile")

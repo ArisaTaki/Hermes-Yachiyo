@@ -102,12 +102,19 @@ _OPENAI_COMPATIBLE_PROVIDER_IDS = {
     "tokenpony",
     "compshare",
     "fastgpt",
+    "xiaomi",
+    "xiaomi_mimo",
+    "mimo",
 }
 
 
 def _supports_openai_compatible_api(provider: str) -> bool:
     provider_id = (provider or "openai_compatible").strip().lower()
     return not provider_id or provider_id in _OPENAI_COMPATIBLE_PROVIDER_IDS
+
+
+def supports_openai_compatible_api(provider: str) -> bool:
+    return _supports_openai_compatible_api(provider)
 
 
 def _remote_model_provider_key(model_id: str, owned_by: str, fallback_provider: str) -> str:
