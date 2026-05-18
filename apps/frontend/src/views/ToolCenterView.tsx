@@ -188,17 +188,6 @@ type HermesUpdateResult = {
   dashboard?: DashboardData;
 };
 
-type CodingProviderStatus = {
-  id: string;
-  display_name?: string;
-  role?: string;
-  availability?: string;
-  version?: string;
-  executable_path?: string;
-  blocking_reason?: string;
-  capabilities?: Record<string, unknown>;
-};
-
 type ConfigFieldValue = string | boolean;
 type WorkflowTarget = 'live2d' | 'proactive-tts' | 'chat' | 'bubble' | 'settings' | 'tools';
 type YachiyoWorkflowDefinition = {
@@ -309,14 +298,6 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
     description: '让 Hermes 控制本机桌面应用和窗口交互。',
     requirement: '需要 Hermes computer_use 工具集与 macOS 权限',
     aliases: ['computer-use', 'computer'],
-  },
-  {
-    id: 'openai-codex',
-    label: 'Codex App-Server Runtime',
-    category: '本地工作',
-    description: '通过 Hermes 调用 Codex App-Server Runtime 执行 coding 工作流。',
-    requirement: '需要 Hermes 2026.5+、Codex CLI 0.130.0+ 和 codex login',
-    aliases: ['codex', 'codex-cli', 'codex_app_server', 'codex-app-server'],
   },
   {
     id: 'memory',
@@ -431,7 +412,7 @@ const YACHIYO_WORKFLOWS: YachiyoWorkflowDefinition[] = [
     primaryAction: { label: '配置 Live2D', target: 'live2d' },
     requiredCapabilities: ['tts', 'memory', 'computer_use'],
     ownedSettingsRoute: 'Live2D 模式 / 气泡模式 / 主动关怀语音',
-    externalRecommendations: ['Claude Code 可增强 coding 对话', 'OpenDesign 可增强设计流转'],
+    externalRecommendations: ['Agent Studio 可编排专用 Agent', 'Skill Library 可注入本地能力包'],
   },
   {
     id: 'proactive-care',
@@ -453,15 +434,6 @@ const YACHIYO_WORKFLOWS: YachiyoWorkflowDefinition[] = [
   },
 ];
 
-async function fetchCodingToolProviders(): Promise<CodingProviderStatus[]> {
-  const [coding, review] = await Promise.all([
-    apiGet<{ providers?: CodingProviderStatus[] }>('/ui/coding/providers'),
-    apiGet<{ providers?: CodingProviderStatus[] }>('/ui/coding/review-providers'),
-  ]);
-  const merged = [...(coding.providers || []), ...(review.providers || [])];
-  return merged.filter((provider) => ['local_claude_code', 'codex_review', 'opendesign'].includes(provider.id));
-}
-
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -470,7 +442,6 @@ export function ToolCenterView() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [diagnosticCache, setDiagnosticCache] = useState<DiagnosticCache | null>(null);
   const [toolConfig, setToolConfig] = useState<ToolConfigPayload | null>(null);
-  const [codingProviders, setCodingProviders] = useState<CodingProviderStatus[]>([]);
   const [toolConfigLoaded, setToolConfigLoaded] = useState(false);
   const [draftToolId, setDraftToolId] = useState('');
   const [configDraft, setConfigDraft] = useState<Record<string, ConfigFieldValue>>({});
@@ -500,17 +471,15 @@ export function ToolCenterView() {
     let disposed = false;
     async function refresh() {
       try {
-        const [payload, cache, config, coding] = await Promise.all([
+        const [payload, cache, config] = await Promise.all([
           apiGet<DashboardData>('/ui/dashboard'),
           apiGet<DiagnosticCache>('/ui/hermes/diagnostics/cache').catch(() => null),
           apiGet<ToolConfigPayload>('/ui/hermes/tools/config').catch(() => null),
-          fetchCodingToolProviders().catch(() => []),
         ]);
         if (!disposed) {
           setData(payload);
           setDiagnosticCache(cache);
           setToolConfig(config);
-          setCodingProviders(coding);
           setToolConfigLoaded(true);
           setError('');
         }
@@ -675,19 +644,18 @@ export function ToolCenterView() {
         const doctor = options.runDoctor
           ? await apiPost<DiagnosticResult>('/ui/hermes/diagnostic-command', { command: 'hermes doctor' }).catch(() => null)
           : null;
-        const [payload, cache, config, coding] = await Promise.all([
+        const [payload, cache, config] = await Promise.all([
           apiPost<DashboardData>('/ui/hermes/recheck'),
           apiGet<DiagnosticCache>('/ui/hermes/diagnostics/cache').catch(() => doctor?.diagnostic_cache || null),
           apiGet<ToolConfigPayload>('/ui/hermes/tools/config').catch(() => null),
-          fetchCodingToolProviders().catch(() => []),
         ]);
         if (check) setHermesUpdate(check);
         setData(payload);
         setDiagnosticCache(cache);
         setToolConfig(config);
-        setCodingProviders(coding);
+        setToolConfigLoaded(true);
         setError('');
-        return { check, doctor, payload, cache, config, coding };
+        return { check, doctor, payload, cache, config };
       } catch (err) {
         lastError = err;
       }
@@ -889,7 +857,7 @@ export function ToolCenterView() {
       setUpdateTerminalMessage('Hermes 更新命令已结束，正在等待 Bridge 和 Hermes gateway 恢复。');
       await refreshToolCenterState({ checkUpdate: true, runDoctor: true, retries: 10, retryDelayMs: 1300 });
       setActionStatus('Hermes 更新完成，工具清单和 Doctor 状态已刷新');
-      setUpdateTerminalMessage('Hermes 更新完成，工具清单、Doctor 和 Coding Provider 状态已刷新。');
+      setUpdateTerminalMessage('Hermes 更新完成，工具清单和 Doctor 状态已刷新。');
     } catch (err) {
       setActionStatus(err instanceof Error ? err.message : 'Hermes 更新结束，但刷新工具状态失败');
       setUpdateTerminalMessage('Hermes 更新结束，但自动刷新失败；请点击重新检测。');
@@ -1216,8 +1184,6 @@ export function ToolCenterView() {
         cacheStale={cacheStale}
         checked={checked}
       />
-
-      <CodingToolSyncPanel providers={codingProviders} />
 
       <section className="tool-center-panel">
         <div className="section-heading-row">
@@ -1795,84 +1761,6 @@ function ToolSummaryCard({
   );
 }
 
-function CodingToolSyncPanel({ providers }: { providers: CodingProviderStatus[] }) {
-  const ordered = ['local_claude_code', 'codex_review', 'opendesign']
-    .map((id) => providers.find((provider) => provider.id === id))
-    .filter(Boolean) as CodingProviderStatus[];
-  return (
-    <section className="tool-sync-panel">
-      <div className="section-heading-row">
-        <div>
-          <h2>推荐外部工具</h2>
-          <p className="section-caption">Yachiyo 只检测这些工具是否存在、解释影响并给出下一步建议；安装、登录和密钥配置仍走 Hermes GUI、CLI 或官方流程。</p>
-        </div>
-        <button type="button" className="primary-action" onClick={() => navigateTo('coding')}>打开 Coding 工作流</button>
-      </div>
-      <div className="tool-sync-grid">
-        {ordered.map((provider) => (
-          <CodingToolSyncCard provider={provider} key={provider.id} />
-        ))}
-        {!ordered.length ? (
-          <article className="tool-sync-card pending">
-            <div className="tool-sync-card-head">
-              <strong>等待同步</strong>
-              <span className="tool-status-pill pending">pending</span>
-            </div>
-            <p>还没有读取到 Coding provider 状态。</p>
-          </article>
-        ) : null}
-      </div>
-    </section>
-  );
-}
-
-function CodingToolSyncCard({ provider }: { provider: CodingProviderStatus }) {
-  const capabilities = provider.capabilities || {};
-  const mode = String(capabilities.credential_mode || '');
-  const tone = provider.availability === 'available' || provider.availability === 'installed_stopped'
-    ? 'ready'
-    : provider.availability === 'not_installed' || provider.availability === 'not_authenticated' || provider.availability === 'misconfigured'
-      ? 'limited'
-      : 'pending';
-  const runtimeReady = Boolean(capabilities.app_server_runtime_ready);
-  const title = provider.display_name || provider.id;
-  return (
-    <article className={`tool-sync-card ${tone}`}>
-      <div className="tool-sync-card-head">
-        <strong>{title}</strong>
-        <span className={`tool-status-pill ${tone}`}>{provider.availability || 'unknown'}</span>
-      </div>
-      <p>{toolSyncDetail(provider)}</p>
-      <div className="tool-sync-meta">
-        {provider.version ? <span>{provider.version}</span> : null}
-        {mode ? <span>{mode === 'api_env' ? 'API Key 模式' : 'CLI Login 模式'}</span> : null}
-        {provider.id === 'codex_review' ? <span>{runtimeReady ? 'Hermes Runtime ready' : 'Runtime 需升级/登录'}</span> : null}
-      </div>
-      <div className="tool-sync-actions">
-        <button type="button" onClick={() => navigateTo('coding')}>查看建议</button>
-        {provider.id === 'codex_review' && !runtimeReady ? <span>{'建议 Codex CLI >= 0.130.0'}</span> : null}
-      </div>
-    </article>
-  );
-}
-
-function toolSyncDetail(provider: CodingProviderStatus): string {
-  if (provider.id === 'codex_review') {
-    const capabilities = provider.capabilities || {};
-    if (!provider.executable_path) return '未检测到 Codex CLI；建议按官方流程安装、运行 codex login，并确认 Hermes Codex Runtime 前置条件。';
-    if (capabilities.app_server_runtime_ready) return 'Codex CLI、login 和 Hermes App-Server Runtime 前置条件已满足，可作为 review 环境。';
-    return `Yachiyo 已检测到 Codex，但只提供状态建议：${String(capabilities.app_server_status || provider.blocking_reason || 'Runtime 前置条件仍需确认。')}`;
-  }
-  if (provider.id === 'local_claude_code') {
-    if (!provider.executable_path) return '未检测到 Claude Code CLI；建议按 Claude Code 官方流程安装和登录，Hermes provider 配置仍以 Hermes 为准。';
-    return provider.blocking_reason || 'Claude Code CLI 已检测到；Yachiyo 会把它作为 Coding 环境建议显示。';
-  }
-  if (provider.id === 'opendesign') {
-    return provider.blocking_reason || 'OpenDesign daemon/WebUI 状态已同步；建议在本机或官方项目入口完成启动与维护。';
-  }
-  return provider.blocking_reason || '工具状态已同步。';
-}
-
 function formatHermesVersion(version?: string, releaseDate?: string): string {
   const cleanVersion = String(version || '').trim();
   const cleanDate = String(releaseDate || '').trim();
@@ -1976,7 +1864,7 @@ function hermesUpdateBusyText(mode: HermesUpdateMode, elapsedSeconds: number): s
   }
   if (mode === 'refresh') {
     if (elapsedSeconds >= 12) return '仍在等待 Bridge/Hermes gateway 恢复，恢复后会自动同步工具清单。';
-    return '更新命令已完成，正在重新读取版本、Doctor、工具清单和 Coding Provider。';
+    return '更新命令已完成，正在重新读取版本、Doctor 和工具清单。';
   }
   if (elapsedSeconds >= 90) {
     return '仍在更新 Hermes；可能正在下载依赖或刷新工具清单。';

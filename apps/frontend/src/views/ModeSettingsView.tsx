@@ -580,7 +580,7 @@ function ReferenceSettingsHome() {
         ) : (
           <>
             <SettingsItem
-              label="Agent 信息"
+              label="主 Agent 信息"
               description="侧边栏、待机状态和对话头像使用这里的资料"
               wide
             >
@@ -772,22 +772,17 @@ function ReferenceSettingsHome() {
           <SettingsLoadingRows count={3} />
         ) : (
           <>
-            <SettingsItem label="模型提供商" description={currentProviderOption?.label || currentProvider || '未读取到模型配置'}>
-              <SettingsActionButton onClick={() => navigateTo('provider')}>打开模型配置</SettingsActionButton>
+            <SettingsItem label="模型组管理" description="统一保存、测试并复用文本、图片识别和 TTS 模型配置">
+              <SettingsActionButton onClick={() => navigateTo('provider')}>打开新版模型配置</SettingsActionButton>
             </SettingsItem>
-            <SettingsItem label="API Key" description={apiKeyConfigured ? `已配置${apiKeyDisplay ? `：${apiKeyDisplay}` : ''}` : '未配置，前往模型配置可设置'}>
-              <SettingsActionButton onClick={() => navigateTo('provider')}>{apiKeyConfigured ? '查看' : '配置'}</SettingsActionButton>
+            <SettingsItem label="Agent 模型" description="Agent Studio 会引用已验证的模型组，不再在每个 Agent 里重复保存 API Key">
+              <SettingsActionButton onClick={() => navigateTo('agents')}>打开 Agent Studio</SettingsActionButton>
             </SettingsItem>
             <SettingsItem
-              label="连接测试"
-              description={connectionTestResult ? (connectionTestOk ? '连接正常' : `连接失败：${connectionTestMessage}`) : '测试模型服务连接状态'}
+              label="当前主模型"
+              description={`${currentProviderOption?.label || currentProvider || '未读取到模型配置'} · ${apiKeyConfigured ? `密钥已配置${apiKeyDisplay ? `：${apiKeyDisplay}` : ''}` : '密钥未配置'}`}
             >
-              <SettingsActionButton
-                loading={connectionTesting}
-                onClick={() => void runConnectionTest()}
-              >
-                {connectionTesting ? '测试中…' : '测试连接'}
-              </SettingsActionButton>
+              <SettingsActionButton onClick={() => navigateTo('provider')}>迁移/查看</SettingsActionButton>
             </SettingsItem>
           </>
         )}
@@ -906,10 +901,10 @@ function AvatarEditorModal({
 function SpecificModeSettingsView({ mode }: { mode: string }) {
   const [activationPending, setActivationPending] = useState(
     mode === 'live2d'
-      && (
-        currentParam('reason') === 'live2d-resource-required'
-        || window.sessionStorage.getItem(LIVE2D_ACTIVATION_DRAFT_KEY) === '1'
-      ),
+    && (
+      currentParam('reason') === 'live2d-resource-required'
+      || window.sessionStorage.getItem(LIVE2D_ACTIVATION_DRAFT_KEY) === '1'
+    ),
   );
   const [payload, setPayload] = useState<SettingsPayload | null>(null);
   const [form, setForm] = useState<ModeForm>({});

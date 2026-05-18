@@ -7,7 +7,6 @@ import {
   DashboardPage,
   Live2DModePage,
   OpenDesignShell,
-  ProviderPage,
   ResourcesPage,
   ToolsAllPage,
   WorkspacePage,
@@ -15,8 +14,8 @@ import {
 import { ROUTE_CHANGE_EVENT, currentParam, currentView } from './lib/view';
 
 const ChatView = lazy(() => import('./views/ChatView').then((module) => ({ default: module.ChatView })));
-const CodingJobsView = lazy(() =>
-  import('./views/CodingJobsView').then((module) => ({ default: module.CodingJobsView })),
+const AgentStudioView = lazy(() =>
+  import('./views/AgentStudioView').then((module) => ({ default: module.AgentStudioView })),
 );
 const DiagnosticsView = lazy(() =>
   import('./views/DiagnosticsView').then((module) => ({ default: module.DiagnosticsView })),
@@ -26,6 +25,9 @@ const InstallerView = lazy(() =>
 );
 const ModeSettingsView = lazy(() =>
   import('./views/ModeSettingsView').then((module) => ({ default: module.ModeSettingsView })),
+);
+const ModelProfilesView = lazy(() =>
+  import('./views/ModelProfilesView').then((module) => ({ default: module.ModelProfilesView })),
 );
 const ProactiveTtsSettingsView = lazy(() =>
   import('./views/ProactiveTtsSettingsView').then((module) => ({ default: module.ProactiveTtsSettingsView })),
@@ -81,14 +83,14 @@ export function App() {
 
   let page: ReactNode = <DashboardPage />;
   if (view === 'chat') page = <ChatView />;
-  else if (view === 'coding') page = <CodingJobsView />;
+  else if (view === 'agents') page = <AgentStudioView />;
   else if (view === 'settings') page = <ModeSettingsView />;
   else if (view === 'installer') page = <InstallerView />;
   else if (view === 'diagnostics') page = <DiagnosticsView />;
   else if (view === 'tools') page = <ToolCenterView />;
   else if (view === 'proactive-tts') page = <ProactiveTtsSettingsView />;
   else if (view === 'app-update') page = <AppUpdateView />;
-  else if (view === 'provider') page = <ProviderPage />;
+  else if (view === 'provider') page = <ModelProfilesView />;
   else if (view === 'bubble') page = <BubbleModePage />;
   else if (view === 'live2d') page = null;
   else if (view === 'resources') page = <ResourcesPage />;

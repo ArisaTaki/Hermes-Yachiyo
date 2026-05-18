@@ -222,7 +222,7 @@ const NAV_GROUPS: Array<{
       label: '日常桌面',
       items: [
         { view: 'chat', label: '对话', icon: 'chat' },
-        { view: 'coding', label: 'Coding', icon: 'model' },
+        { view: 'agents', label: 'Agent Studio', icon: 'model' },
         { view: 'bubble', label: '气泡模式', icon: 'bubble' },
         { view: 'live2d', label: 'Live2D 模式', icon: 'live2d' },
         { view: 'proactive-tts', label: 'GPT-SoVITS', icon: 'voice' },
@@ -2476,7 +2476,7 @@ function groupActivitiesByDay(rows: ActivityRowData[]): Array<{ label: string; i
 function routeTitle(view: AppView, settingsMode = ''): string {
   if (view === 'main') return 'Hermes Yachiyo — 主控台';
   if (view === 'chat') return 'Hermes Yachiyo — 对话';
-  if (view === 'coding') return 'Hermes Yachiyo — Coding';
+  if (view === 'agents') return 'Hermes Yachiyo — Agent Studio';
   if (view === 'provider') return 'Hermes Yachiyo — 模型配置';
   if (view === 'bubble') return 'Hermes Yachiyo — 气泡模式';
   if (view === 'live2d') return 'Hermes Yachiyo — Live2D 模式';

@@ -719,7 +719,7 @@ export function DiagnosticsView() {
         <div className="hy-diagnostics-routing-grid">
           <article className="hy-diagnostics-route-card">
             <strong>能力中心</strong>
-            <span>Hermes 更新、工具清单同步、Provider 配置、Codex/Claude/OpenDesign 安装与 API 测试。</span>
+            <span>Hermes 更新、工具清单同步、Provider 配置、Agent Runtime 与 API 测试。</span>
             <button type="button" className="hy-btn hy-btn-primary" onClick={() => navigateTo('tools')}>打开能力中心</button>
           </article>
           <article className="hy-diagnostics-route-card">

@@ -34,7 +34,7 @@ from apps.core.chat_session import (
 from apps.core.activity_store import get_activity_store
 from apps.core.special_sessions import is_proactive_chat_session
 from apps.locald.screenshot import capture_screenshot_to_file
-from apps.shell.coding_execution import get_coding_execution_service, parse_start_code_command
+from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
 from apps.shell.hermes_capabilities import get_current_hermes_image_input_capability
 from packages.protocol.enums import TaskStatus, TaskType
 
@@ -267,7 +267,13 @@ class ChatAPI:
     def _state(self):
         return self._runtime.state
 
-    def send_message(self, text: str, attachments: list[dict] | None = None) -> Dict[str, Any]:
+    def send_message(
+        self,
+        text: str,
+        attachments: list[dict] | None = None,
+        *,
+        runnable_id: str = "",
+    ) -> Dict[str, Any]:
         """发送用户消息并创建对应任务
 
         流程：
@@ -289,9 +295,9 @@ class ChatAPI:
             return {"ok": False, "error": "消息内容不能为空"}
 
         try:
-            coding_command = self._handle_start_code_command(text, raw_attachments)
-            if coding_command is not None:
-                return coding_command
+            runnable_command = self._handle_runnable_command(text, raw_attachments, runnable_id=runnable_id)
+            if runnable_command is not None:
+                return runnable_command
 
             if raw_attachments and self._should_enforce_image_capability():
                 image_input = get_current_hermes_image_input_capability()
@@ -362,64 +368,90 @@ class ChatAPI:
             logger.error("发送消息失败: %s", exc)
             return {"ok": False, "error": str(exc)}
 
-    def _handle_start_code_command(self, text: str, raw_attachments: list[dict]) -> Dict[str, Any] | None:
-        if parse_start_code_command(text, {}) is None:
+    def _handle_runnable_command(
+        self,
+        text: str,
+        raw_attachments: list[dict],
+        *,
+        runnable_id: str = "",
+    ) -> Dict[str, Any] | None:
+        if not runnable_id and not text.strip().startswith("@"):
             return None
+        service = get_agent_runtime_service()
+        parsed = None if runnable_id else service.parse_known_chat_runnable(text)
+        if not runnable_id and parsed is None:
+            return None
+        name = parsed[0] if parsed else ""
+        user_goal = parsed[1] if parsed else text.strip()
         message_id = self._session.add_user_message(text, [])
-        pseudo_task_id = f"coding:{uuid4().hex[:10]}"
+        pseudo_task_id = f"agent:{uuid4().hex[:10]}"
         self._session.link_message_to_task(message_id, pseudo_task_id)
         if raw_attachments:
-            content = "Coding workflow 指令暂不支持附件。请把需求写在 /start-code 正文里，或先在普通对话中整理需求。"
+            content = "Agent/Workflow 运行入口暂不支持附件。请把附件内容先整理成文字，或使用普通对话发送图片。"
             assistant_id = self._session.add_assistant_message(content, task_id=pseudo_task_id)
             return {
                 "ok": True,
-                "coding_command": True,
+                "runnable_command": True,
                 "message_id": message_id,
                 "assistant_message_id": assistant_id,
                 "task_id": "",
                 "status": "completed",
-                "needs_config": False,
                 "error": content,
             }
-
-        service = get_coding_execution_service()
-        result = service.create_job_from_start_code(text)
-        if result is None:
-            return None
-        if result.get("ok") is not True:
-            content = str(result.get("error") or "Coding Job 创建失败")
+        if not user_goal:
+            content = "运行目标不能为空。请在 Agent/Workflow 名称后写明需求。"
             assistant_id = self._session.add_assistant_message(content, task_id=pseudo_task_id)
             return {
                 "ok": True,
-                "coding_command": True,
+                "runnable_command": True,
                 "message_id": message_id,
                 "assistant_message_id": assistant_id,
                 "task_id": "",
                 "status": "completed",
-                "needs_config": bool(result.get("needs_config")),
                 "error": content,
             }
 
-        job = result["job"]
+        try:
+            run = service.create_run_for_runnable(runnable_id=runnable_id, name=name, user_goal=user_goal)
+        except AgentRuntimeError as exc:
+            content = str(exc)
+            assistant_id = self._session.add_assistant_message(content, task_id=pseudo_task_id)
+            return {
+                "ok": True,
+                "runnable_command": True,
+                "message_id": message_id,
+                "assistant_message_id": assistant_id,
+                "task_id": "",
+                "status": "completed",
+                "error": content,
+            }
+
+        runnable = run.get("runnable") or {}
+        run_label = "WorkflowRun" if run.get("kind") == "workflow_run" else "AgentRun"
         content = (
-            "Coding Job 已创建，等待审批。\n\n"
-            f"- Job: `{job['job_id']}`\n"
-            f"- Status: `{job['status']}`\n"
-            f"- Repo: `{job['repo_path']}`\n"
-            f"- Branch: `{job['branch_name']}`\n\n"
-            "我已经打开 Coding 页面；真实 provider 执行仍需要你在页面里审批。"
+            f"{run_label} 已完成。\n\n"
+            f"- Runnable: `{runnable.get('name') or run.get('runnable_id')}`\n"
+            f"- Run: `{run['run_id']}`\n"
+            f"- Status: `{run['status']}`\n\n"
+            f"{run.get('result') or ''}"
         )
         assistant_id = self._session.add_assistant_message(content, task_id=pseudo_task_id)
-        return {
+        response: Dict[str, Any] = {
             "ok": True,
-            "coding_command": True,
+            "runnable_command": True,
             "message_id": message_id,
             "assistant_message_id": assistant_id,
             "task_id": "",
             "status": "completed",
-            "coding_job_id": job["job_id"],
-            "coding_job_status": job["status"],
-            "needs_config": False,
+            "run_id": run["run_id"],
+            "run_status": run["status"],
+        }
+        if run.get("kind") == "workflow_run":
+            response["workflow_run_id"] = run["run_id"]
+        else:
+            response["agent_run_id"] = run["run_id"]
+        return {
+            **response,
         }
 
     def _should_enforce_image_capability(self) -> bool:

@@ -16,6 +16,7 @@
     "node": ">=20.19.0"
   },
   "dependencies": {
+    "@xyflow/react": "^12.10.2",
     "node-pty": "^1.1.0"
   },
   "devDependencies": {

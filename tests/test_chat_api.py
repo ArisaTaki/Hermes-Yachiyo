@@ -14,7 +14,7 @@ import apps.core.chat_store as _store_mod
 from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID
 from apps.core.state import AppState
 import apps.shell.chat_api as chat_api_mod
-from apps.shell.coding_execution import CodingExecutionService
+from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.chat_api import ChatAPI
 from packages.protocol.enums import TaskStatus
 
@@ -49,19 +49,6 @@ def _make_api(tmp_path):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _RuntimeStub(store)
     return ChatAPI(runtime), runtime, store
-
-
-def _init_git_repo(path: Path) -> Path:
-    import subprocess
-
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init"], cwd=path, check=True, stdout=subprocess.DEVNULL)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=path, check=True)
-    subprocess.run(["git", "config", "user.name", "Test User"], cwd=path, check=True)
-    (path / "README.md").write_text("hello\n", encoding="utf-8")
-    subprocess.run(["git", "add", "."], cwd=path, check=True)
-    subprocess.run(["git", "commit", "-m", "init"], cwd=path, check=True, stdout=subprocess.DEVNULL)
-    return path
 
 
 def _chat_message(
@@ -102,29 +89,31 @@ def test_send_message_creates_task_and_links_user_message(tmp_path):
         store.close()
 
 
-def test_start_code_command_creates_coding_job_without_general_task(tmp_path, monkeypatch):
+def test_agent_mention_creates_agent_run_without_general_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
-    repo = _init_git_repo(tmp_path / "repo")
-    service = CodingExecutionService(
-        db_path=tmp_path / "coding.db",
-        workspace_dir=tmp_path / "coding-workspace",
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        seed_templates=False,
     )
-    service.update_config(
+    agent = service.create_agent(
         {
-            "default_repo_path": str(repo),
-            "default_provider": "mock",
-            "default_review_strategy": "manual_only",
+            "name": "Helper",
+            "description": "test helper",
+            "instructions": "Summarize requests.",
+            "model_mode": "follow_main",
         }
     )
-    monkeypatch.setattr(chat_api_mod, "get_coding_execution_service", lambda: service)
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
     try:
-        result = api.send_message("/start-code --scope . 修改一个小 UI 文案")
+        result = api.send_message("@Helper 做个总结")
         assert result["ok"] is True
-        assert result["coding_command"] is True
-        assert result["coding_job_id"]
+        assert result["runnable_command"] is True
+        assert result["agent_run_id"]
         assert runtime.state.list_tasks() == []
-        job = service.get_job(result["coding_job_id"])
-        assert job["status"] == "awaiting_approval"
+        run = service.get_run(result["agent_run_id"])
+        assert run["status"] == "completed"
+        assert run["runnable_id"] == agent["agent_id"]
         messages = runtime.chat_session.get_messages()
         assert messages[0].status == MessageStatus.COMPLETED
         assert messages[1].role == MessageRole.ASSISTANT
@@ -133,19 +122,41 @@ def test_start_code_command_creates_coding_job_without_general_task(tmp_path, mo
         store.close()
 
 
-def test_start_code_command_guides_to_defaults_when_repo_missing(tmp_path, monkeypatch):
+def test_selected_runnable_creates_agent_run_without_mention(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
-    service = CodingExecutionService(
-        db_path=tmp_path / "coding.db",
-        workspace_dir=tmp_path / "coding-workspace",
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        seed_templates=False,
     )
-    monkeypatch.setattr(chat_api_mod, "get_coding_execution_service", lambda: service)
+    agent = service.create_agent({"name": "Draft Agent", "model_mode": "follow_main"})
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
     try:
-        result = api.send_message("/start-code 修改一个小 UI 文案")
+        result = api.send_message("整理需求", runnable_id=agent["agent_id"])
         assert result["ok"] is True
-        assert result["coding_command"] is True
-        assert result["needs_config"] is True
-        assert "repo path" in result["error"]
+        assert result["runnable_command"] is True
+        assert result["agent_run_id"]
+        assert runtime.state.list_tasks() == []
+    finally:
+        service.close()
+        store.close()
+
+
+def test_agent_mention_supports_multiword_names(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        seed_templates=False,
+    )
+    agent = service.create_agent({"name": "Draft Agent", "model_mode": "follow_main"})
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    try:
+        result = api.send_message("@Draft Agent 整理需求")
+        assert result["ok"] is True
+        assert result["agent_run_id"]
+        run = service.get_run(result["agent_run_id"])
+        assert run["runnable_id"] == agent["agent_id"]
         assert runtime.state.list_tasks() == []
     finally:
         service.close()
