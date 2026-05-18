@@ -7368,7 +7368,7 @@ body.electron-window .hy-traffic {
 }
 
 .hy-content>.open-chat-shell {
-  min-height: 100%;
+  min-height: 0;
   padding: 0;
   grid-template-rows: minmax(0, 1fr);
 }
@@ -7376,6 +7376,7 @@ body.electron-window .hy-traffic {
 .hy-chat-workspace {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
   border: 1px solid var(--hy-border-soft);
   border-radius: var(--hy-radius-panel);
@@ -7387,6 +7388,8 @@ body.electron-window .hy-traffic {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   border-right: 1px solid var(--hy-border-soft);
   background:
     radial-gradient(circle at 38% 8%, oklch(72% 0.14 350 / 0.045), transparent 42%),
@@ -7480,6 +7483,7 @@ body.electron-window .hy-traffic {
 .hy-content .open-chat-shell .hy-chat-workspace {
   height: 100%;
   min-width: 0;
+  min-height: 0;
   border: 0;
   border-radius: 0;
   background: oklch(10.5% 0.025 260 / 0.78);
@@ -7492,6 +7496,8 @@ body.electron-window .hy-traffic {
 .hy-content .open-chat-shell .hy-chat-sessions {
   width: 280px;
   min-width: 220px;
+  min-height: 0;
+  overflow: hidden;
   background:
     radial-gradient(circle at 34% 0%, oklch(72% 0.14 350 / 0.06), transparent 44%),
     var(--hy-surface);
@@ -7583,6 +7589,9 @@ body.electron-window .hy-traffic {
   display: grid;
   align-content: start;
   gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 8px;
   background: transparent;
 }
@@ -7701,6 +7710,8 @@ body.electron-window .hy-traffic {
 
 .hy-content .open-chat-shell .hy-chat-mainpane {
   grid-template-rows: auto minmax(0, 1fr) auto auto;
+  min-height: 0;
+  overflow: hidden;
   background:
     radial-gradient(ellipse 54% 42% at 82% 2%, oklch(75% 0.095 205 / 0.04), transparent 64%),
     var(--hy-bg);
@@ -7838,6 +7849,7 @@ body.electron-window .hy-traffic {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 24px clamp(18px, 2.8vw, 40px);
   background:
     linear-gradient(180deg, oklch(10.5% 0.025 260 / 0.42), transparent 30%),
