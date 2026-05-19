@@ -66,7 +66,15 @@
 - 新建 Agent 会进入稳定的空白草稿；刷新逻辑不会再因为 `selectedAgentId` 为空自动选回第一个模板。
 - 保存 Agent / Workflow 后通过刷新参数保留刚保存的选中项；删除后保留空白草稿，方便继续创建。
 - Run 创建后显式选中新 Run；URL 中带来的 `run` 参数会被保留，允许详情补取。
-- 下一阶段应把 `hermes_profile`、`yachiyo_profile`、`external_cli` 从普通 select 改成带能力状态的执行后端卡片，明确哪些已可运行、哪些是实验/占位。
+- 执行后端成熟度表达已进入第二阶段，由普通 select 改成带能力状态的卡片。
+
+### Execution Backend 状态 UI
+
+- Agent 编辑页现在用三张卡片表达执行后端，而不是让用户从普通 select 里猜成熟度。
+- `Hermes Runtime` 显示为实验能力：当前默认产出 RunGroup 和上下文，不隐式启动额外 Hermes 会话。
+- `Yachiyo Profile` 显示为可运行路径：要求选择已经测试通过的 chat Profile，缺 Profile 时明确显示配置缺口。
+- `External CLI` 显示为占位能力：MVP 不提供 command 输入框，避免从前端提交任意 shell command。
+- 后端语义保持不变：这一步只让 UI 与当前 runtime 边界对齐，第三阶段再补 Agent 运行闭环和 Run/artifact 体验。
 
 ### TTS 与主动关怀入口
 
@@ -103,5 +111,5 @@
 3. 把 Xiaomi MiMo、OpenRouter、Gemini、DashScope、DeepSeek、MiniMax 等常用源的真实图片测试链路逐个手工验收。
 4. 完成 TTS API/HTTP/Command 的真实测试语义：TTS 不应只保存 profile id，还应能对 endpoint/voice/timeout/test text 做可证实的连接测试。
 5. 为 `yachiyo_profile` 补 ToolBroker：优先支持 OpenAI tool_calls；不支持 tool_calls 的模型走 JSON fallback。
-6. 设计 Agent Studio 第二阶段的执行后端状态 UI：Hermes Runtime / Yachiyo Profile / External CLI 分别展示成熟度、配置要求和下一步动作。
+6. 完成 Agent Studio 第三阶段的 MVP 运行闭环：Agent 快速运行、Skill 挂载反馈、Run detail/artifact 预览整理，以及 Workflow 最小保存/运行路径。
 7. 更新用户手册中的旧“主动关怀语音”命名，统一为“主动关怀与桌面观察”，并保留 GPT-SoVITS 作为该页内的本地 TTS 服务模块。

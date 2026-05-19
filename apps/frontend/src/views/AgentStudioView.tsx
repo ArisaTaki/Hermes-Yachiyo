@@ -99,6 +99,36 @@ const starterNodes: Node[] = [
   { id: 'start', type: 'input', position: { x: 40, y: 120 }, data: { label: 'Start', kind: 'start' } },
 ];
 
+const executionBackendOptions: Array<{
+  id: AgentDraft['execution_backend'];
+  label: string;
+  summary: string;
+  detail: string;
+  action: string;
+}> = [
+  {
+    id: 'hermes_profile',
+    label: 'Hermes Runtime',
+    summary: 'Hermes 工具链上下文',
+    detail: '默认创建 RunGroup 与 Agent 上下文；真实 Hermes CLI 执行需要后端开关。',
+    action: '使用 Hermes Runtime',
+  },
+  {
+    id: 'yachiyo_profile',
+    label: 'Yachiyo Profile',
+    summary: '直连已测试模型 Profile',
+    detail: 'MVP 推荐路径；使用模型配置中的可用 chat Profile 运行 Agent。',
+    action: '选择 Yachiyo Profile',
+  },
+  {
+    id: 'external_cli',
+    label: 'External CLI',
+    summary: '外部执行器预留入口',
+    detail: '仅保留 Agent 配置占位；MVP 暂不从 UI 提交外部命令。',
+    action: '保留占位',
+  },
+];
+
 function scopesToText(value: unknown): string {
   return Array.isArray(value) ? value.join(', ') : String(value || '');
 }
@@ -150,6 +180,18 @@ function workflowEdges(workflow: WorkflowSpec | null): Edge[] {
     source: edge.source,
     target: edge.target,
   }));
+}
+
+function executionBackendBadge(backend: AgentDraft['execution_backend'], chatProfileCount: number): string {
+  if (backend === 'yachiyo_profile') return chatProfileCount ? '可运行' : '需要 Profile';
+  if (backend === 'external_cli') return '占位';
+  return '实验';
+}
+
+function executionBackendTone(backend: AgentDraft['execution_backend'], chatProfileCount: number): string {
+  if (backend === 'yachiyo_profile') return chatProfileCount ? 'ready' : 'warn';
+  if (backend === 'external_cli') return 'muted';
+  return 'info';
 }
 
 export function AgentStudioView() {
@@ -306,6 +348,18 @@ export function AgentStudioView() {
     setSelectedWorkflowId(workflowId);
     setStatus('');
     setError('');
+  }
+
+  function chooseExecutionBackend(execution_backend: AgentDraft['execution_backend']) {
+    setDraft((current) => ({
+      ...current,
+      execution_backend,
+      model_mode: current.model_mode === 'custom_api'
+        ? 'custom_api'
+        : execution_backend === 'yachiyo_profile'
+          ? 'profile'
+          : 'follow_main',
+    }));
   }
 
   async function runAction(action: () => Promise<StudioRefreshOptions | void>, label: string) {
@@ -493,58 +547,56 @@ export function AgentStudioView() {
               <span>Instructions</span>
               <textarea className="hy-input agent-textarea" value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} />
             </label>
-            <div className="agent-form-row">
-              <label>
-                <span>Execution Backend</span>
-                <select
-                  className="hy-select"
-                  value={draft.execution_backend}
-                  onChange={(event) => {
-                    const execution_backend = event.target.value as AgentDraft['execution_backend'];
-                    setDraft({
-                      ...draft,
-                      execution_backend,
-                      model_mode: draft.model_mode === 'custom_api'
-                        ? 'custom_api'
-                        : execution_backend === 'yachiyo_profile'
-                          ? 'profile'
-                          : 'follow_main',
-                    });
-                  }}
-                >
-                  <option value="hermes_profile">Hermes profile</option>
-                  <option value="yachiyo_profile">Yachiyo Profile</option>
-                  <option value="external_cli">External CLI</option>
-                </select>
-              </label>
-              {draft.model_mode === 'custom_api' ? (
-                <label><span>Model</span><input className="hy-input" value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} placeholder="gpt-4.1-mini" /></label>
-              ) : draft.execution_backend === 'yachiyo_profile' ? (
-                <label>
-                  <span>Model Profile</span>
-                  <select className="hy-select" value={draft.model_profile_id} onChange={(event) => setDraft({ ...draft, model_profile_id: event.target.value })}>
-                    <option value="">选择已保存模型组</option>
-                    {chatModelProfiles.map((profile) => (
-                      <option key={profile.profile_id} value={profile.profile_id}>
-                        {profile.name} · {profile.model || profile.provider}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : draft.execution_backend === 'external_cli' ? (
-                <label><span>External CLI</span><span className="agent-inline-note">CLI 执行器入口已预留，具体 Codex / Claude Code / OpenDesign 适配将在后续配置中接入。</span></label>
-              ) : (
-                <label><span>Hermes Profile</span><button type="button" className="hy-btn hy-btn-ghost" onClick={() => openAppView('provider')}>管理主模型</button></label>
-              )}
-            </div>
+            <section className="agent-backend-section" aria-label="Execution Backend">
+              <div className="section-heading-row compact">
+                <h3>Execution Backend</h3>
+              </div>
+              <div className="agent-backend-grid">
+                {executionBackendOptions.map((option) => {
+                  const active = draft.execution_backend === option.id;
+                  const tone = executionBackendTone(option.id, chatModelProfiles.length);
+                  return (
+                    <button
+                      type="button"
+                      className={`agent-backend-card ${tone} ${active ? 'active' : ''}`}
+                      key={option.id}
+                      onClick={() => chooseExecutionBackend(option.id)}
+                    >
+                      <span className="agent-backend-card-top">
+                        <strong>{option.label}</strong>
+                        <em>{executionBackendBadge(option.id, chatModelProfiles.length)}</em>
+                      </span>
+                      <span>{option.summary}</span>
+                      <small>{option.detail}</small>
+                      <b>{active ? '当前选择' : option.action}</b>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="agent-backend-fields">
+                {draft.model_mode === 'custom_api' ? (
+                  <label><span>Model</span><input className="hy-input" value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} placeholder="gpt-4.1-mini" /></label>
+                ) : draft.execution_backend === 'yachiyo_profile' ? (
+                  <label>
+                    <span>Chat Profile</span>
+                    <select className="hy-select" value={draft.model_profile_id} onChange={(event) => setDraft({ ...draft, model_profile_id: event.target.value })}>
+                      <option value="">选择已保存模型组</option>
+                      {chatModelProfiles.map((profile) => (
+                        <option key={profile.profile_id} value={profile.profile_id}>
+                          {profile.name} · {profile.model || profile.provider}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : draft.execution_backend === 'external_cli' ? (
+                  <div className="agent-inline-note">External CLI 只保留配置占位；后续会接入受控 adapter，而不是从 UI 直接提交任意 shell 命令。</div>
+                ) : (
+                  <label><span>Hermes Runtime</span><button type="button" className="hy-btn hy-btn-ghost" onClick={() => openAppView('provider')}>管理主模型</button></label>
+                )}
+              </div>
+            </section>
             {draft.execution_backend === 'yachiyo_profile' && !chatModelProfiles.length ? (
               <div className="notice">还没有可用的文本模型组。请先在模型配置页面新建并测试。</div>
-            ) : null}
-            {draft.execution_backend === 'hermes_profile' ? (
-              <div className="notice">Hermes profile 后端由 Yachiyo 创建 RunGroup 并交给 Hermes 主运行时能力链路；适合需要 Hermes 工具、联网和委派能力的 Agent。</div>
-            ) : null}
-            {draft.execution_backend === 'yachiyo_profile' ? (
-              <div className="notice">Yachiyo Profile 后端直连已测试通过的模型，并使用 Yachiyo 自己的 Skills、Workflow 和受控 ToolBroker。</div>
             ) : null}
             <div className="agent-form-row">
               <label>

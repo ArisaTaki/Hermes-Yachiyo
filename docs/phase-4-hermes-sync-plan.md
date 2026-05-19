@@ -106,6 +106,15 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - Run 创建后显式选中新 Run；通过 URL 打开的历史 Run ID 会继续保留并触发详情补取，不会被最近 Run 列表覆盖。
 - 加载状态与操作状态拆分：初次读取显示“正在读取 Agent Studio...”，保存/删除/导入/运行等操作使用局部 action 状态，不再因为切换列表项造成页面闪烁。
 
+### Batch 9：Execution Backend 状态 UI
+
+- Agent 编辑页的 `Execution Backend` 从普通下拉改为三张能力状态卡片。
+- `Hermes Runtime` 标注为实验：默认创建 RunGroup 与 Agent 上下文，真实 Hermes CLI 执行需要后端开关。
+- `Yachiyo Profile` 标注为 MVP 推荐/可运行路径：直连模型配置中已经测试通过的 `chat` Profile；没有可用 Profile 时显示“需要 Profile”。
+- `External CLI` 标注为占位：保留 Codex / Claude Code / OpenDesign daemon 等后续 adapter 入口，但 MVP 不从 UI 提交任意 shell command。
+- 选择 `Yachiyo Profile` 后只展示 `Chat Profile` 选择器；选择 `Hermes Runtime` 后展示主模型管理入口；选择 `External CLI` 后仅展示占位说明。
+- 这一步只改变能力表达与选择体验，不改变后端执行语义；下一步再补 Agent 快速运行、Skill 挂载反馈和 Run/artifact 体验闭环。
+
 ## 新增接口
 
 - `GET/POST /ui/model-profiles`

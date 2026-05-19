@@ -2,6 +2,16 @@
 
 ## 已完成
 
+### Milestone 82 — Agent Studio Execution Backend 状态 UI
+
+- ✅ Agent 编辑页的 `Execution Backend` 已从普通下拉改为三张能力状态卡片。
+- ✅ `Hermes Runtime` 明确标注为实验能力：当前默认创建 RunGroup 与上下文，真实 Hermes CLI 执行需要显式后端开关。
+- ✅ `Yachiyo Profile` 明确标注为可运行路径：依赖模型配置中已经测试通过的 chat Profile；无可用 Profile 时显示“需要 Profile”。
+- ✅ `External CLI` 明确标注为占位能力：MVP 不暴露 command 输入，避免从 UI 提交任意 shell 命令。
+- ✅ Backend 选择后的下方配置区按当前能力切换：Hermes 显示主模型管理入口，Yachiyo 显示 Chat Profile 选择器，External CLI 显示占位说明。
+- ✅ 阶段说明已补入 `docs/phase-4-hermes-sync-plan.md` 与 `docs/model-profile-runtime-notes.md`。
+- ✅ 验证：`npm --prefix apps/frontend run build` passed；`python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_model_profiles.py` → 75 passed；本地浏览器验证 backend 卡片切换、Yachiyo Profile 字段和 External CLI 无命令输入入口。
+
 ### Milestone 81 — Agent Studio 第一阶段稳定化
 
 - ✅ Agent Studio 选择态已从数据刷新依赖中拆出：切换 Agent / Workflow 不再触发全页重新读取、`busy` notice 或表单闪烁。

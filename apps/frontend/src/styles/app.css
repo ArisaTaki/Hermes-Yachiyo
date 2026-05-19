@@ -12391,6 +12391,123 @@ button.activity-item {
   gap: 10px;
 }
 
+.agent-backend-section {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agent-studio-panel .section-heading-row.compact {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.agent-backend-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.agent-backend-card {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 154px;
+  padding: 12px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+  color: var(--hy-subtle);
+  text-align: left;
+}
+
+.agent-backend-card.active {
+  border-color: oklch(66% 0.12 188 / 0.42);
+  background: oklch(66% 0.12 188 / 0.1);
+  box-shadow: inset 0 0 0 1px oklch(66% 0.12 188 / 0.12);
+}
+
+.agent-backend-card.ready.active {
+  border-color: oklch(68% 0.15 155 / 0.42);
+  background: oklch(68% 0.15 155 / 0.1);
+}
+
+.agent-backend-card.warn.active {
+  border-color: oklch(78% 0.14 80 / 0.42);
+  background: oklch(78% 0.14 80 / 0.1);
+}
+
+.agent-backend-card.muted {
+  color: var(--hy-faint);
+}
+
+.agent-backend-card:hover {
+  border-color: oklch(66% 0.12 188 / 0.34);
+  color: var(--hy-fg);
+}
+
+.agent-backend-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.agent-backend-card strong {
+  color: var(--hy-fg);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.agent-backend-card em {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 3px 7px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  background: oklch(255 0 0 / 0.035);
+  color: var(--hy-muted);
+  font-size: 10px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.agent-backend-card.ready em {
+  border-color: oklch(68% 0.15 155 / 0.26);
+  color: oklch(78% 0.11 155);
+}
+
+.agent-backend-card.warn em {
+  border-color: oklch(78% 0.14 80 / 0.3);
+  color: oklch(86% 0.11 76);
+}
+
+.agent-backend-card span:not(.agent-backend-card-top) {
+  color: var(--hy-muted);
+  font-size: 12px;
+  line-height: 1.42;
+}
+
+.agent-backend-card small {
+  color: var(--hy-faint);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.agent-backend-card b {
+  align-self: end;
+  color: var(--hy-subtle);
+  font-size: 11px;
+  font-weight: 560;
+}
+
+.agent-backend-fields {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
 .agent-inline-note {
   display: block;
   min-height: 38px;
@@ -13767,6 +13884,7 @@ button.activity-item {
   .agent-studio-grid,
   .workflow-studio-grid,
   .agent-form-row,
+  .agent-backend-grid,
   .model-profile-layout,
   .model-provider-layout,
   .model-provider-grid,
