@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import zipfile
 
 import pytest
@@ -15,6 +16,37 @@ def make_service(tmp_path, *, seed_templates: bool = False) -> AgentRuntimeServi
         workspace_dir=tmp_path / "runtime",
         seed_templates=seed_templates,
     )
+
+
+def test_runtime_migrates_legacy_runs_before_index_creation(tmp_path):
+    db_path = tmp_path / "agent-runtime.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            runnable_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            user_goal TEXT NOT NULL DEFAULT '',
+            result TEXT NOT NULL DEFAULT '',
+            timeline_json TEXT NOT NULL DEFAULT '[]',
+            artifacts_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+    conn.close()
+
+    service = make_service(tmp_path)
+    try:
+        columns = {row["name"] for row in service._conn.execute("PRAGMA table_info(runs)").fetchall()}
+        assert "run_group_id" in columns
+        indexes = {row["name"] for row in service._conn.execute("PRAGMA index_list(runs)").fetchall()}
+        assert "idx_runs_group_updated" in indexes
+    finally:
+        service.close()
 
 
 def test_agent_crud_and_api_key_redaction(tmp_path):

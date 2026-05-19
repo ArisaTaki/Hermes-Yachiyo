@@ -312,6 +312,11 @@ class AgentRuntimeService:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            """
+        )
+        self._ensure_runtime_columns()
+        self._conn.executescript(
+            """
             CREATE INDEX IF NOT EXISTS idx_agents_name ON agents (LOWER(name));
             CREATE INDEX IF NOT EXISTS idx_workflows_name ON workflows (LOWER(name));
             CREATE INDEX IF NOT EXISTS idx_run_groups_status_updated ON run_groups (status, updated_at);
@@ -319,7 +324,6 @@ class AgentRuntimeService:
             CREATE INDEX IF NOT EXISTS idx_runs_kind_updated ON runs (kind, updated_at);
             """
         )
-        self._ensure_runtime_columns()
         self._conn.commit()
 
     def _ensure_runtime_columns(self) -> None:
