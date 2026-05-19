@@ -117,6 +117,106 @@ def test_model_profile_test_updates_status(monkeypatch, tmp_path):
         service.close()
 
 
+def test_test_and_save_profile_failure_does_not_persist(monkeypatch, tmp_path):
+    service = make_profile_service(tmp_path)
+    source = service.create_source(
+        {
+            "name": "Gateway",
+            "provider": "openai_compatible",
+            "base_url": "https://api.example.test/v1",
+            "api_key": "sk-source-secret",
+        }
+    )
+
+    def fail_chat(*_args, **_kwargs):
+        raise ModelProfileError("network failed")
+
+    monkeypatch.setattr("apps.shell.model_profiles.openai_compatible_chat", fail_chat)
+    try:
+        result = service.test_and_save_profile(
+            source["source_id"],
+            {"name": "Draft", "capability": "chat", "model": "demo-model"},
+        )
+
+        assert result["ok"] is False
+        assert service.list_profiles()["profiles"] == []
+    finally:
+        service.close()
+
+
+def test_vision_profile_requires_remote_image_metadata(monkeypatch, tmp_path):
+    service = make_profile_service(tmp_path)
+    source = service.create_source(
+        {
+            "name": "OpenRouter",
+            "provider": "openrouter",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "sk-source-secret",
+        }
+    )
+    calls = []
+    monkeypatch.setattr("apps.shell.model_profiles.openai_compatible_chat", lambda *args, **kwargs: calls.append((args, kwargs)) or "OK")
+    try:
+        result = service.test_and_save_profile(
+            source["source_id"],
+            {
+                "name": "Text Only",
+                "capability": "vision",
+                "model": "qwen/qwen3-coder",
+                "options": {"remote_model": {"id": "qwen/qwen3-coder", "input_modalities": ["text"]}},
+            },
+        )
+
+        assert result["ok"] is False
+        assert "image 输入" in result["message"]
+        assert calls == []
+        assert service.list_profiles()["profiles"] == []
+    finally:
+        service.close()
+
+
+def test_vision_profile_test_uses_image_payload_and_saves(monkeypatch, tmp_path):
+    service = make_profile_service(tmp_path)
+    source = service.create_source(
+        {
+            "name": "OpenRouter",
+            "provider": "openrouter",
+            "base_url": "https://openrouter.ai/api/v1",
+            "api_key": "sk-source-secret",
+        }
+    )
+    calls = []
+
+    def fake_chat(base_url, model, api_key, messages):
+        calls.append((base_url, model, api_key, messages))
+        return "OK"
+
+    monkeypatch.setattr("apps.shell.model_profiles.openai_compatible_chat", fake_chat)
+    try:
+        result = service.test_and_save_profile(
+            source["source_id"],
+            {
+                "name": "Vision",
+                "capability": "vision",
+                "model": "openai/gpt-4.1-mini",
+                "options": {
+                    "remote_model": {
+                        "id": "openai/gpt-4.1-mini",
+                        "input_modalities": ["text", "image"],
+                        "output_modalities": ["text"],
+                    }
+                },
+            },
+        )
+
+        assert result["ok"] is True
+        assert result["profile"]["status"] == "available"
+        assert result["profile"]["options"]["remote_model"]["input_modalities"] == ["text", "image"]
+        assert calls[0][3][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    finally:
+        service.close()
+
+
 def test_fetch_source_models_reads_openai_compatible_list(monkeypatch, tmp_path):
     service = make_profile_service(tmp_path)
     source = service.create_source(
@@ -244,6 +344,7 @@ def test_agent_runtime_uses_model_profile(monkeypatch, tmp_path):
             "api_key": "sk-secret",
         }
     )
+    profile_service._record_test_result(profile["profile_id"], ok=True, message="OK")
     monkeypatch.setattr("apps.shell.agent_runtime.get_model_profile_service", lambda: profile_service)
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "Profile result")
     try:
@@ -286,6 +387,7 @@ def test_agent_runtime_uses_openai_compatible_provider_source_profile(monkeypatc
             "model": "mimo-v2.5-pro",
         }
     )
+    profile_service._record_test_result(profile["profile_id"], ok=True, message="OK")
     monkeypatch.setattr("apps.shell.agent_runtime.get_model_profile_service", lambda: profile_service)
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "MiMo result")
     try:

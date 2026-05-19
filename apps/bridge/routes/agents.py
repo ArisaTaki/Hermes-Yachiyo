@@ -24,6 +24,7 @@ class AgentRequest(BaseModel):
     instructions: str | None = Field(default=None, max_length=60000)
     model_mode: str | None = Field(default=None, max_length=40)
     model_profile_id: str | None = Field(default=None, max_length=160)
+    vision_model_profile_id: str | None = Field(default=None, max_length=160)
     model_config_data: dict[str, Any] | None = Field(default=None, alias="model_config")
     tool_policy: dict[str, Any] | None = None
     workspace_policy: dict[str, Any] | None = None

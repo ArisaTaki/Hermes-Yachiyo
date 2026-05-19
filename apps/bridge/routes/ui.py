@@ -105,6 +105,8 @@ class TerminalCommandRequest(BaseModel):
 
 
 class HermesConfigUpdateRequest(BaseModel):
+    chat_profile_id: str | None = None
+    vision_profile_id: str | None = None
     provider: str = ""
     model: str = ""
     base_url: str = ""

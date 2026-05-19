@@ -239,6 +239,7 @@ class AgentRuntimeService:
                 instructions TEXT NOT NULL DEFAULT '',
                 model_mode TEXT NOT NULL DEFAULT 'follow_main',
                 model_profile_id TEXT NOT NULL DEFAULT '',
+                vision_model_profile_id TEXT NOT NULL DEFAULT '',
                 model_provider TEXT NOT NULL DEFAULT 'openai_compatible',
                 model_base_url TEXT NOT NULL DEFAULT '',
                 model_name TEXT NOT NULL DEFAULT '',
@@ -297,6 +298,8 @@ class AgentRuntimeService:
         columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(agents)").fetchall()}
         if "model_profile_id" not in columns:
             self._conn.execute("ALTER TABLE agents ADD COLUMN model_profile_id TEXT NOT NULL DEFAULT ''")
+        if "vision_model_profile_id" not in columns:
+            self._conn.execute("ALTER TABLE agents ADD COLUMN vision_model_profile_id TEXT NOT NULL DEFAULT ''")
 
     def _seed_templates(self) -> None:
         count = self._conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
@@ -445,6 +448,7 @@ class AgentRuntimeService:
             "instructions": row["instructions"],
             "model_mode": row["model_mode"],
             "model_profile_id": row["model_profile_id"],
+            "vision_model_profile_id": row["vision_model_profile_id"],
             "model_config": {
                 "provider": row["model_provider"],
                 "base_url": row["model_base_url"],
@@ -533,6 +537,30 @@ class AgentRuntimeService:
         if workflow and workflow["workflow_id"] != ignore_workflow_id:
             raise AgentRuntimeError("Agent/Workflow 名称必须全局唯一")
 
+    @staticmethod
+    def _validate_available_profile(profile_id: str, capability: str) -> dict[str, Any]:
+        try:
+            profile = get_model_profile_service().get_profile(profile_id)
+        except KeyError as exc:
+            raise AgentRuntimeError("Agent 引用的模型 Profile 不存在") from exc
+        if str(profile.get("capability") or "") != capability:
+            raise AgentRuntimeError(f"Agent 引用的 {capability} 模型 Profile 类型不匹配")
+        if str(profile.get("status") or "") != "available":
+            raise AgentRuntimeError("Agent 只能引用已通过连接测试的模型 Profile")
+        if not profile.get("enabled", True):
+            raise AgentRuntimeError("Agent 引用的模型 Profile 已停用")
+        return profile
+
+    def _validate_agent_profile_refs(self, payload: dict[str, Any]) -> None:
+        if str(payload.get("model_mode") or "follow_main") == "profile":
+            profile_id = str(payload.get("model_profile_id") or "").strip()
+            if not profile_id:
+                raise AgentRuntimeError("请选择已通过测试的 Agent 文本模型 Profile")
+            self._validate_available_profile(profile_id, "chat")
+        vision_profile_id = str(payload.get("vision_model_profile_id") or "").strip()
+        if vision_profile_id:
+            self._validate_available_profile(vision_profile_id, "vision")
+
     def list_agents(self) -> dict[str, Any]:
         rows = self._conn.execute("SELECT * FROM agents ORDER BY category, name").fetchall()
         return {"ok": True, "agents": [self._row_to_agent(row) for row in rows]}
@@ -552,6 +580,7 @@ class AgentRuntimeService:
     def create_agent(self, payload: dict[str, Any], *, seed: bool = False) -> dict[str, Any]:
         name = str(payload.get("name") or "").strip()
         self._ensure_global_name_available(name)
+        self._validate_agent_profile_refs(payload)
         now = _now()
         agent_id = str(payload.get("agent_id") or f"agent_{_slug(name, 'agent')}_{uuid4().hex[:8]}")
         model_config = payload.get("model_config") or {}
@@ -560,10 +589,10 @@ class AgentRuntimeService:
             """
             INSERT INTO agents (
                 agent_id, name, description, avatar_url, category, instructions,
-                model_mode, model_profile_id, model_provider, model_base_url, model_name, model_api_key,
+                model_mode, model_profile_id, vision_model_profile_id, model_provider, model_base_url, model_name, model_api_key,
                 tool_policy_json, workspace_policy_json, skill_ids_json, output_contract,
                 enabled, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 agent_id,
@@ -574,6 +603,7 @@ class AgentRuntimeService:
                 str(payload.get("instructions") or ""),
                 str(payload.get("model_mode") or "follow_main"),
                 str(payload.get("model_profile_id") or ""),
+                str(payload.get("vision_model_profile_id") or ""),
                 str(model_config.get("provider") or "openai_compatible"),
                 str(model_config.get("base_url") or ""),
                 str(model_config.get("model") or ""),
@@ -595,6 +625,7 @@ class AgentRuntimeService:
         if "name" in payload:
             self._ensure_global_name_available(str(payload.get("name") or ""), ignore_agent_id=agent_id)
         next_agent = {**current, **{key: value for key, value in payload.items() if key not in {"model_config"}}}
+        self._validate_agent_profile_refs(next_agent)
         model_config = {**current.get("model_config", {}), **(payload.get("model_config") or {})}
         api_key = str(model_config.get("api_key") or "")
         if "model_config" in payload and "api_key" not in payload.get("model_config", {}):
@@ -607,7 +638,7 @@ class AgentRuntimeService:
             """
             UPDATE agents
                SET name=?, description=?, avatar_url=?, category=?, instructions=?,
-                   model_mode=?, model_profile_id=?, model_provider=?, model_base_url=?, model_name=?, model_api_key=?,
+                   model_mode=?, model_profile_id=?, vision_model_profile_id=?, model_provider=?, model_base_url=?, model_name=?, model_api_key=?,
                    tool_policy_json=?, workspace_policy_json=?, skill_ids_json=?, output_contract=?,
                    enabled=?, updated_at=?
              WHERE agent_id=?
@@ -620,6 +651,7 @@ class AgentRuntimeService:
                 str(next_agent.get("instructions") or ""),
                 str(next_agent.get("model_mode") or "follow_main"),
                 str(next_agent.get("model_profile_id") or ""),
+                str(next_agent.get("vision_model_profile_id") or ""),
                 str(model_config.get("provider") or "openai_compatible"),
                 str(model_config.get("base_url") or ""),
                 str(model_config.get("model") or ""),
@@ -1072,10 +1104,12 @@ class AgentRuntimeService:
                 raise AgentRuntimeError("Agent 引用的模型 Profile 不存在") from exc
             if not profile.get("enabled", True):
                 raise AgentRuntimeError("Agent 引用的模型 Profile 已停用")
+            if str(profile.get("status") or "") != "available":
+                raise AgentRuntimeError("Agent 引用的模型 Profile 尚未通过连接测试")
             if not supports_openai_compatible_api(str(profile.get("provider") or "openai_compatible")):
                 raise AgentRuntimeError("Agent Runtime 首版仅支持 OpenAI-compatible 模型 Profile")
-            if str(profile.get("capability") or "chat") not in {"chat", "vision"}:
-                raise AgentRuntimeError("Agent 运行需要 chat 或 vision 模型 Profile")
+            if str(profile.get("capability") or "chat") != "chat":
+                raise AgentRuntimeError("Agent 文本推理需要 chat 模型 Profile")
             return {
                 "provider": profile.get("provider") or "openai_compatible",
                 "base_url": profile.get("base_url") or "",
@@ -1119,8 +1153,23 @@ class AgentRuntimeService:
 
     def test_agent_model(self, agent_id: str) -> dict[str, Any]:
         agent = self._get_agent_private(agent_id)
+        vision_profile_id = str(agent.get("vision_model_profile_id") or "").strip()
+        vision_result: dict[str, Any] | None = None
+        if vision_profile_id:
+            try:
+                vision_result = get_model_profile_service().test_profile(vision_profile_id)
+            except KeyError as exc:
+                raise AgentRuntimeError("Agent 引用的图片识别 Profile 不存在") from exc
+            if not vision_result.get("ok"):
+                vision_result["mode"] = "vision_profile"
+                return vision_result
         if agent.get("model_mode") == "follow_main":
-            return {"ok": True, "mode": "follow_main", "message": "Agent 将跟随主模型配置。"}
+            return {
+                "ok": True,
+                "mode": "follow_main",
+                "message": "Agent 将跟随主模型配置。"
+                + (" 图片识别 Profile 测试通过。" if vision_result else ""),
+            }
         profile_id = str(agent.get("model_profile_id") or "").strip()
         if profile_id:
             try:
@@ -1128,6 +1177,8 @@ class AgentRuntimeService:
             except KeyError as exc:
                 raise AgentRuntimeError("Agent 引用的模型 Profile 不存在") from exc
             result["mode"] = "profile"
+            if result.get("ok") and vision_result:
+                result["message"] = f"{result.get('message') or '文本模型测试通过'}；图片识别 Profile 测试通过。"
             return result
         model_config = agent.get("model_config") or {}
         missing = [

@@ -11,6 +11,7 @@ export type AgentSpec = {
   instructions?: string;
   model_mode: AgentModelMode;
   model_profile_id?: string;
+  vision_model_profile_id?: string;
   model_config: {
     provider?: 'openai_compatible' | string;
     base_url?: string;

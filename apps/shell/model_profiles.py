@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import time
 from datetime import datetime, timezone
@@ -147,6 +148,46 @@ def _pricing_is_free(pricing: dict[str, Any]) -> bool:
         return float(str(pricing.get("prompt", "0") or "0")) == 0 and float(str(pricing.get("completion", "0") or "0")) == 0
     except ValueError:
         return False
+
+
+_VISION_TEST_IMAGE_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
+
+
+def _remote_model_from_options(options: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(options, dict):
+        return {}
+    remote_model = options.get("remote_model")
+    return remote_model if isinstance(remote_model, dict) else {}
+
+
+def _remote_model_supports_vision(remote_model: dict[str, Any], model_id: str) -> bool:
+    if not remote_model:
+        return False
+    remote_id = str(remote_model.get("id") or remote_model.get("model") or "").strip()
+    if remote_id and remote_id != model_id:
+        return False
+    input_modalities = {
+        str(item).strip().lower()
+        for item in remote_model.get("input_modalities", [])
+        if str(item).strip()
+    }
+    modality = str(remote_model.get("modality") or "").strip().lower()
+    return "image" in input_modalities or bool(re.search(r"\bimage\b|vision|multimodal", modality))
+
+
+def _vision_test_messages() -> list[dict[str, Any]]:
+    return [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Reply with OK if you can inspect this image."},
+                {"type": "image_url", "image_url": {"url": _VISION_TEST_IMAGE_DATA_URL}},
+            ],
+        }
+    ]
 
 
 class ModelProfileService:
@@ -598,6 +639,34 @@ class ModelProfileService:
         self._conn.commit()
         return self.get_profile(profile_id)
 
+    def test_and_save_profile(self, source_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        source = self.get_source_private(source_id)
+        test_result = self._test_profile_payload(source, payload)
+        if not test_result.get("ok"):
+            return test_result
+
+        profile_payload = {
+            **payload,
+            "source_id": source_id,
+            "provider": source.get("provider") or payload.get("provider") or "openai_compatible",
+            "base_url": source.get("base_url") or payload.get("base_url") or "",
+        }
+        try:
+            if str(payload.get("profile_id") or "").strip():
+                profile = self.update_profile(str(payload["profile_id"]), profile_payload)
+            else:
+                profile = self.create_profile(profile_payload)
+        except sqlite3.IntegrityError as exc:
+            raise ModelProfileError("Profile 名称必须唯一") from exc
+        result = self._record_test_result(
+            profile["profile_id"],
+            ok=True,
+            message=str(test_result.get("message") or "OK"),
+            extra={"latency_ms": test_result.get("latency_ms")},
+        )
+        result["created"] = not bool(str(payload.get("profile_id") or "").strip())
+        return result
+
     def get_profile(self, profile_id: str) -> dict[str, Any]:
         row = self._conn.execute("SELECT * FROM model_profiles WHERE profile_id=?", (profile_id,)).fetchone()
         if row is None:
@@ -657,48 +726,68 @@ class ModelProfileService:
 
     def test_profile(self, profile_id: str) -> dict[str, Any]:
         profile = self.get_profile_private(profile_id)
-        capability = str(profile.get("capability") or "chat")
-        provider = str(profile.get("provider") or "openai_compatible")
+        result = self._test_profile_payload(
+            {
+                "provider": profile.get("provider"),
+                "base_url": profile.get("base_url"),
+                "api_key": profile.get("api_key"),
+            },
+            profile,
+        )
+        return self._record_test_result(
+            profile_id,
+            ok=bool(result.get("ok")),
+            message=str(result.get("message") or ""),
+            extra={
+                key: value
+                for key, value in result.items()
+                if key not in {"ok", "success", "message"}
+            },
+        )
+
+    def _test_profile_payload(self, source: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+        capability = _normalize_capability(str(payload.get("capability") or "chat"))
+        provider = str(source.get("provider") or payload.get("provider") or "openai_compatible")
+        base_url = str(source.get("base_url") or payload.get("base_url") or "").strip()
+        api_key = str(source.get("api_key") or payload.get("api_key") or "").strip()
+        model = str(payload.get("model") or "").strip()
         if not _supports_openai_compatible_api(provider):
-            return self._record_test_result(
-                profile_id,
-                ok=False,
-                message="首版仅支持 OpenAI-compatible Profile 的自动测试。",
-            )
+            return {"ok": False, "success": False, "message": "首版仅支持 OpenAI-compatible Profile 的自动测试。"}
         if capability == "tts":
-            return self._record_test_result(
-                profile_id,
-                ok=False,
-                message="TTS Profile 首版只做保存与复用，连接测试会在 TTS 专用链路中补齐。",
-            )
+            return {"ok": False, "success": False, "message": "TTS Profile 首版只做保存与复用，连接测试会在 TTS 专用链路中补齐。"}
         missing = [
             key
-            for key in ("base_url", "model", "api_key")
-            if not str(profile.get(key) or "").strip()
+            for key, value in (("base_url", base_url), ("model", model), ("api_key", api_key))
+            if not value
         ]
         if missing:
-            return self._record_test_result(
-                profile_id,
-                ok=False,
-                message="Profile 配置不完整。",
-                extra={"missing": missing},
-            )
+            return {"ok": False, "success": False, "message": "Profile 配置不完整。", "missing": missing}
+        messages: list[dict[str, Any]] = [{"role": "user", "content": "Reply with OK."}]
+        if capability == "vision":
+            remote_model = _remote_model_from_options(payload.get("options") if isinstance(payload.get("options"), dict) else {})
+            if not _remote_model_supports_vision(remote_model, model):
+                return {
+                    "ok": False,
+                    "success": False,
+                    "message": "图片识别模型必须先从远端模型列表确认支持 image 输入。",
+                }
+            messages = _vision_test_messages()
         started = time.time()
         try:
             result = openai_compatible_chat(
-                str(profile["base_url"]).rstrip("/"),
-                str(profile["model"]),
-                str(profile["api_key"]),
-                [{"role": "user", "content": "Reply with OK."}],
+                base_url.rstrip("/"),
+                model,
+                api_key,
+                messages,
             )
         except ModelProfileError as exc:
-            return self._record_test_result(profile_id, ok=False, message=str(exc))
-        return self._record_test_result(
-            profile_id,
-            ok=True,
-            message=result[:500] or "OK",
-            extra={"latency_ms": int((time.time() - started) * 1000)},
-        )
+            return {"ok": False, "success": False, "message": str(exc)}
+        return {
+            "ok": True,
+            "success": True,
+            "message": result[:500] or "OK",
+            "latency_ms": int((time.time() - started) * 1000),
+        }
 
     def _record_test_result(
         self,
@@ -724,7 +813,7 @@ class ModelProfileService:
         return payload
 
 
-def openai_compatible_chat(base_url: str, model: str, api_key: str, messages: list[dict[str, str]]) -> str:
+def openai_compatible_chat(base_url: str, model: str, api_key: str, messages: list[dict[str, Any]]) -> str:
     url = f"{base_url.rstrip('/')}/chat/completions"
     body = json.dumps({"model": model, "messages": messages, "temperature": 0.2}).encode("utf-8")
     request = urlrequest.Request(

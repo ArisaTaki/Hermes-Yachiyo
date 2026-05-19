@@ -131,6 +131,17 @@ export async function createModelProfile(request: ModelProfileRequest): Promise<
   return apiPost('/ui/model-profiles', request);
 }
 
+export async function testAndSaveModelProfile(sourceId: string, request: ModelProfileRequest & { profile_id?: string }): Promise<{
+  ok?: boolean;
+  success?: boolean;
+  message?: string;
+  missing?: string[];
+  latency_ms?: number;
+  profile?: ModelProfile;
+}> {
+  return apiPost(`/ui/model-sources/${encodeURIComponent(sourceId)}/models/test-and-save`, request);
+}
+
 export async function updateModelProfile(profileId: string, request: ModelProfileRequest): Promise<ModelProfile> {
   return apiPatch(`/ui/model-profiles/${encodeURIComponent(profileId)}`, request);
 }
@@ -152,4 +163,12 @@ export async function testModelProfile(profileId: string): Promise<{
 
 export async function updateModelProfileDefaults(defaults: ModelProfileDefaults): Promise<{ ok?: boolean; defaults?: ModelProfileDefaults }> {
   return apiPatch('/ui/model-profiles/defaults', defaults);
+}
+
+export async function syncHermesProfileDefault(capability: Extract<ModelCapability, 'chat' | 'vision'>, profileId: string): Promise<{
+  ok?: boolean;
+  error?: string;
+  message?: string;
+}> {
+  return apiPost('/ui/hermes/config', capability === 'chat' ? { chat_profile_id: profileId } : { vision_profile_id: profileId });
 }

@@ -144,6 +144,22 @@ async def create_model_source_profile(source_id: str, request: ModelProfileReque
         raise _bad_request(exc) from exc
 
 
+@router.post("/model-sources/{source_id}/models/test-and-save")
+async def test_and_save_model_source_profile(source_id: str, request: ModelProfileRequest) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(
+            get_model_profile_service().test_and_save_profile,
+            source_id,
+            _payload(request),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="模型提供商源或 Profile 不存在") from exc
+    except sqlite3.IntegrityError as exc:
+        raise _bad_request(ModelProfileError("Profile 名称必须唯一")) from exc
+    except ModelProfileError as exc:
+        raise _bad_request(exc) from exc
+
+
 @router.post("/model-profiles")
 async def create_model_profile(request: ModelProfileRequest) -> dict[str, Any]:
     try:
