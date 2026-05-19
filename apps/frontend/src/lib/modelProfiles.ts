@@ -32,6 +32,7 @@ export type ModelProfile = {
 export type ModelSource = {
   source_id: string;
   name: string;
+  capability?: ModelCapability;
   provider: 'openai_compatible' | string;
   base_url?: string;
   api_key_configured?: boolean;
@@ -84,6 +85,7 @@ export type ModelProfileRequest = {
 
 export type ModelSourceRequest = {
   name?: string;
+  capability?: ModelCapability;
   provider?: string;
   base_url?: string;
   api_key?: string;

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 import pytest
 
@@ -90,6 +91,113 @@ def test_model_source_owns_credentials_and_models_reference_it(tmp_path):
         assert private_profile["api_key"] == "sk-source-secret"
         assert service.get_profile_private(profile["profile_id"])["api_key"] == "sk-source-secret"
         assert updated["model"] == "MiniMax-M2.8"
+    finally:
+        service.close()
+
+
+def test_model_sources_are_scoped_by_capability(tmp_path):
+    service = make_profile_service(tmp_path)
+    try:
+        chat_source = service.create_source(
+            {
+                "name": "Gateway",
+                "capability": "chat",
+                "provider": "openai_compatible",
+                "base_url": "https://api.example.test/v1",
+                "api_key": "sk-chat",
+            }
+        )
+        vision_source = service.create_source(
+            {
+                "name": "Gateway",
+                "capability": "vision",
+                "provider": "openai_compatible",
+                "base_url": "https://api.example.test/v1",
+                "api_key": "sk-vision",
+            }
+        )
+
+        assert chat_source["capability"] == "chat"
+        assert vision_source["capability"] == "vision"
+        with pytest.raises(ModelProfileError):
+            service.create_profile(
+                {
+                    "source_id": chat_source["source_id"],
+                    "name": "Wrong Vision",
+                    "capability": "vision",
+                    "model": "vision-model",
+                }
+            )
+    finally:
+        service.close()
+
+
+def test_legacy_shared_source_is_split_by_profile_capability(tmp_path):
+    db_path = tmp_path / "model-profiles.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE model_sources (
+            source_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            provider TEXT NOT NULL DEFAULT 'openai_compatible',
+            base_url TEXT NOT NULL DEFAULT '',
+            api_key TEXT NOT NULL DEFAULT '',
+            options_json TEXT NOT NULL DEFAULT '{}',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'untested',
+            last_tested_at TEXT NOT NULL DEFAULT '',
+            last_error TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE model_profiles (
+            profile_id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL DEFAULT '',
+            name TEXT NOT NULL UNIQUE,
+            capability TEXT NOT NULL DEFAULT 'chat',
+            provider TEXT NOT NULL DEFAULT 'openai_compatible',
+            base_url TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            api_key TEXT NOT NULL DEFAULT '',
+            options_json TEXT NOT NULL DEFAULT '{}',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            status TEXT NOT NULL DEFAULT 'untested',
+            last_tested_at TEXT NOT NULL DEFAULT '',
+            last_error TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE model_profile_defaults (
+            capability TEXT PRIMARY KEY,
+            profile_id TEXT NOT NULL DEFAULT ''
+        );
+        INSERT INTO model_sources VALUES (
+            'source_shared', 'Gateway', 'openai_compatible', 'https://api.example.test/v1',
+            'sk-source', '{}', 1, 'available', 'now', '', 'now', 'now'
+        );
+        INSERT INTO model_profiles VALUES (
+            'profile_chat', 'source_shared', 'Gateway Chat', 'chat', 'openai_compatible',
+            '', 'chat-model', '', '{}', 1, 'available', 'now', '', 'now', 'now'
+        );
+        INSERT INTO model_profiles VALUES (
+            'profile_vision', 'source_shared', 'Gateway Vision', 'vision', 'openai_compatible',
+            '', 'vision-model', '', '{}', 1, 'available', 'now', '', 'now', 'now'
+        );
+        """
+    )
+    conn.close()
+
+    service = make_profile_service(tmp_path)
+    try:
+        sources = service.list_sources()["sources"]
+        by_capability = {source["capability"]: source for source in sources}
+
+        assert set(by_capability) == {"chat", "vision"}
+        assert by_capability["chat"]["name"] == "Gateway"
+        assert by_capability["vision"]["name"] == "Gateway"
+        assert service.get_profile("profile_chat")["source_id"] == by_capability["chat"]["source_id"]
+        assert service.get_profile("profile_vision")["source_id"] == by_capability["vision"]["source_id"]
     finally:
         service.close()
 
@@ -242,6 +350,7 @@ def test_vision_profile_rejects_model_that_fails_real_image_test(monkeypatch, tm
     source = service.create_source(
         {
             "name": "OpenRouter",
+            "capability": "vision",
             "provider": "openrouter",
             "base_url": "https://openrouter.ai/api/v1",
             "api_key": "sk-source-secret",
@@ -273,6 +382,7 @@ def test_vision_profile_test_uses_image_payload_and_saves(monkeypatch, tmp_path)
     source = service.create_source(
         {
             "name": "OpenRouter",
+            "capability": "vision",
             "provider": "openrouter",
             "base_url": "https://openrouter.ai/api/v1",
             "api_key": "sk-source-secret",
@@ -316,6 +426,7 @@ def test_vision_profile_can_pass_without_remote_metadata(monkeypatch, tmp_path):
     source = service.create_source(
         {
             "name": "Xiaomi",
+            "capability": "vision",
             "provider": "xiaomi",
             "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
             "api_key": "sk-source-secret",

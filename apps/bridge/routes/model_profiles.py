@@ -30,6 +30,7 @@ class ModelProfileRequest(BaseModel):
 class ModelSourceRequest(BaseModel):
     source_id: str | None = Field(default=None, max_length=160)
     name: str | None = Field(default=None, max_length=160)
+    capability: str | None = Field(default=None, max_length=40)
     provider: str | None = Field(default=None, max_length=80)
     base_url: str | None = Field(default=None, max_length=4000)
     api_key: str | None = Field(default=None, max_length=8000)

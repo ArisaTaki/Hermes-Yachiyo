@@ -24,6 +24,7 @@ import {
 
 type SourceDraft = {
   source_id?: string;
+  capability: ModelCapability;
   name: string;
   provider: string;
   base_url: string;
@@ -235,35 +236,6 @@ const capabilityLabels: Record<ModelCapability, string> = {
   tts: '文字转语音',
 };
 
-const legacyTextProviderIds = new Set([
-  '302ai',
-  'aihubmix',
-  'azure_openai',
-  'baichuan',
-  'baidu_qianfan',
-  'compshare',
-  'fastgpt',
-  'fireworks',
-  'google_gemini',
-  'groq',
-  'lm_studio',
-  'mistral',
-  'modelscope',
-  'moonshot',
-  'ollama',
-  'perplexity',
-  'ppio',
-  'qwen_dashscope',
-  'sensenova',
-  'siliconflow',
-  'tencent_hunyuan',
-  'together',
-  'tokenpony',
-  'volcengine_doubao',
-  'xiaomi_mimo',
-  'zhipu',
-]);
-
 const catalogProviderMeta: Record<string, { label: string; iconProvider?: string }> = {
   aion_labs: { label: 'Aion Labs' },
   amazon: { label: 'AWS / Amazon', iconProvider: 'aws' },
@@ -295,6 +267,7 @@ const catalogProviderMeta: Record<string, { label: string; iconProvider?: string
 };
 
 const emptySourceDraft: SourceDraft = {
+  capability: 'chat',
   name: '',
   provider: 'openai_compatible',
   base_url: 'https://api.openai.com/v1',
@@ -369,6 +342,7 @@ function providerPreset(provider: string): ProviderPreset {
 function defaultSourceDraft(capability: ModelCapability): SourceDraft {
   const preset = providerPresetsForCapability(capability)[0] || providerPresets[0];
   return {
+    capability,
     name: '',
     provider: preset.id,
     base_url: preset.baseUrl,
@@ -378,13 +352,7 @@ function defaultSourceDraft(capability: ModelCapability): SourceDraft {
 }
 
 function sourceMatchesCapability(source: ModelSourceView, capability: ModelCapability): boolean {
-  const providerIds = new Set(providerPresetsForCapability(capability).map((preset) => preset.id));
-  if (capability === 'tts') {
-    return providerIds.has(source.provider) || Boolean(source.models?.some((model) => model.capability === 'tts'));
-  }
-  if (legacyTextProviderIds.has(source.provider)) return true;
-  if (providerIds.has(source.provider)) return true;
-  return Boolean(source.models?.some((model) => model.capability === capability));
+  return (source.capability || 'chat') === capability;
 }
 
 function sourcesForCapability(sources: ModelSourceView[], capability: ModelCapability): ModelSourceView[] {
@@ -502,6 +470,7 @@ function capabilityEmptyModelHint(capability: ModelCapability): string {
 function sourceToDraft(source: ModelSourceView): SourceDraft {
   return {
     source_id: source.source_id,
+    capability: source.capability || 'chat',
     name: source.name,
     provider: source.provider || 'openai_compatible',
     base_url: source.base_url || '',
@@ -675,6 +644,7 @@ export function ModelProfilesView() {
   function hasUnsavedDraftChanges(): boolean {
     const sourceBaseline = selectedSource ? sourceToDraft(selectedSource) : defaultSourceDraft(activeCapability);
     const sourceDirty = cleanDraftValue(sourceDraft.name) !== cleanDraftValue(sourceBaseline.name)
+      || sourceDraft.capability !== sourceBaseline.capability
       || sourceDraft.provider !== sourceBaseline.provider
       || cleanDraftValue(sourceDraft.base_url) !== cleanDraftValue(sourceBaseline.base_url)
       || sourceDraft.enabled !== sourceBaseline.enabled
@@ -730,6 +700,7 @@ export function ModelProfilesView() {
 
   function sourceDraftFromPreset(preset: ProviderPreset): SourceDraft {
     return {
+      capability: activeCapability,
       name: preset.id,
       provider: preset.id,
       base_url: preset.baseUrl,
@@ -752,6 +723,7 @@ export function ModelProfilesView() {
   }
 
   function switchCapability(capability: ModelCapability) {
+    if (capability !== activeCapability && !confirmDiscardDraftChanges()) return;
     setActiveCapability(capability);
     const nextCapabilitySources = sourcesForCapability(sources, capability);
     const source = nextCapabilitySources.find((item) => item.source_id === selectedSourceId) || nextCapabilitySources[0] || null;
@@ -797,6 +769,7 @@ export function ModelProfilesView() {
     if (!sourceDraft.name.trim()) throw new Error('提供商源名称不能为空');
     const payload = {
       name: sourceDraft.name.trim(),
+      capability: sourceDraft.capability,
       provider: sourceDraft.provider,
       base_url: sourceDraft.base_url.trim(),
       api_key: sourceDraft.api_key.trim(),
@@ -1008,8 +981,8 @@ export function ModelProfilesView() {
   const sourceFormHelp = activeCapability === 'tts'
     ? 'TTS 使用语音服务专用来源；这里登记 provider、endpoint 和 voice/profile 名称，不复用 OpenRouter 模型目录。'
     : activeCapability === 'vision'
-      ? '图片识别只应登记支持 image 输入的多模态模型；获取远端列表后会自动过滤。'
-      : '默认主模型只使用 Hermes 可执行 provider；Agent Studio 可选择所有已测试通过的 Profile。OpenRouter 里的厂商是动态模型分组，不会被写成 Hermes provider。';
+      ? '图片转述使用独立视觉来源，不复用对话来源；模型最终以真实图片测试通过为准。'
+      : '对话使用独立文本来源；默认主模型只使用 Hermes 可执行 provider，Agent Studio 可选择已测试通过的文本 Profile。';
   const sourceDraftRuntimeProvider = selectedSource
     ? sourceHermesProvider(selectedSource)
     : (providerPreset(sourceDraft.provider).hermesProvider || sourceDraft.provider);
@@ -1020,7 +993,7 @@ export function ModelProfilesView() {
         <div>
           <span className="hy-eyebrow">Model Providers</span>
           <h2>模型提供商</h2>
-          <p>先配置模型服务商源，再在源下面登记模型；所有模型都来自服务商，不再生成本地主模型快照。</p>
+          <p>对话、图片转述、文字转语音分别维护独立服务商源；通过测试的模型会进入对应场景的选择列表。</p>
         </div>
       </header>
 

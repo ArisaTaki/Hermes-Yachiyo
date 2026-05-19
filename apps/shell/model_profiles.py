@@ -226,7 +226,8 @@ class ModelProfileService:
             """
             CREATE TABLE IF NOT EXISTS model_sources (
                 source_id TEXT PRIMARY KEY,
-                name TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                capability TEXT NOT NULL DEFAULT 'chat',
                 provider TEXT NOT NULL DEFAULT 'openai_compatible',
                 base_url TEXT NOT NULL DEFAULT '',
                 api_key TEXT NOT NULL DEFAULT '',
@@ -236,7 +237,8 @@ class ModelProfileService:
                 last_tested_at TEXT NOT NULL DEFAULT '',
                 last_error TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                UNIQUE(capability, name)
             );
             CREATE TABLE IF NOT EXISTS model_profiles (
                 profile_id TEXT PRIMARY KEY,
@@ -268,12 +270,116 @@ class ModelProfileService:
         columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(model_profiles)").fetchall()}
         if "source_id" not in columns:
             self._conn.execute("ALTER TABLE model_profiles ADD COLUMN source_id TEXT NOT NULL DEFAULT ''")
+        self._ensure_source_schema()
+
+    def _ensure_source_schema(self) -> None:
+        columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(model_sources)").fetchall()}
+        table = self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='model_sources'"
+        ).fetchone()
+        table_sql = str(table["sql"] if table is not None else "")
+        if "capability" in columns and "name TEXT NOT NULL UNIQUE" not in table_sql:
+            return
+
+        legacy_table = f"model_sources_legacy_{uuid4().hex[:8]}"
+        self._conn.execute(f"ALTER TABLE model_sources RENAME TO {legacy_table}")
+        self._conn.execute(
+            """
+            CREATE TABLE model_sources (
+                source_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                capability TEXT NOT NULL DEFAULT 'chat',
+                provider TEXT NOT NULL DEFAULT 'openai_compatible',
+                base_url TEXT NOT NULL DEFAULT '',
+                api_key TEXT NOT NULL DEFAULT '',
+                options_json TEXT NOT NULL DEFAULT '{}',
+                enabled INTEGER NOT NULL DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'untested',
+                last_tested_at TEXT NOT NULL DEFAULT '',
+                last_error TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(capability, name)
+            );
+            """
+        )
+
+        legacy_rows = self._conn.execute(f"SELECT * FROM {legacy_table} ORDER BY name").fetchall()
+        used_names: set[tuple[str, str]] = set()
+        legacy_columns = {str(row["name"]) for row in self._conn.execute(f"PRAGMA table_info({legacy_table})").fetchall()}
+        for row in legacy_rows:
+            source_id = str(row["source_id"])
+            profile_caps = [
+                str(item["capability"])
+                for item in self._conn.execute(
+                    """
+                    SELECT DISTINCT capability
+                      FROM model_profiles
+                     WHERE source_id=?
+                     ORDER BY CASE capability WHEN 'chat' THEN 0 WHEN 'vision' THEN 1 WHEN 'tts' THEN 2 ELSE 3 END
+                    """,
+                    (source_id,),
+                ).fetchall()
+            ]
+            has_legacy_capability = "capability" in legacy_columns
+            legacy_capability = _normalize_capability(str(row["capability"])) if has_legacy_capability else "chat"
+            capabilities = profile_caps or [legacy_capability]
+            if has_legacy_capability and legacy_capability not in capabilities:
+                capabilities.insert(0, legacy_capability)
+            for index, capability in enumerate(capabilities):
+                next_source_id = source_id if index == 0 else f"{source_id}_{capability}"
+                while self._conn.execute("SELECT 1 FROM model_sources WHERE source_id=?", (next_source_id,)).fetchone():
+                    next_source_id = _source_id()
+                name = self._unique_source_name(str(row["name"]), capability, used_names)
+                self._conn.execute(
+                    """
+                    INSERT INTO model_sources (
+                        source_id, name, capability, provider, base_url, api_key, options_json,
+                        enabled, status, last_tested_at, last_error, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        next_source_id,
+                        name,
+                        capability,
+                        str(row["provider"]),
+                        str(row["base_url"]),
+                        str(row["api_key"]),
+                        str(row["options_json"]),
+                        int(row["enabled"]),
+                        str(row["status"]),
+                        str(row["last_tested_at"]),
+                        str(row["last_error"]),
+                        str(row["created_at"]),
+                        str(row["updated_at"]),
+                    ),
+                )
+                if next_source_id != source_id:
+                    self._conn.execute(
+                        "UPDATE model_profiles SET source_id=? WHERE source_id=? AND capability=?",
+                        (next_source_id, source_id, capability),
+                    )
+        self._conn.execute(f"DROP TABLE {legacy_table}")
+
+    @staticmethod
+    def _unique_source_name(name: str, capability: str, used_names: set[tuple[str, str]]) -> str:
+        base = (name or capability).strip() or capability
+        candidate = base
+        index = 2
+        key = (capability, candidate.lower())
+        while key in used_names:
+            candidate = f"{base} {index}"
+            key = (capability, candidate.lower())
+            index += 1
+        used_names.add(key)
+        return candidate
 
     def _row_to_source(self, row: sqlite3.Row, *, include_secret: bool = False) -> dict[str, Any]:
         adapter = resolve_provider_adapter(row["provider"], row["base_url"])
         source = {
             "source_id": row["source_id"],
             "name": row["name"],
+            "capability": row["capability"],
             "provider": row["provider"],
             "base_url": row["base_url"],
             "api_key_configured": bool(row["api_key"]),
@@ -353,7 +459,7 @@ class ModelProfileService:
 
     def list_sources(self) -> dict[str, Any]:
         rows = self._conn.execute(
-            "SELECT * FROM model_sources ORDER BY name"
+            "SELECT * FROM model_sources ORDER BY capability, name"
         ).fetchall()
         sources = []
         for row in rows:
@@ -366,18 +472,20 @@ class ModelProfileService:
         name = str(payload.get("name") or "").strip()
         if not name:
             raise ModelProfileError("提供商源名称不能为空")
+        capability = _normalize_capability(str(payload.get("capability") or "chat"))
         now = _now()
         source_id = str(payload.get("source_id") or _source_id())
         self._conn.execute(
             """
             INSERT INTO model_sources (
-                source_id, name, provider, base_url, api_key, options_json,
+                source_id, name, capability, provider, base_url, api_key, options_json,
                 enabled, status, last_tested_at, last_error, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 source_id,
                 name,
+                capability,
                 str(payload.get("provider") or "openai_compatible"),
                 str(payload.get("base_url") or ""),
                 str(payload.get("api_key") or ""),
@@ -412,6 +520,15 @@ class ModelProfileService:
     def update_source(self, source_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.get_source_private(source_id)
         next_source = {**current, **{key: value for key, value in payload.items() if key != "api_key"}}
+        if "capability" in payload:
+            next_source["capability"] = _normalize_capability(str(payload.get("capability") or "chat"))
+        next_capability = str(next_source.get("capability") or "chat")
+        mismatched = self._conn.execute(
+            "SELECT 1 FROM model_profiles WHERE source_id=? AND capability<>? LIMIT 1",
+            (source_id, next_capability),
+        ).fetchone()
+        if mismatched is not None:
+            raise ModelProfileError("提供商源类型不能与已登记模型类型不一致")
         api_key = str(current.get("api_key") or "")
         if "api_key" in payload and str(payload.get("api_key") or "").strip():
             api_key = str(payload.get("api_key") or "").strip()
@@ -419,11 +536,12 @@ class ModelProfileService:
         self._conn.execute(
             """
             UPDATE model_sources
-               SET name=?, provider=?, base_url=?, api_key=?, options_json=?, enabled=?, updated_at=?
+               SET name=?, capability=?, provider=?, base_url=?, api_key=?, options_json=?, enabled=?, updated_at=?
              WHERE source_id=?
             """,
             (
                 str(next_source.get("name") or "").strip(),
+                next_capability,
                 str(next_source.get("provider") or "openai_compatible"),
                 str(next_source.get("base_url") or ""),
                 api_key,
@@ -450,19 +568,26 @@ class ModelProfileService:
 
     def list_source_profiles(self, source_id: str) -> dict[str, Any]:
         rows = self._conn.execute(
-            "SELECT * FROM model_profiles WHERE source_id=? ORDER BY capability, name",
+            "SELECT * FROM model_profiles WHERE source_id=? ORDER BY name",
             (source_id,),
         ).fetchall()
         return {"ok": True, "profiles": [self._row_to_profile(row) for row in rows]}
 
     def test_source(self, source_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         source = self.get_source_private(source_id)
+        source_capability = str(source.get("capability") or "chat")
+        if source_capability == "tts":
+            return self._record_source_test_result(
+                source_id,
+                ok=False,
+                message="TTS 提供商源使用语音专用链路测试，不走 OpenAI-compatible 模型测试。",
+            )
         provider = str(source.get("provider") or "openai_compatible")
         model = str((payload or {}).get("model") or "").strip()
         if not model:
             first = self._conn.execute(
-                "SELECT model FROM model_profiles WHERE source_id=? AND capability IN ('chat', 'vision') ORDER BY capability, name LIMIT 1",
-                (source_id,),
+                "SELECT model FROM model_profiles WHERE source_id=? AND capability=? ORDER BY name LIMIT 1",
+                (source_id, source_capability),
             ).fetchone()
             model = str(first["model"]) if first is not None else ""
         if not _supports_openai_compatible_api(provider):
@@ -529,6 +654,8 @@ class ModelProfileService:
 
     def fetch_source_models(self, source_id: str) -> dict[str, Any]:
         source = self.get_source_private(source_id)
+        if str(source.get("capability") or "chat") == "tts":
+            raise ModelProfileError("TTS 提供商源不支持从 /models 获取模型列表。")
         provider = str(source.get("provider") or "openai_compatible")
         if not _supports_openai_compatible_api(provider):
             raise ModelProfileError("当前提供商源暂不支持自动获取模型列表。")
@@ -648,7 +775,9 @@ class ModelProfileService:
         capability = _normalize_capability(str(payload.get("capability") or "chat"))
         source_id = str(payload.get("source_id") or "").strip()
         if source_id:
-            self.get_source(source_id)
+            source = self.get_source(source_id)
+            if str(source.get("capability") or "chat") != capability:
+                raise ModelProfileError("模型类型必须与提供商源类型一致")
         now = _now()
         profile_id = str(payload.get("profile_id") or _profile_id())
         self._conn.execute(
@@ -681,6 +810,10 @@ class ModelProfileService:
 
     def test_and_save_profile(self, source_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         source = self.get_source_private(source_id)
+        capability = _normalize_capability(str(payload.get("capability") or source.get("capability") or "chat"))
+        if str(source.get("capability") or "chat") != capability:
+            raise ModelProfileError("模型类型必须与提供商源类型一致")
+        payload = {**payload, "capability": capability}
         test_result = self._test_profile_payload(source, payload)
         if not test_result.get("ok"):
             return self._record_source_test_result(
@@ -736,6 +869,10 @@ class ModelProfileService:
         if "source_id" in payload and str(payload.get("source_id") or "").strip():
             self.get_source(str(payload.get("source_id") or "").strip())
         next_source_id = str(next_profile.get("source_id") or "")
+        if next_source_id:
+            source = self.get_source(next_source_id)
+            if str(source.get("capability") or "chat") != str(next_profile.get("capability") or "chat"):
+                raise ModelProfileError("模型类型必须与提供商源类型一致")
         api_key = "" if next_source_id else str(current.get("api_key") or "")
         if not next_source_id and "api_key" in payload and str(payload.get("api_key") or "").strip():
             api_key = str(payload.get("api_key") or "").strip()

@@ -1057,6 +1057,7 @@ def test_update_hermes_configuration_syncs_vision_profile(tmp_path, monkeypatch)
         source = profile_service.create_source(
             {
                 "name": "Vision",
+                "capability": "vision",
                 "provider": "openrouter",
                 "base_url": "https://openrouter.ai/api/v1",
                 "api_key": "sk-vision-secret",
