@@ -884,6 +884,27 @@ class TestConsumeStreamBridgeRobustness:
         assert result.stdout == "full response"
 
     @pytest.mark.asyncio
+    async def test_partial_done_response_does_not_discard_streamed_answer(self):
+        """done.response 若只是流式完整回复的尾部，不应覆盖已流出的前文。"""
+        lines = [
+            json.dumps({"type": "delta", "delta": "第一问：完整回答。\n\n"}),
+            json.dumps({"type": "delta", "delta": "第二问：完整回答。\n\n"}),
+            json.dumps({"type": "delta", "delta": "第三问：完整回答。"}),
+            json.dumps({"type": "done", "response": "第二问：完整回答。\n\n第三问：完整回答。", "session_id": "s-partial"}),
+        ]
+        proc = self._make_proc_from_lines(lines)
+        updates = []
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            updates.append,
+        )
+
+        assert result.success is True
+        assert result.stdout == "第一问：完整回答。\n\n第二问：完整回答。\n\n第三问：完整回答。"
+
+    @pytest.mark.asyncio
     async def test_activity_event_is_forwarded_without_affecting_tokens(self):
         """activity 事件应独立转发，不污染 assistant token 流。"""
         lines = [

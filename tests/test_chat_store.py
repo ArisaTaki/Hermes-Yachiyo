@@ -68,6 +68,42 @@ class TestChatStore:
         assert loaded[0].content == "你好"
         assert loaded[0].role == "user"
 
+    def test_load_messages_limit_returns_latest_in_time_order(self, store: ChatStore):
+        store.create_session("s1")
+        for index in range(5):
+            store.save_message(StoredMessage(
+                message_id=f"m{index}",
+                session_id="s1",
+                role="user",
+                content=f"消息 {index}",
+                status="completed",
+                task_id=None,
+                error=None,
+                created_at=f"2026-01-01T00:00:0{index}+00:00",
+            ))
+
+        loaded = store.load_messages("s1", limit=3)
+
+        assert [message.message_id for message in loaded] == ["m2", "m3", "m4"]
+
+    def test_load_messages_limit_zero_returns_all(self, store: ChatStore):
+        store.create_session("s1")
+        for index in range(5):
+            store.save_message(StoredMessage(
+                message_id=f"m{index}",
+                session_id="s1",
+                role="user",
+                content=f"消息 {index}",
+                status="completed",
+                task_id=None,
+                error=None,
+                created_at=f"2026-01-01T00:00:0{index}+00:00",
+            ))
+
+        loaded = store.load_messages("s1", limit=0)
+
+        assert [message.message_id for message in loaded] == ["m0", "m1", "m2", "m3", "m4"]
+
     def test_update_message_status(self, store: ChatStore):
         store.create_session("s1")
         msg = StoredMessage(

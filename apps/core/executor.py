@@ -705,6 +705,41 @@ def _dedupe_repeated_paragraphs(text: str) -> str:
     return "\n\n".join(unique)
 
 
+def _normalized_response_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def _select_bridge_response(final_response: str, streamed_response: str) -> str:
+    """Choose the most complete bridge response without discarding streamed text."""
+    final_response = (final_response or "").strip()
+    streamed_response = (streamed_response or "").strip()
+    if not final_response:
+        return streamed_response
+    if not streamed_response:
+        return final_response
+
+    final_norm = _normalized_response_text(final_response)
+    streamed_norm = _normalized_response_text(streamed_response)
+    if not final_norm:
+        return streamed_response
+    if not streamed_norm:
+        return final_response
+    if final_norm == streamed_norm:
+        return final_response
+    if final_norm in streamed_norm:
+        return streamed_response
+    if streamed_norm in final_norm:
+        return final_response
+
+    final_len = len(final_norm)
+    streamed_len = len(streamed_norm)
+    if streamed_len >= max(final_len + 120, int(final_len * 1.25)):
+        return streamed_response
+    if final_len >= max(streamed_len + 120, int(streamed_len * 1.25)):
+        return final_response
+    return final_response
+
+
 def _sanitize_hermes_response(stdout: str) -> str:
     """清理 Hermes CLI 输出中的 UI 噪声和重复内容。"""
     text = _ANSI_RE.sub("", stdout).replace("\r\n", "\n").replace("\r", "\n")
@@ -985,7 +1020,7 @@ async def _consume_stream_bridge(
         if not stderr_task.done():
             stderr_task.cancel()
 
-    content = final_response or "".join(parts)
+    content = _select_bridge_response(final_response, "".join(parts))
     content = _dedupe_repeated_paragraphs(content)
     if content and content != last_emitted:
         _emit_stream_update(on_update, content)
