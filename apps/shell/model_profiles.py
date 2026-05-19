@@ -26,6 +26,7 @@ from uuid import uuid4
 
 from apps.shell.hermes_capabilities import lookup_model_supports_vision
 from apps.shell.model_provider_adapters import resolve_provider_adapter
+from apps.shell.provider_catalog_sync import cached_model_metadata, cached_provider_models
 
 
 class ModelProfileError(RuntimeError):
@@ -256,6 +257,36 @@ def _apply_known_model_capability(
         model["not_recommended_for"] = sorted(set(_as_string_list(model.get("not_recommended_for")) + ["vision"]))
     if "recommended_vision_models" in hint:
         model["recommended_vision_models"] = hint["recommended_vision_models"]
+    return model
+
+
+def _merge_cached_model_metadata(model: dict[str, Any], *, provider: str, base_url: str) -> dict[str, Any]:
+    cached = cached_model_metadata(provider, str(model.get("id") or ""), base_url=base_url)
+    if not cached:
+        return model
+    for key in (
+        "canonical_slug",
+        "context_length",
+        "default_parameters",
+        "description",
+        "input_modalities",
+        "is_free",
+        "is_moderated",
+        "max_completion_tokens",
+        "modality",
+        "name",
+        "output_modalities",
+        "pricing",
+        "provider_key",
+        "supported_parameters",
+        "capability_hint",
+    ):
+        if model.get(key) in ("", None, [], {}) and cached.get(key) not in ("", None, [], {}):
+            model[key] = cached[key]
+    model["catalog_cache"] = {
+        "available": True,
+        "source_url": cached.get("source_url", ""),
+    }
     return model
 
 
@@ -833,6 +864,20 @@ class ModelProfileService:
             with urlrequest.urlopen(request, timeout=20) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except (urlerror.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            cached_models = cached_provider_models(provider, base_url=base_url)
+            if cached_models:
+                models = [
+                    _apply_known_model_capability(dict(model), provider=provider, base_url=base_url)
+                    for model in cached_models
+                ]
+                return {
+                    "ok": True,
+                    "models": models,
+                    "count": len(models),
+                    "source": self.get_source(source_id),
+                    "from_cache": True,
+                    "warning": f"远端模型列表获取失败，已使用本地能力目录缓存：{exc}",
+                }
             raise ModelProfileError(f"获取模型列表失败：{exc}") from exc
 
         if isinstance(payload, dict):
@@ -889,6 +934,7 @@ class ModelProfileService:
             for key, value in model_info.items():
                 if value not in ("", None, [], {}):
                     model[key] = value
+            _merge_cached_model_metadata(model, provider=provider, base_url=base_url)
             _apply_known_model_capability(model, provider=provider, base_url=base_url)
             models.append(model)
 

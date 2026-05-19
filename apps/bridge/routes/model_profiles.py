@@ -10,6 +10,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from apps.shell.model_profiles import ModelProfileError, get_model_profile_service
+from apps.shell.provider_catalog_sync import (
+    list_provider_catalog_adapters,
+    load_provider_catalog_cache,
+    sync_provider_catalogs,
+)
 
 router = APIRouter(prefix="/ui", tags=["Model Profiles"])
 
@@ -48,6 +53,12 @@ class ModelProfileDefaultsRequest(BaseModel):
     tts: str | None = Field(default=None, max_length=160)
 
 
+class ProviderCatalogSyncRequest(BaseModel):
+    providers: list[str] = Field(default_factory=list)
+    if_stale: bool = False
+    max_age_seconds: int = Field(default=24 * 60 * 60, ge=60, le=30 * 24 * 60 * 60)
+
+
 def _payload(model: BaseModel) -> dict[str, Any]:
     return model.model_dump(exclude_unset=True, exclude_none=True)
 
@@ -64,6 +75,26 @@ async def list_model_profiles() -> dict[str, Any]:
 @router.get("/model-sources")
 async def list_model_sources() -> dict[str, Any]:
     return await asyncio.to_thread(get_model_profile_service().list_sources)
+
+
+@router.get("/model-provider-capabilities")
+async def get_model_provider_capabilities() -> dict[str, Any]:
+    cache = await asyncio.to_thread(load_provider_catalog_cache)
+    return {
+        "ok": True,
+        "cache": cache,
+        "adapters": list_provider_catalog_adapters(),
+    }
+
+
+@router.post("/model-provider-capabilities/sync")
+async def sync_model_provider_capabilities(request: ProviderCatalogSyncRequest) -> dict[str, Any]:
+    return await asyncio.to_thread(
+        sync_provider_catalogs,
+        providers=request.providers or None,
+        if_stale=request.if_stale,
+        max_age_seconds=request.max_age_seconds,
+    )
 
 
 @router.post("/model-sources")
