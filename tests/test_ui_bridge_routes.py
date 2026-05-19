@@ -253,7 +253,7 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         def get_messages(self, limit, anchor_message_id=""):
             return {"messages": [], "limit": limit, "anchor_message_id": anchor_message_id}
 
-        def send_message(self, text, attachments=None):
+        def send_message(self, text, attachments=None, runnable_id=""):
             return {"ok": True, "text": text, "attachments": attachments or []}
 
         def retry_message(self, message_id):

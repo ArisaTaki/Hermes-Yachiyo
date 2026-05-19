@@ -31,6 +31,32 @@ def test_chat_session_restores_messages(tmp_path):
         store.close()
 
 
+def test_chat_session_restores_all_messages_beyond_default_window(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        store.create_session("s1")
+        for index in range(130):
+            store.save_message(StoredMessage(
+                message_id=f"m{index}",
+                session_id="s1",
+                role="user",
+                content=f"消息 {index}",
+                status="completed",
+                task_id=None,
+                error=None,
+                created_at=f"2026-01-01T00:{index // 60:02d}:{index % 60:02d}+00:00",
+            ))
+
+        restored = ChatSession(session_id="s1")
+        restored.attach_store(store)
+
+        assert len(restored.messages) == 130
+        assert restored.messages[0].content == "消息 0"
+        assert restored.messages[-1].content == "消息 129"
+    finally:
+        store.close()
+
+
 def test_add_assistant_message_with_error_updates_user_error(tmp_path):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     try:
@@ -541,7 +567,7 @@ def test_get_chat_session_initializes_global_once_under_concurrency(monkeypatch)
             with self._lock:
                 self.create_calls += 1
 
-        def load_messages(self, session_id: str):
+        def load_messages(self, session_id: str, limit: int = 100):
             return []
 
         def get_session(self, session_id: str):

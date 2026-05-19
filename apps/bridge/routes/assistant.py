@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from apps.bridge.deps import get_runtime
+from apps.core.executor import user_task_unavailable_reason
 from apps.shell.assets import DEFAULT_BUBBLE_AVATAR_PATH, data_uri, get_user_avatar_assets_dir
 from packages.protocol.enums import RiskLevel, TaskType
 from packages.protocol.schemas import (
@@ -265,7 +266,16 @@ async def assistant_intent(req: AssistantIntentRequest) -> AssistantIntentRespon
             message="将创建 RiskLevel.LOW 的 Hermes 自然语言任务",
         )
 
-    task = get_runtime().state.create_task(
+    runtime = get_runtime()
+    unavailable_reason = user_task_unavailable_reason(runtime)
+    if unavailable_reason:
+        return AssistantIntentResponse(
+            ok=False,
+            action="hermes_unavailable",
+            message=unavailable_reason,
+        )
+
+    task = runtime.state.create_task(
         description=text,
         task_type=TaskType.GENERAL,
         risk_level=RiskLevel.LOW,

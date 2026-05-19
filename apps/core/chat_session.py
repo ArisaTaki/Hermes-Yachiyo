@@ -100,7 +100,7 @@ class ChatSession:
             return
 
         restored: list[ChatMessage] = []
-        for stored in self._store.load_messages(self.session_id):
+        for stored in self._store.load_messages(self.session_id, limit=0):
             try:
                 role = MessageRole(stored.role)
                 status = MessageStatus(stored.status)
@@ -453,9 +453,15 @@ class ChatSession:
         return False
     
     def get_messages(self, limit: int = 50) -> List[ChatMessage]:
-        """获取最近 N 条消息"""
+        """获取消息快照；limit <= 0 时返回全部消息。"""
+        try:
+            normalized_limit = int(limit)
+        except (TypeError, ValueError):
+            normalized_limit = 50
         with self._lock:
-            return list(self.messages[-limit:])
+            if normalized_limit <= 0:
+                return list(self.messages)
+            return list(self.messages[-normalized_limit:])
 
     def get_all_messages(self) -> List[ChatMessage]:
         """获取当前会话全部消息的快照。"""

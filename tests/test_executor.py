@@ -12,6 +12,7 @@ from apps.core.executor import (
     HermesCallError,
     HermesExecutor,
     HermesInvokeResult,
+    HermesUnavailableExecutor,
     SimulatedExecutor,
     _HERMES_CMD,
     _HERMES_FLAGS,
@@ -28,6 +29,7 @@ from apps.core.executor import (
     _sanitize_generated_session_title,
     _should_refresh_generated_title,
     resolve_hermes_stream_bridge_script,
+    select_executor,
     format_persona_description,
 )
 import apps.core.executor as executor_mod
@@ -144,6 +146,32 @@ class TestSimulatedExecutor:
         finally:
             mod._SIM_RUN_DELAY = original_run
             mod._SIM_COMPLETE_DELAY = original_complete
+
+
+class TestHermesUnavailableExecutor:
+    @pytest.mark.asyncio
+    async def test_run_fails_without_simulated_result(self):
+        executor = HermesUnavailableExecutor("Hermes Agent 当前不可用")
+
+        with pytest.raises(HermesCallError) as excinfo:
+            await executor.run(_make_task("测试任务"))
+
+        assert "Hermes Agent 当前不可用" in str(excinfo.value)
+        assert "[模拟结果]" not in excinfo.value.to_error_string()
+
+    def test_select_executor_returns_unavailable_when_runtime_not_ready(self):
+        runtime = types.SimpleNamespace(
+            is_hermes_ready=lambda: False,
+            hermes_install_info=types.SimpleNamespace(
+                status="not_installed",
+                error_message="missing hermes",
+            ),
+        )
+
+        executor = select_executor(runtime)
+
+        assert isinstance(executor, HermesUnavailableExecutor)
+        assert "missing hermes" in executor.reason
 
 
 class TestHermesExecutor:
@@ -854,6 +882,27 @@ class TestConsumeStreamBridgeRobustness:
 
         assert result.success is True
         assert result.stdout == "full response"
+
+    @pytest.mark.asyncio
+    async def test_partial_done_response_does_not_discard_streamed_answer(self):
+        """done.response 若只是流式完整回复的尾部，不应覆盖已流出的前文。"""
+        lines = [
+            json.dumps({"type": "delta", "delta": "第一问：完整回答。\n\n"}),
+            json.dumps({"type": "delta", "delta": "第二问：完整回答。\n\n"}),
+            json.dumps({"type": "delta", "delta": "第三问：完整回答。"}),
+            json.dumps({"type": "done", "response": "第二问：完整回答。\n\n第三问：完整回答。", "session_id": "s-partial"}),
+        ]
+        proc = self._make_proc_from_lines(lines)
+        updates = []
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            updates.append,
+        )
+
+        assert result.success is True
+        assert result.stdout == "第一问：完整回答。\n\n第二问：完整回答。\n\n第三问：完整回答。"
 
     @pytest.mark.asyncio
     async def test_activity_event_is_forwarded_without_affecting_tokens(self):

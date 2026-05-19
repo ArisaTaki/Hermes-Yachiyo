@@ -261,7 +261,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     const anchorMessageId = (options.anchorMessageId || '').trim();
     try {
       const query = new URLSearchParams();
-      query.set('limit', anchorMessageId ? '220' : '80');
+      query.set('limit', anchorMessageId ? '220' : '0');
       if (anchorMessageId) query.set('anchor_message_id', anchorMessageId);
       const payload = await apiGet<MessagesPayload>(`/ui/chat/messages?${query.toString()}`);
       if (payload.ok === false) throw new Error(payload.error || '读取消息失败');
@@ -1601,8 +1601,8 @@ function messageMetaText(role: string, status?: string, createdAt?: string) {
 }
 
 function executorLabel(executor: ExecutorPayload | null) {
-  if (!executor?.available) return '—';
-  return executor.executor === 'HermesExecutor' ? 'Hermes' : '模拟';
+  if (!executor?.available) return '未就绪';
+  return executor.executor === 'HermesExecutor' ? 'Hermes' : '不可用';
 }
 
 function canAttachImages(executor: ExecutorPayload | null) {
