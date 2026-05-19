@@ -2,6 +2,22 @@
 
 ## 已完成
 
+### Milestone 80 — 模型 Profile 统一化、Agent 执行后端与 TTS 入口整理
+
+- ✅ Profile 已作为模型配置中心推进：模型配置页按 `对话`、`图片转述`、`文字转语音` 分离服务商源，测试通过后才进入对应场景选择列表。
+- ✅ Hermes CLI 仍保留为主对话执行适配器；默认主模型只同步 Hermes 可执行的 `chat` Profile，避免把 OpenRouter 模型厂商误写成 Hermes provider。
+- ✅ 新增 Hermes provider adapter 层：集中维护 provider id、API Key env、alias、Base URL host hint 和 OpenRouter 模型前缀边界，修复 Xiaomi MiMo / DeepSeek 等源同步到 Hermes config 的 provider mismatch。
+- ✅ OpenRouter `/api/v1/models` 用于动态 OpenRouter 模型目录；本地仍维护各厂商源预设、Base URL、Hermes provider 映射和官方 icon。
+- ✅ 新增 provider catalog 同步模块 `apps/shell/provider_catalog_sync.py`，可把主流 provider `/models` 元数据同步到本地缓存，为后续每日订阅更新打基础。
+- ✅ Vision Profile 改为真实图片测试通过后才保存为 `available + vision`；远端 metadata 与本地已知能力表只作为“视觉/文本/未知”提示。
+- ✅ Agent spec 增加 `execution_backend`，支持 `hermes_profile`、`yachiyo_profile`、`external_cli`；Agent run 增加 `run_group_id`，为 `@Agent`、Workflow 和后续自动编排统一运行组结构。
+- ✅ 模型配置页交互修复：新增/返回列表会提示未保存变更；详情页有返回列表；保存按钮收敛为“保存并获取模型列表”和“测试连接并保存”；左侧状态会及时显示可用、失败、密钥配置和暂未选择模型。
+- ✅ TTS tab 改为独立语音来源入口，补充 GSV TTS(Local)、HTTP TTS、Command TTS、OpenAI、MiMo、Edge、FishAudio、阿里云百炼、Azure、MiniMax、火山、Gemini 等预设。
+- ✅ 侧栏原 `GPT-SoVITS` 改名为 `主动关怀`；该页定位为“主动关怀与桌面观察”，承载桌面观察、提醒触发、语音播报链路、音色资源与本地 GPT-SoVITS 服务。
+- ✅ Provider icon 修正为厂商品牌图标，Hugging Face 已不再落到 OpenAI icon。
+- ✅ 阶段说明已写入 `docs/model-profile-runtime-notes.md`，并在 `docs/phase-4-hermes-sync-plan.md` 记录 Batch 7。
+- ✅ 验证：多轮 `npm --prefix apps/frontend run build` passed；模型配置页本地预览检查通过；相关后端迁移/Agent runtime/model profile/vision 测试在本轮变更中分批通过；最新文档同步仅涉及 Markdown。
+
 ### Milestone 79 — macOS 发布链路、应用更新器与安装体验收口
 
 - ✅ macOS release workflow 现在覆盖 `main` 与 `develop` 两条渠道：`main` 生成正式版 stable DMG，`develop` 生成实验版 experimental prerelease DMG；滚动 release 分别维护 `main-latest` 与 `develop-latest`。

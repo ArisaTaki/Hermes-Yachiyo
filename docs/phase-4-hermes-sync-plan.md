@@ -84,6 +84,19 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - Agent 可选择 `follow_main` 或引用已保存的 `model_profile_id`。
 - 设置页“模型”区域改为新版模型配置入口，不再直接承担连接测试表单。
 
+### Batch 7：Profile 统一化、执行后端与视觉/TTS 收口
+
+- 新增 Hermes provider adapter 层，集中维护 Hermes 可执行 provider、API Key env、alias、Base URL host hint 和 OpenRouter 模型前缀边界。
+- OpenRouter `/api/v1/models` 只替代 OpenRouter 模型列表硬编码；各厂商源的 Base URL、Hermes provider 映射和官方 icon 仍由本地预设维护。
+- 模型配置页按 `chat` / `vision` / `tts` 分离服务商源，避免对话和图片转述共用同一来源。
+- 模型保存流程收敛为“保存并获取模型列表”与“测试连接并保存”；测试失败不保存为可用 Profile。
+- Vision Profile 改为真实图片测试通过后才可用，远端 metadata 与本地已知能力表只作为提示，不作为唯一准入条件。
+- 新增 `apps/shell/provider_catalog_sync.py`，为后续每日同步 provider `/models` 元数据准备缓存能力。
+- Agent spec 增加 `execution_backend`，支持 `hermes_profile` / `yachiyo_profile` / `external_cli`；Agent run 增加 `run_group_id`，为 `@Agent`、Workflow 和自动编排统一 RunGroup 数据结构。
+- TTS tab 改为独立语音来源入口；`GSV TTS(Local)` / 旧 `GPT-SoVITS` 入口跳转到“主动关怀与桌面观察”页维护完整本地 TTS 参数。
+- 侧栏原 `GPT-SoVITS` 改名为 `主动关怀`，Hugging Face 和 TTS 预设补充厂商品牌 icon。
+- 详细阶段记录见 `docs/model-profile-runtime-notes.md`。
+
 ## 新增接口
 
 - `GET/POST /ui/model-profiles`
@@ -134,7 +147,9 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - `follow_main` Agent 首版会整理运行上下文并记录产物；后续再接入更完整的 Hermes orchestrator streaming。
 - `profile` Agent 首版支持 OpenAI-compatible Chat Completions 与简单受控工具循环。
 - 旧 `custom_api` Agent 作为兼容路径保留，新增 Agent 默认使用 `follow_main` 或 Model Profile。
-- TTS Profile 首版做统一保存与复用入口，具体语音合成、服务检测和连接测试仍由 TTS 专用链路执行。
+- `yachiyo_profile` 能直连模型，但不默认等同 Hermes Agent；联网、工具调用和复杂协作能力依赖后续 Yachiyo ToolBroker。
+- TTS Profile 首版做统一保存与复用入口，具体语音合成、服务检测和连接测试仍由主动关怀 / TTS 专用链路执行。
+- Provider 目录同步目前是可手动运行的缓存能力；每日自动订阅更新机制尚未接入应用 lifecycle。
 - Skill v1 只支持本地目录/ZIP，不做远程 marketplace，也不自动扫描用户全局 skills。
 - 第三方 CLI/daemon 由用户自行管理，不再由 Yachiyo 安装、登录、升级或托管。
 

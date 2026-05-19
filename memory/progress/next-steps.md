@@ -2,6 +2,15 @@
 
 ## 当前优先项
 
+### Phase 4 模型 / Agent / TTS 后续
+
+1. 把 `apps/shell/provider_catalog_sync.py` 接入每日或低频后台更新机制，更新 `~/.hermes/yachiyo/provider-capabilities.json`；刷新失败不能阻塞应用启动。
+2. 继续扩展 provider adapter：为 Xiaomi MiMo、OpenRouter、Gemini、DashScope、DeepSeek、MiniMax 等常用源沉淀 `/models` 路径、鉴权 header、模型 ID 规范、chat payload、vision payload 和错误归因。
+3. 手工验证真实 provider：至少覆盖 Xiaomi MiMo `mimo-v2.5` / `mimo-v2-omni`、OpenRouter 视觉模型、Gemini、DashScope 和 DeepSeek；确认文本模型不能误保存为 vision Profile。
+4. 完成 TTS 真实测试语义：HTTP TTS / Command TTS / API TTS 需要能配置 endpoint、voice、timeout、test text 并进行可证实测试；GPT-SoVITS 完整参数继续放在“主动关怀与桌面观察”页。
+5. 为 `yachiyo_profile` 补第一版 ToolBroker：优先 OpenAI tool_calls，非 tool_calls 模型用 JSON fallback；不要默认宣称其能力等同 Hermes Agent。
+6. 更新用户手册和截图索引中的旧命名：将“主动关怀语音”逐步统一为“主动关怀与桌面观察”，同时说明 GPT-SoVITS 是该页内的本地 TTS 服务模块。
+
 1. 推送后验证 `Build macOS DMG`：`develop-latest` / `main-latest` 的 latest JSON 应包含 `changelog.generated_from=git`、`sections`、`commits` 和 `compare_url`；GitHub versioned release notes 与 rolling latest release notes 都应展示同一份“更新日志”。
 2. 用下一版 develop DMG 验证应用更新页：检查更新后应显示“更新内容”，下载时有进度，下载完成后按钮切换为“安装并重启”；退出页面或重启后仍能识别已下载但未安装的更高版本 DMG。
 3. 验证更新安装后的首次重开体验：Bridge/backend 尚未就绪时安装向导应显示“正在启动本地 Bridge”并自动重试，而不是直接红色报错；Bridge 可用后应自动恢复主控台或安装状态。
