@@ -163,7 +163,7 @@ def _pricing_is_free(pricing: dict[str, Any]) -> bool:
 
 _VISION_TEST_IMAGE_DATA_URL = (
     "data:image/png;base64,"
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mP8z8AARQAFAAH/AS7x7fqQAAAAAElFTkSuQmCC"
 )
 
 
@@ -194,11 +194,16 @@ def _vision_test_messages() -> list[dict[str, Any]]:
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": "Reply with OK if you can inspect this image."},
+                {"type": "text", "text": "What color is the solid square in this image? Reply with exactly one English color word."},
                 {"type": "image_url", "image_url": {"url": _VISION_TEST_IMAGE_DATA_URL}},
             ],
         }
     ]
+
+
+def _vision_test_passed(response: str) -> bool:
+    text = str(response or "").strip().lower()
+    return bool(re.search(r"\bred\b|红色|红", text))
 
 
 class ModelProfileService:
@@ -811,13 +816,6 @@ class ModelProfileService:
             return {"ok": False, "success": False, "message": "Profile 配置不完整。", "missing": missing}
         messages: list[dict[str, Any]] = [{"role": "user", "content": "Reply with OK."}]
         if capability == "vision":
-            remote_model = _remote_model_from_options(payload.get("options") if isinstance(payload.get("options"), dict) else {})
-            if not _remote_model_supports_vision(remote_model, model):
-                return {
-                    "ok": False,
-                    "success": False,
-                    "message": "图片识别模型必须先从远端模型列表确认支持 image 输入。",
-                }
             messages = _vision_test_messages()
         started = time.time()
         try:
@@ -829,6 +827,13 @@ class ModelProfileService:
             )
         except ModelProfileError as exc:
             return {"ok": False, "success": False, "message": str(exc)}
+        if capability == "vision" and not _vision_test_passed(result):
+            return {
+                "ok": False,
+                "success": False,
+                "message": "图片识别模型没有通过真实图片测试，请选择能够读取图片内容的多模态模型。",
+                "vision_test_response": result[:500],
+            }
         return {
             "ok": True,
             "success": True,

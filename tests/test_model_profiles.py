@@ -237,7 +237,7 @@ def test_test_and_save_profile_failure_does_not_persist(monkeypatch, tmp_path):
         service.close()
 
 
-def test_vision_profile_requires_remote_image_metadata(monkeypatch, tmp_path):
+def test_vision_profile_rejects_model_that_fails_real_image_test(monkeypatch, tmp_path):
     service = make_profile_service(tmp_path)
     source = service.create_source(
         {
@@ -261,8 +261,8 @@ def test_vision_profile_requires_remote_image_metadata(monkeypatch, tmp_path):
         )
 
         assert result["ok"] is False
-        assert "image 输入" in result["message"]
-        assert calls == []
+        assert "真实图片测试" in result["message"]
+        assert calls
         assert service.list_profiles()["profiles"] == []
     finally:
         service.close()
@@ -282,7 +282,7 @@ def test_vision_profile_test_uses_image_payload_and_saves(monkeypatch, tmp_path)
 
     def fake_chat(base_url, model, api_key, messages):
         calls.append((base_url, model, api_key, messages))
-        return "OK"
+        return "red"
 
     monkeypatch.setattr("apps.shell.model_profiles.openai_compatible_chat", fake_chat)
     try:
@@ -307,6 +307,36 @@ def test_vision_profile_test_uses_image_payload_and_saves(monkeypatch, tmp_path)
         assert service.get_source(source["source_id"])["status"] == "available"
         assert result["profile"]["options"]["remote_model"]["input_modalities"] == ["text", "image"]
         assert calls[0][3][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    finally:
+        service.close()
+
+
+def test_vision_profile_can_pass_without_remote_metadata(monkeypatch, tmp_path):
+    service = make_profile_service(tmp_path)
+    source = service.create_source(
+        {
+            "name": "Xiaomi",
+            "provider": "xiaomi",
+            "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+            "api_key": "sk-source-secret",
+        }
+    )
+    calls = []
+    monkeypatch.setattr("apps.shell.model_profiles.openai_compatible_chat", lambda *args, **kwargs: calls.append((args, kwargs)) or "red")
+    try:
+        result = service.test_and_save_profile(
+            source["source_id"],
+            {
+                "name": "MiMo Vision",
+                "capability": "vision",
+                "model": "mimo-v2.5",
+            },
+        )
+
+        assert result["ok"] is True
+        assert result["profile"]["status"] == "available"
+        assert result["profile"]["capability"] == "vision"
+        assert calls[0][0][3][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
     finally:
         service.close()
 

@@ -452,7 +452,7 @@ function catalogPriceBadge(pricing?: RemoteModelInfo['pricing']): string {
   return `$${compact(promptPerMillion)}/${compact(completionPerMillion)}M`;
 }
 
-function catalogModelBadges(model: RemoteModelInfo): string[] {
+function catalogModelBadges(model: RemoteModelInfo, capability: ModelCapability): string[] {
   const badges: string[] = [];
   const inputModalities = new Set((model.input_modalities || []).map((item) => item.toLowerCase()));
   const supportedParameters = new Set((model.supported_parameters || []).map((item) => item.toLowerCase()));
@@ -462,7 +462,9 @@ function catalogModelBadges(model: RemoteModelInfo): string[] {
     const price = catalogPriceBadge(model.pricing);
     if (price) badges.push(price);
   }
-  if (inputModalities.has('image')) badges.push('视觉');
+  const supportsVision = modelSupportsCapability(model, 'vision');
+  if (capability === 'vision') badges.push(supportsVision ? '声明视觉' : '未声明视觉');
+  else if (supportsVision || inputModalities.has('image')) badges.push('视觉');
   if (inputModalities.has('file')) badges.push('文件');
   if (inputModalities.has('audio')) badges.push('音频');
   if (inputModalities.has('video')) badges.push('视频');
@@ -487,11 +489,12 @@ function modelSupportsCapability(model: RemoteModelInfo, capability: ModelCapabi
 
 function capabilityCatalogModels(models: RemoteModelInfo[], capability: ModelCapability): RemoteModelInfo[] {
   if (capability === 'tts') return [];
+  if (capability === 'vision') return models;
   return models.filter((model) => modelSupportsCapability(model, capability));
 }
 
 function capabilityEmptyModelHint(capability: ModelCapability): string {
-  if (capability === 'vision') return '请先获取远端模型列表，再选择标记为“视觉”的多模态模型进行测试保存。';
+  if (capability === 'vision') return '请先获取远端模型列表，再选择模型进行真实图片测试；通过后才会保存为可用视觉模型。';
   if (capability === 'tts') return '选择 TTS 提供商后，在这里登记 voice / profile id；实际连接测试走语音设置链路。';
   return '获取远端模型列表后选择模型并测试保存；通过后会出现在设置页和 Agent Studio。';
 }
@@ -840,8 +843,10 @@ export function ModelProfilesView() {
       const models = result.models || [];
       setModelCatalog(models);
       setModelCatalogQuery('');
-      const usableCount = capabilityCatalogModels(models, activeCapability).length;
-      const suffix = activeCapability === 'vision' ? ' 个支持图片输入的多模态模型' : ' 个可用模型';
+      const usableCount = activeCapability === 'vision'
+        ? models.filter((model) => modelSupportsCapability(model, 'vision')).length
+        : capabilityCatalogModels(models, activeCapability).length;
+      const suffix = activeCapability === 'vision' ? ' 个远端声明视觉能力的模型' : ' 个可用模型';
       setStatus(models.length ? `已获取 ${models.length} 个模型，其中 ${usableCount}${suffix}；请选择模型后测试保存。` : '已连接源，但没有读取到模型列表');
       await refresh(saved.source_id, selectedModelId, activeCapability);
     } catch (err) {
@@ -866,12 +871,6 @@ export function ModelProfilesView() {
     if (!modelDraft.model.trim()) throw new Error('模型名称不能为空');
     const modelName = modelDraft.model.trim();
     const catalogMatch = modelCatalog.find((model) => model.id === modelName);
-    if (modelDraft.capability === 'vision' && modelCatalog.length && !catalogMatch) {
-      throw new Error('图片识别模型需要先通过远端模型资料确认多模态能力，请从列表选择带“视觉”标记的模型。');
-    }
-    if (modelDraft.capability === 'vision' && catalogMatch && !modelSupportsCapability(catalogMatch, 'vision')) {
-      throw new Error('图片识别模型必须支持 image 输入，请从远端列表选择带“视觉”标记的多模态模型。');
-    }
     const payload = {
       source_id: sourceId,
       name: modelDraft.name.trim() || `${sourceDraft.name}/${modelName}`,
@@ -892,12 +891,6 @@ export function ModelProfilesView() {
     const modelName = modelDraft.model.trim();
     if (!modelName) throw new Error('模型名称不能为空');
     const catalogMatch = modelCatalog.find((model) => model.id === modelName);
-    if (modelDraft.capability === 'vision' && !catalogMatch) {
-      throw new Error('图片识别模型必须先从远端列表选择带“视觉”标记的多模态模型。');
-    }
-    if (modelDraft.capability === 'vision' && catalogMatch && !modelSupportsCapability(catalogMatch, 'vision')) {
-      throw new Error('图片识别模型必须支持 image 输入，请选择带“视觉”标记的多模态模型。');
-    }
     return testAndSaveModelProfile(sourceId, {
       ...(modelDraft.profile_id ? { profile_id: modelDraft.profile_id } : {}),
       name: modelDraft.name.trim() || `${sourceDraft.name}/${modelName}`,
@@ -1266,7 +1259,7 @@ export function ModelProfilesView() {
                     <div className="model-catalog-panel">
                       <div className="model-catalog-head">
                         <div>
-                          <strong>{activeCapability === 'vision' ? '支持图片输入的远端模型' : '远端模型列表'}</strong>
+                          <strong>{activeCapability === 'vision' ? '远端模型列表（视觉实测为准）' : '远端模型列表'}</strong>
                           <span>
                             {modelCatalog.length
                               ? `${visibleCatalogModels.length}/${modelCatalog.length} 个模型 · ${modelCatalogGroups.length} 组`
@@ -1295,7 +1288,7 @@ export function ModelProfilesView() {
                             </div>
                             <div className="model-catalog-group-items">
                               {group.models.map((model) => {
-                                const badges = catalogModelBadges(model);
+                                const badges = catalogModelBadges(model, activeCapability);
                                 return (
                                   <button type="button" key={model.id} disabled={Boolean(busy) || sourceDraft.enabled === false} onClick={() => applyCatalogModel(model)}>
                                     <strong>{model.id}</strong>
