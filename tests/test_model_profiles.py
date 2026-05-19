@@ -506,6 +506,40 @@ def test_vision_profile_can_pass_without_remote_metadata(monkeypatch, tmp_path):
         service.close()
 
 
+def test_xiaomi_text_reasoning_model_is_not_saved_as_vision(monkeypatch, tmp_path):
+    service = make_profile_service(tmp_path)
+    source = service.create_source(
+        {
+            "name": "Xiaomi",
+            "capability": "vision",
+            "provider": "xiaomi",
+            "base_url": "https://api.mimo-v2.com/v1",
+            "api_key": "sk-source-secret",
+        }
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("known text-only Xiaomi model should be rejected before HTTP probing")
+
+    monkeypatch.setattr("apps.shell.model_profiles.openai_compatible_chat", fail_if_called)
+    try:
+        result = service.test_and_save_profile(
+            source["source_id"],
+            {
+                "name": "MiMo Pro Vision",
+                "capability": "vision",
+                "model": "mimo-v2.5-pro",
+            },
+        )
+
+        assert result["ok"] is False
+        assert "文本/推理模型" in result["message"]
+        assert result["vision_capability"]["recommended_vision_models"] == ["mimo-v2.5", "mimo-v2-omni"]
+        assert service.list_profiles()["profiles"] == []
+    finally:
+        service.close()
+
+
 def test_fetch_source_models_reads_openai_compatible_list(monkeypatch, tmp_path):
     service = make_profile_service(tmp_path)
     source = service.create_source(
@@ -552,6 +586,57 @@ def test_fetch_source_models_reads_openai_compatible_list(monkeypatch, tmp_path)
             {"id": "deepseek-reasoner", "owned_by": "", "provider_key": "deepseek"},
         ]
         assert "api_key" not in result["source"]
+    finally:
+        service.close()
+
+
+def test_fetch_xiaomi_models_marks_known_vision_capabilities(monkeypatch, tmp_path):
+    service = make_profile_service(tmp_path)
+    source = service.create_source(
+        {
+            "name": "Xiaomi",
+            "capability": "vision",
+            "provider": "xiaomi",
+            "base_url": "https://api.mimo-v2.com/v1",
+            "api_key": "sk-source-secret",
+        }
+    )
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "data": [
+                        {"id": "mimo-v2.5-pro"},
+                        {"id": "mimo-v2.5"},
+                        {"id": "mimo-v2-omni"},
+                    ]
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        assert timeout == 20
+        assert request.full_url == "https://api.mimo-v2.com/v1/models"
+        assert request.get_header("Authorization") == "Bearer sk-source-secret"
+        assert request.get_header("Api-key") == "sk-source-secret"
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+    try:
+        result = service.fetch_source_models(source["source_id"])
+        by_id = {model["id"]: model for model in result["models"]}
+
+        assert by_id["mimo-v2.5-pro"]["known_capability"] == "text"
+        assert by_id["mimo-v2.5-pro"]["not_recommended_for"] == ["vision"]
+        assert by_id["mimo-v2.5"]["known_capability"] == "vision"
+        assert by_id["mimo-v2.5"]["recommended_for"] == ["vision"]
+        assert by_id["mimo-v2-omni"]["known_capability"] == "vision"
     finally:
         service.close()
 

@@ -76,11 +76,11 @@ const providerPresets: ProviderPreset[] = [
   {
     id: 'xiaomi',
     label: 'Xiaomi MiMo',
-    baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
+    baseUrl: 'https://api.mimo-v2.com/v1',
     mark: 'Mi',
     hermesProvider: 'xiaomi',
-    note: 'Hermes 原生 Xiaomi provider。旧的 xiaomi_mimo 源会自动映射到 xiaomi。',
-    modelHints: ['mimo-v2.5-pro', 'mimo-v2.5'],
+    note: 'Hermes 原生 Xiaomi provider。图片转述建议使用 mimo-v2.5 或 mimo-v2-omni。',
+    modelHints: ['mimo-v2.5-pro', 'mimo-v2.5', 'mimo-v2-omni'],
   },
   {
     id: 'deepseek',
@@ -420,6 +420,12 @@ function catalogPriceBadge(pricing?: RemoteModelInfo['pricing']): string {
   return `$${compact(promptPerMillion)}/${compact(completionPerMillion)}M`;
 }
 
+function catalogBadgeClass(badge: string): string {
+  if (badge === '已知视觉' || badge === '声明视觉' || badge === '免费') return 'positive';
+  if (badge === '文本/推理' || badge === '未知视觉' || badge === '未声明视觉') return 'warning';
+  return '';
+}
+
 function catalogModelBadges(model: RemoteModelInfo, capability: ModelCapability): string[] {
   const badges: string[] = [];
   const inputModalities = new Set((model.input_modalities || []).map((item) => item.toLowerCase()));
@@ -431,7 +437,13 @@ function catalogModelBadges(model: RemoteModelInfo, capability: ModelCapability)
     if (price) badges.push(price);
   }
   const supportsVision = modelSupportsCapability(model, 'vision');
-  if (capability === 'vision') badges.push(supportsVision ? '声明视觉' : '未声明视觉');
+  const knownCapability = (model.known_capability || '').toLowerCase();
+  const notRecommended = new Set((model.not_recommended_for || []).map((item) => item.toLowerCase()));
+  if (capability === 'vision') {
+    if (knownCapability === 'vision') badges.push('已知视觉');
+    else if (knownCapability === 'text' || notRecommended.has('vision')) badges.push('文本/推理');
+    else badges.push(supportsVision ? '声明视觉' : '未知视觉');
+  }
   else if (supportsVision || inputModalities.has('image')) badges.push('视觉');
   if (inputModalities.has('file')) badges.push('文件');
   if (inputModalities.has('audio')) badges.push('音频');
@@ -446,7 +458,11 @@ function modelSupportsCapability(model: RemoteModelInfo, capability: ModelCapabi
   const input = (model.input_modalities || []).map((item) => item.toLowerCase());
   const output = (model.output_modalities || []).map((item) => item.toLowerCase());
   const modality = (model.modality || '').toLowerCase();
+  const knownCapability = (model.known_capability || '').toLowerCase();
+  const notRecommended = new Set((model.not_recommended_for || []).map((item) => item.toLowerCase()));
   if (capability === 'vision') {
+    if (knownCapability === 'vision') return true;
+    if (knownCapability === 'text' || notRecommended.has('vision')) return false;
     return input.includes('image') || /\bimage\b|vision|multimodal/.test(modality);
   }
   if (capability === 'tts') {
@@ -457,7 +473,17 @@ function modelSupportsCapability(model: RemoteModelInfo, capability: ModelCapabi
 
 function capabilityCatalogModels(models: RemoteModelInfo[], capability: ModelCapability): RemoteModelInfo[] {
   if (capability === 'tts') return [];
-  if (capability === 'vision') return models;
+  if (capability === 'vision') {
+    const rank = (model: RemoteModelInfo) => {
+      const knownCapability = (model.known_capability || '').toLowerCase();
+      const notRecommended = new Set((model.not_recommended_for || []).map((item) => item.toLowerCase()));
+      if (knownCapability === 'vision') return 0;
+      if (modelSupportsCapability(model, 'vision')) return 1;
+      if (knownCapability === 'text' || notRecommended.has('vision')) return 3;
+      return 2;
+    };
+    return [...models].sort((left, right) => rank(left) - rank(right) || left.id.localeCompare(right.id));
+  }
   return models.filter((model) => modelSupportsCapability(model, capability));
 }
 
@@ -839,7 +865,7 @@ export function ModelProfilesView() {
       const usableCount = activeCapability === 'vision'
         ? models.filter((model) => modelSupportsCapability(model, 'vision')).length
         : capabilityCatalogModels(models, activeCapability).length;
-      const suffix = activeCapability === 'vision' ? ' 个远端声明视觉能力的模型' : ' 个可用模型';
+      const suffix = activeCapability === 'vision' ? ' 个已知或远端声明视觉能力的模型' : ' 个可用模型';
       setStatus(models.length ? `已获取 ${models.length} 个模型，其中 ${usableCount}${suffix}；请选择模型后测试保存。` : '已连接源，但没有读取到模型列表');
       await refresh(saved.source_id, selectedModelId, activeCapability);
     } catch (err) {
@@ -855,6 +881,14 @@ export function ModelProfilesView() {
       model: model.id,
       name: `${sourceDraft.name || providerPreset(sourceDraft.provider).label}/${model.id}`,
     }));
+    if (activeCapability === 'vision') {
+      const knownCapability = (model.known_capability || '').toLowerCase();
+      const notRecommended = new Set((model.not_recommended_for || []).map((item) => item.toLowerCase()));
+      if (knownCapability === 'text' || notRecommended.has('vision')) {
+        const recommended = model.recommended_vision_models?.length ? `建议改选 ${model.recommended_vision_models.join(' / ')}。` : '建议改选明确支持图片输入的多模态模型。';
+        setStatus(`${model.id} 在当前厂商适配中偏文本/推理用途，图片转述测试不会保存为可用模型；${recommended}`);
+      }
+    }
   }
 
   async function saveModel(): Promise<ModelProfile> {
@@ -1288,7 +1322,7 @@ export function ModelProfilesView() {
                                     {model.name && model.name !== model.id ? <small>{model.name}</small> : null}
                                     {badges.length ? (
                                       <span className="model-catalog-badges">
-                                        {badges.map((badge) => <em key={badge}>{badge}</em>)}
+                                        {badges.map((badge) => <em key={badge} className={catalogBadgeClass(badge)}>{badge}</em>)}
                                       </span>
                                     ) : null}
                                   </button>

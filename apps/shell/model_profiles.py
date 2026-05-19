@@ -24,6 +24,7 @@ from urllib import request as urlrequest
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from apps.shell.hermes_capabilities import lookup_model_supports_vision
 from apps.shell.model_provider_adapters import resolve_provider_adapter
 
 
@@ -183,6 +184,10 @@ _VISION_COLOR_ALIASES: dict[str, tuple[str, ...]] = {
     "purple": ("purple", "紫", "紫色"),
 }
 
+_PROVIDER_RECOMMENDED_VISION_MODELS: dict[str, tuple[str, ...]] = {
+    "xiaomi": ("mimo-v2.5", "mimo-v2-omni"),
+}
+
 
 def _remote_model_from_options(options: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(options, dict):
@@ -204,6 +209,67 @@ def _remote_model_supports_vision(remote_model: dict[str, Any], model_id: str) -
     }
     modality = str(remote_model.get("modality") or "").strip().lower()
     return "image" in input_modalities or bool(re.search(r"\bimage\b|vision|multimodal", modality))
+
+
+def _effective_provider_id(provider: str, base_url: str = "", model: str = "") -> str:
+    adapter = resolve_provider_adapter(provider, base_url, model)
+    return str(adapter.get("hermes_provider") or provider or "").strip().lower()
+
+
+def _provider_capability_model_id(provider: str, model: str) -> str:
+    model_id = (model or "").strip()
+    if provider == "xiaomi" and "/" in model_id:
+        return model_id.rsplit("/", 1)[-1]
+    return model_id
+
+
+def _vision_capability_hint(provider: str, base_url: str, model: str) -> dict[str, Any]:
+    effective_provider = _effective_provider_id(provider, base_url, model)
+    lookup_model = _provider_capability_model_id(effective_provider, model)
+    supports = None
+    if effective_provider in _PROVIDER_RECOMMENDED_VISION_MODELS:
+        supports = lookup_model_supports_vision(effective_provider, lookup_model)
+    hint: dict[str, Any] = {
+        "provider": effective_provider,
+        "model": lookup_model,
+        "known_supports_vision": supports,
+    }
+    recommended = _PROVIDER_RECOMMENDED_VISION_MODELS.get(effective_provider)
+    if recommended:
+        hint["recommended_vision_models"] = list(recommended)
+    return hint
+
+
+def _apply_known_model_capability(
+    model: dict[str, Any],
+    *,
+    provider: str,
+    base_url: str,
+) -> dict[str, Any]:
+    hint = _vision_capability_hint(provider, base_url, str(model.get("id") or ""))
+    supports = hint.get("known_supports_vision")
+    if supports is True:
+        model["known_capability"] = "vision"
+        model["recommended_for"] = sorted(set(_as_string_list(model.get("recommended_for")) + ["vision"]))
+    elif supports is False:
+        model["known_capability"] = "text"
+        model["not_recommended_for"] = sorted(set(_as_string_list(model.get("not_recommended_for")) + ["vision"]))
+    if "recommended_vision_models" in hint:
+        model["recommended_vision_models"] = hint["recommended_vision_models"]
+    return model
+
+
+def _vision_route_failure_hint(provider: str, base_url: str, model: str, message: str) -> str:
+    if "HTTP 404" not in message:
+        return ""
+    effective_provider = _effective_provider_id(provider, base_url, model)
+    if effective_provider == "xiaomi":
+        return (
+            "这是接口路由或模型 ID 层面的 404，不足以证明模型视觉能力失败；"
+            "小米官方 OpenAI-compatible 文档当前示例使用 https://api.mimo-v2.com/v1，"
+            "图片转述请优先测试 mimo-v2.5 或 mimo-v2-omni。"
+        )
+    return "这是接口路由或模型 ID 层面的 404，请先确认 Base URL 是否包含 /v1、模型 ID 是否属于该厂商，以及该厂商是否支持 OpenAI-compatible 图片输入格式。"
 
 
 def _png_chunk(kind: bytes, data: bytes) -> bytes:
@@ -760,7 +826,8 @@ class ModelProfileService:
         headers = {"Accept": "application/json"}
         api_key = str(source.get("api_key") or "").strip()
         if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+            headers.update(_openai_compatible_auth_headers(base_url, api_key))
+            headers["Accept"] = "application/json"
         request = urlrequest.Request(models_url, method="GET", headers=headers)
         try:
             with urlrequest.urlopen(request, timeout=20) as response:
@@ -822,6 +889,7 @@ class ModelProfileService:
             for key, value in model_info.items():
                 if value not in ("", None, [], {}):
                     model[key] = value
+            _apply_known_model_capability(model, provider=provider, base_url=base_url)
             models.append(model)
 
         return {
@@ -1048,6 +1116,16 @@ class ModelProfileService:
         messages: list[dict[str, Any]] = [{"role": "user", "content": "Reply with OK."}]
         vision_expected: tuple[str, ...] | None = None
         if capability == "vision":
+            vision_hint = _vision_capability_hint(provider, base_url, model)
+            if vision_hint.get("known_supports_vision") is False:
+                recommended = vision_hint.get("recommended_vision_models") or []
+                suggestion = f"；建议改选 {', '.join(recommended)}" if recommended else ""
+                return {
+                    "ok": False,
+                    "success": False,
+                    "message": f"{model} 在当前厂商适配中是文本/推理模型，不作为图片转述模型保存{suggestion}。",
+                    "vision_capability": vision_hint,
+                }
             messages, vision_expected = _vision_test_challenge()
         started = time.time()
         try:
@@ -1058,7 +1136,12 @@ class ModelProfileService:
                 messages,
             )
         except ModelProfileError as exc:
-            return {"ok": False, "success": False, "message": str(exc)}
+            message = str(exc)
+            if capability == "vision":
+                hint = _vision_route_failure_hint(provider, base_url, model, message)
+                if hint:
+                    message = f"{message}；{hint}"
+            return {"ok": False, "success": False, "message": message}
         if capability == "vision" and (vision_expected is None or not _vision_test_passed(result, vision_expected)):
             return {
                 "ok": False,

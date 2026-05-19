@@ -102,13 +102,17 @@ export type RemoteModelInfo = {
   input_modalities?: string[];
   is_free?: boolean;
   is_moderated?: boolean;
+  known_capability?: 'chat' | 'vision' | 'text' | string;
   max_completion_tokens?: number;
   modality?: string;
   name?: string;
+  not_recommended_for?: string[];
   owned_by?: string;
   output_modalities?: string[];
   pricing?: Record<string, string | number | null | undefined>;
   provider_key?: string;
+  recommended_for?: string[];
+  recommended_vision_models?: string[];
   supported_parameters?: string[];
 };
 

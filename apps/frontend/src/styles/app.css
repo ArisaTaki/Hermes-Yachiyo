@@ -13583,6 +13583,18 @@ button.activity-item {
   line-height: 1.1;
 }
 
+.model-catalog-badges em.positive {
+  border-color: oklch(72% 0.14 166 / 0.36);
+  background: oklch(72% 0.14 166 / 0.14);
+  color: oklch(86% 0.12 166);
+}
+
+.model-catalog-badges em.warning {
+  border-color: oklch(82% 0.12 74 / 0.34);
+  background: oklch(82% 0.12 74 / 0.12);
+  color: oklch(89% 0.11 74);
+}
+
 .model-catalog-empty {
   grid-column: 1 / -1;
   padding: 10px;

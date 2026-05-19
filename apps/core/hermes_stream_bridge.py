@@ -143,6 +143,7 @@ _PROVIDER_HOST_HINTS: tuple[tuple[str, str], ...] = (
     ("api.openai.com", "openai"),
     ("api.anthropic.com", "anthropic"),
     ("generativelanguage.googleapis.com", "gemini"),
+    ("api.mimo-v2.com", "xiaomi"),
     ("api.xiaomimimo.com", "xiaomi"),
     ("token-plan-cn.xiaomimimo.com", "xiaomi"),
     ("api.deepseek.com", "deepseek"),

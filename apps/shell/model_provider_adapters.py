@@ -139,6 +139,7 @@ HERMES_PROVIDER_HOST_HINTS: tuple[tuple[str, str], ...] = (
     ("generativelanguage.googleapis.com", "gemini"),
     ("dashscope.aliyuncs.com", "alibaba"),
     ("dashscope-intl.aliyuncs.com", "alibaba"),
+    ("api.mimo-v2.com", "xiaomi"),
     ("api.xiaomimimo.com", "xiaomi"),
     ("token-plan-cn.xiaomimimo.com", "xiaomi"),
     ("api.deepseek.com", "deepseek"),
