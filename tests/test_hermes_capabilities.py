@@ -201,3 +201,9 @@ def test_effective_provider_inference_keeps_explicit_provider():
         )
         == "custom"
     )
+
+
+def test_effective_provider_inference_maps_profile_provider_aliases():
+    assert infer_effective_hermes_provider("xiaomi_mimo") == "xiaomi"
+    assert infer_effective_hermes_provider("google_gemini") == "gemini"
+    assert infer_effective_hermes_provider("moonshot") == "kimi-coding"

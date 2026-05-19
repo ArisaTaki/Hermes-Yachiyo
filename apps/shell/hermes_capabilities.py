@@ -47,11 +47,18 @@ _PROVIDER_ALIASES = {
     "google": "gemini",
     "google-ai": "gemini",
     "google-ai-studio": "gemini",
+    "google_gemini": "gemini",
     "x-ai": "xai",
+    "xiaomi_mimo": "xiaomi",
+    "mimo": "xiaomi",
     "moonshot": "kimi-coding",
     "kimi": "kimi-coding",
+    "kimi_coding_plan": "kimi-coding",
     "glm": "zai",
     "z-ai": "zai",
+    "z_ai": "zai",
+    "zhipu": "zai",
+    "lm_studio": "lmstudio",
 }
 _AUTO_PROVIDER_VALUES = {"", "auto", "main"}
 _PROVIDER_HOST_HINTS: tuple[tuple[str, str], ...] = (
