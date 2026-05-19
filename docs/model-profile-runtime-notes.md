@@ -59,6 +59,15 @@
 - `@Agent` 不直接走普通 Hermes Chat，而是进入 Yachiyo router。
 - `yachiyo_profile` 不是 Hermes Agent 的等价替代；它可以直连模型，但工具调用、联网查询和复杂协作能力要依赖 Yachiyo ToolBroker 后续补齐。
 
+### Agent Studio 第一阶段稳定化
+
+- Agent Studio 的刷新边界已从“选择态驱动全量刷新”改为“初始加载 + 操作后显式刷新”。
+- 切换 Agent / Workflow 只更新本地编辑 draft，不再触发全页 `busy`、列表重载或表单闪烁。
+- 新建 Agent 会进入稳定的空白草稿；刷新逻辑不会再因为 `selectedAgentId` 为空自动选回第一个模板。
+- 保存 Agent / Workflow 后通过刷新参数保留刚保存的选中项；删除后保留空白草稿，方便继续创建。
+- Run 创建后显式选中新 Run；URL 中带来的 `run` 参数会被保留，允许详情补取。
+- 下一阶段应把 `hermes_profile`、`yachiyo_profile`、`external_cli` 从普通 select 改成带能力状态的执行后端卡片，明确哪些已可运行、哪些是实验/占位。
+
 ### TTS 与主动关怀入口
 
 - 模型配置页的 TTS tab 改为独立语音来源入口。
@@ -94,4 +103,5 @@
 3. 把 Xiaomi MiMo、OpenRouter、Gemini、DashScope、DeepSeek、MiniMax 等常用源的真实图片测试链路逐个手工验收。
 4. 完成 TTS API/HTTP/Command 的真实测试语义：TTS 不应只保存 profile id，还应能对 endpoint/voice/timeout/test text 做可证实的连接测试。
 5. 为 `yachiyo_profile` 补 ToolBroker：优先支持 OpenAI tool_calls；不支持 tool_calls 的模型走 JSON fallback。
-6. 更新用户手册中的旧“主动关怀语音”命名，统一为“主动关怀与桌面观察”，并保留 GPT-SoVITS 作为该页内的本地 TTS 服务模块。
+6. 设计 Agent Studio 第二阶段的执行后端状态 UI：Hermes Runtime / Yachiyo Profile / External CLI 分别展示成熟度、配置要求和下一步动作。
+7. 更新用户手册中的旧“主动关怀语音”命名，统一为“主动关怀与桌面观察”，并保留 GPT-SoVITS 作为该页内的本地 TTS 服务模块。

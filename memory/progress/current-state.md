@@ -2,6 +2,17 @@
 
 ## 已完成
 
+### Milestone 81 — Agent Studio 第一阶段稳定化
+
+- ✅ Agent Studio 选择态已从数据刷新依赖中拆出：切换 Agent / Workflow 不再触发全页重新读取、`busy` notice 或表单闪烁。
+- ✅ 修复“新建 Agent 闪一下无事发生”：新建现在会稳定进入空白 Agent 草稿，不会被初始化/刷新逻辑自动选回第一个内置模板。
+- ✅ Agent 保存后显式保留刚保存的 Agent；删除后保留空白草稿，便于继续创建。
+- ✅ Workflow 新建/保存/删除也使用显式选择状态，避免画布在非保存操作中被刷新重置。
+- ✅ Run 创建后显式选中新 Run；通过 URL 进入的历史 Run ID 会继续保留并补取详情。
+- ✅ 初始加载状态与操作状态拆分：只有首次读取显示加载提示，保存/删除/导入/运行等操作后再按需刷新列表。
+- ✅ 阶段说明已补入 `docs/phase-4-hermes-sync-plan.md` 与 `docs/model-profile-runtime-notes.md`。
+- ✅ 验证：`npm --prefix apps/frontend run build` passed；`python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_model_profiles.py` → 75 passed。
+
 ### Milestone 80 — 模型 Profile 统一化、Agent 执行后端与 TTS 入口整理
 
 - ✅ Profile 已作为模型配置中心推进：模型配置页按 `对话`、`图片转述`、`文字转语音` 分离服务商源，测试通过后才进入对应场景选择列表。

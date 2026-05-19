@@ -97,6 +97,15 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - 侧栏原 `GPT-SoVITS` 改名为 `主动关怀`，Hugging Face 和 TTS 预设补充厂商品牌 icon。
 - 详细阶段记录见 `docs/model-profile-runtime-notes.md`。
 
+### Batch 8：Agent Studio 第一阶段稳定化
+
+- Agent Studio 数据加载改为初始 bootstrap + 操作后按需刷新，选择 Agent / Workflow 不再触发全页 `busy` 和列表重载。
+- 修复“新建 Agent 闪一下无事发生”：点击新建会进入明确的空白草稿状态，不再被刷新逻辑自动选回第一个模板 Agent。
+- 保存 Agent 后显式保留新建/编辑后的 Agent 选中项；删除 Agent 后保留空白草稿状态，方便继续创建。
+- Workflow 新建/保存/删除同样使用显式选择状态，避免画布在非保存操作中被刷新重置。
+- Run 创建后显式选中新 Run；通过 URL 打开的历史 Run ID 会继续保留并触发详情补取，不会被最近 Run 列表覆盖。
+- 加载状态与操作状态拆分：初次读取显示“正在读取 Agent Studio...”，保存/删除/导入/运行等操作使用局部 action 状态，不再因为切换列表项造成页面闪烁。
+
 ## 新增接口
 
 - `GET/POST /ui/model-profiles`
@@ -148,6 +157,8 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - `profile` Agent 首版支持 OpenAI-compatible Chat Completions 与简单受控工具循环。
 - 旧 `custom_api` Agent 作为兼容路径保留，新增 Agent 默认使用 `follow_main` 或 Model Profile。
 - `yachiyo_profile` 能直连模型，但不默认等同 Hermes Agent；联网、工具调用和复杂协作能力依赖后续 Yachiyo ToolBroker。
+- `hermes_profile` 目前默认只生成 RunGroup 与上下文；真实 Hermes CLI 执行需要显式启用后端开关，后续还要设计为用户可理解的运行能力状态。
+- `external_cli` 后端已有服务端 command 入口，但 UI 尚未开放 command / args / timeout / stdin context 配置，仍属于占位能力。
 - TTS Profile 首版做统一保存与复用入口，具体语音合成、服务检测和连接测试仍由主动关怀 / TTS 专用链路执行。
 - Provider 目录同步目前是可手动运行的缓存能力；每日自动订阅更新机制尚未接入应用 lifecycle。
 - Skill v1 只支持本地目录/ZIP，不做远程 marketplace，也不自动扫描用户全局 skills。

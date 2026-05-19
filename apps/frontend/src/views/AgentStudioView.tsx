@@ -44,6 +44,16 @@ import { currentParam } from '../lib/view';
 
 type StudioTab = 'agents' | 'skills' | 'workflows' | 'runs';
 
+type StudioRefreshOptions = {
+  selectedAgentId?: string;
+  selectFirstAgent?: boolean;
+  selectedWorkflowId?: string;
+  selectFirstWorkflow?: boolean;
+  runTarget?: string;
+  selectedRunId?: string;
+  selectFirstRun?: boolean;
+};
+
 type AgentDraft = {
   agent_id?: string;
   name: string;
@@ -162,9 +172,11 @@ export function AgentStudioView() {
   const [artifactPreview, setArtifactPreview] = useState<{ path: string; content: string; truncated?: boolean } | null>(null);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [busyAction, setBusyAction] = useState('');
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(starterNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const busy = loading || Boolean(busyAction);
 
   const selectedAgent = useMemo(
     () => agents.find((agent) => agent.agent_id === selectedAgentId) || null,
@@ -187,7 +199,7 @@ export function AgentStudioView() {
     [modelProfiles],
   );
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options: StudioRefreshOptions = {}) => {
     const [nextAgents, nextSkills, nextProfiles, nextWorkflows, nextRunnables, nextRuns] = await Promise.all([
       listAgents(),
       listSkills(),
@@ -202,18 +214,34 @@ export function AgentStudioView() {
     setWorkflows(nextWorkflows);
     setRunnables(nextRunnables);
     setRuns(nextRuns);
-    if (!selectedAgentId && nextAgents.length) setSelectedAgentId(nextAgents[0].agent_id);
-    if (!selectedWorkflowId && nextWorkflows.length) setSelectedWorkflowId(nextWorkflows[0].workflow_id);
-    if (!runTarget && nextRunnables.length) setRunTarget(nextRunnables[0].id);
-    if (!selectedRunId && nextRuns.length) setSelectedRunId(nextRuns[0].run_id);
-  }, [runTarget, selectedAgentId, selectedRunId, selectedWorkflowId]);
+    setSelectedAgentId((current) => {
+      const desired = options.selectedAgentId !== undefined ? options.selectedAgentId : current;
+      if (desired && nextAgents.some((agent) => agent.agent_id === desired)) return desired;
+      return options.selectFirstAgent && nextAgents.length ? nextAgents[0].agent_id : '';
+    });
+    setSelectedWorkflowId((current) => {
+      const desired = options.selectedWorkflowId !== undefined ? options.selectedWorkflowId : current;
+      if (desired && nextWorkflows.some((workflow) => workflow.workflow_id === desired)) return desired;
+      return options.selectFirstWorkflow && nextWorkflows.length ? nextWorkflows[0].workflow_id : '';
+    });
+    setRunTarget((current) => {
+      const desired = options.runTarget !== undefined ? options.runTarget : current;
+      if (desired && nextRunnables.some((item) => item.id === desired)) return desired;
+      return nextRunnables[0]?.id || '';
+    });
+    setSelectedRunId((current) => {
+      const desired = options.selectedRunId !== undefined ? options.selectedRunId : current;
+      if (desired) return desired;
+      return options.selectFirstRun && nextRuns.length ? nextRuns[0].run_id : '';
+    });
+  }, []);
 
   useEffect(() => {
-    setBusy(true);
-    refresh()
+    setLoading(true);
+    refresh({ selectFirstAgent: true, selectFirstWorkflow: true, selectFirstRun: true })
       .then(() => setError(''))
       .catch((err: unknown) => setError(err instanceof Error ? err.message : '读取 Agent Studio 失败'))
-      .finally(() => setBusy(false));
+      .finally(() => setLoading(false));
   }, [refresh]);
 
   useEffect(() => {
@@ -251,22 +279,51 @@ export function AgentStudioView() {
     [setEdges],
   );
 
-  async function runAction(action: () => Promise<void>, label: string) {
-    setBusy(true);
-    setStatus(label);
+  function startNewAgent() {
+    setSelectedAgentId('');
+    setDraft({ ...emptyAgentDraft });
+    setStatus('正在编辑新的 Agent 草稿');
+    setError('');
+  }
+
+  function selectAgent(agentId: string) {
+    setSelectedAgentId(agentId);
+    setStatus('');
+    setError('');
+  }
+
+  function startNewWorkflow() {
+    setSelectedWorkflowId('');
+    setNodes(starterNodes);
+    setEdges([]);
+    setWorkflowName('New Workflow');
+    setWorkflowDescription('');
+    setStatus('正在编辑新的 Workflow 草稿');
+    setError('');
+  }
+
+  function selectWorkflow(workflowId: string) {
+    setSelectedWorkflowId(workflowId);
+    setStatus('');
+    setError('');
+  }
+
+  async function runAction(action: () => Promise<StudioRefreshOptions | void>, label: string) {
+    setBusyAction(label);
+    setStatus(`${label}...`);
     setError('');
     try {
-      await action();
-      await refresh();
+      const refreshOptions = await action();
+      await refresh(refreshOptions || {});
       setStatus(`${label} 完成`);
     } catch (err) {
       setError(err instanceof Error ? err.message : `${label} 失败`);
     } finally {
-      setBusy(false);
+      setBusyAction('');
     }
   }
 
-  async function saveAgent() {
+  async function saveAgent(): Promise<StudioRefreshOptions> {
     if (draft.execution_backend === 'yachiyo_profile' && draft.model_mode !== 'custom_api' && !draft.model_profile_id) {
       throw new Error('请选择已通过测试的文本模型 Profile，或改为 Hermes profile 后端。');
     }
@@ -304,9 +361,10 @@ export function AgentStudioView() {
     const saved = draft.agent_id ? await updateAgent(draft.agent_id, request) : await createAgent(request);
     setSelectedAgentId(saved.agent_id);
     setDraft(agentToDraft(saved));
+    return { selectedAgentId: saved.agent_id };
   }
 
-  async function saveWorkflow() {
+  async function saveWorkflow(): Promise<StudioRefreshOptions> {
     const request: Partial<WorkflowSpec> = {
       name: workflowName,
       description: workflowDescription,
@@ -325,6 +383,7 @@ export function AgentStudioView() {
     };
     const saved = selectedWorkflow ? await updateWorkflow(selectedWorkflow.workflow_id, request) : await createWorkflow(request);
     setSelectedWorkflowId(saved.workflow_id);
+    return { selectedWorkflowId: saved.workflow_id };
   }
 
   function addFlowNode(kind: 'agent' | 'approval' | 'artifact') {
@@ -385,7 +444,7 @@ export function AgentStudioView() {
         ))}
       </div>
 
-      {busy ? <div className="notice">处理中...</div> : null}
+      {loading ? <div className="notice">正在读取 Agent Studio...</div> : null}
       {status ? <div className="notice">{status}</div> : null}
       {error ? <div className="notice danger">{error}</div> : null}
 
@@ -394,7 +453,7 @@ export function AgentStudioView() {
           <aside className="agent-studio-panel">
             <div className="section-heading-row">
               <h2>Agents</h2>
-              <button type="button" onClick={() => { setSelectedAgentId(''); setDraft(emptyAgentDraft); }}>新建</button>
+              <button type="button" disabled={busy} onClick={startNewAgent}>新建</button>
             </div>
             <div className="agent-list">
               {agents.map((agent) => (
@@ -402,7 +461,7 @@ export function AgentStudioView() {
                   type="button"
                   className={agent.agent_id === selectedAgentId ? 'active' : ''}
                   key={agent.agent_id}
-                  onClick={() => setSelectedAgentId(agent.agent_id)}
+                  onClick={() => selectAgent(agent.agent_id)}
                 >
                   <strong>{agent.name}</strong>
                   <span>{agent.category || 'custom'} · {agent.execution_backend || agent.model_mode}</span>
@@ -413,7 +472,7 @@ export function AgentStudioView() {
           <form className="agent-studio-panel agent-editor" onSubmit={(event) => { event.preventDefault(); void runAction(saveAgent, '保存 Agent'); }}>
             <div className="section-heading-row">
               <h2>{draft.agent_id ? '编辑 Agent' : '新建 Agent'}</h2>
-              {draft.agent_id ? <button type="button" className="danger-action" onClick={() => void runAction(async () => { await deleteAgent(draft.agent_id || ''); setSelectedAgentId(''); setDraft(emptyAgentDraft); }, '删除 Agent')}>删除</button> : null}
+              {draft.agent_id ? <button type="button" className="danger-action" disabled={busy} onClick={() => void runAction(async () => { await deleteAgent(draft.agent_id || ''); setSelectedAgentId(''); setDraft({ ...emptyAgentDraft }); return { selectedAgentId: '' }; }, '删除 Agent')}>删除</button> : null}
             </div>
             <label><span>Name</span><input className="hy-input" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required /></label>
             <label><span>Description</span><input className="hy-input" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
@@ -581,7 +640,7 @@ export function AgentStudioView() {
           <aside className="agent-studio-panel">
             <div className="section-heading-row">
               <h2>Workflows</h2>
-              <button type="button" onClick={() => { setSelectedWorkflowId(''); setNodes(starterNodes); setEdges([]); setWorkflowName('New Workflow'); setWorkflowDescription(''); }}>新建</button>
+              <button type="button" disabled={busy} onClick={startNewWorkflow}>新建</button>
             </div>
             <div className="agent-list">
               {workflows.map((workflow) => (
@@ -589,7 +648,7 @@ export function AgentStudioView() {
                   type="button"
                   className={workflow.workflow_id === selectedWorkflowId ? 'active' : ''}
                   key={workflow.workflow_id}
-                  onClick={() => setSelectedWorkflowId(workflow.workflow_id)}
+                  onClick={() => selectWorkflow(workflow.workflow_id)}
                 >
                   <strong>{workflow.name}</strong>
                   <span>{workflow.nodes.length} nodes · {workflow.edges.length} edges</span>
@@ -605,7 +664,7 @@ export function AgentStudioView() {
               <button type="button" onClick={() => addFlowNode('approval')}>Approval</button>
               <button type="button" onClick={() => addFlowNode('artifact')}>Artifact</button>
               <button type="button" className="primary-action" onClick={() => void runAction(saveWorkflow, '保存 Workflow')}>保存</button>
-              {selectedWorkflow ? <button type="button" className="danger-action" onClick={() => void runAction(async () => { await deleteWorkflow(selectedWorkflow.workflow_id); setSelectedWorkflowId(''); }, '删除 Workflow')}>删除</button> : null}
+              {selectedWorkflow ? <button type="button" className="danger-action" onClick={() => void runAction(async () => { await deleteWorkflow(selectedWorkflow.workflow_id); startNewWorkflow(); return { selectedWorkflowId: '' }; }, '删除 Workflow')}>删除</button> : null}
             </div>
             <div className="workflow-canvas">
               <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} fitView>
@@ -652,6 +711,7 @@ export function AgentStudioView() {
                 : await createWorkflowRun(target.id, runGoal);
               setSelectedRunId(run.run_id);
               setRunGoal('');
+              return { selectedRunId: run.run_id, runTarget: target.id };
             }, '创建 Run')}>运行</button>
             <div className="run-list">
               {runs.map((run) => (
