@@ -1,6 +1,7 @@
 import { apiDelete, apiGet, apiPatch, apiPost } from './bridge';
 
 export type AgentModelMode = 'follow_main' | 'profile' | 'custom_api';
+export type AgentExecutionBackend = 'hermes_profile' | 'yachiyo_profile' | 'external_cli';
 
 export type AgentSpec = {
   agent_id: string;
@@ -10,6 +11,7 @@ export type AgentSpec = {
   category?: string;
   instructions?: string;
   model_mode: AgentModelMode;
+  execution_backend?: AgentExecutionBackend;
   model_profile_id?: string;
   vision_model_profile_id?: string;
   model_config: {
@@ -74,6 +76,7 @@ export type RunnableSummary = {
 
 export type RunSpec = {
   run_id: string;
+  run_group_id?: string;
   kind: 'agent_run' | 'workflow_run' | string;
   runnable_id: string;
   runnable_name?: string;
@@ -86,6 +89,18 @@ export type RunSpec = {
   updated_at?: string;
   agent_run_id?: string;
   workflow_run_id?: string;
+};
+
+export type RunGroupSpec = {
+  run_group_id: string;
+  title: string;
+  source?: string;
+  workspace_dir?: string;
+  status: string;
+  summary?: string;
+  child_run_ids?: string[];
+  created_at?: string;
+  updated_at?: string;
 };
 
 export async function listAgents(): Promise<AgentSpec[]> {
@@ -155,6 +170,11 @@ export async function listRunnables(): Promise<RunnableSummary[]> {
 export async function listRuns(): Promise<RunSpec[]> {
   const payload = await apiGet<{ runs?: RunSpec[] }>('/ui/runs');
   return payload.runs || [];
+}
+
+export async function listRunGroups(): Promise<RunGroupSpec[]> {
+  const payload = await apiGet<{ run_groups?: RunGroupSpec[] }>('/ui/run-groups');
+  return payload.run_groups || [];
 }
 
 export async function getRun(runId: string): Promise<RunSpec> {

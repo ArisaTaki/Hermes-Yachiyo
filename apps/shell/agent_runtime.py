@@ -25,6 +25,10 @@ class AgentRuntimeError(RuntimeError):
     """Raised when an Agent Studio operation cannot be completed."""
 
 
+_EXECUTION_BACKENDS = {"hermes_profile", "yachiyo_profile", "external_cli"}
+_DIRECT_MODEL_MODES = {"profile", "custom_api"}
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -52,6 +56,15 @@ def _json_load(value: str | None, default: Any) -> Any:
 
 def _json_dump(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _normalize_execution_backend(value: Any, *, model_mode: str = "") -> str:
+    backend = str(value or "").strip()
+    if not backend:
+        return "yachiyo_profile" if str(model_mode or "").strip() in _DIRECT_MODEL_MODES else "hermes_profile"
+    if backend not in _EXECUTION_BACKENDS:
+        raise AgentRuntimeError("execution_backend 仅支持 hermes_profile / yachiyo_profile / external_cli")
+    return backend
 
 
 _SECRET_RE = re.compile(
@@ -238,6 +251,7 @@ class AgentRuntimeService:
                 category TEXT NOT NULL DEFAULT 'custom',
                 instructions TEXT NOT NULL DEFAULT '',
                 model_mode TEXT NOT NULL DEFAULT 'follow_main',
+                execution_backend TEXT NOT NULL DEFAULT 'hermes_profile',
                 model_profile_id TEXT NOT NULL DEFAULT '',
                 vision_model_profile_id TEXT NOT NULL DEFAULT '',
                 model_provider TEXT NOT NULL DEFAULT 'openai_compatible',
@@ -274,8 +288,20 @@ class AgentRuntimeService:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS run_groups (
+                run_group_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT '',
+                workspace_dir TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'running',
+                summary TEXT NOT NULL DEFAULT '',
+                child_run_ids_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS runs (
                 run_id TEXT PRIMARY KEY,
+                run_group_id TEXT NOT NULL DEFAULT '',
                 kind TEXT NOT NULL,
                 runnable_id TEXT NOT NULL,
                 status TEXT NOT NULL,
@@ -288,18 +314,25 @@ class AgentRuntimeService:
             );
             CREATE INDEX IF NOT EXISTS idx_agents_name ON agents (LOWER(name));
             CREATE INDEX IF NOT EXISTS idx_workflows_name ON workflows (LOWER(name));
+            CREATE INDEX IF NOT EXISTS idx_run_groups_status_updated ON run_groups (status, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_runs_group_updated ON runs (run_group_id, updated_at);
             CREATE INDEX IF NOT EXISTS idx_runs_kind_updated ON runs (kind, updated_at);
             """
         )
-        self._ensure_agent_columns()
+        self._ensure_runtime_columns()
         self._conn.commit()
 
-    def _ensure_agent_columns(self) -> None:
+    def _ensure_runtime_columns(self) -> None:
         columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(agents)").fetchall()}
+        if "execution_backend" not in columns:
+            self._conn.execute("ALTER TABLE agents ADD COLUMN execution_backend TEXT NOT NULL DEFAULT 'hermes_profile'")
         if "model_profile_id" not in columns:
             self._conn.execute("ALTER TABLE agents ADD COLUMN model_profile_id TEXT NOT NULL DEFAULT ''")
         if "vision_model_profile_id" not in columns:
             self._conn.execute("ALTER TABLE agents ADD COLUMN vision_model_profile_id TEXT NOT NULL DEFAULT ''")
+        run_columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(runs)").fetchall()}
+        if "run_group_id" not in run_columns:
+            self._conn.execute("ALTER TABLE runs ADD COLUMN run_group_id TEXT NOT NULL DEFAULT ''")
 
     def _seed_templates(self) -> None:
         count = self._conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
@@ -447,6 +480,7 @@ class AgentRuntimeService:
             "category": row["category"],
             "instructions": row["instructions"],
             "model_mode": row["model_mode"],
+            "execution_backend": _normalize_execution_backend(row["execution_backend"], model_mode=row["model_mode"]),
             "model_profile_id": row["model_profile_id"],
             "vision_model_profile_id": row["vision_model_profile_id"],
             "model_config": {
@@ -498,6 +532,7 @@ class AgentRuntimeService:
     def _row_to_run(self, row: sqlite3.Row) -> dict[str, Any]:
         run = {
             "run_id": row["run_id"],
+            "run_group_id": row["run_group_id"],
             "kind": row["kind"],
             "runnable_id": row["runnable_id"],
             "runnable_name": self._runnable_name(str(row["kind"]), str(row["runnable_id"])),
@@ -510,6 +545,20 @@ class AgentRuntimeService:
             "updated_at": row["updated_at"],
         }
         return run
+
+    def _row_to_run_group(self, row: sqlite3.Row) -> dict[str, Any]:
+        child_run_ids = _json_load(row["child_run_ids_json"], [])
+        return {
+            "run_group_id": row["run_group_id"],
+            "title": row["title"],
+            "source": row["source"],
+            "workspace_dir": row["workspace_dir"],
+            "status": row["status"],
+            "summary": row["summary"],
+            "child_run_ids": child_run_ids if isinstance(child_run_ids, list) else [],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
 
     def _runnable_name(self, kind: str, runnable_id: str) -> str:
         if kind == "agent_run":
@@ -552,7 +601,9 @@ class AgentRuntimeService:
         return profile
 
     def _validate_agent_profile_refs(self, payload: dict[str, Any]) -> None:
-        if str(payload.get("model_mode") or "follow_main") == "profile":
+        model_mode = str(payload.get("model_mode") or "follow_main")
+        backend = _normalize_execution_backend(payload.get("execution_backend"), model_mode=model_mode)
+        if model_mode == "profile" or (backend == "yachiyo_profile" and model_mode != "custom_api"):
             profile_id = str(payload.get("model_profile_id") or "").strip()
             if not profile_id:
                 raise AgentRuntimeError("请选择已通过测试的 Agent 文本模型 Profile")
@@ -585,14 +636,16 @@ class AgentRuntimeService:
         agent_id = str(payload.get("agent_id") or f"agent_{_slug(name, 'agent')}_{uuid4().hex[:8]}")
         model_config = payload.get("model_config") or {}
         category = str(payload.get("category") or "custom")
+        model_mode = str(payload.get("model_mode") or "follow_main")
+        execution_backend = _normalize_execution_backend(payload.get("execution_backend"), model_mode=model_mode)
         self._conn.execute(
             """
             INSERT INTO agents (
                 agent_id, name, description, avatar_url, category, instructions,
-                model_mode, model_profile_id, vision_model_profile_id, model_provider, model_base_url, model_name, model_api_key,
+                model_mode, execution_backend, model_profile_id, vision_model_profile_id, model_provider, model_base_url, model_name, model_api_key,
                 tool_policy_json, workspace_policy_json, skill_ids_json, output_contract,
                 enabled, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 agent_id,
@@ -601,7 +654,8 @@ class AgentRuntimeService:
                 str(payload.get("avatar_url") or ""),
                 category,
                 str(payload.get("instructions") or ""),
-                str(payload.get("model_mode") or "follow_main"),
+                model_mode,
+                execution_backend,
                 str(payload.get("model_profile_id") or ""),
                 str(payload.get("vision_model_profile_id") or ""),
                 str(model_config.get("provider") or "openai_compatible"),
@@ -634,11 +688,13 @@ class AgentRuntimeService:
             api_key = str(current.get("model_config", {}).get("api_key") or "")
         now = _now()
         category = str(next_agent.get("category") or "custom")
+        model_mode = str(next_agent.get("model_mode") or "follow_main")
+        execution_backend = _normalize_execution_backend(next_agent.get("execution_backend"), model_mode=model_mode)
         self._conn.execute(
             """
             UPDATE agents
                SET name=?, description=?, avatar_url=?, category=?, instructions=?,
-                   model_mode=?, model_profile_id=?, vision_model_profile_id=?, model_provider=?, model_base_url=?, model_name=?, model_api_key=?,
+                   model_mode=?, execution_backend=?, model_profile_id=?, vision_model_profile_id=?, model_provider=?, model_base_url=?, model_name=?, model_api_key=?,
                    tool_policy_json=?, workspace_policy_json=?, skill_ids_json=?, output_contract=?,
                    enabled=?, updated_at=?
              WHERE agent_id=?
@@ -649,7 +705,8 @@ class AgentRuntimeService:
                 str(next_agent.get("avatar_url") or ""),
                 category,
                 str(next_agent.get("instructions") or ""),
-                str(next_agent.get("model_mode") or "follow_main"),
+                model_mode,
+                execution_backend,
                 str(next_agent.get("model_profile_id") or ""),
                 str(next_agent.get("vision_model_profile_id") or ""),
                 str(model_config.get("provider") or "openai_compatible"),
@@ -929,6 +986,19 @@ class AgentRuntimeService:
         ).fetchall()
         return {"ok": True, "runs": [self._row_to_run(row) for row in rows]}
 
+    def list_run_groups(self, limit: int = 50) -> dict[str, Any]:
+        rows = self._conn.execute(
+            "SELECT * FROM run_groups ORDER BY updated_at DESC LIMIT ?",
+            (max(1, min(int(limit or 50), 200)),),
+        ).fetchall()
+        return {"ok": True, "run_groups": [self._row_to_run_group(row) for row in rows]}
+
+    def get_run_group(self, run_group_id: str) -> dict[str, Any]:
+        row = self._conn.execute("SELECT * FROM run_groups WHERE run_group_id=?", (run_group_id,)).fetchone()
+        if row is None:
+            raise KeyError(run_group_id)
+        return self._row_to_run_group(row)
+
     def get_run(self, run_id: str) -> dict[str, Any]:
         row = self._conn.execute("SELECT * FROM runs WHERE run_id=?", (run_id,)).fetchone()
         if row is None:
@@ -951,19 +1021,83 @@ class AgentRuntimeService:
             "truncated": target.stat().st_size > 300_000,
         }
 
-    def _insert_run(self, *, kind: str, runnable_id: str, user_goal: str) -> dict[str, Any]:
+    def _insert_run_group(
+        self,
+        *,
+        title: str,
+        source: str,
+        workspace_dir: str = "",
+    ) -> dict[str, Any]:
+        run_group_id = f"run_group_{uuid4().hex[:12]}"
+        now = _now()
+        self._conn.execute(
+            """
+            INSERT INTO run_groups (
+                run_group_id, title, source, workspace_dir, status, summary,
+                child_run_ids_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (run_group_id, title[:180], source[:80], workspace_dir, "running", "", "[]", now, now),
+        )
+        self._conn.commit()
+        return self.get_run_group(run_group_id)
+
+    def _append_run_to_group(self, run_group_id: str, run_id: str) -> None:
+        if not run_group_id:
+            return
+        group = self.get_run_group(run_group_id)
+        child_run_ids = [str(item) for item in group.get("child_run_ids") or [] if str(item)]
+        if run_id not in child_run_ids:
+            child_run_ids.append(run_id)
+        self._conn.execute(
+            """
+            UPDATE run_groups
+               SET child_run_ids_json=?, updated_at=?
+             WHERE run_group_id=?
+            """,
+            (_json_dump(child_run_ids), _now(), run_group_id),
+        )
+        self._conn.commit()
+
+    def _update_run_group(
+        self,
+        run_group_id: str,
+        *,
+        status: str | None = None,
+        summary: str | None = None,
+    ) -> None:
+        if not run_group_id:
+            return
+        current = self.get_run_group(run_group_id)
+        self._conn.execute(
+            """
+            UPDATE run_groups
+               SET status=?, summary=?, updated_at=?
+             WHERE run_group_id=?
+            """,
+            (
+                status or current["status"],
+                summary if summary is not None else current["summary"],
+                _now(),
+                run_group_id,
+            ),
+        )
+        self._conn.commit()
+
+    def _insert_run(self, *, kind: str, runnable_id: str, user_goal: str, run_group_id: str = "") -> dict[str, Any]:
         run_id = f"{kind}_{uuid4().hex[:12]}"
         now = _now()
         self._conn.execute(
             """
             INSERT INTO runs (
-                run_id, kind, runnable_id, status, user_goal, result,
+                run_id, run_group_id, kind, runnable_id, status, user_goal, result,
                 timeline_json, artifacts_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (run_id, kind, runnable_id, "running", user_goal, "", "[]", "[]", now, now),
+            (run_id, run_group_id, kind, runnable_id, "running", user_goal, "", "[]", "[]", now, now),
         )
         self._conn.commit()
+        self._append_run_to_group(run_group_id, run_id)
         return self.get_run(run_id)
 
     def _update_run(
@@ -1026,6 +1160,11 @@ class AgentRuntimeService:
             ]
         )
 
+    @staticmethod
+    def _agent_workspace_dir(agent: dict[str, Any]) -> str:
+        workspace = agent.get("workspace_policy") or {}
+        return str(workspace.get("default_workdir") or "").strip()
+
     def create_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         agent_id = str(payload.get("agent_id") or payload.get("runnable_id") or "")
         user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
@@ -1034,23 +1173,38 @@ class AgentRuntimeService:
         if not user_goal:
             raise AgentRuntimeError("运行目标不能为空")
         agent = self._get_agent_private(agent_id)
-        run = self._insert_run(kind="agent_run", runnable_id=agent_id, user_goal=user_goal)
-        return self._execute_agent_run(run["run_id"], agent, user_goal)
+        run_group_id = str(payload.get("run_group_id") or "").strip()
+        root_group = False
+        if run_group_id:
+            self.get_run_group(run_group_id)
+        else:
+            group = self._insert_run_group(
+                title=f"{agent['name']}: {user_goal[:80]}",
+                source=str(payload.get("source") or "agent"),
+                workspace_dir=self._agent_workspace_dir(agent),
+            )
+            run_group_id = group["run_group_id"]
+            root_group = True
+        run = self._insert_run(kind="agent_run", runnable_id=agent_id, user_goal=user_goal, run_group_id=run_group_id)
+        result = self._execute_agent_run(run["run_id"], agent, user_goal)
+        if root_group:
+            self._update_run_group(run_group_id, status=result["status"], summary=result.get("result") or "")
+            result = self.get_run(result["run_id"])
+        return result
 
     def _execute_agent_run(self, run_id: str, agent: dict[str, Any], user_goal: str, upstream: str = "") -> dict[str, Any]:
-        timeline = [self._timeline("agent.run.started", f"{agent['name']} started")]
+        backend = _normalize_execution_backend(agent.get("execution_backend"), model_mode=str(agent.get("model_mode") or "follow_main"))
+        timeline = [self._timeline("agent.run.started", f"{agent['name']} started", backend=backend)]
         artifact_root = self.agent_artifacts_dir / run_id
         context = self._agent_context(agent, user_goal, upstream)
         broker = ToolBroker(agent.get("workspace_policy") or self._default_workspace_policy(), artifact_root)
         try:
-            if agent.get("model_mode") in {"custom_api", "profile"}:
+            if backend == "yachiyo_profile" or agent.get("model_mode") in {"custom_api", "profile"}:
                 result = self._run_custom_api_agent(agent, context, broker, timeline)
+            elif backend == "external_cli":
+                result = self._run_external_cli_agent(agent, context, broker, timeline)
             else:
-                result = (
-                    f"{agent['name']} run 已创建。\n\n"
-                    "此 Agent 使用 follow_main 模式，运行上下文已整理给 Yachiyo 主模型链路：\n\n"
-                    f"{context[:4000]}"
-                )
+                result = self._run_hermes_profile_agent(agent, context, broker, timeline)
             artifact = broker.artifact_write("agent-context.md", context)
             artifacts = [{"kind": "context", **artifact}]
             timeline.append(self._timeline("agent.run.completed", "Agent run completed"))
@@ -1058,6 +1212,61 @@ class AgentRuntimeService:
         except Exception as exc:
             timeline.append(self._timeline("agent.run.failed", str(exc)))
             return self._update_run(run_id, status="failed", result=str(exc), timeline=timeline, artifacts=[])
+
+    def _run_hermes_profile_agent(
+        self,
+        agent: dict[str, Any],
+        context: str,
+        broker: ToolBroker,
+        timeline: list[dict[str, Any]],
+    ) -> str:
+        timeline.append(self._timeline("agent.backend.hermes_profile", "Hermes profile backend selected"))
+        if os.getenv("HERMES_YACHIYO_AGENT_HERMES_EXEC", "").strip() != "1":
+            return (
+                f"{agent['name']} run 已创建。\n\n"
+                "此 Agent 使用 hermes_profile 后端；当前默认只生成 Yachiyo RunGroup 与上下文，"
+                "避免在 Agent Studio 中隐式启动额外 Hermes 会话。\n\n"
+                f"{context[:4000]}"
+            )
+        hermes = shutil.which("hermes") or str(Path.home() / ".local" / "bin" / "hermes")
+        if not Path(hermes).exists():
+            raise AgentRuntimeError("Hermes CLI 不可用，无法执行 hermes_profile Agent")
+        timeout = max(10, min(int(os.getenv("HERMES_YACHIYO_AGENT_HERMES_TIMEOUT", "180") or "180"), 600))
+        try:
+            result = subprocess.run(
+                [hermes, "-z", context],
+                cwd=str(broker.workdir),
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise AgentRuntimeError(f"Hermes profile Agent 执行失败：{redact_secrets(exc)}") from exc
+        if result.returncode != 0:
+            raise AgentRuntimeError(f"Hermes profile Agent 执行失败：{redact_secrets(result.stderr or result.stdout)}")
+        return redact_secrets(result.stdout).strip() or "Hermes Agent completed."
+
+    def _run_external_cli_agent(
+        self,
+        agent: dict[str, Any],
+        context: str,
+        broker: ToolBroker,
+        timeline: list[dict[str, Any]],
+    ) -> str:
+        timeline.append(self._timeline("agent.backend.external_cli", "External CLI backend selected"))
+        model_config = agent.get("model_config") or {}
+        command = str(model_config.get("command") or "").strip()
+        if not command:
+            return (
+                f"{agent['name']} run 已创建。\n\n"
+                "此 Agent 使用 external_cli 后端，但尚未配置具体 CLI command。"
+                "上下文已写入 agent-context.md，后续可接入 Codex / Claude Code / OpenDesign daemon。"
+            )
+        result = broker.terminal_run(command, approved=True, timeout_seconds=int(model_config.get("timeout_seconds") or 120))
+        if not result.get("ok"):
+            raise AgentRuntimeError(str(result.get("stderr") or result.get("stdout") or "external_cli 执行失败"))
+        return str(result.get("stdout") or "").strip() or "external_cli completed."
 
     def _run_custom_api_agent(
         self,
@@ -1213,7 +1422,19 @@ class AgentRuntimeService:
             raise AgentRuntimeError("运行目标不能为空")
         workflow = self.get_workflow(workflow_id)
         self.validate_workflow(workflow["nodes"], workflow["edges"])
-        run = self._insert_run(kind="workflow_run", runnable_id=workflow_id, user_goal=user_goal)
+        run_group_id = str(payload.get("run_group_id") or "").strip()
+        root_group = False
+        if run_group_id:
+            self.get_run_group(run_group_id)
+        else:
+            group = self._insert_run_group(
+                title=f"{workflow['name']}: {user_goal[:80]}",
+                source=str(payload.get("source") or "workflow"),
+                workspace_dir="",
+            )
+            run_group_id = group["run_group_id"]
+            root_group = True
+        run = self._insert_run(kind="workflow_run", runnable_id=workflow_id, user_goal=user_goal, run_group_id=run_group_id)
         timeline = [self._timeline("workflow.run.started", workflow["name"])]
         artifacts: list[dict[str, Any]] = []
         context = user_goal
@@ -1229,7 +1450,7 @@ class AgentRuntimeService:
                     if not agent_id:
                         raise AgentRuntimeError(f"Agent 节点 {label} 缺少 agent_id")
                     agent = self._get_agent_private(agent_id)
-                    child = self._insert_run(kind="agent_run", runnable_id=agent_id, user_goal=context)
+                    child = self._insert_run(kind="agent_run", runnable_id=agent_id, user_goal=context, run_group_id=run_group_id)
                     child = self._execute_agent_run(child["run_id"], agent, context, upstream=context)
                     context = child["result"]
                     timeline.append(self._timeline("workflow.node.agent", label, child_run_id=child["run_id"], status=child["status"]))
@@ -1245,10 +1466,18 @@ class AgentRuntimeService:
                     continue
                 raise AgentRuntimeError(f"未知 Workflow 节点类型：{kind}")
             timeline.append(self._timeline("workflow.run.completed", "Workflow run completed"))
-            return self._update_run(run["run_id"], status="completed", result=context, timeline=timeline, artifacts=artifacts)
+            result = self._update_run(run["run_id"], status="completed", result=context, timeline=timeline, artifacts=artifacts)
+            if root_group:
+                self._update_run_group(run_group_id, status="completed", summary=context)
+                result = self.get_run(result["run_id"])
+            return result
         except Exception as exc:
             timeline.append(self._timeline("workflow.run.failed", str(exc)))
-            return self._update_run(run["run_id"], status="failed", result=str(exc), timeline=timeline, artifacts=artifacts)
+            result = self._update_run(run["run_id"], status="failed", result=str(exc), timeline=timeline, artifacts=artifacts)
+            if root_group:
+                self._update_run_group(run_group_id, status="failed", summary=str(exc))
+                result = self.get_run(result["run_id"])
+            return result
 
     def _workflow_path(self, workflow: dict[str, Any]) -> list[dict[str, Any]]:
         nodes = {str(node["id"]): node for node in workflow["nodes"]}
@@ -1309,11 +1538,11 @@ class AgentRuntimeService:
         if runnable is None:
             raise AgentRuntimeError("未找到指定 Agent 或 Workflow")
         if runnable["kind"] == "agent":
-            run = self.create_agent_run({"agent_id": runnable["id"], "user_goal": user_goal})
+            run = self.create_agent_run({"agent_id": runnable["id"], "user_goal": user_goal, "source": "chat"})
             run["agent_run_id"] = run["run_id"]
             run["runnable"] = runnable
             return run
-        run = self.create_workflow_run({"workflow_id": runnable["id"], "user_goal": user_goal})
+        run = self.create_workflow_run({"workflow_id": runnable["id"], "user_goal": user_goal, "source": "chat"})
         run["workflow_run_id"] = run["run_id"]
         run["runnable"] = runnable
         return run

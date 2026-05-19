@@ -12391,6 +12391,17 @@ button.activity-item {
   gap: 10px;
 }
 
+.agent-inline-note {
+  display: block;
+  min-height: 38px;
+  padding: 9px 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  color: var(--hy-faint);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .agent-textarea {
   min-height: 130px;
   resize: vertical;

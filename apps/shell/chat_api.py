@@ -449,6 +449,7 @@ class ChatAPI:
             "task_id": "",
             "status": "completed",
             "run_id": run["run_id"],
+            "run_group_id": run.get("run_group_id", ""),
             "run_status": run["status"],
         }
         if run.get("kind") == "workflow_run":

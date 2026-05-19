@@ -85,6 +85,10 @@ def test_import_skill_directory_and_mount_to_agent(tmp_path):
         artifact = service.read_run_artifact(run["run_id"], "agent-context.md")
         assert artifact["ok"] is True
         assert "Useful instruction" in artifact["content"]
+        assert run["run_group_id"]
+        group = service.get_run_group(run["run_group_id"])
+        assert group["source"] == "agent"
+        assert group["child_run_ids"] == [run["run_id"]]
         with pytest.raises(AgentRuntimeError):
             service.read_run_artifact(run["run_id"], "../escape.md")
     finally:
@@ -165,8 +169,29 @@ def test_linear_workflow_executes_agent_nodes_in_order(tmp_path):
         run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "Ship it"})
 
         assert run["status"] == "completed"
+        assert run["run_group_id"]
         assert [event["event"] for event in run["timeline"]].count("workflow.node.agent") == 2
         assert "Agent B" in run["result"]
+        group = service.get_run_group(run["run_group_id"])
+        assert group["source"] == "workflow"
+        assert len(group["child_run_ids"]) == 3
+    finally:
+        service.close()
+
+
+def test_agent_execution_backend_defaults_and_external_cli_placeholder(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        hermes_agent = service.create_agent({"name": "Hermes Agent"})
+        assert hermes_agent["execution_backend"] == "hermes_profile"
+        run = service.create_agent_run({"agent_id": hermes_agent["agent_id"], "user_goal": "Plan"})
+        assert run["status"] == "completed"
+        assert "hermes_profile 后端" in run["result"]
+
+        external = service.create_agent({"name": "CLI Agent", "execution_backend": "external_cli"})
+        external_run = service.create_agent_run({"agent_id": external["agent_id"], "user_goal": "Review"})
+        assert external_run["status"] == "completed"
+        assert "external_cli 后端" in external_run["result"]
     finally:
         service.close()
 

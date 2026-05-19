@@ -52,6 +52,7 @@ type AgentDraft = {
   category: string;
   instructions: string;
   model_mode: 'follow_main' | 'profile' | 'custom_api';
+  execution_backend: 'hermes_profile' | 'yachiyo_profile' | 'external_cli';
   model_profile_id: string;
   vision_model_profile_id: string;
   base_url: string;
@@ -71,6 +72,7 @@ const emptyAgentDraft: AgentDraft = {
   category: 'custom',
   instructions: '',
   model_mode: 'follow_main',
+  execution_backend: 'hermes_profile',
   model_profile_id: '',
   vision_model_profile_id: '',
   base_url: '',
@@ -97,6 +99,8 @@ function textToScopes(value: string): string[] {
 
 function agentToDraft(agent: AgentSpec): AgentDraft {
   const workspace = agent.workspace_policy || {};
+  const executionBackend = agent.execution_backend
+    || (agent.model_mode === 'profile' || agent.model_mode === 'custom_api' ? 'yachiyo_profile' : 'hermes_profile');
   return {
     agent_id: agent.agent_id,
     name: agent.name,
@@ -105,6 +109,7 @@ function agentToDraft(agent: AgentSpec): AgentDraft {
     category: agent.category || 'custom',
     instructions: agent.instructions || '',
     model_mode: agent.model_mode,
+    execution_backend: executionBackend,
     model_profile_id: agent.model_profile_id || '',
     vision_model_profile_id: agent.vision_model_profile_id || '',
     base_url: agent.model_config?.base_url || '',
@@ -262,17 +267,23 @@ export function AgentStudioView() {
   }
 
   async function saveAgent() {
-    if (draft.model_mode === 'profile' && !draft.model_profile_id) {
-      throw new Error('请选择模型组，或改为 follow_main。');
+    if (draft.execution_backend === 'yachiyo_profile' && draft.model_mode !== 'custom_api' && !draft.model_profile_id) {
+      throw new Error('请选择已通过测试的文本模型 Profile，或改为 Hermes profile 后端。');
     }
+    const nextModelMode: AgentDraft['model_mode'] = draft.model_mode === 'custom_api'
+      ? 'custom_api'
+      : draft.execution_backend === 'yachiyo_profile'
+        ? 'profile'
+        : 'follow_main';
     const request: Partial<AgentSpec> = {
       name: draft.name,
       description: draft.description,
       avatar_url: draft.avatar_url,
       category: draft.category,
       instructions: draft.instructions,
-      model_mode: draft.model_mode,
-      model_profile_id: draft.model_mode === 'profile' ? draft.model_profile_id : '',
+      model_mode: nextModelMode,
+      execution_backend: draft.execution_backend,
+      model_profile_id: draft.execution_backend === 'yachiyo_profile' ? draft.model_profile_id : '',
       vision_model_profile_id: draft.vision_model_profile_id,
       workspace_policy: {
         default_workdir: draft.default_workdir,
@@ -282,7 +293,7 @@ export function AgentStudioView() {
       output_contract: draft.output_contract,
       enabled: draft.enabled,
     };
-    if (draft.model_mode === 'custom_api') {
+    if (nextModelMode === 'custom_api') {
       request.model_config = {
         provider: 'openai_compatible',
         base_url: draft.base_url,
@@ -394,7 +405,7 @@ export function AgentStudioView() {
                   onClick={() => setSelectedAgentId(agent.agent_id)}
                 >
                   <strong>{agent.name}</strong>
-                  <span>{agent.category || 'custom'} · {agent.model_mode}</span>
+                  <span>{agent.category || 'custom'} · {agent.execution_backend || agent.model_mode}</span>
                 </button>
               ))}
             </div>
@@ -425,14 +436,31 @@ export function AgentStudioView() {
             </label>
             <div className="agent-form-row">
               <label>
-                <span>Model Mode</span>
-                <select className="hy-select" value={draft.model_mode} onChange={(event) => setDraft({ ...draft, model_mode: event.target.value as AgentDraft['model_mode'] })}>
-                  <option value="follow_main">follow_main</option>
-                  <option value="profile">model_profile</option>
-                  {draft.model_mode === 'custom_api' ? <option value="custom_api">legacy_custom_api</option> : null}
+                <span>Execution Backend</span>
+                <select
+                  className="hy-select"
+                  value={draft.execution_backend}
+                  onChange={(event) => {
+                    const execution_backend = event.target.value as AgentDraft['execution_backend'];
+                    setDraft({
+                      ...draft,
+                      execution_backend,
+                      model_mode: draft.model_mode === 'custom_api'
+                        ? 'custom_api'
+                        : execution_backend === 'yachiyo_profile'
+                          ? 'profile'
+                          : 'follow_main',
+                    });
+                  }}
+                >
+                  <option value="hermes_profile">Hermes profile</option>
+                  <option value="yachiyo_profile">Yachiyo Profile</option>
+                  <option value="external_cli">External CLI</option>
                 </select>
               </label>
-              {draft.model_mode === 'profile' ? (
+              {draft.model_mode === 'custom_api' ? (
+                <label><span>Model</span><input className="hy-input" value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} placeholder="gpt-4.1-mini" /></label>
+              ) : draft.execution_backend === 'yachiyo_profile' ? (
                 <label>
                   <span>Model Profile</span>
                   <select className="hy-select" value={draft.model_profile_id} onChange={(event) => setDraft({ ...draft, model_profile_id: event.target.value })}>
@@ -444,14 +472,20 @@ export function AgentStudioView() {
                     ))}
                   </select>
                 </label>
-              ) : draft.model_mode === 'custom_api' ? (
-                <label><span>Model</span><input className="hy-input" value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} placeholder="gpt-4.1-mini" /></label>
+              ) : draft.execution_backend === 'external_cli' ? (
+                <label><span>External CLI</span><span className="agent-inline-note">CLI 执行器入口已预留，具体 Codex / Claude Code / OpenDesign 适配将在后续配置中接入。</span></label>
               ) : (
-                <label><span>Model Profile</span><button type="button" className="hy-btn hy-btn-ghost" onClick={() => openAppView('provider')}>管理模型组</button></label>
+                <label><span>Hermes Profile</span><button type="button" className="hy-btn hy-btn-ghost" onClick={() => openAppView('provider')}>管理主模型</button></label>
               )}
             </div>
-            {draft.model_mode === 'profile' && !chatModelProfiles.length ? (
+            {draft.execution_backend === 'yachiyo_profile' && !chatModelProfiles.length ? (
               <div className="notice">还没有可用的文本模型组。请先在模型配置页面新建并测试。</div>
+            ) : null}
+            {draft.execution_backend === 'hermes_profile' ? (
+              <div className="notice">Hermes profile 后端由 Yachiyo 创建 RunGroup 并交给 Hermes 主运行时能力链路；适合需要 Hermes 工具、联网和委派能力的 Agent。</div>
+            ) : null}
+            {draft.execution_backend === 'yachiyo_profile' ? (
+              <div className="notice">Yachiyo Profile 后端直连已测试通过的模型，并使用 Yachiyo 自己的 Skills、Workflow 和受控 ToolBroker。</div>
             ) : null}
             <div className="agent-form-row">
               <label>

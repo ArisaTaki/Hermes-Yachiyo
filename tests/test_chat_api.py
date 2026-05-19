@@ -128,9 +128,11 @@ def test_agent_mention_creates_agent_run_without_general_task(tmp_path, monkeypa
         assert result["ok"] is True
         assert result["runnable_command"] is True
         assert result["agent_run_id"]
+        assert result["run_group_id"]
         assert runtime.state.list_tasks() == []
         run = service.get_run(result["agent_run_id"])
         assert run["status"] == "completed"
+        assert run["run_group_id"] == result["run_group_id"]
         assert run["runnable_id"] == agent["agent_id"]
         messages = runtime.chat_session.get_messages()
         assert messages[0].status == MessageStatus.COMPLETED

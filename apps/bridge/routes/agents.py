@@ -23,6 +23,7 @@ class AgentRequest(BaseModel):
     category: str | None = Field(default=None, max_length=80)
     instructions: str | None = Field(default=None, max_length=60000)
     model_mode: str | None = Field(default=None, max_length=40)
+    execution_backend: str | None = Field(default=None, max_length=40)
     model_profile_id: str | None = Field(default=None, max_length=160)
     vision_model_profile_id: str | None = Field(default=None, max_length=160)
     model_config_data: dict[str, Any] | None = Field(default=None, alias="model_config")
@@ -54,6 +55,8 @@ class WorkflowRequest(BaseModel):
 class AgentRunRequest(BaseModel):
     agent_id: str | None = Field(default=None, max_length=160)
     runnable_id: str | None = Field(default=None, max_length=160)
+    run_group_id: str | None = Field(default=None, max_length=160)
+    source: str | None = Field(default=None, max_length=80)
     user_goal: str | None = Field(default=None, max_length=60000)
     goal: str | None = Field(default=None, max_length=60000)
 
@@ -61,6 +64,8 @@ class AgentRunRequest(BaseModel):
 class WorkflowRunRequest(BaseModel):
     workflow_id: str | None = Field(default=None, max_length=160)
     runnable_id: str | None = Field(default=None, max_length=160)
+    run_group_id: str | None = Field(default=None, max_length=160)
+    source: str | None = Field(default=None, max_length=80)
     user_goal: str | None = Field(default=None, max_length=60000)
     goal: str | None = Field(default=None, max_length=60000)
 
@@ -210,6 +215,19 @@ async def list_runnables() -> dict[str, Any]:
 @router.get("/runs")
 async def list_runs(limit: int = 50) -> dict[str, Any]:
     return await asyncio.to_thread(get_agent_runtime_service().list_runs, limit)
+
+
+@router.get("/run-groups")
+async def list_run_groups(limit: int = 50) -> dict[str, Any]:
+    return await asyncio.to_thread(get_agent_runtime_service().list_run_groups, limit)
+
+
+@router.get("/run-groups/{run_group_id}")
+async def get_run_group(run_group_id: str) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(get_agent_runtime_service().get_run_group, run_group_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="RunGroup 不存在") from exc
 
 
 @router.get("/runs/{run_id}")
