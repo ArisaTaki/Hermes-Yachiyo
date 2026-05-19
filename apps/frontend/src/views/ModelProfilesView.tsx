@@ -9,8 +9,9 @@ import {
   deleteModelSource,
   fetchModelSourceModels,
   listModelProfiles,
+  syncHermesProfileDefault,
+  testAndSaveModelProfile,
   testModelProfile,
-  testModelSource,
   updateModelProfile,
   updateModelProfileDefaults,
   updateModelSource,
@@ -243,7 +244,7 @@ const providerPresets: ProviderPreset[] = [
     baseUrl: 'https://openrouter.ai/api/v1',
     mark: 'OR',
     note: '多供应商聚合路由，常用于快速接入 Claude、Gemini、DeepSeek 等模型。',
-    modelHints: ['openai/gpt-4.1-mini', 'deepseek/deepseek-chat'],
+    modelHints: [],
   },
   {
     id: 'perplexity',
@@ -511,12 +512,27 @@ function formatContextLength(contextLength?: number): string {
   return `${contextLength} ctx`;
 }
 
+function catalogPriceBadge(pricing?: RemoteModelInfo['pricing']): string {
+  if (!pricing) return '';
+  const prompt = Number(pricing.prompt || 0);
+  const completion = Number(pricing.completion || 0);
+  if (!Number.isFinite(prompt) || !Number.isFinite(completion) || (prompt <= 0 && completion <= 0)) return '';
+  const promptPerMillion = prompt * 1_000_000;
+  const completionPerMillion = completion * 1_000_000;
+  const compact = (value: number) => value >= 1 ? value.toFixed(2).replace(/\.?0+$/, '') : value.toPrecision(2);
+  return `$${compact(promptPerMillion)}/${compact(completionPerMillion)}M`;
+}
+
 function catalogModelBadges(model: RemoteModelInfo): string[] {
   const badges: string[] = [];
   const inputModalities = new Set((model.input_modalities || []).map((item) => item.toLowerCase()));
   const supportedParameters = new Set((model.supported_parameters || []).map((item) => item.toLowerCase()));
   const context = formatContextLength(model.context_length);
   if (model.is_free || model.id.endsWith(':free')) badges.push('免费');
+  else {
+    const price = catalogPriceBadge(model.pricing);
+    if (price) badges.push(price);
+  }
   if (inputModalities.has('image')) badges.push('视觉');
   if (inputModalities.has('file')) badges.push('文件');
   if (inputModalities.has('audio')) badges.push('音频');
@@ -546,9 +562,9 @@ function capabilityCatalogModels(models: RemoteModelInfo[], capability: ModelCap
 }
 
 function capabilityEmptyModelHint(capability: ModelCapability): string {
-  if (capability === 'vision') return '请先获取远端模型列表，或选择标记为“视觉”的多模态模型。';
+  if (capability === 'vision') return '请先获取远端模型列表，再选择标记为“视觉”的多模态模型进行测试保存。';
   if (capability === 'tts') return '选择 TTS 提供商后，在这里登记 voice / profile id；实际连接测试走语音设置链路。';
-  return '在上方输入模型 ID 后添加。默认模型会被 Agent Studio 和 Workflow Studio 引用。';
+  return '获取远端模型列表后选择模型并测试保存；通过后会出现在设置页和 Agent Studio。';
 }
 
 function sourceToDraft(source: ModelSourceView): SourceDraft {
@@ -593,7 +609,6 @@ function defaultModelName(source: SourceDraft, capability: ModelCapability): str
   if (capability === 'vision') {
     if (preset.id === 'openai' || preset.id === 'openai_compatible') return 'gpt-4.1-mini';
     if (preset.id === 'google_gemini') return 'gemini-2.5-flash';
-    if (preset.id === 'openrouter') return 'openai/gpt-4.1-mini';
     if (preset.id === 'minimax') return 'MiniMax-M2.7';
     return '';
   }
@@ -742,6 +757,10 @@ export function ModelProfilesView() {
     setStatus('');
   }
 
+  function returnToPresetList() {
+    createNewSource();
+  }
+
   function sourceDraftFromPreset(preset: ProviderPreset): SourceDraft {
     return {
       name: preset.id,
@@ -836,26 +855,6 @@ export function ModelProfilesView() {
     }
   }
 
-  async function runSourceTest() {
-    if (busy) return;
-    if (activeCapability === 'tts') {
-      setStatus('TTS 提供商不使用 OpenRouter /models 与 Chat Completions 测试；请在语音设置链路测试实际合成。');
-      return;
-    }
-    setBusy('source-test');
-    setStatus('正在保存并测试提供商源...');
-    try {
-      const saved = await saveSource();
-      const test = await testModelSource(saved.source_id, modelDraft.model);
-      setStatus(test.ok || test.success ? `源测试通过：${test.message || 'OK'}` : `源测试失败：${test.message || '请检查配置'}`);
-      await refresh(saved.source_id, selectedModelId);
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : '测试提供商源失败');
-    } finally {
-      setBusy('');
-    }
-  }
-
   async function fetchModelsForSource() {
     if (busy) return;
     if (activeCapability === 'tts') {
@@ -872,7 +871,7 @@ export function ModelProfilesView() {
       setModelCatalogQuery('');
       const usableCount = capabilityCatalogModels(models, activeCapability).length;
       const suffix = activeCapability === 'vision' ? ' 个支持图片输入的多模态模型' : ' 个可用模型';
-      setStatus(models.length ? `已获取 ${models.length} 个模型，其中 ${usableCount}${suffix}` : '已连接源，但没有读取到模型列表');
+      setStatus(models.length ? `已获取 ${models.length} 个模型，其中 ${usableCount}${suffix}；请选择模型后测试保存。` : '已连接源，但没有读取到模型列表');
       await refresh(saved.source_id, selectedModelId, activeCapability);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '获取模型列表失败');
@@ -914,6 +913,29 @@ export function ModelProfilesView() {
     return createModelProfile(payload);
   }
 
+  async function testAndSaveCurrentModel(): Promise<{ ok?: boolean; success?: boolean; message?: string; profile?: ModelProfile }> {
+    const source = sourceDraft.source_id ? selectedSource : await saveSource();
+    const sourceId = source?.source_id || sourceDraft.source_id || '';
+    if (!sourceId) throw new Error('请先保存提供商源');
+    const modelName = modelDraft.model.trim();
+    if (!modelName) throw new Error('模型名称不能为空');
+    const catalogMatch = modelCatalog.find((model) => model.id === modelName);
+    if (modelDraft.capability === 'vision' && !catalogMatch) {
+      throw new Error('图片识别模型必须先从远端列表选择带“视觉”标记的多模态模型。');
+    }
+    if (modelDraft.capability === 'vision' && catalogMatch && !modelSupportsCapability(catalogMatch, 'vision')) {
+      throw new Error('图片识别模型必须支持 image 输入，请选择带“视觉”标记的多模态模型。');
+    }
+    return testAndSaveModelProfile(sourceId, {
+      ...(modelDraft.profile_id ? { profile_id: modelDraft.profile_id } : {}),
+      name: modelDraft.name.trim() || `${sourceDraft.name}/${modelName}`,
+      capability: modelDraft.capability,
+      model: modelName,
+      enabled: modelDraft.enabled,
+      options: catalogMatch ? { remote_model: catalogMatch } : {},
+    });
+  }
+
   async function onSaveModel(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
@@ -933,13 +955,20 @@ export function ModelProfilesView() {
   async function runModelTest(profileId?: string) {
     if (busy) return;
     setBusy('model-test');
-    setStatus('正在保存并测试模型...');
+    setStatus(profileId ? '正在重新测试模型...' : '正在测试连接并保存模型...');
     try {
-      const model = profileId ? profiles.find((item) => item.profile_id === profileId) : await saveModel();
-      if (!model) throw new Error('模型不存在');
-      const test = await testModelProfile(model.profile_id);
-      setStatus(test.ok || test.success ? `模型测试通过：${test.message || 'OK'}` : `模型测试失败：${test.message || '请检查配置'}`);
-      await refresh(model.source_id || selectedSourceId, model.profile_id);
+      if (profileId) {
+        const model = profiles.find((item) => item.profile_id === profileId);
+        if (!model) throw new Error('模型不存在');
+        const test = await testModelProfile(model.profile_id);
+        setStatus(test.ok || test.success ? `模型测试通过：${test.message || 'OK'}` : `模型测试失败：${test.message || '请检查配置'}`);
+        await refresh(model.source_id || selectedSourceId, model.profile_id);
+        return;
+      }
+      const test = await testAndSaveCurrentModel();
+      const savedProfile = test.profile;
+      setStatus(test.ok || test.success ? `模型测试通过并已保存：${test.message || 'OK'}` : `模型测试失败，未保存为可用模型：${test.message || '请检查配置'}`);
+      await refresh(savedProfile?.source_id || selectedSourceId || sourceDraft.source_id, savedProfile?.profile_id || selectedModelId);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '测试模型失败');
     } finally {
@@ -977,11 +1006,19 @@ export function ModelProfilesView() {
 
   async function setDefault(profile: ModelProfile) {
     if (busy) return;
+    if (profile.status !== 'available') {
+      setStatus('只有通过连接测试的模型才能设为默认。');
+      return;
+    }
     setBusy('default');
     try {
+      if (profile.capability === 'chat' || profile.capability === 'vision') {
+        const sync = await syncHermesProfileDefault(profile.capability, profile.profile_id);
+        if (sync.ok === false) throw new Error(sync.error || sync.message || '同步 Hermes 配置失败');
+      }
       const result = await updateModelProfileDefaults({ [profile.capability]: profile.profile_id });
       setDefaults(result.defaults || {});
-      setStatus(`${capabilityLabels[profile.capability]}默认模型已更新`);
+      setStatus(`${capabilityLabels[profile.capability]}默认模型已更新${profile.capability === 'tts' ? '' : '，并已同步到 Hermes 配置'}`);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '更新默认模型失败');
     } finally {
@@ -1021,7 +1058,7 @@ export function ModelProfilesView() {
         ))}
       </div>
 
-      {status ? <div className={/失败|错误|不能为空|不存在/.test(status) ? 'notice danger' : 'notice'}>{status}</div> : null}
+      {status ? <div className={/失败|错误|不能为空|不存在|不支持|必须/.test(status) ? 'notice danger' : 'notice'}>{status}</div> : null}
 
       {loading ? (
         <section className="model-provider-empty">正在读取模型提供商源...</section>
@@ -1101,7 +1138,17 @@ export function ModelProfilesView() {
               </div>
             ) : (
               <>
-                <form className="model-source-form" onSubmit={onSaveSource}>
+                <form
+                  className="model-source-form"
+                  onSubmit={(event) => {
+                    if (activeCapability === 'tts') {
+                      void onSaveSource(event);
+                      return;
+                    }
+                    event.preventDefault();
+                    void fetchModelsForSource();
+                  }}
+                >
                   <div className="model-source-config-head">
                     <span className={`model-source-mark ${providerIconClass(sourceDraft.provider)}`}>
                       <ProviderBrandIcon provider={sourceDraft.provider} />
@@ -1110,9 +1157,18 @@ export function ModelProfilesView() {
                       <h3>{sourceDraft.name || providerPreset(sourceDraft.provider).label}</h3>
                       <p>{sourceDraft.base_url || providerPreset(sourceDraft.provider).baseUrl || sourceFormHelp}</p>
                     </div>
-                    <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>
-                      {busy === 'source-save' ? '保存中...' : '保存配置'}
-                    </button>
+                    <div className="model-source-config-actions">
+                      <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={returnToPresetList}>返回列表</button>
+                      {activeCapability === 'tts' ? (
+                        <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>
+                          {busy === 'source-save' ? '保存中...' : '保存语音源'}
+                        </button>
+                      ) : (
+                        <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(busy)} onClick={() => void fetchModelsForSource()}>
+                          {busy === 'models-fetch' ? '获取中...' : '保存并获取模型列表'}
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="model-inline-note">{sourceFormHelp}</div>
                   <div className="model-provider-grid">
@@ -1175,13 +1231,6 @@ export function ModelProfilesView() {
                     <span>启用这个提供商源</span>
                   </label>
                   <div className="agent-editor-actions">
-                    <button type="submit" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)}>{busy === 'source-save' ? '保存中...' : '保存源'}</button>
-                    {activeCapability !== 'tts' ? (
-                      <>
-                        <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={() => void fetchModelsForSource()}>{busy === 'models-fetch' ? '获取中...' : activeCapability === 'vision' ? '获取多模态模型' : '保存并获取模型'}</button>
-                        <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(busy)} onClick={() => void runSourceTest()}>{busy === 'source-test' ? '测试中...' : '保存并测试源'}</button>
-                      </>
-                    ) : null}
                     {sourceDraft.source_id ? <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={() => void removeSource()}>删除源</button> : null}
                   </div>
                 </form>
@@ -1191,7 +1240,17 @@ export function ModelProfilesView() {
                     <h3>{capabilityLabels[activeCapability]}模型</h3>
                     <span>{visibleModels.length} 个</span>
                   </div>
-                  <form className="model-inline-form" onSubmit={onSaveModel}>
+                  <form
+                    className="model-inline-form"
+                    onSubmit={(event) => {
+                      if (activeCapability === 'tts') {
+                        void onSaveModel(event);
+                        return;
+                      }
+                      event.preventDefault();
+                      void runModelTest();
+                    }}
+                  >
                     <input
                       className="hy-input"
                       value={modelDraft.model}
@@ -1200,10 +1259,11 @@ export function ModelProfilesView() {
                       placeholder={activeCapability === 'tts' ? 'voice / profile id，例如 default-voice' : activeCapability === 'vision' ? '多模态模型 ID，例如 openai/gpt-4o-mini' : '模型 ID，例如 gpt-4.1-mini'}
                     />
                     <input className="hy-input" value={modelDraft.name} disabled={Boolean(busy)} onChange={(event) => setModelDraft({ ...modelDraft, name: event.target.value })} placeholder="显示名称，可留空" />
-                    <button type="submit" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)}>{modelDraft.profile_id ? '保存模型' : '添加模型'}</button>
-                    {activeCapability !== 'tts' ? (
-                      <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(busy)} onClick={() => void runModelTest()}>{busy === 'model-test' ? '测试中...' : '保存并测试'}</button>
-                    ) : null}
+                    {activeCapability === 'tts' ? (
+                      <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>{modelDraft.profile_id ? '保存语音配置' : '添加语音配置'}</button>
+                    ) : (
+                      <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>{busy === 'model-test' ? '测试中...' : '测试连接并保存'}</button>
+                    )}
                   </form>
 
                   {activeCapability !== 'tts' && (modelCatalog.length || busy === 'models-fetch') ? (
@@ -1269,8 +1329,8 @@ export function ModelProfilesView() {
                         </button>
                         <em className={`status-pill ${statusClass(model.status)}`}>{statusLabel(model.status)}</em>
                         {defaults[model.capability] === model.profile_id ? <small>默认</small> : null}
-                        <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={() => void setDefault(model)}>设为默认</button>
-                        {model.capability !== 'tts' ? <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={() => void runModelTest(model.profile_id)}>测试</button> : null}
+                        <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || model.status !== 'available'} onClick={() => void setDefault(model)}>设为默认</button>
+                        {model.capability !== 'tts' ? <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={() => void runModelTest(model.profile_id)}>重新测试</button> : null}
                         <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={() => void removeModel(model.profile_id)}>删除</button>
                       </div>
                     ))}

@@ -9855,6 +9855,10 @@ body.electron-window .hy-traffic {
   border-color: var(--hy-border);
 }
 
+.settings-profile-select {
+  width: min(340px, 42vw);
+}
+
 .settings-input {
   min-width: 140px;
   height: 32px;
@@ -13121,6 +13125,13 @@ button.activity-item {
   color: var(--hy-subtle);
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.model-source-config-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .model-main-summary {

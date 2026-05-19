@@ -19,6 +19,13 @@ import {
   restartDesktopBridge,
   type AvatarImageSelection,
 } from '../lib/bridge';
+import {
+  listModelProfiles,
+  syncHermesProfileDefault,
+  updateModelProfileDefaults,
+  type ModelProfile,
+  type ModelProfileDefaults,
+} from '../lib/modelProfiles';
 import { currentParam, navigateTo } from '../lib/view';
 
 type SettingsPayload = {
@@ -165,6 +172,13 @@ type BackupStatus = {
   total_size_display?: string;
 };
 
+type HermesSettingsConfig = {
+  model?: { provider?: string; default?: string; base_url?: string };
+  provider_options?: Array<{ id: string; label?: string; api_key_configured?: boolean; auth_type?: string }>;
+  api_key?: { configured?: boolean; display?: string };
+  vision?: { effective_provider?: string; model?: string; base_url_configured?: boolean; api_key_configured?: boolean };
+};
+
 type UninstallTarget = {
   id?: string;
   label?: string;
@@ -308,11 +322,11 @@ function ReferenceSettingsHome() {
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [modelLoading, setModelLoading] = useState(true);
   const [assistantLoading, setAssistantLoading] = useState(true);
-  const [hermesConfig, setHermesConfig] = useState<{
-    model?: { provider?: string };
-    provider_options?: Array<{ id: string; label?: string; api_key_configured?: boolean; auth_type?: string }>;
-    api_key?: { configured?: boolean; display?: string };
-  } | null>(null);
+  const [hermesConfig, setHermesConfig] = useState<HermesSettingsConfig | null>(null);
+  const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
+  const [modelDefaults, setModelDefaults] = useState<ModelProfileDefaults>({});
+  const [modelProfileStatus, setModelProfileStatus] = useState('');
+  const [profileApplying, setProfileApplying] = useState<'chat' | 'vision' | ''>('');
   const [connectionTestResult, setConnectionTestResult] = useState<{ success?: boolean; ok?: boolean; error?: string; message?: string } | null>(null);
   const [connectionTesting, setConnectionTesting] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
@@ -330,9 +344,10 @@ function ReferenceSettingsHome() {
     let disposed = false;
     void Promise.allSettled([
       apiGet<GeneralSettingsPayload>('/ui/settings'),
-      apiGet<{ model?: { provider?: string }; provider_options?: Array<{ id: string; label?: string; api_key_configured?: boolean; auth_type?: string }>; api_key?: { configured?: boolean; display?: string } }>('/ui/hermes/config'),
+      apiGet<HermesSettingsConfig>('/ui/hermes/config'),
       apiGet<AssistantProfilePayload>('/assistant/profile'),
-    ]).then(([settingsResult, configResult, profileResult]) => {
+      listModelProfiles(),
+    ]).then(([settingsResult, configResult, profileResult, modelProfileResult]) => {
       if (disposed) return;
       if (settingsResult.status === 'fulfilled') setPayload(settingsResult.value);
       if (configResult.status === 'fulfilled') {
@@ -341,6 +356,10 @@ function ReferenceSettingsHome() {
       if (profileResult.status === 'fulfilled') {
         setAssistantProfile(profileResult.value);
         setAssistantDraft(assistantDraftFromProfile(profileResult.value));
+      }
+      if (modelProfileResult.status === 'fulfilled') {
+        setModelProfiles(modelProfileResult.value.profiles || []);
+        setModelDefaults(modelProfileResult.value.defaults || {});
       }
       setSettingsLoading(false);
       setModelLoading(false);
@@ -522,6 +541,29 @@ function ReferenceSettingsHome() {
     }
   }
 
+  async function applyModelProfileDefault(capability: 'chat' | 'vision', profileId: string) {
+    if (!profileId || profileApplying) return;
+    setProfileApplying(capability);
+    setModelProfileStatus(capability === 'chat' ? '正在同步主模型...' : '正在同步图片识别模型...');
+    try {
+      const sync = await syncHermesProfileDefault(capability, profileId);
+      if (sync.ok === false) throw new Error(sync.error || sync.message || '同步 Hermes 配置失败');
+      const defaults = await updateModelProfileDefaults({ [capability]: profileId });
+      setModelDefaults(defaults.defaults || {});
+      const [nextConfig, nextProfiles] = await Promise.all([
+        apiGet<HermesSettingsConfig>('/ui/hermes/config'),
+        listModelProfiles(),
+      ]);
+      setHermesConfig(nextConfig);
+      setModelProfiles(nextProfiles.profiles || []);
+      setModelProfileStatus(capability === 'chat' ? '主模型已同步' : '图片识别模型已同步');
+    } catch (err) {
+      setModelProfileStatus(err instanceof Error ? err.message : '模型配置同步失败');
+    } finally {
+      setProfileApplying('');
+    }
+  }
+
   async function runUpdateCheck() {
     if (updateChecking) return;
     setUpdateChecking(true);
@@ -552,6 +594,12 @@ function ReferenceSettingsHome() {
   const currentProviderOption = providerOptions.find((opt) => opt.id === currentProvider);
   const apiKeyConfigured = currentProviderOption?.api_key_configured ?? hermesConfig?.api_key?.configured ?? false;
   const apiKeyDisplay = hermesConfig?.api_key?.display || '';
+  const availableChatProfiles = modelProfiles.filter((profile) => profile.capability === 'chat' && profile.status === 'available');
+  const availableVisionProfiles = modelProfiles.filter((profile) => profile.capability === 'vision' && profile.status === 'available');
+  const selectedChatProfileId = modelDefaults.chat || '';
+  const selectedVisionProfileId = modelDefaults.vision || '';
+  const selectedChatProfile = availableChatProfiles.find((profile) => profile.profile_id === selectedChatProfileId);
+  const selectedVisionProfile = availableVisionProfiles.find((profile) => profile.profile_id === selectedVisionProfileId);
 
   const connectionTestOk = connectionTestResult?.success ?? connectionTestResult?.ok;
   const connectionTestMessage = connectionTestResult?.error || connectionTestResult?.message || '连接失败，请检查模型配置';
@@ -788,15 +836,50 @@ function ReferenceSettingsHome() {
             <SettingsItem label="模型组管理" description="统一保存、测试并复用文本、图片识别和 TTS 模型配置">
               <SettingsActionButton onClick={() => navigateTo('provider')}>打开新版模型配置</SettingsActionButton>
             </SettingsItem>
-            <SettingsItem label="Agent 模型" description="Agent Studio 会引用已验证的模型组，不再在每个 Agent 里重复保存 API Key">
-              <SettingsActionButton onClick={() => navigateTo('agents')}>打开 Agent Studio</SettingsActionButton>
-            </SettingsItem>
             <SettingsItem
               label="当前主模型"
-              description={`${currentProviderOption?.label || currentProvider || '未读取到模型配置'} · ${apiKeyConfigured ? `密钥已配置${apiKeyDisplay ? `：${apiKeyDisplay}` : ''}` : '密钥未配置'}`}
+              description={selectedChatProfile ? `${selectedChatProfile.name} · ${selectedChatProfile.model || '未记录模型 ID'}` : `${currentProviderOption?.label || currentProvider || '未读取到模型配置'} · ${apiKeyConfigured ? `密钥已配置${apiKeyDisplay ? `：${apiKeyDisplay}` : ''}` : '密钥未配置'}`}
             >
-              <SettingsActionButton onClick={() => navigateTo('provider')}>迁移/查看</SettingsActionButton>
+              <select
+                className="settings-select settings-profile-select"
+                value={selectedChatProfileId}
+                disabled={profileApplying === 'chat'}
+                onChange={(event) => void applyModelProfileDefault('chat', event.target.value)}
+              >
+                <option value="">选择已测试主模型</option>
+                {availableChatProfiles.map((profile) => (
+                  <option key={profile.profile_id} value={profile.profile_id}>{profile.name} · {profile.model}</option>
+                ))}
+              </select>
+              <SettingsActionButton onClick={() => navigateTo('provider')}>管理</SettingsActionButton>
             </SettingsItem>
+            <SettingsItem
+              label="图片识别模型"
+              description={selectedVisionProfile ? `${selectedVisionProfile.name} · ${selectedVisionProfile.model || '未记录模型 ID'}` : hermesConfig?.vision?.model ? `${hermesConfig.vision.effective_provider || 'vision'} · ${hermesConfig.vision.model}` : '选择已通过多模态测试的 vision Profile'}
+            >
+              <select
+                className="settings-select settings-profile-select"
+                value={selectedVisionProfileId}
+                disabled={profileApplying === 'vision'}
+                onChange={(event) => void applyModelProfileDefault('vision', event.target.value)}
+              >
+                <option value="">选择已测试视觉模型</option>
+                {availableVisionProfiles.map((profile) => (
+                  <option key={profile.profile_id} value={profile.profile_id}>{profile.name} · {profile.model}</option>
+                ))}
+              </select>
+              <SettingsActionButton onClick={() => navigateTo('provider')}>管理</SettingsActionButton>
+            </SettingsItem>
+            <SettingsItem label="Agent 模型" description="Agent Studio 只引用已验证的文本与图片识别模型组，不再在每个 Agent 里重复保存 API Key">
+              <SettingsActionButton onClick={() => navigateTo('agents')}>打开 Agent Studio</SettingsActionButton>
+            </SettingsItem>
+            {modelProfileStatus ? (
+              <SettingsItem label="模型同步状态" description={modelProfileStatus}>
+                <span className={`status-pill ${/失败|错误|不能为空|不存在/.test(modelProfileStatus) ? 'warn' : 'ok'}`}>
+                  {profileApplying ? '同步中' : '完成'}
+                </span>
+              </SettingsItem>
+            ) : null}
           </>
         )}
       </SettingsSection>

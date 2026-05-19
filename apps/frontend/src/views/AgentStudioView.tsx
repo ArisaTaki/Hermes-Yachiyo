@@ -53,6 +53,7 @@ type AgentDraft = {
   instructions: string;
   model_mode: 'follow_main' | 'profile' | 'custom_api';
   model_profile_id: string;
+  vision_model_profile_id: string;
   base_url: string;
   model: string;
   api_key: string;
@@ -71,6 +72,7 @@ const emptyAgentDraft: AgentDraft = {
   instructions: '',
   model_mode: 'follow_main',
   model_profile_id: '',
+  vision_model_profile_id: '',
   base_url: '',
   model: '',
   api_key: '',
@@ -104,6 +106,7 @@ function agentToDraft(agent: AgentSpec): AgentDraft {
     instructions: agent.instructions || '',
     model_mode: agent.model_mode,
     model_profile_id: agent.model_profile_id || '',
+    vision_model_profile_id: agent.vision_model_profile_id || '',
     base_url: agent.model_config?.base_url || '',
     model: agent.model_config?.model || '',
     api_key: '',
@@ -171,7 +174,11 @@ export function AgentStudioView() {
     [runs, selectedRunId],
   );
   const chatModelProfiles = useMemo(
-    () => modelProfiles.filter((profile) => profile.capability === 'chat' || profile.capability === 'vision'),
+    () => modelProfiles.filter((profile) => profile.capability === 'chat' && profile.status === 'available'),
+    [modelProfiles],
+  );
+  const visionModelProfiles = useMemo(
+    () => modelProfiles.filter((profile) => profile.capability === 'vision' && profile.status === 'available'),
     [modelProfiles],
   );
 
@@ -266,6 +273,7 @@ export function AgentStudioView() {
       instructions: draft.instructions,
       model_mode: draft.model_mode,
       model_profile_id: draft.model_mode === 'profile' ? draft.model_profile_id : '',
+      vision_model_profile_id: draft.vision_model_profile_id,
       workspace_policy: {
         default_workdir: draft.default_workdir,
         readable_scopes: textToScopes(draft.readable_scopes),
@@ -431,7 +439,7 @@ export function AgentStudioView() {
                     <option value="">选择已保存模型组</option>
                     {chatModelProfiles.map((profile) => (
                       <option key={profile.profile_id} value={profile.profile_id}>
-                        {profile.name}{profile.status === 'available' ? ' · 可用' : ''}
+                        {profile.name} · {profile.model || profile.provider}
                       </option>
                     ))}
                   </select>
@@ -444,6 +452,23 @@ export function AgentStudioView() {
             </div>
             {draft.model_mode === 'profile' && !chatModelProfiles.length ? (
               <div className="notice">还没有可用的文本模型组。请先在模型配置页面新建并测试。</div>
+            ) : null}
+            <div className="agent-form-row">
+              <label>
+                <span>Vision Profile</span>
+                <select className="hy-select" value={draft.vision_model_profile_id} onChange={(event) => setDraft({ ...draft, vision_model_profile_id: event.target.value })}>
+                  <option value="">跟随全局图片识别</option>
+                  {visionModelProfiles.map((profile) => (
+                    <option key={profile.profile_id} value={profile.profile_id}>
+                      {profile.name} · {profile.model || profile.provider}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label><span>模型配置</span><button type="button" className="hy-btn hy-btn-ghost" onClick={() => openAppView('provider')}>管理 Profile</button></label>
+            </div>
+            {!visionModelProfiles.length ? (
+              <div className="notice">还没有可用的图片识别模型组。需要图片能力时，请先在模型配置页面创建 vision Profile。</div>
             ) : null}
             {draft.model_mode === 'custom_api' ? (
               <div className="agent-config-box">
