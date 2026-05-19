@@ -53,6 +53,17 @@ class ModelProfileDefaultsRequest(BaseModel):
     tts: str | None = Field(default=None, max_length=160)
 
 
+class TtsProviderSyncRequest(BaseModel):
+    enabled: bool | None = None
+    provider: str | None = Field(default=None, max_length=80)
+    name: str | None = Field(default=None, max_length=160)
+    base_url: str | None = Field(default=None, max_length=4000)
+    endpoint: str | None = Field(default=None, max_length=4000)
+    voice: str | None = Field(default=None, max_length=400)
+    model: str | None = Field(default=None, max_length=400)
+    options: dict[str, Any] | None = None
+
+
 class ProviderCatalogSyncRequest(BaseModel):
     providers: list[str] = Field(default_factory=list)
     if_stale: bool = False
@@ -208,6 +219,16 @@ async def update_model_profile_defaults(request: ModelProfileDefaultsRequest) ->
         return await asyncio.to_thread(get_model_profile_service().set_defaults, _payload(request))
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="模型 Profile 不存在") from exc
+    except ModelProfileError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.post("/model-profiles/tts/sync")
+async def sync_tts_provider(request: TtsProviderSyncRequest) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(get_model_profile_service().sync_tts_provider, _payload(request))
+    except sqlite3.IntegrityError as exc:
+        raise _bad_request(ModelProfileError("TTS 语音源名称必须唯一")) from exc
     except ModelProfileError as exc:
         raise _bad_request(exc) from exc
 

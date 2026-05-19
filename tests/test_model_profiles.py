@@ -153,6 +153,44 @@ def test_model_sources_are_scoped_by_capability(tmp_path):
         service.close()
 
 
+def test_sync_tts_provider_registers_available_gsv_source_and_default(tmp_path):
+    service = make_profile_service(tmp_path)
+    try:
+        result = service.sync_tts_provider(
+            {
+                "enabled": True,
+                "provider": "gpt-sovits",
+                "base_url": "http://127.0.0.1:9880",
+                "voice": "yachiyo",
+                "options": {"gsv_text_language": "zh"},
+            }
+        )
+
+        assert result["ok"] is True
+        assert result["source"]["capability"] == "tts"
+        assert result["source"]["provider"] == "gsv_tts_local"
+        assert result["source"]["status"] == "available"
+        assert result["profile"]["capability"] == "tts"
+        assert result["profile"]["model"] == "yachiyo"
+        assert result["profile"]["status"] == "available"
+        assert result["defaults"]["tts"] == result["profile"]["profile_id"]
+
+        second = service.sync_tts_provider(
+            {
+                "enabled": True,
+                "provider": "gpt-sovits",
+                "base_url": "http://127.0.0.1:9880",
+                "voice": "yachiyo",
+            }
+        )
+
+        assert second["source"]["source_id"] == result["source"]["source_id"]
+        assert second["profile"]["profile_id"] == result["profile"]["profile_id"]
+        assert len([source for source in service.list_sources()["sources"] if source["capability"] == "tts"]) == 1
+    finally:
+        service.close()
+
+
 def test_legacy_shared_source_is_split_by_profile_capability(tmp_path):
     db_path = tmp_path / "model-profiles.db"
     conn = sqlite3.connect(db_path)

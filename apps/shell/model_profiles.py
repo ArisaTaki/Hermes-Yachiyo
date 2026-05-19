@@ -189,6 +189,29 @@ _PROVIDER_RECOMMENDED_VISION_MODELS: dict[str, tuple[str, ...]] = {
     "xiaomi": ("mimo-v2.5", "mimo-v2-omni"),
 }
 
+_TTS_PROVIDER_REGISTRY: dict[str, dict[str, str]] = {
+    "gpt-sovits": {
+        "source_provider": "gsv_tts_local",
+        "source_name": "GSV TTS(Local)",
+        "model": "default-voice",
+    },
+    "gsv_tts_local": {
+        "source_provider": "gsv_tts_local",
+        "source_name": "GSV TTS(Local)",
+        "model": "default-voice",
+    },
+    "http": {
+        "source_provider": "http_tts",
+        "source_name": "HTTP TTS",
+        "model": "default",
+    },
+    "command": {
+        "source_provider": "command_tts",
+        "source_name": "Command TTS",
+        "model": "local-command",
+    },
+}
+
 
 def _remote_model_from_options(options: dict[str, Any] | None) -> dict[str, Any]:
     if not isinstance(options, dict):
@@ -975,6 +998,129 @@ class ModelProfileService:
             )
         self._conn.commit()
         return {"ok": True, "defaults": self.get_defaults()}
+
+    def sync_tts_provider(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Register a TTS provider that already passed the dedicated TTS test."""
+        if payload.get("enabled") is False:
+            raise ModelProfileError("TTS Provider 未启用，不能登记为可用语音源")
+        configured_provider = str(payload.get("provider") or "").strip()
+        provider_key = configured_provider.lower()
+        if not provider_key or provider_key == "none":
+            raise ModelProfileError("TTS Provider 为空，不能登记为可用语音源")
+        meta = _TTS_PROVIDER_REGISTRY.get(provider_key)
+        if meta is None:
+            source_provider = provider_key
+            source_name = str(payload.get("name") or provider_key).strip() or provider_key
+            default_model = str(payload.get("model") or payload.get("voice") or "default").strip() or "default"
+        else:
+            source_provider = meta["source_provider"]
+            source_name = str(payload.get("name") or meta["source_name"]).strip() or meta["source_name"]
+            default_model = meta["model"]
+
+        base_url = str(payload.get("base_url") or payload.get("endpoint") or "").strip()
+        voice = str(payload.get("voice") or payload.get("model") or default_model).strip() or default_model
+        options = payload.get("options") if isinstance(payload.get("options"), dict) else {}
+        options = {
+            **options,
+            "source": "proactive_tts",
+            "tested_provider": configured_provider,
+        }
+        source = self._upsert_tts_source(
+            source_name=source_name,
+            source_provider=source_provider,
+            base_url=base_url,
+            options=options,
+        )
+        profile = self._upsert_tts_profile(
+            source_id=str(source["source_id"]),
+            source_name=source_name,
+            source_provider=source_provider,
+            base_url=base_url,
+            voice=voice,
+            options=options,
+        )
+        result = self._record_test_result(
+            str(profile["profile_id"]),
+            ok=True,
+            message="TTS 专用链路测试已通过",
+        )
+        defaults = self.set_defaults({"tts": result["profile"]["profile_id"]})["defaults"]
+        return {
+            "ok": True,
+            "success": True,
+            "message": "已同步为可用文字转语音源",
+            "source": self.get_source(str(source["source_id"])),
+            "profile": result["profile"],
+            "defaults": defaults,
+        }
+
+    def _upsert_tts_source(
+        self,
+        *,
+        source_name: str,
+        source_provider: str,
+        base_url: str,
+        options: dict[str, Any],
+    ) -> dict[str, Any]:
+        row = self._conn.execute(
+            """
+            SELECT source_id
+              FROM model_sources
+             WHERE capability='tts'
+               AND (LOWER(name)=LOWER(?) OR provider=?)
+             ORDER BY CASE WHEN LOWER(name)=LOWER(?) THEN 0 ELSE 1 END, updated_at DESC
+             LIMIT 1
+            """,
+            (source_name, source_provider, source_name),
+        ).fetchone()
+        payload = {
+            "name": source_name,
+            "capability": "tts",
+            "provider": source_provider,
+            "base_url": base_url,
+            "options": options,
+            "enabled": True,
+        }
+        if row is None:
+            return self.create_source(payload)
+        return self.update_source(str(row["source_id"]), payload)
+
+    def _upsert_tts_profile(
+        self,
+        *,
+        source_id: str,
+        source_name: str,
+        source_provider: str,
+        base_url: str,
+        voice: str,
+        options: dict[str, Any],
+    ) -> dict[str, Any]:
+        profile_name = f"{source_name}/{voice}"
+        row = self._conn.execute(
+            """
+            SELECT profile_id
+              FROM model_profiles
+             WHERE capability='tts'
+               AND (source_id=? OR LOWER(name)=LOWER(?))
+               AND (model=? OR LOWER(name)=LOWER(?))
+             ORDER BY CASE WHEN source_id=? THEN 0 ELSE 1 END, updated_at DESC
+             LIMIT 1
+            """,
+            (source_id, profile_name, voice, profile_name, source_id),
+        ).fetchone()
+        payload = {
+            "source_id": source_id,
+            "name": profile_name,
+            "capability": "tts",
+            "provider": source_provider,
+            "base_url": base_url,
+            "model": voice,
+            "enabled": True,
+            "options": options,
+        }
+        if row is None:
+            return self.create_profile(payload)
+        return self.update_profile(str(row["profile_id"]), payload)
 
     def create_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name") or "").strip()

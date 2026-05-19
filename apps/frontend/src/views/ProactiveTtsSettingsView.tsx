@@ -10,6 +10,7 @@ import {
   openPath,
 } from '../lib/bridge';
 import { navigateTo } from '../lib/view';
+import { syncTtsProviderSource } from '../lib/modelProfiles';
 import {
   emptyTtsForm,
   formFromTtsSettings,
@@ -139,6 +140,7 @@ export function ProactiveTtsSettingsView() {
   const [proactiveResult, setProactiveResult] = useState<ProactiveActionResult | null>(null);
   const [testText, setTestText] = useState('八千代语音测试成功。主动关怀播报已经可以正常调用。');
   const [testResult, setTestResult] = useState<TtsTestResult | null>(null);
+  const [ttsRegistryReady, setTtsRegistryReady] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<TtsRuntimeStatus | null>(null);
   const [voiceResource, setVoiceResource] = useState<TtsVoiceResource | null>(null);
   const [serviceStatus, setServiceStatus] = useState<GptSovitsServiceStatus | null>(null);
@@ -231,6 +233,7 @@ export function ProactiveTtsSettingsView() {
       return next;
     });
     setTestResult(null);
+    setTtsRegistryReady(false);
     if (status && /保存|TTS|语音/.test(status)) setStatus('');
   }
 
@@ -330,7 +333,19 @@ export function ProactiveTtsSettingsView() {
     setBusyAction('save');
     setStatus('正在保存主动关怀语音设置...');
     try {
-      await persistSettings('主动关怀语音设置已保存');
+      const next = await persistSettings('');
+      if (shouldSyncTtsRegistry(next, ttsRegistryReady)) {
+        setStatus('语音设置已保存，正在同步到模型配置...');
+        const result = await syncTtsProviderSource(ttsRegistryPayload(next));
+        if (result.ok === false || result.success === false) {
+          throw new Error(result.message || '同步文字转语音源失败');
+        }
+        setTtsRegistryReady(false);
+        setStatus(result.message || '已同步到模型配置的文字转语音源');
+        window.setTimeout(() => navigateTo('provider', { capability: 'tts' }, ['mode', 'tool', 'run', 'event_id']), 300);
+        return;
+      }
+      setStatus('主动关怀语音设置已保存');
       window.setTimeout(() => void openAppView('main'), 700);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '保存主动关怀语音设置失败');
@@ -361,6 +376,7 @@ export function ProactiveTtsSettingsView() {
       const result = await apiPost<TtsTestResult>('/ui/tts/test', { text: testText });
       setTestResult(result);
       setRuntimeStatus(result);
+      setTtsRegistryReady(Boolean(result.success && next.enabled && next.provider === 'gpt-sovits'));
       setStatus(result.success ? result.message || '测试语音已完成' : result.error || result.message || '测试语音失败');
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '保存并测试主动关怀语音失败');
@@ -373,6 +389,7 @@ export function ProactiveTtsSettingsView() {
     setForm(savedForm);
     setStatus('已恢复到上次保存的语音设置');
     setTestResult(null);
+    setTtsRegistryReady(false);
   }
 
   async function importVoiceArchive() {
@@ -397,6 +414,7 @@ export function ProactiveTtsSettingsView() {
       }));
       setVoiceResource(result.resource || voiceResource);
       setTestResult(null);
+      setTtsRegistryReady(false);
       const displayPath = result.imported_path_display ? `：${result.imported_path_display}` : '';
       setStatus(`${result.message || '音色包已导入，等待保存 TTS 设置'}${displayPath}`);
     } catch (err) {
@@ -593,6 +611,7 @@ export function ProactiveTtsSettingsView() {
   const interactionBusy = busy || loading || resourceBusy;
   const externalGsvServiceDetected = hasExternalGsvService(serviceStatus);
   const externalGsvAgent = firstExternalGsvLaunchAgent(serviceStatus);
+  const registryReady = shouldSyncTtsRegistry(form, ttsRegistryReady);
 
   return (
     <section className="hy-route-page hy-tts-page">
@@ -1190,6 +1209,7 @@ export function ProactiveTtsSettingsView() {
                       onChange={(event) => {
                         setTestText(event.target.value);
                         setTestResult(null);
+                        setTtsRegistryReady(false);
                       }}
                     />
                   </label>
@@ -1206,7 +1226,7 @@ export function ProactiveTtsSettingsView() {
             ) : null}
 
             <div className="settings-savebar hy-tts-savebar">
-              <span>{isDirty ? '有未保存的语音设置' : enabled ? '语音设置已同步' : '主动关怀将只发送文字'}</span>
+              <span>{registryReady ? '语音测试已通过，保存后同步到模型配置' : isDirty ? '有未保存的语音设置' : enabled ? '语音设置已同步' : '主动关怀将只发送文字'}</span>
               <button type="button" className="hy-btn hy-btn-ghost" disabled={interactionBusy || !isDirty} onClick={resetDraft}>重置草稿</button>
               <button
                 type="button"
@@ -1221,7 +1241,7 @@ export function ProactiveTtsSettingsView() {
                 className={busyAction === 'save' ? 'hy-btn hy-btn-primary loading-button' : 'hy-btn hy-btn-primary'}
                 disabled={interactionBusy}
               >
-                {busyAction === 'save' ? '保存中...' : '保存语音设置'}
+                {busyAction === 'save' ? '保存中...' : registryReady ? '保存并登记语音源' : '保存语音设置'}
               </button>
             </div>
           </form>
@@ -1229,6 +1249,29 @@ export function ProactiveTtsSettingsView() {
       </section>
     </section>
   );
+}
+
+function shouldSyncTtsRegistry(form: TtsForm, registryReady: boolean): boolean {
+  return Boolean(registryReady && form.enabled && form.provider === 'gpt-sovits');
+}
+
+function ttsRegistryPayload(form: TtsForm) {
+  return {
+    enabled: form.enabled,
+    provider: form.provider,
+    base_url: form.gsv_base_url,
+    voice: form.voice || 'default-voice',
+    options: {
+      gsv_base_url: form.gsv_base_url,
+      gsv_service_workdir: form.gsv_service_workdir,
+      gsv_gpt_weights_path: form.gsv_gpt_weights_path,
+      gsv_sovits_weights_path: form.gsv_sovits_weights_path,
+      gsv_ref_audio_path: form.gsv_ref_audio_path,
+      gsv_ref_audio_language: form.gsv_ref_audio_language,
+      gsv_text_language: form.gsv_text_language,
+      gsv_media_type: form.gsv_media_type,
+    },
+  };
 }
 
 function ttsFromSettings(settings: SettingsData | null): TtsSettings | undefined {

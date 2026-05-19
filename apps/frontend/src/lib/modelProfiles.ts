@@ -64,6 +64,17 @@ export type ModelProviderRuntime = {
 
 export type ModelProfileDefaults = Partial<Record<ModelCapability, string>>;
 
+export type TtsProviderSyncRequest = {
+  enabled?: boolean;
+  provider?: string;
+  name?: string;
+  base_url?: string;
+  endpoint?: string;
+  voice?: string;
+  model?: string;
+  options?: Record<string, unknown>;
+};
+
 export type ModelProfilesPayload = {
   ok?: boolean;
   sources?: ModelSource[];
@@ -192,6 +203,17 @@ export async function testModelProfile(profileId: string): Promise<{
 
 export async function updateModelProfileDefaults(defaults: ModelProfileDefaults): Promise<{ ok?: boolean; defaults?: ModelProfileDefaults }> {
   return apiPatch('/ui/model-profiles/defaults', defaults);
+}
+
+export async function syncTtsProviderSource(request: TtsProviderSyncRequest): Promise<{
+  ok?: boolean;
+  success?: boolean;
+  message?: string;
+  source?: ModelSource;
+  profile?: ModelProfile;
+  defaults?: ModelProfileDefaults;
+}> {
+  return apiPost('/ui/model-profiles/tts/sync', request);
 }
 
 export async function syncHermesProfileDefault(capability: Extract<ModelCapability, 'chat' | 'vision'>, profileId: string): Promise<{

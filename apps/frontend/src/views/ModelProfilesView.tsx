@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import { ProviderBrandIcon } from '../components/ProviderBrandIcon';
 import { UiIcon } from '../components/UiIcon';
-import { navigateTo, type AppView } from '../lib/view';
+import { currentParam, navigateTo, type AppView } from '../lib/view';
 import {
   createModelProfile,
   createModelSource,
@@ -650,13 +650,18 @@ function defaultModelName(source: SourceDraft, capability: ModelCapability): str
   return '';
 }
 
+function initialCapabilityFromRoute(): ModelCapability {
+  const capability = currentParam('capability');
+  return capability === 'vision' || capability === 'tts' ? capability : 'chat';
+}
+
 export function ModelProfilesView() {
   const [sources, setSources] = useState<ModelSourceView[]>([]);
   const [profiles, setProfiles] = useState<ModelProfileView[]>([]);
   const [defaults, setDefaults] = useState<ModelProfileDefaults>({});
   const [selectedSourceId, setSelectedSourceId] = useState('');
   const [selectedModelId, setSelectedModelId] = useState('');
-  const [activeCapability, setActiveCapability] = useState<ModelCapability>('chat');
+  const [activeCapability, setActiveCapability] = useState<ModelCapability>(() => initialCapabilityFromRoute());
   const [sourceDraft, setSourceDraft] = useState<SourceDraft>(emptySourceDraft);
   const [modelDraft, setModelDraft] = useState<ModelDraft>(emptyModelDraft);
   const [modelCatalog, setModelCatalog] = useState<RemoteModelInfo[]>([]);
