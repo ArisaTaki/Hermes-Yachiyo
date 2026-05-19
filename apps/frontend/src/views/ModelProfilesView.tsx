@@ -325,6 +325,18 @@ function hermesProviderLabel(provider?: string): string {
   return provider ? `Hermes: ${provider}` : '不可用于 Hermes';
 }
 
+function runtimeProviderLabel(provider?: string): string {
+  return provider ? hermesProviderLabel(provider) : 'Agent 直连';
+}
+
+function runtimePillClass(provider?: string): string {
+  return provider ? 'model-key-pill model-runtime-pill is-hermes' : 'model-key-pill model-runtime-pill is-direct';
+}
+
+function presetRuntimePillClass(provider?: string): string {
+  return provider ? 'model-preset-runtime model-runtime-pill is-hermes' : 'model-preset-runtime model-runtime-pill is-direct';
+}
+
 function sourceHermesProvider(source: ModelSource): string {
   return source.hermes_provider || source.runtime?.hermes_provider || '';
 }
@@ -1004,7 +1016,7 @@ export function ModelProfilesView() {
     ? 'TTS 使用语音服务专用来源；这里登记 provider、endpoint 和 voice/profile 名称，不复用 OpenRouter 模型目录。'
     : activeCapability === 'vision'
       ? '图片识别只应登记支持 image 输入的多模态模型；获取远端列表后会自动过滤。'
-      : '这里只展示 Hermes 可执行的 provider；OpenRouter 里的厂商是动态模型分组，不会被写成 Hermes provider。';
+      : '默认主模型只使用 Hermes 可执行 provider；Agent Studio 可选择所有已测试通过的 Profile。OpenRouter 里的厂商是动态模型分组，不会被写成 Hermes provider。';
   const sourceDraftRuntimeProvider = selectedSource
     ? sourceHermesProvider(selectedSource)
     : (providerPreset(sourceDraft.provider).hermesProvider || sourceDraft.provider);
@@ -1069,7 +1081,7 @@ export function ModelProfilesView() {
                     </span>
                     <span className="model-source-badges">
                       <em className={source.enabled === false ? 'model-key-pill warn' : 'model-key-pill ok'}>{source.enabled === false ? '已暂停' : '正在使用'}</em>
-                      {activeCapability !== 'tts' ? <em className={runtimeProvider ? 'model-key-pill ok' : 'model-key-pill warn'}>{hermesProviderLabel(runtimeProvider)}</em> : null}
+                      {activeCapability !== 'tts' ? <em className={runtimePillClass(runtimeProvider)}>{runtimeProviderLabel(runtimeProvider)}</em> : null}
                       <em className={`status-pill ${statusClass(source.status)}`}>{statusLabel(source.status)}</em>
                       <em className={configured ? 'model-key-pill ok' : 'model-key-pill'}>{configured ? '密钥已配置' : activeCapability === 'tts' ? 'Token 可选' : '未配置 API'}</em>
                       {configured && !hasCapabilityModel ? <em className="model-key-pill warn">暂未选择模型</em> : null}
@@ -1111,7 +1123,7 @@ export function ModelProfilesView() {
                       </span>
                       <strong>{preset.label}</strong>
                       <small>{preset.baseUrl}</small>
-                      {activeCapability !== 'tts' ? <span className="model-preset-runtime">{hermesProviderLabel(preset.hermesProvider || preset.id)}</span> : null}
+                      {activeCapability !== 'tts' ? <span className={presetRuntimePillClass(preset.hermesProvider || preset.id)}>{runtimeProviderLabel(preset.hermesProvider || preset.id)}</span> : null}
                       <em>{preset.note}</em>
                     </button>
                   ))}
@@ -1140,7 +1152,7 @@ export function ModelProfilesView() {
                     </div>
                     <div className="model-source-config-actions">
                       <span className={sourceDraft.enabled ? 'model-key-pill ok' : 'model-key-pill warn'}>{sourceDraft.enabled ? '正在使用' : '已暂停'}</span>
-                      {activeCapability !== 'tts' ? <span className={sourceDraftRuntimeProvider ? 'model-key-pill ok' : 'model-key-pill warn'}>{hermesProviderLabel(sourceDraftRuntimeProvider)}</span> : null}
+                      {activeCapability !== 'tts' ? <span className={runtimePillClass(sourceDraftRuntimeProvider)}>{runtimeProviderLabel(sourceDraftRuntimeProvider)}</span> : null}
                       <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={returnToPresetList}>返回列表</button>
                       {activeCapability === 'tts' ? (
                         <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>
@@ -1312,7 +1324,7 @@ export function ModelProfilesView() {
                           <span>{sourceDraft.name}/{model.model}</span>
                         </button>
                         <em className={`status-pill ${statusClass(model.status)}`}>{statusLabel(model.status)}</em>
-                        {model.capability !== 'tts' ? <em className={profileSelectableForHermes(model) ? 'model-key-pill ok' : 'model-key-pill warn'}>{hermesProviderLabel(profileHermesProvider(model))}</em> : null}
+                        {model.capability !== 'tts' ? <em className={runtimePillClass(profileHermesProvider(model))}>{runtimeProviderLabel(profileHermesProvider(model))}</em> : null}
                         {defaults[model.capability] === model.profile_id ? <small>默认</small> : null}
                         <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || !profileSelectableForHermes(model)} onClick={() => void setDefault(model)}>设为默认</button>
                         {model.capability !== 'tts' ? <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || sourceDraft.enabled === false} onClick={() => void runModelTest(model.profile_id)}>重新测试</button> : null}

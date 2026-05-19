@@ -12962,9 +12962,9 @@ button.activity-item {
 }
 
 .model-key-pill.ok {
-  border-color: oklch(68% 0.15 155 / 0.28);
-  background: oklch(68% 0.15 155 / 0.1);
-  color: oklch(80% 0.11 155);
+  border-color: oklch(72% 0.16 160 / 0.42);
+  background: oklch(68% 0.15 155 / 0.16);
+  color: oklch(84% 0.13 158);
 }
 
 .model-key-pill.warn {
@@ -13044,14 +13044,16 @@ button.activity-item {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 10px;
+  align-items: stretch;
 }
 
 .model-preset-card {
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr);
+  align-content: start;
   gap: 4px 10px;
   min-width: 0;
-  min-height: 122px;
+  min-height: 118px;
   padding: 12px;
   border: 1px solid var(--hy-border-soft);
   border-radius: var(--hy-radius-card);
@@ -13084,7 +13086,17 @@ button.activity-item {
   white-space: nowrap;
 }
 
-.model-preset-card small,
+.model-preset-card small {
+  min-width: 0;
+  color: var(--hy-faint);
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .model-preset-card em {
   min-width: 0;
   color: var(--hy-faint);
@@ -13097,6 +13109,10 @@ button.activity-item {
 .model-preset-card em {
   grid-column: 2;
   color: var(--hy-subtle);
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .model-preset-runtime {
@@ -13104,15 +13120,31 @@ button.activity-item {
   width: fit-content;
   max-width: 100%;
   padding: 2px 7px;
-  border: 1px solid oklch(68% 0.15 155 / 0.22);
   border-radius: 999px;
-  background: oklch(68% 0.15 155 / 0.08);
-  color: var(--hy-faint);
   font-size: 11px;
   line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.model-runtime-pill {
+  font-weight: 660;
+  letter-spacing: 0;
+}
+
+.model-runtime-pill.is-hermes {
+  border-color: oklch(74% 0.16 160 / 0.52);
+  background:
+    linear-gradient(135deg, oklch(68% 0.16 160 / 0.22), oklch(84% 0.14 82 / 0.13));
+  color: oklch(88% 0.14 158);
+  box-shadow: inset 0 0 0 1px oklch(92% 0.12 155 / 0.08);
+}
+
+.model-runtime-pill.is-direct {
+  border-color: oklch(72% 0.12 220 / 0.36);
+  background: oklch(72% 0.12 220 / 0.12);
+  color: oklch(82% 0.1 220);
 }
 
 .model-source-form,
