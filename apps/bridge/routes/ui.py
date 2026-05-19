@@ -523,7 +523,7 @@ async def import_live2d_archive_path(request: Live2DResourcePathRequest) -> dict
 
 
 @router.get("/chat/messages")
-async def get_chat_messages(limit: int = 80, anchor_message_id: str = "") -> dict[str, Any]:
+async def get_chat_messages(limit: int = 0, anchor_message_id: str = "") -> dict[str, Any]:
     return ChatAPI(get_runtime()).get_messages(limit, anchor_message_id=anchor_message_id)
 
 

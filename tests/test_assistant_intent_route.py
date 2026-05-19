@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from types import SimpleNamespace
 
 from apps.bridge.routes import assistant as assistant_route
 from apps.core.state import AppState
@@ -12,6 +13,7 @@ from packages.protocol.schemas import AssistantIntentRequest
 class _RuntimeStub:
     def __init__(self) -> None:
         self.state = AppState()
+        self.task_runner = SimpleNamespace(executor=SimpleNamespace(name="HermesExecutor"))
 
     def is_hermes_ready(self) -> bool:
         return True

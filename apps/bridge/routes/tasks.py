@@ -3,6 +3,7 @@
 from fastapi import APIRouter, HTTPException
 
 from apps.bridge.deps import get_runtime
+from apps.core.executor import user_task_unavailable_reason
 from packages.protocol.enums import ErrorCode
 from packages.protocol.errors import ErrorResponse
 from packages.protocol.schemas import (
@@ -43,7 +44,18 @@ async def get_task(task_id: str) -> TaskGetResponse:
 
 @router.post("/tasks", response_model=TaskCreateResponse, status_code=201)
 async def create_task(req: TaskCreateRequest) -> TaskCreateResponse:
-    state = get_runtime().state
+    runtime = get_runtime()
+    unavailable_reason = user_task_unavailable_reason(runtime)
+    if unavailable_reason:
+        raise HTTPException(
+            status_code=503,
+            detail=ErrorResponse(
+                error=ErrorCode.HERMES_NOT_INSTALLED,
+                message=unavailable_reason,
+            ).model_dump(),
+        )
+
+    state = runtime.state
     task = state.create_task(
         description=req.description,
         task_type=req.task_type,

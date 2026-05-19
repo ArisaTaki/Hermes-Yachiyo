@@ -633,7 +633,7 @@ class ChatAPI:
             )
             return task_description, saved_attachments
 
-    def get_messages(self, limit: int = 50, anchor_message_id: str = "") -> Dict[str, Any]:
+    def get_messages(self, limit: int = 0, anchor_message_id: str = "") -> Dict[str, Any]:
         """获取消息列表，同时同步任务状态到消息
 
         此方法会检查每条 user 消息关联的任务状态：

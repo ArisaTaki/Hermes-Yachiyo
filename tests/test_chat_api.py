@@ -142,6 +142,21 @@ def test_agent_mention_creates_agent_run_without_general_task(tmp_path, monkeypa
         store.close()
 
 
+def test_get_messages_limit_zero_returns_complete_current_session(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        for index in range(90):
+            runtime.chat_session.add_system_message(f"系统消息 {index}")
+
+        messages = api.get_messages(limit=0)["messages"]
+
+        assert len(messages) == 90
+        assert messages[0]["content"] == "系统消息 0"
+        assert messages[-1]["content"] == "系统消息 89"
+    finally:
+        store.close()
+
+
 def test_selected_runnable_creates_agent_run_without_mention(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = AgentRuntimeService(

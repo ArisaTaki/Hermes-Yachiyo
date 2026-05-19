@@ -466,19 +466,38 @@ class ChatStore:
     def load_messages(
         self, session_id: str, limit: int = 100
     ) -> List[StoredMessage]:
-        """加载会话消息（按时间正序）"""
+        """加载会话消息（按时间正序）。
+
+        limit > 0 时返回最近 N 条；limit <= 0 时返回全部消息。
+        """
+        try:
+            normalized_limit = int(limit)
+        except (TypeError, ValueError):
+            normalized_limit = 100
         with self._lock:
             conn = self._get_conn()
-            rows = conn.execute(
-                """
-                SELECT message_id, session_id, role, content, status, task_id, error, created_at, attachments_json
-                FROM chat_messages
-                WHERE session_id = ?
-                ORDER BY created_at ASC
-                LIMIT ?
-                """,
-                (session_id, limit),
-            ).fetchall()
+            if normalized_limit <= 0:
+                rows = conn.execute(
+                    """
+                    SELECT message_id, session_id, role, content, status, task_id, error, created_at, attachments_json
+                    FROM chat_messages
+                    WHERE session_id = ?
+                    ORDER BY created_at ASC, rowid ASC
+                    """,
+                    (session_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT message_id, session_id, role, content, status, task_id, error, created_at, attachments_json
+                    FROM chat_messages
+                    WHERE session_id = ?
+                    ORDER BY created_at DESC, rowid DESC
+                    LIMIT ?
+                    """,
+                    (session_id, normalized_limit),
+                ).fetchall()
+                rows = list(reversed(rows))
         return [
             StoredMessage(
                 message_id=r["message_id"],

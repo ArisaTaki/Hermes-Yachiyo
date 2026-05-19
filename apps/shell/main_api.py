@@ -3505,15 +3505,7 @@ class MainWindowAPI:
 
     def get_executor_info(self) -> Dict[str, Any]:
         """获取当前执行器信息"""
-        image_input = get_current_hermes_image_input_capability()
-        runner = self._runtime.task_runner
-        if runner is None:
-            return {"executor": "none", "available": False, "image_input": image_input}
-        return {
-            "executor": runner.executor.name,
-            "available": True,
-            "image_input": image_input,
-        }
+        return self._chat_api.get_executor_info()
 
     def open_chat(self) -> Dict[str, Any]:
         """Electron opens chat windows through IPC; HTTP callers get an instruction."""
