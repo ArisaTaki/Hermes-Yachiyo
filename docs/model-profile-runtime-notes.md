@@ -74,7 +74,15 @@
 - `Hermes Runtime` 显示为实验能力：当前默认产出 RunGroup 和上下文，不隐式启动额外 Hermes 会话。
 - `Yachiyo Profile` 显示为可运行路径：要求选择已经测试通过的 chat Profile，缺 Profile 时明确显示配置缺口。
 - `External CLI` 显示为占位能力：MVP 不提供 command 输入框，避免从前端提交任意 shell command。
-- 后端语义保持不变：这一步只让 UI 与当前 runtime 边界对齐，第三阶段再补 Agent 运行闭环和 Run/artifact 体验。
+- 后端语义保持不变：这一步只让 UI 与当前 runtime 边界对齐。
+
+### Agent Studio MVP 运行闭环
+
+- 保存后的 Agent 可在编辑页用 `Quick Run` 直接创建 Agent Run，并自动跳转到 Runs 详情。
+- 保存后的 Workflow 可在 Workflow Studio 用 `Workflow Run` 直接创建 Workflow Run；未保存 Workflow 明确要求先保存。
+- Skill 挂载区显示挂载数量，Skill Library 中已挂载 Skill 会显示 mounted 状态。
+- Runs 详情整理为查看结果的主面板：状态、RunGroup、Result、Timeline 和 Artifacts 在同一页闭环。
+- MVP 仍是同步执行模型；后续再考虑 streaming、运行中轮询、审批恢复、失败重试和更完整的 artifact viewer。
 
 ### TTS 与主动关怀入口
 
@@ -111,5 +119,5 @@
 3. 把 Xiaomi MiMo、OpenRouter、Gemini、DashScope、DeepSeek、MiniMax 等常用源的真实图片测试链路逐个手工验收。
 4. 完成 TTS API/HTTP/Command 的真实测试语义：TTS 不应只保存 profile id，还应能对 endpoint/voice/timeout/test text 做可证实的连接测试。
 5. 为 `yachiyo_profile` 补 ToolBroker：优先支持 OpenAI tool_calls；不支持 tool_calls 的模型走 JSON fallback。
-6. 完成 Agent Studio 第三阶段的 MVP 运行闭环：Agent 快速运行、Skill 挂载反馈、Run detail/artifact 预览整理，以及 Workflow 最小保存/运行路径。
+6. 为 Agent Studio 后续补 streaming/轮询、审批恢复、失败重试、Run 取消 UI 和更完整 artifact viewer。
 7. 更新用户手册中的旧“主动关怀语音”命名，统一为“主动关怀与桌面观察”，并保留 GPT-SoVITS 作为该页内的本地 TTS 服务模块。

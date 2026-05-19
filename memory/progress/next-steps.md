@@ -4,7 +4,7 @@
 
 ### Phase 4 模型 / Agent / TTS 后续
 
-1. Agent Studio 第三阶段：补 MVP 运行闭环，包括 Agent 快速运行入口、Skill 挂载反馈、Run detail/artifact 预览整理，以及 Workflow Studio 的最小可用保存/运行路径。
+1. Agent Studio MVP 后续增强：补 streaming/轮询、运行中取消 UI、审批恢复、失败重试和更完整 artifact viewer。
 2. 把 `apps/shell/provider_catalog_sync.py` 接入每日或低频后台更新机制，更新 `~/.hermes/yachiyo/provider-capabilities.json`；刷新失败不能阻塞应用启动。
 3. 继续扩展 provider adapter：为 Xiaomi MiMo、OpenRouter、Gemini、DashScope、DeepSeek、MiniMax 等常用源沉淀 `/models` 路径、鉴权 header、模型 ID 规范、chat payload、vision payload 和错误归因。
 4. 手工验证真实 provider：至少覆盖 Xiaomi MiMo `mimo-v2.5` / `mimo-v2-omni`、OpenRouter 视觉模型、Gemini、DashScope 和 DeepSeek；确认文本模型不能误保存为 vision Profile。

@@ -115,6 +115,15 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - 选择 `Yachiyo Profile` 后只展示 `Chat Profile` 选择器；选择 `Hermes Runtime` 后展示主模型管理入口；选择 `External CLI` 后仅展示占位说明。
 - 这一步只改变能力表达与选择体验，不改变后端执行语义；下一步再补 Agent 快速运行、Skill 挂载反馈和 Run/artifact 体验闭环。
 
+### Batch 10：Agent Studio MVP 运行闭环
+
+- Agent 编辑页新增 `Quick Run`：保存后的 Agent 可直接输入目标并创建 Agent Run，完成后自动切到 Runs 详情。
+- Workflow Studio 新增 `Workflow Run`：保存后的 Workflow 可直接输入目标并创建 Workflow Run；新建未保存时按钮禁用并提示先保存。
+- Skill 挂载反馈更明确：Agent 编辑页显示 `mounted / skills` 计数；Skill Library 中已挂载 Skill 会以 mounted 状态显示。
+- Runs 详情整理为 MVP 查看面板：顶部展示 runnable、goal、状态 pill、run kind、更新时间、RunGroup 和 run id；Result、Timeline、Artifacts 分区显示数量。
+- 无 Run 时的空状态说明后续会展示 Result、Timeline 和 Artifacts，减少用户进入 Runs 页后的空白感。
+- 这一步仍复用既有后端同步执行语义，不引入 streaming、取消中的实时轮询或复杂审批流程。
+
 ## 新增接口
 
 - `GET/POST /ui/model-profiles`

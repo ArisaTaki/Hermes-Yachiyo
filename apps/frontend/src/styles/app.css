@@ -12527,6 +12527,7 @@ button.activity-item {
 
 .agent-config-box,
 .agent-skill-mounts,
+.agent-quick-run,
 .workflow-node-settings {
   display: grid;
   gap: 10px;
@@ -12537,12 +12538,54 @@ button.activity-item {
   background: oklch(255 0 0 / 0.025);
 }
 
+.agent-quick-run h3,
+.agent-quick-run p {
+  margin: 0;
+}
+
+.agent-quick-run h3 {
+  color: var(--hy-fg);
+  font-size: 14px;
+  font-weight: 590;
+}
+
+.agent-quick-run p {
+  color: var(--hy-faint);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.agent-run-textarea {
+  min-height: 82px;
+  resize: vertical;
+}
+
 .agent-editor-actions,
 .workflow-toolbar {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+
+.agent-skill-mounts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.agent-skill-mounts-head h3 {
+  margin: 0;
+  color: var(--hy-fg);
+  font-size: 14px;
+  font-weight: 590;
+}
+
+.agent-skill-mounts-head span,
+.agent-empty-inline {
+  color: var(--hy-faint);
+  font-size: 11px;
 }
 
 .agent-skill-grid {
@@ -12574,6 +12617,11 @@ button.activity-item {
   border: 1px solid var(--hy-border-soft);
   border-radius: 8px;
   background: oklch(255 0 0 / 0.025);
+}
+
+.skill-card.mounted {
+  border-color: oklch(68% 0.15 155 / 0.3);
+  background: oklch(68% 0.15 155 / 0.06);
 }
 
 .skill-card p,
@@ -12654,6 +12702,13 @@ button.activity-item {
   min-width: 0;
 }
 
+.run-detail-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .run-detail h3,
 .run-detail h4,
 .run-detail p {
@@ -12675,6 +12730,34 @@ button.activity-item {
   color: var(--hy-muted);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.run-status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  background: oklch(255 0 0 / 0.025);
+  color: var(--hy-subtle);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.run-status-pill.ready {
+  border-color: oklch(68% 0.15 155 / 0.28);
+  color: oklch(78% 0.11 155);
+}
+
+.run-status-pill.danger {
+  border-color: oklch(58% 0.19 24 / 0.32);
+  color: oklch(84% 0.09 24);
+}
+
+.run-status-pill.running {
+  border-color: oklch(66% 0.12 188 / 0.28);
+  color: oklch(78% 0.1 188);
 }
 
 .run-detail section {

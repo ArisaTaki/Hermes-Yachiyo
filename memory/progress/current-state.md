@@ -2,6 +2,16 @@
 
 ## 已完成
 
+### Milestone 83 — Agent Studio MVP 运行闭环
+
+- ✅ Agent 编辑页新增 `Quick Run`：保存后的 Agent 可直接输入目标创建 Agent Run，完成后自动切到 Runs 详情。
+- ✅ Workflow Studio 新增 `Workflow Run`：保存后的 Workflow 可直接输入目标创建 Workflow Run；新建未保存时按钮禁用并提示先保存。
+- ✅ Skill 挂载反馈更清楚：Agent 编辑页显示 `mounted / skills` 计数；Skill Library 中已挂载 Skill 会显示 mounted 状态。
+- ✅ Runs 详情整理为 MVP 查看面板：展示 runnable、goal、状态 pill、run kind、更新时间、RunGroup、run id、Result、Timeline 和 Artifacts。
+- ✅ 无 Run 空状态已说明后续会展示 Result、Timeline 和 Artifacts，避免 Runs 页看起来像坏掉。
+- ✅ 阶段说明已补入 `docs/phase-4-hermes-sync-plan.md` 与 `docs/model-profile-runtime-notes.md`。
+- ✅ 验证：`npm --prefix apps/frontend run build` passed；`python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_model_profiles.py` → 75 passed；本地浏览器验证 Quick Run、Workflow Run、Skill 挂载计数和 Runs 空状态。
+
 ### Milestone 82 — Agent Studio Execution Backend 状态 UI
 
 - ✅ Agent 编辑页的 `Execution Backend` 已从普通下拉改为三张能力状态卡片。

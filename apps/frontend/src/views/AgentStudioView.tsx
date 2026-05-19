@@ -194,6 +194,30 @@ function executionBackendTone(backend: AgentDraft['execution_backend'], chatProf
   return 'info';
 }
 
+function runStatusTone(status: string): string {
+  if (status === 'completed') return 'ready';
+  if (status === 'failed' || status === 'cancelled') return 'danger';
+  return 'running';
+}
+
+function runKindLabel(kind: string): string {
+  if (kind === 'agent_run') return 'Agent Run';
+  if (kind === 'workflow_run') return 'Workflow Run';
+  return kind || 'Run';
+}
+
+function formatRunDate(value?: string): string {
+  if (!value) return '未知时间';
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return value;
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(timestamp);
+}
+
 export function AgentStudioView() {
   const [tab, setTab] = useState<StudioTab>(() => currentParam('run') ? 'runs' : 'agents');
   const [agents, setAgents] = useState<AgentSpec[]>([]);
@@ -208,6 +232,8 @@ export function AgentStudioView() {
   const [skillPath, setSkillPath] = useState('');
   const [workflowName, setWorkflowName] = useState('New Workflow');
   const [workflowDescription, setWorkflowDescription] = useState('');
+  const [agentRunGoal, setAgentRunGoal] = useState('');
+  const [workflowRunGoal, setWorkflowRunGoal] = useState('');
   const [runTarget, setRunTarget] = useState('');
   const [runGoal, setRunGoal] = useState('');
   const [selectedRunId, setSelectedRunId] = useState(() => currentParam('run'));
@@ -239,6 +265,10 @@ export function AgentStudioView() {
   const visionModelProfiles = useMemo(
     () => modelProfiles.filter((profile) => profile.capability === 'vision' && profile.status === 'available' && profile.enabled !== false),
     [modelProfiles],
+  );
+  const mountedSkillCount = useMemo(
+    () => skills.filter((skill) => selectedAgent?.skill_ids?.includes(skill.skill_id)).length,
+    [selectedAgent, skills],
   );
 
   const refresh = useCallback(async (options: StudioRefreshOptions = {}) => {
@@ -440,6 +470,30 @@ export function AgentStudioView() {
     return { selectedWorkflowId: saved.workflow_id };
   }
 
+  async function runCurrentAgent(): Promise<StudioRefreshOptions> {
+    if (!draft.agent_id) throw new Error('请先保存 Agent，再运行。');
+    const goal = agentRunGoal.trim();
+    if (!goal) throw new Error('运行目标不能为空');
+    const run = await createAgentRun(draft.agent_id, goal);
+    setAgentRunGoal('');
+    setRunTarget(draft.agent_id);
+    setSelectedRunId(run.run_id);
+    setTab('runs');
+    return { selectedAgentId: draft.agent_id, runTarget: draft.agent_id, selectedRunId: run.run_id };
+  }
+
+  async function runCurrentWorkflow(): Promise<StudioRefreshOptions> {
+    if (!selectedWorkflow) throw new Error('请先保存 Workflow，再运行。');
+    const goal = workflowRunGoal.trim();
+    if (!goal) throw new Error('运行目标不能为空');
+    const run = await createWorkflowRun(selectedWorkflow.workflow_id, goal);
+    setWorkflowRunGoal('');
+    setRunTarget(selectedWorkflow.workflow_id);
+    setSelectedRunId(run.run_id);
+    setTab('runs');
+    return { selectedWorkflowId: selectedWorkflow.workflow_id, runTarget: selectedWorkflow.workflow_id, selectedRunId: run.run_id };
+  }
+
   function addFlowNode(kind: 'agent' | 'approval' | 'artifact') {
     const id = `${kind}-${Date.now().toString(36)}`;
     const agent = agents[0];
@@ -631,8 +685,33 @@ export function AgentStudioView() {
               {draft.agent_id ? <button type="button" disabled={busy} onClick={() => void runAction(async () => { const result = await testAgentModel(draft.agent_id || ''); setStatus(result.message || (result.ok ? '模型测试通过' : '模型测试失败')); }, '测试模型')}>测试模型</button> : null}
             </div>
             {draft.agent_id ? (
+              <section className="agent-quick-run">
+                <div>
+                  <h3>Quick Run</h3>
+                  <p>用当前 Agent 立即创建 Run，完成后自动打开 Runs 详情。</p>
+                </div>
+                <label>
+                  <span>Goal</span>
+                  <textarea
+                    className="hy-input agent-run-textarea"
+                    value={agentRunGoal}
+                    onChange={(event) => setAgentRunGoal(event.target.value)}
+                    placeholder="例如：检查这个页面还有哪些交互缺口"
+                  />
+                </label>
+                <button type="button" className="primary-action" disabled={busy || !agentRunGoal.trim()} onClick={() => void runAction(runCurrentAgent, '运行 Agent')}>
+                  运行当前 Agent
+                </button>
+              </section>
+            ) : (
+              <div className="agent-inline-note">保存 Agent 后即可在这里直接运行，并在 Runs 中查看结果和 artifacts。</div>
+            )}
+            {draft.agent_id ? (
               <div className="agent-skill-mounts">
-                <h3>Mounted Skills</h3>
+                <div className="agent-skill-mounts-head">
+                  <h3>Mounted Skills</h3>
+                  <span>{mountedSkillCount} mounted / {skills.length} skills</span>
+                </div>
                 <div className="agent-skill-grid">
                   {skills.map((skill) => {
                     const mounted = selectedAgent?.skill_ids?.includes(skill.skill_id);
@@ -651,6 +730,7 @@ export function AgentStudioView() {
                       </button>
                     );
                   })}
+                  {!skills.length ? <span className="agent-empty-inline">暂无 Skill，可到 Skill Library 导入。</span> : null}
                 </div>
               </div>
             ) : null}
@@ -740,6 +820,24 @@ export function AgentStudioView() {
                 </label>
               ))}
             </div>
+            <section className="agent-quick-run">
+              <div>
+                <h3>Workflow Run</h3>
+                <p>{selectedWorkflow ? '运行当前已保存 Workflow，完成后自动打开 Runs 详情。' : '新建 Workflow 需要先保存，保存后即可运行。'}</p>
+              </div>
+              <label>
+                <span>Goal</span>
+                <textarea
+                  className="hy-input agent-run-textarea"
+                  value={workflowRunGoal}
+                  onChange={(event) => setWorkflowRunGoal(event.target.value)}
+                  placeholder="例如：从设计到审查跑一遍这个任务"
+                />
+              </label>
+              <button type="button" className="primary-action" disabled={busy || !selectedWorkflow || !workflowRunGoal.trim()} onClick={() => void runAction(runCurrentWorkflow, '运行 Workflow')}>
+                {selectedWorkflow ? '运行当前 Workflow' : '先保存 Workflow'}
+              </button>
+            </section>
           </div>
         </section>
       ) : null}
@@ -784,19 +882,25 @@ export function AgentStudioView() {
             <div className="section-heading-row"><h2>Run Detail</h2></div>
             {selectedRun ? (
               <article className="run-detail">
+                <div className="run-detail-title">
+                  <div>
+                    <h3>{selectedRun.runnable_name || selectedRun.runnable_id}</h3>
+                    <p>{selectedRun.user_goal}</p>
+                  </div>
+                  <span className={`run-status-pill ${runStatusTone(selectedRun.status)}`}>{selectedRun.status}</span>
+                </div>
                 <div className="run-detail-meta">
-                  <span>{selectedRun.kind}</span>
-                  <span>{selectedRun.status}</span>
+                  <span>{runKindLabel(selectedRun.kind)}</span>
+                  <span>Updated {formatRunDate(selectedRun.updated_at || selectedRun.created_at)}</span>
+                  {selectedRun.run_group_id ? <span>Group {selectedRun.run_group_id}</span> : null}
                   <code>{selectedRun.run_id}</code>
                 </div>
-                <h3>{selectedRun.runnable_name || selectedRun.runnable_id}</h3>
-                <p>{selectedRun.user_goal}</p>
                 <section>
                   <h4>Result</h4>
                   <pre>{selectedRun.result || 'No result yet.'}</pre>
                 </section>
                 <section>
-                  <h4>Timeline</h4>
+                  <h4>Timeline · {(selectedRun.timeline || []).length}</h4>
                   <ol className="run-timeline">
                     {(selectedRun.timeline || []).map((event, index) => (
                       <li key={`${String(event.event || 'event')}-${index}`}>
@@ -807,7 +911,7 @@ export function AgentStudioView() {
                   </ol>
                 </section>
                 <section>
-                  <h4>Artifacts</h4>
+                  <h4>Artifacts · {(selectedRun.artifacts || []).length}</h4>
                   <div className="run-artifacts">
                     {(selectedRun.artifacts || []).map((artifact, index) => {
                       const path = String(artifact.path || '');
@@ -833,7 +937,7 @@ export function AgentStudioView() {
                 </section>
               </article>
             ) : (
-              <div className="empty-state inline-empty">暂无 Run</div>
+              <div className="empty-state inline-empty">暂无 Run；运行 Agent 或 Workflow 后会在这里显示 Result、Timeline 和 Artifacts。</div>
             )}
           </div>
         </section>
@@ -857,9 +961,9 @@ function SkillCard({
 }) {
   const mounted = Boolean(agent?.skill_ids?.includes(skill.skill_id));
   return (
-    <article className="skill-card">
+    <article className={mounted ? 'skill-card mounted' : 'skill-card'}>
       <div className="section-heading-row">
-        <div><h3>{skill.name}</h3><span>{skill.source_path}</span></div>
+        <div><h3>{skill.name}</h3><span>{mounted ? `Mounted to ${agent?.name || 'Agent'}` : skill.source_path}</span></div>
         <button type="button" className="danger-action" onClick={() => void onDelete()}>删除</button>
       </div>
       <p>{skill.description || skill.content_summary}</p>
