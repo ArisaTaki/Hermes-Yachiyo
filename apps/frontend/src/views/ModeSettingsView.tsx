@@ -594,8 +594,8 @@ function ReferenceSettingsHome() {
   const currentProviderOption = providerOptions.find((opt) => opt.id === currentProvider);
   const apiKeyConfigured = currentProviderOption?.api_key_configured ?? hermesConfig?.api_key?.configured ?? false;
   const apiKeyDisplay = hermesConfig?.api_key?.display || '';
-  const availableChatProfiles = modelProfiles.filter((profile) => profile.capability === 'chat' && profile.status === 'available');
-  const availableVisionProfiles = modelProfiles.filter((profile) => profile.capability === 'vision' && profile.status === 'available');
+  const availableChatProfiles = modelProfiles.filter((profile) => profile.capability === 'chat' && profile.status === 'available' && profile.enabled !== false);
+  const availableVisionProfiles = modelProfiles.filter((profile) => profile.capability === 'vision' && profile.status === 'available' && profile.enabled !== false);
   const selectedChatProfileId = modelDefaults.chat || '';
   const selectedVisionProfileId = modelDefaults.vision || '';
   const selectedChatProfile = availableChatProfiles.find((profile) => profile.profile_id === selectedChatProfileId);

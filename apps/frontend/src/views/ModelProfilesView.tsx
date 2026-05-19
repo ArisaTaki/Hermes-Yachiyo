@@ -466,6 +466,10 @@ function sourcesForCapability(sources: ModelSourceView[], capability: ModelCapab
   return sources.filter((source) => sourceMatchesCapability(source, capability));
 }
 
+function sourceHasCapabilityModel(source: ModelSource, capability: ModelCapability): boolean {
+  return Boolean(source.models?.some((model) => model.capability === capability));
+}
+
 function providerIconClass(provider: string): string {
   const safe = (provider || 'openai_compatible').toLowerCase().replace(/[^a-z0-9]+/g, '-');
   return `provider-${safe}`;
@@ -584,7 +588,7 @@ function modelToDraft(model: ModelProfileView): ModelDraft {
     name: model.name,
     model: model.model || '',
     capability: model.capability,
-    enabled: model.enabled !== false,
+    enabled: model.profile_enabled ?? (model.enabled !== false),
   };
 }
 
@@ -638,6 +642,10 @@ export function ModelProfilesView() {
   const selectedSource = useMemo(
     () => sources.find((source) => source.source_id === selectedSourceId) || null,
     [selectedSourceId, sources],
+  );
+  const selectedModel = useMemo(
+    () => profiles.find((profile) => profile.profile_id === selectedModelId) || null,
+    [profiles, selectedModelId],
   );
   const capabilitySources = useMemo(
     () => sourcesForCapability(sources, activeCapability),
@@ -731,8 +739,37 @@ export function ModelProfilesView() {
     };
   }, []);
 
+  function cleanDraftValue(value?: string): string {
+    return (value || '').trim();
+  }
+
+  function hasUnsavedDraftChanges(): boolean {
+    const sourceBaseline = selectedSource ? sourceToDraft(selectedSource) : defaultSourceDraft(activeCapability);
+    const sourceDirty = cleanDraftValue(sourceDraft.name) !== cleanDraftValue(sourceBaseline.name)
+      || sourceDraft.provider !== sourceBaseline.provider
+      || cleanDraftValue(sourceDraft.base_url) !== cleanDraftValue(sourceBaseline.base_url)
+      || sourceDraft.enabled !== sourceBaseline.enabled
+      || Boolean(cleanDraftValue(sourceDraft.api_key));
+
+    const modelBaseline = selectedModel
+      ? modelToDraft(selectedModel)
+      : { ...emptyModelDraft, capability: activeCapability, model: defaultModelName(sourceDraft, activeCapability) };
+    const modelDirty = cleanDraftValue(modelDraft.name) !== cleanDraftValue(modelBaseline.name)
+      || cleanDraftValue(modelDraft.model) !== cleanDraftValue(modelBaseline.model)
+      || modelDraft.capability !== modelBaseline.capability
+      || modelDraft.enabled !== modelBaseline.enabled;
+
+    return sourceDirty || modelDirty;
+  }
+
+  function confirmDiscardDraftChanges(): boolean {
+    if (!hasUnsavedDraftChanges()) return true;
+    return window.confirm('当前提供商源或模型有未保存更改，是否放弃这些更改？');
+  }
+
   function selectSource(source: ModelSource) {
     if (busy) return;
+    if (source.source_id !== selectedSourceId && !confirmDiscardDraftChanges()) return;
     setSelectedSourceId(source.source_id);
     setSourceDraft(sourceToDraft(source));
     const firstModel = profiles.find((profile) => profile.source_id === source.source_id && profile.capability === activeCapability);
@@ -746,6 +783,7 @@ export function ModelProfilesView() {
 
   function createNewSource() {
     if (busy) return;
+    if (!confirmDiscardDraftChanges()) return;
     const draft = defaultSourceDraft(activeCapability);
     setSelectedSourceId('');
     setSelectedModelId('');
@@ -865,6 +903,13 @@ export function ModelProfilesView() {
     setStatus('正在保存源并获取模型列表...');
     try {
       const saved = await saveSource();
+      if (saved.enabled === false) {
+        setModelCatalog([]);
+        setModelCatalogQuery('');
+        setStatus('提供商源已暂停，状态已保存；恢复使用后才能获取模型列表或测试模型。');
+        await refresh(saved.source_id, selectedModelId, activeCapability);
+        return;
+      }
       const result = await fetchModelSourceModels(saved.source_id);
       const models = result.models || [];
       setModelCatalog(models);
@@ -884,7 +929,7 @@ export function ModelProfilesView() {
     setModelDraft((current) => ({
       ...current,
       model: model.id,
-      name: current.name || `${sourceDraft.name}/${model.id}`,
+      name: `${sourceDraft.name || providerPreset(sourceDraft.provider).label}/${model.id}`,
     }));
   }
 
@@ -913,10 +958,11 @@ export function ModelProfilesView() {
     return createModelProfile(payload);
   }
 
-  async function testAndSaveCurrentModel(): Promise<{ ok?: boolean; success?: boolean; message?: string; profile?: ModelProfile }> {
+  async function testAndSaveCurrentModel(): Promise<{ ok?: boolean; success?: boolean; message?: string; profile?: ModelProfile; source?: ModelSource }> {
     const source = sourceDraft.source_id ? selectedSource : await saveSource();
     const sourceId = source?.source_id || sourceDraft.source_id || '';
     if (!sourceId) throw new Error('请先保存提供商源');
+    if (sourceDraft.enabled === false || source?.enabled === false) throw new Error('提供商源已暂停，恢复使用后才能测试模型。');
     const modelName = modelDraft.model.trim();
     if (!modelName) throw new Error('模型名称不能为空');
     const catalogMatch = modelCatalog.find((model) => model.id === modelName);
@@ -954,6 +1000,10 @@ export function ModelProfilesView() {
 
   async function runModelTest(profileId?: string) {
     if (busy) return;
+    if (sourceDraft.enabled === false) {
+      setStatus('提供商源已暂停，恢复使用后才能测试模型。');
+      return;
+    }
     setBusy('model-test');
     setStatus(profileId ? '正在重新测试模型...' : '正在测试连接并保存模型...');
     try {
@@ -968,7 +1018,7 @@ export function ModelProfilesView() {
       const test = await testAndSaveCurrentModel();
       const savedProfile = test.profile;
       setStatus(test.ok || test.success ? `模型测试通过并已保存：${test.message || 'OK'}` : `模型测试失败，未保存为可用模型：${test.message || '请检查配置'}`);
-      await refresh(savedProfile?.source_id || selectedSourceId || sourceDraft.source_id, savedProfile?.profile_id || selectedModelId);
+      await refresh(savedProfile?.source_id || test.source?.source_id || selectedSourceId || sourceDraft.source_id, savedProfile?.profile_id || selectedModelId);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '测试模型失败');
     } finally {
@@ -1008,6 +1058,10 @@ export function ModelProfilesView() {
     if (busy) return;
     if (profile.status !== 'available') {
       setStatus('只有通过连接测试的模型才能设为默认。');
+      return;
+    }
+    if (profile.enabled === false) {
+      setStatus('提供商源或模型已暂停，不能设为默认。');
       return;
     }
     setBusy('default');
@@ -1076,6 +1130,7 @@ export function ModelProfilesView() {
               {capabilitySources.map((source) => {
                 const preset = providerPreset(source.provider);
                 const configured = Boolean(source.api_key_configured);
+                const hasCapabilityModel = sourceHasCapabilityModel(source, activeCapability);
                 return (
                   <button
                     key={source.source_id}
@@ -1091,8 +1146,10 @@ export function ModelProfilesView() {
                       <small>{source.base_url || source.provider_label || preset.label}</small>
                     </span>
                     <span className="model-source-badges">
+                      <em className={source.enabled === false ? 'model-key-pill warn' : 'model-key-pill ok'}>{source.enabled === false ? '已暂停' : '正在使用'}</em>
                       <em className={`status-pill ${statusClass(source.status)}`}>{statusLabel(source.status)}</em>
                       <em className={configured ? 'model-key-pill ok' : 'model-key-pill'}>{configured ? '密钥已配置' : activeCapability === 'tts' ? 'Token 可选' : '未配置 API'}</em>
+                      {configured && !hasCapabilityModel ? <em className="model-key-pill warn">暂未选择模型</em> : null}
                     </span>
                   </button>
                 );
@@ -1158,6 +1215,7 @@ export function ModelProfilesView() {
                       <p>{sourceDraft.base_url || providerPreset(sourceDraft.provider).baseUrl || sourceFormHelp}</p>
                     </div>
                     <div className="model-source-config-actions">
+                      <span className={sourceDraft.enabled ? 'model-key-pill ok' : 'model-key-pill warn'}>{sourceDraft.enabled ? '正在使用' : '已暂停'}</span>
                       <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={returnToPresetList}>返回列表</button>
                       {activeCapability === 'tts' ? (
                         <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>
@@ -1165,7 +1223,7 @@ export function ModelProfilesView() {
                         </button>
                       ) : (
                         <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(busy)} onClick={() => void fetchModelsForSource()}>
-                          {busy === 'models-fetch' ? '获取中...' : '保存并获取模型列表'}
+                          {busy === 'models-fetch' ? '获取中...' : sourceDraft.enabled ? '保存并获取模型列表' : '保存暂停状态'}
                         </button>
                       )}
                     </div>
@@ -1226,9 +1284,9 @@ export function ModelProfilesView() {
                       <input className="hy-input" type="password" value={sourceDraft.api_key} disabled={Boolean(busy)} onChange={(event) => setSourceDraft({ ...sourceDraft, api_key: event.target.value })} placeholder={selectedSource?.api_key_configured ? '已配置，留空不覆盖' : '仅保存在本机后端'} />
                     </label>
                   </div>
-                  <label className="model-profile-toggle">
+                  <label className={sourceDraft.enabled ? 'model-profile-toggle' : 'model-profile-toggle paused'}>
                     <input type="checkbox" checked={sourceDraft.enabled} disabled={Boolean(busy)} onChange={(event) => setSourceDraft({ ...sourceDraft, enabled: event.target.checked })} />
-                    <span>启用这个提供商源</span>
+                    <span>{sourceDraft.enabled ? '正在使用这个提供商源' : '已暂停这个提供商源'}</span>
                   </label>
                   <div className="agent-editor-actions">
                     {sourceDraft.source_id ? <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={() => void removeSource()}>删除源</button> : null}
@@ -1239,6 +1297,7 @@ export function ModelProfilesView() {
                   <div className="model-panel-title">
                     <h3>{capabilityLabels[activeCapability]}模型</h3>
                     <span>{visibleModels.length} 个</span>
+                    {selectedSource?.api_key_configured && !visibleModels.length ? <em className="model-key-pill warn">暂未选择模型</em> : null}
                   </div>
                   <form
                     className="model-inline-form"
@@ -1254,15 +1313,15 @@ export function ModelProfilesView() {
                     <input
                       className="hy-input"
                       value={modelDraft.model}
-                      disabled={Boolean(busy)}
+                      disabled={Boolean(busy) || sourceDraft.enabled === false}
                       onChange={(event) => setModelDraft({ ...modelDraft, model: event.target.value })}
                       placeholder={activeCapability === 'tts' ? 'voice / profile id，例如 default-voice' : activeCapability === 'vision' ? '多模态模型 ID，例如 openai/gpt-4o-mini' : '模型 ID，例如 gpt-4.1-mini'}
                     />
-                    <input className="hy-input" value={modelDraft.name} disabled={Boolean(busy)} onChange={(event) => setModelDraft({ ...modelDraft, name: event.target.value })} placeholder="显示名称，可留空" />
+                    <input className="hy-input" value={modelDraft.name} disabled={Boolean(busy) || sourceDraft.enabled === false} onChange={(event) => setModelDraft({ ...modelDraft, name: event.target.value })} placeholder="显示名称，可留空" />
                     {activeCapability === 'tts' ? (
                       <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>{modelDraft.profile_id ? '保存语音配置' : '添加语音配置'}</button>
                     ) : (
-                      <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>{busy === 'model-test' ? '测试中...' : '测试连接并保存'}</button>
+                      <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy) || sourceDraft.enabled === false}>{busy === 'model-test' ? '测试中...' : '测试连接并保存'}</button>
                     )}
                   </form>
 
@@ -1280,7 +1339,7 @@ export function ModelProfilesView() {
                         <input
                           className="hy-input"
                           value={modelCatalogQuery}
-                          disabled={Boolean(busy) && busy !== 'models-fetch'}
+                          disabled={(Boolean(busy) && busy !== 'models-fetch') || sourceDraft.enabled === false}
                           onChange={(event) => setModelCatalogQuery(event.target.value)}
                           placeholder="搜索模型 ID"
                         />
@@ -1301,7 +1360,7 @@ export function ModelProfilesView() {
                               {group.models.map((model) => {
                                 const badges = catalogModelBadges(model);
                                 return (
-                                  <button type="button" key={model.id} disabled={Boolean(busy)} onClick={() => applyCatalogModel(model)}>
+                                  <button type="button" key={model.id} disabled={Boolean(busy) || sourceDraft.enabled === false} onClick={() => applyCatalogModel(model)}>
                                     <strong>{model.id}</strong>
                                     {model.name && model.name !== model.id ? <small>{model.name}</small> : null}
                                     {badges.length ? (
@@ -1329,8 +1388,8 @@ export function ModelProfilesView() {
                         </button>
                         <em className={`status-pill ${statusClass(model.status)}`}>{statusLabel(model.status)}</em>
                         {defaults[model.capability] === model.profile_id ? <small>默认</small> : null}
-                        <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || model.status !== 'available'} onClick={() => void setDefault(model)}>设为默认</button>
-                        {model.capability !== 'tts' ? <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={() => void runModelTest(model.profile_id)}>重新测试</button> : null}
+                        <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || model.status !== 'available' || model.enabled === false} onClick={() => void setDefault(model)}>设为默认</button>
+                        {model.capability !== 'tts' ? <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || sourceDraft.enabled === false} onClick={() => void runModelTest(model.profile_id)}>重新测试</button> : null}
                         <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={() => void removeModel(model.profile_id)}>删除</button>
                       </div>
                     ))}

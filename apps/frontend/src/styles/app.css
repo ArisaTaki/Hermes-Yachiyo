@@ -12957,6 +12957,12 @@ button.activity-item {
   color: oklch(80% 0.11 155);
 }
 
+.model-key-pill.warn {
+  border-color: oklch(82% 0.135 76 / 0.3);
+  background: oklch(82% 0.135 76 / 0.1);
+  color: oklch(86% 0.11 76);
+}
+
 .model-source-empty-action {
   display: grid !important;
   grid-template-columns: 32px minmax(0, 1fr) !important;
@@ -13643,6 +13649,10 @@ button.activity-item {
 .model-profile-toggle input {
   width: 16px;
   height: 16px;
+}
+
+.model-profile-toggle.paused span {
+  color: oklch(86% 0.11 76);
 }
 
 .hy-btn-danger {

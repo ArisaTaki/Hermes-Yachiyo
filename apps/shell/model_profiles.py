@@ -281,6 +281,8 @@ class ModelProfileService:
             ).fetchone()
             if source_row is not None:
                 source = self._row_to_source(source_row, include_secret=include_secret)
+        profile_enabled = bool(row["enabled"])
+        source_enabled = bool(source.get("enabled", True)) if source else True
         profile = {
             "profile_id": row["profile_id"],
             "source_id": row["source_id"],
@@ -293,7 +295,9 @@ class ModelProfileService:
             "source_name": source["name"] if source else "",
             "source_provider": source["provider"] if source else "",
             "options": _json_load(row["options_json"], {}),
-            "enabled": bool(row["enabled"]),
+            "enabled": profile_enabled and source_enabled,
+            "profile_enabled": profile_enabled,
+            "source_enabled": source_enabled,
             "status": row["status"],
             "last_tested_at": row["last_tested_at"],
             "last_error": row["last_error"],
@@ -590,6 +594,8 @@ class ModelProfileService:
                 profile = self.get_profile(profile_id)
                 if profile["capability"] != capability:
                     raise ModelProfileError(f"{capability} 默认 Profile 类型不匹配")
+                if not profile.get("enabled", True):
+                    raise ModelProfileError(f"{capability} 默认 Profile 已暂停")
             self._conn.execute(
                 """
                 INSERT INTO model_profile_defaults (capability, profile_id)
@@ -643,7 +649,16 @@ class ModelProfileService:
         source = self.get_source_private(source_id)
         test_result = self._test_profile_payload(source, payload)
         if not test_result.get("ok"):
-            return test_result
+            return self._record_source_test_result(
+                source_id,
+                ok=False,
+                message=str(test_result.get("message") or "模型测试失败"),
+                extra={
+                    key: value
+                    for key, value in test_result.items()
+                    if key not in {"ok", "success", "message"}
+                },
+            )
 
         profile_payload = {
             **payload,
@@ -690,6 +705,9 @@ class ModelProfileService:
         api_key = "" if next_source_id else str(current.get("api_key") or "")
         if not next_source_id and "api_key" in payload and str(payload.get("api_key") or "").strip():
             api_key = str(payload.get("api_key") or "").strip()
+        profile_enabled = next_profile.get("enabled", True)
+        if "enabled" not in payload and "profile_enabled" in current:
+            profile_enabled = current.get("profile_enabled", True)
         now = _now()
         self._conn.execute(
             """
@@ -707,7 +725,7 @@ class ModelProfileService:
                 str(next_profile.get("model") or ""),
                 api_key,
                 _json_dump(next_profile.get("options") or {}),
-                1 if next_profile.get("enabled", True) else 0,
+                1 if profile_enabled else 0,
                 now,
                 profile_id,
             ),
@@ -798,6 +816,7 @@ class ModelProfileService:
         extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         tested_at = _now()
+        profile = self.get_profile(profile_id)
         self._conn.execute(
             """
             UPDATE model_profiles
@@ -806,6 +825,16 @@ class ModelProfileService:
             """,
             ("available" if ok else "failed", tested_at, "" if ok else message, tested_at, profile_id),
         )
+        source_id = str(profile.get("source_id") or "")
+        if source_id:
+            self._conn.execute(
+                """
+                UPDATE model_sources
+                   SET status=?, last_tested_at=?, last_error=?, updated_at=?
+                 WHERE source_id=?
+                """,
+                ("available" if ok else "failed", tested_at, "" if ok else message, tested_at, source_id),
+            )
         self._conn.commit()
         payload = {"ok": ok, "success": ok, "message": message, "profile": self.get_profile(profile_id)}
         if extra:

@@ -94,6 +94,39 @@ def test_model_source_owns_credentials_and_models_reference_it(tmp_path):
         service.close()
 
 
+def test_paused_source_marks_child_profiles_unavailable(tmp_path):
+    service = make_profile_service(tmp_path)
+    try:
+        source = service.create_source(
+            {
+                "name": "Gateway",
+                "provider": "openai_compatible",
+                "base_url": "https://api.example.test/v1",
+                "api_key": "sk-source-secret",
+            }
+        )
+        profile = service.create_profile(
+            {
+                "source_id": source["source_id"],
+                "name": "Gateway Chat",
+                "capability": "chat",
+                "model": "demo-model",
+            }
+        )
+
+        service.update_source(source["source_id"], {"enabled": False})
+        paused_profile = service.get_profile(profile["profile_id"])
+
+        assert paused_profile["enabled"] is False
+        assert paused_profile["profile_enabled"] is True
+        assert paused_profile["source_enabled"] is False
+
+        service.update_source(source["source_id"], {"enabled": True})
+        assert service.get_profile(profile["profile_id"])["enabled"] is True
+    finally:
+        service.close()
+
+
 def test_model_profile_test_updates_status(monkeypatch, tmp_path):
     service = make_profile_service(tmp_path)
     profile = service.create_profile(
@@ -139,6 +172,7 @@ def test_test_and_save_profile_failure_does_not_persist(monkeypatch, tmp_path):
         )
 
         assert result["ok"] is False
+        assert result["source"]["status"] == "failed"
         assert service.list_profiles()["profiles"] == []
     finally:
         service.close()
@@ -211,6 +245,7 @@ def test_vision_profile_test_uses_image_payload_and_saves(monkeypatch, tmp_path)
 
         assert result["ok"] is True
         assert result["profile"]["status"] == "available"
+        assert service.get_source(source["source_id"])["status"] == "available"
         assert result["profile"]["options"]["remote_model"]["input_modalities"] == ["text", "image"]
         assert calls[0][3][0]["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
     finally:

@@ -15,6 +15,8 @@ export type ModelProfile = {
   source_provider?: string;
   options?: Record<string, unknown>;
   enabled?: boolean;
+  profile_enabled?: boolean;
+  source_enabled?: boolean;
   status?: 'untested' | 'available' | 'failed' | string;
   last_tested_at?: string;
   last_error?: string;

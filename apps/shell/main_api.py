@@ -1373,6 +1373,8 @@ def _model_profile_config_for_hermes(profile_id: str, capability: str) -> dict[s
         raise ValueError(f"{capability} Profile 类型不匹配")
     if str(profile.get("status") or "") != "available":
         raise ValueError("只能选择已通过连接测试的模型 Profile")
+    if not profile.get("enabled", True):
+        raise ValueError("不能选择已暂停的模型 Profile")
     provider = str(profile.get("provider") or "openai_compatible").strip()
     model = str(profile.get("model") or "").strip()
     base_url = str(profile.get("base_url") or "").strip()

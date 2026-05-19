@@ -174,11 +174,11 @@ export function AgentStudioView() {
     [runs, selectedRunId],
   );
   const chatModelProfiles = useMemo(
-    () => modelProfiles.filter((profile) => profile.capability === 'chat' && profile.status === 'available'),
+    () => modelProfiles.filter((profile) => profile.capability === 'chat' && profile.status === 'available' && profile.enabled !== false),
     [modelProfiles],
   );
   const visionModelProfiles = useMemo(
-    () => modelProfiles.filter((profile) => profile.capability === 'vision' && profile.status === 'available'),
+    () => modelProfiles.filter((profile) => profile.capability === 'vision' && profile.status === 'available' && profile.enabled !== false),
     [modelProfiles],
   );
 
