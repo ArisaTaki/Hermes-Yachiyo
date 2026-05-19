@@ -12835,9 +12835,9 @@ button.activity-item {
 
 .model-source-list button {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
-  gap: 2px 10px;
-  align-items: center;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: start;
   width: 100%;
   border: 1px solid var(--hy-border-soft);
   border-radius: var(--hy-radius-card);
@@ -12907,6 +12907,9 @@ button.activity-item {
   align-items: center;
   gap: 6px;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 14px;
 }
 
@@ -12924,15 +12927,18 @@ button.activity-item {
 .model-source-list small {
   color: var(--hy-faint);
   font-size: 12px;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-source-badges {
-  grid-row: span 2;
+  grid-column: 2;
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 5px;
-  align-items: flex-end;
+  align-items: center;
+  min-width: 0;
 }
 
 .model-source-list em {
@@ -12942,12 +12948,16 @@ button.activity-item {
 .model-key-pill {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  max-width: 180px;
   min-height: 22px;
   padding: 3px 8px;
   border: 1px solid var(--hy-border-soft);
   border-radius: 999px;
   color: var(--hy-faint);
   font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -13032,7 +13042,7 @@ button.activity-item {
 
 .model-preset-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 10px;
 }
 
@@ -13069,10 +13079,12 @@ button.activity-item {
   min-width: 0;
   color: var(--hy-fg);
   font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-preset-card small,
-.model-preset-card span.model-preset-runtime,
 .model-preset-card em {
   min-width: 0;
   color: var(--hy-faint);
@@ -13090,10 +13102,17 @@ button.activity-item {
 .model-preset-runtime {
   grid-column: 2;
   width: fit-content;
+  max-width: 100%;
   padding: 2px 7px;
   border: 1px solid oklch(68% 0.15 155 / 0.22);
   border-radius: 999px;
   background: oklch(68% 0.15 155 / 0.08);
+  color: var(--hy-faint);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-source-form,
@@ -13109,15 +13128,19 @@ button.activity-item {
 
 .model-source-config-head {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto;
+  grid-template-columns: 42px minmax(0, 1fr);
   gap: 10px;
-  align-items: center;
+  align-items: start;
   padding-bottom: 14px;
   border-bottom: 1px solid var(--hy-line);
 }
 
 .model-source-config-head .model-source-mark {
   grid-row: auto;
+}
+
+.model-source-config-head>div {
+  min-width: 0;
 }
 
 .model-source-config-head small {
@@ -13141,14 +13164,17 @@ button.activity-item {
   margin-top: 3px;
   color: var(--hy-subtle);
   font-size: 12px;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-source-config-actions {
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .model-main-summary {
@@ -13525,8 +13551,8 @@ button.activity-item {
 }
 
 .model-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto auto auto auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
   min-width: 0;
@@ -13543,6 +13569,7 @@ button.activity-item {
 
 .model-row>button:first-child {
   display: grid;
+  flex: 1 1 240px;
   gap: 3px;
   min-width: 0;
   border: 0;
@@ -13561,6 +13588,12 @@ button.activity-item {
   color: var(--hy-faint);
   font-size: 11px;
   overflow-wrap: anywhere;
+}
+
+.model-row>button:first-child span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-provider-empty {
