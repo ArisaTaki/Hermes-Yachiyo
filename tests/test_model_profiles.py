@@ -8,7 +8,7 @@ import sqlite3
 import pytest
 
 from apps.shell.agent_runtime import AgentRuntimeService
-from apps.shell.model_profiles import ModelProfileError, ModelProfileService
+from apps.shell.model_profiles import ModelProfileError, ModelProfileService, openai_compatible_chat
 
 
 def make_profile_service(tmp_path) -> ModelProfileService:
@@ -16,6 +16,18 @@ def make_profile_service(tmp_path) -> ModelProfileService:
         db_path=tmp_path / "model-profiles.db",
         workspace_dir=tmp_path / "profiles",
     )
+
+
+def _vision_challenge():
+    return [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "left/right color test"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+            ],
+        }
+    ], ("red", "blue")
 
 
 def test_model_profile_crud_redacts_and_preserves_api_key(tmp_path):
@@ -326,6 +338,36 @@ def test_model_profile_test_updates_status(monkeypatch, tmp_path):
         service.close()
 
 
+def test_openai_compatible_chat_reads_reasoning_content_and_xiaomi_api_key_header(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps({"choices": [{"message": {"content": "", "reasoning_content": "red, blue"}}]}).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        assert timeout == 20
+        assert request.full_url == "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
+        assert request.get_header("Authorization") == "Bearer sk-xiaomi"
+        assert request.get_header("Api-key") == "sk-xiaomi"
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    result = openai_compatible_chat(
+        "https://token-plan-cn.xiaomimimo.com/v1",
+        "mimo-v2-omni",
+        "sk-xiaomi",
+        [{"role": "user", "content": "hello"}],
+    )
+
+    assert result == "red, blue"
+
+
 def test_test_and_save_profile_failure_does_not_persist(monkeypatch, tmp_path):
     service = make_profile_service(tmp_path)
     source = service.create_source(
@@ -366,6 +408,7 @@ def test_vision_profile_rejects_model_that_fails_real_image_test(monkeypatch, tm
         }
     )
     calls = []
+    monkeypatch.setattr("apps.shell.model_profiles._vision_test_challenge", _vision_challenge)
     monkeypatch.setattr("apps.shell.model_profiles.openai_compatible_chat", lambda *args, **kwargs: calls.append((args, kwargs)) or "OK")
     try:
         result = service.test_and_save_profile(
@@ -401,8 +444,9 @@ def test_vision_profile_test_uses_image_payload_and_saves(monkeypatch, tmp_path)
 
     def fake_chat(base_url, model, api_key, messages):
         calls.append((base_url, model, api_key, messages))
-        return "red"
+        return "red, blue"
 
+    monkeypatch.setattr("apps.shell.model_profiles._vision_test_challenge", _vision_challenge)
     monkeypatch.setattr("apps.shell.model_profiles.openai_compatible_chat", fake_chat)
     try:
         result = service.test_and_save_profile(
@@ -442,7 +486,8 @@ def test_vision_profile_can_pass_without_remote_metadata(monkeypatch, tmp_path):
         }
     )
     calls = []
-    monkeypatch.setattr("apps.shell.model_profiles.openai_compatible_chat", lambda *args, **kwargs: calls.append((args, kwargs)) or "red")
+    monkeypatch.setattr("apps.shell.model_profiles._vision_test_challenge", _vision_challenge)
+    monkeypatch.setattr("apps.shell.model_profiles.openai_compatible_chat", lambda *args, **kwargs: calls.append((args, kwargs)) or "left red, right blue")
     try:
         result = service.test_and_save_profile(
             source["source_id"],

@@ -7,16 +7,21 @@ backend database; public payloads only expose configured state.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
+import secrets
 import sqlite3
+import struct
 import time
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib import error as urlerror
 from urllib import request as urlrequest
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from apps.shell.model_provider_adapters import resolve_provider_adapter
@@ -161,10 +166,22 @@ def _pricing_is_free(pricing: dict[str, Any]) -> bool:
         return False
 
 
-_VISION_TEST_IMAGE_DATA_URL = (
-    "data:image/png;base64,"
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mP8z8AARQAFAAH/AS7x7fqQAAAAAElFTkSuQmCC"
-)
+_VISION_TEST_COLORS: dict[str, tuple[int, int, int]] = {
+    "red": (230, 48, 56),
+    "green": (30, 170, 95),
+    "blue": (55, 110, 230),
+    "yellow": (245, 205, 45),
+    "orange": (240, 128, 35),
+    "purple": (135, 80, 205),
+}
+_VISION_COLOR_ALIASES: dict[str, tuple[str, ...]] = {
+    "red": ("red", "红", "红色"),
+    "green": ("green", "绿", "绿色"),
+    "blue": ("blue", "蓝", "蓝色"),
+    "yellow": ("yellow", "黄", "黄色"),
+    "orange": ("orange", "橙", "橙色"),
+    "purple": ("purple", "紫", "紫色"),
+}
 
 
 def _remote_model_from_options(options: dict[str, Any] | None) -> dict[str, Any]:
@@ -189,21 +206,86 @@ def _remote_model_supports_vision(remote_model: dict[str, Any], model_id: str) -
     return "image" in input_modalities or bool(re.search(r"\bimage\b|vision|multimodal", modality))
 
 
-def _vision_test_messages() -> list[dict[str, Any]]:
+def _png_chunk(kind: bytes, data: bytes) -> bytes:
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+
+def _grid_png_data_url(colors: tuple[tuple[int, int, int], tuple[int, int, int], tuple[int, int, int], tuple[int, int, int]]) -> str:
+    width = 72
+    height = 72
+    split_x = width // 2
+    split_y = height // 2
+    top_left, top_right, bottom_left, bottom_right = [bytes(color) for color in colors]
+    rows = []
+    for y in range(height):
+        if y < split_y:
+            rows.append(b"\x00" + top_left * split_x + top_right * (width - split_x))
+        else:
+            rows.append(b"\x00" + bottom_left * split_x + bottom_right * (width - split_x))
+    raw = b"".join(rows)
+    png = (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+        + _png_chunk(b"IDAT", zlib.compress(raw))
+        + _png_chunk(b"IEND", b"")
+    )
+    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+
+
+def _vision_test_challenge() -> tuple[list[dict[str, Any]], tuple[str, ...]]:
+    names = list(_VISION_TEST_COLORS)
+    selected: list[str] = []
+    while len(selected) < 4:
+        candidate = names[secrets.randbelow(len(names))]
+        if candidate not in selected:
+            selected.append(candidate)
+    expected = (selected[0], selected[1], selected[2], selected[3])
+    image_url = _grid_png_data_url(
+        (
+            _VISION_TEST_COLORS[expected[0]],
+            _VISION_TEST_COLORS[expected[1]],
+            _VISION_TEST_COLORS[expected[2]],
+            _VISION_TEST_COLORS[expected[3]],
+        )
+    )
     return [
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": "What color is the solid square in this image? Reply with exactly one English color word."},
-                {"type": "image_url", "image_url": {"url": _VISION_TEST_IMAGE_DATA_URL}},
+                {
+                    "type": "text",
+                    "text": (
+                        "This image is a 2 by 2 grid of solid color blocks. Reply with exactly four English color "
+                        "words in this order: top-left, top-right, bottom-left, bottom-right. Separate them with commas. "
+                        "If you cannot inspect the image, reply unable."
+                    ),
+                },
+                {"type": "image_url", "image_url": {"url": image_url}},
             ],
         }
-    ]
+    ], expected
 
 
-def _vision_test_passed(response: str) -> bool:
+def _find_color_position(text: str, color: str) -> int:
+    positions: list[int] = []
+    for alias in _VISION_COLOR_ALIASES[color]:
+        if alias.isascii():
+            match = re.search(rf"\b{re.escape(alias)}\b", text)
+            if match:
+                positions.append(match.start())
+        else:
+            index = text.find(alias)
+            if index >= 0:
+                positions.append(index)
+    return min(positions) if positions else -1
+
+
+def _vision_test_passed(response: str, expected: tuple[str, ...]) -> bool:
     text = str(response or "").strip().lower()
-    return bool(re.search(r"\bred\b|红色|红", text))
+    if not text or re.search(r"\b(unable|cannot|can't|not able|no image)\b|无法|不能|看不到", text):
+        return False
+    positions = [_find_color_position(text, color) for color in expected]
+    return all(position >= 0 for position in positions) and positions == sorted(positions)
 
 
 class ModelProfileService:
@@ -964,8 +1046,9 @@ class ModelProfileService:
         if missing:
             return {"ok": False, "success": False, "message": "Profile 配置不完整。", "missing": missing}
         messages: list[dict[str, Any]] = [{"role": "user", "content": "Reply with OK."}]
+        vision_expected: tuple[str, ...] | None = None
         if capability == "vision":
-            messages = _vision_test_messages()
+            messages, vision_expected = _vision_test_challenge()
         started = time.time()
         try:
             result = openai_compatible_chat(
@@ -976,11 +1059,12 @@ class ModelProfileService:
             )
         except ModelProfileError as exc:
             return {"ok": False, "success": False, "message": str(exc)}
-        if capability == "vision" and not _vision_test_passed(result):
+        if capability == "vision" and (vision_expected is None or not _vision_test_passed(result, vision_expected)):
             return {
                 "ok": False,
                 "success": False,
                 "message": "图片识别模型没有通过真实图片测试，请选择能够读取图片内容的多模态模型。",
+                "vision_expected": list(vision_expected or ()),
                 "vision_test_response": result[:500],
             }
         return {
@@ -1025,6 +1109,45 @@ class ModelProfileService:
         return payload
 
 
+def _openai_compatible_auth_headers(base_url: str, api_key: str) -> dict[str, str]:
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    host = (urlparse(base_url or "").hostname or "").lower()
+    if host == "mimo-v2.com" or host.endswith(".mimo-v2.com") or host == "xiaomimimo.com" or host.endswith(".xiaomimimo.com"):
+        headers["api-key"] = api_key
+    return headers
+
+
+def _message_content_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "\n".join(parts)
+    return ""
+
+
+def _chat_response_text(payload: dict[str, Any]) -> str:
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0] if isinstance(choices[0], dict) else {}
+    message = first.get("message") if isinstance(first.get("message"), dict) else {}
+    content = _message_content_text(message.get("content"))
+    if content:
+        return content
+    reasoning = message.get("reasoning_content") or first.get("reasoning_content")
+    if isinstance(reasoning, str) and reasoning.strip():
+        return reasoning
+    text = first.get("text")
+    return str(text) if text is not None else ""
+
+
 def openai_compatible_chat(base_url: str, model: str, api_key: str, messages: list[dict[str, Any]]) -> str:
     url = f"{base_url.rstrip('/')}/chat/completions"
     body = json.dumps({"model": model, "messages": messages, "temperature": 0.2}).encode("utf-8")
@@ -1032,17 +1155,24 @@ def openai_compatible_chat(base_url: str, model: str, api_key: str, messages: li
         url,
         data=body,
         method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
-        },
+        headers=_openai_compatible_auth_headers(base_url, api_key),
     )
     try:
         with urlrequest.urlopen(request, timeout=20) as response:
             payload = json.loads(response.read().decode("utf-8"))
+    except urlerror.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            detail = ""
+        suffix = f"：{detail[:300]}" if detail else ""
+        raise ModelProfileError(
+            f"OpenAI-compatible Profile 调用失败：HTTP {exc.code} {exc.reason}（POST /chat/completions）{suffix}"
+        ) from exc
     except (urlerror.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise ModelProfileError(f"OpenAI-compatible Profile 调用失败：{exc}") from exc
-    return str(payload.get("choices", [{}])[0].get("message", {}).get("content") or "")
+    return _chat_response_text(payload)
 
 
 _model_profile_service: ModelProfileService | None = None
