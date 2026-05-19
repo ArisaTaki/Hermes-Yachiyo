@@ -13,9 +13,11 @@ import DeepSeekIcon from '@lobehub/icons/es/DeepSeek/components/Color';
 import DoubaoIcon from '@lobehub/icons/es/Doubao/components/Color';
 import FastGPTIcon from '@lobehub/icons/es/FastGPT/components/Color';
 import FireworksIcon from '@lobehub/icons/es/Fireworks/components/Color';
+import FishAudioIcon from '@lobehub/icons/es/FishAudio/components/Mono';
 import GeminiIcon from '@lobehub/icons/es/Gemini/components/Color';
 import GoogleIcon from '@lobehub/icons/es/Google/components/Color';
 import GroqIcon from '@lobehub/icons/es/Groq/components/Mono';
+import HuggingFaceIcon from '@lobehub/icons/es/HuggingFace/components/Color';
 import HunyuanIcon from '@lobehub/icons/es/Hunyuan/components/Color';
 import IBMIcon from '@lobehub/icons/es/IBM/components/Mono';
 import KimiIcon from '@lobehub/icons/es/Kimi/components/Color';
@@ -80,6 +82,7 @@ const providerBrandLogos: Record<string, ProviderLogo> = {
   aws: { Icon: AwsIcon, kind: 'icon' },
   azure: { Icon: AzureAIIcon, kind: 'icon' },
   azure_openai: { Icon: AzureAIIcon, kind: 'icon' },
+  azure_tts: { Icon: AzureAIIcon, kind: 'icon' },
   baichuan: { Icon: BaichuanIcon, kind: 'icon' },
   baidu: { Icon: BaiduIcon, kind: 'icon' },
   baidu_qianfan: { Icon: WenxinIcon, kind: 'icon' },
@@ -94,11 +97,18 @@ const providerBrandLogos: Record<string, ProviderLogo> = {
   doubao: { Icon: DoubaoIcon, kind: 'icon' },
   fastgpt: { Icon: FastGPTIcon, kind: 'icon' },
   fireworks: { Icon: FireworksIcon, kind: 'icon' },
+  fishaudio: { Icon: FishAudioIcon, kind: 'icon' },
+  fishaudio_tts: { Icon: FishAudioIcon, kind: 'icon' },
   gemini: { Icon: GeminiIcon, kind: 'icon' },
+  gemini_tts: { Icon: GeminiIcon, kind: 'icon' },
+  genie_tts: { kind: 'text', text: 'GEN' },
   google: { Icon: GoogleIcon, kind: 'icon' },
   google_gemini: { Icon: GeminiIcon, kind: 'icon' },
   gpt_sovits: { kind: 'text', text: 'GSV' },
+  gsv_tts_api: { kind: 'text', text: 'GSV' },
+  gsv_tts_local: { kind: 'text', text: 'GSV' },
   groq: { Icon: GroqIcon, kind: 'icon' },
+  huggingface: { Icon: HuggingFaceIcon, kind: 'icon' },
   hunyuan: { Icon: HunyuanIcon, kind: 'icon' },
   http_tts: { kind: 'text', text: 'HTTP' },
   ibm: { Icon: IBMIcon, kind: 'icon' },
@@ -112,12 +122,14 @@ const providerBrandLogos: Record<string, ProviderLogo> = {
   lmstudio: { Icon: LmStudioIcon, kind: 'icon' },
   minimax: { Icon: MinimaxIcon, kind: 'icon' },
   minimax_cn: { Icon: MinimaxIcon, kind: 'icon' },
+  minimax_tts: { Icon: MinimaxIcon, kind: 'icon' },
   mistral: { Icon: MistralIcon, kind: 'icon' },
   mistralai: { Icon: MistralIcon, kind: 'icon' },
   mimo: { Icon: XiaomiMiMoIcon, kind: 'icon' },
   meta: { Icon: MetaIcon, kind: 'icon' },
   meta_llama: { Icon: MetaIcon, kind: 'icon' },
   microsoft: { Icon: MicrosoftIcon, kind: 'icon' },
+  edge_tts: { Icon: MicrosoftIcon, kind: 'icon' },
   modelscope: { Icon: ModelScopeIcon, kind: 'icon' },
   moonshot: { Icon: KimiIcon, kind: 'icon' },
   moonshotai: { Icon: KimiIcon, kind: 'icon' },
@@ -126,6 +138,7 @@ const providerBrandLogos: Record<string, ProviderLogo> = {
   ollama: { Icon: OllamaIcon, kind: 'icon' },
   openai: { Icon: OpenAIIcon, kind: 'icon' },
   openai_compatible: { Icon: OpenAIIcon, kind: 'icon' },
+  openai_tts: { Icon: OpenAIIcon, kind: 'icon' },
   openrouter: { Icon: OpenRouterIcon, kind: 'icon' },
   perplexity: { Icon: PerplexityIcon, kind: 'icon' },
   ppio: { Icon: PPIOIcon, kind: 'icon' },
@@ -143,12 +156,14 @@ const providerBrandLogos: Record<string, ProviderLogo> = {
   tokenpony: { alt: 'TokenPony', kind: 'image', src: '/provider-icons/tokenpony.png' },
   volcengine: { Icon: VolcengineIcon, kind: 'icon' },
   volcengine_doubao: { Icon: DoubaoIcon, kind: 'icon' },
+  volcengine_tts: { Icon: VolcengineIcon, kind: 'icon' },
   wenxin: { Icon: WenxinIcon, kind: 'icon' },
   xai: { Icon: XAIIcon, kind: 'icon' },
   x_ai: { Icon: XAIIcon, kind: 'icon' },
   xiaomi: { Icon: XiaomiMiMoIcon, kind: 'icon' },
   xiaomi_mimo: { Icon: XiaomiMiMoIcon, kind: 'icon' },
   xiaomimimo: { Icon: XiaomiMiMoIcon, kind: 'icon' },
+  mimo_tts: { Icon: XiaomiMiMoIcon, kind: 'icon' },
   zai: { Icon: ZAIIcon, kind: 'icon' },
   z_ai: { Icon: ZAIIcon, kind: 'icon' },
   zhipu: { Icon: ZhipuIcon, kind: 'icon' },

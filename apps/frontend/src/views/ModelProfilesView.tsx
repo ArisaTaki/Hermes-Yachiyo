@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import { ProviderBrandIcon } from '../components/ProviderBrandIcon';
 import { UiIcon } from '../components/UiIcon';
+import { navigateTo, type AppView } from '../lib/view';
 import {
   createModelProfile,
   createModelSource,
@@ -54,6 +55,7 @@ type ProviderPreset = {
   note: string;
   hermesProvider?: string;
   modelHints?: string[];
+  route?: AppView;
 };
 
 type ModelCatalogGroup = {
@@ -203,19 +205,20 @@ const providerPresets: ProviderPreset[] = [
 
 const ttsProviderPresets: ProviderPreset[] = [
   {
-    id: 'gpt_sovits',
-    label: 'GPT-SoVITS',
+    id: 'gsv_tts_local',
+    label: 'GSV TTS(Local)',
     baseUrl: 'http://127.0.0.1:9880',
     mark: 'GSV',
-    note: '本地 GPT-SoVITS 服务，语音、参考音频和权重仍在 GPT-SoVITS 设置页管理。',
+    note: '打开完整的主动关怀语音页配置 GPT-SoVITS 服务、音色、参考音频和推理参数。',
     modelHints: ['default-voice'],
+    route: 'proactive-tts',
   },
   {
     id: 'http_tts',
-    label: 'HTTP TTS Endpoint',
+    label: 'HTTP TTS',
     baseUrl: 'http://127.0.0.1:9880/tts',
     mark: 'HTTP',
-    note: '通用 HTTP 语音合成服务，用于登记一个可复用的语音端点或 voice id。',
+    note: '通用 HTTP 语音服务；主动关怀页可配置 endpoint、voice、超时和测试文本。',
     modelHints: ['default'],
   },
   {
@@ -223,12 +226,112 @@ const ttsProviderPresets: ProviderPreset[] = [
     label: 'Command TTS',
     baseUrl: '',
     mark: 'CMD',
-    note: '本地命令式 TTS 适配入口；这里登记 profile 名称，具体命令在语音设置链路执行。',
+    note: '本地命令式 TTS；主动关怀页可填写命令模板、voice、超时和播报限制。',
     modelHints: ['local-command'],
+  },
+  {
+    id: 'openai_tts',
+    label: 'OpenAI TTS(API)',
+    baseUrl: 'https://api.openai.com/v1',
+    mark: 'AI',
+    note: 'OpenAI 语音 API 预设；用于登记 API TTS 来源，实际调用链路后续接入。',
+    modelHints: ['gpt-4o-mini-tts', 'tts-1'],
+  },
+  {
+    id: 'mimo_tts',
+    label: 'MiMo TTS(API)',
+    baseUrl: 'https://api.mimo-v2.com/v1',
+    mark: 'Mi',
+    note: '小米 MiMo TTS 预设；可登记普通、克隆或设计类 voice/model ID。',
+    modelHints: ['mimo-v2.5-tts', 'mimo-v2.5-tts-voiceclone'],
+  },
+  {
+    id: 'genie_tts',
+    label: 'Genie TTS',
+    baseUrl: '',
+    mark: 'GEN',
+    note: 'Genie 语音服务占位预设；填写服务端点和 voice/profile 后作为可选语音源。',
+    modelHints: ['default'],
+  },
+  {
+    id: 'edge_tts',
+    label: 'Edge TTS',
+    baseUrl: '',
+    mark: 'MS',
+    note: '本地 Edge TTS 命令预设；通常通过 command provider 执行 edge-tts。',
+    modelHints: ['zh-CN-XiaoxiaoNeural'],
+  },
+  {
+    id: 'gsv_tts_api',
+    label: 'GSV TTS(API)',
+    baseUrl: 'http://127.0.0.1:9880/tts',
+    mark: 'GSV',
+    note: '仅登记 GPT-SoVITS API 端点；完整本地部署、音色和推理参数请进主动关怀语音页。',
+    modelHints: ['default-voice'],
+  },
+  {
+    id: 'fishaudio_tts',
+    label: 'FishAudio TTS(API)',
+    baseUrl: 'https://api.fish.audio',
+    mark: 'FISH',
+    note: 'FishAudio 语音 API 预设；填写 token 和 voice/model ID 后登记为语音源。',
+    modelHints: ['default'],
+  },
+  {
+    id: 'alibaba_tts',
+    label: '阿里云百炼 TTS(API)',
+    baseUrl: 'https://dashscope.aliyuncs.com/api/v1',
+    mark: 'Q',
+    note: 'DashScope 语音服务预设；可登记 voice、speaker 或 profile ID。',
+    modelHints: ['cosyvoice-v1'],
+  },
+  {
+    id: 'azure_tts',
+    label: 'Azure TTS',
+    baseUrl: 'https://{region}.tts.speech.microsoft.com/cognitiveservices/v1',
+    mark: 'AZ',
+    note: 'Azure Speech 端点预设；需要按区域替换 endpoint 并配置密钥。',
+    modelHints: ['zh-CN-XiaoxiaoNeural'],
+  },
+  {
+    id: 'minimax_tts',
+    label: 'MiniMax TTS(API)',
+    baseUrl: 'https://api.minimax.io/v1',
+    mark: 'MM',
+    note: 'MiniMax 语音 API 预设；填写 API Key 和 voice ID 后登记。',
+    modelHints: ['default'],
+  },
+  {
+    id: 'volcengine_tts',
+    label: '火山引擎 TTS(API)',
+    baseUrl: 'https://openspeech.bytedance.com/api/v1/tts',
+    mark: 'VE',
+    note: '火山引擎语音端点预设；按应用配置替换 endpoint、voice 与认证信息。',
+    modelHints: ['default'],
+  },
+  {
+    id: 'gemini_tts',
+    label: 'Gemini TTS',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    mark: 'G',
+    note: 'Gemini 语音能力预设；用于登记语音模型或 voice profile。',
+    modelHints: ['gemini-2.5-flash-preview-tts'],
   },
 ];
 
-const allProviderPresets = [...providerPresets, ...ttsProviderPresets];
+const legacyProviderPresets: ProviderPreset[] = [
+  {
+    id: 'gpt_sovits',
+    label: 'GPT-SoVITS',
+    baseUrl: 'http://127.0.0.1:9880',
+    mark: 'GSV',
+    note: '旧版 GPT-SoVITS 语音源；完整参数请在主动关怀语音页维护。',
+    modelHints: ['default-voice'],
+    route: 'proactive-tts',
+  },
+];
+
+const allProviderPresets = [...providerPresets, ...ttsProviderPresets, ...legacyProviderPresets];
 
 const capabilityLabels: Record<ModelCapability, string> = {
   chat: '对话',
@@ -489,7 +592,7 @@ function capabilityCatalogModels(models: RemoteModelInfo[], capability: ModelCap
 
 function capabilityEmptyModelHint(capability: ModelCapability): string {
   if (capability === 'vision') return '请先获取远端模型列表，再选择模型进行真实图片测试；通过后才会保存为可用视觉模型。';
-  if (capability === 'tts') return '选择 TTS 提供商后，在这里登记 voice / profile id；实际连接测试走语音设置链路。';
+  if (capability === 'tts') return '选择 TTS 提供商后，在这里登记 voice / profile id；主动关怀实际播报参数在语音设置页维护。';
   return '获取远端模型列表后选择模型并测试保存；通过后会出现在设置页和 Agent Studio。';
 }
 
@@ -741,6 +844,10 @@ export function ModelProfilesView() {
 
   function startPresetSource(preset: ProviderPreset) {
     if (busy) return;
+    if (preset.route) {
+      navigateTo(preset.route);
+      return;
+    }
     const existing = capabilitySources.find((source) => source.name === preset.id)
       || capabilitySources.find((source) => source.provider === preset.id && source.base_url === preset.baseUrl);
     if (existing) {
@@ -788,6 +895,10 @@ export function ModelProfilesView() {
 
   function applyProvider(provider: string) {
     const preset = providerPreset(provider);
+    if (preset.route) {
+      navigateTo(preset.route);
+      return;
+    }
     const nextDraft = {
       ...sourceDraft,
       provider,
@@ -1033,7 +1144,7 @@ export function ModelProfilesView() {
   const sourceCountLabel = capabilitySources.length ? `${capabilitySources.length}` : '0';
   const activeProviderPresets = providerPresetsForCapability(activeCapability);
   const sourceFormHelp = activeCapability === 'tts'
-    ? 'TTS 使用语音服务专用来源；这里登记 provider、endpoint 和 voice/profile 名称，不复用 OpenRouter 模型目录。'
+    ? 'TTS 使用语音服务专用来源；这里登记 provider、endpoint 和 voice/profile 名称。GPT-SoVITS 完整参数走主动关怀语音页。'
     : activeCapability === 'vision'
       ? '图片转述使用独立视觉来源，不复用对话来源；模型最终以真实图片测试通过为准。'
       : '对话使用独立文本来源；默认主模型只使用 Hermes 可执行 provider，Agent Studio 可选择已测试通过的文本 Profile。';
@@ -1113,7 +1224,7 @@ export function ModelProfilesView() {
                 <button type="button" className="model-source-empty-action" disabled={Boolean(busy)} onClick={createNewSource}>
                   <UiIcon name="plus" />
                   <strong>新增提供商源</strong>
-                  <span>{activeCapability === 'tts' ? '创建 GPT-SoVITS / HTTP TTS 等语音来源' : '创建 OpenRouter / Xiaomi MiMo / MiniMax 等模型来源'}</span>
+                  <span>{activeCapability === 'tts' ? '创建 HTTP / Command / API TTS 等语音来源' : '创建 OpenRouter / Xiaomi MiMo / MiniMax 等模型来源'}</span>
                 </button>
               ) : null}
             </div>
@@ -1142,7 +1253,7 @@ export function ModelProfilesView() {
                         <ProviderBrandIcon provider={preset.id} />
                       </span>
                       <strong>{preset.label}</strong>
-                      <small>{preset.baseUrl}</small>
+                      <small>{preset.route ? '打开完整设置页' : preset.baseUrl}</small>
                       {activeCapability !== 'tts' ? <span className={presetRuntimePillClass(preset.hermesProvider || preset.id)}>{runtimeProviderLabel(preset.hermesProvider || preset.id)}</span> : null}
                       <em>{preset.note}</em>
                     </button>

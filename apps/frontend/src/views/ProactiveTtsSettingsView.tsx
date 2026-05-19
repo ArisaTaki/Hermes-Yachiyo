@@ -598,9 +598,9 @@ export function ProactiveTtsSettingsView() {
     <section className="hy-route-page hy-tts-page">
       <header className="hy-page-header hy-tts-page-header hy-stagger">
         <div>
-          <span className="hy-eyebrow">GPT-SoVITS · Voice Core</span>
-          <h2>语音中枢</h2>
-          <p>配置八千代主动关怀播报链路、音色资源与本地 GPT-SoVITS 服务。普通聊天回复仍保持文本，不会自动转语音。</p>
+          <span className="hy-eyebrow">Proactive Care · Desktop Watch</span>
+          <h2>主动关怀与桌面观察</h2>
+          <p>配置八千代主动关怀、桌面观察触发、语音播报链路、音色资源与本地 GPT-SoVITS 服务。普通聊天回复仍保持文本，不会自动转语音。</p>
           <div className="hy-tts-hero-actions">
             <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('diagnostics')}>诊断工具</button>
           </div>

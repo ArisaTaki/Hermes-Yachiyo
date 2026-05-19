@@ -225,7 +225,7 @@ const NAV_GROUPS: Array<{
         { view: 'agents', label: 'Agent Studio', icon: 'model' },
         { view: 'bubble', label: '气泡模式', icon: 'bubble' },
         { view: 'live2d', label: 'Live2D 模式', icon: 'live2d' },
-        { view: 'proactive-tts', label: 'GPT-SoVITS', icon: 'voice' },
+        { view: 'proactive-tts', label: '主动关怀', icon: 'voice' },
       ],
     },
     {
@@ -266,7 +266,7 @@ const TOOL_CARD_DEFS: Array<Omit<ToolCard, 'status' | 'statusTone'> & { status?:
   { view: 'chat' as AppView, icon: 'chat', title: '对话', detail: '与八千代对话，支持文本和图片输入。' },
   { view: 'bubble' as AppView, icon: 'bubble', title: '气泡模式', detail: '桌面悬浮气泡，随时对话，支持拖拽和边缘吸附。', status: '就绪', statusTone: 'ready' },
   { view: 'live2d' as AppView, icon: 'live2d', title: 'Live2D 模式', detail: '虚拟形象互动，口型同步，表情动作。' },
-  { view: 'proactive-tts' as AppView, icon: 'voice', title: 'GPT-SoVITS', detail: '语音合成，让八千代开口说话。', status: '就绪', statusTone: 'ready' },
+  { view: 'proactive-tts' as AppView, icon: 'voice', title: '主动关怀', detail: '桌面观察、提醒触发和语音播报设置。', status: '就绪', statusTone: 'ready' },
 ];
 
 const TWEAK_ACCENTS = [
@@ -1669,7 +1669,7 @@ export function ToolsAllPage() {
   const allTools = [
     { view: 'bubble' as AppView, icon: 'bubble' as UiIconName, title: '气泡模式', detail: '桌面悬浮气泡，随时对话，支持拖拽和边缘吸附。', status: '就绪', statusTone: 'ready' },
     { view: 'live2d' as AppView, icon: 'live2d' as UiIconName, title: 'Live2D 模式', detail: '虚拟形象互动，口型同步，表情动作。', ...live2dStatus },
-    { view: 'proactive-tts' as AppView, icon: 'voice' as UiIconName, title: 'GPT-SoVITS', detail: '语音合成，让八千代开口说话。', status: '就绪', statusTone: 'ready' },
+    { view: 'proactive-tts' as AppView, icon: 'voice' as UiIconName, title: '主动关怀', detail: '桌面观察、提醒触发和语音播报设置。', status: '就绪', statusTone: 'ready' },
     { view: 'resources' as AppView, icon: 'resources' as UiIconName, title: '资源管理', detail: '管理 Live2D 模型、语音、壁纸等资源文件。', status: '就绪', statusTone: 'ready' },
     { view: 'workspace' as AppView, icon: 'workspace' as UiIconName, title: '工作区', detail: '管理对话记录、项目文件和工作区配置。', status: '已初始化', statusTone: 'ready' },
     { view: 'diagnostics' as AppView, icon: 'diagnostics' as UiIconName, title: '诊断详情', detail: 'Doctor 输出、运行时日志和本地能力探测。', status: '就绪', statusTone: 'ready' },
@@ -2583,6 +2583,7 @@ function routeTitle(view: AppView, settingsMode = ''): string {
   if (view === 'activity-all') return 'Hermes Yachiyo — 活动日志';
   if (view === 'activity-detail') return 'Hermes Yachiyo — 活动详情';
   if (view === 'app-update') return 'Hermes Yachiyo — 应用更新';
+  if (view === 'proactive-tts') return 'Hermes Yachiyo — 主动关怀';
   if (view === 'settings' && settingsMode === 'live2d') return 'Hermes Yachiyo — Live2D 设置';
   if (view === 'settings' && settingsMode === 'bubble') return 'Hermes Yachiyo — 气泡设置';
   return 'Hermes Yachiyo';

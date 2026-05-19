@@ -2681,7 +2681,7 @@ const BUBBLE_FIELD_SECTIONS: ModeFieldSection[] = [
   },
   {
     title: '主动关怀',
-    note: '这些字段只影响气泡模式；统一开关可以在 GPT-SoVITS 页面同步写入 Bubble 和 Live2D。',
+    note: '这些字段只影响气泡模式；统一开关可以在主动关怀页面同步写入 Bubble 和 Live2D。',
     fields: [
       { key: 'bubble_mode.proactive_enabled', sourceKey: 'proactive_enabled', label: '启用主动关怀', kind: 'checkbox', wide: true },
       { key: 'bubble_mode.proactive_desktop_watch_enabled', sourceKey: 'proactive_desktop_watch_enabled', label: '启用桌面观察', kind: 'checkbox', wide: true },
@@ -2798,7 +2798,7 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
   },
   {
     title: '主动关怀',
-    note: '这些字段只影响 Live2D 模式；桌面观察权限和立即测试可在 GPT-SoVITS 页面执行。',
+    note: '这些字段只影响 Live2D 模式；桌面观察权限和立即测试可在主动关怀页面执行。',
     fields: [
       { key: 'live2d_mode.proactive_enabled', sourceKey: 'proactive_enabled', label: '启用主动关怀', kind: 'checkbox', wide: true },
       { key: 'live2d_mode.proactive_desktop_watch_enabled', sourceKey: 'proactive_desktop_watch_enabled', label: '启用桌面观察', kind: 'checkbox', wide: true },
