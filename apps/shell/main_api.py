@@ -52,6 +52,7 @@ from apps.shell.mode_settings import (
     effective_display_mode,
     serialize_mode_settings,
 )
+from apps.shell.model_provider_adapters import provider_api_key_names, resolve_provider_adapter
 
 if TYPE_CHECKING:
     from apps.core.runtime import HermesRuntime
@@ -1387,6 +1388,8 @@ def _model_profile_config_for_hermes(profile_id: str, capability: str) -> dict[s
     if missing:
         raise ValueError(f"模型 Profile 配置不完整：缺少 {', '.join(missing)}")
     provider = _model_profile_provider_for_hermes(provider, base_url, model)
+    if not provider:
+        raise ValueError("当前模型源不能映射到 Hermes 支持的 Provider")
     return {
         "provider": provider,
         "model": model,
@@ -1402,19 +1405,12 @@ def _provider_api_key_names(provider: str) -> tuple[str, ...]:
     preset = _PROVIDER_PRESET_BY_ID.get(normalized)
     if preset:
         return tuple(str(item) for item in preset.get("api_key_names", ()) if item)
-    return (f"{normalized.upper().replace('-', '_')}_API_KEY",)
+    return provider_api_key_names(normalized)
 
 
 def _model_profile_provider_for_hermes(provider: str, base_url: str = "", model: str = "") -> str:
-    normalized = (provider or "openai_compatible").strip().lower()
-    effective = _effective_provider_id(normalized, base_url, model)
-    if normalized in _PROVIDER_PRESET_BY_ID:
-        return effective or normalized
-    if normalized == "custom":
-        return "custom"
-    if normalized in {"", "openai_compatible", "openai-compatible"}:
-        return infer_effective_hermes_provider("auto", base_url, model) or "custom"
-    return effective if effective in _PROVIDER_PRESET_BY_ID else "custom"
+    adapter = resolve_provider_adapter(provider, base_url, model)
+    return str(adapter.get("hermes_provider") or "")
 
 
 def _configured_api_key_name(

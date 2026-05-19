@@ -51,6 +51,7 @@ type ProviderPreset = {
   baseUrl: string;
   mark: string;
   note: string;
+  hermesProvider?: string;
   modelHints?: string[];
 };
 
@@ -63,276 +64,139 @@ type ModelCatalogGroup = {
 
 const providerPresets: ProviderPreset[] = [
   {
-    id: 'openai_compatible',
-    label: 'OpenAI Compatible',
-    baseUrl: 'https://api.openai.com/v1',
-    mark: 'AI',
-    note: '适合任意兼容 /v1/chat/completions 与 /v1/models 的网关。',
-    modelHints: ['gpt-4.1-mini', 'gpt-4o-mini'],
+    id: 'openrouter',
+    label: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    mark: 'OR',
+    hermesProvider: 'openrouter',
+    note: 'OpenRouter 是一个 Hermes provider；下方模型供应商只作为 OpenRouter 模型分组展示。',
+    modelHints: [],
   },
   {
-    id: 'google_gemini',
-    label: 'Google Gemini',
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    mark: 'G',
-    note: 'Gemini 的 OpenAI-compatible 端点，适合使用 Google AI Studio Key。',
-    modelHints: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+    id: 'xiaomi',
+    label: 'Xiaomi MiMo',
+    baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
+    mark: 'Mi',
+    hermesProvider: 'xiaomi',
+    note: 'Hermes 原生 Xiaomi provider。旧的 xiaomi_mimo 源会自动映射到 xiaomi。',
+    modelHints: ['mimo-v2.5-pro', 'mimo-v2.5'],
   },
   {
     id: 'deepseek',
     label: 'DeepSeek',
-    baseUrl: 'https://api.deepseek.com',
+    baseUrl: 'https://api.deepseek.com/v1',
     mark: 'DS',
-    note: 'DeepSeek 官方 OpenAI-compatible API。',
+    hermesProvider: 'deepseek',
+    note: 'Hermes 原生 DeepSeek provider。',
     modelHints: ['deepseek-chat', 'deepseek-reasoner'],
   },
   {
-    id: 'qwen_dashscope',
+    id: 'gemini',
+    label: 'Google Gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    mark: 'G',
+    hermesProvider: 'gemini',
+    note: 'Hermes 原生 Gemini provider；这里使用 Gemini 的 OpenAI-compatible 端点做模型获取与测试。',
+    modelHints: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+  },
+  {
+    id: 'alibaba',
     label: '阿里云百炼 / Qwen',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     mark: 'Q',
-    note: '阿里云百炼 DashScope 兼容模式，适合通义千问与多模态模型。',
+    hermesProvider: 'alibaba',
+    note: 'Hermes Alibaba provider；用于通义千问 / DashScope 兼容端点。',
     modelHints: ['qwen-plus', 'qwen-turbo', 'qwen-max'],
   },
   {
-    id: 'moonshot',
+    id: 'kimi-coding',
     label: 'Moonshot / Kimi',
     baseUrl: 'https://api.moonshot.ai/v1',
     mark: 'K',
-    note: 'Moonshot Kimi 官方兼容端点，适合 Kimi 与长上下文模型。',
-    modelHints: ['moonshot-v1-8k', 'moonshot-v1-32k'],
+    hermesProvider: 'kimi-coding',
+    note: 'Hermes Kimi Coding provider；Moonshot 旧源会自动映射到 kimi-coding。',
+    modelHints: ['kimi-k2.5', 'kimi-k2-thinking'],
+  },
+  {
+    id: 'zai',
+    label: '智谱 GLM / Z.AI',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    mark: 'GLM',
+    hermesProvider: 'zai',
+    note: 'Hermes Z.AI provider；智谱旧源会自动映射到 zai。',
+    modelHints: ['glm-4.5-flash', 'glm-4-plus'],
   },
   {
     id: 'minimax',
     label: 'MiniMax',
     baseUrl: 'https://api.minimax.io/v1',
     mark: 'MM',
-    note: 'MiniMax 国际站 OpenAI-compatible API。',
-    modelHints: ['MiniMax-M2.7', 'MiniMax-Text-01'],
-  },
-  {
-    id: 'xiaomi_mimo',
-    label: 'Xiaomi MiMo',
-    baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
-    mark: 'Mi',
-    note: '小米 MiMo OpenAI-compatible 端点，可登记 MiMo 文本与多模态模型。',
-    modelHints: ['mimo-v2.5-pro'],
-  },
-  {
-    id: 'zhipu',
-    label: '智谱 GLM / BigModel',
-    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    mark: 'GLM',
-    note: '智谱 GLM / BigModel OpenAI-compatible 端点。',
-    modelHints: ['glm-4-flash', 'glm-4-plus'],
-  },
-  {
-    id: 'volcengine_doubao',
-    label: '火山方舟 / 豆包',
-    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    mark: 'DB',
-    note: '火山引擎方舟 OpenAI-compatible API；模型 ID 通常使用方舟 Endpoint ID。',
-    modelHints: ['ep-xxxxxxxx', 'doubao-seed-1-6-flash-250715'],
-  },
-  {
-    id: 'tencent_hunyuan',
-    label: '腾讯混元',
-    baseUrl: 'https://api.hunyuan.cloud.tencent.com/v1',
-    mark: 'HY',
-    note: '腾讯混元 OpenAI 兼容接口。',
-    modelHints: ['hunyuan-turbos-latest', 'hunyuan-large-latest'],
-  },
-  {
-    id: 'baidu_qianfan',
-    label: '百度千帆 / 文心',
-    baseUrl: 'https://qianfan.baidubce.com/v2',
-    mark: 'BD',
-    note: '百度千帆 ModelBuilder OpenAI-compatible v2 接口。',
-    modelHints: ['ernie-4.0-turbo-8k', 'ernie-4.5-turbo-vl'],
-  },
-  {
-    id: 'baichuan',
-    label: '百川智能',
-    baseUrl: 'https://api.baichuan-ai.com/v1',
-    mark: 'BC',
-    note: '百川智能 Baichuan 系列 OpenAI 风格 API。',
-    modelHints: ['Baichuan4-Turbo', 'Baichuan4-Air'],
+    hermesProvider: 'minimax',
+    note: 'Hermes 原生 MiniMax provider。',
+    modelHints: ['MiniMax-M2.7', 'MiniMax-M2.5'],
   },
   {
     id: 'stepfun',
     label: '阶跃星辰 StepFun',
     baseUrl: 'https://api.stepfun.com/v1',
     mark: 'S',
-    note: '阶跃星辰 Step 系列 OpenAI-compatible API。',
-    modelHints: ['step-2-mini', 'step-1-8k'],
-  },
-  {
-    id: 'siliconflow',
-    label: 'SiliconFlow',
-    baseUrl: 'https://api.siliconflow.cn/v1',
-    mark: 'SF',
-    note: '国内常用模型聚合平台，支持 OpenAI-compatible 调用。',
-    modelHints: ['Qwen/Qwen2.5-72B-Instruct', 'deepseek-ai/DeepSeek-V3'],
-  },
-  {
-    id: 'modelscope',
-    label: 'ModelScope 魔搭',
-    baseUrl: 'https://api-inference.modelscope.cn/v1',
-    mark: 'MS',
-    note: '魔搭社区模型服务 OpenAI-compatible API。',
-    modelHints: ['Qwen/Qwen2.5-7B-Instruct', 'deepseek-ai/DeepSeek-R1'],
-  },
-  {
-    id: 'sensenova',
-    label: '商汤日日新 SenseNova',
-    baseUrl: 'https://api.sensenova.cn/compatible-mode/v2',
-    mark: 'SN',
-    note: '商汤日日新 OpenAI 接口兼容模式。',
-    modelHints: ['SenseNova-6.7-Flash-Lite', 'SenseChat-5'],
-  },
-  {
-    id: 'aihubmix',
-    label: 'AIHubMix',
-    baseUrl: 'https://aihubmix.com/v1',
-    mark: 'AH',
-    note: '国内常用聚合网关，兼容 OpenAI 请求格式。',
-    modelHints: ['gpt-4o-mini', 'deepseek-chat'],
-  },
-  {
-    id: 'ppio',
-    label: 'PPIO 派欧云',
-    baseUrl: 'https://api.ppinfra.com/v3/openai',
-    mark: 'PP',
-    note: 'PPIO 高性能模型推理服务的 OpenAI-compatible 入口。',
-    modelHints: ['deepseek/deepseek-v3.1', 'qwen/qwen3-coder'],
-  },
-  {
-    id: '302ai',
-    label: '302.AI',
-    baseUrl: 'https://api.302.ai/v1',
-    mark: '302',
-    note: '聚合式 OpenAI-compatible 转发服务。',
-    modelHints: ['gpt-4o-mini', 'deepseek-chat'],
-  },
-  {
-    id: 'tokenpony',
-    label: 'TokenPony',
-    baseUrl: 'https://api.tokenpony.cn/v1',
-    mark: 'TP',
-    note: '第三方模型聚合网关，适合统一管理多模型调用。',
-    modelHints: ['gpt-4o-mini', 'deepseek-chat'],
-  },
-  {
-    id: 'compshare',
-    label: 'Compshare',
-    baseUrl: 'https://api.compshare.cn/v1',
-    mark: 'CS',
-    note: '国内模型聚合服务，可按实际控制台地址调整 Base URL。',
-    modelHints: ['deepseek-chat'],
-  },
-  {
-    id: 'fastgpt',
-    label: 'FastGPT',
-    baseUrl: 'http://127.0.0.1:3000/api/v1',
-    mark: 'FG',
-    note: 'FastGPT 私有部署 / 知识库应用的 OpenAI-compatible 接口。',
-    modelHints: ['fastgpt-app'],
-  },
-  {
-    id: 'openrouter',
-    label: 'OpenRouter',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    mark: 'OR',
-    note: '多供应商聚合路由，常用于快速接入 Claude、Gemini、DeepSeek 等模型。',
-    modelHints: [],
-  },
-  {
-    id: 'perplexity',
-    label: 'Perplexity',
-    baseUrl: 'https://api.perplexity.ai/v1',
-    mark: 'P',
-    note: '适合联网问答和检索增强场景的兼容 API。',
-    modelHints: ['sonar', 'sonar-pro'],
-  },
-  {
-    id: 'together',
-    label: 'Together AI',
-    baseUrl: 'https://api.together.xyz/v1',
-    mark: 'T',
-    note: '开源模型托管和推理平台，兼容 OpenAI 请求格式。',
-    modelHints: ['meta-llama/Llama-3.3-70B-Instruct-Turbo'],
-  },
-  {
-    id: 'fireworks',
-    label: 'Fireworks AI',
-    baseUrl: 'https://api.fireworks.ai/inference/v1',
-    mark: 'FW',
-    note: '模型推理与微调平台，提供 OpenAI-compatible endpoint。',
-    modelHints: ['accounts/fireworks/models/llama-v3p1-70b-instruct'],
-  },
-  {
-    id: 'mistral',
-    label: 'Mistral AI',
-    baseUrl: 'https://api.mistral.ai/v1',
-    mark: 'M',
-    note: 'Mistral 官方 API，适合 Mistral Large、Small、Codestral 等模型。',
-    modelHints: ['mistral-large-latest', 'mistral-small-latest'],
+    hermesProvider: 'stepfun',
+    note: 'Hermes 原生 StepFun provider。',
+    modelHints: ['step-3.5-flash', 'step-2-mini'],
   },
   {
     id: 'nvidia',
     label: 'NVIDIA NIM',
     baseUrl: 'https://integrate.api.nvidia.com/v1',
     mark: 'NV',
-    note: 'NVIDIA 托管 NIM / Catalog API 的 OpenAI-compatible 入口。',
-    modelHints: ['nvidia/llama-3.1-nemotron-70b-instruct'],
+    hermesProvider: 'nvidia',
+    note: 'Hermes 原生 NVIDIA provider。',
+    modelHints: ['nvidia/nemotron-3-super-120b-a12b'],
   },
   {
     id: 'xai',
     label: 'xAI',
     baseUrl: 'https://api.x.ai/v1',
     mark: 'x',
-    note: 'xAI Grok 系列 OpenAI-compatible API。',
-    modelHints: ['grok-4', 'grok-3-mini'],
+    hermesProvider: 'xai',
+    note: 'Hermes 原生 xAI provider。',
+    modelHints: ['grok-4', 'grok-code-fast-1'],
   },
   {
-    id: 'groq',
-    label: 'Groq',
-    baseUrl: 'https://api.groq.com/openai/v1',
-    mark: 'GQ',
-    note: '低延迟推理平台，兼容 OpenAI SDK。',
-    modelHints: ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b'],
+    id: 'huggingface',
+    label: 'Hugging Face',
+    baseUrl: 'https://router.huggingface.co/v1',
+    mark: 'HF',
+    hermesProvider: 'huggingface',
+    note: 'Hermes 原生 Hugging Face provider。',
+    modelHints: ['Qwen/Qwen3.5-35B-A3B'],
   },
   {
-    id: 'anthropic',
-    label: 'Anthropic',
-    baseUrl: 'https://api.anthropic.com/v1',
-    mark: 'A',
-    note: 'Claude 官方 API。当前自动测试仍以兼容接口为主，必要时可作为自定义源保存。',
-    modelHints: ['claude-sonnet-4-5', 'claude-haiku-4-5'],
-  },
-  {
-    id: 'ollama',
-    label: 'Ollama',
-    baseUrl: 'http://127.0.0.1:11434/v1',
-    mark: 'O',
-    note: '本机 Ollama OpenAI-compatible API，通常不需要 API Key。',
-    modelHints: ['llama3.2', 'qwen2.5'],
-  },
-  {
-    id: 'lm_studio',
+    id: 'lmstudio',
     label: 'LM Studio',
     baseUrl: 'http://127.0.0.1:1234/v1',
     mark: 'LM',
-    note: '本机 LM Studio Server，适合本地 GGUF 模型。',
+    hermesProvider: 'lmstudio',
+    note: 'Hermes LM Studio provider，本地服务通常可使用占位 API Key。',
     modelHints: ['local-model'],
   },
   {
-    id: 'azure_openai',
-    label: 'Azure OpenAI',
-    baseUrl: '',
-    mark: 'AZ',
-    note: 'Azure OpenAI 端点由资源名和 API 版本决定，请按 Azure 控制台填写。',
-    modelHints: ['gpt-4o-mini'],
+    id: 'openai',
+    label: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    mark: 'AI',
+    hermesProvider: 'openai',
+    note: 'Hermes OpenAI provider。',
+    modelHints: ['gpt-4.1-mini', 'gpt-4o-mini'],
+  },
+  {
+    id: 'openai_compatible',
+    label: '自定义 OpenAI-Compatible',
+    baseUrl: 'https://api.example.com/v1',
+    mark: 'API',
+    hermesProvider: 'custom',
+    note: '非 Hermes 原生 provider 会写入 Hermes custom；同一时间只能作为一个 custom 主模型使用。',
+    modelHints: [],
   },
 ];
 
@@ -370,6 +234,35 @@ const capabilityLabels: Record<ModelCapability, string> = {
   vision: '图片转述',
   tts: '文字转语音',
 };
+
+const legacyTextProviderIds = new Set([
+  '302ai',
+  'aihubmix',
+  'azure_openai',
+  'baichuan',
+  'baidu_qianfan',
+  'compshare',
+  'fastgpt',
+  'fireworks',
+  'google_gemini',
+  'groq',
+  'lm_studio',
+  'mistral',
+  'modelscope',
+  'moonshot',
+  'ollama',
+  'perplexity',
+  'ppio',
+  'qwen_dashscope',
+  'sensenova',
+  'siliconflow',
+  'tencent_hunyuan',
+  'together',
+  'tokenpony',
+  'volcengine_doubao',
+  'xiaomi_mimo',
+  'zhipu',
+]);
 
 const catalogProviderMeta: Record<string, { label: string; iconProvider?: string }> = {
   aion_labs: { label: 'Aion Labs' },
@@ -428,6 +321,25 @@ function statusClass(status?: string): string {
   return '';
 }
 
+function hermesProviderLabel(provider?: string): string {
+  return provider ? `Hermes: ${provider}` : '不可用于 Hermes';
+}
+
+function sourceHermesProvider(source: ModelSource): string {
+  return source.hermes_provider || source.runtime?.hermes_provider || '';
+}
+
+function profileHermesProvider(profile: ModelProfile): string {
+  return profile.hermes_provider || profile.runtime?.hermes_provider || '';
+}
+
+function profileSelectableForHermes(profile: ModelProfile): boolean {
+  return profile.status === 'available'
+    && profile.enabled !== false
+    && profile.can_use_as_hermes !== false
+    && Boolean(profileHermesProvider(profile));
+}
+
 function providerPresetsForCapability(capability: ModelCapability): ProviderPreset[] {
   return capability === 'tts' ? ttsProviderPresets : providerPresets;
 }
@@ -458,6 +370,7 @@ function sourceMatchesCapability(source: ModelSourceView, capability: ModelCapab
   if (capability === 'tts') {
     return providerIds.has(source.provider) || Boolean(source.models?.some((model) => model.capability === 'tts'));
   }
+  if (legacyTextProviderIds.has(source.provider)) return true;
   if (providerIds.has(source.provider)) return true;
   return Boolean(source.models?.some((model) => model.capability === capability));
 }
@@ -612,8 +525,9 @@ function defaultModelName(source: SourceDraft, capability: ModelCapability): str
   if (capability === 'tts') return preset.modelHints?.[0] || '';
   if (capability === 'vision') {
     if (preset.id === 'openai' || preset.id === 'openai_compatible') return 'gpt-4.1-mini';
-    if (preset.id === 'google_gemini') return 'gemini-2.5-flash';
+    if (preset.id === 'gemini' || preset.id === 'google_gemini') return 'gemini-2.5-flash';
     if (preset.id === 'minimax') return 'MiniMax-M2.7';
+    if (preset.id === 'xiaomi') return 'mimo-v2.5';
     return '';
   }
   if (preset.modelHints?.length) return preset.modelHints[0];
@@ -1064,6 +978,10 @@ export function ModelProfilesView() {
       setStatus('提供商源或模型已暂停，不能设为默认。');
       return;
     }
+    if (!profileSelectableForHermes(profile)) {
+      setStatus('这个 Profile 不能映射到 Hermes 支持的 Provider，不能设为默认。');
+      return;
+    }
     setBusy('default');
     try {
       if (profile.capability === 'chat' || profile.capability === 'vision') {
@@ -1086,7 +1004,10 @@ export function ModelProfilesView() {
     ? 'TTS 使用语音服务专用来源；这里登记 provider、endpoint 和 voice/profile 名称，不复用 OpenRouter 模型目录。'
     : activeCapability === 'vision'
       ? '图片识别只应登记支持 image 输入的多模态模型；获取远端列表后会自动过滤。'
-      : '对话模型来自服务商源；主模型不在这里生成本地快照。';
+      : '这里只展示 Hermes 可执行的 provider；OpenRouter 里的厂商是动态模型分组，不会被写成 Hermes provider。';
+  const sourceDraftRuntimeProvider = selectedSource
+    ? sourceHermesProvider(selectedSource)
+    : (providerPreset(sourceDraft.provider).hermesProvider || sourceDraft.provider);
 
   return (
     <section className="hy-route-page model-profiles-page">
@@ -1131,6 +1052,7 @@ export function ModelProfilesView() {
                 const preset = providerPreset(source.provider);
                 const configured = Boolean(source.api_key_configured);
                 const hasCapabilityModel = sourceHasCapabilityModel(source, activeCapability);
+                const runtimeProvider = sourceHermesProvider(source);
                 return (
                   <button
                     key={source.source_id}
@@ -1147,6 +1069,7 @@ export function ModelProfilesView() {
                     </span>
                     <span className="model-source-badges">
                       <em className={source.enabled === false ? 'model-key-pill warn' : 'model-key-pill ok'}>{source.enabled === false ? '已暂停' : '正在使用'}</em>
+                      {activeCapability !== 'tts' ? <em className={runtimeProvider ? 'model-key-pill ok' : 'model-key-pill warn'}>{hermesProviderLabel(runtimeProvider)}</em> : null}
                       <em className={`status-pill ${statusClass(source.status)}`}>{statusLabel(source.status)}</em>
                       <em className={configured ? 'model-key-pill ok' : 'model-key-pill'}>{configured ? '密钥已配置' : activeCapability === 'tts' ? 'Token 可选' : '未配置 API'}</em>
                       {configured && !hasCapabilityModel ? <em className="model-key-pill warn">暂未选择模型</em> : null}
@@ -1188,6 +1111,7 @@ export function ModelProfilesView() {
                       </span>
                       <strong>{preset.label}</strong>
                       <small>{preset.baseUrl}</small>
+                      {activeCapability !== 'tts' ? <span className="model-preset-runtime">{hermesProviderLabel(preset.hermesProvider || preset.id)}</span> : null}
                       <em>{preset.note}</em>
                     </button>
                   ))}
@@ -1216,6 +1140,7 @@ export function ModelProfilesView() {
                     </div>
                     <div className="model-source-config-actions">
                       <span className={sourceDraft.enabled ? 'model-key-pill ok' : 'model-key-pill warn'}>{sourceDraft.enabled ? '正在使用' : '已暂停'}</span>
+                      {activeCapability !== 'tts' ? <span className={sourceDraftRuntimeProvider ? 'model-key-pill ok' : 'model-key-pill warn'}>{hermesProviderLabel(sourceDraftRuntimeProvider)}</span> : null}
                       <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={returnToPresetList}>返回列表</button>
                       {activeCapability === 'tts' ? (
                         <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>
@@ -1387,8 +1312,9 @@ export function ModelProfilesView() {
                           <span>{sourceDraft.name}/{model.model}</span>
                         </button>
                         <em className={`status-pill ${statusClass(model.status)}`}>{statusLabel(model.status)}</em>
+                        {model.capability !== 'tts' ? <em className={profileSelectableForHermes(model) ? 'model-key-pill ok' : 'model-key-pill warn'}>{hermesProviderLabel(profileHermesProvider(model))}</em> : null}
                         {defaults[model.capability] === model.profile_id ? <small>默认</small> : null}
-                        <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || model.status !== 'available' || model.enabled === false} onClick={() => void setDefault(model)}>设为默认</button>
+                        <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || !profileSelectableForHermes(model)} onClick={() => void setDefault(model)}>设为默认</button>
                         {model.capability !== 'tts' ? <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || sourceDraft.enabled === false} onClick={() => void runModelTest(model.profile_id)}>重新测试</button> : null}
                         <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={() => void removeModel(model.profile_id)}>删除</button>
                       </div>

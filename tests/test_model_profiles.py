@@ -94,6 +94,65 @@ def test_model_source_owns_credentials_and_models_reference_it(tmp_path):
         service.close()
 
 
+def test_model_source_reports_hermes_provider_adapter(tmp_path):
+    service = make_profile_service(tmp_path)
+    try:
+        source = service.create_source(
+            {
+                "name": "Xiaomi MiMo",
+                "provider": "xiaomi_mimo",
+                "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+                "api_key": "sk-source-secret",
+            }
+        )
+        profile = service.create_profile(
+            {
+                "source_id": source["source_id"],
+                "name": "MiMo",
+                "capability": "chat",
+                "model": "mimo-v2-pro",
+            }
+        )
+        public_source = service.get_source(source["source_id"])
+        public_profile = service.get_profile(profile["profile_id"])
+
+        assert public_source["hermes_provider"] == "xiaomi"
+        assert public_source["api_key_name"] == "XIAOMI_API_KEY"
+        assert public_source["can_use_as_hermes"] is True
+        assert public_profile["hermes_provider"] == "xiaomi"
+        assert public_profile["runtime_scope"] == "hermes"
+    finally:
+        service.close()
+
+
+def test_openrouter_profile_keeps_openrouter_as_runtime_provider(tmp_path):
+    service = make_profile_service(tmp_path)
+    try:
+        source = service.create_source(
+            {
+                "name": "OpenRouter",
+                "provider": "openrouter",
+                "base_url": "https://openrouter.ai/api/v1",
+                "api_key": "sk-source-secret",
+            }
+        )
+        profile = service.create_profile(
+            {
+                "source_id": source["source_id"],
+                "name": "DeepSeek via OpenRouter",
+                "capability": "chat",
+                "model": "deepseek/deepseek-chat",
+            }
+        )
+
+        public_profile = service.get_profile(profile["profile_id"])
+
+        assert public_profile["hermes_provider"] == "openrouter"
+        assert public_profile["api_key_name"] == "OPENROUTER_API_KEY"
+    finally:
+        service.close()
+
+
 def test_paused_source_marks_child_profiles_unavailable(tmp_path):
     service = make_profile_service(tmp_path)
     try:

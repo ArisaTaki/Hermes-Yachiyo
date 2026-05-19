@@ -19,6 +19,8 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 from uuid import uuid4
 
+from apps.shell.model_provider_adapters import resolve_provider_adapter
+
 
 class ModelProfileError(RuntimeError):
     """Raised when a model profile operation cannot be completed."""
@@ -65,14 +67,21 @@ def _normalize_capability(value: str) -> str:
 
 _OPENAI_COMPATIBLE_PROVIDER_IDS = {
     "openai",
+    "openai-compatible",
     "openai_compatible",
+    "alibaba",
+    "alibaba-coding-plan",
     "google_gemini",
     "gemini",
     "qwen_dashscope",
     "dashscope",
+    "custom",
     "minimax",
+    "minimax-cn",
     "moonshot",
     "kimi",
+    "kimi-coding",
+    "kimi-coding-cn",
     "kimi_coding_plan",
     "openrouter",
     "xai",
@@ -86,6 +95,7 @@ _OPENAI_COMPATIBLE_PROVIDER_IDS = {
     "qianfan",
     "baichuan",
     "stepfun",
+    "tencent-tokenhub",
     "siliconflow",
     "modelscope",
     "sensenova",
@@ -98,6 +108,7 @@ _OPENAI_COMPATIBLE_PROVIDER_IDS = {
     "302ai",
     "ollama",
     "lm_studio",
+    "lmstudio",
     "aihubmix",
     "ppio",
     "tokenpony",
@@ -254,6 +265,7 @@ class ModelProfileService:
             self._conn.execute("ALTER TABLE model_profiles ADD COLUMN source_id TEXT NOT NULL DEFAULT ''")
 
     def _row_to_source(self, row: sqlite3.Row, *, include_secret: bool = False) -> dict[str, Any]:
+        adapter = resolve_provider_adapter(row["provider"], row["base_url"])
         source = {
             "source_id": row["source_id"],
             "name": row["name"],
@@ -267,6 +279,11 @@ class ModelProfileService:
             "last_error": row["last_error"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+            "runtime": adapter,
+            "runtime_scope": adapter["runtime_scope"],
+            "hermes_provider": adapter["hermes_provider"],
+            "can_use_as_hermes": adapter["can_use_as_hermes"],
+            "api_key_name": adapter["api_key_name"],
         }
         if include_secret:
             source["api_key"] = row["api_key"]
@@ -283,6 +300,11 @@ class ModelProfileService:
                 source = self._row_to_source(source_row, include_secret=include_secret)
         profile_enabled = bool(row["enabled"])
         source_enabled = bool(source.get("enabled", True)) if source else True
+        adapter = resolve_provider_adapter(
+            source["provider"] if source else row["provider"],
+            source["base_url"] if source else row["base_url"],
+            row["model"],
+        )
         profile = {
             "profile_id": row["profile_id"],
             "source_id": row["source_id"],
@@ -303,6 +325,11 @@ class ModelProfileService:
             "last_error": row["last_error"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+            "runtime": adapter,
+            "runtime_scope": adapter["runtime_scope"],
+            "hermes_provider": adapter["hermes_provider"],
+            "can_use_as_hermes": adapter["can_use_as_hermes"],
+            "api_key_name": adapter["api_key_name"],
         }
         if include_secret:
             profile["api_key"] = source.get("api_key", "") if source else row["api_key"]
@@ -596,6 +623,8 @@ class ModelProfileService:
                     raise ModelProfileError(f"{capability} 默认 Profile 类型不匹配")
                 if not profile.get("enabled", True):
                     raise ModelProfileError(f"{capability} 默认 Profile 已暂停")
+                if not profile.get("can_use_as_hermes", True):
+                    raise ModelProfileError(f"{capability} 默认 Profile 不能映射到 Hermes Provider")
             self._conn.execute(
                 """
                 INSERT INTO model_profile_defaults (capability, profile_id)

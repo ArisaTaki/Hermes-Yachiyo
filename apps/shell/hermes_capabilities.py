@@ -11,6 +11,11 @@ from typing import Any
 from urllib.parse import urlparse
 
 from apps.installer.hermes_check import locate_hermes_binary
+from apps.shell.model_provider_adapters import (
+    HERMES_PROVIDER_ALIASES as _PROVIDER_ALIASES,
+    HERMES_PROVIDER_HOST_HINTS as _PROVIDER_HOST_HINTS,
+    OPENROUTER_MODEL_PREFIXES as _OPENROUTER_MODEL_PREFIXES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,51 +48,7 @@ _PROVIDER_TO_MODELS_DEV = {
     "lmstudio": "",
     "custom": "",
 }
-_PROVIDER_ALIASES = {
-    "google": "gemini",
-    "google-ai": "gemini",
-    "google-ai-studio": "gemini",
-    "google_gemini": "gemini",
-    "x-ai": "xai",
-    "xiaomi_mimo": "xiaomi",
-    "mimo": "xiaomi",
-    "moonshot": "kimi-coding",
-    "kimi": "kimi-coding",
-    "kimi_coding_plan": "kimi-coding",
-    "glm": "zai",
-    "z-ai": "zai",
-    "z_ai": "zai",
-    "zhipu": "zai",
-    "lm_studio": "lmstudio",
-}
 _AUTO_PROVIDER_VALUES = {"", "auto", "main"}
-_PROVIDER_HOST_HINTS: tuple[tuple[str, str], ...] = (
-    ("openrouter.ai", "openrouter"),
-    ("api.openai.com", "openai"),
-    ("api.anthropic.com", "anthropic"),
-    ("generativelanguage.googleapis.com", "gemini"),
-    ("api.xiaomimimo.com", "xiaomi"),
-    ("token-plan-cn.xiaomimimo.com", "xiaomi"),
-    ("api.deepseek.com", "deepseek"),
-    ("api.x.ai", "xai"),
-    ("api.moonshot.ai", "kimi-coding"),
-    ("api.moonshot.cn", "kimi-coding"),
-    ("api.kimi.com", "kimi-coding"),
-    ("api.z.ai", "zai"),
-    ("open.bigmodel.cn", "zai"),
-    ("router.huggingface.co", "huggingface"),
-)
-_OPENROUTER_MODEL_PREFIXES = (
-    "anthropic/",
-    "openai/",
-    "google/",
-    "deepseek/",
-    "x-ai/",
-    "meta-llama/",
-    "mistralai/",
-    "qwen/",
-    "minimax/",
-)
 
 
 def get_current_hermes_image_input_capability() -> dict[str, Any]:

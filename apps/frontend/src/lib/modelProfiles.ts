@@ -17,6 +17,11 @@ export type ModelProfile = {
   enabled?: boolean;
   profile_enabled?: boolean;
   source_enabled?: boolean;
+  runtime?: ModelProviderRuntime;
+  runtime_scope?: 'hermes' | 'unsupported' | string;
+  hermes_provider?: string;
+  can_use_as_hermes?: boolean;
+  api_key_name?: string;
   status?: 'untested' | 'available' | 'failed' | string;
   last_tested_at?: string;
   last_error?: string;
@@ -32,12 +37,28 @@ export type ModelSource = {
   api_key_configured?: boolean;
   options?: Record<string, unknown>;
   enabled?: boolean;
+  runtime?: ModelProviderRuntime;
+  runtime_scope?: 'hermes' | 'unsupported' | string;
+  hermes_provider?: string;
+  can_use_as_hermes?: boolean;
+  api_key_name?: string;
   status?: 'untested' | 'available' | 'failed' | string;
   last_tested_at?: string;
   last_error?: string;
   created_at?: string;
   updated_at?: string;
   models?: ModelProfile[];
+};
+
+export type ModelProviderRuntime = {
+  source_provider?: string;
+  hermes_provider?: string;
+  hermes_provider_label?: string;
+  api_key_name?: string;
+  api_key_names?: string[];
+  runtime_scope?: 'hermes' | 'unsupported' | string;
+  can_use_as_hermes?: boolean;
+  note?: string;
 };
 
 export type ModelProfileDefaults = Partial<Record<ModelCapability, string>>;

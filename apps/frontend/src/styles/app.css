@@ -13061,7 +13061,7 @@ button.activity-item {
 }
 
 .model-preset-card .model-source-mark {
-  grid-row: span 3;
+  grid-row: span 4;
   align-self: start;
 }
 
@@ -13072,6 +13072,7 @@ button.activity-item {
 }
 
 .model-preset-card small,
+.model-preset-card span.model-preset-runtime,
 .model-preset-card em {
   min-width: 0;
   color: var(--hy-faint);
@@ -13082,7 +13083,17 @@ button.activity-item {
 }
 
 .model-preset-card em {
+  grid-column: 2;
   color: var(--hy-subtle);
+}
+
+.model-preset-runtime {
+  grid-column: 2;
+  width: fit-content;
+  padding: 2px 7px;
+  border: 1px solid oklch(68% 0.15 155 / 0.22);
+  border-radius: 999px;
+  background: oklch(68% 0.15 155 / 0.08);
 }
 
 .model-source-form,
@@ -13515,7 +13526,7 @@ button.activity-item {
 
 .model-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto auto auto;
   gap: 8px;
   align-items: center;
   min-width: 0;
