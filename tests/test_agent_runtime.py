@@ -49,6 +49,17 @@ def test_runtime_migrates_legacy_runs_before_index_creation(tmp_path):
         service.close()
 
 
+def test_runtime_restores_row_factory_before_listing_runnables(tmp_path):
+    service = make_service(tmp_path, seed_templates=True)
+    try:
+        service._conn.row_factory = None
+        result = service.list_runnables()
+        assert result["ok"] is True
+        assert any(item["id"] == "agent_coding" for item in result["runnables"])
+    finally:
+        service.close()
+
+
 def test_agent_crud_and_api_key_redaction(tmp_path):
     service = make_service(tmp_path)
     try:

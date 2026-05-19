@@ -240,6 +240,10 @@ class AgentRuntimeService:
     def close(self) -> None:
         self._conn.close()
 
+    def _ensure_row_factory(self) -> None:
+        if self._conn.row_factory is not sqlite3.Row:
+            self._conn.row_factory = sqlite3.Row
+
     def _init_db(self) -> None:
         self._conn.executescript(
             """
@@ -565,6 +569,7 @@ class AgentRuntimeService:
         }
 
     def _runnable_name(self, kind: str, runnable_id: str) -> str:
+        self._ensure_row_factory()
         if kind == "agent_run":
             row = self._conn.execute("SELECT name FROM agents WHERE agent_id=?", (runnable_id,)).fetchone()
             return str(row["name"]) if row is not None else ""
@@ -574,6 +579,7 @@ class AgentRuntimeService:
         return ""
 
     def _ensure_global_name_available(self, name: str, *, ignore_agent_id: str = "", ignore_workflow_id: str = "") -> None:
+        self._ensure_row_factory()
         clean = (name or "").strip()
         if not clean:
             raise AgentRuntimeError("名称不能为空")
@@ -617,16 +623,19 @@ class AgentRuntimeService:
             self._validate_available_profile(vision_profile_id, "vision")
 
     def list_agents(self) -> dict[str, Any]:
+        self._ensure_row_factory()
         rows = self._conn.execute("SELECT * FROM agents ORDER BY category, name").fetchall()
         return {"ok": True, "agents": [self._row_to_agent(row) for row in rows]}
 
     def get_agent(self, agent_id: str) -> dict[str, Any]:
+        self._ensure_row_factory()
         row = self._conn.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
         if row is None:
             raise KeyError(agent_id)
         return self._row_to_agent(row)
 
     def _get_agent_private(self, agent_id: str) -> dict[str, Any]:
+        self._ensure_row_factory()
         row = self._conn.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
         if row is None:
             raise KeyError(agent_id)
@@ -746,10 +755,12 @@ class AgentRuntimeService:
         return self.update_agent(agent_id, {"skill_ids": skill_ids})
 
     def list_skills(self) -> dict[str, Any]:
+        self._ensure_row_factory()
         rows = self._conn.execute("SELECT * FROM skills ORDER BY updated_at DESC").fetchall()
         return {"ok": True, "skills": [self._row_to_skill(row) for row in rows]}
 
     def get_skill(self, skill_id: str) -> dict[str, Any]:
+        self._ensure_row_factory()
         row = self._conn.execute("SELECT * FROM skills WHERE skill_id=?", (skill_id,)).fetchone()
         if row is None:
             raise KeyError(skill_id)
@@ -848,6 +859,7 @@ class AgentRuntimeService:
         return sorted(paths)
 
     def delete_skill(self, skill_id: str) -> dict[str, Any]:
+        self._ensure_row_factory()
         self._conn.execute("DELETE FROM skills WHERE skill_id=?", (skill_id,))
         rows = self._conn.execute("SELECT agent_id, skill_ids_json FROM agents").fetchall()
         for row in rows:
@@ -861,10 +873,12 @@ class AgentRuntimeService:
         return {"ok": True}
 
     def list_workflows(self) -> dict[str, Any]:
+        self._ensure_row_factory()
         rows = self._conn.execute("SELECT * FROM workflows ORDER BY updated_at DESC").fetchall()
         return {"ok": True, "workflows": [self._row_to_workflow(row) for row in rows]}
 
     def get_workflow(self, workflow_id: str) -> dict[str, Any]:
+        self._ensure_row_factory()
         row = self._conn.execute("SELECT * FROM workflows WHERE workflow_id=?", (workflow_id,)).fetchone()
         if row is None:
             raise KeyError(workflow_id)
@@ -984,6 +998,7 @@ class AgentRuntimeService:
         return {"ok": True}
 
     def list_runs(self, limit: int = 50) -> dict[str, Any]:
+        self._ensure_row_factory()
         rows = self._conn.execute(
             "SELECT * FROM runs ORDER BY updated_at DESC LIMIT ?",
             (max(1, min(int(limit or 50), 200)),),
@@ -991,6 +1006,7 @@ class AgentRuntimeService:
         return {"ok": True, "runs": [self._row_to_run(row) for row in rows]}
 
     def list_run_groups(self, limit: int = 50) -> dict[str, Any]:
+        self._ensure_row_factory()
         rows = self._conn.execute(
             "SELECT * FROM run_groups ORDER BY updated_at DESC LIMIT ?",
             (max(1, min(int(limit or 50), 200)),),
@@ -998,12 +1014,14 @@ class AgentRuntimeService:
         return {"ok": True, "run_groups": [self._row_to_run_group(row) for row in rows]}
 
     def get_run_group(self, run_group_id: str) -> dict[str, Any]:
+        self._ensure_row_factory()
         row = self._conn.execute("SELECT * FROM run_groups WHERE run_group_id=?", (run_group_id,)).fetchone()
         if row is None:
             raise KeyError(run_group_id)
         return self._row_to_run_group(row)
 
     def get_run(self, run_id: str) -> dict[str, Any]:
+        self._ensure_row_factory()
         row = self._conn.execute("SELECT * FROM runs WHERE run_id=?", (run_id,)).fetchone()
         if row is None:
             raise KeyError(run_id)
@@ -1517,6 +1535,7 @@ class AgentRuntimeService:
         }
 
     def resolve_runnable(self, *, runnable_id: str = "", name: str = "") -> dict[str, Any] | None:
+        self._ensure_row_factory()
         if runnable_id:
             agent = self._conn.execute("SELECT agent_id, name FROM agents WHERE agent_id=?", (runnable_id,)).fetchone()
             if agent:
