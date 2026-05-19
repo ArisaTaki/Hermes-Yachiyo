@@ -468,11 +468,21 @@ class ModelProfileService:
             sources.append(source)
         return {"ok": True, "sources": sources}
 
+    def _ensure_source_id_available(self, name: str, capability: str, *, ignore_source_id: str = "") -> None:
+        clean = (name or "").strip()
+        if not clean:
+            raise ModelProfileError("提供商源 ID 不能为空")
+        row = self._conn.execute(
+            "SELECT source_id FROM model_sources WHERE capability=? AND LOWER(name)=LOWER(?)",
+            (capability, clean),
+        ).fetchone()
+        if row is not None and str(row["source_id"]) != ignore_source_id:
+            raise ModelProfileError("提供商源 ID 在当前类型下必须唯一")
+
     def create_source(self, payload: dict[str, Any]) -> dict[str, Any]:
         name = str(payload.get("name") or "").strip()
-        if not name:
-            raise ModelProfileError("提供商源名称不能为空")
         capability = _normalize_capability(str(payload.get("capability") or "chat"))
+        self._ensure_source_id_available(name, capability)
         now = _now()
         source_id = str(payload.get("source_id") or _source_id())
         self._conn.execute(
@@ -523,6 +533,8 @@ class ModelProfileService:
         if "capability" in payload:
             next_source["capability"] = _normalize_capability(str(payload.get("capability") or "chat"))
         next_capability = str(next_source.get("capability") or "chat")
+        next_name = str(next_source.get("name") or "").strip()
+        self._ensure_source_id_available(next_name, next_capability, ignore_source_id=source_id)
         mismatched = self._conn.execute(
             "SELECT 1 FROM model_profiles WHERE source_id=? AND capability<>? LIMIT 1",
             (source_id, next_capability),
@@ -537,10 +549,10 @@ class ModelProfileService:
             """
             UPDATE model_sources
                SET name=?, capability=?, provider=?, base_url=?, api_key=?, options_json=?, enabled=?, updated_at=?
-             WHERE source_id=?
+            WHERE source_id=?
             """,
             (
-                str(next_source.get("name") or "").strip(),
+                next_name,
                 next_capability,
                 str(next_source.get("provider") or "openai_compatible"),
                 str(next_source.get("base_url") or ""),

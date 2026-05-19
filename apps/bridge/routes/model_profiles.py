@@ -71,7 +71,7 @@ async def create_model_source(request: ModelSourceRequest) -> dict[str, Any]:
     try:
         return await asyncio.to_thread(get_model_profile_service().create_source, _payload(request))
     except sqlite3.IntegrityError as exc:
-        raise _bad_request(ModelProfileError("提供商源名称必须唯一")) from exc
+        raise _bad_request(ModelProfileError("提供商源 ID 在当前类型下必须唯一")) from exc
     except ModelProfileError as exc:
         raise _bad_request(exc) from exc
 
@@ -91,7 +91,7 @@ async def update_model_source(source_id: str, request: ModelSourceRequest) -> di
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="模型提供商源不存在") from exc
     except sqlite3.IntegrityError as exc:
-        raise _bad_request(ModelProfileError("提供商源名称必须唯一")) from exc
+        raise _bad_request(ModelProfileError("提供商源 ID 在当前类型下必须唯一")) from exc
     except ModelProfileError as exc:
         raise _bad_request(exc) from exc
 

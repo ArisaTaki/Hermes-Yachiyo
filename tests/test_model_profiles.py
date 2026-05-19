@@ -119,6 +119,15 @@ def test_model_sources_are_scoped_by_capability(tmp_path):
 
         assert chat_source["capability"] == "chat"
         assert vision_source["capability"] == "vision"
+        with pytest.raises(ModelProfileError, match="ID 在当前类型下必须唯一"):
+            service.create_source(
+                {
+                    "name": "Gateway",
+                    "capability": "vision",
+                    "provider": "openai_compatible",
+                    "base_url": "https://api.example.test/v1",
+                }
+            )
         with pytest.raises(ModelProfileError):
             service.create_profile(
                 {

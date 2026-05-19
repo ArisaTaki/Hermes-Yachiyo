@@ -666,17 +666,21 @@ export function ModelProfilesView() {
     return window.confirm('当前提供商源或模型有未保存更改，是否放弃这些更改？');
   }
 
-  function selectSource(source: ModelSource) {
-    if (busy) return;
-    if (source.source_id !== selectedSourceId && !confirmDiscardDraftChanges()) return;
+  function applySelectedSource(source: ModelSource) {
     setSelectedSourceId(source.source_id);
-    setSourceDraft(sourceToDraft(source));
+    setSourceDraft(sourceToDraft(source as ModelSourceView));
     const firstModel = profiles.find((profile) => profile.source_id === source.source_id && profile.capability === activeCapability);
     setSelectedModelId(firstModel?.profile_id || '');
-    setModelDraft(firstModel ? modelToDraft(firstModel) : { ...emptyModelDraft, capability: activeCapability, model: defaultModelName(sourceToDraft(source), activeCapability) });
+    setModelDraft(firstModel ? modelToDraft(firstModel) : { ...emptyModelDraft, capability: activeCapability, model: defaultModelName(sourceToDraft(source as ModelSourceView), activeCapability) });
     setModelCatalog([]);
     setModelCatalogQuery('');
     setProviderMenuOpen(false);
+  }
+
+  function selectSource(source: ModelSource) {
+    if (busy) return;
+    if (source.source_id !== selectedSourceId && !confirmDiscardDraftChanges()) return;
+    applySelectedSource(source);
     setStatus('');
   }
 
@@ -711,6 +715,14 @@ export function ModelProfilesView() {
 
   function startPresetSource(preset: ProviderPreset) {
     if (busy) return;
+    const existing = capabilitySources.find((source) => source.name === preset.id)
+      || capabilitySources.find((source) => source.provider === preset.id && source.base_url === preset.baseUrl);
+    if (existing) {
+      if (existing.source_id !== selectedSourceId && !confirmDiscardDraftChanges()) return;
+      applySelectedSource(existing);
+      setStatus(`已切换到已有 ${preset.label} ${capabilityLabels[activeCapability]}源`);
+      return;
+    }
     const nextDraft = sourceDraftFromPreset(preset);
     setSelectedSourceId('');
     setSelectedModelId('');
@@ -775,8 +787,16 @@ export function ModelProfilesView() {
       api_key: sourceDraft.api_key.trim(),
       enabled: sourceDraft.enabled,
     };
-    if (sourceDraft.source_id) return updateModelSource(sourceDraft.source_id, payload);
-    return createModelSource(payload);
+    const saved = sourceDraft.source_id
+      ? await updateModelSource(sourceDraft.source_id, payload)
+      : await createModelSource(payload);
+    setSelectedSourceId(saved.source_id);
+    setSourceDraft(sourceToDraft(saved as ModelSourceView));
+    setSources((current) => {
+      const next = [...current.filter((source) => source.source_id !== saved.source_id), saved as ModelSourceView];
+      return next.sort((left, right) => `${left.capability || 'chat'}:${left.name}`.localeCompare(`${right.capability || 'chat'}:${right.name}`));
+    });
+    return saved;
   }
 
   async function onSaveSource(event: FormEvent) {
