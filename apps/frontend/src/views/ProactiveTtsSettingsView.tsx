@@ -130,6 +130,8 @@ type ProactiveActionResult = {
 };
 
 const MIN_PROACTIVE_INTERVAL_SECONDS = 300;
+const GSV_SERVICE_READY_TIMEOUT_MS = 180_000;
+const GSV_SERVICE_READY_POLL_MS = 3_000;
 
 export function ProactiveTtsSettingsView() {
   const [form, setForm] = useState<TtsForm>(emptyTtsForm());
@@ -214,8 +216,12 @@ export function ProactiveTtsSettingsView() {
     if (provider !== 'gpt-sovits') return undefined;
     let disposed = false;
     void refreshGsvServiceStatus(() => disposed);
+    const timer = window.setInterval(() => {
+      void refreshGsvServiceStatus(() => disposed);
+    }, 5000);
     return () => {
       disposed = true;
+      window.clearInterval(timer);
     };
   }, [provider]);
 
@@ -445,16 +451,49 @@ export function ProactiveTtsSettingsView() {
     }
   }
 
+  async function waitForGsvServiceReady(
+    draft: { base_url?: string; workdir?: string; command?: string },
+    initialStatus: GptSovitsServiceStatus | null = null,
+  ) {
+    const deadline = Date.now() + GSV_SERVICE_READY_TIMEOUT_MS;
+    let latest = initialStatus;
+    if (latest?.reachable) return latest;
+    while (Date.now() < deadline) {
+      await sleep(GSV_SERVICE_READY_POLL_MS);
+      const data = await apiPost<GptSovitsServiceStatus>('/ui/tts/gpt-sovits/service-status', draft);
+      latest = data;
+      setServiceStatus(data);
+      if (data.reachable) return data;
+      if (data.api_process?.running || data.launch_agent_running) {
+        setStatus('GPT-SoVITS 后台服务正在启动，等待 API 监听端口...');
+      }
+    }
+    return latest;
+  }
+
   async function installGsvLaunchAgent() {
     if (interactionBusy) return;
     setBusyAction('service-install');
     setStatus('正在启动 GPT-SoVITS 后台服务并安装开机自启...');
     try {
-      await persistSettings('');
+      const next = await persistSettings('');
       const result = await apiPost<{ ok?: boolean; error?: string; message?: string; status?: GptSovitsServiceStatus }>('/ui/tts/gpt-sovits/service/install');
       if (result.ok === false) throw new Error(result.error || '启动 GPT-SoVITS 后台服务失败');
       setServiceStatus(result.status || null);
-      setStatus(result.message || 'GPT-SoVITS 后台服务已启动，并会随登录自动运行');
+      setStatus('GPT-SoVITS 后台服务已启动，正在等待 API 就绪...');
+      const readyStatus = await waitForGsvServiceReady(
+        {
+          base_url: next.gsv_base_url,
+          workdir: next.gsv_service_workdir,
+          command: next.gsv_service_command,
+        },
+        result.status || null,
+      );
+      setStatus(
+        readyStatus?.reachable
+          ? 'GPT-SoVITS API 已就绪，可以保存并测试语音链路'
+          : 'GPT-SoVITS 后台服务已启动，但 API 暂未就绪；可稍后刷新状态或查看后台日志',
+      );
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '启动 GPT-SoVITS 后台服务失败');
     } finally {
@@ -492,7 +531,7 @@ export function ProactiveTtsSettingsView() {
     setBusyAction('service-adopt');
     setStatus('正在接管 GPT-SoVITS 后台服务...');
     try {
-      await persistSettings('');
+      const next = await persistSettings('');
       const result = await apiPost<{
         ok?: boolean;
         error?: string;
@@ -501,7 +540,20 @@ export function ProactiveTtsSettingsView() {
       }>('/ui/tts/gpt-sovits/service/adopt');
       if (result.ok === false) throw new Error(result.error || '接管 GPT-SoVITS 后台服务失败');
       setServiceStatus(result.status || null);
-      setStatus(result.message || 'GPT-SoVITS 后台服务已交由 Hermes-Yachiyo 管理');
+      setStatus('GPT-SoVITS 后台服务已接管，正在等待 API 就绪...');
+      const readyStatus = await waitForGsvServiceReady(
+        {
+          base_url: next.gsv_base_url,
+          workdir: next.gsv_service_workdir,
+          command: next.gsv_service_command,
+        },
+        result.status || null,
+      );
+      setStatus(
+        readyStatus?.reachable
+          ? 'GPT-SoVITS API 已就绪，可以保存并测试语音链路'
+          : result.message || 'GPT-SoVITS 后台服务已交由 Hermes-Yachiyo 管理，但 API 暂未就绪',
+      );
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '接管 GPT-SoVITS 后台服务失败');
     } finally {
@@ -1312,6 +1364,10 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 function homePlaceholder(): string {
   return '$HOME';
 }
@@ -1391,11 +1447,11 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
     'if ! command -v mecab-config >/dev/null 2>&1; then echo "未找到 mecab-config。请先执行：brew install mecab"; exit 1; fi',
     'PYTHON_BIN=""',
     'if [ "$HOST_ARCH" = "arm64" ]; then',
-    '  PYTHON_CANDIDATES="/opt/homebrew/opt/python@3.11/bin/python3.11 /opt/homebrew/bin/python3.11 python3.11 /usr/local/opt/python@3.11/bin/python3.11 /usr/local/bin/python3.11"',
+    '  PYTHON_CANDIDATES=(/opt/homebrew/opt/python@3.11/bin/python3.11 /opt/homebrew/bin/python3.11 python3.11 /usr/local/opt/python@3.11/bin/python3.11 /usr/local/bin/python3.11)',
     'else',
-    '  PYTHON_CANDIDATES="python3.11 /usr/local/opt/python@3.11/bin/python3.11 /usr/local/bin/python3.11 /opt/homebrew/opt/python@3.11/bin/python3.11 /opt/homebrew/bin/python3.11"',
+    '  PYTHON_CANDIDATES=(python3.11 /usr/local/opt/python@3.11/bin/python3.11 /usr/local/bin/python3.11 /opt/homebrew/opt/python@3.11/bin/python3.11 /opt/homebrew/bin/python3.11)',
     'fi',
-    'for candidate in $PYTHON_CANDIDATES; do',
+    'for candidate in "${PYTHON_CANDIDATES[@]}"; do',
     '  CANDIDATE_PATH=""',
     '  if command -v "$candidate" >/dev/null 2>&1; then CANDIDATE_PATH="$(command -v "$candidate")"; fi',
     '  if [ -z "$CANDIDATE_PATH" ] && [ -x "$candidate" ]; then CANDIDATE_PATH="$candidate"; fi',
@@ -1478,7 +1534,7 @@ function buildGsvPretrainedModelSetupLines(): string[] {
     '    if command -v curl >/dev/null 2>&1; then',
     '      if curl -L --fail --retry 5 --connect-timeout 20 -o "$PRETRAINED_ZIP" "$PRETRAINED_URL"; then DOWNLOAD_OK=1; break; fi',
     '    else',
-    "      if \"$PYTHON_BIN\" -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' \"$PRETRAINED_URL\" \"$PRETRAINED_ZIP\"; then DOWNLOAD_OK=1; break; fi",
+    "      if run_host_arch \"$PYTHON_BIN\" -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' \"$PRETRAINED_URL\" \"$PRETRAINED_ZIP\"; then DOWNLOAD_OK=1; break; fi",
     '    fi',
     '  done',
     '  if [ "$DOWNLOAD_OK" -ne 1 ]; then echo "预训练模型下载失败，请检查网络后重试。"; rm -f "$PRETRAINED_ZIP"; exit 1; fi',
@@ -1505,7 +1561,7 @@ function buildGsvG2pwModelSetupLines(): string[] {
     '    if command -v curl >/dev/null 2>&1; then',
     '      if curl -L --fail --retry 5 --connect-timeout 20 -o "$G2PW_ZIP" "$G2PW_URL"; then DOWNLOAD_OK=1; break; fi',
     '    else',
-    "      if \"$PYTHON_BIN\" -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' \"$G2PW_URL\" \"$G2PW_ZIP\"; then DOWNLOAD_OK=1; break; fi",
+    "      if run_host_arch \"$PYTHON_BIN\" -c 'import sys, urllib.request; urllib.request.urlretrieve(sys.argv[1], sys.argv[2])' \"$G2PW_URL\" \"$G2PW_ZIP\"; then DOWNLOAD_OK=1; break; fi",
     '    fi',
     '  done',
     '  if [ "$DOWNLOAD_OK" -ne 1 ]; then echo "G2PW 模型下载失败，请检查网络后重试。"; rm -f "$G2PW_ZIP"; exit 1; fi',
