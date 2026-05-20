@@ -46,3 +46,6 @@ apps/shell/assets/live2d/**/*.jpeg
 !apps/shell/assets/live2d/**/README.md
 !apps/shell/assets/live2d/.gitkeep
 !apps/shell/assets/live2d/**/.gitkeep
+
+# codegraph
+.codegraph/
