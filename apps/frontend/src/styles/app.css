@@ -12526,6 +12526,7 @@ button.activity-item {
 }
 
 .agent-config-box,
+.agent-capability-box,
 .agent-skill-mounts,
 .agent-quick-run,
 .workflow-node-settings {
@@ -12553,6 +12554,44 @@ button.activity-item {
   color: var(--hy-faint);
   font-size: 12px;
   line-height: 1.5;
+}
+
+.agent-capability-box {
+  align-content: start;
+}
+
+.agent-capability-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.agent-checkbox-row {
+  display: flex !important;
+  min-height: 34px;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 7px 9px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+  color: var(--hy-muted);
+  font-size: 12px;
+}
+
+.agent-checkbox-row input {
+  width: 15px;
+  height: 15px;
+  accent-color: oklch(66% 0.12 188);
+}
+
+.agent-checkbox-row span {
+  min-width: 0;
+  color: var(--hy-muted);
+  font-size: 12px;
+  line-height: 1.25;
 }
 
 .agent-run-textarea {
@@ -13968,6 +14007,7 @@ button.activity-item {
   .workflow-studio-grid,
   .agent-form-row,
   .agent-backend-grid,
+  .agent-capability-grid,
   .model-profile-layout,
   .model-provider-layout,
   .model-provider-grid,

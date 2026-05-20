@@ -4,13 +4,15 @@
 
 ### Phase 4 模型 / Agent / TTS 后续
 
-1. Agent Studio MVP 后续增强：补 streaming/轮询、运行中取消 UI、审批恢复、失败重试和更完整 artifact viewer。
-2. 把 `apps/shell/provider_catalog_sync.py` 接入每日或低频后台更新机制，更新 `~/.hermes/yachiyo/provider-capabilities.json`；刷新失败不能阻塞应用启动。
-3. 继续扩展 provider adapter：为 Xiaomi MiMo、OpenRouter、Gemini、DashScope、DeepSeek、MiniMax 等常用源沉淀 `/models` 路径、鉴权 header、模型 ID 规范、chat payload、vision payload 和错误归因。
-4. 手工验证真实 provider：至少覆盖 Xiaomi MiMo `mimo-v2.5` / `mimo-v2-omni`、OpenRouter 视觉模型、Gemini、DashScope 和 DeepSeek；确认文本模型不能误保存为 vision Profile。
-5. 完成 TTS 真实测试语义：HTTP TTS / Command TTS / API TTS 需要能配置 endpoint、voice、timeout、test text 并进行可证实测试；GPT-SoVITS 完整参数继续放在“主动关怀与桌面观察”页。
-6. 为 `yachiyo_profile` 补第一版 ToolBroker：优先 OpenAI tool_calls，非 tool_calls 模型用 JSON fallback；不要默认宣称其能力等同 Hermes Agent。
-7. 更新用户手册和截图索引中的旧命名：将“主动关怀语音”逐步统一为“主动关怀与桌面观察”，同时说明 GPT-SoVITS 是该页内的本地 TTS 服务模块。
+1. Agent Studio 持久岗位 Runtime 后续增强：补 streaming/轮询、运行中取消 UI、审批恢复、失败重试、更完整 artifact viewer，以及 Runs 页面按 Agent 履历聚合。
+2. 补第一版 Yachiyo ToolBroker 真实执行层：优先 OpenAI tool_calls，非 tool_calls 模型走 JSON fallback；`terminal.run` / `workspace.write_patch` 必须保留审批语义。
+3. 手工验证主 Agent 自动委派体验：用真实 Chat Profile 创建启用 Agent / Workflow，检查主会话是否能触发 `run_yachiyo_agent` / `run_yachiyo_workflow`、Run 留档、结果回填和 3 次上限。
+4. 为 Agent Studio 增加更清楚的能力状态展示：当 Agent 缺少 Chat Profile、挂载 Skill 缺失或高风险工具需要审批时，在编辑页和 Quick Run 前置提示。
+5. 把 `apps/shell/provider_catalog_sync.py` 接入每日或低频后台更新机制，更新 `~/.hermes/yachiyo/provider-capabilities.json`；刷新失败不能阻塞应用启动。
+6. 继续扩展 provider adapter：为 Xiaomi MiMo、OpenRouter、Gemini、DashScope、DeepSeek、MiniMax 等常用源沉淀 `/models` 路径、鉴权 header、模型 ID 规范、chat payload、vision payload 和错误归因。
+7. 手工验证真实 provider：至少覆盖 Xiaomi MiMo `mimo-v2.5` / `mimo-v2-omni`、OpenRouter 视觉模型、Gemini、DashScope 和 DeepSeek；确认文本模型不能误保存为 vision Profile。
+8. 完成 TTS 真实测试语义：HTTP TTS / Command TTS / API TTS 需要能配置 endpoint、voice、timeout、test text 并进行可证实测试；GPT-SoVITS 完整参数继续放在“主动关怀与桌面观察”页。
+9. 更新用户手册和截图索引中的旧命名：将“主动关怀语音”逐步统一为“主动关怀与桌面观察”，同时说明 GPT-SoVITS 是该页内的本地 TTS 服务模块。
 
 1. 推送后验证 `Build macOS DMG`：`develop-latest` / `main-latest` 的 latest JSON 应包含 `changelog.generated_from=git`、`sections`、`commits` 和 `compare_url`；GitHub versioned release notes 与 rolling latest release notes 都应展示同一份“更新日志”。
 2. 用下一版 develop DMG 验证应用更新页：检查更新后应显示“更新内容”，下载时有进度，下载完成后按钮切换为“安装并重启”；退出页面或重启后仍能识别已下载但未安装的更高版本 DMG。

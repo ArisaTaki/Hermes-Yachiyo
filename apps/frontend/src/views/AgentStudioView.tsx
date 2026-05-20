@@ -61,14 +61,17 @@ type AgentDraft = {
   avatar_url: string;
   category: string;
   instructions: string;
-  model_mode: 'follow_main' | 'profile' | 'custom_api';
-  execution_backend: 'hermes_profile' | 'yachiyo_profile' | 'external_cli';
+  model_mode: 'profile' | 'custom_api';
   model_profile_id: string;
   vision_model_profile_id: string;
   base_url: string;
   model: string;
   api_key: string;
   output_contract: string;
+  allow_workspace_read: boolean;
+  allow_workspace_write: boolean;
+  allow_terminal: boolean;
+  allow_artifacts: boolean;
   default_workdir: string;
   readable_scopes: string;
   writable_scopes: string;
@@ -81,14 +84,17 @@ const emptyAgentDraft: AgentDraft = {
   avatar_url: '',
   category: 'custom',
   instructions: '',
-  model_mode: 'follow_main',
-  execution_backend: 'hermes_profile',
+  model_mode: 'profile',
   model_profile_id: '',
   vision_model_profile_id: '',
   base_url: '',
   model: '',
   api_key: '',
   output_contract: 'chat',
+  allow_workspace_read: false,
+  allow_workspace_write: false,
+  allow_terminal: false,
+  allow_artifacts: true,
   default_workdir: '',
   readable_scopes: '.',
   writable_scopes: '',
@@ -99,36 +105,6 @@ const starterNodes: Node[] = [
   { id: 'start', type: 'input', position: { x: 40, y: 120 }, data: { label: 'Start', kind: 'start' } },
 ];
 
-const executionBackendOptions: Array<{
-  id: AgentDraft['execution_backend'];
-  label: string;
-  summary: string;
-  detail: string;
-  action: string;
-}> = [
-  {
-    id: 'hermes_profile',
-    label: 'Hermes Runtime',
-    summary: 'Hermes 工具链上下文',
-    detail: '默认创建 RunGroup 与 Agent 上下文；真实 Hermes CLI 执行需要后端开关。',
-    action: '使用 Hermes Runtime',
-  },
-  {
-    id: 'yachiyo_profile',
-    label: 'Yachiyo Profile',
-    summary: '直连已测试模型 Profile',
-    detail: 'MVP 推荐路径；使用模型配置中的可用 chat Profile 运行 Agent。',
-    action: '选择 Yachiyo Profile',
-  },
-  {
-    id: 'external_cli',
-    label: 'External CLI',
-    summary: '外部执行器预留入口',
-    detail: '仅保留 Agent 配置占位；MVP 暂不从 UI 提交外部命令。',
-    action: '保留占位',
-  },
-];
-
 function scopesToText(value: unknown): string {
   return Array.isArray(value) ? value.join(', ') : String(value || '');
 }
@@ -137,10 +113,32 @@ function textToScopes(value: string): string[] {
   return value.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
+function policyTools(agent: AgentSpec): Set<string> {
+  const allowed = agent.tool_policy?.allowed_tools;
+  return new Set(Array.isArray(allowed) ? allowed.map((item) => String(item)) : []);
+}
+
+function draftToolPolicy(draft: AgentDraft): Record<string, unknown> {
+  const allowed = new Set<string>();
+  if (draft.allow_workspace_read) {
+    allowed.add('workspace.list');
+    allowed.add('workspace.read');
+  }
+  if (draft.allow_workspace_write) allowed.add('workspace.write_patch');
+  if (draft.allow_terminal) allowed.add('terminal.run');
+  if (draft.allow_artifacts) allowed.add('artifact.write');
+  return {
+    allowed_tools: Array.from(allowed),
+    approval_required: {
+      'terminal.run': true,
+      'workspace.write_patch': true,
+    },
+  };
+}
+
 function agentToDraft(agent: AgentSpec): AgentDraft {
   const workspace = agent.workspace_policy || {};
-  const executionBackend = agent.execution_backend
-    || (agent.model_mode === 'profile' || agent.model_mode === 'custom_api' ? 'yachiyo_profile' : 'hermes_profile');
+  const tools = policyTools(agent);
   return {
     agent_id: agent.agent_id,
     name: agent.name,
@@ -148,14 +146,17 @@ function agentToDraft(agent: AgentSpec): AgentDraft {
     avatar_url: agent.avatar_url || '',
     category: agent.category || 'custom',
     instructions: agent.instructions || '',
-    model_mode: agent.model_mode,
-    execution_backend: executionBackend,
+    model_mode: agent.model_mode === 'custom_api' ? 'custom_api' : 'profile',
     model_profile_id: agent.model_profile_id || '',
     vision_model_profile_id: agent.vision_model_profile_id || '',
     base_url: agent.model_config?.base_url || '',
     model: agent.model_config?.model || '',
     api_key: '',
     output_contract: agent.output_contract || 'chat',
+    allow_workspace_read: tools.has('workspace.list') || tools.has('workspace.read'),
+    allow_workspace_write: tools.has('workspace.write_patch'),
+    allow_terminal: tools.has('terminal.run'),
+    allow_artifacts: tools.has('artifact.write') || !tools.size,
     default_workdir: String(workspace.default_workdir || ''),
     readable_scopes: scopesToText(workspace.readable_scopes || ['.']),
     writable_scopes: scopesToText(workspace.writable_scopes || []),
@@ -180,18 +181,6 @@ function workflowEdges(workflow: WorkflowSpec | null): Edge[] {
     source: edge.source,
     target: edge.target,
   }));
-}
-
-function executionBackendBadge(backend: AgentDraft['execution_backend'], chatProfileCount: number): string {
-  if (backend === 'yachiyo_profile') return chatProfileCount ? '可运行' : '需要 Profile';
-  if (backend === 'external_cli') return '占位';
-  return '实验';
-}
-
-function executionBackendTone(backend: AgentDraft['execution_backend'], chatProfileCount: number): string {
-  if (backend === 'yachiyo_profile') return chatProfileCount ? 'ready' : 'warn';
-  if (backend === 'external_cli') return 'muted';
-  return 'info';
 }
 
 function runStatusTone(status: string): string {
@@ -380,18 +369,6 @@ export function AgentStudioView() {
     setError('');
   }
 
-  function chooseExecutionBackend(execution_backend: AgentDraft['execution_backend']) {
-    setDraft((current) => ({
-      ...current,
-      execution_backend,
-      model_mode: current.model_mode === 'custom_api'
-        ? 'custom_api'
-        : execution_backend === 'yachiyo_profile'
-          ? 'profile'
-          : 'follow_main',
-    }));
-  }
-
   async function runAction(action: () => Promise<StudioRefreshOptions | void>, label: string) {
     setBusyAction(label);
     setStatus(`${label}...`);
@@ -408,24 +385,16 @@ export function AgentStudioView() {
   }
 
   async function saveAgent(): Promise<StudioRefreshOptions> {
-    if (draft.execution_backend === 'yachiyo_profile' && draft.model_mode !== 'custom_api' && !draft.model_profile_id) {
-      throw new Error('请选择已通过测试的文本模型 Profile，或改为 Hermes profile 后端。');
-    }
-    const nextModelMode: AgentDraft['model_mode'] = draft.model_mode === 'custom_api'
-      ? 'custom_api'
-      : draft.execution_backend === 'yachiyo_profile'
-        ? 'profile'
-        : 'follow_main';
     const request: Partial<AgentSpec> = {
       name: draft.name,
       description: draft.description,
       avatar_url: draft.avatar_url,
       category: draft.category,
       instructions: draft.instructions,
-      model_mode: nextModelMode,
-      execution_backend: draft.execution_backend,
-      model_profile_id: draft.execution_backend === 'yachiyo_profile' ? draft.model_profile_id : '',
+      model_mode: draft.model_mode,
+      model_profile_id: draft.model_mode === 'profile' ? draft.model_profile_id : '',
       vision_model_profile_id: draft.vision_model_profile_id,
+      tool_policy: draftToolPolicy(draft),
       workspace_policy: {
         default_workdir: draft.default_workdir,
         readable_scopes: textToScopes(draft.readable_scopes),
@@ -434,7 +403,7 @@ export function AgentStudioView() {
       output_contract: draft.output_contract,
       enabled: draft.enabled,
     };
-    if (nextModelMode === 'custom_api') {
+    if (draft.model_mode === 'custom_api') {
       request.model_config = {
         provider: 'openai_compatible',
         base_url: draft.base_url,
@@ -572,7 +541,7 @@ export function AgentStudioView() {
                   onClick={() => selectAgent(agent.agent_id)}
                 >
                   <strong>{agent.name}</strong>
-                  <span>{agent.category || 'custom'} · {agent.execution_backend || agent.model_mode}</span>
+                  <span>{agent.category || 'custom'} · {agent.model_mode === 'custom_api' ? 'Custom API' : 'Chat Profile'}</span>
                 </button>
               ))}
             </div>
@@ -601,55 +570,38 @@ export function AgentStudioView() {
               <span>Instructions</span>
               <textarea className="hy-input agent-textarea" value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} />
             </label>
-            <section className="agent-backend-section" aria-label="Execution Backend">
+            <section className="agent-backend-section" aria-label="Model">
               <div className="section-heading-row compact">
-                <h3>Execution Backend</h3>
-              </div>
-              <div className="agent-backend-grid">
-                {executionBackendOptions.map((option) => {
-                  const active = draft.execution_backend === option.id;
-                  const tone = executionBackendTone(option.id, chatModelProfiles.length);
-                  return (
-                    <button
-                      type="button"
-                      className={`agent-backend-card ${tone} ${active ? 'active' : ''}`}
-                      key={option.id}
-                      onClick={() => chooseExecutionBackend(option.id)}
-                    >
-                      <span className="agent-backend-card-top">
-                        <strong>{option.label}</strong>
-                        <em>{executionBackendBadge(option.id, chatModelProfiles.length)}</em>
-                      </span>
-                      <span>{option.summary}</span>
-                      <small>{option.detail}</small>
-                      <b>{active ? '当前选择' : option.action}</b>
-                    </button>
-                  );
-                })}
+                <h3>Model</h3>
               </div>
               <div className="agent-backend-fields">
-                {draft.model_mode === 'custom_api' ? (
-                  <label><span>Model</span><input className="hy-input" value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} placeholder="gpt-4.1-mini" /></label>
-                ) : draft.execution_backend === 'yachiyo_profile' ? (
-                  <label>
-                    <span>Chat Profile</span>
-                    <select className="hy-select" value={draft.model_profile_id} onChange={(event) => setDraft({ ...draft, model_profile_id: event.target.value })}>
-                      <option value="">选择已保存模型组</option>
-                      {chatModelProfiles.map((profile) => (
-                        <option key={profile.profile_id} value={profile.profile_id}>
-                          {profile.name} · {profile.model || profile.provider}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : draft.execution_backend === 'external_cli' ? (
-                  <div className="agent-inline-note">External CLI 只保留配置占位；后续会接入受控 adapter，而不是从 UI 直接提交任意 shell 命令。</div>
-                ) : (
-                  <label><span>Hermes Runtime</span><button type="button" className="hy-btn hy-btn-ghost" onClick={() => openAppView('provider')}>管理主模型</button></label>
-                )}
+                <label>
+                  <span>Chat Profile</span>
+                  <select
+                    className="hy-select"
+                    disabled={draft.model_mode === 'custom_api'}
+                    value={draft.model_profile_id}
+                    onChange={(event) => setDraft({ ...draft, model_profile_id: event.target.value })}
+                  >
+                    <option value="">选择已保存模型组</option>
+                    {chatModelProfiles.map((profile) => (
+                      <option key={profile.profile_id} value={profile.profile_id}>
+                        {profile.name} · {profile.model || profile.provider}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="agent-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={draft.model_mode === 'custom_api'}
+                    onChange={(event) => setDraft({ ...draft, model_mode: event.target.checked ? 'custom_api' : 'profile' })}
+                  />
+                  <span>Custom API</span>
+                </label>
               </div>
             </section>
-            {draft.execution_backend === 'yachiyo_profile' && !chatModelProfiles.length ? (
+            {!chatModelProfiles.length ? (
               <div className="notice">还没有可用的文本模型组。请先在模型配置页面新建并测试。</div>
             ) : null}
             <div className="agent-form-row">
@@ -671,10 +623,34 @@ export function AgentStudioView() {
             ) : null}
             {draft.model_mode === 'custom_api' ? (
               <div className="agent-config-box">
+                <label><span>Model</span><input className="hy-input" value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} placeholder="gpt-4.1-mini" /></label>
                 <label><span>Base URL</span><input className="hy-input" value={draft.base_url} onChange={(event) => setDraft({ ...draft, base_url: event.target.value })} placeholder="https://api.example.com/v1" /></label>
                 <label><span>API Key</span><input className="hy-input" type="password" value={draft.api_key} onChange={(event) => setDraft({ ...draft, api_key: event.target.value })} placeholder={selectedAgent?.model_config.api_key_configured ? '已配置，留空不覆盖' : '保存到后端'} /></label>
               </div>
             ) : null}
+            <section className="agent-capability-box" aria-label="Capabilities">
+              <div className="section-heading-row compact">
+                <h3>Capabilities</h3>
+              </div>
+              <div className="agent-capability-grid">
+                <label className="agent-checkbox-row">
+                  <input type="checkbox" checked={draft.allow_workspace_read} onChange={(event) => setDraft({ ...draft, allow_workspace_read: event.target.checked })} />
+                  <span>Read workspace</span>
+                </label>
+                <label className="agent-checkbox-row">
+                  <input type="checkbox" checked={draft.allow_workspace_write} onChange={(event) => setDraft({ ...draft, allow_workspace_write: event.target.checked, allow_workspace_read: event.target.checked ? true : draft.allow_workspace_read })} />
+                  <span>Write files</span>
+                </label>
+                <label className="agent-checkbox-row">
+                  <input type="checkbox" checked={draft.allow_terminal} onChange={(event) => setDraft({ ...draft, allow_terminal: event.target.checked })} />
+                  <span>Run commands</span>
+                </label>
+                <label className="agent-checkbox-row">
+                  <input type="checkbox" checked={draft.allow_artifacts} onChange={(event) => setDraft({ ...draft, allow_artifacts: event.target.checked })} />
+                  <span>Write artifacts</span>
+                </label>
+              </div>
+            </section>
             <div className="agent-form-row">
               <label><span>Default Workdir</span><input className="hy-input" value={draft.default_workdir} onChange={(event) => setDraft({ ...draft, default_workdir: event.target.value })} /></label>
               <label><span>Writable Scopes</span><input className="hy-input" value={draft.writable_scopes} onChange={(event) => setDraft({ ...draft, writable_scopes: event.target.value })} placeholder="src, tests" /></label>

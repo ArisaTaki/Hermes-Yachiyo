@@ -277,6 +277,55 @@ class TestHermesExecutor:
         assert wrapped.index("[人设设定]") < wrapped.index("[用户称呼]")
         assert wrapped.index("[用户称呼]") < wrapped.index("[用户请求]")
 
+    def test_parse_yachiyo_delegation_request(self):
+        request = executor_mod._parse_yachiyo_delegation_request(
+            '{"action":"run_yachiyo_agent","agent":"Research Agent","goal":"核对事实"}'
+        )
+
+        assert request == {
+            "kind": "agent",
+            "name": "Research Agent",
+            "runnable_id": "",
+            "goal": "核对事实",
+        }
+
+    @pytest.mark.asyncio
+    async def test_call_hermes_runs_yachiyo_delegation_before_final_reply(self, monkeypatch):
+        calls: list[str] = []
+
+        async def fake_invoke(description, **_kwargs):
+            calls.append(description)
+            if len(calls) == 1:
+                return HermesInvokeResult(
+                    success=True,
+                    stdout='{"action":"run_yachiyo_agent","agent":"Research Agent","goal":"核对事实"}',
+                    returncode=0,
+                    hermes_session_id="sid",
+                )
+            return HermesInvokeResult(success=True, stdout="最终回复", returncode=0, hermes_session_id="sid")
+
+        monkeypatch.setattr(executor_mod, "invoke_hermes_cli", fake_invoke)
+        monkeypatch.setattr(executor_mod, "_yachiyo_delegation_catalog_context", lambda: "catalog")
+        monkeypatch.setattr(
+            executor_mod,
+            "_run_yachiyo_delegation",
+            lambda request: {
+                "ok": True,
+                "runnable": {"kind": request["kind"], "name": request["name"], "id": "agent_research"},
+                "run_id": "agent_run_1",
+                "run_group_id": "run_group_1",
+                "status": "completed",
+                "result": "事实核对完成",
+            },
+        )
+
+        result = await HermesExecutor().run(_make_task("需要研究"))
+
+        assert result == "最终回复"
+        assert len(calls) == 2
+        assert "catalog" in calls[0]
+        assert "事实核对完成" in calls[1]
+
     @pytest.mark.asyncio
     async def test_call_hermes_injects_user_address(self, monkeypatch):
         captured: dict[str, str] = {}

@@ -2,6 +2,20 @@
 
 ## 已完成
 
+### Milestone 84 — Agent Studio 持久岗位 Runtime
+
+- ✅ Agent Studio 设计收敛为“主 Agent + 持久自定义 Agent”：Hermes/Yachiyo 主助手继续负责总调度，Agent Studio 只管理长期登记的岗位 Agent 与 Workflow。
+- ✅ 前端移除 `Execution Backend` 选择体验：用户现在配置岗位名称、职责、instructions、模型 Profile、Skills、工作区范围、能力开关和输出格式，不再看到 `Hermes Runtime` / `External CLI` 后端选项。
+- ✅ 后端保留旧 `execution_backend` 字段兼容，但 `hermes_profile`、`external_cli`、空 backend 都归一为 `yachiyo_profile`；自定义 Agent 统一走 Yachiyo Agent Runtime。
+- ✅ 删除 `external_cli` 执行路径；本地命令能力只能通过受控 `terminal.run` 工具授权进入，不能由 Agent prompt 绕过权限。
+- ✅ Agent 保存/运行时会自动编译 runtime 配置：根据 category、instructions、Skills、workspace policy 和 output contract 生成运行 prompt、工具白名单、审批策略、workspace policy 与进度事件。
+- ✅ 高风险工具默认需要审批：`terminal.run` 和 `workspace.write_patch` 会进入 `approval-required` 策略，不会直接执行。
+- ✅ Agent Run 自动写入 context artifact，并记录 runtime 编译、artifact 写入、模型响应、工具调用、完成/失败等 timeline/progress 事件。
+- ✅ Skill 运行前校验更严格：挂载 Skill 不存在时会在运行前报错，避免静默缺上下文。
+- ✅ 主 Agent 新增 Yachiyo 委派桥：主会话上下文会注入已启用 Agent/Workflow 名录，可通过 `run_yachiyo_agent` / `run_yachiyo_workflow` 创建普通 Run，结果回填后继续整合最终回复。
+- ✅ 委派安全边界已落地：未知目标、空目标、停用 Agent/Workflow 会拒绝；单轮自动委派最多 3 次，避免循环调用。
+- ✅ 验证：`pytest` → 610 passed，1 warning；`npm run build`（`apps/frontend`）通过；`git diff --check` 通过；本地浏览器打开 Agent Studio 确认旧 backend 文案不可见，新 `Model` / `Capabilities` 配置可见。
+
 ### Milestone 83 — Agent Studio MVP 运行闭环
 
 - ✅ Agent 编辑页新增 `Quick Run`：保存后的 Agent 可直接输入目标创建 Agent Run，完成后自动切到 Runs 详情。

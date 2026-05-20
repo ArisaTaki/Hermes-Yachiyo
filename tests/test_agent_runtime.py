@@ -108,15 +108,26 @@ def test_agent_and_workflow_names_are_globally_unique(tmp_path):
         service.close()
 
 
-def test_import_skill_directory_and_mount_to_agent(tmp_path):
+def test_import_skill_directory_and_mount_to_agent(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     source = tmp_path / "demo-skill"
     (source / "assets").mkdir(parents=True)
     (source / "SKILL.md").write_text("# Demo Skill\n\nUseful instruction.", encoding="utf-8")
     (source / "assets" / "sample.txt").write_text("asset", encoding="utf-8")
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "Demo Skill used")
     try:
         skill = service.import_skill(str(source))
-        agent = service.create_agent({"name": "Skill Agent"})
+        agent = service.create_agent(
+            {
+                "name": "Skill Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+            }
+        )
         mounted = service.attach_skill(agent["agent_id"], skill["skill_id"])
 
         assert skill["name"] == "Demo Skill"
@@ -124,7 +135,7 @@ def test_import_skill_directory_and_mount_to_agent(tmp_path):
         assert skill["asset_paths"] == ["assets/sample.txt"]
         assert mounted["skill_ids"] == [skill["skill_id"]]
         run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Use the skill"})
-        assert "Demo Skill" in run["result"]
+        assert run["result"] == "Demo Skill used"
         artifact = service.read_run_artifact(run["run_id"], "agent-context.md")
         assert artifact["ok"] is True
         assert "Useful instruction" in artifact["content"]
@@ -190,11 +201,17 @@ def test_workflow_validation_rejects_branch_and_cycle(tmp_path):
         service.close()
 
 
-def test_linear_workflow_executes_agent_nodes_in_order(tmp_path):
+def test_linear_workflow_executes_agent_nodes_in_order(tmp_path, monkeypatch):
     service = make_service(tmp_path)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "Profile result")
     try:
-        agent_a = service.create_agent({"name": "Agent A", "model_mode": "follow_main"})
-        agent_b = service.create_agent({"name": "Agent B", "model_mode": "follow_main"})
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        agent_a = service.create_agent({"name": "Agent A", "model_mode": "custom_api", "model_config": model_config})
+        agent_b = service.create_agent({"name": "Agent B", "model_mode": "custom_api", "model_config": model_config})
         workflow = service.create_workflow(
             {
                 "name": "Linear Flow",
@@ -214,7 +231,7 @@ def test_linear_workflow_executes_agent_nodes_in_order(tmp_path):
         assert run["status"] == "completed"
         assert run["run_group_id"]
         assert [event["event"] for event in run["timeline"]].count("workflow.node.agent") == 2
-        assert "Agent B" in run["result"]
+        assert run["result"] == "Profile result"
         group = service.get_run_group(run["run_group_id"])
         assert group["source"] == "workflow"
         assert len(group["child_run_ids"]) == 3
@@ -222,19 +239,49 @@ def test_linear_workflow_executes_agent_nodes_in_order(tmp_path):
         service.close()
 
 
-def test_agent_execution_backend_defaults_and_external_cli_placeholder(tmp_path):
+def test_agent_execution_backend_legacy_values_normalize_to_yachiyo(tmp_path):
     service = make_service(tmp_path)
     try:
         hermes_agent = service.create_agent({"name": "Hermes Agent"})
-        assert hermes_agent["execution_backend"] == "hermes_profile"
+        assert hermes_agent["execution_backend"] == "yachiyo_profile"
         run = service.create_agent_run({"agent_id": hermes_agent["agent_id"], "user_goal": "Plan"})
-        assert run["status"] == "completed"
-        assert "hermes_profile 后端" in run["result"]
+        assert run["status"] == "failed"
+        assert "Chat Profile" in run["result"]
 
         external = service.create_agent({"name": "CLI Agent", "execution_backend": "external_cli"})
+        assert external["execution_backend"] == "yachiyo_profile"
         external_run = service.create_agent_run({"agent_id": external["agent_id"], "user_goal": "Review"})
-        assert external_run["status"] == "completed"
-        assert "external_cli 后端" in external_run["result"]
+        assert external_run["status"] == "failed"
+        assert "Chat Profile" in external_run["result"]
+    finally:
+        service.close()
+
+
+def test_delegation_targets_and_delegate_run(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "Delegated result")
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Delegated Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+            }
+        )
+        targets = service.list_delegation_targets()
+        assert any(item["name"] == "Delegated Agent" for item in targets["agents"])
+
+        result = service.delegate_runnable(kind="agent", name="Delegated Agent", user_goal="Do the work")
+        assert result["ok"] is True
+        assert result["runnable"]["id"] == agent["agent_id"]
+        assert result["result"] == "Delegated result"
+        run = service.get_run(result["run_id"])
+        assert run["status"] == "completed"
+        assert run["run_group_id"]
     finally:
         service.close()
 

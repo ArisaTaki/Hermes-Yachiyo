@@ -10,10 +10,10 @@
 - Hermes CLI 仍是主对话的执行适配器，不在本阶段替换。
 - 设置页主模型只选择已经测试通过、且 Hermes 可执行的 `chat` Profile。
 - 图片识别只选择已经通过真实图片测试的 `vision` Profile。
-- Agent Studio 可以选择执行后端：
-  - `hermes_profile`：适合需要 Hermes 原生工具、联网、会话和复杂执行能力的 Agent。
-  - `yachiyo_profile`：直接调用 Yachiyo 已保存 Profile，工具能力后续由 Yachiyo ToolBroker 补齐。
-  - `external_cli`：预留给 Codex、Claude Code、OpenDesign daemon 等专用外部执行器。
+- Agent Studio 只管理持久自定义 Agent / Workflow，不管理主 Agent 本身。
+- Agent Studio 不再让用户选择执行后端；旧 `execution_backend` 字段保留为数据兼容层，运行时统一归一到 Yachiyo Agent Runtime。
+- 本地命令能力只能通过受控 `terminal.run` 工具授权进入，不再提供 `external_cli` 执行路径。
+- 主 Agent 可以通过 Yachiyo 内部委派桥调用已启用的持久 Agent / Workflow；这不同于 Hermes 临时 `delegate_task` subagent。
 - TTS 与对话、图片转述分离，不复用 OpenRouter 模型目录。
 
 ## 已落地内容
@@ -54,10 +54,15 @@
 
 ### Agent runtime
 
-- Agent spec 增加 `execution_backend`。
+- Agent spec 保留 `execution_backend` 兼容旧数据，但当前运行时统一归一为 `yachiyo_profile`。
 - Agent run 增加 `run_group_id`，`@Agent`、Workflow 和后续自动编排都挂到同一种 RunGroup 数据结构。
 - `@Agent` 不直接走普通 Hermes Chat，而是进入 Yachiyo router。
-- `yachiyo_profile` 不是 Hermes Agent 的等价替代；它可以直连模型，但工具调用、联网查询和复杂协作能力要依赖 Yachiyo ToolBroker 后续补齐。
+- Agent Studio Agent 是持久岗位，不是 Hermes 原生 `delegate_task` 的临时 subagent 注册表。
+- 运行时会根据 Agent category、instructions、Skills、workspace policy 和 output contract 编译运行 prompt、工具白名单、审批策略和 context artifact。
+- 默认工具策略按 category 推断：research/design/office/orchestrator 偏读工作区和写 artifacts，coding/review 可申请写入和终端，custom 默认最小权限。
+- `terminal.run` 与 `workspace.write_patch` 默认需要审批，Agent prompt 不能绕过权限边界。
+- 每次 Agent Run 会记录 context artifact、timeline、progress events 和 final result；挂载 Skill 缺失时会在运行前失败。
+- 主 Agent 自动委派第一版走内部桥 `run_yachiyo_agent` / `run_yachiyo_workflow`，只接受已保存、已启用目标，并限制单轮最多 3 次。
 
 ### Agent Studio 第一阶段稳定化
 
@@ -70,11 +75,11 @@
 
 ### Execution Backend 状态 UI
 
-- Agent 编辑页现在用三张卡片表达执行后端，而不是让用户从普通 select 里猜成熟度。
-- `Hermes Runtime` 显示为实验能力：当前默认产出 RunGroup 和上下文，不隐式启动额外 Hermes 会话。
-- `Yachiyo Profile` 显示为可运行路径：要求选择已经测试通过的 chat Profile，缺 Profile 时明确显示配置缺口。
-- `External CLI` 显示为占位能力：MVP 不提供 command 输入框，避免从前端提交任意 shell command。
-- 后端语义保持不变：这一步只让 UI 与当前 runtime 边界对齐。
+- 这一阶段曾用三张卡片表达执行后端成熟度，帮助区分 `Hermes Runtime`、`Yachiyo Profile` 和 `External CLI` 的边界。
+- 最新设计已经移除该选择体验：用户不再看到底层 backend 名称，只配置“岗位”和“能力”。
+- `Hermes Runtime` 不再作为 Agent Studio 自定义 Agent 的后端选项；主 Hermes/Yachiyo 助手只负责调度和整合。
+- `External CLI` 不再作为执行路径；如需本地命令，由受控 `terminal.run` 工具能力和审批策略承载。
+- `Yachiyo Profile` 的概念也下沉为运行时实现细节：Agent Studio 保存的是业务配置，后端自动编译为 Yachiyo Agent Runtime 配置。
 
 ### Agent Studio MVP 运行闭环
 
@@ -118,6 +123,6 @@
 2. 继续扩展 provider adapter：每个 provider 明确 `/models` 路径、鉴权 header、模型 ID 规范、chat payload、vision payload 和错误归因。
 3. 把 Xiaomi MiMo、OpenRouter、Gemini、DashScope、DeepSeek、MiniMax 等常用源的真实图片测试链路逐个手工验收。
 4. 完成 TTS API/HTTP/Command 的真实测试语义：TTS 不应只保存 profile id，还应能对 endpoint/voice/timeout/test text 做可证实的连接测试。
-5. 为 `yachiyo_profile` 补 ToolBroker：优先支持 OpenAI tool_calls；不支持 tool_calls 的模型走 JSON fallback。
-6. 为 Agent Studio 后续补 streaming/轮询、审批恢复、失败重试、Run 取消 UI 和更完整 artifact viewer。
+5. 为 Yachiyo Agent Runtime 补真实 ToolBroker：优先支持 OpenAI tool_calls；不支持 tool_calls 的模型走 JSON fallback，并保留高风险工具审批。
+6. 为 Agent Studio 后续补 streaming/轮询、审批恢复、失败重试、Run 取消 UI、Runs 履历聚合和更完整 artifact viewer。
 7. 更新用户手册中的旧“主动关怀语音”命名，统一为“主动关怀与桌面观察”，并保留 GPT-SoVITS 作为该页内的本地 TTS 服务模块。

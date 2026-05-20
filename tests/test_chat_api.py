@@ -119,10 +119,16 @@ def test_agent_mention_creates_agent_run_without_general_task(tmp_path, monkeypa
             "name": "Helper",
             "description": "test helper",
             "instructions": "Summarize requests.",
-            "model_mode": "follow_main",
+            "model_mode": "custom_api",
+            "model_config": {
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-secret",
+            },
         }
     )
     monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "Agent result")
     try:
         result = api.send_message("@Helper 做个总结")
         assert result["ok"] is True
@@ -164,8 +170,19 @@ def test_selected_runnable_creates_agent_run_without_mention(tmp_path, monkeypat
         workspace_dir=tmp_path / "agent-runtime",
         seed_templates=False,
     )
-    agent = service.create_agent({"name": "Draft Agent", "model_mode": "follow_main"})
+    agent = service.create_agent(
+        {
+            "name": "Draft Agent",
+            "model_mode": "custom_api",
+            "model_config": {
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-secret",
+            },
+        }
+    )
     monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "Agent result")
     try:
         result = api.send_message("整理需求", runnable_id=agent["agent_id"])
         assert result["ok"] is True
@@ -184,8 +201,19 @@ def test_agent_mention_supports_multiword_names(tmp_path, monkeypatch):
         workspace_dir=tmp_path / "agent-runtime",
         seed_templates=False,
     )
-    agent = service.create_agent({"name": "Draft Agent", "model_mode": "follow_main"})
+    agent = service.create_agent(
+        {
+            "name": "Draft Agent",
+            "model_mode": "custom_api",
+            "model_config": {
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-secret",
+            },
+        }
+    )
     monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "Agent result")
     try:
         result = api.send_message("@Draft Agent 整理需求")
         assert result["ok"] is True

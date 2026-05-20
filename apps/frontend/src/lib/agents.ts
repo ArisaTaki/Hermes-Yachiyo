@@ -1,6 +1,9 @@
 import { apiDelete, apiGet, apiPatch, apiPost } from './bridge';
 
 export type AgentModelMode = 'follow_main' | 'profile' | 'custom_api';
+// Legacy backend values may be returned by older local databases, but the UI
+// no longer exposes backend selection. Agent Studio agents run through
+// Yachiyo Agent Runtime.
 export type AgentExecutionBackend = 'hermes_profile' | 'yachiyo_profile' | 'external_cli';
 
 export type AgentSpec = {

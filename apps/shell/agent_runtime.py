@@ -26,7 +26,14 @@ class AgentRuntimeError(RuntimeError):
 
 
 _EXECUTION_BACKENDS = {"hermes_profile", "yachiyo_profile", "external_cli"}
-_DIRECT_MODEL_MODES = {"profile", "custom_api"}
+_KNOWN_AGENT_TOOLS = {
+    "workspace.list",
+    "workspace.read",
+    "workspace.write_patch",
+    "terminal.run",
+    "artifact.write",
+}
+_HIGH_RISK_AGENT_TOOLS = {"terminal.run", "workspace.write_patch"}
 
 
 def _now() -> str:
@@ -59,12 +66,16 @@ def _json_dump(value: Any) -> str:
 
 
 def _normalize_execution_backend(value: Any, *, model_mode: str = "") -> str:
+    """Normalize legacy backend values to the persistent Yachiyo runtime.
+
+    Agent Studio used to expose Hermes/external CLI backends. Those values are
+    now kept only for database compatibility; custom Studio agents always run
+    through Yachiyo Agent Runtime.
+    """
     backend = str(value or "").strip()
-    if not backend:
-        return "yachiyo_profile" if str(model_mode or "").strip() in _DIRECT_MODEL_MODES else "hermes_profile"
-    if backend not in _EXECUTION_BACKENDS:
-        raise AgentRuntimeError("execution_backend 仅支持 hermes_profile / yachiyo_profile / external_cli")
-    return backend
+    if backend and backend not in _EXECUTION_BACKENDS:
+        raise AgentRuntimeError("execution_backend 仅支持 yachiyo_profile（旧值将自动迁移）")
+    return "yachiyo_profile"
 
 
 _SECRET_RE = re.compile(
@@ -254,8 +265,8 @@ class AgentRuntimeService:
                 avatar_url TEXT NOT NULL DEFAULT '',
                 category TEXT NOT NULL DEFAULT 'custom',
                 instructions TEXT NOT NULL DEFAULT '',
-                model_mode TEXT NOT NULL DEFAULT 'follow_main',
-                execution_backend TEXT NOT NULL DEFAULT 'hermes_profile',
+                model_mode TEXT NOT NULL DEFAULT 'profile',
+                execution_backend TEXT NOT NULL DEFAULT 'yachiyo_profile',
                 model_profile_id TEXT NOT NULL DEFAULT '',
                 vision_model_profile_id TEXT NOT NULL DEFAULT '',
                 model_provider TEXT NOT NULL DEFAULT 'openai_compatible',
@@ -333,7 +344,7 @@ class AgentRuntimeService:
     def _ensure_runtime_columns(self) -> None:
         columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(agents)").fetchall()}
         if "execution_backend" not in columns:
-            self._conn.execute("ALTER TABLE agents ADD COLUMN execution_backend TEXT NOT NULL DEFAULT 'hermes_profile'")
+            self._conn.execute("ALTER TABLE agents ADD COLUMN execution_backend TEXT NOT NULL DEFAULT 'yachiyo_profile'")
         if "model_profile_id" not in columns:
             self._conn.execute("ALTER TABLE agents ADD COLUMN model_profile_id TEXT NOT NULL DEFAULT ''")
         if "vision_model_profile_id" not in columns:
@@ -412,7 +423,7 @@ class AgentRuntimeService:
                     "description": description,
                     "category": category,
                     "instructions": instructions,
-                    "model_mode": "follow_main",
+                    "model_mode": "profile",
                     "tool_policy": self._default_tool_policy(category),
                     "workspace_policy": self._default_workspace_policy(),
                     "output_contract": output_contract,
@@ -479,6 +490,50 @@ class AgentRuntimeService:
     def _default_workspace_policy() -> dict[str, Any]:
         return {"default_workdir": "", "readable_scopes": ["."], "writable_scopes": []}
 
+    def _compile_tool_policy(self, category: str, policy: Any = None) -> dict[str, Any]:
+        raw = policy if isinstance(policy, dict) else {}
+        default_policy = self._default_tool_policy(category)
+        allowed = raw.get("allowed_tools")
+        if isinstance(allowed, str):
+            allowed = [allowed]
+        if not isinstance(allowed, list):
+            allowed = default_policy["allowed_tools"]
+        normalized_allowed = []
+        for tool in allowed:
+            name = str(tool or "").strip()
+            if name in _KNOWN_AGENT_TOOLS and name not in normalized_allowed:
+                normalized_allowed.append(name)
+        if "artifact.write" not in normalized_allowed:
+            normalized_allowed.append("artifact.write")
+
+        raw_approval = raw.get("approval_required")
+        approval_required = dict(raw_approval) if isinstance(raw_approval, dict) else {}
+        for tool in _HIGH_RISK_AGENT_TOOLS:
+            if tool in normalized_allowed:
+                approval_required[tool] = True
+            else:
+                approval_required.pop(tool, None)
+        return {"allowed_tools": normalized_allowed, "approval_required": approval_required}
+
+    def _compile_workspace_policy(self, policy: Any = None) -> dict[str, Any]:
+        raw = policy if isinstance(policy, dict) else {}
+        default_policy = self._default_workspace_policy()
+        readable = raw.get("readable_scopes", default_policy["readable_scopes"])
+        writable = raw.get("writable_scopes", default_policy["writable_scopes"])
+        if isinstance(readable, str):
+            readable = [item.strip() for item in readable.split(",") if item.strip()]
+        if isinstance(writable, str):
+            writable = [item.strip() for item in writable.split(",") if item.strip()]
+        if not isinstance(readable, list):
+            readable = default_policy["readable_scopes"]
+        if not isinstance(writable, list):
+            writable = default_policy["writable_scopes"]
+        return {
+            "default_workdir": str(raw.get("default_workdir") or "").strip(),
+            "readable_scopes": [str(item or ".").strip() or "." for item in readable],
+            "writable_scopes": [str(item or "").strip() for item in writable if str(item or "").strip()],
+        }
+
     def _row_to_agent(self, row: sqlite3.Row) -> dict[str, Any]:
         return {
             "agent_id": row["agent_id"],
@@ -497,8 +552,13 @@ class AgentRuntimeService:
                 "model": row["model_name"],
                 "api_key_configured": bool(row["model_api_key"]),
             },
-            "tool_policy": _json_load(row["tool_policy_json"], self._default_tool_policy(row["category"])),
-            "workspace_policy": _json_load(row["workspace_policy_json"], self._default_workspace_policy()),
+            "tool_policy": self._compile_tool_policy(
+                row["category"],
+                _json_load(row["tool_policy_json"], self._default_tool_policy(row["category"])),
+            ),
+            "workspace_policy": self._compile_workspace_policy(
+                _json_load(row["workspace_policy_json"], self._default_workspace_policy()),
+            ),
             "skill_ids": _json_load(row["skill_ids_json"], []),
             "output_contract": row["output_contract"],
             "enabled": bool(row["enabled"]),
@@ -611,13 +671,11 @@ class AgentRuntimeService:
         return profile
 
     def _validate_agent_profile_refs(self, payload: dict[str, Any]) -> None:
-        model_mode = str(payload.get("model_mode") or "follow_main")
-        backend = _normalize_execution_backend(payload.get("execution_backend"), model_mode=model_mode)
-        if model_mode == "profile" or (backend == "yachiyo_profile" and model_mode != "custom_api"):
+        model_mode = str(payload.get("model_mode") or "profile")
+        if model_mode == "profile":
             profile_id = str(payload.get("model_profile_id") or "").strip()
-            if not profile_id:
-                raise AgentRuntimeError("请选择已通过测试的 Agent 文本模型 Profile")
-            self._validate_available_profile(profile_id, "chat")
+            if profile_id:
+                self._validate_available_profile(profile_id, "chat")
         vision_profile_id = str(payload.get("vision_model_profile_id") or "").strip()
         if vision_profile_id:
             self._validate_available_profile(vision_profile_id, "vision")
@@ -649,8 +707,10 @@ class AgentRuntimeService:
         agent_id = str(payload.get("agent_id") or f"agent_{_slug(name, 'agent')}_{uuid4().hex[:8]}")
         model_config = payload.get("model_config") or {}
         category = str(payload.get("category") or "custom")
-        model_mode = str(payload.get("model_mode") or "follow_main")
+        model_mode = str(payload.get("model_mode") or "profile")
         execution_backend = _normalize_execution_backend(payload.get("execution_backend"), model_mode=model_mode)
+        tool_policy = self._compile_tool_policy(category, payload.get("tool_policy"))
+        workspace_policy = self._compile_workspace_policy(payload.get("workspace_policy"))
         self._conn.execute(
             """
             INSERT INTO agents (
@@ -675,8 +735,8 @@ class AgentRuntimeService:
                 str(model_config.get("base_url") or ""),
                 str(model_config.get("model") or ""),
                 str(model_config.get("api_key") or ""),
-                _json_dump(payload.get("tool_policy") or self._default_tool_policy(category)),
-                _json_dump(payload.get("workspace_policy") or self._default_workspace_policy()),
+                _json_dump(tool_policy),
+                _json_dump(workspace_policy),
                 _json_dump(payload.get("skill_ids") or []),
                 str(payload.get("output_contract") or "chat"),
                 1 if payload.get("enabled", True) else 0,
@@ -701,8 +761,10 @@ class AgentRuntimeService:
             api_key = str(current.get("model_config", {}).get("api_key") or "")
         now = _now()
         category = str(next_agent.get("category") or "custom")
-        model_mode = str(next_agent.get("model_mode") or "follow_main")
+        model_mode = str(next_agent.get("model_mode") or "profile")
         execution_backend = _normalize_execution_backend(next_agent.get("execution_backend"), model_mode=model_mode)
+        tool_policy = self._compile_tool_policy(category, next_agent.get("tool_policy"))
+        workspace_policy = self._compile_workspace_policy(next_agent.get("workspace_policy"))
         self._conn.execute(
             """
             UPDATE agents
@@ -726,8 +788,8 @@ class AgentRuntimeService:
                 str(model_config.get("base_url") or ""),
                 str(model_config.get("model") or ""),
                 api_key,
-                _json_dump(next_agent.get("tool_policy") or self._default_tool_policy(category)),
-                _json_dump(next_agent.get("workspace_policy") or self._default_workspace_policy()),
+                _json_dump(tool_policy),
+                _json_dump(workspace_policy),
                 _json_dump(next_agent.get("skill_ids") or []),
                 str(next_agent.get("output_contract") or "chat"),
                 1 if next_agent.get("enabled", True) else 0,
@@ -1159,12 +1221,34 @@ class AgentRuntimeService:
         for skill_id in skill_ids:
             try:
                 skills.append(self.get_skill(skill_id))
-            except KeyError:
-                continue
+            except KeyError as exc:
+                raise AgentRuntimeError(f"Agent 挂载的 Skill 不存在：{skill_id}") from exc
         return skills
+
+    def _compile_agent_runtime(self, agent: dict[str, Any]) -> dict[str, Any]:
+        category = str(agent.get("category") or "custom")
+        tool_policy = self._compile_tool_policy(category, agent.get("tool_policy"))
+        workspace_policy = self._compile_workspace_policy(agent.get("workspace_policy"))
+        return {
+            "runtime": "yachiyo_agent",
+            "tool_policy": tool_policy,
+            "workspace_policy": workspace_policy,
+            "progress_events": [
+                "agent.run.started",
+                "agent.runtime.compiled",
+                "agent.model.response",
+                "agent.tool.call",
+                "agent.artifact.write",
+                "agent.run.completed",
+                "agent.run.failed",
+            ],
+        }
 
     def _agent_context(self, agent: dict[str, Any], user_goal: str, upstream: str = "") -> str:
         skills = self._load_agent_skills(agent.get("skill_ids") or [])
+        runtime = self._compile_agent_runtime(agent)
+        tool_policy = runtime["tool_policy"]
+        workspace_policy = runtime["workspace_policy"]
         skill_blocks = []
         for skill in skills:
             skill_blocks.append(
@@ -1176,6 +1260,11 @@ class AgentRuntimeService:
                 f"# Agent\nName: {agent['name']}\nCategory: {agent.get('category') or 'custom'}",
                 f"# Instructions\n{agent.get('instructions') or 'No extra instructions.'}",
                 f"# Mounted Skills\n{chr(10).join(skill_blocks) if skill_blocks else 'No mounted skills.'}",
+                "# Runtime\n"
+                "Runtime: Yachiyo Agent Runtime\n"
+                f"Allowed tools: {', '.join(tool_policy.get('allowed_tools') or [])}\n"
+                f"Approval required: {json.dumps(tool_policy.get('approval_required') or {}, ensure_ascii=False)}\n"
+                f"Workspace: {json.dumps(workspace_policy, ensure_ascii=False)}",
                 f"# Upstream Context\n{upstream or 'None'}",
                 f"# User Goal\n{user_goal}",
                 f"# Output Contract\n{agent.get('output_contract') or 'chat'}",
@@ -1195,6 +1284,8 @@ class AgentRuntimeService:
         if not user_goal:
             raise AgentRuntimeError("运行目标不能为空")
         agent = self._get_agent_private(agent_id)
+        if not agent.get("enabled", True):
+            raise AgentRuntimeError("Agent 已停用")
         run_group_id = str(payload.get("run_group_id") or "").strip()
         root_group = False
         if run_group_id:
@@ -1215,80 +1306,30 @@ class AgentRuntimeService:
         return result
 
     def _execute_agent_run(self, run_id: str, agent: dict[str, Any], user_goal: str, upstream: str = "") -> dict[str, Any]:
-        backend = _normalize_execution_backend(agent.get("execution_backend"), model_mode=str(agent.get("model_mode") or "follow_main"))
-        timeline = [self._timeline("agent.run.started", f"{agent['name']} started", backend=backend)]
+        backend = _normalize_execution_backend(agent.get("execution_backend"), model_mode=str(agent.get("model_mode") or "profile"))
+        runtime = self._compile_agent_runtime(agent)
+        timeline = [self._timeline("agent.run.started", f"{agent['name']} started", backend=backend, runtime=runtime["runtime"])]
+        timeline.append(
+            self._timeline(
+                "agent.runtime.compiled",
+                "Yachiyo Agent Runtime compiled tools and workspace policy",
+                allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
+            )
+        )
         artifact_root = self.agent_artifacts_dir / run_id
         context = self._agent_context(agent, user_goal, upstream)
-        broker = ToolBroker(agent.get("workspace_policy") or self._default_workspace_policy(), artifact_root)
+        broker = ToolBroker(runtime["workspace_policy"], artifact_root)
+        artifacts: list[dict[str, Any]] = []
         try:
-            if backend == "yachiyo_profile" or agent.get("model_mode") in {"custom_api", "profile"}:
-                result = self._run_custom_api_agent(agent, context, broker, timeline)
-            elif backend == "external_cli":
-                result = self._run_external_cli_agent(agent, context, broker, timeline)
-            else:
-                result = self._run_hermes_profile_agent(agent, context, broker, timeline)
             artifact = broker.artifact_write("agent-context.md", context)
-            artifacts = [{"kind": "context", **artifact}]
+            artifacts.append({"kind": "context", **artifact})
+            timeline.append(self._timeline("agent.artifact.write", "agent-context.md", artifact=artifact))
+            result = self._run_custom_api_agent(agent, context, broker, timeline)
             timeline.append(self._timeline("agent.run.completed", "Agent run completed"))
             return self._update_run(run_id, status="completed", result=result, timeline=timeline, artifacts=artifacts)
         except Exception as exc:
             timeline.append(self._timeline("agent.run.failed", str(exc)))
-            return self._update_run(run_id, status="failed", result=str(exc), timeline=timeline, artifacts=[])
-
-    def _run_hermes_profile_agent(
-        self,
-        agent: dict[str, Any],
-        context: str,
-        broker: ToolBroker,
-        timeline: list[dict[str, Any]],
-    ) -> str:
-        timeline.append(self._timeline("agent.backend.hermes_profile", "Hermes profile backend selected"))
-        if os.getenv("HERMES_YACHIYO_AGENT_HERMES_EXEC", "").strip() != "1":
-            return (
-                f"{agent['name']} run 已创建。\n\n"
-                "此 Agent 使用 hermes_profile 后端；当前默认只生成 Yachiyo RunGroup 与上下文，"
-                "避免在 Agent Studio 中隐式启动额外 Hermes 会话。\n\n"
-                f"{context[:4000]}"
-            )
-        hermes = shutil.which("hermes") or str(Path.home() / ".local" / "bin" / "hermes")
-        if not Path(hermes).exists():
-            raise AgentRuntimeError("Hermes CLI 不可用，无法执行 hermes_profile Agent")
-        timeout = max(10, min(int(os.getenv("HERMES_YACHIYO_AGENT_HERMES_TIMEOUT", "180") or "180"), 600))
-        try:
-            result = subprocess.run(
-                [hermes, "-z", context],
-                cwd=str(broker.workdir),
-                text=True,
-                capture_output=True,
-                timeout=timeout,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise AgentRuntimeError(f"Hermes profile Agent 执行失败：{redact_secrets(exc)}") from exc
-        if result.returncode != 0:
-            raise AgentRuntimeError(f"Hermes profile Agent 执行失败：{redact_secrets(result.stderr or result.stdout)}")
-        return redact_secrets(result.stdout).strip() or "Hermes Agent completed."
-
-    def _run_external_cli_agent(
-        self,
-        agent: dict[str, Any],
-        context: str,
-        broker: ToolBroker,
-        timeline: list[dict[str, Any]],
-    ) -> str:
-        timeline.append(self._timeline("agent.backend.external_cli", "External CLI backend selected"))
-        model_config = agent.get("model_config") or {}
-        command = str(model_config.get("command") or "").strip()
-        if not command:
-            return (
-                f"{agent['name']} run 已创建。\n\n"
-                "此 Agent 使用 external_cli 后端，但尚未配置具体 CLI command。"
-                "上下文已写入 agent-context.md，后续可接入 Codex / Claude Code / OpenDesign daemon。"
-            )
-        result = broker.terminal_run(command, approved=True, timeout_seconds=int(model_config.get("timeout_seconds") or 120))
-        if not result.get("ok"):
-            raise AgentRuntimeError(str(result.get("stderr") or result.get("stdout") or "external_cli 执行失败"))
-        return str(result.get("stdout") or "").strip() or "external_cli completed."
+            return self._update_run(run_id, status="failed", result=str(exc), timeline=timeline, artifacts=artifacts)
 
     def _run_custom_api_agent(
         self,
@@ -1347,7 +1388,10 @@ class AgentRuntimeService:
                 "model": profile.get("model") or "",
                 "api_key": profile.get("api_key") or "",
             }
-        return agent.get("model_config") or {}
+        model_config = agent.get("model_config") or {}
+        if any(str(model_config.get(key) or "").strip() for key in ("base_url", "model", "api_key")):
+            return model_config
+        raise AgentRuntimeError("Agent 缺少可运行的 Chat Profile；请在 Agent Studio 为该岗位选择已测试的文本模型。")
 
     @staticmethod
     def _parse_tool_request(content: str) -> dict[str, Any] | None:
@@ -1394,13 +1438,6 @@ class AgentRuntimeService:
             if not vision_result.get("ok"):
                 vision_result["mode"] = "vision_profile"
                 return vision_result
-        if agent.get("model_mode") == "follow_main":
-            return {
-                "ok": True,
-                "mode": "follow_main",
-                "message": "Agent 将跟随主模型配置。"
-                + (" 图片识别 Profile 测试通过。" if vision_result else ""),
-            }
         profile_id = str(agent.get("model_profile_id") or "").strip()
         if profile_id:
             try:
@@ -1411,6 +1448,13 @@ class AgentRuntimeService:
             if result.get("ok") and vision_result:
                 result["message"] = f"{result.get('message') or '文本模型测试通过'}；图片识别 Profile 测试通过。"
             return result
+        if agent.get("model_mode") != "custom_api":
+            return {
+                "ok": False,
+                "mode": "profile",
+                "missing": ["model_profile_id"],
+                "message": "请选择已通过测试的 Agent 文本模型 Profile。",
+            }
         model_config = agent.get("model_config") or {}
         missing = [
             key
@@ -1443,6 +1487,8 @@ class AgentRuntimeService:
         if not user_goal:
             raise AgentRuntimeError("运行目标不能为空")
         workflow = self.get_workflow(workflow_id)
+        if not workflow.get("enabled", True):
+            raise AgentRuntimeError("Workflow 已停用")
         self.validate_workflow(workflow["nodes"], workflow["edges"])
         run_group_id = str(payload.get("run_group_id") or "").strip()
         root_group = False
@@ -1534,32 +1580,61 @@ class AgentRuntimeService:
             ],
         }
 
+    def list_delegation_targets(self) -> dict[str, Any]:
+        agents = [
+            {
+                "kind": "agent",
+                "id": agent["agent_id"],
+                "name": agent["name"],
+                "description": agent.get("description") or "",
+                "category": agent.get("category") or "custom",
+                "output_contract": agent.get("output_contract") or "chat",
+            }
+            for agent in self.list_agents()["agents"]
+            if agent.get("enabled", True)
+        ]
+        workflows = [
+            {
+                "kind": "workflow",
+                "id": workflow["workflow_id"],
+                "name": workflow["name"],
+                "description": workflow.get("description") or "",
+                "nodes": len(workflow.get("nodes") or []),
+                "output_contract": "workflow",
+            }
+            for workflow in self.list_workflows()["workflows"]
+            if workflow.get("enabled", True)
+        ]
+        return {"ok": True, "agents": agents, "workflows": workflows}
+
     def resolve_runnable(self, *, runnable_id: str = "", name: str = "") -> dict[str, Any] | None:
         self._ensure_row_factory()
         if runnable_id:
-            agent = self._conn.execute("SELECT agent_id, name FROM agents WHERE agent_id=?", (runnable_id,)).fetchone()
+            agent = self._conn.execute("SELECT agent_id, name, enabled FROM agents WHERE agent_id=?", (runnable_id,)).fetchone()
             if agent:
-                return {"kind": "agent", "id": agent["agent_id"], "name": agent["name"]}
-            workflow = self._conn.execute("SELECT workflow_id, name FROM workflows WHERE workflow_id=?", (runnable_id,)).fetchone()
+                return {"kind": "agent", "id": agent["agent_id"], "name": agent["name"], "enabled": bool(agent["enabled"])}
+            workflow = self._conn.execute("SELECT workflow_id, name, enabled FROM workflows WHERE workflow_id=?", (runnable_id,)).fetchone()
             if workflow:
-                return {"kind": "workflow", "id": workflow["workflow_id"], "name": workflow["name"]}
+                return {"kind": "workflow", "id": workflow["workflow_id"], "name": workflow["name"], "enabled": bool(workflow["enabled"])}
         clean_name = (name or "").strip()
         if clean_name:
-            agent = self._conn.execute("SELECT agent_id, name FROM agents WHERE LOWER(name)=LOWER(?)", (clean_name,)).fetchone()
-            workflow = self._conn.execute("SELECT workflow_id, name FROM workflows WHERE LOWER(name)=LOWER(?)", (clean_name,)).fetchone()
+            agent = self._conn.execute("SELECT agent_id, name, enabled FROM agents WHERE LOWER(name)=LOWER(?)", (clean_name,)).fetchone()
+            workflow = self._conn.execute("SELECT workflow_id, name, enabled FROM workflows WHERE LOWER(name)=LOWER(?)", (clean_name,)).fetchone()
             matches = [item for item in (agent, workflow) if item is not None]
             if len(matches) > 1:
                 raise AgentRuntimeError("Agent/Workflow 名称不唯一")
             if agent:
-                return {"kind": "agent", "id": agent["agent_id"], "name": agent["name"]}
+                return {"kind": "agent", "id": agent["agent_id"], "name": agent["name"], "enabled": bool(agent["enabled"])}
             if workflow:
-                return {"kind": "workflow", "id": workflow["workflow_id"], "name": workflow["name"]}
+                return {"kind": "workflow", "id": workflow["workflow_id"], "name": workflow["name"], "enabled": bool(workflow["enabled"])}
         return None
 
     def create_run_for_runnable(self, *, runnable_id: str = "", name: str = "", user_goal: str = "") -> dict[str, Any]:
         runnable = self.resolve_runnable(runnable_id=runnable_id, name=name)
         if runnable is None:
             raise AgentRuntimeError("未找到指定 Agent 或 Workflow")
+        if not runnable.get("enabled", True):
+            raise AgentRuntimeError("指定 Agent 或 Workflow 已停用")
         if runnable["kind"] == "agent":
             run = self.create_agent_run({"agent_id": runnable["id"], "user_goal": user_goal, "source": "chat"})
             run["agent_run_id"] = run["run_id"]
@@ -1569,6 +1644,38 @@ class AgentRuntimeService:
         run["workflow_run_id"] = run["run_id"]
         run["runnable"] = runnable
         return run
+
+    def delegate_runnable(
+        self,
+        *,
+        kind: str = "",
+        runnable_id: str = "",
+        name: str = "",
+        user_goal: str = "",
+    ) -> dict[str, Any]:
+        goal = str(user_goal or "").strip()
+        if not goal:
+            raise AgentRuntimeError("委派目标不能为空")
+        runnable = self.resolve_runnable(runnable_id=runnable_id, name=name)
+        if runnable is None:
+            raise AgentRuntimeError("未找到可委派的 Agent 或 Workflow")
+        requested_kind = str(kind or "").strip()
+        if requested_kind and requested_kind not in {runnable["kind"], f"{runnable['kind']}_run"}:
+            raise AgentRuntimeError("委派类型与目标不匹配")
+        if not runnable.get("enabled", True):
+            raise AgentRuntimeError("指定 Agent 或 Workflow 已停用")
+        if runnable["kind"] == "agent":
+            run = self.create_agent_run({"agent_id": runnable["id"], "user_goal": goal, "source": "delegation"})
+        else:
+            run = self.create_workflow_run({"workflow_id": runnable["id"], "user_goal": goal, "source": "delegation"})
+        return {
+            "ok": run["status"] == "completed",
+            "runnable": runnable,
+            "run_id": run["run_id"],
+            "run_group_id": run.get("run_group_id", ""),
+            "status": run["status"],
+            "result": run.get("result") or "",
+        }
 
     def parse_known_chat_runnable(self, text: str) -> tuple[str, str] | None:
         value = (text or "").strip()

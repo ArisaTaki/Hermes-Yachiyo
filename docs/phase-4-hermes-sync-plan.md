@@ -10,7 +10,7 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - Skill Library：导入本地 Skill，并挂载到 Agent。
 - Workflow Studio：用可视化节点把多个 Agent 编排成线性可运行流程。
 - Model Profiles：按服务商源保存、测试和复用文本 / Vision / TTS 配置；不再生成“本地主模型”快照。
-- Chat 入口：普通消息继续走 Hermes Chat；`@Name 需求` 或 Composer 选择器会启动指定 Agent / Workflow。
+- Chat 入口：普通消息继续走 Hermes Chat；`@Name 需求`、Composer 选择器或主 Agent 自动委派会启动已启用的持久 Agent / Workflow。
 
 ## 已实现批次
 
@@ -124,6 +124,19 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - 无 Run 时的空状态说明后续会展示 Result、Timeline 和 Artifacts，减少用户进入 Runs 页后的空白感。
 - 这一步仍复用既有后端同步执行语义，不引入 streaming、取消中的实时轮询或复杂审批流程。
 
+### Batch 11：持久 Agent 岗位模型与 Yachiyo Runtime 收口
+
+- Agent Studio 正式收敛为“持久岗位”配置，不再等同 Hermes 临时 subagent；Hermes/Yachiyo 主助手是全局调度者，不放进 Agent Studio 列表。
+- 前端移除 `Execution Backend` 选择，用户只看到岗位配置、模型 Profile、Skills、workspace 范围、能力开关和输出格式。
+- 后端保留旧 `execution_backend` 字段兼容，但所有旧值都会归一到 `yachiyo_profile`；`hermes_profile` / `external_cli` 不再作为可选运行后端。
+- 删除 `external_cli` 执行路径；本地命令只能通过受控 `terminal.run` 工具能力进入，并继续受审批策略约束。
+- Agent Runtime 会在保存和运行时编译工具策略、workspace policy、运行 prompt、进度事件标签和 context artifact。
+- 默认工具策略按 category 推断：research/design/office/orchestrator 偏 artifacts 与工作区读取，coding/review 可申请写入和终端，custom 默认最小权限。
+- `terminal.run` 与 `workspace.write_patch` 作为高风险工具默认需要审批；Agent prompt 不能绕过该策略。
+- 每次 Agent Run 都会生成 context artifact、timeline、progress events、final result；缺失 Skill 会在运行前失败。
+- 主 Agent 上下文会注入已启用 Agent/Workflow 名录，并可通过内部桥 `run_yachiyo_agent` / `run_yachiyo_workflow` 创建普通 Run；结果回填给主 Agent 后继续整合回复。
+- 委派桥只接受已保存、已启用的 Agent/Workflow；未知、空目标、停用对象都会拒绝；单轮自动委派最多 3 次。
+
 ## 新增接口
 
 - `GET/POST /ui/model-profiles`
@@ -156,6 +169,7 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 ## 安全边界
 
 - 前端不能提交任意 shell command。
+- Agent Studio 不暴露底层 backend 名称；旧 backend 字段只是数据兼容层。
 - Tool Broker 只暴露受控工具：
   - `workspace.list`
   - `workspace.read`
@@ -163,6 +177,7 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
   - `terminal.run`
   - `artifact.write`
 - `terminal.run` 默认需要审批。
+- `workspace.write_patch` 默认需要审批。
 - 文件读写必须落在 Agent workspace policy 范围内。
 - Artifact 写入有路径越界保护。
 - Skill scripts 不执行。
@@ -171,12 +186,11 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 ## 当前限制
 
 - Workflow v1 只做线性流程，不做分支、并行、条件表达式和失败回退。
-- `follow_main` Agent 首版会整理运行上下文并记录产物；后续再接入更完整的 Hermes orchestrator streaming。
-- `profile` Agent 首版支持 OpenAI-compatible Chat Completions 与简单受控工具循环。
-- 旧 `custom_api` Agent 作为兼容路径保留，新增 Agent 默认使用 `follow_main` 或 Model Profile。
-- `yachiyo_profile` 能直连模型，但不默认等同 Hermes Agent；联网、工具调用和复杂协作能力依赖后续 Yachiyo ToolBroker。
-- `hermes_profile` 目前默认只生成 RunGroup 与上下文；真实 Hermes CLI 执行需要显式启用后端开关，后续还要设计为用户可理解的运行能力状态。
-- `external_cli` 后端已有服务端 command 入口，但 UI 尚未开放 command / args / timeout / stdin context 配置，仍属于占位能力。
+- 旧 `execution_backend` 数据仍能读取，但产品语义统一归一到 Yachiyo Agent Runtime。
+- Agent Studio Agent 是持久岗位，不是 Hermes 原生 `delegate_task` 临时 subagent 注册表。
+- Custom API 作为高级模型配置兼容路径保留，但仍走同一个 Yachiyo Agent Runtime。
+- ToolBroker 仍需补真实工具调用循环、审批恢复、运行中取消、streaming/轮询和失败重试。
+- 主 Agent 自动委派第一版走 Yachiyo 内部桥，不改 Hermes 原生 `delegate_task` 实现。
 - TTS Profile 首版做统一保存与复用入口，具体语音合成、服务检测和连接测试仍由主动关怀 / TTS 专用链路执行。
 - Provider 目录同步目前是可手动运行的缓存能力；每日自动订阅更新机制尚未接入应用 lifecycle。
 - Skill v1 只支持本地目录/ZIP，不做远程 marketplace，也不自动扫描用户全局 skills。

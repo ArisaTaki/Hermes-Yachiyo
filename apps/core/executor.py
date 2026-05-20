@@ -361,6 +361,126 @@ def format_persona_description(
     return "\n\n".join(parts)
 
 
+def _yachiyo_delegation_catalog_context() -> str:
+    try:
+        from apps.shell.agent_runtime import get_agent_runtime_service
+
+        targets = get_agent_runtime_service().list_delegation_targets()
+    except Exception:
+        logger.debug("读取 Yachiyo 委派目标失败", exc_info=True)
+        return ""
+    entries: list[str] = []
+    for agent in targets.get("agents") or []:
+        entries.append(
+            "- Agent: "
+            f"{agent.get('name')} | category={agent.get('category') or 'custom'} | "
+            f"output={agent.get('output_contract') or 'chat'} | "
+            f"description={agent.get('description') or ''}"
+        )
+    for workflow in targets.get("workflows") or []:
+        entries.append(
+            "- Workflow: "
+            f"{workflow.get('name')} | nodes={workflow.get('nodes') or 0} | "
+            f"description={workflow.get('description') or ''}"
+        )
+    if not entries:
+        return ""
+    return (
+        "[Yachiyo 持久 Agent 委派]\n"
+        "你可以把明确的子任务委派给 Agent Studio 中已保存的持久 Agent 或 Workflow。"
+        "这些不是 Hermes 临时 delegate_task 子 Agent，而是有固定职责、Skills、模型和审计记录的岗位。\n"
+        "当你需要委派时，只输出一个 JSON 对象，不要附加其他正文：\n"
+        '{"action":"run_yachiyo_agent","agent":"Agent 名称","goal":"自包含任务目标"}\n'
+        "或：\n"
+        '{"action":"run_yachiyo_workflow","workflow":"Workflow 名称","goal":"自包含任务目标"}\n'
+        "委派结果会返回给你，然后你再继续整合最终回复。每轮最多委派 3 次。\n"
+        "可用目标：\n"
+        + "\n".join(entries[:40])
+    )
+
+
+def _append_yachiyo_delegation_context(profile_context: str) -> str:
+    catalog = _yachiyo_delegation_catalog_context()
+    if not catalog:
+        return profile_context
+    base = (profile_context or "").strip()
+    return f"{base}\n\n{catalog}" if base else catalog
+
+
+def _parse_yachiyo_delegation_request(content: str) -> dict[str, str] | None:
+    text = (content or "").strip()
+    if not text:
+        return None
+    match = re.search(r"<yachiyo_delegation>\s*(\{.*?\})\s*</yachiyo_delegation>", text, re.DOTALL | re.IGNORECASE)
+    if match:
+        text = match.group(1).strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.DOTALL).strip()
+    if not text.startswith("{"):
+        match = re.search(r"(\{[^{}]*\"action\"\s*:\s*\"run_yachiyo_[^{}]+\})", text, re.DOTALL)
+        if not match:
+            return None
+        text = match.group(1).strip()
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    action = str(payload.get("action") or payload.get("tool") or "").strip()
+    if action not in {"run_yachiyo_agent", "run_yachiyo_workflow"}:
+        return None
+    goal = str(payload.get("goal") or payload.get("user_goal") or payload.get("task") or "").strip()
+    if not goal:
+        return None
+    if action == "run_yachiyo_agent":
+        name = str(payload.get("agent") or payload.get("name") or payload.get("agent_name") or "").strip()
+        runnable_id = str(payload.get("agent_id") or payload.get("runnable_id") or "").strip()
+        kind = "agent"
+    else:
+        name = str(payload.get("workflow") or payload.get("name") or payload.get("workflow_name") or "").strip()
+        runnable_id = str(payload.get("workflow_id") or payload.get("runnable_id") or "").strip()
+        kind = "workflow"
+    if not name and not runnable_id:
+        return None
+    return {"kind": kind, "name": name, "runnable_id": runnable_id, "goal": goal}
+
+
+def _run_yachiyo_delegation(request: dict[str, str]) -> dict[str, Any]:
+    from apps.shell.agent_runtime import get_agent_runtime_service
+
+    return get_agent_runtime_service().delegate_runnable(
+        kind=request.get("kind", ""),
+        name=request.get("name", ""),
+        runnable_id=request.get("runnable_id", ""),
+        user_goal=request.get("goal", ""),
+    )
+
+
+def _format_yachiyo_delegation_result(result: dict[str, Any]) -> str:
+    runnable = result.get("runnable") or {}
+    return (
+        f"Runnable: {runnable.get('kind') or ''} {runnable.get('name') or runnable.get('id') or ''}\n"
+        f"Run: {result.get('run_id') or ''}\n"
+        f"Status: {result.get('status') or ''}\n"
+        f"Result:\n{result.get('result') or ''}"
+    ).strip()
+
+
+def _build_yachiyo_delegation_followup(
+    original_prompt: str,
+    delegation_request_text: str,
+    delegation_result: str,
+) -> str:
+    return (
+        f"{original_prompt}\n\n"
+        "[Yachiyo 委派请求]\n"
+        f"{delegation_request_text.strip()[:4000]}\n\n"
+        "[Yachiyo 委派结果]\n"
+        f"{delegation_result[:12000]}\n\n"
+        "请基于以上委派结果继续处理用户请求。若仍需委派，可再次输出同样 JSON；"
+        "否则直接给出最终回复，不要重复委派 JSON。"
+    )
+
+
 def _task_image_paths(task: TaskInfo) -> list[str]:
     paths: list[str] = []
     for attachment in getattr(task, "attachments", []) or []:
@@ -1506,6 +1626,7 @@ class HermesExecutor(ExecutionStrategy):
                 profile_context = self._profile_context_getter()
             except Exception:
                 logger.debug("读取助手/用户资料失败", exc_info=True)
+        profile_context = _append_yachiyo_delegation_context(profile_context)
         description = format_persona_description(
             task.description,
             persona_prompt,
@@ -1577,45 +1698,109 @@ class HermesExecutor(ExecutionStrategy):
                 except Exception:
                     logger.debug("Hermes 活动占位消息更新失败", exc_info=True)
 
-        started_at = time.monotonic()
-        invoke_result = await invoke_hermes_cli(
-            description,
-            hermes_session_id=hermes_sid,
-            on_update=on_update if chat_session is not None else None,
-            on_activity=on_activity,
-            image_paths=image_paths,
-        )
-        elapsed = time.monotonic() - started_at
+        max_delegations = 3
+        delegation_count = 0
+        current_description = description
+        while True:
+            started_at = time.monotonic()
+            invoke_result = await invoke_hermes_cli(
+                current_description,
+                hermes_session_id=hermes_sid,
+                on_update=on_update if chat_session is not None else None,
+                on_activity=on_activity,
+                image_paths=image_paths,
+            )
+            elapsed = time.monotonic() - started_at
 
-        if invoke_result.success:
-            logger.debug(
-                "[Hermes] 调用成功: returncode=%d, elapsed=%.2fs, stdout_len=%d, session=%s",
+            if invoke_result.success:
+                logger.debug(
+                    "[Hermes] 调用成功: returncode=%d, elapsed=%.2fs, stdout_len=%d, session=%s",
+                    invoke_result.returncode,
+                    elapsed,
+                    len(invoke_result.stdout),
+                    invoke_result.hermes_session_id,
+                )
+                if invoke_result.hermes_session_id:
+                    hermes_sid = invoke_result.hermes_session_id
+                    if chat_session is not None:
+                        chat_session.set_hermes_session_id(invoke_result.hermes_session_id)
+                output = invoke_result.output
+                delegation_request = _parse_yachiyo_delegation_request(output)
+                if delegation_request:
+                    if delegation_count >= max_delegations:
+                        on_activity(
+                            {
+                                "phase": "subagent",
+                                "title": "Yachiyo 委派已停止",
+                                "detail": "单轮自动委派超过 3 次上限",
+                                "status": "failed",
+                                "tool_name": "yachiyo.delegation",
+                            }
+                        )
+                        return "Yachiyo 自动委派已达到 3 次上限，已停止以避免循环调用。"
+                    delegation_count += 1
+                    target = delegation_request.get("name") or delegation_request.get("runnable_id") or "Yachiyo Agent"
+                    on_activity(
+                        {
+                            "phase": "subagent",
+                            "title": f"正在委派给 {target}",
+                            "detail": delegation_request.get("goal", ""),
+                            "status": "running",
+                            "tool_name": "yachiyo.delegation",
+                        }
+                    )
+                    try:
+                        delegation_result = _run_yachiyo_delegation(delegation_request)
+                    except Exception as exc:
+                        delegation_text = f"Yachiyo delegation failed: {exc}"
+                        on_activity(
+                            {
+                                "phase": "subagent",
+                                "title": f"{target} 委派失败",
+                                "detail": str(exc),
+                                "status": "failed",
+                                "tool_name": "yachiyo.delegation",
+                            }
+                        )
+                    else:
+                        delegation_text = _format_yachiyo_delegation_result(delegation_result)
+                        on_activity(
+                            {
+                                "phase": "subagent",
+                                "title": f"{target} 委派完成",
+                                "detail": delegation_text[:500],
+                                "status": "completed" if delegation_result.get("ok") else "failed",
+                                "tool_name": "yachiyo.delegation",
+                                "metadata": {
+                                    "run_id": delegation_result.get("run_id", ""),
+                                    "run_group_id": delegation_result.get("run_group_id", ""),
+                                },
+                            }
+                        )
+                    current_description = _build_yachiyo_delegation_followup(
+                        description,
+                        output,
+                        delegation_text,
+                    )
+                    continue
+                _schedule_session_title_refresh(
+                    chat_session,
+                    assistant_text=output,
+                )
+                return output
+
+            # 失败：结构化日志 + 结构化异常
+            logger.warning(
+                "[Hermes] 调用失败: returncode=%d, elapsed=%.2fs | %s",
                 invoke_result.returncode,
                 elapsed,
-                len(invoke_result.stdout),
-                invoke_result.hermes_session_id,
+                invoke_result.error_message,
             )
-            # 记录 session_id 以便后续 --resume
-            if invoke_result.hermes_session_id and chat_session is not None:
-                chat_session.set_hermes_session_id(invoke_result.hermes_session_id)
-            _schedule_session_title_refresh(
-                chat_session,
-                assistant_text=invoke_result.output,
+            raise HermesCallError(
+                invoke_result.error_message,
+                returncode=invoke_result.returncode,
+                stderr=invoke_result.stderr,
             )
-            return invoke_result.output
-
-        # 失败：结构化日志 + 结构化异常
-        logger.warning(
-            "[Hermes] 调用失败: returncode=%d, elapsed=%.2fs | %s",
-            invoke_result.returncode,
-            elapsed,
-            invoke_result.error_message,
-        )
-        raise HermesCallError(
-            invoke_result.error_message,
-            returncode=invoke_result.returncode,
-            stderr=invoke_result.stderr,
-        )
 
     def _chat_session_for_task(self, task: TaskInfo) -> Optional["ChatSession"]:
         session_id = str(getattr(task, "chat_session_id", "") or "")
