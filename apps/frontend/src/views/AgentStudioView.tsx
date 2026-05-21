@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type DragEvent } from 'react';
 import type { Connection, Edge, Node } from '@xyflow/react';
 import {
   Background,
@@ -13,6 +13,7 @@ import '@xyflow/react/dist/style.css';
 
 import {
   attachSkill,
+  approveRunApproval,
   createAgent,
   createAgentRun,
   createWorkflow,
@@ -29,8 +30,10 @@ import {
   listRuns,
   listSkills,
   listWorkflows,
+  rejectRunApproval,
   testAgentModel,
   updateAgent,
+  updateSkill,
   updateWorkflow,
   type AgentSpec,
   type RunnableSummary,
@@ -38,7 +41,7 @@ import {
   type SkillSpec,
   type WorkflowSpec,
 } from '../lib/agents';
-import { openAppView } from '../lib/bridge';
+import { chooseAvatarImage, chooseSkillSources, openAppView, openPath } from '../lib/bridge';
 import { listModelProfiles, type ModelProfile } from '../lib/modelProfiles';
 import { currentParam } from '../lib/view';
 
@@ -57,10 +60,12 @@ type StudioRefreshOptions = {
 type AgentDraft = {
   agent_id?: string;
   name: string;
+  nickname: string;
   description: string;
   avatar_url: string;
   category: string;
   instructions: string;
+  persona_prompt: string;
   model_mode: 'profile' | 'custom_api';
   model_profile_id: string;
   vision_model_profile_id: string;
@@ -80,10 +85,12 @@ type AgentDraft = {
 
 const emptyAgentDraft: AgentDraft = {
   name: '',
+  nickname: '',
   description: '',
   avatar_url: '',
   category: 'custom',
   instructions: '',
+  persona_prompt: '',
   model_mode: 'profile',
   model_profile_id: '',
   vision_model_profile_id: '',
@@ -101,6 +108,12 @@ const emptyAgentDraft: AgentDraft = {
   enabled: true,
 };
 
+type SkillImportResult = {
+  source: string;
+  status: 'success' | 'failed' | 'skipped';
+  message: string;
+};
+
 const starterNodes: Node[] = [
   { id: 'start', type: 'input', position: { x: 40, y: 120 }, data: { label: 'Start', kind: 'start' } },
 ];
@@ -111,6 +124,33 @@ function scopesToText(value: unknown): string {
 
 function textToScopes(value: string): string[] {
   return value.split(',').map((item) => item.trim()).filter(Boolean);
+}
+
+function parseSkillSources(value: string): string[] {
+  const sources = value
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return Array.from(new Set(sources));
+}
+
+function appendSkillSources(current: string, sources: string[]): string {
+  return parseSkillSources([current, ...sources].filter(Boolean).join('\n')).join('\n');
+}
+
+function skillPathLabel(skill: SkillSpec): string {
+  return skill.local_path || skill.source_path || 'local skill';
+}
+
+function localSourceAlias(source: string): string {
+  const clean = source.trim().replace(/[\\/]+$/, '');
+  const name = clean.split(/[\\/]/).pop();
+  return name ? `local:${name}` : '';
+}
+
+function agentInitial(name: string): string {
+  const clean = name.trim();
+  return clean ? clean.slice(0, 1).toUpperCase() : 'A';
 }
 
 function policyTools(agent: AgentSpec): Set<string> {
@@ -142,10 +182,12 @@ function agentToDraft(agent: AgentSpec): AgentDraft {
   return {
     agent_id: agent.agent_id,
     name: agent.name,
+    nickname: agent.nickname || agent.name,
     description: agent.description || '',
     avatar_url: agent.avatar_url || '',
     category: agent.category || 'custom',
     instructions: agent.instructions || '',
+    persona_prompt: agent.persona_prompt || '',
     model_mode: agent.model_mode === 'custom_api' ? 'custom_api' : 'profile',
     model_profile_id: agent.model_profile_id || '',
     vision_model_profile_id: agent.vision_model_profile_id || '',
@@ -186,6 +228,7 @@ function workflowEdges(workflow: WorkflowSpec | null): Edge[] {
 function runStatusTone(status: string): string {
   if (status === 'completed') return 'ready';
   if (status === 'failed' || status === 'cancelled') return 'danger';
+  if (status === 'approval_required') return 'approval';
   return 'running';
 }
 
@@ -207,6 +250,23 @@ function formatRunDate(value?: string): string {
   }).format(timestamp);
 }
 
+function formatApprovalInput(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value || {}, null, 2);
+  } catch {
+    return String(value || '');
+  }
+}
+
+function AgentAvatar({ avatarUrl, name }: { avatarUrl?: string; name: string }) {
+  return (
+    <span className={avatarUrl ? 'agent-avatar has-image' : 'agent-avatar'} aria-hidden="true">
+      {avatarUrl ? <img src={avatarUrl} alt="" /> : agentInitial(name)}
+    </span>
+  );
+}
+
 export function AgentStudioView() {
   const [tab, setTab] = useState<StudioTab>(() => currentParam('run') ? 'runs' : 'agents');
   const [agents, setAgents] = useState<AgentSpec[]>([]);
@@ -218,7 +278,8 @@ export function AgentStudioView() {
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
   const [draft, setDraft] = useState<AgentDraft>(emptyAgentDraft);
-  const [skillPath, setSkillPath] = useState('');
+  const [skillImportText, setSkillImportText] = useState('');
+  const [skillImportResults, setSkillImportResults] = useState<SkillImportResult[]>([]);
   const [workflowName, setWorkflowName] = useState('New Workflow');
   const [workflowDescription, setWorkflowDescription] = useState('');
   const [agentRunGoal, setAgentRunGoal] = useState('');
@@ -256,7 +317,12 @@ export function AgentStudioView() {
     [modelProfiles],
   );
   const mountedSkillCount = useMemo(
-    () => skills.filter((skill) => selectedAgent?.skill_ids?.includes(skill.skill_id)).length,
+    () => skills.filter((skill) => skill.enabled !== false && selectedAgent?.skill_ids?.includes(skill.skill_id)).length,
+    [selectedAgent, skills],
+  );
+  const enabledSkills = useMemo(() => skills.filter((skill) => skill.enabled !== false), [skills]);
+  const disabledMountedSkills = useMemo(
+    () => skills.filter((skill) => skill.enabled === false && selectedAgent?.skill_ids?.includes(skill.skill_id)),
     [selectedAgent, skills],
   );
 
@@ -384,13 +450,82 @@ export function AgentStudioView() {
     }
   }
 
+  async function pickSkillSources() {
+    setBusyAction('选择 Skill 文件');
+    setError('');
+    try {
+      const selected = await chooseSkillSources();
+      if (selected.length) {
+        setSkillImportText((current) => appendSkillSources(current, selected));
+        setStatus(`已选择 ${selected.length} 个 Skill 来源`);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '选择 Skill 文件失败');
+    } finally {
+      setBusyAction('');
+    }
+  }
+
+  async function pickAgentAvatar() {
+    setBusyAction('选择 Agent 头像');
+    setError('');
+    try {
+      const selection = await chooseAvatarImage();
+      const avatar = typeof selection === 'string' ? selection : selection?.data_url || selection?.path || '';
+      if (avatar) {
+        setDraft((current) => ({ ...current, avatar_url: avatar }));
+        setStatus('已选择 Agent 头像');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '选择 Agent 头像失败');
+    } finally {
+      setBusyAction('');
+    }
+  }
+
+  function dropSkillSources(event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    const filePaths = Array.from(event.dataTransfer.files)
+      .map((file) => (file as File & { path?: string }).path || file.name)
+      .filter(Boolean);
+    if (filePaths.length) {
+      setSkillImportText((current) => appendSkillSources(current, filePaths));
+      setStatus(`已添加 ${filePaths.length} 个待导入 Skill`);
+    }
+  }
+
+  async function importSkillSources(): Promise<StudioRefreshOptions | void> {
+    const sources = parseSkillSources(skillImportText);
+    if (!sources.length) throw new Error('请先选择或输入 Skill 目录/ZIP 路径');
+    const existingPaths = new Set(skills.flatMap((skill) => [skill.local_path, skill.source_path]).filter(Boolean).map(String));
+    const results: SkillImportResult[] = [];
+    for (const source of sources) {
+      if (existingPaths.has(source) || existingPaths.has(localSourceAlias(source))) {
+        results.push({ source, status: 'skipped', message: '已存在，跳过' });
+        continue;
+      }
+      try {
+        const imported = await importSkill(source);
+        results.push({ source, status: 'success', message: `已导入 ${imported.name}` });
+      } catch (err) {
+        results.push({ source, status: 'failed', message: err instanceof Error ? err.message : '导入失败' });
+      }
+    }
+    setSkillImportResults(results);
+    if (results.some((item) => item.status === 'success')) {
+      setSkillImportText('');
+    }
+  }
+
   async function saveAgent(): Promise<StudioRefreshOptions> {
     const request: Partial<AgentSpec> = {
       name: draft.name,
+      nickname: draft.nickname,
       description: draft.description,
       avatar_url: draft.avatar_url,
       category: draft.category,
       instructions: draft.instructions,
+      persona_prompt: draft.persona_prompt,
       model_mode: draft.model_mode,
       model_profile_id: draft.model_mode === 'profile' ? draft.model_profile_id : '',
       vision_model_profile_id: draft.vision_model_profile_id,
@@ -497,6 +632,20 @@ export function AgentStudioView() {
     }
   }
 
+  async function approveSelectedRun(): Promise<StudioRefreshOptions> {
+    if (!selectedRun) throw new Error('请选择待审批 Run');
+    const run = await approveRunApproval(selectedRun.run_id);
+    setSelectedRunId(run.run_id);
+    return { selectedRunId: run.run_id };
+  }
+
+  async function rejectSelectedRun(): Promise<StudioRefreshOptions> {
+    if (!selectedRun) throw new Error('请选择待审批 Run');
+    const run = await rejectRunApproval(selectedRun.run_id);
+    setSelectedRunId(run.run_id);
+    return { selectedRunId: run.run_id };
+  }
+
   return (
     <section className="agent-studio-page hy-route-page">
       <header className="agent-studio-hero">
@@ -540,7 +689,13 @@ export function AgentStudioView() {
                   key={agent.agent_id}
                   onClick={() => selectAgent(agent.agent_id)}
                 >
-                  <strong>{agent.name}</strong>
+                  <span className="agent-list-profile">
+                    <AgentAvatar avatarUrl={agent.avatar_url} name={agent.nickname || agent.name} />
+                    <span>
+                      <strong>{agent.nickname || agent.name}</strong>
+                      <small>{agent.name}</small>
+                    </span>
+                  </span>
                   <span>{agent.category || 'custom'} · {agent.model_mode === 'custom_api' ? 'Custom API' : 'Chat Profile'}</span>
                 </button>
               ))}
@@ -551,12 +706,24 @@ export function AgentStudioView() {
               <h2>{draft.agent_id ? '编辑 Agent' : '新建 Agent'}</h2>
               {draft.agent_id ? <button type="button" className="danger-action" disabled={busy} onClick={() => void runAction(async () => { await deleteAgent(draft.agent_id || ''); setSelectedAgentId(''); setDraft({ ...emptyAgentDraft }); return { selectedAgentId: '' }; }, '删除 Agent')}>删除</button> : null}
             </div>
-            <label><span>Name</span><input className="hy-input" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required /></label>
-            <label><span>Description</span><input className="hy-input" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
+            <div className="agent-profile-editor">
+              <AgentAvatar avatarUrl={draft.avatar_url} name={draft.nickname || draft.name || 'Agent'} />
+              <div className="agent-profile-fields">
+                <div className="agent-form-row">
+                  <label><span>Name</span><input className="hy-input" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required /></label>
+                  <label><span>Nickname</span><input className="hy-input" value={draft.nickname} onChange={(event) => setDraft({ ...draft, nickname: event.target.value })} placeholder="对话框里显示的称呼" /></label>
+                </div>
+                <div className="agent-avatar-input-row">
+                  <label><span>Avatar URL / data URL</span><input className="hy-input" value={draft.avatar_url} onChange={(event) => setDraft({ ...draft, avatar_url: event.target.value })} placeholder="https://... 或 data:image/..." /></label>
+                  <button type="button" className="hy-btn hy-btn-ghost" disabled={busy} onClick={() => void pickAgentAvatar()}>选择头像</button>
+                </div>
+                <label><span>Description</span><input className="hy-input" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
+              </div>
+            </div>
             <div className="agent-form-row">
               <label><span>Category</span><input className="hy-input" value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} /></label>
               <label>
-                <span>Output</span>
+                <span>Output Contract</span>
                 <select className="hy-select" value={draft.output_contract} onChange={(event) => setDraft({ ...draft, output_contract: event.target.value })}>
                   <option value="chat">chat</option>
                   <option value="markdown">markdown</option>
@@ -564,11 +731,18 @@ export function AgentStudioView() {
                   <option value="report">report</option>
                   <option value="artifacts">artifacts</option>
                 </select>
+                <small className="agent-field-help">约束最终回复倾向，不是 Skill 的输出类型。</small>
               </label>
             </div>
             <label>
-              <span>Instructions</span>
+              <span>Functional Instructions</span>
               <textarea className="hy-input agent-textarea" value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} />
+              <small className="agent-field-help">写任务边界、工作方法、必须遵守的功能要求。</small>
+            </label>
+            <label>
+              <span>Persona Prompt</span>
+              <textarea className="hy-input agent-textarea compact" value={draft.persona_prompt} onChange={(event) => setDraft({ ...draft, persona_prompt: event.target.value })} />
+              <small className="agent-field-help">写人设、口吻、角色偏好；运行时会和功能要求分段放进 Agent context。</small>
             </label>
             <section className="agent-backend-section" aria-label="Model">
               <div className="section-heading-row compact">
@@ -632,6 +806,7 @@ export function AgentStudioView() {
               <div className="section-heading-row compact">
                 <h3>Capabilities</h3>
               </div>
+              <p className="agent-section-help">这里会实际写入 ToolBroker 允许工具；写文件和运行命令即使开启，也仍然需要 Run 审批。</p>
               <div className="agent-capability-grid">
                 <label className="agent-checkbox-row">
                   <input type="checkbox" checked={draft.allow_workspace_read} onChange={(event) => setDraft({ ...draft, allow_workspace_read: event.target.checked })} />
@@ -652,10 +827,23 @@ export function AgentStudioView() {
               </div>
             </section>
             <div className="agent-form-row">
-              <label><span>Default Workdir</span><input className="hy-input" value={draft.default_workdir} onChange={(event) => setDraft({ ...draft, default_workdir: event.target.value })} /></label>
-              <label><span>Writable Scopes</span><input className="hy-input" value={draft.writable_scopes} onChange={(event) => setDraft({ ...draft, writable_scopes: event.target.value })} placeholder="src, tests" /></label>
+              <label>
+                <span>Default Workdir</span>
+                <input className="hy-input" value={draft.default_workdir} onChange={(event) => setDraft({ ...draft, default_workdir: event.target.value })} />
+                <small className="agent-field-help">工具相对路径的基准目录；留空就是当前 Hermes-Yachiyo 工作区。</small>
+              </label>
+              <label>
+                <span>Writable Scopes</span>
+                <input className="hy-input" value={draft.writable_scopes} onChange={(event) => setDraft({ ...draft, writable_scopes: event.target.value })} placeholder="src, tests" />
+                <small className="agent-field-help">允许 `workspace.write_patch` 写入的相对目录，逗号分隔。</small>
+              </label>
             </div>
-            <label><span>Readable Scopes</span><input className="hy-input" value={draft.readable_scopes} onChange={(event) => setDraft({ ...draft, readable_scopes: event.target.value })} /></label>
+            <label>
+              <span>Readable Scopes</span>
+              <input className="hy-input" value={draft.readable_scopes} onChange={(event) => setDraft({ ...draft, readable_scopes: event.target.value })} />
+              <small className="agent-field-help">允许 `workspace.list/read` 访问的相对目录，默认 `.` 表示工作区内可读。</small>
+            </label>
+            <div className="agent-inline-note">可行性验证：保存后先用“测试模型”检查模型连接，再用 Quick Run 做端到端验证；工具权限和 scopes 会在运行时强制校验。</div>
             <div className="agent-editor-actions">
               <button type="submit" className="primary-action" disabled={busy}>保存 Agent</button>
               {draft.agent_id ? <button type="button" disabled={busy} onClick={() => void runAction(async () => { const result = await testAgentModel(draft.agent_id || ''); setStatus(result.message || (result.ok ? '模型测试通过' : '模型测试失败')); }, '测试模型')}>测试模型</button> : null}
@@ -686,10 +874,15 @@ export function AgentStudioView() {
               <div className="agent-skill-mounts">
                 <div className="agent-skill-mounts-head">
                   <h3>Mounted Skills</h3>
-                  <span>{mountedSkillCount} mounted / {skills.length} skills</span>
+                  <span>{mountedSkillCount} mounted / {enabledSkills.length} enabled skills</span>
                 </div>
+                {disabledMountedSkills.length ? (
+                  <div className="agent-inline-note warn">
+                    有 {disabledMountedSkills.length} 个已挂载 Skill 当前已停用，运行时不会通过校验。
+                  </div>
+                ) : null}
                 <div className="agent-skill-grid">
-                  {skills.map((skill) => {
+                  {enabledSkills.map((skill) => {
                     const mounted = selectedAgent?.skill_ids?.includes(skill.skill_id);
                     return (
                       <button
@@ -706,7 +899,7 @@ export function AgentStudioView() {
                       </button>
                     );
                   })}
-                  {!skills.length ? <span className="agent-empty-inline">暂无 Skill，可到 Skill Library 导入。</span> : null}
+                  {!enabledSkills.length ? <span className="agent-empty-inline">暂无启用 Skill，可到 Skill Library 导入或开启。</span> : null}
                 </div>
               </div>
             ) : null}
@@ -716,28 +909,59 @@ export function AgentStudioView() {
 
       {tab === 'skills' ? (
         <section className="agent-studio-grid">
-          <div className="agent-studio-panel">
-            <div className="section-heading-row"><h2>Import Skill</h2></div>
-            <label><span>Local directory or ZIP</span><input className="hy-input" value={skillPath} onChange={(event) => setSkillPath(event.target.value)} placeholder="/path/to/skill-or.zip" /></label>
-            <button type="button" className="primary-action" disabled={!skillPath.trim() || busy} onClick={() => void runAction(async () => { await importSkill(skillPath.trim()); setSkillPath(''); }, '导入 Skill')}>导入</button>
+          <div className="agent-studio-panel skill-import-panel">
+            <div className="section-heading-row"><h2>上传 Skills</h2></div>
+            <p className="agent-section-help">支持批量上传 zip 技能包，也支持选择本地 Skill 目录。系统会校验目录里是否包含 `SKILL.md`，并逐个返回导入结果。</p>
+            <div className="skill-import-hints">
+              <span>一次上传多个 zip</span>
+              <span>自动校验 SKILL.md</span>
+              <span>跳过重复选择</span>
+            </div>
+            <div
+              className="skill-drop-zone"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={dropSkillSources}
+            >
+              <strong>拖拽 Skill 目录或 zip 到这里</strong>
+              <span>也可以点击选择文件，再从下面列表确认导入</span>
+              <button type="button" disabled={busy} onClick={() => void pickSkillSources()}>选择文件</button>
+            </div>
+            <label>
+              <span>待导入路径</span>
+              <textarea
+                className="hy-input skill-import-textarea"
+                value={skillImportText}
+                onChange={(event) => setSkillImportText(event.target.value)}
+                placeholder="/path/to/skill-folder&#10;/path/to/skill.zip"
+              />
+            </label>
+            <button type="button" className="primary-action" disabled={!skillImportText.trim() || busy} onClick={() => void runAction(importSkillSources, '导入 Skills')}>开始导入</button>
+            {skillImportResults.length ? (
+              <div className="skill-import-results" aria-label="Skill import results">
+                {skillImportResults.map((result) => (
+                  <div className={`skill-import-result ${result.status}`} key={`${result.source}-${result.status}`}>
+                    <strong>{result.status === 'success' ? '成功' : result.status === 'skipped' ? '跳过' : '失败'}</strong>
+                    <span>{result.source}</span>
+                    <small>{result.message}</small>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
           <div className="agent-studio-panel">
             <div className="section-heading-row"><h2>Skill Library</h2></div>
             <div className="skill-list">
               {skills.map((skill) => (
                 <SkillCard
-                  agent={selectedAgent}
                   busy={busy}
                   key={skill.skill_id}
                   onDelete={() => runAction(async () => { await deleteSkill(skill.skill_id); }, '删除 Skill')}
-                  onToggleMount={() => runAction(async () => {
-                    if (!selectedAgent) return;
-                    if (selectedAgent.skill_ids?.includes(skill.skill_id)) await detachSkill(selectedAgent.agent_id, skill.skill_id);
-                    else await attachSkill(selectedAgent.agent_id, skill.skill_id);
-                  }, selectedAgent?.skill_ids?.includes(skill.skill_id) ? '移除 Skill' : '挂载 Skill')}
+                  onOpenLocation={() => runAction(async () => { await openPath(skill.local_path || ''); }, '打开 Skill 路径')}
+                  onToggleEnabled={() => runAction(async () => { await updateSkill(skill.skill_id, { enabled: skill.enabled === false }); }, skill.enabled === false ? '启用 Skill' : '停用 Skill')}
                   skill={skill}
                 />
               ))}
+              {!skills.length ? <div className="empty-state inline-empty">暂无 Skill。导入后会在这里显示启停、删除和本地路径入口。</div> : null}
             </div>
           </div>
         </section>
@@ -871,6 +1095,19 @@ export function AgentStudioView() {
                   {selectedRun.run_group_id ? <span>Group {selectedRun.run_group_id}</span> : null}
                   <code>{selectedRun.run_id}</code>
                 </div>
+                {selectedRun.status === 'approval_required' && selectedRun.pending_approval?.tool ? (
+                  <section className="run-approval-box">
+                    <div>
+                      <h4>Approval Required · {selectedRun.pending_approval.tool}</h4>
+                      <p>这个工具调用需要人工确认后才会继续当前 Run。</p>
+                    </div>
+                    <pre>{formatApprovalInput(selectedRun.pending_approval.input_preview)}</pre>
+                    <div className="run-approval-actions">
+                      <button type="button" className="primary-action" disabled={busy} onClick={() => void runAction(approveSelectedRun, '批准工具调用')}>Approve</button>
+                      <button type="button" className="danger-action" disabled={busy} onClick={() => void runAction(rejectSelectedRun, '拒绝工具调用')}>Reject</button>
+                    </div>
+                  </section>
+                ) : null}
                 <section>
                   <h4>Result</h4>
                   <pre>{selectedRun.result || 'No result yet.'}</pre>
@@ -923,31 +1160,45 @@ export function AgentStudioView() {
 }
 
 function SkillCard({
-  agent,
   busy,
   onDelete,
-  onToggleMount,
+  onOpenLocation,
+  onToggleEnabled,
   skill,
 }: {
-  agent: AgentSpec | null;
   busy: boolean;
   onDelete: () => Promise<void>;
-  onToggleMount: () => Promise<void>;
+  onOpenLocation: () => Promise<void>;
+  onToggleEnabled: () => Promise<void>;
   skill: SkillSpec;
 }) {
-  const mounted = Boolean(agent?.skill_ids?.includes(skill.skill_id));
+  const enabled = skill.enabled !== false;
   return (
-    <article className={mounted ? 'skill-card mounted' : 'skill-card'}>
-      <div className="section-heading-row">
-        <div><h3>{skill.name}</h3><span>{mounted ? `Mounted to ${agent?.name || 'Agent'}` : skill.source_path}</span></div>
-        <button type="button" className="danger-action" onClick={() => void onDelete()}>删除</button>
+    <article className={enabled ? 'skill-card' : 'skill-card disabled'}>
+      <div className="section-heading-row skill-card-head">
+        <div>
+          <h3>{skill.name}</h3>
+          <span className="skill-source-tag">本地 Skill</span>
+        </div>
+        <label className={enabled ? 'skill-enable-switch active' : 'skill-enable-switch'}>
+          <input
+            type="checkbox"
+            checked={enabled}
+            disabled={busy}
+            onChange={() => void onToggleEnabled()}
+          />
+          <span aria-hidden="true" />
+        </label>
       </div>
       <p>{skill.description || skill.content_summary}</p>
+      <div className="skill-card-path">
+        <span>路径</span>
+        <code>{skillPathLabel(skill)}</code>
+      </div>
       {skill.asset_paths?.length ? <small>{skill.asset_paths.length} assets/templates</small> : null}
       <div className="skill-card-actions">
-        <button type="button" disabled={!agent || busy} onClick={() => void onToggleMount()}>
-          {mounted ? `从 ${agent?.name || 'Agent'} 移除` : agent ? `挂载到 ${agent.name}` : '先选择 Agent'}
-        </button>
+        <button type="button" disabled={busy || !skill.local_path} onClick={() => void onOpenLocation()}>打开路径</button>
+        <button type="button" className="danger-action" disabled={busy} onClick={() => void onDelete()}>删除</button>
       </div>
       <pre>{(skill.skill_markdown || '').slice(0, 1200)}</pre>
     </article>

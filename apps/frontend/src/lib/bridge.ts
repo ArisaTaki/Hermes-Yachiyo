@@ -134,6 +134,7 @@ declare global {
       chooseAvatarImage?: () => Promise<AvatarImageSelection | string | null>;
       chooseLive2DArchive?: () => Promise<string | null>;
       chooseLive2DModelDirectory?: () => Promise<string | null>;
+      chooseSkillSources?: () => Promise<string[]>;
       checkAppUpdate?: () => Promise<AppUpdateCheckResult>;
       copyText?: (text: string) => Promise<void>;
       downloadAppUpdate?: () => Promise<AppUpdateDownloadResult>;
@@ -345,6 +346,13 @@ export async function chooseLive2DArchive(): Promise<string | null> {
     throw new Error('当前环境没有桌面文件选择器入口，请在页面中输入 ZIP 路径');
   }
   return window.hermesDesktop.chooseLive2DArchive();
+}
+
+export async function chooseSkillSources(): Promise<string[]> {
+  if (!window.hermesDesktop?.chooseSkillSources) {
+    throw new Error('当前环境没有桌面文件选择器入口，请在页面中输入 Skill 目录或 ZIP 路径');
+  }
+  return window.hermesDesktop.chooseSkillSources();
 }
 
 export function hasDesktopAvatarPicker(): boolean {

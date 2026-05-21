@@ -2594,6 +2594,17 @@ async function showOpenDialogForSender(
   return result.filePaths[0] || null;
 }
 
+async function showOpenDialogPathsForSender(
+  event: IpcMainInvokeEvent,
+  options: OpenDialogOptions,
+): Promise<string[]> {
+  const parentWindow = BrowserWindow.fromWebContents(event.sender) || mainWindow || undefined;
+  const result = parentWindow
+    ? await dialog.showOpenDialog(parentWindow, options)
+    : await dialog.showOpenDialog(options);
+  return result.canceled ? [] : result.filePaths;
+}
+
 function imageMimeTypeForPath(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.png') return 'image/png';
@@ -2786,6 +2797,15 @@ ipcMain.handle('hermes:chooseLive2DArchive', (event) => showOpenDialogForSender(
   filters: [
     { name: 'Live2D 资源包', extensions: ['zip'] },
     { name: '压缩包', extensions: ['zip'] },
+  ],
+}));
+ipcMain.handle('hermes:chooseSkillSources', (event) => showOpenDialogPathsForSender(event, {
+  title: '上传 Skills',
+  defaultPath: app.getPath('home'),
+  properties: ['openFile', 'openDirectory', 'multiSelections'],
+  filters: [
+    { name: 'Skill ZIP', extensions: ['zip'] },
+    { name: '所有文件', extensions: ['*'] },
   ],
 }));
 ipcMain.handle('hermes:openPath', async (_event, value: unknown) => {

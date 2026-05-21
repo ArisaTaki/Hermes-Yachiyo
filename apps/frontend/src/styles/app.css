@@ -12373,11 +12373,57 @@ button.activity-item {
   font-size: 13px;
 }
 
+.agent-list-profile {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+}
+
+.agent-list-profile>span:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.agent-list-profile small {
+  overflow: hidden;
+  color: var(--hy-faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-avatar {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid oklch(66% 0.12 188 / 0.28);
+  border-radius: 50%;
+  background: oklch(66% 0.12 188 / 0.14);
+  color: var(--hy-fg);
+  font-size: 13px;
+  font-weight: 680;
+}
+
+.agent-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .agent-list span,
 .skill-card span,
 .run-card span {
   color: var(--hy-faint);
   font-size: 11px;
+}
+
+.agent-list .agent-avatar {
+  color: var(--hy-fg);
+  font-size: 13px;
 }
 
 .agent-editor,
@@ -12389,6 +12435,37 @@ button.activity-item {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.agent-profile-editor {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.agent-profile-editor .agent-avatar {
+  width: 64px;
+  height: 64px;
+  font-size: 22px;
+}
+
+.agent-profile-fields {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.agent-avatar-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.agent-avatar-input-row button {
+  min-height: 38px;
+  white-space: nowrap;
 }
 
 .agent-backend-section {
@@ -12519,9 +12596,27 @@ button.activity-item {
   line-height: 1.45;
 }
 
+.agent-inline-note.warn {
+  border-color: oklch(78% 0.14 80 / 0.3);
+  background: oklch(78% 0.14 80 / 0.08);
+  color: oklch(86% 0.11 76);
+}
+
 .agent-textarea {
   min-height: 130px;
   resize: vertical;
+  line-height: 1.5;
+}
+
+.agent-textarea.compact {
+  min-height: 96px;
+}
+
+.agent-field-help,
+.agent-section-help {
+  margin: 0;
+  color: var(--hy-faint);
+  font-size: 11px;
   line-height: 1.5;
 }
 
@@ -12648,6 +12743,95 @@ button.activity-item {
   color: var(--hy-fg);
 }
 
+.skill-import-panel {
+  align-content: start;
+}
+
+.skill-import-hints {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.skill-import-hints span {
+  min-height: 34px;
+  padding: 9px 10px;
+  border: 1px solid oklch(66% 0.12 188 / 0.24);
+  border-radius: 8px;
+  background: oklch(66% 0.12 188 / 0.07);
+  color: var(--hy-subtle);
+  font-size: 11px;
+}
+
+.skill-drop-zone {
+  display: grid;
+  min-height: 170px;
+  place-items: center;
+  gap: 8px;
+  padding: 22px;
+  border: 1px dashed oklch(66% 0.12 188 / 0.36);
+  border-radius: 8px;
+  background: oklch(66% 0.12 188 / 0.045);
+  text-align: center;
+}
+
+.skill-drop-zone strong {
+  color: var(--hy-fg);
+  font-size: 13px;
+  font-weight: 590;
+}
+
+.skill-drop-zone span {
+  color: var(--hy-faint);
+  font-size: 12px;
+}
+
+.skill-drop-zone button {
+  min-height: 32px;
+  padding: 6px 11px;
+}
+
+.skill-import-textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.skill-import-results {
+  display: grid;
+  gap: 8px;
+}
+
+.skill-import-result {
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.skill-import-result strong {
+  color: var(--hy-subtle);
+  font-size: 12px;
+}
+
+.skill-import-result span,
+.skill-import-result small {
+  overflow: hidden;
+  color: var(--hy-faint);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-import-result.success {
+  border-color: oklch(68% 0.15 155 / 0.28);
+}
+
+.skill-import-result.failed {
+  border-color: oklch(58% 0.19 24 / 0.34);
+}
+
 .skill-card,
 .run-card {
   display: grid;
@@ -12658,9 +12842,88 @@ button.activity-item {
   background: oklch(255 0 0 / 0.025);
 }
 
-.skill-card.mounted {
-  border-color: oklch(68% 0.15 155 / 0.3);
-  background: oklch(68% 0.15 155 / 0.06);
+.skill-card.disabled {
+  opacity: 0.72;
+}
+
+.skill-card-head {
+  align-items: start;
+}
+
+.skill-source-tag {
+  display: inline-flex;
+  width: max-content;
+  margin-top: 5px;
+  padding: 3px 7px;
+  border: 1px solid oklch(66% 0.12 188 / 0.24);
+  border-radius: 999px;
+  background: oklch(66% 0.12 188 / 0.09);
+  color: oklch(78% 0.11 205) !important;
+}
+
+.skill-card-path {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.skill-card-path span {
+  color: var(--hy-faint);
+  font-size: 11px;
+}
+
+.skill-card-path code {
+  overflow: hidden;
+  color: var(--hy-subtle);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-enable-switch {
+  display: inline-flex !important;
+  position: relative;
+  width: 36px;
+  height: 22px;
+  min-width: 36px;
+  cursor: pointer;
+}
+
+.skill-enable-switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.skill-enable-switch span {
+  display: block;
+  width: 36px;
+  height: 22px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  background: oklch(255 0 0 / 0.08);
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.skill-enable-switch span::after {
+  display: block;
+  width: 16px;
+  height: 16px;
+  margin: 2px;
+  border-radius: 50%;
+  background: var(--hy-muted);
+  content: "";
+  transition: transform 160ms ease, background 160ms ease;
+}
+
+.skill-enable-switch.active span {
+  border-color: oklch(68% 0.15 155 / 0.36);
+  background: oklch(68% 0.15 155 / 0.16);
+}
+
+.skill-enable-switch.active span::after {
+  transform: translateX(14px);
+  background: oklch(82% 0.13 155);
 }
 
 .skill-card p,
@@ -12799,6 +13062,11 @@ button.activity-item {
   color: oklch(78% 0.1 188);
 }
 
+.run-status-pill.approval {
+  border-color: oklch(78% 0.14 78 / 0.34);
+  color: oklch(86% 0.12 78);
+}
+
 .run-detail section {
   display: grid;
   gap: 8px;
@@ -12819,6 +13087,19 @@ button.activity-item {
   font-size: 11px;
   line-height: 1.55;
   white-space: pre-wrap;
+}
+
+.run-approval-box {
+  border: 1px solid oklch(78% 0.14 78 / 0.28);
+  border-radius: 8px;
+  padding: 12px;
+  background: oklch(78% 0.14 78 / 0.06);
+}
+
+.run-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .run-detail-meta,
@@ -14006,8 +14287,11 @@ button.activity-item {
   .agent-studio-grid,
   .workflow-studio-grid,
   .agent-form-row,
+  .agent-profile-editor,
+  .agent-avatar-input-row,
   .agent-backend-grid,
   .agent-capability-grid,
+  .skill-import-hints,
   .model-profile-layout,
   .model-provider-layout,
   .model-provider-grid,

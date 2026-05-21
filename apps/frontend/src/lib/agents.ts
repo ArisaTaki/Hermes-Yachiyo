@@ -9,10 +9,12 @@ export type AgentExecutionBackend = 'hermes_profile' | 'yachiyo_profile' | 'exte
 export type AgentSpec = {
   agent_id: string;
   name: string;
+  nickname?: string;
   description?: string;
   avatar_url?: string;
   category?: string;
   instructions?: string;
+  persona_prompt?: string;
   model_mode: AgentModelMode;
   execution_backend?: AgentExecutionBackend;
   model_profile_id?: string;
@@ -38,9 +40,11 @@ export type SkillSpec = {
   name: string;
   description?: string;
   source_path?: string;
+  local_path?: string;
   content_summary?: string;
   skill_markdown?: string;
   asset_paths?: string[];
+  enabled?: boolean;
   created_at?: string;
   updated_at?: string;
 };
@@ -88,6 +92,12 @@ export type RunSpec = {
   result?: string;
   timeline?: Array<Record<string, unknown>>;
   artifacts?: Array<Record<string, unknown>>;
+  pending_approval?: {
+    approval_id?: string;
+    tool?: string;
+    input_preview?: Record<string, unknown> | string;
+    requested_at?: string;
+  };
   created_at?: string;
   updated_at?: string;
   agent_run_id?: string;
@@ -144,6 +154,10 @@ export async function importSkill(sourcePath: string): Promise<SkillSpec> {
   return apiPost('/ui/skills/import', { source_path: sourcePath });
 }
 
+export async function updateSkill(skillId: string, request: Partial<SkillSpec>): Promise<SkillSpec> {
+  return apiPatch(`/ui/skills/${encodeURIComponent(skillId)}`, request);
+}
+
 export async function deleteSkill(skillId: string): Promise<{ ok?: boolean }> {
   return apiDelete(`/ui/skills/${encodeURIComponent(skillId)}`);
 }
@@ -195,4 +209,12 @@ export async function createAgentRun(agentId: string, userGoal: string): Promise
 
 export async function createWorkflowRun(workflowId: string, userGoal: string): Promise<RunSpec> {
   return apiPost('/ui/workflow-runs', { workflow_id: workflowId, user_goal: userGoal });
+}
+
+export async function approveRunApproval(runId: string): Promise<RunSpec> {
+  return apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/approve`, {});
+}
+
+export async function rejectRunApproval(runId: string, reason = ''): Promise<RunSpec> {
+  return apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/reject`, reason ? { reason } : {});
 }
