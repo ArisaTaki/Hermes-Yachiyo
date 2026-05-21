@@ -18,11 +18,23 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 from uuid import uuid4
 
-from apps.shell.model_profiles import get_model_profile_service, openai_compatible_chat, supports_openai_compatible_api
+from apps.shell.model_profiles import (
+    get_model_profile_service,
+    openai_compatible_chat_message,
+    supports_openai_compatible_api,
+)
 
 
 class AgentRuntimeError(RuntimeError):
     """Raised when an Agent Studio operation cannot be completed."""
+
+
+class AgentApprovalRequired(AgentRuntimeError):
+    """Raised internally when a run must pause for user approval."""
+
+    def __init__(self, pending_approval: dict[str, Any]) -> None:
+        self.pending_approval = pending_approval
+        super().__init__(f"等待审批：{pending_approval.get('tool') or 'tool'}")
 
 
 _EXECUTION_BACKENDS = {"hermes_profile", "yachiyo_profile", "external_cli"}
@@ -34,6 +46,16 @@ _KNOWN_AGENT_TOOLS = {
     "artifact.write",
 }
 _HIGH_RISK_AGENT_TOOLS = {"terminal.run", "workspace.write_patch"}
+_TOOL_FUNCTION_NAMES = {
+    "workspace.list": "workspace_list",
+    "workspace.read": "workspace_read",
+    "workspace.write_patch": "workspace_write_patch",
+    "terminal.run": "terminal_run",
+    "artifact.write": "artifact_write",
+}
+_TOOL_NAME_ALIASES = {value: key for key, value in _TOOL_FUNCTION_NAMES.items()}
+_FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
+_UNSET = object()
 
 
 def _now() -> str:
@@ -107,6 +129,55 @@ def _is_within(path: Path, root: Path) -> bool:
 def _read_text(path: Path, limit: int = 200_000) -> str:
     data = path.read_bytes()[:limit]
     return data.decode("utf-8", errors="replace")
+
+
+def _normalize_tool_name(value: Any) -> str:
+    name = str(value or "").strip()
+    return _TOOL_NAME_ALIASES.get(name, name)
+
+
+def _message_content_text(content: Any) -> str:
+    if isinstance(content, dict):
+        nested = _message_content_text(content.get("content"))
+        if nested:
+            return nested
+        reasoning = content.get("reasoning_content")
+        if isinstance(reasoning, str) and reasoning.strip():
+            return reasoning
+        text = content.get("text")
+        return str(text) if text is not None else ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "\n".join(parts)
+    return ""
+
+
+def _tool_input_preview(value: Any, *, limit: int = 1200) -> Any:
+    if isinstance(value, dict):
+        return {str(key): _tool_input_preview(item, limit=limit) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_tool_input_preview(item, limit=limit) for item in value[:20]]
+    text = redact_secrets(value)
+    if len(text) > limit:
+        return f"{text[:limit]}... [truncated]"
+    return text
+
+
+def _public_pending_approval(value: Any) -> dict[str, Any]:
+    raw = value if isinstance(value, dict) else {}
+    if not raw:
+        return {}
+    return {
+        "approval_id": str(raw.get("approval_id") or ""),
+        "tool": str(raw.get("tool") or ""),
+        "input_preview": raw.get("input_preview") or _tool_input_preview(raw.get("input") or {}),
+        "requested_at": str(raw.get("requested_at") or ""),
+    }
 
 
 @dataclass
@@ -202,7 +273,7 @@ class ToolBroker:
         target.write_text(content, encoding="utf-8")
         return {"ok": True, "path": rel, "bytes": len(content.encode("utf-8"))}
 
-    def call(self, name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def call(self, name: str, payload: dict[str, Any], *, approved: bool = False) -> dict[str, Any]:
         if name == "workspace.list":
             return self.workspace_list(str(payload.get("path") or "."))
         if name == "workspace.read":
@@ -211,10 +282,12 @@ class ToolBroker:
             return self.workspace_write_patch(
                 str(payload.get("path") or ""),
                 str(payload.get("content") or payload.get("patch") or ""),
+                approved=approved,
             )
         if name == "terminal.run":
             return self.terminal_run(
                 str(payload.get("command") or ""),
+                approved=approved,
                 timeout_seconds=int(payload.get("timeout_seconds") or 30),
             )
         if name == "artifact.write":
@@ -261,10 +334,12 @@ class AgentRuntimeService:
             CREATE TABLE IF NOT EXISTS agents (
                 agent_id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
+                nickname TEXT NOT NULL DEFAULT '',
                 description TEXT NOT NULL DEFAULT '',
                 avatar_url TEXT NOT NULL DEFAULT '',
                 category TEXT NOT NULL DEFAULT 'custom',
                 instructions TEXT NOT NULL DEFAULT '',
+                persona_prompt TEXT NOT NULL DEFAULT '',
                 model_mode TEXT NOT NULL DEFAULT 'profile',
                 execution_backend TEXT NOT NULL DEFAULT 'yachiyo_profile',
                 model_profile_id TEXT NOT NULL DEFAULT '',
@@ -286,9 +361,11 @@ class AgentRuntimeService:
                 name TEXT NOT NULL,
                 description TEXT NOT NULL DEFAULT '',
                 source_path TEXT NOT NULL DEFAULT '',
+                local_path TEXT NOT NULL DEFAULT '',
                 content_summary TEXT NOT NULL DEFAULT '',
                 skill_markdown TEXT NOT NULL,
                 asset_paths_json TEXT NOT NULL DEFAULT '[]',
+                enabled INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -324,6 +401,7 @@ class AgentRuntimeService:
                 result TEXT NOT NULL DEFAULT '',
                 timeline_json TEXT NOT NULL DEFAULT '[]',
                 artifacts_json TEXT NOT NULL DEFAULT '[]',
+                pending_approval_json TEXT NOT NULL DEFAULT '{}',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -343,15 +421,26 @@ class AgentRuntimeService:
 
     def _ensure_runtime_columns(self) -> None:
         columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(agents)").fetchall()}
+        if "nickname" not in columns:
+            self._conn.execute("ALTER TABLE agents ADD COLUMN nickname TEXT NOT NULL DEFAULT ''")
+        if "persona_prompt" not in columns:
+            self._conn.execute("ALTER TABLE agents ADD COLUMN persona_prompt TEXT NOT NULL DEFAULT ''")
         if "execution_backend" not in columns:
             self._conn.execute("ALTER TABLE agents ADD COLUMN execution_backend TEXT NOT NULL DEFAULT 'yachiyo_profile'")
         if "model_profile_id" not in columns:
             self._conn.execute("ALTER TABLE agents ADD COLUMN model_profile_id TEXT NOT NULL DEFAULT ''")
         if "vision_model_profile_id" not in columns:
             self._conn.execute("ALTER TABLE agents ADD COLUMN vision_model_profile_id TEXT NOT NULL DEFAULT ''")
+        skill_columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(skills)").fetchall()}
+        if "local_path" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN local_path TEXT NOT NULL DEFAULT ''")
+        if "enabled" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
         run_columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(runs)").fetchall()}
         if "run_group_id" not in run_columns:
             self._conn.execute("ALTER TABLE runs ADD COLUMN run_group_id TEXT NOT NULL DEFAULT ''")
+        if "pending_approval_json" not in run_columns:
+            self._conn.execute("ALTER TABLE runs ADD COLUMN pending_approval_json TEXT NOT NULL DEFAULT '{}'")
 
     def _seed_templates(self) -> None:
         count = self._conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
@@ -490,6 +579,66 @@ class AgentRuntimeService:
     def _default_workspace_policy() -> dict[str, Any]:
         return {"default_workdir": "", "readable_scopes": ["."], "writable_scopes": []}
 
+    @staticmethod
+    def _tool_schemas(allowed_tools: list[str]) -> list[dict[str, Any]]:
+        specs: dict[str, dict[str, Any]] = {
+            "workspace.list": {
+                "description": "List entries in an allowed workspace directory.",
+                "properties": {"path": {"type": "string", "description": "Relative directory path."}},
+            },
+            "workspace.read": {
+                "description": "Read a UTF-8 text file from the allowed workspace.",
+                "properties": {"path": {"type": "string", "description": "Relative file path."}},
+                "required": ["path"],
+            },
+            "workspace.write_patch": {
+                "description": "Write text content to an allowed workspace path. Requires user approval.",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative file path inside writable scopes."},
+                    "content": {"type": "string", "description": "Full text content to write."},
+                },
+                "required": ["path", "content"],
+            },
+            "terminal.run": {
+                "description": "Run a shell command in the Agent workdir. Requires user approval.",
+                "properties": {
+                    "command": {"type": "string", "description": "Shell command to run."},
+                    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 120},
+                },
+                "required": ["command"],
+            },
+            "artifact.write": {
+                "description": "Write a markdown/text artifact for the current run.",
+                "properties": {
+                    "path": {"type": "string", "description": "Relative artifact path."},
+                    "content": {"type": "string", "description": "Artifact content."},
+                },
+                "required": ["path", "content"],
+            },
+        }
+        schemas = []
+        for tool in allowed_tools:
+            spec = specs.get(tool)
+            function_name = _TOOL_FUNCTION_NAMES.get(tool)
+            if not spec or not function_name:
+                continue
+            schemas.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": function_name,
+                        "description": spec["description"],
+                        "parameters": {
+                            "type": "object",
+                            "properties": spec.get("properties") or {},
+                            "required": spec.get("required") or [],
+                            "additionalProperties": False,
+                        },
+                    },
+                }
+            )
+        return schemas
+
     def _compile_tool_policy(self, category: str, policy: Any = None) -> dict[str, Any]:
         raw = policy if isinstance(policy, dict) else {}
         default_policy = self._default_tool_policy(category)
@@ -538,10 +687,12 @@ class AgentRuntimeService:
         return {
             "agent_id": row["agent_id"],
             "name": row["name"],
+            "nickname": row["nickname"] or row["name"],
             "description": row["description"],
             "avatar_url": row["avatar_url"],
             "category": row["category"],
             "instructions": row["instructions"],
+            "persona_prompt": row["persona_prompt"],
             "model_mode": row["model_mode"],
             "execution_backend": _normalize_execution_backend(row["execution_backend"], model_mode=row["model_mode"]),
             "model_profile_id": row["model_profile_id"],
@@ -577,9 +728,11 @@ class AgentRuntimeService:
             "name": row["name"],
             "description": row["description"],
             "source_path": row["source_path"],
+            "local_path": row["local_path"] or str(self.skills_dir / row["skill_id"]),
             "content_summary": row["content_summary"],
             "skill_markdown": row["skill_markdown"],
             "asset_paths": _json_load(row["asset_paths_json"], []),
+            "enabled": bool(row["enabled"]),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
@@ -609,6 +762,7 @@ class AgentRuntimeService:
             "result": row["result"],
             "timeline": _json_load(row["timeline_json"], []),
             "artifacts": _json_load(row["artifacts_json"], []),
+            "pending_approval": _public_pending_approval(_json_load(row["pending_approval_json"], {})),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
@@ -714,19 +868,21 @@ class AgentRuntimeService:
         self._conn.execute(
             """
             INSERT INTO agents (
-                agent_id, name, description, avatar_url, category, instructions,
+                agent_id, name, nickname, description, avatar_url, category, instructions, persona_prompt,
                 model_mode, execution_backend, model_profile_id, vision_model_profile_id, model_provider, model_base_url, model_name, model_api_key,
                 tool_policy_json, workspace_policy_json, skill_ids_json, output_contract,
                 enabled, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 agent_id,
                 name,
+                str(payload.get("nickname") or name),
                 str(payload.get("description") or ""),
                 str(payload.get("avatar_url") or ""),
                 category,
                 str(payload.get("instructions") or ""),
+                str(payload.get("persona_prompt") or ""),
                 model_mode,
                 execution_backend,
                 str(payload.get("model_profile_id") or ""),
@@ -768,7 +924,7 @@ class AgentRuntimeService:
         self._conn.execute(
             """
             UPDATE agents
-               SET name=?, description=?, avatar_url=?, category=?, instructions=?,
+               SET name=?, nickname=?, description=?, avatar_url=?, category=?, instructions=?, persona_prompt=?,
                    model_mode=?, execution_backend=?, model_profile_id=?, vision_model_profile_id=?, model_provider=?, model_base_url=?, model_name=?, model_api_key=?,
                    tool_policy_json=?, workspace_policy_json=?, skill_ids_json=?, output_contract=?,
                    enabled=?, updated_at=?
@@ -776,10 +932,12 @@ class AgentRuntimeService:
             """,
             (
                 str(next_agent.get("name") or ""),
+                str(next_agent.get("nickname") or next_agent.get("name") or ""),
                 str(next_agent.get("description") or ""),
                 str(next_agent.get("avatar_url") or ""),
                 category,
                 str(next_agent.get("instructions") or ""),
+                str(next_agent.get("persona_prompt") or ""),
                 model_mode,
                 execution_backend,
                 str(next_agent.get("model_profile_id") or ""),
@@ -807,7 +965,9 @@ class AgentRuntimeService:
 
     def attach_skill(self, agent_id: str, skill_id: str) -> dict[str, Any]:
         agent = self.get_agent(agent_id)
-        self.get_skill(skill_id)
+        skill = self.get_skill(skill_id)
+        if not skill.get("enabled", True):
+            raise AgentRuntimeError("Skill 已停用，不能挂载")
         skill_ids = list(dict.fromkeys([*agent.get("skill_ids", []), skill_id]))
         return self.update_agent(agent_id, {"skill_ids": skill_ids})
 
@@ -869,21 +1029,39 @@ class AgentRuntimeService:
         self._conn.execute(
             """
             INSERT INTO skills (
-                skill_id, name, description, source_path, content_summary,
-                skill_markdown, asset_paths_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                skill_id, name, description, source_path, local_path, content_summary,
+                skill_markdown, asset_paths_json, enabled, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 skill_id,
                 name,
                 description,
                 f"local:{source.name}",
+                str(target),
                 summary,
                 markdown,
                 _json_dump(asset_paths),
+                1,
                 now,
                 now,
             ),
+        )
+        self._conn.commit()
+        return self.get_skill(skill_id)
+
+    def update_skill(self, skill_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        current = self.get_skill(skill_id)
+        if "enabled" not in payload:
+            return current
+        enabled = payload.get("enabled")
+        self._conn.execute(
+            """
+            UPDATE skills
+               SET enabled=?, updated_at=?
+             WHERE skill_id=?
+            """,
+            (1 if enabled is not False else 0, _now(), skill_id),
         )
         self._conn.commit()
         return self.get_skill(skill_id)
@@ -1089,6 +1267,17 @@ class AgentRuntimeService:
             raise KeyError(run_id)
         return self._row_to_run(row)
 
+    def _pending_approval_json(self, run_id: str) -> str:
+        self._ensure_row_factory()
+        row = self._conn.execute("SELECT pending_approval_json FROM runs WHERE run_id=?", (run_id,)).fetchone()
+        if row is None:
+            raise KeyError(run_id)
+        return str(row["pending_approval_json"] or "{}")
+
+    def _pending_approval_private(self, run_id: str) -> dict[str, Any]:
+        pending = _json_load(self._pending_approval_json(run_id), {})
+        return pending if isinstance(pending, dict) else {}
+
     def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
         run = self.get_run(run_id)
         rel = _safe_rel_path(artifact_path)
@@ -1175,10 +1364,10 @@ class AgentRuntimeService:
             """
             INSERT INTO runs (
                 run_id, run_group_id, kind, runnable_id, status, user_goal, result,
-                timeline_json, artifacts_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                timeline_json, artifacts_json, pending_approval_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (run_id, run_group_id, kind, runnable_id, "running", user_goal, "", "[]", "[]", now, now),
+            (run_id, run_group_id, kind, runnable_id, "running", user_goal, "", "[]", "[]", "{}", now, now),
         )
         self._conn.commit()
         self._append_run_to_group(run_group_id, run_id)
@@ -1192,12 +1381,17 @@ class AgentRuntimeService:
         result: str | None = None,
         timeline: list[dict[str, Any]] | None = None,
         artifacts: list[dict[str, Any]] | None = None,
+        pending_approval: dict[str, Any] | None | object = _UNSET,
     ) -> dict[str, Any]:
         current = self.get_run(run_id)
+        if pending_approval is _UNSET:
+            pending_approval_json = self._pending_approval_json(run_id)
+        else:
+            pending_approval_json = _json_dump(pending_approval or {})
         self._conn.execute(
             """
             UPDATE runs
-               SET status=?, result=?, timeline_json=?, artifacts_json=?, updated_at=?
+               SET status=?, result=?, timeline_json=?, artifacts_json=?, pending_approval_json=?, updated_at=?
              WHERE run_id=?
             """,
             (
@@ -1205,6 +1399,7 @@ class AgentRuntimeService:
                 result if result is not None else current["result"],
                 _json_dump(timeline if timeline is not None else current["timeline"]),
                 _json_dump(artifacts if artifacts is not None else current["artifacts"]),
+                pending_approval_json,
                 _now(),
                 run_id,
             ),
@@ -1220,9 +1415,12 @@ class AgentRuntimeService:
         skills = []
         for skill_id in skill_ids:
             try:
-                skills.append(self.get_skill(skill_id))
+                skill = self.get_skill(skill_id)
             except KeyError as exc:
                 raise AgentRuntimeError(f"Agent 挂载的 Skill 不存在：{skill_id}") from exc
+            if not skill.get("enabled", True):
+                raise AgentRuntimeError(f"Agent 挂载的 Skill 已停用：{skill.get('name') or skill_id}")
+            skills.append(skill)
         return skills
 
     def _compile_agent_runtime(self, agent: dict[str, Any]) -> dict[str, Any]:
@@ -1257,8 +1455,9 @@ class AgentRuntimeService:
             )
         return "\n\n".join(
             [
-                f"# Agent\nName: {agent['name']}\nCategory: {agent.get('category') or 'custom'}",
-                f"# Instructions\n{agent.get('instructions') or 'No extra instructions.'}",
+                f"# Agent\nName: {agent['name']}\nNickname: {agent.get('nickname') or agent['name']}\nCategory: {agent.get('category') or 'custom'}",
+                f"# Functional Instructions\n{agent.get('instructions') or 'No extra functional instructions.'}",
+                f"# Persona Prompt\n{agent.get('persona_prompt') or 'No persona override.'}",
                 f"# Mounted Skills\n{chr(10).join(skill_blocks) if skill_blocks else 'No mounted skills.'}",
                 "# Runtime\n"
                 "Runtime: Yachiyo Agent Runtime\n"
@@ -1324,12 +1523,42 @@ class AgentRuntimeService:
             artifact = broker.artifact_write("agent-context.md", context)
             artifacts.append({"kind": "context", **artifact})
             timeline.append(self._timeline("agent.artifact.write", "agent-context.md", artifact=artifact))
-            result = self._run_custom_api_agent(agent, context, broker, timeline)
+            result = self._run_custom_api_agent(agent, context, broker, timeline, artifacts)
             timeline.append(self._timeline("agent.run.completed", "Agent run completed"))
-            return self._update_run(run_id, status="completed", result=result, timeline=timeline, artifacts=artifacts)
+            return self._update_run(
+                run_id,
+                status="completed",
+                result=result,
+                timeline=timeline,
+                artifacts=artifacts,
+                pending_approval=None,
+            )
+        except AgentApprovalRequired as exc:
+            timeline.append(
+                self._timeline(
+                    "agent.tool.approval_required",
+                    str(exc.pending_approval.get("tool") or ""),
+                    pending_approval=_public_pending_approval(exc.pending_approval),
+                )
+            )
+            return self._update_run(
+                run_id,
+                status="approval_required",
+                result=f"等待审批：{exc.pending_approval.get('tool') or 'tool'}",
+                timeline=timeline,
+                artifacts=artifacts,
+                pending_approval=exc.pending_approval,
+            )
         except Exception as exc:
             timeline.append(self._timeline("agent.run.failed", str(exc)))
-            return self._update_run(run_id, status="failed", result=str(exc), timeline=timeline, artifacts=artifacts)
+            return self._update_run(
+                run_id,
+                status="failed",
+                result=str(exc),
+                timeline=timeline,
+                artifacts=artifacts,
+                pending_approval=None,
+            )
 
     def _run_custom_api_agent(
         self,
@@ -1337,6 +1566,10 @@ class AgentRuntimeService:
         context: str,
         broker: ToolBroker,
         timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        *,
+        messages: list[dict[str, Any]] | None = None,
+        start_iteration: int = 0,
     ) -> str:
         model_config = self._agent_model_config_private(agent)
         base_url = str(model_config.get("base_url") or "").rstrip("/")
@@ -1345,27 +1578,172 @@ class AgentRuntimeService:
         if not base_url or not model or not api_key:
             raise AgentRuntimeError("Agent 模型 Profile 缺少 base_url、model 或 API Key")
         allowed_tools = (agent.get("tool_policy") or {}).get("allowed_tools") or []
-        prompt = (
-            "You are running inside Hermes-Yachiyo Agent Runtime. "
-            "Return concise final output. If a controlled tool is needed, respond as JSON "
-            "{\"action\":\"tool\",\"tool\":\"workspace.list\",\"input\":{}}; otherwise respond normally.\n\n"
-            f"Allowed tools: {', '.join(allowed_tools)}\n\n{context}"
-        )
-        messages: list[dict[str, str]] = [{"role": "user", "content": prompt}]
-        for _ in range(6):
-            content = openai_compatible_chat(base_url, model, api_key, messages)
-            timeline.append(self._timeline("agent.model.response", content[:500]))
-            tool_request = self._parse_tool_request(content)
-            if not tool_request:
+        if messages is None:
+            prompt = (
+                "You are running inside Hermes-Yachiyo Agent Runtime. "
+                "Return concise final output. Prefer native tool_calls when available. "
+                "If the model endpoint does not support tool_calls and a controlled tool is needed, respond as JSON "
+                "{\"action\":\"tool\",\"tool\":\"workspace.list\",\"input\":{}}; otherwise respond normally. "
+                "Request at most one high-risk tool per turn.\n\n"
+                f"Allowed tools: {', '.join(allowed_tools)}\n\n{context}"
+            )
+            messages = [{"role": "user", "content": prompt}]
+        tools = self._tool_schemas(allowed_tools)
+        for iteration in range(max(0, int(start_iteration or 0)), 6):
+            message = openai_compatible_chat_message(base_url, model, api_key, messages, tools=tools)
+            content = _message_content_text(message)
+            tool_requests = self._tool_requests_from_message(message, content)
+            detail = content[:500] if content else ", ".join(request["tool"] for request in tool_requests)[:500]
+            timeline.append(self._timeline("agent.model.response", detail))
+            if not tool_requests:
                 return content
-            tool_name = str(tool_request.get("tool") or "")
-            if tool_name not in allowed_tools:
-                raise AgentRuntimeError(f"Agent 试图调用未授权工具：{tool_name}")
-            tool_result = broker.call(tool_name, tool_request.get("input") or {})
-            timeline.append(self._timeline("agent.tool.call", tool_name, result=tool_result))
-            messages.append({"role": "assistant", "content": content})
-            messages.append({"role": "user", "content": f"Tool result for {tool_name}: {json.dumps(tool_result, ensure_ascii=False)}"})
+
+            if tool_requests[0].get("protocol") == "tool_calls":
+                messages.append(self._assistant_message_for_history(message))
+            else:
+                messages.append({"role": "assistant", "content": content})
+            self._run_tool_requests(
+                tool_requests,
+                allowed_tools,
+                broker,
+                messages,
+                timeline,
+                artifacts,
+                next_iteration=iteration + 1,
+            )
         raise AgentRuntimeError("custom_api Agent 工具循环超过上限")
+
+    @staticmethod
+    def _assistant_message_for_history(message: dict[str, Any]) -> dict[str, Any]:
+        history = {"role": "assistant", "content": message.get("content") or ""}
+        tool_calls = message.get("tool_calls")
+        if isinstance(tool_calls, list):
+            history["tool_calls"] = tool_calls
+        return history
+
+    @staticmethod
+    def _append_tool_result_message(messages: list[dict[str, Any]], tool_request: dict[str, Any], tool_result: dict[str, Any]) -> None:
+        content = json.dumps(tool_result, ensure_ascii=False)
+        if tool_request.get("protocol") == "tool_calls":
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": str(tool_request.get("tool_call_id") or ""),
+                    "content": content,
+                }
+            )
+            return
+        messages.append({"role": "user", "content": f"Tool result for {tool_request['tool']}: {content}"})
+
+    def _run_tool_requests(
+        self,
+        tool_requests: list[dict[str, Any]],
+        allowed_tools: list[str],
+        broker: ToolBroker,
+        messages: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        *,
+        next_iteration: int,
+    ) -> None:
+        for index, tool_request in enumerate(tool_requests):
+            tool_result = self._call_agent_tool(tool_request, allowed_tools, broker, timeline, artifacts=artifacts)
+            if tool_result.get("approval_required"):
+                raise AgentApprovalRequired(
+                    self._make_pending_approval(
+                        tool_request,
+                        messages=messages,
+                        next_iteration=next_iteration,
+                        remaining_tool_requests=tool_requests[index + 1 :],
+                    )
+                )
+            self._append_tool_result_message(messages, tool_request, tool_result)
+
+    def _call_agent_tool(
+        self,
+        tool_request: dict[str, Any],
+        allowed_tools: list[str],
+        broker: ToolBroker,
+        timeline: list[dict[str, Any]],
+        *,
+        artifacts: list[dict[str, Any]] | None = None,
+        approved: bool = False,
+    ) -> dict[str, Any]:
+        tool_name = _normalize_tool_name(tool_request.get("tool"))
+        if tool_name not in allowed_tools:
+            timeline.append(self._timeline("agent.tool.denied", tool_name))
+            raise AgentRuntimeError(f"Agent 试图调用未授权工具：{tool_name}")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        tool_result = broker.call(tool_name, payload, approved=approved)
+        timeline.append(self._timeline("agent.tool.call", tool_name, result=tool_result))
+        if artifacts is not None and tool_name == "artifact.write" and tool_result.get("ok"):
+            artifact = {"kind": "tool_artifact", **tool_result}
+            if artifact not in artifacts:
+                artifacts.append(artifact)
+        return tool_result
+
+    @staticmethod
+    def _make_pending_approval(
+        tool_request: dict[str, Any],
+        *,
+        messages: list[dict[str, Any]],
+        next_iteration: int,
+        remaining_tool_requests: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        return {
+            "approval_id": f"approval_{uuid4().hex[:12]}",
+            "tool": _normalize_tool_name(tool_request.get("tool")),
+            "input": raw_input,
+            "input_preview": _tool_input_preview(raw_input),
+            "requested_at": _now(),
+            "messages": messages,
+            "tool_request": tool_request,
+            "remaining_tool_requests": remaining_tool_requests,
+            "next_iteration": max(0, min(int(next_iteration or 0), 6)),
+        }
+
+    def _tool_requests_from_message(self, message: dict[str, Any], content: str) -> list[dict[str, Any]]:
+        native = self._parse_tool_calls(message.get("tool_calls"))
+        if native:
+            return native
+        fallback = self._parse_tool_request(content)
+        return [fallback] if fallback else []
+
+    @staticmethod
+    def _parse_tool_calls(tool_calls: Any) -> list[dict[str, Any]]:
+        if not isinstance(tool_calls, list):
+            return []
+        requests = []
+        for index, call in enumerate(tool_calls):
+            if not isinstance(call, dict):
+                continue
+            function = call.get("function") if isinstance(call.get("function"), dict) else {}
+            function_name = str(function.get("name") or "").strip()
+            if not function_name:
+                continue
+            raw_arguments = function.get("arguments") or "{}"
+            if isinstance(raw_arguments, str):
+                try:
+                    arguments = json.loads(raw_arguments or "{}")
+                except json.JSONDecodeError as exc:
+                    raise AgentRuntimeError(f"工具参数不是合法 JSON：{function_name}") from exc
+            elif isinstance(raw_arguments, dict):
+                arguments = raw_arguments
+            else:
+                raise AgentRuntimeError(f"工具参数格式无效：{function_name}")
+            if not isinstance(arguments, dict):
+                raise AgentRuntimeError(f"工具参数必须是对象：{function_name}")
+            requests.append(
+                {
+                    "protocol": "tool_calls",
+                    "tool": _normalize_tool_name(function_name),
+                    "input": arguments,
+                    "tool_call_id": str(call.get("id") or f"call_{index}"),
+                    "function_name": function_name,
+                }
+            )
+        return requests
 
     def _agent_model_config_private(self, agent: dict[str, Any]) -> dict[str, Any]:
         profile_id = str(agent.get("model_profile_id") or "").strip()
@@ -1403,6 +1781,10 @@ class AgentRuntimeService:
         except json.JSONDecodeError:
             return None
         if payload.get("action") == "tool" and payload.get("tool"):
+            payload["protocol"] = "json_fallback"
+            payload["tool"] = _normalize_tool_name(payload.get("tool"))
+            if not isinstance(payload.get("input"), dict):
+                payload["input"] = {}
             return payload
         return None
 
@@ -1522,6 +1904,13 @@ class AgentRuntimeService:
                     child = self._execute_agent_run(child["run_id"], agent, context, upstream=context)
                     context = child["result"]
                     timeline.append(self._timeline("workflow.node.agent", label, child_run_id=child["run_id"], status=child["status"]))
+                    if child["status"] == "approval_required":
+                        timeline.append(self._timeline("workflow.run.approval_required", label, child_run_id=child["run_id"]))
+                        result = self._update_run(run["run_id"], status="approval_required", result=context, timeline=timeline, artifacts=artifacts)
+                        if root_group:
+                            self._update_run_group(run_group_id, status="approval_required", summary=context)
+                            result = self.get_run(result["run_id"])
+                        return result
                     continue
                 if kind == "approval":
                     timeline.append(self._timeline("workflow.node.approval", f"{label} checkpoint recorded"))
@@ -1560,10 +1949,120 @@ class AgentRuntimeService:
 
     def cancel_run(self, run_id: str) -> dict[str, Any]:
         run = self.get_run(run_id)
-        if run["status"] in {"completed", "failed", "cancelled"}:
+        if run["status"] in _FINAL_RUN_STATUSES:
             return run
         timeline = [*run["timeline"], self._timeline("run.cancelled", "Run cancelled")]
-        return self._update_run(run_id, status="cancelled", timeline=timeline)
+        result = self._update_run(run_id, status="cancelled", timeline=timeline, pending_approval=None)
+        self._update_agent_run_group_if_root(result)
+        return result
+
+    def approve_run_approval(self, run_id: str) -> dict[str, Any]:
+        run = self.get_run(run_id)
+        if run["status"] != "approval_required":
+            raise AgentRuntimeError("Run 当前不在待审批状态")
+        if run["kind"] != "agent_run":
+            raise AgentRuntimeError("当前只支持恢复 Agent Run 的工具审批")
+        pending = self._pending_approval_private(run_id)
+        if not pending:
+            raise AgentRuntimeError("Run 缺少待审批工具信息")
+        agent = self._get_agent_private(str(run["runnable_id"]))
+        runtime = self._compile_agent_runtime(agent)
+        broker = ToolBroker(runtime["workspace_policy"], self.agent_artifacts_dir / run_id)
+        allowed_tools = runtime["tool_policy"].get("allowed_tools") or []
+        timeline = [*run["timeline"]]
+        artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
+        messages = pending.get("messages") if isinstance(pending.get("messages"), list) else []
+        tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
+        if not messages or not tool_request:
+            raise AgentRuntimeError("Run 待审批上下文不完整，无法恢复")
+        try:
+            tool_result = self._call_agent_tool(tool_request, allowed_tools, broker, timeline, artifacts=artifacts, approved=True)
+            self._append_tool_result_message(messages, tool_request, tool_result)
+            remaining = pending.get("remaining_tool_requests")
+            remaining_requests = [item for item in remaining if isinstance(item, dict)] if isinstance(remaining, list) else []
+            self._run_tool_requests(
+                remaining_requests,
+                allowed_tools,
+                broker,
+                messages,
+                timeline,
+                artifacts,
+                next_iteration=int(pending.get("next_iteration") or 0),
+            )
+            result_text = self._run_custom_api_agent(
+                agent,
+                "",
+                broker,
+                timeline,
+                artifacts,
+                messages=messages,
+                start_iteration=int(pending.get("next_iteration") or 0),
+            )
+            timeline.append(self._timeline("agent.run.completed", "Agent run completed"))
+            result = self._update_run(
+                run_id,
+                status="completed",
+                result=result_text,
+                timeline=timeline,
+                artifacts=artifacts,
+                pending_approval=None,
+            )
+        except AgentApprovalRequired as exc:
+            timeline.append(
+                self._timeline(
+                    "agent.tool.approval_required",
+                    str(exc.pending_approval.get("tool") or ""),
+                    pending_approval=_public_pending_approval(exc.pending_approval),
+                )
+            )
+            result = self._update_run(
+                run_id,
+                status="approval_required",
+                result=f"等待审批：{exc.pending_approval.get('tool') or 'tool'}",
+                timeline=timeline,
+                artifacts=artifacts,
+                pending_approval=exc.pending_approval,
+            )
+        except Exception as exc:
+            timeline.append(self._timeline("agent.run.failed", str(exc)))
+            result = self._update_run(
+                run_id,
+                status="failed",
+                result=str(exc),
+                timeline=timeline,
+                artifacts=artifacts,
+                pending_approval=None,
+            )
+        self._update_agent_run_group_if_root(result)
+        return result
+
+    def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
+        run = self.get_run(run_id)
+        if run["status"] != "approval_required":
+            raise AgentRuntimeError("Run 当前不在待审批状态")
+        detail = redact_secrets(reason).strip() or "Tool approval rejected"
+        timeline = [*run["timeline"], self._timeline("agent.tool.approval_rejected", detail)]
+        result = self._update_run(
+            run_id,
+            status="cancelled",
+            result=f"工具审批已拒绝：{detail}",
+            timeline=timeline,
+            pending_approval=None,
+        )
+        self._update_agent_run_group_if_root(result)
+        return result
+
+    def _update_agent_run_group_if_root(self, run: dict[str, Any]) -> None:
+        run_group_id = str(run.get("run_group_id") or "")
+        if not run_group_id:
+            return
+        try:
+            group = self.get_run_group(run_group_id)
+        except KeyError:
+            return
+        child_run_ids = [str(item) for item in group.get("child_run_ids") or [] if str(item)]
+        if group.get("source") in {"agent", "delegation"} or child_run_ids == [run.get("run_id")]:
+            self._update_run_group(run_group_id, status=str(run.get("status") or ""), summary=str(run.get("result") or ""))
 
     def list_runnables(self) -> dict[str, Any]:
         agents = self.list_agents()["agents"]

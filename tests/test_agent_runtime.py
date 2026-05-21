@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import zipfile
 
@@ -66,6 +67,8 @@ def test_agent_crud_and_api_key_redaction(tmp_path):
         agent = service.create_agent(
             {
                 "name": "Private Model",
+                "nickname": "Private",
+                "persona_prompt": "Keep a concise operator tone.",
                 "model_mode": "custom_api",
                 "model_config": {
                     "base_url": "https://api.example.test/v1",
@@ -77,15 +80,19 @@ def test_agent_crud_and_api_key_redaction(tmp_path):
 
         assert agent["model_config"]["api_key_configured"] is True
         assert "api_key" not in agent["model_config"]
+        assert agent["nickname"] == "Private"
+        assert agent["persona_prompt"] == "Keep a concise operator tone."
 
         updated = service.update_agent(
             agent["agent_id"],
             {
                 "description": "updated",
+                "nickname": "Private Ops",
                 "model_config": {"base_url": "https://gateway.example.test/v1", "api_key": ""},
             },
         )
         assert updated["description"] == "updated"
+        assert updated["nickname"] == "Private Ops"
         assert updated["model_config"]["base_url"] == "https://gateway.example.test/v1"
         assert updated["model_config"]["api_key_configured"] is True
     finally:
@@ -114,7 +121,7 @@ def test_import_skill_directory_and_mount_to_agent(tmp_path, monkeypatch):
     (source / "assets").mkdir(parents=True)
     (source / "SKILL.md").write_text("# Demo Skill\n\nUseful instruction.", encoding="utf-8")
     (source / "assets" / "sample.txt").write_text("asset", encoding="utf-8")
-    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "Demo Skill used")
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "Demo Skill used"})
     try:
         skill = service.import_skill(str(source))
         agent = service.create_agent(
@@ -132,6 +139,8 @@ def test_import_skill_directory_and_mount_to_agent(tmp_path, monkeypatch):
 
         assert skill["name"] == "Demo Skill"
         assert skill["source_path"] == "local:demo-skill"
+        assert skill["local_path"].endswith(skill["skill_id"])
+        assert skill["enabled"] is True
         assert skill["asset_paths"] == ["assets/sample.txt"]
         assert mounted["skill_ids"] == [skill["skill_id"]]
         run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Use the skill"})
@@ -143,8 +152,45 @@ def test_import_skill_directory_and_mount_to_agent(tmp_path, monkeypatch):
         group = service.get_run_group(run["run_group_id"])
         assert group["source"] == "agent"
         assert group["child_run_ids"] == [run["run_id"]]
+        disabled = service.update_skill(skill["skill_id"], {"enabled": False})
+        assert disabled["enabled"] is False
+        with pytest.raises(AgentRuntimeError, match="已停用"):
+            service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Use disabled skill"})
+        other_agent = service.create_agent({"name": "Other Skill Agent"})
+        with pytest.raises(AgentRuntimeError, match="已停用"):
+            service.attach_skill(other_agent["agent_id"], skill["skill_id"])
         with pytest.raises(AgentRuntimeError):
             service.read_run_artifact(run["run_id"], "../escape.md")
+    finally:
+        service.close()
+
+
+def test_agent_context_includes_nickname_and_persona_prompt(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "ok"})
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Context Agent",
+                "nickname": "Ctx",
+                "instructions": "Always inspect the local brief.",
+                "persona_prompt": "Speak like a careful reviewer.",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Check context"})
+        artifact = service.read_run_artifact(run["run_id"], "agent-context.md")
+
+        assert "Nickname: Ctx" in artifact["content"]
+        assert "# Functional Instructions" in artifact["content"]
+        assert "Always inspect the local brief." in artifact["content"]
+        assert "# Persona Prompt" in artifact["content"]
+        assert "Speak like a careful reviewer." in artifact["content"]
     finally:
         service.close()
 
@@ -203,7 +249,7 @@ def test_workflow_validation_rejects_branch_and_cycle(tmp_path):
 
 def test_linear_workflow_executes_agent_nodes_in_order(tmp_path, monkeypatch):
     service = make_service(tmp_path)
-    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "Profile result")
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "Profile result"})
     try:
         model_config = {
             "base_url": "https://api.example.test/v1",
@@ -259,7 +305,7 @@ def test_agent_execution_backend_legacy_values_normalize_to_yachiyo(tmp_path):
 
 def test_delegation_targets_and_delegate_run(tmp_path, monkeypatch):
     service = make_service(tmp_path)
-    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "Delegated result")
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "Delegated result"})
     try:
         agent = service.create_agent(
             {
@@ -286,6 +332,227 @@ def test_delegation_targets_and_delegate_run(tmp_path, monkeypatch):
         service.close()
 
 
+def test_agent_run_executes_native_tool_call_and_continues(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("hello native tools", encoding="utf-8")
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert any((tool.get("function") or {}).get("name") == "workspace_read" for tool in tools or [])
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_read",
+                        "type": "function",
+                        "function": {"name": "workspace_read", "arguments": json.dumps({"path": "README.md"})},
+                    }
+                ],
+            }
+        assert messages[-1]["role"] == "tool"
+        assert "hello native tools" in messages[-1]["content"]
+        return {"content": "Read complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Reader",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.read"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Read README"})
+
+        assert run["status"] == "completed"
+        assert run["result"] == "Read complete"
+        assert any(event["event"] == "agent.tool.call" and event["detail"] == "workspace.read" for event in run["timeline"])
+    finally:
+        service.close()
+
+
+def test_agent_run_json_fallback_writes_artifact(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {"content": json.dumps({"action": "tool", "tool": "artifact.write", "input": {"path": "notes.md", "content": "hello"}})}
+        assert "Tool result for artifact.write" in messages[-1]["content"]
+        return {"content": "Artifact done"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Artifact Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["artifact.write"]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Write artifact"})
+
+        assert run["status"] == "completed"
+        assert any(artifact.get("path") == "notes.md" for artifact in run["artifacts"])
+        assert service.read_run_artifact(run["run_id"], "notes.md")["content"] == "hello"
+    finally:
+        service.close()
+
+
+def test_agent_run_denies_unallowed_tool(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_terminal",
+                    "type": "function",
+                    "function": {"name": "terminal_run", "arguments": json.dumps({"command": "echo no"})},
+                }
+            ],
+        },
+    )
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Denied Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.read"]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Run command"})
+
+        assert run["status"] == "failed"
+        assert "未授权工具" in run["result"]
+        assert any(event["event"] == "agent.tool.denied" for event in run["timeline"])
+    finally:
+        service.close()
+
+
+def test_agent_run_pauses_for_terminal_approval_and_resumes(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_terminal",
+                        "type": "function",
+                        "function": {"name": "terminal_run", "arguments": json.dumps({"command": "printf approved"})},
+                    }
+                ],
+            }
+        assert messages[-1]["role"] == "tool"
+        assert "approved" in messages[-1]["content"]
+        return {"content": "Command complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Terminal Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Run command"})
+
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"]["tool"] == "terminal.run"
+        assert "messages" not in run["pending_approval"]
+        resumed = service.approve_run_approval(run["run_id"])
+
+        assert resumed["status"] == "completed"
+        assert resumed["result"] == "Command complete"
+        assert service.get_run_group(resumed["run_group_id"])["status"] == "completed"
+    finally:
+        service.close()
+
+
+def test_agent_run_rejects_pending_tool(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: {
+            "content": json.dumps({"action": "tool", "tool": "terminal.run", "input": {"command": "echo blocked"}})
+        },
+    )
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Reject Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Run command"})
+        rejected = service.reject_run_approval(run["run_id"], "not now")
+
+        assert rejected["status"] == "cancelled"
+        assert rejected["pending_approval"] == {}
+        assert "not now" in rejected["result"]
+    finally:
+        service.close()
+
+
+def test_model_payload_approved_flag_does_not_bypass_write_approval(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    (workdir / "src").mkdir(parents=True)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_write",
+                    "type": "function",
+                    "function": {
+                        "name": "workspace_write_patch",
+                        "arguments": json.dumps({"path": "src/out.txt", "content": "bad", "approved": True}),
+                    },
+                }
+            ],
+        },
+    )
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Writer",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.write_patch"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."], "writable_scopes": ["src"]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Write file"})
+
+        assert run["status"] == "approval_required"
+        assert not (workdir / "src" / "out.txt").exists()
+    finally:
+        service.close()
+
+
 def test_tool_broker_blocks_out_of_scope_and_unapproved_terminal(tmp_path):
     workdir = tmp_path / "repo"
     workdir.mkdir()
@@ -304,3 +571,58 @@ def test_tool_broker_blocks_out_of_scope_and_unapproved_terminal(tmp_path):
         broker.workspace_write_patch("../escape.txt", "bad", approved=True)
     assert broker.terminal_run("echo should-not-run")["approval_required"] is True
     assert broker.call("terminal.run", {"command": "echo should-not-run", "approved": True})["approval_required"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_approval_routes_return_404_and_400(tmp_path, monkeypatch):
+    from fastapi import HTTPException
+
+    from apps.bridge.routes import agents as agent_routes
+
+    service = make_service(tmp_path)
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "Done"})
+    try:
+        with pytest.raises(HTTPException) as missing:
+            await agent_routes.approve_run_approval("run_missing")
+        assert missing.value.status_code == 404
+
+        agent = service.create_agent(
+            {
+                "name": "Done Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Finish"})
+        with pytest.raises(HTTPException) as invalid:
+            await agent_routes.approve_run_approval(run["run_id"])
+        assert invalid.value.status_code == 400
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_skill_update_route_toggles_enabled_and_returns_404(tmp_path, monkeypatch):
+    from fastapi import HTTPException
+
+    from apps.bridge.routes import agents as agent_routes
+
+    service = make_service(tmp_path)
+    source = tmp_path / "route-skill"
+    source.mkdir()
+    (source / "SKILL.md").write_text("# Route Skill\n\nRoute import.", encoding="utf-8")
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    try:
+        skill = service.import_skill(str(source))
+        updated = await agent_routes.update_skill(
+            skill["skill_id"],
+            agent_routes.SkillUpdateRequest(enabled=False),
+        )
+        assert updated["enabled"] is False
+
+        with pytest.raises(HTTPException) as missing:
+            await agent_routes.update_skill("missing", agent_routes.SkillUpdateRequest(enabled=True))
+        assert missing.value.status_code == 404
+    finally:
+        service.close()

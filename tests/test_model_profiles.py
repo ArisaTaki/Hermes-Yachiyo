@@ -8,7 +8,7 @@ import sqlite3
 import pytest
 
 from apps.shell.agent_runtime import AgentRuntimeService
-from apps.shell.model_profiles import ModelProfileError, ModelProfileService, openai_compatible_chat
+from apps.shell.model_profiles import ModelProfileError, ModelProfileService, openai_compatible_chat, openai_compatible_chat_message
 
 
 def make_profile_service(tmp_path) -> ModelProfileService:
@@ -406,6 +406,53 @@ def test_openai_compatible_chat_reads_reasoning_content_and_xiaomi_api_key_heade
     assert result == "red, blue"
 
 
+def test_openai_compatible_chat_message_returns_tool_calls(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": "",
+                                "tool_calls": [
+                                    {
+                                        "id": "call_1",
+                                        "type": "function",
+                                        "function": {"name": "workspace_read", "arguments": "{\"path\":\"README.md\"}"},
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        body = json.loads(request.data.decode("utf-8"))
+        assert timeout == 20
+        assert body["tools"][0]["function"]["name"] == "workspace_read"
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    message = openai_compatible_chat_message(
+        "https://api.example.test/v1",
+        "demo-model",
+        "sk-demo",
+        [{"role": "user", "content": "hello"}],
+        tools=[{"type": "function", "function": {"name": "workspace_read", "parameters": {"type": "object"}}}],
+    )
+
+    assert message["tool_calls"][0]["function"]["name"] == "workspace_read"
+
+
 def test_test_and_save_profile_failure_does_not_persist(monkeypatch, tmp_path):
     service = make_profile_service(tmp_path)
     source = service.create_source(
@@ -758,7 +805,7 @@ def test_agent_runtime_uses_model_profile(monkeypatch, tmp_path):
     )
     profile_service._record_test_result(profile["profile_id"], ok=True, message="OK")
     monkeypatch.setattr("apps.shell.agent_runtime.get_model_profile_service", lambda: profile_service)
-    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "Profile result")
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "Profile result"})
     try:
         agent = runtime.create_agent(
             {
@@ -801,7 +848,7 @@ def test_agent_runtime_uses_openai_compatible_provider_source_profile(monkeypatc
     )
     profile_service._record_test_result(profile["profile_id"], ok=True, message="OK")
     monkeypatch.setattr("apps.shell.agent_runtime.get_model_profile_service", lambda: profile_service)
-    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "MiMo result")
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "MiMo result"})
     try:
         agent = runtime.create_agent(
             {

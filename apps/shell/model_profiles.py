@@ -1423,9 +1423,20 @@ def _chat_response_text(payload: dict[str, Any]) -> str:
     return str(text) if text is not None else ""
 
 
-def openai_compatible_chat(base_url: str, model: str, api_key: str, messages: list[dict[str, Any]]) -> str:
+def _openai_compatible_chat_payload(
+    base_url: str,
+    model: str,
+    api_key: str,
+    messages: list[dict[str, Any]],
+    *,
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     url = f"{base_url.rstrip('/')}/chat/completions"
-    body = json.dumps({"model": model, "messages": messages, "temperature": 0.2}).encode("utf-8")
+    payload: dict[str, Any] = {"model": model, "messages": messages, "temperature": 0.2}
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
+    body = json.dumps(payload).encode("utf-8")
     request = urlrequest.Request(
         url,
         data=body,
@@ -1447,6 +1458,31 @@ def openai_compatible_chat(base_url: str, model: str, api_key: str, messages: li
         ) from exc
     except (urlerror.URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise ModelProfileError(f"OpenAI-compatible Profile 调用失败：{exc}") from exc
+    return payload
+
+
+def openai_compatible_chat_message(
+    base_url: str,
+    model: str,
+    api_key: str,
+    messages: list[dict[str, Any]],
+    *,
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    payload = _openai_compatible_chat_payload(base_url, model, api_key, messages, tools=tools)
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return {}
+    first = choices[0] if isinstance(choices[0], dict) else {}
+    message = first.get("message")
+    if isinstance(message, dict):
+        return message
+    text = first.get("text")
+    return {"role": "assistant", "content": str(text) if text is not None else ""}
+
+
+def openai_compatible_chat(base_url: str, model: str, api_key: str, messages: list[dict[str, Any]]) -> str:
+    payload = _openai_compatible_chat_payload(base_url, model, api_key, messages)
     return _chat_response_text(payload)
 
 

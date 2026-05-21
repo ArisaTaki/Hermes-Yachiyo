@@ -18,10 +18,12 @@ class AgentRequest(BaseModel):
 
     agent_id: str | None = Field(default=None, max_length=160)
     name: str | None = Field(default=None, max_length=160)
+    nickname: str | None = Field(default=None, max_length=160)
     description: str | None = Field(default=None, max_length=2000)
-    avatar_url: str | None = Field(default=None, max_length=4000)
+    avatar_url: str | None = Field(default=None, max_length=2_000_000)
     category: str | None = Field(default=None, max_length=80)
     instructions: str | None = Field(default=None, max_length=60000)
+    persona_prompt: str | None = Field(default=None, max_length=60000)
     model_mode: str | None = Field(default=None, max_length=40)
     execution_backend: str | None = Field(default=None, max_length=40)
     model_profile_id: str | None = Field(default=None, max_length=160)
@@ -36,6 +38,10 @@ class AgentRequest(BaseModel):
 
 class SkillImportRequest(BaseModel):
     source_path: str = Field(..., min_length=1, max_length=4000)
+
+
+class SkillUpdateRequest(BaseModel):
+    enabled: bool | None = None
 
 
 class AgentSkillRequest(BaseModel):
@@ -68,6 +74,10 @@ class WorkflowRunRequest(BaseModel):
     source: str | None = Field(default=None, max_length=80)
     user_goal: str | None = Field(default=None, max_length=60000)
     goal: str | None = Field(default=None, max_length=60000)
+
+
+class ApprovalRejectRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=2000)
 
 
 def _payload(model: BaseModel) -> dict[str, Any]:
@@ -130,6 +140,8 @@ async def attach_agent_skill(agent_id: str, request: AgentSkillRequest) -> dict[
         return await asyncio.to_thread(get_agent_runtime_service().attach_skill, agent_id, request.skill_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Agent 或 Skill 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
 
 
 @router.delete("/agents/{agent_id}/skills/{skill_id}")
@@ -164,6 +176,16 @@ async def get_skill(skill_id: str) -> dict[str, Any]:
         return await asyncio.to_thread(get_agent_runtime_service().get_skill, skill_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Skill 不存在") from exc
+
+
+@router.patch("/skills/{skill_id}")
+async def update_skill(skill_id: str, request: SkillUpdateRequest) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(get_agent_runtime_service().update_skill, skill_id, _payload(request))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
 
 
 @router.delete("/skills/{skill_id}")
@@ -282,3 +304,24 @@ async def cancel_run(run_id: str) -> dict[str, Any]:
         return await asyncio.to_thread(get_agent_runtime_service().cancel_run, run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Run 不存在") from exc
+
+
+@router.post("/runs/{run_id}/approval/approve")
+async def approve_run_approval(run_id: str) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(get_agent_runtime_service().approve_run_approval, run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.post("/runs/{run_id}/approval/reject")
+async def reject_run_approval(run_id: str, request: ApprovalRejectRequest | None = None) -> dict[str, Any]:
+    try:
+        reason = request.reason if request is not None else ""
+        return await asyncio.to_thread(get_agent_runtime_service().reject_run_approval, run_id, reason or "")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc

@@ -128,7 +128,7 @@ def test_agent_mention_creates_agent_run_without_general_task(tmp_path, monkeypa
         }
     )
     monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
-    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "Agent result")
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "Agent result"})
     try:
         result = api.send_message("@Helper 做个总结")
         assert result["ok"] is True
@@ -182,7 +182,7 @@ def test_selected_runnable_creates_agent_run_without_mention(tmp_path, monkeypat
         }
     )
     monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
-    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "Agent result")
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "Agent result"})
     try:
         result = api.send_message("整理需求", runnable_id=agent["agent_id"])
         assert result["ok"] is True
@@ -213,7 +213,7 @@ def test_agent_mention_supports_multiword_names(tmp_path, monkeypatch):
         }
     )
     monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
-    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat", lambda *_args, **_kwargs: "Agent result")
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "Agent result"})
     try:
         result = api.send_message("@Draft Agent 整理需求")
         assert result["ok"] is True
