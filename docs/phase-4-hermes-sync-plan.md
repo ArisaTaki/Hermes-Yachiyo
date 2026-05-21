@@ -137,6 +137,35 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - 主 Agent 上下文会注入已启用 Agent/Workflow 名录，并可通过内部桥 `run_yachiyo_agent` / `run_yachiyo_workflow` 创建普通 Run；结果回填给主 Agent 后继续整合回复。
 - 委派桥只接受已保存、已启用的 Agent/Workflow；未知、空目标、停用对象都会拒绝；单轮自动委派最多 3 次。
 
+### Batch 12：ToolBroker 真实执行层与审批恢复
+
+- Agent Runtime 新增统一 tool-call 循环，优先读取 OpenAI-compatible `message.tool_calls`，并保留旧 JSON fallback：`{"action":"tool","tool":"workspace.list","input":{...}}`。
+- OpenAI tool schema 使用函数名别名，后端映射回 dotted 工具名：
+  - `workspace_list` -> `workspace.list`
+  - `workspace_read` -> `workspace.read`
+  - `workspace_write_patch` -> `workspace.write_patch`
+  - `terminal_run` -> `terminal.run`
+  - `artifact_write` -> `artifact.write`
+- Tool loop 上限为 6 次；超限后 Run 标记为 failed，并记录 timeline。
+- 未授权工具直接失败，记录 `agent.tool.denied`，不会执行工具 payload。
+- `workspace.list`、`workspace.read`、`artifact.write` 可直接执行；`terminal.run`、`workspace.write_patch` 永远不会因为模型 payload 自带 `approved=true` 而执行。
+- 新增 Run 状态 `approval_required`；遇到高风险工具时，Run 写入 `pending_approval_json`，RunGroup 同步停在 `approval_required`。
+- 前端只读取脱敏/截断后的 `pending_approval` 展示信息；原始 tool input 只保留在后端用于审批后继续执行。
+- 新增 approve/reject API：审批通过后执行当前 pending tool，把结果回填给模型并继续同一个 Run；拒绝后 Run 标记为 `cancelled` 并记录原因。
+- Runs 详情页显示待审批工具、脱敏输入和 Approve / Reject 按钮。
+- `openai_compatible_chat` 保留原有文本返回行为；新增完整 chat completion message helper 供 Agent Runtime 读取 `tool_calls`。
+
+### Batch 13：Agent Profile、Persona Prompt 与本地 Skill Library
+
+- Agent 定义新增 `nickname`、`avatar_url` 和 `persona_prompt`；头像用于 Agent Studio 列表与未来对话入口，昵称用于未来直接与 Agent 聊天时的显示名。
+- `instructions` 收敛为功能 prompt；`persona_prompt` 单独进入运行上下文，用于人设、口吻和角色偏好。
+- Agent context artifact 会分段写入 `# Functional Instructions` 与 `# Persona Prompt`，避免功能约束和角色设定混杂。
+- Agent Studio 编辑页新增头像预览、昵称输入、头像选择按钮和 Persona Prompt textarea。
+- Skill Library 改为本地上传/导入体验：支持选择多个本地 Skill 目录或 ZIP，也支持拖放/粘贴路径；导入后逐条展示成功、失败或跳过结果。
+- Skill 数据新增 `local_path` 与 `enabled`；Skill 卡片展示本地路径、启停开关、删除和“打开路径”入口，不再提供下载按钮。
+- Agent 的 Mounted Skills 只从已启用 Skill Library 里选择；后端同时阻止挂载停用 Skill，并在运行前拒绝已挂载但已停用的 Skill。
+- Agent Studio 补充 Output Contract、Capabilities、Default Workdir、Readable Scopes、Writable Scopes 的解释文案，并提示用“测试模型 + Quick Run”做可行性验证。
+
 ## 新增接口
 
 - `GET/POST /ui/model-profiles`
@@ -153,7 +182,7 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - `POST /ui/agents/{agent_id}/test-model`
 - `GET/POST /ui/skills`
 - `POST /ui/skills/import`
-- `GET/DELETE /ui/skills/{skill_id}`
+- `GET/PATCH/DELETE /ui/skills/{skill_id}`
 - `POST /ui/agents/{agent_id}/skills`
 - `DELETE /ui/agents/{agent_id}/skills/{skill_id}`
 - `GET/POST /ui/workflows`
@@ -165,6 +194,8 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - `POST /ui/workflow-runs`
 - `GET /ui/workflow-runs/{run_id}`
 - `POST /ui/runs/{run_id}/cancel`
+- `POST /ui/runs/{run_id}/approval/approve`
+- `POST /ui/runs/{run_id}/approval/reject`
 
 ## 安全边界
 
@@ -178,6 +209,8 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
   - `artifact.write`
 - `terminal.run` 默认需要审批。
 - `workspace.write_patch` 默认需要审批。
+- 模型 payload 里的 `approved=true` 不会绕过审批；只有后端 approve API 能传入运行时审批许可。
+- Run 进入 `approval_required` 时，前端只展示脱敏/截断后的 pending approval 信息。
 - 文件读写必须落在 Agent workspace policy 范围内。
 - Artifact 写入有路径越界保护。
 - Skill scripts 不执行。
@@ -189,11 +222,12 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - 旧 `execution_backend` 数据仍能读取，但产品语义统一归一到 Yachiyo Agent Runtime。
 - Agent Studio Agent 是持久岗位，不是 Hermes 原生 `delegate_task` 临时 subagent 注册表。
 - Custom API 作为高级模型配置兼容路径保留，但仍走同一个 Yachiyo Agent Runtime。
-- ToolBroker 仍需补真实工具调用循环、审批恢复、运行中取消、streaming/轮询和失败重试。
+- ToolBroker 已支持真实 tool-call 循环和单个 Agent Run 审批恢复；Workflow 子 Run 遇到审批后的父 Workflow 完整恢复仍待增强。
+- 运行中取消、streaming/轮询、失败重试和复杂 artifact viewer 仍待补齐。
 - 主 Agent 自动委派第一版走 Yachiyo 内部桥，不改 Hermes 原生 `delegate_task` 实现。
 - TTS Profile 首版做统一保存与复用入口，具体语音合成、服务检测和连接测试仍由主动关怀 / TTS 专用链路执行。
 - Provider 目录同步目前是可手动运行的缓存能力；每日自动订阅更新机制尚未接入应用 lifecycle。
-- Skill v1 只支持本地目录/ZIP，不做远程 marketplace，也不自动扫描用户全局 skills。
+- Skill v1 只支持本地目录/ZIP 与本地启停管理，不做远程 marketplace，也不自动扫描用户全局 skills。
 - 第三方 CLI/daemon 由用户自行管理，不再由 Yachiyo 安装、登录、升级或托管。
 
 ## 验证目标
@@ -208,14 +242,15 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
   - Agent 引用 Xiaomi MiMo 等 OpenAI-compatible provider source Profile 后可创建 run。
   - Skill 导入、ZIP 路径穿越拒绝。
   - Workflow 线性校验。
-  - Tool Broker 越界与审批保护。
+  - Tool Broker 原生 `tool_calls`、JSON fallback、未授权工具拒绝、越界拒绝、审批暂停、审批恢复和拒绝取消。
   - Chat `@Agent` 创建 run 且不创建普通 Hermes task。
 - 前端：
   - Agent Studio 创建/编辑 Agent，挂载 Skill。
   - Model Providers 不展示本地主模型快照。
   - Vision 模型列表只登记支持图片输入的多模态模型。
   - TTS tab 使用独立语音来源，不复用对话模型提供商界面。
-  - Skill Library 导入、预览、删除 Skill。
+  - Skill Library 批量导入、启停、打开本地路径、删除 Skill。
+  - Runs 详情可显示 `approval_required` 并执行 Approve / Reject。
   - Workflow Studio 拖拽、连线、保存、运行。
   - Chat 选择 Agent / Workflow 或输入 `@Name` 能创建 run。
   - `npm --prefix apps/frontend run build` 通过。

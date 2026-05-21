@@ -2,6 +2,31 @@
 
 ## 已完成
 
+### Milestone 86 — Agent Profile 与本地 Skill Library
+
+- ✅ Agent 定义新增 `nickname`、`avatar_url` 与 `persona_prompt`；昵称和头像用于 Agent Studio 展示，也为后续对话框内直接和某个 Agent 聊天预留数据。
+- ✅ `instructions` 明确作为功能 prompt，`persona_prompt` 单独作为人设/口吻/角色偏好 prompt；Agent context artifact 会分段写入 `# Functional Instructions` 与 `# Persona Prompt`。
+- ✅ Agent Studio 编辑页新增头像预览、昵称输入、头像选择按钮和 Persona Prompt 输入框；头像选择沿用 Electron 图片选择器，保存为可直接渲染的 data URL。
+- ✅ Skill Library 改成上传/导入体验：支持选择多个本地 Skill 目录或 ZIP，支持拖放/粘贴路径，导入后逐条显示成功、失败或跳过结果。
+- ✅ Skill 数据新增 `local_path` 与 `enabled`；Skill 卡片展示本地路径、启停开关、删除和打开本地路径入口，不再提供下载。
+- ✅ Agent 的 Mounted Skills 只从已启用 Skill Library 中选择；后端同时阻止挂载停用 Skill，并在运行前拒绝已挂载但已停用的 Skill。
+- ✅ Agent Studio 补充 Output Contract、Capabilities、Default Workdir、Readable Scopes、Writable Scopes 的解释文案，并提示用“测试模型 + Quick Run”进行可行性验证。
+- ✅ 验证：`python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_ui_bridge_routes.py tests/test_model_profiles.py -q` → 107 passed；`npm --prefix apps/frontend run build` passed；`git diff --check` passed；Computer Use 冒烟确认 Agent 表单、Skill Library 导入、Skill 卡片和 Mounted Skills 显示正常。
+
+### Milestone 85 — ToolBroker 真实执行层与审批恢复
+
+- ✅ Agent Runtime 新增统一 tool-call 循环：优先解析 OpenAI-compatible `message.tool_calls`，并保留 JSON fallback `{"action":"tool","tool":"workspace.list","input":{...}}`。
+- ✅ OpenAI tool schema 使用函数名别名，后端映射回 dotted 工具名：`workspace_list`、`workspace_read`、`workspace_write_patch`、`terminal_run`、`artifact_write`。
+- ✅ Tool loop 上限为 6 次；超限后 Run 失败。
+- ✅ 非授权工具会失败并记录 `agent.tool.denied` timeline，不执行模型 payload。
+- ✅ `workspace.list`、`workspace.read`、`artifact.write` 可直接执行；`terminal.run` 和 `workspace.write_patch` 永远不会因为模型 payload 自带 `approved=true` 而执行。
+- ✅ 新增 Run 状态 `approval_required` 和 `pending_approval_json`；遇到高风险工具时 Run 与 RunGroup 同步停在 `approval_required`。
+- ✅ `pending_approval` 对前端只暴露脱敏/截断后的展示信息；原始 tool input 只保留在后端用于审批后继续执行。
+- ✅ 新增 `POST /ui/runs/{run_id}/approval/approve` 与 `POST /ui/runs/{run_id}/approval/reject`；approve 后执行 pending tool 并继续同一个 Run，reject 后 Run 变为 `cancelled`。
+- ✅ Runs 详情页在 `approval_required` 时显示待审批工具、脱敏输入和 Approve / Reject。
+- ✅ `openai_compatible_chat` 保持原文本返回行为，并新增完整 chat completion message helper 供 Agent Runtime 读取 `tool_calls`。
+- ✅ 验证：真实 Electron + fake OpenAI-compatible server 冒烟，`terminal.run` 进入审批，UI Approve 后执行并回填 stdout，Run 最终 completed。
+
 ### Milestone 84 — Agent Studio 持久岗位 Runtime
 
 - ✅ Agent Studio 设计收敛为“主 Agent + 持久自定义 Agent”：Hermes/Yachiyo 主助手继续负责总调度，Agent Studio 只管理长期登记的岗位 Agent 与 Workflow。
