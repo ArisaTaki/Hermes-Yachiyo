@@ -25,12 +25,15 @@ import {
   getRun,
   getRunArtifact,
   importSkill,
+  installSkillCommand,
   listAgents,
   listRunnables,
   listRuns,
+  listSkillSources,
   listSkills,
   listWorkflows,
   rejectRunApproval,
+  syncHermesSkills,
   testAgentModel,
   updateAgent,
   updateSkill,
@@ -38,6 +41,9 @@ import {
   type AgentSpec,
   type RunnableSummary,
   type RunSpec,
+  type SkillInstallResponse,
+  type SkillSourceRoot,
+  type SkillSyncResult,
   type SkillSpec,
   type WorkflowSpec,
 } from '../lib/agents';
@@ -110,9 +116,11 @@ const emptyAgentDraft: AgentDraft = {
 
 type SkillImportResult = {
   source: string;
-  status: 'success' | 'failed' | 'skipped';
+  status: 'success' | 'failed' | 'skipped' | 'updated' | 'imported';
   message: string;
 };
+
+type SkillSourceFilter = 'yachiyo' | 'hermes';
 
 const starterNodes: Node[] = [
   { id: 'start', type: 'input', position: { x: 40, y: 120 }, data: { label: 'Start', kind: 'start' } },
@@ -126,16 +134,11 @@ function textToScopes(value: string): string[] {
   return value.split(',').map((item) => item.trim()).filter(Boolean);
 }
 
-function parseSkillSources(value: string): string[] {
-  const sources = value
-    .split(/[\n,]+/)
+function normalizeSkillSources(sources: string[]): string[] {
+  const cleanSources = sources
     .map((item) => item.trim())
     .filter(Boolean);
-  return Array.from(new Set(sources));
-}
-
-function appendSkillSources(current: string, sources: string[]): string {
-  return parseSkillSources([current, ...sources].filter(Boolean).join('\n')).join('\n');
+  return Array.from(new Set(cleanSources));
 }
 
 function skillPathLabel(skill: SkillSpec): string {
@@ -146,6 +149,56 @@ function localSourceAlias(source: string): string {
   const clean = source.trim().replace(/[\\/]+$/, '');
   const name = clean.split(/[\\/]/).pop();
   return name ? `local:${name}` : '';
+}
+
+function skillSourceTypeLabel(value?: string): string {
+  if (value === 'hermes_global') return 'Hermes Global';
+  if (value === 'hermes_project') return 'Hermes Project';
+  if (value === 'npx_skills') return 'npx skills';
+  if (value === 'hermes_cli') return 'Hermes CLI';
+  if (value === 'local_zip') return 'Yachiyo ZIP';
+  return 'Yachiyo Skill';
+}
+
+function isHermesSkill(skill: SkillSpec): boolean {
+  return skill.source_type === 'hermes_global' || skill.source_type === 'hermes_project';
+}
+
+function isYachiyoSkill(skill: SkillSpec): boolean {
+  return !isHermesSkill(skill);
+}
+
+function skillMatchesSourceFilter(skill: SkillSpec, filter: SkillSourceFilter): boolean {
+  return filter === 'hermes' ? isHermesSkill(skill) : isYachiyoSkill(skill);
+}
+
+function skillMatchesQuery(skill: SkillSpec, query: string): boolean {
+  const clean = query.trim().toLowerCase();
+  if (!clean) return true;
+  return [
+    skill.name,
+    skill.description,
+    skill.content_summary,
+    skill.source_ref,
+    skill.source_path,
+    skill.local_path,
+    skill.origin_path,
+  ].some((value) => String(value || '').toLowerCase().includes(clean));
+}
+
+function skillResultStatusLabel(status: string): string {
+  if (status === 'success' || status === 'imported') return '成功';
+  if (status === 'updated') return '更新';
+  if (status === 'skipped') return '跳过';
+  return '失败';
+}
+
+function syncResultsToImportResults(results: SkillSyncResult[] = []): SkillImportResult[] {
+  return results.map((result) => ({
+    source: result.source || result.source_ref || result.name || 'unknown',
+    status: result.status === 'updated' ? 'updated' : result.status === 'imported' ? 'imported' : result.status === 'failed' ? 'failed' : 'skipped',
+    message: result.message || result.name || result.status,
+  }));
 }
 
 function agentInitial(name: string): string {
@@ -278,8 +331,14 @@ export function AgentStudioView() {
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
   const [draft, setDraft] = useState<AgentDraft>(emptyAgentDraft);
-  const [skillImportText, setSkillImportText] = useState('');
+  const [skillSources, setSkillSources] = useState<SkillSourceRoot[]>([]);
+  const [skillInstallCommand, setSkillInstallCommand] = useState('');
+  const [skillInstallResult, setSkillInstallResult] = useState<SkillInstallResponse | null>(null);
   const [skillImportResults, setSkillImportResults] = useState<SkillImportResult[]>([]);
+  const [skillLibraryFilter, setSkillLibraryFilter] = useState<SkillSourceFilter>('yachiyo');
+  const [skillLibrarySearch, setSkillLibrarySearch] = useState('');
+  const [skillMountFilter, setSkillMountFilter] = useState<SkillSourceFilter>('yachiyo');
+  const [skillMountSearch, setSkillMountSearch] = useState('');
   const [workflowName, setWorkflowName] = useState('New Workflow');
   const [workflowDescription, setWorkflowDescription] = useState('');
   const [agentRunGoal, setAgentRunGoal] = useState('');
@@ -295,6 +354,7 @@ export function AgentStudioView() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(starterNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const busy = loading || Boolean(busyAction);
+  const installingSkill = busyAction === '安装 Skill';
 
   const selectedAgent = useMemo(
     () => agents.find((agent) => agent.agent_id === selectedAgentId) || null,
@@ -321,22 +381,34 @@ export function AgentStudioView() {
     [selectedAgent, skills],
   );
   const enabledSkills = useMemo(() => skills.filter((skill) => skill.enabled !== false), [skills]);
+  const yachiyoSkillCount = useMemo(() => skills.filter(isYachiyoSkill).length, [skills]);
+  const hermesSkillCount = useMemo(() => skills.filter(isHermesSkill).length, [skills]);
+  const filteredLibrarySkills = useMemo(
+    () => skills.filter((skill) => skillMatchesSourceFilter(skill, skillLibraryFilter) && skillMatchesQuery(skill, skillLibrarySearch)),
+    [skills, skillLibraryFilter, skillLibrarySearch],
+  );
+  const filteredMountSkills = useMemo(
+    () => enabledSkills.filter((skill) => skillMatchesSourceFilter(skill, skillMountFilter) && skillMatchesQuery(skill, skillMountSearch)),
+    [enabledSkills, skillMountFilter, skillMountSearch],
+  );
   const disabledMountedSkills = useMemo(
     () => skills.filter((skill) => skill.enabled === false && selectedAgent?.skill_ids?.includes(skill.skill_id)),
     [selectedAgent, skills],
   );
 
   const refresh = useCallback(async (options: StudioRefreshOptions = {}) => {
-    const [nextAgents, nextSkills, nextProfiles, nextWorkflows, nextRunnables, nextRuns] = await Promise.all([
+    const [nextAgents, nextSkills, nextProfiles, nextWorkflows, nextRunnables, nextRuns, nextSkillSources] = await Promise.all([
       listAgents(),
       listSkills(),
       listModelProfiles(),
       listWorkflows(),
       listRunnables(),
       listRuns(),
+      listSkillSources(),
     ]);
     setAgents(nextAgents);
     setSkills(nextSkills);
+    setSkillSources(nextSkillSources);
     setModelProfiles(nextProfiles.profiles || []);
     setWorkflows(nextWorkflows);
     setRunnables(nextRunnables);
@@ -451,18 +523,12 @@ export function AgentStudioView() {
   }
 
   async function pickSkillSources() {
-    setBusyAction('选择 Skill 文件');
     setError('');
     try {
       const selected = await chooseSkillSources();
-      if (selected.length) {
-        setSkillImportText((current) => appendSkillSources(current, selected));
-        setStatus(`已选择 ${selected.length} 个 Skill 来源`);
-      }
+      if (selected.length) await runAction(() => importSkillSourceList(selected), '导入 Skills');
     } catch (err) {
       setError(err instanceof Error ? err.message : '选择 Skill 文件失败');
-    } finally {
-      setBusyAction('');
     }
   }
 
@@ -489,14 +555,13 @@ export function AgentStudioView() {
       .map((file) => (file as File & { path?: string }).path || file.name)
       .filter(Boolean);
     if (filePaths.length) {
-      setSkillImportText((current) => appendSkillSources(current, filePaths));
-      setStatus(`已添加 ${filePaths.length} 个待导入 Skill`);
+      void runAction(() => importSkillSourceList(filePaths), '导入 Skills');
     }
   }
 
-  async function importSkillSources(): Promise<StudioRefreshOptions | void> {
-    const sources = parseSkillSources(skillImportText);
-    if (!sources.length) throw new Error('请先选择或输入 Skill 目录/ZIP 路径');
+  async function importSkillSourceList(rawSources: string[]): Promise<StudioRefreshOptions | void> {
+    const sources = normalizeSkillSources(rawSources);
+    if (!sources.length) throw new Error('请先选择或拖入 Skill 目录/ZIP');
     const existingPaths = new Set(skills.flatMap((skill) => [skill.local_path, skill.source_path]).filter(Boolean).map(String));
     const results: SkillImportResult[] = [];
     for (const source of sources) {
@@ -512,8 +577,25 @@ export function AgentStudioView() {
       }
     }
     setSkillImportResults(results);
-    if (results.some((item) => item.status === 'success')) {
-      setSkillImportText('');
+  }
+
+  async function syncHermesSkillLibrary(): Promise<StudioRefreshOptions | void> {
+    const result = await syncHermesSkills();
+    setSkillImportResults(syncResultsToImportResults(result.results || []));
+    if (result.roots) setSkillSources(result.roots);
+  }
+
+  async function installSkillFromCommand(): Promise<StudioRefreshOptions | void> {
+    const command = skillInstallCommand.trim();
+    if (!command) throw new Error('请输入 Skill 来源或安装命令');
+    setSkillInstallResult(null);
+    const result = await installSkillCommand(command);
+    setSkillInstallResult(result);
+    if (result.sync?.results) {
+      setSkillImportResults(syncResultsToImportResults(result.sync.results));
+    }
+    if (!result.ok) {
+      throw new Error(result.stderr || result.stdout || `安装命令退出：${result.returncode ?? 'unknown'}`);
     }
   }
 
@@ -692,11 +774,15 @@ export function AgentStudioView() {
                   <span className="agent-list-profile">
                     <AgentAvatar avatarUrl={agent.avatar_url} name={agent.nickname || agent.name} />
                     <span>
-                      <strong>{agent.nickname || agent.name}</strong>
-                      <small>{agent.name}</small>
+                      <strong className="agent-list-name">{agent.nickname || agent.name}</strong>
+                      <small className="agent-list-base-name">{agent.name}</small>
                     </span>
                   </span>
-                  <span>{agent.category || 'custom'} · {agent.model_mode === 'custom_api' ? 'Custom API' : 'Chat Profile'}</span>
+                  <span className="agent-list-meta">
+                    <span className="agent-list-category">{agent.category || 'custom'}</span>
+                    <span className="agent-list-separator">·</span>
+                    <span className="agent-list-profile-type">{agent.model_mode === 'custom_api' ? 'Custom API' : 'Chat Profile'}</span>
+                  </span>
                 </button>
               ))}
             </div>
@@ -713,9 +799,17 @@ export function AgentStudioView() {
                   <label><span>Name</span><input className="hy-input" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} required /></label>
                   <label><span>Nickname</span><input className="hy-input" value={draft.nickname} onChange={(event) => setDraft({ ...draft, nickname: event.target.value })} placeholder="对话框里显示的称呼" /></label>
                 </div>
-                <div className="agent-avatar-input-row">
-                  <label><span>Avatar URL / data URL</span><input className="hy-input" value={draft.avatar_url} onChange={(event) => setDraft({ ...draft, avatar_url: event.target.value })} placeholder="https://... 或 data:image/..." /></label>
-                  <button type="button" className="hy-btn hy-btn-ghost" disabled={busy} onClick={() => void pickAgentAvatar()}>选择头像</button>
+                <div className="agent-avatar-picker-row">
+                  <div>
+                    <span>Avatar</span>
+                    <strong>{draft.avatar_url ? '已选择自定义头像' : '使用首字母头像'}</strong>
+                  </div>
+                  <div className="agent-avatar-picker-actions">
+                    <button type="button" className="hy-btn hy-btn-ghost" disabled={busy} onClick={() => void pickAgentAvatar()}>选择头像</button>
+                    {draft.avatar_url ? (
+                      <button type="button" className="hy-btn hy-btn-ghost" disabled={busy} onClick={() => setDraft({ ...draft, avatar_url: '' })}>清除</button>
+                    ) : null}
+                  </div>
                 </div>
                 <label><span>Description</span><input className="hy-input" value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} /></label>
               </div>
@@ -874,15 +968,27 @@ export function AgentStudioView() {
               <div className="agent-skill-mounts">
                 <div className="agent-skill-mounts-head">
                   <h3>Mounted Skills</h3>
-                  <span>{mountedSkillCount} mounted / {enabledSkills.length} enabled skills</span>
+                  <span>{mountedSkillCount} mounted / {filteredMountSkills.length} visible skills</span>
                 </div>
                 {disabledMountedSkills.length ? (
                   <div className="agent-inline-note warn">
                     有 {disabledMountedSkills.length} 个已挂载 Skill 当前已停用，运行时不会通过校验。
                   </div>
                 ) : null}
+                <div className="skill-filter-bar">
+                  <div className="skill-filter-tabs">
+                    <button type="button" className={skillMountFilter === 'yachiyo' ? 'active' : ''} onClick={() => setSkillMountFilter('yachiyo')}>Yachiyo</button>
+                    <button type="button" className={skillMountFilter === 'hermes' ? 'active' : ''} onClick={() => setSkillMountFilter('hermes')}>Hermes Agent</button>
+                  </div>
+                  <input
+                    className="hy-input"
+                    value={skillMountSearch}
+                    onChange={(event) => setSkillMountSearch(event.target.value)}
+                    placeholder="搜索可挂载 Skills"
+                  />
+                </div>
                 <div className="agent-skill-grid">
-                  {enabledSkills.map((skill) => {
+                  {filteredMountSkills.map((skill) => {
                     const mounted = selectedAgent?.skill_ids?.includes(skill.skill_id);
                     return (
                       <button
@@ -899,7 +1005,7 @@ export function AgentStudioView() {
                       </button>
                     );
                   })}
-                  {!enabledSkills.length ? <span className="agent-empty-inline">暂无启用 Skill，可到 Skill Library 导入或开启。</span> : null}
+                  {!filteredMountSkills.length ? <span className="agent-empty-inline">当前筛选下没有可挂载 Skill。</span> : null}
                 </div>
               </div>
             ) : null}
@@ -910,8 +1016,41 @@ export function AgentStudioView() {
       {tab === 'skills' ? (
         <section className="agent-studio-grid">
           <div className="agent-studio-panel skill-import-panel">
+            <div className="section-heading-row">
+              <h2>Yachiyo Skills</h2>
+            </div>
+            <p className="agent-section-help">从 Hermes-Yachiyo 安装或上传的 Skills 会进入 Yachiyo 管理区；它们和 Hermes Agent 自带 Skills 分开展示和挂载。</p>
+            <div className="skill-install-box">
+              <label>
+                <span>Skill 来源或安装命令</span>
+                <input
+                  className="hy-input"
+                  value={skillInstallCommand}
+                  onChange={(event) => setSkillInstallCommand(event.target.value)}
+                  placeholder="owner/repo --skill skill-name 或 skills@latest add owner/repo"
+                />
+              </label>
+              {installingSkill ? (
+                <div className="skill-install-progress" role="progressbar" aria-label="Skill 安装进度">
+                  <span />
+                </div>
+              ) : null}
+              <button type="button" disabled={busy || !skillInstallCommand.trim()} onClick={() => void runAction(installSkillFromCommand, '安装 Skill')}>
+                {installingSkill ? '安装中...' : '安装并同步'}
+              </button>
+              <small>可以直接输入 Skill 来源，也可以输入 <code>skills@latest add ...</code> 或 <code>npx skills add ...</code>。Yachiyo 会固定使用 <code>hermes-agent</code> 目标并补上 <code>--copy -y</code>，在 Yachiyo 的 Skill 工作区执行，不写入 Hermes 全局库。</small>
+              {skillInstallResult ? (
+                <pre className={skillInstallResult.ok ? 'skill-install-log' : 'skill-install-log failed'}>
+                  {[
+                    `exit ${skillInstallResult.returncode ?? 0}`,
+                    skillInstallResult.stdout,
+                    skillInstallResult.stderr,
+                  ].filter(Boolean).join('\n')}
+                </pre>
+              ) : null}
+            </div>
             <div className="section-heading-row"><h2>上传 Skills</h2></div>
-            <p className="agent-section-help">支持批量上传 zip 技能包，也支持选择本地 Skill 目录。系统会校验目录里是否包含 `SKILL.md`，并逐个返回导入结果。</p>
+            <p className="agent-section-help">支持批量上传 zip 技能包，也支持选择本地 Skill 目录；导入后会复制到 Yachiyo 管理区。</p>
             <div className="skill-import-hints">
               <span>一次上传多个 zip</span>
               <span>自动校验 SKILL.md</span>
@@ -923,24 +1062,29 @@ export function AgentStudioView() {
               onDrop={dropSkillSources}
             >
               <strong>拖拽 Skill 目录或 zip 到这里</strong>
-              <span>也可以点击选择文件，再从下面列表确认导入</span>
-              <button type="button" disabled={busy} onClick={() => void pickSkillSources()}>选择文件</button>
+              <span>也可以点击选择文件，选择后会立即校验并导入</span>
+              <button type="button" disabled={busy} onClick={() => void pickSkillSources()}>上传 Skills</button>
             </div>
-            <label>
-              <span>待导入路径</span>
-              <textarea
-                className="hy-input skill-import-textarea"
-                value={skillImportText}
-                onChange={(event) => setSkillImportText(event.target.value)}
-                placeholder="/path/to/skill-folder&#10;/path/to/skill.zip"
-              />
-            </label>
-            <button type="button" className="primary-action" disabled={!skillImportText.trim() || busy} onClick={() => void runAction(importSkillSources, '导入 Skills')}>开始导入</button>
+            <div className="section-heading-row">
+              <h2>Hermes Agent Skills</h2>
+              <button type="button" disabled={busy} onClick={() => void runAction(syncHermesSkillLibrary, '同步 Hermes Skills')}>从 Hermes 同步</button>
+            </div>
+            <p className="agent-section-help">Hermes Agent 的 `~/.hermes/skills` 只登记引用，不复制到 Yachiyo 管理区；项目级 Skills 暂不纳入本页管理。</p>
+            <div className="skill-source-roots">
+              {skillSources.map((source) => (
+                <div className={source.exists ? 'skill-source-root' : 'skill-source-root missing'} key={`${source.source_type}-${source.path}`}>
+                  <strong>{skillSourceTypeLabel(source.source_type)}</strong>
+                  <span>{source.skill_count || 0} skills</span>
+                  <code>{source.path}</code>
+                </div>
+              ))}
+              {!skillSources.length ? <div className="empty-state inline-empty">暂未检测到 Hermes skills root。</div> : null}
+            </div>
             {skillImportResults.length ? (
               <div className="skill-import-results" aria-label="Skill import results">
                 {skillImportResults.map((result) => (
                   <div className={`skill-import-result ${result.status}`} key={`${result.source}-${result.status}`}>
-                    <strong>{result.status === 'success' ? '成功' : result.status === 'skipped' ? '跳过' : '失败'}</strong>
+                    <strong>{skillResultStatusLabel(result.status)}</strong>
                     <span>{result.source}</span>
                     <small>{result.message}</small>
                   </div>
@@ -949,9 +1093,24 @@ export function AgentStudioView() {
             ) : null}
           </div>
           <div className="agent-studio-panel">
-            <div className="section-heading-row"><h2>Skill Library</h2></div>
+            <div className="section-heading-row">
+              <h2>{skillLibraryFilter === 'hermes' ? 'Hermes Skill Library' : 'Yachiyo Skill Library'}</h2>
+              <span className="agent-section-count">{yachiyoSkillCount} Yachiyo / {hermesSkillCount} Hermes</span>
+            </div>
+            <div className="skill-filter-bar">
+              <div className="skill-filter-tabs">
+                <button type="button" className={skillLibraryFilter === 'yachiyo' ? 'active' : ''} onClick={() => setSkillLibraryFilter('yachiyo')}>Yachiyo</button>
+                <button type="button" className={skillLibraryFilter === 'hermes' ? 'active' : ''} onClick={() => setSkillLibraryFilter('hermes')}>Hermes Agent</button>
+              </div>
+              <input
+                className="hy-input"
+                value={skillLibrarySearch}
+                onChange={(event) => setSkillLibrarySearch(event.target.value)}
+                placeholder="搜索 Skill 名称、路径或摘要"
+              />
+            </div>
             <div className="skill-list">
-              {skills.map((skill) => (
+              {filteredLibrarySkills.map((skill) => (
                 <SkillCard
                   busy={busy}
                   key={skill.skill_id}
@@ -961,7 +1120,7 @@ export function AgentStudioView() {
                   skill={skill}
                 />
               ))}
-              {!skills.length ? <div className="empty-state inline-empty">暂无 Skill。导入后会在这里显示启停、删除和本地路径入口。</div> : null}
+              {!filteredLibrarySkills.length ? <div className="empty-state inline-empty">当前分类或搜索下没有 Skill。</div> : null}
             </div>
           </div>
         </section>
@@ -1178,7 +1337,7 @@ function SkillCard({
       <div className="section-heading-row skill-card-head">
         <div>
           <h3>{skill.name}</h3>
-          <span className="skill-source-tag">本地 Skill</span>
+          <span className="skill-source-tag">{skillSourceTypeLabel(skill.source_type)}</span>
         </div>
         <label className={enabled ? 'skill-enable-switch active' : 'skill-enable-switch'}>
           <input
@@ -1195,6 +1354,12 @@ function SkillCard({
         <span>路径</span>
         <code>{skillPathLabel(skill)}</code>
       </div>
+      {skill.origin_path ? (
+        <div className="skill-card-path">
+          <span>来源</span>
+          <code>{skill.origin_path}</code>
+        </div>
+      ) : null}
       {skill.asset_paths?.length ? <small>{skill.asset_paths.length} assets/templates</small> : null}
       <div className="skill-card-actions">
         <button type="button" disabled={busy || !skill.local_path} onClick={() => void onOpenLocation()}>打开路径</button>
