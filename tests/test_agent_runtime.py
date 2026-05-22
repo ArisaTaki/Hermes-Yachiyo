@@ -63,6 +63,17 @@ def test_runtime_restores_row_factory_before_listing_runnables(tmp_path):
         service.close()
 
 
+def test_runtime_restores_row_factory_before_listing_agents(tmp_path):
+    service = make_service(tmp_path, seed_templates=True)
+    try:
+        service._conn.row_factory = None
+        result = service.list_agents()
+        assert result["ok"] is True
+        assert any(agent["agent_id"] == "agent_coding" for agent in result["agents"])
+    finally:
+        service.close()
+
+
 def test_agent_crud_and_api_key_redaction(tmp_path):
     service = make_service(tmp_path)
     try:

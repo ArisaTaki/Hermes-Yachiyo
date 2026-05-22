@@ -12784,6 +12784,34 @@ button.activity-item {
   font-size: 11px;
 }
 
+.agent-skill-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.agent-skill-bulk-actions span {
+  margin-right: auto;
+  color: var(--hy-faint);
+  font-size: 11px;
+}
+
+.agent-skill-bulk-actions button {
+  min-height: 28px;
+  padding: 5px 9px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+  color: var(--hy-muted);
+}
+
+.agent-skill-bulk-actions button:hover:not(:disabled) {
+  border-color: oklch(66% 0.12 188 / 0.3);
+  color: var(--hy-fg);
+}
+
 .agent-section-count {
   color: var(--hy-faint);
   font-size: 11px;
@@ -12844,6 +12872,21 @@ button.activity-item {
   align-content: start;
 }
 
+.skill-import-target {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.skill-import-target small {
+  color: var(--hy-faint);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .skill-folder-box {
   display: grid;
   gap: 9px;
@@ -12900,6 +12943,89 @@ button.activity-item {
 }
 
 .skill-folder-row button:last-child {
+  min-height: 32px;
+}
+
+.skill-group-page {
+  grid-template-columns: minmax(260px, 0.34fr) minmax(520px, 1fr);
+}
+
+.skill-folder-system-row {
+  display: grid;
+  gap: 5px;
+  padding: 11px;
+  border: 1px solid oklch(66% 0.12 188 / 0.18);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.skill-folder-system-row strong {
+  color: var(--hy-fg);
+  font-size: 14px;
+}
+
+.skill-folder-system-row span,
+.skill-folder-system-row small {
+  color: var(--hy-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.skill-folder-manager-list {
+  display: grid;
+  gap: 10px;
+}
+
+.skill-folder-manager-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.022);
+}
+
+.skill-folder-manager-main {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.skill-folder-manager-main h3 {
+  margin: 0;
+  overflow: hidden;
+  color: var(--hy-fg);
+  font-size: 16px;
+  font-weight: 590;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-folder-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.skill-folder-meta span {
+  padding: 3px 7px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  color: var(--hy-muted);
+  font-size: 11px;
+}
+
+.skill-folder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.skill-folder-actions button {
   min-height: 32px;
 }
 
@@ -12996,26 +13122,6 @@ button.activity-item {
   to {
     transform: translateX(360%);
   }
-}
-
-.skill-install-log {
-  max-height: 180px;
-  margin: 0;
-  overflow: auto;
-  padding: 9px;
-  border: 1px solid oklch(68% 0.15 155 / 0.24);
-  border-radius: 8px;
-  background: oklch(68% 0.15 155 / 0.055);
-  color: var(--hy-subtle);
-  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
-  line-height: 1.45;
-  white-space: pre-wrap;
-}
-
-.skill-install-log.failed {
-  border-color: oklch(58% 0.19 24 / 0.34);
-  background: oklch(58% 0.19 24 / 0.065);
 }
 
 .skill-import-hints {

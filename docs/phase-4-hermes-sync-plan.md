@@ -179,9 +179,11 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 
 - 新增一层 Skill Folder 元数据层：`skill_folders` 表保存文件夹名称、说明、来源范围与排序；`skills.folder_id` 保存归属。
 - Skill Folder 只作为管理和筛选维度，不移动 Hermes Agent 原路径，也不强制改动 Yachiyo 已导入 Skill 的本地快照路径。
-- Skill Library 左侧可新建/删除文件夹，导入和安装 Skill 时可选择目标文件夹；删除文件夹会把其中 Skill 归回未分类。
+- Skill Groups 独立成 Agent Studio 页面，负责文件夹新建、重命名、查看与删除；Skill Library 左侧只保留安装/上传时的目标文件夹选择。
+- 删除文件夹会把其中 Skill 归回“无需分组”。
 - Skill Library 卡片可直接移动 Skill 到其他文件夹；Agent Mounted Skills 增加文件夹筛选，便于给 Coding / Design 等 Agent 按主题挑选 Skill。
-- Agent Studio 增加 Agent 列表 stale state 自愈：当开发态 HMR 或临时刷新导致左侧列表为空但右侧仍有 Agent draft 时，会重新拉取 Agent 列表。
+- Agent Mounted Skills 支持对当前筛选结果一键全选/清空；安装完成后不再显示 stdout/stderr 结果框，只保留导入/同步结果。
+- Agent Studio 增加 Agent 列表 stale state 自愈；Agent 列表读取增加 row factory 回归覆盖，避免开发态连接状态漂移后 `/ui/agents` 列表转换崩溃。
 
 ## 新增接口
 
