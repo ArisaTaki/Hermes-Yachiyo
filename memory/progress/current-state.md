@@ -2,6 +2,16 @@
 
 ## 已完成
 
+### Milestone 87 — Yachiyo / Hermes 双 Skill 库与受限安装入口
+
+- ✅ Skill Library 分成 Yachiyo 管理区与 Hermes Agent 管理区：Yachiyo 上传/安装的 Skill 留在 Yachiyo 工作区，Hermes Agent 自带全局 Skill 只登记 `~/.hermes/skills` 原路径引用，不复制到 Yachiyo 目录；项目级 `.hermes/skills` 暂不纳入本页管理。
+- ✅ Skill 数据新增 `source_type`、`origin_path`、`source_ref`、`content_hash`、`last_synced_at`、`sync_status`；同步按 Yachiyo / Hermes 大类隔离去重，hash 变化会更新同一大类内已有 Skill。
+- ✅ Skill Library 与 Agent Mounted Skills 都增加 Yachiyo / Hermes Agent 来源筛选和搜索，默认显示 Yachiyo，避免 Hermes 自带大量 Skill 挤占管理视图。
+- ✅ 新增受限安装入口：支持直接输入 Skill 来源、`skills@latest add ...`、`npx skills add ...` / `npx -y skills@latest add ...` / `hermes skills install ...`，拒绝 shell 管道、串联和重定向；`skills` CLI 路径会固定使用 `hermes-agent`、补齐 `--copy -y`，在 Yachiyo 的 Skill 安装工作区执行并同步为 Yachiyo Skill。
+- ✅ Skill 安装 UI 改成来源/安装命令输入，安装中显示不确定进度条并保留 stdout/stderr 尾部日志；不伪造 CLI 未提供的百分比进度。
+- ✅ Agent 列表层级颜色、头像选择控件和 Skill 上传区域已按最新 UI 反馈调整：不再显示 avatar URL，不再显示手动导入路径 textarea。
+- ✅ 验证：`.venv/bin/python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_ui_bridge_routes.py -q` → 92 passed；`npm --prefix apps/frontend run build` passed；`git diff --check` passed。
+
 ### Milestone 86 — Agent Profile 与本地 Skill Library
 
 - ✅ Agent 定义新增 `nickname`、`avatar_url` 与 `persona_prompt`；昵称和头像用于 Agent Studio 展示，也为后续对话框内直接和某个 Agent 聊天预留数据。

@@ -166,6 +166,15 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - Agent 的 Mounted Skills 只从已启用 Skill Library 里选择；后端同时阻止挂载停用 Skill，并在运行前拒绝已挂载但已停用的 Skill。
 - Agent Studio 补充 Output Contract、Capabilities、Default Workdir、Readable Scopes、Writable Scopes 的解释文案，并提示用“测试模型 + Quick Run”做可行性验证。
 
+### Batch 14：Yachiyo / Hermes 双 Skill 库与受限安装入口
+
+- Skill Library 分成 Yachiyo 管理区与 Hermes Agent 管理区：Yachiyo 上传/安装的 Skill 留在 Yachiyo 工作区，Hermes Agent 自带全局 Skill 只登记 `~/.hermes/skills` 原路径引用，不复制到 Yachiyo 目录；项目级 `.hermes/skills` 暂不纳入本页管理。
+- 后端新增 Skill 来源字段：`source_type`、`origin_path`、`source_ref`、`content_hash`、`last_synced_at`、`sync_status`；同步时按来源大类隔离去重，hash 变化会更新同一大类内已有 Skill。
+- Skill Library 与 Agent Mounted Skills 都增加 Yachiyo / Hermes Agent 来源筛选和搜索，默认显示 Yachiyo，避免 Hermes 自带大量 Skill 挤占管理视图。
+- 新增受限安装入口：支持直接输入 Skill 来源，也支持 `skills@latest add ...`、`npx skills add ...`、`npx -y skills@latest add ...` 与 `hermes skills install ...`；禁止 shell 管道、串联和重定向。`skills` CLI 路径会固定补齐 `hermes-agent` 目标、`--copy` 与 `-y`，命令在 Yachiyo 的 Skill 安装工作区执行，安装结果同步为 Yachiyo Skill。
+- Skill 安装 UI 显示不确定进度条和 stdout/stderr 尾部日志；当前 CLI 没有稳定机器可读百分比事件，因此不显示假百分比。
+- Agent Run 和模型工具调用不能触发 Skill 安装；安装只能来自 UI 用户操作。
+
 ## 新增接口
 
 - `GET/POST /ui/model-profiles`
@@ -182,6 +191,9 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - `POST /ui/agents/{agent_id}/test-model`
 - `GET/POST /ui/skills`
 - `POST /ui/skills/import`
+- `GET /ui/skills/sources`
+- `POST /ui/skills/sync`
+- `POST /ui/skills/install`
 - `GET/PATCH/DELETE /ui/skills/{skill_id}`
 - `POST /ui/agents/{agent_id}/skills`
 - `DELETE /ui/agents/{agent_id}/skills/{skill_id}`
@@ -214,6 +226,7 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - 文件读写必须落在 Agent workspace policy 范围内。
 - Artifact 写入有路径越界保护。
 - Skill scripts 不执行。
+- Skill 安装命令不走 shell，只接受白名单 argv；模型与 Agent Run 不能提交安装命令。
 - API Key 和命令日志走脱敏。
 
 ## 当前限制
@@ -227,7 +240,7 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - 主 Agent 自动委派第一版走 Yachiyo 内部桥，不改 Hermes 原生 `delegate_task` 实现。
 - TTS Profile 首版做统一保存与复用入口，具体语音合成、服务检测和连接测试仍由主动关怀 / TTS 专用链路执行。
 - Provider 目录同步目前是可手动运行的缓存能力；每日自动订阅更新机制尚未接入应用 lifecycle。
-- Skill v1 只支持本地目录/ZIP 与本地启停管理，不做远程 marketplace，也不自动扫描用户全局 skills。
+- Skill Library 已支持 Yachiyo / Hermes 双库、Hermes roots 同步、受限安装命令和本地 ZIP/目录上传；仍不做远程 marketplace 浏览器或任意包管理协议。
 - 第三方 CLI/daemon 由用户自行管理，不再由 Yachiyo 安装、登录、升级或托管。
 
 ## 验证目标

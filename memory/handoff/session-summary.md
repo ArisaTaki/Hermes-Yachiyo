@@ -1,27 +1,27 @@
 # Session Summary
 
-## Milestone 85/86 — ToolBroker 闭环与 Agent/Skill Studio 更新
+## Milestone 85/86/87 — ToolBroker 闭环与 Agent/Skill Studio 更新
 
 ### 核心结果
 
-本轮完成 Phase 4 的 ToolBroker 真实执行层，并继续把 Agent Studio 推进为可长期使用的本地 Agent 管理界面：Run 可以处理 OpenAI-compatible 原生 `tool_calls`，高风险工具会停在可审批/可恢复状态；Agent 定义补齐头像、昵称、人设 prompt；Skill Library 改成本地上传、启停和路径管理体验。
+本轮完成 Phase 4 的 ToolBroker 真实执行层，并继续把 Agent Studio 推进为可长期使用的本地 Agent 管理界面：Run 可以处理 OpenAI-compatible 原生 `tool_calls`，高风险工具会停在可审批/可恢复状态；Agent 定义补齐头像、昵称、人设 prompt；Skill Library 从本地上传扩展为 Yachiyo / Hermes 双库、受限安装命令和来源筛选体验。
 
 ### 主要变更
 
-- `apps/shell/agent_runtime.py`：新增 OpenAI `message.tool_calls` 解析、JSON fallback、tool loop、`approval_required`、`pending_approval_json`、approve/reject 后继续 Run、未授权工具拒绝和高风险工具审批边界。
+- `apps/shell/agent_runtime.py`：新增 OpenAI `message.tool_calls` 解析、JSON fallback、tool loop、`approval_required`、`pending_approval_json`、approve/reject 后继续 Run、未授权工具拒绝和高风险工具审批边界；Skill 支持 Yachiyo / Hermes 来源隔离、Hermes Global 原路径引用、旧 Hermes 拷贝路径自动修复、hash 去重/更新和受限安装入口，接受裸 Skill 来源、`skills@latest add ...` 与受控 `npx skills add ...`。
 - `apps/shell/model_profiles.py`：保留 `openai_compatible_chat` 文本返回行为，并提供完整 chat completion message helper 给 Agent Runtime 读取 tool calls。
-- `apps/bridge/routes/agents.py`：新增 approve/reject route，Agent 请求支持 `nickname` / `persona_prompt`，Skill 支持 `enabled` PATCH。
-- `apps/frontend/src/views/AgentStudioView.tsx`：Runs 详情支持审批按钮；Agent 表单新增头像、昵称、Persona Prompt 和字段说明；Skill Library 支持多路径导入、导入结果、启停、删除和打开本地路径。
+- `apps/bridge/routes/agents.py`：新增 approve/reject route，Agent 请求支持 `nickname` / `persona_prompt`，Skill 支持 `enabled` PATCH，并增加 `/ui/skills/sources`、`/ui/skills/sync`、`/ui/skills/install`。
+- `apps/frontend/src/views/AgentStudioView.tsx`：Runs 详情支持审批按钮；Agent 表单新增头像、昵称、Persona Prompt 和字段说明；Skill Library 支持 Yachiyo / Hermes 分类筛选、Hermes roots 展示/同步、来源式安装输入、不确定安装进度、本地上传、导入结果、启停、删除和打开本地路径。
 - `apps/frontend/electron/main.ts`、`apps/frontend/electron/preload.cts`、`apps/frontend/src/lib/bridge.ts`：新增多选 Skill 来源文件选择器；头像选择沿用现有图片 picker。
-- `tests/test_agent_runtime.py`、`tests/test_chat_api.py`、`tests/test_model_profiles.py`：补齐 tool_calls、fallback、审批恢复、审批拒绝、未授权工具、路径越界、Agent persona context、Skill enabled 等覆盖。
-- `docs/phase-4-hermes-sync-plan.md`、`memory/progress/current-state.md`、`memory/progress/next-steps.md`：同步记录 Batch 12/13、当前完成状态和后续优先项。
+- `tests/test_agent_runtime.py`、`tests/test_chat_api.py`、`tests/test_model_profiles.py`：补齐 tool_calls、fallback、审批恢复、审批拒绝、未授权工具、路径越界、Agent persona context、Skill enabled、Hermes roots 同步与受限安装等覆盖。
+- `docs/phase-4-hermes-sync-plan.md`、`memory/progress/current-state.md`、`memory/progress/next-steps.md`：同步记录 Batch 12/13/14、当前完成状态和后续优先项。
 
 ### 验证结果
 
-- `.venv/bin/python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_ui_bridge_routes.py tests/test_model_profiles.py -q` → 107 passed。
+- `.venv/bin/python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_ui_bridge_routes.py -q` → 91 passed。
 - `npm --prefix apps/frontend run build` → passed。
 - `git diff --check` → passed。
-- Computer Use 冒烟：本地 Electron 中确认 Agent 表单、Skill Library 导入、Skill 卡片和 Mounted Skills 显示正常；临时 Skill 与测试目录已清理。
+- Computer Use 轻量检查：本地 Electron 主控台可正常加载；这次未通过 UI 点击完成 Agent Studio 视觉复核，功能验证以自动测试和前端 build 为准。
 
 ### 后续建议
 
