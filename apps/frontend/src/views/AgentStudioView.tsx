@@ -14,11 +14,13 @@ import '@xyflow/react/dist/style.css';
 import {
   attachSkill,
   approveRunApproval,
+  createSkillFolder,
   createAgent,
   createAgentRun,
   createWorkflow,
   createWorkflowRun,
   deleteAgent,
+  deleteSkillFolder,
   deleteSkill,
   deleteWorkflow,
   detachSkill,
@@ -29,6 +31,7 @@ import {
   listAgents,
   listRunnables,
   listRuns,
+  listSkillFolders,
   listSkillSources,
   listSkills,
   listWorkflows,
@@ -41,6 +44,7 @@ import {
   type AgentSpec,
   type RunnableSummary,
   type RunSpec,
+  type SkillFolderSpec,
   type SkillInstallResponse,
   type SkillSourceRoot,
   type SkillSyncResult,
@@ -121,6 +125,7 @@ type SkillImportResult = {
 };
 
 type SkillSourceFilter = 'yachiyo' | 'hermes';
+type SkillFolderFilter = 'all' | 'uncategorized' | string;
 
 const starterNodes: Node[] = [
   { id: 'start', type: 'input', position: { x: 40, y: 120 }, data: { label: 'Start', kind: 'start' } },
@@ -172,6 +177,12 @@ function skillMatchesSourceFilter(skill: SkillSpec, filter: SkillSourceFilter): 
   return filter === 'hermes' ? isHermesSkill(skill) : isYachiyoSkill(skill);
 }
 
+function skillMatchesFolderFilter(skill: SkillSpec, filter: SkillFolderFilter): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'uncategorized') return !skill.folder_id;
+  return skill.folder_id === filter;
+}
+
 function skillMatchesQuery(skill: SkillSpec, query: string): boolean {
   const clean = query.trim().toLowerCase();
   if (!clean) return true;
@@ -183,6 +194,7 @@ function skillMatchesQuery(skill: SkillSpec, query: string): boolean {
     skill.source_path,
     skill.local_path,
     skill.origin_path,
+    skill.folder_name,
   ].some((value) => String(value || '').toLowerCase().includes(clean));
 }
 
@@ -332,12 +344,17 @@ export function AgentStudioView() {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
   const [draft, setDraft] = useState<AgentDraft>(emptyAgentDraft);
   const [skillSources, setSkillSources] = useState<SkillSourceRoot[]>([]);
+  const [skillFolders, setSkillFolders] = useState<SkillFolderSpec[]>([]);
+  const [newSkillFolderName, setNewSkillFolderName] = useState('');
+  const [skillTargetFolderId, setSkillTargetFolderId] = useState('');
   const [skillInstallCommand, setSkillInstallCommand] = useState('');
   const [skillInstallResult, setSkillInstallResult] = useState<SkillInstallResponse | null>(null);
   const [skillImportResults, setSkillImportResults] = useState<SkillImportResult[]>([]);
   const [skillLibraryFilter, setSkillLibraryFilter] = useState<SkillSourceFilter>('yachiyo');
+  const [skillLibraryFolderFilter, setSkillLibraryFolderFilter] = useState<SkillFolderFilter>('all');
   const [skillLibrarySearch, setSkillLibrarySearch] = useState('');
   const [skillMountFilter, setSkillMountFilter] = useState<SkillSourceFilter>('yachiyo');
+  const [skillMountFolderFilter, setSkillMountFolderFilter] = useState<SkillFolderFilter>('all');
   const [skillMountSearch, setSkillMountSearch] = useState('');
   const [workflowName, setWorkflowName] = useState('New Workflow');
   const [workflowDescription, setWorkflowDescription] = useState('');
@@ -384,12 +401,20 @@ export function AgentStudioView() {
   const yachiyoSkillCount = useMemo(() => skills.filter(isYachiyoSkill).length, [skills]);
   const hermesSkillCount = useMemo(() => skills.filter(isHermesSkill).length, [skills]);
   const filteredLibrarySkills = useMemo(
-    () => skills.filter((skill) => skillMatchesSourceFilter(skill, skillLibraryFilter) && skillMatchesQuery(skill, skillLibrarySearch)),
-    [skills, skillLibraryFilter, skillLibrarySearch],
+    () => skills.filter((skill) => (
+      skillMatchesSourceFilter(skill, skillLibraryFilter)
+      && skillMatchesFolderFilter(skill, skillLibraryFolderFilter)
+      && skillMatchesQuery(skill, skillLibrarySearch)
+    )),
+    [skills, skillLibraryFilter, skillLibraryFolderFilter, skillLibrarySearch],
   );
   const filteredMountSkills = useMemo(
-    () => enabledSkills.filter((skill) => skillMatchesSourceFilter(skill, skillMountFilter) && skillMatchesQuery(skill, skillMountSearch)),
-    [enabledSkills, skillMountFilter, skillMountSearch],
+    () => enabledSkills.filter((skill) => (
+      skillMatchesSourceFilter(skill, skillMountFilter)
+      && skillMatchesFolderFilter(skill, skillMountFolderFilter)
+      && skillMatchesQuery(skill, skillMountSearch)
+    )),
+    [enabledSkills, skillMountFilter, skillMountFolderFilter, skillMountSearch],
   );
   const disabledMountedSkills = useMemo(
     () => skills.filter((skill) => skill.enabled === false && selectedAgent?.skill_ids?.includes(skill.skill_id)),
@@ -397,7 +422,7 @@ export function AgentStudioView() {
   );
 
   const refresh = useCallback(async (options: StudioRefreshOptions = {}) => {
-    const [nextAgents, nextSkills, nextProfiles, nextWorkflows, nextRunnables, nextRuns, nextSkillSources] = await Promise.all([
+    const [nextAgents, nextSkills, nextProfiles, nextWorkflows, nextRunnables, nextRuns, nextSkillSources, nextSkillFolders] = await Promise.all([
       listAgents(),
       listSkills(),
       listModelProfiles(),
@@ -405,10 +430,12 @@ export function AgentStudioView() {
       listRunnables(),
       listRuns(),
       listSkillSources(),
+      listSkillFolders(),
     ]);
     setAgents(nextAgents);
     setSkills(nextSkills);
     setSkillSources(nextSkillSources);
+    setSkillFolders(nextSkillFolders);
     setModelProfiles(nextProfiles.profiles || []);
     setWorkflows(nextWorkflows);
     setRunnables(nextRunnables);
@@ -597,7 +624,7 @@ export function AgentStudioView() {
         continue;
       }
       try {
-        const imported = await importSkill(source);
+        const imported = await importSkill(source, skillTargetFolderId);
         results.push({ source, status: 'success', message: `已导入 ${imported.name}` });
       } catch (err) {
         results.push({ source, status: 'failed', message: err instanceof Error ? err.message : '导入失败' });
@@ -616,7 +643,7 @@ export function AgentStudioView() {
     const command = skillInstallCommand.trim();
     if (!command) throw new Error('请输入 Skill 来源或安装命令');
     setSkillInstallResult(null);
-    const result = await installSkillCommand(command);
+    const result = await installSkillCommand(command, skillTargetFolderId);
     setSkillInstallResult(result);
     if (result.sync?.results) {
       setSkillImportResults(syncResultsToImportResults(result.sync.results));
@@ -624,6 +651,23 @@ export function AgentStudioView() {
     if (!result.ok) {
       throw new Error(result.stderr || result.stdout || `安装命令退出：${result.returncode ?? 'unknown'}`);
     }
+  }
+
+  async function createSkillFolderFromDraft(): Promise<StudioRefreshOptions | void> {
+    const name = newSkillFolderName.trim();
+    if (!name) throw new Error('请输入 Skill 文件夹名称');
+    const folder = await createSkillFolder({ name });
+    setNewSkillFolderName('');
+    setSkillTargetFolderId(folder.folder_id);
+    setSkillLibraryFolderFilter(folder.folder_id);
+    setSkillMountFolderFilter(folder.folder_id);
+  }
+
+  async function deleteSkillFolderById(folderId: string): Promise<StudioRefreshOptions | void> {
+    await deleteSkillFolder(folderId);
+    if (skillTargetFolderId === folderId) setSkillTargetFolderId('');
+    if (skillLibraryFolderFilter === folderId) setSkillLibraryFolderFilter('all');
+    if (skillMountFolderFilter === folderId) setSkillMountFolderFilter('all');
   }
 
   async function saveAgent(): Promise<StudioRefreshOptions> {
@@ -1008,6 +1052,17 @@ export function AgentStudioView() {
                     <button type="button" className={skillMountFilter === 'yachiyo' ? 'active' : ''} onClick={() => setSkillMountFilter('yachiyo')}>Yachiyo</button>
                     <button type="button" className={skillMountFilter === 'hermes' ? 'active' : ''} onClick={() => setSkillMountFilter('hermes')}>Hermes Agent</button>
                   </div>
+                  <select
+                    className="hy-select"
+                    value={skillMountFolderFilter}
+                    onChange={(event) => setSkillMountFolderFilter(event.target.value)}
+                  >
+                    <option value="all">全部文件夹</option>
+                    <option value="uncategorized">未分类</option>
+                    {skillFolders.map((folder) => (
+                      <option value={folder.folder_id} key={folder.folder_id}>{folder.name}</option>
+                    ))}
+                  </select>
                   <input
                     className="hy-input"
                     value={skillMountSearch}
@@ -1048,6 +1103,41 @@ export function AgentStudioView() {
               <h2>Yachiyo Skills</h2>
             </div>
             <p className="agent-section-help">从 Hermes-Yachiyo 安装或上传的 Skills 会进入 Yachiyo 管理区；它们和 Hermes Agent 自带 Skills 分开展示和挂载。</p>
+            <div className="skill-folder-box">
+              <div className="section-heading-row compact">
+                <h3>Skill Folders</h3>
+              </div>
+              <div className="skill-folder-create">
+                <input
+                  className="hy-input"
+                  value={newSkillFolderName}
+                  onChange={(event) => setNewSkillFolderName(event.target.value)}
+                  placeholder="例如 Laravel / Design"
+                />
+                <button type="button" disabled={busy || !newSkillFolderName.trim()} onClick={() => void runAction(createSkillFolderFromDraft, '创建 Skill 文件夹')}>新建</button>
+              </div>
+              <label>
+                <span>导入到文件夹</span>
+                <select className="hy-select" value={skillTargetFolderId} onChange={(event) => setSkillTargetFolderId(event.target.value)}>
+                  <option value="">未分类</option>
+                  {skillFolders.map((folder) => (
+                    <option value={folder.folder_id} key={folder.folder_id}>{folder.name}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="skill-folder-list">
+                {skillFolders.map((folder) => (
+                  <div className="skill-folder-row" key={folder.folder_id}>
+                    <button type="button" disabled={busy} onClick={() => setSkillLibraryFolderFilter(folder.folder_id)}>
+                      <strong>{folder.name}</strong>
+                      <span>{folder.skill_count || 0} skills</span>
+                    </button>
+                    <button type="button" className="danger-action" disabled={busy} onClick={() => void runAction(async () => deleteSkillFolderById(folder.folder_id), '删除 Skill 文件夹')}>删除</button>
+                  </div>
+                ))}
+                {!skillFolders.length ? <span className="agent-empty-inline">暂无文件夹，新建后可用于导入和筛选。</span> : null}
+              </div>
+            </div>
             <div className="skill-install-box">
               <label>
                 <span>Skill 来源或安装命令</span>
@@ -1130,6 +1220,17 @@ export function AgentStudioView() {
                 <button type="button" className={skillLibraryFilter === 'yachiyo' ? 'active' : ''} onClick={() => setSkillLibraryFilter('yachiyo')}>Yachiyo</button>
                 <button type="button" className={skillLibraryFilter === 'hermes' ? 'active' : ''} onClick={() => setSkillLibraryFilter('hermes')}>Hermes Agent</button>
               </div>
+              <select
+                className="hy-select"
+                value={skillLibraryFolderFilter}
+                onChange={(event) => setSkillLibraryFolderFilter(event.target.value)}
+              >
+                <option value="all">全部文件夹</option>
+                <option value="uncategorized">未分类</option>
+                {skillFolders.map((folder) => (
+                  <option value={folder.folder_id} key={folder.folder_id}>{folder.name}</option>
+                ))}
+              </select>
               <input
                 className="hy-input"
                 value={skillLibrarySearch}
@@ -1141,8 +1242,10 @@ export function AgentStudioView() {
               {filteredLibrarySkills.map((skill) => (
                 <SkillCard
                   busy={busy}
+                  folders={skillFolders}
                   key={skill.skill_id}
                   onDelete={() => runAction(async () => { await deleteSkill(skill.skill_id); }, '删除 Skill')}
+                  onMoveFolder={(folderId) => runAction(async () => { await updateSkill(skill.skill_id, { folder_id: folderId }); }, '移动 Skill')}
                   onOpenLocation={() => runAction(async () => { await openPath(skill.local_path || ''); }, '打开 Skill 路径')}
                   onToggleEnabled={() => runAction(async () => { await updateSkill(skill.skill_id, { enabled: skill.enabled === false }); }, skill.enabled === false ? '启用 Skill' : '停用 Skill')}
                   skill={skill}
@@ -1348,13 +1451,17 @@ export function AgentStudioView() {
 
 function SkillCard({
   busy,
+  folders,
   onDelete,
+  onMoveFolder,
   onOpenLocation,
   onToggleEnabled,
   skill,
 }: {
   busy: boolean;
+  folders: SkillFolderSpec[];
   onDelete: () => Promise<void>;
+  onMoveFolder: (folderId: string) => Promise<void>;
   onOpenLocation: () => Promise<void>;
   onToggleEnabled: () => Promise<void>;
   skill: SkillSpec;
@@ -1378,6 +1485,20 @@ function SkillCard({
         </label>
       </div>
       <p>{skill.description || skill.content_summary}</p>
+      <label className="skill-card-folder">
+        <span>文件夹</span>
+        <select
+          className="hy-select"
+          value={skill.folder_id || ''}
+          disabled={busy}
+          onChange={(event) => void onMoveFolder(event.target.value)}
+        >
+          <option value="">未分类</option>
+          {folders.map((folder) => (
+            <option value={folder.folder_id} key={folder.folder_id}>{folder.name}</option>
+          ))}
+        </select>
+      </label>
       <div className="skill-card-path">
         <span>路径</span>
         <code>{skillPathLabel(skill)}</code>

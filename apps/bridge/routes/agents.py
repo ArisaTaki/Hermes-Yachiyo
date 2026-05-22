@@ -38,14 +38,25 @@ class AgentRequest(BaseModel):
 
 class SkillImportRequest(BaseModel):
     source_path: str = Field(..., min_length=1, max_length=4000)
+    folder_id: str | None = Field(default=None, max_length=160)
 
 
 class SkillInstallRequest(BaseModel):
     command: str = Field(..., min_length=1, max_length=4000)
+    folder_id: str | None = Field(default=None, max_length=160)
 
 
 class SkillUpdateRequest(BaseModel):
     enabled: bool | None = None
+    folder_id: str | None = Field(default=None, max_length=160)
+
+
+class SkillFolderRequest(BaseModel):
+    folder_id: str | None = Field(default=None, max_length=160)
+    name: str | None = Field(default=None, max_length=160)
+    description: str | None = Field(default=None, max_length=1000)
+    source_scope: str | None = Field(default=None, max_length=40)
+    sort_order: int | None = None
 
 
 class AgentSkillRequest(BaseModel):
@@ -169,7 +180,7 @@ async def import_skill_from_post(request: SkillImportRequest) -> dict[str, Any]:
 @router.post("/skills/import")
 async def import_skill(request: SkillImportRequest) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().import_skill, request.source_path)
+        return await asyncio.to_thread(get_agent_runtime_service().import_skill, request.source_path, request.folder_id)
     except AgentRuntimeError as exc:
         raise _bad_request(exc) from exc
 
@@ -177,6 +188,37 @@ async def import_skill(request: SkillImportRequest) -> dict[str, Any]:
 @router.get("/skills/sources")
 async def list_skill_sources() -> dict[str, Any]:
     return await asyncio.to_thread(get_agent_runtime_service().list_hermes_skill_sources)
+
+
+@router.get("/skill-folders")
+async def list_skill_folders() -> dict[str, Any]:
+    return await asyncio.to_thread(get_agent_runtime_service().list_skill_folders)
+
+
+@router.post("/skill-folders")
+async def create_skill_folder(request: SkillFolderRequest) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(get_agent_runtime_service().create_skill_folder, _payload(request))
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.patch("/skill-folders/{folder_id}")
+async def update_skill_folder(folder_id: str, request: SkillFolderRequest) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(get_agent_runtime_service().update_skill_folder, folder_id, _payload(request))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill 文件夹不存在") from exc
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.delete("/skill-folders/{folder_id}")
+async def delete_skill_folder(folder_id: str) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(get_agent_runtime_service().delete_skill_folder, folder_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill 文件夹不存在") from exc
 
 
 @router.post("/skills/sync")
@@ -190,7 +232,7 @@ async def sync_hermes_skills() -> dict[str, Any]:
 @router.post("/skills/install")
 async def install_skill(request: SkillInstallRequest) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().install_skill_command, request.command)
+        return await asyncio.to_thread(get_agent_runtime_service().install_skill_command, request.command, request.folder_id)
     except AgentRuntimeError as exc:
         raise _bad_request(exc) from exc
 

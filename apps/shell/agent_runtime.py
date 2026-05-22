@@ -406,6 +406,7 @@ class AgentRuntimeService:
                 description TEXT NOT NULL DEFAULT '',
                 source_path TEXT NOT NULL DEFAULT '',
                 local_path TEXT NOT NULL DEFAULT '',
+                folder_id TEXT NOT NULL DEFAULT '',
                 source_type TEXT NOT NULL DEFAULT 'local_dir',
                 origin_path TEXT NOT NULL DEFAULT '',
                 source_ref TEXT NOT NULL DEFAULT '',
@@ -416,6 +417,15 @@ class AgentRuntimeService:
                 skill_markdown TEXT NOT NULL,
                 asset_paths_json TEXT NOT NULL DEFAULT '[]',
                 enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS skill_folders (
+                folder_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                source_scope TEXT NOT NULL DEFAULT 'all',
+                sort_order INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -462,8 +472,10 @@ class AgentRuntimeService:
             """
             CREATE INDEX IF NOT EXISTS idx_agents_name ON agents (LOWER(name));
             CREATE INDEX IF NOT EXISTS idx_workflows_name ON workflows (LOWER(name));
+            CREATE INDEX IF NOT EXISTS idx_skills_folder ON skills (folder_id);
             CREATE INDEX IF NOT EXISTS idx_skills_origin ON skills (origin_path);
             CREATE INDEX IF NOT EXISTS idx_skills_content_hash ON skills (content_hash);
+            CREATE INDEX IF NOT EXISTS idx_skill_folders_sort ON skill_folders (sort_order, LOWER(name));
             CREATE INDEX IF NOT EXISTS idx_run_groups_status_updated ON run_groups (status, updated_at);
             CREATE INDEX IF NOT EXISTS idx_runs_group_updated ON runs (run_group_id, updated_at);
             CREATE INDEX IF NOT EXISTS idx_runs_kind_updated ON runs (kind, updated_at);
@@ -486,6 +498,8 @@ class AgentRuntimeService:
         skill_columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(skills)").fetchall()}
         if "local_path" not in skill_columns:
             self._conn.execute("ALTER TABLE skills ADD COLUMN local_path TEXT NOT NULL DEFAULT ''")
+        if "folder_id" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN folder_id TEXT NOT NULL DEFAULT ''")
         if "enabled" not in skill_columns:
             self._conn.execute("ALTER TABLE skills ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
         if "source_type" not in skill_columns:
@@ -787,12 +801,17 @@ class AgentRuntimeService:
         return agent
 
     def _row_to_skill(self, row: sqlite3.Row) -> dict[str, Any]:
+        keys = set(row.keys())
+        folder_id = str(row["folder_id"] if "folder_id" in keys else "")
+        folder_name = str(row["folder_name"] if "folder_name" in keys and row["folder_name"] else "")
         return {
             "skill_id": row["skill_id"],
             "name": row["name"],
             "description": row["description"],
             "source_path": row["source_path"],
             "local_path": row["local_path"] or str(self.skills_dir / row["skill_id"]),
+            "folder_id": folder_id,
+            "folder_name": folder_name,
             "source_type": row["source_type"],
             "origin_path": row["origin_path"],
             "source_ref": row["source_ref"],
@@ -803,6 +822,20 @@ class AgentRuntimeService:
             "skill_markdown": row["skill_markdown"],
             "asset_paths": _json_load(row["asset_paths_json"], []),
             "enabled": bool(row["enabled"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def _row_to_skill_folder(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "folder_id": row["folder_id"],
+            "name": row["name"],
+            "description": row["description"],
+            "source_scope": row["source_scope"],
+            "sort_order": int(row["sort_order"]),
+            "skill_count": int(row["skill_count"] or 0),
+            "yachiyo_count": int(row["yachiyo_count"] or 0),
+            "hermes_count": int(row["hermes_count"] or 0),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
@@ -1046,10 +1079,131 @@ class AgentRuntimeService:
         skill_ids = [item for item in agent.get("skill_ids", []) if item != skill_id]
         return self.update_agent(agent_id, {"skill_ids": skill_ids})
 
+    def list_skill_folders(self) -> dict[str, Any]:
+        self._ensure_row_factory()
+        rows = self._conn.execute(
+            """
+            SELECT f.*,
+                   COUNT(s.skill_id) AS skill_count,
+                   SUM(CASE WHEN s.source_type IN ('hermes_global', 'hermes_project') THEN 0 ELSE 1 END) AS yachiyo_count,
+                   SUM(CASE WHEN s.source_type IN ('hermes_global', 'hermes_project') THEN 1 ELSE 0 END) AS hermes_count
+              FROM skill_folders f
+              LEFT JOIN skills s ON s.folder_id = f.folder_id
+             GROUP BY f.folder_id
+             ORDER BY f.sort_order ASC, LOWER(f.name) ASC
+            """
+        ).fetchall()
+        uncategorized = self._conn.execute(
+            """
+            SELECT COUNT(*) AS skill_count,
+                   SUM(CASE WHEN source_type IN ('hermes_global', 'hermes_project') THEN 0 ELSE 1 END) AS yachiyo_count,
+                   SUM(CASE WHEN source_type IN ('hermes_global', 'hermes_project') THEN 1 ELSE 0 END) AS hermes_count
+              FROM skills
+             WHERE folder_id = ''
+            """
+        ).fetchone()
+        return {
+            "ok": True,
+            "folders": [self._row_to_skill_folder(row) for row in rows],
+            "uncategorized": {
+                "folder_id": "",
+                "name": "Uncategorized",
+                "description": "",
+                "source_scope": "all",
+                "sort_order": -1,
+                "skill_count": int(uncategorized["skill_count"] or 0),
+                "yachiyo_count": int(uncategorized["yachiyo_count"] or 0),
+                "hermes_count": int(uncategorized["hermes_count"] or 0),
+            },
+        }
+
+    def create_skill_folder(self, payload: dict[str, Any]) -> dict[str, Any]:
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise AgentRuntimeError("文件夹名称不能为空")
+        folder_id = str(payload.get("folder_id") or f"folder_{_slug(name, 'folder')}_{uuid4().hex[:6]}").strip()
+        folder_id = _slug(folder_id, "folder")
+        if not folder_id.startswith("folder_"):
+            folder_id = f"folder_{folder_id}"
+        description = str(payload.get("description") or "").strip()[:1000]
+        source_scope = str(payload.get("source_scope") or "all")
+        if source_scope not in {"all", "yachiyo", "hermes"}:
+            source_scope = "all"
+        sort_order = int(payload.get("sort_order") or 0)
+        now = _now()
+        try:
+            self._conn.execute(
+                """
+                INSERT INTO skill_folders (
+                    folder_id, name, description, source_scope, sort_order, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (folder_id, name[:120], description, source_scope, sort_order, now, now),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise AgentRuntimeError("Skill 文件夹已存在") from exc
+        self._conn.commit()
+        return self.get_skill_folder(folder_id)
+
+    def get_skill_folder(self, folder_id: str) -> dict[str, Any]:
+        self._ensure_row_factory()
+        row = self._conn.execute(
+            """
+            SELECT f.*,
+                   COUNT(s.skill_id) AS skill_count,
+                   SUM(CASE WHEN s.source_type IN ('hermes_global', 'hermes_project') THEN 0 ELSE 1 END) AS yachiyo_count,
+                   SUM(CASE WHEN s.source_type IN ('hermes_global', 'hermes_project') THEN 1 ELSE 0 END) AS hermes_count
+              FROM skill_folders f
+              LEFT JOIN skills s ON s.folder_id = f.folder_id
+             WHERE f.folder_id=?
+             GROUP BY f.folder_id
+            """,
+            (folder_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(folder_id)
+        return self._row_to_skill_folder(row)
+
+    def update_skill_folder(self, folder_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        current = self.get_skill_folder(folder_id)
+        name = str(payload.get("name") if "name" in payload else current["name"]).strip()
+        if not name:
+            raise AgentRuntimeError("文件夹名称不能为空")
+        description = str(payload.get("description") if "description" in payload else current["description"]).strip()[:1000]
+        source_scope = str(payload.get("source_scope") if "source_scope" in payload else current["source_scope"])
+        if source_scope not in {"all", "yachiyo", "hermes"}:
+            source_scope = "all"
+        sort_order = int(payload.get("sort_order") if "sort_order" in payload else current["sort_order"])
+        self._conn.execute(
+            """
+            UPDATE skill_folders
+               SET name=?, description=?, source_scope=?, sort_order=?, updated_at=?
+             WHERE folder_id=?
+            """,
+            (name[:120], description, source_scope, sort_order, _now(), folder_id),
+        )
+        self._conn.commit()
+        return self.get_skill_folder(folder_id)
+
+    def delete_skill_folder(self, folder_id: str) -> dict[str, Any]:
+        self.get_skill_folder(folder_id)
+        now = _now()
+        self._conn.execute("UPDATE skills SET folder_id='', updated_at=? WHERE folder_id=?", (now, folder_id))
+        self._conn.execute("DELETE FROM skill_folders WHERE folder_id=?", (folder_id,))
+        self._conn.commit()
+        return {"ok": True}
+
     def list_skills(self) -> dict[str, Any]:
         self._ensure_row_factory()
         self._repair_hermes_skill_references()
-        rows = self._conn.execute("SELECT * FROM skills ORDER BY updated_at DESC").fetchall()
+        rows = self._conn.execute(
+            """
+            SELECT s.*, f.name AS folder_name
+              FROM skills s
+              LEFT JOIN skill_folders f ON f.folder_id = s.folder_id
+             ORDER BY s.updated_at DESC
+            """
+        ).fetchall()
         return {"ok": True, "skills": [self._row_to_skill(row) for row in rows]}
 
     def list_hermes_skill_sources(self) -> dict[str, Any]:
@@ -1071,15 +1225,24 @@ class AgentRuntimeService:
     def get_skill(self, skill_id: str) -> dict[str, Any]:
         self._ensure_row_factory()
         self._repair_hermes_skill_references()
-        row = self._conn.execute("SELECT * FROM skills WHERE skill_id=?", (skill_id,)).fetchone()
+        row = self._conn.execute(
+            """
+            SELECT s.*, f.name AS folder_name
+              FROM skills s
+              LEFT JOIN skill_folders f ON f.folder_id = s.folder_id
+             WHERE s.skill_id=?
+            """,
+            (skill_id,),
+        ).fetchone()
         if row is None:
             raise KeyError(skill_id)
         return self._row_to_skill(row)
 
-    def import_skill(self, source_path: str) -> dict[str, Any]:
+    def import_skill(self, source_path: str, folder_id: str | None = None) -> dict[str, Any]:
         source = Path(source_path).expanduser()
         if not source.exists():
             raise AgentRuntimeError("Skill 路径不存在")
+        target_folder_id = self._normalize_skill_folder_id(folder_id)
         temp_dir: Path | None = None
         source_type = "local_dir"
         source_ref = source.name
@@ -1110,6 +1273,7 @@ class AgentRuntimeService:
                 origin_path=origin_path,
                 source_ref=source_ref,
                 sync_status="imported",
+                folder_id=target_folder_id,
             )
         finally:
             if temp_dir is not None:
@@ -1118,14 +1282,26 @@ class AgentRuntimeService:
     def sync_hermes_skills(self, roots: list[Any] | None = None) -> dict[str, Any]:
         return self._sync_skill_roots(self._hermes_skill_root_specs(roots), library="hermes")
 
-    def sync_yachiyo_installed_skills(self, *, record_source_type: str = "npx_skills") -> dict[str, Any]:
+    def sync_yachiyo_installed_skills(
+        self,
+        *,
+        record_source_type: str = "npx_skills",
+        folder_id: str | None = None,
+    ) -> dict[str, Any]:
         source_type = record_source_type if record_source_type in {"npx_skills", "hermes_cli"} else "npx_skills"
         roots = self._yachiyo_skill_root_specs(source_type=source_type)
-        return self._sync_skill_roots(roots, library="yachiyo")
+        return self._sync_skill_roots(roots, library="yachiyo", folder_id=folder_id)
 
-    def _sync_skill_roots(self, root_specs: list[dict[str, Any]], *, library: str) -> dict[str, Any]:
+    def _sync_skill_roots(
+        self,
+        root_specs: list[dict[str, Any]],
+        *,
+        library: str,
+        folder_id: str | None = None,
+    ) -> dict[str, Any]:
         results: list[dict[str, Any]] = []
         now = _now()
+        target_folder_id = self._normalize_skill_folder_id(folder_id) if folder_id is not None else None
         for root_spec in root_specs:
             root = root_spec["path"]
             source_type = str(root_spec["source_type"])
@@ -1176,6 +1352,7 @@ class AgentRuntimeService:
                         sync_status="synced",
                         synced_at=now,
                         copy_to_managed=False,
+                        folder_id=target_folder_id,
                     )
                     results.append({
                         "source": str(source_root),
@@ -1213,8 +1390,9 @@ class AgentRuntimeService:
         ]
         return {"ok": summary["failed"] == 0, "roots": roots_info, "summary": summary, "results": results}
 
-    def install_skill_command(self, command: str) -> dict[str, Any]:
+    def install_skill_command(self, command: str, folder_id: str | None = None) -> dict[str, Any]:
         argv, installer = self._validated_skill_install_argv(command)
+        target_folder_id = self._normalize_skill_folder_id(folder_id)
         started_at = _now()
         env = os.environ.copy()
         env["HERMES_HOME"] = str(self.skill_installs_hermes_home)
@@ -1234,7 +1412,11 @@ class AgentRuntimeService:
             raise AgentRuntimeError("Skill 安装命令超时") from exc
         stdout = redact_secrets(completed.stdout)[-12000:]
         stderr = redact_secrets(completed.stderr)[-12000:]
-        sync_result = self.sync_yachiyo_installed_skills(record_source_type=installer) if completed.returncode == 0 else None
+        sync_result = (
+            self.sync_yachiyo_installed_skills(record_source_type=installer, folder_id=target_folder_id)
+            if completed.returncode == 0
+            else None
+        )
         return {
             "ok": completed.returncode == 0,
             "installer": installer,
@@ -1258,6 +1440,7 @@ class AgentRuntimeService:
         sync_status: str,
         synced_at: str = "",
         copy_to_managed: bool = True,
+        folder_id: str | None = None,
     ) -> dict[str, Any]:
         if source_type not in _SKILL_SOURCE_TYPES:
             raise AgentRuntimeError("未知 Skill 来源类型")
@@ -1275,6 +1458,7 @@ class AgentRuntimeService:
         summary = self._skill_summary(markdown)
         now = _now()
         last_synced_at = synced_at or (now if source_type not in {"local_dir", "local_zip"} else "")
+        target_folder_id = self._normalize_skill_folder_id(folder_id) if folder_id is not None else ""
         if existing is None:
             skill_id = f"skill_{_slug(name, 'skill')}_{uuid4().hex[:8]}"
             target = self.skills_dir / skill_id if copy_to_managed else source_root
@@ -1284,10 +1468,10 @@ class AgentRuntimeService:
             self._conn.execute(
                 """
                 INSERT INTO skills (
-                    skill_id, name, description, source_path, local_path, source_type, origin_path,
+                    skill_id, name, description, source_path, local_path, folder_id, source_type, origin_path,
                     source_ref, content_hash, last_synced_at, sync_status, content_summary,
                     skill_markdown, asset_paths_json, enabled, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     skill_id,
@@ -1295,6 +1479,7 @@ class AgentRuntimeService:
                     description,
                     source_path,
                     str(target.resolve()),
+                    target_folder_id,
                     source_type,
                     origin_path,
                     source_ref,
@@ -1316,11 +1501,12 @@ class AgentRuntimeService:
             next_local_path = str(target.resolve()) if copy_to_managed else origin_path
             if not copy_to_managed:
                 self._remove_managed_copy_if_safe(target, origin_path)
+            next_folder_id = target_folder_id if folder_id is not None else existing["folder_id"]
             self._conn.execute(
                 """
                 UPDATE skills
                    SET source_path=?, local_path=?, source_type=?, origin_path=?, source_ref=?,
-                       last_synced_at=?, sync_status=?
+                       folder_id=?, last_synced_at=?, sync_status=?
                  WHERE skill_id=?
                 """,
                 (
@@ -1329,6 +1515,7 @@ class AgentRuntimeService:
                     source_type if existing["origin_path"] == origin_path else existing["source_type"],
                     origin_path if existing["origin_path"] == origin_path else existing["origin_path"],
                     source_ref if existing["origin_path"] == origin_path else existing["source_ref"],
+                    next_folder_id,
                     last_synced_at or existing["last_synced_at"],
                     "skipped",
                     skill_id,
@@ -1346,10 +1533,11 @@ class AgentRuntimeService:
             if copy_to_managed:
                 shutil.copytree(source_root, target)
             asset_paths = self._skill_asset_paths(target)
+            next_folder_id = target_folder_id if folder_id is not None else existing["folder_id"]
             self._conn.execute(
                 """
                 UPDATE skills
-                   SET name=?, description=?, source_path=?, local_path=?, source_type=?, origin_path=?,
+                   SET name=?, description=?, source_path=?, local_path=?, folder_id=?, source_type=?, origin_path=?,
                        source_ref=?, content_hash=?, last_synced_at=?, sync_status=?, content_summary=?,
                        skill_markdown=?, asset_paths_json=?, updated_at=?
                  WHERE skill_id=?
@@ -1359,6 +1547,7 @@ class AgentRuntimeService:
                     description,
                     source_path,
                     str(target.resolve()),
+                    next_folder_id,
                     source_type,
                     origin_path,
                     source_ref,
@@ -1544,18 +1733,28 @@ class AgentRuntimeService:
             elif arg.startswith("--agent=") and arg != "--agent=hermes-agent":
                 raise AgentRuntimeError("Yachiyo 安装入口固定使用 hermes-agent 目标")
 
+    def _normalize_skill_folder_id(self, folder_id: str | None) -> str:
+        clean = str(folder_id or "").strip()
+        if not clean:
+            return ""
+        row = self._conn.execute("SELECT folder_id FROM skill_folders WHERE folder_id=?", (clean,)).fetchone()
+        if row is None:
+            raise AgentRuntimeError("Skill 文件夹不存在")
+        return clean
+
     def update_skill(self, skill_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.get_skill(skill_id)
-        if "enabled" not in payload:
+        if "enabled" not in payload and "folder_id" not in payload:
             return current
-        enabled = payload.get("enabled")
+        enabled = payload.get("enabled") if "enabled" in payload else current.get("enabled", True)
+        folder_id = self._normalize_skill_folder_id(payload.get("folder_id")) if "folder_id" in payload else current.get("folder_id", "")
         self._conn.execute(
             """
             UPDATE skills
-               SET enabled=?, updated_at=?
+               SET enabled=?, folder_id=?, updated_at=?
              WHERE skill_id=?
             """,
-            (1 if enabled is not False else 0, _now(), skill_id),
+            (1 if enabled is not False else 0, folder_id, _now(), skill_id),
         )
         self._conn.commit()
         return self.get_skill(skill_id)

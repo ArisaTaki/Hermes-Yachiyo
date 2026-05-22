@@ -317,6 +317,47 @@ def test_skill_dedup_is_scoped_to_yachiyo_or_hermes_library(tmp_path):
         service.close()
 
 
+def test_skill_folders_assign_move_and_delete_without_moving_files(tmp_path):
+    service = make_service(tmp_path)
+    skill_root = tmp_path / "laravel-skill"
+    skill_root.mkdir()
+    (skill_root / "SKILL.md").write_text("# Laravel Skill\n\nUse Laravel conventions.", encoding="utf-8")
+    try:
+        folder = service.create_skill_folder({"name": "Laravel"})
+        skill = service.import_skill(str(skill_root), folder["folder_id"])
+        assert skill["folder_id"] == folder["folder_id"]
+        assert skill["folder_name"] == "Laravel"
+
+        folders = service.list_skill_folders()
+        listed = next(item for item in folders["folders"] if item["folder_id"] == folder["folder_id"])
+        assert listed["skill_count"] == 1
+        assert listed["yachiyo_count"] == 1
+
+        moved = service.update_skill(skill["skill_id"], {"folder_id": ""})
+        assert moved["folder_id"] == ""
+        assert moved["local_path"].startswith(str(service.skills_dir))
+
+        service.update_skill(skill["skill_id"], {"folder_id": folder["folder_id"]})
+        service.delete_skill_folder(folder["folder_id"])
+        after_delete = service.get_skill(skill["skill_id"])
+        assert after_delete["folder_id"] == ""
+        assert after_delete["local_path"].startswith(str(service.skills_dir))
+    finally:
+        service.close()
+
+
+def test_skill_folder_validation_rejects_missing_folder(tmp_path):
+    service = make_service(tmp_path)
+    skill_root = tmp_path / "missing-folder-skill"
+    skill_root.mkdir()
+    (skill_root / "SKILL.md").write_text("# Missing Folder Skill\n\nDemo.", encoding="utf-8")
+    try:
+        with pytest.raises(AgentRuntimeError, match="文件夹不存在"):
+            service.import_skill(str(skill_root), "folder_missing")
+    finally:
+        service.close()
+
+
 def test_hermes_skill_list_repairs_old_managed_copy_path(tmp_path):
     service = make_service(tmp_path)
     hermes_root = tmp_path / ".hermes" / "skills" / "productivity" / "powerpoint"
@@ -797,9 +838,15 @@ async def test_skill_sync_and_install_routes(tmp_path, monkeypatch):
         sources = await agent_routes.list_skill_sources()
         assert sources["roots"][0]["path"] == str(hermes_home / "skills")
 
-        installed = await agent_routes.install_skill(agent_routes.SkillInstallRequest(command="skills@latest add owner/repo"))
+        folder = await agent_routes.create_skill_folder(agent_routes.SkillFolderRequest(name="Office"))
+        installed = await agent_routes.install_skill(
+            agent_routes.SkillInstallRequest(command="skills@latest add owner/repo", folder_id=folder["folder_id"])
+        )
         assert installed["ok"] is True
         assert installed["sync"]["summary"]["imported"] == 1
+        skills = service.list_skills()["skills"]
+        assert skills[0]["folder_id"] == folder["folder_id"]
+        assert skills[0]["folder_name"] == "Office"
 
         synced = await agent_routes.sync_hermes_skills()
         assert synced["summary"]["skipped"] >= 1

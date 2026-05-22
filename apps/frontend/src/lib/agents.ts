@@ -41,6 +41,8 @@ export type SkillSpec = {
   description?: string;
   source_path?: string;
   local_path?: string;
+  folder_id?: string;
+  folder_name?: string;
   source_type?: string;
   origin_path?: string;
   source_ref?: string;
@@ -61,6 +63,19 @@ export type SkillSourceRoot = {
   library?: 'hermes' | 'yachiyo' | string;
   exists?: boolean;
   skill_count?: number;
+};
+
+export type SkillFolderSpec = {
+  folder_id: string;
+  name: string;
+  description?: string;
+  source_scope?: 'all' | 'yachiyo' | 'hermes' | string;
+  sort_order?: number;
+  skill_count?: number;
+  yachiyo_count?: number;
+  hermes_count?: number;
+  created_at?: string;
+  updated_at?: string;
 };
 
 export type SkillSyncResult = {
@@ -193,8 +208,8 @@ export async function listSkills(): Promise<SkillSpec[]> {
   return payload.skills || [];
 }
 
-export async function importSkill(sourcePath: string): Promise<SkillSpec> {
-  return apiPost('/ui/skills/import', { source_path: sourcePath });
+export async function importSkill(sourcePath: string, folderId?: string): Promise<SkillSpec> {
+  return apiPost('/ui/skills/import', { source_path: sourcePath, folder_id: folderId || undefined });
 }
 
 export async function listSkillSources(): Promise<SkillSourceRoot[]> {
@@ -202,12 +217,29 @@ export async function listSkillSources(): Promise<SkillSourceRoot[]> {
   return payload.roots || [];
 }
 
+export async function listSkillFolders(): Promise<SkillFolderSpec[]> {
+  const payload = await apiGet<{ folders?: SkillFolderSpec[] }>('/ui/skill-folders');
+  return payload.folders || [];
+}
+
+export async function createSkillFolder(request: Partial<SkillFolderSpec>): Promise<SkillFolderSpec> {
+  return apiPost('/ui/skill-folders', request);
+}
+
+export async function updateSkillFolder(folderId: string, request: Partial<SkillFolderSpec>): Promise<SkillFolderSpec> {
+  return apiPatch(`/ui/skill-folders/${encodeURIComponent(folderId)}`, request);
+}
+
+export async function deleteSkillFolder(folderId: string): Promise<{ ok?: boolean }> {
+  return apiDelete(`/ui/skill-folders/${encodeURIComponent(folderId)}`);
+}
+
 export async function syncHermesSkills(): Promise<SkillSyncResponse> {
   return apiPost('/ui/skills/sync', {});
 }
 
-export async function installSkillCommand(command: string): Promise<SkillInstallResponse> {
-  return apiPost('/ui/skills/install', { command });
+export async function installSkillCommand(command: string, folderId?: string): Promise<SkillInstallResponse> {
+  return apiPost('/ui/skills/install', { command, folder_id: folderId || undefined });
 }
 
 export async function updateSkill(skillId: string, request: Partial<SkillSpec>): Promise<SkillSpec> {
