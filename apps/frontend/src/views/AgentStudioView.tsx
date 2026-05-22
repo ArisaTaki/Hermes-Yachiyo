@@ -448,6 +448,22 @@ export function AgentStudioView() {
   }, [selectedAgent]);
 
   useEffect(() => {
+    if (tab !== 'agents' || loading || busyAction || agents.length) return;
+    if (!selectedAgentId && !draft.agent_id) return;
+    let disposed = false;
+    refresh({ selectFirstAgent: true })
+      .then(() => {
+        if (!disposed) setError('');
+      })
+      .catch((err: unknown) => {
+        if (!disposed) setError(err instanceof Error ? err.message : '刷新 Agent 列表失败');
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [agents.length, busyAction, draft.agent_id, loading, refresh, selectedAgentId, tab]);
+
+  useEffect(() => {
     if (!selectedRunId || selectedRun) return;
     let disposed = false;
     getRun(selectedRunId)
@@ -505,6 +521,17 @@ export function AgentStudioView() {
     setSelectedWorkflowId(workflowId);
     setStatus('');
     setError('');
+  }
+
+  function activateTab(nextTab: StudioTab) {
+    setTab(nextTab);
+    setStatus('');
+    setError('');
+    if (nextTab === 'agents') {
+      void refresh({ selectFirstAgent: true }).catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : '刷新 Agent 列表失败');
+      });
+    }
   }
 
   async function runAction(action: () => Promise<StudioRefreshOptions | void>, label: string) {
@@ -745,7 +772,7 @@ export function AgentStudioView() {
             type="button"
             className={tab === item ? 'active' : ''}
             key={item}
-            onClick={() => setTab(item)}
+            onClick={() => activateTab(item)}
           >
             {item === 'agents' ? 'Agents' : item === 'skills' ? 'Skill Library' : item === 'workflows' ? 'Workflow Studio' : 'Runs'}
           </button>
@@ -785,6 +812,7 @@ export function AgentStudioView() {
                   </span>
                 </button>
               ))}
+              {!agents.length ? <span className="agent-empty-inline">暂无 Agent。点击“新建”创建一个 Agent。</span> : null}
             </div>
           </aside>
           <form className="agent-studio-panel agent-editor" onSubmit={(event) => { event.preventDefault(); void runAction(saveAgent, '保存 Agent'); }}>
