@@ -2,6 +2,15 @@
 
 ## 已完成
 
+### Milestone 88 — Skill Folder / Collection
+
+- ✅ 新增一层 Skill Folder 元数据层：`skill_folders` 表保存文件夹名称、说明、来源范围与排序；`skills.folder_id` 保存归属，默认未分类。
+- ✅ Skill Folder 只作为管理和筛选维度，不移动 Hermes Agent 原路径，也不强制改动 Yachiyo 已导入 Skill 的本地快照路径。
+- ✅ Skill Library 左侧支持新建/删除文件夹，安装/上传 Skill 时可选择目标文件夹；删除文件夹会把 Skill 归回未分类。
+- ✅ Skill Library 卡片支持移动 Skill 到其他文件夹；Agent Mounted Skills 增加文件夹筛选，便于按 Laravel / Design 等主题为 Agent 挑选 Skill。
+- ✅ 修复 Agent Studio stale state：开发态 HMR 或临时刷新导致左侧 Agent 列表为空但右侧仍有 draft 时，会自动重新拉取 Agent 列表；Computer Use 已确认 Agent 列表恢复显示。
+- ✅ 验证：`.venv/bin/python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_ui_bridge_routes.py -q` → 94 passed；`npm --prefix apps/frontend run build` passed；Computer Use 通过 `.venv/bin/hermes-yachiyo` 实机确认 Agent 列表、Skill Folders、导入目标文件夹、Library 文件夹筛选和 Mounted Skills 文件夹筛选可见。
+
 ### Milestone 87 — Yachiyo / Hermes 双 Skill 库与受限安装入口
 
 - ✅ Skill Library 分成 Yachiyo 管理区与 Hermes Agent 管理区：Yachiyo 上传/安装的 Skill 留在 Yachiyo 工作区，Hermes Agent 自带全局 Skill 只登记 `~/.hermes/skills` 原路径引用，不复制到 Yachiyo 目录；项目级 `.hermes/skills` 暂不纳入本页管理。

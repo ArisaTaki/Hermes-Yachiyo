@@ -8,7 +8,7 @@
 2. Agent Runtime 后续增强：补 streaming/轮询刷新、运行中取消 UI、失败重试、更完整 artifact viewer，以及 Runs 页面按 Agent 履历聚合。
 3. 手工验证主 Agent 自动委派体验：用真实 Chat Profile 创建启用 Agent / Workflow，检查主会话是否能触发 `run_yachiyo_agent` / `run_yachiyo_workflow`、Run 留档、结果回填和 3 次上限。
 4. 规划“直接与 Agent 聊天”入口：复用 Agent 的 `nickname`、`avatar_url`、`persona_prompt`，明确与主 Chat / Workflow Run / Quick Run 的数据边界。
-5. 为 Skill Library 补后续管理能力：批量启停、导入/同步历史、打开 Hermes roots、安装命令历史，以及后续 marketplace/全局 skills 浏览边界。
+5. 为 Skill Library 补后续管理能力：批量启停、导入/同步历史、打开 Hermes roots、安装命令历史、文件夹重命名/排序，以及后续 marketplace/全局 skills 浏览边界。
 6. 为 Agent Studio 增加更清楚的能力状态展示：当 Agent 缺少 Chat Profile、挂载 Skill 已停用或高风险工具需要审批时，在编辑页和 Quick Run 前置提示。
 7. 把 `apps/shell/provider_catalog_sync.py` 接入每日或低频后台更新机制，更新 `~/.hermes/yachiyo/provider-capabilities.json`；刷新失败不能阻塞应用启动。
 8. 继续扩展 provider adapter：为 Xiaomi MiMo、OpenRouter、Gemini、DashScope、DeepSeek、MiniMax 等常用源沉淀 `/models` 路径、鉴权 header、模型 ID 规范、chat payload、vision payload 和错误归因。
