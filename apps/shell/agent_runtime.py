@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -55,6 +57,8 @@ _TOOL_FUNCTION_NAMES = {
 }
 _TOOL_NAME_ALIASES = {value: key for key, value in _TOOL_FUNCTION_NAMES.items()}
 _FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
+_SKILL_SOURCE_TYPES = {"hermes_global", "hermes_project", "npx_skills", "hermes_cli", "local_zip", "local_dir"}
+_SHELL_METACHARS = {"&&", "||", "&", ";", "|", ">", ">>", "<", "$(", "`", "\n", "\r"}
 _UNSET = object()
 
 
@@ -67,6 +71,10 @@ def _hermes_yachiyo_home() -> Path:
     root = Path(hermes_home) / "yachiyo"
     root.mkdir(parents=True, exist_ok=True)
     return root
+
+
+def _hermes_home() -> Path:
+    return Path(os.getenv("HERMES_HOME", os.path.expanduser("~/.hermes"))).expanduser()
 
 
 def _slug(value: str, fallback: str) -> str:
@@ -129,6 +137,38 @@ def _is_within(path: Path, root: Path) -> bool:
 def _read_text(path: Path, limit: int = 200_000) -> str:
     data = path.read_bytes()[:limit]
     return data.decode("utf-8", errors="replace")
+
+
+def _skill_content_hash(root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        try:
+            rel = path.relative_to(root).as_posix()
+            digest.update(rel.encode("utf-8", errors="replace"))
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+        except OSError:
+            continue
+    return digest.hexdigest()
+
+
+def _parse_skill_frontmatter(markdown: str) -> dict[str, Any]:
+    lines = markdown.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+    data: dict[str, Any] = {}
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        if not line.strip() or line.lstrip().startswith("#") or ":" not in line:
+            continue
+        key, raw_value = line.split(":", 1)
+        key = key.strip()
+        value = raw_value.strip().strip("\"'")
+        if key and value:
+            data[key] = value
+    return data
 
 
 def _normalize_tool_name(value: Any) -> str:
@@ -310,9 +350,13 @@ class AgentRuntimeService:
         self.workspace_dir = root
         self.db_path = Path(db_path) if db_path is not None else root / "agent-runtime.db"
         self.skills_dir = root / "skills"
+        self.skill_installs_dir = root / "skill-installs"
+        self.skill_installs_hermes_home = self.skill_installs_dir / "hermes-home"
         self.agent_artifacts_dir = root / "artifacts" / "agent-runs"
         self.workflow_artifacts_dir = root / "artifacts" / "workflow-runs"
         self.skills_dir.mkdir(parents=True, exist_ok=True)
+        self.skill_installs_dir.mkdir(parents=True, exist_ok=True)
+        self.skill_installs_hermes_home.mkdir(parents=True, exist_ok=True)
         self.agent_artifacts_dir.mkdir(parents=True, exist_ok=True)
         self.workflow_artifacts_dir.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
@@ -362,6 +406,12 @@ class AgentRuntimeService:
                 description TEXT NOT NULL DEFAULT '',
                 source_path TEXT NOT NULL DEFAULT '',
                 local_path TEXT NOT NULL DEFAULT '',
+                source_type TEXT NOT NULL DEFAULT 'local_dir',
+                origin_path TEXT NOT NULL DEFAULT '',
+                source_ref TEXT NOT NULL DEFAULT '',
+                content_hash TEXT NOT NULL DEFAULT '',
+                last_synced_at TEXT NOT NULL DEFAULT '',
+                sync_status TEXT NOT NULL DEFAULT 'imported',
                 content_summary TEXT NOT NULL DEFAULT '',
                 skill_markdown TEXT NOT NULL,
                 asset_paths_json TEXT NOT NULL DEFAULT '[]',
@@ -412,6 +462,8 @@ class AgentRuntimeService:
             """
             CREATE INDEX IF NOT EXISTS idx_agents_name ON agents (LOWER(name));
             CREATE INDEX IF NOT EXISTS idx_workflows_name ON workflows (LOWER(name));
+            CREATE INDEX IF NOT EXISTS idx_skills_origin ON skills (origin_path);
+            CREATE INDEX IF NOT EXISTS idx_skills_content_hash ON skills (content_hash);
             CREATE INDEX IF NOT EXISTS idx_run_groups_status_updated ON run_groups (status, updated_at);
             CREATE INDEX IF NOT EXISTS idx_runs_group_updated ON runs (run_group_id, updated_at);
             CREATE INDEX IF NOT EXISTS idx_runs_kind_updated ON runs (kind, updated_at);
@@ -436,6 +488,18 @@ class AgentRuntimeService:
             self._conn.execute("ALTER TABLE skills ADD COLUMN local_path TEXT NOT NULL DEFAULT ''")
         if "enabled" not in skill_columns:
             self._conn.execute("ALTER TABLE skills ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1")
+        if "source_type" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN source_type TEXT NOT NULL DEFAULT 'local_dir'")
+        if "origin_path" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN origin_path TEXT NOT NULL DEFAULT ''")
+        if "source_ref" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN source_ref TEXT NOT NULL DEFAULT ''")
+        if "content_hash" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''")
+        if "last_synced_at" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN last_synced_at TEXT NOT NULL DEFAULT ''")
+        if "sync_status" not in skill_columns:
+            self._conn.execute("ALTER TABLE skills ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'imported'")
         run_columns = {str(row["name"]) for row in self._conn.execute("PRAGMA table_info(runs)").fetchall()}
         if "run_group_id" not in run_columns:
             self._conn.execute("ALTER TABLE runs ADD COLUMN run_group_id TEXT NOT NULL DEFAULT ''")
@@ -729,6 +793,12 @@ class AgentRuntimeService:
             "description": row["description"],
             "source_path": row["source_path"],
             "local_path": row["local_path"] or str(self.skills_dir / row["skill_id"]),
+            "source_type": row["source_type"],
+            "origin_path": row["origin_path"],
+            "source_ref": row["source_ref"],
+            "content_hash": row["content_hash"],
+            "last_synced_at": row["last_synced_at"],
+            "sync_status": row["sync_status"],
             "content_summary": row["content_summary"],
             "skill_markdown": row["skill_markdown"],
             "asset_paths": _json_load(row["asset_paths_json"], []),
@@ -978,11 +1048,29 @@ class AgentRuntimeService:
 
     def list_skills(self) -> dict[str, Any]:
         self._ensure_row_factory()
+        self._repair_hermes_skill_references()
         rows = self._conn.execute("SELECT * FROM skills ORDER BY updated_at DESC").fetchall()
         return {"ok": True, "skills": [self._row_to_skill(row) for row in rows]}
 
+    def list_hermes_skill_sources(self) -> dict[str, Any]:
+        roots = self._hermes_skill_root_specs()
+        return {
+            "ok": True,
+            "roots": [
+                {
+                    "path": str(root["path"]),
+                    "source_type": root["source_type"],
+                    "library": "hermes",
+                    "exists": root["path"].exists(),
+                    "skill_count": self._count_skill_files(root["path"]),
+                }
+                for root in roots
+            ],
+        }
+
     def get_skill(self, skill_id: str) -> dict[str, Any]:
         self._ensure_row_factory()
+        self._repair_hermes_skill_references()
         row = self._conn.execute("SELECT * FROM skills WHERE skill_id=?", (skill_id,)).fetchone()
         if row is None:
             raise KeyError(skill_id)
@@ -993,9 +1081,13 @@ class AgentRuntimeService:
         if not source.exists():
             raise AgentRuntimeError("Skill 路径不存在")
         temp_dir: Path | None = None
+        source_type = "local_dir"
+        source_ref = source.name
+        origin_path = str(source.resolve())
         if source.is_file():
             if source.suffix.lower() != ".zip":
                 raise AgentRuntimeError("Skill 文件只支持 ZIP")
+            source_type = "local_zip"
             temp_dir = self.workspace_dir / "skill-import-tmp" / uuid4().hex
             temp_dir.mkdir(parents=True, exist_ok=True)
             with zipfile.ZipFile(source) as archive:
@@ -1010,45 +1102,447 @@ class AgentRuntimeService:
                 source_root = roots[0]
         else:
             source_root = source
-        skill_md = source_root / "SKILL.md"
-        if not skill_md.is_file():
+        try:
+            return self._import_skill_root(
+                source_root,
+                source_path=f"local:{source.name}",
+                source_type=source_type,
+                origin_path=origin_path,
+                source_ref=source_ref,
+                sync_status="imported",
+            )
+        finally:
             if temp_dir is not None:
                 shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def sync_hermes_skills(self, roots: list[Any] | None = None) -> dict[str, Any]:
+        return self._sync_skill_roots(self._hermes_skill_root_specs(roots), library="hermes")
+
+    def sync_yachiyo_installed_skills(self, *, record_source_type: str = "npx_skills") -> dict[str, Any]:
+        source_type = record_source_type if record_source_type in {"npx_skills", "hermes_cli"} else "npx_skills"
+        roots = self._yachiyo_skill_root_specs(source_type=source_type)
+        return self._sync_skill_roots(roots, library="yachiyo")
+
+    def _sync_skill_roots(self, root_specs: list[dict[str, Any]], *, library: str) -> dict[str, Any]:
+        results: list[dict[str, Any]] = []
+        now = _now()
+        for root_spec in root_specs:
+            root = root_spec["path"]
+            source_type = str(root_spec["source_type"])
+            if source_type not in _SKILL_SOURCE_TYPES:
+                source_type = "local_dir"
+            if not root.exists():
+                results.append({
+                    "source": str(root),
+                    "source_type": source_type,
+                    "library": library,
+                    "status": "skipped",
+                    "message": "Skills root 不存在",
+                })
+                continue
+            skill_files = sorted(root.rglob("SKILL.md"))
+            if not skill_files:
+                results.append({
+                    "source": str(root),
+                    "source_type": source_type,
+                    "library": library,
+                    "status": "skipped",
+                    "message": "未发现 SKILL.md",
+                })
+                continue
+            skill_ancestors = {path.parent for path in skill_files}
+            for child in sorted(item for item in root.iterdir() if item.is_dir()):
+                if not any(child == parent or child in parent.parents for parent in skill_ancestors):
+                    results.append({
+                        "source": str(child),
+                        "source_type": source_type,
+                        "library": library,
+                        "status": "skipped",
+                        "message": "目录中未发现 SKILL.md",
+                    })
+            for skill_md in skill_files:
+                source_root = skill_md.parent
+                try:
+                    source_ref = source_root.relative_to(root).as_posix()
+                except ValueError:
+                    source_ref = source_root.name
+                try:
+                    result = self._import_skill_root(
+                        source_root,
+                        source_path=f"{source_type}:{source_ref}",
+                        source_type=source_type,
+                        origin_path=str(source_root.resolve()),
+                        source_ref=source_ref,
+                        sync_status="synced",
+                        synced_at=now,
+                        copy_to_managed=False,
+                    )
+                    results.append({
+                        "source": str(source_root),
+                        "source_type": source_type,
+                        "library": library,
+                        "source_ref": source_ref,
+                        "status": result["sync_status"],
+                        "skill_id": result["skill_id"],
+                        "name": result["name"],
+                    })
+                except AgentRuntimeError as exc:
+                    results.append({
+                        "source": str(source_root),
+                        "source_type": source_type,
+                        "library": library,
+                        "source_ref": source_ref,
+                        "status": "failed",
+                        "message": str(exc),
+                    })
+        summary = {
+            "imported": sum(1 for item in results if item.get("status") == "imported"),
+            "updated": sum(1 for item in results if item.get("status") == "updated"),
+            "skipped": sum(1 for item in results if item.get("status") == "skipped"),
+            "failed": sum(1 for item in results if item.get("status") == "failed"),
+        }
+        roots_info = [
+            {
+                "path": str(root["path"]),
+                "source_type": root["source_type"],
+                "library": library,
+                "exists": root["path"].exists(),
+                "skill_count": self._count_skill_files(root["path"]),
+            }
+            for root in root_specs
+        ]
+        return {"ok": summary["failed"] == 0, "roots": roots_info, "summary": summary, "results": results}
+
+    def install_skill_command(self, command: str) -> dict[str, Any]:
+        argv, installer = self._validated_skill_install_argv(command)
+        started_at = _now()
+        env = os.environ.copy()
+        env["HERMES_HOME"] = str(self.skill_installs_hermes_home)
+        try:
+            completed = subprocess.run(
+                argv,
+                cwd=self.skill_installs_dir,
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=600,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            raise AgentRuntimeError(f"找不到安装命令：{argv[0]}") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise AgentRuntimeError("Skill 安装命令超时") from exc
+        stdout = redact_secrets(completed.stdout)[-12000:]
+        stderr = redact_secrets(completed.stderr)[-12000:]
+        sync_result = self.sync_yachiyo_installed_skills(record_source_type=installer) if completed.returncode == 0 else None
+        return {
+            "ok": completed.returncode == 0,
+            "installer": installer,
+            "command": argv,
+            "started_at": started_at,
+            "finished_at": _now(),
+            "returncode": completed.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "sync": sync_result,
+        }
+
+    def _import_skill_root(
+        self,
+        source_root: Path,
+        *,
+        source_path: str,
+        source_type: str,
+        origin_path: str,
+        source_ref: str,
+        sync_status: str,
+        synced_at: str = "",
+        copy_to_managed: bool = True,
+    ) -> dict[str, Any]:
+        if source_type not in _SKILL_SOURCE_TYPES:
+            raise AgentRuntimeError("未知 Skill 来源类型")
+        skill_md = source_root / "SKILL.md"
+        if not skill_md.is_file():
             raise AgentRuntimeError("Skill 根目录必须包含 SKILL.md")
         markdown = _read_text(skill_md)
+        metadata = _parse_skill_frontmatter(markdown)
         name = self._skill_name(markdown, source_root.name)
+        name = str(metadata.get("name") or name)[:120] or source_root.name
         description = self._skill_description(markdown)
-        skill_id = f"skill_{_slug(name, 'skill')}_{uuid4().hex[:8]}"
-        target = self.skills_dir / skill_id
-        shutil.copytree(source_root, target)
-        if temp_dir is not None:
-            shutil.rmtree(temp_dir, ignore_errors=True)
-        asset_paths = self._skill_asset_paths(target)
+        description = str(metadata.get("description") or description)[:240]
+        content_hash = _skill_content_hash(source_root)
+        existing = self._find_existing_skill(origin_path, content_hash, source_type)
         summary = self._skill_summary(markdown)
         now = _now()
-        self._conn.execute(
-            """
-            INSERT INTO skills (
-                skill_id, name, description, source_path, local_path, content_summary,
-                skill_markdown, asset_paths_json, enabled, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                skill_id,
-                name,
-                description,
-                f"local:{source.name}",
-                str(target),
-                summary,
-                markdown,
-                _json_dump(asset_paths),
-                1,
-                now,
-                now,
-            ),
-        )
+        last_synced_at = synced_at or (now if source_type not in {"local_dir", "local_zip"} else "")
+        if existing is None:
+            skill_id = f"skill_{_slug(name, 'skill')}_{uuid4().hex[:8]}"
+            target = self.skills_dir / skill_id if copy_to_managed else source_root
+            if copy_to_managed:
+                shutil.copytree(source_root, target)
+            asset_paths = self._skill_asset_paths(target)
+            self._conn.execute(
+                """
+                INSERT INTO skills (
+                    skill_id, name, description, source_path, local_path, source_type, origin_path,
+                    source_ref, content_hash, last_synced_at, sync_status, content_summary,
+                    skill_markdown, asset_paths_json, enabled, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    skill_id,
+                    name,
+                    description,
+                    source_path,
+                    str(target.resolve()),
+                    source_type,
+                    origin_path,
+                    source_ref,
+                    content_hash,
+                    last_synced_at,
+                    sync_status,
+                    summary,
+                    markdown,
+                    _json_dump(asset_paths),
+                    1,
+                    now,
+                    now,
+                ),
+            )
+            final_status = "imported"
+        elif existing["content_hash"] == content_hash:
+            skill_id = str(existing["skill_id"])
+            target = Path(str(existing["local_path"] or self.skills_dir / skill_id))
+            next_local_path = str(target.resolve()) if copy_to_managed else origin_path
+            if not copy_to_managed:
+                self._remove_managed_copy_if_safe(target, origin_path)
+            self._conn.execute(
+                """
+                UPDATE skills
+                   SET source_path=?, local_path=?, source_type=?, origin_path=?, source_ref=?,
+                       last_synced_at=?, sync_status=?
+                 WHERE skill_id=?
+                """,
+                (
+                    source_path if existing["origin_path"] == origin_path else existing["source_path"],
+                    next_local_path if existing["origin_path"] == origin_path else existing["local_path"],
+                    source_type if existing["origin_path"] == origin_path else existing["source_type"],
+                    origin_path if existing["origin_path"] == origin_path else existing["origin_path"],
+                    source_ref if existing["origin_path"] == origin_path else existing["source_ref"],
+                    last_synced_at or existing["last_synced_at"],
+                    "skipped",
+                    skill_id,
+                ),
+            )
+            final_status = "skipped"
+        else:
+            skill_id = str(existing["skill_id"])
+            target = Path(str(existing["local_path"] or self.skills_dir / skill_id))
+            if copy_to_managed and target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+            elif not copy_to_managed:
+                self._remove_managed_copy_if_safe(target, origin_path)
+                target = source_root
+            if copy_to_managed:
+                shutil.copytree(source_root, target)
+            asset_paths = self._skill_asset_paths(target)
+            self._conn.execute(
+                """
+                UPDATE skills
+                   SET name=?, description=?, source_path=?, local_path=?, source_type=?, origin_path=?,
+                       source_ref=?, content_hash=?, last_synced_at=?, sync_status=?, content_summary=?,
+                       skill_markdown=?, asset_paths_json=?, updated_at=?
+                 WHERE skill_id=?
+                """,
+                (
+                    name,
+                    description,
+                    source_path,
+                    str(target.resolve()),
+                    source_type,
+                    origin_path,
+                    source_ref,
+                    content_hash,
+                    last_synced_at,
+                    sync_status,
+                    summary,
+                    markdown,
+                    _json_dump(asset_paths),
+                    now,
+                    skill_id,
+                ),
+            )
+            final_status = "updated"
         self._conn.commit()
-        return self.get_skill(skill_id)
+        skill = self.get_skill(skill_id)
+        skill["sync_status"] = final_status
+        return skill
+
+    def _find_existing_skill(self, origin_path: str, content_hash: str, source_type: str) -> sqlite3.Row | None:
+        self._ensure_row_factory()
+        library_condition = (
+            "source_type IN ('hermes_global', 'hermes_project')"
+            if source_type in {"hermes_global", "hermes_project"}
+            else "source_type NOT IN ('hermes_global', 'hermes_project')"
+        )
+        if origin_path:
+            row = self._conn.execute(
+                f"SELECT * FROM skills WHERE origin_path=? AND {library_condition}",
+                (origin_path,),
+            ).fetchone()
+            if row is not None:
+                return row
+        if content_hash:
+            return self._conn.execute(
+                f"SELECT * FROM skills WHERE content_hash=? AND {library_condition}",
+                (content_hash,),
+            ).fetchone()
+        return None
+
+    def _remove_managed_copy_if_safe(self, path: Path, origin_path: str) -> None:
+        try:
+            resolved = path.resolve()
+            origin = Path(origin_path).resolve()
+        except OSError:
+            return
+        if resolved == origin:
+            return
+        if _is_within(resolved, self.skills_dir) and resolved.exists():
+            shutil.rmtree(resolved, ignore_errors=True)
+
+    def _skill_path_owned_by_yachiyo(self, path: Path) -> bool:
+        return _is_within(path, self.skills_dir) or _is_within(path, self.skill_installs_dir)
+
+    def _repair_hermes_skill_references(self) -> None:
+        rows = self._conn.execute(
+            """
+            SELECT skill_id, local_path, origin_path
+              FROM skills
+             WHERE source_type IN ('hermes_global', 'hermes_project')
+               AND origin_path != ''
+               AND local_path != origin_path
+            """
+        ).fetchall()
+        if not rows:
+            return
+        for row in rows:
+            old_local_path = Path(str(row["local_path"] or ""))
+            origin_path = str(row["origin_path"])
+            self._remove_managed_copy_if_safe(old_local_path, origin_path)
+            self._conn.execute(
+                """
+                UPDATE skills
+                   SET local_path=?, updated_at=?
+                 WHERE skill_id=?
+                """,
+                (origin_path, _now(), row["skill_id"]),
+            )
+        self._conn.commit()
+
+    def _hermes_skill_root_specs(self, roots: list[Any] | None = None) -> list[dict[str, Any]]:
+        if roots is None:
+            raw_roots: list[Any] = [
+                {"path": _hermes_home() / "skills", "source_type": "hermes_global"},
+            ]
+        else:
+            raw_roots = roots
+        specs: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in raw_roots:
+            if isinstance(item, dict):
+                path = Path(str(item.get("path") or "")).expanduser()
+                source_type = str(item.get("source_type") or self._infer_hermes_source_type(path))
+            else:
+                path = Path(str(item)).expanduser()
+                source_type = self._infer_hermes_source_type(path)
+            if source_type not in {"hermes_global", "hermes_project"}:
+                source_type = "hermes_global"
+            key = str(path.resolve()) if path.exists() else str(path)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            specs.append({"path": path, "source_type": source_type})
+        return specs
+
+    def _yachiyo_skill_root_specs(self, *, source_type: str) -> list[dict[str, Any]]:
+        roots = [
+            self.skill_installs_dir / ".hermes" / "skills",
+            self.skill_installs_hermes_home / "skills",
+        ]
+        return [{"path": root, "source_type": source_type} for root in roots]
+
+    @staticmethod
+    def _infer_hermes_source_type(path: Path) -> str:
+        project_root = Path.cwd() / ".hermes" / "skills"
+        try:
+            if path.resolve() == project_root.resolve():
+                return "hermes_project"
+        except OSError:
+            pass
+        return "hermes_global"
+
+    @staticmethod
+    def _count_skill_files(root: Path) -> int:
+        if not root.exists():
+            return 0
+        return sum(1 for _ in root.rglob("SKILL.md"))
+
+    def _validated_skill_install_argv(self, command: str) -> tuple[list[str], str]:
+        if not command.strip():
+            raise AgentRuntimeError("请输入 Skill 来源或安装命令")
+        if any(token in command for token in _SHELL_METACHARS):
+            raise AgentRuntimeError("Skill 安装命令不能包含 shell 管道、重定向或串联操作")
+        try:
+            argv = shlex.split(command)
+        except ValueError as exc:
+            raise AgentRuntimeError("Skill 安装命令格式无效") from exc
+        if not argv:
+            raise AgentRuntimeError("请输入 Skill 来源或安装命令")
+        if re.fullmatch(r"skills(@[A-Za-z0-9._~-]+)?", argv[0]):
+            argv = ["npx", *argv]
+        if argv[0] == "npx":
+            return self._validated_npx_skills_argv(argv), "npx_skills"
+        if argv[:3] == ["hermes", "skills", "install"]:
+            return argv, "hermes_cli"
+        if argv[0] in {"npm", "pnpm", "yarn", "bun", "curl", "bash", "sh", "zsh"}:
+            raise AgentRuntimeError("只允许 skills 来源、npx skills add 或 hermes skills install")
+        return self._validated_npx_skills_argv(["npx", "skills@latest", "add", *argv]), "npx_skills"
+
+    @staticmethod
+    def _validated_npx_skills_argv(argv: list[str]) -> list[str]:
+        normalized = list(argv)
+        index = 1
+        while index < len(normalized) and normalized[index] in {"-y", "--yes"}:
+            index += 1
+        if index + 1 >= len(normalized) or not re.fullmatch(r"skills(@[A-Za-z0-9._~-]+)?", normalized[index]):
+            raise AgentRuntimeError("只允许 Skill 来源、npx skills add 或 npx skills@latest add")
+        if normalized[index + 1] not in {"add", "install"}:
+            raise AgentRuntimeError("只允许 Skill 来源、npx skills add 或 npx skills@latest add")
+        install_args = normalized[index + 2:]
+        if not install_args:
+            raise AgentRuntimeError("请提供要安装的 Skill 来源")
+        AgentRuntimeService._validate_skill_install_agent_target(install_args)
+        if not AgentRuntimeService._has_agent_target(install_args):
+            normalized.extend(["-a", "hermes-agent"])
+        if "--copy" not in install_args:
+            normalized.append("--copy")
+        if "-y" not in normalized and "--yes" not in normalized:
+            normalized.append("-y")
+        return normalized
+
+    @staticmethod
+    def _has_agent_target(args: list[str]) -> bool:
+        return any(arg in {"-a", "--agent"} or arg.startswith("--agent=") for arg in args)
+
+    @staticmethod
+    def _validate_skill_install_agent_target(args: list[str]) -> None:
+        for index, arg in enumerate(args):
+            if arg == "-a" or arg == "--agent":
+                value = args[index + 1] if index + 1 < len(args) else ""
+                if value != "hermes-agent":
+                    raise AgentRuntimeError("Yachiyo 安装入口固定使用 hermes-agent 目标")
+            elif arg.startswith("--agent=") and arg != "--agent=hermes-agent":
+                raise AgentRuntimeError("Yachiyo 安装入口固定使用 hermes-agent 目标")
 
     def update_skill(self, skill_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.get_skill(skill_id)
@@ -1100,6 +1594,7 @@ class AgentRuntimeService:
 
     def delete_skill(self, skill_id: str) -> dict[str, Any]:
         self._ensure_row_factory()
+        skill_row = self._conn.execute("SELECT local_path, source_type FROM skills WHERE skill_id=?", (skill_id,)).fetchone()
         self._conn.execute("DELETE FROM skills WHERE skill_id=?", (skill_id,))
         rows = self._conn.execute("SELECT agent_id, skill_ids_json FROM agents").fetchall()
         for row in rows:
@@ -1109,7 +1604,11 @@ class AgentRuntimeService:
                 (_json_dump(skill_ids), _now(), row["agent_id"]),
             )
         self._conn.commit()
-        shutil.rmtree(self.skills_dir / skill_id, ignore_errors=True)
+        source_type = str(skill_row["source_type"] if skill_row is not None else "")
+        if source_type not in {"hermes_global", "hermes_project"}:
+            local_path = Path(str(skill_row["local_path"])) if skill_row is not None and skill_row["local_path"] else self.skills_dir / skill_id
+            if self._skill_path_owned_by_yachiyo(local_path):
+                shutil.rmtree(local_path, ignore_errors=True)
         return {"ok": True}
 
     def list_workflows(self) -> dict[str, Any]:

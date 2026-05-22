@@ -41,12 +41,55 @@ export type SkillSpec = {
   description?: string;
   source_path?: string;
   local_path?: string;
+  source_type?: string;
+  origin_path?: string;
+  source_ref?: string;
+  content_hash?: string;
+  last_synced_at?: string;
+  sync_status?: string;
   content_summary?: string;
   skill_markdown?: string;
   asset_paths?: string[];
   enabled?: boolean;
   created_at?: string;
   updated_at?: string;
+};
+
+export type SkillSourceRoot = {
+  path: string;
+  source_type: string;
+  library?: 'hermes' | 'yachiyo' | string;
+  exists?: boolean;
+  skill_count?: number;
+};
+
+export type SkillSyncResult = {
+  source?: string;
+  source_type?: string;
+  source_ref?: string;
+  status: 'imported' | 'updated' | 'skipped' | 'failed' | string;
+  skill_id?: string;
+  name?: string;
+  message?: string;
+};
+
+export type SkillSyncResponse = {
+  ok?: boolean;
+  roots?: SkillSourceRoot[];
+  summary?: Record<string, number>;
+  results?: SkillSyncResult[];
+};
+
+export type SkillInstallResponse = {
+  ok?: boolean;
+  installer?: string;
+  command?: string[];
+  started_at?: string;
+  finished_at?: string;
+  returncode?: number;
+  stdout?: string;
+  stderr?: string;
+  sync?: SkillSyncResponse | null;
 };
 
 export type WorkflowNode = {
@@ -152,6 +195,19 @@ export async function listSkills(): Promise<SkillSpec[]> {
 
 export async function importSkill(sourcePath: string): Promise<SkillSpec> {
   return apiPost('/ui/skills/import', { source_path: sourcePath });
+}
+
+export async function listSkillSources(): Promise<SkillSourceRoot[]> {
+  const payload = await apiGet<{ roots?: SkillSourceRoot[] }>('/ui/skills/sources');
+  return payload.roots || [];
+}
+
+export async function syncHermesSkills(): Promise<SkillSyncResponse> {
+  return apiPost('/ui/skills/sync', {});
+}
+
+export async function installSkillCommand(command: string): Promise<SkillInstallResponse> {
+  return apiPost('/ui/skills/install', { command });
 }
 
 export async function updateSkill(skillId: string, request: Partial<SkillSpec>): Promise<SkillSpec> {

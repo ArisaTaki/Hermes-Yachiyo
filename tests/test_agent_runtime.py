@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -214,6 +216,153 @@ def test_import_skill_zip_rejects_path_traversal(tmp_path):
     try:
         with pytest.raises(AgentRuntimeError):
             service.import_skill(str(archive))
+    finally:
+        service.close()
+
+
+def test_sync_hermes_skills_imports_skips_and_updates(tmp_path):
+    service = make_service(tmp_path)
+    hermes_root = tmp_path / ".hermes" / "skills"
+    skill_root = hermes_root / "research" / "demo-skill"
+    skill_root.mkdir(parents=True)
+    (skill_root / "SKILL.md").write_text(
+        "---\nname: demo-sync\ndescription: Synced skill.\n---\n\n# Demo Sync\n\nUse carefully.",
+        encoding="utf-8",
+    )
+    (hermes_root / "not-a-skill").mkdir(parents=True)
+    try:
+        first = service.sync_hermes_skills(roots=[{"path": str(hermes_root), "source_type": "hermes_global"}])
+        assert first["summary"]["imported"] == 1
+        assert first["summary"]["skipped"] == 1
+        skill = service.list_skills()["skills"][0]
+        assert skill["name"] == "demo-sync"
+        assert skill["description"] == "Synced skill."
+        assert skill["source_type"] == "hermes_global"
+        assert skill["origin_path"] == str(skill_root.resolve())
+        assert skill["local_path"] == str(skill_root.resolve())
+        assert skill["source_ref"] == "research/demo-skill"
+        assert skill["content_hash"]
+        assert skill["last_synced_at"]
+
+        second = service.sync_hermes_skills(roots=[{"path": str(hermes_root), "source_type": "hermes_global"}])
+        assert second["summary"]["imported"] == 0
+        assert second["summary"]["skipped"] >= 1
+        assert len(service.list_skills()["skills"]) == 1
+
+        (skill_root / "SKILL.md").write_text(
+            "---\nname: demo-sync\ndescription: Updated skill.\n---\n\n# Demo Sync\n\nUpdated instruction.",
+            encoding="utf-8",
+        )
+        updated = service.sync_hermes_skills(roots=[{"path": str(hermes_root), "source_type": "hermes_global"}])
+        assert updated["summary"]["updated"] == 1
+        skills = service.list_skills()["skills"]
+        assert len(skills) == 1
+        assert skills[0]["skill_id"] == skill["skill_id"]
+        assert skills[0]["description"] == "Updated skill."
+        assert "Updated instruction" in skills[0]["skill_markdown"]
+        service.delete_skill(skill["skill_id"])
+        assert skill_root.exists()
+    finally:
+        service.close()
+
+
+def test_skill_install_command_validation_rejects_shell_and_unknown_commands(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        with pytest.raises(AgentRuntimeError, match="shell"):
+            service.install_skill_command("npx skills add owner/repo && rm -rf /")
+        with pytest.raises(AgentRuntimeError, match="只允许"):
+            service.install_skill_command("npm install owner/repo")
+    finally:
+        service.close()
+
+
+def test_skill_install_command_validation_accepts_latest_and_source_shortcuts(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        argv, installer = service._validated_skill_install_argv("skills@latest add owner/repo")
+        assert installer == "npx_skills"
+        assert argv == ["npx", "skills@latest", "add", "owner/repo", "-a", "hermes-agent", "--copy", "-y"]
+
+        argv, installer = service._validated_skill_install_argv("npx -y skills@latest add owner/repo")
+        assert installer == "npx_skills"
+        assert argv == ["npx", "-y", "skills@latest", "add", "owner/repo", "-a", "hermes-agent", "--copy"]
+
+        argv, installer = service._validated_skill_install_argv("owner/repo --skill docs")
+        assert installer == "npx_skills"
+        assert argv == ["npx", "skills@latest", "add", "owner/repo", "--skill", "docs", "-a", "hermes-agent", "--copy", "-y"]
+
+        with pytest.raises(AgentRuntimeError, match="hermes-agent"):
+            service._validated_skill_install_argv("npx skills@latest add owner/repo -a codex")
+    finally:
+        service.close()
+
+
+def test_skill_dedup_is_scoped_to_yachiyo_or_hermes_library(tmp_path):
+    service = make_service(tmp_path)
+    hermes_root = tmp_path / ".hermes" / "skills" / "dev" / "shared"
+    yachiyo_root = tmp_path / "local-shared"
+    content = "# Shared Skill\n\nSame instructions."
+    hermes_root.mkdir(parents=True)
+    yachiyo_root.mkdir()
+    (hermes_root / "SKILL.md").write_text(content, encoding="utf-8")
+    (yachiyo_root / "SKILL.md").write_text(content, encoding="utf-8")
+    try:
+        service.sync_hermes_skills(roots=[{"path": str(tmp_path / ".hermes" / "skills"), "source_type": "hermes_global"}])
+        service.import_skill(str(yachiyo_root))
+        skills = service.list_skills()["skills"]
+        assert len(skills) == 2
+        assert {skill["source_type"] for skill in skills} == {"hermes_global", "local_dir"}
+    finally:
+        service.close()
+
+
+def test_hermes_skill_list_repairs_old_managed_copy_path(tmp_path):
+    service = make_service(tmp_path)
+    hermes_root = tmp_path / ".hermes" / "skills" / "productivity" / "powerpoint"
+    hermes_root.mkdir(parents=True)
+    (hermes_root / "SKILL.md").write_text("# Powerpoint\n\nCreate decks.", encoding="utf-8")
+    try:
+        skill = service.sync_hermes_skills(roots=[{"path": str(tmp_path / ".hermes" / "skills"), "source_type": "hermes_global"}])["results"][0]
+        skill_id = skill["skill_id"]
+        old_copy = service.skills_dir / skill_id
+        old_copy.mkdir(parents=True, exist_ok=True)
+        (old_copy / "SKILL.md").write_text("# Old Copy\n\nold", encoding="utf-8")
+        service._conn.execute("UPDATE skills SET local_path=? WHERE skill_id=?", (str(old_copy), skill_id))
+        service._conn.commit()
+
+        repaired = service.list_skills()["skills"][0]
+        assert repaired["local_path"] == str(hermes_root.resolve())
+        assert repaired["origin_path"] == str(hermes_root.resolve())
+        assert not old_copy.exists()
+    finally:
+        service.close()
+
+
+def test_skill_install_command_runs_whitelisted_npx_and_syncs(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    hermes_home = tmp_path / ".hermes"
+    recorded: dict[str, list[str]] = {}
+
+    def fake_run(argv, **_kwargs):
+        recorded["argv"] = list(argv)
+        skill_root = Path(_kwargs["cwd"]) / ".hermes" / "skills" / "dev" / "installed-skill"
+        skill_root.mkdir(parents=True)
+        (skill_root / "SKILL.md").write_text("# Installed Skill\n\nInstalled by npx.", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, stdout="installed", stderr="")
+
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setattr("apps.shell.agent_runtime.subprocess.run", fake_run)
+    try:
+        result = service.install_skill_command("npx skills add owner/repo")
+        assert result["ok"] is True
+        assert result["installer"] == "npx_skills"
+        assert recorded["argv"] == ["npx", "skills", "add", "owner/repo", "-a", "hermes-agent", "--copy", "-y"]
+        assert result["sync"]["summary"]["imported"] == 1
+        skill = service.list_skills()["skills"][0]
+        assert skill["name"] == "Installed Skill"
+        assert skill["source_type"] == "npx_skills"
+        assert "/skill-installs/.hermes/skills/" in skill["local_path"]
     finally:
         service.close()
 
@@ -624,5 +773,35 @@ async def test_skill_update_route_toggles_enabled_and_returns_404(tmp_path, monk
         with pytest.raises(HTTPException) as missing:
             await agent_routes.update_skill("missing", agent_routes.SkillUpdateRequest(enabled=True))
         assert missing.value.status_code == 404
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_skill_sync_and_install_routes(tmp_path, monkeypatch):
+    from apps.bridge.routes import agents as agent_routes
+
+    service = make_service(tmp_path)
+    hermes_home = tmp_path / ".hermes"
+
+    def fake_run(argv, **_kwargs):
+        skill_root = Path(_kwargs["cwd"]) / ".hermes" / "skills" / "office" / "route-installed"
+        skill_root.mkdir(parents=True)
+        (skill_root / "SKILL.md").write_text("# Route Installed\n\nRoute install.", encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, stdout="installed", stderr="")
+
+    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr("apps.shell.agent_runtime.subprocess.run", fake_run)
+    try:
+        sources = await agent_routes.list_skill_sources()
+        assert sources["roots"][0]["path"] == str(hermes_home / "skills")
+
+        installed = await agent_routes.install_skill(agent_routes.SkillInstallRequest(command="skills@latest add owner/repo"))
+        assert installed["ok"] is True
+        assert installed["sync"]["summary"]["imported"] == 1
+
+        synced = await agent_routes.sync_hermes_skills()
+        assert synced["summary"]["skipped"] >= 1
     finally:
         service.close()

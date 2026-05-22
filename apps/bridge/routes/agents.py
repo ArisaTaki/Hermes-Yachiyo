@@ -40,6 +40,10 @@ class SkillImportRequest(BaseModel):
     source_path: str = Field(..., min_length=1, max_length=4000)
 
 
+class SkillInstallRequest(BaseModel):
+    command: str = Field(..., min_length=1, max_length=4000)
+
+
 class SkillUpdateRequest(BaseModel):
     enabled: bool | None = None
 
@@ -166,6 +170,27 @@ async def import_skill_from_post(request: SkillImportRequest) -> dict[str, Any]:
 async def import_skill(request: SkillImportRequest) -> dict[str, Any]:
     try:
         return await asyncio.to_thread(get_agent_runtime_service().import_skill, request.source_path)
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.get("/skills/sources")
+async def list_skill_sources() -> dict[str, Any]:
+    return await asyncio.to_thread(get_agent_runtime_service().list_hermes_skill_sources)
+
+
+@router.post("/skills/sync")
+async def sync_hermes_skills() -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(get_agent_runtime_service().sync_hermes_skills)
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.post("/skills/install")
+async def install_skill(request: SkillInstallRequest) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(get_agent_runtime_service().install_skill_command, request.command)
     except AgentRuntimeError as exc:
         raise _bad_request(exc) from exc
 
