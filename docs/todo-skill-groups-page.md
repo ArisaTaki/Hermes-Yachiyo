@@ -10,6 +10,8 @@
 - Agent Mounted Skills can filter by folder and bulk select/clear the current filter.
 - Folder create/rename rejects duplicate names and names longer than 120 characters; the UI shows inline validation copy.
 - Deleting a folder now asks for confirmation and explains that contained skills return to `无需分组`.
+- The default `无需分组` group now splits counts into total / Yachiyo / Hermes.
+- Latest implementation commit: `bb4436b feat(agent): finish skill groups todo`.
 
 ## Product Decisions To Revisit
 
@@ -22,6 +24,8 @@
 
 - Decide whether to promote `source_scope` into the UI; it is still kept backend-only for now.
 - Decide whether folder sorting should become user-controlled instead of only stored in the data model.
+- If sorting becomes user-controlled, wire `sort_order` into the Skill Groups UI with move up/down controls and keep the default order stable.
+- If Hermes Agent skills should stay read-only, prevent assigning Hermes skills to Yachiyo groups in the Skill card selector and document that boundary in the UI.
 
 ## Remaining Test TODO
 
@@ -37,6 +41,7 @@
 
 ## Notes
 
-- Latest implementation commit before this TODO: `570d678 feat(agent): split skill groups management`.
+- Earlier implementation commit before this TODO: `570d678 feat(agent): split skill groups management`.
 - The backend crash reported while switching tabs was not reproduced after restarting through `.venv/bin/hermes-yachiyo`; current code now has a row factory regression test for `list_agents`.
 - Route-level folder rename/delete coverage was added in `tests/test_agent_runtime.py`; this repo does not currently have a frontend smoke test runner.
+- 2026-05-24 browser smoke opened `http://127.0.0.1:5174/#/agents/skill-groups`, confirmed the Skill Groups tab is active, switching to Skill Library updates the URL to `#/agents/skills`, and browser console errors are empty.

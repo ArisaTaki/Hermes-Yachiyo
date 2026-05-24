@@ -184,6 +184,10 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - Skill Library 卡片可直接移动 Skill 到其他文件夹；Agent Mounted Skills 增加文件夹筛选，便于给 Coding / Design 等 Agent 按主题挑选 Skill。
 - Agent Mounted Skills 支持对当前筛选结果一键全选/清空；安装完成后不再显示 stdout/stderr 结果框，只保留导入/同步结果。
 - Agent Studio 增加 Agent 列表 stale state 自愈；Agent 列表读取增加 row factory 回归覆盖，避免开发态连接状态漂移后 `/ui/agents` 列表转换崩溃。
+- `#/agents/skill-groups` 可直达 Skill Groups，旧 `#/agents/<run_id>` Run 详情链接继续兼容。
+- Skill Folder 创建/重命名拒绝重复名和超过 120 字符的名称；前端提供 inline validation，删除前确认 Skill 会回到“无需分组”。
+- “无需分组”计数拆成总数 / Yachiyo / Hermes，避免 Hermes Agent 全局 Skills 干扰默认组判断。
+- 当前剩余决策：Skill Groups 是否保留顶层 tab、最终命名、Hermes Agent skills 是否可归入 Yachiyo 分组、`source_scope` 是否暴露、是否做手动排序。
 
 ## 新增接口
 
@@ -205,6 +209,8 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - `POST /ui/skills/sync`
 - `POST /ui/skills/install`
 - `GET/PATCH/DELETE /ui/skills/{skill_id}`
+- `GET/POST /ui/skill-folders`
+- `PATCH/DELETE /ui/skill-folders/{folder_id}`
 - `POST /ui/agents/{agent_id}/skills`
 - `DELETE /ui/agents/{agent_id}/skills/{skill_id}`
 - `GET/POST /ui/workflows`

@@ -11,7 +11,11 @@
 - ✅ Skill Library 卡片支持移动 Skill 到其他文件夹；Agent Mounted Skills 增加文件夹筛选，便于按 Laravel / Design 等主题为 Agent 挑选 Skill。
 - ✅ Agent Mounted Skills 支持对当前筛选结果一键全选/清空；安装完成后不再显示 stdout/stderr 结果框，只保留同步结果提示。
 - ✅ 修复 Agent Studio stale state：开发态 HMR 或临时刷新导致左侧 Agent 列表为空但右侧仍有 draft 时，会自动重新拉取 Agent 列表；`list_agents` 增加 row factory 回归覆盖，避免连接状态漂移后 `/ui/agents` 列表转换崩溃。
-- ✅ 验证：`.venv/bin/python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_ui_bridge_routes.py -q` → 95 passed；`npm --prefix apps/frontend run build` passed；`git diff --check` passed；Computer Use 通过 `.venv/bin/hermes-yachiyo` 实机确认 Agent 列表、Skill Library 仅保留导入目标选择、Skill Groups 独立管理页和 Mounted Skills 批量按钮可见。
+- ✅ Skill Groups 后续 TODO 已收口：`#/agents/skill-groups` 可直达，保留旧 `#/agents/<run_id>` Run 详情链接兼容；从 Skill Groups 点击“查看”会进入 Skill Library 并保留对应文件夹筛选。
+- ✅ Skill Folder 创建/重命名新增前后端名称校验：拒绝空名、重复名和超过 120 字符的名称；删除文件夹前会确认并说明 Skill 会回到“无需分组”。
+- ✅ “无需分组”现在拆分显示总数、Yachiyo 与 Hermes 计数，避免 Hermes 自带 Skills 让默认组看起来异常庞大。
+- ✅ 验证：`.venv/bin/python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_ui_bridge_routes.py -q` → 97 passed；`npm --prefix apps/frontend run build` passed；`git diff --check` passed；浏览器打开 `http://127.0.0.1:5174/#/agents/skill-groups` 确认 Skill Groups 直达、Skill Library tab 跳转和 console error 为空。
+- ✅ 最新实现提交：`bb4436b feat(agent): finish skill groups todo`。
 
 ### Milestone 87 — Yachiyo / Hermes 双 Skill 库与受限安装入口
 
