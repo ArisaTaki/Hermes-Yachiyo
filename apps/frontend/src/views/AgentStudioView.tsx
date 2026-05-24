@@ -53,9 +53,10 @@ import {
 } from '../lib/agents';
 import { chooseAvatarImage, chooseSkillSources, openAppView, openPath } from '../lib/bridge';
 import { listModelProfiles, type ModelProfile } from '../lib/modelProfiles';
-import { currentParam } from '../lib/view';
+import { currentParam, navigateTo } from '../lib/view';
 
 type StudioTab = 'agents' | 'skills' | 'skill-groups' | 'workflows' | 'runs';
+type SkillFolderFilter = 'all' | 'uncategorized' | string;
 
 type StudioRefreshOptions = {
   selectedAgentId?: string;
@@ -125,7 +126,8 @@ type SkillImportResult = {
 };
 
 type SkillSourceFilter = 'yachiyo' | 'hermes';
-type SkillFolderFilter = 'all' | 'uncategorized' | string;
+const studioTabs: StudioTab[] = ['agents', 'skills', 'skill-groups', 'workflows', 'runs'];
+const skillFolderNameMaxLength = 120;
 
 const starterNodes: Node[] = [
   { id: 'start', type: 'input', position: { x: 40, y: 120 }, data: { label: 'Start', kind: 'start' } },
@@ -324,6 +326,21 @@ function formatApprovalInput(value: unknown): string {
   }
 }
 
+function normalizeStudioTab(value: string): StudioTab {
+  return studioTabs.includes(value as StudioTab) ? value as StudioTab : 'agents';
+}
+
+function skillFolderNameError(name: string, folders: SkillFolderSpec[], currentFolderId = ''): string {
+  const clean = name.trim();
+  if (!clean) return '';
+  if (clean.length > skillFolderNameMaxLength) return `文件夹名称不能超过 ${skillFolderNameMaxLength} 个字符`;
+  const duplicate = folders.some((folder) => (
+    folder.folder_id !== currentFolderId
+    && folder.name.trim().toLowerCase() === clean.toLowerCase()
+  ));
+  return duplicate ? '已存在同名 Skill 文件夹' : '';
+}
+
 function AgentAvatar({ avatarUrl, name }: { avatarUrl?: string; name: string }) {
   return (
     <span className={avatarUrl ? 'agent-avatar has-image' : 'agent-avatar'} aria-hidden="true">
@@ -333,7 +350,9 @@ function AgentAvatar({ avatarUrl, name }: { avatarUrl?: string; name: string }) 
 }
 
 export function AgentStudioView() {
-  const [tab, setTab] = useState<StudioTab>(() => currentParam('run') ? 'runs' : 'agents');
+  const routeRunId = currentParam('run').trim();
+  const routeTab = normalizeStudioTab(currentParam('tab'));
+  const [tab, setTab] = useState<StudioTab>(() => routeRunId ? 'runs' : routeTab);
   const [agents, setAgents] = useState<AgentSpec[]>([]);
   const [skills, setSkills] = useState<SkillSpec[]>([]);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
@@ -363,7 +382,7 @@ export function AgentStudioView() {
   const [workflowRunGoal, setWorkflowRunGoal] = useState('');
   const [runTarget, setRunTarget] = useState('');
   const [runGoal, setRunGoal] = useState('');
-  const [selectedRunId, setSelectedRunId] = useState(() => currentParam('run'));
+  const [selectedRunId, setSelectedRunId] = useState(() => routeRunId);
   const [artifactPreview, setArtifactPreview] = useState<{ path: string; content: string; truncated?: boolean } | null>(null);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
@@ -429,6 +448,22 @@ export function AgentStudioView() {
     () => visibleMountSkillIds.filter((skillId) => selectedAgent?.skill_ids?.includes(skillId)).length,
     [selectedAgent, visibleMountSkillIds],
   );
+  const ungroupedSkillStats = useMemo(() => {
+    const ungrouped = skills.filter((skill) => !skill.folder_id);
+    return {
+      total: ungrouped.length,
+      yachiyo: ungrouped.filter(isYachiyoSkill).length,
+      hermes: ungrouped.filter(isHermesSkill).length,
+    };
+  }, [skills]);
+  const newSkillFolderError = useMemo(
+    () => skillFolderNameError(newSkillFolderName, skillFolders),
+    [newSkillFolderName, skillFolders],
+  );
+  const editingSkillFolderError = useMemo(
+    () => skillFolderNameError(editingSkillFolderName, skillFolders, editingSkillFolderId),
+    [editingSkillFolderId, editingSkillFolderName, skillFolders],
+  );
 
   const refresh = useCallback(async (options: StudioRefreshOptions = {}) => {
     const [nextAgents, nextSkills, nextProfiles, nextWorkflows, nextRunnables, nextRuns, nextSkillSources, nextSkillFolders] = await Promise.all([
@@ -478,6 +513,14 @@ export function AgentStudioView() {
       .catch((err: unknown) => setError(err instanceof Error ? err.message : '读取 Agent Studio 失败'))
       .finally(() => setLoading(false));
   }, [refresh]);
+
+  useEffect(() => {
+    const nextTab = routeRunId ? 'runs' : routeTab;
+    setTab((current) => current === nextTab ? current : nextTab);
+    if (routeRunId) {
+      setSelectedRunId((current) => current === routeRunId ? current : routeRunId);
+    }
+  }, [routeRunId, routeTab]);
 
   useEffect(() => {
     if (selectedAgent) setDraft(agentToDraft(selectedAgent));
@@ -563,6 +606,7 @@ export function AgentStudioView() {
     setTab(nextTab);
     setStatus('');
     setError('');
+    navigateTo('agents', nextTab === 'agents' ? {} : { tab: nextTab }, ['run', 'tab']);
     if (nextTab === 'agents') {
       void refresh({ selectFirstAgent: true }).catch((err: unknown) => {
         setError(err instanceof Error ? err.message : '刷新 Agent 列表失败');
@@ -663,6 +707,8 @@ export function AgentStudioView() {
   async function createSkillFolderFromDraft(): Promise<StudioRefreshOptions | void> {
     const name = newSkillFolderName.trim();
     if (!name) throw new Error('请输入 Skill 文件夹名称');
+    const validation = skillFolderNameError(name, skillFolders);
+    if (validation) throw new Error(validation);
     const folder = await createSkillFolder({ name });
     setNewSkillFolderName('');
     setSkillTargetFolderId(folder.folder_id);
@@ -685,6 +731,8 @@ export function AgentStudioView() {
   async function updateSkillFolderFromDraft(folderId: string): Promise<StudioRefreshOptions | void> {
     const name = editingSkillFolderName.trim();
     if (!name) throw new Error('请输入 Skill 文件夹名称');
+    const validation = skillFolderNameError(name, skillFolders, folderId);
+    if (validation) throw new Error(validation);
     await updateSkillFolder(folderId, { name });
     cancelEditingSkillFolder();
   }
@@ -695,6 +743,18 @@ export function AgentStudioView() {
     if (skillLibraryFolderFilter === folderId) setSkillLibraryFolderFilter('all');
     if (skillMountFolderFilter === folderId) setSkillMountFolderFilter('all');
     if (editingSkillFolderId === folderId) cancelEditingSkillFolder();
+  }
+
+  function confirmDeleteSkillFolder(folder: SkillFolderSpec): boolean {
+    const count = folder.skill_count || skills.filter((skill) => skill.folder_id === folder.folder_id).length;
+    return window.confirm(`删除「${folder.name}」？${count} 个 Skill 会回到“无需分组”。`);
+  }
+
+  function openSkillLibraryFolder(folder: SkillFolderSpec) {
+    setSkillTargetFolderId(folder.folder_id);
+    setSkillLibraryFolderFilter(folder.folder_id);
+    setTab('skills');
+    navigateTo('agents', { tab: 'skills' }, ['run', 'tab']);
   }
 
   async function mountVisibleSkills(): Promise<StudioRefreshOptions | void> {
@@ -767,6 +827,12 @@ export function AgentStudioView() {
     return { selectedWorkflowId: saved.workflow_id };
   }
 
+  function openRunDetail(runId: string) {
+    setSelectedRunId(runId);
+    setTab('runs');
+    navigateTo('agents', { run: runId }, ['tab']);
+  }
+
   async function runCurrentAgent(): Promise<StudioRefreshOptions> {
     if (!draft.agent_id) throw new Error('请先保存 Agent，再运行。');
     const goal = agentRunGoal.trim();
@@ -774,8 +840,7 @@ export function AgentStudioView() {
     const run = await createAgentRun(draft.agent_id, goal);
     setAgentRunGoal('');
     setRunTarget(draft.agent_id);
-    setSelectedRunId(run.run_id);
-    setTab('runs');
+    openRunDetail(run.run_id);
     return { selectedAgentId: draft.agent_id, runTarget: draft.agent_id, selectedRunId: run.run_id };
   }
 
@@ -786,8 +851,7 @@ export function AgentStudioView() {
     const run = await createWorkflowRun(selectedWorkflow.workflow_id, goal);
     setWorkflowRunGoal('');
     setRunTarget(selectedWorkflow.workflow_id);
-    setSelectedRunId(run.run_id);
-    setTab('runs');
+    openRunDetail(run.run_id);
     return { selectedWorkflowId: selectedWorkflow.workflow_id, runTarget: selectedWorkflow.workflow_id, selectedRunId: run.run_id };
   }
 
@@ -851,7 +915,7 @@ export function AgentStudioView() {
       </header>
 
       <div className="agent-studio-tabs" role="tablist" aria-label="Agent Studio">
-        {(['agents', 'skills', 'skill-groups', 'workflows', 'runs'] as StudioTab[]).map((item) => (
+        {studioTabs.map((item) => (
           <button
             type="button"
             className={tab === item ? 'active' : ''}
@@ -1296,16 +1360,22 @@ export function AgentStudioView() {
               <div className="skill-folder-create">
                 <input
                   className="hy-input"
+                  maxLength={skillFolderNameMaxLength + 1}
                   value={newSkillFolderName}
                   onChange={(event) => setNewSkillFolderName(event.target.value)}
                   placeholder="例如 Laravel / Design"
                 />
-                <button type="button" disabled={busy || !newSkillFolderName.trim()} onClick={() => void runAction(createSkillFolderFromDraft, '创建 Skill 文件夹')}>新建</button>
+                <button type="button" disabled={busy || !newSkillFolderName.trim() || Boolean(newSkillFolderError)} onClick={() => void runAction(createSkillFolderFromDraft, '创建 Skill 文件夹')}>新建</button>
               </div>
+              {newSkillFolderError ? <small className="skill-folder-validation">{newSkillFolderError}</small> : null}
             </div>
             <div className="skill-folder-system-row">
               <strong>无需分组</strong>
-              <span>{skills.filter((skill) => !skill.folder_id).length} skills</span>
+              <div className="skill-folder-meta">
+                <span>{ungroupedSkillStats.total} skills</span>
+                <span>{ungroupedSkillStats.yachiyo} Yachiyo</span>
+                <span>{ungroupedSkillStats.hermes} Hermes</span>
+              </div>
               <small>默认分组，不能删除；删除其他文件夹后 Skill 会回到这里。</small>
             </div>
           </aside>
@@ -1323,6 +1393,7 @@ export function AgentStudioView() {
                       {editing ? (
                         <input
                           className="hy-input"
+                          maxLength={skillFolderNameMaxLength + 1}
                           value={editingSkillFolderName}
                           onChange={(event) => setEditingSkillFolderName(event.target.value)}
                           autoFocus
@@ -1341,21 +1412,36 @@ export function AgentStudioView() {
                     <div className="skill-folder-actions">
                       {editing ? (
                         <>
-                          <button type="button" disabled={busy || !editingSkillFolderName.trim()} onClick={() => void runAction(async () => updateSkillFolderFromDraft(folder.folder_id), '重命名 Skill 文件夹')}>保存</button>
+                          <button type="button" disabled={busy || !editingSkillFolderName.trim() || Boolean(editingSkillFolderError)} onClick={() => void runAction(async () => updateSkillFolderFromDraft(folder.folder_id), '重命名 Skill 文件夹')}>保存</button>
                           <button type="button" disabled={busy} onClick={cancelEditingSkillFolder}>取消</button>
                         </>
                       ) : (
                         <>
                           <button type="button" disabled={busy} onClick={() => startEditingSkillFolder(folder)}>重命名</button>
-                          <button type="button" disabled={busy} onClick={() => { setSkillLibraryFolderFilter(folder.folder_id); setTab('skills'); }}>查看</button>
-                          <button type="button" className="danger-action" disabled={busy} onClick={() => void runAction(async () => deleteSkillFolderById(folder.folder_id), '删除 Skill 文件夹')}>删除</button>
+                          <button type="button" disabled={busy} onClick={() => openSkillLibraryFolder(folder)}>查看</button>
+                          <button
+                            type="button"
+                            className="danger-action"
+                            disabled={busy}
+                            onClick={() => {
+                              if (confirmDeleteSkillFolder(folder)) void runAction(async () => deleteSkillFolderById(folder.folder_id), '删除 Skill 文件夹');
+                            }}
+                          >
+                            删除
+                          </button>
                         </>
                       )}
                     </div>
+                    {editing && editingSkillFolderError ? <small className="skill-folder-validation">{editingSkillFolderError}</small> : null}
                   </article>
                 );
               })}
-              {!skillFolders.length ? <div className="empty-state inline-empty">暂无文件夹。创建后可作为安装、上传和 Agent 挂载筛选的目标。</div> : null}
+              {!skillFolders.length ? (
+                <div className="empty-state inline-empty skill-folder-empty-state">
+                  <strong>暂无自定义文件夹</strong>
+                  <span>现有 Skill 会继续显示在“无需分组”里。</span>
+                </div>
+              ) : null}
             </div>
           </div>
         </section>
@@ -1453,7 +1539,7 @@ export function AgentStudioView() {
               const run = target.kind === 'agent'
                 ? await createAgentRun(target.id, runGoal)
                 : await createWorkflowRun(target.id, runGoal);
-              setSelectedRunId(run.run_id);
+              openRunDetail(run.run_id);
               setRunGoal('');
               return { selectedRunId: run.run_id, runTarget: target.id };
             }, '创建 Run')}>运行</button>
@@ -1463,7 +1549,7 @@ export function AgentStudioView() {
                   type="button"
                   className={run.run_id === selectedRunId ? 'run-list-item active' : 'run-list-item'}
                   key={run.run_id}
-                  onClick={() => setSelectedRunId(run.run_id)}
+                  onClick={() => openRunDetail(run.run_id)}
                 >
                   <strong>{run.runnable_name || run.runnable_id}</strong>
                   <span>{run.kind} · {run.status}</span>

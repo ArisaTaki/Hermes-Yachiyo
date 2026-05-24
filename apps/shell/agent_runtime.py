@@ -1121,6 +1121,7 @@ class AgentRuntimeService:
         name = str(payload.get("name") or "").strip()
         if not name:
             raise AgentRuntimeError("文件夹名称不能为空")
+        self._validate_skill_folder_name(name)
         folder_id = str(payload.get("folder_id") or f"folder_{_slug(name, 'folder')}_{uuid4().hex[:6]}").strip()
         folder_id = _slug(folder_id, "folder")
         if not folder_id.startswith("folder_"):
@@ -1138,7 +1139,7 @@ class AgentRuntimeService:
                     folder_id, name, description, source_scope, sort_order, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (folder_id, name[:120], description, source_scope, sort_order, now, now),
+                (folder_id, name, description, source_scope, sort_order, now, now),
             )
         except sqlite3.IntegrityError as exc:
             raise AgentRuntimeError("Skill 文件夹已存在") from exc
@@ -1169,6 +1170,7 @@ class AgentRuntimeService:
         name = str(payload.get("name") if "name" in payload else current["name"]).strip()
         if not name:
             raise AgentRuntimeError("文件夹名称不能为空")
+        self._validate_skill_folder_name(name, current_folder_id=folder_id)
         description = str(payload.get("description") if "description" in payload else current["description"]).strip()[:1000]
         source_scope = str(payload.get("source_scope") if "source_scope" in payload else current["source_scope"])
         if source_scope not in {"all", "yachiyo", "hermes"}:
@@ -1180,7 +1182,7 @@ class AgentRuntimeService:
                SET name=?, description=?, source_scope=?, sort_order=?, updated_at=?
              WHERE folder_id=?
             """,
-            (name[:120], description, source_scope, sort_order, _now(), folder_id),
+            (name, description, source_scope, sort_order, _now(), folder_id),
         )
         self._conn.commit()
         return self.get_skill_folder(folder_id)
@@ -1741,6 +1743,22 @@ class AgentRuntimeService:
         if row is None:
             raise AgentRuntimeError("Skill 文件夹不存在")
         return clean
+
+    def _validate_skill_folder_name(self, name: str, *, current_folder_id: str = "") -> None:
+        if len(name) > 120:
+            raise AgentRuntimeError("Skill 文件夹名称不能超过 120 个字符")
+        row = self._conn.execute(
+            """
+            SELECT folder_id
+              FROM skill_folders
+             WHERE LOWER(name)=LOWER(?)
+               AND folder_id != ?
+             LIMIT 1
+            """,
+            (name, current_folder_id),
+        ).fetchone()
+        if row is not None:
+            raise AgentRuntimeError("Skill 文件夹已存在")
 
     def update_skill(self, skill_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.get_skill(skill_id)

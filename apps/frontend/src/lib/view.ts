@@ -75,6 +75,9 @@ export function routePath(view: AppView, params: Record<string, string> = {}): s
   if (view === 'settings' && params.mode) return `#/settings/${encodeURIComponent(params.mode)}`;
   if (view === 'tools' && params.tool) return `#/tools/${encodeURIComponent(params.tool)}`;
   if (view === 'agents' && params.run) return `#/agents/${encodeURIComponent(params.run)}`;
+  if (view === 'agents' && isAgentStudioTab(params.tab) && params.tab !== 'agents') {
+    return `#/agents/${encodeURIComponent(params.tab)}`;
+  }
   if (view === 'provider' && params.capability) return `#/provider/${encodeURIComponent(params.capability)}`;
   if (view === 'activity-detail' && params.event_id) return `#/activity-detail/${encodeURIComponent(params.event_id)}`;
   return `#/${encodeURIComponent(view)}`;
@@ -111,8 +114,15 @@ function routeFromHash(hash: string): RouteState | null {
   if (!isAppView(rawView)) return { view: 'main', params: {} };
   if (rawView === 'settings' && rawMode) return { view: 'settings', params: { mode: rawMode } };
   if (rawView === 'tools' && rawMode) return { view: 'tools', params: { tool: rawMode } };
-  if (rawView === 'agents' && rawMode) return { view: 'agents', params: { run: rawMode } };
+  if (rawView === 'agents' && rawMode) {
+    if (isAgentStudioTab(rawMode)) return { view: 'agents', params: rawMode === 'agents' ? {} : { tab: rawMode } };
+    return { view: 'agents', params: { run: rawMode } };
+  }
   if (rawView === 'provider' && rawMode) return { view: 'provider', params: { capability: rawMode } };
   if (rawView === 'activity-detail' && rawMode) return { view: 'activity-detail', params: { event_id: rawMode } };
   return { view: rawView, params: {} };
+}
+
+function isAgentStudioTab(value?: string): boolean {
+  return Boolean(value && ['agents', 'skills', 'skill-groups', 'workflows', 'runs'].includes(value));
 }

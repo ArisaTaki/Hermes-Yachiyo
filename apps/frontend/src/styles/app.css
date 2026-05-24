@@ -12906,6 +12906,12 @@ button.activity-item {
   min-height: 34px;
 }
 
+.skill-folder-validation {
+  color: oklch(84% 0.09 24);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .skill-folder-list {
   display: grid;
   gap: 7px;
@@ -12971,6 +12977,11 @@ button.activity-item {
   line-height: 1.5;
 }
 
+.skill-folder-system-row .skill-folder-meta span {
+  color: var(--hy-muted);
+  font-size: 11px;
+}
+
 .skill-folder-manager-list {
   display: grid;
   gap: 10px;
@@ -13027,6 +13038,25 @@ button.activity-item {
 
 .skill-folder-actions button {
   min-height: 32px;
+}
+
+.skill-folder-manager-row>.skill-folder-validation {
+  grid-column: 1 / -1;
+}
+
+.skill-folder-empty-state {
+  gap: 4px;
+}
+
+.skill-folder-empty-state strong {
+  color: var(--hy-fg);
+  font-size: 13px;
+  font-weight: 590;
+}
+
+.skill-folder-empty-state span {
+  color: var(--hy-faint);
+  font-size: 12px;
 }
 
 .skill-source-roots {
@@ -14692,6 +14722,21 @@ button.activity-item {
   .model-catalog-group-items,
   .model-row {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .skill-folder-create,
+  .skill-folder-manager-row {
+    grid-template-columns: 1fr;
+  }
+
+  .skill-folder-actions {
+    justify-content: stretch;
+  }
+
+  .skill-folder-actions button {
+    flex: 1 1 96px;
   }
 }
 

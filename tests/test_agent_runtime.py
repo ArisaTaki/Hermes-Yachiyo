@@ -369,6 +369,18 @@ def test_skill_folder_validation_rejects_missing_folder(tmp_path):
         service.close()
 
 
+def test_skill_folder_validation_rejects_duplicate_and_long_names(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        service.create_skill_folder({"name": "Design"})
+        with pytest.raises(AgentRuntimeError, match="已存在"):
+            service.create_skill_folder({"name": "design"})
+        with pytest.raises(AgentRuntimeError, match="不能超过"):
+            service.create_skill_folder({"name": "x" * 121})
+    finally:
+        service.close()
+
+
 def test_hermes_skill_list_repairs_old_managed_copy_path(tmp_path):
     service = make_service(tmp_path)
     hermes_root = tmp_path / ".hermes" / "skills" / "productivity" / "powerpoint"
@@ -824,6 +836,47 @@ async def test_skill_update_route_toggles_enabled_and_returns_404(tmp_path, monk
 
         with pytest.raises(HTTPException) as missing:
             await agent_routes.update_skill("missing", agent_routes.SkillUpdateRequest(enabled=True))
+        assert missing.value.status_code == 404
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_skill_folder_routes_rename_delete_and_validate(tmp_path, monkeypatch):
+    from fastapi import HTTPException
+
+    from apps.bridge.routes import agents as agent_routes
+
+    service = make_service(tmp_path)
+    source = tmp_path / "route-folder-skill"
+    source.mkdir()
+    (source / "SKILL.md").write_text("# Route Folder Skill\n\nRoute folder.", encoding="utf-8")
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    try:
+        folder = await agent_routes.create_skill_folder(agent_routes.SkillFolderRequest(name="Writing"))
+        skill = service.import_skill(str(source), folder["folder_id"])
+
+        renamed = await agent_routes.update_skill_folder(
+            folder["folder_id"],
+            agent_routes.SkillFolderRequest(name="Docs"),
+        )
+        assert renamed["name"] == "Docs"
+        assert service.get_skill(skill["skill_id"])["folder_name"] == "Docs"
+
+        duplicate = await agent_routes.create_skill_folder(agent_routes.SkillFolderRequest(name="Research"))
+        with pytest.raises(HTTPException) as duplicate_name:
+            await agent_routes.update_skill_folder(
+                duplicate["folder_id"],
+                agent_routes.SkillFolderRequest(name="docs"),
+            )
+        assert duplicate_name.value.status_code == 400
+
+        deleted = await agent_routes.delete_skill_folder(folder["folder_id"])
+        assert deleted["ok"] is True
+        assert service.get_skill(skill["skill_id"])["folder_id"] == ""
+
+        with pytest.raises(HTTPException) as missing:
+            await agent_routes.delete_skill_folder("folder_missing")
         assert missing.value.status_code == 404
     finally:
         service.close()
