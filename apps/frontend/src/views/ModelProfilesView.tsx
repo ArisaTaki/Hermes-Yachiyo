@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
+import { useConfirmDialog } from '../components/ConfirmDialog';
 import { ProviderBrandIcon } from '../components/ProviderBrandIcon';
 import { UiIcon } from '../components/UiIcon';
 import { currentParam, navigateTo, type AppView } from '../lib/view';
@@ -670,6 +671,7 @@ export function ModelProfilesView() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
   const [status, setStatus] = useState('');
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
 
   const selectedSource = useMemo(
     () => sources.find((source) => source.source_id === selectedSourceId) || null,
@@ -795,9 +797,18 @@ export function ModelProfilesView() {
     return sourceDirty || modelDirty;
   }
 
-  function confirmDiscardDraftChanges(): boolean {
-    if (!hasUnsavedDraftChanges()) return true;
-    return window.confirm('当前提供商源或模型有未保存更改，是否放弃这些更改？');
+  function runAfterDiscardConfirmation(action: () => void) {
+    if (!hasUnsavedDraftChanges()) {
+      action();
+      return;
+    }
+    requestConfirm({
+      title: '放弃未保存更改？',
+      description: '当前提供商源或模型有未保存更改。继续操作会丢弃这些草稿内容。',
+      confirmLabel: '放弃更改',
+      variant: 'danger',
+      onConfirm: action,
+    });
   }
 
   function applySelectedSource(source: ModelSource) {
@@ -813,14 +824,30 @@ export function ModelProfilesView() {
 
   function selectSource(source: ModelSource) {
     if (busy) return;
-    if (source.source_id !== selectedSourceId && !confirmDiscardDraftChanges()) return;
-    applySelectedSource(source);
-    setStatus('');
+    const apply = () => {
+      applySelectedSource(source);
+      setStatus('');
+    };
+    if (source.source_id === selectedSourceId) apply();
+    else runAfterDiscardConfirmation(apply);
   }
 
   function createNewSource() {
     if (busy) return;
-    if (!confirmDiscardDraftChanges()) return;
+    runAfterDiscardConfirmation(() => {
+      const draft = defaultSourceDraft(activeCapability);
+      setSelectedSourceId('');
+      setSelectedModelId('');
+      setSourceDraft(draft);
+      setModelDraft({ ...emptyModelDraft, capability: activeCapability, model: defaultModelName(draft, activeCapability) });
+      setModelCatalog([]);
+      setModelCatalogQuery('');
+      setProviderMenuOpen(false);
+      setStatus('');
+    });
+  }
+
+  function applyNewSourceFromDraft() {
     const draft = defaultSourceDraft(activeCapability);
     setSelectedSourceId('');
     setSelectedModelId('');
@@ -833,7 +860,8 @@ export function ModelProfilesView() {
   }
 
   function returnToPresetList() {
-    createNewSource();
+    if (busy) return;
+    runAfterDiscardConfirmation(applyNewSourceFromDraft);
   }
 
   function sourceDraftFromPreset(preset: ProviderPreset): SourceDraft {
@@ -856,24 +884,28 @@ export function ModelProfilesView() {
     const existing = capabilitySources.find((source) => source.name === preset.id)
       || capabilitySources.find((source) => source.provider === preset.id && source.base_url === preset.baseUrl);
     if (existing) {
-      if (existing.source_id !== selectedSourceId && !confirmDiscardDraftChanges()) return;
-      applySelectedSource(existing);
-      setStatus(`已切换到已有 ${preset.label} ${capabilityLabels[activeCapability]}源`);
+      const apply = () => {
+        applySelectedSource(existing);
+        setStatus(`已切换到已有 ${preset.label} ${capabilityLabels[activeCapability]}源`);
+      };
+      if (existing.source_id === selectedSourceId) apply();
+      else runAfterDiscardConfirmation(apply);
       return;
     }
-    const nextDraft = sourceDraftFromPreset(preset);
-    setSelectedSourceId('');
-    setSelectedModelId('');
-    setSourceDraft(nextDraft);
-    setModelDraft({ ...emptyModelDraft, capability: activeCapability, model: defaultModelName(nextDraft, activeCapability) });
-    setModelCatalog([]);
-    setModelCatalogQuery('');
-    setProviderMenuOpen(false);
-    setStatus('');
+    runAfterDiscardConfirmation(() => {
+      const nextDraft = sourceDraftFromPreset(preset);
+      setSelectedSourceId('');
+      setSelectedModelId('');
+      setSourceDraft(nextDraft);
+      setModelDraft({ ...emptyModelDraft, capability: activeCapability, model: defaultModelName(nextDraft, activeCapability) });
+      setModelCatalog([]);
+      setModelCatalogQuery('');
+      setProviderMenuOpen(false);
+      setStatus('');
+    });
   }
 
-  function switchCapability(capability: ModelCapability) {
-    if (capability !== activeCapability && !confirmDiscardDraftChanges()) return;
+  function applyCapability(capability: ModelCapability) {
     setActiveCapability(capability);
     const nextCapabilitySources = sourcesForCapability(sources, capability);
     const source = nextCapabilitySources.find((item) => item.source_id === selectedSourceId) || nextCapabilitySources[0] || null;
@@ -896,6 +928,14 @@ export function ModelProfilesView() {
     setModelCatalog([]);
     setModelCatalogQuery('');
     setProviderMenuOpen(false);
+  }
+
+  function switchCapability(capability: ModelCapability) {
+    if (capability === activeCapability) {
+      applyCapability(capability);
+      return;
+    }
+    runAfterDiscardConfirmation(() => applyCapability(capability));
   }
 
   function applyProvider(provider: string) {
@@ -1102,6 +1142,17 @@ export function ModelProfilesView() {
     }
   }
 
+  function requestRemoveModel(model: ModelProfileView) {
+    if (busy) return;
+    requestConfirm({
+      title: `删除模型「${model.name || model.model}」？`,
+      description: '这个模型配置会从本机删除；如果它是某个能力的默认模型，相关功能需要重新选择可用模型。',
+      confirmLabel: '删除模型',
+      variant: 'danger',
+      onConfirm: () => void removeModel(model.profile_id),
+    });
+  }
+
   async function removeSource() {
     if (!sourceDraft.source_id || busy) return;
     setBusy('source-delete');
@@ -1114,6 +1165,20 @@ export function ModelProfilesView() {
     } finally {
       setBusy('');
     }
+  }
+
+  function requestRemoveSource() {
+    if (!sourceDraft.source_id || busy) return;
+    const modelCount = profiles.filter((profile) => profile.source_id === sourceDraft.source_id).length;
+    requestConfirm({
+      title: `删除提供商源「${sourceDraft.name || selectedSource?.name || sourceDraft.source_id}」？`,
+      description: modelCount
+        ? `这个提供商源和它下面的 ${modelCount} 个模型配置会从本机删除。相关默认模型和依赖这个源的功能可能需要重新配置。`
+        : '这个提供商源会从本机删除。相关默认模型和依赖这个源的功能可能需要重新配置。',
+      confirmLabel: '删除源',
+      variant: 'danger',
+      onConfirm: () => void removeSource(),
+    });
   }
 
   async function setDefault(profile: ModelProfile) {
@@ -1362,7 +1427,7 @@ export function ModelProfilesView() {
                     <span>{sourceDraft.enabled ? '正在使用这个提供商源' : '已暂停这个提供商源'}</span>
                   </label>
                   <div className="agent-editor-actions">
-                    {sourceDraft.source_id ? <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={() => void removeSource()}>删除源</button> : null}
+                    {sourceDraft.source_id ? <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={requestRemoveSource}>删除源</button> : null}
                   </div>
                 </form>
 
@@ -1464,7 +1529,7 @@ export function ModelProfilesView() {
                         {defaults[model.capability] === model.profile_id ? <small>默认</small> : null}
                         <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || !profileSelectableForHermes(model)} onClick={() => void setDefault(model)}>设为默认</button>
                         {model.capability !== 'tts' ? <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || sourceDraft.enabled === false} onClick={() => void runModelTest(model.profile_id)}>重新测试</button> : null}
-                        <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={() => void removeModel(model.profile_id)}>删除</button>
+                        <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={() => requestRemoveModel(model)}>删除</button>
                       </div>
                     ))}
                     {!visibleModels.length ? (
@@ -1480,6 +1545,7 @@ export function ModelProfilesView() {
           </section>
         </div>
       )}
+      {confirmDialog}
     </section>
   );
 }

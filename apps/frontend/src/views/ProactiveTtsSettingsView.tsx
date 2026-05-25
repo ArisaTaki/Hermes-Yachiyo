@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { useConfirmDialog } from '../components/ConfirmDialog';
 import {
   apiGet,
   apiPost,
@@ -149,6 +150,7 @@ export function ProactiveTtsSettingsView() {
   const [busyAction, setBusyAction] = useState('');
   const [resourceBusy, setResourceBusy] = useState(false);
   const [status, setStatus] = useState('');
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
   const provider = form.provider || 'none';
 
   useEffect(() => {
@@ -501,12 +503,6 @@ export function ProactiveTtsSettingsView() {
 
   async function adoptGsvLaunchAgent() {
     if (interactionBusy) return;
-    const agent = firstExternalGsvLaunchAgent(serviceStatus);
-    const label = agent?.label || '外部 GPT-SoVITS 服务';
-    const confirmed = window.confirm(
-      `将停用外部 GPT-SoVITS LaunchAgent（${label}），保留服务目录和模型文件，并安装 Hermes-Yachiyo 自己的后台/自启。继续吗？`,
-    );
-    if (!confirmed) return;
     setBusyAction('service-adopt');
     setStatus('正在接管 GPT-SoVITS 后台服务...');
     try {
@@ -527,9 +523,21 @@ export function ProactiveTtsSettingsView() {
     }
   }
 
+  function requestAdoptGsvLaunchAgent() {
+    if (interactionBusy) return;
+    const agent = firstExternalGsvLaunchAgent(serviceStatus);
+    const label = agent?.label || '外部 GPT-SoVITS 服务';
+    requestConfirm({
+      title: '接管外部 GPT-SoVITS 服务？',
+      description: `将停用外部 GPT-SoVITS LaunchAgent（${label}），保留服务目录和模型文件，并安装 Hermes-Yachiyo 自己的后台/自启。`,
+      confirmLabel: '交由 Yachiyo 管理',
+      variant: 'danger',
+      onConfirm: () => void adoptGsvLaunchAgent(),
+    });
+  }
+
   async function uninstallGsvLaunchAgent() {
     if (interactionBusy) return;
-    if (!window.confirm('将停止并移除 GPT-SoVITS 开机自启服务，不会删除模型文件。继续吗？')) return;
     setBusyAction('service-uninstall');
     setStatus('正在停止 GPT-SoVITS 后台服务并移除开机自启...');
     try {
@@ -542,6 +550,17 @@ export function ProactiveTtsSettingsView() {
     } finally {
       setBusyAction('');
     }
+  }
+
+  function requestUninstallGsvLaunchAgent() {
+    if (interactionBusy) return;
+    requestConfirm({
+      title: '停止 GPT-SoVITS 本地后台？',
+      description: '将停止并移除 GPT-SoVITS 开机自启服务，不会删除模型文件。',
+      confirmLabel: '停止后台',
+      variant: 'danger',
+      onConfirm: () => void uninstallGsvLaunchAgent(),
+    });
   }
 
   async function openGsvServiceTerminal() {
@@ -571,9 +590,6 @@ export function ProactiveTtsSettingsView() {
 
   async function openGsvSetupTerminal() {
     if (interactionBusy) return;
-    if (!window.confirm(
-      '将打开系统终端并尝试克隆 GPT-SoVITS、创建本地 Python 3.11 环境并安装依赖。部署完成后不会直接占用 9880 端口；需要运行服务时请使用本地后台服务或调试终端。继续吗？',
-    )) return;
     setBusyAction('service-setup');
     setStatus('正在打开 GPT-SoVITS 本地依赖部署终端...');
     try {
@@ -600,6 +616,17 @@ export function ProactiveTtsSettingsView() {
     } finally {
       setBusyAction('');
     }
+  }
+
+  function requestOpenGsvSetupTerminal() {
+    if (interactionBusy) return;
+    requestConfirm({
+      title: '部署 GPT-SoVITS 运行时？',
+      description: '将打开系统终端并尝试克隆 GPT-SoVITS、创建本地 Python 3.11 环境并安装依赖。部署完成后不会直接占用 9880 端口；需要运行服务时请使用本地后台服务或调试终端。',
+      confirmLabel: '打开部署终端',
+      variant: 'danger',
+      onConfirm: () => void openGsvSetupTerminal(),
+    });
   }
 
   const enabled = Boolean(form.enabled && provider !== 'none');
@@ -901,7 +928,7 @@ export function ProactiveTtsSettingsView() {
                         type="button"
                         className={busyAction === 'service-setup' ? 'loading-button' : undefined}
                         disabled={interactionBusy}
-                        onClick={() => void openGsvSetupTerminal()}
+                        onClick={requestOpenGsvSetupTerminal}
                       >
                         {busyAction === 'service-setup' ? '部署中...' : '部署运行时/基础模型'}
                       </button>
@@ -927,7 +954,7 @@ export function ProactiveTtsSettingsView() {
                         type="button"
                         className={busyAction === 'service-uninstall' ? 'loading-button danger-action' : 'danger-action'}
                         disabled={interactionBusy || !serviceStatus?.launch_agent_installed}
-                        onClick={() => void uninstallGsvLaunchAgent()}
+                        onClick={requestUninstallGsvLaunchAgent}
                       >
                         {busyAction === 'service-uninstall' ? '停止中...' : '停止本地后台'}
                       </button>
@@ -951,7 +978,7 @@ export function ProactiveTtsSettingsView() {
                           type="button"
                           className={busyAction === 'service-adopt' ? 'loading-button' : undefined}
                           disabled={interactionBusy}
-                          onClick={() => void adoptGsvLaunchAgent()}
+                          onClick={requestAdoptGsvLaunchAgent}
                         >
                           {busyAction === 'service-adopt' ? '接管中...' : '交由 Yachiyo 管理'}
                         </button>
@@ -1247,6 +1274,7 @@ export function ProactiveTtsSettingsView() {
           </form>
         </article>
       </section>
+      {confirmDialog}
     </section>
   );
 }

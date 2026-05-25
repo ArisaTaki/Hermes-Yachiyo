@@ -3,6 +3,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 
+import { useConfirmDialog } from '../components/ConfirmDialog';
+import { UiIcon } from '../components/UiIcon';
 import {
   apiGet,
   apiPost,
@@ -17,7 +19,6 @@ import {
   type DesktopTerminalTask,
 } from '../lib/bridge';
 import { currentParam, navigateTo } from '../lib/view';
-import { UiIcon } from '../components/UiIcon';
 
 type HermesStatus = {
   status?: string;
@@ -466,6 +467,7 @@ export function ToolCenterView() {
   const updateTerminalRef = useRef<Terminal | null>(null);
   const updateFitAddonRef = useRef<FitAddon | null>(null);
   const updateTerminalIdRef = useRef<string | null>(null);
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
 
   useEffect(() => {
     let disposed = false;
@@ -841,15 +843,25 @@ export function ToolCenterView() {
     }
   }
 
-  async function stopHermesUpdateTerminal(options: { confirm?: boolean } = {}) {
+  async function stopHermesUpdateTerminalNow() {
     const id = updateTerminalIdRef.current;
     if (!id) return;
-    if (options.confirm !== false) {
-      const ok = window.confirm('Hermes 更新仍在运行。停止终端会中断 Hermes 更新，确定要停止吗？');
-      if (!ok) return;
-    }
     setUpdateTerminalMessage('正在停止 Hermes 更新终端...');
     await killDesktopTerminal(id);
+  }
+
+  async function stopHermesUpdateTerminal(options: { confirm?: boolean } = {}) {
+    if (options.confirm === false) {
+      await stopHermesUpdateTerminalNow();
+      return;
+    }
+    requestConfirm({
+      title: '停止 Hermes 更新终端？',
+      description: 'Hermes 更新仍在运行。停止终端会中断 Hermes 更新。',
+      confirmLabel: '停止终端',
+      variant: 'danger',
+      onConfirm: () => void stopHermesUpdateTerminalNow(),
+    });
   }
 
   async function refreshAfterHermesUpdateTerminal() {
@@ -1297,6 +1309,7 @@ export function ToolCenterView() {
         />
       </section>
       {unsavedDialog}
+      {confirmDialog}
     </main>
   );
 }

@@ -8,6 +8,7 @@ import type {
 } from 'react';
 
 import { ImageAttachmentViewer } from '../components/ImageAttachmentViewer';
+import { useConfirmDialog } from '../components/ConfirmDialog';
 import { UiIcon } from '../components/UiIcon';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
@@ -229,6 +230,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [runnables, setRunnables] = useState<RunnableSummary[]>([]);
   const [selectedRunnableId, setSelectedRunnableId] = useState('');
   const [, setRenderTick] = useState(0);
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -811,7 +813,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }
 
   async function deleteSession() {
-    if (!window.confirm('删除此对话？此操作不可恢复。')) return;
     const conversationToken = beginConversationLoading();
     try {
       await apiPost('/ui/chat/session/delete');
@@ -830,6 +831,16 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setMessagesVisible(true);
       setStatus(error instanceof Error ? error.message : '删除失败');
     }
+  }
+
+  function requestDeleteSession() {
+    requestConfirm({
+      title: '删除此对话？',
+      description: '当前对话记录会从本机删除，此操作不可恢复。',
+      confirmLabel: '删除对话',
+      variant: 'danger',
+      onConfirm: () => void deleteSession(),
+    });
   }
 
   async function switchSession(sessionId: string, anchorMessageId = '') {
@@ -1248,7 +1259,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
               <button type="button" className="chat-action-btn" title="新对话" aria-label="新对话" onClick={() => void clearSession()}>
                 <UiIcon name="plus" />
               </button>
-              <button type="button" className="chat-action-btn danger-action" title="删除对话" aria-label="删除对话" onClick={() => void deleteSession()} disabled={!sessions?.sessions?.length}>
+              <button type="button" className="chat-action-btn danger-action" title="删除对话" aria-label="删除对话" onClick={requestDeleteSession} disabled={!sessions?.sessions?.length}>
                 <UiIcon name="close" />
               </button>
             </div>
@@ -1411,6 +1422,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           label={assistantProfile?.agent_name || '月見八千代'}
         />
       </div>
+      {confirmDialog}
     </section>
   );
 }

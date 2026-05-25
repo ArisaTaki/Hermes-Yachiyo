@@ -1,6 +1,7 @@
 import { Suspense, createContext, lazy, FormEvent, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type PointerEvent as ReactPointerEvent } from 'react';
 
 import logoUrl from '../../../../docs/open-design/logo.png';
+import { useConfirmDialog } from '../components/ConfirmDialog';
 import { UiIcon, type UiIconName } from '../components/UiIcon';
 import { AssistantProfileSeedContext, type AssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiDelete, apiGet, apiPost, checkAppUpdate, openDesktopMode, openExternalUrl, openPath, quitApp } from '../lib/bridge';
@@ -1711,6 +1712,7 @@ export function ActivityAllPage() {
   const [availablePhases, setAvailablePhases] = useState<string[]>([]);
   const [selectedActivityIds, setSelectedActivityIds] = useState<Set<string>>(() => new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
 
   async function reloadActivityList(shouldApply: () => boolean = () => true) {
     setActivityLoading(true);
@@ -1791,7 +1793,6 @@ export function ActivityAllPage() {
   async function deleteSelectedActivities() {
     const ids = [...selectedActivityIds];
     if (!ids.length || bulkDeleting) return;
-    if (!window.confirm(`删除选中的 ${ids.length} 条活动日志？此操作不可恢复。`)) return;
     setBulkDeleting(true);
     try {
       const result = await apiDelete<{ ok?: boolean; error?: string; deleted?: number }>('/ui/activity', {
@@ -1806,6 +1807,18 @@ export function ActivityAllPage() {
     } finally {
       setBulkDeleting(false);
     }
+  }
+
+  function requestDeleteSelectedActivities() {
+    const ids = [...selectedActivityIds];
+    if (!ids.length || bulkDeleting) return;
+    requestConfirm({
+      title: `删除选中的 ${ids.length} 条活动日志？`,
+      description: '这些活动日志会从本机记录中删除，此操作不可恢复。',
+      confirmLabel: '删除日志',
+      variant: 'danger',
+      onConfirm: () => void deleteSelectedActivities(),
+    });
   }
 
   return (
@@ -1853,7 +1866,7 @@ export function ActivityAllPage() {
             type="button"
             className="hy-btn activity-danger-btn"
             disabled={!selectedCount || bulkDeleting}
-            onClick={() => void deleteSelectedActivities()}
+            onClick={requestDeleteSelectedActivities}
           >
             {bulkDeleting ? '删除中...' : '删除选中日志'}
           </button>
@@ -1882,6 +1895,7 @@ export function ActivityAllPage() {
           <div className="inline-empty">暂无活动记录</div>
         ) : null}
       </div>
+      {confirmDialog}
     </section>
   );
 }
@@ -1891,6 +1905,7 @@ export function ActivityDetailPage() {
   const [payload, setPayload] = useState<ActivityDetailPayload | null>(null);
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
 
   useEffect(() => {
     if (!eventId) {
@@ -1932,7 +1947,6 @@ export function ActivityDetailPage() {
 
   async function deleteCurrentEvent() {
     if (!eventId || deleting) return;
-    if (!window.confirm('删除这条活动日志？此操作不可恢复。')) return;
     setDeleting(true);
     try {
       const result = await apiDelete<{ ok?: boolean; error?: string }>(`/ui/activity/${encodeURIComponent(eventId)}`);
@@ -1944,6 +1958,17 @@ export function ActivityDetailPage() {
     } finally {
       setDeleting(false);
     }
+  }
+
+  function requestDeleteCurrentEvent() {
+    if (!eventId || deleting) return;
+    requestConfirm({
+      title: '删除这条活动日志？',
+      description: '这条活动日志会从本机记录中删除，此操作不可恢复。',
+      confirmLabel: '删除日志',
+      variant: 'danger',
+      onConfirm: () => void deleteCurrentEvent(),
+    });
   }
 
   return (
@@ -1968,7 +1993,7 @@ export function ActivityDetailPage() {
             type="button"
             className="hy-btn hy-btn-ghost activity-delete-btn danger-action"
             disabled={deleting}
-            onClick={() => void deleteCurrentEvent()}
+            onClick={requestDeleteCurrentEvent}
           >
             {deleting ? '删除中...' : '删除日志'}
           </button>
@@ -2044,6 +2069,7 @@ export function ActivityDetailPage() {
           </section>
         </>
       ) : null}
+      {confirmDialog}
     </section>
   );
 }

@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 
+import { useConfirmDialog } from '../components/ConfirmDialog';
 import {
   apiGet,
   apiPatch,
@@ -1660,6 +1661,7 @@ function SystemSettingsView() {
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
   const [bridgeRestarting, setBridgeRestarting] = useState(false);
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
 
   const changes = useMemo(() => buildGeneralSettingsChanges(payload, form), [payload, form]);
   const pendingCount = useMemo(() => countGeneralSettingsPendingChanges(payload, form), [payload, form]);
@@ -1848,7 +1850,6 @@ function SystemSettingsView() {
 
   async function createBackup(overwriteLatest = false) {
     if (backupBusy) return;
-    if (overwriteLatest && !window.confirm('将生成新备份并替换最近一次备份，继续吗？')) return;
     setBackupAction(overwriteLatest ? 'backup-overwrite' : 'backup-create');
     setStatus(overwriteLatest ? '正在覆盖最近一次备份…' : '正在生成备份…');
     try {
@@ -1863,9 +1864,22 @@ function SystemSettingsView() {
     }
   }
 
+  function requestCreateBackup(overwriteLatest = false) {
+    if (!overwriteLatest) {
+      void createBackup(false);
+      return;
+    }
+    requestConfirm({
+      title: '覆盖最近一次备份？',
+      description: '将生成新备份并替换最近一次备份。旧的最近备份记录会被覆盖。',
+      confirmLabel: '覆盖备份',
+      variant: 'danger',
+      onConfirm: () => void createBackup(true),
+    });
+  }
+
   async function restoreBackup(backupPath = '') {
     if (backupBusy) return;
-    if (!window.confirm('恢复备份会覆盖当前本地资料并安排应用重启，继续吗？')) return;
     setBackupAction(backupPath ? `backup-restore:${backupPath}` : 'backup-restore');
     setStatus('正在恢复备份…');
     try {
@@ -1879,9 +1893,19 @@ function SystemSettingsView() {
     }
   }
 
+  function requestRestoreBackup(backupPath = '') {
+    requestConfirm({
+      title: backupPath ? '恢复这份备份？' : '恢复最近备份？',
+      description: '恢复备份会覆盖当前本地资料，并按需要安排应用重启。',
+      confirmLabel: '恢复备份',
+      variant: 'danger',
+      onConfirm: () => void restoreBackup(backupPath),
+    });
+  }
+
   async function deleteBackup(backupPath: string) {
     if (backupBusy) return;
-    if (!backupPath || !window.confirm('确认删除这份备份吗？')) return;
+    if (!backupPath) return;
     setBackupAction(`backup-delete:${backupPath}`);
     setStatus('正在删除备份…');
     try {
@@ -1894,6 +1918,17 @@ function SystemSettingsView() {
     } finally {
       setBackupAction('');
     }
+  }
+
+  function requestDeleteBackup(backupPath: string) {
+    if (!backupPath) return;
+    requestConfirm({
+      title: '删除这份备份？',
+      description: '这份备份会从本机备份目录删除，此操作不可撤销。',
+      confirmLabel: '删除备份',
+      variant: 'danger',
+      onConfirm: () => void deleteBackup(backupPath),
+    });
   }
 
   async function openBackupLocation(backupPath = '') {
@@ -1916,7 +1951,6 @@ function SystemSettingsView() {
       setStatus(`请输入确认短语 ${uninstallConfirmPhrase}`);
       return;
     }
-    if (!window.confirm('卸载会删除所选本机资料，此操作不可撤销。确认继续吗？')) return;
     setUninstallRunning(true);
     setStatus('正在卸载…');
     try {
@@ -1938,6 +1972,21 @@ function SystemSettingsView() {
       setStatus(err instanceof Error ? err.message : '卸载失败');
       setUninstallRunning(false);
     }
+  }
+
+  function requestRunUninstall() {
+    if (uninstallRunning) return;
+    if (!uninstallConfirmValid) {
+      setStatus(`请输入确认短语 ${uninstallConfirmPhrase}`);
+      return;
+    }
+    requestConfirm({
+      title: '确认卸载 Hermes-Yachiyo？',
+      description: '卸载会删除所选本机资料，此操作不可撤销。请确认卸载范围、备份选项和 GPT-SoVITS 选项无误。',
+      confirmLabel: '确认卸载',
+      variant: 'danger',
+      onConfirm: () => void runUninstall(),
+    });
   }
 
   async function refreshUninstallPreview() {
@@ -2048,7 +2097,7 @@ function SystemSettingsView() {
             <SettingsActionButton
               disabled={backupBusy}
               loading={backupAction === 'backup-create'}
-              onClick={() => void createBackup(false)}
+              onClick={() => requestCreateBackup(false)}
             >
               {backupAction === 'backup-create' ? '生成中…' : '生成备份'}
             </SettingsActionButton>
@@ -2065,14 +2114,14 @@ function SystemSettingsView() {
                 <SettingsActionButton
                   disabled={backupBusy}
                   loading={backupAction === 'backup-overwrite'}
-                  onClick={() => void createBackup(true)}
+                  onClick={() => requestCreateBackup(true)}
                 >
                   {backupAction === 'backup-overwrite' ? '覆盖中…' : '覆盖最近一次'}
                 </SettingsActionButton>
                 <SettingsActionButton
                   disabled={backupBusy}
                   loading={backupAction === 'backup-restore'}
-                  onClick={() => void restoreBackup()}
+                  onClick={() => requestRestoreBackup()}
                 >
                   {backupAction === 'backup-restore' ? '恢复中…' : '恢复最近备份'}
                 </SettingsActionButton>
@@ -2097,7 +2146,7 @@ function SystemSettingsView() {
                         <SettingsActionButton
                           disabled={backupBusy}
                           loading={backupAction === `backup-restore:${item.path || ''}`}
-                          onClick={() => void restoreBackup(item.path || '')}
+                          onClick={() => requestRestoreBackup(item.path || '')}
                         >
                           {backupAction === `backup-restore:${item.path || ''}` ? '恢复中…' : '恢复'}
                         </SettingsActionButton>
@@ -2112,7 +2161,7 @@ function SystemSettingsView() {
                           variant="danger"
                           disabled={backupBusy}
                           loading={backupAction === `backup-delete:${item.path || ''}`}
-                          onClick={() => void deleteBackup(item.path || '')}
+                          onClick={() => requestDeleteBackup(item.path || '')}
                         >
                           {backupAction === `backup-delete:${item.path || ''}` ? '删除中…' : '删除'}
                         </SettingsActionButton>
@@ -2142,7 +2191,7 @@ function SystemSettingsView() {
               variant="danger"
               disabled={uninstallRunning || !uninstallConfirmValid}
               loading={uninstallRunning}
-              onClick={() => void runUninstall()}
+              onClick={requestRunUninstall}
             >
               {uninstallRunning ? '正在卸载…' : '卸载'}
             </SettingsActionButton>
@@ -2218,6 +2267,7 @@ function SystemSettingsView() {
           </SettingsActionButton>
         </div>
       </form>
+      {confirmDialog}
     </main>
   );
 }
