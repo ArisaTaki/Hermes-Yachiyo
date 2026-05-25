@@ -1889,6 +1889,7 @@ export function ActivityDetailPage() {
   const [payload, setPayload] = useState<ActivityDetailPayload | null>(null);
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [expandedTraceIds, setExpandedTraceIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     if (!eventId) {
@@ -1912,6 +1913,10 @@ export function ActivityDetailPage() {
     return () => {
       disposed = true;
     };
+  }, [eventId]);
+
+  useEffect(() => {
+    setExpandedTraceIds(new Set());
   }, [eventId]);
 
   const event = payload?.event || null;
@@ -1942,6 +1947,15 @@ export function ActivityDetailPage() {
     } finally {
       setDeleting(false);
     }
+  }
+
+  function toggleTraceExpanded(traceId: string) {
+    setExpandedTraceIds((current) => {
+      const next = new Set(current);
+      if (next.has(traceId)) next.delete(traceId);
+      else next.add(traceId);
+      return next;
+    });
   }
 
   return (
@@ -2025,17 +2039,48 @@ export function ActivityDetailPage() {
           <section className="activity-detail-body">
             <h3>完整过程</h3>
             <div className="activity-trace-list">
-              {trace.length ? trace.map((item) => (
-                <article className={`activity-trace-row activity-item-${activityTone(item.status)}`} key={item.event_id || `${item.created_at}-${item.title}`}>
-                  <span className="activity-icon">{activityIcon(item)}</span>
-                  <div className="activity-content">
-                    <strong>{item.title || item.tool_name || 'Hermes 活动'}</strong>
-                    <small>{activityDetail(item)}</small>
-                    <em>{activityPhaseLabel(item.phase)}</em>
-                  </div>
-                  <time className="activity-time">{formatFullDateTime(item.created_at)}</time>
-                </article>
-              )) : (
+              {trace.length ? trace.map((item, index) => {
+                const traceId = activityTraceKey(item, index);
+                const itemMetadataText = formatMetadata(item.metadata);
+                const canExpand = Boolean(item.detail || itemMetadataText);
+                const expanded = expandedTraceIds.has(traceId);
+                return (
+                  <article className={`activity-trace-row activity-item-${activityTone(item.status)}${expanded ? ' expanded' : ''}`} key={traceId}>
+                    <span className="activity-icon">{activityIcon(item)}</span>
+                    <div className="activity-content">
+                      <strong>{item.title || item.tool_name || 'Hermes 活动'}</strong>
+                      <small>{activityDetail(item)}</small>
+                      {expanded ? (
+                        <div className="activity-trace-expanded">
+                          {item.detail ? (
+                            <div>
+                              <span>完整摘要</span>
+                              <p>{item.detail}</p>
+                            </div>
+                          ) : null}
+                          {itemMetadataText ? (
+                            <pre>{itemMetadataText}</pre>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      <em>{activityPhaseLabel(item.phase)}</em>
+                    </div>
+                    {canExpand ? (
+                      <button
+                        type="button"
+                        className="activity-trace-expand"
+                        title={expanded ? '收起全文' : '查看全文'}
+                        aria-label={expanded ? '收起全文' : '查看全文'}
+                        onClick={() => toggleTraceExpanded(traceId)}
+                      >
+                        <UiIcon name={expanded ? 'close' : 'plus'} />
+                        <span>{expanded ? '收起' : '全文'}</span>
+                      </button>
+                    ) : null}
+                    <time className="activity-time">{formatFullDateTime(item.created_at)}</time>
+                  </article>
+                );
+              }) : (
                 <div className="inline-empty">暂无同任务过程</div>
               )}
             </div>
@@ -2455,6 +2500,10 @@ function activityEventRow(event: ActivityEvent, fullTime: boolean): ActivityRowD
     taskId: event.task_id,
     phase: event.phase,
   };
+}
+
+function activityTraceKey(event: ActivityEvent, index: number) {
+  return event.event_id || `${event.created_at || 'trace'}-${event.title || event.tool_name || 'activity'}-${index}`;
 }
 
 function activityDetail(event: ActivityEvent) {

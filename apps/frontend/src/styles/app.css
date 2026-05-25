@@ -11997,8 +11997,70 @@ button.activity-item {
   border-bottom: 1px solid var(--hy-line);
 }
 
+.activity-trace-row.expanded {
+  align-items: stretch;
+}
+
 .activity-trace-row:last-child {
   border-bottom: 0;
+}
+
+.activity-trace-expanded {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+  max-width: 100%;
+}
+
+.activity-trace-expanded span {
+  display: block;
+  color: var(--hy-muted);
+  font-size: 11px;
+}
+
+.activity-trace-expanded p,
+.activity-trace-expanded pre {
+  margin: 3px 0 0;
+  color: var(--hy-fg);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.activity-trace-expanded pre {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: var(--hy-bg);
+  padding: 10px;
+}
+
+.activity-trace-expand {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--hy-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.activity-trace-expand:hover {
+  border-color: oklch(75% 0.095 205 / 0.24);
+  background: oklch(75% 0.095 205 / 0.06);
+  color: var(--hy-fg);
+}
+
+.activity-trace-expand .ui-icon {
+  width: 13px;
+  height: 13px;
 }
 
 @media (max-width: 760px) {
@@ -12013,6 +12075,10 @@ button.activity-item {
 
   .activity-trace-row {
     flex-direction: column;
+  }
+
+  .activity-trace-expand {
+    align-self: flex-start;
   }
 }
 

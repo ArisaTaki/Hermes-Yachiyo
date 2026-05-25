@@ -1904,6 +1904,7 @@ function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
   let paragraph: string[] = [];
   let listType: 'ul' | 'ol' | null = null;
   let inCode = false;
+  let codeFenceMarker = '';
   let codeLines: string[] = [];
   let codeLanguage = '';
   let codeBlockIndex = 0;
@@ -1938,21 +1939,25 @@ function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
     html += `<div class="markdown-code-block" data-code-index="${blockIndex}">${languageLabel}<button type="button" class="markdown-code-copy${copied ? ' copied' : ''}" data-code-copy aria-label="${copyButtonLabel}" title="${copyButtonLabel}">${copyButtonIcon}</button><pre><code class="${language ? `language-${escapeHtml(language)}` : ''}">${renderHighlightedCode(code, language)}</code></pre></div>`;
     codeLines = [];
     codeLanguage = '';
+    codeFenceMarker = '';
     inCode = false;
     codeBlockIndex += 1;
   }
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (line.trim().startsWith('```')) {
+    const fence = parseMarkdownFence(line);
+    if (fence) {
       if (inCode) {
-        flushCode();
+        if (fence.marker === codeFenceMarker) flushCode();
+        else codeLines.push(line);
       } else {
         flushParagraph();
         closeList();
         inCode = true;
+        codeFenceMarker = fence.marker;
         codeLines = [];
-        codeLanguage = normalizeFenceLanguage(line);
+        codeLanguage = normalizeFenceLanguage(fence.info);
       }
       continue;
     }
@@ -2028,9 +2033,21 @@ function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
   return html;
 }
 
-function normalizeFenceLanguage(fenceLine: string) {
-  const raw = fenceLine.trim().slice(3).trim().split(/\s+/)[0] || '';
-  return normalizeCodeLanguage(raw);
+function parseMarkdownFence(line: string) {
+  const match = line.trim().match(/^(```|~~~|:::)\s*(.*)$/);
+  if (!match) return null;
+  return {
+    marker: match[1],
+    info: match[2] || '',
+  };
+}
+
+function normalizeFenceLanguage(fenceInfo: string) {
+  const raw = fenceInfo.trim();
+  const lower = raw.toLowerCase();
+  if (lower === 'review diff' || lower === 'review-diff' || lower.startsWith('review diff ')) return 'diff';
+  if (lower === 'patch' || lower.includes(' diff')) return 'diff';
+  return normalizeCodeLanguage(raw.split(/\s+/)[0] || '');
 }
 
 function normalizeCodeLanguage(language: string) {
