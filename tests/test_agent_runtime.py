@@ -6,6 +6,7 @@ import json
 import sqlite3
 import subprocess
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -89,6 +90,28 @@ def test_runtime_restores_row_factory_before_listing_agents(tmp_path):
         result = service.list_agents()
         assert result["ok"] is True
         assert any(agent["agent_id"] == "agent_coding" for agent in result["agents"])
+    finally:
+        service.close()
+
+
+def test_runtime_agent_studio_reads_are_safe_under_parallel_refresh(tmp_path):
+    service = make_service(tmp_path, seed_templates=True)
+    try:
+        def read_agent_studio_state(_index: int):
+            return (
+                service.list_agents()["agents"],
+                service.list_skill_folders()["uncategorized"],
+                service.list_runnables()["runnables"],
+            )
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(read_agent_studio_state, range(40)))
+
+        assert results
+        for agents, uncategorized, runnables in results:
+            assert any(agent["agent_id"] == "agent_coding" for agent in agents)
+            assert "skill_count" in uncategorized
+            assert any(item["id"] == "agent_coding" for item in runnables)
     finally:
         service.close()
 

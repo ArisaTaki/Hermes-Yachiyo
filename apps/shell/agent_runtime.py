@@ -10,6 +10,7 @@ import shlex
 import shutil
 import sqlite3
 import subprocess
+import threading
 import time
 import zipfile
 from dataclasses import dataclass
@@ -69,6 +70,70 @@ _DEFAULT_AGENT_IDS = {
     "agent_office",
     "agent_custom",
 }
+
+
+def _named_row_factory(cursor: sqlite3.Cursor, row: tuple[Any, ...]) -> dict[str, Any]:
+    return {
+        column[0]: row[index]
+        for index, column in enumerate(cursor.description or ())
+        if index < len(row)
+    }
+
+
+class _LockedCursor:
+    def __init__(self, cursor: sqlite3.Cursor, lock: threading.RLock) -> None:
+        self._cursor = cursor
+        self._lock = lock
+
+    @property
+    def description(self) -> Any:
+        return self._cursor.description
+
+    def fetchone(self) -> Any:
+        with self._lock:
+            return self._cursor.fetchone()
+
+    def fetchall(self) -> list[Any]:
+        with self._lock:
+            return self._cursor.fetchall()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._cursor, name)
+
+
+class _LockedConnection:
+    def __init__(self, conn: sqlite3.Connection, lock: threading.RLock) -> None:
+        self._conn = conn
+        self._lock = lock
+
+    @property
+    def row_factory(self) -> Any:
+        with self._lock:
+            return self._conn.row_factory
+
+    @row_factory.setter
+    def row_factory(self, value: Any) -> None:
+        with self._lock:
+            self._conn.row_factory = value
+
+    def execute(self, *args: Any, **kwargs: Any) -> _LockedCursor:
+        with self._lock:
+            return _LockedCursor(self._conn.execute(*args, **kwargs), self._lock)
+
+    def executescript(self, *args: Any, **kwargs: Any) -> _LockedCursor:
+        with self._lock:
+            return _LockedCursor(self._conn.executescript(*args, **kwargs), self._lock)
+
+    def commit(self) -> None:
+        with self._lock:
+            self._conn.commit()
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
 
 
 def _now() -> str:
@@ -368,8 +433,10 @@ class AgentRuntimeService:
         self.skill_installs_hermes_home.mkdir(parents=True, exist_ok=True)
         self.agent_artifacts_dir.mkdir(parents=True, exist_ok=True)
         self.workflow_artifacts_dir.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
+        self._db_lock = threading.RLock()
+        raw_conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        self._conn = _LockedConnection(raw_conn, self._db_lock)
+        self._conn.row_factory = _named_row_factory
         self._init_db()
         if seed_templates:
             self._seed_templates()
@@ -378,12 +445,20 @@ class AgentRuntimeService:
         self._conn.close()
 
     def _ensure_row_factory(self) -> None:
-        if self._conn.row_factory is not sqlite3.Row:
-            self._conn.row_factory = sqlite3.Row
+        if self._conn.row_factory is not _named_row_factory:
+            self._conn.row_factory = _named_row_factory
 
     def _coerce_named_row(self, row: Any, description: Any = None) -> Any:
-        if row is None or isinstance(row, sqlite3.Row) or isinstance(row, dict):
+        if row is None or isinstance(row, dict):
             return row
+        if isinstance(row, sqlite3.Row):
+            if description:
+                return {
+                    column[0]: row[index]
+                    for index, column in enumerate(description)
+                    if index < len(row)
+                }
+            return {key: row[key] for key in row.keys()}
         if description:
             return {
                 column[0]: row[index]
