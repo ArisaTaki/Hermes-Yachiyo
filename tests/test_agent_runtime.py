@@ -67,6 +67,7 @@ def test_runtime_restores_row_factory_before_listing_agents(tmp_path):
     service = make_service(tmp_path, seed_templates=True)
     try:
         service._conn.row_factory = None
+        service._ensure_row_factory = lambda: None  # type: ignore[method-assign]
         result = service.list_agents()
         assert result["ok"] is True
         assert any(agent["agent_id"] == "agent_coding" for agent in result["agents"])
@@ -231,6 +232,22 @@ def test_import_skill_zip_rejects_path_traversal(tmp_path):
         service.close()
 
 
+def test_import_skill_zip_uses_frontmatter_source_when_available(tmp_path):
+    service = make_service(tmp_path)
+    archive = tmp_path / "with-source.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        zf.writestr(
+            "skill/SKILL.md",
+            "---\nname: Source Skill\nrepository: https://example.test/source-skill\n---\n\n# Source Skill\n",
+        )
+    try:
+        skill = service.import_skill(str(archive))
+        assert skill["source_type"] == "local_zip"
+        assert skill["source_ref"] == "https://example.test/source-skill"
+    finally:
+        service.close()
+
+
 def test_sync_hermes_skills_imports_skips_and_updates(tmp_path):
     service = make_service(tmp_path)
     hermes_root = tmp_path / ".hermes" / "skills"
@@ -357,6 +374,31 @@ def test_skill_folders_assign_move_and_delete_without_moving_files(tmp_path):
         service.close()
 
 
+def test_delete_skill_folder_can_delete_contained_skills(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    skill_root = tmp_path / "folder-delete-skill"
+    skill_root.mkdir()
+    (skill_root / "SKILL.md").write_text("# Folder Delete Skill\n\nDelete with folder.", encoding="utf-8")
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "ok"})
+    try:
+        folder = service.create_skill_folder({"name": "Disposable"})
+        skill = service.import_skill(str(skill_root), folder["folder_id"])
+        local_path = Path(skill["local_path"])
+        agent = service.create_agent({"name": "Folder Delete Agent"})
+        service.attach_skill(agent["agent_id"], skill["skill_id"])
+
+        deleted = service.delete_skill_folder(folder["folder_id"], delete_skills=True)
+
+        assert deleted["ok"] is True
+        assert deleted["deleted_skill_count"] == 1
+        with pytest.raises(KeyError):
+            service.get_skill(skill["skill_id"])
+        assert service.get_agent(agent["agent_id"])["skill_ids"] == []
+        assert not local_path.exists()
+    finally:
+        service.close()
+
+
 def test_skill_folder_validation_rejects_missing_folder(tmp_path):
     service = make_service(tmp_path)
     skill_root = tmp_path / "missing-folder-skill"
@@ -413,6 +455,21 @@ def test_skill_install_command_runs_whitelisted_npx_and_syncs(tmp_path, monkeypa
         skill_root = Path(_kwargs["cwd"]) / ".hermes" / "skills" / "dev" / "installed-skill"
         skill_root.mkdir(parents=True)
         (skill_root / "SKILL.md").write_text("# Installed Skill\n\nInstalled by npx.", encoding="utf-8")
+        (Path(_kwargs["cwd"]) / "skills-lock.json").write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "skills": {
+                        "installed-skill": {
+                            "source": "owner/repo",
+                            "sourceType": "github",
+                            "skillPath": "skills/dev/installed-skill/SKILL.md",
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
         return subprocess.CompletedProcess(argv, 0, stdout="installed", stderr="")
 
     monkeypatch.setenv("HERMES_HOME", str(hermes_home))
@@ -426,6 +483,7 @@ def test_skill_install_command_runs_whitelisted_npx_and_syncs(tmp_path, monkeypa
         skill = service.list_skills()["skills"][0]
         assert skill["name"] == "Installed Skill"
         assert skill["source_type"] == "npx_skills"
+        assert skill["source_ref"] == "https://github.com/owner/repo/blob/main/skills/dev/installed-skill/SKILL.md"
         assert "/skill-installs/.hermes/skills/" in skill["local_path"]
     finally:
         service.close()
@@ -874,6 +932,14 @@ async def test_skill_folder_routes_rename_delete_and_validate(tmp_path, monkeypa
         deleted = await agent_routes.delete_skill_folder(folder["folder_id"])
         assert deleted["ok"] is True
         assert service.get_skill(skill["skill_id"])["folder_id"] == ""
+
+        destructive_folder = await agent_routes.create_skill_folder(agent_routes.SkillFolderRequest(name="Temporary"))
+        destructive_skill = service.import_skill(str(source), destructive_folder["folder_id"])
+        deleted_with_skills = await agent_routes.delete_skill_folder(destructive_folder["folder_id"], delete_skills=True)
+        assert deleted_with_skills["ok"] is True
+        assert deleted_with_skills["deleted_skill_count"] == 1
+        with pytest.raises(KeyError):
+            service.get_skill(destructive_skill["skill_id"])
 
         with pytest.raises(HTTPException) as missing:
             await agent_routes.delete_skill_folder("folder_missing")

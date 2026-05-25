@@ -214,9 +214,13 @@ async def update_skill_folder(folder_id: str, request: SkillFolderRequest) -> di
 
 
 @router.delete("/skill-folders/{folder_id}")
-async def delete_skill_folder(folder_id: str) -> dict[str, Any]:
+async def delete_skill_folder(folder_id: str, delete_skills: bool = False) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().delete_skill_folder, folder_id)
+        return await asyncio.to_thread(
+            get_agent_runtime_service().delete_skill_folder,
+            folder_id,
+            delete_skills=delete_skills,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Skill 文件夹不存在") from exc
 

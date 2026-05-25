@@ -372,6 +372,17 @@ class AgentRuntimeService:
         if self._conn.row_factory is not sqlite3.Row:
             self._conn.row_factory = sqlite3.Row
 
+    def _coerce_named_row(self, row: Any, description: Any = None) -> Any:
+        if row is None or isinstance(row, sqlite3.Row) or isinstance(row, dict):
+            return row
+        if description:
+            return {
+                column[0]: row[index]
+                for index, column in enumerate(description)
+                if index < len(row)
+            }
+        return row
+
     def _init_db(self) -> None:
         self._conn.executescript(
             """
@@ -761,7 +772,7 @@ class AgentRuntimeService:
             "writable_scopes": [str(item or "").strip() for item in writable if str(item or "").strip()],
         }
 
-    def _row_to_agent(self, row: sqlite3.Row) -> dict[str, Any]:
+    def _row_to_agent(self, row: Any) -> dict[str, Any]:
         return {
             "agent_id": row["agent_id"],
             "name": row["name"],
@@ -795,7 +806,7 @@ class AgentRuntimeService:
             "updated_at": row["updated_at"],
         }
 
-    def _row_to_agent_private(self, row: sqlite3.Row) -> dict[str, Any]:
+    def _row_to_agent_private(self, row: Any) -> dict[str, Any]:
         agent = self._row_to_agent(row)
         agent["model_config"]["api_key"] = row["model_api_key"]
         return agent
@@ -939,22 +950,31 @@ class AgentRuntimeService:
 
     def list_agents(self) -> dict[str, Any]:
         self._ensure_row_factory()
-        rows = self._conn.execute("SELECT * FROM agents ORDER BY category, name").fetchall()
-        return {"ok": True, "agents": [self._row_to_agent(row) for row in rows]}
+        cursor = self._conn.execute("SELECT * FROM agents ORDER BY category, name")
+        rows = cursor.fetchall()
+        return {
+            "ok": True,
+            "agents": [
+                self._row_to_agent(self._coerce_named_row(row, cursor.description))
+                for row in rows
+            ],
+        }
 
     def get_agent(self, agent_id: str) -> dict[str, Any]:
         self._ensure_row_factory()
-        row = self._conn.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+        cursor = self._conn.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,))
+        row = cursor.fetchone()
         if row is None:
             raise KeyError(agent_id)
-        return self._row_to_agent(row)
+        return self._row_to_agent(self._coerce_named_row(row, cursor.description))
 
     def _get_agent_private(self, agent_id: str) -> dict[str, Any]:
         self._ensure_row_factory()
-        row = self._conn.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,)).fetchone()
+        cursor = self._conn.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,))
+        row = cursor.fetchone()
         if row is None:
             raise KeyError(agent_id)
-        return self._row_to_agent_private(row)
+        return self._row_to_agent_private(self._coerce_named_row(row, cursor.description))
 
     def create_agent(self, payload: dict[str, Any], *, seed: bool = False) -> dict[str, Any]:
         name = str(payload.get("name") or "").strip()
@@ -1187,17 +1207,28 @@ class AgentRuntimeService:
         self._conn.commit()
         return self.get_skill_folder(folder_id)
 
-    def delete_skill_folder(self, folder_id: str) -> dict[str, Any]:
+    def delete_skill_folder(self, folder_id: str, *, delete_skills: bool = False) -> dict[str, Any]:
         self.get_skill_folder(folder_id)
+        deleted_skill_count = 0
+        if delete_skills:
+            self._ensure_row_factory()
+            rows = self._conn.execute("SELECT skill_id FROM skills WHERE folder_id=?", (folder_id,)).fetchall()
+            for row in rows:
+                self.delete_skill(str(row["skill_id"]))
+                deleted_skill_count += 1
+            self._conn.execute("DELETE FROM skill_folders WHERE folder_id=?", (folder_id,))
+            self._conn.commit()
+            return {"ok": True, "deleted_skill_count": deleted_skill_count}
         now = _now()
         self._conn.execute("UPDATE skills SET folder_id='', updated_at=? WHERE folder_id=?", (now, folder_id))
         self._conn.execute("DELETE FROM skill_folders WHERE folder_id=?", (folder_id,))
         self._conn.commit()
-        return {"ok": True}
+        return {"ok": True, "deleted_skill_count": 0}
 
     def list_skills(self) -> dict[str, Any]:
         self._ensure_row_factory()
         self._repair_hermes_skill_references()
+        self._repair_yachiyo_installed_skill_provenance()
         rows = self._conn.execute(
             """
             SELECT s.*, f.name AS folder_name
@@ -1227,6 +1258,7 @@ class AgentRuntimeService:
     def get_skill(self, skill_id: str) -> dict[str, Any]:
         self._ensure_row_factory()
         self._repair_hermes_skill_references()
+        self._repair_yachiyo_installed_skill_provenance()
         row = self._conn.execute(
             """
             SELECT s.*, f.name AS folder_name
@@ -1289,9 +1321,10 @@ class AgentRuntimeService:
         *,
         record_source_type: str = "npx_skills",
         folder_id: str | None = None,
+        source_ref_override: str = "",
     ) -> dict[str, Any]:
         source_type = record_source_type if record_source_type in {"npx_skills", "hermes_cli"} else "npx_skills"
-        roots = self._yachiyo_skill_root_specs(source_type=source_type)
+        roots = self._yachiyo_skill_root_specs(source_type=source_type, source_ref_override=source_ref_override)
         return self._sync_skill_roots(roots, library="yachiyo", folder_id=folder_id)
 
     def _sync_skill_roots(
@@ -1344,6 +1377,13 @@ class AgentRuntimeService:
                     source_ref = source_root.relative_to(root).as_posix()
                 except ValueError:
                     source_ref = source_root.name
+                source_map = root_spec.get("source_map") if isinstance(root_spec.get("source_map"), dict) else {}
+                source_ref = str(
+                    source_map.get(source_root.name)
+                    or source_map.get(source_ref)
+                    or root_spec.get("source_ref_override")
+                    or source_ref
+                )
                 try:
                     result = self._import_skill_root(
                         source_root,
@@ -1395,6 +1435,7 @@ class AgentRuntimeService:
     def install_skill_command(self, command: str, folder_id: str | None = None) -> dict[str, Any]:
         argv, installer = self._validated_skill_install_argv(command)
         target_folder_id = self._normalize_skill_folder_id(folder_id)
+        source_ref = self._skill_install_source_ref(argv, installer)
         started_at = _now()
         env = os.environ.copy()
         env["HERMES_HOME"] = str(self.skill_installs_hermes_home)
@@ -1415,7 +1456,11 @@ class AgentRuntimeService:
         stdout = redact_secrets(completed.stdout)[-12000:]
         stderr = redact_secrets(completed.stderr)[-12000:]
         sync_result = (
-            self.sync_yachiyo_installed_skills(record_source_type=installer, folder_id=target_folder_id)
+            self.sync_yachiyo_installed_skills(
+                record_source_type=installer,
+                folder_id=target_folder_id,
+                source_ref_override=source_ref,
+            )
             if completed.returncode == 0
             else None
         )
@@ -1451,6 +1496,7 @@ class AgentRuntimeService:
             raise AgentRuntimeError("Skill 根目录必须包含 SKILL.md")
         markdown = _read_text(skill_md)
         metadata = _parse_skill_frontmatter(markdown)
+        source_ref = self._metadata_skill_source_ref(metadata, source_ref)
         name = self._skill_name(markdown, source_root.name)
         name = str(metadata.get("name") or name)[:120] or source_root.name
         description = self._skill_description(markdown)
@@ -1630,6 +1676,40 @@ class AgentRuntimeService:
             )
         self._conn.commit()
 
+    def _repair_yachiyo_installed_skill_provenance(self) -> None:
+        source_map = self._installed_skill_source_map()
+        if not source_map:
+            return
+        self._ensure_row_factory()
+        rows = self._conn.execute(
+            """
+            SELECT skill_id, local_path, origin_path, source_ref, source_type
+              FROM skills
+             WHERE source_type IN ('npx_skills', 'hermes_cli')
+            """
+        ).fetchall()
+        changed = False
+        for row in rows:
+            keys = []
+            for raw_path in (row["local_path"], row["origin_path"]):
+                if raw_path:
+                    keys.append(Path(str(raw_path)).name)
+            if row["source_ref"]:
+                keys.append(str(row["source_ref"]))
+            next_ref = next((source_map[key] for key in keys if key in source_map), "")
+            if next_ref and next_ref != row["source_ref"]:
+                self._conn.execute(
+                    """
+                    UPDATE skills
+                       SET source_ref=?, source_path=?, updated_at=?
+                     WHERE skill_id=?
+                    """,
+                    (next_ref, f"{row['source_type']}:{next_ref}", _now(), row["skill_id"]),
+                )
+                changed = True
+        if changed:
+            self._conn.commit()
+
     def _hermes_skill_root_specs(self, roots: list[Any] | None = None) -> list[dict[str, Any]]:
         if roots is None:
             raw_roots: list[Any] = [
@@ -1655,12 +1735,56 @@ class AgentRuntimeService:
             specs.append({"path": path, "source_type": source_type})
         return specs
 
-    def _yachiyo_skill_root_specs(self, *, source_type: str) -> list[dict[str, Any]]:
+    def _yachiyo_skill_root_specs(self, *, source_type: str, source_ref_override: str = "") -> list[dict[str, Any]]:
         roots = [
             self.skill_installs_dir / ".hermes" / "skills",
             self.skill_installs_hermes_home / "skills",
         ]
-        return [{"path": root, "source_type": source_type} for root in roots]
+        source_map = self._installed_skill_source_map()
+        return [
+            {
+                "path": root,
+                "source_type": source_type,
+                "source_map": source_map,
+                "source_ref_override": source_ref_override,
+            }
+            for root in roots
+        ]
+
+    def _installed_skill_source_map(self) -> dict[str, str]:
+        lock_path = self.skill_installs_dir / "skills-lock.json"
+        if not lock_path.is_file():
+            return {}
+        try:
+            data = _json_load(lock_path.read_text(encoding="utf-8"), {})
+        except OSError:
+            return {}
+        raw_skills = data.get("skills") if isinstance(data, dict) else {}
+        if not isinstance(raw_skills, dict):
+            return {}
+        source_map: dict[str, str] = {}
+        for skill_name, raw_entry in raw_skills.items():
+            if not isinstance(raw_entry, dict):
+                continue
+            source_ref = self._skill_lock_source_ref(raw_entry)
+            if not source_ref:
+                continue
+            source_map[str(skill_name)] = source_ref
+            skill_path = str(raw_entry.get("skillPath") or "")
+            if skill_path:
+                source_map[Path(skill_path).parent.name] = source_ref
+        return source_map
+
+    @staticmethod
+    def _skill_lock_source_ref(entry: dict[str, Any]) -> str:
+        source = str(entry.get("source") or "").strip()
+        source_type = str(entry.get("sourceType") or "").strip().lower()
+        skill_path = str(entry.get("skillPath") or "").strip()
+        if source_type == "github" and re.fullmatch(r"[^/\s]+/[^/\s]+", source):
+            if skill_path:
+                return f"https://github.com/{source}/blob/main/{skill_path}"
+            return f"https://github.com/{source}"
+        return " · ".join(part for part in [source, skill_path] if part)
 
     @staticmethod
     def _infer_hermes_source_type(path: Path) -> str:
@@ -1698,6 +1822,44 @@ class AgentRuntimeService:
         if argv[0] in {"npm", "pnpm", "yarn", "bun", "curl", "bash", "sh", "zsh"}:
             raise AgentRuntimeError("只允许 skills 来源、npx skills add 或 hermes skills install")
         return self._validated_npx_skills_argv(["npx", "skills@latest", "add", *argv]), "npx_skills"
+
+    @staticmethod
+    def _skill_install_source_ref(argv: list[str], installer: str) -> str:
+        if installer == "hermes_cli" and argv[:3] == ["hermes", "skills", "install"]:
+            return " ".join(argv[3:])
+        if installer != "npx_skills":
+            return ""
+        index = 1
+        while index < len(argv) and argv[index] in {"-y", "--yes"}:
+            index += 1
+        if index + 1 >= len(argv):
+            return ""
+        install_args = argv[index + 2:]
+        clean_args: list[str] = []
+        skip_next = False
+        for arg in install_args:
+            if skip_next:
+                skip_next = False
+                continue
+            if arg in {"-a", "--agent"}:
+                skip_next = True
+                continue
+            if arg.startswith("--agent=") or arg in {"--copy", "-y", "--yes"}:
+                continue
+            clean_args.append(arg)
+        if not clean_args:
+            return ""
+        if re.fullmatch(r"[^/\s]+/[^/\s]+", clean_args[0]):
+            clean_args[0] = f"https://github.com/{clean_args[0]}"
+        return " ".join(clean_args)
+
+    @staticmethod
+    def _metadata_skill_source_ref(metadata: dict[str, Any], fallback: str) -> str:
+        for key in ("source", "repository", "repo", "homepage", "url", "origin"):
+            value = metadata.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return fallback
 
     @staticmethod
     def _validated_npx_skills_argv(argv: list[str]) -> list[str]:
