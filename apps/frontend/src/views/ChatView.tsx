@@ -257,6 +257,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const highlightedScrollTargetRef = useRef('');
   const highlightClearTimerRef = useRef<number | null>(null);
   const loadSessionsRef = useRef<() => Promise<void>>(async () => undefined);
+  const transientEmptySessionIdRef = useRef('');
+  const latestChatSnapshotRef = useRef({
+    currentSessionId: '',
+    messageCount: 0,
+    isProcessing: false,
+    isSending: false,
+  });
 
   const refreshMessages = useCallback(async (options: { allowDuringTransition?: boolean; anchorMessageId?: string } = {}) => {
     if (conversationTransitionRef.current && !options.allowDuringTransition) return;
@@ -349,6 +356,19 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   useEffect(() => {
     loadSessionsRef.current = loadSessions;
   }, [loadSessions]);
+
+  useEffect(() => {
+    const currentSessionId = sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId;
+    latestChatSnapshotRef.current = {
+      currentSessionId,
+      messageCount: messages.length,
+      isProcessing,
+      isSending,
+    };
+    if (currentSessionId === transientEmptySessionIdRef.current && messages.length > 0) {
+      transientEmptySessionIdRef.current = '';
+    }
+  }, [isProcessing, isSending, messages.length, sessions?.current_session_id]);
 
   useEffect(() => {
     void loadSessions();
@@ -542,8 +562,22 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
       if (codeCopyTimerRef.current !== null) window.clearTimeout(codeCopyTimerRef.current);
       if (highlightClearTimerRef.current !== null) window.clearTimeout(highlightClearTimerRef.current);
+      const snapshot = latestChatSnapshotRef.current;
+      const transientSessionId = transientEmptySessionIdRef.current;
+      if (
+        !embedded
+        && transientSessionId
+        && snapshot.currentSessionId === transientSessionId
+        && snapshot.messageCount === 0
+        && !snapshot.isProcessing
+        && !snapshot.isSending
+      ) {
+        transientEmptySessionIdRef.current = '';
+        clearRetainedComposerDraft();
+        void apiPost('/ui/chat/session/discard-empty').catch(() => undefined);
+      }
     };
-  }, []);
+  }, [embedded]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -655,6 +689,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         runnable_id: selectedRunnableId,
       });
       if (result.ok === false) throw new Error(result.error || '发送失败');
+      transientEmptySessionIdRef.current = '';
       if (result.runnable_command) {
         pendingReplyTaskIdRef.current = '';
         pendingReplyScrollRef.current = false;
@@ -783,7 +818,15 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     try {
       pendingReplyScrollRef.current = false;
       pendingReplyTaskIdRef.current = '';
-      await apiPost('/ui/chat/session/clear');
+      const result = await apiPost<{ ok?: boolean; error?: string; session_id?: string }>('/ui/chat/session/clear');
+      if (result.ok === false) throw new Error(result.error || '新建对话失败');
+      const nextSessionId = String(result.session_id || '');
+      transientEmptySessionIdRef.current = nextSessionId;
+      latestChatSnapshotRef.current = {
+        ...latestChatSnapshotRef.current,
+        currentSessionId: nextSessionId,
+        messageCount: 0,
+      };
       renderStateRef.current.clear();
       setMessages([]);
       isProcessingRef.current = false;

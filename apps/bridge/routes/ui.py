@@ -560,6 +560,11 @@ async def clear_chat_session() -> dict[str, Any]:
     return ChatAPI(get_runtime()).clear_session()
 
 
+@router.post("/chat/session/discard-empty")
+async def discard_empty_chat_session() -> dict[str, Any]:
+    return ChatAPI(get_runtime()).discard_empty_current_session()
+
+
 @router.post("/chat/session/cancel")
 async def cancel_chat_session_tasks() -> dict[str, Any]:
     return ChatAPI(get_runtime()).cancel_current_tasks()

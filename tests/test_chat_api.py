@@ -814,6 +814,45 @@ def test_clear_session_starts_new_session_and_preserves_active_task(tmp_path):
         store.close()
 
 
+def test_discard_empty_current_session_switches_back_to_recent_session(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
+    try:
+        api.send_message("保留的旧会话")
+        old_session_id = runtime.chat_session.session_id
+        cleared = api.clear_session()
+        empty_session_id = cleared["session_id"]
+
+        discarded = api.discard_empty_current_session()
+
+        assert discarded["ok"] is True
+        assert discarded["discarded"] is True
+        assert discarded["deleted_session_id"] == empty_session_id
+        assert runtime.chat_session.session_id == old_session_id
+        assert store.get_session(empty_session_id) is None
+        assert api.get_messages()["messages"][0]["content"] == "保留的旧会话"
+    finally:
+        store.close()
+
+
+def test_discard_empty_current_session_keeps_nonempty_current_session(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
+    try:
+        api.send_message("不要删除")
+        current_session_id = runtime.chat_session.session_id
+
+        discarded = api.discard_empty_current_session()
+
+        assert discarded["ok"] is True
+        assert discarded["discarded"] is False
+        assert discarded["session_id"] == current_session_id
+        assert runtime.chat_session.session_id == current_session_id
+        assert store.get_session(current_session_id) is not None
+    finally:
+        store.close()
+
+
 def test_delete_current_session_removes_session_and_cancels_active_task(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))

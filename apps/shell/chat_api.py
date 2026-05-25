@@ -1155,6 +1155,45 @@ class ChatAPI:
             logger.error("清空会话失败: %s", exc)
             return {"ok": False, "error": str(exc)}
 
+    def discard_empty_current_session(self) -> Dict[str, Any]:
+        """丢弃当前空白会话，并切回最近历史会话。"""
+        try:
+            current_session_id = self._session.session_id
+            if self._session_is_processing(current_session_id):
+                return {"ok": True, "discarded": False, "session_id": current_session_id}
+
+            from apps.core.chat_store import get_chat_store
+
+            store = get_chat_store()
+            messages = store.load_messages(current_session_id, limit=1)
+            if messages:
+                return {"ok": True, "discarded": False, "session_id": current_session_id}
+
+            store.delete_session(current_session_id)
+            _remove_attachment_session_dir(current_session_id)
+            remaining = store.list_sessions(limit=1)
+            if remaining:
+                next_session_id = remaining[0].session_id
+                switch_session = getattr(self._runtime, "switch_session", None)
+                if not callable(switch_session):
+                    raise RuntimeError("runtime 不支持切换会话")
+                switch_session(next_session_id)
+            else:
+                self._session.clear()
+                next_session_id = self._session.session_id
+
+            logger.info("空白会话已丢弃: %s -> %s", current_session_id, next_session_id)
+            return {
+                "ok": True,
+                "discarded": True,
+                "deleted_session_id": current_session_id,
+                "session_id": next_session_id,
+                "empty": not remaining,
+            }
+        except Exception as exc:
+            logger.error("丢弃空白会话失败: %s", exc)
+            return {"ok": False, "error": str(exc)}
+
     def cancel_current_tasks(self) -> Dict[str, Any]:
         """取消当前会话中仍在等待/执行的任务，但保留会话历史。"""
         try:
