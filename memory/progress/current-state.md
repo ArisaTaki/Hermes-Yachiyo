@@ -2,6 +2,15 @@
 
 ## 已完成
 
+### Milestone 89 — Workflow Studio 基础补强
+
+- ✅ Workflow seed 逻辑修正：默认 Workflow 会独立补种，已有 Agent 的数据库也能获得缺失的默认 Workflow。
+- ✅ 新增 `Phase 4 Agent 全线流通测试` 默认 Workflow，线性调用 Orchestrator、Research、Design、Coding、Review、Office，并把最终上下文写入 Flow Summary artifact。
+- ✅ 默认 Agent / `follow_main` Agent 可跟随默认 Chat Profile；旧数据中的默认 Agent 即使未显式绑定 `model_profile_id`，也能参与 Workflow Run。
+- ✅ Workflow Studio 增加“全线测试模板”按钮，按当前默认 Agent 自动生成节点与边；手动新增 Agent / Approval / Artifact 节点会自动接到当前线性链末端。
+- ✅ 节点设置区显示 node/edge 数量，Agent 节点可选择具体 Agent 或移除；移除中间节点时会自动桥接前后节点。
+- ✅ 验证：`.venv/bin/python -m pytest tests/test_agent_runtime.py -q` → 37 passed；`.venv/bin/python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_ui_bridge_routes.py -q` → 103 passed；`npm --prefix apps/frontend run build` passed；`git diff --check` passed。
+
 ### Milestone 88 — Skill Folder / Collection
 
 - ✅ 新增一层 Skill Folder 元数据层：`skill_folders` 表保存文件夹名称、说明、来源范围与排序；`skills.folder_id` 保存归属，默认显示为“无需分组”。

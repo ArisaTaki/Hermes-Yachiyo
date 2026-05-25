@@ -60,6 +60,15 @@ _FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 _SKILL_SOURCE_TYPES = {"hermes_global", "hermes_project", "npx_skills", "hermes_cli", "local_zip", "local_dir"}
 _SHELL_METACHARS = {"&&", "||", "&", ";", "|", ">", ">>", "<", "$(", "`", "\n", "\r"}
 _UNSET = object()
+_DEFAULT_AGENT_IDS = {
+    "agent_yachiyo_orchestrator",
+    "agent_coding",
+    "agent_design",
+    "agent_review",
+    "agent_research",
+    "agent_office",
+    "agent_custom",
+}
 
 
 def _now() -> str:
@@ -532,9 +541,6 @@ class AgentRuntimeService:
             self._conn.execute("ALTER TABLE runs ADD COLUMN pending_approval_json TEXT NOT NULL DEFAULT '{}'")
 
     def _seed_templates(self) -> None:
-        count = self._conn.execute("SELECT COUNT(*) FROM agents").fetchone()[0]
-        if count:
-            return
         templates = [
             (
                 "agent_yachiyo_orchestrator",
@@ -593,7 +599,12 @@ class AgentRuntimeService:
                 "chat",
             ),
         ]
+        agent_rows = self._conn.execute("SELECT agent_id, name FROM agents").fetchall()
+        existing_agent_ids = {str(row["agent_id"]) for row in agent_rows}
+        existing_agent_names = {str(row["name"]).strip().lower() for row in agent_rows}
         for agent_id, name, description, category, instructions, output_contract in templates:
+            if agent_id in existing_agent_ids or name.strip().lower() in existing_agent_names:
+                continue
             self.create_agent(
                 {
                     "agent_id": agent_id,
@@ -601,7 +612,7 @@ class AgentRuntimeService:
                     "description": description,
                     "category": category,
                     "instructions": instructions,
-                    "model_mode": "profile",
+                    "model_mode": "follow_main",
                     "tool_policy": self._default_tool_policy(category),
                     "workspace_policy": self._default_workspace_policy(),
                     "output_contract": output_contract,
@@ -609,7 +620,10 @@ class AgentRuntimeService:
                 },
                 seed=True,
             )
-        self.create_workflow(
+        self._seed_workflow_templates()
+
+    def _seed_workflow_templates(self) -> None:
+        workflow_templates = [
             {
                 "workflow_id": "workflow_web_idea_full",
                 "name": "网页点子全流程",
@@ -649,8 +663,87 @@ class AgentRuntimeService:
                 ],
                 "enabled": True,
             },
-            seed=True,
-        )
+            {
+                "workflow_id": "workflow_phase4_agent_line_smoke",
+                "name": "Phase 4 Agent 全线流通测试",
+                "description": "依次调用 Orchestrator、Research、Design、Coding、Review、Office，并写出最终 Artifact。",
+                "nodes": [
+                    {"id": "start", "type": "start", "position": {"x": 0, "y": 80}, "data": {"label": "Start"}},
+                    {
+                        "id": "orchestrator",
+                        "type": "agent",
+                        "position": {"x": 220, "y": 80},
+                        "data": {"label": "Yachiyo Orchestrator", "agent_id": "agent_yachiyo_orchestrator"},
+                    },
+                    {
+                        "id": "research",
+                        "type": "agent",
+                        "position": {"x": 440, "y": 80},
+                        "data": {"label": "Research Agent", "agent_id": "agent_research"},
+                    },
+                    {
+                        "id": "design",
+                        "type": "agent",
+                        "position": {"x": 660, "y": 80},
+                        "data": {"label": "Design Agent", "agent_id": "agent_design"},
+                    },
+                    {
+                        "id": "coding",
+                        "type": "agent",
+                        "position": {"x": 880, "y": 80},
+                        "data": {"label": "Coding Agent", "agent_id": "agent_coding"},
+                    },
+                    {
+                        "id": "review",
+                        "type": "agent",
+                        "position": {"x": 1100, "y": 80},
+                        "data": {"label": "Review Agent", "agent_id": "agent_review"},
+                    },
+                    {
+                        "id": "office",
+                        "type": "agent",
+                        "position": {"x": 1320, "y": 80},
+                        "data": {"label": "Office Agent", "agent_id": "agent_office"},
+                    },
+                    {
+                        "id": "artifact",
+                        "type": "artifact",
+                        "position": {"x": 1540, "y": 80},
+                        "data": {"label": "Flow Summary", "kind": "artifact"},
+                    },
+                ],
+                "edges": [
+                    {"id": "e-start-orchestrator", "source": "start", "target": "orchestrator"},
+                    {"id": "e-orchestrator-research", "source": "orchestrator", "target": "research"},
+                    {"id": "e-research-design", "source": "research", "target": "design"},
+                    {"id": "e-design-coding", "source": "design", "target": "coding"},
+                    {"id": "e-coding-review", "source": "coding", "target": "review"},
+                    {"id": "e-review-office", "source": "review", "target": "office"},
+                    {"id": "e-office-artifact", "source": "office", "target": "artifact"},
+                ],
+                "enabled": True,
+            },
+        ]
+        agent_ids = {
+            str(row["agent_id"])
+            for row in self._conn.execute("SELECT agent_id FROM agents").fetchall()
+        }
+        existing_workflows = self._conn.execute("SELECT workflow_id, name FROM workflows").fetchall()
+        existing_workflow_ids = {str(row["workflow_id"]) for row in existing_workflows}
+        existing_workflow_names = {str(row["name"]).strip().lower() for row in existing_workflows}
+        for workflow in workflow_templates:
+            workflow_id = str(workflow["workflow_id"])
+            name = str(workflow["name"])
+            if workflow_id in existing_workflow_ids or name.strip().lower() in existing_workflow_names:
+                continue
+            referenced_agents = [
+                str((node.get("data") or {}).get("agent_id") or "")
+                for node in workflow["nodes"]
+                if str(node.get("type") or (node.get("data") or {}).get("kind") or "") == "agent"
+            ]
+            if any(agent_id and agent_id not in agent_ids for agent_id in referenced_agents):
+                continue
+            self.create_workflow(workflow, seed=True)
 
     @staticmethod
     def _default_tool_policy(category: str = "custom") -> dict[str, Any]:
@@ -2623,27 +2716,37 @@ class AgentRuntimeService:
             )
         return requests
 
+    @staticmethod
+    def _chat_profile_model_config_private(profile_id: str) -> dict[str, Any]:
+        try:
+            profile = get_model_profile_service().get_profile_private(profile_id)
+        except KeyError as exc:
+            raise AgentRuntimeError("Agent 引用的模型 Profile 不存在") from exc
+        if not profile.get("enabled", True):
+            raise AgentRuntimeError("Agent 引用的模型 Profile 已停用")
+        if str(profile.get("status") or "") != "available":
+            raise AgentRuntimeError("Agent 引用的模型 Profile 尚未通过连接测试")
+        if not supports_openai_compatible_api(str(profile.get("provider") or "openai_compatible")):
+            raise AgentRuntimeError("Agent Runtime 首版仅支持 OpenAI-compatible 模型 Profile")
+        if str(profile.get("capability") or "chat") != "chat":
+            raise AgentRuntimeError("Agent 文本推理需要 chat 模型 Profile")
+        return {
+            "provider": profile.get("provider") or "openai_compatible",
+            "base_url": profile.get("base_url") or "",
+            "model": profile.get("model") or "",
+            "api_key": profile.get("api_key") or "",
+        }
+
     def _agent_model_config_private(self, agent: dict[str, Any]) -> dict[str, Any]:
         profile_id = str(agent.get("model_profile_id") or "").strip()
         if profile_id:
-            try:
-                profile = get_model_profile_service().get_profile_private(profile_id)
-            except KeyError as exc:
-                raise AgentRuntimeError("Agent 引用的模型 Profile 不存在") from exc
-            if not profile.get("enabled", True):
-                raise AgentRuntimeError("Agent 引用的模型 Profile 已停用")
-            if str(profile.get("status") or "") != "available":
-                raise AgentRuntimeError("Agent 引用的模型 Profile 尚未通过连接测试")
-            if not supports_openai_compatible_api(str(profile.get("provider") or "openai_compatible")):
-                raise AgentRuntimeError("Agent Runtime 首版仅支持 OpenAI-compatible 模型 Profile")
-            if str(profile.get("capability") or "chat") != "chat":
-                raise AgentRuntimeError("Agent 文本推理需要 chat 模型 Profile")
-            return {
-                "provider": profile.get("provider") or "openai_compatible",
-                "base_url": profile.get("base_url") or "",
-                "model": profile.get("model") or "",
-                "api_key": profile.get("api_key") or "",
-            }
+            return self._chat_profile_model_config_private(profile_id)
+        model_mode = str(agent.get("model_mode") or "profile")
+        agent_id = str(agent.get("agent_id") or "")
+        if model_mode == "follow_main" or agent_id in _DEFAULT_AGENT_IDS:
+            default_profile_id = str(get_model_profile_service().get_defaults().get("chat") or "").strip()
+            if default_profile_id:
+                return self._chat_profile_model_config_private(default_profile_id)
         model_config = agent.get("model_config") or {}
         if any(str(model_config.get(key) or "").strip() for key in ("base_url", "model", "api_key")):
             return model_config
@@ -2708,6 +2811,17 @@ class AgentRuntimeService:
             if result.get("ok") and vision_result:
                 result["message"] = f"{result.get('message') or '文本模型测试通过'}；图片识别 Profile 测试通过。"
             return result
+        if agent.get("model_mode") == "follow_main" or str(agent.get("agent_id") or "") in _DEFAULT_AGENT_IDS:
+            default_profile_id = str(get_model_profile_service().get_defaults().get("chat") or "").strip()
+            if default_profile_id:
+                try:
+                    result = get_model_profile_service().test_profile(default_profile_id)
+                except KeyError as exc:
+                    raise AgentRuntimeError("默认 Chat Profile 不存在") from exc
+                result["mode"] = "follow_main"
+                if result.get("ok") and vision_result:
+                    result["message"] = f"{result.get('message') or '文本模型测试通过'}；图片识别 Profile 测试通过。"
+                return result
         if agent.get("model_mode") != "custom_api":
             return {
                 "ok": False,

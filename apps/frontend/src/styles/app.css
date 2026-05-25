@@ -12991,6 +12991,19 @@ button.activity-item {
   align-items: center;
 }
 
+.workflow-template-action {
+  border-color: oklch(66% 0.12 188 / 0.36) !important;
+  background: oklch(66% 0.12 188 / 0.11) !important;
+  color: var(--hy-subtle) !important;
+}
+
+.workflow-node-setting-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
 .agent-skill-mounts-head {
   display: flex;
   align-items: center;

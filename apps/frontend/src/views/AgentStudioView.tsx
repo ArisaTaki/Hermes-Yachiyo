@@ -143,6 +143,15 @@ const starterNodes: Node[] = [
   { id: 'start', type: 'input', position: { x: 40, y: 120 }, data: { label: 'Start', kind: 'start' } },
 ];
 
+const phase4WorkflowAgentOrder = [
+  { id: 'agent_yachiyo_orchestrator', category: 'orchestrator', nodeId: 'orchestrator', fallbackLabel: 'Yachiyo Orchestrator' },
+  { id: 'agent_research', category: 'research', nodeId: 'research', fallbackLabel: 'Research Agent' },
+  { id: 'agent_design', category: 'design', nodeId: 'design', fallbackLabel: 'Design Agent' },
+  { id: 'agent_coding', category: 'coding', nodeId: 'coding', fallbackLabel: 'Coding Agent' },
+  { id: 'agent_review', category: 'review', nodeId: 'review', fallbackLabel: 'Review Agent' },
+  { id: 'agent_office', category: 'office', nodeId: 'office', fallbackLabel: 'Office Agent' },
+];
+
 function AgentStudioLoadingState() {
   return (
     <section className="agent-studio-grid agent-studio-loading" aria-label="正在读取 Agent Studio">
@@ -345,6 +354,52 @@ function workflowEdges(workflow: WorkflowSpec | null): Edge[] {
     source: edge.source,
     target: edge.target,
   }));
+}
+
+function linearEdgesForNodes(nextNodes: Node[]): Edge[] {
+  return nextNodes.slice(0, -1).map((node, index) => {
+    const target = nextNodes[index + 1];
+    return {
+      id: `edge-${node.id}-${target.id}`,
+      source: node.id,
+      target: target.id,
+    };
+  });
+}
+
+function terminalNodeId(currentNodes: Node[], currentEdges: Edge[]): string {
+  const nodesWithOutgoing = new Set(currentEdges.map((edge) => edge.source).filter(Boolean));
+  const terminal = [...currentNodes].reverse().find((node) => !nodesWithOutgoing.has(node.id));
+  return terminal?.id || currentNodes[currentNodes.length - 1]?.id || '';
+}
+
+function buildPhase4WorkflowNodes(agents: AgentSpec[]): Node[] {
+  const agentNodes: Node[] = [];
+  phase4WorkflowAgentOrder.forEach((item) => {
+    const agent = agents.find((candidate) => candidate.agent_id === item.id)
+      || agents.find((candidate) => candidate.category === item.category);
+    if (!agent) return;
+    agentNodes.push({
+      id: item.nodeId,
+      type: 'default',
+      position: { x: 260 + agentNodes.length * 220, y: 120 },
+      data: {
+        label: agent.name || item.fallbackLabel,
+        kind: 'agent',
+        agent_id: agent.agent_id,
+      },
+    });
+  });
+  return [
+    { id: 'start', type: 'input', position: { x: 40, y: 120 }, data: { label: 'Start', kind: 'start' } },
+    ...agentNodes,
+    {
+      id: 'artifact',
+      type: 'output',
+      position: { x: 260 + agentNodes.length * 220, y: 120 },
+      data: { label: 'Flow Summary', kind: 'artifact' },
+    },
+  ];
 }
 
 function runStatusTone(status: string): string {
@@ -651,6 +706,22 @@ export function AgentStudioView() {
     setWorkflowName('New Workflow');
     setWorkflowDescription('');
     setStatus('正在编辑新的 Workflow 草稿');
+    setError('');
+  }
+
+  function loadPhase4WorkflowTemplate() {
+    const nextNodes = buildPhase4WorkflowNodes(agents);
+    const agentNodeCount = nextNodes.filter((node) => node.data?.kind === 'agent').length;
+    if (!agentNodeCount) {
+      setError('当前没有可用 Agent，无法生成全线测试模板。');
+      return;
+    }
+    setSelectedWorkflowId('');
+    setWorkflowName('Phase 4 Agent 全线流通测试');
+    setWorkflowDescription('依次调用 Orchestrator、Research、Design、Coding、Review、Office，并写出最终 Artifact。');
+    setNodes(nextNodes);
+    setEdges(linearEdgesForNodes(nextNodes));
+    setStatus(`已生成全线测试模板：${agentNodeCount} 个 Agent 节点`);
     setError('');
   }
 
@@ -1014,19 +1085,46 @@ export function AgentStudioView() {
   function addFlowNode(kind: 'agent' | 'approval' | 'artifact') {
     const id = `${kind}-${Date.now().toString(36)}`;
     const agent = agents[0];
-    setNodes((current) => [
-      ...current,
-      {
-        id,
-        type: kind === 'artifact' ? 'output' : 'default',
-        position: { x: 120 + current.length * 180, y: 140 },
-        data: {
-          label: kind === 'agent' ? agent?.name || 'Agent' : kind === 'approval' ? '人工审批' : 'Artifact',
-          kind,
-          ...(kind === 'agent' && agent ? { agent_id: agent.agent_id } : {}),
-        },
+    const sourceId = terminalNodeId(nodes, edges);
+    const nextNode: Node = {
+      id,
+      type: kind === 'artifact' ? 'output' : 'default',
+      position: { x: 120 + nodes.length * 180, y: 140 },
+      data: {
+        label: kind === 'agent' ? agent?.name || 'Agent' : kind === 'approval' ? '人工审批' : 'Artifact',
+        kind,
+        ...(kind === 'agent' && agent ? { agent_id: agent.agent_id } : {}),
       },
-    ]);
+    };
+    setNodes((current) => [...current, nextNode]);
+    if (sourceId) {
+      setEdges((current) => [
+        ...current,
+        {
+          id: `edge-${sourceId}-${id}`,
+          source: sourceId,
+          target: id,
+        },
+      ]);
+    }
+  }
+
+  function removeFlowNode(nodeId: string) {
+    if (nodeId === 'start') return;
+    const incoming = edges.find((edge) => edge.target === nodeId);
+    const outgoing = edges.find((edge) => edge.source === nodeId);
+    setNodes((current) => current.filter((node) => node.id !== nodeId));
+    setEdges((current) => {
+      const nextEdges = current.filter((edge) => edge.source !== nodeId && edge.target !== nodeId);
+      if (incoming?.source && outgoing?.target && incoming.source !== outgoing.target) {
+        nextEdges.push({
+          id: `edge-${incoming.source}-${outgoing.target}`,
+          source: incoming.source,
+          target: outgoing.target,
+        });
+      }
+      return nextEdges;
+    });
   }
 
   async function openArtifact(run: RunSpec, path: string) {
@@ -1649,9 +1747,10 @@ export function AgentStudioView() {
             <div className="workflow-toolbar">
               <input className="hy-input" value={workflowName} onChange={(event) => setWorkflowName(event.target.value)} />
               <input className="hy-input" value={workflowDescription} onChange={(event) => setWorkflowDescription(event.target.value)} placeholder="Description" />
-              <button type="button" onClick={() => addFlowNode('agent')}>Agent</button>
-              <button type="button" onClick={() => addFlowNode('approval')}>Approval</button>
-              <button type="button" onClick={() => addFlowNode('artifact')}>Artifact</button>
+              <button type="button" className="workflow-template-action" disabled={busy || !agents.length} onClick={loadPhase4WorkflowTemplate}>全线测试模板</button>
+              <button type="button" disabled={busy} onClick={() => addFlowNode('agent')}>Agent</button>
+              <button type="button" disabled={busy} onClick={() => addFlowNode('approval')}>Approval</button>
+              <button type="button" disabled={busy} onClick={() => addFlowNode('artifact')}>Artifact</button>
               <button type="button" className="primary-action" onClick={() => void runAction(saveWorkflow, '保存 Workflow')}>保存</button>
               {selectedWorkflow ? <button type="button" className="danger-action" onClick={requestDeleteWorkflow}>删除</button> : null}
             </div>
@@ -1663,19 +1762,29 @@ export function AgentStudioView() {
               </ReactFlow>
             </div>
             <div className="workflow-node-settings">
+              <div className="agent-skill-mounts-head">
+                <h3>节点设置</h3>
+                <span>{nodes.length} nodes / {edges.length} edges</span>
+              </div>
               {nodes.filter((node) => node.data?.kind === 'agent').map((node) => (
-                <label key={node.id}>
-                  <span>{String(node.data?.label || node.id)} Agent</span>
-                  <select
-                    className="hy-select"
-                    value={String(node.data?.agent_id || '')}
-                    onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, agent_id: event.target.value, label: agents.find((agent) => agent.agent_id === event.target.value)?.name || item.data?.label } } : item))}
-                  >
-                    <option value="">选择 Agent</option>
-                    {agents.map((agent) => <option value={agent.agent_id} key={agent.agent_id}>{agent.name}</option>)}
-                  </select>
-                </label>
+                <div className="workflow-node-setting-row" key={node.id}>
+                  <label>
+                    <span>{String(node.data?.label || node.id)} Agent</span>
+                    <select
+                      className="hy-select"
+                      value={String(node.data?.agent_id || '')}
+                      onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, agent_id: event.target.value, label: agents.find((agent) => agent.agent_id === event.target.value)?.name || item.data?.label } } : item))}
+                    >
+                      <option value="">选择 Agent</option>
+                      {agents.map((agent) => <option value={agent.agent_id} key={agent.agent_id}>{agent.name}</option>)}
+                    </select>
+                  </label>
+                  <button type="button" disabled={busy} onClick={() => removeFlowNode(node.id)}>移除</button>
+                </div>
               ))}
+              {!nodes.some((node) => node.data?.kind === 'agent') ? (
+                <div className="empty-state inline-empty">点击 Agent 或“全线测试模板”添加可运行节点。</div>
+              ) : null}
             </div>
             <section className="agent-quick-run">
               <div>

@@ -189,6 +189,15 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - “无需分组”计数拆成总数 / Yachiyo / Hermes，避免 Hermes Agent 全局 Skills 干扰默认组判断。
 - 当前剩余决策：Hermes Agent skills 是否可归入 Yachiyo 分组、是否做手动排序；`source_scope` 暂时保持后端内部字段，不暴露到 UI。
 
+### Batch 16：Workflow Studio 基础可用性与全线测试模板
+
+- 默认模板补种逻辑拆开 Agent 与 Workflow：已有 Agent 的数据库启动时也会补齐缺失的默认 Workflow，不再因为 `agents` 表非空而跳过。
+- 新增默认 Workflow：`Phase 4 Agent 全线流通测试`，按 `Yachiyo Orchestrator -> Research -> Design -> Coding -> Review -> Office -> Flow Summary artifact` 线性执行。
+- 默认 Agent 和 `follow_main` Agent 在没有显式 Chat Profile 时会使用模型配置里的默认 Chat Profile；旧数据里 `agent_coding` 仍是 `profile` 但未绑定 Profile 时，也能作为默认 Agent 跟随默认 Chat Profile 跑通。
+- Workflow Studio 增加“全线测试模板”按钮，可按现有 Agent 自动生成线性节点和边；手动新增 Agent / Approval / Artifact 节点时会自动接到当前线性链末端。
+- Workflow 节点设置区显示 node/edge 数量，Agent 节点可直接选择 Agent 或从链路中移除，移除时会自动桥接前后节点。
+- 已增加 deterministic 流通性测试：用 fake 默认 Chat Profile 跑完整 `workflow_phase4_agent_line_smoke`，验证 6 个 Agent 子 Run、RunGroup 和最终 Workflow artifact 都完成。
+
 ## 新增接口
 
 - `GET/POST /ui/model-profiles`
@@ -251,7 +260,7 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - 旧 `execution_backend` 数据仍能读取，但产品语义统一归一到 Yachiyo Agent Runtime。
 - Agent Studio Agent 是持久岗位，不是 Hermes 原生 `delegate_task` 临时 subagent 注册表。
 - Custom API 作为高级模型配置兼容路径保留，但仍走同一个 Yachiyo Agent Runtime。
-- ToolBroker 已支持真实 tool-call 循环和单个 Agent Run 审批恢复；Workflow 子 Run 遇到审批后的父 Workflow 完整恢复仍待增强。
+- ToolBroker 已支持真实 tool-call 循环和单个 Agent Run 审批恢复；Workflow 子 Run 遇到审批后父 Workflow 会暂停为 `approval_required`，审批完成后自动继续父 Workflow 仍待增强。
 - 运行中取消、streaming/轮询、失败重试和复杂 artifact viewer 仍待补齐。
 - 主 Agent 自动委派第一版走 Yachiyo 内部桥，不改 Hermes 原生 `delegate_task` 实现。
 - TTS Profile 首版做统一保存与复用入口，具体语音合成、服务检测和连接测试仍由主动关怀 / TTS 专用链路执行。

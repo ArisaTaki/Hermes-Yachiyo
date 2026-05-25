@@ -21,6 +21,24 @@ def make_service(tmp_path, *, seed_templates: bool = False) -> AgentRuntimeServi
     )
 
 
+class FakeDefaultProfileService:
+    def get_defaults(self):
+        return {"chat": "profile_default"}
+
+    def get_profile_private(self, profile_id):
+        assert profile_id == "profile_default"
+        return {
+            "profile_id": profile_id,
+            "provider": "openai_compatible",
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+            "capability": "chat",
+            "status": "available",
+            "enabled": True,
+        }
+
+
 def test_runtime_migrates_legacy_runs_before_index_creation(tmp_path):
     db_path = tmp_path / "agent-runtime.db"
     conn = sqlite3.connect(db_path)
@@ -71,6 +89,55 @@ def test_runtime_restores_row_factory_before_listing_agents(tmp_path):
         result = service.list_agents()
         assert result["ok"] is True
         assert any(agent["agent_id"] == "agent_coding" for agent in result["agents"])
+    finally:
+        service.close()
+
+
+def test_seed_templates_backfill_default_workflows_when_agents_exist(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        service.create_agent({"name": "Existing Agent"})
+    finally:
+        service.close()
+
+    service = make_service(tmp_path, seed_templates=True)
+    try:
+        workflows = service.list_workflows()["workflows"]
+        workflow_ids = {workflow["workflow_id"] for workflow in workflows}
+
+        assert "workflow_web_idea_full" in workflow_ids
+        assert "workflow_phase4_agent_line_smoke" in workflow_ids
+        assert any(agent["agent_id"] == "agent_coding" for agent in service.list_agents()["agents"])
+    finally:
+        service.close()
+
+
+def test_phase4_seeded_workflow_executes_default_agent_line(tmp_path, monkeypatch):
+    service = make_service(tmp_path, seed_templates=True)
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        return {"content": f"Step {len(calls)} complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.get_model_profile_service", lambda: FakeDefaultProfileService())
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.create_workflow_run(
+            {
+                "workflow_id": "workflow_phase4_agent_line_smoke",
+                "user_goal": "跑一次 Phase 4 全线流通性测试",
+            }
+        )
+
+        assert run["status"] == "completed"
+        assert run["result"] == "Step 6 complete"
+        assert len(calls) == 6
+        assert [event["event"] for event in run["timeline"]].count("workflow.node.agent") == 6
+        assert any(artifact.get("kind") == "workflow_artifact" for artifact in run["artifacts"])
+        group = service.get_run_group(run["run_group_id"])
+        assert group["status"] == "completed"
+        assert len(group["child_run_ids"]) == 7
     finally:
         service.close()
 

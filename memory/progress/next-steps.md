@@ -2,13 +2,14 @@
 
 ## 当前优先项
 
-### 2026-05-25 公司继续处理建议
+### 2026-05-25 晚上继续处理建议
 
-1. 先处理分支同步：当前 `phase-4/develop` 已包含 `bb4436b feat(agent): finish skill groups todo`，本地比 `origin/phase-4/develop` ahead 1；同时 `origin/develop` 还有 `8f690de fix： GPT-SoVITS 部署脚本以及状态检查bug` 尚未进本分支。明天继续前先决定是 merge/rebase `origin/develop`，再推送 `phase-4/develop`。
-2. 做一次真实 Electron Agent Studio 冒烟：重点走 `#/agents/skill-groups`、新建/重命名/删除 Skill Group、Skill Library 导入目标选择、Mounted Skills 文件夹筛选与批量全选/清空。
-3. Skill Groups 还剩产品决策，不是代码阻塞：顶层 tab vs Skill Library 二级页、最终命名、Hermes Agent skills 是否允许归入 Yachiyo 分组、`source_scope` 是否暴露、是否做手动排序。
-4. 若继续 Phase 4 功能开发，下一项优先补 Workflow 中子 Agent `approval_required` 后的父 Workflow 恢复语义：子 Run 审批完成后，父 Workflow Run 应继续后续节点。
-5. 如果要准备打包或发 PR，复跑 `.venv/bin/python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_ui_bridge_routes.py -q`、`npm --prefix apps/frontend run build`、`git diff --check`，并确认 Skill Groups 页面没有前端 console error。
+1. 重启 `hermes-yachiyo` 后进入 `#/agents/workflows`，确认默认 `Phase 4 Agent 全线流通测试` 已补种；如果旧进程仍在运行，前端也可以用“全线测试模板”按钮手动生成并保存。
+2. 用真实默认 Chat Profile 手工跑一次全线 Workflow：目标建议写成一个低风险 brief，检查 6 个 Agent 子 Run、RunGroup、Timeline 和 Flow Summary artifact。
+3. 真实跑之前先给需要专业能力的默认 Agent 挂载 14 个 Yachiyo skills 中合适的一组；当前后端流通性测试使用 fake model，只验证编排闭环，不验证真实 Prompt 质量。
+4. 下一项 Phase 4 功能优先补 Workflow 中子 Agent `approval_required` 后的父 Workflow 恢复语义：子 Run 审批完成后，父 Workflow Run 应继续后续节点。
+5. 当前工作区还保留 Chat 空会话清理改动，若晚上继续收口，可以单独复查并提交那一批，避免混进 Workflow 提交。
+6. 如果要准备打包或发 PR，复跑 `.venv/bin/python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_ui_bridge_routes.py -q`、`npm --prefix apps/frontend run build`、`git diff --check`。
 
 ### Phase 4 模型 / Agent / TTS 后续
 
