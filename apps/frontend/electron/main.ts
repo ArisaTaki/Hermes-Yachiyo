@@ -86,6 +86,7 @@ type IconKind = 'dock' | 'tray' | 'window';
 type AppView =
   | 'main'
   | 'chat'
+  | 'agents'
   | 'settings'
   | 'installer'
   | 'provider'
@@ -95,6 +96,7 @@ type AppView =
   | 'tools'
   | 'tools-all'
   | 'activity-all'
+  | 'activity-detail'
   | 'app-update'
   | 'proactive-tts'
   | 'bubble'
@@ -103,6 +105,7 @@ type AppView =
 type ModeId = 'bubble' | 'live2d';
 type DisplayModeId = ModeId | 'none';
 type InstallerTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup' | 'update-hermes' | 'update-hermes-backup';
+type MainRoute = { view: AppView; params: Record<string, string> };
 
 type ModeSettings = {
   config?: Record<string, unknown>;
@@ -276,6 +279,7 @@ let modeWindowShapeApplied = false;
 let modeWindowTopSuppressed = false;
 let lastInstallReady: boolean | null = null;
 let lastUiSettings: UiSettings | null = null;
+let lastMainWindowRoute: MainRoute | null = null;
 let hasEnteredMainExperience = false;
 let backendRestartPromise: Promise<{ success: boolean; bridgeUrl?: string; error?: string }> | null = null;
 let lastDownloadedAppUpdate: AppUpdateDownloadResult | null = null;
@@ -1112,6 +1116,7 @@ function mainWindowTitle(params: Record<string, string> = {}): string {
   const view = normalizeView(params.view);
   if (view === 'installer') return 'Hermes-Yachiyo 安装向导';
   if (view === 'provider') return 'Hermes-Yachiyo 模型配置';
+  if (view === 'agents') return 'Hermes-Yachiyo Agent Studio';
   if (view === 'resources') return 'Hermes-Yachiyo 资源管理';
   if (view === 'workspace') return 'Hermes-Yachiyo 工作区';
   if (view === 'settings') return params.mode === 'live2d'
@@ -1123,6 +1128,7 @@ function mainWindowTitle(params: Record<string, string> = {}): string {
   if (view === 'tools') return 'Hermes-Yachiyo 工具中心';
   if (view === 'tools-all') return 'Hermes-Yachiyo 桌面工具';
   if (view === 'activity-all') return 'Hermes-Yachiyo 活动日志';
+  if (view === 'activity-detail') return 'Hermes-Yachiyo 活动详情';
   if (view === 'app-update') return 'Hermes-Yachiyo 应用更新';
   if (view === 'proactive-tts') return 'Hermes-Yachiyo 主动关怀语音';
   if (view === 'chat') return 'Hermes-Yachiyo 对话';
@@ -1485,6 +1491,13 @@ function routeHash(params: Record<string, string> = {}): string {
   const view = normalizeView(params.view);
   if (view === 'main') return '#/';
   if (view === 'settings' && params.mode) return `#/settings/${encodeURIComponent(params.mode)}`;
+  if (view === 'tools' && params.tool) return `#/tools/${encodeURIComponent(params.tool)}`;
+  if (view === 'agents' && params.run) return `#/agents/${encodeURIComponent(params.run)}`;
+  if (view === 'agents' && isAgentStudioTab(params.tab) && params.tab !== 'agents') {
+    return `#/agents/${encodeURIComponent(params.tab)}`;
+  }
+  if (view === 'provider' && params.capability) return `#/provider/${encodeURIComponent(params.capability)}`;
+  if (view === 'activity-detail' && params.event_id) return `#/activity-detail/${encodeURIComponent(params.event_id)}`;
   return `#/${encodeURIComponent(view)}`;
 }
 
@@ -1605,6 +1618,8 @@ function createMainWindow(
   mainWindow.on('hide', restoreModeWindowTopPreference);
   const createdWindow = mainWindow;
   mainWindow.on('close', (event) => {
+    const closingRoute = routeForWindow(createdWindow);
+    if (closingRoute) lastMainWindowRoute = { view: closingRoute.view, params: { ...closingRoute.params } };
     if (!activeAppUpdateDownload || appUpdateQuitConfirmed || appUpdateCloseConfirmedWindows.has(createdWindow)) return;
     event.preventDefault();
     if (!confirmCancelAppUpdateDownload(createdWindow, '关闭并取消更新')) return;
@@ -1646,6 +1661,29 @@ function showMainWindow(
   if (options.focusOnReady !== false) mainWindow.focus();
 }
 
+function focusMainWindowWithoutNavigation(
+  route: MainRoute | null,
+  settings: UiSettings | null = lastUiSettings,
+  options: MainWindowOptions = {},
+): boolean {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (settings) lastUiSettings = settings;
+  if (route) {
+    lastMainWindowRoute = { view: route.view, params: { ...route.params } };
+    enforceWindowTitle(mainWindow, mainWindowTitle({ ...route.params, view: route.view }));
+  }
+  ensureMainWindowUsableBounds(settings);
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  const startHidden = Boolean(options.respectStartMinimized && settings?.app?.start_minimized);
+  if (startHidden && !mainWindow.isVisible()) return true;
+  showMacDockIcon();
+  suppressModeWindowForMainWindow();
+  mainWindow.show();
+  mainWindow.moveTop();
+  if (options.focusOnReady !== false) mainWindow.focus();
+  return true;
+}
+
 function showMainWindowFromAppActivation(): void {
   void (async () => {
     const installInfo = await waitForInstallInfo();
@@ -1658,11 +1696,21 @@ function showMainWindowFromAppActivation(): void {
         lastInstallReady = false;
       }
     }
-    const currentRoute = routeForWindow(mainWindow);
+    const currentRoute = routeForWindow(mainWindow) || lastMainWindowRoute;
     const shouldShowInstaller = lastInstallReady === false
       && !hasEnteredMainExperience
       && currentRoute?.view !== 'main';
-    const params = shouldShowInstaller ? { view: 'installer' } : mainActivationRouteParams(currentRoute);
+    const activationParams = mainActivationRouteParams(currentRoute);
+    const canFocusExistingRoute = !currentRoute || activationParams.view === currentRoute.view;
+    if (!shouldShowInstaller && canFocusExistingRoute && mainWindow && !mainWindow.isDestroyed()) {
+      if (focusMainWindowWithoutNavigation(currentRoute, lastUiSettings)) {
+        if (currentRoute?.view === 'main' || !currentRoute) {
+          setTimeout(() => void openConfiguredDesktopMode(), 180);
+        }
+        return;
+      }
+    }
+    const params = shouldShowInstaller ? { view: 'installer' } : activationParams;
     showMainWindow(params, lastUiSettings);
     if (!shouldShowInstaller && params.view === 'main') {
       setTimeout(() => void openConfiguredDesktopMode(), 180);
@@ -1834,7 +1882,7 @@ function showMainWindowAtLastRoute(params: Record<string, string> = {}): void {
   restoreModeWindowIfPolluted();
   const cleanParams = { ...params };
   delete cleanParams.restore;
-  const route = routeForWindow(mainWindow);
+  const route = routeForWindow(mainWindow) || lastMainWindowRoute;
   showMainWindow({ ...mainActivationRouteParams(route), ...cleanParams });
 }
 
@@ -1862,6 +1910,7 @@ function normalizeView(value: unknown): AppView {
   const views: AppView[] = [
     'main',
     'chat',
+    'agents',
     'settings',
     'installer',
     'provider',
@@ -1871,6 +1920,7 @@ function normalizeView(value: unknown): AppView {
     'tools',
     'tools-all',
     'activity-all',
+    'activity-detail',
     'app-update',
     'proactive-tts',
     'bubble',
@@ -1917,10 +1967,24 @@ function routeFromUrl(rawUrl: string): { view: AppView; params: Record<string, s
     const [rawView, rawMode] = parts;
     const view = normalizeView(rawView);
     if (view === 'settings' && rawMode) params.mode = rawMode;
+    if (view === 'tools' && rawMode) params.tool = rawMode;
+    if (view === 'agents' && rawMode) {
+      if (isAgentStudioTab(rawMode)) {
+        if (rawMode !== 'agents') params.tab = rawMode;
+      } else {
+        params.run = rawMode;
+      }
+    }
+    if (view === 'provider' && rawMode) params.capability = rawMode;
+    if (view === 'activity-detail' && rawMode) params.event_id = rawMode;
     return { view, params };
   }
   const view = normalizeView(parsed.searchParams.get('view'));
   return { view, params };
+}
+
+function isAgentStudioTab(value?: string): boolean {
+  return Boolean(value && ['agents', 'skills', 'skill-groups', 'workflows', 'runs'].includes(value));
 }
 
 function redirectDesktopModeNavigation(targetUrl: string, launcherMode: ModeId): boolean {
