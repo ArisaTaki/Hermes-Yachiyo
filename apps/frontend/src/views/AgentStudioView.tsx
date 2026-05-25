@@ -11,6 +11,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
   attachSkill,
   approveRunApproval,
@@ -66,6 +67,14 @@ type StudioRefreshOptions = {
   runTarget?: string;
   selectedRunId?: string;
   selectFirstRun?: boolean;
+};
+
+type ConfirmDialogState = {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  variant?: 'default' | 'danger';
+  onConfirm: () => void;
 };
 
 type AgentDraft = {
@@ -126,12 +135,50 @@ type SkillImportResult = {
 };
 
 type SkillSourceFilter = 'yachiyo' | 'hermes';
-const studioTabs: StudioTab[] = ['agents', 'skills', 'skill-groups', 'workflows', 'runs'];
+const studioRouteTabs: StudioTab[] = ['agents', 'skills', 'skill-groups', 'workflows', 'runs'];
+const studioTabs: StudioTab[] = ['agents', 'skills', 'workflows', 'runs'];
 const skillFolderNameMaxLength = 120;
 
 const starterNodes: Node[] = [
   { id: 'start', type: 'input', position: { x: 40, y: 120 }, data: { label: 'Start', kind: 'start' } },
 ];
+
+function AgentStudioLoadingState() {
+  return (
+    <section className="agent-studio-grid agent-studio-loading" aria-label="正在读取 Agent Studio">
+      <aside className="agent-studio-panel">
+        <div className="section-heading-row">
+          <span className="agent-studio-skeleton-line title" />
+          <span className="agent-studio-skeleton-button" />
+        </div>
+        <div className="agent-studio-skeleton-list">
+          {Array.from({ length: 5 }).map((_, index) => (
+            <div className="agent-studio-skeleton-card" key={index}>
+              <span className="agent-studio-skeleton-avatar" />
+              <span className="agent-studio-skeleton-stack">
+                <span className="agent-studio-skeleton-line name" />
+                <span className="agent-studio-skeleton-line meta" />
+              </span>
+            </div>
+          ))}
+        </div>
+      </aside>
+      <div className="agent-studio-panel">
+        <div className="section-heading-row">
+          <span className="agent-studio-skeleton-line title wide" />
+        </div>
+        <div className="agent-studio-skeleton-form">
+          <span className="agent-studio-skeleton-avatar large" />
+          <span className="agent-studio-skeleton-line field" />
+          <span className="agent-studio-skeleton-line field" />
+          <span className="agent-studio-skeleton-line field wide" />
+          <span className="agent-studio-skeleton-block" />
+          <span className="agent-studio-skeleton-block short" />
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function scopesToText(value: unknown): string {
   return Array.isArray(value) ? value.join(', ') : String(value || '');
@@ -150,6 +197,14 @@ function normalizeSkillSources(sources: string[]): string[] {
 
 function skillPathLabel(skill: SkillSpec): string {
   return skill.local_path || skill.source_path || 'local skill';
+}
+
+function skillSourceLabel(skill: SkillSpec): string {
+  const sourceRef = String(skill.source_ref || '').trim();
+  const sourceType = String(skill.source_type || '');
+  if (sourceRef && (sourceType === 'npx_skills' || sourceType === 'hermes_cli')) return sourceRef;
+  if (sourceRef && /^https?:\/\//.test(sourceRef)) return sourceRef;
+  return skill.origin_path || skill.source_path || sourceRef;
 }
 
 function localSourceAlias(source: string): string {
@@ -327,7 +382,7 @@ function formatApprovalInput(value: unknown): string {
 }
 
 function normalizeStudioTab(value: string): StudioTab {
-  return studioTabs.includes(value as StudioTab) ? value as StudioTab : 'agents';
+  return studioRouteTabs.includes(value as StudioTab) ? value as StudioTab : 'agents';
 }
 
 function skillFolderNameError(name: string, folders: SkillFolderSpec[], currentFolderId = ''): string {
@@ -367,6 +422,7 @@ export function AgentStudioView() {
   const [newSkillFolderName, setNewSkillFolderName] = useState('');
   const [editingSkillFolderId, setEditingSkillFolderId] = useState('');
   const [editingSkillFolderName, setEditingSkillFolderName] = useState('');
+  const [skillFolderDeleteModes, setSkillFolderDeleteModes] = useState<Record<string, 'folder' | 'skills'>>({});
   const [skillTargetFolderId, setSkillTargetFolderId] = useState('');
   const [skillInstallCommand, setSkillInstallCommand] = useState('');
   const [skillImportResults, setSkillImportResults] = useState<SkillImportResult[]>([]);
@@ -386,12 +442,14 @@ export function AgentStudioView() {
   const [artifactPreview, setArtifactPreview] = useState<{ path: string; content: string; truncated?: boolean } | null>(null);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState('');
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>(starterNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const busy = loading || Boolean(busyAction);
   const installingSkill = busyAction === '安装 Skill';
+  const isSkillLibraryTab = tab === 'skills' || tab === 'skill-groups';
 
   const selectedAgent = useMemo(
     () => agents.find((agent) => agent.agent_id === selectedAgentId) || null,
@@ -614,6 +672,11 @@ export function AgentStudioView() {
     }
   }
 
+  function isTopTabActive(item: StudioTab): boolean {
+    if (item === 'skills') return isSkillLibraryTab;
+    return tab === item;
+  }
+
   async function runAction(action: () => Promise<StudioRefreshOptions | void>, label: string) {
     setBusyAction(label);
     setStatus(`${label}...`);
@@ -737,17 +800,110 @@ export function AgentStudioView() {
     cancelEditingSkillFolder();
   }
 
-  async function deleteSkillFolderById(folderId: string): Promise<StudioRefreshOptions | void> {
-    await deleteSkillFolder(folderId);
+  async function deleteSkillFolderById(folderId: string, deleteSkills = false): Promise<StudioRefreshOptions | void> {
+    await deleteSkillFolder(folderId, { deleteSkills });
     if (skillTargetFolderId === folderId) setSkillTargetFolderId('');
     if (skillLibraryFolderFilter === folderId) setSkillLibraryFolderFilter('all');
     if (skillMountFolderFilter === folderId) setSkillMountFolderFilter('all');
     if (editingSkillFolderId === folderId) cancelEditingSkillFolder();
+    setSkillFolderDeleteMode(folderId, null);
   }
 
-  function confirmDeleteSkillFolder(folder: SkillFolderSpec): boolean {
+  function setSkillFolderDeleteMode(folderId: string, mode: 'folder' | 'skills' | null) {
+    setSkillFolderDeleteModes((current) => {
+      const next = { ...current };
+      if (mode) next[folderId] = mode;
+      else delete next[folderId];
+      return next;
+    });
+  }
+
+  function showConfirmDialog(nextConfirm: ConfirmDialogState) {
+    setConfirmDialog(nextConfirm);
+  }
+
+  function closeConfirmDialog() {
+    setConfirmDialog(null);
+  }
+
+  function confirmCurrentDialog() {
+    const action = confirmDialog?.onConfirm;
+    setConfirmDialog(null);
+    if (action) action();
+  }
+
+  function requestDeleteAgent() {
+    if (!draft.agent_id) return;
+    const agentId = draft.agent_id;
+    const agentName = draft.name || selectedAgent?.name || 'Agent';
+    showConfirmDialog({
+      title: `删除「${agentName}」？`,
+      description: '这个 Agent 的定义会从 Agent Studio 移除；已生成的历史 Run 不会被删除。',
+      confirmLabel: '删除 Agent',
+      variant: 'danger',
+      onConfirm: () => void runAction(async () => {
+        await deleteAgent(agentId);
+        setSelectedAgentId('');
+        setDraft({ ...emptyAgentDraft });
+        return { selectedAgentId: '' };
+      }, '删除 Agent'),
+    });
+  }
+
+  function requestDeleteSkill(skill: SkillSpec) {
+    showConfirmDialog({
+      title: `删除 Skill「${skill.name}」？`,
+      description: isHermesSkill(skill)
+        ? '这只会删除 Yachiyo 中的登记和挂载关系，不会删除 Hermes Agent 原始 Skill 文件。'
+        : 'Yachiyo 管理区里的本地 Skill 副本会被删除，已挂载它的 Agent 会失去这个 Skill。',
+      confirmLabel: '删除 Skill',
+      variant: 'danger',
+      onConfirm: () => void runAction(async () => { await deleteSkill(skill.skill_id); }, '删除 Skill'),
+    });
+  }
+
+  function requestDeleteWorkflow() {
+    if (!selectedWorkflow) return;
+    const workflowId = selectedWorkflow.workflow_id;
+    const workflowName = selectedWorkflow.name || 'Workflow';
+    showConfirmDialog({
+      title: `删除「${workflowName}」？`,
+      description: '这个 Workflow 定义会从 Workflow Studio 移除；已生成的历史 Run 不会被删除。',
+      confirmLabel: '删除 Workflow',
+      variant: 'danger',
+      onConfirm: () => void runAction(async () => {
+        await deleteWorkflow(workflowId);
+        startNewWorkflow();
+        return { selectedWorkflowId: '' };
+      }, '删除 Workflow'),
+    });
+  }
+
+  function requestDeleteSkillFolder(folder: SkillFolderSpec, deleteSkills: boolean) {
     const count = folder.skill_count || skills.filter((skill) => skill.folder_id === folder.folder_id).length;
-    return window.confirm(`删除「${folder.name}」？${count} 个 Skill 会回到“无需分组”。`);
+    if (deleteSkills) {
+      showConfirmDialog({
+        title: `删除「${folder.name}」和其中 ${count} 个 Skill？`,
+        description: 'Yachiyo 安装或上传的 Skill 本地副本会被删除；Hermes Agent Skill 只会删除 Yachiyo 的登记，不会删除 Hermes 原始文件。',
+        confirmLabel: '连带删除',
+        variant: 'danger',
+        onConfirm: () => void runAction(
+          async () => deleteSkillFolderById(folder.folder_id, true),
+          '删除 Skill 文件夹和 Skills',
+        ),
+      });
+      return;
+    }
+    showConfirmDialog({
+      title: `删除文件夹「${folder.name}」？`,
+      description: `${count} 个 Skill 会回到“无需分组”。`,
+      confirmLabel: '删除文件夹',
+      variant: 'danger',
+      onConfirm: () => void runAction(
+        async () => deleteSkillFolderById(folder.folder_id, false),
+        '删除 Skill 文件夹',
+      ),
+    });
   }
 
   function openSkillLibraryFolder(folder: SkillFolderSpec) {
@@ -918,20 +1074,27 @@ export function AgentStudioView() {
         {studioTabs.map((item) => (
           <button
             type="button"
-            className={tab === item ? 'active' : ''}
+            className={isTopTabActive(item) ? 'active' : ''}
             key={item}
             onClick={() => activateTab(item)}
           >
-            {item === 'agents' ? 'Agents' : item === 'skills' ? 'Skill Library' : item === 'skill-groups' ? 'Skill Groups' : item === 'workflows' ? 'Workflow Studio' : 'Runs'}
+            {item === 'agents' ? 'Agents' : item === 'skills' ? 'Skill Library' : item === 'workflows' ? 'Workflow Studio' : 'Runs'}
           </button>
         ))}
       </div>
 
-      {loading ? <div className="notice">正在读取 Agent Studio...</div> : null}
+      {loading ? <AgentStudioLoadingState /> : null}
       {status ? <div className="notice">{status}</div> : null}
       {error ? <div className="notice danger">{error}</div> : null}
 
-      {tab === 'agents' ? (
+      {!loading && isSkillLibraryTab ? (
+        <div className="skill-library-subnav" role="tablist" aria-label="Skill Library">
+          <button type="button" className={tab === 'skills' ? 'active' : ''} onClick={() => activateTab('skills')}>Skills 列表</button>
+          <button type="button" className={tab === 'skill-groups' ? 'active' : ''} onClick={() => activateTab('skill-groups')}>分组管理</button>
+        </div>
+      ) : null}
+
+      {!loading && tab === 'agents' ? (
         <section className="agent-studio-grid">
           <aside className="agent-studio-panel">
             <div className="section-heading-row">
@@ -966,7 +1129,7 @@ export function AgentStudioView() {
           <form className="agent-studio-panel agent-editor" onSubmit={(event) => { event.preventDefault(); void runAction(saveAgent, '保存 Agent'); }}>
             <div className="section-heading-row">
               <h2>{draft.agent_id ? '编辑 Agent' : '新建 Agent'}</h2>
-              {draft.agent_id ? <button type="button" className="danger-action" disabled={busy} onClick={() => void runAction(async () => { await deleteAgent(draft.agent_id || ''); setSelectedAgentId(''); setDraft({ ...emptyAgentDraft }); return { selectedAgentId: '' }; }, '删除 Agent')}>删除</button> : null}
+              {draft.agent_id ? <button type="button" className="danger-action" disabled={busy} onClick={requestDeleteAgent}>删除</button> : null}
             </div>
             <div className="agent-profile-editor">
               <AgentAvatar avatarUrl={draft.avatar_url} name={draft.nickname || draft.name || 'Agent'} />
@@ -1217,7 +1380,7 @@ export function AgentStudioView() {
         </section>
       ) : null}
 
-      {tab === 'skills' ? (
+      {!loading && tab === 'skills' ? (
         <section className="agent-studio-grid">
           <div className="agent-studio-panel skill-import-panel">
             <div className="section-heading-row">
@@ -1234,7 +1397,7 @@ export function AgentStudioView() {
                   ))}
                 </select>
               </label>
-              <small>需要新增、重命名或删除文件夹时，进入 Skill Groups 页面管理。</small>
+              <small>需要新增、重命名或删除文件夹时，进入上方“分组管理”。</small>
             </div>
             <div className="skill-install-box">
               <label>
@@ -1333,7 +1496,7 @@ export function AgentStudioView() {
                   busy={busy}
                   folders={skillFolders}
                   key={skill.skill_id}
-                  onDelete={() => runAction(async () => { await deleteSkill(skill.skill_id); }, '删除 Skill')}
+                  onDelete={() => requestDeleteSkill(skill)}
                   onMoveFolder={(folderId) => runAction(async () => { await updateSkill(skill.skill_id, { folder_id: folderId }); }, '移动 Skill')}
                   onOpenLocation={() => runAction(async () => { await openPath(skill.local_path || ''); }, '打开 Skill 路径')}
                   onToggleEnabled={() => runAction(async () => { await updateSkill(skill.skill_id, { enabled: skill.enabled === false }); }, skill.enabled === false ? '启用 Skill' : '停用 Skill')}
@@ -1346,11 +1509,11 @@ export function AgentStudioView() {
         </section>
       ) : null}
 
-      {tab === 'skill-groups' ? (
+      {!loading && tab === 'skill-groups' ? (
         <section className="agent-studio-grid skill-group-page">
           <aside className="agent-studio-panel">
             <div className="section-heading-row">
-              <h2>Skill Groups</h2>
+              <h2>Skill 分组</h2>
             </div>
             <p className="agent-section-help">文件夹只用于筛选、导入目标和 Agent 挂载选择，不会移动 Hermes Agent 原始 Skill 路径。</p>
             <div className="skill-folder-box">
@@ -1387,6 +1550,8 @@ export function AgentStudioView() {
             <div className="skill-folder-manager-list">
               {skillFolders.map((folder) => {
                 const editing = editingSkillFolderId === folder.folder_id;
+                const deleteMode = skillFolderDeleteModes[folder.folder_id] || 'folder';
+                const deleteWithSkills = deleteMode === 'skills' && Boolean(folder.skill_count || 0);
                 return (
                   <article className="skill-folder-manager-row" key={folder.folder_id}>
                     <div className="skill-folder-manager-main">
@@ -1419,16 +1584,28 @@ export function AgentStudioView() {
                         <>
                           <button type="button" disabled={busy} onClick={() => startEditingSkillFolder(folder)}>重命名</button>
                           <button type="button" disabled={busy} onClick={() => openSkillLibraryFolder(folder)}>查看</button>
-                          <button
-                            type="button"
-                            className="danger-action"
-                            disabled={busy}
-                            onClick={() => {
-                              if (confirmDeleteSkillFolder(folder)) void runAction(async () => deleteSkillFolderById(folder.folder_id), '删除 Skill 文件夹');
-                            }}
-                          >
-                            删除
-                          </button>
+                          <div className="skill-folder-delete-control" aria-label={`${folder.name} 删除设置`}>
+                            <label className="skill-folder-delete-switch" title="开启后删除文件夹时会连带删除其中 Skills">
+                              <input
+                                type="checkbox"
+                                role="switch"
+                                checked={deleteWithSkills}
+                                disabled={busy || !(folder.skill_count || 0)}
+                                aria-label={`${folder.name} 删除时连带删除 Skills`}
+                                onChange={(event) => setSkillFolderDeleteMode(folder.folder_id, event.currentTarget.checked ? 'skills' : 'folder')}
+                              />
+                              <span className="skill-folder-delete-toggle" aria-hidden="true" />
+                              <span>连带 Skills</span>
+                            </label>
+                            <button
+                              type="button"
+                              className="danger-action"
+                              disabled={busy}
+                              onClick={() => requestDeleteSkillFolder(folder, deleteWithSkills)}
+                            >
+                              删除
+                            </button>
+                          </div>
                         </>
                       )}
                     </div>
@@ -1447,7 +1624,7 @@ export function AgentStudioView() {
         </section>
       ) : null}
 
-      {tab === 'workflows' ? (
+      {!loading && tab === 'workflows' ? (
         <section className="agent-studio-grid workflow-studio-grid">
           <aside className="agent-studio-panel">
             <div className="section-heading-row">
@@ -1476,7 +1653,7 @@ export function AgentStudioView() {
               <button type="button" onClick={() => addFlowNode('approval')}>Approval</button>
               <button type="button" onClick={() => addFlowNode('artifact')}>Artifact</button>
               <button type="button" className="primary-action" onClick={() => void runAction(saveWorkflow, '保存 Workflow')}>保存</button>
-              {selectedWorkflow ? <button type="button" className="danger-action" onClick={() => void runAction(async () => { await deleteWorkflow(selectedWorkflow.workflow_id); startNewWorkflow(); return { selectedWorkflowId: '' }; }, '删除 Workflow')}>删除</button> : null}
+              {selectedWorkflow ? <button type="button" className="danger-action" onClick={requestDeleteWorkflow}>删除</button> : null}
             </div>
             <div className="workflow-canvas">
               <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} fitView>
@@ -1522,7 +1699,7 @@ export function AgentStudioView() {
         </section>
       ) : null}
 
-      {tab === 'runs' ? (
+      {!loading && tab === 'runs' ? (
         <section className="agent-studio-grid">
           <div className="agent-studio-panel">
             <div className="section-heading-row"><h2>Run Agent / Workflow</h2></div>
@@ -1635,6 +1812,16 @@ export function AgentStudioView() {
           </div>
         </section>
       ) : null}
+
+      <ConfirmDialog
+        confirmLabel={confirmDialog?.confirmLabel}
+        description={confirmDialog?.description}
+        onCancel={closeConfirmDialog}
+        onConfirm={confirmCurrentDialog}
+        open={Boolean(confirmDialog)}
+        title={confirmDialog?.title || ''}
+        variant={confirmDialog?.variant}
+      />
     </section>
   );
 }
@@ -1650,7 +1837,7 @@ function SkillCard({
 }: {
   busy: boolean;
   folders: SkillFolderSpec[];
-  onDelete: () => Promise<void>;
+  onDelete: () => Promise<void> | void;
   onMoveFolder: (folderId: string) => Promise<void>;
   onOpenLocation: () => Promise<void>;
   onToggleEnabled: () => Promise<void>;
@@ -1693,10 +1880,10 @@ function SkillCard({
         <span>路径</span>
         <code>{skillPathLabel(skill)}</code>
       </div>
-      {skill.origin_path ? (
+      {skillSourceLabel(skill) ? (
         <div className="skill-card-path">
           <span>来源</span>
-          <code>{skill.origin_path}</code>
+          <code>{skillSourceLabel(skill)}</code>
         </div>
       ) : null}
       {skill.asset_paths?.length ? <small>{skill.asset_paths.length} assets/templates</small> : null}

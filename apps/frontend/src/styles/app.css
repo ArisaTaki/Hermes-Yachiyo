@@ -15,6 +15,42 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-color: transparent transparent;
+  scrollbar-width: thin;
+}
+
+*:hover,
+*:focus-within {
+  scrollbar-color: color-mix(in oklch, var(--hy-accent, var(--accent)) 52%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+  background-color: transparent;
+}
+
+*:hover::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb {
+  background-color: color-mix(in oklch, var(--hy-accent, var(--accent)) 42%, transparent);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklch, var(--hy-accent, var(--accent)) 62%, white 8%);
+}
+
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 html,
@@ -50,7 +86,7 @@ body,
 .installer-guidance-list pre,
 .installer-log,
 .json-panel pre {
-  scrollbar-gutter: stable;
+  scrollbar-gutter: auto;
 }
 
 html.desktop-mode-root,
@@ -1053,6 +1089,70 @@ button:hover {
   max-height: calc(100dvh - 118px);
   object-fit: contain;
   border-radius: 6px;
+}
+
+.hy-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  padding: 20px;
+  background: oklch(0 0 0 / 0.58);
+  backdrop-filter: blur(10px);
+}
+
+.hy-confirm-dialog {
+  display: grid;
+  width: min(430px, calc(100vw - 40px));
+  max-height: min(520px, calc(100dvh - 40px));
+  overflow: auto;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 10px;
+  background:
+    radial-gradient(ellipse 80% 100% at 100% 0%, oklch(75% 0.095 205 / 0.07), transparent 70%),
+    color-mix(in oklch, var(--hy-surface) 94%, black);
+  box-shadow: 0 24px 70px oklch(0 0 0 / 0.42);
+}
+
+.hy-confirm-dialog.danger {
+  border-color: oklch(64% 0.14 22 / 0.34);
+  background:
+    radial-gradient(ellipse 85% 105% at 100% 0%, oklch(60% 0.16 24 / 0.11), transparent 70%),
+    color-mix(in oklch, var(--hy-surface) 94%, black);
+}
+
+.hy-confirm-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.hy-confirm-copy h2 {
+  margin: 0;
+  color: var(--hy-fg);
+  font-size: 17px;
+  font-weight: 620;
+  line-height: 1.3;
+}
+
+.hy-confirm-description {
+  color: var(--hy-subtle);
+  font-size: 13px;
+  line-height: 1.62;
+}
+
+.hy-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.hy-confirm-actions button {
+  min-height: 34px;
 }
 
 .markdown p {
@@ -12290,6 +12390,32 @@ button.activity-item {
   color: var(--hy-fg);
 }
 
+.skill-library-subnav {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.skill-library-subnav button {
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--hy-muted);
+  font-size: 12px;
+}
+
+.skill-library-subnav button.active {
+  background: oklch(66% 0.12 188 / 0.14);
+  color: var(--hy-fg);
+}
+
 .agent-studio-grid {
   display: grid;
   grid-template-columns: minmax(260px, 0.42fr) minmax(420px, 1fr);
@@ -12299,6 +12425,10 @@ button.activity-item {
 
 .workflow-studio-grid {
   grid-template-columns: minmax(260px, 0.32fr) minmax(520px, 1fr);
+}
+
+.agent-studio-loading {
+  pointer-events: none;
 }
 
 .agent-studio-panel {
@@ -12317,6 +12447,103 @@ button.activity-item {
 .agent-studio-panel .section-heading-row {
   padding-bottom: 10px;
   border-bottom: 1px solid var(--hy-line);
+}
+
+.agent-studio-skeleton-list,
+.agent-studio-skeleton-form {
+  display: grid;
+  gap: 12px;
+}
+
+.agent-studio-skeleton-card {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-height: 70px;
+  padding: 11px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.agent-studio-skeleton-stack {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-studio-skeleton-avatar,
+.agent-studio-skeleton-button,
+.agent-studio-skeleton-line,
+.agent-studio-skeleton-block {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(90deg, oklch(100% 0 0 / 0.07), oklch(100% 0 0 / 0.14), oklch(100% 0 0 / 0.07));
+  background-size: 220% 100%;
+  animation: hy-skeleton-sheen 1300ms cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+.agent-studio-skeleton-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+}
+
+.agent-studio-skeleton-avatar.large {
+  width: 58px;
+  height: 58px;
+}
+
+.agent-studio-skeleton-button {
+  width: 52px;
+  height: 34px;
+  border-radius: 8px;
+}
+
+.agent-studio-skeleton-line {
+  display: block;
+  width: 38%;
+  height: 12px;
+  border-radius: 999px;
+}
+
+.agent-studio-skeleton-line.title {
+  width: 112px;
+  height: 17px;
+}
+
+.agent-studio-skeleton-line.title.wide {
+  width: 168px;
+}
+
+.agent-studio-skeleton-line.name {
+  width: 56%;
+}
+
+.agent-studio-skeleton-line.meta {
+  width: 42%;
+  opacity: 0.72;
+}
+
+.agent-studio-skeleton-line.field {
+  width: 72%;
+  height: 38px;
+  border-radius: 8px;
+}
+
+.agent-studio-skeleton-line.field.wide {
+  width: 100%;
+}
+
+.agent-studio-skeleton-block {
+  width: 100%;
+  height: 128px;
+  border-radius: 8px;
+}
+
+.agent-studio-skeleton-block.short {
+  height: 84px;
 }
 
 .agent-studio-panel .section-heading-row h2,
@@ -13038,6 +13265,96 @@ button.activity-item {
 
 .skill-folder-actions button {
   min-height: 32px;
+}
+
+.skill-folder-delete-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 3px 3px 9px;
+  border: 1px solid oklch(65% 0.12 18 / 0.34);
+  border-radius: 8px;
+  background: oklch(55% 0.13 18 / 0.08);
+}
+
+.skill-folder-delete-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  color: var(--hy-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.skill-folder-delete-switch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skill-folder-delete-toggle {
+  position: relative;
+  display: inline-flex;
+  width: 36px;
+  height: 20px;
+  flex: 0 0 auto;
+  border: 1px solid oklch(255 0 0 / 0.14);
+  border-radius: 999px;
+  background: oklch(255 0 0 / 0.18);
+  box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.18);
+  transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.skill-folder-delete-toggle::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: oklch(97% 0.01 250);
+  box-shadow: 0 2px 7px oklch(0 0 0 / 0.36);
+  transition: transform 140ms ease, background 140ms ease;
+}
+
+.skill-folder-delete-switch input:checked+.skill-folder-delete-toggle {
+  border-color: oklch(72% 0.14 165 / 0.82);
+  background: oklch(63% 0.16 165 / 0.72);
+  box-shadow: 0 0 0 1px oklch(72% 0.14 165 / 0.16), inset 0 1px 2px oklch(0 0 0 / 0.16);
+}
+
+.skill-folder-delete-switch input:checked+.skill-folder-delete-toggle::before {
+  transform: translateX(16px);
+  background: oklch(99% 0.008 160);
+}
+
+.skill-folder-delete-switch input:focus-visible+.skill-folder-delete-toggle {
+  outline: 2px solid var(--hy-accent);
+  outline-offset: 2px;
+}
+
+.skill-folder-delete-switch:has(input:checked) {
+  color: var(--hy-fg);
+}
+
+.skill-folder-delete-switch:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.skill-folder-delete-control .danger-action {
+  min-height: 28px;
+  padding-inline: 10px;
 }
 
 .skill-folder-manager-row>.skill-folder-validation {
@@ -14737,6 +15054,11 @@ button.activity-item {
 
   .skill-folder-actions button {
     flex: 1 1 96px;
+  }
+
+  .skill-folder-delete-control {
+    flex: 1 1 100%;
+    justify-content: space-between;
   }
 }
 

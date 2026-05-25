@@ -174,9 +174,29 @@ export type RunGroupSpec = {
   updated_at?: string;
 };
 
+function uniqueByKey<T>(items: T[], getKey: (item: T) => string): T[] {
+  const indexByKey = new Map<string, number>();
+  const uniqueItems: T[] = [];
+  items.forEach((item) => {
+    const key = getKey(item).trim();
+    if (!key) {
+      uniqueItems.push(item);
+      return;
+    }
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex === undefined) {
+      indexByKey.set(key, uniqueItems.length);
+      uniqueItems.push(item);
+      return;
+    }
+    uniqueItems[existingIndex] = item;
+  });
+  return uniqueItems;
+}
+
 export async function listAgents(): Promise<AgentSpec[]> {
   const payload = await apiGet<{ agents?: AgentSpec[] }>('/ui/agents');
-  return payload.agents || [];
+  return uniqueByKey(payload.agents || [], (agent) => String(agent.agent_id || ''));
 }
 
 export async function createAgent(request: Partial<AgentSpec>): Promise<AgentSpec> {
@@ -230,8 +250,9 @@ export async function updateSkillFolder(folderId: string, request: Partial<Skill
   return apiPatch(`/ui/skill-folders/${encodeURIComponent(folderId)}`, request);
 }
 
-export async function deleteSkillFolder(folderId: string): Promise<{ ok?: boolean }> {
-  return apiDelete(`/ui/skill-folders/${encodeURIComponent(folderId)}`);
+export async function deleteSkillFolder(folderId: string, options: { deleteSkills?: boolean } = {}): Promise<{ ok?: boolean; deleted_skill_count?: number }> {
+  const query = options.deleteSkills ? '?delete_skills=true' : '';
+  return apiDelete(`/ui/skill-folders/${encodeURIComponent(folderId)}${query}`);
 }
 
 export async function syncHermesSkills(): Promise<SkillSyncResponse> {

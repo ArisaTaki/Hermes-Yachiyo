@@ -179,15 +179,15 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 
 - 新增一层 Skill Folder 元数据层：`skill_folders` 表保存文件夹名称、说明、来源范围与排序；`skills.folder_id` 保存归属。
 - Skill Folder 只作为管理和筛选维度，不移动 Hermes Agent 原路径，也不强制改动 Yachiyo 已导入 Skill 的本地快照路径。
-- Skill Groups 独立成 Agent Studio 页面，负责文件夹新建、重命名、查看与删除；Skill Library 左侧只保留安装/上传时的目标文件夹选择。
-- 删除文件夹会把其中 Skill 归回“无需分组”。
+- Skill Groups 收进 Skill Library 二级页面：顶层 Agent Studio 只保留 `Skill Library`，内部用 `Skills 列表 / 分组管理` 切换；Skill Library 左侧只保留安装/上传时的目标文件夹选择。
+- 删除文件夹默认会把其中 Skill 归回“无需分组”，也可以在同一个删除操作区打开“连带 Skills”后一起删除文件夹内 Skill。
 - Skill Library 卡片可直接移动 Skill 到其他文件夹；Agent Mounted Skills 增加文件夹筛选，便于给 Coding / Design 等 Agent 按主题挑选 Skill。
 - Agent Mounted Skills 支持对当前筛选结果一键全选/清空；安装完成后不再显示 stdout/stderr 结果框，只保留导入/同步结果。
 - Agent Studio 增加 Agent 列表 stale state 自愈；Agent 列表读取增加 row factory 回归覆盖，避免开发态连接状态漂移后 `/ui/agents` 列表转换崩溃。
-- `#/agents/skill-groups` 可直达 Skill Groups，旧 `#/agents/<run_id>` Run 详情链接继续兼容。
-- Skill Folder 创建/重命名拒绝重复名和超过 120 字符的名称；前端提供 inline validation，删除前确认 Skill 会回到“无需分组”。
+- `#/agents/skill-groups` 兼容直达 `Skill Library > 分组管理`，旧 `#/agents/<run_id>` Run 详情链接继续兼容。
+- Skill Folder 创建/重命名拒绝重复名和超过 120 字符的名称；前端提供 inline validation。删除、恢复、覆盖、卸载、中断终端/更新等高风险操作统一使用 `ConfirmDialog`，不再依赖 `window.confirm`。
 - “无需分组”计数拆成总数 / Yachiyo / Hermes，避免 Hermes Agent 全局 Skills 干扰默认组判断。
-- 当前剩余决策：Skill Groups 是否保留顶层 tab、最终命名、Hermes Agent skills 是否可归入 Yachiyo 分组、`source_scope` 是否暴露、是否做手动排序。
+- 当前剩余决策：Hermes Agent skills 是否可归入 Yachiyo 分组、是否做手动排序；`source_scope` 暂时保持后端内部字段，不暴露到 UI。
 
 ## 新增接口
 
