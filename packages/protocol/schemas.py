@@ -146,8 +146,8 @@ class AssistantProfileResponse(BaseModel):
     user_avatar_url: str = ""
     user_profile: str = ""
     user_preferences: str = ""
-    memory_enabled: bool = False
-    memory_scope: str = "local_only"
+    memory_enabled: bool = True
+    memory_scope: str = "local_chat_history"
     prompt_order: list[str] = Field(
         default_factory=lambda: [
             "agent_profile",

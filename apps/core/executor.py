@@ -120,6 +120,7 @@ _EXEC_TIMEOUT_ENV = "HERMES_YACHIYO_EXEC_TIMEOUT_SECONDS"
 _DEFAULT_EXEC_TIMEOUT: float = 30 * 60.0
 _PROBE_TIMEOUT: float = 5.0   # hermes --version 探测超时（秒）
 _STREAM_UPDATE_INTERVAL: float = 0.05
+_STREAM_BRIDGE_DONE_EXIT_GRACE: float = 2.0
 _ERROR_DETAIL_MAX_CHARS = 500
 _ERROR_DETAIL_MAX_LINES = 12
 _ATTACHED_IMAGE_GUARD = (
@@ -137,6 +138,34 @@ _DEFAULT_TITLE_INTERVAL_TURNS = 4
 _DEFAULT_TITLE_TIMEOUT_SECONDS = 8.0
 _GENERATED_TITLE_MAX_CHARS = 28
 _TITLE_REFRESH_TASKS: dict[str, asyncio.Task[None]] = {}
+_MEMORY_CONTEXT_MAX_ITEMS = 8
+_MEMORY_CONTEXT_MAX_SESSIONS = 80
+_MEMORY_CONTEXT_MAX_MESSAGES_PER_SESSION = 80
+_MEMORY_CONTEXT_ITEM_MAX_CHARS = 180
+_MEMORY_CONTEXT_TOTAL_MAX_CHARS = 1400
+_MEMORY_MARKERS = (
+    "记住",
+    "记忆",
+    "长期",
+    "以后",
+    "今后",
+    "偏好",
+    "我喜欢",
+    "我不喜欢",
+    "不要",
+    "别",
+    "必须",
+    "先问",
+    "许可",
+    "允许",
+    "未经",
+    "擅自",
+    "always",
+    "never",
+    "remember",
+    "preference",
+    "permission",
+)
 
 
 def resolve_hermes_stream_bridge_script() -> Path:
@@ -401,6 +430,131 @@ def format_environment_context(now: Optional[datetime] = None) -> str:
         f"（{timezone_label}，{weekday}，{period}）\n"
         "请结合当前时间、日期与时段理解问候、计划和相对时间表达。"
     )
+
+
+def build_cross_session_memory_context(
+    current_session_id: str = "",
+    *,
+    store: Any | None = None,
+    max_items: int = _MEMORY_CONTEXT_MAX_ITEMS,
+) -> str:
+    """Build lightweight durable memory from explicit user statements in chat history."""
+    max_items = max(0, min(int(max_items or 0), 20))
+    if max_items <= 0:
+        return ""
+    try:
+        if store is None:
+            from apps.core.chat_store import get_chat_store
+
+            store = get_chat_store()
+        sessions = store.list_sessions(limit=_MEMORY_CONTEXT_MAX_SESSIONS)
+    except Exception:
+        logger.debug("读取长期记忆候选会话失败", exc_info=True)
+        return ""
+
+    current_session_id = str(current_session_id or "").strip()
+    candidates: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+    for session in sessions:
+        session_id = str(getattr(session, "session_id", "") or "")
+        try:
+            messages = store.load_messages(
+                session_id,
+                limit=_MEMORY_CONTEXT_MAX_MESSAGES_PER_SESSION,
+            )
+        except Exception:
+            logger.debug("读取长期记忆候选消息失败: %s", session_id, exc_info=True)
+            continue
+        for message in reversed(messages):
+            if str(getattr(message, "role", "") or "") != "user":
+                continue
+            memory = _extract_memory_statement(str(getattr(message, "content", "") or ""))
+            if not memory:
+                continue
+            key = memory.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            created_at = str(getattr(message, "created_at", "") or getattr(session, "created_at", "") or "")
+            candidates.append((created_at, session_id, memory))
+            if len(candidates) >= max_items:
+                return _format_memory_context(candidates, current_session_id)
+    return _format_memory_context(candidates, current_session_id)
+
+
+def build_runtime_profile_context(runtime: "HermesRuntime") -> str:
+    """Combine configured profile fields with lightweight cross-session memory."""
+    parts: list[str] = []
+    try:
+        configured = runtime.config.assistant.prompt_profile_context()
+        if configured:
+            parts.append(configured)
+    except Exception:
+        logger.debug("读取配置资料上下文失败", exc_info=True)
+    try:
+        current_session_id = str(getattr(runtime.chat_session, "session_id", "") or "")
+        memory_context = build_cross_session_memory_context(current_session_id)
+        if memory_context:
+            parts.append(memory_context)
+    except Exception:
+        logger.debug("构建长期记忆上下文失败", exc_info=True)
+    return "\n\n".join(parts)
+
+
+def _extract_memory_statement(text: str) -> str:
+    value = " ".join(str(text or "").replace("\r", "\n").split())
+    if len(value) < 4:
+        return ""
+    lowered = value.lower()
+    if not any(marker in value or marker in lowered for marker in _MEMORY_MARKERS):
+        return ""
+    for prefix in (
+        "请记住",
+        "帮我记住",
+        "记住：",
+        "记住:",
+        "记忆：",
+        "记忆:",
+        "以后请",
+        "今后请",
+    ):
+        if value.startswith(prefix):
+            value = value[len(prefix):].strip()
+            break
+    value = value.strip(" ：:，,。.;；")
+    if not value:
+        return ""
+    if len(value) > _MEMORY_CONTEXT_ITEM_MAX_CHARS:
+        value = value[: _MEMORY_CONTEXT_ITEM_MAX_CHARS - 1].rstrip() + "…"
+    return value
+
+
+def _format_memory_context(candidates: list[tuple[str, str, str]], current_session_id: str) -> str:
+    if not candidates:
+        return ""
+    lines = [
+        "[长期记忆]",
+        "以下是用户在历史会话中明确表达的偏好、约束和长期说明；除非本轮明确更新，请持续遵守。",
+    ]
+    for created_at, session_id, memory in candidates:
+        source = "当前会话" if session_id and session_id == current_session_id else "历史会话"
+        date = _memory_context_date(created_at)
+        label = f"{source} {date}".strip()
+        lines.append(f"- {label}：{memory}" if label else f"- {memory}")
+    context = "\n".join(lines)
+    if len(context) > _MEMORY_CONTEXT_TOTAL_MAX_CHARS:
+        context = context[: _MEMORY_CONTEXT_TOTAL_MAX_CHARS - 1].rstrip() + "…"
+    return context
+
+
+def _memory_context_date(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return value[:10] if len(value) >= 10 else ""
+    return parsed.date().isoformat()
 
 
 def _read_title_int_env(name: str, default: int, *, minimum: int, maximum: int) -> int:
@@ -916,6 +1070,33 @@ async def _terminate_process(proc: asyncio.subprocess.Process) -> None:
         await proc.communicate()
 
 
+async def _terminate_process_after_done(proc: asyncio.subprocess.Process) -> None:
+    """Terminate a bridge process after a definitive done event without reading pipes twice."""
+    if proc.returncode is not None:
+        return
+    try:
+        proc.terminate()
+    except ProcessLookupError:
+        return
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=3.0)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+
+
+async def _wait_for_bridge_exit_after_done(proc: asyncio.subprocess.Process) -> int:
+    """Give bridge cleanup a short grace period once the final answer is known."""
+    try:
+        return await asyncio.wait_for(proc.wait(), timeout=_STREAM_BRIDGE_DONE_EXIT_GRACE)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "[Hermes bridge] done 后进程未退出，按已收到的最终回复收尾"
+        )
+        await _terminate_process_after_done(proc)
+        return proc.returncode if proc.returncode is not None else 0
+
+
 async def _consume_stream_bridge(
     proc: asyncio.subprocess.Process,
     payload: dict[str, Any],
@@ -999,6 +1180,7 @@ async def _consume_stream_bridge(
                     len(final_response),
                     failed,
                 )
+                break
             elif event_type == "error":
                 raw_message = event.get("message")
                 raw_message = raw_message if isinstance(raw_message, str) else "Hermes streaming bridge 调用失败"
@@ -1013,9 +1195,12 @@ async def _consume_stream_bridge(
                 # 未知事件类型：不崩溃，仅记录 debug 日志
                 logger.debug("忽略未知 bridge 事件类型: %s", event_type)
 
+        if saw_done_event:
+            rc = await _wait_for_bridge_exit_after_done(proc)
+        else:
+            rc = await proc.wait()
         stderr_bytes = await stderr_task
         stderr = stderr_bytes.decode(errors="replace").strip()
-        rc = await proc.wait()
     finally:
         if not stderr_task.done():
             stderr_task.cancel()
@@ -1041,15 +1226,16 @@ async def _consume_stream_bridge(
         len(stderr),
     )
 
-    if rc != 0 or failed:
+    effective_rc = 0 if saw_done_event and not failed else rc
+    if effective_rc != 0 or failed:
         return HermesInvokeResult(
             success=False,
             stdout=content,
             stderr=stderr,
-            returncode=rc,
+            returncode=effective_rc,
             error_message=_bridge_failure_message(
                 error_message,
-                returncode=rc,
+                returncode=effective_rc,
                 stderr=stderr,
             ),
             hermes_session_id=hermes_session_id,
@@ -1060,7 +1246,7 @@ async def _consume_stream_bridge(
         success=True,
         stdout=content or f"[Hermes 执行完毕，无输出] {payload.get('description', '')[:60]}",
         stderr=stderr,
-        returncode=rc,
+        returncode=effective_rc,
         hermes_session_id=hermes_session_id,
         hermes_title=hermes_title,
     )
@@ -1673,7 +1859,7 @@ def select_executor(runtime: "HermesRuntime | None" = None) -> ExecutionStrategy
                 chat_session=runtime.chat_session,
                 persona_prompt_getter=lambda: runtime.config.assistant.persona_prompt,
                 user_address_getter=lambda: runtime.config.assistant.user_address,
-                profile_context_getter=lambda: runtime.config.assistant.prompt_profile_context(),
+                profile_context_getter=lambda: build_runtime_profile_context(runtime),
             )
         logger.info(
             "select_executor: Hermes 报告就绪但命令不可用，使用 HermesUnavailableExecutor"

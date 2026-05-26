@@ -329,6 +329,10 @@ def _wire_agent_activity_callbacks(agent: Any) -> None:
             tool_name=tool_name,
             tool_call_id=call_id,
             duration_seconds=duration,
+            metadata={
+                "tool_call_id": call_id,
+                "result": _detail_text(result, drop_empty_literals=False),
+            },
         )
 
     def on_tool_progress(event_type: Any, name: Any = None, preview: Any = None, args: Any = None, **kwargs: Any) -> None:

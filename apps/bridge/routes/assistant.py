@@ -133,8 +133,8 @@ def _build_profile_response(*, message: str = "") -> AssistantProfileResponse:
         user_avatar_url=_avatar_url(assistant.user_avatar_path, fallback=False),
         user_profile=assistant.user_profile,
         user_preferences=assistant.user_preferences,
-        memory_enabled=False,
-        memory_scope="local_only",
+        memory_enabled=True,
+        memory_scope="local_chat_history",
         prompt_order=list(_PROMPT_ORDER),
         message=message,
     )

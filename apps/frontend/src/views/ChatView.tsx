@@ -12,7 +12,7 @@ import { UiIcon } from '../components/UiIcon';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiGet, apiPost, bridgeUrl, copyText, openAppView, openExternalUrl } from '../lib/bridge';
-import { currentParam } from '../lib/view';
+import { currentParam, navigateTo } from '../lib/view';
 
 type PendingAttachment = {
   id: string;
@@ -46,6 +46,7 @@ type ChatActivityEvent = {
   status?: string;
   duration_seconds?: number | null;
   created_at?: string;
+  metadata?: Record<string, unknown>;
 };
 
 type ChatMessage = {
@@ -1445,29 +1446,97 @@ function MessageActivityList({ events, messageStatus, progressLabel }: {
   messageStatus?: string;
   progressLabel?: string;
 }) {
+  const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(() => new Set());
   const rows = events.slice(0, 4);
   const fallback = progressLabel && !rows.length
     ? [{ title: progressLabel, status: messageStatus || 'running' } as ChatActivityEvent]
     : [];
   const visibleRows = rows.length ? rows : fallback;
   if (!visibleRows.length) return null;
+
+  function toggleExpanded(eventKey: string) {
+    setExpandedEventIds((current) => {
+      const next = new Set(current);
+      if (next.has(eventKey)) next.delete(eventKey);
+      else next.add(eventKey);
+      return next;
+    });
+  }
+
+  function openActivity(event: ChatActivityEvent) {
+    if (event.event_id) {
+      navigateTo('activity-detail', { event_id: event.event_id });
+      return;
+    }
+    navigateTo('activity-all');
+  }
+
   return (
     <div className="message-activity-list" aria-label="执行活动">
       {visibleRows.map((event, index) => {
         const displayStatus = activityDisplayStatus(event.status, messageStatus);
+        const eventKey = activityEventKey(event, index);
+        const metadataText = formatActivityMetadata(event.metadata);
+        const canExpand = Boolean(event.detail || metadataText);
+        const expanded = expandedEventIds.has(eventKey);
         return (
-          <div className={`message-activity-row ${activityStatusClass(displayStatus)}`} key={event.event_id || `${event.title}-${index}`}>
+          <div className={`message-activity-row ${activityStatusClass(displayStatus)}${expanded ? ' expanded' : ''}`} key={eventKey}>
             <span className="message-activity-icon" aria-hidden="true">{activityStatusIcon(displayStatus)}</span>
-            <span className="message-activity-text">
-              <strong>{event.title || event.tool_name || 'Hermes 活动'}</strong>
+            <div className="message-activity-text">
+              <div className="message-activity-heading">
+                <strong>{event.title || event.tool_name || 'Hermes 活动'}</strong>
+                {event.event_id ? (
+                  <button
+                    type="button"
+                    className="message-activity-link"
+                    title="打开活动详情"
+                    aria-label="打开活动详情"
+                    onClick={() => openActivity(event)}
+                  >
+                    <UiIcon name="activity" />
+                    <span>详情</span>
+                  </button>
+                ) : null}
+                {canExpand ? (
+                  <button
+                    type="button"
+                    className="message-activity-link"
+                    title={expanded ? '收起调用记录' : '展开调用记录'}
+                    aria-label={expanded ? '收起调用记录' : '展开调用记录'}
+                    onClick={() => toggleExpanded(eventKey)}
+                  >
+                    <UiIcon name={expanded ? 'close' : 'plus'} />
+                    <span>{expanded ? '收起' : '展开'}</span>
+                  </button>
+                ) : null}
+              </div>
               {event.detail ? <small>{event.detail}</small> : null}
-            </span>
+              {expanded ? (
+                <div className="message-activity-expanded">
+                  {event.detail ? <span>{event.detail}</span> : null}
+                  {metadataText ? <pre>{metadataText}</pre> : null}
+                </div>
+              ) : null}
+            </div>
             <time>{formatShortTime(event.created_at)}</time>
           </div>
         );
       })}
     </div>
   );
+}
+
+function activityEventKey(event: ChatActivityEvent, index: number) {
+  return event.event_id || `${event.created_at || 'activity'}-${event.task_id || event.title || index}-${index}`;
+}
+
+function formatActivityMetadata(metadata?: Record<string, unknown>) {
+  if (!metadata || !Object.keys(metadata).length) return '';
+  try {
+    return JSON.stringify(metadata, null, 2);
+  } catch {
+    return '';
+  }
 }
 
 function TypingIndicator() {
@@ -1904,6 +1973,7 @@ function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
   let paragraph: string[] = [];
   let listType: 'ul' | 'ol' | null = null;
   let inCode = false;
+  let codeFenceMarker = '';
   let codeLines: string[] = [];
   let codeLanguage = '';
   let codeBlockIndex = 0;
@@ -1928,31 +1998,37 @@ function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
   }
 
   function flushCode() {
-    const code = codeLines.join('\n');
-    const language = codeLanguage || detectCodeLanguage(code);
+    const normalizedBlock = normalizeCodeBlockContent(codeLines.join('\n'), codeLanguage);
+    const code = normalizedBlock.code;
+    const language = normalizedBlock.language || detectCodeLanguage(code);
     const blockIndex = String(codeBlockIndex);
     const copied = copiedCodeBlockKey === codeBlockStateKey(messageId, blockIndex);
     const languageLabel = language ? `<span class="markdown-code-lang">${escapeHtml(language)}</span>` : '<span class="markdown-code-lang">text</span>';
     const copyButtonLabel = copied ? '已复制' : '复制代码';
     const copyButtonIcon = copied ? CODE_CHECK_ICON_HTML : CODE_COPY_ICON_HTML;
-    html += `<div class="markdown-code-block" data-code-index="${blockIndex}">${languageLabel}<button type="button" class="markdown-code-copy${copied ? ' copied' : ''}" data-code-copy aria-label="${copyButtonLabel}" title="${copyButtonLabel}">${copyButtonIcon}</button><pre><code class="${language ? `language-${escapeHtml(language)}` : ''}">${renderHighlightedCode(code, language)}</code></pre></div>`;
+    const blockClass = `markdown-code-block${language ? ` markdown-code-block-${escapeHtml(language)}` : ''}`;
+    html += `<div class="${blockClass}" data-code-index="${blockIndex}">${languageLabel}<button type="button" class="markdown-code-copy${copied ? ' copied' : ''}" data-code-copy aria-label="${copyButtonLabel}" title="${copyButtonLabel}">${copyButtonIcon}</button><pre><code class="${language ? `language-${escapeHtml(language)}` : ''}">${renderHighlightedCode(code, language)}</code></pre></div>`;
     codeLines = [];
     codeLanguage = '';
+    codeFenceMarker = '';
     inCode = false;
     codeBlockIndex += 1;
   }
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (line.trim().startsWith('```')) {
+    const fence = parseMarkdownFence(line);
+    if (fence) {
       if (inCode) {
-        flushCode();
+        if (fence.marker === codeFenceMarker) flushCode();
+        else codeLines.push(line);
       } else {
         flushParagraph();
         closeList();
         inCode = true;
+        codeFenceMarker = fence.marker;
         codeLines = [];
-        codeLanguage = normalizeFenceLanguage(line);
+        codeLanguage = normalizeFenceLanguage(fence.info);
       }
       continue;
     }
@@ -2028,9 +2104,51 @@ function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
   return html;
 }
 
-function normalizeFenceLanguage(fenceLine: string) {
-  const raw = fenceLine.trim().slice(3).trim().split(/\s+/)[0] || '';
-  return normalizeCodeLanguage(raw);
+function parseMarkdownFence(line: string) {
+  const match = line.trim().match(/^(```|~~~|:::)\s*(.*)$/);
+  if (!match) return null;
+  return {
+    marker: match[1],
+    info: match[2] || '',
+  };
+}
+
+function normalizeFenceLanguage(fenceInfo: string) {
+  const raw = fenceInfo.trim();
+  const lower = raw.toLowerCase();
+  if (lower === 'review diff' || lower === 'review-diff' || lower.startsWith('review diff ')) return 'diff';
+  if (lower === 'patch' || lower.includes(' diff')) return 'diff';
+  return normalizeCodeLanguage(raw.split(/\s+/)[0] || '');
+}
+
+function normalizeCodeBlockContent(code: string, language: string) {
+  const directLanguage = normalizeCodeLanguage(language);
+  const unwrapped = unwrapReviewDiffFence(code);
+  if (unwrapped) {
+    return {
+      code: unwrapped,
+      language: 'diff',
+    };
+  }
+  return {
+    code,
+    language: directLanguage,
+  };
+}
+
+function unwrapReviewDiffFence(code: string) {
+  const lines = String(code || '').replace(/\r\n/g, '\n').split('\n');
+  while (lines.length && !lines[0].trim()) lines.shift();
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  if (lines.length < 2) return '';
+  const opening = parseMarkdownFence(lines[0]);
+  if (!opening) return '';
+  if (normalizeFenceLanguage(opening.info) !== 'diff') return '';
+  const closing = parseMarkdownFence(lines[lines.length - 1]);
+  const contentLines = closing && closing.marker === opening.marker
+    ? lines.slice(1, -1)
+    : lines.slice(1);
+  return contentLines.join('\n');
 }
 
 function normalizeCodeLanguage(language: string) {
@@ -2063,6 +2181,7 @@ function detectCodeLanguage(code: string) {
       // Keep looking for a better lightweight guess.
     }
   }
+  if (/^@@\s|(?:^|\n)\+[^+\n]/.test(trimmed) && /(?:^|\n)-[^-\n]/.test(trimmed)) return 'diff';
   if (/\bfunc\s+\w+\s*\(|\bpackage\s+main\b|:=/.test(trimmed)) return 'go';
   if (/\b(def|class|from|import)\s+\w+|__name__/.test(trimmed)) return 'python';
   if (/\b(const|let|var|function|interface|type)\s+\w+|=>/.test(trimmed)) return 'typescript';
@@ -2073,6 +2192,7 @@ function detectCodeLanguage(code: string) {
 
 function renderHighlightedCode(code: string, language: string) {
   const normalizedLanguage = normalizeCodeLanguage(language) || detectCodeLanguage(code);
+  if (normalizedLanguage === 'diff') return renderDiffCode(code);
   const keywords = codeKeywordsForLanguage(normalizedLanguage);
   let html = '';
   let index = 0;
@@ -2148,6 +2268,30 @@ function renderHighlightedCode(code: string, language: string) {
   }
 
   return html;
+}
+
+function renderDiffCode(code: string) {
+  const lines = String(code || '').replace(/\r\n/g, '\n').split('\n');
+  return lines.map((line) => {
+    const kind = diffLineKind(line);
+    const marker = diffLineMarker(line, kind);
+    const content = kind === 'add' || kind === 'delete' ? line.slice(1) : line;
+    return `<span class="diff-line diff-line-${kind}"><span class="diff-marker">${escapeHtml(marker)}</span><span class="diff-content">${escapeHtml(content || ' ')}</span></span>`;
+  }).join('');
+}
+
+function diffLineKind(line: string) {
+  if (line.startsWith('@@')) return 'hunk';
+  if (line.startsWith('+++') || line.startsWith('---')) return 'file';
+  if (line.startsWith('+')) return 'add';
+  if (line.startsWith('-')) return 'delete';
+  return 'context';
+}
+
+function diffLineMarker(line: string, kind: string) {
+  if (kind === 'add') return '+';
+  if (kind === 'delete') return '-';
+  return line.startsWith(' ') ? ' ' : '';
 }
 
 function codeKeywordsForLanguage(language: string) {
