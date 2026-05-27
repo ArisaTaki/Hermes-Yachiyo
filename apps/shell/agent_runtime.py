@@ -22,6 +22,7 @@ from urllib import request as urlrequest
 from uuid import uuid4
 
 from apps.shell.model_profiles import (
+    OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS,
     get_model_profile_service,
     openai_compatible_chat_message,
     supports_openai_compatible_api,
@@ -909,8 +910,6 @@ class AgentRuntimeService:
             name = str(tool or "").strip()
             if name in _KNOWN_AGENT_TOOLS and name not in normalized_allowed:
                 normalized_allowed.append(name)
-        if "artifact.write" not in normalized_allowed:
-            normalized_allowed.append("artifact.write")
 
         raw_approval = raw.get("approval_required")
         approval_required = dict(raw_approval) if isinstance(raw_approval, dict) else {}
@@ -1033,9 +1032,17 @@ class AgentRuntimeService:
         }
 
     def _row_to_run(self, row: sqlite3.Row) -> dict[str, Any]:
+        row_keys = row.keys() if hasattr(row, "keys") else []
+        run_group_id = row["run_group_id"]
+        run_group_source = (
+            str(row["run_group_source"] or "")
+            if "run_group_source" in row_keys
+            else self._run_group_source(str(run_group_id or ""))
+        )
         run = {
             "run_id": row["run_id"],
-            "run_group_id": row["run_group_id"],
+            "run_group_id": run_group_id,
+            "run_group_source": run_group_source,
             "kind": row["kind"],
             "runnable_id": row["runnable_id"],
             "runnable_name": self._runnable_name(str(row["kind"]), str(row["runnable_id"])),
@@ -2286,7 +2293,17 @@ class AgentRuntimeService:
     def list_runs(self, limit: int = 50) -> dict[str, Any]:
         self._ensure_row_factory()
         rows = self._conn.execute(
-            "SELECT * FROM runs ORDER BY updated_at DESC LIMIT ?",
+            """
+            SELECT runs.*, run_groups.source AS run_group_source
+              FROM runs
+              LEFT JOIN run_groups ON run_groups.run_group_id = runs.run_group_id
+             WHERE NOT (
+                runs.kind = 'agent_run'
+                AND COALESCE(run_groups.source, '') = 'workflow'
+             )
+             ORDER BY runs.updated_at DESC
+             LIMIT ?
+            """,
             (max(1, min(int(limit or 50), 200)),),
         ).fetchall()
         return {"ok": True, "runs": [self._row_to_run(row) for row in rows]}
@@ -2305,6 +2322,17 @@ class AgentRuntimeService:
         if row is None:
             raise KeyError(run_group_id)
         return self._row_to_run_group(row)
+
+    def _run_group_source(self, run_group_id: str) -> str:
+        if not run_group_id:
+            return ""
+        row = self._conn.execute(
+            "SELECT source FROM run_groups WHERE run_group_id=?",
+            (run_group_id,),
+        ).fetchone()
+        if row is None:
+            return ""
+        return str(row["source"] or "")
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         self._ensure_row_factory()
@@ -2625,15 +2653,23 @@ class AgentRuntimeService:
             raise AgentRuntimeError("Agent 模型 Profile 缺少 base_url、model 或 API Key")
         allowed_tools = (agent.get("tool_policy") or {}).get("allowed_tools") or []
         if messages is None:
-            prompt = (
+            allowed_tool_text = ", ".join(allowed_tools) or "none"
+            system_prompt = (
                 "You are running inside Hermes-Yachiyo Agent Runtime. "
-                "Return concise final output. Prefer native tool_calls when available. "
+                "Follow the Agent functional instructions, persona prompt, user goal, and exact output requests. "
+                "If those instructions require an exact phrase or format, return exactly that final output. "
+                "Return concise final output unless the Agent instructions require otherwise. "
+                "Prefer native tool_calls when available. "
                 "If the model endpoint does not support tool_calls and a controlled tool is needed, respond as JSON "
-                "{\"action\":\"tool\",\"tool\":\"workspace.list\",\"input\":{}}; otherwise respond normally. "
-                "Request at most one high-risk tool per turn.\n\n"
-                f"Allowed tools: {', '.join(allowed_tools)}\n\n{context}"
+                "{\"action\":\"tool\",\"tool\":\"workspace.list\",\"input\":{}}. "
+                "Do not request tools that are not listed as allowed. "
+                "If no tools are allowed, do not request tools. "
+                f"Request at most one high-risk tool per turn.\n\nAllowed tools: {allowed_tool_text}"
             )
-            messages = [{"role": "user", "content": prompt}]
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": context},
+            ]
         tools = self._tool_schemas(allowed_tools)
         for iteration in range(max(0, int(start_iteration or 0)), 6):
             message = openai_compatible_chat_message(base_url, model, api_key, messages, tools=tools)
@@ -2858,7 +2894,7 @@ class AgentRuntimeService:
             },
         )
         try:
-            with urlrequest.urlopen(request, timeout=20) as response:
+            with urlrequest.urlopen(request, timeout=OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except (urlerror.URLError, TimeoutError, json.JSONDecodeError) as exc:
             raise AgentRuntimeError(f"custom_api 调用失败：{redact_secrets(exc)}") from exc
@@ -2955,49 +2991,312 @@ class AgentRuntimeService:
         timeline = [self._timeline("workflow.run.started", workflow["name"])]
         artifacts: list[dict[str, Any]] = []
         context = user_goal
+        return self._continue_workflow_run(
+            run,
+            workflow,
+            context=context,
+            timeline=timeline,
+            artifacts=artifacts,
+            start_index=0,
+            root_group=root_group,
+        )
+
+    def _workflow_parent_runs_waiting_for_child(
+        self,
+        child_run: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if child_run.get("kind") != "agent_run" or not child_run.get("run_group_id"):
+            return []
         try:
-            for node in self._workflow_path(workflow):
+            group = self.get_run_group(str(child_run["run_group_id"]))
+        except KeyError:
+            return []
+        parents: list[dict[str, Any]] = []
+        child_run_id = str(child_run.get("run_id") or "")
+        for run_id in [str(item) for item in group.get("child_run_ids") or [] if str(item)]:
+            if run_id == child_run_id:
+                continue
+            try:
+                candidate = self.get_run(run_id)
+            except KeyError:
+                continue
+            if (
+                candidate.get("kind") != "workflow_run"
+                or candidate.get("status") != "approval_required"
+            ):
+                continue
+            if any(
+                event.get("event") == "workflow.run.approval_required"
+                and str(event.get("child_run_id") or "") == child_run_id
+                for event in candidate.get("timeline") or []
+                if isinstance(event, dict)
+            ):
+                parents.append(candidate)
+        return parents
+
+    def _workflow_resume_start_index(
+        self,
+        workflow: dict[str, Any],
+        workflow_run: dict[str, Any],
+        child_run_id: str,
+    ) -> int | None:
+        target_agent_ordinal = 0
+        for event in workflow_run.get("timeline") or []:
+            if not isinstance(event, dict) or event.get("event") != "workflow.node.agent":
+                continue
+            target_agent_ordinal += 1
+            if str(event.get("child_run_id") or "") == child_run_id:
+                break
+        else:
+            return None
+        seen_agent_nodes = 0
+        for index, node in enumerate(self._workflow_path(workflow)):
+            if self._node_kind(node) != "agent":
+                continue
+            seen_agent_nodes += 1
+            if seen_agent_nodes == target_agent_ordinal:
+                return index + 1
+        return None
+
+    def _workflow_run_is_group_root(self, workflow_run: dict[str, Any]) -> bool:
+        run_group_id = str(workflow_run.get("run_group_id") or "")
+        if not run_group_id:
+            return False
+        try:
+            group = self.get_run_group(run_group_id)
+        except KeyError:
+            return False
+        child_run_ids = [str(item) for item in group.get("child_run_ids") or [] if str(item)]
+        return (
+            group.get("source") == "workflow"
+            or child_run_ids[:1] == [workflow_run.get("run_id")]
+        )
+
+    def _resume_parent_workflows_after_child_update(self, child_run: dict[str, Any]) -> None:
+        for workflow_run in self._workflow_parent_runs_waiting_for_child(child_run):
+            self._resume_parent_workflow_after_child_update(workflow_run, child_run)
+
+    def _resume_parent_workflow_after_child_update(
+        self,
+        workflow_run: dict[str, Any],
+        child_run: dict[str, Any],
+    ) -> dict[str, Any]:
+        root_group = self._workflow_run_is_group_root(workflow_run)
+        timeline = [
+            event
+            for event in workflow_run.get("timeline") or []
+            if isinstance(event, dict)
+        ]
+        artifacts = [item for item in workflow_run.get("artifacts") or [] if isinstance(item, dict)]
+        child_status = str(child_run.get("status") or "")
+        child_result = str(child_run.get("result") or "")
+        child_run_id = str(child_run.get("run_id") or "")
+        run_group_id = str(workflow_run.get("run_group_id") or "")
+        if child_status == "approval_required":
+            result = self._update_run(
+                str(workflow_run["run_id"]),
+                status="approval_required",
+                result=child_result,
+                timeline=timeline,
+                artifacts=artifacts,
+            )
+            if root_group:
+                self._update_run_group(
+                    run_group_id,
+                    status="approval_required",
+                    summary=child_result,
+                )
+            return result
+        if child_status != "completed":
+            status = "cancelled" if child_status == "cancelled" else "failed"
+            detail = (
+                f"{child_run.get('runnable_name') or child_run.get('runnable_id')}: "
+                f"{child_result}"
+            )
+            timeline.append(
+                self._timeline(
+                    f"workflow.run.{status}",
+                    detail,
+                    child_run_id=child_run_id,
+                    status=child_status,
+                )
+            )
+            result = self._update_run(
+                str(workflow_run["run_id"]),
+                status=status,
+                result=child_result,
+                timeline=timeline,
+                artifacts=artifacts,
+            )
+            if root_group:
+                self._update_run_group(run_group_id, status=status, summary=child_result)
+            return result
+        try:
+            workflow = self.get_workflow(str(workflow_run["runnable_id"]))
+            start_index = self._workflow_resume_start_index(workflow, workflow_run, child_run_id)
+            if start_index is None:
+                return workflow_run
+            timeline.append(
+                self._timeline(
+                    "workflow.run.resumed",
+                    "Workflow resumed after child Agent approval",
+                    child_run_id=child_run_id,
+                )
+            )
+            return self._continue_workflow_run(
+                workflow_run,
+                workflow,
+                context=child_result,
+                timeline=timeline,
+                artifacts=artifacts,
+                start_index=start_index,
+                root_group=root_group,
+            )
+        except Exception as exc:
+            timeline.append(self._timeline("workflow.run.failed", str(exc)))
+            result = self._update_run(
+                str(workflow_run["run_id"]),
+                status="failed",
+                result=str(exc),
+                timeline=timeline,
+                artifacts=artifacts,
+            )
+            if root_group:
+                self._update_run_group(run_group_id, status="failed", summary=str(exc))
+            return result
+
+    def _continue_workflow_run(
+        self,
+        run: dict[str, Any],
+        workflow: dict[str, Any],
+        *,
+        context: str,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        start_index: int,
+        root_group: bool,
+    ) -> dict[str, Any]:
+        run_group_id = str(run.get("run_group_id") or "")
+        try:
+            workflow_goal = str(run.get("user_goal") or context)
+            has_agent_upstream = max(0, start_index) > 0
+            for node in self._workflow_path(workflow)[max(0, start_index) :]:
                 kind = self._node_kind(node)
                 label = str((node.get("data") or {}).get("label") or node.get("id"))
                 if kind == "start":
                     timeline.append(self._timeline("workflow.node.start", label))
                     continue
                 if kind == "agent":
-                    agent_id = str((node.get("data") or {}).get("agent_id") or (node.get("data") or {}).get("agentId") or "")
+                    data = node.get("data") or {}
+                    agent_id = str(data.get("agent_id") or data.get("agentId") or "")
                     if not agent_id:
                         raise AgentRuntimeError(f"Agent 节点 {label} 缺少 agent_id")
                     agent = self._get_agent_private(agent_id)
-                    child = self._insert_run(kind="agent_run", runnable_id=agent_id, user_goal=context, run_group_id=run_group_id)
-                    child = self._execute_agent_run(child["run_id"], agent, context, upstream=context)
+                    agent_upstream = context if has_agent_upstream else ""
+                    child = self._insert_run(
+                        kind="agent_run",
+                        runnable_id=agent_id,
+                        user_goal=workflow_goal,
+                        run_group_id=run_group_id,
+                    )
+                    child = self._execute_agent_run(
+                        child["run_id"],
+                        agent,
+                        workflow_goal,
+                        upstream=agent_upstream,
+                    )
                     context = child["result"]
-                    timeline.append(self._timeline("workflow.node.agent", label, child_run_id=child["run_id"], status=child["status"]))
+                    has_agent_upstream = True
+                    timeline.append(
+                        self._timeline(
+                            "workflow.node.agent",
+                            label,
+                            child_run_id=child["run_id"],
+                            status=child["status"],
+                        )
+                    )
                     if child["status"] == "approval_required":
-                        timeline.append(self._timeline("workflow.run.approval_required", label, child_run_id=child["run_id"]))
-                        result = self._update_run(run["run_id"], status="approval_required", result=context, timeline=timeline, artifacts=artifacts)
+                        timeline.append(
+                            self._timeline(
+                                "workflow.run.approval_required",
+                                label,
+                                child_run_id=child["run_id"],
+                            )
+                        )
+                        result = self._update_run(
+                            str(run["run_id"]),
+                            status="approval_required",
+                            result=context,
+                            timeline=timeline,
+                            artifacts=artifacts,
+                        )
                         if root_group:
-                            self._update_run_group(run_group_id, status="approval_required", summary=context)
+                            self._update_run_group(
+                                run_group_id,
+                                status="approval_required",
+                                summary=context,
+                            )
+                            result = self.get_run(result["run_id"])
+                        return result
+                    if child["status"] != "completed":
+                        status = "cancelled" if child["status"] == "cancelled" else "failed"
+                        detail = f"{label}: {context or child['status']}"
+                        timeline.append(
+                            self._timeline(
+                                f"workflow.run.{status}",
+                                detail,
+                                child_run_id=child["run_id"],
+                                status=child["status"],
+                            )
+                        )
+                        result = self._update_run(
+                            str(run["run_id"]),
+                            status=status,
+                            result=context,
+                            timeline=timeline,
+                            artifacts=artifacts,
+                        )
+                        if root_group:
+                            self._update_run_group(run_group_id, status=status, summary=context)
                             result = self.get_run(result["run_id"])
                         return result
                     continue
                 if kind == "approval":
-                    timeline.append(self._timeline("workflow.node.approval", f"{label} checkpoint recorded"))
+                    timeline.append(
+                        self._timeline("workflow.node.approval", f"{label} checkpoint recorded")
+                    )
                     continue
                 if kind == "artifact":
-                    broker = ToolBroker(self._default_workspace_policy(), self.workflow_artifacts_dir / run["run_id"])
+                    broker = ToolBroker(
+                        self._default_workspace_policy(),
+                        self.workflow_artifacts_dir / str(run["run_id"]),
+                    )
                     artifact = broker.artifact_write(f"{_slug(label, 'artifact')}.md", context)
                     artifacts.append({"kind": "workflow_artifact", **artifact})
                     timeline.append(self._timeline("workflow.node.artifact", label))
                     continue
                 raise AgentRuntimeError(f"未知 Workflow 节点类型：{kind}")
             timeline.append(self._timeline("workflow.run.completed", "Workflow run completed"))
-            result = self._update_run(run["run_id"], status="completed", result=context, timeline=timeline, artifacts=artifacts)
+            result = self._update_run(
+                str(run["run_id"]),
+                status="completed",
+                result=context,
+                timeline=timeline,
+                artifacts=artifacts,
+            )
             if root_group:
                 self._update_run_group(run_group_id, status="completed", summary=context)
                 result = self.get_run(result["run_id"])
             return result
         except Exception as exc:
             timeline.append(self._timeline("workflow.run.failed", str(exc)))
-            result = self._update_run(run["run_id"], status="failed", result=str(exc), timeline=timeline, artifacts=artifacts)
+            result = self._update_run(
+                str(run["run_id"]),
+                status="failed",
+                result=str(exc),
+                timeline=timeline,
+                artifacts=artifacts,
+            )
             if root_group:
                 self._update_run_group(run_group_id, status="failed", summary=str(exc))
                 result = self.get_run(result["run_id"])
@@ -3021,6 +3320,7 @@ class AgentRuntimeService:
         timeline = [*run["timeline"], self._timeline("run.cancelled", "Run cancelled")]
         result = self._update_run(run_id, status="cancelled", timeline=timeline, pending_approval=None)
         self._update_agent_run_group_if_root(result)
+        self._resume_parent_workflows_after_child_update(result)
         return result
 
     def approve_run_approval(self, run_id: str) -> dict[str, Any]:
@@ -3101,6 +3401,7 @@ class AgentRuntimeService:
                 pending_approval=None,
             )
         self._update_agent_run_group_if_root(result)
+        self._resume_parent_workflows_after_child_update(result)
         return result
 
     def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
@@ -3117,6 +3418,7 @@ class AgentRuntimeService:
             pending_approval=None,
         )
         self._update_agent_run_group_if_root(result)
+        self._resume_parent_workflows_after_child_update(result)
         return result
 
     def _update_agent_run_group_if_root(self, run: dict[str, Any]) -> None:

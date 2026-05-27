@@ -58,6 +58,13 @@ import { currentParam, navigateTo } from '../lib/view';
 
 type StudioTab = 'agents' | 'skills' | 'skill-groups' | 'workflows' | 'runs';
 type SkillFolderFilter = 'all' | 'uncategorized' | string;
+type RunKindFilter = 'all' | 'workflow' | 'agent';
+
+type WorkflowChildRunRef = {
+  childRunId: string;
+  label: string;
+  status: string;
+};
 
 type StudioRefreshOptions = {
   selectedAgentId?: string;
@@ -329,7 +336,7 @@ function agentToDraft(agent: AgentSpec): AgentDraft {
     allow_workspace_read: tools.has('workspace.list') || tools.has('workspace.read'),
     allow_workspace_write: tools.has('workspace.write_patch'),
     allow_terminal: tools.has('terminal.run'),
-    allow_artifacts: tools.has('artifact.write') || !tools.size,
+    allow_artifacts: agent.tool_policy?.allowed_tools === undefined ? true : tools.has('artifact.write'),
     default_workdir: String(workspace.default_workdir || ''),
     readable_scopes: scopesToText(workspace.readable_scopes || ['.']),
     writable_scopes: scopesToText(workspace.writable_scopes || []),
@@ -415,6 +422,17 @@ function runKindLabel(kind: string): string {
   return kind || 'Run';
 }
 
+function isWorkflowChildAgentRun(run: RunSpec): boolean {
+  return run.kind === 'agent_run' && run.run_group_source === 'workflow';
+}
+
+function runMatchesFilter(run: RunSpec, filter: RunKindFilter): boolean {
+  if (isWorkflowChildAgentRun(run)) return false;
+  if (filter === 'agent') return run.kind === 'agent_run';
+  if (filter === 'workflow') return run.kind === 'workflow_run';
+  return true;
+}
+
 function formatRunDate(value?: string): string {
   if (!value) return '未知时间';
   const timestamp = Date.parse(value);
@@ -434,6 +452,34 @@ function formatApprovalInput(value: unknown): string {
   } catch {
     return String(value || '');
   }
+}
+
+function timelineChildRunId(event: Record<string, unknown>): string {
+  const value = event.child_run_id;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function timelineStatus(event: Record<string, unknown>): string {
+  const value = event.status;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function workflowChildRunRefs(run: RunSpec | null): WorkflowChildRunRef[] {
+  if (!run || run.kind !== 'workflow_run') return [];
+  const refs: WorkflowChildRunRef[] = [];
+  const seen = new Set<string>();
+  (run.timeline || []).forEach((event) => {
+    if (String(event.event || '') !== 'workflow.node.agent') return;
+    const childRunId = timelineChildRunId(event);
+    if (!childRunId || seen.has(childRunId)) return;
+    seen.add(childRunId);
+    refs.push({
+      childRunId,
+      label: String(event.detail || 'Agent'),
+      status: timelineStatus(event),
+    });
+  });
+  return refs;
 }
 
 function normalizeStudioTab(value: string): StudioTab {
@@ -493,6 +539,7 @@ export function AgentStudioView() {
   const [workflowRunGoal, setWorkflowRunGoal] = useState('');
   const [runTarget, setRunTarget] = useState('');
   const [runGoal, setRunGoal] = useState('');
+  const [runKindFilter, setRunKindFilter] = useState<RunKindFilter>('all');
   const [selectedRunId, setSelectedRunId] = useState(() => routeRunId);
   const [artifactPreview, setArtifactPreview] = useState<{ path: string; content: string; truncated?: boolean } | null>(null);
   const [status, setStatus] = useState('');
@@ -517,6 +564,26 @@ export function AgentStudioView() {
   const selectedRun = useMemo(
     () => runs.find((run) => run.run_id === selectedRunId) || null,
     [runs, selectedRunId],
+  );
+  const runById = useMemo(
+    () => new Map(runs.map((run) => [run.run_id, run])),
+    [runs],
+  );
+  const runFilterCounts = useMemo(
+    () => ({
+      all: runs.filter((run) => runMatchesFilter(run, 'all')).length,
+      workflow: runs.filter((run) => runMatchesFilter(run, 'workflow')).length,
+      agent: runs.filter((run) => runMatchesFilter(run, 'agent')).length,
+    }),
+    [runs],
+  );
+  const filteredRuns = useMemo(
+    () => runs.filter((run) => runMatchesFilter(run, runKindFilter)),
+    [runs, runKindFilter],
+  );
+  const selectedWorkflowChildRefs = useMemo(
+    () => workflowChildRunRefs(selectedRun),
+    [selectedRun],
   );
   const chatModelProfiles = useMemo(
     () => modelProfiles.filter((profile) => profile.capability === 'chat' && profile.status === 'available' && profile.enabled !== false),
@@ -667,6 +734,30 @@ export function AgentStudioView() {
       disposed = true;
     };
   }, [selectedRun, selectedRunId]);
+
+  useEffect(() => {
+    const missingChildRunIds = selectedWorkflowChildRefs
+      .map((ref) => ref.childRunId)
+      .filter((runId) => !runById.has(runId));
+    if (!missingChildRunIds.length) return;
+    let disposed = false;
+    Promise.all(missingChildRunIds.map((runId) => getRun(runId).catch(() => null)))
+      .then((childRuns) => {
+        if (disposed) return;
+        const loaded = childRuns.filter((run): run is RunSpec => Boolean(run));
+        if (!loaded.length) return;
+        setRuns((current) => {
+          const nextById = new Map(current.map((run) => [run.run_id, run]));
+          loaded.forEach((run) => nextById.set(run.run_id, run));
+          return current
+            .map((run) => nextById.get(run.run_id) || run)
+            .concat(loaded.filter((run) => !current.some((item) => item.run_id === run.run_id)));
+        });
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [runById, selectedWorkflowChildRefs]);
 
   useEffect(() => {
     setArtifactPreview(null);
@@ -1058,6 +1149,19 @@ export function AgentStudioView() {
     setSelectedRunId(runId);
     setTab('runs');
     navigateTo('agents', { run: runId }, ['tab']);
+  }
+
+  function selectRunKindFilter(nextFilter: RunKindFilter) {
+    setRunKindFilter(nextFilter);
+    if (selectedRun && runMatchesFilter(selectedRun, nextFilter)) return;
+    const nextRun = runs.find((run) => runMatchesFilter(run, nextFilter));
+    if (nextRun) {
+      openRunDetail(nextRun.run_id);
+      return;
+    }
+    setSelectedRunId('');
+    setTab('runs');
+    navigateTo('agents', { tab: 'runs' }, ['run']);
   }
 
   async function runCurrentAgent(): Promise<StudioRefreshOptions> {
@@ -1829,8 +1933,27 @@ export function AgentStudioView() {
               setRunGoal('');
               return { selectedRunId: run.run_id, runTarget: target.id };
             }, '创建 Run')}>运行</button>
+            <div className="run-history-toolbar">
+              <span>Run History · {filteredRuns.length}</span>
+              <div className="run-filter-tabs" role="group" aria-label="Run history filter">
+                {([
+                  ['all', 'All', runFilterCounts.all],
+                  ['workflow', 'Workflows', runFilterCounts.workflow],
+                  ['agent', 'Agents', runFilterCounts.agent],
+                ] as const).map(([filter, label, count]) => (
+                  <button
+                    type="button"
+                    key={filter}
+                    className={runKindFilter === filter ? 'active' : ''}
+                    onClick={() => selectRunKindFilter(filter)}
+                  >
+                    {label} <span>{count}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="run-list">
-              {runs.map((run) => (
+              {filteredRuns.map((run) => (
                 <button
                   type="button"
                   className={run.run_id === selectedRunId ? 'run-list-item active' : 'run-list-item'}
@@ -1842,6 +1965,7 @@ export function AgentStudioView() {
                   <small>{run.user_goal}</small>
                 </button>
               ))}
+              {!filteredRuns.length ? <div className="empty-state inline-empty">当前分类下没有 Run。</div> : null}
             </div>
           </div>
           <div className="agent-studio-panel">
@@ -1875,18 +1999,83 @@ export function AgentStudioView() {
                   </section>
                 ) : null}
                 <section>
-                  <h4>Result</h4>
+                  <h4>{selectedRun.kind === 'workflow_run' ? 'Final Result' : 'Result'}</h4>
                   <pre>{selectedRun.result || 'No result yet.'}</pre>
                 </section>
+                {selectedRun.kind === 'workflow_run' ? (
+                  <section>
+                    <h4>Workflow Steps · {selectedWorkflowChildRefs.length}</h4>
+                    <div className="workflow-child-results">
+                      {selectedWorkflowChildRefs.map((ref, index) => {
+                        const childRun = runById.get(ref.childRunId);
+                        const childStatus = childRun?.status || ref.status || 'loading';
+                        return (
+                          <article className="workflow-child-result" key={ref.childRunId}>
+                            <div className="workflow-child-result-head">
+                              <div>
+                                <strong>{index + 1}. {ref.label}</strong>
+                                <span>{childRun?.runnable_name || ref.childRunId}</span>
+                              </div>
+                              <div>
+                                <em className={`run-status-pill ${runStatusTone(childStatus)}`}>{childStatus}</em>
+                                <button type="button" className="run-timeline-child" onClick={() => openRunDetail(ref.childRunId)}>
+                                  Open Run
+                                </button>
+                              </div>
+                            </div>
+                            <pre>{childRun ? (childRun.result || 'No result yet.') : 'Loading child run...'}</pre>
+                            {childRun?.artifacts?.length ? (
+                              <div className="run-artifacts compact">
+                                {childRun.artifacts.map((artifact, artifactIndex) => {
+                                  const path = String(artifact.path || '');
+                                  return (
+                                    <button
+                                      type="button"
+                                      disabled={!path}
+                                      key={`${ref.childRunId}-${path}-${artifactIndex}`}
+                                      onClick={() => path ? void openArtifact(childRun, path) : undefined}
+                                    >
+                                      {path || 'artifact'}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ) : null}
+                          </article>
+                        );
+                      })}
+                      {!selectedWorkflowChildRefs.length ? <span>No child Agent runs</span> : null}
+                    </div>
+                  </section>
+                ) : null}
                 <section>
                   <h4>Timeline · {(selectedRun.timeline || []).length}</h4>
                   <ol className="run-timeline">
-                    {(selectedRun.timeline || []).map((event, index) => (
-                      <li key={`${String(event.event || 'event')}-${index}`}>
-                        <span>{String(event.event || 'event')}</span>
-                        <small>{String(event.detail || '')}</small>
-                      </li>
-                    ))}
+                    {(selectedRun.timeline || []).map((event, index) => {
+                      const childRunId = timelineChildRunId(event);
+                      const childRun = childRunId ? runById.get(childRunId) : null;
+                      const eventStatus = timelineStatus(event);
+                      return (
+                        <li key={`${String(event.event || 'event')}-${index}`}>
+                          <div className="run-timeline-head">
+                            <span>{String(event.event || 'event')}</span>
+                            {eventStatus ? (
+                              <em className={`run-status-pill ${runStatusTone(eventStatus)}`}>{eventStatus}</em>
+                            ) : null}
+                          </div>
+                          <small>{String(event.detail || '')}</small>
+                          {childRunId ? (
+                            <button
+                              type="button"
+                              className="run-timeline-child"
+                              onClick={() => openRunDetail(childRunId)}
+                            >
+                              Child Run {childRun?.status ? `· ${childRun.status}` : ''} · {childRunId}
+                            </button>
+                          ) : null}
+                        </li>
+                      );
+                    })}
                   </ol>
                 </section>
                 <section>

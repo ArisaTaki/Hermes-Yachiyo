@@ -198,6 +198,38 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - Workflow 节点设置区显示 node/edge 数量，Agent 节点可直接选择 Agent 或从链路中移除，移除时会自动桥接前后节点。
 - 已增加 deterministic 流通性测试：用 fake 默认 Chat Profile 跑完整 `workflow_phase4_agent_line_smoke`，验证 6 个 Agent 子 Run、RunGroup 和最终 Workflow artifact 都完成。
 
+### Batch 17：Workflow 子 Run 审批恢复
+
+- 子 Agent Run 因高风险工具进入 `approval_required` 时，父 Workflow Run 会保持 `approval_required` 并在 timeline 记录对应 `child_run_id`。
+- 审批通过子 Agent Run 后，Agent Runtime 会找到同一 RunGroup 中等待该子 Run 的父 Workflow，从暂停的 Agent 节点之后继续执行后续节点。
+- 审批后若子 Agent 再次请求高风险工具，父 Workflow 会继续停在 `approval_required`；若子 Agent 审批后失败或被拒绝，父 Workflow 会同步进入失败或取消状态。
+- 恢复后的 Workflow 会继续写入 timeline、后续子 Run 和 workflow artifact，并同步更新根 RunGroup 状态与摘要。
+
+### Batch 18：真实模型 E2E 与 Run 可观察性
+
+- 已用已配置默认 Chat Profile 完成真实 E2E：导入 Skill、挂载 Agent、直接运行 Agent、API 运行 Workflow、Runs 页面触发 Workflow，验证真实模型链路、RunGroup、子 Run 和 workflow artifact。
+- Agent Runtime 尊重显式空工具集；用户把 `allowed_tools` 配成 `[]` 时，模型 payload 不再获得 `artifact.write` 或其他 tool schema。
+- 模型调用拆分 system/user messages，system message 固定运行时边界与精确输出优先级，user message 承载 Agent context、Skill、上游上下文和目标。
+- Workflow 初次执行子 Agent 失败或取消时会 fail/cancel 父 Workflow 并停止后续节点，不再把失败文本继续传给下一个 Agent。
+- Runs 详情 timeline 会把 `child_run_id` 渲染为可点击 Child Run 入口，并显示节点状态，便于从 workflow run 追到具体 Agent run。
+- Workflow Studio 的 React Flow 控件、MiniMap 和 attribution 样式已统一暗色主题，避免画布出现白底控件块。
+
+### Batch 19：Runs 顶层历史与 Workflow 中间产物展示
+
+- Runs 列表语义收敛为顶层历史：Workflow 调用出来的子 Agent Run 不再进入主列表；`Workflows` 只展示 Workflow root run，`Agents` 只展示用户单独运行 Agent 的 run。
+- Workflow Run 详情新增 `Final Result` 与 `Workflow Steps`：最终结果仍显示最后一个节点输出，步骤区按节点顺序展示每个子 Agent 的状态、输出和子 Run 入口。
+- 子 Agent Run 仍完整保留在数据库中，并可通过 workflow timeline / steps 按 `child_run_id` 拉取；它们是 Workflow 内部执行记录，不是独立 Agent 历史。
+- Workflow 子 Agent 的 `user_goal` 保持原始 Workflow 目标，上一节点输出只进入 `Upstream Context`，避免第二个及后续 Agent 的上下文重复膨胀，也让 Runs 列表展示更接近用户意图。
+- OpenAI-compatible chat 调用超时从硬编码 20 秒收敛到 60 秒常量，适配真实模型在多 Agent 串联和较长上下文下的响应时间。
+
+## 下一阶段产品方向
+
+- Agent / Workflow 的核心可行性要从“能得到文本结果”推进到“能产出可浏览、可复用的文件”：Design Agent 应能产出原型文件或 Markdown；Coding Agent 应能产出代码文件或 patch；Review Agent 应能产出 Markdown review 建议。
+- Workflow 跑完后需要记录每个 Agent 的结构化产物，而不只是最后一个节点的文本；Runs 详情应成为查看所有中间产物、最终产物、artifact 和子 Run 的统一入口。
+- 任意入口触发 Workflow 都应同步到 Runs：Quick Run、Workflow Studio、Chat `@Agent` / `@Workflow`、未来 Yachiyo 自动派发任务，都应该产生同一套 RunGroup / Run 历史。
+- Chat 入口后续可拆成两类：主动选择某个 Agent 开启一对一对话；在主对话中 `@Agent` / `@Workflow` 由 Yachiyo 派发任务并回填 Runs。
+- 更拟人化的远期方向是“公司派活式群组”：Yachiyo、用户和多个 Agent 同处一个任务群组，用户可插话、@ 任意 Agent，Yachiyo 可自主判断交给谁处理；这需要先明确消息模型、权限边界、RunGroup 映射和产物归属。
+
 ## 新增接口
 
 - `GET/POST /ui/model-profiles`
@@ -260,7 +292,7 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - 旧 `execution_backend` 数据仍能读取，但产品语义统一归一到 Yachiyo Agent Runtime。
 - Agent Studio Agent 是持久岗位，不是 Hermes 原生 `delegate_task` 临时 subagent 注册表。
 - Custom API 作为高级模型配置兼容路径保留，但仍走同一个 Yachiyo Agent Runtime。
-- ToolBroker 已支持真实 tool-call 循环和单个 Agent Run 审批恢复；Workflow 子 Run 遇到审批后父 Workflow 会暂停为 `approval_required`，审批完成后自动继续父 Workflow 仍待增强。
+- ToolBroker 已支持真实 tool-call 循环、单个 Agent Run 审批恢复，以及 Workflow 子 Run 审批后的父 Workflow 继续执行；Workflow 子 Run 失败会停止父 Workflow。
 - 运行中取消、streaming/轮询、失败重试和复杂 artifact viewer 仍待补齐。
 - 主 Agent 自动委派第一版走 Yachiyo 内部桥，不改 Hermes 原生 `delegate_task` 实现。
 - TTS Profile 首版做统一保存与复用入口，具体语音合成、服务检测和连接测试仍由主动关怀 / TTS 专用链路执行。

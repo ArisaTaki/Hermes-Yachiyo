@@ -2,6 +2,31 @@
 
 ## 已完成
 
+### Milestone 92 — Runs 顶层历史与 Workflow 步骤产物
+
+- ✅ 按真实用户流程重新创建 demo Skills、Design / Coding / Review Agents 和线性 Workflow，并用已配置默认 Chat Profile 跑通真实 Workflow：`workflow_run_8254dd42d09c` completed，三个子 Agent 分别产出 `DESIGN_DEMO_OK`、`CODING_DEMO_OK`、`REVIEW_DEMO_OK`。
+- ✅ 修复真实多 Agent 串联暴露的问题：OpenAI-compatible chat 读取超时从 20 秒改为 60 秒常量；Workflow 后续 Agent 的 `user_goal` 保持原始目标，上一节点结果只进入 `Upstream Context`，避免上下文重复膨胀。
+- ✅ Runs 列表语义改为顶层历史：Workflow 子 Agent Run 不再出现在主列表或 Agents 分类里；`Workflows` 只展示 Workflow root run，`Agents` 只展示用户单独运行 Agent 的 run。
+- ✅ Workflow Run 详情新增 `Final Result` 与 `Workflow Steps`，按顺序展示每个子 Agent 的状态、输出、artifact 入口和 Open Run 入口；中间产物不再只能从 timeline 手动跳转查找。
+- ✅ 已确认下一阶段产品方向：Agent / Workflow 需要从文本 demo 走向真实产物契约，Design Agent 产出原型或 Markdown，Coding Agent 产出代码或 patch，Review Agent 产出 Markdown review；Runs 要成为所有入口触发任务的统一产物查看面板。
+- ✅ 验证：`.venv/bin/python -m pytest tests/test_agent_runtime.py tests/test_model_profiles.py tests/test_chat_api.py tests/test_ui_bridge_routes.py -q` → 131 passed；`npm --prefix apps/frontend run build` → passed；`git diff --check` → clean。
+
+### Milestone 91 — 真实模型 E2E 与 Workflow 缺陷收口
+
+- ✅ 使用已配置默认 Chat Profile（`xiaomi_mimo/mimo-v2-pro`）完成真实 E2E：导入本地 Skill、挂载到 Agent、直接运行 Agent、API 运行 Workflow、Runs 页面触发 Workflow，均能创建真实 Run / 子 Run 并得到模型结果。
+- ✅ Agent Runtime 现在尊重显式空工具集；`tool_policy.allowed_tools: []` 不再被强行补成 `artifact.write`，真实回归中两个子 Agent 的 compiled `allowed_tools` 均为 `[]`。
+- ✅ Agent 模型调用改为 system message 承载运行时规则，明确精确输出要求优先；真实回归中 Skill Agent 能稳定返回 `HY_REAL_AGENT_OK HY_REAL_SKILL_MARKER_20260527`。
+- ✅ Workflow 在子 Agent 初次执行失败或取消时会立即让父 Workflow fail/cancel，不再把失败结果当作正常上下文继续传递；取消子 Run 也会同步唤醒等待中的父 Workflow。
+- ✅ Runs 详情 timeline 增加 child run 跳转按钮和节点状态；Workflow Studio 的 React Flow MiniMap / Controls / attribution 白底样式已统一到暗色主题。
+- ✅ 验证：`.venv/bin/python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_ui_bridge_routes.py -q` → 107 passed；`npm --prefix apps/frontend run build` → passed；`git diff --check` → clean。
+
+### Milestone 90 — Workflow 子 Run 审批恢复
+
+- ✅ Workflow 子 Agent Run 进入 `approval_required` 后，父 Workflow Run 会保持暂停并记录对应 `child_run_id`。
+- ✅ 审批通过子 Agent Run 后，Agent Runtime 会找到同一 RunGroup 中等待该子 Run 的父 Workflow，从暂停节点之后继续执行后续 Agent / Approval / Artifact 节点。
+- ✅ 子 Agent 审批后再次请求高风险工具时，父 Workflow 会继续停在 `approval_required`；子 Agent 审批后失败或被拒绝时，父 Workflow 会同步失败或取消。
+- ✅ 验证：`.venv/bin/python -m pytest tests/test_agent_runtime.py::test_workflow_resumes_after_child_agent_approval -q` → 1 passed；`.venv/bin/python -m pytest tests/test_agent_runtime.py -q` → 39 passed。
+
 ### Milestone 89 — Workflow Studio 基础补强
 
 - ✅ Workflow seed 逻辑修正：默认 Workflow 会独立补种，已有 Agent 的数据库也能获得缺失的默认 Workflow。

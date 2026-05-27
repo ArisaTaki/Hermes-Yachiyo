@@ -2,18 +2,19 @@
 
 ## 当前优先项
 
-### 2026-05-25 晚上继续处理建议
+### 2026-05-27 下一轮 Agent / Workflow 可行性讨论
 
-1. 重启 `hermes-yachiyo` 后进入 `#/agents/workflows`，确认默认 `Phase 4 Agent 全线流通测试` 已补种；如果旧进程仍在运行，前端也可以用“全线测试模板”按钮手动生成并保存。
-2. 用真实默认 Chat Profile 手工跑一次全线 Workflow：目标建议写成一个低风险 brief，检查 6 个 Agent 子 Run、RunGroup、Timeline 和 Flow Summary artifact。
-3. 真实跑之前先给需要专业能力的默认 Agent 挂载 14 个 Yachiyo skills 中合适的一组；当前后端流通性测试使用 fake model，只验证编排闭环，不验证真实 Prompt 质量。
-4. 下一项 Phase 4 功能优先补 Workflow 中子 Agent `approval_required` 后的父 Workflow 恢复语义：子 Run 审批完成后，父 Workflow Run 应继续后续节点。
-5. 当前工作区还保留 Chat 空会话清理改动，若晚上继续收口，可以单独复查并提交那一批，避免混进 Workflow 提交。
-6. 如果要准备打包或发 PR，复跑 `.venv/bin/python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_ui_bridge_routes.py -q`、`npm --prefix apps/frontend run build`、`git diff --check`。
+1. 先定义 Agent 产物契约：Design Agent 应产出原型文件或 Markdown，Coding Agent 应产出代码文件或 patch，Review Agent 应产出 Markdown review；每类产物需要明确保存位置、artifact metadata、权限与预览方式。
+2. Workflow 完整跑完后，Runs 需要能展示每个 Agent 的产物，而不只是最后节点结果；当前 `Workflow Steps` 已能展示每个子 Agent 文本输出，下一步要把文件 artifact 和结构化产物一并纳入步骤视图。
+3. 统一所有 Workflow 触发入口的 Run 记录：Workflow Studio、Runs 面板、Chat `@Workflow`、Yachiyo 自动委派都应创建同一套 RunGroup / WorkflowRun / 子 AgentRun，并在 Runs 中可追踪。
+4. 设计 Chat 中的 Agent 对话模式：用户主动选择某个 Agent 开启一对一对话时，应该复用 Agent 的 nickname、avatar、persona prompt、skills 和权限，但需要和一次性 Agent Run 区分会话生命周期。
+5. 设计 Yachiyo 派活模式：主对话里 `@Agent` / `@Workflow` 可以由 Yachiyo 创建任务群组，用户可在群组里插话或继续 @ 其他 Agent；先明确消息模型、RunGroup 映射、用户插话如何影响后续 Agent 上下文。
+6. 保留 Runs 清理按钮为后续 UX/数据管理任务：需要先决定软删除、撤销窗口、RunGroup 与子 Run 的删除关系，以及 artifact 是否一起清理。
+7. 默认 `Phase 4 Agent 全线流通测试` 仍需要单独做 Prompt/Skill 质量调校；真实模型曾暴露长上下文超时、工具误请求和输出约束不足，后续应配合产物契约一起收紧。
 
 ### Phase 4 模型 / Agent / TTS 后续
 
-1. 补 Workflow 中子 Agent `approval_required` 后的父 Workflow 恢复语义：子 Run 审批完成后，父 Workflow Run 应能继续执行后续节点。
+1. 继续收紧默认 Agent 工具策略和 Prompt 质量：低风险 brief 不应轻易诱发 Coding Agent 请求 `terminal.run`，Research / Design 需要更明确的 no-tool / no-loop 行为边界。
 2. Agent Runtime 后续增强：补 streaming/轮询刷新、运行中取消 UI、失败重试、更完整 artifact viewer，以及 Runs 页面按 Agent 履历聚合。
 3. 手工验证主 Agent 自动委派体验：用真实 Chat Profile 创建启用 Agent / Workflow，检查主会话是否能触发 `run_yachiyo_agent` / `run_yachiyo_workflow`、Run 留档、结果回填和 3 次上限。
 4. 规划“直接与 Agent 聊天”入口：复用 Agent 的 `nickname`、`avatar_url`、`persona_prompt`，明确与主 Chat / Workflow Run / Quick Run 的数据边界。

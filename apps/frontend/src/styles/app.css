@@ -13717,6 +13717,49 @@ button.activity-item {
   color: var(--hy-fg);
 }
 
+.run-history-toolbar {
+  display: grid;
+  gap: 8px;
+}
+
+.run-history-toolbar>span {
+  color: var(--hy-faint);
+  font-size: 11px;
+}
+
+.run-filter-tabs {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.run-filter-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--hy-muted);
+  font-size: 11px;
+}
+
+.run-filter-tabs button.active {
+  background: oklch(66% 0.12 188 / 0.14);
+  color: var(--hy-fg);
+}
+
+.run-filter-tabs button span {
+  color: var(--hy-faint);
+}
+
 .run-list-item {
   display: grid;
   gap: 5px;
@@ -13894,15 +13937,46 @@ button.activity-item {
   background: oklch(255 0 0 / 0.02);
 }
 
+.run-timeline-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
 .run-timeline span {
   color: var(--hy-fg);
   font-size: 12px;
+}
+
+.run-timeline .run-status-pill {
+  min-height: 22px;
+  padding: 2px 7px;
+  font-size: 10px;
+  font-style: normal;
 }
 
 .run-timeline small {
   color: var(--hy-faint);
   font-size: 11px;
   overflow-wrap: anywhere;
+}
+
+.run-timeline-child {
+  justify-self: start;
+  min-height: 26px;
+  padding: 4px 8px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--hy-surface) 86%, transparent);
+  color: var(--hy-subtle);
+  font-size: 11px;
+}
+
+.run-timeline-child:hover {
+  border-color: oklch(66% 0.12 188 / 0.32);
+  color: var(--hy-fg);
 }
 
 .run-artifacts button {
@@ -13917,6 +13991,68 @@ button.activity-item {
 .run-artifacts button:hover {
   border-color: oklch(66% 0.12 188 / 0.3);
   color: var(--hy-fg);
+}
+
+.run-artifacts.compact button {
+  min-height: 26px;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+.workflow-child-results {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.workflow-child-results>span {
+  color: var(--hy-faint);
+  font-size: 12px;
+}
+
+.workflow-child-result {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.02);
+}
+
+.workflow-child-result-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workflow-child-result-head>div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.workflow-child-result-head>div:first-child {
+  display: grid;
+  flex: 1;
+  align-items: start;
+  min-width: 180px;
+}
+
+.workflow-child-result-head strong {
+  color: var(--hy-fg);
+  font-size: 12px;
+}
+
+.workflow-child-result-head span {
+  min-width: 0;
+  color: var(--hy-faint);
+  font-size: 11px;
+  overflow-wrap: anywhere;
 }
 
 .artifact-preview {
@@ -13948,6 +14084,48 @@ button.activity-item {
   background: color-mix(in oklch, var(--hy-surface) 92%, black);
   color: var(--hy-fg);
   font-size: 12px;
+}
+
+.workflow-canvas .react-flow__edge-path {
+  stroke: oklch(66% 0.12 188 / 0.56);
+}
+
+.workflow-canvas .react-flow__controls,
+.workflow-canvas .react-flow__minimap {
+  overflow: hidden;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--hy-surface) 94%, transparent);
+  box-shadow: none;
+}
+
+.workflow-canvas .react-flow__controls-button {
+  border-bottom: 1px solid var(--hy-border-soft);
+  background: transparent;
+  color: var(--hy-fg);
+  fill: var(--hy-fg);
+}
+
+.workflow-canvas .react-flow__controls-button:last-child {
+  border-bottom: 0;
+}
+
+.workflow-canvas .react-flow__controls-button:hover {
+  background: oklch(255 0 0 / 0.06);
+}
+
+.workflow-canvas .react-flow__minimap-mask {
+  fill: oklch(0% 0 0 / 0.22);
+}
+
+.workflow-canvas .react-flow__minimap-node {
+  fill: oklch(66% 0.12 188 / 0.5);
+}
+
+.workflow-canvas .react-flow__attribution {
+  border-top-left-radius: 8px;
+  background: color-mix(in oklch, var(--hy-surface) 94%, transparent);
+  color: var(--hy-faint);
 }
 
 .chat-runnable-select {

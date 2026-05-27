@@ -33,6 +33,9 @@ class ModelProfileError(RuntimeError):
     """Raised when a model profile operation cannot be completed."""
 
 
+OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS = 60
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -1444,7 +1447,7 @@ def _openai_compatible_chat_payload(
         headers=_openai_compatible_auth_headers(base_url, api_key),
     )
     try:
-        with urlrequest.urlopen(request, timeout=20) as response:
+        with urlrequest.urlopen(request, timeout=OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urlerror.HTTPError as exc:
         detail = ""

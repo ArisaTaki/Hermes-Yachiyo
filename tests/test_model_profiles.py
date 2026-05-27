@@ -8,7 +8,13 @@ import sqlite3
 import pytest
 
 from apps.shell.agent_runtime import AgentRuntimeService
-from apps.shell.model_profiles import ModelProfileError, ModelProfileService, openai_compatible_chat, openai_compatible_chat_message
+from apps.shell.model_profiles import (
+    OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS,
+    ModelProfileError,
+    ModelProfileService,
+    openai_compatible_chat,
+    openai_compatible_chat_message,
+)
 
 
 def make_profile_service(tmp_path) -> ModelProfileService:
@@ -388,7 +394,7 @@ def test_openai_compatible_chat_reads_reasoning_content_and_xiaomi_api_key_heade
             return json.dumps({"choices": [{"message": {"content": "", "reasoning_content": "red, blue"}}]}).encode("utf-8")
 
     def fake_urlopen(request, timeout):
-        assert timeout == 20
+        assert timeout == OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS
         assert request.full_url == "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
         assert request.get_header("Authorization") == "Bearer sk-xiaomi"
         assert request.get_header("Api-key") == "sk-xiaomi"
@@ -436,7 +442,7 @@ def test_openai_compatible_chat_message_returns_tool_calls(monkeypatch):
 
     def fake_urlopen(request, timeout):
         body = json.loads(request.data.decode("utf-8"))
-        assert timeout == 20
+        assert timeout == OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS
         assert body["tools"][0]["function"]["name"] == "workspace_read"
         return FakeResponse()
 

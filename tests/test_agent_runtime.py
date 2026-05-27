@@ -646,6 +646,152 @@ def test_linear_workflow_executes_agent_nodes_in_order(tmp_path, monkeypatch):
         service.close()
 
 
+def test_workflow_child_agents_keep_goal_and_receive_prior_result_as_upstream(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    contexts = []
+    responses = iter(["Design output", "Code output"])
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        contexts.append(messages[-1]["content"])
+        return {"content": next(responses)}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        agent_a = service.create_agent({"name": "Design Agent", "model_mode": "custom_api", "model_config": model_config})
+        agent_b = service.create_agent({"name": "Coding Agent", "model_mode": "custom_api", "model_config": model_config})
+        workflow = service.create_workflow(
+            {
+                "name": "Context Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {"id": "a", "type": "agent", "data": {"label": "Design Agent", "agent_id": agent_a["agent_id"]}},
+                    {"id": "b", "type": "agent", "data": {"label": "Coding Agent", "agent_id": agent_b["agent_id"]}},
+                ],
+                "edges": [
+                    {"source": "start", "target": "a"},
+                    {"source": "a", "target": "b"},
+                ],
+            }
+        )
+
+        run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "Ship it"})
+
+        assert run["status"] == "completed"
+        assert run["result"] == "Code output"
+        assert "# User Goal\nShip it" in contexts[0]
+        assert "# Upstream Context\nNone" in contexts[0]
+        assert "# User Goal\nShip it" in contexts[1]
+        assert "# Upstream Context\nDesign output" in contexts[1]
+        assert "# User Goal\nDesign output" not in contexts[1]
+        assert contexts[1].count("Design output") == 1
+
+        group = service.get_run_group(run["run_group_id"])
+        agent_runs = [
+            service.get_run(run_id)
+            for run_id in group["child_run_ids"]
+            if run_id != run["run_id"]
+        ]
+        assert [child["user_goal"] for child in agent_runs] == ["Ship it", "Ship it"]
+    finally:
+        service.close()
+
+
+def test_list_runs_returns_roots_and_standalone_agents_only(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "OK"})
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        agent_a = service.create_agent({"name": "Workflow Agent A", "model_mode": "custom_api", "model_config": model_config})
+        agent_b = service.create_agent({"name": "Workflow Agent B", "model_mode": "custom_api", "model_config": model_config})
+        workflow = service.create_workflow(
+            {
+                "name": "List Runs Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {"id": "a", "type": "agent", "data": {"label": "Agent A", "agent_id": agent_a["agent_id"]}},
+                    {"id": "b", "type": "agent", "data": {"label": "Agent B", "agent_id": agent_b["agent_id"]}},
+                ],
+                "edges": [
+                    {"source": "start", "target": "a"},
+                    {"source": "a", "target": "b"},
+                ],
+            }
+        )
+
+        workflow_run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "Ship it"})
+        standalone_agent_run = service.create_agent_run({"agent_id": agent_a["agent_id"], "user_goal": "Run alone"})
+
+        listed = service.list_runs(limit=20)["runs"]
+        listed_ids = {run["run_id"] for run in listed}
+        group = service.get_run_group(workflow_run["run_group_id"])
+        workflow_child_run_ids = [
+            run_id
+            for run_id in group["child_run_ids"]
+            if run_id != workflow_run["run_id"]
+        ]
+
+        assert workflow_run["run_id"] in listed_ids
+        assert standalone_agent_run["run_id"] in listed_ids
+        assert not any(run_id in listed_ids for run_id in workflow_child_run_ids)
+        assert service.get_run(workflow_child_run_ids[0])["run_group_source"] == "workflow"
+        assert service.get_run(standalone_agent_run["run_id"])["run_group_source"] == "agent"
+    finally:
+        service.close()
+
+
+def test_workflow_stops_when_child_agent_fails(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    calls = []
+
+    def fake_chat(*_args, **_kwargs):
+        calls.append("called")
+        raise RuntimeError("model exploded")
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        agent_a = service.create_agent({"name": "Failing Agent", "model_mode": "custom_api", "model_config": model_config})
+        agent_b = service.create_agent({"name": "Skipped Agent", "model_mode": "custom_api", "model_config": model_config})
+        workflow = service.create_workflow(
+            {
+                "name": "Fail Fast Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {"id": "a", "type": "agent", "data": {"label": "Failing Agent", "agent_id": agent_a["agent_id"]}},
+                    {"id": "b", "type": "agent", "data": {"label": "Skipped Agent", "agent_id": agent_b["agent_id"]}},
+                ],
+                "edges": [
+                    {"source": "start", "target": "a"},
+                    {"source": "a", "target": "b"},
+                ],
+            }
+        )
+
+        run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "Ship it"})
+
+        assert run["status"] == "failed"
+        assert run["result"] == "model exploded"
+        assert calls == ["called"]
+        assert [event["event"] for event in run["timeline"]].count("workflow.node.agent") == 1
+        assert any(event["event"] == "workflow.run.failed" for event in run["timeline"])
+        assert service.get_run_group(run["run_group_id"])["status"] == "failed"
+    finally:
+        service.close()
+
+
 def test_agent_execution_backend_legacy_values_normalize_to_yachiyo(tmp_path):
     service = make_service(tmp_path)
     try:
@@ -816,7 +962,10 @@ def test_agent_run_pauses_for_terminal_approval_and_resumes(tmp_path, monkeypatc
                     {
                         "id": "call_terminal",
                         "type": "function",
-                        "function": {"name": "terminal_run", "arguments": json.dumps({"command": "printf approved"})},
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf approved"}),
+                        },
                     }
                 ],
             }
@@ -845,6 +994,118 @@ def test_agent_run_pauses_for_terminal_approval_and_resumes(tmp_path, monkeypatc
         assert resumed["status"] == "completed"
         assert resumed["result"] == "Command complete"
         assert service.get_run_group(resumed["run_group_id"])["status"] == "completed"
+    finally:
+        service.close()
+
+
+def test_workflow_resumes_after_child_agent_approval(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_terminal",
+                        "type": "function",
+                        "function": {"name": "terminal_run", "arguments": json.dumps({"command": "printf approved"})},
+                    }
+                ],
+            }
+        if len(calls) == 2:
+            assert messages[-1]["role"] == "tool"
+            assert "approved" in messages[-1]["content"]
+            return {"content": "Agent A complete"}
+        return {"content": "Agent B complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        agent_a = service.create_agent(
+            {
+                "name": "Needs Approval",
+                "model_mode": "custom_api",
+                "model_config": model_config,
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        agent_b = service.create_agent(
+            {
+                "name": "After Approval",
+                "model_mode": "custom_api",
+                "model_config": model_config,
+            }
+        )
+        workflow = service.create_workflow(
+            {
+                "name": "Approval Resume Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "a",
+                        "type": "agent",
+                        "data": {
+                            "label": "Needs Approval",
+                            "agent_id": agent_a["agent_id"],
+                        },
+                    },
+                    {
+                        "id": "b",
+                        "type": "agent",
+                        "data": {
+                            "label": "After Approval",
+                            "agent_id": agent_b["agent_id"],
+                        },
+                    },
+                    {"id": "summary", "type": "artifact", "data": {"label": "Summary"}},
+                ],
+                "edges": [
+                    {"source": "start", "target": "a"},
+                    {"source": "a", "target": "b"},
+                    {"source": "b", "target": "summary"},
+                ],
+            }
+        )
+
+        run = service.create_workflow_run(
+            {"workflow_id": workflow["workflow_id"], "user_goal": "Run approval flow"}
+        )
+
+        assert run["status"] == "approval_required"
+        group = service.get_run_group(run["run_group_id"])
+        child_run_ids = [run_id for run_id in group["child_run_ids"] if run_id != run["run_id"]]
+        assert len(child_run_ids) == 1
+        child = service.get_run(child_run_ids[0])
+        assert child["status"] == "approval_required"
+
+        approved_child = service.approve_run_approval(child["run_id"])
+
+        assert approved_child["status"] == "completed"
+        resumed_parent = service.get_run(run["run_id"])
+        assert resumed_parent["status"] == "completed"
+        assert resumed_parent["result"] == "Agent B complete"
+        agent_events = [
+            event
+            for event in resumed_parent["timeline"]
+            if event["event"] == "workflow.node.agent"
+        ]
+        assert len(agent_events) == 2
+        assert any(event["event"] == "workflow.run.resumed" for event in resumed_parent["timeline"])
+        assert any(
+            artifact.get("kind") == "workflow_artifact"
+            for artifact in resumed_parent["artifacts"]
+        )
+        assert service.get_run_group(run["run_group_id"])["status"] == "completed"
     finally:
         service.close()
 
@@ -932,6 +1193,42 @@ def test_tool_broker_blocks_out_of_scope_and_unapproved_terminal(tmp_path):
         broker.workspace_write_patch("../escape.txt", "bad", approved=True)
     assert broker.terminal_run("echo should-not-run")["approval_required"] is True
     assert broker.call("terminal.run", {"command": "echo should-not-run", "approved": True})["approval_required"] is True
+
+
+def test_explicit_empty_tool_policy_disables_model_tools(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    captured = {}
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        captured["messages"] = messages
+        captured["tools"] = tools
+        return {"content": "No tools used"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "No Tools Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {"allowed_tools": []},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Answer only"})
+
+        assert agent["tool_policy"]["allowed_tools"] == []
+        assert run["status"] == "completed"
+        assert captured["tools"] == []
+        prompt = captured["messages"][0]["content"]
+        assert "artifact.write" not in prompt
+        compiled = next(event for event in run["timeline"] if event["event"] == "agent.runtime.compiled")
+        assert compiled["allowed_tools"] == []
+    finally:
+        service.close()
 
 
 @pytest.mark.asyncio

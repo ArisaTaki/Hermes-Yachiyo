@@ -142,6 +142,7 @@ export type RunnableSummary = {
 export type RunSpec = {
   run_id: string;
   run_group_id?: string;
+  run_group_source?: string;
   kind: 'agent_run' | 'workflow_run' | string;
   runnable_id: string;
   runnable_name?: string;
