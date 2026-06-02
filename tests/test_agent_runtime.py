@@ -701,6 +701,66 @@ def test_workflow_child_agents_keep_goal_and_receive_prior_result_as_upstream(tm
         service.close()
 
 
+def test_workflow_canvas_spec_exposes_participants_and_executes(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    responses = iter(["Design brief", "Code patch"])
+
+    def fake_chat(_base_url, _model, _api_key, _messages, **_kwargs):
+        return {"content": next(responses)}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        design = service.create_agent({
+            "name": "Design Agent",
+            "nickname": "Design",
+            "avatar_url": "https://example.test/design.png",
+            "model_mode": "custom_api",
+            "model_config": model_config,
+        })
+        coding = service.create_agent({
+            "name": "Coding Agent",
+            "nickname": "Code",
+            "avatar_url": "https://example.test/code.png",
+            "model_mode": "custom_api",
+            "model_config": model_config,
+        })
+        workflow = service.create_workflow(
+            {
+                "name": "Web Design Chain",
+                "nodes": [
+                    {"id": "start", "type": "start", "position": {"x": 40, "y": 120}, "data": {"label": "Start", "kind": "start"}},
+                    {"id": "design", "type": "agent", "position": {"x": 260, "y": 120}, "data": {"label": "Design", "kind": "agent", "agent_id": design["agent_id"]}},
+                    {"id": "coding", "type": "agent", "position": {"x": 480, "y": 120}, "data": {"label": "Coding", "kind": "agent", "agent_id": coding["agent_id"]}},
+                ],
+                "edges": [
+                    {"id": "edge-start-design", "source": "start", "target": "design"},
+                    {"id": "edge-design-coding", "source": "design", "target": "coding"},
+                ],
+            }
+        )
+
+        runnable = next(item for item in service.list_runnables()["runnables"] if item["id"] == workflow["workflow_id"])
+        run = service.create_run_for_runnable(runnable_id=workflow["workflow_id"], user_goal="Build a landing page")
+
+        assert runnable["kind"] == "workflow"
+        assert [participant["name"] for participant in runnable["participants"]] == ["Design Agent", "Coding Agent"]
+        assert [participant["avatar_url"] for participant in runnable["participants"]] == [
+            "https://example.test/design.png",
+            "https://example.test/code.png",
+        ]
+        assert run["status"] == "completed"
+        assert run["result"] == "Code patch"
+        assert [event["event"] for event in run["timeline"]].count("workflow.node.agent") == 2
+        assert service.get_run_group(run["run_group_id"])["source"] == "workflow"
+    finally:
+        service.close()
+
+
 def test_list_runs_returns_roots_and_standalone_agents_only(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "OK"})

@@ -1,4 +1,4 @@
-import { FormEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { FormEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ClipboardEvent as ReactClipboardEvent,
   CSSProperties,
@@ -50,6 +50,39 @@ type ChatActivityEvent = {
   created_at?: string;
 };
 
+type ChatParticipant = {
+  kind?: 'main' | 'agent' | 'workflow' | string;
+  id?: string;
+  name?: string;
+  nickname?: string;
+  description?: string;
+  avatar_url?: string;
+  category?: string;
+  participants?: ChatParticipant[];
+};
+
+type ChatMessageMetadata = {
+  sender?: ChatParticipant;
+  target?: ChatParticipant;
+  runnable_kind?: string;
+  runnable_id?: string;
+  run_id?: string;
+  run_group_id?: string;
+  run_status?: string;
+  workflow_run_id?: string;
+  workflow_status?: string;
+  workflow_node?: string;
+};
+
+type MentionOption = {
+  id: string;
+  name: string;
+  nickname?: string;
+  avatar_url?: string;
+  kind: 'main' | 'agent' | 'workflow';
+  participants?: ChatParticipant[];
+};
+
 type ChatMessage = {
   id?: string;
   role?: string;
@@ -62,6 +95,7 @@ type ChatMessage = {
   progress_label?: string;
   activity_events?: ChatActivityEvent[];
   attachments?: ChatAttachment[];
+  metadata?: ChatMessageMetadata;
 };
 
 type MessagesPayload = {
@@ -70,6 +104,7 @@ type MessagesPayload = {
   is_processing?: boolean;
   messages?: ChatMessage[];
   anchor_message_id?: string;
+  session_context?: ChatSessionContext;
 };
 
 type SessionSearchMatch = {
@@ -85,6 +120,11 @@ type SessionSearchMatch = {
 type SessionItem = {
   session_id: string;
   title?: string;
+  conversation_kind?: 'main' | 'agent' | 'workflow' | string;
+  runnable_id?: string;
+  runnable_name?: string;
+  run_group_id?: string;
+  participants?: ChatParticipant[];
   created_at?: string;
   updated_at?: string;
   message_count?: number;
@@ -99,6 +139,14 @@ type SessionsPayload = {
   ok?: boolean;
   current_session_id?: string;
   sessions?: SessionItem[];
+};
+
+type ChatSessionContext = {
+  conversation_kind?: 'main' | 'agent' | 'workflow' | string;
+  runnable_id?: string;
+  runnable_name?: string;
+  run_group_id?: string;
+  participants?: ChatParticipant[];
 };
 
 type ImageInputPayload = {
@@ -203,6 +251,7 @@ const CODE_CHECK_ICON_HTML = '<svg aria-hidden="true" viewBox="0 0 24 24" fill="
 export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const assistantProfileSeed = useAssistantProfileSeed();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [sessionContext, setSessionContext] = useState<ChatSessionContext | null>(null);
   const [input, setInput] = useState(() => retainedComposerDraft.input);
   const [attachments, setAttachments] = useState<PendingAttachment[]>(() => [...retainedComposerDraft.attachments]);
   const [status, setStatus] = useState('就绪');
@@ -228,7 +277,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [sidebarWidth, setSidebarWidth] = useState(CHAT_SIDEBAR_BASE_MAX_WIDTH);
   const [composerHeight, setComposerHeight] = useState(() => storedComposerHeight());
   const [runnables, setRunnables] = useState<RunnableSummary[]>([]);
-  const [selectedRunnableId, setSelectedRunnableId] = useState('');
   const [, setRenderTick] = useState(0);
   const { confirmDialog, requestConfirm } = useConfirmDialog();
   const listRef = useRef<HTMLDivElement>(null);
@@ -279,6 +327,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       if (payload.ok === false) throw new Error(payload.error || '读取消息失败');
       const baseUrl = await bridgeUrl();
       const nextMessages = withResolvedAttachmentUrls(payload.messages || [], baseUrl);
+      setSessionContext(payload.session_context || null);
       const processing = Boolean(payload.is_processing);
       const processingChanged = processing !== isProcessingRef.current;
       isProcessingRef.current = processing;
@@ -686,7 +735,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       }>('/ui/chat/messages', {
         text,
         attachments: outgoingAttachments,
-        runnable_id: selectedRunnableId,
       });
       if (result.ok === false) throw new Error(result.error || '发送失败');
       transientEmptySessionIdRef.current = '';
@@ -814,6 +862,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setAttachments((current) => current.filter((attachment) => attachment.id !== id));
   }
 
+  function insertMention(option: MentionOption) {
+    setInput((current) => replaceTrailingMentionQuery(current, mentionTextForOption(option)));
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus({ preventScroll: true });
+    });
+  }
+
   async function clearSession() {
     try {
       pendingReplyScrollRef.current = false;
@@ -829,6 +884,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       };
       renderStateRef.current.clear();
       setMessages([]);
+      setSessionContext(null);
       isProcessingRef.current = false;
       setIsProcessing(false);
       setStatus('新对话已创建');
@@ -1171,9 +1227,22 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const visibleSessions = sessionItems;
   const currentSession = sessionItems.find((session) => session.session_id === sessions?.current_session_id);
   const currentSessionId = sessions?.current_session_id || '';
-  const currentTitle = currentSession
-    ? sessionTitle(currentSession)
-    : firstUserMessageTitle(messages) || assistantProfile?.agent_name || '月見八千代';
+  const activeSessionContext = currentSession ? contextFromSession(currentSession) : normalizeSessionContext(sessionContext);
+  const currentTitle = conversationDisplayName(
+    currentSession,
+    activeSessionContext,
+    assistantProfile,
+    messages,
+  );
+  const mentionQuery = mentionQueryAtEnd(input);
+  const mentionSuggestions = useMemo(
+    () => mentionOptionsForQuery(runnables, mentionQuery, assistantProfile),
+    [assistantProfile, mentionQuery, runnables],
+  );
+  const activeMentionChips = useMemo(
+    () => activeMentions(input, runnables, assistantProfile),
+    [assistantProfile, input, runnables],
+  );
   const headerActivity = latestVisibleActivity(messages);
   const chatWorkspaceStyle = embedded
     ? undefined
@@ -1221,9 +1290,17 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 key={session.session_id}
                 onClick={() => void switchSession(session.session_id, session.search_match?.message_id || '')}
               >
-                <span className="chat-item-avatar">{avatarNode(assistantProfile?.agent_avatar_url, assistantProfile?.agent_name || 'Yachiyo', '月', assistantProfileLoading)}</span>
+                <SessionAvatar
+                  assistantProfile={assistantProfile}
+                  context={contextFromSession(session)}
+                  loading={assistantProfileLoading}
+                  size="small"
+                />
                 <span className="chat-item-info">
-                  <strong className="chat-item-name">{sessionTitle(session)}</strong>
+                  <strong className="chat-item-name">{sessionDisplayName(session, assistantProfile)}</strong>
+                  {session.conversation_kind === 'agent' || session.conversation_kind === 'workflow' ? (
+                    <span className="chat-item-kind">{sessionKindLabel(session)}</span>
+                  ) : null}
                   <span className={session.search_match ? 'chat-item-preview search-hit' : 'chat-item-preview'}>
                     <HighlightedText text={sessionPreview(session)} query={normalizedSessionQuery} />
                   </span>
@@ -1261,12 +1338,17 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         <section className="chat-main hy-chat-mainpane">
           <header className="chat-header">
             <div className="chat-header-info">
-              <div className="chat-header-avatar">{avatarNode(assistantProfile?.agent_avatar_url, assistantProfile?.agent_name || 'Yachiyo', '月', assistantProfileLoading)}</div>
+              <SessionAvatar
+                assistantProfile={assistantProfile}
+                context={activeSessionContext}
+                loading={assistantProfileLoading}
+                size="header"
+              />
               <div>
                 <div className="chat-header-name">{currentTitle}</div>
                 <div className="chat-header-status">
                   <div className={`status-dot ${isProcessing ? 'processing' : 'completed'}`} />
-                  <span>{isProcessing ? (headerActivity ? `处理中 · ${compactStatusText(activityLabel(headerActivity))}` : '处理中') : `${status} · ${executorLabel(executor)}`}</span>
+                  <span>{headerStatusText(isProcessing, headerActivity, status, executor, activeSessionContext)}</span>
                 </div>
               </div>
             </div>
@@ -1368,6 +1450,39 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                     ))}
                   </div>
                 ) : null}
+                {activeMentionChips.length ? (
+                  <div className="composer-mention-chips" aria-label="当前提及">
+                    {activeMentionChips.map((mention) => (
+                      <span className={`composer-mention-chip ${mention.kind}`} key={`${mention.kind}-${mention.id}`}>
+                        @{mention.nickname || mention.name}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                {mentionSuggestions.length ? (
+                  <div className="composer-mention-menu" role="listbox" aria-label="选择提及对象">
+                    {mentionSuggestions.map((option) => (
+                      <button
+                        type="button"
+                        className={`composer-mention-option ${option.kind}`}
+                        key={`${option.kind}-${option.id}`}
+                        onClick={() => insertMention(option)}
+                      >
+                        <span className="composer-mention-avatar">
+                          {option.kind === 'workflow' ? (
+                            <AvatarStack participants={option.participants || []} />
+                          ) : (
+                            participantAvatarContent(option, option.kind === 'main' ? '月' : 'A')
+                          )}
+                        </span>
+                        <span>
+                          <strong>{option.nickname || option.name}</strong>
+                          <small>{mentionKindLabel(option)}</small>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
                 <textarea
                   className="chat-input"
                   ref={inputRef}
@@ -1411,23 +1526,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
               >
                 <UiIcon name="image" />
               </button>
-              {!embedded ? (
-                <select
-                  className="chat-runnable-select"
-                  value={selectedRunnableId}
-                  onChange={(event) => setSelectedRunnableId(event.target.value)}
-                  title="@Name 也可以直接指定 Agent 或 Workflow"
-                  aria-label="选择 Agent 或 Workflow"
-                  disabled={isSending || isProcessing}
-                >
-                  <option value="">Hermes Chat</option>
-                  {runnables.map((item) => (
-                    <option value={item.id} key={item.id}>
-                      {item.kind === 'workflow' ? 'Workflow' : 'Agent'} · {item.name}
-                    </option>
-                  ))}
-                </select>
-              ) : null}
               <button
                 type={isProcessing ? 'button' : 'submit'}
                 className={`chat-send-btn neon-glow${isProcessing ? ' is-stop' : ''}`}
@@ -1500,7 +1598,7 @@ function MessageBubble({ assistantProfile, assistantProfileLoading, copied, copi
       data-message-id={message.id || ''}
       ref={(node) => registerMessageNode(message.id, node)}
     >
-      <div className="message-avatar">{messageAvatar(role, assistantProfile, assistantProfileLoading)}</div>
+      <div className="message-avatar">{messageAvatar(message, assistantProfile, assistantProfileLoading)}</div>
       <div className="message-stack">
         <div className="message-bubble">
           {isProcessingEmpty ? (
@@ -1523,7 +1621,7 @@ function MessageBubble({ assistantProfile, assistantProfileLoading, copied, copi
           progressLabel={message.progress_label}
         />
         <div className="message-time">
-          <span>{messageMetaText(role, message.status, message.created_at)}</span>
+          <span>{messageMetaText(message, message.status, message.created_at)}</span>
           {showRetry ? (
             <button
               className={`message-retry-button ${retrying ? 'retrying' : ''}`}
@@ -1661,12 +1759,6 @@ function isImeComposing(event: ReactKeyboardEvent<HTMLElement>, fallback = false
   return Boolean(fallback || nativeEvent.isComposing || nativeEvent.keyCode === 229);
 }
 
-function roleLabel(role: string) {
-  if (role === 'user') return '你';
-  if (role === 'assistant') return 'Yachiyo';
-  return '系统';
-}
-
 function messageVisualRole(role: string) {
   if (role === 'user') return 'user';
   if (role === 'assistant') return 'agent';
@@ -1676,6 +1768,199 @@ function messageVisualRole(role: string) {
 function avatarNode(url: string | undefined, label: string, fallback: string, loading = false): ReactNode {
   if (loading) return <span className="chat-avatar-loading" aria-hidden="true" />;
   return url ? <img src={url} alt={label} /> : fallback;
+}
+
+function mentionQueryAtEnd(value: string): string | null {
+  const match = String(value || '').match(/(^|[\s，。！？、；;,.!?])@([^\s@，。！？、；;,.!?]*)$/);
+  return match ? match[2] : null;
+}
+
+function mentionOptionsForQuery(
+  runnables: RunnableSummary[],
+  query: string | null,
+  assistantProfile: AssistantProfilePayload | null,
+): MentionOption[] {
+  if (query === null) return [];
+  const needle = query.trim().toLowerCase();
+  return allMentionOptions(runnables, assistantProfile)
+    .filter((option) => {
+      if (!needle) return true;
+      return [
+        option.name,
+        option.nickname,
+        option.kind === 'main' ? 'main model' : '',
+        option.kind,
+      ].some((value) => String(value || '').toLowerCase().includes(needle));
+    })
+    .slice(0, 7);
+}
+
+function allMentionOptions(
+  runnables: RunnableSummary[],
+  assistantProfile: AssistantProfilePayload | null,
+): MentionOption[] {
+  const main: MentionOption = {
+    id: 'main',
+    name: '主模型',
+    nickname: assistantProfile?.agent_nickname || '八千代',
+    avatar_url: assistantProfile?.agent_avatar_url,
+    kind: 'main',
+  };
+  const options: MentionOption[] = [
+    main,
+    ...runnables.map((item) => ({
+      id: item.id,
+      name: item.name,
+      nickname: item.nickname,
+      avatar_url: item.avatar_url,
+      kind: item.kind,
+      participants: (item.participants || []).map((participant) => ({
+        id: participant.id,
+        name: participant.name,
+        nickname: participant.nickname,
+        avatar_url: participant.avatar_url,
+        kind: participant.kind,
+      })),
+    })),
+  ];
+  return options;
+}
+
+function mentionKindLabel(option: MentionOption) {
+  if (option.kind === 'main') return '主模型';
+  if (option.kind === 'workflow') {
+    const count = option.participants?.length || 0;
+    return count ? `Workflow · ${count} Agents` : 'Workflow';
+  }
+  return 'Agent';
+}
+
+function mentionTextForOption(option: MentionOption) {
+  if (option.kind === 'main') return '@主模型 ';
+  const name = option.nickname || option.name;
+  if (/\s/.test(name)) return `@"${name.replace(/"/g, '\\"')}" `;
+  return `@${name} `;
+}
+
+function replaceTrailingMentionQuery(value: string, mentionText: string) {
+  const match = String(value || '').match(/(^|[\s\S]*[\s，。！？、；;,.!?])@([^\s@，。！？、；;,.!?]*)$/);
+  if (match) return `${match[1]}${mentionText}`;
+  const spacer = value && !/[\s，。！？、；;,.!?]$/.test(value) ? ' ' : '';
+  return `${value}${spacer}${mentionText}`;
+}
+
+function activeMentions(
+  input: string,
+  runnables: RunnableSummary[],
+  assistantProfile: AssistantProfilePayload | null,
+): MentionOption[] {
+  const options = allMentionOptions(runnables, assistantProfile);
+  const seen = new Set<string>();
+  const result: MentionOption[] = [];
+  const mentionRe = /@(?:"([^"]+)"|'([^']+)'|([^\s@，。！？、；;,.!?]+))/g;
+  let match: RegExpExecArray | null;
+  while ((match = mentionRe.exec(input)) !== null) {
+    const label = String(match[1] || match[2] || match[3] || '').toLowerCase();
+    const option = options.find((candidate) => [
+      candidate.name,
+      candidate.nickname,
+      candidate.kind === 'main' ? '主模型' : '',
+      candidate.kind === 'main' ? 'main' : '',
+    ].some((value) => String(value || '').toLowerCase() === label));
+    if (!option) continue;
+    const key = `${option.kind}-${option.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(option);
+  }
+  return result;
+}
+
+function normalizeSessionContext(context?: ChatSessionContext | null): ChatSessionContext {
+  const kind = context?.conversation_kind || 'main';
+  return {
+    conversation_kind: kind,
+    runnable_id: context?.runnable_id || '',
+    runnable_name: context?.runnable_name || '',
+    run_group_id: context?.run_group_id || '',
+    participants: Array.isArray(context?.participants) ? context?.participants : [],
+  };
+}
+
+function contextFromSession(session?: SessionItem | null): ChatSessionContext {
+  if (!session) return normalizeSessionContext(null);
+  return normalizeSessionContext({
+    conversation_kind: session.conversation_kind || 'main',
+    runnable_id: session.runnable_id || '',
+    runnable_name: session.runnable_name || '',
+    run_group_id: session.run_group_id || '',
+    participants: session.participants || [],
+  });
+}
+
+function primaryParticipant(context?: ChatSessionContext | null): ChatParticipant | null {
+  const normalized = normalizeSessionContext(context);
+  return normalized.participants?.[0] || null;
+}
+
+function participantDisplayName(participant?: ChatParticipant | null) {
+  return String(participant?.nickname || participant?.name || participant?.id || '').trim();
+}
+
+function participantInitial(participant?: ChatParticipant | null, fallback = '月') {
+  const label = participantDisplayName(participant);
+  return Array.from(label || fallback)[0] || fallback;
+}
+
+function participantAvatarContent(participant: ChatParticipant | null | undefined, fallback = '月') {
+  const label = participantDisplayName(participant) || fallback;
+  const url = participant?.avatar_url;
+  return avatarNode(url, label, participantInitial(participant, fallback));
+}
+
+function AvatarStack({ participants }: { participants: ChatParticipant[] }) {
+  const visible = participants.slice(0, 3);
+  if (!visible.length) return <>{'W'}</>;
+  return (
+    <span className="chat-avatar-stack-inner" aria-hidden="true">
+      {visible.map((participant, index) => (
+        <span className="chat-avatar-stack-face" key={participant.id || participant.name || index}>
+          {participantAvatarContent(participant, 'A')}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function SessionAvatar({ assistantProfile, context, loading, size }: {
+  assistantProfile: AssistantProfilePayload | null;
+  context?: ChatSessionContext | null;
+  loading?: boolean;
+  size: 'small' | 'header';
+}) {
+  const normalized = normalizeSessionContext(context);
+  const className = size === 'header' ? 'chat-header-avatar' : 'chat-item-avatar';
+  if (normalized.conversation_kind === 'workflow') {
+    const participants = normalized.participants || [];
+    return (
+      <span className={`${className} chat-avatar-stack`} title={normalized.runnable_name || 'Workflow'}>
+        <AvatarStack participants={participants} />
+      </span>
+    );
+  }
+  if (normalized.conversation_kind === 'agent') {
+    const participant = primaryParticipant(normalized);
+    return (
+      <span className={`${className} chat-agent-avatar`} title={participantDisplayName(participant) || normalized.runnable_name || 'Agent'}>
+        {participantAvatarContent(participant, 'A')}
+      </span>
+    );
+  }
+  return (
+    <span className={className}>
+      {avatarNode(assistantProfile?.agent_avatar_url, assistantProfile?.agent_name || 'Yachiyo', '月', loading)}
+    </span>
+  );
 }
 
 function ChatFullPageLoading({ avatarUrl, label }: { avatarUrl?: string; label: string }) {
@@ -1693,13 +1978,32 @@ function ChatFullPageLoading({ avatarUrl, label }: { avatarUrl?: string; label: 
   );
 }
 
-function messageAvatar(role: string, profile: AssistantProfilePayload | null, profileLoading = false) {
+function messageAvatar(message: ChatMessage, profile: AssistantProfilePayload | null, profileLoading = false) {
+  const role = message.role || 'system';
   if (role === 'user') return avatarNode(profile?.user_avatar_url, '你', '你', profileLoading);
-  if (role === 'assistant') return avatarNode(profile?.agent_avatar_url, profile?.agent_name || 'Yachiyo', '月', profileLoading);
+  if (role === 'assistant') {
+    const sender = message.metadata?.sender;
+    if (sender?.kind === 'workflow') return <AvatarStack participants={sender.participants || []} />;
+    if (sender?.kind === 'agent') return participantAvatarContent(sender, 'A');
+    return avatarNode(profile?.agent_avatar_url, profile?.agent_name || 'Yachiyo', '月', profileLoading);
+  }
   return 'i';
 }
 
-function messageMetaText(role: string, status?: string, createdAt?: string) {
+function messageRoleLabel(message: ChatMessage) {
+  const role = message.role || 'system';
+  if (role === 'user') return '你';
+  if (role === 'assistant') {
+    const sender = message.metadata?.sender;
+    if (sender?.kind === 'agent' || sender?.kind === 'workflow') {
+      return participantDisplayName(sender) || 'Agent';
+    }
+    return 'Yachiyo';
+  }
+  return '系统';
+}
+
+function messageMetaText(message: ChatMessage, status?: string, createdAt?: string) {
   const statusText = status === 'pending'
     ? ' · 等待中'
     : status === 'processing'
@@ -1708,7 +2012,7 @@ function messageMetaText(role: string, status?: string, createdAt?: string) {
         ? ' · 失败'
         : '';
   const timeText = formatShortTime(createdAt);
-  return `${roleLabel(role)}${timeText !== '—' ? ` · ${timeText}` : ''}${statusText}`;
+  return `${messageRoleLabel(message)}${timeText !== '—' ? ` · ${timeText}` : ''}${statusText}`;
 }
 
 function executorLabel(executor: ExecutorPayload | null) {
@@ -1731,6 +2035,63 @@ function imageInputHelpText(executor: ExecutorPayload | null) {
   return imageInput.reason || imageInput.label || '附加图片';
 }
 
+function conversationDisplayName(
+  session: SessionItem | undefined,
+  context: ChatSessionContext,
+  assistantProfile: AssistantProfilePayload | null,
+  messages: ChatMessage[],
+) {
+  const normalized = normalizeSessionContext(context);
+  if (normalized.conversation_kind === 'agent') {
+    return normalized.runnable_name || participantDisplayName(primaryParticipant(normalized)) || 'Agent';
+  }
+  if (normalized.conversation_kind === 'workflow') {
+    return normalized.runnable_name || 'Workflow 群组';
+  }
+  if (session) return sessionTitle(session);
+  return firstUserMessageTitle(messages) || assistantProfile?.agent_name || '月見八千代';
+}
+
+function sessionDisplayName(session: SessionItem, assistantProfile: AssistantProfilePayload | null) {
+  const context = contextFromSession(session);
+  if (context.conversation_kind === 'agent') {
+    return session.runnable_name || participantDisplayName(primaryParticipant(context)) || sessionTitle(session);
+  }
+  if (context.conversation_kind === 'workflow') {
+    return session.runnable_name || 'Workflow 群组';
+  }
+  return sessionTitle(session) || assistantProfile?.agent_name || '新对话';
+}
+
+function sessionKindLabel(session: SessionItem) {
+  const context = contextFromSession(session);
+  if (context.conversation_kind === 'agent') return 'Agent';
+  if (context.conversation_kind === 'workflow') {
+    const count = context.participants?.length || 0;
+    return count ? `Workflow · ${count} Agents` : 'Workflow';
+  }
+  return '';
+}
+
+function headerStatusText(
+  isProcessing: boolean,
+  headerActivity: ChatActivityEvent | null,
+  status: string,
+  executor: ExecutorPayload | null,
+  context: ChatSessionContext,
+) {
+  const base = isProcessing
+    ? (headerActivity ? `处理中 · ${compactStatusText(activityLabel(headerActivity))}` : '处理中')
+    : status;
+  const normalized = normalizeSessionContext(context);
+  if (normalized.conversation_kind === 'agent') return `${base} · Agent`;
+  if (normalized.conversation_kind === 'workflow') {
+    const count = normalized.participants?.length || 0;
+    return count ? `${base} · Workflow 群组 · ${count} Agents` : `${base} · Workflow 群组`;
+  }
+  return `${base} · ${executorLabel(executor)}`;
+}
+
 function sessionTitle(session: SessionItem) {
   const title = (session.title || '').trim();
   if (title && !looksLikeSessionIdTitle(title, session.session_id) && !looksLikeTitlePromptEcho(title)) return title;
@@ -1744,7 +2105,7 @@ function sessionPreview(session: SessionItem) {
     const role = session.search_match.role === 'user'
       ? '你'
       : session.search_match.role === 'assistant'
-        ? 'Yachiyo'
+        ? sessionDisplayName(session, null)
         : '消息';
     const count = session.search_match.match_count && session.search_match.match_count > 1
       ? ` · ${session.search_match.match_count} 处`
@@ -1755,8 +2116,12 @@ function sessionPreview(session: SessionItem) {
   const preview = compactStatusText(session.latest_message_preview || sessionTitle(session), 48);
   if (session.is_processing) return `处理中：${preview || '正在处理'}`;
   if (session.latest_message_status === 'failed') return `处理失败：${preview || '任务执行失败'}`;
+  if (session.conversation_kind === 'workflow') {
+    const names = (session.participants || []).map((participant) => participantDisplayName(participant)).filter(Boolean).slice(0, 3);
+    return names.length ? `${names.join(' / ')} · ${preview || '已创建'}` : `Workflow · ${preview || '已创建'}`;
+  }
   if (session.message_count) return `已完成：${preview || sessionTitle(session)}`;
-  if (!session.message_count) return '新的月夜会话';
+  if (!session.message_count) return session.conversation_kind === 'agent' ? '新的 Agent 对话' : '新的月夜会话';
   return preview;
 }
 
@@ -2378,10 +2743,18 @@ function renderInlineMarkdown(text: string) {
   value = value.replace(/__([^_]+)__/g, '<strong>$1</strong>');
   value = value.replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, '$1<em>$2</em>');
   value = value.replace(/(^|[^_])_([^_\s][^_]*?)_/g, '$1<em>$2</em>');
+  value = renderMentionTokens(value);
   codes.forEach((code, index) => {
     value = value.replace(`\u0000CODE${index}\u0000`, code);
   });
   return value;
+}
+
+function renderMentionTokens(value: string) {
+  return value.replace(
+    /(^|[\s，。！？、；;,.!?])@(&quot;[^&]+&quot;|'[^']+'|[A-Za-z0-9_\-\u4e00-\u9fff.]+)/g,
+    (_match, prefix: string, mention: string) => `${prefix}<span class="mention-token">@${mention}</span>`,
+  );
 }
 
 function sanitizeMarkdownUrl(url: string) {

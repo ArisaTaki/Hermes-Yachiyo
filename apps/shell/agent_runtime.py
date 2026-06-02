@@ -2572,7 +2572,12 @@ class AgentRuntimeService:
             run_group_id = group["run_group_id"]
             root_group = True
         run = self._insert_run(kind="agent_run", runnable_id=agent_id, user_goal=user_goal, run_group_id=run_group_id)
-        result = self._execute_agent_run(run["run_id"], agent, user_goal)
+        result = self._execute_agent_run(
+            run["run_id"],
+            agent,
+            user_goal,
+            upstream=str(payload.get("upstream") or ""),
+        )
         if root_group:
             self._update_run_group(run_group_id, status=result["status"], summary=result.get("result") or "")
             result = self.get_run(result["run_id"])
@@ -3439,13 +3444,54 @@ class AgentRuntimeService:
         return {
             "ok": True,
             "runnables": [
-                {"id": agent["agent_id"], "name": agent["name"], "kind": "agent", "enabled": agent["enabled"]}
+                self._agent_runnable_summary(agent)
                 for agent in agents
             ]
             + [
-                {"id": workflow["workflow_id"], "name": workflow["name"], "kind": "workflow", "enabled": workflow["enabled"]}
+                self._workflow_runnable_summary(workflow)
                 for workflow in workflows
             ],
+        }
+
+    @staticmethod
+    def _agent_runnable_summary(agent: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": agent["agent_id"],
+            "name": agent["name"],
+            "nickname": agent.get("nickname") or agent["name"],
+            "description": agent.get("description") or "",
+            "avatar_url": agent.get("avatar_url") or "",
+            "category": agent.get("category") or "custom",
+            "kind": "agent",
+            "enabled": agent["enabled"],
+        }
+
+    def _workflow_participants(self, workflow: dict[str, Any]) -> list[dict[str, Any]]:
+        participants: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for node in workflow.get("nodes") or []:
+            if self._node_kind(node) != "agent":
+                continue
+            data = node.get("data") or {}
+            agent_id = str(data.get("agent_id") or data.get("agentId") or "").strip()
+            if not agent_id or agent_id in seen_ids:
+                continue
+            try:
+                agent = self.get_agent(agent_id)
+            except KeyError:
+                continue
+            seen_ids.add(agent_id)
+            participants.append(self._agent_runnable_summary(agent))
+        return participants
+
+    def _workflow_runnable_summary(self, workflow: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": workflow["workflow_id"],
+            "name": workflow["name"],
+            "description": workflow.get("description") or "",
+            "kind": "workflow",
+            "enabled": workflow["enabled"],
+            "participants": self._workflow_participants(workflow),
         }
 
     def list_delegation_targets(self) -> dict[str, Any]:
@@ -3478,37 +3524,59 @@ class AgentRuntimeService:
     def resolve_runnable(self, *, runnable_id: str = "", name: str = "") -> dict[str, Any] | None:
         self._ensure_row_factory()
         if runnable_id:
-            agent = self._conn.execute("SELECT agent_id, name, enabled FROM agents WHERE agent_id=?", (runnable_id,)).fetchone()
+            agent = self._conn.execute("SELECT * FROM agents WHERE agent_id=?", (runnable_id,)).fetchone()
             if agent:
-                return {"kind": "agent", "id": agent["agent_id"], "name": agent["name"], "enabled": bool(agent["enabled"])}
-            workflow = self._conn.execute("SELECT workflow_id, name, enabled FROM workflows WHERE workflow_id=?", (runnable_id,)).fetchone()
+                return self._agent_runnable_summary(self._row_to_agent(agent))
+            workflow = self._conn.execute("SELECT * FROM workflows WHERE workflow_id=?", (runnable_id,)).fetchone()
             if workflow:
-                return {"kind": "workflow", "id": workflow["workflow_id"], "name": workflow["name"], "enabled": bool(workflow["enabled"])}
+                return self._workflow_runnable_summary(self._row_to_workflow(workflow))
         clean_name = (name or "").strip()
         if clean_name:
-            agent = self._conn.execute("SELECT agent_id, name, enabled FROM agents WHERE LOWER(name)=LOWER(?)", (clean_name,)).fetchone()
-            workflow = self._conn.execute("SELECT workflow_id, name, enabled FROM workflows WHERE LOWER(name)=LOWER(?)", (clean_name,)).fetchone()
-            matches = [item for item in (agent, workflow) if item is not None]
+            agents = self._conn.execute(
+                "SELECT * FROM agents WHERE LOWER(name)=LOWER(?) OR LOWER(nickname)=LOWER(?)",
+                (clean_name, clean_name),
+            ).fetchall()
+            workflow = self._conn.execute("SELECT * FROM workflows WHERE LOWER(name)=LOWER(?)", (clean_name,)).fetchone()
+            matches = [*agents, *([workflow] if workflow is not None else [])]
             if len(matches) > 1:
                 raise AgentRuntimeError("Agent/Workflow 名称不唯一")
-            if agent:
-                return {"kind": "agent", "id": agent["agent_id"], "name": agent["name"], "enabled": bool(agent["enabled"])}
+            if agents:
+                return self._agent_runnable_summary(self._row_to_agent(agents[0]))
             if workflow:
-                return {"kind": "workflow", "id": workflow["workflow_id"], "name": workflow["name"], "enabled": bool(workflow["enabled"])}
+                return self._workflow_runnable_summary(self._row_to_workflow(workflow))
         return None
 
-    def create_run_for_runnable(self, *, runnable_id: str = "", name: str = "", user_goal: str = "") -> dict[str, Any]:
+    def create_run_for_runnable(
+        self,
+        *,
+        runnable_id: str = "",
+        name: str = "",
+        user_goal: str = "",
+        run_group_id: str = "",
+        upstream: str = "",
+    ) -> dict[str, Any]:
         runnable = self.resolve_runnable(runnable_id=runnable_id, name=name)
         if runnable is None:
             raise AgentRuntimeError("未找到指定 Agent 或 Workflow")
         if not runnable.get("enabled", True):
             raise AgentRuntimeError("指定 Agent 或 Workflow 已停用")
         if runnable["kind"] == "agent":
-            run = self.create_agent_run({"agent_id": runnable["id"], "user_goal": user_goal, "source": "chat"})
+            run = self.create_agent_run({
+                "agent_id": runnable["id"],
+                "user_goal": user_goal,
+                "source": "agent",
+                "run_group_id": run_group_id,
+                "upstream": upstream,
+            })
             run["agent_run_id"] = run["run_id"]
             run["runnable"] = runnable
             return run
-        run = self.create_workflow_run({"workflow_id": runnable["id"], "user_goal": user_goal, "source": "chat"})
+        run = self.create_workflow_run({
+            "workflow_id": runnable["id"],
+            "user_goal": user_goal,
+            "source": "workflow",
+            "run_group_id": run_group_id,
+        })
         run["workflow_run_id"] = run["run_id"]
         run["runnable"] = runnable
         return run
@@ -3547,44 +3615,67 @@ class AgentRuntimeService:
 
     def parse_known_chat_runnable(self, text: str) -> tuple[str, str] | None:
         value = (text or "").strip()
-        if not value.startswith("@"):
+        mention = self._chat_mention_parts(value)
+        if mention is None:
             return None
-        body = value[1:]
+        prefix, body, remaining_lines = mention
         if not body.strip():
             return None
         if body.startswith('"') or body.startswith("'"):
             return self.parse_chat_runnable(value)
         runnables = sorted(
             self.list_runnables()["runnables"],
-            key=lambda item: len(str(item.get("name") or "")),
+            key=lambda item: max(len(str(item.get("name") or "")), len(str(item.get("nickname") or ""))),
             reverse=True,
         )
         body_lower = body.lower()
         for runnable in runnables:
-            name = str(runnable.get("name") or "").strip()
-            if not name:
-                continue
-            if not body_lower.startswith(name.lower()):
-                continue
-            remainder = body[len(name) :]
-            if remainder and not remainder[0].isspace():
-                continue
-            return name, remainder.strip()
+            aliases = [
+                str(runnable.get("name") or "").strip(),
+                str(runnable.get("nickname") or "").strip(),
+            ]
+            for name in sorted({alias for alias in aliases if alias}, key=len, reverse=True):
+                if not body_lower.startswith(name.lower()):
+                    continue
+                remainder = body[len(name) :]
+                if remainder and not remainder[0].isspace():
+                    continue
+                return name, self._chat_mention_goal(prefix, remainder, remaining_lines)
         return self.parse_chat_runnable(value)
 
     @staticmethod
     def parse_chat_runnable(text: str) -> tuple[str, str] | None:
-        first_line = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
-        if not first_line.startswith("@"):
+        value = (text or "").strip()
+        mention = AgentRuntimeService._chat_mention_parts(value)
+        if mention is None:
             return None
-        match = re.match(r"^@(?P<name>\"[^\"]+\"|'[^']+'|[^\s]+)\s*(?P<body>.*)$", first_line)
+        prefix, body, remaining_lines = mention
+        match = re.match(r"^(?P<name>\"[^\"]+\"|'[^']+'|[^\s，。！？、；;,.!?]+)\s*(?P<body>.*)$", body)
         if not match:
             return None
         raw_name = match.group("name").strip("\"'")
         rest = match.group("body")
-        remaining_lines = (text or "").strip().splitlines()[1:]
-        body = "\n".join([rest, *remaining_lines]).strip()
-        return raw_name, body
+        return raw_name, AgentRuntimeService._chat_mention_goal(prefix, rest, remaining_lines)
+
+    @staticmethod
+    def _chat_mention_parts(text: str) -> tuple[str, str, list[str]] | None:
+        value = (text or "").strip()
+        if not value:
+            return None
+        lines = value.splitlines()
+        first_line = lines[0]
+        match = re.search(r"(^|[\s，。！？、；;,.!?])@(?P<body>.+)$", first_line)
+        if not match:
+            return None
+        prefix = first_line[: match.start()].strip()
+        body = match.group("body")
+        return prefix, body, lines[1:]
+
+    @staticmethod
+    def _chat_mention_goal(prefix: str, remainder: str, remaining_lines: list[str]) -> str:
+        first_line_parts = [part.strip() for part in (prefix, remainder) if part and part.strip()]
+        first_line = " ".join(first_line_parts)
+        return "\n".join([first_line, *remaining_lines]).strip()
 
 
 _global_agent_runtime_service: AgentRuntimeService | None = None

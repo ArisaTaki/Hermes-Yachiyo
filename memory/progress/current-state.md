@@ -2,6 +2,17 @@
 
 ## 已完成
 
+### Milestone 93 — Chat Agent / Workflow 会话模式
+
+- ✅ Chat 会话存储新增 Agent / Workflow 上下文字段，消息存储新增 `metadata_json`，可持久化 sender、Run、RunGroup 和群组 participants。
+- ✅ `@Agent` 会创建 AgentRun，并把会话绑定为 Agent 私聊；后续不写 `@` 的普通文本会继续交给该 Agent，不再创建普通 Hermes task。
+- ✅ `@Workflow` 会创建 WorkflowRun / RunGroup，并把每个子 Agent 的结果按顺序写入聊天消息；消息 metadata 标明具体 Agent sender，最后追加 Workflow 完成状态。
+- ✅ Workflow 群组内继续 `@某Agent` 会复用当前 Workflow `run_group_id`，把人工插手结果追加回同一个群组；不指定 Agent / Workflow 时仍交给主模型处理。
+- ✅ React Chat 会话列表、标题栏和消息气泡已接入新上下文：Agent 私聊显示 Agent 头像/名称，Workflow 群组显示 participants 堆叠头像，消息气泡显示具体发言者。
+- ✅ Composer 已移除 Agent / Workflow 下拉框；键入 `@` 会展示主模型、Agent 和 Workflow mention 菜单，选择带空格名称会插入 quoted mention，并显示 token 芯片。消息正文中的 mention 也有独立视觉样式。
+- ✅ Workflow Studio 增加 Agent 快捷面板，可从已有 Agents 直接添加节点并自动接入 ReactFlow 线性链路；画布仍支持拖拽、连线、节点设置、保存和运行。
+- ✅ 验证：`.venv/bin/python -m pytest tests/test_chat_api.py tests/test_chat_store.py tests/test_chat_session.py tests/test_agent_runtime.py tests/test_ui_bridge_routes.py -q` → 157 passed；`npm --prefix apps/frontend run build` → passed；`git diff --check` → clean；Browser 使用只读 fixture 验证 Chat 与 Workflow Studio：旧下拉框数量为 0，`@` 菜单和 quoted Workflow 芯片可见，Workflow 群组展示 3 个具体 Agent sender，画布从 `4 nodes / 3 edges` 添加 Agent 后变为 `5 nodes / 4 edges`，窄屏 Chat 与 Studio 无横向溢出，console error 为空。
+
 ### Milestone 92 — Runs 顶层历史与 Workflow 步骤产物
 
 - ✅ 按真实用户流程重新创建 demo Skills、Design / Coding / Review Agents 和线性 Workflow，并用已配置默认 Chat Profile 跑通真实 Workflow：`workflow_run_8254dd42d09c` completed，三个子 Agent 分别产出 `DESIGN_DEMO_OK`、`CODING_DEMO_OK`、`REVIEW_DEMO_OK`。

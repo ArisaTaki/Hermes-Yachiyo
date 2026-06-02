@@ -135,8 +135,13 @@ export type WorkflowSpec = {
 export type RunnableSummary = {
   id: string;
   name: string;
+  nickname?: string;
+  description?: string;
+  avatar_url?: string;
+  category?: string;
   kind: 'agent' | 'workflow';
   enabled?: boolean;
+  participants?: RunnableSummary[];
 };
 
 export type RunSpec = {

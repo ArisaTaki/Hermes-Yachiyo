@@ -380,6 +380,15 @@ function terminalNodeId(currentNodes: Node[], currentEdges: Edge[]): string {
   return terminal?.id || currentNodes[currentNodes.length - 1]?.id || '';
 }
 
+function uniqueWorkflowNodeId(seed: string, currentNodes: Node[]): string {
+  const existing = new Set(currentNodes.map((node) => node.id));
+  const cleanSeed = seed.replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'node';
+  if (!existing.has(cleanSeed)) return cleanSeed;
+  let index = 2;
+  while (existing.has(`${cleanSeed}-${index}`)) index += 1;
+  return `${cleanSeed}-${index}`;
+}
+
 function buildPhase4WorkflowNodes(agents: AgentSpec[]): Node[] {
   const agentNodes: Node[] = [];
   phase4WorkflowAgentOrder.forEach((item) => {
@@ -1186,9 +1195,14 @@ export function AgentStudioView() {
     return { selectedWorkflowId: selectedWorkflow.workflow_id, runTarget: selectedWorkflow.workflow_id, selectedRunId: run.run_id };
   }
 
-  function addFlowNode(kind: 'agent' | 'approval' | 'artifact') {
-    const id = `${kind}-${Date.now().toString(36)}`;
-    const agent = agents[0];
+  function addFlowNode(kind: 'agent' | 'approval' | 'artifact', agentId = '') {
+    const agent = agentId
+      ? agents.find((candidate) => candidate.agent_id === agentId)
+      : agents[0];
+    const nodeSeed = kind === 'agent'
+      ? `${kind}-${agent?.agent_id || Date.now().toString(36)}`
+      : `${kind}-${Date.now().toString(36)}`;
+    const id = uniqueWorkflowNodeId(nodeSeed, nodes);
     const sourceId = terminalNodeId(nodes, edges);
     const nextNode: Node = {
       id,
@@ -1857,6 +1871,26 @@ export function AgentStudioView() {
               <button type="button" disabled={busy} onClick={() => addFlowNode('artifact')}>Artifact</button>
               <button type="button" className="primary-action" onClick={() => void runAction(saveWorkflow, '保存 Workflow')}>保存</button>
               {selectedWorkflow ? <button type="button" className="danger-action" onClick={requestDeleteWorkflow}>删除</button> : null}
+            </div>
+            <div className="workflow-agent-palette" aria-label="从 Agents 添加到 Workflow">
+              <span>添加 Agent</span>
+              {agents.map((agent) => (
+                <button
+                  type="button"
+                  disabled={busy || agent.enabled === false}
+                  key={agent.agent_id}
+                  onClick={() => addFlowNode('agent', agent.agent_id)}
+                >
+                  <span className="workflow-agent-avatar">
+                    {agent.avatar_url ? <img src={agent.avatar_url} alt="" /> : (agent.nickname || agent.name || 'A').slice(0, 1)}
+                  </span>
+                  <span>
+                    <strong>{agent.nickname || agent.name}</strong>
+                    <small>{agent.category || 'custom'}</small>
+                  </span>
+                </button>
+              ))}
+              {!agents.length ? <small>暂无可添加 Agent</small> : null}
             </div>
             <div className="workflow-canvas">
               <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} fitView>

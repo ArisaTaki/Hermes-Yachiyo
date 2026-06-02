@@ -96,6 +96,20 @@ _DESKTOP_SNAPSHOT_REQUEST_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _CHAT_VISIBLE_ACTIVITY_PHASES = {"tool_start", "tool_complete"}
+_MAIN_MODEL_ALIASES = (
+    "hermes chat",
+    "main model",
+    "main-model",
+    "main",
+    "主模型",
+    "主助手",
+    "八千代",
+    "月見八千代",
+    "月见八千代",
+    "yachiyo",
+    "hermes",
+)
+_MAIN_MODEL_ALIAS_SEPARATORS = set(" \t\r\n:：,，、;；")
 
 
 def _compact_preview(value: Any, limit: int = 72) -> str:
@@ -268,6 +282,14 @@ class ChatAPI:
     def _state(self):
         return self._runtime.state
 
+    def _chat_store(self):
+        store = getattr(self._runtime, "store", None)
+        if store is not None:
+            return store
+        from apps.core.chat_store import get_chat_store
+
+        return get_chat_store()
+
     def send_message(
         self,
         text: str,
@@ -380,47 +402,93 @@ class ChatAPI:
         *,
         runnable_id: str = "",
     ) -> Dict[str, Any] | None:
-        if not runnable_id and not text.strip().startswith("@"):
+        text = (text or "").strip()
+        if not runnable_id and self._parse_main_model_mention(text) is not None:
             return None
+
+        current_context = self._session_context()
+        explicit_target = bool(str(runnable_id or "").strip())
+        if (
+            not explicit_target
+            and not self._has_chat_mention(text)
+            and current_context.get("conversation_kind") != "agent"
+        ):
+            return None
+
         service = get_agent_runtime_service()
-        parsed = None if runnable_id else service.parse_known_chat_runnable(text)
-        if not runnable_id and parsed is None:
-            return None
-        name = parsed[0] if parsed else ""
-        user_goal = parsed[1] if parsed else text.strip()
-        message_id = self._session.add_user_message(text, [])
-        pseudo_task_id = f"agent:{uuid4().hex[:10]}"
-        self._session.link_message_to_task(message_id, pseudo_task_id)
-        if raw_attachments:
-            content = "Agent/Workflow 运行入口暂不支持附件。请把附件内容先整理成文字，或使用普通对话发送图片。"
-            assistant_id = self._session.add_assistant_message(content, task_id=pseudo_task_id)
-            return {
-                "ok": True,
-                "runnable_command": True,
-                "message_id": message_id,
-                "assistant_message_id": assistant_id,
-                "task_id": "",
-                "status": "completed",
-                "error": content,
-            }
-        if not user_goal:
-            content = "运行目标不能为空。请在 Agent/Workflow 名称后写明需求。"
-            assistant_id = self._session.add_assistant_message(content, task_id=pseudo_task_id)
-            return {
-                "ok": True,
-                "runnable_command": True,
-                "message_id": message_id,
-                "assistant_message_id": assistant_id,
-                "task_id": "",
-                "status": "completed",
-                "error": content,
-            }
+        name = ""
+        user_goal = text
+        runnable: dict[str, Any] | None = None
 
         try:
-            run = service.create_run_for_runnable(runnable_id=runnable_id, name=name, user_goal=user_goal)
+            if explicit_target:
+                runnable = service.resolve_runnable(runnable_id=str(runnable_id or "").strip())
+            elif self._has_chat_mention(text):
+                parsed = service.parse_known_chat_runnable(text)
+                if parsed is None:
+                    return None
+                name, user_goal = parsed
+                explicit_target = True
+                runnable = service.resolve_runnable(name=name)
+            elif current_context.get("conversation_kind") == "agent":
+                runnable = service.resolve_runnable(runnable_id=str(current_context.get("runnable_id") or ""))
+                user_goal = text
+        except AgentRuntimeError as exc:
+            return self._record_runnable_error(text, str(exc), context=current_context)
+
+        if runnable is None:
+            return self._record_runnable_error(text, "未找到指定 Agent 或 Workflow", context=current_context)
+
+        keep_workflow_group = (
+            explicit_target
+            and current_context.get("conversation_kind") == "workflow"
+            and runnable.get("kind") == "agent"
+            and bool(current_context.get("run_group_id"))
+        )
+        if not keep_workflow_group:
+            self._prepare_runnable_session(
+                runnable,
+                explicit_target=explicit_target,
+                current_context=current_context,
+            )
+            current_context = self._session_context()
+
+        if raw_attachments:
+            content = "Agent/Workflow 运行入口暂不支持附件。请把附件内容先整理成文字，或使用普通对话发送图片。"
+            return self._record_runnable_error(text, content, runnable=runnable, context=current_context)
+        if not user_goal:
+            content = "运行目标不能为空。请在 Agent/Workflow 名称后写明需求。"
+            return self._record_runnable_error(text, content, runnable=runnable, context=current_context)
+
+        target = self._participant_for_runnable(runnable)
+        run_group_id = ""
+        if runnable.get("kind") == "agent" and current_context.get("conversation_kind") in {"agent", "workflow"}:
+            run_group_id = str(current_context.get("run_group_id") or "")
+        user_metadata = {
+            "target": target,
+            "runnable_kind": runnable.get("kind") or "",
+            "runnable_id": runnable.get("id") or "",
+            "run_group_id": run_group_id,
+        }
+        message_content = text or user_goal
+        message_id = self._session.add_user_message(message_content, [], metadata=user_metadata)
+        upstream = self._chat_upstream_context()
+
+        try:
+            run = service.create_run_for_runnable(
+                runnable_id=str(runnable.get("id") or ""),
+                name=name,
+                user_goal=user_goal,
+                run_group_id=run_group_id,
+                upstream=upstream,
+            )
         except AgentRuntimeError as exc:
             content = str(exc)
-            assistant_id = self._session.add_assistant_message(content, task_id=pseudo_task_id)
+            self._session.mark_message_completed(message_id)
+            assistant_id = self._session.add_assistant_message(
+                content,
+                metadata={"sender": self._main_model_sender(), "runnable_kind": runnable.get("kind") or ""},
+            )
             return {
                 "ok": True,
                 "runnable_command": True,
@@ -431,21 +499,23 @@ class ChatAPI:
                 "error": content,
             }
 
-        runnable = run.get("runnable") or {}
-        run_label = "WorkflowRun" if run.get("kind") == "workflow_run" else "AgentRun"
-        content = (
-            f"{run_label} 已完成。\n\n"
-            f"- Runnable: `{runnable.get('name') or run.get('runnable_id')}`\n"
-            f"- Run: `{run['run_id']}`\n"
-            f"- Status: `{run['status']}`\n\n"
-            f"{run.get('result') or ''}"
-        )
-        assistant_id = self._session.add_assistant_message(content, task_id=pseudo_task_id)
+        self._session.mark_message_completed(message_id)
+        runnable = run.get("runnable") or runnable
+        assistant_ids: list[str]
+        if run.get("kind") == "workflow_run":
+            self._bind_session_context("workflow", runnable, run_group_id=str(run.get("run_group_id") or ""))
+            assistant_ids = self._append_workflow_run_messages(service, run, runnable)
+        else:
+            if current_context.get("conversation_kind") != "workflow":
+                self._bind_session_context("agent", runnable, run_group_id=str(run.get("run_group_id") or ""))
+            assistant_ids = [self._append_agent_run_message(run, runnable)]
+
         response: Dict[str, Any] = {
             "ok": True,
             "runnable_command": True,
             "message_id": message_id,
-            "assistant_message_id": assistant_id,
+            "assistant_message_id": assistant_ids[-1] if assistant_ids else "",
+            "assistant_message_ids": assistant_ids,
             "task_id": "",
             "status": "completed",
             "run_id": run["run_id"],
@@ -459,6 +529,323 @@ class ChatAPI:
         return {
             **response,
         }
+
+    def _prepare_runnable_session(
+        self,
+        runnable: dict[str, Any],
+        *,
+        explicit_target: bool,
+        current_context: dict[str, Any],
+    ) -> None:
+        if not explicit_target:
+            return
+        if (
+            current_context.get("conversation_kind") == "agent"
+            and runnable.get("kind") == "agent"
+            and current_context.get("runnable_id") == runnable.get("id")
+        ):
+            return
+
+        if self._current_session_has_messages():
+            start_new_session = getattr(self._runtime, "start_new_session", None)
+            if callable(start_new_session):
+                start_new_session()
+            else:
+                self._session.clear()
+
+        if runnable.get("kind") == "agent":
+            self._bind_session_context("agent", runnable, run_group_id="")
+        elif runnable.get("kind") == "workflow":
+            self._bind_session_context("workflow", runnable, run_group_id="")
+
+    def _record_runnable_error(
+        self,
+        text: str,
+        content: str,
+        *,
+        runnable: dict[str, Any] | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        target = self._participant_for_runnable(runnable) if runnable else self._main_model_sender()
+        context = context or self._session_context()
+        message_content = (text or "").strip() or "（附件暂未发送给 Agent/Workflow）"
+        message_id = self._session.add_user_message(
+            message_content,
+            [],
+            metadata={
+                "target": target,
+                "runnable_kind": runnable.get("kind") if runnable else "",
+                "run_group_id": context.get("run_group_id") or "",
+            },
+        )
+        self._session.mark_message_completed(message_id)
+        assistant_id = self._session.add_assistant_message(
+            content,
+            error=content,
+            metadata={
+                "sender": self._main_model_sender(),
+                "runnable_kind": runnable.get("kind") if runnable else "",
+                "run_group_id": context.get("run_group_id") or "",
+            },
+        )
+        return {
+            "ok": True,
+            "runnable_command": True,
+            "message_id": message_id,
+            "assistant_message_id": assistant_id,
+            "assistant_message_ids": [assistant_id],
+            "task_id": "",
+            "status": "completed",
+            "error": content,
+        }
+
+    def _append_agent_run_message(self, run: dict[str, Any], runnable: dict[str, Any]) -> str:
+        sender = self._participant_for_runnable(runnable)
+        status = str(run.get("status") or "")
+        content = str(run.get("result") or "").strip()
+        if not content:
+            content = self._run_status_sentence(sender.get("name") or "Agent", status)
+        return self._session.add_assistant_message(
+            content,
+            error=content if status == "failed" else None,
+            metadata={
+                "sender": sender,
+                "runnable_kind": "agent",
+                "runnable_id": runnable.get("id") or run.get("runnable_id") or "",
+                "run_id": run.get("run_id") or "",
+                "run_group_id": run.get("run_group_id") or "",
+                "run_status": status,
+            },
+        )
+
+    def _append_workflow_run_messages(
+        self,
+        service: Any,
+        run: dict[str, Any],
+        runnable: dict[str, Any],
+    ) -> list[str]:
+        assistant_ids: list[str] = []
+        for event in run.get("timeline") or []:
+            if not isinstance(event, dict) or event.get("event") != "workflow.node.agent":
+                continue
+            child_run_id = str(event.get("child_run_id") or "").strip()
+            if not child_run_id:
+                continue
+            try:
+                child = service.get_run(child_run_id)
+                child_runnable = service.resolve_runnable(runnable_id=str(child.get("runnable_id") or "")) or {}
+            except Exception:
+                logger.debug("读取 Workflow 子 Agent 运行失败: %s", child_run_id, exc_info=True)
+                continue
+            sender = self._participant_for_runnable(child_runnable)
+            status = str(child.get("status") or "")
+            content = str(child.get("result") or "").strip()
+            if not content:
+                content = self._run_status_sentence(sender.get("name") or "Agent", status)
+            assistant_ids.append(
+                self._session.add_assistant_message(
+                    content,
+                    error=content if status == "failed" else None,
+                    metadata={
+                        "sender": sender,
+                        "runnable_kind": "agent",
+                        "runnable_id": child_runnable.get("id") or child.get("runnable_id") or "",
+                        "run_id": child.get("run_id") or child_run_id,
+                        "run_group_id": run.get("run_group_id") or child.get("run_group_id") or "",
+                        "workflow_run_id": run.get("run_id") or "",
+                        "workflow_node": event.get("detail") or "",
+                        "run_status": status,
+                    },
+                )
+            )
+
+        workflow_status = str(run.get("status") or "")
+        workflow_name = str(runnable.get("name") or run.get("runnable_name") or "Workflow")
+        result_text = str(run.get("result") or "").strip()
+        if workflow_status == "completed" and assistant_ids:
+            summary = f"{workflow_name} 已完成。"
+        elif result_text:
+            summary = f"{workflow_name} {self._workflow_status_label(workflow_status)}。\n\n{result_text}"
+        else:
+            summary = f"{workflow_name} {self._workflow_status_label(workflow_status)}。"
+        assistant_ids.append(
+            self._session.add_assistant_message(
+                summary,
+                error=summary if workflow_status == "failed" else None,
+                metadata={
+                    "sender": self._participant_for_runnable(runnable),
+                    "runnable_kind": "workflow",
+                    "runnable_id": runnable.get("id") or run.get("runnable_id") or "",
+                    "run_id": run.get("run_id") or "",
+                    "run_group_id": run.get("run_group_id") or "",
+                    "workflow_status": workflow_status,
+                },
+            )
+        )
+        return assistant_ids
+
+    @staticmethod
+    def _run_status_sentence(name: str, status: str) -> str:
+        if status == "completed":
+            return f"{name} 已完成，但没有返回内容。"
+        if status == "approval_required":
+            return f"{name} 等待工具审批。"
+        if status == "cancelled":
+            return f"{name} 已取消。"
+        if status == "failed":
+            return f"{name} 执行失败。"
+        return f"{name} 状态：{status or 'unknown'}。"
+
+    @staticmethod
+    def _workflow_status_label(status: str) -> str:
+        if status == "completed":
+            return "已完成"
+        if status == "approval_required":
+            return "等待审批"
+        if status == "cancelled":
+            return "已取消"
+        if status == "failed":
+            return "执行失败"
+        return f"状态：{status or 'unknown'}"
+
+    def _bind_session_context(self, kind: str, runnable: dict[str, Any], *, run_group_id: str = "") -> None:
+        conversation_kind = kind if kind in {"agent", "workflow"} else "main"
+        participants = [self._participant_for_runnable(runnable)] if conversation_kind == "agent" else self._workflow_participants(runnable)
+        runnable_name = str(
+            runnable.get("nickname")
+            or runnable.get("name")
+            or runnable.get("id")
+            or ""
+        )
+        self._chat_store().update_session_context(
+            self._session.session_id,
+            conversation_kind=conversation_kind,
+            runnable_id=str(runnable.get("id") or ""),
+            runnable_name=runnable_name,
+            run_group_id=str(run_group_id or ""),
+            participants_json=json.dumps(participants, ensure_ascii=False),
+        )
+
+    def _session_context(self, record: Any | None = None) -> dict[str, Any]:
+        if record is None:
+            try:
+                record = self._chat_store().get_session(self._session.session_id)
+            except Exception:
+                record = None
+        kind = str(getattr(record, "conversation_kind", "") or "main")
+        if kind not in {"main", "agent", "workflow"}:
+            kind = "main"
+        participants = self._parse_participants_json(getattr(record, "participants_json", "[]") if record else "[]")
+        return {
+            "conversation_kind": kind,
+            "runnable_id": str(getattr(record, "runnable_id", "") or ""),
+            "runnable_name": str(getattr(record, "runnable_name", "") or ""),
+            "run_group_id": str(getattr(record, "run_group_id", "") or ""),
+            "participants": participants,
+        }
+
+    def _current_session_has_messages(self) -> bool:
+        try:
+            return bool(self._chat_store().load_messages(self._session.session_id, limit=1))
+        except Exception:
+            return self._session.message_count() > 0
+
+    def _chat_upstream_context(self, limit: int = 12) -> str:
+        messages = self._session.get_messages(limit)
+        lines: list[str] = []
+        for msg in messages:
+            text = " ".join(str(msg.content or "").split())
+            if not text:
+                continue
+            label = "系统"
+            if msg.role == MessageRole.USER:
+                label = "用户"
+            elif msg.role == MessageRole.ASSISTANT:
+                sender = (msg.metadata or {}).get("sender") if isinstance(msg.metadata, dict) else {}
+                label = str((sender or {}).get("nickname") or (sender or {}).get("name") or "Yachiyo")
+            lines.append(f"{label}: {_compact_preview(text, 180)}")
+        return "\n".join(lines[-limit:])
+
+    @staticmethod
+    def _participant_for_runnable(runnable: dict[str, Any] | None) -> dict[str, Any]:
+        if not runnable:
+            return {}
+        kind = str(runnable.get("kind") or "agent")
+        participant = {
+            "kind": kind,
+            "id": str(runnable.get("id") or ""),
+            "name": str(runnable.get("name") or runnable.get("id") or ""),
+        }
+        if runnable.get("nickname"):
+            participant["nickname"] = str(runnable.get("nickname") or "")
+        if runnable.get("description"):
+            participant["description"] = str(runnable.get("description") or "")
+        if runnable.get("avatar_url"):
+            participant["avatar_url"] = str(runnable.get("avatar_url") or "")
+        if runnable.get("category"):
+            participant["category"] = str(runnable.get("category") or "")
+        if kind == "workflow":
+            participant["participants"] = ChatAPI._workflow_participants(runnable)
+        return participant
+
+    @staticmethod
+    def _workflow_participants(runnable: dict[str, Any] | None) -> list[dict[str, Any]]:
+        participants = (runnable or {}).get("participants") or []
+        if not isinstance(participants, list):
+            return []
+        return [
+            ChatAPI._participant_for_runnable(item)
+            for item in participants
+            if isinstance(item, dict)
+        ]
+
+    @staticmethod
+    def _main_model_sender() -> dict[str, Any]:
+        return {
+            "kind": "main",
+            "id": "main",
+            "name": "Yachiyo",
+            "nickname": "月見八千代",
+        }
+
+    @staticmethod
+    def _parse_participants_json(value: str | None) -> list[dict[str, Any]]:
+        if not value:
+            return []
+        try:
+            data = json.loads(value)
+        except (TypeError, json.JSONDecodeError):
+            return []
+        if not isinstance(data, list):
+            return []
+        return [item for item in data if isinstance(item, dict)]
+
+    @staticmethod
+    def _parse_main_model_mention(text: str) -> tuple[str, str] | None:
+        value = (text or "").strip()
+        match = re.search(r"(^|[\s，。！？、；;,.!?])@(?P<body>.+)$", value.splitlines()[0] if value else "")
+        if not match:
+            return None
+        body = match.group("body").lstrip()
+        body_lower = body.lower()
+        for alias in sorted(_MAIN_MODEL_ALIASES, key=len, reverse=True):
+            alias_lower = alias.lower()
+            if body_lower == alias_lower:
+                return alias, ""
+            if not body_lower.startswith(alias_lower):
+                continue
+            remainder = body[len(alias):]
+            if remainder and remainder[0] not in _MAIN_MODEL_ALIAS_SEPARATORS:
+                continue
+            return alias, remainder.lstrip(" \t\r\n:：,，、;；")
+        return None
+
+    @staticmethod
+    def _has_chat_mention(text: str) -> bool:
+        value = (text or "").strip()
+        if not value:
+            return False
+        return bool(re.search(r"(^|[\s，。！？、；;,.!?])@.+", value.splitlines()[0]))
 
     def retry_message(self, message_id: str) -> Dict[str, Any]:
         """重新发送当前会话中的失败消息，复用已保存的附件文件。"""
@@ -666,6 +1053,7 @@ class ChatAPI:
             return {
                 "ok": True,
                 "session_id": self._session.session_id,
+                "session_context": self._session_context(),
                 "is_processing": self._session.is_processing(),
                 "messages": serialized_messages,
                 "anchor_message_id": anchor_message_id,
@@ -676,12 +1064,10 @@ class ChatAPI:
             return {"ok": False, "error": str(exc), "messages": []}
 
     def _load_messages_around_anchor(self, message_id: str, *, limit: int) -> list[ChatMessage]:
-        from apps.core.chat_store import get_chat_store
-
         context = max(20, min(int(limit or 80), 400))
         before = max(10, int(context * 0.65))
         after = max(10, context - before - 1)
-        stored_messages = get_chat_store().load_messages_around(
+        stored_messages = self._chat_store().load_messages_around(
             self._session.session_id,
             message_id,
             before=before,
@@ -705,6 +1091,12 @@ class ChatAPI:
                 attachments = parsed_attachments if isinstance(parsed_attachments, list) else []
             except json.JSONDecodeError:
                 attachments = []
+            metadata_json = str(getattr(stored, "metadata_json", "") or "{}")
+            try:
+                parsed_metadata = json.loads(metadata_json)
+                metadata = parsed_metadata if isinstance(parsed_metadata, dict) else {}
+            except json.JSONDecodeError:
+                metadata = {}
             messages.append(
                 ChatMessage(
                     message_id=str(getattr(stored, "message_id", "")),
@@ -715,6 +1107,7 @@ class ChatAPI:
                     task_id=getattr(stored, "task_id", None),
                     error=getattr(stored, "error", None),
                     attachments=attachments,
+                    metadata=metadata,
                 )
             )
         return messages
@@ -738,6 +1131,7 @@ class ChatAPI:
                     "error": m.error,
                     "created_at": m.created_at.isoformat(),
                     "attachments": self._serialize_attachments(m.attachments),
+                    "metadata": m.metadata or {},
                     "progress_label": self._task_progress_label(m.task_id) if activity_events else "",
                     "activity_events": activity_events,
                 }
@@ -989,6 +1383,7 @@ class ChatAPI:
         """获取会话元信息"""
         return {
             "session_id": self._session.session_id,
+            "session_context": self._session_context(),
             "message_count": self._session.message_count(),
             "is_processing": self._session.is_processing(),
             "pending_message_id": self._session.get_pending_message_id(),
@@ -1017,9 +1412,7 @@ class ChatAPI:
 
     def list_sessions(self, limit: int = 20, query: str = "") -> Dict[str, Any]:
         """列出最近会话，包含当前空白会话。"""
-        from apps.core.chat_store import get_chat_store
-
-        store = get_chat_store()
+        store = self._chat_store()
         normalized_query = " ".join(str(query or "").split()).strip()
         current_session = self._runtime.chat_session
         current_session_id = current_session.session_id
@@ -1037,6 +1430,7 @@ class ChatAPI:
             session_items.append({
                 "session_id": session.session_id,
                 "title": self._session_title(session.title, messages),
+                **self._serialize_session_context(session),
                 "created_at": session.created_at,
                 "updated_at": self._session_updated_at(session.session_id, session.created_at, messages=messages),
                 "message_count": session.message_count,
@@ -1050,11 +1444,13 @@ class ChatAPI:
             stored_current = store.get_session(current_session_id)
             current_messages = store.load_messages(current_session_id, limit=240)
             current_title = self._session_title(stored_current.title if stored_current else "", current_messages)
+            current_context = self._serialize_session_context(stored_current) if stored_current else self._session_context()
             session_items.insert(
                 0,
                 {
                     "session_id": current_session_id,
                     "title": current_title or "新对话",
+                    **current_context,
                     "created_at": stored_current.created_at if stored_current else "",
                     "updated_at": self._session_updated_at(
                         current_session_id,
@@ -1074,6 +1470,16 @@ class ChatAPI:
             "current_session_id": current_session_id,
             "sessions": session_items,
             "query": normalized_query,
+        }
+
+    def _serialize_session_context(self, session: Any | None) -> dict[str, Any]:
+        context = self._session_context(session)
+        return {
+            "conversation_kind": context["conversation_kind"],
+            "runnable_id": context["runnable_id"],
+            "runnable_name": context["runnable_name"],
+            "run_group_id": context["run_group_id"],
+            "participants": context["participants"],
         }
 
     @staticmethod
@@ -1162,9 +1568,7 @@ class ChatAPI:
             if self._session_is_processing(current_session_id):
                 return {"ok": True, "discarded": False, "session_id": current_session_id}
 
-            from apps.core.chat_store import get_chat_store
-
-            store = get_chat_store()
+            store = self._chat_store()
             messages = store.load_messages(current_session_id, limit=1)
             if messages:
                 return {"ok": True, "discarded": False, "session_id": current_session_id}
@@ -1254,10 +1658,8 @@ class ChatAPI:
         return False
 
     def _session_updated_at(self, session_id: str, fallback: str = "", messages: list[Any] | None = None) -> str:
-        from apps.core.chat_store import get_chat_store
-
         try:
-            messages = messages if messages is not None else get_chat_store().load_messages(session_id, limit=240)
+            messages = messages if messages is not None else self._chat_store().load_messages(session_id, limit=240)
         except Exception:
             return fallback
         latest = messages[-1].created_at if messages else fallback
@@ -1288,9 +1690,7 @@ class ChatAPI:
             cancelled_count = self._cancel_active_session_tasks("删除会话前取消仍在执行的任务")
             deleted_session_id = self._session.session_id
 
-            from apps.core.chat_store import get_chat_store
-
-            store = get_chat_store()
+            store = self._chat_store()
             store.delete_session(deleted_session_id)
             _remove_attachment_session_dir(deleted_session_id)
             remaining = store.list_sessions(limit=1)

@@ -69,6 +69,11 @@ class StoredSession:
     created_at: str  # ISO 格式
     message_count: int = 0
     hermes_session_id: Optional[str] = None
+    conversation_kind: str = "main"
+    runnable_id: str = ""
+    runnable_name: str = ""
+    run_group_id: str = ""
+    participants_json: str = "[]"
 
 
 @dataclass
@@ -94,6 +99,7 @@ class StoredMessage:
     error: Optional[str]
     created_at: str  # ISO 格式
     attachments_json: str = "[]"
+    metadata_json: str = "{}"
 
 
 class ChatStore:
@@ -122,7 +128,12 @@ class ChatStore:
                     session_id TEXT PRIMARY KEY,
                     title      TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
-                    hermes_session_id TEXT
+                    hermes_session_id TEXT,
+                    conversation_kind TEXT NOT NULL DEFAULT 'main',
+                    runnable_id TEXT NOT NULL DEFAULT '',
+                    runnable_name TEXT NOT NULL DEFAULT '',
+                    run_group_id TEXT NOT NULL DEFAULT '',
+                    participants_json TEXT NOT NULL DEFAULT '[]'
                 );
                 CREATE TABLE IF NOT EXISTS chat_messages (
                     message_id TEXT PRIMARY KEY,
@@ -134,6 +145,7 @@ class ChatStore:
                     error      TEXT,
                     created_at TEXT NOT NULL,
                     attachments_json TEXT NOT NULL DEFAULT '[]',
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
                     FOREIGN KEY (session_id) REFERENCES chat_sessions(session_id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_messages_session
@@ -146,6 +158,21 @@ class ChatStore:
                 pass  # 列已存在
             try:
                 conn.execute("ALTER TABLE chat_messages ADD COLUMN attachments_json TEXT NOT NULL DEFAULT '[]'")
+            except sqlite3.OperationalError:
+                pass  # 列已存在
+            for name, definition in (
+                ("conversation_kind", "TEXT NOT NULL DEFAULT 'main'"),
+                ("runnable_id", "TEXT NOT NULL DEFAULT ''"),
+                ("runnable_name", "TEXT NOT NULL DEFAULT ''"),
+                ("run_group_id", "TEXT NOT NULL DEFAULT ''"),
+                ("participants_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ):
+                try:
+                    conn.execute(f"ALTER TABLE chat_sessions ADD COLUMN {name} {definition}")
+                except sqlite3.OperationalError:
+                    pass  # 列已存在
+            try:
+                conn.execute("ALTER TABLE chat_messages ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'")
             except sqlite3.OperationalError:
                 pass  # 列已存在
             conn.commit()
@@ -171,6 +198,8 @@ class ChatStore:
             rows = conn.execute(
                 """
                 SELECT s.session_id, s.title, s.created_at, s.hermes_session_id,
+                       s.conversation_kind, s.runnable_id, s.runnable_name,
+                       s.run_group_id, s.participants_json,
                        MAX(m.created_at) AS last_message_at,
                        (
                            SELECT um.content
@@ -197,6 +226,11 @@ class ChatStore:
                 created_at=r["created_at"],
                 message_count=r["message_count"],
                 hermes_session_id=r["hermes_session_id"],
+                conversation_kind=r["conversation_kind"] or "main",
+                runnable_id=r["runnable_id"] or "",
+                runnable_name=r["runnable_name"] or "",
+                run_group_id=r["run_group_id"] or "",
+                participants_json=r["participants_json"] or "[]",
             )
             for r in rows
         ]
@@ -217,6 +251,8 @@ class ChatStore:
                 """
                 WITH visible_sessions AS (
                     SELECT s.session_id, s.title, s.created_at, s.hermes_session_id,
+                           s.conversation_kind, s.runnable_id, s.runnable_name,
+                           s.run_group_id, s.participants_json,
                            MAX(m.created_at) AS last_message_at,
                            (
                                SELECT um.content
@@ -233,6 +269,8 @@ class ChatStore:
                     HAVING COUNT(m.message_id) > 0
                 )
                 SELECT vs.session_id, vs.title, vs.created_at, vs.hermes_session_id,
+                       vs.conversation_kind, vs.runnable_id, vs.runnable_name,
+                       vs.run_group_id, vs.participants_json,
                        vs.first_user_content, vs.message_count, vs.last_message_at,
                        mm.message_id AS match_message_id,
                        mm.role AS match_role,
@@ -256,6 +294,7 @@ class ChatStore:
                 WHERE vs.session_id LIKE ? ESCAPE '\\'
                    OR COALESCE(vs.title, '') LIKE ? ESCAPE '\\'
                    OR COALESCE(vs.hermes_session_id, '') LIKE ? ESCAPE '\\'
+                   OR COALESCE(vs.runnable_name, '') LIKE ? ESCAPE '\\'
                    OR EXISTS (
                        SELECT 1
                        FROM chat_messages mx
@@ -266,7 +305,7 @@ class ChatStore:
                          vs.created_at DESC
                 LIMIT ?
                 """,
-                (like, like, like, like, like, like, limit),
+                (like, like, like, like, like, like, like, limit),
             ).fetchall()
         return [
             StoredSessionSearchResult(
@@ -276,6 +315,11 @@ class ChatStore:
                     created_at=r["created_at"],
                     message_count=r["message_count"],
                     hermes_session_id=r["hermes_session_id"],
+                    conversation_kind=r["conversation_kind"] or "main",
+                    runnable_id=r["runnable_id"] or "",
+                    runnable_name=r["runnable_name"] or "",
+                    run_group_id=r["run_group_id"] or "",
+                    participants_json=r["participants_json"] or "[]",
                 ),
                 match_message_id=r["match_message_id"],
                 match_role=r["match_role"] or "",
@@ -310,6 +354,8 @@ class ChatStore:
             row = conn.execute(
                 """
                 SELECT s.session_id, s.title, s.created_at, s.hermes_session_id,
+                       s.conversation_kind, s.runnable_id, s.runnable_name,
+                       s.run_group_id, s.participants_json,
                        COUNT(m.message_id) AS message_count
                 FROM chat_sessions s
                 LEFT JOIN chat_messages m ON m.session_id = s.session_id
@@ -326,6 +372,11 @@ class ChatStore:
             created_at=row["created_at"],
             message_count=row["message_count"],
             hermes_session_id=row["hermes_session_id"],
+            conversation_kind=row["conversation_kind"] or "main",
+            runnable_id=row["runnable_id"] or "",
+            runnable_name=row["runnable_name"] or "",
+            run_group_id=row["run_group_id"] or "",
+            participants_json=row["participants_json"] or "[]",
         )
 
     def update_hermes_session_id(self, session_id: str, hermes_session_id: str) -> None:
@@ -346,6 +397,40 @@ class ChatStore:
             conn.execute(
                 "UPDATE chat_sessions SET title = ? WHERE session_id = ?",
                 (title, session_id),
+            )
+            conn.commit()
+
+    def update_session_context(
+        self,
+        session_id: str,
+        *,
+        conversation_kind: str = "main",
+        runnable_id: str = "",
+        runnable_name: str = "",
+        run_group_id: str = "",
+        participants_json: str = "[]",
+    ) -> None:
+        """Persist the conversation identity used by the desktop chat shell."""
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(
+                """
+                UPDATE chat_sessions
+                   SET conversation_kind = ?,
+                       runnable_id = ?,
+                       runnable_name = ?,
+                       run_group_id = ?,
+                       participants_json = ?
+                 WHERE session_id = ?
+                """,
+                (
+                    (conversation_kind or "main").strip() or "main",
+                    (runnable_id or "").strip(),
+                    (runnable_name or "").strip(),
+                    (run_group_id or "").strip(),
+                    participants_json or "[]",
+                    session_id,
+                ),
             )
             conn.commit()
 
@@ -385,8 +470,8 @@ class ChatStore:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO chat_messages
-                    (message_id, session_id, role, content, status, task_id, error, created_at, attachments_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (message_id, session_id, role, content, status, task_id, error, created_at, attachments_json, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     msg.message_id,
@@ -398,6 +483,7 @@ class ChatStore:
                     msg.error,
                     msg.created_at,
                     msg.attachments_json,
+                    msg.metadata_json,
                 ),
             )
             conn.commit()
@@ -425,7 +511,7 @@ class ChatStore:
             rows = conn.execute(
                 """
                 SELECT message_id, session_id, role, content, status, task_id, error,
-                       created_at, attachments_json
+                       created_at, attachments_json, metadata_json
                 FROM chat_messages
                 WHERE session_id = ?
                   AND task_id = ?
@@ -445,6 +531,7 @@ class ChatStore:
                 error=r["error"],
                 created_at=r["created_at"],
                 attachments_json=r["attachments_json"] or "[]",
+                metadata_json=r["metadata_json"] or "{}",
             )
             for r in rows
         ]
@@ -479,7 +566,7 @@ class ChatStore:
             if normalized_limit <= 0:
                 rows = conn.execute(
                     """
-                    SELECT message_id, session_id, role, content, status, task_id, error, created_at, attachments_json
+                    SELECT message_id, session_id, role, content, status, task_id, error, created_at, attachments_json, metadata_json
                     FROM chat_messages
                     WHERE session_id = ?
                     ORDER BY created_at ASC, rowid ASC
@@ -489,7 +576,7 @@ class ChatStore:
             else:
                 rows = conn.execute(
                     """
-                    SELECT message_id, session_id, role, content, status, task_id, error, created_at, attachments_json
+                    SELECT message_id, session_id, role, content, status, task_id, error, created_at, attachments_json, metadata_json
                     FROM chat_messages
                     WHERE session_id = ?
                     ORDER BY created_at DESC, rowid DESC
@@ -509,6 +596,7 @@ class ChatStore:
                 error=r["error"],
                 created_at=r["created_at"],
                 attachments_json=r["attachments_json"] or "[]",
+                metadata_json=r["metadata_json"] or "{}",
             )
             for r in rows
         ]
@@ -546,7 +634,7 @@ class ChatStore:
             before_rows = conn.execute(
                 """
                 SELECT message_id, session_id, role, content, status, task_id, error,
-                       created_at, attachments_json
+                       created_at, attachments_json, metadata_json
                 FROM chat_messages
                 WHERE session_id = ?
                   AND rowid <= ?
@@ -558,7 +646,7 @@ class ChatStore:
             after_rows = conn.execute(
                 """
                 SELECT message_id, session_id, role, content, status, task_id, error,
-                       created_at, attachments_json
+                       created_at, attachments_json, metadata_json
                 FROM chat_messages
                 WHERE session_id = ?
                   AND rowid > ?
@@ -579,6 +667,7 @@ class ChatStore:
                 error=r["error"],
                 created_at=r["created_at"],
                 attachments_json=r["attachments_json"] or "[]",
+                metadata_json=r["metadata_json"] or "{}",
             )
             for r in rows
         ]

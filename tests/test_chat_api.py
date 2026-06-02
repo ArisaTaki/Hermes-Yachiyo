@@ -143,6 +143,175 @@ def test_agent_mention_creates_agent_run_without_general_task(tmp_path, monkeypa
         messages = runtime.chat_session.get_messages()
         assert messages[0].status == MessageStatus.COMPLETED
         assert messages[1].role == MessageRole.ASSISTANT
+        assert messages[1].content == "Agent result"
+        assert messages[1].metadata["sender"]["name"] == "Helper"
+        stored = store.get_session(runtime.chat_session.session_id)
+        assert stored is not None
+        assert stored.conversation_kind == "agent"
+        assert stored.runnable_id == agent["agent_id"]
+        sessions = api.list_sessions()["sessions"]
+        current = next(item for item in sessions if item["session_id"] == runtime.chat_session.session_id)
+        assert current["conversation_kind"] == "agent"
+        assert current["runnable_name"] == "Helper"
+        assert current["participants"][0]["name"] == "Helper"
+    finally:
+        service.close()
+        store.close()
+
+
+def test_agent_scoped_session_continues_without_new_mention(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        seed_templates=False,
+    )
+    agent = service.create_agent(
+        {
+            "name": "Helper",
+            "model_mode": "custom_api",
+            "model_config": {
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-secret",
+            },
+        }
+    )
+    responses = iter(["First agent result", "Second agent result"])
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: {"content": next(responses)},
+    )
+    try:
+        first = api.send_message("@Helper 第一轮")
+        second = api.send_message("继续处理")
+
+        assert first["ok"] is True
+        assert second["ok"] is True
+        assert second["runnable_command"] is True
+        assert runtime.state.list_tasks() == []
+        assert second["run_group_id"] == first["run_group_id"]
+        second_run = service.get_run(second["agent_run_id"])
+        assert second_run["runnable_id"] == agent["agent_id"]
+        assert second_run["run_group_id"] == first["run_group_id"]
+        messages = api.get_messages()["messages"]
+        assert [message["content"] for message in messages if message["role"] == "assistant"] == [
+            "First agent result",
+            "Second agent result",
+        ]
+        assert messages[-1]["metadata"]["sender"]["name"] == "Helper"
+    finally:
+        service.close()
+        store.close()
+
+
+def test_workflow_mention_creates_group_with_agent_reports_and_intervention(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        seed_templates=False,
+    )
+    responses = iter(["Design output", "Code output", "Design intervention"])
+
+    def fake_chat(_base_url, _model, _api_key, _messages, **_kwargs):
+        return {"content": next(responses)}
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        design = service.create_agent({
+            "name": "Design Agent",
+            "nickname": "Design",
+            "avatar_url": "https://example.test/design.png",
+            "model_mode": "custom_api",
+            "model_config": model_config,
+        })
+        coding = service.create_agent({
+            "name": "Coding Agent",
+            "nickname": "Code",
+            "model_mode": "custom_api",
+            "model_config": model_config,
+        })
+        workflow = service.create_workflow(
+            {
+                "name": "Web Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {"id": "design", "type": "agent", "data": {"label": "Design", "agent_id": design["agent_id"]}},
+                    {"id": "coding", "type": "agent", "data": {"label": "Coding", "agent_id": coding["agent_id"]}},
+                ],
+                "edges": [
+                    {"source": "start", "target": "design"},
+                    {"source": "design", "target": "coding"},
+                ],
+            }
+        )
+
+        workflow_result = api.send_message("@Web Flow 做一个网页设计链路")
+
+        assert workflow_result["ok"] is True
+        assert workflow_result["workflow_run_id"]
+        assert workflow_result["run_group_id"]
+        messages = api.get_messages()["messages"]
+        assistant_messages = [message for message in messages if message["role"] == "assistant"]
+        assert [message["content"] for message in assistant_messages] == [
+            "Design output",
+            "Code output",
+            "Web Flow 已完成。",
+        ]
+        assert [message["metadata"]["sender"]["name"] for message in assistant_messages] == [
+            "Design Agent",
+            "Coding Agent",
+            "Web Flow",
+        ]
+        current = next(
+            item for item in api.list_sessions()["sessions"]
+            if item["session_id"] == runtime.chat_session.session_id
+        )
+        assert current["conversation_kind"] == "workflow"
+        assert current["runnable_id"] == workflow["workflow_id"]
+        assert current["run_group_id"] == workflow_result["run_group_id"]
+        assert [participant["name"] for participant in current["participants"]] == [
+            "Design Agent",
+            "Coding Agent",
+        ]
+        listed_ids = {run["run_id"] for run in service.list_runs(limit=20)["runs"]}
+        group = service.get_run_group(workflow_result["run_group_id"])
+        child_ids = [run_id for run_id in group["child_run_ids"] if run_id != workflow_result["workflow_run_id"]]
+        assert workflow_result["workflow_run_id"] in listed_ids
+        assert not any(run_id in listed_ids for run_id in child_ids)
+
+        intervention = api.send_message("@Design 再收紧一下视觉方向")
+
+        assert intervention["ok"] is True
+        assert intervention["agent_run_id"]
+        assert intervention["run_group_id"] == workflow_result["run_group_id"]
+        intervention_run = service.get_run(intervention["agent_run_id"])
+        assert intervention_run["runnable_id"] == design["agent_id"]
+        assert intervention_run["run_group_id"] == workflow_result["run_group_id"]
+        after = api.get_messages()["messages"]
+        assert after[-1]["content"] == "Design intervention"
+        assert after[-1]["metadata"]["sender"]["name"] == "Design Agent"
+        stored = store.get_session(runtime.chat_session.session_id)
+        assert stored is not None
+        assert stored.conversation_kind == "workflow"
+
+        main = api.send_message("@主模型 总结一下当前工作流状态")
+        assert main["ok"] is True
+        assert "runnable_command" not in main
+        task = runtime.state.get_task(main["task_id"])
+        assert task is not None
+        assert task.chat_session_id == runtime.chat_session.session_id
+        stored = store.get_session(runtime.chat_session.session_id)
+        assert stored is not None
+        assert stored.conversation_kind == "workflow"
     finally:
         service.close()
         store.close()
@@ -189,6 +358,10 @@ def test_selected_runnable_creates_agent_run_without_mention(tmp_path, monkeypat
         assert result["runnable_command"] is True
         assert result["agent_run_id"]
         assert runtime.state.list_tasks() == []
+        session = store.get_session(runtime.chat_session.session_id)
+        assert session is not None
+        assert session.conversation_kind == "agent"
+        assert session.runnable_id == agent["agent_id"]
     finally:
         service.close()
         store.close()
@@ -221,6 +394,47 @@ def test_agent_mention_supports_multiword_names(tmp_path, monkeypatch):
         run = service.get_run(result["agent_run_id"])
         assert run["runnable_id"] == agent["agent_id"]
         assert runtime.state.list_tasks() == []
+    finally:
+        service.close()
+        store.close()
+
+
+def test_agent_mention_can_appear_inline_without_catching_email(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        seed_templates=False,
+    )
+    agent = service.create_agent(
+        {
+            "name": "Design Agent",
+            "nickname": "Design",
+            "model_mode": "custom_api",
+            "model_config": {
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-secret",
+            },
+        }
+    )
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "Design result"})
+    try:
+        normal = api.send_message("我的邮箱是 demo@example.com")
+
+        assert normal["ok"] is True
+        assert "runnable_command" not in normal
+        assert runtime.state.get_task(normal["task_id"]) is not None
+
+        runtime.start_new_session()
+        result = api.send_message("请 @Design 做一版视觉方向")
+
+        assert result["ok"] is True
+        assert result["agent_run_id"]
+        run = service.get_run(result["agent_run_id"])
+        assert run["runnable_id"] == agent["agent_id"]
+        assert run["user_goal"] == "请 做一版视觉方向"
     finally:
         service.close()
         store.close()

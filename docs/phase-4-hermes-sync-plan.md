@@ -10,7 +10,7 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - Skill Library：导入本地 Skill，并挂载到 Agent。
 - Workflow Studio：用可视化节点把多个 Agent 编排成线性可运行流程。
 - Model Profiles：按服务商源保存、测试和复用文本 / Vision / TTS 配置；不再生成“本地主模型”快照。
-- Chat 入口：普通消息继续走 Hermes Chat；`@Name 需求`、Composer 选择器或主 Agent 自动委派会启动已启用的持久 Agent / Workflow。
+- Chat 入口：普通消息继续走 Hermes Chat；输入 `@` 后从 mention 菜单选择目标、直接写 `@Name 需求`，或由主 Agent 自动委派，都会启动已启用的持久 Agent / Workflow。
 
 ## 已实现批次
 
@@ -222,13 +222,25 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - Workflow 子 Agent 的 `user_goal` 保持原始 Workflow 目标，上一节点输出只进入 `Upstream Context`，避免第二个及后续 Agent 的上下文重复膨胀，也让 Runs 列表展示更接近用户意图。
 - OpenAI-compatible chat 调用超时从硬编码 20 秒收敛到 60 秒常量，适配真实模型在多 Agent 串联和较长上下文下的响应时间。
 
+### Batch 20：Chat Agent / Workflow 会话模式
+
+- Chat 会话存储新增 `conversation_kind`、`runnable_id`、`runnable_name`、`run_group_id`、`participants_json`；消息存储新增 `metadata_json`，用于持久化 Agent / Workflow 群组身份和每条消息的 sender。
+- Chat `@Agent` 会创建 AgentRun，并把当前会话绑定为 Agent 私聊；后续不写 `@` 的普通文本会继续发给该 Agent，不再创建普通 Hermes task。
+- Chat `@Workflow` 会创建 WorkflowRun / RunGroup，并把 Workflow 子 Agent Run 的结果按顺序写入聊天消息；每条子 Agent 汇报都带 Agent sender metadata，最后追加 Workflow 完成状态。
+- Workflow 群组内用户可继续 `@某Agent` 插手；该 AgentRun 复用当前 Workflow `run_group_id` 并把结果追加回同一个群组。不指定 Agent / Workflow 时仍交给主模型处理。
+- Chat 会话列表和标题栏会基于会话上下文显示 Agent 头像/名称或 Workflow 群组堆叠头像；消息气泡会基于 `metadata.sender` 显示具体发言 Agent。
+- Composer 移除 Agent / Workflow 下拉框；键入 `@` 会展示主模型、Agent 和 Workflow mention 菜单，选择带空格名称时自动插入 quoted mention，并在输入区显示 token 芯片。消息正文中的 mention 也有独立视觉样式。
+- Workflow Studio 增加 Agent 快捷面板，可从已有 Agents 直接添加节点并自动接入线性链路；ReactFlow 画布继续支持拖拽、连线、节点设置、保存和运行。
+- `GET /ui/chat/messages` 与 `GET /ui/chat/sessions` 返回会话上下文和 participants，前端无需从标题或消息内容猜测会话类型。
+- 验证：`.venv/bin/python -m pytest tests/test_chat_api.py tests/test_chat_store.py tests/test_chat_session.py tests/test_agent_runtime.py tests/test_ui_bridge_routes.py -q` → 157 passed；`npm --prefix apps/frontend run build` → passed；`git diff --check` → clean；Browser 使用只读 fixture 打开 Chat 与 Workflow Studio：旧下拉框数量为 0，`@` 菜单和 quoted Workflow 芯片可见，Workflow 群组展示 3 个具体 Agent sender，画布从 `4 nodes / 3 edges` 添加 Agent 后变为 `5 nodes / 4 edges`，窄屏 Chat 与 Studio 无横向溢出，console error 为空。
+
 ## 下一阶段产品方向
 
 - Agent / Workflow 的核心可行性要从“能得到文本结果”推进到“能产出可浏览、可复用的文件”：Design Agent 应能产出原型文件或 Markdown；Coding Agent 应能产出代码文件或 patch；Review Agent 应能产出 Markdown review 建议。
 - Workflow 跑完后需要记录每个 Agent 的结构化产物，而不只是最后一个节点的文本；Runs 详情应成为查看所有中间产物、最终产物、artifact 和子 Run 的统一入口。
-- 任意入口触发 Workflow 都应同步到 Runs：Quick Run、Workflow Studio、Chat `@Agent` / `@Workflow`、未来 Yachiyo 自动派发任务，都应该产生同一套 RunGroup / Run 历史。
-- Chat 入口后续可拆成两类：主动选择某个 Agent 开启一对一对话；在主对话中 `@Agent` / `@Workflow` 由 Yachiyo 派发任务并回填 Runs。
-- 更拟人化的远期方向是“公司派活式群组”：Yachiyo、用户和多个 Agent 同处一个任务群组，用户可插话、@ 任意 Agent，Yachiyo 可自主判断交给谁处理；这需要先明确消息模型、权限边界、RunGroup 映射和产物归属。
+- 任意入口触发 Workflow 已统一创建 RunGroup / Run 历史；后续仍要把未来 Yachiyo 自动派发任务接入同一套 Chat 群组可观察性。
+- Chat 已支持 Agent 私聊和 Workflow 群组；下一步要补 streaming/轮询、运行中取消、失败重试、审批恢复和中间 artifact 在群组里的展示。
+- 更拟人化的远期方向是“公司派活式群组”：Yachiyo 可自主判断交给谁处理、在群组内协调多个 Agent，并把用户插话纳入后续 Agent 上下文和产物归属。
 
 ## 新增接口
 
@@ -314,6 +326,8 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
   - Workflow 线性校验。
   - Tool Broker 原生 `tool_calls`、JSON fallback、未授权工具拒绝、越界拒绝、审批暂停、审批恢复和拒绝取消。
   - Chat `@Agent` 创建 run 且不创建普通 Hermes task。
+  - Chat `@Workflow` 创建 WorkflowRun / RunGroup，并把子 Agent 汇报写入聊天消息。
+  - Workflow 群组内继续 `@Agent` 会复用同一 RunGroup。
 - 前端：
   - Agent Studio 创建/编辑 Agent，挂载 Skill。
   - Model Providers 不展示本地主模型快照。
@@ -322,5 +336,6 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
   - Skill Library 批量导入、启停、打开本地路径、删除 Skill。
   - Runs 详情可显示 `approval_required` 并执行 Approve / Reject。
   - Workflow Studio 拖拽、连线、保存、运行。
-  - Chat 选择 Agent / Workflow 或输入 `@Name` 能创建 run。
+  - Chat 输入 `@` 可选择 Agent / Workflow mention，或直接输入 `@Name` 创建 run。
+  - Agent 私聊和 Workflow 群组在会话列表、标题栏、消息气泡中显示正确身份。
   - `npm --prefix apps/frontend run build` 通过。
