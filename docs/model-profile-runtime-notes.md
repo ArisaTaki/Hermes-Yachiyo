@@ -63,6 +63,9 @@
 - `terminal.run` 与 `workspace.write_patch` 默认需要审批，Agent prompt 不能绕过权限边界。
 - 每次 Agent Run 会记录 context artifact、timeline、progress events 和 final result；挂载 Skill 缺失时会在运行前失败。
 - 主 Agent 自动委派第一版走内部桥 `run_yachiyo_agent` / `run_yachiyo_workflow`，只接受已保存、已启用目标，并限制单轮最多 3 次。
+- Chat 群组中的主模型协调不再复用普通委派桥：群组上下文会注入成员清单，主模型只输出内部 `dispatch_group_agent` 协议，Chat 层负责隐藏 JSON、创建对应 AgentRun、保留主模型自然说明并展示派发 activity。
+- 群组派发的 AgentRun 失败后可按单条 Agent 气泡重试，重试只重跑该 Agent 的 `delegated_goal`，不会重新触发主模型整轮规划。
+- AgentRun 在 Chat 中进入 `approval_required` 时继续保持 processing，并把待审批工具、脱敏输入摘要和批准 / 拒绝入口直接展示在消息气泡中；原始 pending tool input 仍只保留在后端。
 
 ### Agent Studio 第一阶段稳定化
 

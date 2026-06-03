@@ -326,6 +326,35 @@ class TestHermesExecutor:
         assert "catalog" in calls[0]
         assert "事实核对完成" in calls[1]
 
+    def test_call_hermes_group_mode_returns_dispatch_for_chat_layer(self, monkeypatch):
+        calls: list[str] = []
+        delegated: list[dict] = []
+        dispatch = '{"action":"run_yachiyo_agent","agent":"Research Agent","goal":"核对事实"}'
+
+        async def fake_invoke(description, **_kwargs):
+            calls.append(description)
+            return HermesInvokeResult(success=True, stdout=dispatch, returncode=0, hermes_session_id="sid")
+
+        monkeypatch.setattr(executor_mod, "invoke_hermes_cli", fake_invoke)
+        monkeypatch.setattr(executor_mod, "_yachiyo_delegation_catalog_context", lambda: "single chat catalog")
+        monkeypatch.setattr(
+            executor_mod,
+            "_run_yachiyo_delegation",
+            lambda request: delegated.append(request),
+        )
+
+        async def run_case() -> str:
+            return await HermesExecutor().run(
+                _make_task("[Yachiyo 群组上下文]\n群成员包括：\n- Research Agent（Agent）\n\n请安排")
+            )
+
+        result = asyncio.run(run_case())
+        assert result == dispatch
+        assert len(calls) == 1
+        assert "群组派活" in calls[0]
+        assert "single chat catalog" not in calls[0]
+        assert delegated == []
+
     @pytest.mark.asyncio
     async def test_call_hermes_injects_user_address(self, monkeypatch):
         captured: dict[str, str] = {}

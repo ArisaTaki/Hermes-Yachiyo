@@ -2,6 +2,19 @@
 
 ## 已完成
 
+### Milestone 94 — Chat 群组派活体验收口
+
+- ✅ Chat 新建入口收敛到会话列表 tab 右侧 `+`：Agent tab 创建一对一对话，群组 tab 创建手动群组；右上角重复新建按钮已移除。
+- ✅ 新对话默认是空对话页，用户 `@Agent` 才会进入对应 Agent；没有 `@` 时仍交给主模型。
+- ✅ Agent / 群组标题和删除确认文案已按当前会话类型区分；Agent 标题会忽略开头 mention，群组删除不再显示“删除此对话”。
+- ✅ 手动群组创建后会持久存在，即使没有消息也不会因切换会话消失；未填写名称时默认用主模型和所有选中 Agent 的 nickname 以 `、` 拼接。
+- ✅ 群组成员计数包含主模型，主模型在群组内会收到当前群组成员清单，可正确理解“群里的其他 Agent”。
+- ✅ mention 菜单改成 QQ 式候选体验，支持键盘上下选择；消息输入区和消息正文中的 mention 都有 token 样式。
+- ✅ 群组主模型派活改为内部 `dispatch_group_agent` 协议：Chat 层隐藏 JSON、记录派发 activity、创建具体 AgentRun，并在最终主模型气泡中保留自然说明和派发摘要。
+- ✅ 单个被派发 Agent 失败时，重试只重跑该 Agent 的原始 delegated goal，不会重新触发主模型规划整轮群组任务。
+- ✅ AgentRun 在聊天中等待审批时保持 processing，消息会说明哪个 Agent 需要审批、准备调用哪个工具、输入摘要是什么，并提供批准 / 拒绝按钮。
+- ✅ 验证：`pytest tests/test_chat_store.py tests/test_chat_api.py -q` → 80 passed；`pytest tests/test_executor.py::TestHermesExecutor::test_call_hermes_group_mode_returns_dispatch_for_chat_layer -q` → 1 passed；`npm --prefix apps/frontend run build` → passed。
+
 ### Milestone 93 — Chat Agent / Workflow 会话模式
 
 - ✅ Chat 会话存储新增 Agent / Workflow 上下文字段，消息存储新增 `metadata_json`，可持久化 sender、Run、RunGroup 和群组 participants。

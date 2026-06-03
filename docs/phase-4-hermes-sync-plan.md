@@ -234,6 +234,19 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - `GET /ui/chat/messages` 与 `GET /ui/chat/sessions` 返回会话上下文和 participants，前端无需从标题或消息内容猜测会话类型。
 - 验证：`.venv/bin/python -m pytest tests/test_chat_api.py tests/test_chat_store.py tests/test_chat_session.py tests/test_agent_runtime.py tests/test_ui_bridge_routes.py -q` → 157 passed；`npm --prefix apps/frontend run build` → passed；`git diff --check` → clean；Browser 使用只读 fixture 打开 Chat 与 Workflow Studio：旧下拉框数量为 0，`@` 菜单和 quoted Workflow 芯片可见，Workflow 群组展示 3 个具体 Agent sender，画布从 `4 nodes / 3 edges` 添加 Agent 后变为 `5 nodes / 4 edges`，窄屏 Chat 与 Studio 无横向溢出，console error 为空。
 
+### Batch 21：Chat 群组派活与审批可观察性
+
+- Chat 新会话入口改为“空对话 + mention 路由”：输入 `@Agent` 才进入对应 Agent，一对一会话后续不写 `@` 时继续发给该 Agent；未指定目标时仍走主模型。
+- Chat 会话列表支持 Agent / 群组两个 tab，右侧 `+` 会按当前 tab 创建一对一 Agent 对话或手动群组；顶部重复的新建按钮已移除。
+- 手动群组一旦创建即持久存在，即使还没有消息也不会因为切换会话被清理；空群组名称默认使用主模型与所有选中 Agent 的 nickname，用 `、` 拼接。
+- 群组成员计数包含主模型；群组删除确认、标题和列表文案按群组语义显示，不再沿用“对话”。
+- Chat mention 菜单改为 QQ 式候选列表，支持键盘上下选择；输入框和消息气泡中的 mention 使用 token 样式，Agent 标题不再把 `@xxx` 当作会话标题前缀。
+- 群组内未明确 `@Agent` 或 `@Workflow` 的消息交给主模型作为协调者；主模型会收到群组成员清单，只能基于当前群组成员理解“群里其他模型”。
+- 主模型需要派活时输出内部 `dispatch_group_agent` JSON，由 Chat 层拦截创建具体 AgentRun；UI 不展示内部 JSON，运行中显示群组派发 activity，完成后保留主模型原本的自然说明并追加派发摘要。
+- 派发出去的 AgentRun 会在群组里以对应 Agent sender 出现；如果单个 Agent 失败，点击该 Agent 气泡重试只重跑同一个 Agent 的原始目标，不会触发主模型重新规划整轮派活。
+- AgentRun 进入 `approval_required` 时，聊天气泡保持 processing，显示需要审批的 Agent、工具名和输入摘要，并直接提供批准 / 拒绝按钮；不再只显示突兀的 `等待审批：tool`。
+- 群组派活 prompt 明确禁止用 shell/terminal 模拟派活、禁止 `run_yachiyo_agent` / `run_yachiyo_workflow`，派活协议由 Chat 层接管并隐藏。
+
 ## 下一阶段产品方向
 
 - Agent / Workflow 的核心可行性要从“能得到文本结果”推进到“能产出可浏览、可复用的文件”：Design Agent 应能产出原型文件或 Markdown；Coding Agent 应能产出代码文件或 patch；Review Agent 应能产出 Markdown review 建议。

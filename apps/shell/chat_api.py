@@ -327,6 +327,9 @@ class ChatAPI:
             if unavailable_reason:
                 return {"ok": False, "error": unavailable_reason}
 
+            current_context = self._session_context()
+            task_text = self._main_model_goal_text(text)
+
             if raw_attachments and self._should_enforce_image_capability():
                 image_input = get_current_hermes_image_input_capability()
                 if image_input.get("can_attach_images") is False:
@@ -338,7 +341,8 @@ class ChatAPI:
             saved_attachments = self._save_attachments(raw_attachments)
             if not text and saved_attachments:
                 text = "请识别并分析这张图片。"
-            should_attach_desktop_snapshot = self._should_attach_desktop_snapshot(text, saved_attachments)
+                task_text = text
+            should_attach_desktop_snapshot = self._should_attach_desktop_snapshot(task_text, saved_attachments)
             if should_attach_desktop_snapshot and self._should_enforce_image_capability():
                 image_input = get_current_hermes_image_input_capability()
                 if image_input.get("can_attach_images") is False:
@@ -348,10 +352,11 @@ class ChatAPI:
                         "image_input": image_input,
                     }
             task_description, saved_attachments = self._attach_desktop_snapshot_if_needed(
-                text,
+                task_text,
                 saved_attachments,
                 should_attach=should_attach_desktop_snapshot,
             )
+            task_description = self._with_group_context_for_main_model(task_description, current_context)
             if saved_attachments and not raw_attachments and self._should_enforce_image_capability():
                 image_input = get_current_hermes_image_input_capability()
                 if image_input.get("can_attach_images") is False:
@@ -446,7 +451,14 @@ class ChatAPI:
             and runnable.get("kind") == "agent"
             and bool(current_context.get("run_group_id"))
         )
-        if not keep_workflow_group:
+        keep_manual_group = (
+            explicit_target
+            and current_context.get("conversation_kind") == "group"
+            and runnable.get("kind") == "agent"
+        )
+        if keep_manual_group:
+            current_context = self._group_context_with_runnable(current_context, runnable)
+        if not keep_workflow_group and not keep_manual_group:
             self._prepare_runnable_session(
                 runnable,
                 explicit_target=explicit_target,
@@ -463,7 +475,7 @@ class ChatAPI:
 
         target = self._participant_for_runnable(runnable)
         run_group_id = ""
-        if runnable.get("kind") == "agent" and current_context.get("conversation_kind") in {"agent", "workflow"}:
+        if current_context.get("conversation_kind") in {"agent", "workflow", "group"}:
             run_group_id = str(current_context.get("run_group_id") or "")
         user_metadata = {
             "target": target,
@@ -472,7 +484,14 @@ class ChatAPI:
             "run_group_id": run_group_id,
         }
         message_content = text or user_goal
+        should_set_runnable_title = (
+            current_context.get("conversation_kind") != "group"
+            and self._session.message_count() == 0
+            and bool(user_goal)
+        )
         message_id = self._session.add_user_message(message_content, [], metadata=user_metadata)
+        if should_set_runnable_title:
+            self._set_session_title_from_message(user_goal)
         upstream = self._chat_upstream_context()
 
         # 判断是否为 Workflow（同步执行）
@@ -507,7 +526,10 @@ class ChatAPI:
 
             self._session.mark_message_completed(message_id)
             runnable = run.get("runnable") or runnable
-            self._bind_session_context("workflow", runnable, run_group_id=str(run.get("run_group_id") or ""))
+            if current_context.get("conversation_kind") == "group":
+                self._bind_group_session_context(current_context, run_group_id=str(run.get("run_group_id") or ""))
+            else:
+                self._bind_session_context("workflow", runnable, run_group_id=str(run.get("run_group_id") or ""))
             assistant_ids = self._append_workflow_run_messages(service, run, runnable)
 
             return {
@@ -546,23 +568,8 @@ class ChatAPI:
 
         def _on_run_complete(run_result: dict[str, Any]) -> None:
             """Agent Run 完成后的回调"""
-            status = str(run_result.get("status") or "completed")
-            content = str(run_result.get("result") or "").strip()
-            if not content:
-                content = self._run_status_sentence(sender.get("name") or "Agent", status)
-
-            is_failed = status == "failed"
-            self._session.update_assistant_message(
-                assistant_id,
-                content,
-                status=MessageStatus.FAILED if is_failed else MessageStatus.COMPLETED,
-                error=content if is_failed else None,
-                metadata={
-                    "run_status": status,
-                    "run_id": run_result.get("run_id") or "",
-                },
-            )
-            logger.info("Agent Run 异步完成: run_id=%s, status=%s", run_result.get("run_id"), status)
+            self._update_agent_run_message_from_result(assistant_id, sender, run_result)
+            logger.info("Agent Run 异步完成: run_id=%s, status=%s", run_result.get("run_id"), run_result.get("status"))
 
         try:
             run = service.create_run_for_runnable_async(
@@ -595,7 +602,9 @@ class ChatAPI:
         self._session.mark_message_completed(message_id)
         runnable = run.get("runnable") or runnable
 
-        if current_context.get("conversation_kind") != "workflow":
+        if current_context.get("conversation_kind") == "group":
+            self._bind_group_session_context(current_context, run_group_id=str(run.get("run_group_id") or ""))
+        elif current_context.get("conversation_kind") != "workflow":
             self._bind_session_context("agent", runnable, run_group_id=str(run.get("run_group_id") or ""))
 
         return {
@@ -685,6 +694,8 @@ class ChatAPI:
         sender = self._participant_for_runnable(runnable)
         status = str(run.get("status") or "")
         content = str(run.get("result") or "").strip()
+        if status == "approval_required":
+            content = self._approval_required_content(sender, run)
         if not content:
             content = self._run_status_sentence(sender.get("name") or "Agent", status)
         return self._session.add_assistant_message(
@@ -697,6 +708,7 @@ class ChatAPI:
                 "run_id": run.get("run_id") or "",
                 "run_group_id": run.get("run_group_id") or "",
                 "run_status": status,
+                "pending_approval": run.get("pending_approval") if isinstance(run.get("pending_approval"), dict) else {},
             },
         )
 
@@ -722,6 +734,8 @@ class ChatAPI:
             sender = self._participant_for_runnable(child_runnable)
             status = str(child.get("status") or "")
             content = str(child.get("result") or "").strip()
+            if status == "approval_required":
+                content = self._approval_required_content(sender, child)
             if not content:
                 content = self._run_status_sentence(sender.get("name") or "Agent", status)
             assistant_ids.append(
@@ -737,6 +751,7 @@ class ChatAPI:
                         "workflow_run_id": run.get("run_id") or "",
                         "workflow_node": event.get("detail") or "",
                         "run_status": status,
+                        "pending_approval": child.get("pending_approval") if isinstance(child.get("pending_approval"), dict) else {},
                     },
                 )
             )
@@ -790,8 +805,97 @@ class ChatAPI:
             return "执行失败"
         return f"状态：{status or 'unknown'}"
 
+    def _update_agent_run_message_from_result(
+        self,
+        message_id: str,
+        sender: dict[str, Any],
+        run_result: dict[str, Any],
+    ) -> None:
+        status = str(run_result.get("status") or "completed")
+        content = str(run_result.get("result") or "").strip()
+        if status == "approval_required":
+            content = self._approval_required_content(sender, run_result)
+        if not content:
+            content = self._run_status_sentence(sender.get("name") or "Agent", status)
+        is_failed = status == "failed"
+        message_status = self._message_status_for_run_status(status)
+        pending_approval = run_result.get("pending_approval") if isinstance(run_result.get("pending_approval"), dict) else {}
+        self._session.update_assistant_message(
+            message_id,
+            content,
+            status=message_status,
+            error=content if is_failed else None,
+            metadata={
+                "run_status": status,
+                "run_id": run_result.get("run_id") or "",
+                "run_group_id": run_result.get("run_group_id") or "",
+                "pending_approval": pending_approval,
+            },
+        )
+
+    @classmethod
+    def _approval_required_content(cls, sender: dict[str, Any], run_result: dict[str, Any]) -> str:
+        name = str(
+            sender.get("nickname")
+            or sender.get("name")
+            or run_result.get("runnable_name")
+            or "Agent"
+        ).strip()
+        pending = run_result.get("pending_approval") if isinstance(run_result.get("pending_approval"), dict) else {}
+        tool = str(pending.get("tool") or "").strip()
+        if not tool:
+            match = re.search(r"等待审批[:：]\s*(?P<tool>[A-Za-z0-9_.-]+)", str(run_result.get("result") or ""))
+            tool = match.group("tool") if match else "tool"
+        preview = cls._approval_input_preview_text(tool, pending.get("input_preview"))
+        lines = [
+            f"{name} 需要你确认一次工具调用，批准后会继续执行当前任务。",
+            f"工具：{tool}",
+        ]
+        if preview:
+            lines.append(f"请求摘要：{preview}")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _approval_input_preview_text(tool: str, preview: Any) -> str:
+        if isinstance(preview, dict):
+            command = str(preview.get("command") or "").strip()
+            if tool == "terminal.run" and command:
+                return f"命令：{_compact_preview(command, 160)}"
+            if tool == "workspace.write_patch":
+                path = str(preview.get("path") or "").strip()
+                content = str(preview.get("content") or "").strip()
+                parts: list[str] = []
+                if path:
+                    parts.append(f"文件：{_compact_preview(path, 120)}")
+                if content:
+                    parts.append(f"写入内容：{_compact_preview(content, 160)}")
+                if parts:
+                    return "；".join(parts)
+            parts = []
+            for key, value in preview.items():
+                if key in {"messages", "tool_request", "remaining_tool_requests"}:
+                    continue
+                text = _compact_preview(value, 80)
+                if text:
+                    parts.append(f"{key}={text}")
+                if len(parts) >= 3:
+                    break
+            return "；".join(parts)
+        if isinstance(preview, list):
+            text = _compact_preview(json.dumps(preview, ensure_ascii=False), 180)
+            return text
+        return _compact_preview(preview, 180)
+
+    @staticmethod
+    def _message_status_for_run_status(status: str) -> MessageStatus:
+        if status == "failed":
+            return MessageStatus.FAILED
+        if status in {"approval_required", "processing", "pending"}:
+            return MessageStatus.PROCESSING
+        return MessageStatus.COMPLETED
+
     def _bind_session_context(self, kind: str, runnable: dict[str, Any], *, run_group_id: str = "") -> None:
-        conversation_kind = kind if kind in {"agent", "workflow"} else "main"
+        conversation_kind = kind if kind in {"agent", "workflow", "group"} else "main"
         participants = [self._participant_for_runnable(runnable)] if conversation_kind == "agent" else self._workflow_participants(runnable)
         runnable_name = str(
             runnable.get("nickname")
@@ -808,6 +912,50 @@ class ChatAPI:
             participants_json=json.dumps(participants, ensure_ascii=False),
         )
 
+    def _bind_group_session_context(self, context: dict[str, Any], *, run_group_id: str = "") -> None:
+        participants = [
+            item
+            for item in (context.get("participants") or [])
+            if isinstance(item, dict)
+        ]
+        name = str(context.get("runnable_name") or "群组").strip() or "群组"
+        self._chat_store().update_session_context(
+            self._session.session_id,
+            conversation_kind="group",
+            runnable_id=str(context.get("runnable_id") or ""),
+            runnable_name=name,
+            run_group_id=str(run_group_id or context.get("run_group_id") or ""),
+            participants_json=json.dumps(participants, ensure_ascii=False),
+        )
+
+    def _group_context_with_runnable(self, context: dict[str, Any], runnable: dict[str, Any]) -> dict[str, Any]:
+        participants = [
+            item
+            for item in (context.get("participants") or [])
+            if isinstance(item, dict)
+        ]
+        participant = self._participant_for_runnable(runnable)
+        participant_id = str(participant.get("id") or "")
+        participant_kind = str(participant.get("kind") or "")
+        exists = any(
+            str(item.get("id") or "") == participant_id
+            and str(item.get("kind") or "") == participant_kind
+            for item in participants
+        )
+        if participant_id and participant_kind and not exists:
+            participants.append(participant)
+        return {
+            **context,
+            "participants": participants,
+        }
+
+    def _set_session_title_from_message(self, content: str) -> None:
+        from apps.core.chat_store import make_session_title
+
+        title = make_session_title(content)
+        if title:
+            self._session.set_session_title(title)
+
     def _session_context(self, record: Any | None = None) -> dict[str, Any]:
         if record is None:
             try:
@@ -815,7 +963,7 @@ class ChatAPI:
             except Exception:
                 record = None
         kind = str(getattr(record, "conversation_kind", "") or "main")
-        if kind not in {"main", "agent", "workflow"}:
+        if kind not in {"main", "agent", "workflow", "group"}:
             kind = "main"
         participants = self._parse_participants_json(getattr(record, "participants_json", "[]") if record else "[]")
         return {
@@ -825,6 +973,60 @@ class ChatAPI:
             "run_group_id": str(getattr(record, "run_group_id", "") or ""),
             "participants": participants,
         }
+
+    @staticmethod
+    def _main_model_goal_text(text: str) -> str:
+        value = (text or "").strip()
+        if not value.startswith("@"):
+            return value
+        parsed = ChatAPI._parse_main_model_mention(value)
+        if parsed is None:
+            return value
+        _, remainder = parsed
+        return remainder.strip() or value
+
+    @staticmethod
+    def _participant_context_line(participant: dict[str, Any]) -> str:
+        kind = str(participant.get("kind") or "").strip()
+        display_name = str(
+            participant.get("nickname")
+            or participant.get("name")
+            or participant.get("id")
+            or ""
+        ).strip()
+        if not display_name:
+            return ""
+        role = {
+            "main": "主模型",
+            "agent": "Agent",
+            "workflow": "Workflow",
+        }.get(kind, kind or "成员")
+        details = [role]
+        full_name = str(participant.get("name") or "").strip()
+        if full_name and full_name != display_name:
+            details.append(full_name)
+        return f"- {display_name}（{'；'.join(details)}）"
+
+    def _with_group_context_for_main_model(self, task_description: str, context: dict[str, Any]) -> str:
+        if context.get("conversation_kind") != "group":
+            return task_description
+        participants = [
+            item
+            for item in (context.get("participants") or [])
+            if isinstance(item, dict)
+        ]
+        lines = [line for line in (self._participant_context_line(item) for item in participants) if line]
+        if not lines:
+            return task_description
+        member_lines = "\n".join(lines)
+        note = (
+            "[Yachiyo 群组上下文]\n"
+            "当前会话是群组，群成员包括：\n"
+            f"{member_lines}\n"
+            "当用户提到“群里”“群组里”的其他模型或 Agent 时，请只基于上述成员理解。"
+        )
+        base = (task_description or "").strip()
+        return f"{base}\n\n{note}" if base else note
 
     def _current_session_has_messages(self) -> bool:
         try:
@@ -890,6 +1092,19 @@ class ChatAPI:
             "nickname": "月見八千代",
         }
 
+    def _main_model_sender_from_runtime(self) -> dict[str, Any]:
+        assistant = getattr(getattr(self._runtime, "config", None), "assistant", None)
+        sender: dict[str, Any] = {
+            "kind": "main",
+            "id": "main",
+            "name": str(getattr(assistant, "agent_name", "") or "Yachiyo"),
+            "nickname": str(getattr(assistant, "agent_nickname", "") or "月見八千代"),
+        }
+        avatar_path = str(getattr(assistant, "agent_avatar_path", "") or "")
+        if avatar_path:
+            sender["avatar_path"] = avatar_path
+        return sender
+
     @staticmethod
     def _parse_participants_json(value: str | None) -> list[dict[str, Any]]:
         if not value:
@@ -929,6 +1144,69 @@ class ChatAPI:
             return False
         return bool(re.search(r"(^|[\s，。！？、；;,.!?])@.+", value.splitlines()[0]))
 
+    def create_group_session(
+        self,
+        *,
+        name: str = "",
+        participant_ids: list[str] | None = None,
+    ) -> Dict[str, Any]:
+        """Create a manual group chat session with the main model and selected agents."""
+        clean_ids: list[str] = []
+        seen: set[str] = set()
+        for raw_id in participant_ids or []:
+            participant_id = str(raw_id or "").strip()
+            if not participant_id or participant_id == "main" or participant_id in seen:
+                continue
+            seen.add(participant_id)
+            clean_ids.append(participant_id)
+
+        if not clean_ids:
+            return {"ok": False, "error": "请选择至少一个 Agent"}
+
+        service = get_agent_runtime_service()
+        participants = [self._main_model_sender_from_runtime()]
+        try:
+            for participant_id in clean_ids:
+                runnable = service.resolve_runnable(runnable_id=participant_id)
+                if runnable is None or runnable.get("kind") != "agent":
+                    return {"ok": False, "error": "群组成员必须是已启用的 Agent"}
+                if not runnable.get("enabled", True):
+                    return {"ok": False, "error": "群组成员包含已停用 Agent"}
+                participants.append(self._participant_for_runnable(runnable))
+        except AgentRuntimeError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        group_name = " ".join(str(name or "").split()).strip()
+        if not group_name:
+            participant_names: list[str] = []
+            for item in participants:
+                display_name = str(item.get("nickname") or item.get("name") or "").strip()
+                if display_name:
+                    participant_names.append(display_name)
+            group_name = "、".join(participant_names) or "新群组"
+
+        start_new_session = getattr(self._runtime, "start_new_session", None)
+        if callable(start_new_session):
+            start_new_session()
+        else:
+            self._session.clear()
+
+        self._session.set_session_title(group_name)
+        self._chat_store().update_session_context(
+            self._session.session_id,
+            conversation_kind="group",
+            runnable_id="",
+            runnable_name=group_name,
+            run_group_id="",
+            participants_json=json.dumps(participants, ensure_ascii=False),
+        )
+        context = self._session_context()
+        return {
+            "ok": True,
+            "session_id": self._session.session_id,
+            "session_context": context,
+        }
+
     def retry_message(self, message_id: str) -> Dict[str, Any]:
         """重新发送当前会话中的失败消息，复用已保存的附件文件。"""
         message_id = str(message_id or "").strip()
@@ -937,6 +1215,14 @@ class ChatAPI:
 
         try:
             self._sync_task_status_to_messages()
+            target = next(
+                (msg for msg in self._session.get_all_messages() if msg.message_id == message_id),
+                None,
+            )
+            delegated_retry = self._retry_delegated_agent_message(target)
+            if delegated_retry is not None:
+                return delegated_retry
+
             source = self._find_retry_source_message(message_id)
             if source is None:
                 return {"ok": False, "error": "没有找到可重试的失败消息"}
@@ -995,6 +1281,90 @@ class ChatAPI:
         except Exception as exc:
             logger.error("重试消息失败: %s", exc)
             return {"ok": False, "error": str(exc)}
+
+    def _retry_delegated_agent_message(self, target: ChatMessage | None) -> Dict[str, Any] | None:
+        if target is None or target.role != MessageRole.ASSISTANT or target.status != MessageStatus.FAILED:
+            return None
+        metadata = target.metadata if isinstance(target.metadata, dict) else {}
+        if not metadata.get("delegated_by_task_id"):
+            return None
+        if str(metadata.get("runnable_kind") or "") != "agent":
+            return None
+
+        runnable_id = str(metadata.get("runnable_id") or "").strip()
+        user_goal = str(metadata.get("delegated_goal") or "").strip()
+        if not runnable_id or not user_goal:
+            return {"ok": False, "error": "这条 Agent 消息缺少可重试的派活信息"}
+
+        context = self._session_context()
+        run_group_id = str(metadata.get("run_group_id") or context.get("run_group_id") or "")
+        service = get_agent_runtime_service()
+        try:
+            runnable = service.resolve_runnable(runnable_id=runnable_id)
+        except AgentRuntimeError as exc:
+            return {"ok": False, "error": str(exc)}
+        if runnable is None or runnable.get("kind") != "agent":
+            return {"ok": False, "error": "没有找到可重试的 Agent"}
+
+        sender = self._participant_for_runnable(runnable)
+        assistant_id = self._session.add_assistant_message(
+            "",
+            metadata={
+                "sender": sender,
+                "runnable_kind": "agent",
+                "runnable_id": runnable_id,
+                "run_group_id": run_group_id,
+                "run_status": "processing",
+                "delegated_by_task_id": metadata.get("delegated_by_task_id") or "",
+                "delegated_goal": user_goal,
+                "retry_of_message_id": target.message_id,
+            },
+        )
+        self._session.update_assistant_message(
+            assistant_id,
+            "",
+            status=MessageStatus.PROCESSING,
+        )
+
+        def _on_run_complete(run_result: dict[str, Any]) -> None:
+            self._update_agent_run_message_from_result(assistant_id, sender, run_result)
+
+        try:
+            run = service.create_run_for_runnable_async(
+                runnable_id=runnable_id,
+                name=str(sender.get("nickname") or sender.get("name") or ""),
+                user_goal=user_goal,
+                run_group_id=run_group_id,
+                upstream=self._chat_upstream_context(),
+                on_complete=_on_run_complete,
+            )
+        except AgentRuntimeError as exc:
+            content = str(exc)
+            self._session.update_assistant_message(
+                assistant_id,
+                content,
+                status=MessageStatus.FAILED,
+                error=content,
+                metadata={"run_status": "failed"},
+            )
+            return {"ok": False, "error": content}
+
+        next_run_group_id = str(run.get("run_group_id") or run_group_id)
+        if next_run_group_id:
+            self._bind_group_session_context(context, run_group_id=next_run_group_id)
+        return {
+            "ok": True,
+            "runnable_command": True,
+            "message_id": assistant_id,
+            "assistant_message_id": assistant_id,
+            "assistant_message_ids": [assistant_id],
+            "task_id": "",
+            "status": "processing",
+            "run_id": run["run_id"],
+            "run_group_id": next_run_group_id,
+            "run_status": "processing",
+            "agent_run_id": run["run_id"],
+        }
 
     def _find_retry_source_message(self, message_id: str) -> ChatMessage | None:
         messages = self._session.get_all_messages()
@@ -1119,6 +1489,7 @@ class ChatAPI:
         try:
             # 同步任务状态到消息
             self._sync_task_status_to_messages()
+            self._sync_agent_run_status_to_messages()
 
             anchor_message_id = str(anchor_message_id or "").strip()
             if anchor_message_id:
@@ -1402,6 +1773,7 @@ class ChatAPI:
         无论此方法被并发调用多少次都不会产生重复。
         """
         synced_task_ids: set[str] = set()
+        current_context = self._session_context()
         for msg in self._session.get_all_messages():
             if msg.role not in (MessageRole.USER, MessageRole.ASSISTANT):
                 continue
@@ -1453,6 +1825,27 @@ class ChatAPI:
                         content="",
                         status=MessageStatus.PROCESSING,
                     )
+                elif self._should_hide_group_dispatch_stream(task.description, assistant.content, current_context):
+                    self._record_group_dispatch_activity(
+                        task_id=msg.task_id,
+                        title="正在派发群组任务",
+                        detail="Yachiyo 正在解析需要交给哪些 Agent。",
+                        status="running",
+                        event_id=f"{msg.task_id}-group-dispatch-start",
+                    )
+                    metadata = dict(assistant.metadata or {})
+                    metadata.update({
+                        "sender": metadata.get("sender") or self._main_model_sender_from_runtime(),
+                        "group_dispatch_pending": True,
+                    })
+                    self._session.upsert_assistant_message(
+                        task_id=msg.task_id,
+                        content="",
+                        status=MessageStatus.PROCESSING,
+                        error=assistant.error,
+                        attachments=assistant.attachments,
+                        metadata=metadata,
+                    )
                 elif assistant.status != MessageStatus.PROCESSING:
                     self._session.upsert_assistant_message(
                         task_id=msg.task_id,
@@ -1460,6 +1853,496 @@ class ChatAPI:
                         status=MessageStatus.PROCESSING,
                         error=assistant.error,
                     )
+
+        self._sync_group_dispatches_from_completed_tasks()
+
+    def _sync_agent_run_status_to_messages(self) -> None:
+        candidates: list[tuple[ChatMessage, dict[str, Any]]] = []
+        for msg in self._session.get_all_messages():
+            if msg.role != MessageRole.ASSISTANT:
+                continue
+            metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+            if metadata.get("runnable_kind") != "agent":
+                continue
+            run_id = str(metadata.get("run_id") or "").strip()
+            if not run_id:
+                continue
+            run_status = str(metadata.get("run_status") or "").strip()
+            if msg.status != MessageStatus.PROCESSING and run_status not in {"processing", "approval_required"}:
+                continue
+            candidates.append((msg, metadata))
+        if not candidates:
+            return
+
+        try:
+            service = get_agent_runtime_service()
+        except Exception:
+            logger.debug("读取 Agent Run 状态失败", exc_info=True)
+            return
+        for msg, metadata in candidates:
+            run_id = str(metadata.get("run_id") or "").strip()
+            try:
+                run = service.get_run(run_id)
+            except Exception:
+                logger.debug("读取 Agent Run 失败: %s", run_id, exc_info=True)
+                continue
+            status = str(run.get("status") or "").strip()
+            if status in {"", "processing", "pending"}:
+                continue
+            sender = metadata.get("sender") if isinstance(metadata.get("sender"), dict) else {}
+            self._update_agent_run_message_from_result(msg.message_id, sender, run)
+
+    def _sync_group_dispatches_from_completed_tasks(self) -> None:
+        context = self._session_context()
+        if context.get("conversation_kind") != "group":
+            return
+        for msg in self._session.get_all_messages():
+            if msg.role != MessageRole.ASSISTANT or not msg.task_id:
+                continue
+            if msg.status != MessageStatus.COMPLETED:
+                continue
+            metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+            if metadata.get("group_dispatch_handled"):
+                continue
+            sender = metadata.get("sender") if isinstance(metadata.get("sender"), dict) else {}
+            if sender.get("kind") in {"agent", "workflow"}:
+                continue
+            task = self._state.get_task(msg.task_id)
+            if task is None or task.status != TaskStatus.COMPLETED:
+                continue
+            source_text = task.result or msg.content
+            requests = self._parse_group_dispatch_requests(source_text)
+            if not requests:
+                continue
+            self._dispatch_group_agent_requests(msg, requests, context, source_text=source_text)
+
+    @classmethod
+    def _parse_group_dispatch_requests(cls, content: str) -> list[dict[str, str]]:
+        requests: list[dict[str, str]] = []
+        for payload in cls._json_payloads_from_text(content):
+            requests.extend(cls._group_dispatch_requests_from_payload(payload))
+        deduped: list[dict[str, str]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for item in requests:
+            key = (item.get("kind", ""), item.get("target", ""), item.get("goal", ""))
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped[:3]
+
+    def _should_hide_group_dispatch_stream(
+        self,
+        task_description: str,
+        content: str,
+        context: dict[str, Any],
+    ) -> bool:
+        if context.get("conversation_kind") != "group":
+            return False
+        if "[Yachiyo 群组上下文]" not in (task_description or ""):
+            return False
+        text = (content or "").strip()
+        if not text:
+            return False
+        if self._parse_group_dispatch_requests(text):
+            return True
+        lowered = text.lower()
+        compact = re.sub(r"[\s_-]+", "", lowered)
+        if "dispatchgroupagent" in compact or "runyachiyoagent" in compact:
+            return True
+        if re.match(r"^[\\[{]\\s*(?:\"(?:action|tasks|agents|dispatches)|\\{)", text, re.DOTALL):
+            return True
+        return False
+
+    @staticmethod
+    def _json_payloads_from_text(content: str) -> list[Any]:
+        text = (content or "").strip()
+        if not text:
+            return []
+        tag_match = re.search(
+            r"<yachiyo_group_dispatch>\s*(.*?)\s*</yachiyo_group_dispatch>",
+            text,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if tag_match:
+            text = tag_match.group(1).strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.DOTALL).strip()
+
+        try:
+            return [json.loads(text)]
+        except (TypeError, json.JSONDecodeError):
+            pass
+
+        decoder = json.JSONDecoder()
+        payloads: list[Any] = []
+        index = 0
+        while index < len(text):
+            char = text[index]
+            if char not in "{[":
+                index += 1
+                continue
+            try:
+                payload, offset = decoder.raw_decode(text[index:])
+            except json.JSONDecodeError:
+                index += 1
+                continue
+            payloads.append(payload)
+            index += max(offset, 1)
+        return payloads
+
+    @classmethod
+    def _group_dispatch_requests_from_payload(cls, payload: Any) -> list[dict[str, str]]:
+        if isinstance(payload, list):
+            result: list[dict[str, str]] = []
+            for item in payload:
+                result.extend(cls._group_dispatch_requests_from_payload(item))
+            return result
+        if not isinstance(payload, dict):
+            return []
+        nested = payload.get("tasks") or payload.get("agents") or payload.get("dispatches")
+        if isinstance(nested, list):
+            result = []
+            for item in nested:
+                if isinstance(item, dict):
+                    merged = {**payload, **item}
+                    for key in ("tasks", "agents", "dispatches"):
+                        merged.pop(key, None)
+                    result.extend(cls._group_dispatch_requests_from_payload(merged))
+            return result
+
+        action = cls._normalize_group_dispatch_action(str(payload.get("action") or payload.get("tool") or ""))
+        if action not in {"agent", "workflow"}:
+            return []
+        goal = str(payload.get("goal") or payload.get("user_goal") or payload.get("task") or "").strip()
+        if not goal:
+            return []
+        if action == "agent":
+            target = str(
+                payload.get("agent")
+                or payload.get("name")
+                or payload.get("agent_name")
+                or payload.get("target")
+                or ""
+            )
+            target_id = str(payload.get("agent_id") or payload.get("runnable_id") or "")
+        else:
+            target = str(
+                payload.get("workflow")
+                or payload.get("name")
+                or payload.get("workflow_name")
+                or payload.get("target")
+                or ""
+            )
+            target_id = str(payload.get("workflow_id") or payload.get("runnable_id") or "")
+        target = cls._clean_group_dispatch_target(target)
+        target_id = cls._clean_group_dispatch_target(target_id)
+        if not target and not target_id:
+            return []
+        return [{"kind": action, "target": target, "runnable_id": target_id, "goal": goal}]
+
+    @staticmethod
+    def _normalize_group_dispatch_action(action: str) -> str:
+        normalized = re.sub(r"[\s-]+", "_", (action or "").strip().lower())
+        compact = normalized.replace("_", "")
+        if compact in {
+            "dispatchgroupagent",
+            "rungroupagent",
+            "runyachiyoagent",
+            "yachiyoagent",
+        }:
+            return "agent"
+        if compact in {
+            "dispatchgroupworkflow",
+            "rungroupworkflow",
+            "runyachiyoworkflow",
+            "yachiyoworkflow",
+        }:
+            return "workflow"
+        return ""
+
+    @staticmethod
+    def _clean_group_dispatch_target(value: str) -> str:
+        text = " ".join(str(value or "").split()).strip()
+        text = text.strip("\"'“”‘’")
+        if text.startswith("@"):
+            text = text[1:].strip()
+        return text.strip("\"'“”‘’")
+
+    def _dispatch_group_agent_requests(
+        self,
+        assistant_message: ChatMessage,
+        requests: list[dict[str, str]],
+        context: dict[str, Any],
+        *,
+        source_text: str = "",
+    ) -> None:
+        service = get_agent_runtime_service()
+        resolved: list[tuple[dict[str, str], dict[str, Any]]] = []
+        skipped: list[str] = []
+        for request in requests:
+            try:
+                runnable = service.resolve_runnable(
+                    runnable_id=request.get("runnable_id", ""),
+                    name=request.get("target", ""),
+                )
+            except AgentRuntimeError as exc:
+                skipped.append(f"{request.get('target') or request.get('runnable_id')}: {exc}")
+                continue
+            if runnable is None or runnable.get("kind") != "agent":
+                skipped.append(f"{request.get('target') or request.get('runnable_id')}: 未找到群组 Agent")
+                continue
+            if not self._group_context_contains_runnable(context, runnable, request):
+                skipped.append(f"{request.get('target') or runnable.get('name')}: 不在当前群组中")
+                continue
+            resolved.append((request, runnable))
+
+        summary = self._format_group_dispatch_summary(resolved, skipped)
+        visible_content = self._format_group_dispatch_visible_content(source_text or assistant_message.content, summary)
+        resolved_names = [
+            str(runnable.get("nickname") or runnable.get("name") or request.get("target") or "Agent").strip()
+            for request, runnable in resolved
+        ]
+        resolved_names = [name for name in resolved_names if name]
+        self._record_group_dispatch_activity(
+            task_id=assistant_message.task_id or "",
+            title="群组任务已派发" if resolved else "群组任务派发失败",
+            detail="、".join(resolved_names) if resolved_names else "没有找到可接收任务的 Agent",
+            status="completed" if resolved else "failed",
+            event_id=f"{assistant_message.task_id or assistant_message.message_id}-group-dispatch-complete",
+        )
+        self._session.update_assistant_message(
+            assistant_message.message_id,
+            visible_content,
+            status=MessageStatus.COMPLETED,
+            metadata={
+                "sender": self._main_model_sender_from_runtime(),
+                "group_dispatch_handled": True,
+                "group_dispatch_count": len(resolved),
+                "group_dispatch_skipped": skipped,
+            },
+        )
+        if not resolved:
+            return
+
+        run_group_id = str(context.get("run_group_id") or "")
+        next_context = dict(context)
+        for request, runnable in resolved:
+            sender = self._participant_for_runnable(runnable)
+            assistant_id = self._session.add_assistant_message(
+                "",
+                metadata={
+                    "sender": sender,
+                    "runnable_kind": "agent",
+                    "runnable_id": runnable.get("id") or "",
+                    "run_group_id": run_group_id,
+                    "run_status": "processing",
+                    "delegated_by_task_id": assistant_message.task_id or "",
+                    "delegated_goal": request.get("goal") or "",
+                },
+            )
+            self._session.update_assistant_message(
+                assistant_id,
+                "",
+                status=MessageStatus.PROCESSING,
+            )
+
+            def _on_run_complete(
+                run_result: dict[str, Any],
+                *,
+                message_id: str = assistant_id,
+                current_sender: dict[str, Any] = sender,
+            ) -> None:
+                self._update_agent_run_message_from_result(message_id, current_sender, run_result)
+
+            try:
+                run = service.create_run_for_runnable_async(
+                    runnable_id=str(runnable.get("id") or ""),
+                    name=request.get("target", ""),
+                    user_goal=request.get("goal", ""),
+                    run_group_id=run_group_id,
+                    upstream=self._chat_upstream_context(),
+                    on_complete=_on_run_complete,
+                )
+            except AgentRuntimeError as exc:
+                content = str(exc)
+                self._session.update_assistant_message(
+                    assistant_id,
+                    content,
+                    status=MessageStatus.FAILED,
+                    error=content,
+                    metadata={"run_status": "failed"},
+                )
+                continue
+
+            run_group_id = str(run.get("run_group_id") or run_group_id)
+            if run_group_id:
+                next_context["run_group_id"] = run_group_id
+                self._bind_group_session_context(next_context, run_group_id=run_group_id)
+
+    @staticmethod
+    def _group_context_contains_runnable(
+        context: dict[str, Any],
+        runnable: dict[str, Any],
+        request: dict[str, str],
+    ) -> bool:
+        participants = [
+            item
+            for item in (context.get("participants") or [])
+            if isinstance(item, dict) and item.get("kind") == "agent"
+        ]
+        if not participants:
+            return True
+        runnable_values = {
+            str(runnable.get("id") or "").strip().lower(),
+            str(runnable.get("name") or "").strip().lower(),
+            str(runnable.get("nickname") or "").strip().lower(),
+            str(request.get("target") or "").strip().lower(),
+            str(request.get("runnable_id") or "").strip().lower(),
+        }
+        runnable_values.discard("")
+        for participant in participants:
+            participant_values = {
+                str(participant.get("id") or "").strip().lower(),
+                str(participant.get("name") or "").strip().lower(),
+                str(participant.get("nickname") or "").strip().lower(),
+            }
+            participant_values.discard("")
+            if participant_values & runnable_values:
+                return True
+        return False
+
+    @staticmethod
+    def _format_group_dispatch_summary(
+        resolved: list[tuple[dict[str, str], dict[str, Any]]],
+        skipped: list[str],
+    ) -> str:
+        if not resolved:
+            if skipped:
+                return "我没能找到可以接这个任务的群组 Agent。\n\n" + "\n".join(f"- {item}" for item in skipped)
+            return "我暂时没有派出任务。"
+        names = [
+            str(runnable.get("nickname") or runnable.get("name") or request.get("target") or "Agent").strip()
+            for request, runnable in resolved
+        ]
+        names = [name for name in names if name]
+        if len(names) == 1:
+            text = f"我把这个任务派给 {names[0]} 了。"
+        else:
+            joined_names = "、".join(names)
+            text = f"我把 {len(names)} 个任务分别派给 {joined_names} 了。"
+        if skipped:
+            text += "\n\n以下派活没有执行：\n" + "\n".join(f"- {item}" for item in skipped)
+        return text
+
+    @classmethod
+    def _format_group_dispatch_visible_content(cls, source_text: str, summary: str) -> str:
+        intro = cls._strip_group_dispatch_payloads(source_text)
+        intro = cls._normalize_group_dispatch_intro(intro)
+        if intro and summary:
+            return f"{intro}\n\n{summary}"
+        return summary or intro
+
+    @classmethod
+    def _strip_group_dispatch_payloads(cls, content: str) -> str:
+        text = str(content or "")
+        if not text.strip():
+            return ""
+        spans = cls._group_dispatch_payload_spans(text)
+        if not spans:
+            return text
+        output: list[str] = []
+        cursor = 0
+        for start, end in spans:
+            output.append(text[cursor:start])
+            cursor = end
+        output.append(text[cursor:])
+        return "".join(output)
+
+    @classmethod
+    def _group_dispatch_payload_spans(cls, text: str) -> list[tuple[int, int]]:
+        spans: list[tuple[int, int]] = []
+        for match in re.finditer(
+            r"<yachiyo_group_dispatch>\s*(.*?)\s*</yachiyo_group_dispatch>",
+            text,
+            re.DOTALL | re.IGNORECASE,
+        ):
+            if cls._parse_group_dispatch_requests(match.group(1)):
+                spans.append(match.span())
+        for match in re.finditer(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE):
+            if cls._parse_group_dispatch_requests(match.group(1)):
+                spans.append(match.span())
+
+        decoder = json.JSONDecoder()
+        index = 0
+        while index < len(text):
+            if text[index] not in "{[":
+                index += 1
+                continue
+            try:
+                payload, offset = decoder.raw_decode(text[index:])
+            except json.JSONDecodeError:
+                index += 1
+                continue
+            if cls._group_dispatch_requests_from_payload(payload):
+                spans.append((index, index + max(offset, 1)))
+            index += max(offset, 1)
+        return cls._merge_spans(spans)
+
+    @staticmethod
+    def _merge_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+        if not spans:
+            return []
+        merged: list[tuple[int, int]] = []
+        for start, end in sorted(spans):
+            if not merged or start > merged[-1][1]:
+                merged.append((start, end))
+            else:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        return merged
+
+    @staticmethod
+    def _normalize_group_dispatch_intro(content: str) -> str:
+        lines = []
+        for line in str(content or "").splitlines():
+            clean = line.strip()
+            if not clean:
+                lines.append("")
+                continue
+            if clean in {"```", "```json"}:
+                continue
+            if clean.lower() in {"<yachiyo_group_dispatch>", "</yachiyo_group_dispatch>"}:
+                continue
+            lines.append(line.rstrip())
+        text = "\n".join(lines).strip()
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text
+
+    def _record_group_dispatch_activity(
+        self,
+        *,
+        task_id: str,
+        title: str,
+        detail: str,
+        status: str,
+        event_id: str,
+    ) -> None:
+        task_id = str(task_id or "").strip()
+        if not task_id:
+            return
+        try:
+            get_activity_store().record_event(
+                session_id=self._session.session_id,
+                task_id=task_id,
+                tool_name="yachiyo.group_dispatch",
+                phase="tool_complete" if status in {"completed", "failed"} else "tool_start",
+                title=title,
+                detail=detail,
+                status=status,
+                event_id=event_id,
+            )
+        except Exception:
+            logger.debug("记录群组派活活动失败: %s", task_id, exc_info=True)
 
     def get_session_info(self) -> Dict[str, Any]:
         """获取会话元信息"""
@@ -1589,12 +2472,12 @@ class ChatAPI:
 
     @staticmethod
     def _session_title(stored_title: str, messages: list[Any]) -> str:
-        from apps.core.chat_store import make_session_title
+        from apps.core.chat_store import make_session_title, strip_leading_session_mentions
         from apps.core.title_generator import looks_like_title_prompt_echo
 
         title = (stored_title or "").strip()
         if title and not ChatAPI._looks_like_session_id_title(title) and not looks_like_title_prompt_echo(title):
-            return title
+            return strip_leading_session_mentions(title) or title
         for msg in messages:
             if getattr(msg, "role", "") == MessageRole.USER.value:
                 generated = make_session_title(str(getattr(msg, "content", "") or ""))
@@ -1651,6 +2534,10 @@ class ChatAPI:
                 return {"ok": True, "discarded": False, "session_id": current_session_id}
 
             store = self._chat_store()
+            stored_session = store.get_session(current_session_id)
+            if stored_session is not None and stored_session.conversation_kind == "group":
+                return {"ok": True, "discarded": False, "session_id": current_session_id}
+
             messages = store.load_messages(current_session_id, limit=1)
             if messages:
                 return {"ok": True, "discarded": False, "session_id": current_session_id}

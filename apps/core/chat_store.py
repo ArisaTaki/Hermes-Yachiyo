@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 _DB_FILENAME = "chat.db"
 _SESSION_TITLE_MAX_CHARS = 36
 _TITLE_SENTENCE_BOUNDARY_RE = re.compile(r"[。.!！?？\n\r]")
+_LEADING_MENTION_RE = re.compile(
+    r"^\s*@(?:\"[^\"]+\"|'[^']+'|“[^”]+”|‘[^’]+’|[^\s@:：，。！？、；;,.!?]+)"
+    r"[\s:：,，、;；-]*"
+)
 
 
 def _get_db_path() -> str:
@@ -48,13 +52,22 @@ def make_session_title(content: str, max_chars: int = _SESSION_TITLE_MAX_CHARS) 
 
 
 def _first_user_sentence_title(content: str) -> str:
-    title = " ".join((content or "").split()).strip()
+    title = strip_leading_session_mentions(" ".join((content or "").split()).strip())
     if not title:
         return ""
     boundary = _TITLE_SENTENCE_BOUNDARY_RE.search(title)
     if boundary and boundary.start() > 0:
         title = title[:boundary.end()]
     return title.strip(" \t\r\n\"'“”‘’`*_#")
+
+
+def strip_leading_session_mentions(value: str) -> str:
+    title = value
+    while True:
+        next_title = _LEADING_MENTION_RE.sub("", title, count=1).strip()
+        if next_title == title:
+            return title
+        title = next_title
 
 
 def _escape_like(value: str) -> str:
@@ -213,7 +226,7 @@ class ChatStore:
                 FROM chat_sessions s
                 LEFT JOIN chat_messages m ON m.session_id = s.session_id
                 GROUP BY s.session_id
-                HAVING COUNT(m.message_id) > 0
+                HAVING COUNT(m.message_id) > 0 OR s.conversation_kind = 'group'
                 ORDER BY COALESCE(last_message_at, s.created_at) DESC, s.created_at DESC
                 LIMIT ?
                 """,
@@ -266,7 +279,7 @@ class ChatStore:
                     FROM chat_sessions s
                     LEFT JOIN chat_messages m ON m.session_id = s.session_id
                     GROUP BY s.session_id
-                    HAVING COUNT(m.message_id) > 0
+                    HAVING COUNT(m.message_id) > 0 OR s.conversation_kind = 'group'
                 )
                 SELECT vs.session_id, vs.title, vs.created_at, vs.hermes_session_id,
                        vs.conversation_kind, vs.runnable_id, vs.runnable_name,
@@ -338,11 +351,12 @@ class ChatStore:
                 """
                 SELECT COUNT(*) AS count
                 FROM chat_sessions s
-                WHERE EXISTS (
-                    SELECT 1
-                    FROM chat_messages m
-                    WHERE m.session_id = s.session_id
-                )
+                WHERE s.conversation_kind = 'group'
+                   OR EXISTS (
+                       SELECT 1
+                       FROM chat_messages m
+                       WHERE m.session_id = s.session_id
+                   )
                 """
             ).fetchone()
         return int(row["count"])

@@ -17,6 +17,7 @@ export type UiIconName =
   | 'live2d'
   | 'model'
   | 'moon'
+  | 'paperclip'
   | 'plus'
   | 'provider'
   | 'resources'
@@ -168,6 +169,11 @@ const ICON_PATHS: Record<UiIconName, ReactNode> = {
       <path d="M18.5 14.4A7 7 0 0 1 9.6 5.5 7.7 7.7 0 1 0 18.5 14.4Z" />
       <path d="M17 4.5h2.2" />
       <path d="M18.1 3.4v2.2" />
+    </>
+  ),
+  paperclip: (
+    <>
+      <path d="m21 8.5-9.7 9.7a5 5 0 0 1-7.1-7.1l9.5-9.5a3.4 3.4 0 0 1 4.8 4.8L9 16a1.9 1.9 0 0 1-2.7-2.7l8.4-8.4" />
     </>
   ),
   plus: (

@@ -144,6 +144,22 @@ class TestChatStore:
         store.create_session("empty")
         assert store.list_sessions() == []
 
+    def test_list_sessions_keeps_empty_group_sessions(self, store: ChatStore):
+        store.create_session("empty")
+        store.create_session("group", title="demo Channel")
+        store.update_session_context(
+            "group",
+            conversation_kind="group",
+            runnable_name="demo Channel",
+            participants_json='[{"kind":"main","id":"main"},{"kind":"agent","id":"a1","name":"Agent One"}]',
+        )
+
+        sessions = store.list_sessions()
+
+        assert [session.session_id for session in sessions] == ["group"]
+        assert sessions[0].message_count == 0
+        assert sessions[0].conversation_kind == "group"
+
     def test_count_sessions_hides_empty_sessions(self, store: ChatStore):
         store.create_session("empty")
         store.create_session("visible")
@@ -152,6 +168,12 @@ class TestChatStore:
             content="hi", status="completed", task_id=None,
             error=None, created_at="2026-01-01T00:00:00+00:00",
         ))
+
+        assert store.count_sessions() == 1
+
+    def test_count_sessions_includes_empty_group_sessions(self, store: ChatStore):
+        store.create_session("group", title="demo Channel")
+        store.update_session_context("group", conversation_kind="group", runnable_name="demo Channel")
 
         assert store.count_sessions() == 1
 
@@ -280,3 +302,8 @@ class TestChatStore:
     def test_make_session_title_uses_first_user_sentence(self):
         assert make_session_title("中午好，我点了一份潮汕牛肉饭哦") == "中午好，我点了一份潮汕牛肉饭哦"
         assert make_session_title("能否帮我打开v2ex？然后看一下热门帖子") == "能否帮我打开v2ex？"
+
+    def test_make_session_title_ignores_leading_mentions(self):
+        assert make_session_title('@Helper 做个总结') == "做个总结"
+        assert make_session_title('@"Coding Agent" 你好') == "你好"
+        assert make_session_title('@主模型：总结一下当前状态') == "总结一下当前状态"

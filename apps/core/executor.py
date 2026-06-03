@@ -399,8 +399,29 @@ def _yachiyo_delegation_catalog_context() -> str:
     )
 
 
-def _append_yachiyo_delegation_context(profile_context: str) -> str:
-    catalog = _yachiyo_delegation_catalog_context()
+def _is_yachiyo_group_coordinator_task(description: str) -> bool:
+    return "[Yachiyo 群组上下文]" in (description or "")
+
+
+def _yachiyo_group_dispatch_context() -> str:
+    return (
+        "[Yachiyo 群组派活]\n"
+        "当前会话是群组。你是默认协调者，不要默认让所有 Agent 参与。"
+        "如果用户没有明确 @ 某个 Agent，请先判断应该由你直接回答，还是派给群组上下文里列出的一个或多个 Agent。"
+        "只有当用户表达“大家/所有人/分别做”等意图时，才派给多个 Agent。\n"
+        "派活不是终端命令，也不是工具调用；不要调用 shell/terminal 来 echo、模拟或包装派活指令。\n"
+        "如果需要派活，只输出 JSON，不要附加其他正文。单个任务格式：\n"
+        '{"action":"dispatch_group_agent","agent":"Agent 名称或昵称","goal":"自包含任务目标"}\n'
+        "多个任务格式：\n"
+        '[{"action":"dispatch_group_agent","agent":"Agent A","goal":"任务 A"},'
+        '{"action":"dispatch_group_agent","agent":"Agent B","goal":"任务 B"}]\n'
+        "不要使用 run_yachiyo_agent 或 run_yachiyo_workflow；不要把 JSON 包进 Markdown 代码块。"
+        "群组派活会由聊天层接管、隐藏内部 JSON，并显示各 Agent 的执行状态。"
+    )
+
+
+def _append_yachiyo_delegation_context(profile_context: str, *, group_coordinator: bool = False) -> str:
+    catalog = _yachiyo_group_dispatch_context() if group_coordinator else _yachiyo_delegation_catalog_context()
     if not catalog:
         return profile_context
     base = (profile_context or "").strip()
@@ -1626,7 +1647,11 @@ class HermesExecutor(ExecutionStrategy):
                 profile_context = self._profile_context_getter()
             except Exception:
                 logger.debug("读取助手/用户资料失败", exc_info=True)
-        profile_context = _append_yachiyo_delegation_context(profile_context)
+        group_coordinator = _is_yachiyo_group_coordinator_task(task.description)
+        profile_context = _append_yachiyo_delegation_context(
+            profile_context,
+            group_coordinator=group_coordinator,
+        )
         description = format_persona_description(
             task.description,
             persona_prompt,
@@ -1725,7 +1750,7 @@ class HermesExecutor(ExecutionStrategy):
                     if chat_session is not None:
                         chat_session.set_hermes_session_id(invoke_result.hermes_session_id)
                 output = invoke_result.output
-                delegation_request = _parse_yachiyo_delegation_request(output)
+                delegation_request = None if group_coordinator else _parse_yachiyo_delegation_request(output)
                 if delegation_request:
                     if delegation_count >= max_delegations:
                         on_activity(

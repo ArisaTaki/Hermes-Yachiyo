@@ -259,6 +259,9 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         def retry_message(self, message_id):
             return {"ok": True, "message_id": message_id}
 
+        def create_group_session(self, *, name="", participant_ids=None):
+            return {"ok": True, "name": name, "participant_ids": participant_ids or []}
+
         def get_session_info(self):
             return {"session_id": "session-1"}
 
@@ -295,6 +298,11 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
     assert await ui.retry_chat_message(ui.RetryChatMessageRequest(message_id="m1")) == {
         "ok": True,
         "message_id": "m1",
+    }
+    assert await ui.create_chat_group(ui.CreateChatGroupRequest(name="demo", participant_ids=["a1"])) == {
+        "ok": True,
+        "name": "demo",
+        "participant_ids": ["a1"],
     }
     assert await ui.get_chat_session() == {"session_id": "session-1"}
     assert await ui.clear_chat_session() == {"ok": True}

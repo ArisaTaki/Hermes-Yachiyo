@@ -62,6 +62,11 @@ class RetryChatMessageRequest(BaseModel):
     message_id: str
 
 
+class CreateChatGroupRequest(BaseModel):
+    name: str = ""
+    participant_ids: list[str] = Field(default_factory=list)
+
+
 class LauncherAckRequest(BaseModel):
     mode: str = "bubble"
 
@@ -535,6 +540,14 @@ async def send_chat_message(request: SendChatMessageRequest) -> dict[str, Any]:
 @router.post("/chat/messages/retry")
 async def retry_chat_message(request: RetryChatMessageRequest) -> dict[str, Any]:
     return ChatAPI(get_runtime()).retry_message(request.message_id)
+
+
+@router.post("/chat/groups")
+async def create_chat_group(request: CreateChatGroupRequest) -> dict[str, Any]:
+    return ChatAPI(get_runtime()).create_group_session(
+        name=request.name,
+        participant_ids=request.participant_ids,
+    )
 
 
 @router.get("/chat/attachments/{attachment_id}")
