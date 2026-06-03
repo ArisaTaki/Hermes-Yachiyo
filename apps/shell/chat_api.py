@@ -19,6 +19,7 @@ import logging
 import os
 import re
 import shutil
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -474,21 +475,113 @@ class ChatAPI:
         message_id = self._session.add_user_message(message_content, [], metadata=user_metadata)
         upstream = self._chat_upstream_context()
 
+        # 判断是否为 Workflow（同步执行）
+        is_workflow = runnable.get("kind") == "workflow"
+
+        if is_workflow:
+            # Workflow 保持同步执行
+            try:
+                run = service.create_run_for_runnable(
+                    runnable_id=str(runnable.get("id") or ""),
+                    name=name,
+                    user_goal=user_goal,
+                    run_group_id=run_group_id,
+                    upstream=upstream,
+                )
+            except AgentRuntimeError as exc:
+                content = str(exc)
+                self._session.mark_message_completed(message_id)
+                assistant_id = self._session.add_assistant_message(
+                    content,
+                    metadata={"sender": self._main_model_sender(), "runnable_kind": "workflow"},
+                )
+                return {
+                    "ok": True,
+                    "runnable_command": True,
+                    "message_id": message_id,
+                    "assistant_message_id": assistant_id,
+                    "task_id": "",
+                    "status": "completed",
+                    "error": content,
+                }
+
+            self._session.mark_message_completed(message_id)
+            runnable = run.get("runnable") or runnable
+            self._bind_session_context("workflow", runnable, run_group_id=str(run.get("run_group_id") or ""))
+            assistant_ids = self._append_workflow_run_messages(service, run, runnable)
+
+            return {
+                "ok": True,
+                "runnable_command": True,
+                "message_id": message_id,
+                "assistant_message_id": assistant_ids[-1] if assistant_ids else "",
+                "assistant_message_ids": assistant_ids,
+                "task_id": "",
+                "status": "completed",
+                "run_id": run["run_id"],
+                "run_group_id": run.get("run_group_id", ""),
+                "run_status": run["status"],
+                "workflow_run_id": run["run_id"],
+            }
+
+        # Agent Run - 异步执行
+        sender = self._participant_for_runnable(runnable)
+        assistant_id = self._session.add_assistant_message(
+            "",  # 内容为空，等待异步执行完成
+            metadata={
+                "sender": sender,
+                "runnable_kind": "agent",
+                "runnable_id": runnable.get("id") or "",
+                "run_group_id": run_group_id,
+                "run_status": "processing",
+            },
+        )
+        # 标记为 processing 状态
+        from apps.core.chat_session import MessageStatus
+        self._session.update_assistant_message(
+            assistant_id,
+            "",
+            status=MessageStatus.PROCESSING,
+        )
+
+        def _on_run_complete(run_result: dict[str, Any]) -> None:
+            """Agent Run 完成后的回调"""
+            status = str(run_result.get("status") or "completed")
+            content = str(run_result.get("result") or "").strip()
+            if not content:
+                content = self._run_status_sentence(sender.get("name") or "Agent", status)
+
+            is_failed = status == "failed"
+            self._session.update_assistant_message(
+                assistant_id,
+                content,
+                status=MessageStatus.FAILED if is_failed else MessageStatus.COMPLETED,
+                error=content if is_failed else None,
+                metadata={
+                    "run_status": status,
+                    "run_id": run_result.get("run_id") or "",
+                },
+            )
+            logger.info("Agent Run 异步完成: run_id=%s, status=%s", run_result.get("run_id"), status)
+
         try:
-            run = service.create_run_for_runnable(
+            run = service.create_run_for_runnable_async(
                 runnable_id=str(runnable.get("id") or ""),
                 name=name,
                 user_goal=user_goal,
                 run_group_id=run_group_id,
                 upstream=upstream,
+                on_complete=_on_run_complete,
             )
         except AgentRuntimeError as exc:
             content = str(exc)
-            self._session.mark_message_completed(message_id)
-            assistant_id = self._session.add_assistant_message(
+            self._session.update_assistant_message(
+                assistant_id,
                 content,
-                metadata={"sender": self._main_model_sender(), "runnable_kind": runnable.get("kind") or ""},
+                status=MessageStatus.FAILED,
+                error=content,
             )
+            self._session.mark_message_completed(message_id)
             return {
                 "ok": True,
                 "runnable_command": True,
@@ -501,33 +594,22 @@ class ChatAPI:
 
         self._session.mark_message_completed(message_id)
         runnable = run.get("runnable") or runnable
-        assistant_ids: list[str]
-        if run.get("kind") == "workflow_run":
-            self._bind_session_context("workflow", runnable, run_group_id=str(run.get("run_group_id") or ""))
-            assistant_ids = self._append_workflow_run_messages(service, run, runnable)
-        else:
-            if current_context.get("conversation_kind") != "workflow":
-                self._bind_session_context("agent", runnable, run_group_id=str(run.get("run_group_id") or ""))
-            assistant_ids = [self._append_agent_run_message(run, runnable)]
 
-        response: Dict[str, Any] = {
+        if current_context.get("conversation_kind") != "workflow":
+            self._bind_session_context("agent", runnable, run_group_id=str(run.get("run_group_id") or ""))
+
+        return {
             "ok": True,
             "runnable_command": True,
             "message_id": message_id,
-            "assistant_message_id": assistant_ids[-1] if assistant_ids else "",
-            "assistant_message_ids": assistant_ids,
+            "assistant_message_id": assistant_id,
+            "assistant_message_ids": [assistant_id],
             "task_id": "",
-            "status": "completed",
+            "status": "processing",
             "run_id": run["run_id"],
             "run_group_id": run.get("run_group_id", ""),
-            "run_status": run["status"],
-        }
-        if run.get("kind") == "workflow_run":
-            response["workflow_run_id"] = run["run_id"]
-        else:
-            response["agent_run_id"] = run["run_id"]
-        return {
-            **response,
+            "run_status": "processing",
+            "agent_run_id": run["run_id"],
         }
 
     def _prepare_runnable_session(

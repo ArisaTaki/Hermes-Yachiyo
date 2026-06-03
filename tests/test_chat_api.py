@@ -51,6 +51,17 @@ def _make_api(tmp_path):
     return ChatAPI(runtime), runtime, store
 
 
+def _wait_for_agent_run(service: AgentRuntimeService, run_id: str, timeout: float = 5.0) -> dict:
+    """等待 Agent Run 异步执行完成"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        run = service.get_run(run_id)
+        if run["status"] in ("completed", "failed", "approval_required"):
+            return run
+        time.sleep(0.1)
+    raise TimeoutError(f"Agent Run {run_id} 未在 {timeout} 秒内完成")
+
+
 def _chat_message(
     message_id: str,
     role: MessageRole,
@@ -135,8 +146,11 @@ def test_agent_mention_creates_agent_run_without_general_task(tmp_path, monkeypa
         assert result["runnable_command"] is True
         assert result["agent_run_id"]
         assert result["run_group_id"]
+        assert result["status"] == "processing"  # 异步执行，立即返回 processing
         assert runtime.state.list_tasks() == []
-        run = service.get_run(result["agent_run_id"])
+
+        # 等待异步执行完成
+        run = _wait_for_agent_run(service, result["agent_run_id"])
         assert run["status"] == "completed"
         assert run["run_group_id"] == result["run_group_id"]
         assert run["runnable_id"] == agent["agent_id"]
@@ -185,7 +199,12 @@ def test_agent_scoped_session_continues_without_new_mention(tmp_path, monkeypatc
     )
     try:
         first = api.send_message("@Helper 第一轮")
+        # 等待第一个 Agent Run 完成
+        _wait_for_agent_run(service, first["agent_run_id"])
+
         second = api.send_message("继续处理")
+        # 等待第二个 Agent Run 完成
+        _wait_for_agent_run(service, second["agent_run_id"])
 
         assert first["ok"] is True
         assert second["ok"] is True
@@ -293,6 +312,8 @@ def test_workflow_mention_creates_group_with_agent_reports_and_intervention(tmp_
         assert intervention["ok"] is True
         assert intervention["agent_run_id"]
         assert intervention["run_group_id"] == workflow_result["run_group_id"]
+        # 等待异步执行完成
+        _wait_for_agent_run(service, intervention["agent_run_id"])
         intervention_run = service.get_run(intervention["agent_run_id"])
         assert intervention_run["runnable_id"] == design["agent_id"]
         assert intervention_run["run_group_id"] == workflow_result["run_group_id"]
@@ -391,6 +412,8 @@ def test_agent_mention_supports_multiword_names(tmp_path, monkeypatch):
         result = api.send_message("@Draft Agent 整理需求")
         assert result["ok"] is True
         assert result["agent_run_id"]
+        # 等待异步执行完成
+        _wait_for_agent_run(service, result["agent_run_id"])
         run = service.get_run(result["agent_run_id"])
         assert run["runnable_id"] == agent["agent_id"]
         assert runtime.state.list_tasks() == []
@@ -432,6 +455,8 @@ def test_agent_mention_can_appear_inline_without_catching_email(tmp_path, monkey
 
         assert result["ok"] is True
         assert result["agent_run_id"]
+        # 等待异步执行完成
+        _wait_for_agent_run(service, result["agent_run_id"])
         run = service.get_run(result["agent_run_id"])
         assert run["runnable_id"] == agent["agent_id"]
         assert run["user_goal"] == "请 做一版视觉方向"

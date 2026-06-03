@@ -480,6 +480,32 @@ class ChatSession:
                     self._persist_message(msg)
                     return True
         return False
+
+    def update_assistant_message(
+        self,
+        message_id: str,
+        content: str,
+        *,
+        status: MessageStatus = MessageStatus.COMPLETED,
+        error: str | None = None,
+        metadata: dict | None = None,
+    ) -> bool:
+        """更新 assistant 消息的内容和状态。
+
+        用于异步 Agent Run 完成后更新消息。
+        """
+        with self._lock:
+            for msg in self.messages:
+                if msg.message_id == message_id:
+                    msg.content = content
+                    msg.status = status
+                    msg.error = error
+                    if metadata:
+                        msg.metadata.update(metadata)
+                    self._pending_message_id = self._find_active_message_id_locked()
+                    self._persist_message(msg)
+                    return True
+        return False
     
     def get_messages(self, limit: int = 50) -> List[ChatMessage]:
         """获取消息快照；limit <= 0 时返回全部消息。"""

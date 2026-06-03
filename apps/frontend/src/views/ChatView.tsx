@@ -12,7 +12,7 @@ import { useConfirmDialog } from '../components/ConfirmDialog';
 import { UiIcon } from '../components/UiIcon';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
-import { listRunnables, type RunnableSummary } from '../lib/agents';
+import { listRunnables, type RunnableSummary, getRun } from '../lib/agents';
 import { apiGet, apiPost, bridgeUrl, copyText, openAppView, openExternalUrl } from '../lib/bridge';
 import { currentParam } from '../lib/view';
 
@@ -732,6 +732,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         runnable_command?: boolean;
         agent_run_id?: string;
         workflow_run_id?: string;
+        run_id?: string;
+        run_status?: string;
+        status?: string;
       }>('/ui/chat/messages', {
         text,
         attachments: outgoingAttachments,
@@ -740,6 +743,16 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       transientEmptySessionIdRef.current = '';
       if (result.runnable_command) {
         pendingReplyTaskIdRef.current = '';
+        // 如果是异步执行的 Agent Run（status="processing"），启动轮询
+        if (result.status === 'processing' && result.run_id) {
+          setStatus('Agent 执行中...');
+          stickToBottomRef.current = true;
+          await refreshMessages();
+          // 启动轮询等待 Agent Run 完成
+          await pollAgentRunCompletion(result.run_id);
+          return;
+        }
+        // 同步完成的 Workflow Run 或其他情况
         pendingReplyScrollRef.current = false;
         setStatus(result.agent_run_id || result.workflow_run_id ? 'Agent/Workflow Run 已完成。' : result.error || 'Agent/Workflow 指令已处理。');
         await refreshMessages();
@@ -909,6 +922,39 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '取消失败');
     }
+  }
+
+  async function pollAgentRunCompletion(runId: string) {
+    const maxAttempts = 600; // 最多轮询 600 次（约 5 分钟）
+    const interval = ACTIVE_POLL_INTERVAL_MS;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const run = await getRun(runId);
+        const status = run.status || '';
+        if (status === 'completed' || status === 'failed' || status === 'approval_required') {
+          // 执行完成，刷新消息
+          await refreshMessages();
+          await loadSessions();
+          isProcessingRef.current = false;
+          setIsProcessing(false);
+          setStatus(status === 'completed' ? 'Agent Run 已完成。' : status === 'failed' ? 'Agent Run 执行失败。' : '等待审批...');
+          return;
+        }
+        // 更新状态文本
+        if (attempt % 10 === 0) {
+          setStatus(`Agent 执行中... (${Math.floor(attempt * interval / 1000)}s)`);
+        }
+      } catch (error) {
+        console.error('轮询 Agent Run 状态失败:', error);
+      }
+      await new Promise((resolve) => setTimeout(resolve, interval));
+    }
+    // 超时
+    await refreshMessages();
+    await loadSessions();
+    isProcessingRef.current = false;
+    setIsProcessing(false);
+    setStatus('Agent Run 轮询超时');
   }
 
   async function deleteSession() {
