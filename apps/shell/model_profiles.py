@@ -415,12 +415,14 @@ class ModelProfileService:
     """Persistent model profile registry."""
 
     def __init__(self, db_path: Path | str | None = None, workspace_dir: Path | str | None = None) -> None:
+        import threading
         root = Path(workspace_dir) if workspace_dir is not None else _hermes_yachiyo_home()
         root.mkdir(parents=True, exist_ok=True)
         self.workspace_dir = root
         self.db_path = Path(db_path) if db_path is not None else root / "model-profiles.db"
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        self._lock = threading.RLock()
         self._init_db()
 
     def close(self) -> None:
@@ -652,24 +654,30 @@ class ModelProfileService:
         return profile
 
     def list_profiles(self) -> dict[str, Any]:
-        rows = self._conn.execute(
-            "SELECT * FROM model_profiles ORDER BY capability, name"
-        ).fetchall()
-        return {
-            "ok": True,
-            "sources": self.list_sources()["sources"],
-            "profiles": [self._row_to_profile(row) for row in rows],
-            "defaults": self.get_defaults(),
-        }
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM model_profiles ORDER BY capability, name"
+            ).fetchall()
+            return {
+                "ok": True,
+                "sources": self._list_sources_locked()["sources"],
+                "profiles": [self._row_to_profile(row) for row in rows],
+                "defaults": self._get_defaults_locked(),
+            }
 
     def list_sources(self) -> dict[str, Any]:
+        with self._lock:
+            return self._list_sources_locked()
+
+    def _list_sources_locked(self) -> dict[str, Any]:
+        """内部方法，调用时必须已持有 self._lock"""
         rows = self._conn.execute(
             "SELECT * FROM model_sources ORDER BY capability, name"
         ).fetchall()
         sources = []
         for row in rows:
             source = self._row_to_source(row)
-            source["models"] = self.list_source_profiles(source["source_id"])["profiles"]
+            source["models"] = self._list_source_profiles_locked(source["source_id"])["profiles"]
             sources.append(source)
         return {"ok": True, "sources": sources}
 
@@ -717,73 +725,95 @@ class ModelProfileService:
         return self.get_source(source_id)
 
     def get_source(self, source_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self._get_source_locked(source_id)
+
+    def _get_source_locked(self, source_id: str) -> dict[str, Any]:
+        """内部方法，调用时必须已持有 self._lock"""
         row = self._conn.execute("SELECT * FROM model_sources WHERE source_id=?", (source_id,)).fetchone()
         if row is None:
             raise KeyError(source_id)
         source = self._row_to_source(row)
-        source["models"] = self.list_source_profiles(source_id)["profiles"]
+        source["models"] = self._list_source_profiles_locked(source_id)["profiles"]
         return source
 
     def get_source_private(self, source_id: str) -> dict[str, Any]:
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM model_sources WHERE source_id=?", (source_id,)).fetchone()
+            if row is None:
+                raise KeyError(source_id)
+            source = self._row_to_source(row, include_secret=True)
+            source["models"] = self._list_source_profiles_locked(source_id)["profiles"]
+            return source
+
+    def update_source(self, source_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            current = self._get_source_private_locked(source_id)
+            next_source = {**current, **{key: value for key, value in payload.items() if key != "api_key"}}
+            if "capability" in payload:
+                next_source["capability"] = _normalize_capability(str(payload.get("capability") or "chat"))
+            next_capability = str(next_source.get("capability") or "chat")
+            next_name = str(next_source.get("name") or "").strip()
+            self._ensure_source_id_available(next_name, next_capability, ignore_source_id=source_id)
+            mismatched = self._conn.execute(
+                "SELECT 1 FROM model_profiles WHERE source_id=? AND capability<>? LIMIT 1",
+                (source_id, next_capability),
+            ).fetchone()
+            if mismatched is not None:
+                raise ModelProfileError("提供商源类型不能与已登记模型类型不一致")
+            api_key = str(current.get("api_key") or "")
+            if "api_key" in payload and str(payload.get("api_key") or "").strip():
+                api_key = str(payload.get("api_key") or "").strip()
+            now = _now()
+            self._conn.execute(
+                """
+                UPDATE model_sources
+                   SET name=?, capability=?, provider=?, base_url=?, api_key=?, options_json=?, enabled=?, updated_at=?
+                WHERE source_id=?
+                """,
+                (
+                    next_name,
+                    next_capability,
+                    str(next_source.get("provider") or "openai_compatible"),
+                    str(next_source.get("base_url") or ""),
+                    api_key,
+                    _json_dump(next_source.get("options") or {}),
+                    1 if next_source.get("enabled", True) else 0,
+                    now,
+                    source_id,
+                ),
+            )
+            self._conn.commit()
+            return self._get_source_locked(source_id)
+
+    def _get_source_private_locked(self, source_id: str) -> dict[str, Any]:
+        """内部方法，调用时必须已持有 self._lock"""
         row = self._conn.execute("SELECT * FROM model_sources WHERE source_id=?", (source_id,)).fetchone()
         if row is None:
             raise KeyError(source_id)
         source = self._row_to_source(row, include_secret=True)
-        source["models"] = self.list_source_profiles(source_id)["profiles"]
+        source["models"] = self._list_source_profiles_locked(source_id)["profiles"]
         return source
 
-    def update_source(self, source_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        current = self.get_source_private(source_id)
-        next_source = {**current, **{key: value for key, value in payload.items() if key != "api_key"}}
-        if "capability" in payload:
-            next_source["capability"] = _normalize_capability(str(payload.get("capability") or "chat"))
-        next_capability = str(next_source.get("capability") or "chat")
-        next_name = str(next_source.get("name") or "").strip()
-        self._ensure_source_id_available(next_name, next_capability, ignore_source_id=source_id)
-        mismatched = self._conn.execute(
-            "SELECT 1 FROM model_profiles WHERE source_id=? AND capability<>? LIMIT 1",
-            (source_id, next_capability),
-        ).fetchone()
-        if mismatched is not None:
-            raise ModelProfileError("提供商源类型不能与已登记模型类型不一致")
-        api_key = str(current.get("api_key") or "")
-        if "api_key" in payload and str(payload.get("api_key") or "").strip():
-            api_key = str(payload.get("api_key") or "").strip()
-        now = _now()
-        self._conn.execute(
-            """
-            UPDATE model_sources
-               SET name=?, capability=?, provider=?, base_url=?, api_key=?, options_json=?, enabled=?, updated_at=?
-            WHERE source_id=?
-            """,
-            (
-                next_name,
-                next_capability,
-                str(next_source.get("provider") or "openai_compatible"),
-                str(next_source.get("base_url") or ""),
-                api_key,
-                _json_dump(next_source.get("options") or {}),
-                1 if next_source.get("enabled", True) else 0,
-                now,
-                source_id,
-            ),
-        )
-        self._conn.commit()
-        return self.get_source(source_id)
-
     def delete_source(self, source_id: str) -> dict[str, Any]:
-        model_ids = [
-            str(row["profile_id"])
-            for row in self._conn.execute("SELECT profile_id FROM model_profiles WHERE source_id=?", (source_id,)).fetchall()
-        ]
-        self._conn.execute("DELETE FROM model_sources WHERE source_id=?", (source_id,))
-        self._conn.execute("DELETE FROM model_profiles WHERE source_id=?", (source_id,))
-        for profile_id in model_ids:
-            self._conn.execute("UPDATE model_profile_defaults SET profile_id='' WHERE profile_id=?", (profile_id,))
-        self._conn.commit()
-        return {"ok": True}
+        with self._lock:
+            model_ids = [
+                str(row["profile_id"])
+                for row in self._conn.execute("SELECT profile_id FROM model_profiles WHERE source_id=?", (source_id,)).fetchall()
+            ]
+            self._conn.execute("DELETE FROM model_sources WHERE source_id=?", (source_id,))
+            self._conn.execute("DELETE FROM model_profiles WHERE source_id=?", (source_id,))
+            for profile_id in model_ids:
+                self._conn.execute("UPDATE model_profile_defaults SET profile_id='' WHERE profile_id=?", (profile_id,))
+            self._conn.commit()
+            return {"ok": True}
 
     def list_source_profiles(self, source_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self._list_source_profiles_locked(source_id)
+
+    def _list_source_profiles_locked(self, source_id: str) -> dict[str, Any]:
+        """内部方法，调用时必须已持有 self._lock"""
         rows = self._conn.execute(
             "SELECT * FROM model_profiles WHERE source_id=? ORDER BY name",
             (source_id,),
@@ -972,6 +1002,11 @@ class ModelProfileService:
         }
 
     def get_defaults(self) -> dict[str, str]:
+        with self._lock:
+            return self._get_defaults_locked()
+
+    def _get_defaults_locked(self) -> dict[str, str]:
+        """内部方法，调用时必须已持有 self._lock"""
         rows = self._conn.execute("SELECT capability, profile_id FROM model_profile_defaults").fetchall()
         defaults = {str(row["capability"]): str(row["profile_id"]) for row in rows}
         for capability in ("chat", "vision", "tts"):
@@ -1207,59 +1242,70 @@ class ModelProfileService:
         return result
 
     def get_profile(self, profile_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self._get_profile_locked(profile_id)
+
+    def _get_profile_locked(self, profile_id: str) -> dict[str, Any]:
+        """内部方法，调用时必须已持有 self._lock"""
         row = self._conn.execute("SELECT * FROM model_profiles WHERE profile_id=?", (profile_id,)).fetchone()
         if row is None:
             raise KeyError(profile_id)
         return self._row_to_profile(row)
 
     def get_profile_private(self, profile_id: str) -> dict[str, Any]:
+        with self._lock:
+            return self._get_profile_private_locked(profile_id)
+
+    def _get_profile_private_locked(self, profile_id: str) -> dict[str, Any]:
+        """内部方法，调用时必须已持有 self._lock"""
         row = self._conn.execute("SELECT * FROM model_profiles WHERE profile_id=?", (profile_id,)).fetchone()
         if row is None:
             raise KeyError(profile_id)
         return self._row_to_profile(row, include_secret=True)
 
     def update_profile(self, profile_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        current = self.get_profile_private(profile_id)
-        next_profile = {**current, **{key: value for key, value in payload.items() if key != "api_key"}}
-        if "capability" in payload:
-            next_profile["capability"] = _normalize_capability(str(payload.get("capability") or "chat"))
-        if "source_id" in payload and str(payload.get("source_id") or "").strip():
-            self.get_source(str(payload.get("source_id") or "").strip())
-        next_source_id = str(next_profile.get("source_id") or "")
-        if next_source_id:
-            source = self.get_source(next_source_id)
-            if str(source.get("capability") or "chat") != str(next_profile.get("capability") or "chat"):
-                raise ModelProfileError("模型类型必须与提供商源类型一致")
-        api_key = "" if next_source_id else str(current.get("api_key") or "")
-        if not next_source_id and "api_key" in payload and str(payload.get("api_key") or "").strip():
-            api_key = str(payload.get("api_key") or "").strip()
-        profile_enabled = next_profile.get("enabled", True)
-        if "enabled" not in payload and "profile_enabled" in current:
-            profile_enabled = current.get("profile_enabled", True)
-        now = _now()
-        self._conn.execute(
-            """
-            UPDATE model_profiles
-               SET source_id=?, name=?, capability=?, provider=?, base_url=?, model=?, api_key=?,
-                   options_json=?, enabled=?, updated_at=?
-             WHERE profile_id=?
-            """,
-            (
-                str(next_profile.get("source_id") or ""),
-                str(next_profile.get("name") or "").strip(),
-                str(next_profile.get("capability") or "chat"),
-                str(next_profile.get("provider") or "openai_compatible"),
-                str(next_profile.get("base_url") or ""),
-                str(next_profile.get("model") or ""),
-                api_key,
-                _json_dump(next_profile.get("options") or {}),
-                1 if profile_enabled else 0,
-                now,
-                profile_id,
-            ),
-        )
-        self._conn.commit()
-        return self.get_profile(profile_id)
+        with self._lock:
+            current = self._get_profile_private_locked(profile_id)
+            next_profile = {**current, **{key: value for key, value in payload.items() if key != "api_key"}}
+            if "capability" in payload:
+                next_profile["capability"] = _normalize_capability(str(payload.get("capability") or "chat"))
+            if "source_id" in payload and str(payload.get("source_id") or "").strip():
+                self._get_source_locked(str(payload.get("source_id") or "").strip())
+            next_source_id = str(next_profile.get("source_id") or "")
+            if next_source_id:
+                source = self._get_source_locked(next_source_id)
+                if str(source.get("capability") or "chat") != str(next_profile.get("capability") or "chat"):
+                    raise ModelProfileError("模型类型必须与提供商源类型一致")
+            api_key = "" if next_source_id else str(current.get("api_key") or "")
+            if not next_source_id and "api_key" in payload and str(payload.get("api_key") or "").strip():
+                api_key = str(payload.get("api_key") or "").strip()
+            profile_enabled = next_profile.get("enabled", True)
+            if "enabled" not in payload and "profile_enabled" in current:
+                profile_enabled = current.get("profile_enabled", True)
+            now = _now()
+            self._conn.execute(
+                """
+                UPDATE model_profiles
+                   SET source_id=?, name=?, capability=?, provider=?, base_url=?, model=?, api_key=?,
+                       options_json=?, enabled=?, updated_at=?
+                 WHERE profile_id=?
+                """,
+                (
+                    str(next_profile.get("source_id") or ""),
+                    str(next_profile.get("name") or "").strip(),
+                    str(next_profile.get("capability") or "chat"),
+                    str(next_profile.get("provider") or "openai_compatible"),
+                    str(next_profile.get("base_url") or ""),
+                    str(next_profile.get("model") or ""),
+                    api_key,
+                    _json_dump(next_profile.get("options") or {}),
+                    1 if profile_enabled else 0,
+                    now,
+                    profile_id,
+                ),
+            )
+            self._conn.commit()
+            return self._get_profile_locked(profile_id)
 
     def delete_profile(self, profile_id: str) -> dict[str, Any]:
         self._conn.execute("DELETE FROM model_profiles WHERE profile_id=?", (profile_id,))

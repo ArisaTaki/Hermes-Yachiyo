@@ -7675,7 +7675,7 @@ body.electron-window .hy-traffic {
 
 .hy-chat-sessions {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -7706,12 +7706,12 @@ body.electron-window .hy-traffic {
 }
 
 .hy-chat-session-list {
-  display: grid;
-  align-content: start;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   min-height: 0;
-  overflow: auto;
-  padding: 12px;
+  overflow-y: auto;
+  padding: 8px;
 }
 
 .hy-chat-session-list button {
@@ -7835,11 +7835,11 @@ body.electron-window .hy-traffic {
 
 .hy-content .open-chat-shell .hy-chat-sessions-head {
   display: block;
-  padding: 20px 16px 12px;
+  padding: 12px 12px 8px;
 }
 
 .hy-content .open-chat-shell .chat-sidebar-title {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   color: var(--hy-fg);
   font-size: 15px;
   font-weight: 590;
@@ -7889,9 +7889,9 @@ body.electron-window .hy-traffic {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 12px;
-  min-height: 60px;
-  padding: 12px;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 10px;
   border: 0;
   border-radius: var(--hy-radius-card);
   background: transparent;
@@ -8007,6 +8007,126 @@ body.electron-window .hy-traffic {
   color: var(--hy-faint);
   font-family: var(--hy-font-mono);
   font-size: 10px;
+}
+
+/* Session Tabs */
+.hy-content .open-chat-shell .session-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 8px;
+  flex-shrink: 0;
+}
+
+.hy-content .open-chat-shell .session-tab {
+  flex: 1;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--hy-muted);
+  font-size: 11px;
+  font-weight: 510;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: none;
+  outline: none;
+  padding: 0 8px;
+}
+
+.hy-content .open-chat-shell .session-tab:hover {
+  background: oklch(75% 0.095 205 / 0.06);
+  color: var(--hy-text);
+}
+
+.hy-content .open-chat-shell .session-tab.active {
+  background: oklch(75% 0.095 205 / 0.1);
+  color: var(--hy-text);
+}
+
+/* Agent Group */
+.hy-content .open-chat-shell .agent-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.hy-content .open-chat-shell .agent-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  cursor: pointer;
+  user-select: none;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  color: var(--hy-text);
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+}
+
+.hy-content .open-chat-shell .agent-group-header:hover {
+  background: oklch(75% 0.095 205 / 0.06);
+}
+
+.hy-content .open-chat-shell .agent-group-toggle {
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  transition: transform 0.2s ease;
+  color: var(--hy-muted);
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.hy-content .open-chat-shell .agent-group-toggle.expanded {
+  transform: rotate(90deg);
+}
+
+.hy-content .open-chat-shell .agent-group-name {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 560;
+  color: var(--hy-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hy-content .open-chat-shell .agent-group-count {
+  font-size: 10px;
+  color: var(--hy-muted);
+  background: oklch(75% 0.095 205 / 0.08);
+  padding: 1px 5px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  min-width: 18px;
+  text-align: center;
+}
+
+.hy-content .open-chat-shell .agent-group-sessions {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height 0.25s ease;
+}
+
+.hy-content .open-chat-shell .agent-group-sessions.expanded {
+  max-height: 500px;
+}
+
+.hy-content .open-chat-shell .agent-group-sessions-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0;
 }
 
 .hy-content .open-chat-shell .hy-chat-mainpane {

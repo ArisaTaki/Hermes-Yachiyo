@@ -277,6 +277,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [sidebarWidth, setSidebarWidth] = useState(CHAT_SIDEBAR_BASE_MAX_WIDTH);
   const [composerHeight, setComposerHeight] = useState(() => storedComposerHeight());
   const [runnables, setRunnables] = useState<RunnableSummary[]>([]);
+  const [sessionTab, setSessionTab] = useState<'agents' | 'groups'>('agents');
+  const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
   const [, setRenderTick] = useState(0);
   const { confirmDialog, requestConfirm } = useConfirmDialog();
   const listRef = useRef<HTMLDivElement>(null);
@@ -1271,6 +1273,54 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const sessionItems = sessions?.sessions || [];
   const normalizedSessionQuery = debouncedSessionQuery.trim();
   const visibleSessions = sessionItems;
+
+  // Agent 分组逻辑
+  type AgentGroup = {
+    agent_id: string;
+    agent_name: string;
+    agent_avatar?: string;
+    sessions: SessionItem[];
+  };
+
+  const agentGroups = useMemo(() => {
+    const groups = new Map<string, AgentGroup>();
+
+    sessionItems
+      .filter((s) => s.conversation_kind === 'main' || s.conversation_kind === 'agent')
+      .forEach((session) => {
+        const agentId = session.runnable_id || 'main';
+
+        // 从 runnables 中获取最新的 Agent 名称
+        const runnable = runnables.find((r) => r.id === agentId);
+        const agentName = agentId === 'main'
+          ? (assistantProfile?.agent_nickname || assistantProfile?.agent_name || '主模型')
+          : runnable?.nickname || runnable?.name || session.runnable_name || 'Agent';
+
+        if (!groups.has(agentId)) {
+          groups.set(agentId, {
+            agent_id: agentId,
+            agent_name: agentName,
+            sessions: [],
+          });
+        }
+        groups.get(agentId)!.sessions.push(session);
+      });
+
+    return Array.from(groups.values());
+  }, [sessionItems, runnables, assistantProfile]);
+
+  const workflowSessions = useMemo(() => {
+    return sessionItems.filter((s) => s.conversation_kind === 'workflow');
+  }, [sessionItems]);
+
+  // 初始化展开状态（默认全部展开）
+  const initializedAgentsRef = useRef(false);
+  useEffect(() => {
+    if (!initializedAgentsRef.current && agentGroups.length > 0) {
+      initializedAgentsRef.current = true;
+      setExpandedAgents(new Set(agentGroups.map((g) => g.agent_id)));
+    }
+  }, [agentGroups]);
   const currentSession = sessionItems.find((session) => session.session_id === sessions?.current_session_id);
   const currentSessionId = sessions?.current_session_id || '';
   const activeSessionContext = currentSession ? contextFromSession(currentSession) : normalizeSessionContext(sessionContext);
@@ -1328,39 +1378,167 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
               </div>
             ) : null}
           </div>
+
+          {/* Tab 切换 */}
+          <div className="session-tabs">
+            <button
+              type="button"
+              className={`session-tab ${sessionTab === 'agents' ? 'active' : ''}`}
+              onClick={() => setSessionTab('agents')}
+            >
+              Agent
+            </button>
+            <button
+              type="button"
+              className={`session-tab ${sessionTab === 'groups' ? 'active' : ''}`}
+              onClick={() => setSessionTab('groups')}
+            >
+              群组
+            </button>
+          </div>
+
           <div className="chat-list hy-chat-session-list">
-            {visibleSessions.length ? visibleSessions.map((session) => (
-              <button
-                type="button"
-                className={`chat-item ${session.session_id === sessions?.current_session_id ? 'active' : ''}`}
-                key={session.session_id}
-                onClick={() => void switchSession(session.session_id, session.search_match?.message_id || '')}
-              >
-                <SessionAvatar
-                  assistantProfile={assistantProfile}
-                  context={contextFromSession(session)}
-                  loading={assistantProfileLoading}
-                  size="small"
-                />
-                <span className="chat-item-info">
-                  <strong className="chat-item-name">{sessionDisplayName(session, assistantProfile)}</strong>
-                  {session.conversation_kind === 'agent' || session.conversation_kind === 'workflow' ? (
-                    <span className="chat-item-kind">{sessionKindLabel(session)}</span>
-                  ) : null}
-                  <span className={session.search_match ? 'chat-item-preview search-hit' : 'chat-item-preview'}>
-                    <HighlightedText text={sessionPreview(session)} query={normalizedSessionQuery} />
-                  </span>
-                </span>
-                <span className="chat-item-side">
-                  <span className="chat-item-time">
-                    {session.is_processing ? '处理中' : formatShortTime(session.updated_at || session.created_at)}
-                  </span>
-                </span>
-              </button>
-            )) : (
-              <div className="empty-state inline-empty">
-                {sessionItems.length ? '无匹配会话' : '暂无对话'}
-              </div>
+            {/* 搜索结果显示所有匹配的会话 */}
+            {normalizedSessionQuery ? (
+              visibleSessions.length > 0 ? (
+                visibleSessions.map((session) => (
+                  <button
+                    type="button"
+                    className={`chat-item ${session.session_id === sessions?.current_session_id ? 'active' : ''}`}
+                    key={session.session_id}
+                    onClick={() => void switchSession(session.session_id, session.search_match?.message_id || '')}
+                  >
+                    <SessionAvatar
+                      assistantProfile={assistantProfile}
+                      context={contextFromSession(session)}
+                      loading={assistantProfileLoading}
+                      size="small"
+                      runnables={runnables}
+                    />
+                    <span className="chat-item-info">
+                      <strong className="chat-item-name">{sessionDisplayName(session, assistantProfile)}</strong>
+                      {session.conversation_kind === 'agent' || session.conversation_kind === 'workflow' ? (
+                        <span className="chat-item-kind">{sessionKindLabel(session)}</span>
+                      ) : null}
+                      <span className={session.search_match ? 'chat-item-preview search-hit' : 'chat-item-preview'}>
+                        <HighlightedText text={sessionPreview(session)} query={normalizedSessionQuery} />
+                      </span>
+                    </span>
+                    <span className="chat-item-side">
+                      <span className="chat-item-time">
+                        {session.is_processing ? '处理中' : formatShortTime(session.updated_at || session.created_at)}
+                      </span>
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="empty-state inline-empty">
+                  无匹配会话
+                </div>
+              )
+            ) : sessionTab === 'agents' ? (
+              /* Agent 分组视图 */
+              agentGroups.length > 0 ? (
+                agentGroups.map((group) => {
+                  const isExpanded = expandedAgents.has(group.agent_id);
+                  return (
+                    <div key={group.agent_id} className="agent-group">
+                      <button
+                        type="button"
+                        className="agent-group-header"
+                        onClick={() => {
+                          setExpandedAgents((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(group.agent_id)) {
+                              next.delete(group.agent_id);
+                            } else {
+                              next.add(group.agent_id);
+                            }
+                            return next;
+                          });
+                        }}
+                      >
+                        <span className={`agent-group-toggle ${isExpanded ? 'expanded' : ''}`}>
+                          {'>'}
+                        </span>
+                        <span className="agent-group-name">{group.agent_name}</span>
+                        <span className="agent-group-count">{group.sessions.length}</span>
+                      </button>
+                      <div className={`agent-group-sessions ${isExpanded ? 'expanded' : ''}`}>
+                        <div className="agent-group-sessions-inner">
+                          {group.sessions.map((session) => (
+                            <button
+                              type="button"
+                              className={`chat-item ${session.session_id === sessions?.current_session_id ? 'active' : ''}`}
+                              key={session.session_id}
+                              onClick={() => void switchSession(session.session_id, session.search_match?.message_id || '')}
+                            >
+                              <SessionAvatar
+                                assistantProfile={assistantProfile}
+                                context={contextFromSession(session)}
+                                loading={assistantProfileLoading}
+                                size="small"
+                                runnables={runnables}
+                              />
+                              <span className="chat-item-info">
+                                <strong className="chat-item-name">{sessionDisplayName(session, assistantProfile)}</strong>
+                                <span className={session.search_match ? 'chat-item-preview search-hit' : 'chat-item-preview'}>
+                                  <HighlightedText text={sessionPreview(session)} query={normalizedSessionQuery} />
+                                </span>
+                              </span>
+                              <span className="chat-item-side">
+                                <span className="chat-item-time">
+                                  {session.is_processing ? '处理中' : formatShortTime(session.updated_at || session.created_at)}
+                                </span>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="empty-state inline-empty">
+                  {sessionItems.length ? '无匹配会话' : '暂无对话'}
+                </div>
+              )
+            ) : (
+              /* 群组视图 (Workflow) */
+              workflowSessions.length > 0 ? (
+                workflowSessions.map((session) => (
+                  <button
+                    type="button"
+                    className={`chat-item ${session.session_id === sessions?.current_session_id ? 'active' : ''}`}
+                    key={session.session_id}
+                    onClick={() => void switchSession(session.session_id, session.search_match?.message_id || '')}
+                  >
+                    <SessionAvatar
+                      assistantProfile={assistantProfile}
+                      context={contextFromSession(session)}
+                      loading={assistantProfileLoading}
+                      size="small"
+                      runnables={runnables}
+                    />
+                    <span className="chat-item-info">
+                      <strong className="chat-item-name">{sessionDisplayName(session, assistantProfile)}</strong>
+                      <span className="chat-item-kind">{sessionKindLabel(session)}</span>
+                      <span className={session.search_match ? 'chat-item-preview search-hit' : 'chat-item-preview'}>
+                        <HighlightedText text={sessionPreview(session)} query={normalizedSessionQuery} />
+                      </span>
+                    </span>
+                    <span className="chat-item-side">
+                      <span className="chat-item-time">
+                        {session.is_processing ? '处理中' : formatShortTime(session.updated_at || session.created_at)}
+                      </span>
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="empty-state inline-empty">
+                  {sessionItems.length ? '无群组会话' : '暂无对话'}
+                </div>
+              )
             )}
           </div>
         </aside>
@@ -1389,6 +1567,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 context={activeSessionContext}
                 loading={assistantProfileLoading}
                 size="header"
+                runnables={runnables}
               />
               <div>
                 <div className="chat-header-name">{currentTitle}</div>
@@ -1470,6 +1649,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                   onCopy={() => void copyMessage(message)}
                   onRetry={() => void retryMessage(message)}
                   registerMessageNode={registerMessageNode}
+                  runnables={runnables}
                 />
               ))}
               <div className="chat-bottom-anchor" ref={bottomAnchorRef} aria-hidden="true" />
@@ -1614,7 +1794,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   );
 }
 
-function MessageBubble({ assistantProfile, assistantProfileLoading, copied, copiedCodeBlockKey, displayContent, highlighted, message, retryDisabled, retrying, showRetry, onCopy, onRetry, registerMessageNode }: {
+function MessageBubble({ assistantProfile, assistantProfileLoading, copied, copiedCodeBlockKey, displayContent, highlighted, message, retryDisabled, retrying, showRetry, onCopy, onRetry, registerMessageNode, runnables }: {
   assistantProfile: AssistantProfilePayload | null;
   assistantProfileLoading: boolean;
   copied: boolean;
@@ -1628,6 +1808,7 @@ function MessageBubble({ assistantProfile, assistantProfileLoading, copied, copi
   onCopy: () => void;
   onRetry: () => void;
   registerMessageNode: (messageId: string | undefined, node: HTMLElement | null) => void;
+  runnables: RunnableSummary[];
 }) {
   const role = message.role || 'system';
   const statusClass = message.status === 'failed'
@@ -1644,7 +1825,7 @@ function MessageBubble({ assistantProfile, assistantProfileLoading, copied, copi
       data-message-id={message.id || ''}
       ref={(node) => registerMessageNode(message.id, node)}
     >
-      <div className="message-avatar">{messageAvatar(message, assistantProfile, assistantProfileLoading)}</div>
+      <div className="message-avatar">{messageAvatar(message, assistantProfile, assistantProfileLoading, runnables)}</div>
       <div className="message-stack">
         <div className="message-bubble">
           {isProcessingEmpty ? (
@@ -1978,27 +2159,41 @@ function AvatarStack({ participants }: { participants: ChatParticipant[] }) {
   );
 }
 
-function SessionAvatar({ assistantProfile, context, loading, size }: {
+function SessionAvatar({ assistantProfile, context, loading, size, runnables }: {
   assistantProfile: AssistantProfilePayload | null;
   context?: ChatSessionContext | null;
   loading?: boolean;
   size: 'small' | 'header';
+  runnables?: RunnableSummary[];
 }) {
   const normalized = normalizeSessionContext(context);
   const className = size === 'header' ? 'chat-header-avatar' : 'chat-item-avatar';
   if (normalized.conversation_kind === 'workflow') {
-    const participants = normalized.participants || [];
+    // 从 runnables 中获取最新的参与者信息
+    const runnable = runnables?.find((r) => r.id === normalized.runnable_id);
+    const participants = runnable?.participants || normalized.participants || [];
     return (
-      <span className={`${className} chat-avatar-stack`} title={normalized.runnable_name || 'Workflow'}>
-        <AvatarStack participants={participants} />
+      <span className={`${className} chat-avatar-stack`} title={runnable?.name || normalized.runnable_name || 'Workflow'}>
+        <AvatarStack participants={participants.map((p) => ({
+          kind: p.kind,
+          id: p.id,
+          name: p.name || p.nickname || '',
+          nickname: p.nickname,
+          avatar_url: p.avatar_url,
+        }))} />
       </span>
     );
   }
   if (normalized.conversation_kind === 'agent') {
+    // 从 runnables 中获取最新的 Agent 信息
+    const runnable = runnables?.find((r) => r.id === normalized.runnable_id);
     const participant = primaryParticipant(normalized);
+    // 如果找到了 runnable，使用它的头像（即使为空），否则使用会话中的旧头像
+    const avatarUrl = runnable ? runnable.avatar_url : participant?.avatar_url;
+    const name = runnable?.nickname || runnable?.name || participantDisplayName(participant) || normalized.runnable_name || 'Agent';
     return (
-      <span className={`${className} chat-agent-avatar`} title={participantDisplayName(participant) || normalized.runnable_name || 'Agent'}>
-        {participantAvatarContent(participant, 'A')}
+      <span className={`${className} chat-agent-avatar`} title={name}>
+        {agentAvatarNode(avatarUrl, name)}
       </span>
     );
   }
@@ -2024,16 +2219,57 @@ function ChatFullPageLoading({ avatarUrl, label }: { avatarUrl?: string; label: 
   );
 }
 
-function messageAvatar(message: ChatMessage, profile: AssistantProfilePayload | null, profileLoading = false) {
+// Agent Studio 风格的首字母获取函数
+function agentInitial(name: string): string {
+  const clean = (name || '').trim();
+  return clean ? clean.slice(0, 1).toUpperCase() : 'A';
+}
+
+function messageAvatar(message: ChatMessage, profile: AssistantProfilePayload | null, profileLoading = false, runnables: RunnableSummary[] = []) {
   const role = message.role || 'system';
   if (role === 'user') return avatarNode(profile?.user_avatar_url, '你', '你', profileLoading);
   if (role === 'assistant') {
     const sender = message.metadata?.sender;
-    if (sender?.kind === 'workflow') return <AvatarStack participants={sender.participants || []} />;
-    if (sender?.kind === 'agent') return participantAvatarContent(sender, 'A');
+    if (sender?.kind === 'workflow') {
+      // 从 runnables 中获取最新的参与者信息
+      const runnable = runnables.find((r) => r.id === sender.id);
+      const participants = runnable?.participants || sender.participants || [];
+      return <AvatarStack participants={participants.map((p) => ({
+        kind: p.kind,
+        id: p.id,
+        name: p.name || p.nickname || '',
+        nickname: p.nickname,
+        avatar_url: p.avatar_url,
+      }))} />;
+    }
+    if (sender?.kind === 'agent') {
+      // 从 runnables 中获取最新的 Agent 信息
+      const runnable = runnables.find((r) => r.id === sender.id);
+      // 如果找到了 runnable，使用它的信息，否则使用消息中的旧信息
+      const avatarUrl = runnable ? runnable.avatar_url : sender.avatar_url;
+      const name = runnable?.nickname || runnable?.name || participantDisplayName(sender) || 'Agent';
+      // 使用 Agent Studio 风格的头像
+      return agentAvatarNode(avatarUrl, name);
+    }
     return avatarNode(profile?.agent_avatar_url, profile?.agent_name || 'Yachiyo', '月', profileLoading);
   }
   return 'i';
+}
+
+// Agent Studio 风格的头像节点
+function agentAvatarNode(avatarUrl: string | undefined, name: string) {
+  if (avatarUrl) {
+    return (
+      <span className="agent-avatar has-image" aria-hidden="true">
+        <img src={avatarUrl} alt="" />
+      </span>
+    );
+  }
+  return (
+    <span className="agent-avatar" aria-hidden="true">
+      {agentInitial(name)}
+    </span>
+  );
 }
 
 function messageRoleLabel(message: ChatMessage) {
@@ -2101,9 +2337,15 @@ function conversationDisplayName(
 function sessionDisplayName(session: SessionItem, assistantProfile: AssistantProfilePayload | null) {
   const context = contextFromSession(session);
   if (context.conversation_kind === 'agent') {
-    return session.runnable_name || participantDisplayName(primaryParticipant(context)) || sessionTitle(session);
+    // 优先使用会话标题（如果已总结），否则使用 Agent 名称
+    const title = sessionTitle(session);
+    if (title && title !== '新对话') return title;
+    return session.runnable_name || participantDisplayName(primaryParticipant(context)) || 'Agent';
   }
   if (context.conversation_kind === 'workflow') {
+    // 优先使用会话标题（如果已总结），否则使用 Workflow 名称
+    const title = sessionTitle(session);
+    if (title && title !== '新对话') return title;
     return session.runnable_name || 'Workflow 群组';
   }
   return sessionTitle(session) || assistantProfile?.agent_name || '新对话';
