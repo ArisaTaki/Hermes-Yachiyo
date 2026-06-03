@@ -247,13 +247,23 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - AgentRun 进入 `approval_required` 时，聊天气泡保持 processing，显示需要审批的 Agent、工具名和输入摘要，并直接提供批准 / 拒绝按钮；不再只显示突兀的 `等待审批：tool`。
 - 群组派活 prompt 明确禁止用 shell/terminal 模拟派活、禁止 `run_yachiyo_agent` / `run_yachiyo_workflow`，派活协议由 Chat 层接管并隐藏。
 
+### Batch 22：Chat 群组流式、主模型汇总与审批恢复
+
+- 群组 AgentRun 的空 processing 内容由前端渲染为三点 loading，与主模型流式等待态保持一致；不再把“已接收任务”作为最终气泡内容插入聊天流。
+- 主模型流式输出派发协议时，Chat 层会剥离内部 JSON 并保留已经生成的自然语言说明，避免每次识别到派发 payload 都把气泡内容重置为空。
+- 主模型派发出去的 AgentRun 到达 completed / failed / cancelled 后，只在 Agent 气泡展示简短状态，完整 Agent 报告写入消息 metadata 的 `agent_report`。
+- Chat 层会等待同一轮主模型派发的 Agent 都进入终态，然后自动创建主模型汇总 task，把用户原始请求、主模型派活计划和各 Agent 报告交回主模型，由主模型统一流式汇报给用户。
+- 直接 `@Agent` 的场景不经过主模型汇总，仍由该 Agent 直接在群里回复；只有“主模型派发”的 Agent 结果会回到主模型整理。
+- Agent 审批通过后，Chat 轮询会同步 Run 最新状态；若审批后 Agent 完成，会沿用同一套主模型汇总链路。前端批准按钮完成后如果仍有汇总任务在跑，会显示“等待主模型汇总”。
+- 群组派发、审批恢复、失败重试和汇总任务已加入 Chat API 回归测试，避免重新出现“批准后无结果”或“Agent 各说各的”的体验。
+
 ## 下一阶段产品方向
 
 - Agent / Workflow 的核心可行性要从“能得到文本结果”推进到“能产出可浏览、可复用的文件”：Design Agent 应能产出原型文件或 Markdown；Coding Agent 应能产出代码文件或 patch；Review Agent 应能产出 Markdown review 建议。
 - Workflow 跑完后需要记录每个 Agent 的结构化产物，而不只是最后一个节点的文本；Runs 详情应成为查看所有中间产物、最终产物、artifact 和子 Run 的统一入口。
 - 任意入口触发 Workflow 已统一创建 RunGroup / Run 历史；后续仍要把未来 Yachiyo 自动派发任务接入同一套 Chat 群组可观察性。
-- Chat 已支持 Agent 私聊和 Workflow 群组；下一步要补 streaming/轮询、运行中取消、失败重试、审批恢复和中间 artifact 在群组里的展示。
-- 更拟人化的远期方向是“公司派活式群组”：Yachiyo 可自主判断交给谁处理、在群组内协调多个 Agent，并把用户插话纳入后续 Agent 上下文和产物归属。
+- Chat 已支持 Agent 私聊、手动群组、主模型派发、流式派发隐藏、AgentRun 审批恢复和主模型统一汇总；下一步重点是用真实模型压测长输出、失败重试、取消和中间 artifact 展示。
+- 更拟人化的远期方向是“公司派活式群组”：Yachiyo 可自主判断交给谁处理、在群组内协调多个 Agent，并把用户插话纳入后续 Agent 上下文、产物归属和主模型验收总结。
 
 ## 新增接口
 
@@ -318,7 +328,7 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
 - Agent Studio Agent 是持久岗位，不是 Hermes 原生 `delegate_task` 临时 subagent 注册表。
 - Custom API 作为高级模型配置兼容路径保留，但仍走同一个 Yachiyo Agent Runtime。
 - ToolBroker 已支持真实 tool-call 循环、单个 Agent Run 审批恢复，以及 Workflow 子 Run 审批后的父 Workflow 继续执行；Workflow 子 Run 失败会停止父 Workflow。
-- 运行中取消、streaming/轮询、失败重试和复杂 artifact viewer 仍待补齐。
+- Chat 群组已具备基础 streaming/轮询、派发隐藏、单 Agent 失败重试、审批恢复和主模型汇总；运行中取消、复杂 artifact viewer、真实模型长输出压力和用户插话改派仍待补齐。
 - 主 Agent 自动委派第一版走 Yachiyo 内部桥，不改 Hermes 原生 `delegate_task` 实现。
 - TTS Profile 首版做统一保存与复用入口，具体语音合成、服务检测和连接测试仍由主动关怀 / TTS 专用链路执行。
 - Provider 目录同步目前是可手动运行的缓存能力；每日自动订阅更新机制尚未接入应用 lifecycle。
@@ -341,6 +351,7 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
   - Chat `@Agent` 创建 run 且不创建普通 Hermes task。
   - Chat `@Workflow` 创建 WorkflowRun / RunGroup，并把子 Agent 汇报写入聊天消息。
   - Workflow 群组内继续 `@Agent` 会复用同一 RunGroup。
+  - Chat 群组主模型派发 Agent 后，Agent 报告会交回主模型自动汇总；审批通过后也能同步结果并进入汇总链路。
 - 前端：
   - Agent Studio 创建/编辑 Agent，挂载 Skill。
   - Model Providers 不展示本地主模型快照。
@@ -351,4 +362,5 @@ Phase 4 放弃旧 Coding/Provider 集成路线。Yachiyo 不再管理第三方 C
   - Workflow Studio 拖拽、连线、保存、运行。
   - Chat 输入 `@` 可选择 Agent / Workflow mention，或直接输入 `@Name` 创建 run。
   - Agent 私聊和 Workflow 群组在会话列表、标题栏、消息气泡中显示正确身份。
+  - 群组派发中的内部 JSON 不闪回成空气泡；AgentRun processing 显示三点 loading；审批按钮批准后能继续显示主模型汇总状态。
   - `npm --prefix apps/frontend run build` 通过。

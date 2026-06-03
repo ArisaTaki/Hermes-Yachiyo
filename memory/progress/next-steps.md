@@ -2,21 +2,21 @@
 
 ## 当前优先项
 
-### 2026-05-27 下一轮 Agent / Workflow 可行性讨论
+### 2026-06-04 下一轮 Agent / Workflow 可行性讨论
 
 1. 先定义 Agent 产物契约：Design Agent 应产出原型文件或 Markdown，Coding Agent 应产出代码文件或 patch，Review Agent 应产出 Markdown review；每类产物需要明确保存位置、artifact metadata、权限与预览方式。
 2. Workflow 完整跑完后，Runs 需要能展示每个 Agent 的产物，而不只是最后节点结果；当前 `Workflow Steps` 已能展示每个子 Agent 文本输出，下一步要把文件 artifact 和结构化产物一并纳入步骤视图。
-3. Chat Agent / Workflow 会话模式已落地；下一步补运行中状态、审批恢复、失败重试、取消和 artifact 展示，让群组不只是同步完成后回填文本。
-4. 未来 Yachiyo 自动派发任务仍需接入同一套 Chat 群组可观察性：自动委派的 Agent / Workflow Run 应能映射到对应会话或任务群组。
+3. Chat 群组已支持主模型派发、流式派发隐藏、AgentRun 审批恢复、单 Agent 重试和主模型统一汇总；明天重点用真实 Chat Profile 压测长输出、失败/取消、连续审批和用户中途插话。
+4. 未来 Yachiyo 自动派发任务仍需接入同一套 Chat 群组可观察性：自动委派的 Agent / Workflow Run 应能映射到对应会话或任务群组，并最终回到主模型总结。
 5. 保留 Runs 清理按钮为后续 UX/数据管理任务：需要先决定软删除、撤销窗口、RunGroup 与子 Run 的删除关系，以及 artifact 是否一起清理。
 6. 默认 `Phase 4 Agent 全线流通测试` 仍需要单独做 Prompt/Skill 质量调校；真实模型曾暴露长上下文超时、工具误请求和输出约束不足，后续应配合产物契约一起收紧。
 
 ### Phase 4 模型 / Agent / TTS 后续
 
 1. 继续收紧默认 Agent 工具策略和 Prompt 质量：低风险 brief 不应轻易诱发 Coding Agent 请求 `terminal.run`，Research / Design 需要更明确的 no-tool / no-loop 行为边界。
-2. Agent Runtime 后续增强：补 streaming/轮询刷新、运行中取消 UI、失败重试、更完整 artifact viewer，以及 Runs 页面按 Agent 履历聚合。
+2. Agent Runtime 后续增强：补更完整的运行中取消 UI、复杂 artifact viewer、真实模型长输出稳定性，以及 Runs 页面按 Agent 履历聚合。
 3. 手工验证主 Agent 自动委派体验：用真实 Chat Profile 创建启用 Agent / Workflow，检查主会话是否能触发 `run_yachiyo_agent` / `run_yachiyo_workflow`、Run 留档、结果回填和 3 次上限。
-4. 用真实 Chat Profile 继续压测 Chat Agent / Workflow 群组体验：在 `@` mention 菜单、Agent 私聊续聊、Workflow 群组内 `@Agent` 插手和 `@主模型` 干预路径上补运行中、失败和较长输出场景。
+4. 用真实 Chat Profile 继续压测 Chat Agent / Workflow 群组体验：覆盖 `@` mention 菜单、Agent 私聊续聊、手动群组主模型派发、审批通过后的主模型汇总、Workflow 群组内 `@Agent` 插手和 `@主模型` 干预路径。
 5. 为 Skill Library 补后续管理能力：批量启停、导入/同步历史、打开 Hermes roots、安装命令历史、文件夹重命名/排序，以及后续 marketplace/全局 skills 浏览边界。
 6. 为 Agent Studio 增加更清楚的能力状态展示：当 Agent 缺少 Chat Profile、挂载 Skill 已停用或高风险工具需要审批时，在编辑页和 Quick Run 前置提示。
 7. 把 `apps/shell/provider_catalog_sync.py` 接入每日或低频后台更新机制，更新 `~/.hermes/yachiyo/provider-capabilities.json`；刷新失败不能阻塞应用启动。

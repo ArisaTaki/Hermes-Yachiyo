@@ -2,6 +2,16 @@
 
 ## 已完成
 
+### Milestone 95 — Chat 群组流式、汇总与审批体验收口
+
+- ✅ 群组里 AgentRun 的 processing 气泡恢复为主模型同款三点 loading；不再先插入“已接收任务”文案造成信息噪音。
+- ✅ 主模型流式输出中出现派发 JSON 时，Chat 层会隐藏内部协议但保留主模型已经输出的自然语言，不再把气泡内容清空回三点 loading 后又恢复。
+- ✅ 主模型派发的 Agent 完成 / 失败 / 取消后，不再把完整结果各自直接散落给用户；Agent 气泡只显示“已交给主模型汇总”等状态，详细 `agent_report` 写入 metadata。
+- ✅ 所有由主模型派发的 Agent 都进入同一个汇总链路：等本轮被派发 Agent 都到终态后，Chat 层自动创建主模型汇总任务，让主模型基于 Agent 汇报再流式回复用户。
+- ✅ 直接 `@Agent` 的场景仍保留 Agent 自己回复；只有主模型派发出去的 Agent 结果会回到主模型统一汇报。
+- ✅ 审批体验补强：Agent 待审批气泡继续显示工具名、关联任务和输入摘要；批准后会同步 AgentRun 结果并触发主模型汇总任务，前端状态会显示“等待主模型汇总”，不再看起来像批准后没结果。
+- ✅ 验证：`.venv/bin/python -m pytest tests/test_chat_store.py tests/test_chat_api.py tests/test_ui_bridge_routes.py -q` → 109 passed；`npm --prefix apps/frontend run build` → passed；`git diff --check` → clean；源码 Bridge 已重启并确认 `/chat` 页面可连接。
+
 ### Milestone 94 — Chat 群组派活体验收口
 
 - ✅ Chat 新建入口收敛到会话列表 tab 右侧 `+`：Agent tab 创建一对一对话，群组 tab 创建手动群组；右上角重复新建按钮已移除。

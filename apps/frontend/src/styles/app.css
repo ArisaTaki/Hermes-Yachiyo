@@ -8218,6 +8218,13 @@ body.electron-window .hy-traffic {
   height: 15px;
 }
 
+.hy-content .open-chat-shell .chat-group-custom-avatar {
+  overflow: hidden;
+  background: oklch(75% 0.095 205 / 0.08);
+  border: 1px solid oklch(75% 0.095 205 / 0.18);
+  animation: none;
+}
+
 .hy-content .open-chat-shell .chat-avatar-stack {
   overflow: visible;
   background: linear-gradient(135deg, oklch(72% 0.14 350 / 0.82), oklch(75% 0.095 205 / 0.82));
@@ -9034,6 +9041,94 @@ body.electron-window .hy-traffic {
   font-size: 11px;
 }
 
+.hy-content .open-chat-shell .chat-group-profile-fields {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.hy-content .open-chat-shell .chat-group-avatar-control {
+  position: relative;
+  width: 58px;
+  height: 58px;
+}
+
+.hy-content .open-chat-shell .chat-group-avatar-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid oklch(75% 0.095 205 / 0.16);
+  border-radius: 50%;
+  background: linear-gradient(135deg, oklch(72% 0.14 350 / 0.72), oklch(75% 0.095 205 / 0.72));
+  color: var(--hy-fg);
+  cursor: pointer;
+}
+
+.hy-content .open-chat-shell .chat-group-avatar-preview:hover {
+  border-color: oklch(75% 0.095 205 / 0.34);
+  filter: brightness(1.08);
+}
+
+.hy-content .open-chat-shell .chat-group-avatar-preview>span {
+  width: 100%;
+  height: 100%;
+}
+
+.hy-content .open-chat-shell .chat-group-avatar-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hy-content .open-chat-shell .chat-group-avatar-clear {
+  position: absolute;
+  right: 0;
+  bottom: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 50%;
+  background: oklch(11% 0.035 250 / 0.96);
+  color: var(--hy-subtle);
+  cursor: pointer;
+}
+
+.hy-content .open-chat-shell .chat-group-avatar-clear:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.hy-content .open-chat-shell .chat-group-avatar-clear .ui-icon {
+  width: 12px;
+  height: 12px;
+}
+
+.hy-content .open-chat-shell .chat-group-field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hy-content .open-chat-shell .chat-group-avatar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.hy-content .open-chat-shell .chat-group-avatar-actions .chat-group-secondary-btn {
+  height: 28px;
+  padding: 0 10px;
+}
+
 .hy-content .open-chat-shell .chat-group-name-input {
   height: 34px;
   width: 100%;
@@ -9048,6 +9143,16 @@ body.electron-window .hy-traffic {
 
 .hy-content .open-chat-shell .chat-group-name-input:focus {
   border-color: oklch(75% 0.095 205 / 0.42);
+}
+
+.hy-content .open-chat-shell .chat-group-dialog-error {
+  border: 1px solid oklch(74% 0.14 350 / 0.22);
+  border-radius: 6px;
+  background: oklch(74% 0.14 350 / 0.08);
+  color: oklch(78% 0.14 350);
+  font-size: 11px;
+  line-height: 1.45;
+  padding: 8px 10px;
 }
 
 .hy-content .open-chat-shell .chat-group-member-list {
@@ -9159,6 +9264,44 @@ body.electron-window .hy-traffic {
 .hy-content .open-chat-shell .chat-group-primary-btn:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.hy-content .open-chat-shell .chat-session-id-dialog {
+  width: min(440px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(10% 0.032 250 / 0.98);
+  box-shadow: 0 24px 60px oklch(0% 0 0 / 0.38);
+}
+
+.hy-content .open-chat-shell .chat-session-id-input {
+  height: 38px;
+  width: 100%;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 6px;
+  background: oklch(13% 0.035 250 / 0.9);
+  color: var(--hy-text);
+  font-family: var(--hy-font-mono);
+  font-size: 12px;
+  outline: none;
+  padding: 0 10px;
+}
+
+.hy-content .open-chat-shell .chat-session-id-input:focus {
+  border-color: oklch(75% 0.095 205 / 0.42);
+}
+
+.hy-content .open-chat-shell .chat-session-id-error {
+  border: 1px solid oklch(74% 0.14 350 / 0.22);
+  border-radius: 6px;
+  background: oklch(74% 0.14 350 / 0.08);
+  color: oklch(78% 0.14 350);
+  font-size: 11px;
+  padding: 8px 10px;
 }
 
 .hy-content .open-chat-shell .chat-attach-btn,

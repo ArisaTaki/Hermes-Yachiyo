@@ -68,6 +68,29 @@ async def test_settings_route_forwards_changes(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_clipboard_route_copies_text(monkeypatch):
+    copied: list[str] = []
+
+    monkeypatch.setattr(ui, "_copy_text_to_system_clipboard", copied.append)
+
+    assert await ui.copy_clipboard_text(ui.ClipboardTextRequest(text="047e43ac")) == {"ok": True}
+    assert copied == ["047e43ac"]
+
+
+@pytest.mark.asyncio
+async def test_clipboard_route_reports_system_failure(monkeypatch):
+    def fail_copy(_text: str) -> None:
+        raise RuntimeError("no clipboard")
+
+    monkeypatch.setattr(ui, "_copy_text_to_system_clipboard", fail_copy)
+
+    assert await ui.copy_clipboard_text(ui.ClipboardTextRequest(text="047e43ac")) == {
+        "ok": False,
+        "error": "no clipboard",
+    }
+
+
+@pytest.mark.asyncio
 async def test_settings_operation_routes_use_main_api(monkeypatch):
     runtime = SimpleNamespace(config=SimpleNamespace())
     monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
@@ -259,8 +282,17 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         def retry_message(self, message_id):
             return {"ok": True, "message_id": message_id}
 
-        def create_group_session(self, *, name="", participant_ids=None):
-            return {"ok": True, "name": name, "participant_ids": participant_ids or []}
+        def create_group_session(self, *, name="", avatar_url="", participant_ids=None):
+            return {"ok": True, "name": name, "avatar_url": avatar_url, "participant_ids": participant_ids or []}
+
+        def update_group_session(self, session_id, *, name="", avatar_url="", participant_ids=None):
+            return {
+                "ok": True,
+                "session_id": session_id,
+                "name": name,
+                "avatar_url": avatar_url,
+                "participant_ids": participant_ids or [],
+            }
 
         def get_session_info(self):
             return {"session_id": "session-1"}
@@ -299,9 +331,17 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         "ok": True,
         "message_id": "m1",
     }
-    assert await ui.create_chat_group(ui.CreateChatGroupRequest(name="demo", participant_ids=["a1"])) == {
+    assert await ui.create_chat_group(ui.CreateChatGroupRequest(name="demo", avatar_url="https://example.test/g.png", participant_ids=["a1"])) == {
         "ok": True,
         "name": "demo",
+        "avatar_url": "https://example.test/g.png",
+        "participant_ids": ["a1"],
+    }
+    assert await ui.update_chat_group("group-1", ui.UpdateChatGroupRequest(name="new", avatar_url="https://example.test/n.png", participant_ids=["a1"])) == {
+        "ok": True,
+        "session_id": "group-1",
+        "name": "new",
+        "avatar_url": "https://example.test/n.png",
         "participant_ids": ["a1"],
     }
     assert await ui.get_chat_session() == {"session_id": "session-1"}

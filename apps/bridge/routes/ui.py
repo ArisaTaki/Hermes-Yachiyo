@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -64,7 +67,18 @@ class RetryChatMessageRequest(BaseModel):
 
 class CreateChatGroupRequest(BaseModel):
     name: str = ""
+    avatar_url: str = ""
     participant_ids: list[str] = Field(default_factory=list)
+
+
+class UpdateChatGroupRequest(BaseModel):
+    name: str = ""
+    avatar_url: str = ""
+    participant_ids: list[str] = Field(default_factory=list)
+
+
+class ClipboardTextRequest(BaseModel):
+    text: str = Field(default="", max_length=1_000_000)
 
 
 class LauncherAckRequest(BaseModel):
@@ -193,6 +207,37 @@ async def get_settings() -> dict[str, Any]:
 async def update_settings(request: SettingsUpdateRequest) -> dict[str, Any]:
     runtime = get_runtime()
     return MainWindowAPI(runtime, runtime.config).update_settings(request.changes)
+
+
+@router.post("/clipboard")
+async def copy_clipboard_text(request: ClipboardTextRequest) -> dict[str, Any]:
+    try:
+        await asyncio.to_thread(_copy_text_to_system_clipboard, request.text)
+    except Exception as exc:
+        return {"ok": False, "error": str(exc) or "系统剪贴板不可用"}
+    return {"ok": True}
+
+
+def _copy_text_to_system_clipboard(text: str) -> None:
+    if sys.platform == "darwin":
+        command = ["pbcopy"]
+    elif sys.platform == "win32":
+        command = ["clip"]
+    else:
+        command = _linux_clipboard_command()
+    if not command:
+        raise RuntimeError("系统剪贴板不可用")
+    subprocess.run(command, input=text, text=True, check=True, timeout=3)
+
+
+def _linux_clipboard_command() -> list[str]:
+    if shutil.which("wl-copy"):
+        return ["wl-copy"]
+    if shutil.which("xclip"):
+        return ["xclip", "-selection", "clipboard"]
+    if shutil.which("xsel"):
+        return ["xsel", "--clipboard", "--input"]
+    return []
 
 
 @router.post("/tts/test")
@@ -546,6 +591,17 @@ async def retry_chat_message(request: RetryChatMessageRequest) -> dict[str, Any]
 async def create_chat_group(request: CreateChatGroupRequest) -> dict[str, Any]:
     return ChatAPI(get_runtime()).create_group_session(
         name=request.name,
+        avatar_url=request.avatar_url,
+        participant_ids=request.participant_ids,
+    )
+
+
+@router.patch("/chat/groups/{session_id}")
+async def update_chat_group(session_id: str, request: UpdateChatGroupRequest) -> dict[str, Any]:
+    return ChatAPI(get_runtime()).update_group_session(
+        session_id,
+        name=request.name,
+        avatar_url=request.avatar_url,
         participant_ids=request.participant_ids,
     )
 

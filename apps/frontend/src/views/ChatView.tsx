@@ -13,7 +13,7 @@ import { UiIcon } from '../components/UiIcon';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { approveRunApproval, listRunnables, type RunnableSummary, getRun, rejectRunApproval } from '../lib/agents';
-import { apiGet, apiPost, bridgeUrl, copyText, openExternalUrl } from '../lib/bridge';
+import { apiGet, apiPatch, apiPost, bridgeUrl, chooseAvatarImage, copyText, openExternalUrl, restartDesktopBridge } from '../lib/bridge';
 import { currentParam } from '../lib/view';
 
 type PendingAttachment = {
@@ -124,6 +124,7 @@ type SessionItem = {
   runnable_id?: string;
   runnable_name?: string;
   run_group_id?: string;
+  avatar_url?: string;
   participants?: ChatParticipant[];
   created_at?: string;
   updated_at?: string;
@@ -146,6 +147,7 @@ type ChatSessionContext = {
   runnable_id?: string;
   runnable_name?: string;
   run_group_id?: string;
+  avatar_url?: string;
   participants?: ChatParticipant[];
 };
 
@@ -237,6 +239,8 @@ const COPY_FEEDBACK_MS = 1500;
 const CODE_COPY_FEEDBACK_MS = 2600;
 const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const GROUP_AVATAR_MAX_BYTES = 1024 * 1024;
+const GROUP_AVATAR_MAX_DATA_URL_CHARS = Math.ceil((GROUP_AVATAR_MAX_BYTES * 4) / 3) + 128;
 const MIN_LOADING_MS = 1400;
 const CHAT_SIDEBAR_MIN_WIDTH = 220;
 const CHAT_SIDEBAR_BASE_MAX_WIDTH = 280;
@@ -268,6 +272,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [copiedMessageId, setCopiedMessageId] = useState('');
   const [copiedCodeBlockKey, setCopiedCodeBlockKey] = useState('');
   const [copiedSessionId, setCopiedSessionId] = useState('');
+  const [sessionIdDialogOpen, setSessionIdDialogOpen] = useState(false);
+  const [sessionIdCopyError, setSessionIdCopyError] = useState('');
   const [retryingMessageId, setRetryingMessageId] = useState('');
   const [approvalActionMessageId, setApprovalActionMessageId] = useState('');
   const [highlightedMessageId, setHighlightedMessageId] = useState('');
@@ -281,7 +287,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [sessionTab, setSessionTab] = useState<'agents' | 'groups'>('agents');
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [groupDialogMode, setGroupDialogMode] = useState<'create' | 'edit'>('create');
+  const [groupDialogError, setGroupDialogError] = useState('');
   const [groupName, setGroupName] = useState('');
+  const [groupAvatarUrl, setGroupAvatarUrl] = useState('');
   const [selectedGroupAgentIds, setSelectedGroupAgentIds] = useState<string[]>([]);
   const [isCreatingGroup, setIsCreatingGroup] = useState(false);
   const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
@@ -345,7 +354,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         setIsProcessing(processing);
         setStatus(chatStatusLabel(processing, failed, nextMessages));
         if (processingChanged) void loadSessionsRef.current();
-        return;
+        return { is_processing: processing, messages: nextMessages };
       }
       syncRenderStates(nextMessages, renderStateRef.current);
       const elapsed = Date.now() - startedAt;
@@ -384,6 +393,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         setStatus('就绪');
       }
       if (processingChanged) void loadSessionsRef.current();
+      return { is_processing: processing, messages: nextMessages };
     } catch (error) {
       const elapsed = Date.now() - startedAt;
       const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
@@ -393,6 +403,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setMessagesLoaded(true);
       setMessagesVisible(true);
       setStatus(error instanceof Error ? error.message : '读取消息失败');
+      return { is_processing: false, messages: [] };
     }
   }, []);
 
@@ -916,6 +927,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }
 
   function toggleGroupAgent(agentId: string) {
+    setGroupDialogError('');
     setSelectedGroupAgentIds((current) => (
       current.includes(agentId)
         ? current.filter((item) => item !== agentId)
@@ -924,9 +936,60 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }
 
   function openGroupDialog() {
+    setGroupDialogMode('create');
     setGroupDialogOpen(true);
+    setGroupDialogError('');
     setGroupName('');
+    setGroupAvatarUrl('');
     setSelectedGroupAgentIds([]);
+  }
+
+  function openGroupSettings() {
+    if (!currentSessionId || activeSessionContext.conversation_kind !== 'group') return;
+    const currentAgentIds = (activeSessionContext.participants || [])
+      .filter((participant) => participant.kind === 'agent' && participant.id)
+      .map((participant) => String(participant.id));
+    setGroupDialogMode('edit');
+    setGroupDialogOpen(true);
+    setGroupDialogError('');
+    setGroupName(activeSessionContext.runnable_name || currentTitle || '');
+    setGroupAvatarUrl(activeSessionContext.avatar_url || '');
+    setSelectedGroupAgentIds(currentAgentIds);
+  }
+
+  function closeGroupDialog() {
+    setGroupDialogOpen(false);
+    setGroupDialogError('');
+  }
+
+  async function updateCurrentGroupSession() {
+    if (!currentSessionId) throw new Error('当前群组不可用');
+    const result = await apiPatch<{
+      ok?: boolean;
+      error?: string;
+      session_id?: string;
+      session_context?: ChatSessionContext;
+    }>(`/ui/chat/groups/${encodeURIComponent(currentSessionId)}`, {
+      name: groupName.trim() || defaultGroupName,
+      avatar_url: groupAvatarUrl.trim(),
+      participant_ids: selectedGroupAgentIds,
+    });
+    if (result.ok === false) throw new Error(result.error || '保存群组失败');
+    return result;
+  }
+
+  async function updateCurrentGroupSessionWithRecovery() {
+    try {
+      return await updateCurrentGroupSession();
+    } catch (error) {
+      if (!isMissingGroupEditRouteError(error)) throw error;
+      setStatus('Bridge 正在重启以加载群组编辑接口...');
+      const restartResult = await restartDesktopBridge();
+      if (!restartResult.success) {
+        throw new Error('当前 Bridge 尚未加载群组编辑接口，请重启 Hermes-Yachiyo 后重试');
+      }
+      return await updateCurrentGroupSession();
+    }
   }
 
   function handleSessionTabCreate() {
@@ -937,11 +1000,21 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     void clearSession();
   }
 
-  async function createGroupSession(event: FormEvent) {
+  async function submitGroupDialog(event: FormEvent) {
     event.preventDefault();
     if (isCreatingGroup || selectedGroupAgentIds.length === 0) return;
     setIsCreatingGroup(true);
+    setGroupDialogError('');
     try {
+      if (groupDialogMode === 'edit') {
+        const result = await updateCurrentGroupSessionWithRecovery();
+        setSessionContext(result.session_context || activeSessionContext);
+        setGroupDialogOpen(false);
+        setStatus('群组资料已更新');
+        await loadSessions();
+        await refreshMessages({ allowDuringTransition: true });
+        return;
+      }
       const result = await apiPost<{
         ok?: boolean;
         error?: string;
@@ -949,6 +1022,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         session_context?: ChatSessionContext;
       }>('/ui/chat/groups', {
         name: groupName.trim() || defaultGroupName,
+        avatar_url: groupAvatarUrl.trim(),
         participant_ids: selectedGroupAgentIds,
       });
       if (result.ok === false) throw new Error(result.error || '创建群组失败');
@@ -965,6 +1039,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setSessionTab('groups');
       setGroupDialogOpen(false);
       setGroupName('');
+      setGroupAvatarUrl('');
       setSelectedGroupAgentIds([]);
       isProcessingRef.current = false;
       setIsProcessing(false);
@@ -972,7 +1047,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       await loadSessions();
       await refreshMessages({ allowDuringTransition: true });
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : '创建群组失败');
+      const message = error instanceof Error ? error.message : (groupDialogMode === 'edit' ? '保存群组失败' : '创建群组失败');
+      setGroupDialogError(message);
+      setStatus(message);
     } finally {
       setIsCreatingGroup(false);
     }
@@ -1200,17 +1277,22 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const run = action === 'approve'
         ? await approveRunApproval(runId)
         : await rejectRunApproval(runId, 'Rejected from chat');
-      await refreshMessages();
+      const refreshed = await refreshMessages();
       await loadSessions();
+      const chatStillProcessing = Boolean(refreshed?.is_processing);
       if (run.status === 'processing' || run.status === 'approval_required') {
         setIsProcessing(true);
         isProcessingRef.current = true;
         setStatus(run.status === 'approval_required' ? '等待审批...' : 'Agent 执行中...');
         if (run.status === 'processing') await pollAgentRunCompletion(runId);
       } else {
-        setIsProcessing(false);
-        isProcessingRef.current = false;
-        setStatus(run.status === 'completed' ? '审批后执行完成。' : '审批后执行结束。');
+        setIsProcessing(chatStillProcessing);
+        isProcessingRef.current = chatStillProcessing;
+        if (chatStillProcessing) {
+          setStatus(action === 'approve' ? '已批准，等待主模型汇总...' : '已拒绝，等待主模型整理结果...');
+        } else {
+          setStatus(run.status === 'completed' ? '审批后执行完成。' : '审批后执行结束。');
+        }
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : '处理审批失败');
@@ -1251,14 +1333,26 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setStatus('没有可复制的 Session ID');
       return;
     }
+    setSessionIdCopyError('');
     try {
       await copyText(sessionId);
       setCopiedSessionId(sessionId);
       setStatus('已复制会话调试 ID');
       window.setTimeout(() => setCopiedSessionId(''), COPY_FEEDBACK_MS);
-    } catch {
+    } catch (error) {
+      setSessionIdDialogOpen(true);
+      setSessionIdCopyError(error instanceof Error ? error.message : '复制失败');
       setStatus('复制会话调试 ID 失败');
     }
+  }
+
+  function openSessionIdDialog() {
+    if (!currentSessionId) {
+      setStatus('没有可查看的 Session ID');
+      return;
+    }
+    setSessionIdCopyError('');
+    setSessionIdDialogOpen(true);
   }
 
   function registerMessageNode(messageId: string | undefined, node: HTMLElement | null) {
@@ -1799,13 +1893,25 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
               </div>
             </div>
             <div className="chat-header-actions">
+              {activeSessionContext.conversation_kind === 'group' ? (
+                <button
+                  type="button"
+                  className="chat-action-btn"
+                  title="群组设置"
+                  aria-label="群组设置"
+                  disabled={!currentSessionId}
+                  onClick={openGroupSettings}
+                >
+                  <UiIcon name="settings" />
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={`chat-action-btn ${copiedSessionId === currentSessionId ? 'copied' : ''}`}
-                title={currentSessionId ? `复制会话调试 ID：${currentSessionId}` : '复制会话调试 ID'}
-                aria-label="复制会话调试 ID，不复制聊天记录"
+                title={currentSessionId ? `查看/复制会话 ID：${currentSessionId}` : '查看/复制会话 ID'}
+                aria-label="查看/复制会话 ID，不复制聊天记录"
                 disabled={!currentSessionId}
-                onClick={(event) => void copySessionId(currentSessionId, event)}
+                onClick={openSessionIdDialog}
               >
                 <UiIcon name={copiedSessionId === currentSessionId ? 'check' : 'copy'} />
               </button>
@@ -1996,13 +2102,37 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           agentRunnables={agentRunnables}
           assistantProfile={assistantProfile}
           defaultGroupName={defaultGroupName}
+          error={groupDialogError}
+          groupAvatarUrl={groupAvatarUrl}
           groupName={groupName}
+          mode={groupDialogMode}
           isCreating={isCreatingGroup}
           selectedAgentIds={selectedGroupAgentIds}
-          onClose={() => setGroupDialogOpen(false)}
-          onNameChange={setGroupName}
-          onSubmit={createGroupSession}
+          onAvatarUrlChange={(value) => {
+            setGroupDialogError('');
+            setGroupAvatarUrl(value);
+          }}
+          onAvatarError={(message) => {
+            setGroupDialogError(message);
+            setStatus(message);
+          }}
+          onClose={closeGroupDialog}
+          onNameChange={(value) => {
+            setGroupDialogError('');
+            setGroupName(value);
+          }}
+          onSubmit={submitGroupDialog}
           onToggleAgent={toggleGroupAgent}
+        />
+      ) : null}
+
+      {sessionIdDialogOpen ? (
+        <SessionIdDialog
+          copied={copiedSessionId === currentSessionId}
+          error={sessionIdCopyError}
+          sessionId={currentSessionId}
+          onClose={() => setSessionIdDialogOpen(false)}
+          onCopy={() => void copySessionId(currentSessionId)}
         />
       ) : null}
 
@@ -2020,42 +2150,170 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   );
 }
 
-function CreateGroupDialog({ agentRunnables, assistantProfile, defaultGroupName, groupName, isCreating, selectedAgentIds, onClose, onNameChange, onSubmit, onToggleAgent }: {
+function isMissingGroupEditRouteError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /\b(?:HTTP 404|404|Not Found)\b/i.test(message);
+}
+
+function CreateGroupDialog({ agentRunnables, assistantProfile, defaultGroupName, error, groupAvatarUrl, groupName, isCreating, mode, selectedAgentIds, onAvatarError, onAvatarUrlChange, onClose, onNameChange, onSubmit, onToggleAgent }: {
   agentRunnables: RunnableSummary[];
   assistantProfile: AssistantProfilePayload | null;
   defaultGroupName: string;
+  error: string;
+  groupAvatarUrl: string;
   groupName: string;
   isCreating: boolean;
+  mode: 'create' | 'edit';
   selectedAgentIds: string[];
+  onAvatarError: (message: string) => void;
+  onAvatarUrlChange: (value: string) => void;
   onClose: () => void;
   onNameChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
   onToggleAgent: (agentId: string) => void;
 }) {
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const mainName = assistantProfile?.agent_name || 'Yachiyo';
   const mainNickname = assistantProfile?.agent_nickname || '八千代';
   const memberCount = selectedAgentIds.length + 1;
+  const selectedParticipants: ChatParticipant[] = [
+    { kind: 'main', name: mainName, nickname: mainNickname, avatar_url: assistantProfile?.agent_avatar_url },
+    ...selectedAgentIds
+      .map((agentId) => agentRunnables.find((agent) => agent.id === agentId))
+      .filter((agent): agent is RunnableSummary => Boolean(agent))
+      .map((agent): ChatParticipant => ({
+        kind: 'agent',
+        id: agent.id,
+        name: agent.name,
+        nickname: agent.nickname,
+        avatar_url: agent.avatar_url,
+      })),
+  ];
+  const dialogTitle = mode === 'edit' ? '群组设置' : '创建群组';
+  const submittingText = mode === 'edit' ? '保存中...' : '创建中...';
+  const submitText = mode === 'edit' ? '保存' : '创建';
+
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
+
+  function acceptAvatarValue(value: string) {
+    const avatar = String(value || '').trim();
+    if (!avatar) return;
+    if (avatar.startsWith('data:image/') && avatar.length > GROUP_AVATAR_MAX_DATA_URL_CHARS) {
+      onAvatarError('群头像不能超过 1 MB');
+      return;
+    }
+    onAvatarUrlChange(avatar);
+  }
+
+  async function pickGroupAvatar() {
+    try {
+      const selection = await chooseAvatarImage();
+      const avatar = typeof selection === 'string' ? selection : selection?.data_url || selection?.path || '';
+      acceptAvatarValue(avatar);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '选择群头像失败';
+      if (message.includes('桌面图片选择器')) {
+        avatarInputRef.current?.click();
+        return;
+      }
+      onAvatarError(message);
+    }
+  }
+
+  async function applyAvatarFile(file: File) {
+    if (!file.type.startsWith('image/')) {
+      onAvatarError('请选择图片作为群头像');
+      return;
+    }
+    if (file.size > GROUP_AVATAR_MAX_BYTES) {
+      onAvatarError('群头像不能超过 1 MB');
+      return;
+    }
+    try {
+      const attachment = await readPendingAttachment(file);
+      onAvatarUrlChange(attachment.data_url);
+    } catch (error) {
+      onAvatarError(error instanceof Error ? error.message : '读取群头像失败');
+    }
+  }
+
   return (
     <div className="chat-modal-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-      <form className="chat-group-dialog" onSubmit={onSubmit}>
+      <form className="chat-group-dialog" role="dialog" aria-modal="true" aria-label={dialogTitle} onSubmit={onSubmit}>
         <header className="chat-group-dialog-header">
           <div>
-            <strong>创建群组</strong>
+            <strong>{dialogTitle}</strong>
             <span>{memberCount} 成员</span>
           </div>
           <button type="button" className="chat-action-btn" aria-label="关闭" title="关闭" onClick={onClose}>
             <UiIcon name="close" />
           </button>
         </header>
-        <input
-          className="chat-group-name-input"
-          value={groupName}
-          onChange={(event) => onNameChange(event.target.value)}
-          placeholder={defaultGroupName ? `默认：${defaultGroupName}` : '群组名称'}
-          maxLength={48}
-        />
+        <div className="chat-group-profile-fields">
+          <div className="chat-group-avatar-control">
+            <button
+              type="button"
+              className="chat-group-avatar-preview"
+              aria-label="选择群头像"
+              title="选择群头像"
+              onClick={() => void pickGroupAvatar()}
+            >
+              {groupAvatarUrl.trim() ? (
+                avatarNode(groupAvatarUrl.trim(), groupName || defaultGroupName || '群组', '群')
+              ) : (
+                <AvatarStack participants={selectedParticipants} />
+              )}
+            </button>
+            <button
+              type="button"
+              className="chat-group-avatar-clear"
+              aria-label="清除群头像"
+              title="清除群头像"
+              disabled={!groupAvatarUrl.trim()}
+              onClick={() => onAvatarUrlChange('')}
+            >
+              <UiIcon name="close" />
+            </button>
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (file) void applyAvatarFile(file);
+              }}
+            />
+          </div>
+          <div className="chat-group-field-stack">
+            <input
+              className="chat-group-name-input"
+              value={groupName}
+              onChange={(event) => onNameChange(event.target.value)}
+              placeholder={defaultGroupName ? `默认：${defaultGroupName}` : '群组名称'}
+              maxLength={48}
+              aria-label="群组名称"
+            />
+            <div className="chat-group-avatar-actions">
+              <button type="button" className="chat-group-secondary-btn" onClick={() => void pickGroupAvatar()}>
+                选择头像
+              </button>
+              <button type="button" className="chat-group-secondary-btn" disabled={!groupAvatarUrl.trim()} onClick={() => onAvatarUrlChange('')}>
+                清除
+              </button>
+            </div>
+          </div>
+        </div>
+        {error ? <div className="chat-group-dialog-error">{error}</div> : null}
         <div className="chat-group-member-list">
           <label className="chat-group-member is-fixed">
             <input type="checkbox" checked readOnly />
@@ -2093,10 +2351,64 @@ function CreateGroupDialog({ agentRunnables, assistantProfile, defaultGroupName,
         <footer className="chat-group-dialog-actions">
           <button type="button" className="chat-group-secondary-btn" onClick={onClose}>取消</button>
           <button type="submit" className="chat-group-primary-btn" disabled={isCreating || selectedAgentIds.length === 0}>
-            {isCreating ? '创建中...' : '创建'}
+            {isCreating ? submittingText : submitText}
           </button>
         </footer>
       </form>
+    </div>
+  );
+}
+
+function SessionIdDialog({ copied, error, sessionId, onClose, onCopy }: {
+  copied: boolean;
+  error: string;
+  sessionId: string;
+  onClose: () => void;
+  onCopy: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    window.setTimeout(() => {
+      inputRef.current?.focus({ preventScroll: true });
+      inputRef.current?.select();
+    }, 30);
+  }, []);
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') onClose();
+    }
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
+  return (
+    <div className="chat-modal-backdrop" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <div className="chat-session-id-dialog" role="dialog" aria-modal="true" aria-label="会话 ID">
+        <header className="chat-group-dialog-header">
+          <div>
+            <strong>会话 ID</strong>
+            <span>{error ? '复制失败时可手动选择' : '用于调试，不会复制聊天记录'}</span>
+          </div>
+          <button type="button" className="chat-action-btn" aria-label="关闭" title="关闭" onClick={onClose}>
+            <UiIcon name="close" />
+          </button>
+        </header>
+        <input
+          ref={inputRef}
+          className="chat-session-id-input"
+          value={sessionId}
+          readOnly
+          onFocus={(event) => event.currentTarget.select()}
+        />
+        {error ? <div className="chat-session-id-error">剪贴板不可用：{error}</div> : null}
+        <footer className="chat-group-dialog-actions">
+          <button type="button" className="chat-group-secondary-btn" onClick={onClose}>关闭</button>
+          <button type="button" className="chat-group-primary-btn" onClick={onCopy}>
+            {copied ? '已复制' : '复制 ID'}
+          </button>
+        </footer>
+      </div>
     </div>
   );
 }
@@ -2454,6 +2766,7 @@ function normalizeSessionContext(context?: ChatSessionContext | null): ChatSessi
     runnable_id: context?.runnable_id || '',
     runnable_name: context?.runnable_name || '',
     run_group_id: context?.run_group_id || '',
+    avatar_url: context?.avatar_url || '',
     participants: Array.isArray(context?.participants) ? context?.participants : [],
   };
 }
@@ -2481,6 +2794,7 @@ function contextFromSession(session?: SessionItem | null): ChatSessionContext {
     runnable_id: session.runnable_id || '',
     runnable_name: session.runnable_name || '',
     run_group_id: session.run_group_id || '',
+    avatar_url: session.avatar_url || '',
     participants: session.participants || [],
   });
 }
@@ -2536,6 +2850,14 @@ function SessionAvatar({ assistantProfile, context, loading, size, runnables }: 
     );
   }
   if (normalized.conversation_kind === 'workflow' || normalized.conversation_kind === 'group') {
+    if (normalized.conversation_kind === 'group' && normalized.avatar_url) {
+      const name = normalized.runnable_name || '群组';
+      return (
+        <span className={`${className} chat-group-custom-avatar`} title={name}>
+          {avatarNode(normalized.avatar_url, name, '群', loading)}
+        </span>
+      );
+    }
     // 从 runnables 中获取最新的参与者信息
     const runnable = runnables?.find((r) => r.id === normalized.runnable_id);
     const participants = runnable?.participants || normalized.participants || [];

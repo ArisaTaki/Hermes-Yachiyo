@@ -151,6 +151,7 @@ class TestChatStore:
             "group",
             conversation_kind="group",
             runnable_name="demo Channel",
+            avatar_url="https://example.test/group.png",
             participants_json='[{"kind":"main","id":"main"},{"kind":"agent","id":"a1","name":"Agent One"}]',
         )
 
@@ -159,6 +160,7 @@ class TestChatStore:
         assert [session.session_id for session in sessions] == ["group"]
         assert sessions[0].message_count == 0
         assert sessions[0].conversation_kind == "group"
+        assert sessions[0].avatar_url == "https://example.test/group.png"
 
     def test_count_sessions_hides_empty_sessions(self, store: ChatStore):
         store.create_session("empty")

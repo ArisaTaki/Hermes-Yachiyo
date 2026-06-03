@@ -87,6 +87,7 @@ class StoredSession:
     runnable_name: str = ""
     run_group_id: str = ""
     participants_json: str = "[]"
+    avatar_url: str = ""
 
 
 @dataclass
@@ -146,7 +147,8 @@ class ChatStore:
                     runnable_id TEXT NOT NULL DEFAULT '',
                     runnable_name TEXT NOT NULL DEFAULT '',
                     run_group_id TEXT NOT NULL DEFAULT '',
-                    participants_json TEXT NOT NULL DEFAULT '[]'
+                    participants_json TEXT NOT NULL DEFAULT '[]',
+                    avatar_url TEXT NOT NULL DEFAULT ''
                 );
                 CREATE TABLE IF NOT EXISTS chat_messages (
                     message_id TEXT PRIMARY KEY,
@@ -179,6 +181,7 @@ class ChatStore:
                 ("runnable_name", "TEXT NOT NULL DEFAULT ''"),
                 ("run_group_id", "TEXT NOT NULL DEFAULT ''"),
                 ("participants_json", "TEXT NOT NULL DEFAULT '[]'"),
+                ("avatar_url", "TEXT NOT NULL DEFAULT ''"),
             ):
                 try:
                     conn.execute(f"ALTER TABLE chat_sessions ADD COLUMN {name} {definition}")
@@ -212,7 +215,7 @@ class ChatStore:
                 """
                 SELECT s.session_id, s.title, s.created_at, s.hermes_session_id,
                        s.conversation_kind, s.runnable_id, s.runnable_name,
-                       s.run_group_id, s.participants_json,
+                       s.run_group_id, s.participants_json, s.avatar_url,
                        MAX(m.created_at) AS last_message_at,
                        (
                            SELECT um.content
@@ -244,6 +247,7 @@ class ChatStore:
                 runnable_name=r["runnable_name"] or "",
                 run_group_id=r["run_group_id"] or "",
                 participants_json=r["participants_json"] or "[]",
+                avatar_url=r["avatar_url"] or "",
             )
             for r in rows
         ]
@@ -265,7 +269,7 @@ class ChatStore:
                 WITH visible_sessions AS (
                     SELECT s.session_id, s.title, s.created_at, s.hermes_session_id,
                            s.conversation_kind, s.runnable_id, s.runnable_name,
-                           s.run_group_id, s.participants_json,
+                           s.run_group_id, s.participants_json, s.avatar_url,
                            MAX(m.created_at) AS last_message_at,
                            (
                                SELECT um.content
@@ -283,7 +287,7 @@ class ChatStore:
                 )
                 SELECT vs.session_id, vs.title, vs.created_at, vs.hermes_session_id,
                        vs.conversation_kind, vs.runnable_id, vs.runnable_name,
-                       vs.run_group_id, vs.participants_json,
+                       vs.run_group_id, vs.participants_json, vs.avatar_url,
                        vs.first_user_content, vs.message_count, vs.last_message_at,
                        mm.message_id AS match_message_id,
                        mm.role AS match_role,
@@ -333,6 +337,7 @@ class ChatStore:
                     runnable_name=r["runnable_name"] or "",
                     run_group_id=r["run_group_id"] or "",
                     participants_json=r["participants_json"] or "[]",
+                    avatar_url=r["avatar_url"] or "",
                 ),
                 match_message_id=r["match_message_id"],
                 match_role=r["match_role"] or "",
@@ -369,7 +374,7 @@ class ChatStore:
                 """
                 SELECT s.session_id, s.title, s.created_at, s.hermes_session_id,
                        s.conversation_kind, s.runnable_id, s.runnable_name,
-                       s.run_group_id, s.participants_json,
+                       s.run_group_id, s.participants_json, s.avatar_url,
                        COUNT(m.message_id) AS message_count
                 FROM chat_sessions s
                 LEFT JOIN chat_messages m ON m.session_id = s.session_id
@@ -391,6 +396,7 @@ class ChatStore:
             runnable_name=row["runnable_name"] or "",
             run_group_id=row["run_group_id"] or "",
             participants_json=row["participants_json"] or "[]",
+            avatar_url=row["avatar_url"] or "",
         )
 
     def update_hermes_session_id(self, session_id: str, hermes_session_id: str) -> None:
@@ -423,6 +429,7 @@ class ChatStore:
         runnable_name: str = "",
         run_group_id: str = "",
         participants_json: str = "[]",
+        avatar_url: str = "",
     ) -> None:
         """Persist the conversation identity used by the desktop chat shell."""
         with self._lock:
@@ -434,7 +441,8 @@ class ChatStore:
                        runnable_id = ?,
                        runnable_name = ?,
                        run_group_id = ?,
-                       participants_json = ?
+                       participants_json = ?,
+                       avatar_url = ?
                  WHERE session_id = ?
                 """,
                 (
@@ -443,6 +451,7 @@ class ChatStore:
                     (runnable_name or "").strip(),
                     (run_group_id or "").strip(),
                     participants_json or "[]",
+                    (avatar_url or "").strip(),
                     session_id,
                 ),
             )
