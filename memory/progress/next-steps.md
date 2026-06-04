@@ -6,10 +6,12 @@
 
 1. 先定义 Agent 产物契约：Design Agent 应产出原型文件或 Markdown，Coding Agent 应产出代码文件或 patch，Review Agent 应产出 Markdown review；每类产物需要明确保存位置、artifact metadata、权限与预览方式。
 2. Workflow 完整跑完后，Runs 需要能展示每个 Agent 的产物，而不只是最后节点结果；当前 `Workflow Steps` 已能展示每个子 Agent 文本输出，下一步要把文件 artifact 和结构化产物一并纳入步骤视图。
-3. Chat 群组已支持主模型派发、流式派发隐藏、AgentRun 审批恢复、单 Agent 重试和主模型统一汇总；明天重点用真实 Chat Profile 压测长输出、失败/取消、连续审批和用户中途插话。
-4. 未来 Yachiyo 自动派发任务仍需接入同一套 Chat 群组可观察性：自动委派的 Agent / Workflow Run 应能映射到对应会话或任务群组，并最终回到主模型总结。
-5. 保留 Runs 清理按钮为后续 UX/数据管理任务：需要先决定软删除、撤销窗口、RunGroup 与子 Run 的删除关系，以及 artifact 是否一起清理。
-6. 默认 `Phase 4 Agent 全线流通测试` 仍需要单独做 Prompt/Skill 质量调校；真实模型曾暴露长上下文超时、工具误请求和输出约束不足，后续应配合产物契约一起收紧。
+3. Chat 群组已支持主模型派发、流式派发隐藏、AgentRun 审批恢复、单 Agent 重试和主模型统一汇总；但 2026-06-04 实测仍有两个高优先缺陷：主模型派活流式过程中气泡会反复回退/重刷，且被派发 Agent 的等待态显示为 `状态：running` 而不是三点 loading。
+4. 审批链路还需要继续排查：出现 Coding Agent 待审批时，Design Agent 的后续呈现/结果链路不稳定，可能是 delegated Agent 消息、审批恢复、主模型汇总任务之间的同步顺序问题。
+5. 明天重点用真实 Chat Profile 压测长输出、派发 JSON 流式片段、失败/取消、连续审批和用户中途插话，并把上述闪烁/等待态/审批后缺失 Agent 的问题先收掉。
+6. 未来 Yachiyo 自动派发任务仍需接入同一套 Chat 群组可观察性：自动委派的 Agent / Workflow Run 应能映射到对应会话或任务群组，并最终回到主模型总结。
+7. 保留 Runs 清理按钮为后续 UX/数据管理任务：需要先决定软删除、撤销窗口、RunGroup 与子 Run 的删除关系，以及 artifact 是否一起清理。
+8. 默认 `Phase 4 Agent 全线流通测试` 仍需要单独做 Prompt/Skill 质量调校；真实模型曾暴露长上下文超时、工具误请求和输出约束不足，后续应配合产物契约一起收紧。
 
 ### Phase 4 模型 / Agent / TTS 后续
 
