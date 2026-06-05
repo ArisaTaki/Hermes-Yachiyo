@@ -15884,6 +15884,8 @@ button.activity-item {
 }
 
 .workflow-step-task {
+  display: grid;
+  gap: 4px;
   padding: 8px 9px;
   border: 1px solid oklch(66% 0.12 188 / 0.16);
   border-radius: 8px;
@@ -15892,6 +15894,11 @@ button.activity-item {
   font-size: 12px;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.workflow-step-task strong {
+  color: var(--hy-subtle);
+  font-size: 11px;
 }
 
 .artifact-preview {

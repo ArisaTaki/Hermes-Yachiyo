@@ -25,6 +25,7 @@
 - ✅ Workflow 入口边界按产品讨论收紧：Chat `@` 候选只保留主模型和 Agent，手动 `@Workflow` 或主模型误派发 Workflow 会提示去 Agent Studio 的 Workflow Studio / Runs 执行；Workflow 的设计、保存、保存并运行和 Runs 手动运行仍保持可用，且保存更新后立即运行会使用最新画布节点/连线，不会跑到旧版本；Bridge route 层也覆盖 create/update/run 这条用户实际点击路径。
 - ✅ Workflow Studio 的 Agent palette、节点设置区和 Runs 手动运行目标选择已补能力摘要：会展示 Agent/Workflow 的类别、交付契约和职责说明，Runs 的目标下拉选项本身也带能力摘要，用户设计流程、维护节点或手动选择运行目标时能判断该把任务交给谁，而不是只看到名称。
 - ✅ 2026-06-05 追加：Workflow Agent 节点支持配置 `Step Task`，运行时会把每个节点自己的任务说明与全局 Workflow Goal 合并后交给对应子 Agent；没有 Step Task 的节点保持旧行为，上游结果仍只进入 `Upstream Context`，避免上下文重复膨胀。运行快照和 timeline 会记录节点任务，Run Detail 的 Workflow Steps 也会显示该 Step Task，用户可以复盘每个 Agent 原本被要求做什么。
+- ✅ 2026-06-05 追加：Workflow Approval 节点支持配置 `Approval Criteria`，运行到人工审批时会把审批说明写入 pending approval、timeline 和运行快照；审批卡会把“审批节点 / 审批说明 / 当前上下文”分层展示，Run Detail 的 Workflow Steps 也会保留该说明，让用户知道自己到底在批准什么，而不是只看到一个泛泛的确认按钮。
 - ✅ Workflow / Runs 的能力摘要会标出停用 Agent，Workflow palette 中停用项保持不可点击且有明确 disabled 视觉状态；Runs 手动运行下拉也会禁用停用目标，运行按钮会在目标停用时禁用并提示原因；已有节点绑定到停用 Agent 时，节点设置预览也能看见状态，便于解释为什么校验/运行会被拦截。
 - ✅ Agent Studio 编辑页会直接展示当前 Agent 的运行前状态：缺 Chat Profile / Custom API 配置不完整、挂载停用 Skill、`workspace.write_patch` / `terminal.run` 会进入审批、写入 scope 为空等都会在 Capabilities 下提示；Quick Run 也会在模型配置不可用时提前禁用，减少用户把权限或配置问题误判成 Workflow 链路故障。
 - ✅ 2026-06-05 追加：Runs 手动选择单个 Agent 时也会复用 Agent readiness 提示；后端会在创建 Agent Run 前拦截 Custom API 缺字段、停用 Skill、停用 Agent 等确定的本地配置错误，但保留旧 Profile 缺失 Agent 创建失败 Run 的兼容留档语义。

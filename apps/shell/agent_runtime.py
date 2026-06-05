@@ -3762,18 +3762,21 @@ class AgentRuntimeService:
                         return result
                     continue
                 if kind == "approval":
+                    criteria = self._workflow_approval_criteria(node)
                     pending = {
                         "approval_id": f"approval_{uuid4().hex[:12]}",
                         "tool": "workflow.approval",
                         "input_preview": {
                             "checkpoint": label,
                             "context": _tool_input_preview(context),
+                            **({"criteria": criteria} if criteria else {}),
                         },
                         "requested_at": _now(),
                         "workflow_context": context,
                         "workflow_next_index": index + 1,
                         "workflow_node_id": str(node.get("id") or ""),
                         "workflow_node_label": label,
+                        "workflow_node_approval_criteria": criteria,
                     }
                     timeline.append(
                             self._timeline(
@@ -3782,6 +3785,7 @@ class AgentRuntimeService:
                                 workflow_node_id=str(node.get("id") or ""),
                                 workflow_node_kind=kind,
                                 workflow_node_label=label,
+                                workflow_node_approval_criteria=criteria,
                                 status="approval_required",
                                 pending_approval=_public_pending_approval(pending),
                             )
@@ -3883,6 +3887,15 @@ class AgentRuntimeService:
         return ""
 
     @staticmethod
+    def _workflow_approval_criteria(node: dict[str, Any]) -> str:
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        for key in ("criteria", "approval_criteria", "instructions", "task", "prompt"):
+            value = str(data.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
     def _workflow_child_goal(workflow_goal: str, step_task: str) -> str:
         clean_workflow_goal = str(workflow_goal or "").strip()
         clean_step_task = str(step_task or "").strip()
@@ -3917,6 +3930,10 @@ class AgentRuntimeService:
                 step_task = self._workflow_node_task(node)
                 if step_task:
                     item["task"] = step_task
+            if kind == "approval":
+                criteria = self._workflow_approval_criteria(node)
+                if criteria:
+                    item["criteria"] = criteria
             snapshot.append(item)
         return snapshot
 
@@ -3967,6 +3984,7 @@ class AgentRuntimeService:
                     "workflow_node_id": str(pending.get("workflow_node_id") or ""),
                     "workflow_node_kind": "approval",
                     "workflow_node_label": label,
+                    "workflow_node_approval_criteria": str(pending.get("workflow_node_approval_criteria") or "").strip(),
                 }
             else:
                 child_run_id = ""
@@ -4147,6 +4165,7 @@ class AgentRuntimeService:
             if isinstance(event, dict)
         ]
         workflow_node_id = str(pending.get("workflow_node_id") or "")
+        criteria = str(pending.get("workflow_node_approval_criteria") or "").strip()
         timeline.append(
             self._timeline(
                 "workflow.node.approval_approved",
@@ -4154,6 +4173,7 @@ class AgentRuntimeService:
                 workflow_node_id=workflow_node_id,
                 workflow_node_kind="approval",
                 workflow_node_label=label,
+                workflow_node_approval_criteria=criteria,
                 status="completed",
             )
         )
@@ -4189,6 +4209,7 @@ class AgentRuntimeService:
             if not pending or str(pending.get("tool") or "") != "workflow.approval":
                 raise AgentRuntimeError("Workflow Run 缺少待审批节点信息")
             label = str(pending.get("workflow_node_label") or "Approval")
+            criteria = str(pending.get("workflow_node_approval_criteria") or "").strip()
             detail = redact_secrets(reason).strip() or f"{label} approval rejected"
             timeline = [
                 *run["timeline"],
@@ -4198,6 +4219,7 @@ class AgentRuntimeService:
                     workflow_node_id=str(pending.get("workflow_node_id") or ""),
                     workflow_node_kind="approval",
                     workflow_node_label=label,
+                    workflow_node_approval_criteria=criteria,
                     status="cancelled",
                 ),
             ]

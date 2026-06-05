@@ -867,6 +867,7 @@ function RunApprovalRequest({ inputPreview, runGoal = '', runId = '', runLabel =
 }) {
   const preview = approvalPreviewRecord(inputPreview);
   const checkpoint = approvalPreviewValue(preview, ['checkpoint', 'label', 'approval']);
+  const criteria = approvalPreviewValue(preview, ['criteria', 'approval_criteria', 'instructions']);
   const workdir = approvalPreviewValue(preview, ['cwd', 'workdir', 'working_dir']);
   const path = approvalPreviewValue(preview, ['path', 'file', 'target']);
   const command = tool === 'terminal.run' ? approvalPreviewValue(preview, ['command', 'cmd']) : '';
@@ -875,6 +876,7 @@ function RunApprovalRequest({ inputPreview, runGoal = '', runId = '', runLabel =
     runId ? ['Run', runLabel ? `${runLabel} · ${runId}` : runId] : null,
     runGoal ? ['关联任务', runGoal] : null,
     checkpoint ? ['审批节点', checkpoint] : null,
+    criteria ? ['审批说明', criteria] : null,
     workdir ? ['工作目录', workdir] : null,
     path ? ['路径', path] : null,
   ].filter((row): row is string[] => Boolean(row));
@@ -984,8 +986,10 @@ function workflowApprovalPayloadSummary(event: Record<string, unknown>): string 
   const input = preview as Record<string, unknown>;
   const lines: string[] = [];
   const checkpoint = compactWorkflowStepText(input.checkpoint, 180);
+  const criteria = compactWorkflowStepText(input.criteria || input.approval_criteria || input.instructions, 520);
   const context = compactWorkflowStepText(input.context, 520);
   if (checkpoint) lines.push(`审批节点：${checkpoint}`);
+  if (criteria) lines.push(`审批说明：${criteria}`);
   if (context) lines.push(`当前上下文：${context}`);
   return lines.join('\n') || timelineEventPayload(event);
 }
@@ -1017,6 +1021,15 @@ function workflowSpecNodeKind(node: WorkflowSpec['nodes'][number]): WorkflowStep
 function workflowNodeTaskFromData(data: Record<string, unknown> | undefined): string {
   if (!data) return '';
   for (const key of ['task', 'instructions', 'step_task', 'prompt']) {
+    const value = data[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function workflowApprovalCriteriaFromData(data: Record<string, unknown> | undefined): string {
+  if (!data) return '';
+  for (const key of ['criteria', 'approval_criteria', 'instructions', 'task', 'prompt']) {
     const value = data[key];
     if (typeof value === 'string' && value.trim()) return value.trim();
   }
@@ -1056,7 +1069,11 @@ function workflowSpecStepRefs(workflow: WorkflowSpec | null): WorkflowStepRef[] 
         existingArtifactPaths,
       )
       : '';
-    const task = kind === 'agent' ? workflowNodeTaskFromData(node.data) : '';
+    const task = kind === 'agent'
+      ? workflowNodeTaskFromData(node.data)
+      : kind === 'approval'
+        ? workflowApprovalCriteriaFromData(node.data)
+        : '';
     return {
       key: `${kind}:${nodeId || label || index}`,
       kind,
@@ -1083,7 +1100,11 @@ function workflowSnapshotStepRefs(run: RunSpec | null): WorkflowStepRef[] {
       const nodeId = String(row.id || '');
       const label = String(row.label || nodeId || workflowStepKindLabel(kind)).trim();
       const artifactPath = kind === 'artifact' ? String(row.artifact_path || row.artifactPath || '').trim() : '';
-      const task = kind === 'agent' ? String(row.task || row.step_task || '').trim() : '';
+      const task = kind === 'agent'
+        ? String(row.task || row.step_task || '').trim()
+        : kind === 'approval'
+          ? String(row.criteria || row.approval_criteria || row.instructions || '').trim()
+          : '';
       return {
         key: `${kind}:${nodeId || label || index}`,
         kind,
@@ -1185,6 +1206,7 @@ function workflowStepRefs(run: RunSpec | null, workflow: WorkflowSpec | null = n
     }
     if (name === 'workflow.node.approval_required' || name === 'workflow.node.approval_approved' || name === 'workflow.node.approval_rejected') {
       const label = normalizeWorkflowApprovalLabel(name, detail);
+      const task = String(event.workflow_node_approval_criteria || event.criteria || '').trim();
       upsertWorkflowStep(steps, indexByKey, {
         key: `approval:${nodeId || label}`,
         kind: 'approval',
@@ -1192,6 +1214,7 @@ function workflowStepRefs(run: RunSpec | null, workflow: WorkflowSpec | null = n
         label,
         status: timelineStatus(event) || (name === 'workflow.node.approval_required' ? 'approval_required' : name === 'workflow.node.approval_rejected' ? 'cancelled' : 'completed'),
         payload: workflowApprovalPayloadSummary(event),
+        task,
       });
       return;
     }
@@ -3258,6 +3281,16 @@ export function AgentStudioView() {
                           />
                         </label>
                       ) : null}
+                      {kind === 'approval' ? (
+                        <label>
+                          <span>Approval Criteria</span>
+                          <textarea
+                            className="hy-input agent-textarea compact"
+                            value={String(node.data?.criteria || '')}
+                            onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, criteria: event.target.value } } : item))}
+                          />
+                        </label>
+                      ) : null}
                       {selectedNodeAgent ? (
                         <div className="workflow-node-agent-preview">
                           <strong>{selectedNodeAgent.nickname || selectedNodeAgent.name}</strong>
@@ -3625,7 +3658,12 @@ export function AgentStudioView() {
                                 ) : null}
                               </div>
                             </div>
-                            {step.task ? <p className="workflow-step-task">{step.task}</p> : null}
+                            {step.task ? (
+                              <p className="workflow-step-task">
+                                <strong>{step.kind === 'approval' ? '审批说明' : 'Step Task'}</strong>
+                                {step.task}
+                              </p>
+                            ) : null}
                             <pre>{step.childRunId && !childRun ? 'Loading child run...' : summary}</pre>
                             {childRun?.artifacts?.length ? (
                               <div className="run-artifacts compact">

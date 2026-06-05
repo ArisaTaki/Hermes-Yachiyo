@@ -1094,7 +1094,14 @@ def test_workflow_approval_node_pauses_and_resumes(tmp_path, monkeypatch):
                 "nodes": [
                     {"id": "start", "type": "start", "data": {"label": "Start"}},
                     {"id": "a", "type": "agent", "data": {"label": "Before Approval", "agent_id": agent_a["agent_id"]}},
-                    {"id": "gate", "type": "approval", "data": {"label": "人工确认"}},
+                    {
+                        "id": "gate",
+                        "type": "approval",
+                        "data": {
+                            "label": "人工确认",
+                            "criteria": "确认设计输出已经覆盖验收点，再继续编码。",
+                        },
+                    },
                     {"id": "b", "type": "agent", "data": {"label": "After Approval", "agent_id": agent_b["agent_id"]}},
                     {"id": "summary", "type": "artifact", "data": {"label": "Summary"}},
                 ],
@@ -1113,8 +1120,11 @@ def test_workflow_approval_node_pauses_and_resumes(tmp_path, monkeypatch):
         assert run["result"] == "等待审批：人工确认"
         assert run["pending_approval"]["tool"] == "workflow.approval"
         assert run["pending_approval"]["input_preview"]["checkpoint"] == "人工确认"
+        assert run["pending_approval"]["input_preview"]["criteria"] == "确认设计输出已经覆盖验收点，再继续编码。"
         assert run["pending_approval"]["input_preview"]["context"] == "Agent 1 complete"
         assert "workflow_context" not in run["pending_approval"]
+        started_event = next(event for event in run["timeline"] if event["event"] == "workflow.run.started")
+        assert started_event["workflow_path"][2]["criteria"] == "确认设计输出已经覆盖验收点，再继续编码。"
         assert [event["event"] for event in run["timeline"] if event["event"] == "workflow.node.agent"] == [
             "workflow.node.agent",
         ]
@@ -1123,6 +1133,7 @@ def test_workflow_approval_node_pauses_and_resumes(tmp_path, monkeypatch):
         assert start_event["status"] == "completed"
         approval_event = next(event for event in run["timeline"] if event["event"] == "workflow.node.approval_required")
         assert approval_event["workflow_node_id"] == "gate"
+        assert approval_event["workflow_node_approval_criteria"] == "确认设计输出已经覆盖验收点，再继续编码。"
         assert approval_event["status"] == "approval_required"
         assert service.get_run_group(run["run_group_id"])["status"] == "approval_required"
 
@@ -1134,6 +1145,7 @@ def test_workflow_approval_node_pauses_and_resumes(tmp_path, monkeypatch):
         assert len(calls) == 2
         approval_approved = next(event for event in resumed["timeline"] if event["event"] == "workflow.node.approval_approved")
         assert approval_approved["workflow_node_id"] == "gate"
+        assert approval_approved["workflow_node_approval_criteria"] == "确认设计输出已经覆盖验收点，再继续编码。"
         assert approval_approved["status"] == "completed"
         assert [event["event"] for event in resumed["timeline"]].count("workflow.node.agent") == 2
         artifact_event = next(event for event in resumed["timeline"] if event["event"] == "workflow.node.artifact")
