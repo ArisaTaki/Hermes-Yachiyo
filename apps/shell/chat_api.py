@@ -967,6 +967,10 @@ class ChatAPI:
                 content = self._approval_required_content(sender, child)
             if not content:
                 content = self._run_status_sentence(sender.get("name") or "Agent", status)
+            child_artifact_count, child_artifact_summaries = self._visible_run_artifact_summaries(child)
+            child_artifact_notice_count = child_artifact_count if status in {"completed", "failed", "cancelled"} else 0
+            if child_artifact_notice_count > 0:
+                content = self._append_artifact_notice(content, child_artifact_notice_count)
             assistant_ids.append(
                 self._session.add_assistant_message(
                     content,
@@ -981,6 +985,8 @@ class ChatAPI:
                         "workflow_node": event.get("detail") or "",
                         "run_status": status,
                         "pending_approval": child.get("pending_approval") if isinstance(child.get("pending_approval"), dict) else {},
+                        "run_artifact_count": child_artifact_count,
+                        "run_artifacts": child_artifact_summaries,
                     },
                 )
             )
@@ -991,6 +997,10 @@ class ChatAPI:
         workflow_sender = self._participant_for_runnable(runnable)
         workflow_pending_approval = run.get("pending_approval") if isinstance(run.get("pending_approval"), dict) else {}
         waiting_child_approval = self._workflow_waiting_for_child_approval(run)
+        workflow_artifact_count, workflow_artifact_summaries = self._visible_run_artifact_summaries(run)
+        workflow_artifact_notice_count = (
+            workflow_artifact_count if workflow_status in {"completed", "failed", "cancelled"} else 0
+        )
         if workflow_status == "approval_required" and workflow_pending_approval.get("tool"):
             summary = self._approval_required_content(
                 workflow_sender,
@@ -1003,19 +1013,35 @@ class ChatAPI:
                 "处理对应子 Agent 的审批请求后，Workflow 会继续执行后续步骤。"
             )
         elif workflow_status == "completed" and assistant_ids:
-            summary = f"{workflow_name} 已完成。"
+            summary = self._workflow_terminal_content(
+                workflow_sender,
+                workflow_status,
+                "",
+                artifact_notice_count=workflow_artifact_notice_count,
+            )
         elif result_text:
-            summary_lines = [f"{workflow_name} {self._workflow_status_label(workflow_status)}。"]
-            node_hint = self._workflow_terminal_node_hint(run, workflow_status)
-            if node_hint:
-                summary_lines.append(node_hint)
-            summary_lines.extend(["", result_text])
-            summary = "\n".join(summary_lines)
+            if workflow_status in {"completed", "failed", "cancelled"}:
+                summary = self._workflow_terminal_content(
+                    workflow_sender,
+                    workflow_status,
+                    result_text,
+                    artifact_notice_count=workflow_artifact_notice_count,
+                    node_hint=self._workflow_terminal_node_hint(run, workflow_status),
+                )
+            else:
+                summary_lines = [f"{workflow_name} {self._workflow_status_label(workflow_status)}。"]
+                node_hint = self._workflow_terminal_node_hint(run, workflow_status)
+                if node_hint:
+                    summary_lines.append(node_hint)
+                summary_lines.extend(["", result_text])
+                summary = "\n".join(summary_lines)
         else:
             summary_lines = [f"{workflow_name} {self._workflow_status_label(workflow_status)}。"]
             node_hint = self._workflow_terminal_node_hint(run, workflow_status)
             if node_hint:
                 summary_lines.append(node_hint)
+            if workflow_artifact_notice_count > 0:
+                summary_lines.append(f"产物：{workflow_artifact_notice_count} 个，见运行详情。")
             summary = "\n".join(summary_lines)
         message_run_status = "processing" if waiting_child_approval and not workflow_pending_approval.get("tool") else workflow_status
         workflow_metadata = {
@@ -1028,6 +1054,8 @@ class ChatAPI:
             "run_status": message_run_status,
             "workflow_status": workflow_status,
             "pending_approval": workflow_pending_approval,
+            "run_artifact_count": workflow_artifact_count,
+            "run_artifacts": workflow_artifact_summaries,
         }
         workflow_message_id = self._session.add_assistant_message(
             summary,
@@ -1148,6 +1176,16 @@ class ChatAPI:
                 }
             )
         return count, summaries
+
+    @staticmethod
+    def _append_artifact_notice(content: str, artifact_count: int) -> str:
+        notice = f"产物：{artifact_count} 个，见运行详情。"
+        body = str(content or "").strip()
+        if not body:
+            return notice
+        if notice in body:
+            return body
+        return f"{body}\n{notice}"
 
     def _update_agent_run_message_from_result(
         self,
@@ -1324,7 +1362,7 @@ class ChatAPI:
         status_prefixes = {
             "completed": (f"{name} 已完成", "Workflow 已完成"),
             "failed": (f"{name} 执行失败", "Workflow 执行失败"),
-            "cancelled": (f"{name} 已取消", "Workflow 已取消", "Workflow 审批已拒绝"),
+            "cancelled": (f"{name} 已取消", "Workflow 已取消"),
         }.get(status, ())
         lines = [body] if body and any(body.startswith(prefix) for prefix in status_prefixes) else [intro]
         if node_hint and status in {"failed", "cancelled"}:

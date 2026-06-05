@@ -15159,11 +15159,15 @@ button.activity-item {
 }
 
 .run-status-filter-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   width: 100%;
+  overflow: visible;
 }
 
 .run-status-filter-tabs button {
-  min-width: 64px;
+  min-width: 0;
+  padding-inline: 7px;
 }
 
 .run-list.grouped {
@@ -15181,8 +15185,9 @@ button.activity-item {
   grid-template-columns: 28px minmax(0, 1fr) 24px;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  padding: 7px 8px;
+  width: calc(100% - 8px);
+  margin-inline: 4px;
+  padding: 8px 9px;
   border: 0;
   border-radius: 8px;
   background: transparent;

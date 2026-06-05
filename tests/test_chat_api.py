@@ -411,6 +411,68 @@ def test_workflow_failed_summary_message_includes_failed_node_hint(tmp_path):
         store.close()
 
 
+def test_workflow_chat_messages_carry_artifact_metadata(tmp_path):
+    api, _runtime, store = _make_api(tmp_path)
+
+    class FakeWorkflowService:
+        def get_run(self, run_id):
+            assert run_id == "agent_run_design"
+            return {
+                "run_id": run_id,
+                "run_group_id": "run_group_artifacts",
+                "kind": "agent_run",
+                "runnable_id": "agent_design",
+                "status": "completed",
+                "result": "Design Agent 完成草案。",
+                "artifacts": [
+                    {"kind": "context", "path": "agent-context.md"},
+                    {"kind": "tool_artifact", "path": "design-draft.md"},
+                ],
+            }
+
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            assert runnable_id == "agent_design"
+            return {"id": "agent_design", "name": "Design Agent", "kind": "agent"}
+
+    try:
+        run = {
+            "run_id": "workflow_run_artifacts",
+            "run_group_id": "run_group_artifacts",
+            "kind": "workflow_run",
+            "runnable_id": "workflow_demo",
+            "status": "completed",
+            "result": "Workflow 已完成并生成交付物。",
+            "artifacts": [
+                {"kind": "workflow_artifact", "path": "reports/summary.md"},
+            ],
+            "timeline": [
+                {"event": "workflow.run.started", "detail": "Demo Workflow"},
+                {
+                    "event": "workflow.node.agent",
+                    "detail": "Design",
+                    "child_run_id": "agent_run_design",
+                    "status": "completed",
+                },
+                {"event": "workflow.run.completed", "detail": "Demo Workflow"},
+            ],
+        }
+        runnable = {"id": "workflow_demo", "name": "Demo Workflow", "kind": "workflow"}
+
+        assistant_ids = api._append_workflow_run_messages(FakeWorkflowService(), run, runnable)
+        messages = api.get_messages()["messages"]
+        child = next(message for message in messages if message["id"] == assistant_ids[0])
+        summary = next(message for message in messages if message["id"] == assistant_ids[-1])
+
+        assert child["content"] == "Design Agent 完成草案。\n产物：1 个，见运行详情。"
+        assert child["metadata"]["run_artifact_count"] == 1
+        assert child["metadata"]["run_artifacts"] == [{"path": "design-draft.md", "kind": "tool_artifact"}]
+        assert summary["content"] == "Demo Workflow 已完成。\n产物：1 个，见运行详情。"
+        assert summary["metadata"]["run_artifact_count"] == 1
+        assert summary["metadata"]["run_artifacts"] == [{"path": "reports/summary.md", "kind": "workflow_artifact"}]
+    finally:
+        store.close()
+
+
 def test_workflow_approval_chat_message_carries_pending_details(tmp_path, monkeypatch):
     api, _runtime, store = _make_api(tmp_path)
     service = AgentRuntimeService(

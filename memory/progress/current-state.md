@@ -26,6 +26,7 @@
 - ✅ 聊天气泡已接入 Run Detail：Agent 完成/失败时会显示真实产物数量和运行详情入口，主模型汇总 Prompt 也会带上 Agent 状态、汇报和 artifact 路径摘要，避免用户不知道文件在哪里或哪些 Agent 没有完成。
 - ✅ 群组主模型整理状态现在直接体现在原 Agent / 派发气泡和底部全局状态上：等待时显示“等待主模型整理 Agent 结果”，整理成功后原 Agent 气泡会保留轻量完成提示，如果整理任务失败，会在原气泡下显示失败原因；后端回归覆盖直接 `@Agent` 和主模型派发两条路径都会清掉 pending 并写入 `group_agent_summary_status/error`。
 - ✅ Workflow 入口边界按产品讨论收紧：Chat `@` 候选只保留主模型和 Agent，手动 `@Workflow` 或主模型误派发 Workflow 会提示去 Agent Studio 的 Workflow Studio / Runs 执行；Workflow 的设计、保存、保存并运行和 Runs 手动运行仍保持可用，且保存更新后立即运行会使用最新画布节点/连线，不会跑到旧版本；Bridge route 层也覆盖 create/update/run 这条用户实际点击路径。
+- ✅ 2026-06-05 追加：Chat 里直接触发的 Workflow 总结消息和 Workflow 子 Agent 消息都会带真实产物数量与 artifact 摘要 metadata；有产物时气泡正文也会提示“产物 N 个，见运行详情”，让 Workflow 完成后的交付物入口和普通 Agent Run 保持一致。
 - ✅ Workflow Studio 的 Agent palette、节点设置区和 Runs 手动运行目标选择已补能力摘要：会展示 Agent/Workflow 的类别、交付契约和职责说明，Runs 的目标下拉选项本身也带能力摘要，用户设计流程、维护节点或手动选择运行目标时能判断该把任务交给谁，而不是只看到名称。
 - ✅ 2026-06-05 追加：Workflow Agent 节点支持配置 `Step Task`，运行时会把每个节点自己的任务说明与全局 Workflow Goal 合并后交给对应子 Agent；没有 Step Task 的节点保持旧行为，上游结果仍只进入 `Upstream Context`，避免上下文重复膨胀。运行快照和 timeline 会记录节点任务，Run Detail 的 Workflow Steps 也会显示该 Step Task，用户可以复盘每个 Agent 原本被要求做什么。
 - ✅ 2026-06-05 追加：Workflow Approval 节点支持配置 `Approval Criteria`，运行到人工审批时会把审批说明写入 pending approval、timeline 和运行快照；审批卡会把“审批节点 / 审批说明 / 当前上下文”分层展示，Run Detail 的 Workflow Steps 也会保留该说明，让用户知道自己到底在批准什么，而不是只看到一个泛泛的确认按钮。
@@ -48,6 +49,7 @@
 - ✅ Run Detail 已重做为任务、结果、Workflow Steps、Execution Timeline、Artifacts 的层级视图；History 可按 Agent / Workflow 分组、折叠，按完成、失败、进行中筛选，并能搜索目标、结果、Agent 名称、Run ID、timeline 与 artifact 线索，长任务和模型响应不再省略关键细节；主 History 只展示 Workflow 根 Run 与独立 Agent Run，Workflow 内部 child Agent Run 会从主列表隐藏，即使该 Workflow 是通过 delegation/统一委派入口创建，也不会把内部步骤刷进 Agent 历史卡片；Bridge artifact route 已覆盖从父 Workflow Run 的 artifact 列表打开 child Agent artifact，会按 `source_run_id` 读取真实子 Run 产物，避免详情页有按钮但点开 404。
 - ✅ 2026-06-05 追加：Workflow Run Detail 会在对应 Workflow 定义仍存在时提供“打开 Workflow Studio”入口，用户从完成/失败/待审批 Run 看完步骤后可以直接回设计画布调整；Run History 分组和组内条目都会按更新时间稳定倒序，刚完成或刚失败的 Run 不会因为后端返回顺序藏到旧记录后面。
 - ✅ 2026-06-05 追加：Run Detail 不再保留任何“刷新后自动选中第一个 Run”的路径，空详情会要求用户明确选择历史或创建新 Run；完成/失败/取消后的详情页新增“准备重跑”和“重新运行”，前者把原目标和任务填回 Runs 面板便于修改，后者会复用当前 Agent Studio 的 Agent/Workflow 可运行性、权限和校验结果直接创建新 Run。
+- ✅ 2026-06-05 追加：Runs History 的状态筛选在窄宽度下改为稳定四列布局，分组 hover/选中态保留横向 padding，避免按钮被挤变形或 hover 紧贴边缘。
 - ✅ 2026-06-05 追加：Run Detail 的 Workflow Steps、Execution 和 Artifacts 区块支持折叠；长节点结果、模型响应和工具 payload 默认收起为可读摘要，展开后显示完整内容且不截断，失败和待审批内容会默认展开，方便用户先扫状态再钻取细节。
 - ✅ Workflow 子 Agent 审批桥已闭环：父 Workflow 会显示正在等待哪个 child run 的工具审批，可在父详情页批准/拒绝；审批恢复、拒绝、取消和父 Run 取消都会同步更新父子 Run、RunGroup 和步骤状态，避免留下孤儿审批；Run Detail 批准后会按返回状态提示“继续执行 / 需要下一次审批 / 已完成 / 已失败”，不再只显示泛泛的 action 完成；Bridge 审批批准 route 已覆盖暂停后编辑 Workflow 的场景，会继续原 Run 的运行时快照，不会把新画布混进旧 Run；Bridge 取消 route 已覆盖父 Workflow 等待子 Agent 工具审批时的取消路径，会同步取消 child Run 并清空 pending approval。
 - ✅ Run Detail 的待审批区域也改为结构化请求视图：工具名、Run、关联任务、审批节点/路径/工作目录分层展示，`terminal.run` 请求内容按 bash 代码块呈现；父 Workflow 等待子 Agent 审批和普通 Agent / Workflow 审批共用同一套可读结构。
