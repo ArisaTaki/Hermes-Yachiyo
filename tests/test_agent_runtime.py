@@ -2705,6 +2705,58 @@ async def test_workflow_routes_update_then_run_latest_graph(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_workflow_routes_accept_reactflow_node_types(tmp_path, monkeypatch):
+    from apps.bridge.routes import agents as agent_routes
+
+    service = make_service(tmp_path)
+
+    def fake_chat(_base_url, _model, _api_key, _messages, **_kwargs):
+        return {"content": "ReactFlow route done"}
+
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        agent = service.create_agent({"name": "Route Design", "model_mode": "custom_api", "model_config": model_config})
+
+        workflow = await agent_routes.create_workflow(
+            agent_routes.WorkflowRequest(
+                name="ReactFlow Raw Types",
+                nodes=[
+                    {"id": "start", "type": "input", "data": {"label": "Start", "kind": "start"}},
+                    {"id": "design", "type": "default", "data": {"label": "Route Design", "kind": "agent", "agent_id": agent["agent_id"]}},
+                    {"id": "summary", "type": "output", "data": {"label": "Summary", "kind": "artifact"}},
+                ],
+                edges=[
+                    {"source": "start", "target": "design"},
+                    {"source": "design", "target": "summary"},
+                ],
+            )
+        )
+        run = await agent_routes.create_workflow_run(
+            agent_routes.WorkflowRunRequest(
+                workflow_id=workflow["workflow_id"],
+                user_goal="Run raw ReactFlow graph",
+            )
+        )
+
+        assert run["status"] == "completed"
+        started_event = next(event for event in run["timeline"] if event["event"] == "workflow.run.started")
+        assert started_event["workflow_path"] == [
+            {"id": "start", "kind": "start", "label": "Start"},
+            {"id": "design", "kind": "agent", "label": "Route Design"},
+            {"id": "summary", "kind": "artifact", "label": "Summary", "artifact_path": "summary.md"},
+        ]
+        assert service.read_run_artifact(run["run_id"], "summary.md")["content"] == "ReactFlow route done"
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
 async def test_workflow_run_route_rejects_start_only_saved_draft(tmp_path, monkeypatch):
     from fastapi import HTTPException
 

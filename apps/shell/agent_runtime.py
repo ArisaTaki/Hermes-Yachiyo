@@ -2355,7 +2355,11 @@ class AgentRuntimeService:
     @staticmethod
     def _node_kind(node: dict[str, Any]) -> str:
         data = node.get("data") or {}
-        return str(node.get("type") or data.get("kind") or data.get("node_type") or "").strip()
+        data_kind = str(data.get("kind") or data.get("node_type") or "").strip()
+        node_type = str(node.get("type") or "").strip()
+        if data_kind and node_type in {"", "input", "default", "output"}:
+            return data_kind
+        return node_type or data_kind
 
     def validate_workflow(self, nodes: list[dict[str, Any]], edges: list[dict[str, Any]]) -> dict[str, Any]:
         if not nodes:
