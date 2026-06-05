@@ -302,6 +302,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [retryingMessageId, setRetryingMessageId] = useState('');
   const [approvalActionMessageId, setApprovalActionMessageId] = useState('');
   const [composerApprovalMessageId, setComposerApprovalMessageId] = useState('');
+  const [resolvedComposerApprovalIds, setResolvedComposerApprovalIds] = useState<string[]>([]);
   const [highlightedMessageId, setHighlightedMessageId] = useState('');
   const [messagesLoaded, setMessagesLoaded] = useState(false);
   const [messagesVisible, setMessagesVisible] = useState(false);
@@ -1351,13 +1352,15 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     await resolveApprovalRun({
       action,
       busyId: item.id,
+      composerItemId: item.id,
       runId: item.runId,
     });
   }
 
-  async function resolveApprovalRun({ action, busyId, runId }: {
+  async function resolveApprovalRun({ action, busyId, composerItemId, runId }: {
     action: 'approve' | 'reject';
     busyId: string;
+    composerItemId?: string;
     runId: string;
   }) {
     if (!runId || approvalActionMessageId) return;
@@ -1372,6 +1375,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const chatStillProcessing = Boolean(refreshed?.is_processing);
       const chatProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));
       const runStatus = normalizeRunStatus(run.status);
+      if (composerItemId && runStatus !== 'approval_required') {
+        setResolvedComposerApprovalIds((current) => (
+          current.includes(composerItemId) ? current : [...current.slice(-20), composerItemId]
+        ));
+      }
       if (runStatus === 'processing' || runStatus === 'approval_required') {
         setIsProcessing(true);
         isProcessingRef.current = true;
@@ -1721,8 +1729,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   );
   const headerActivity = latestVisibleActivity(messages);
   const composerApprovalItems = useMemo(
-    () => approvalRequiredItems(messages),
-    [messages],
+    () => approvalRequiredItems(messages, resolvedComposerApprovalIds),
+    [messages, resolvedComposerApprovalIds],
   );
   const composerApprovalItem = useMemo(() => {
     if (!composerApprovalItems.length) return null;
@@ -3138,7 +3146,8 @@ function approvalRequiredMessages(messages: ChatMessage[]) {
   ));
 }
 
-function approvalRequiredItems(messages: ChatMessage[]): ComposerApprovalItem[] {
+function approvalRequiredItems(messages: ChatMessage[], resolvedItemIds: string[] = []): ComposerApprovalItem[] {
+  const resolved = new Set(resolvedItemIds);
   const messageApprovals = approvalRequiredMessages(messages).map((message) => ({
     id: message.id || '',
     messageId: message.id,
@@ -3146,7 +3155,7 @@ function approvalRequiredItems(messages: ChatMessage[]): ComposerApprovalItem[] 
     createdAt: message.created_at,
     details: approvalRequestDetails(message),
     source: 'message' as const,
-  })).filter((item) => item.id && item.runId);
+  })).filter((item) => item.id && item.runId && !resolved.has(item.id));
   const messageRunIds = new Set(messageApprovals.map((item) => item.runId));
   const seenActivityRunIds = new Set<string>();
   const activityApprovals: ComposerApprovalItem[] = [];
@@ -3159,8 +3168,10 @@ function approvalRequiredItems(messages: ChatMessage[]): ComposerApprovalItem[] 
       seenActivityRunIds.add(runId);
       if (!hasActionableActivityApproval(event)) continue;
       const eventId = String(event.event_id || `${message.id || messageIndex}:${runId}`);
+      const itemId = `activity:${eventId}`;
+      if (resolved.has(itemId)) continue;
       activityApprovals.push({
-        id: `activity:${eventId}`,
+        id: itemId,
         messageId: message.id,
         runId,
         createdAt: event.created_at || message.created_at,
