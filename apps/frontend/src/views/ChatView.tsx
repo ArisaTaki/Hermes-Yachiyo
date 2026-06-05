@@ -1379,6 +1379,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const runStatus = normalizeRunStatus(run.status);
       let delegatedSummaryCreated = false;
       let delegatedSummaryError = '';
+      let delegatedSummaryTaskId = '';
       if (summarizeDelegatedRun && ['completed', 'failed', 'cancelled'].includes(runStatus)) {
         try {
           const summary = await apiPost<{
@@ -1388,8 +1389,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             task_id?: string;
           }>('/ui/chat/delegated-run-summary', { run_id: runId });
           if (summary.ok === false) throw new Error(summary.error || '创建主模型整理任务失败');
-          delegatedSummaryCreated = Boolean(summary.summary_created && summary.task_id);
+          delegatedSummaryTaskId = String(summary.task_id || '');
+          delegatedSummaryCreated = Boolean(summary.summary_created && delegatedSummaryTaskId);
           if (delegatedSummaryCreated) {
+            expectPendingAssistantReply(delegatedSummaryTaskId);
             await refreshMessages();
             await loadSessions();
           }
@@ -1595,6 +1598,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     window.requestAnimationFrame(() => {
       inputRef.current?.focus({ preventScroll: true });
     });
+  }
+
+  function expectPendingAssistantReply(taskId: string) {
+    const normalizedTaskId = String(taskId || '').trim();
+    pendingReplyTaskIdRef.current = normalizedTaskId;
+    pendingReplyScrollRef.current = Boolean(normalizedTaskId);
+    if (normalizedTaskId) stickToBottomRef.current = true;
   }
 
   function shouldTriggerPendingReplyScroll(nextMessages: ChatMessage[]) {
