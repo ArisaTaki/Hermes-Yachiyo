@@ -3443,6 +3443,23 @@ def test_group_main_model_dispatch_accepts_agent_target_lists(tmp_path, monkeypa
         assert [call["user_goal"] for call in calls[-2:]] == ["整理第二轮建议", "整理第二轮建议"]
         assert calls[-2]["actual_run_group_id"] != calls[0]["actual_run_group_id"]
         assert calls[-2]["actual_run_group_id"] == calls[-1]["actual_run_group_id"]
+
+        third = api.send_message("@主模型 给每个 Agent 不同任务")
+        assert third["ok"] is True
+        runtime.state.update_task_status(
+            third["task_id"],
+            TaskStatus.COMPLETED,
+            result=(
+                '{"action":"dispatch_group_agent","agents":["Design","Code"],'
+                '"goals":["整理设计验收点","写验证脚本"]}'
+            ),
+        )
+
+        api.get_messages()
+        assert [call["runnable_id"] for call in calls[-2:]] == ["agent_design", "agent_coding"]
+        assert [call["user_goal"] for call in calls[-2:]] == ["整理设计验收点", "写验证脚本"]
+        assert calls[-2]["actual_run_group_id"] != calls[-4]["actual_run_group_id"]
+        assert calls[-2]["actual_run_group_id"] == calls[-1]["actual_run_group_id"]
     finally:
         store.close()
 

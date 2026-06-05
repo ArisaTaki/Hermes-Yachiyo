@@ -3110,23 +3110,30 @@ class ChatAPI:
         ))
         if action not in {"agent", "workflow"}:
             return []
-        goal = str(
+        goal_values = cls._group_dispatch_goal_values(
             cls._payload_value(
                 payload,
                 "goal",
+                "goals",
                 "user_goal",
                 "userGoal",
+                "user_goals",
+                "userGoals",
                 "task",
+                "tasks",
                 "task_goal",
                 "taskGoal",
+                "task_goals",
+                "taskGoals",
                 "objective",
+                "objectives",
                 "instruction",
                 "instructions",
                 "prompt",
+                "prompts",
             )
-            or ""
-        ).strip()
-        if not goal:
+        )
+        if not goal_values:
             return []
         if action == "agent":
             target_values = cls._group_dispatch_target_values(
@@ -3171,11 +3178,12 @@ class ChatAPI:
             )
         if not target_values and not target_id_values:
             return []
-        count = max(len(target_values), len(target_id_values), 1)
+        count = max(len(target_values), len(target_id_values), len(goal_values), 1)
         requests = []
         for index in range(count):
             target = target_values[index] if index < len(target_values) else ""
             target_id = target_id_values[index] if index < len(target_id_values) else ""
+            goal = goal_values[index] if index < len(goal_values) else goal_values[0]
             if not target and not target_id:
                 continue
             requests.append({"kind": action, "target": target, "runnable_id": target_id, "goal": goal})
@@ -3260,6 +3268,35 @@ class ChatAPI:
         ]
         cleaned = [piece for piece in pieces if piece]
         return cls._dedupe_group_dispatch_targets(cleaned or [text])
+
+    @classmethod
+    def _group_dispatch_goal_values(cls, value: Any) -> list[str]:
+        if value in (None, ""):
+            return []
+        if isinstance(value, list):
+            goals: list[str] = []
+            for item in value:
+                if isinstance(item, dict):
+                    goals.extend(cls._group_dispatch_goal_values(
+                        cls._payload_value(
+                            item,
+                            "goal",
+                            "user_goal",
+                            "userGoal",
+                            "task",
+                            "task_goal",
+                            "taskGoal",
+                            "objective",
+                            "instruction",
+                            "instructions",
+                            "prompt",
+                        )
+                    ))
+                else:
+                    goals.extend(cls._group_dispatch_goal_values(item))
+            return goals
+        text = " ".join(str(value or "").split()).strip()
+        return [text] if text else []
 
     @staticmethod
     def _dedupe_group_dispatch_targets(targets: list[str]) -> list[str]:
