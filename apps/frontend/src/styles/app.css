@@ -15738,6 +15738,12 @@ button.activity-item {
   line-height: 1.5;
 }
 
+.workflow-approval-bridge-head small {
+  color: var(--hy-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .workflow-approval-request-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

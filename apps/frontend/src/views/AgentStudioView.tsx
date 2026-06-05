@@ -1785,6 +1785,9 @@ export function AgentStudioView() {
   const selectedWorkflowApprovalChildRun = selectedWorkflowApprovalChildRunId
     ? runById.get(selectedWorkflowApprovalChildRunId) || null
     : null;
+  const selectedWorkflowApprovalStep = selectedWorkflowApprovalChildRunId
+    ? selectedWorkflowSteps.find((step) => step.childRunId === selectedWorkflowApprovalChildRunId) || null
+    : null;
   const selectedWorkflowParentRun = useMemo(() => {
     if (!selectedRun || !isWorkflowChildAgentRun(selectedRun) || !selectedRun.run_group_id) return null;
     return Array.from(runById.values()).find((run) => (
@@ -3856,9 +3859,12 @@ export function AgentStudioView() {
                       <div>
                         <h4>Workflow 正在等待子 Agent 审批</h4>
                         <p>
-                          {selectedWorkflowApprovalChildRun?.runnable_name || selectedWorkflowApprovalChildRunId}
+                          {selectedWorkflowApprovalStep?.label || selectedWorkflowApprovalChildRun?.runnable_name || selectedWorkflowApprovalChildRunId}
                           {' '}需要确认工具调用，处理后 Workflow 会继续执行后续步骤。
                         </p>
+                        {selectedWorkflowApprovalStep?.task ? (
+                          <small>Step Task：{selectedWorkflowApprovalStep.task}</small>
+                        ) : null}
                       </div>
                       <span className={`run-status-pill ${runStatusTone(selectedWorkflowApprovalChildRun?.status || 'approval_required')}`}>
                         {selectedWorkflowApprovalChildRun ? runStatusLabel(selectedWorkflowApprovalChildRun.status) : 'loading'}
