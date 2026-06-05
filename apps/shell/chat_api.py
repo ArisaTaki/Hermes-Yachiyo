@@ -3092,6 +3092,29 @@ class ChatAPI:
                             merged.pop(key, None)
                     result.extend(cls._group_dispatch_requests_from_payload(merged))
             return result
+        mapped = cls._payload_value(payload, "assignments", "assignment", "tasks", "dispatches", "delegations")
+        if isinstance(mapped, dict):
+            result = []
+            for target, item in mapped.items():
+                if isinstance(item, dict):
+                    merged = {
+                        **payload,
+                        **item,
+                        "agent": item.get("agent") or item.get("target") or target,
+                    }
+                else:
+                    merged = {**payload, "agent": target, "goal": item}
+                for key in list(merged):
+                    if re.sub(r"[\s_-]+", "", str(key or "")).lower() in {
+                        "assignments",
+                        "assignment",
+                        "tasks",
+                        "dispatches",
+                        "delegations",
+                    }:
+                        merged.pop(key, None)
+                result.extend(cls._group_dispatch_requests_from_payload(merged))
+            return result
         agent_entries = cls._payload_value(payload, "agents")
         if isinstance(agent_entries, list) and any(isinstance(item, dict) for item in agent_entries):
             result = []
@@ -3102,6 +3125,22 @@ class ChatAPI:
                         if re.sub(r"[\s_-]+", "", str(key or "")).lower() == "agents":
                             merged.pop(key, None)
                     result.extend(cls._group_dispatch_requests_from_payload(merged))
+            return result
+        if isinstance(agent_entries, dict):
+            result = []
+            for target, item in agent_entries.items():
+                if isinstance(item, dict):
+                    merged = {
+                        **payload,
+                        **item,
+                        "agent": item.get("agent") or item.get("target") or target,
+                    }
+                else:
+                    merged = {**payload, "agent": target, "goal": item}
+                for key in list(merged):
+                    if re.sub(r"[\s_-]+", "", str(key or "")).lower() == "agents":
+                        merged.pop(key, None)
+                result.extend(cls._group_dispatch_requests_from_payload(merged))
             return result
 
         action = cls._normalize_group_dispatch_action(str(

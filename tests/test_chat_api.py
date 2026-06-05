@@ -3460,6 +3460,40 @@ def test_group_main_model_dispatch_accepts_agent_target_lists(tmp_path, monkeypa
         assert [call["user_goal"] for call in calls[-2:]] == ["整理设计验收点", "写验证脚本"]
         assert calls[-2]["actual_run_group_id"] != calls[-4]["actual_run_group_id"]
         assert calls[-2]["actual_run_group_id"] == calls[-1]["actual_run_group_id"]
+
+        fourth = api.send_message("@主模型 用映射格式派活")
+        assert fourth["ok"] is True
+        runtime.state.update_task_status(
+            fourth["task_id"],
+            TaskStatus.COMPLETED,
+            result=(
+                '{"action":"dispatch_group_agent",'
+                '"assignments":{"Design":"整理映射设计点","Code":"实现映射脚本"}}'
+            ),
+        )
+
+        api.get_messages()
+        assert [call["runnable_id"] for call in calls[-2:]] == ["agent_design", "agent_coding"]
+        assert [call["user_goal"] for call in calls[-2:]] == ["整理映射设计点", "实现映射脚本"]
+        assert calls[-2]["actual_run_group_id"] != calls[-4]["actual_run_group_id"]
+        assert calls[-2]["actual_run_group_id"] == calls[-1]["actual_run_group_id"]
+
+        fifth = api.send_message("@主模型 用 agents 映射格式派活")
+        assert fifth["ok"] is True
+        runtime.state.update_task_status(
+            fifth["task_id"],
+            TaskStatus.COMPLETED,
+            result=(
+                '{"action":"dispatch_group_agent",'
+                '"agents":{"Design":{"goal":"整理 agents 映射设计点"},"Code":{"task":"实现 agents 映射脚本"}}}'
+            ),
+        )
+
+        api.get_messages()
+        assert [call["runnable_id"] for call in calls[-2:]] == ["agent_design", "agent_coding"]
+        assert [call["user_goal"] for call in calls[-2:]] == ["整理 agents 映射设计点", "实现 agents 映射脚本"]
+        assert calls[-2]["actual_run_group_id"] != calls[-4]["actual_run_group_id"]
+        assert calls[-2]["actual_run_group_id"] == calls[-1]["actual_run_group_id"]
     finally:
         store.close()
 
