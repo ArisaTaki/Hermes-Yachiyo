@@ -2971,13 +2971,16 @@ function ComposerApprovalNotice({ busy, currentIndex, details, onApprove, onNext
   const preview = details.codeText || details.summary.map((item) => item.value).join(' ');
   const hasMultiple = total > 1 && currentIndex >= 0;
   const workflowApproval = isWorkflowApprovalDetails(details);
+  const subtitle = workflowApproval
+    ? workflowApprovalNoticeSubtitle(details, preview)
+    : details.goal || compactStatusText(preview, 86) || '需要确认工具调用后继续执行';
   return (
     <div className="composer-approval-notice">
       <div className="composer-approval-main">
         <span className="composer-approval-badge">{hasMultiple ? `待审批 ${currentIndex + 1}/${total}` : '待审批'}</span>
         <div>
           <strong>{workflowApproval ? `${details.requester} 等待人工确认` : `${details.requester} 请求 ${details.tool}`}</strong>
-          <span>{details.goal || compactStatusText(preview, 86) || (workflowApproval ? '需要确认审批节点后继续执行' : '需要确认工具调用后继续执行')}</span>
+          <span>{subtitle}</span>
         </div>
       </div>
       <div className="composer-approval-actions">
@@ -2996,6 +2999,13 @@ function ComposerApprovalNotice({ busy, currentIndex, details, onApprove, onNext
       </div>
     </div>
   );
+}
+
+function workflowApprovalNoticeSubtitle(details: ApprovalRequestDetails, preview: string) {
+  const checkpoint = details.summary.find((item) => item.label === '审批节点')?.value || '';
+  const criteria = details.summary.find((item) => item.label === '审批说明')?.value || '';
+  const primary = [checkpoint, criteria].filter(Boolean).join('：');
+  return compactStatusText(primary || preview || details.goal || '需要确认审批节点后继续执行', 86);
 }
 
 function AgentRunProgressCard({ message, onOpenDetails, runId }: {
@@ -3042,6 +3052,8 @@ function approvalRequestDetails(message: ChatMessage): ApprovalRequestDetails {
     if (tool === 'workflow.approval') {
       const checkpoint = stringValue(preview.checkpoint || preview.node || preview.label);
       if (checkpoint) summary.push({ label: '审批节点', value: checkpoint });
+      const criteria = stringValue(preview.criteria || preview.approval_criteria || preview.instructions);
+      if (criteria) summary.push({ label: '审批说明', value: criteria });
       const context = stringValue(preview.context || preview.summary || preview.result);
       if (context) summary.push({ label: '当前上下文', value: context });
     }
