@@ -684,6 +684,23 @@ def test_workflow_run_rejects_start_only_draft(tmp_path):
         service.close()
 
 
+def test_workflow_name_validation_and_update_trim(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        nodes = [{"id": "start", "type": "start", "data": {"label": "Start"}}]
+        with pytest.raises(AgentRuntimeError, match="名称不能为空"):
+            service.create_workflow({"name": "  ", "nodes": nodes, "edges": []})
+
+        workflow = service.create_workflow({"name": "Name Trim Flow", "nodes": nodes, "edges": []})
+        updated = service.update_workflow(workflow["workflow_id"], {"name": "  Renamed Flow  "})
+
+        assert updated["name"] == "Renamed Flow"
+        with pytest.raises(AgentRuntimeError, match="名称不能为空"):
+            service.update_workflow(workflow["workflow_id"], {"name": "   "})
+    finally:
+        service.close()
+
+
 def test_workflow_run_rejects_unrunnable_agent_config_before_start(tmp_path):
     service = make_service(tmp_path)
     try:

@@ -2372,9 +2372,12 @@ class AgentRuntimeService:
 
     def update_workflow(self, workflow_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         current = self.get_workflow(workflow_id)
+        next_payload = dict(payload)
         if "name" in payload:
-            self._ensure_global_name_available(str(payload.get("name") or ""), ignore_workflow_id=workflow_id)
-        next_workflow = {**current, **payload}
+            name = str(payload.get("name") or "").strip()
+            self._ensure_global_name_available(name, ignore_workflow_id=workflow_id)
+            next_payload["name"] = name
+        next_workflow = {**current, **next_payload}
         self.validate_workflow(next_workflow.get("nodes") or [], next_workflow.get("edges") or [])
         self._validate_workflow_agent_nodes(next_workflow.get("nodes") or [])
         self._conn.execute(

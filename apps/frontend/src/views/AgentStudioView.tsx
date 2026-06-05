@@ -1610,19 +1610,21 @@ export function AgentStudioView() {
     () => validateWorkflowDraft(nodes, edges, agents),
     [agents, edges, nodes],
   );
+  const workflowNameError = workflowName.trim() ? '' : 'Workflow 名称不能为空';
+  const workflowErrors = workflowNameError ? [workflowNameError, ...workflowValidation.errors] : workflowValidation.errors;
   const workflowRunPreviewSteps = useMemo(
     () => workflowSpecStepRefs({
       workflow_id: selectedWorkflow?.workflow_id || 'draft',
-      name: workflowName || 'New Workflow',
-      description: workflowDescription,
+      name: workflowName.trim() || 'New Workflow',
+      description: workflowDescription.trim(),
       nodes: workflowRequestNodes(nodes),
       edges: workflowRequestEdges(edges),
       enabled: true,
     }),
     [edges, nodes, selectedWorkflow?.workflow_id, workflowDescription, workflowName],
   );
-  const workflowHasErrors = workflowValidation.errors.length > 0;
-  const workflowPrimaryError = workflowValidation.errors[0] || '';
+  const workflowHasErrors = workflowErrors.length > 0;
+  const workflowPrimaryError = workflowErrors[0] || '';
   const agentRunIssueById = useMemo(() => {
     const next = new Map<string, string>();
     agents.forEach((agent) => {
@@ -1705,12 +1707,13 @@ export function AgentStudioView() {
   }, [agentRunIssueById, agents, selectedRunTarget, selectedRunTargetDisabled, selectedRunTargetWorkflow, selectedRunTargetWorkflowAgentIssue, selectedRunTargetWorkflowNodes, selectedRunTargetWorkflowValidation.errors]);
   const workflowRunDisabledReason = useMemo(() => {
     if (selectedWorkflow?.enabled === false) return '当前 Workflow 已停用，无法运行。';
+    if (workflowNameError) return workflowNameError;
     if (workflowHasErrors) return workflowPrimaryError || '当前 Workflow 存在校验错误。';
     if (!workflowRunGoal.trim()) return '请输入运行目标。';
     if (!workflowHasRunnableSteps(nodes)) return workflowRunnableStepRequiredMessage;
     if (workflowRunAgentIssue) return workflowRunAgentIssue;
     return '';
-  }, [nodes, selectedWorkflow, workflowHasErrors, workflowPrimaryError, workflowRunAgentIssue, workflowRunGoal]);
+  }, [nodes, selectedWorkflow, workflowHasErrors, workflowNameError, workflowPrimaryError, workflowRunAgentIssue, workflowRunGoal]);
   const workflowRunDisabled = busy || Boolean(workflowRunDisabledReason);
   const runFilterCounts = useMemo(
     () => ({
@@ -2559,8 +2562,8 @@ export function AgentStudioView() {
 
   function workflowDraftRequest(): Partial<WorkflowSpec> {
     return {
-      name: workflowName,
-      description: workflowDescription,
+      name: workflowName.trim(),
+      description: workflowDescription.trim(),
       nodes: workflowRequestNodes(nodes),
       edges: workflowRequestEdges(edges),
       enabled: true,
@@ -2568,8 +2571,8 @@ export function AgentStudioView() {
   }
 
   async function saveWorkflowDraft(): Promise<WorkflowSpec> {
-    if (workflowValidation.errors.length) {
-      throw new Error(workflowValidation.errors[0]);
+    if (workflowErrors.length) {
+      throw new Error(workflowErrors[0]);
     }
     const request = workflowDraftRequest();
     const saved = selectedWorkflow ? await updateWorkflow(selectedWorkflow.workflow_id, request) : await createWorkflow(request);
@@ -3489,12 +3492,12 @@ export function AgentStudioView() {
                 <h3>节点设置</h3>
                 <span>{nodes.length} nodes / {edges.length} edges</span>
               </div>
-              {workflowValidation.errors.length || workflowValidation.warnings.length ? (
+              {workflowErrors.length || workflowValidation.warnings.length ? (
                 <div className={`workflow-validation-box ${workflowHasErrors ? 'has-errors' : 'has-warnings'}`}>
                   {workflowHasErrors ? (
                     <div>
                       <strong>需要修复</strong>
-                      {workflowValidation.errors.map((item) => <span key={`error-${item}`}>{item}</span>)}
+                      {workflowErrors.map((item) => <span key={`error-${item}`}>{item}</span>)}
                     </div>
                   ) : null}
                   {workflowValidation.warnings.length ? (
