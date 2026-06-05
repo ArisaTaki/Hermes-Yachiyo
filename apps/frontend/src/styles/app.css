@@ -15691,6 +15691,36 @@ button.activity-item {
   color: var(--hy-fg);
 }
 
+.run-detail-meta .run-rerun-prepare {
+  border-color: oklch(70% 0.11 230 / 0.26);
+  background: oklch(70% 0.11 230 / 0.075);
+  color: oklch(82% 0.11 230);
+}
+
+.run-detail-meta .run-rerun-prepare:hover:not(:disabled) {
+  border-color: oklch(70% 0.11 230 / 0.42);
+  background: oklch(70% 0.11 230 / 0.12);
+  color: var(--hy-fg);
+}
+
+.run-detail-meta .run-rerun-action {
+  border-color: oklch(78% 0.13 150 / 0.28);
+  background: oklch(78% 0.13 150 / 0.08);
+  color: oklch(84% 0.12 150);
+}
+
+.run-detail-meta .run-rerun-action:hover:not(:disabled) {
+  border-color: oklch(78% 0.13 150 / 0.44);
+  background: oklch(78% 0.13 150 / 0.13);
+  color: var(--hy-fg);
+}
+
+.run-detail-meta .run-rerun-prepare:disabled,
+.run-detail-meta .run-rerun-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .run-detail-meta .run-cancel-action {
   border-color: oklch(58% 0.19 24 / 0.34);
   background: oklch(58% 0.19 24 / 0.08);

@@ -104,7 +104,6 @@ type StudioRefreshOptions = {
   selectFirstWorkflow?: boolean;
   runTarget?: string;
   selectedRunId?: string;
-  selectFirstRun?: boolean;
   statusMessage?: string;
 };
 
@@ -1589,6 +1588,29 @@ export function AgentStudioView() {
     const agent = agents.find((item) => item.agent_id === selectedRun.runnable_id);
     return runnable?.avatar_url || agent?.avatar_url || '';
   }, [agents, runnables, selectedRun]);
+  const selectedRunRerunTarget = useMemo(() => {
+    if (!selectedRun) return null;
+    const expectedKind = selectedRun.kind === 'workflow_run' ? 'workflow' : 'agent';
+    return runnables.find((item) => item.id === selectedRun.runnable_id && item.kind === expectedKind) || null;
+  }, [runnables, selectedRun]);
+  const selectedRunRerunDisabledReason = useMemo(() => {
+    if (!selectedRun) return '';
+    if (isActiveRunStatus(selectedRun.status)) return '当前 Run 还在进行中，请完成、失败或取消后再重跑。';
+    if (!selectedRun.user_goal?.trim()) return '原 Run 没有记录任务目标，无法直接重跑。';
+    if (!selectedRunRerunTarget) return '找不到原 Run 对应的 Agent 或 Workflow，无法重跑。';
+    if (selectedRunRerunTarget.enabled === false) return '原目标已停用，无法重跑。';
+    if (selectedRunRerunTarget.kind === 'agent') {
+      const agent = agents.find((item) => item.agent_id === selectedRunRerunTarget.id);
+      if (!agent) return '找不到 Agent 定义，无法重跑。';
+      return agentRunIssueById.get(agent.agent_id) || '';
+    }
+    const workflow = workflows.find((item) => item.workflow_id === selectedRunRerunTarget.id);
+    if (!workflow) return '找不到 Workflow 定义，无法重跑。';
+    const validation = validateWorkflowDraft(workflowNodes(workflow), workflowEdges(workflow), agents);
+    if (validation.errors.length) return validation.errors[0] || '当前 Workflow 存在校验错误。';
+    if (!workflowHasRunnableSteps(workflowNodes(workflow))) return workflowRunnableStepRequiredMessage;
+    return workflowAgentRunReadinessIssue(workflowNodes(workflow), agentRunIssueById);
+  }, [agentRunIssueById, agents, selectedRun, selectedRunRerunTarget, workflows]);
   const mountedSkillCount = useMemo(
     () => skills.filter((skill) => skill.enabled !== false && selectedAgent?.skill_ids?.includes(skill.skill_id)).length,
     [selectedAgent, skills],
@@ -1780,7 +1802,7 @@ export function AgentStudioView() {
     setSelectedRunId((current) => {
       const desired = options.selectedRunId !== undefined ? options.selectedRunId : current;
       if (desired) return desired;
-      return options.selectFirstRun && nextRuns.length ? nextRuns[0].run_id : '';
+      return '';
     });
   }, []);
 
@@ -2411,6 +2433,43 @@ export function AgentStudioView() {
     setRunTarget(saved.workflow_id);
     openRunDetail(run.run_id);
     return { selectedWorkflowId: saved.workflow_id, runTarget: saved.workflow_id, selectedRunId: run.run_id };
+  }
+
+  function prepareSelectedRunRerun() {
+    if (!selectedRun) return;
+    if (!selectedRunRerunTarget) {
+      setError('找不到原 Run 对应的 Agent 或 Workflow，无法准备重跑。');
+      return;
+    }
+    setRunTarget(selectedRunRerunTarget.id);
+    setRunGoal(selectedRun.user_goal || '');
+    setStatus(`已把「${selectedRunRerunTarget.name || selectedRun.runnable_name || selectedRun.runnable_id}」和原任务填回 Run 面板。`);
+    setError('');
+  }
+
+  async function rerunSelectedRun(): Promise<StudioRefreshOptions> {
+    if (!selectedRun) throw new Error('请选择要重跑的 Run');
+    if (selectedRunRerunDisabledReason) throw new Error(selectedRunRerunDisabledReason);
+    if (!selectedRunRerunTarget) throw new Error('找不到原 Run 对应的 Agent 或 Workflow，无法重跑。');
+    const goal = selectedRun.user_goal?.trim() || '';
+    const run = selectedRunRerunTarget.kind === 'agent'
+      ? await createAgentRun(selectedRunRerunTarget.id, goal)
+      : await createWorkflowRun(selectedRunRerunTarget.id, goal);
+    openRunDetail(run.run_id);
+    if (selectedRunRerunTarget.kind === 'agent') {
+      return {
+        selectedAgentId: selectedRunRerunTarget.id,
+        selectedRunId: run.run_id,
+        runTarget: selectedRunRerunTarget.id,
+        statusMessage: '已按原任务重新运行 Agent。',
+      };
+    }
+    return {
+      selectedWorkflowId: selectedRunRerunTarget.id,
+      selectedRunId: run.run_id,
+      runTarget: selectedRunRerunTarget.id,
+      statusMessage: '已按原任务重新运行 Workflow。',
+    };
   }
 
   function addFlowNode(kind: 'agent' | 'approval' | 'artifact', agentId = '') {
@@ -3507,6 +3566,24 @@ export function AgentStudioView() {
                   {selectedRunIsLive ? <span className="run-live-pill">实时更新</span> : null}
                   {selectedRun.run_group_id ? <span>Group {selectedRun.run_group_id}</span> : null}
                   <code>{selectedRun.run_id}</code>
+                  <button
+                    type="button"
+                    className="run-rerun-prepare"
+                    disabled={busy || !selectedRunRerunTarget}
+                    title={!selectedRunRerunTarget ? '找不到原目标，无法准备重跑。' : undefined}
+                    onClick={prepareSelectedRunRerun}
+                  >
+                    准备重跑
+                  </button>
+                  <button
+                    type="button"
+                    className="run-rerun-action"
+                    disabled={busy || Boolean(selectedRunRerunDisabledReason)}
+                    title={selectedRunRerunDisabledReason || undefined}
+                    onClick={() => void runAction(rerunSelectedRun, '重新运行')}
+                  >
+                    重新运行
+                  </button>
                   {selectedWorkflowParentRunId ? (
                     <button type="button" className="run-parent-link" onClick={() => openRunDetail(selectedWorkflowParentRunId)}>
                       返回 Workflow：{selectedWorkflowParentRun?.runnable_name || selectedWorkflowParentRun?.runnable_id || '父 Workflow'}
@@ -3775,7 +3852,7 @@ export function AgentStudioView() {
                 </section>
               </article>
             ) : (
-              <div className="empty-state inline-empty">暂无 Run；运行 Agent 或 Workflow 后会在这里显示 Result、Timeline 和 Artifacts。</div>
+              <div className="empty-state inline-empty">从左侧选择一个 Run，或运行新的 Agent / Workflow 后查看 Result、Timeline 和 Artifacts。</div>
             )}
           </div>
         </section>
