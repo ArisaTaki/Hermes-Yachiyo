@@ -12,7 +12,7 @@ import { useConfirmDialog } from '../components/ConfirmDialog';
 import { UiIcon } from '../components/UiIcon';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
-import { approveRunApproval, listRunnables, type RunnableSummary, getRun, rejectRunApproval } from '../lib/agents';
+import { approveRunApproval, listRunnables, type RunnableSummary, type RunSpec, getRun, rejectRunApproval } from '../lib/agents';
 import { apiGet, apiPatch, apiPost, bridgeUrl, chooseAvatarImage, copyText, openExternalUrl, restartDesktopBridge } from '../lib/bridge';
 import { currentParam, navigateTo } from '../lib/view';
 
@@ -303,6 +303,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [approvalActionMessageId, setApprovalActionMessageId] = useState('');
   const [composerApprovalMessageId, setComposerApprovalMessageId] = useState('');
   const [resolvedComposerApprovalIds, setResolvedComposerApprovalIds] = useState<string[]>([]);
+  const [runApprovalDetailOverrides, setRunApprovalDetailOverrides] = useState<Record<string, RunApprovalDetailOverride>>({});
   const [highlightedMessageId, setHighlightedMessageId] = useState('');
   const [messagesLoaded, setMessagesLoaded] = useState(false);
   const [messagesVisible, setMessagesVisible] = useState(false);
@@ -349,6 +350,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const pendingReplyTaskIdRef = useRef('');
   const highlightedScrollTargetRef = useRef('');
   const highlightClearTimerRef = useRef<number | null>(null);
+  const approvalSessionIdRef = useRef('');
   const loadSessionsRef = useRef<() => Promise<void>>(async () => undefined);
   const transientEmptySessionIdRef = useRef('');
   const latestChatSnapshotRef = useRef({
@@ -1151,11 +1153,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           const chatStillProcessing = Boolean(refreshed?.is_processing);
           const chatProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));
           if (status === 'approval_required') {
+            rememberRunApprovalDetails(run);
             isProcessingRef.current = true;
             setIsProcessing(true);
             setProcessingCount(Math.max(1, chatProcessingCount));
             setStatus(nextApprovalStatusText(run));
           } else {
+            forgetRunApprovalDetails(runId);
             isProcessingRef.current = chatStillProcessing;
             setIsProcessing(chatStillProcessing);
             setProcessingCount(chatProcessingCount);
@@ -1354,14 +1358,16 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       busyId: item.id,
       composerItemId: item.id,
       runId: item.runId,
+      fallbackApprovalDetails: item.details,
       summarizeDelegatedRun: item.source === 'activity',
     });
   }
 
-  async function resolveApprovalRun({ action, busyId, composerItemId, runId, summarizeDelegatedRun }: {
+  async function resolveApprovalRun({ action, busyId, composerItemId, fallbackApprovalDetails, runId, summarizeDelegatedRun }: {
     action: 'approve' | 'reject';
     busyId: string;
     composerItemId?: string;
+    fallbackApprovalDetails?: ApprovalRequestDetails;
     runId: string;
     summarizeDelegatedRun?: boolean;
   }) {
@@ -1410,12 +1416,15 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         isProcessingRef.current = true;
         setProcessingCount(Math.max(1, chatProcessingCount));
         if (runStatus === 'approval_required') {
+          rememberRunApprovalDetails(run, fallbackApprovalDetails);
           setStatus(nextApprovalStatusText(run));
         } else {
+          forgetRunApprovalDetails(runId);
           setStatus('已批准，Agent 正在继续执行...');
           pollAgentRunInBackground(runId);
         }
       } else {
+        forgetRunApprovalDetails(runId);
         const nextProcessing = chatStillProcessing || delegatedSummaryCreated;
         setIsProcessing(nextProcessing);
         isProcessingRef.current = nextProcessing;
@@ -1607,6 +1616,36 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     if (normalizedTaskId) stickToBottomRef.current = true;
   }
 
+  function rememberRunApprovalDetails(run: RunSpec, fallbackDetails: ApprovalRequestDetails | null = null) {
+    const runId = String(run.run_id || run.agent_run_id || run.workflow_run_id || '').trim();
+    const pending = run.pending_approval;
+    if (!runId || normalizeRunStatus(run.status) !== 'approval_required' || !pending?.tool) {
+      if (runId) forgetRunApprovalDetails(runId);
+      return;
+    }
+    const details = approvalRequestDetailsFromRun(run, fallbackDetails);
+    const signature = approvalSignatureFromPending(pending);
+    setRunApprovalDetailOverrides((current) => ({
+      ...current,
+      [runId]: {
+        details,
+        signature,
+        createdAt: String(pending.requested_at || run.updated_at || new Date().toISOString()),
+      },
+    }));
+  }
+
+  function forgetRunApprovalDetails(runId: string) {
+    const normalizedRunId = String(runId || '').trim();
+    if (!normalizedRunId) return;
+    setRunApprovalDetailOverrides((current) => {
+      if (!current[normalizedRunId]) return current;
+      const next = { ...current };
+      delete next[normalizedRunId];
+      return next;
+    });
+  }
+
   function shouldTriggerPendingReplyScroll(nextMessages: ChatMessage[]) {
     if (!pendingReplyScrollRef.current) return false;
     const taskId = pendingReplyTaskIdRef.current;
@@ -1745,6 +1784,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const activeSessionContext = currentIsUnassigned
     ? { ...normalizeSessionContext(currentSession ? contextFromSession(currentSession) : sessionContext), conversation_kind: 'unassigned' }
     : currentSession ? contextFromSession(currentSession) : normalizeSessionContext(sessionContext);
+  useEffect(() => {
+    if (approvalSessionIdRef.current === currentSessionId) return;
+    approvalSessionIdRef.current = currentSessionId;
+    setRunApprovalDetailOverrides({});
+    setResolvedComposerApprovalIds([]);
+    setComposerApprovalMessageId('');
+  }, [currentSessionId]);
   const currentTitle = conversationDisplayName(
     currentSession,
     activeSessionContext,
@@ -1766,8 +1812,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   );
   const headerActivity = latestVisibleActivity(messages);
   const composerApprovalItems = useMemo(
-    () => approvalRequiredItems(messages, resolvedComposerApprovalIds),
-    [messages, resolvedComposerApprovalIds],
+    () => approvalRequiredItems(messages, resolvedComposerApprovalIds, runApprovalDetailOverrides),
+    [messages, resolvedComposerApprovalIds, runApprovalDetailOverrides],
   );
   const composerApprovalItem = useMemo(() => {
     if (!composerApprovalItems.length) return null;
@@ -2142,7 +2188,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                   retryDisabled={isSending || isProcessing || Boolean(retryingMessageId)}
                   retrying={retryingMessageId === message.id}
                   showRetry={isRetryableMessage(message, messages)}
-                  approvalBusy={approvalActionMessageId === message.id}
+                  approvalBusy={Boolean(
+                    message.id
+                    && (approvalActionMessageId === message.id || approvalActionMessageId.startsWith(`message:${message.id}:`)),
+                  )}
                   onCopy={() => void copyMessage(message)}
                   onRetry={() => void retryMessage(message)}
                   onApprove={() => void resolveApprovalMessage(message, 'approve')}
@@ -2814,6 +2863,12 @@ type ApprovalRequestDetails = {
   summary: Array<{ label: string; value: string }>;
 };
 
+type RunApprovalDetailOverride = {
+  signature: string;
+  details: ApprovalRequestDetails;
+  createdAt?: string;
+};
+
 type ComposerApprovalItem = {
   id: string;
   messageId?: string;
@@ -3011,6 +3066,23 @@ function approvalRequestDetailsFromActivity(event: ChatActivityEvent): ApprovalR
   });
 }
 
+function approvalRequestDetailsFromRun(run: RunSpec, fallbackDetails: ApprovalRequestDetails | null = null): ApprovalRequestDetails {
+  const pending = run.pending_approval || {};
+  return approvalRequestDetails({
+    id: run.run_id,
+    role: 'assistant',
+    content: '',
+    metadata: {
+      delegated_goal: String(run.user_goal || fallbackDetails?.goal || ''),
+      pending_approval: pending as ChatMessageMetadata['pending_approval'],
+      sender: {
+        kind: run.kind === 'workflow_run' ? 'workflow' : 'agent',
+        name: String(run.runnable_name || fallbackDetails?.requester || 'Agent'),
+      },
+    },
+  });
+}
+
 function activityApprovalRequester(event: ChatActivityEvent) {
   const title = String(event.title || '').trim();
   return title
@@ -3045,6 +3117,24 @@ function approvalPreviewFallback(value: unknown) {
   } catch {
     return String(value);
   }
+}
+
+function messageApprovalSignature(message: ChatMessage) {
+  return approvalSignatureFromPending(message.metadata?.pending_approval);
+}
+
+function activityApprovalSignature(event: ChatActivityEvent) {
+  return approvalSignatureFromPending(event.metadata?.pending_approval);
+}
+
+function approvalSignatureFromPending(pending: unknown) {
+  if (!isRecord(pending)) return 'none';
+  const approvalId = stringValue(pending.approval_id);
+  const requestedAt = stringValue(pending.requested_at);
+  const tool = stringValue(pending.tool);
+  const preview = approvalPreviewFallback(pending.input_preview).slice(0, 220);
+  const raw = [approvalId, requestedAt, tool, preview].filter(Boolean).join('|') || 'pending';
+  return raw.replace(/[^A-Za-z0-9_.:-]+/g, '_').slice(0, 240);
 }
 
 function nextApprovalStatusText(run: { pending_approval?: { tool?: string; input_preview?: unknown } }) {
@@ -3183,10 +3273,14 @@ function approvalRequiredMessages(messages: ChatMessage[]) {
   ));
 }
 
-function approvalRequiredItems(messages: ChatMessage[], resolvedItemIds: string[] = []): ComposerApprovalItem[] {
+function approvalRequiredItems(
+  messages: ChatMessage[],
+  resolvedItemIds: string[] = [],
+  runApprovalOverrides: Record<string, RunApprovalDetailOverride> = {},
+): ComposerApprovalItem[] {
   const resolved = new Set(resolvedItemIds);
   const messageApprovals = approvalRequiredMessages(messages).map((message) => ({
-    id: message.id || '',
+    id: `message:${message.id || ''}:${messageApprovalSignature(message)}`,
     messageId: message.id,
     runId: messageRunId(message),
     createdAt: message.created_at,
@@ -3202,17 +3296,19 @@ function approvalRequiredItems(messages: ChatMessage[], resolvedItemIds: string[
     for (const event of message.activity_events || []) {
       const runId = activityRunId(event);
       if (!runId || messageRunIds.has(runId) || seenActivityRunIds.has(runId)) continue;
+      const override = runApprovalOverrides[runId];
+      if (!hasActionableActivityApproval(event) && !override) continue;
       seenActivityRunIds.add(runId);
-      if (!hasActionableActivityApproval(event)) continue;
       const eventId = String(event.event_id || `${message.id || messageIndex}:${runId}`);
-      const itemId = `activity:${eventId}`;
+      const signature = override?.signature || activityApprovalSignature(event);
+      const itemId = `activity:${eventId}:${signature}`;
       if (resolved.has(itemId)) continue;
       activityApprovals.push({
         id: itemId,
         messageId: message.id,
         runId,
-        createdAt: event.created_at || message.created_at,
-        details: approvalRequestDetailsFromActivity(event),
+        createdAt: override?.createdAt || event.created_at || message.created_at,
+        details: override?.details || approvalRequestDetailsFromActivity(event),
         source: 'activity',
       });
     }
