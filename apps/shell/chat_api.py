@@ -3076,7 +3076,7 @@ class ChatAPI:
                             merged.pop(key, None)
                     result.extend(cls._group_dispatch_requests_from_payload(merged))
             return result
-        nested = cls._payload_value(payload, "tasks", "agents", "dispatches", "delegations")
+        nested = cls._payload_value(payload, "tasks", "dispatches", "delegations")
         if isinstance(nested, list):
             result = []
             for item in nested:
@@ -3089,6 +3089,17 @@ class ChatAPI:
                             "dispatches",
                             "delegations",
                         }:
+                            merged.pop(key, None)
+                    result.extend(cls._group_dispatch_requests_from_payload(merged))
+            return result
+        agent_entries = cls._payload_value(payload, "agents")
+        if isinstance(agent_entries, list) and any(isinstance(item, dict) for item in agent_entries):
+            result = []
+            for item in agent_entries:
+                if isinstance(item, dict):
+                    merged = {**payload, **item}
+                    for key in list(merged):
+                        if re.sub(r"[\s_-]+", "", str(key or "")).lower() == "agents":
                             merged.pop(key, None)
                     result.extend(cls._group_dispatch_requests_from_payload(merged))
             return result
@@ -3118,7 +3129,7 @@ class ChatAPI:
         if not goal:
             return []
         if action == "agent":
-            target = str(
+            target_values = cls._group_dispatch_target_values(
                 cls._payload_value(
                     payload,
                     "agent",
@@ -3134,11 +3145,12 @@ class ChatAPI:
                     "runnable_name",
                     "runnableName",
                 )
-                or ""
             )
-            target_id = str(cls._payload_value(payload, "agent_id", "agentId", "runnable_id", "runnableId", "id") or "")
+            target_id_values = cls._group_dispatch_target_values(
+                cls._payload_value(payload, "agent_id", "agentId", "runnable_id", "runnableId", "id")
+            )
         else:
-            target = str(
+            target_values = cls._group_dispatch_target_values(
                 cls._payload_value(
                     payload,
                     "workflow",
@@ -3153,14 +3165,21 @@ class ChatAPI:
                     "runnable_name",
                     "runnableName",
                 )
-                or ""
             )
-            target_id = str(cls._payload_value(payload, "workflow_id", "workflowId", "runnable_id", "runnableId", "id") or "")
-        target = cls._clean_group_dispatch_target(target)
-        target_id = cls._clean_group_dispatch_target(target_id)
-        if not target and not target_id:
+            target_id_values = cls._group_dispatch_target_values(
+                cls._payload_value(payload, "workflow_id", "workflowId", "runnable_id", "runnableId", "id")
+            )
+        if not target_values and not target_id_values:
             return []
-        return [{"kind": action, "target": target, "runnable_id": target_id, "goal": goal}]
+        count = max(len(target_values), len(target_id_values), 1)
+        requests = []
+        for index in range(count):
+            target = target_values[index] if index < len(target_values) else ""
+            target_id = target_id_values[index] if index < len(target_id_values) else ""
+            if not target and not target_id:
+                continue
+            requests.append({"kind": action, "target": target, "runnable_id": target_id, "goal": goal})
+        return requests
 
     @staticmethod
     def _normalize_group_dispatch_action(action: str) -> str:
@@ -3208,6 +3227,51 @@ class ChatAPI:
         if text.startswith("@"):
             text = text[1:].strip()
         return text.strip("\"'“”‘’")
+
+    @classmethod
+    def _group_dispatch_target_values(cls, value: Any) -> list[str]:
+        if value in (None, ""):
+            return []
+        if isinstance(value, list):
+            targets: list[str] = []
+            for item in value:
+                if isinstance(item, dict):
+                    targets.extend(cls._group_dispatch_target_values(
+                        cls._payload_value(
+                            item,
+                            "agent",
+                            "workflow",
+                            "name",
+                            "nickname",
+                            "target",
+                            "runnable",
+                            "id",
+                        )
+                    ))
+                else:
+                    targets.extend(cls._group_dispatch_target_values(item))
+            return cls._dedupe_group_dispatch_targets(targets)
+        text = cls._clean_group_dispatch_target(str(value))
+        if not text:
+            return []
+        pieces = [
+            cls._clean_group_dispatch_target(piece)
+            for piece in re.split(r"[、,，;；/]+", text)
+        ]
+        cleaned = [piece for piece in pieces if piece]
+        return cls._dedupe_group_dispatch_targets(cleaned or [text])
+
+    @staticmethod
+    def _dedupe_group_dispatch_targets(targets: list[str]) -> list[str]:
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for target in targets:
+            key = target.lower()
+            if not target or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(target)
+        return deduped
 
     def _dispatch_group_agent_requests(
         self,
