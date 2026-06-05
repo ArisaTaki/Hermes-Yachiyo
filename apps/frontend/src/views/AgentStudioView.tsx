@@ -81,6 +81,7 @@ type WorkflowStepRef = {
   payload?: string;
   artifactPath?: string;
   artifactCount?: number;
+  task?: string;
 };
 
 type WorkflowValidationReport = {
@@ -1013,6 +1014,15 @@ function workflowSpecNodeKind(node: WorkflowSpec['nodes'][number]): WorkflowStep
   return 'agent';
 }
 
+function workflowNodeTaskFromData(data: Record<string, unknown> | undefined): string {
+  if (!data) return '';
+  for (const key of ['task', 'instructions', 'step_task', 'prompt']) {
+    const value = data[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
 function workflowSpecStepRefs(workflow: WorkflowSpec | null): WorkflowStepRef[] {
   if (!workflow) return [];
   const nodesById = new Map(workflow.nodes.map((node) => [String(node.id || ''), node]));
@@ -1046,6 +1056,7 @@ function workflowSpecStepRefs(workflow: WorkflowSpec | null): WorkflowStepRef[] 
         existingArtifactPaths,
       )
       : '';
+    const task = kind === 'agent' ? workflowNodeTaskFromData(node.data) : '';
     return {
       key: `${kind}:${nodeId || label || index}`,
       kind,
@@ -1053,6 +1064,7 @@ function workflowSpecStepRefs(workflow: WorkflowSpec | null): WorkflowStepRef[] 
       label,
       status: 'pending',
       artifactPath,
+      task,
     };
   });
 }
@@ -1071,6 +1083,7 @@ function workflowSnapshotStepRefs(run: RunSpec | null): WorkflowStepRef[] {
       const nodeId = String(row.id || '');
       const label = String(row.label || nodeId || workflowStepKindLabel(kind)).trim();
       const artifactPath = kind === 'artifact' ? String(row.artifact_path || row.artifactPath || '').trim() : '';
+      const task = kind === 'agent' ? String(row.task || row.step_task || '').trim() : '';
       return {
         key: `${kind}:${nodeId || label || index}`,
         kind,
@@ -1078,6 +1091,7 @@ function workflowSnapshotStepRefs(run: RunSpec | null): WorkflowStepRef[] {
         label,
         status: 'pending',
         artifactPath,
+        task,
       } as WorkflowStepRef;
     })
     .filter((item): item is WorkflowStepRef => Boolean(item));
@@ -1131,6 +1145,7 @@ function upsertWorkflowStep(steps: WorkflowStepRef[], indexByKey: Map<string, nu
     artifactPath: next.artifactPath || previous.artifactPath,
     artifactCount: next.artifactCount ?? previous.artifactCount,
     payload: next.payload || previous.payload,
+    task: next.task || previous.task,
   };
 }
 
@@ -1154,6 +1169,7 @@ function workflowStepRefs(run: RunSpec | null, workflow: WorkflowSpec | null = n
     }
     if (name === 'workflow.node.agent') {
       const childRunId = timelineChildRunId(event);
+      const task = String(event.workflow_node_task || event.step_task || '').trim();
       upsertWorkflowStep(steps, indexByKey, {
         key: `agent:${nodeId || childRunId || detail || index}`,
         kind: 'agent',
@@ -1163,6 +1179,7 @@ function workflowStepRefs(run: RunSpec | null, workflow: WorkflowSpec | null = n
         childRunId,
         payload: timelineEventPayload(event),
         artifactCount: Number(event.artifact_count || 0),
+        task,
       });
       return;
     }
@@ -1236,6 +1253,7 @@ function workflowStepSummary(step: WorkflowStepRef, childRun: RunSpec | null): s
         ? `等待前置节点完成后写出 Workflow artifact：${step.artifactPath}`
         : '等待前置节点完成后写出 artifact。';
     }
+    if (step.task) return `等待前置节点完成后执行：${step.task}`;
     return '等待前置节点完成后执行。';
   }
   if (step.kind === 'start') return 'Workflow 开始执行。';
@@ -3203,21 +3221,31 @@ export function AgentStudioView() {
                         />
                       </label>
                       {kind === 'agent' ? (
-                        <label>
-                          <span>Agent</span>
-                          <select
-                            className="hy-select"
-                            value={String(node.data?.agent_id || '')}
-                            onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, agent_id: event.target.value, label: agents.find((agent) => agent.agent_id === event.target.value)?.name || item.data?.label } } : item))}
-                          >
-                            <option value="">选择 Agent</option>
-                            {agents.map((agent) => (
-                              <option value={agent.agent_id} key={agent.agent_id}>
-                                {agent.name} · {agentCapabilityLine(agent)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                        <>
+                          <label>
+                            <span>Agent</span>
+                            <select
+                              className="hy-select"
+                              value={String(node.data?.agent_id || '')}
+                              onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, agent_id: event.target.value, label: agents.find((agent) => agent.agent_id === event.target.value)?.name || item.data?.label } } : item))}
+                            >
+                              <option value="">选择 Agent</option>
+                              {agents.map((agent) => (
+                                <option value={agent.agent_id} key={agent.agent_id}>
+                                  {agent.name} · {agentCapabilityLine(agent)}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
+                            <span>Step Task</span>
+                            <textarea
+                              className="hy-input agent-textarea compact"
+                              value={String(node.data?.task || '')}
+                              onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, task: event.target.value } } : item))}
+                            />
+                          </label>
+                        </>
                       ) : null}
                       {kind === 'artifact' ? (
                         <label>
@@ -3597,6 +3625,7 @@ export function AgentStudioView() {
                                 ) : null}
                               </div>
                             </div>
+                            {step.task ? <p className="workflow-step-task">{step.task}</p> : null}
                             <pre>{step.childRunId && !childRun ? 'Loading child run...' : summary}</pre>
                             {childRun?.artifacts?.length ? (
                               <div className="run-artifacts compact">

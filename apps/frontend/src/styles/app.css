@@ -15883,6 +15883,17 @@ button.activity-item {
   overflow-wrap: anywhere;
 }
 
+.workflow-step-task {
+  padding: 8px 9px;
+  border: 1px solid oklch(66% 0.12 188 / 0.16);
+  border-radius: 8px;
+  background: oklch(66% 0.12 188 / 0.04);
+  color: var(--hy-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .artifact-preview {
   display: grid;
   gap: 8px;

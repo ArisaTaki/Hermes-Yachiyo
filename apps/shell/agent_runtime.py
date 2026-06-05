@@ -3677,17 +3677,19 @@ class AgentRuntimeService:
                     data = node.get("data") or {}
                     agent = self._workflow_agent_for_node(node)
                     agent_id = str(agent.get("agent_id") or data.get("agent_id") or data.get("agentId") or "")
+                    step_task = self._workflow_node_task(node)
+                    child_goal = self._workflow_child_goal(workflow_goal, step_task)
                     agent_upstream = context if has_agent_upstream else ""
                     child = self._insert_run(
                         kind="agent_run",
                         runnable_id=agent_id,
-                        user_goal=workflow_goal,
+                        user_goal=child_goal,
                         run_group_id=run_group_id,
                     )
                     child = self._execute_agent_run(
                         child["run_id"],
                         agent,
-                        workflow_goal,
+                        child_goal,
                         upstream=agent_upstream,
                     )
                     context = child["result"]
@@ -3699,6 +3701,7 @@ class AgentRuntimeService:
                             workflow_node_id=str(node.get("id") or ""),
                             workflow_node_kind=kind,
                             workflow_node_label=label,
+                            workflow_node_task=step_task,
                             child_run_id=child["run_id"],
                             status=child["status"],
                             result=_tool_input_preview(child.get("result") or "", limit=1800),
@@ -3870,6 +3873,25 @@ class AgentRuntimeService:
             result.append(nodes[current])
         return result
 
+    @staticmethod
+    def _workflow_node_task(node: dict[str, Any]) -> str:
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        for key in ("task", "instructions", "step_task", "prompt"):
+            value = str(data.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
+    def _workflow_child_goal(workflow_goal: str, step_task: str) -> str:
+        clean_workflow_goal = str(workflow_goal or "").strip()
+        clean_step_task = str(step_task or "").strip()
+        if not clean_step_task:
+            return clean_workflow_goal
+        if not clean_workflow_goal:
+            return clean_step_task
+        return f"{clean_step_task}\n\nWorkflow Goal:\n{clean_workflow_goal}"
+
     def _workflow_path_snapshot(self, workflow: dict[str, Any]) -> list[dict[str, str]]:
         snapshot: list[dict[str, str]] = []
         planned_artifacts: list[dict[str, Any]] = []
@@ -3891,6 +3913,10 @@ class AgentRuntimeService:
                 )
                 item["artifact_path"] = artifact_path
                 planned_artifacts.append({"kind": "workflow_artifact", "path": artifact_path})
+            if kind == "agent":
+                step_task = self._workflow_node_task(node)
+                if step_task:
+                    item["task"] = step_task
             snapshot.append(item)
         return snapshot
 

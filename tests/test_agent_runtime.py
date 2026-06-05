@@ -895,6 +895,84 @@ def test_workflow_child_agents_keep_goal_and_receive_prior_result_as_upstream(tm
         service.close()
 
 
+def test_workflow_agent_nodes_can_define_step_tasks(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    contexts: list[str] = []
+    responses = iter(["Research notes", "Implementation plan"])
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        contexts.append(messages[-1]["content"])
+        return {"content": next(responses)}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        research_agent = service.create_agent({"name": "Research Agent", "model_mode": "custom_api", "model_config": model_config})
+        coding_agent = service.create_agent({"name": "Coding Agent", "model_mode": "custom_api", "model_config": model_config})
+        workflow = service.create_workflow(
+            {
+                "name": "Step Task Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "research",
+                        "type": "agent",
+                        "data": {
+                            "label": "Research",
+                            "agent_id": research_agent["agent_id"],
+                            "task": "Collect constraints and summarize the tradeoffs.",
+                        },
+                    },
+                    {
+                        "id": "coding",
+                        "type": "agent",
+                        "data": {
+                            "label": "Coding",
+                            "agent_id": coding_agent["agent_id"],
+                            "instructions": "Turn the research notes into an implementation plan.",
+                        },
+                    },
+                ],
+                "edges": [
+                    {"source": "start", "target": "research"},
+                    {"source": "research", "target": "coding"},
+                ],
+            }
+        )
+
+        run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "Ship feature X"})
+
+        assert run["status"] == "completed"
+        assert "# User Goal\nCollect constraints and summarize the tradeoffs.\n\nWorkflow Goal:\nShip feature X" in contexts[0]
+        assert "# Upstream Context\nNone" in contexts[0]
+        assert "# User Goal\nTurn the research notes into an implementation plan.\n\nWorkflow Goal:\nShip feature X" in contexts[1]
+        assert "# Upstream Context\nResearch notes" in contexts[1]
+
+        group = service.get_run_group(run["run_group_id"])
+        agent_runs = [
+            service.get_run(run_id)
+            for run_id in group["child_run_ids"]
+            if run_id != run["run_id"]
+        ]
+        assert [child["user_goal"] for child in agent_runs] == [
+            "Collect constraints and summarize the tradeoffs.\n\nWorkflow Goal:\nShip feature X",
+            "Turn the research notes into an implementation plan.\n\nWorkflow Goal:\nShip feature X",
+        ]
+        started_event = next(event for event in run["timeline"] if event["event"] == "workflow.run.started")
+        assert started_event["workflow_path"][1]["task"] == "Collect constraints and summarize the tradeoffs."
+        agent_events = [event for event in run["timeline"] if event["event"] == "workflow.node.agent"]
+        assert [event["workflow_node_task"] for event in agent_events] == [
+            "Collect constraints and summarize the tradeoffs.",
+            "Turn the research notes into an implementation plan.",
+        ]
+    finally:
+        service.close()
+
+
 def test_workflow_rejects_missing_and_disabled_agent_nodes(tmp_path):
     service = make_service(tmp_path)
     try:
