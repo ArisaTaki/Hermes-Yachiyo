@@ -14152,6 +14152,103 @@ button.activity-item {
   resize: vertical;
 }
 
+.workflow-run-preview {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid oklch(66% 0.12 188 / 0.2);
+  border-radius: 8px;
+  background: oklch(66% 0.12 188 / 0.045);
+}
+
+.workflow-run-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workflow-run-preview-head strong {
+  color: var(--hy-fg);
+  font-size: 12px;
+}
+
+.workflow-run-preview-head span {
+  color: var(--hy-faint);
+  font-size: 11px;
+}
+
+.workflow-run-preview ol {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow-run-preview-step {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.workflow-run-preview-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  color: var(--hy-subtle);
+  font-size: 11px;
+}
+
+.workflow-run-preview-step>div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.workflow-run-preview-step strong,
+.workflow-run-preview-step em,
+.workflow-run-preview-step p,
+.workflow-run-preview-step small {
+  overflow-wrap: anywhere;
+}
+
+.workflow-run-preview-step strong {
+  color: var(--hy-fg);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.workflow-run-preview-step em {
+  color: var(--hy-faint);
+  font-size: 11px;
+  font-style: normal;
+}
+
+.workflow-run-preview-step p {
+  margin: 0;
+  color: var(--hy-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.workflow-run-preview-step small {
+  padding-top: 3px;
+  color: oklch(83% 0.1 24);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .agent-editor-actions,
 .workflow-toolbar {
   display: flex;
