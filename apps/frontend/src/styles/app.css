@@ -8789,6 +8789,20 @@ body.electron-window .hy-traffic {
   font-size: 10px;
 }
 
+.hy-content .open-chat-shell .message-followup-status {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 22px;
+  padding: 3px 8px;
+  border: 1px solid oklch(66% 0.12 188 / 0.24);
+  border-radius: 999px;
+  background: oklch(66% 0.12 188 / 0.07);
+  color: var(--hy-teal);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
 .hy-content .open-chat-shell .message-copy-button,
 .hy-content .open-chat-shell .message-retry-button {
   width: 24px;

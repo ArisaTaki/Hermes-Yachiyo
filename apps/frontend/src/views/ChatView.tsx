@@ -93,6 +93,8 @@ type ChatMessageMetadata = {
   group_agent_summary_pending?: boolean;
   group_agent_summary_status?: string;
   group_agent_summary_error?: string;
+  group_followup_for_task_ids?: string[];
+  group_followup_for_agent_message_ids?: string[];
   guidance_type?: string;
 };
 
@@ -2732,6 +2734,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   const artifactCount = Number(message.metadata?.run_artifact_count || 0);
   const duplicateError = Boolean(message.error && displayContent.trim() && message.error.trim() === displayContent.trim());
   const summaryNotice = groupAgentSummaryNotice(message);
+  const followupNotice = groupFollowupNotice(message);
   const showWorkflowStudioAction = message.metadata?.guidance_type === 'workflow_chat_entry_disabled';
   return (
     <article
@@ -2767,6 +2770,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
           onOpenRunDetails={onOpenRunDetails}
           progressLabel={message.progress_label}
         />
+        {followupNotice ? <div className="message-followup-status">{followupNotice}</div> : null}
         {showApprovalActions ? (
           <div className="message-approval-actions">
             <button type="button" className="message-approval-approve" disabled={approvalBusy} onClick={onApprove}>
@@ -3232,6 +3236,20 @@ function groupAgentSummaryNotice(message: ChatMessage): { tone: 'pending' | 'fai
     return { tone: 'pending', text: '等待主模型整理 Agent 结果...' };
   }
   return null;
+}
+
+function groupFollowupNotice(message: ChatMessage): string {
+  if (message.role !== 'user') return '';
+  const metadata = message.metadata || {};
+  const taskCount = Array.isArray(metadata.group_followup_for_task_ids)
+    ? metadata.group_followup_for_task_ids.filter(Boolean).length
+    : 0;
+  const agentMessageCount = Array.isArray(metadata.group_followup_for_agent_message_ids)
+    ? metadata.group_followup_for_agent_message_ids.filter(Boolean).length
+    : 0;
+  if (!taskCount && !agentMessageCount) return '';
+  if (agentMessageCount && !taskCount) return '已作为当前 Agent 汇总补充';
+  return '已作为当前群组任务补充';
 }
 
 function latestGroupAgentSummaryNotice(messages: ChatMessage[]) {
