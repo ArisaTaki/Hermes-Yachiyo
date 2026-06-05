@@ -3104,6 +3104,7 @@ class ChatAPI:
                     }
                 else:
                     merged = {**payload, "agent": target, "goal": item}
+                cls._ensure_group_dispatch_agent_action(merged)
                 for key in list(merged):
                     if re.sub(r"[\s_-]+", "", str(key or "")).lower() in {
                         "assignments",
@@ -3137,6 +3138,7 @@ class ChatAPI:
                     }
                 else:
                     merged = {**payload, "agent": target, "goal": item}
+                cls._ensure_group_dispatch_agent_action(merged)
                 for key in list(merged):
                     if re.sub(r"[\s_-]+", "", str(key or "")).lower() == "agents":
                         merged.pop(key, None)
@@ -3274,6 +3276,12 @@ class ChatAPI:
         if text.startswith("@"):
             text = text[1:].strip()
         return text.strip("\"'“”‘’")
+
+    @classmethod
+    def _ensure_group_dispatch_agent_action(cls, payload: dict[str, Any]) -> None:
+        if cls._payload_value(payload, "action", "tool", "kind", "type", "target_kind", "runnable_kind"):
+            return
+        payload["action"] = "dispatch_group_agent"
 
     @classmethod
     def _group_dispatch_target_values(cls, value: Any) -> list[str]:

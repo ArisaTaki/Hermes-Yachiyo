@@ -3467,8 +3467,7 @@ def test_group_main_model_dispatch_accepts_agent_target_lists(tmp_path, monkeypa
             fourth["task_id"],
             TaskStatus.COMPLETED,
             result=(
-                '{"action":"dispatch_group_agent",'
-                '"assignments":{"Design":"整理映射设计点","Code":"实现映射脚本"}}'
+                '{"assignments":{"Design":"整理映射设计点","Code":"实现映射脚本"}}'
             ),
         )
 
@@ -3484,8 +3483,7 @@ def test_group_main_model_dispatch_accepts_agent_target_lists(tmp_path, monkeypa
             fifth["task_id"],
             TaskStatus.COMPLETED,
             result=(
-                '{"action":"dispatch_group_agent",'
-                '"agents":{"Design":{"goal":"整理 agents 映射设计点"},"Code":{"task":"实现 agents 映射脚本"}}}'
+                '{"agents":{"Design":{"goal":"整理 agents 映射设计点"},"Code":{"task":"实现 agents 映射脚本"}}}'
             ),
         )
 
