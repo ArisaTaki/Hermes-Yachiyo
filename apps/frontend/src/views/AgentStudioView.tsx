@@ -3242,7 +3242,7 @@ export function AgentStudioView() {
                   placeholder="例如：从设计到审查跑一遍这个任务"
                 />
               </label>
-              {workflowRunDisabledReason && workflowRunGoal.trim() ? (
+              {workflowRunDisabledReason ? (
                 <div className="agent-inline-note warn">{workflowRunDisabledReason}</div>
               ) : null}
               <button
