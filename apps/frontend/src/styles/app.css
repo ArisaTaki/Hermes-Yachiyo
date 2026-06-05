@@ -15332,6 +15332,47 @@ button.activity-item {
   background: oklch(255 0 0 / 0.02);
 }
 
+.run-detail-fold {
+  display: grid;
+  gap: 0;
+  padding: 0;
+}
+
+.run-detail-fold>summary {
+  padding: 12px;
+  border-radius: 9px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.run-detail-fold>summary::-webkit-details-marker {
+  display: none;
+}
+
+.run-detail-fold>summary::after {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  color: var(--hy-faint);
+  font-size: 10px;
+  content: "收起";
+}
+
+.run-detail-fold:not([open])>summary::after {
+  content: "展开";
+}
+
+.run-detail-fold>summary:hover {
+  background: oklch(66% 0.12 188 / 0.055);
+}
+
+.run-detail-fold-body {
+  padding: 0 12px 12px;
+}
+
 .run-task-block {
   background: oklch(66% 0.12 188 / 0.045);
 }
@@ -15500,6 +15541,47 @@ button.activity-item {
 .run-step-card pre {
   padding: 9px;
   font-size: 10px;
+}
+
+.run-expandable-content {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.run-expandable-content>summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+  cursor: pointer;
+  list-style: none;
+}
+
+.run-expandable-content>summary::-webkit-details-marker {
+  display: none;
+}
+
+.run-expandable-content>summary:hover {
+  border-color: oklch(66% 0.12 188 / 0.28);
+  background: oklch(66% 0.12 188 / 0.05);
+}
+
+.run-expandable-content>summary span {
+  color: var(--hy-subtle);
+  font-size: 11px;
+}
+
+.run-expandable-content>summary em {
+  color: var(--hy-faint);
+  font-size: 10px;
+  font-style: normal;
 }
 
 .run-step-card>.run-status-pill {

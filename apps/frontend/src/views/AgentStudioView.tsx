@@ -1009,6 +1009,43 @@ function timelineEventPayload(event: Record<string, unknown>): string {
   return '';
 }
 
+function payloadLineCount(value: string): number {
+  if (!value) return 0;
+  return value.split(/\r?\n/).length;
+}
+
+function runPayloadShouldCollapse(value: string): boolean {
+  return value.length > 700 || payloadLineCount(value) > 10;
+}
+
+function runPayloadSummary(value: string): string {
+  const lines = payloadLineCount(value);
+  const units = [`${lines} 行`, `${value.length} 字符`];
+  return units.join(' · ');
+}
+
+function RunExpandableContent({
+  content,
+  label,
+  defaultOpen = false,
+}: {
+  content: string;
+  label: string;
+  defaultOpen?: boolean;
+}) {
+  const shouldCollapse = runPayloadShouldCollapse(content);
+  if (!shouldCollapse) return <pre>{content}</pre>;
+  return (
+    <details className="run-expandable-content" open={defaultOpen}>
+      <summary>
+        <span>{label}</span>
+        <em>{runPayloadSummary(content)}</em>
+      </summary>
+      <pre>{content}</pre>
+    </details>
+  );
+}
+
 function compactWorkflowStepText(value: unknown, maxLength = 420): string {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
@@ -3752,14 +3789,14 @@ export function AgentStudioView() {
                   <pre>{selectedRun.result || 'No result yet.'}</pre>
                 </section>
                 {selectedRun.kind === 'workflow_run' ? (
-                  <section className="run-detail-block">
-                    <div className="run-detail-section-head">
+                  <details className="run-detail-block run-detail-fold" open>
+                    <summary className="run-detail-section-head">
                       <div>
                         <h4>Workflow Steps · {selectedWorkflowSteps.length}</h4>
                         <span>Workflow 中每个节点的执行状态、审批和产物</span>
                       </div>
-                    </div>
-                    <div className="workflow-child-results">
+                    </summary>
+                    <div className="run-detail-fold-body workflow-child-results">
                       {selectedWorkflowSteps.map((step, index) => {
                         const childRun = step.childRunId ? runById.get(step.childRunId) || null : null;
                         const childStatus = childRun?.status || step.status || 'loading';
@@ -3786,7 +3823,11 @@ export function AgentStudioView() {
                                 {step.task}
                               </p>
                             ) : null}
-                            <pre>{step.childRunId && !childRun ? 'Loading child run...' : summary}</pre>
+                            <RunExpandableContent
+                              content={step.childRunId && !childRun ? 'Loading child run...' : summary}
+                              label="展开完整节点结果"
+                              defaultOpen={childStatus === 'failed' || childStatus === 'cancelled' || childStatus === 'approval_required'}
+                            />
                             {childRun?.artifacts?.length ? (
                               <div className="run-artifacts compact">
                                 {childRun.artifacts.map((artifact, artifactIndex) => {
@@ -3816,24 +3857,25 @@ export function AgentStudioView() {
                       })}
                       {!selectedWorkflowSteps.length ? <span>No workflow steps</span> : null}
                     </div>
-                  </section>
+                  </details>
                 ) : null}
-                <section className="run-detail-block run-execution-block">
-                  <div className="run-detail-section-head">
+                <details className="run-detail-block run-detail-fold run-execution-block" open>
+                  <summary className="run-detail-section-head">
                     <div>
                       <h4>Execution · {(selectedRun.timeline || []).length}</h4>
                       <span>模型响应、工具调用、审批与完成节点</span>
                     </div>
-                  </div>
-                  <ol className="run-execution-steps">
+                  </summary>
+                  <ol className="run-detail-fold-body run-execution-steps">
                     {(selectedRun.timeline || []).map((event, index) => {
                       const childRunId = timelineChildRunId(event);
                       const childRun = childRunId ? runById.get(childRunId) : null;
                       const eventStatus = timelineStatus(event);
                       const payload = timelineEventPayload(event);
                       const detail = String(event.detail || '').trim();
+                      const eventTone = timelineEventTone(event);
                       return (
-                        <li className={`run-execution-step ${timelineEventTone(event)}`} key={`${String(event.event || 'event')}-${index}`}>
+                        <li className={`run-execution-step ${eventTone}`} key={`${String(event.event || 'event')}-${index}`}>
                           <span className="run-step-rail"><i aria-hidden="true" /></span>
                           <div className="run-step-card">
                             <div className="run-step-head">
@@ -3847,7 +3889,13 @@ export function AgentStudioView() {
                             {eventStatus ? (
                               <em className={`run-status-pill ${runStatusTone(eventStatus)}`}>{eventStatus}</em>
                             ) : null}
-                            {payload ? <pre>{payload}</pre> : null}
+                            {payload ? (
+                              <RunExpandableContent
+                                content={payload}
+                                label="展开完整事件内容"
+                                defaultOpen={eventTone === 'danger' || eventTone === 'approval'}
+                              />
+                            ) : null}
                             {childRunId ? (
                               <button
                                 type="button"
@@ -3862,15 +3910,15 @@ export function AgentStudioView() {
                       );
                     })}
                   </ol>
-                </section>
-                <section className="run-detail-block">
-                  <div className="run-detail-section-head">
+                </details>
+                <details className="run-detail-block run-detail-fold" open>
+                  <summary className="run-detail-section-head">
                     <div>
                       <h4>Artifacts · {(selectedRun.artifacts || []).length}</h4>
                       <span>上下文、工具产物和可预览文件</span>
                     </div>
-                  </div>
-                  <div className="run-artifacts">
+                  </summary>
+                  <div className="run-detail-fold-body run-artifacts">
                     {(selectedRun.artifacts || []).map((artifact, index) => {
                       const path = String(artifact.path || '');
                       const sourceRunId = String(artifact.source_run_id || artifact.run_id || selectedRun.run_id);
@@ -3889,12 +3937,12 @@ export function AgentStudioView() {
                     {!selectedRun.artifacts?.length ? <span>No artifacts</span> : null}
                   </div>
                   {artifactPreview ? (
-                    <div className="artifact-preview">
+                    <div className="run-detail-fold-body artifact-preview">
                       <strong>{artifactPreview.path}{artifactPreview.truncated ? ' · truncated' : ''}</strong>
                       <pre>{artifactPreview.content}</pre>
                     </div>
                   ) : null}
-                </section>
+                </details>
               </article>
             ) : (
               <div className="empty-state inline-empty">从左侧选择一个 Run，或运行新的 Agent / Workflow 后查看 Result、Timeline 和 Artifacts。</div>
