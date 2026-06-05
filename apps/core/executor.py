@@ -428,37 +428,168 @@ def _append_yachiyo_delegation_context(profile_context: str, *, group_coordinato
     return f"{base}\n\n{catalog}" if base else catalog
 
 
-def _parse_yachiyo_delegation_request(content: str) -> dict[str, str] | None:
-    text = (content or "").strip()
+def _payload_value(payload: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in payload and payload[key] not in (None, ""):
+            return payload[key]
+    normalized_keys = {
+        re.sub(r"[\s_-]+", "", str(key or "")).lower()
+        for key in keys
+        if str(key or "").strip()
+    }
+    for raw_key, value in payload.items():
+        if value in (None, ""):
+            continue
+        normalized = re.sub(r"[\s_-]+", "", str(raw_key or "")).lower()
+        if normalized in normalized_keys:
+            return value
+    return None
+
+
+def _json_candidate_texts(text: str) -> list[str]:
+    candidates = [text]
+    normalized = (
+        text.replace("“", '"')
+        .replace("”", '"')
+        .replace("„", '"')
+        .replace("＂", '"')
+    )
+    if normalized != text:
+        candidates.append(normalized)
+    return candidates
+
+
+def _json_objects_from_text(text: str) -> list[dict[str, Any]]:
+    text = (text or "").strip()
     if not text:
-        return None
-    match = re.search(r"<yachiyo_delegation>\s*(\{.*?\})\s*</yachiyo_delegation>", text, re.DOTALL | re.IGNORECASE)
+        return []
+    match = re.search(r"<yachiyo_delegation>\s*(.*?)\s*</yachiyo_delegation>", text, re.DOTALL | re.IGNORECASE)
     if match:
         text = match.group(1).strip()
     if text.startswith("```"):
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.DOTALL).strip()
-    if not text.startswith("{"):
-        match = re.search(r"(\{[^{}]*\"action\"\s*:\s*\"run_yachiyo_[^{}]+\})", text, re.DOTALL)
-        if not match:
-            return None
-        text = match.group(1).strip()
-    try:
-        payload = json.loads(text)
-    except json.JSONDecodeError:
+
+    payloads: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for candidate in _json_candidate_texts(text):
+        candidate = candidate.strip()
+        decoder = json.JSONDecoder()
+        index = 0
+        while index < len(candidate):
+            if candidate[index] != "{":
+                index += 1
+                continue
+            try:
+                payload, offset = decoder.raw_decode(candidate[index:])
+            except json.JSONDecodeError:
+                index += 1
+                continue
+            if isinstance(payload, dict):
+                key = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+                if key not in seen:
+                    payloads.append(payload)
+                    seen.add(key)
+            index += max(offset, 1)
+    return payloads
+
+
+def _normalize_yachiyo_delegation_action(value: str) -> str:
+    compact = re.sub(r"[\s_\-./]+", "", str(value or "").strip().lower())
+    if compact in {
+        "agent",
+        "agentrun",
+        "runagent",
+        "delegateagent",
+        "delegatetoagent",
+        "assignagent",
+        "runyachiyoagent",
+        "yachiyoagent",
+    }:
+        return "agent"
+    if compact in {
+        "workflow",
+        "workflowrun",
+        "runworkflow",
+        "delegateworkflow",
+        "delegatetoworkflow",
+        "assignworkflow",
+        "runyachiyoworkflow",
+        "yachiyoworkflow",
+    }:
+        return "workflow"
+    return ""
+
+
+def _parse_yachiyo_delegation_request(content: str) -> dict[str, str] | None:
+    for payload in _json_objects_from_text(content):
+        request = _yachiyo_delegation_request_from_payload(payload)
+        if request:
+            return request
+    return None
+
+
+def _yachiyo_delegation_request_from_payload(payload: dict[str, Any]) -> dict[str, str] | None:
+    action = _normalize_yachiyo_delegation_action(str(
+        _payload_value(payload, "action", "tool", "kind", "type", "target_kind", "runnable_kind")
+        or ""
+    ))
+    if action not in {"agent", "workflow"}:
         return None
-    action = str(payload.get("action") or payload.get("tool") or "").strip()
-    if action not in {"run_yachiyo_agent", "run_yachiyo_workflow"}:
-        return None
-    goal = str(payload.get("goal") or payload.get("user_goal") or payload.get("task") or "").strip()
+    goal = str(
+        _payload_value(
+            payload,
+            "goal",
+            "user_goal",
+            "userGoal",
+            "task",
+            "task_goal",
+            "taskGoal",
+            "objective",
+            "instruction",
+            "instructions",
+            "prompt",
+        )
+        or ""
+    ).strip()
     if not goal:
         return None
-    if action == "run_yachiyo_agent":
-        name = str(payload.get("agent") or payload.get("name") or payload.get("agent_name") or "").strip()
-        runnable_id = str(payload.get("agent_id") or payload.get("runnable_id") or "").strip()
+    if action == "agent":
+        name = str(
+            _payload_value(
+                payload,
+                "agent",
+                "agent_name",
+                "agentName",
+                "name",
+                "target",
+                "target_name",
+                "targetName",
+                "runnable",
+                "runnable_name",
+                "runnableName",
+            )
+            or ""
+        ).strip()
+        runnable_id = str(_payload_value(payload, "agent_id", "agentId", "runnable_id", "runnableId", "id") or "").strip()
         kind = "agent"
     else:
-        name = str(payload.get("workflow") or payload.get("name") or payload.get("workflow_name") or "").strip()
-        runnable_id = str(payload.get("workflow_id") or payload.get("runnable_id") or "").strip()
+        name = str(
+            _payload_value(
+                payload,
+                "workflow",
+                "workflow_name",
+                "workflowName",
+                "name",
+                "target",
+                "target_name",
+                "targetName",
+                "runnable",
+                "runnable_name",
+                "runnableName",
+            )
+            or ""
+        ).strip()
+        runnable_id = str(_payload_value(payload, "workflow_id", "workflowId", "runnable_id", "runnableId", "id") or "").strip()
         kind = "workflow"
     if not name and not runnable_id:
         return None

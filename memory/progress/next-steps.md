@@ -18,7 +18,7 @@
 
 1. 继续收紧默认 Agent 工具策略和 Prompt 质量：2026-06-05 已加第一层运行时护栏，用户明确“不创建/不保存/只展示代码”时会拦截误触发的 `workspace.write_patch` / `artifact.write`，明确“不运行/不执行”时会拦截 `terminal.run`，并把可恢复 tool result 喂回模型要求 inline 交付；中文“代码完整展示即可”和 Workflow 子 Agent “不需要运行命令或脚本”已补回归；后续仍需要用真实模型继续调校低风险 brief，减少 Coding / Research / Design 自发请求工具和循环。
 2. Agent Runtime 后续增强：补更完整的运行中取消 UI、复杂 artifact viewer、真实模型长输出稳定性，以及 Runs 页面按 Agent 履历聚合。
-3. 手工验证主 Agent 自动委派体验：用真实 Chat Profile 创建启用 Agent / Workflow，检查主会话是否能触发 `run_yachiyo_agent` / `run_yachiyo_workflow`、Run 留档、结果回填和 3 次上限。
+3. 手工验证主 Agent 自动委派体验：用真实 Chat Profile 创建启用 Agent / Workflow，检查主会话是否能触发 `run_yachiyo_agent` / `run_yachiyo_workflow`、Run 留档、结果回填和 3 次上限。2026-06-05 已补自动委派解析容错：普通主会话可识别 `<yachiyo_delegation>`、智能引号、`type/kind`、`agentName/userGoal/objective/runnableId` 等模型输出变体，并会扫描长回复中的多个 JSON 对象寻找有效委派；群组协调任务仍禁用这条路径，避免和群组派发协议混用。
 4. 用真实 Chat Profile 继续压测 Chat Agent / Workflow 群组体验：覆盖 `@` mention 菜单、Agent 私聊续聊、手动群组主模型派发、审批通过后的主模型汇总、Workflow 群组内 `@Agent` 插手和 `@主模型` 干预路径。
 5. 为 Skill Library 补后续管理能力：批量启停、导入/同步历史、打开 Hermes roots、安装命令历史、文件夹重命名/排序，以及后续 marketplace/全局 skills 浏览边界。
 6. 2026-06-05 已补第一版 Agent Studio 能力状态展示：缺 Chat Profile / 默认 Chat Profile 不可用 / Custom API 配置不完整、挂载 Skill 已停用、高风险 `workspace.write_patch` / `terminal.run` 会审批、写入 scope 为空等会在编辑页、Quick Run、Runs 单 Agent 入口和 Workflow 节点预览里前置提示；后端也会在创建 Agent Run / Workflow Run 前拦截 Custom API 缺字段、停用 Skill、停用目标、Workflow 节点 follow_main Agent 无可用默认 Chat Profile 等确定本地配置错误，后续再继续细化真实模型/Skill 质量状态。

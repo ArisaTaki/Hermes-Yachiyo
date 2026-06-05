@@ -289,6 +289,31 @@ class TestHermesExecutor:
             "goal": "核对事实",
         }
 
+    def test_parse_yachiyo_delegation_request_accepts_model_field_variants(self):
+        agent_request = executor_mod._parse_yachiyo_delegation_request(
+            "<yachiyo_delegation>"
+            "{”type”:”agent”,”agentName”:”Research Agent”,”userGoal”:”核对事实”}"
+            "</yachiyo_delegation>"
+        )
+        workflow_request = executor_mod._parse_yachiyo_delegation_request(
+            "我会先跑流程："
+            '{"note":"先说明一下"}'
+            '{"kind":"workflow","runnableId":"workflow_release","objective":"执行发布检查"}'
+        )
+
+        assert agent_request == {
+            "kind": "agent",
+            "name": "Research Agent",
+            "runnable_id": "",
+            "goal": "核对事实",
+        }
+        assert workflow_request == {
+            "kind": "workflow",
+            "name": "",
+            "runnable_id": "workflow_release",
+            "goal": "执行发布检查",
+        }
+
     @pytest.mark.asyncio
     async def test_call_hermes_runs_yachiyo_delegation_before_final_reply(self, monkeypatch):
         calls: list[str] = []
