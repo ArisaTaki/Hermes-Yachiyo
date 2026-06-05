@@ -1383,6 +1383,55 @@ function workflowStepSummary(step: WorkflowStepRef, childRun: RunSpec | null): s
   return childRun?.result || step.payload || 'No result yet.';
 }
 
+function WorkflowRunPreview({
+  agents,
+  agentIssueById,
+  sourceNodes,
+  steps,
+}: {
+  agents: AgentSpec[];
+  agentIssueById: Map<string, string>;
+  sourceNodes: Node[];
+  steps: WorkflowStepRef[];
+}) {
+  const visibleSteps = steps.filter((step) => step.kind !== 'start');
+  if (!visibleSteps.length) return null;
+  return (
+    <div className="workflow-run-preview">
+      <div className="workflow-run-preview-head">
+        <strong>运行顺序</strong>
+        <span>{visibleSteps.length} steps</span>
+      </div>
+      <ol>
+        {visibleSteps.map((step, index) => {
+          const sourceNode = sourceNodes.find((node) => node.id === step.nodeId);
+          const agentId = step.kind === 'agent' ? String(sourceNode?.data?.agent_id || '').trim() : '';
+          const agent = agentId ? agents.find((item) => item.agent_id === agentId) || null : null;
+          const agentIssue = agent ? agentIssueById.get(agent.agent_id) || '' : '';
+          const detail = step.kind === 'agent'
+            ? step.task || '接收 Workflow Goal 和上游上下文。'
+            : step.kind === 'approval'
+              ? step.task || '等待人工确认后继续。'
+              : step.artifactPath
+                ? `写出 artifact：${step.artifactPath}`
+                : '按节点名称自动生成 artifact 路径。';
+          return (
+            <li className={`workflow-run-preview-step ${step.kind}`} key={step.key}>
+              <span className="workflow-run-preview-index">{index + 1}</span>
+              <div>
+                <strong>{step.label}</strong>
+                <em>{workflowStepKindLabel(step.kind)}{agent ? ` · ${agent.nickname || agent.name}` : ''}</em>
+                <p>{detail}</p>
+                {agentIssue ? <small>{agentIssue}</small> : null}
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 function workflowChildRunRefs(run: RunSpec | null): WorkflowChildRunRef[] {
   if (!run || run.kind !== 'workflow_run') return [];
   const refs: WorkflowChildRunRef[] = [];
@@ -1556,17 +1605,29 @@ export function AgentStudioView() {
       : null,
     [selectedRunTarget, workflows],
   );
+  const selectedRunTargetWorkflowNodes = useMemo(
+    () => selectedRunTargetWorkflow ? workflowNodes(selectedRunTargetWorkflow) : [],
+    [selectedRunTargetWorkflow],
+  );
+  const selectedRunTargetWorkflowEdges = useMemo(
+    () => selectedRunTargetWorkflow ? workflowEdges(selectedRunTargetWorkflow) : [],
+    [selectedRunTargetWorkflow],
+  );
+  const selectedRunTargetWorkflowPreviewSteps = useMemo(
+    () => selectedRunTargetWorkflow ? workflowSpecStepRefs(selectedRunTargetWorkflow) : [],
+    [selectedRunTargetWorkflow],
+  );
   const selectedRunTargetWorkflowValidation = useMemo(
     () => selectedRunTargetWorkflow
-      ? validateWorkflowDraft(workflowNodes(selectedRunTargetWorkflow), workflowEdges(selectedRunTargetWorkflow), agents)
+      ? validateWorkflowDraft(selectedRunTargetWorkflowNodes, selectedRunTargetWorkflowEdges, agents)
       : { errors: [], warnings: [] },
-    [agents, selectedRunTargetWorkflow],
+    [agents, selectedRunTargetWorkflow, selectedRunTargetWorkflowEdges, selectedRunTargetWorkflowNodes],
   );
   const selectedRunTargetWorkflowAgentIssue = useMemo(
     () => selectedRunTargetWorkflow
-      ? workflowAgentRunReadinessIssue(workflowNodes(selectedRunTargetWorkflow), agentRunIssueById)
+      ? workflowAgentRunReadinessIssue(selectedRunTargetWorkflowNodes, agentRunIssueById)
       : '',
-    [agentRunIssueById, selectedRunTargetWorkflow],
+    [agentRunIssueById, selectedRunTargetWorkflow, selectedRunTargetWorkflowNodes],
   );
   const selectedRunTargetDisabled = selectedRunTarget?.enabled === false;
   const runTargetDisabledReason = useMemo(() => {
@@ -1582,13 +1643,13 @@ export function AgentStudioView() {
       if (selectedRunTargetWorkflowValidation.errors.length) {
         return selectedRunTargetWorkflowValidation.errors[0] || '当前 Workflow 存在校验错误。';
       }
-      if (!workflowHasRunnableSteps(workflowNodes(selectedRunTargetWorkflow))) {
+      if (!workflowHasRunnableSteps(selectedRunTargetWorkflowNodes)) {
         return workflowRunnableStepRequiredMessage;
       }
       if (selectedRunTargetWorkflowAgentIssue) return selectedRunTargetWorkflowAgentIssue;
     }
     return '';
-  }, [agentRunIssueById, agents, selectedRunTarget, selectedRunTargetDisabled, selectedRunTargetWorkflow, selectedRunTargetWorkflowAgentIssue, selectedRunTargetWorkflowValidation.errors]);
+  }, [agentRunIssueById, agents, selectedRunTarget, selectedRunTargetDisabled, selectedRunTargetWorkflow, selectedRunTargetWorkflowAgentIssue, selectedRunTargetWorkflowNodes, selectedRunTargetWorkflowValidation.errors]);
   const workflowRunDisabledReason = useMemo(() => {
     if (selectedWorkflow?.enabled === false) return '当前 Workflow 已停用，无法运行。';
     if (workflowHasErrors) return workflowPrimaryError || '当前 Workflow 存在校验错误。';
@@ -3485,40 +3546,12 @@ export function AgentStudioView() {
               {workflowRunDisabledReason ? (
                 <div className="agent-inline-note warn">{workflowRunDisabledReason}</div>
               ) : null}
-              {workflowRunPreviewSteps.some((step) => step.kind !== 'start') ? (
-                <div className="workflow-run-preview">
-                  <div className="workflow-run-preview-head">
-                    <strong>运行顺序</strong>
-                    <span>{workflowRunPreviewSteps.filter((step) => step.kind !== 'start').length} steps</span>
-                  </div>
-                  <ol>
-                    {workflowRunPreviewSteps.filter((step) => step.kind !== 'start').map((step, index) => {
-                      const sourceNode = nodes.find((node) => node.id === step.nodeId);
-                      const agentId = step.kind === 'agent' ? String(sourceNode?.data?.agent_id || '').trim() : '';
-                      const agent = agentId ? agents.find((item) => item.agent_id === agentId) || null : null;
-                      const agentIssue = agent ? agentRunIssueById.get(agent.agent_id) || '' : '';
-                      const detail = step.kind === 'agent'
-                        ? step.task || '接收 Workflow Goal 和上游上下文。'
-                        : step.kind === 'approval'
-                          ? step.task || '等待人工确认后继续。'
-                          : step.artifactPath
-                            ? `写出 artifact：${step.artifactPath}`
-                            : '按节点名称自动生成 artifact 路径。';
-                      return (
-                        <li className={`workflow-run-preview-step ${step.kind}`} key={step.key}>
-                          <span className="workflow-run-preview-index">{index + 1}</span>
-                          <div>
-                            <strong>{step.label}</strong>
-                            <em>{workflowStepKindLabel(step.kind)}{agent ? ` · ${agent.nickname || agent.name}` : ''}</em>
-                            <p>{detail}</p>
-                            {agentIssue ? <small>{agentIssue}</small> : null}
-                          </div>
-                        </li>
-                      );
-                    })}
-                  </ol>
-                </div>
-              ) : null}
+              <WorkflowRunPreview
+                agents={agents}
+                agentIssueById={agentRunIssueById}
+                sourceNodes={nodes}
+                steps={workflowRunPreviewSteps}
+              />
               <button
                 type="button"
                 className="primary-action"
@@ -3565,6 +3598,14 @@ export function AgentStudioView() {
                   {selectedRunTargetWorkflowValidation.errors.map((item) => <span key={`run-target-error-${item}`}>{item}</span>)}
                 </div>
               </div>
+            ) : null}
+            {selectedRunTarget?.kind === 'workflow' ? (
+              <WorkflowRunPreview
+                agents={agents}
+                agentIssueById={agentRunIssueById}
+                sourceNodes={selectedRunTargetWorkflowNodes}
+                steps={selectedRunTargetWorkflowPreviewSteps}
+              />
             ) : null}
             <label><span>Goal</span><textarea className="hy-input agent-textarea" value={runGoal} onChange={(event) => setRunGoal(event.target.value)} /></label>
             <button
