@@ -654,6 +654,11 @@ function runHistoryGroupSummary(runs: RunSpec[]): string {
   return parts.length ? parts.join(' · ') : `${runs.length} runs`;
 }
 
+function runUpdatedTimestamp(run?: RunSpec): number {
+  const timestamp = Date.parse(run?.updated_at || run?.created_at || '');
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
 function runnableCapabilityLine(item: Pick<RunnableSummary, 'category' | 'description' | 'enabled' | 'kind' | 'output_contract'>): string {
   const parts = [
     item.enabled === false ? 'Disabled' : '',
@@ -745,11 +750,12 @@ function runHistoryGroupsFor(runs: RunSpec[], runnables: RunnableSummary[], agen
       runs: [run],
     });
   });
-  return Array.from(groups.values()).sort((a, b) => {
-    const aLatest = Date.parse(a.runs[0]?.updated_at || a.runs[0]?.created_at || '');
-    const bLatest = Date.parse(b.runs[0]?.updated_at || b.runs[0]?.created_at || '');
-    return (Number.isFinite(bLatest) ? bLatest : 0) - (Number.isFinite(aLatest) ? aLatest : 0);
-  });
+  return Array.from(groups.values())
+    .map((group) => ({
+      ...group,
+      runs: [...group.runs].sort((a, b) => runUpdatedTimestamp(b) - runUpdatedTimestamp(a)),
+    }))
+    .sort((a, b) => runUpdatedTimestamp(b.runs[0]) - runUpdatedTimestamp(a.runs[0]));
 }
 
 function isWorkflowChildAgentRun(run: RunSpec): boolean {
@@ -1949,6 +1955,19 @@ export function AgentStudioView() {
     setSelectedWorkflowId(workflowId);
     setStatus('');
     setError('');
+  }
+
+  function openWorkflowDesign(workflowId: string) {
+    const workflow = workflows.find((item) => item.workflow_id === workflowId);
+    if (!workflow) {
+      setError('找不到对应的 Workflow 定义，可能已被删除。');
+      return;
+    }
+    setSelectedWorkflowId(workflow.workflow_id);
+    setTab('workflows');
+    setStatus(`已打开 Workflow Studio：${workflow.name || workflow.workflow_id}`);
+    setError('');
+    navigateTo('agents', { tab: 'workflows' }, ['run']);
   }
 
   function activateTab(nextTab: StudioTab) {
@@ -3430,6 +3449,11 @@ export function AgentStudioView() {
                   {selectedWorkflowParentRunId ? (
                     <button type="button" className="run-parent-link" onClick={() => openRunDetail(selectedWorkflowParentRunId)}>
                       返回 Workflow：{selectedWorkflowParentRun?.runnable_name || selectedWorkflowParentRun?.runnable_id || '父 Workflow'}
+                    </button>
+                  ) : null}
+                  {selectedRun.kind === 'workflow_run' && selectedRunWorkflow ? (
+                    <button type="button" className="run-workflow-link" onClick={() => openWorkflowDesign(selectedRunWorkflow.workflow_id)}>
+                      打开 Workflow Studio
                     </button>
                   ) : null}
                   {isActiveRunStatus(selectedRun.status) ? (

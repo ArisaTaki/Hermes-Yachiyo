@@ -15679,6 +15679,18 @@ button.activity-item {
   color: var(--hy-fg);
 }
 
+.run-detail-meta .run-workflow-link {
+  border-color: oklch(74% 0.13 300 / 0.28);
+  background: oklch(74% 0.13 300 / 0.08);
+  color: oklch(82% 0.12 300);
+}
+
+.run-detail-meta .run-workflow-link:hover {
+  border-color: oklch(74% 0.13 300 / 0.42);
+  background: oklch(74% 0.13 300 / 0.12);
+  color: var(--hy-fg);
+}
+
 .run-detail-meta .run-cancel-action {
   border-color: oklch(58% 0.19 24 / 0.34);
   background: oklch(58% 0.19 24 / 0.08);
