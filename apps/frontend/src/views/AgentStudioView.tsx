@@ -1407,7 +1407,13 @@ function WorkflowRunPreview({
           const sourceNode = sourceNodes.find((node) => node.id === step.nodeId);
           const agentId = step.kind === 'agent' ? String(sourceNode?.data?.agent_id || '').trim() : '';
           const agent = agentId ? agents.find((item) => item.agent_id === agentId) || null : null;
-          const agentIssue = agent ? agentIssueById.get(agent.agent_id) || '' : '';
+          const agentIssue = step.kind === 'agent'
+            ? agent
+              ? agentIssueById.get(agent.agent_id) || ''
+              : agentId
+                ? '找不到 Agent 定义。'
+                : '尚未选择 Agent。'
+            : '';
           const detail = step.kind === 'agent'
             ? step.task || '接收 Workflow Goal 和上游上下文。'
             : step.kind === 'approval'
