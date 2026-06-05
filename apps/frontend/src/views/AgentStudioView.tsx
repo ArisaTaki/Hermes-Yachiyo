@@ -571,7 +571,7 @@ function validateWorkflowDraft(nodes: Node[], edges: Edge[], agents: AgentSpec[]
   }
 
   if (!nodes.some((node) => workflowNodeKind(node) !== 'start')) {
-    warnings.push('当前只有 Start 节点；运行后不会调用任何 Agent。');
+    warnings.push('当前只有 Start 节点；可以保存草稿，但运行前需要添加 Agent、Approval 或 Artifact。');
   }
 
   return {

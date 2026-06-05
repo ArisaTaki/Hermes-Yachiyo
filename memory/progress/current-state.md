@@ -43,7 +43,7 @@
 - ✅ Workflow Artifact 节点支持配置产物路径：用户可以在节点设置里指定 `reports/summary.md` 这类相对路径；留空时继续按 Label 自动生成，重复路径会自动去重为 `name-2.md`；Run Detail 的尚未执行步骤也会提前显示预计写出路径，前后端都会拦截越界路径。
 - ✅ Workflow Studio 的保存与保存并运行会在硬校验错误时禁用，并把第一个错误放到按钮 title；只有 Start 节点这类低价值但可保存的状态仍作为 warning 提醒，避免用户在明显无效的 Workflow 上误点保存/运行。
 - ✅ 2026-06-05 追加：Workflow 后端节点类型解析已和 ReactFlow 画布形态对齐；当节点 `type` 是 `input/default/output`、真实业务类型在 `data.kind` 时，Bridge 保存与运行仍会按 Start / Agent / Artifact 正确执行，避免导入画布或未清洗节点数据被误判为未知节点类型。
-- ✅ 2026-06-05 追加：Start-only Workflow 仍可作为草稿保存，但所有运行入口都会要求至少存在一个可执行节点（Agent、Approval 或 Artifact）；后端 `create_workflow_run` 和 Bridge `/ui/workflow-runs` route 同步硬拦截，避免空流程直接 completed 造成“已运行但什么也没做”的假阳性。
+- ✅ 2026-06-05 追加：Start-only Workflow 仍可作为草稿保存，但所有运行入口都会要求至少存在一个可执行节点（Agent、Approval 或 Artifact）；前端 warning 也会说明“可保存草稿、运行前需添加可执行节点”，后端 `create_workflow_run` 和 Bridge `/ui/workflow-runs` route 同步硬拦截，避免空流程直接 completed 造成“已运行但什么也没做”的假阳性。
 - ✅ 2026-06-05 追加：Workflow 运行前会预检节点 Agent 的可运行性：缺 Chat Profile、默认 Chat Profile 不可用、Profile 不可用、Custom API 配置不完整、挂载 Skill 停用等确定失败会在创建 Run 前拦截；Workflow 节点设置预览和 Runs 目标预览也会显示同样原因，减少用户运行后才在详情页看到失败。
 - ✅ 2026-06-05 追加：Workflow Studio 的“保存并运行 Workflow”禁用原因会在运行区直接显示，空 Goal、校验错误、缺可执行节点或 Agent 不可运行时不再只依赖按钮 title/hover 才能发现原因。
 - ✅ 2026-06-05 追加：Chat 中手动 `@Workflow` 被引导到 Studio 时，引导消息会提供“打开 Workflow Studio”动作按钮，让 Workflow 触发边界更清晰：群聊协作继续走主模型/Agent，复用流程从 Workflow Studio / Runs 进入。
