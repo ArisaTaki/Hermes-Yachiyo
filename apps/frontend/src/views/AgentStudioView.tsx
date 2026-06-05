@@ -1430,6 +1430,13 @@ function workflowStepSummary(step: WorkflowStepRef, childRun: RunSpec | null): s
   return childRun?.result || step.payload || 'No result yet.';
 }
 
+function workflowStepArtifacts(childRun: RunSpec | null) {
+  return (childRun?.artifacts || []).filter((artifact) => (
+    String(artifact.kind || '').trim() !== 'context'
+    && Boolean(String(artifact.path || '').trim())
+  ));
+}
+
 function WorkflowRunPreview({
   agents,
   agentIssueById,
@@ -3957,6 +3964,7 @@ export function AgentStudioView() {
                         const childRun = step.childRunId ? runById.get(step.childRunId) || null : null;
                         const childStatus = childRun?.status || step.status || 'loading';
                         const summary = workflowStepSummary(step, childRun);
+                        const childArtifacts = workflowStepArtifacts(childRun);
                         return (
                           <article className={`workflow-child-result workflow-step-result ${step.kind}`} key={step.key}>
                             <div className="workflow-child-result-head">
@@ -3984,9 +3992,9 @@ export function AgentStudioView() {
                               label="展开完整节点结果"
                               defaultOpen={childStatus === 'failed' || childStatus === 'cancelled' || childStatus === 'approval_required'}
                             />
-                            {childRun?.artifacts?.length ? (
+                            {childRun && childArtifacts.length ? (
                               <div className="run-artifacts compact">
-                                {childRun.artifacts.map((artifact, artifactIndex) => {
+                                {childArtifacts.map((artifact, artifactIndex) => {
                                   const path = String(artifact.path || '');
                                   return (
                                     <button

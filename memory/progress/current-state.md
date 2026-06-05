@@ -49,7 +49,7 @@
 - ✅ 2026-06-05 追加：Workflow Studio 的“保存并运行 Workflow”禁用原因会在运行区直接显示，空 Goal、校验错误、缺可执行节点或 Agent 不可运行时不再只依赖按钮 title/hover 才能发现原因。
 - ✅ 2026-06-05 追加：Chat 中手动 `@Workflow` 被引导到 Studio 时，引导消息会提供“打开 Workflow Studio”动作按钮，让 Workflow 触发边界更清晰：群聊协作继续走主模型/Agent，复用流程从 Workflow Studio / Runs 进入。
 - ✅ Run Detail 已重做为任务、结果、Workflow Steps、Execution Timeline、Artifacts 的层级视图；History 可按 Agent / Workflow 分组、折叠，按完成、失败、进行中筛选，并能搜索目标、结果、Agent 名称、Run ID、timeline 与 artifact 线索，长任务和模型响应不再省略关键细节；主 History 只展示 Workflow 根 Run 与独立 Agent Run，Workflow 内部 child Agent Run 会从主列表隐藏，即使该 Workflow 是通过 delegation/统一委派入口创建，也不会把内部步骤刷进 Agent 历史卡片；Bridge artifact route 已覆盖从父 Workflow Run 的 artifact 列表打开 child Agent artifact，会按 `source_run_id` 读取真实子 Run 产物，避免详情页有按钮但点开 404。
-- ✅ 2026-06-05 追加：父 Workflow 聚合子 Agent 产物时会跳过 `context` artifact，只保留真实交付物引用；Run Detail、聊天气泡和主模型汇总里的产物数量不会再把运行上下文当成交付物。
+- ✅ 2026-06-05 追加：父 Workflow 聚合子 Agent 产物时会跳过 `context` artifact，只保留真实交付物引用；Run Detail、聊天气泡和主模型汇总里的产物数量不会再把运行上下文当成交付物；2026-06-06 追加：Workflow Steps 里每个子 Agent 的 compact artifact 按钮也会过滤 `context`，保留真实交付物，完整上下文仍可从子 Run 详情查看。
 - ✅ 2026-06-05 追加：Workflow Run Detail 会在对应 Workflow 定义仍存在时提供“打开 Workflow Studio”入口，用户从完成/失败/待审批 Run 看完步骤后可以直接回设计画布调整；Run History 分组和组内条目都会按更新时间稳定倒序，刚完成或刚失败的 Run 不会因为后端返回顺序藏到旧记录后面。
 - ✅ 2026-06-05 追加：Run Detail 不再保留任何“刷新后自动选中第一个 Run”的路径，空详情会要求用户明确选择历史或创建新 Run；完成/失败/取消后的详情页新增“准备重跑”和“重新运行”，前者把原目标和任务填回 Runs 面板便于修改，后者会复用当前 Agent Studio 的 Agent/Workflow 可运行性、权限和校验结果直接创建新 Run。
 - ✅ 2026-06-05 追加：Runs History 的状态筛选在窄宽度下改为稳定四列布局，分组 hover/选中态保留横向 padding，避免按钮被挤变形或 hover 紧贴边缘。
