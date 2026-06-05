@@ -3491,6 +3491,9 @@ class AgentRuntimeService:
         for artifact in child_run.get("artifacts") or []:
             if not isinstance(artifact, dict):
                 continue
+            artifact_kind = str(artifact.get("kind") or "").strip()
+            if artifact_kind == "context":
+                continue
             path = str(artifact.get("path") or "").strip()
             if not path:
                 continue
@@ -3503,7 +3506,7 @@ class AgentRuntimeService:
                     "source_runnable_id": str(child_run.get("runnable_id") or ""),
                     "source_runnable_name": str(child_run.get("runnable_name") or child_run.get("runnable_id") or ""),
                     "workflow_step_label": label,
-                    "artifact_kind": str(artifact.get("kind") or ""),
+                    "artifact_kind": artifact_kind,
                 }
             )
         return refs

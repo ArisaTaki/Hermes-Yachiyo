@@ -2220,6 +2220,7 @@ def test_workflow_parent_records_child_agent_artifact_refs(tmp_path, monkeypatch
             for artifact in run["artifacts"]
             if artifact.get("kind") == "workflow_child_artifact"
         ]
+        assert all(artifact.get("artifact_kind") != "context" for artifact in child_artifact_refs)
         design_ref = next(artifact for artifact in child_artifact_refs if artifact.get("path") == "design.md")
         assert design_ref["workflow_step_label"] == "Design"
         assert design_ref["source_runnable_name"] == "Design Artifact Agent"
