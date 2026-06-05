@@ -1008,9 +1008,11 @@ class ChatAPI:
                 goal=str(run.get("user_goal") or ""),
             )
         elif workflow_status == "approval_required" and waiting_child_approval:
+            waiting_context = self._workflow_child_approval_context(run, service)
             summary = (
-                f"{workflow_name} 正在等待子 Agent 审批。\n\n"
-                "处理对应子 Agent 的审批请求后，Workflow 会继续执行后续步骤。"
+                f"{workflow_name} 正在等待子 Agent 审批。"
+                f"{self._workflow_child_approval_notice(waiting_context)}\n\n"
+                "处理上述子 Agent 的审批请求后，Workflow 会继续执行后续步骤。"
             )
         elif workflow_status == "completed" and assistant_ids:
             summary = self._workflow_terminal_content(
@@ -1057,6 +1059,14 @@ class ChatAPI:
             "run_artifact_count": workflow_artifact_count,
             "run_artifacts": workflow_artifact_summaries,
         }
+        if waiting_child_approval:
+            waiting_context = self._workflow_child_approval_context(run, service)
+            if waiting_context.get("child_run_id"):
+                workflow_metadata["workflow_waiting_child_run_id"] = waiting_context["child_run_id"]
+            if waiting_context.get("tool"):
+                workflow_metadata["workflow_waiting_tool"] = waiting_context["tool"]
+            if waiting_context.get("workflow_node_label"):
+                workflow_metadata["workflow_waiting_node"] = waiting_context["workflow_node_label"]
         workflow_message_id = self._session.add_assistant_message(
             summary,
             error=summary if workflow_status in {"failed", "cancelled"} else None,
@@ -1100,6 +1110,59 @@ class ChatAPI:
             and bool(str(event.get("child_run_id") or "").strip())
             for event in run_result.get("timeline") or []
         )
+
+    @staticmethod
+    def _workflow_child_approval_context(run_result: dict[str, Any], service: Any | None = None) -> dict[str, str]:
+        if not ChatAPI._workflow_waiting_for_child_approval(run_result):
+            return {}
+        timeline = [event for event in (run_result.get("timeline") or []) if isinstance(event, dict)]
+        for event in reversed(timeline):
+            if str(event.get("event") or "") != "workflow.run.approval_required":
+                continue
+            child_run_id = str(event.get("child_run_id") or "").strip()
+            if not child_run_id:
+                continue
+            context = {
+                "child_run_id": child_run_id,
+                "workflow_node_id": str(event.get("workflow_node_id") or "").strip(),
+                "workflow_node_kind": str(event.get("workflow_node_kind") or "").strip(),
+                "workflow_node_label": str(event.get("workflow_node_label") or event.get("detail") or "").strip(),
+                "child_name": "",
+                "tool": "",
+            }
+            if service is not None:
+                try:
+                    child = service.get_run(child_run_id)
+                    context["child_name"] = str(
+                        child.get("runnable_name")
+                        or child.get("runnable_id")
+                        or ""
+                    ).strip()
+                    pending = child.get("pending_approval") if isinstance(child.get("pending_approval"), dict) else {}
+                    context["tool"] = str(pending.get("tool") or "").strip()
+                except Exception:
+                    logger.debug("读取 Workflow 等待审批子 Run 失败: %s", child_run_id, exc_info=True)
+            return context
+        return {}
+
+    @staticmethod
+    def _workflow_child_approval_notice(context: dict[str, str]) -> str:
+        if not context:
+            return ""
+        child_name = str(context.get("child_name") or "").strip()
+        node_label = str(context.get("workflow_node_label") or "").strip()
+        node_kind = str(context.get("workflow_node_kind") or "").strip()
+        tool = str(context.get("tool") or "").strip()
+        target = child_name or node_label or str(context.get("child_run_id") or "").strip()
+        lines: list[str] = []
+        if target:
+            lines.append(f"等待对象：{target}")
+        if node_label:
+            suffix = f"（{node_kind}）" if node_kind else ""
+            lines.append(f"Workflow 节点：{node_label}{suffix}")
+        if tool:
+            lines.append(f"审批工具：{tool}")
+        return "\n" + "\n".join(lines) if lines else ""
 
     @staticmethod
     def _agent_run_progress_from_timeline(sender: dict[str, Any], run_result: dict[str, Any]) -> tuple[str, str]:
@@ -2658,23 +2721,32 @@ class ChatAPI:
             ):
                 workflow_sender = metadata.get("sender") if isinstance(metadata.get("sender"), dict) else {}
                 workflow_name = str(workflow_sender.get("nickname") or workflow_sender.get("name") or run.get("runnable_name") or "Workflow")
+                waiting_context = self._workflow_child_approval_context(run, service)
                 summary = (
-                    f"{workflow_name} 正在等待子 Agent 审批。\n\n"
-                    "处理对应子 Agent 的审批请求后，Workflow 会继续执行后续步骤。"
+                    f"{workflow_name} 正在等待子 Agent 审批。"
+                    f"{self._workflow_child_approval_notice(waiting_context)}\n\n"
+                    "处理上述子 Agent 的审批请求后，Workflow 会继续执行后续步骤。"
                 )
+                metadata_update = {
+                    "run_id": run.get("run_id") or "",
+                    "workflow_run_id": run.get("run_id") or "",
+                    "run_group_id": run.get("run_group_id") or "",
+                    "run_status": "processing",
+                    "workflow_status": normalized_status,
+                    "pending_approval": {},
+                }
+                if waiting_context.get("child_run_id"):
+                    metadata_update["workflow_waiting_child_run_id"] = waiting_context["child_run_id"]
+                if waiting_context.get("tool"):
+                    metadata_update["workflow_waiting_tool"] = waiting_context["tool"]
+                if waiting_context.get("workflow_node_label"):
+                    metadata_update["workflow_waiting_node"] = waiting_context["workflow_node_label"]
                 self._session.update_assistant_message(
                     msg.message_id,
                     summary,
                     status=MessageStatus.PROCESSING,
                     error=None,
-                    metadata={
-                        "run_id": run.get("run_id") or "",
-                        "workflow_run_id": run.get("run_id") or "",
-                        "run_group_id": run.get("run_group_id") or "",
-                        "run_status": "processing",
-                        "workflow_status": normalized_status,
-                        "pending_approval": {},
-                    },
+                    metadata=metadata_update,
                 )
                 continue
             if normalized_status in {"processing", "pending"}:

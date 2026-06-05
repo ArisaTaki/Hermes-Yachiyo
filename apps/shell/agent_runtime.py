@@ -3683,7 +3683,19 @@ class AgentRuntimeService:
                 root_group=root_group,
             )
         except Exception as exc:
-            timeline.append(self._timeline("workflow.run.failed", str(exc)))
+            failed_event_extra = dict(child_node_info)
+            if child_run_id:
+                failed_event_extra["child_run_id"] = child_run_id
+            if child_status:
+                failed_event_extra["child_run_status"] = child_status
+            timeline.append(
+                self._timeline(
+                    "workflow.run.failed",
+                    str(exc),
+                    status="failed",
+                    **failed_event_extra,
+                )
+            )
             result = self._update_run(
                 str(workflow_run["run_id"]),
                 status="failed",

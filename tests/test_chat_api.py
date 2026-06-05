@@ -612,6 +612,9 @@ def test_workflow_waiting_for_child_agent_approval_counts_only_child(tmp_path, m
         assert child_message["metadata"]["pending_approval"]["tool"] == "terminal.run"
         assert workflow_message["status"] == "processing"
         assert "正在等待子 Agent 审批" in workflow_message["content"]
+        assert "等待对象：Needs Approval" in workflow_message["content"]
+        assert "Workflow 节点：Needs Approval（agent）" in workflow_message["content"]
+        assert "审批工具：terminal.run" in workflow_message["content"]
         assert workflow_message["metadata"]["run_status"] == "processing"
         assert workflow_message["metadata"]["workflow_status"] == "approval_required"
         assert workflow_message["metadata"]["pending_approval"] == {}
@@ -619,6 +622,9 @@ def test_workflow_waiting_for_child_agent_approval_counts_only_child(tmp_path, m
         group = service.get_run_group(run["run_group_id"])
         child_run_ids = [run_id for run_id in group["child_run_ids"] if run_id != run["run_id"]]
         assert len(child_run_ids) == 1
+        assert workflow_message["metadata"]["workflow_waiting_child_run_id"] == child_run_ids[0]
+        assert workflow_message["metadata"]["workflow_waiting_node"] == "Needs Approval"
+        assert workflow_message["metadata"]["workflow_waiting_tool"] == "terminal.run"
 
         approved_child = service.approve_run_approval(child_run_ids[0])
         parent_after = service.get_run(run["run_id"])

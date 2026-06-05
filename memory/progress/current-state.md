@@ -19,6 +19,7 @@
 - ✅ Chat 的会话列表和 session info 也会先同步当前会话里的主模型 Task / Agent / Workflow Run 状态：即使没有打开消息流，已完成的 Agent / Workflow Run 也会从 processing 刷到完成态，孤儿 processing 消息会被修复为 failed，避免列表和气泡状态互相矛盾。
 - ✅ 会话列表、消息 payload 和 session info 已暴露 `approval_count`；列表预览和右侧状态会优先显示“待审批 / 待审批 N”，审批卡和输入框上方提醒也会同时识别 Agent `run_id/run_status` 与 Workflow `workflow_run_id/workflow_status`，Workflow 自身审批会把 `pending_approval`、审批节点和当前上下文写入聊天消息，避免用户切走群聊后只看到“处理中”而错过或看不懂 Agent/Workflow 的确认请求。
 - ✅ Workflow 因子 Agent 工具审批暂停时，Chat 只把真正有 `pending_approval.tool` 的子 Agent Run 计为待审批；父 Workflow 消息显示“正在等待子 Agent 审批”的进度说明，不再变成第二个可点击但不可操作的审批卡，避免用户连续点批准却不知道下一项是什么。
+- ✅ 2026-06-06 追加：父 Workflow 等待子 Agent 工具审批时，聊天摘要会直接显示等待对象、Workflow 节点和审批工具，并把 `workflow_waiting_child_run_id` / `workflow_waiting_node` / `workflow_waiting_tool` 写入 metadata，给前端后续在输入区附近突出审批留下稳定入口；子 Agent 审批通过后如果父 Workflow 恢复失败，失败 timeline 也会保留关联 `child_run_id`、子 Run 状态和节点信息，Run Detail 能定位到具体失败节点。
 - ✅ 2026-06-05 追加：子 Agent 工具审批通过并带动父 Workflow 继续后，Chat 会把子 Agent 消息和父 Workflow 消息一起同步到终态，`processing_count` / `approval_count` 会归零；父 Workflow 终态会按 Workflow 语义展示完成/失败/取消，只有缺少状态上下文的 result 才补 Workflow 标题，避免把子 Agent 输出直接塞成一条不明所以的流程消息。
 - ✅ Chat 里直接触发的 Agent/Workflow 指令结果也统一按 `run_status/status` 和 `run_id/agent_run_id/workflow_run_id` 解释：进行中会后台轮询对应 Run，待审批会优先显示等待审批文案，避免不同返回字段导致前端不跟进。
 - ✅ 聊天消息底部状态也区分主模型流式回复和 Agent/Workflow Run：主模型仍显示“输入中”，挂载 Run metadata 的 Agent/Workflow 消息显示“处理中”，避免用户把后台执行误读成普通打字状态。

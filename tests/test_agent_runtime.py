@@ -2457,6 +2457,83 @@ def test_workflow_resumes_after_child_agent_approval(tmp_path, monkeypatch):
         service.close()
 
 
+def test_workflow_resume_failure_keeps_child_node_context(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    responses = iter(["approval", "Agent A complete"])
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        response = next(responses)
+        if response == "approval":
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_terminal",
+                        "type": "function",
+                        "function": {"name": "terminal_run", "arguments": json.dumps({"command": "printf approved"})},
+                    }
+                ],
+            }
+        assert messages[-1]["role"] == "tool"
+        return {"content": response}
+
+    def fail_resume(_run):
+        raise AgentRuntimeError("workflow snapshot unavailable")
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Needs Approval",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        workflow = service.create_workflow(
+            {
+                "name": "Approval Resume Failure Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {"id": "a", "type": "agent", "data": {"label": "Needs Approval", "agent_id": agent["agent_id"]}},
+                    {"id": "summary", "type": "artifact", "data": {"label": "Summary"}},
+                ],
+                "edges": [
+                    {"source": "start", "target": "a"},
+                    {"source": "a", "target": "summary"},
+                ],
+            }
+        )
+
+        run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "Run approval flow"})
+        group = service.get_run_group(run["run_group_id"])
+        child_run_id = next(run_id for run_id in group["child_run_ids"] if run_id != run["run_id"])
+        monkeypatch.setattr(service, "_workflow_for_run_resume", fail_resume)
+
+        approved_child = service.approve_run_approval(child_run_id)
+        parent = service.get_run(run["run_id"])
+
+        assert approved_child["status"] == "completed"
+        assert parent["status"] == "failed"
+        assert parent["result"] == "workflow snapshot unavailable"
+        failed_event = next(event for event in parent["timeline"] if event["event"] == "workflow.run.failed")
+        assert failed_event["workflow_node_id"] == "a"
+        assert failed_event["workflow_node_kind"] == "agent"
+        assert failed_event["workflow_node_label"] == "Needs Approval"
+        assert failed_event["child_run_id"] == child_run_id
+        assert failed_event["child_run_status"] == "completed"
+        assert service.get_run_group(run["run_group_id"])["status"] == "failed"
+    finally:
+        service.close()
+
+
 def test_workflow_parent_records_child_agent_rejection_node_info(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
