@@ -981,6 +981,19 @@ def test_direct_group_agent_summary_includes_user_followups(tmp_path, monkeypatc
             TaskStatus.COMPLETED,
             result="收到补充。",
         )
+        natural_followup = api.send_message("@主模型 把最终说明改成按移动端验收点输出")
+        assert natural_followup["ok"] is True
+        natural_followup_message = next(
+            message
+            for message in api.get_messages()["messages"]
+            if message["id"] == natural_followup["message_id"]
+        )
+        assert natural_followup_message["metadata"]["group_followup_for_agent_message_ids"] == [sent["assistant_message_id"]]
+        runtime.state.update_task_status(
+            natural_followup["task_id"],
+            TaskStatus.COMPLETED,
+            result="收到自然补充。",
+        )
         separate_goal = api.send_message("@主模型 另一个目标：再做一个 logo 方向")
         assert separate_goal["ok"] is True
         runtime.state.update_task_status(
@@ -1025,6 +1038,7 @@ def test_direct_group_agent_summary_includes_user_followups(tmp_path, monkeypatc
         assert "用户原始请求：@Design 做一版视觉方向" in summary_task.description
         assert "用户后续补充/纠偏：" in summary_task.description
         assert "- 补充：这版先按移动端优先，颜色不要太亮" in summary_task.description
+        assert "- @主模型 把最终说明改成按移动端验收点输出" in summary_task.description
         assert "另一个目标：再做一个 logo 方向" not in summary_task.description
         assert "安排第二轮视觉目标" not in summary_task.description
         assert "汇报：设计方向已经整理完成。" in summary_task.description
