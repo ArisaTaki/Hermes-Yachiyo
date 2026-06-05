@@ -48,6 +48,12 @@ type ChatActivityEvent = {
   status?: string;
   duration_seconds?: number | null;
   created_at?: string;
+  metadata?: {
+    run_id?: string;
+    workflow_run_id?: string;
+    run_status?: string;
+    pending_approval?: Record<string, unknown>;
+  } & Record<string, unknown>;
 };
 
 type ChatParticipant = {
@@ -2635,6 +2641,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
         <MessageActivityList
           events={message.activity_events || []}
           messageStatus={message.status}
+          onOpenRunDetails={onOpenRunDetails}
           progressLabel={message.progress_label}
         />
         {showApprovalActions ? (
@@ -2695,9 +2702,10 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   );
 }
 
-function MessageActivityList({ events, messageStatus, progressLabel }: {
+function MessageActivityList({ events, messageStatus, onOpenRunDetails, progressLabel }: {
   events: ChatActivityEvent[];
   messageStatus?: string;
+  onOpenRunDetails: (runId: string) => void;
   progressLabel?: string;
 }) {
   const rows = events.slice(0, 4);
@@ -2710,14 +2718,20 @@ function MessageActivityList({ events, messageStatus, progressLabel }: {
     <div className="message-activity-list" aria-label="执行活动">
       {visibleRows.map((event, index) => {
         const displayStatus = activityDisplayStatus(event.status, messageStatus);
+        const runId = activityRunId(event);
         return (
-          <div className={`message-activity-row ${activityStatusClass(displayStatus)}`} key={`${event.event_id || event.title || 'activity'}-${index}`}>
+          <div className={`message-activity-row ${activityStatusClass(displayStatus)}${runId ? ' has-detail' : ''}`} key={`${event.event_id || event.title || 'activity'}-${index}`}>
             <span className="message-activity-icon" aria-hidden="true">{activityStatusIcon(displayStatus)}</span>
             <span className="message-activity-text">
               <strong>{event.title || event.tool_name || 'Hermes 活动'}</strong>
               {event.detail ? <small>{event.detail}</small> : null}
             </span>
             <time>{formatShortTime(event.created_at)}</time>
+            {runId ? (
+              <button type="button" className="message-activity-detail-button" onClick={() => onOpenRunDetails(runId)}>
+                详情
+              </button>
+            ) : null}
           </div>
         );
       })}
@@ -3725,9 +3739,14 @@ function activityLabel(event?: ChatActivityEvent | null) {
   return String(event.title || event.detail || event.tool_name || '').trim();
 }
 
+function activityRunId(event?: ChatActivityEvent | null) {
+  return String(event?.metadata?.run_id || event?.metadata?.workflow_run_id || '').trim();
+}
+
 function activityStatusClass(status?: string) {
   if (status === 'completed' || status === 'success') return 'completed';
   if (status === 'failed' || status === 'error') return 'failed';
+  if (status === 'approval_required') return 'approval';
   if (status === 'progress' || status === 'running') return 'running';
   return 'status';
 }
@@ -3735,6 +3754,7 @@ function activityStatusClass(status?: string) {
 function activityStatusIcon(status?: string) {
   if (status === 'completed' || status === 'success') return '✓';
   if (status === 'failed' || status === 'error') return '!';
+  if (status === 'approval_required') return '!';
   return '';
 }
 

@@ -609,12 +609,40 @@ def _run_yachiyo_delegation(request: dict[str, str]) -> dict[str, Any]:
 
 def _format_yachiyo_delegation_result(result: dict[str, Any]) -> str:
     runnable = result.get("runnable") or {}
-    return (
-        f"Runnable: {runnable.get('kind') or ''} {runnable.get('name') or runnable.get('id') or ''}\n"
-        f"Run: {result.get('run_id') or ''}\n"
-        f"Status: {result.get('status') or ''}\n"
-        f"Result:\n{result.get('result') or ''}"
-    ).strip()
+    lines = [
+        f"Runnable: {runnable.get('kind') or ''} {runnable.get('name') or runnable.get('id') or ''}",
+        f"Run: {result.get('run_id') or ''}",
+        f"Status: {result.get('status') or ''}",
+    ]
+    pending = result.get("pending_approval") if isinstance(result.get("pending_approval"), dict) else {}
+    if pending:
+        lines.append("Pending approval:")
+        tool = str(pending.get("tool") or "").strip()
+        if tool:
+            lines.append(f"- Tool: {tool}")
+        preview = pending.get("input_preview")
+        if preview:
+            try:
+                preview_text = json.dumps(preview, ensure_ascii=False, indent=2)
+            except TypeError:
+                preview_text = str(preview)
+            lines.append(f"- Request:\n{preview_text[:2000]}")
+    lines.append(f"Result:\n{result.get('result') or ''}")
+    return "\n".join(lines).strip()
+
+
+def _yachiyo_delegation_activity_status(result: dict[str, Any]) -> str:
+    status = str(result.get("status") or "").strip()
+    if status == "approval_required":
+        return "approval_required"
+    return "completed" if result.get("ok") else "failed"
+
+
+def _yachiyo_delegation_activity_title(target: str, result: dict[str, Any]) -> str:
+    status = str(result.get("status") or "").strip()
+    if status == "approval_required":
+        return f"{target} 等待审批"
+    return f"{target} 委派完成" if result.get("ok") else f"{target} 委派失败"
 
 
 def _build_yachiyo_delegation_followup(
@@ -1920,16 +1948,19 @@ class HermesExecutor(ExecutionStrategy):
                         )
                     else:
                         delegation_text = _format_yachiyo_delegation_result(delegation_result)
+                        activity_status = _yachiyo_delegation_activity_status(delegation_result)
                         on_activity(
                             {
                                 "phase": "subagent",
-                                "title": f"{target} 委派完成",
+                                "title": _yachiyo_delegation_activity_title(target, delegation_result),
                                 "detail": delegation_text[:500],
-                                "status": "completed" if delegation_result.get("ok") else "failed",
+                                "status": activity_status,
                                 "tool_name": "yachiyo.delegation",
                                 "metadata": {
                                     "run_id": delegation_result.get("run_id", ""),
                                     "run_group_id": delegation_result.get("run_group_id", ""),
+                                    "run_status": delegation_result.get("status", ""),
+                                    "pending_approval": delegation_result.get("pending_approval", {}),
                                 },
                             }
                         )

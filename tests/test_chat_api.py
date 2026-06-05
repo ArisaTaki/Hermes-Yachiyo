@@ -4965,6 +4965,7 @@ def test_get_messages_and_sessions_include_activity_events(tmp_path, monkeypatch
             title="正在运行脚本",
             detail="python build.py",
             status="running",
+            metadata={"run_id": "agent_run_activity", "run_status": "processing"},
         )
         runtime.chat_session.upsert_assistant_message(
             task_id=task_id,
@@ -4978,6 +4979,8 @@ def test_get_messages_and_sessions_include_activity_events(tmp_path, monkeypatch
         assert user["progress_label"] == ""
         assert user["activity_events"] == []
         assert assistant["activity_events"][0]["title"] == "正在运行脚本"
+        assert assistant["activity_events"][0]["metadata"]["run_id"] == "agent_run_activity"
+        assert assistant["activity_events"][0]["metadata"]["run_status"] == "processing"
 
         sessions = api.list_sessions()["sessions"]
         current = next(item for item in sessions if item["session_id"] == runtime.chat_session.session_id)

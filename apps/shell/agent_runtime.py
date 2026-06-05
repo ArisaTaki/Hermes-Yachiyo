@@ -4435,6 +4435,7 @@ class AgentRuntimeService:
             "run_group_id": run.get("run_group_id", ""),
             "status": run["status"],
             "result": run.get("result") or "",
+            "pending_approval": run.get("pending_approval") if isinstance(run.get("pending_approval"), dict) else {},
         }
 
     def parse_known_chat_runnable(self, text: str) -> tuple[str, str] | None:

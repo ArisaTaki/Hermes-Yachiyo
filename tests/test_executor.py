@@ -37,6 +37,7 @@ from apps.core.executor import (
 import apps.core.executor as executor_mod
 import apps.core.hermes_stream_bridge as bridge_mod
 from apps.core.chat_session import ChatSession, MessageStatus
+from apps.core.activity_store import ActivityStore
 from apps.core.chat_store import ChatStore
 from packages.protocol.enums import RiskLevel, TaskStatus, TaskType
 from packages.protocol.schemas import TaskInfo
@@ -314,6 +315,24 @@ class TestHermesExecutor:
             "goal": "执行发布检查",
         }
 
+    def test_format_yachiyo_delegation_result_includes_pending_approval(self):
+        result = executor_mod._format_yachiyo_delegation_result({
+            "ok": False,
+            "runnable": {"kind": "agent", "name": "Coding Agent"},
+            "run_id": "agent_run_waiting",
+            "status": "approval_required",
+            "result": "",
+            "pending_approval": {
+                "tool": "terminal.run",
+                "input_preview": {"command": "python3 fibonacci.py 5"},
+            },
+        })
+
+        assert "Status: approval_required" in result
+        assert "Pending approval:" in result
+        assert "- Tool: terminal.run" in result
+        assert "python3 fibonacci.py 5" in result
+
     @pytest.mark.asyncio
     async def test_call_hermes_runs_yachiyo_delegation_before_final_reply(self, monkeypatch):
         calls: list[str] = []
@@ -350,6 +369,59 @@ class TestHermesExecutor:
         assert len(calls) == 2
         assert "catalog" in calls[0]
         assert "事实核对完成" in calls[1]
+
+    @pytest.mark.asyncio
+    async def test_call_hermes_records_delegation_approval_activity(self, tmp_path, monkeypatch):
+        calls: list[str] = []
+        activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+
+        async def fake_invoke(description, **_kwargs):
+            calls.append(description)
+            if len(calls) == 1:
+                return HermesInvokeResult(
+                    success=True,
+                    stdout='{"action":"run_yachiyo_agent","agent":"Coding Agent","goal":"写一个 CLI 工具"}',
+                    returncode=0,
+                    hermes_session_id="sid",
+                )
+            return HermesInvokeResult(success=True, stdout="需要审批后继续。", returncode=0, hermes_session_id="sid")
+
+        monkeypatch.setattr(executor_mod, "invoke_hermes_cli", fake_invoke)
+        monkeypatch.setattr(executor_mod, "_yachiyo_delegation_catalog_context", lambda: "catalog")
+        monkeypatch.setattr("apps.core.activity_store.get_activity_store", lambda: activity_store)
+        monkeypatch.setattr(
+            executor_mod,
+            "_run_yachiyo_delegation",
+            lambda request: {
+                "ok": False,
+                "runnable": {"kind": request["kind"], "name": request["name"], "id": "agent_coding"},
+                "run_id": "agent_run_waiting",
+                "run_group_id": "run_group_waiting",
+                "status": "approval_required",
+                "result": "",
+                "pending_approval": {
+                    "tool": "terminal.run",
+                    "input_preview": {"command": "python3 fibonacci.py 5"},
+                },
+            },
+        )
+        task = _make_task("需要写代码")
+        task.chat_session_id = "chat-session-1"
+
+        try:
+            result = await HermesExecutor(chat_session=ChatSession(session_id="chat-session-1")).run(task)
+            events = activity_store.list_events(session_id="chat-session-1", limit=5, key_only=True)
+        finally:
+            activity_store.close()
+
+        approval_event = next(event for event in events if event.status == "approval_required")
+        metadata = approval_event.to_dict()["metadata"]
+        assert result == "需要审批后继续。"
+        assert approval_event.title == "Coding Agent 等待审批"
+        assert approval_event.tool_name == "yachiyo.delegation"
+        assert metadata["run_id"] == "agent_run_waiting"
+        assert metadata["run_status"] == "approval_required"
+        assert metadata["pending_approval"]["tool"] == "terminal.run"
 
     def test_call_hermes_group_mode_returns_dispatch_for_chat_layer(self, monkeypatch):
         calls: list[str] = []

@@ -8895,8 +8895,17 @@ body.electron-window .hy-traffic {
   font-size: 11px;
 }
 
+.hy-content .open-chat-shell .message-activity-row.has-detail {
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+}
+
 .hy-content .open-chat-shell .message-activity-row.running {
   border-color: oklch(82% 0.135 76 / 0.18);
+}
+
+.hy-content .open-chat-shell .message-activity-row.approval {
+  border-color: oklch(82% 0.135 76 / 0.32);
+  background: oklch(82% 0.135 76 / 0.07);
 }
 
 .hy-content .open-chat-shell .message-activity-row.failed {
@@ -8932,6 +8941,10 @@ body.electron-window .hy-traffic {
   color: var(--hy-danger);
 }
 
+.hy-content .open-chat-shell .message-activity-row.approval .message-activity-icon {
+  color: var(--hy-warning);
+}
+
 .hy-content .open-chat-shell .message-activity-text {
   display: grid;
   gap: 1px;
@@ -8953,6 +8966,25 @@ body.electron-window .hy-traffic {
 .hy-content .open-chat-shell .message-activity-text small,
 .hy-content .open-chat-shell .message-activity-row time {
   color: var(--hy-faint);
+}
+
+.hy-content .open-chat-shell .message-activity-detail-button {
+  height: 22px;
+  min-width: 42px;
+  padding: 0 8px;
+  border: 1px solid oklch(66% 0.12 188 / 0.26);
+  border-radius: 6px;
+  background: oklch(66% 0.12 188 / 0.08);
+  color: var(--hy-teal);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.hy-content .open-chat-shell .message-activity-detail-button:hover {
+  border-color: oklch(66% 0.12 188 / 0.44);
+  background: oklch(66% 0.12 188 / 0.13);
+  color: var(--hy-fg);
 }
 
 .hy-content .open-chat-shell .loading-dots {
