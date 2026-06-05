@@ -4994,6 +4994,135 @@ def test_get_messages_and_sessions_include_activity_events(tmp_path, monkeypatch
         store.close()
 
 
+def test_summarize_delegated_run_creates_main_followup_task(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+
+    run = {
+        "run_id": "agent_run_delegated",
+        "run_group_id": "run_group_delegated",
+        "kind": "agent_run",
+        "runnable_id": "agent_coding",
+        "runnable_name": "Coding Agent",
+        "status": "completed",
+        "user_goal": "写一个 CLI 工具",
+        "result": "CLI 工具已经完成。",
+        "artifacts": [
+            {"path": "scripts/tool.py", "kind": "code"},
+            {"path": "agent-context.md", "kind": "context"},
+        ],
+    }
+
+    class FakeAgentRuntimeService:
+        def get_run(self, run_id: str):
+            assert run_id == "agent_run_delegated"
+            return run
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeAgentRuntimeService())
+
+    try:
+        sent = api.send_message("帮我派一个 Agent 写脚本")
+        task_id = sent["task_id"]
+        runtime.chat_session.upsert_assistant_message(
+            task_id=task_id,
+            content=(
+                "我会交给 Coding Agent 处理。\n"
+                '<yachiyo_delegation>{"action":"run_yachiyo_agent","agent":"Coding Agent","goal":"写一个 CLI 工具"}</yachiyo_delegation>'
+            ),
+            status=MessageStatus.COMPLETED,
+        )
+        activity_store.record_event(
+            session_id=runtime.chat_session.session_id,
+            task_id=task_id,
+            tool_name="yachiyo.delegation",
+            phase="subagent",
+            title="Coding Agent 等待审批",
+            detail="Status: approval_required",
+            status="approval_required",
+            metadata={
+                "run_id": "agent_run_delegated",
+                "run_group_id": "run_group_delegated",
+                "run_status": "approval_required",
+                "pending_approval": {"tool": "terminal.run"},
+            },
+        )
+
+        result = api.summarize_delegated_run("agent_run_delegated")
+        repeat = api.summarize_delegated_run("agent_run_delegated")
+        summary_message = next(
+            message for message in runtime.chat_session.get_all_messages()
+            if message.metadata.get("delegated_run_summary_for_run_id") == "agent_run_delegated"
+        )
+        summary_task = runtime.state.get_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["summary_created"] is True
+        assert repeat["summary_created"] is False
+        assert summary_message.status == MessageStatus.PROCESSING
+        assert summary_message.metadata["sender"]["kind"] == "main"
+        assert summary_message.metadata["delegated_run_source_task_id"] == task_id
+        assert summary_task is not None
+        assert "[Yachiyo 自动委派 Run 汇总]" in summary_task.description
+        assert "用户原始请求：帮我派一个 Agent 写脚本" in summary_task.description
+        assert "我会交给 Coding Agent 处理。" in summary_task.description
+        assert "run_yachiyo_agent" not in summary_task.description
+        assert "Coding Agent：已完成" in summary_task.description
+        assert "任务：写一个 CLI 工具" in summary_task.description
+        assert "汇报：CLI 工具已经完成。" in summary_task.description
+        assert "产物：scripts/tool.py (code)" in summary_task.description
+    finally:
+        activity_store.close()
+        store.close()
+
+
+def test_summarize_delegated_run_waits_for_terminal_status(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+
+    class FakeAgentRuntimeService:
+        def get_run(self, _run_id: str):
+            return {
+                "run_id": "agent_run_waiting",
+                "run_group_id": "run_group_waiting",
+                "kind": "agent_run",
+                "runnable_id": "agent_coding",
+                "runnable_name": "Coding Agent",
+                "status": "approval_required",
+                "user_goal": "写一个 CLI 工具",
+                "result": "",
+                "artifacts": [],
+            }
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeAgentRuntimeService())
+
+    try:
+        sent = api.send_message("帮我派一个 Agent 写脚本")
+        activity_store.record_event(
+            session_id=runtime.chat_session.session_id,
+            task_id=sent["task_id"],
+            tool_name="yachiyo.delegation",
+            phase="subagent",
+            title="Coding Agent 等待审批",
+            status="approval_required",
+            metadata={"run_id": "agent_run_waiting", "run_status": "approval_required"},
+        )
+
+        result = api.summarize_delegated_run("agent_run_waiting")
+
+        assert result["ok"] is True
+        assert result["summary_created"] is False
+        assert result["reason"] == "not_terminal"
+        assert not any(
+            message.metadata.get("delegated_run_summary_for_run_id") == "agent_run_waiting"
+            for message in runtime.chat_session.get_all_messages()
+        )
+    finally:
+        activity_store.close()
+        store.close()
+
+
 def test_get_messages_hides_internal_reasoning_activity(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))

@@ -65,6 +65,10 @@ class RetryChatMessageRequest(BaseModel):
     message_id: str
 
 
+class SummarizeDelegatedRunRequest(BaseModel):
+    run_id: str
+
+
 class CreateChatGroupRequest(BaseModel):
     name: str = ""
     avatar_url: str = ""
@@ -585,6 +589,11 @@ async def send_chat_message(request: SendChatMessageRequest) -> dict[str, Any]:
 @router.post("/chat/messages/retry")
 async def retry_chat_message(request: RetryChatMessageRequest) -> dict[str, Any]:
     return ChatAPI(get_runtime()).retry_message(request.message_id)
+
+
+@router.post("/chat/delegated-run-summary")
+async def summarize_delegated_run(request: SummarizeDelegatedRunRequest) -> dict[str, Any]:
+    return ChatAPI(get_runtime()).summarize_delegated_run(request.run_id)
 
 
 @router.post("/chat/groups")

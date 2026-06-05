@@ -468,6 +468,55 @@ class ChatAPI:
             logger.error("发送消息失败: %s", exc)
             return {"ok": False, "error": str(exc)}
 
+    def summarize_delegated_run(self, run_id: str) -> Dict[str, Any]:
+        """Create a main-model follow-up task for an auto-delegated Agent/Workflow run."""
+        run_id = str(run_id or "").strip()
+        if not run_id:
+            return {"ok": False, "error": "Run ID 不能为空"}
+        if self._delegated_run_summary_message(run_id) is not None:
+            return {"ok": True, "summary_created": False, "run_id": run_id, "reason": "already_exists"}
+        try:
+            run = get_agent_runtime_service().get_run(run_id)
+        except KeyError:
+            return {"ok": False, "error": "Run 不存在"}
+        except AgentRuntimeError as exc:
+            return {"ok": False, "error": str(exc)}
+
+        status = self._normalize_agent_run_status(str(run.get("status") or ""))
+        if status not in {"completed", "failed", "cancelled"}:
+            return {"ok": True, "summary_created": False, "run_id": run_id, "run_status": status, "reason": "not_terminal"}
+
+        activity = self._delegated_run_activity(run_id)
+        if activity is None:
+            return {"ok": True, "summary_created": False, "run_id": run_id, "run_status": status, "reason": "activity_not_found"}
+
+        task = self._state.create_task(
+            task_type=TaskType.GENERAL,
+            description=self._delegated_run_summary_task_description(run, activity),
+            chat_session_id=self._session.session_id,
+        )
+        message_id = self._session.upsert_assistant_message(
+            task_id=task.task_id,
+            content="",
+            status=MessageStatus.PROCESSING,
+            metadata={
+                "sender": self._main_model_sender_from_runtime(),
+                "delegated_run_summary_for_run_id": run_id,
+                "delegated_run_source_task_id": activity.get("task_id", ""),
+                "run_id": run_id,
+                "run_group_id": run.get("run_group_id", ""),
+                "run_status": status,
+            },
+        )
+        return {
+            "ok": True,
+            "summary_created": True,
+            "message_id": message_id,
+            "task_id": task.task_id,
+            "run_id": run_id,
+            "run_status": status,
+        }
+
     def _handle_runnable_command(
         self,
         text: str,
@@ -3175,6 +3224,91 @@ class ChatAPI:
             },
         )
 
+    def _delegated_run_summary_message(self, run_id: str) -> ChatMessage | None:
+        run_id = str(run_id or "").strip()
+        if not run_id:
+            return None
+        for msg in self._session.get_all_messages():
+            metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+            if str(metadata.get("delegated_run_summary_for_run_id") or "").strip() == run_id:
+                return msg
+        return None
+
+    def _delegated_run_activity(self, run_id: str) -> dict[str, Any] | None:
+        run_id = str(run_id or "").strip()
+        if not run_id:
+            return None
+        try:
+            events = get_activity_store().list_events(
+                session_id=self._session.session_id,
+                query=run_id,
+                tool="yachiyo.delegation",
+                phase="subagent",
+                limit=50,
+                key_only=True,
+            )
+        except Exception:
+            logger.debug("读取自动委派 activity 失败: run_id=%s", run_id, exc_info=True)
+            return None
+        for event in events:
+            event_dict = event.to_dict()
+            metadata = event_dict.get("metadata") if isinstance(event_dict.get("metadata"), dict) else {}
+            if str(metadata.get("run_id") or "").strip() == run_id:
+                return event_dict
+        return None
+
+    def _delegated_run_summary_task_description(self, run: dict[str, Any], activity: dict[str, Any]) -> str:
+        source_task_id = str(activity.get("task_id") or "").strip()
+        user_request = ""
+        main_reply = ""
+        if source_task_id:
+            for msg in self._session.get_all_messages():
+                if msg.task_id != source_task_id:
+                    continue
+                if msg.role == MessageRole.USER and not user_request:
+                    user_request = str(msg.content or "").strip()
+                elif msg.role == MessageRole.ASSISTANT and not main_reply:
+                    main_reply = str(msg.content or "").strip()
+        status = self._normalize_agent_run_status(str(run.get("status") or ""))
+        runnable_name = str(run.get("runnable_name") or run.get("runnable_id") or "Yachiyo Agent").strip() or "Yachiyo Agent"
+        goal = str(run.get("user_goal") or "").strip()
+        result = str(run.get("result") or "").strip()
+        artifact_count, artifact_summaries = self._visible_run_artifact_summaries(run)
+
+        lines = [
+            "[Yachiyo 自动委派 Run 汇总]",
+            "你是当前对话的主模型。你之前自动委派了一个 Agent/Workflow Run，现在它已经结束，请把结果整理后回复用户。",
+            "不要再输出 yachiyo_delegation 或任何机器可读委派 JSON；如果还需要继续委派，请先用自然语言说明需要用户确认。",
+            "回复需要说明：委派目标完成/失败/取消了什么、关键结果是什么、是否有产物，以及用户下一步可以验收或继续做什么。",
+        ]
+        if user_request:
+            lines.extend(["", f"用户原始请求：{user_request}"])
+        if main_reply:
+            lines.extend(["", f"你之前对用户的回复：{self._strip_yachiyo_delegation_payloads(main_reply)}"])
+        activity_title = str(activity.get("title") or "").strip()
+        activity_detail = str(activity.get("detail") or "").strip()
+        if activity_title or activity_detail:
+            lines.extend(["", "委派活动："])
+            if activity_title:
+                lines.append(f"- {activity_title}")
+            if activity_detail:
+                lines.append(f"- {_compact_preview(activity_detail, 500)}")
+        lines.extend(["", "Run 结果：", f"- {runnable_name}：{self._workflow_status_label(status)}"])
+        if goal:
+            lines.append(f"  任务：{goal}")
+        if result:
+            lines.append(f"  汇报：{result}")
+        if artifact_summaries:
+            artifact_parts = [
+                f"{item.get('path')} ({item.get('kind')})" if item.get("kind") else str(item.get("path") or "")
+                for item in artifact_summaries
+                if item.get("path")
+            ]
+            extra_count = max(0, artifact_count - len(artifact_parts))
+            extra_note = f"；另有 {extra_count} 个产物见 Run Detail" if extra_count else ""
+            lines.append(f"  产物：{'; '.join(artifact_parts)}{extra_note}")
+        return "\n".join(lines)
+
     def _maybe_create_group_direct_agent_summary_task(self, message_id: str) -> None:
         message_id = str(message_id or "").strip()
         if not message_id:
@@ -3683,6 +3817,31 @@ class ChatAPI:
             cursor = end
         output.append(text[cursor:])
         return "".join(output)
+
+    @classmethod
+    def _strip_yachiyo_delegation_payloads(cls, content: str) -> str:
+        text = str(content or "")
+        if not text.strip():
+            return ""
+        text = re.sub(
+            r"<\s*yachiyo[\s_-]*delegation\b[^>]*>.*?</\s*yachiyo[\s_-]*delegation\s*>",
+            "",
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        text = re.sub(
+            r"```(?:json)?\s*[^`]*(?:run_yachiyo|yachiyo_delegation|delegate_agent|delegate_workflow)[^`]*```",
+            "",
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+        text = re.sub(
+            r"^\s*\{[^\n{}]*(?:run_yachiyo|yachiyo_delegation|delegate_agent|delegate_workflow)[^\n{}]*\}\s*$",
+            "",
+            text,
+            flags=re.MULTILINE | re.IGNORECASE,
+        )
+        return text.strip()
 
     @classmethod
     def _group_dispatch_payload_spans(cls, text: str) -> list[tuple[int, int]]:
