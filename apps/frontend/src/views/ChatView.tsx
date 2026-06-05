@@ -14,7 +14,7 @@ import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { approveRunApproval, listRunnables, type RunnableSummary, getRun, rejectRunApproval } from '../lib/agents';
 import { apiGet, apiPatch, apiPost, bridgeUrl, chooseAvatarImage, copyText, openExternalUrl, restartDesktopBridge } from '../lib/bridge';
-import { currentParam } from '../lib/view';
+import { currentParam, navigateTo } from '../lib/view';
 
 type PendingAttachment = {
   id: string;
@@ -69,9 +69,24 @@ type ChatMessageMetadata = {
   run_id?: string;
   run_group_id?: string;
   run_status?: string;
+  group_goal?: string;
+  delegated_goal?: string;
+  pending_approval?: {
+    approval_id?: string;
+    tool?: string;
+    input_preview?: unknown;
+    requested_at?: string;
+  };
+  run_progress_title?: string;
+  run_progress_detail?: string;
+  run_artifact_count?: number;
+  run_artifacts?: Array<{ path?: string; kind?: string }>;
   workflow_run_id?: string;
   workflow_status?: string;
   workflow_node?: string;
+  group_agent_summary_pending?: boolean;
+  group_agent_summary_status?: string;
+  group_agent_summary_error?: string;
 };
 
 type MentionOption = {
@@ -102,6 +117,7 @@ type MessagesPayload = {
   ok?: boolean;
   error?: string;
   is_processing?: boolean;
+  processing_count?: number;
   messages?: ChatMessage[];
   anchor_message_id?: string;
   session_context?: ChatSessionContext;
@@ -130,6 +146,8 @@ type SessionItem = {
   updated_at?: string;
   message_count?: number;
   is_processing?: boolean;
+  processing_count?: number;
+  approval_count?: number;
   latest_activity?: ChatActivityEvent | null;
   latest_message_preview?: string;
   latest_message_status?: string;
@@ -260,6 +278,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [attachments, setAttachments] = useState<PendingAttachment[]>(() => [...retainedComposerDraft.attachments]);
   const [status, setStatus] = useState('就绪');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingCount, setProcessingCount] = useState(0);
   const [isSending, setIsSending] = useState(false);
   const [sessions, setSessions] = useState<SessionsPayload | null>(null);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
@@ -276,6 +295,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [sessionIdCopyError, setSessionIdCopyError] = useState('');
   const [retryingMessageId, setRetryingMessageId] = useState('');
   const [approvalActionMessageId, setApprovalActionMessageId] = useState('');
+  const [composerApprovalMessageId, setComposerApprovalMessageId] = useState('');
   const [highlightedMessageId, setHighlightedMessageId] = useState('');
   const [messagesLoaded, setMessagesLoaded] = useState(false);
   const [messagesVisible, setMessagesVisible] = useState(false);
@@ -346,15 +366,17 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const baseUrl = await bridgeUrl();
       const nextMessages = withResolvedAttachmentUrls(payload.messages || [], baseUrl);
       setSessionContext(payload.session_context || null);
-      const processing = Boolean(payload.is_processing);
+      const nextProcessingCount = Math.max(0, Number(payload.processing_count || 0));
+      const processing = Boolean(payload.is_processing || nextProcessingCount > 0);
       const processingChanged = processing !== isProcessingRef.current;
       isProcessingRef.current = processing;
       const failed = latestFailedMessage(nextMessages);
       if (!shouldHoldLoading && isMessageSelectionPaused()) {
         setIsProcessing(processing);
-        setStatus(chatStatusLabel(processing, failed, nextMessages));
+        setProcessingCount(nextProcessingCount);
+        setStatus(chatStatusLabel(processing, failed, nextMessages, nextProcessingCount));
         if (processingChanged) void loadSessionsRef.current();
-        return { is_processing: processing, messages: nextMessages };
+        return { is_processing: processing, processing_count: nextProcessingCount, messages: nextMessages };
       }
       syncRenderStates(nextMessages, renderStateRef.current);
       const elapsed = Date.now() - startedAt;
@@ -372,6 +394,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       }
       setMessages(nextMessages);
       setIsProcessing(processing);
+      setProcessingCount(nextProcessingCount);
       if (shouldTriggerPendingReplyScroll(nextMessages)) {
         pendingReplyScrollRef.current = false;
         pendingReplyTaskIdRef.current = '';
@@ -386,14 +409,14 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         setMessagesLoaded(true);
       }
       if (processing) {
-        setStatus(chatStatusLabel(processing, failed, nextMessages));
+        setStatus(chatStatusLabel(processing, failed, nextMessages, nextProcessingCount));
       } else if (failed) {
         setStatus(`处理失败：${compactStatusText(messageErrorText(failed))}`);
       } else {
         setStatus('就绪');
       }
       if (processingChanged) void loadSessionsRef.current();
-      return { is_processing: processing, messages: nextMessages };
+      return { is_processing: processing, processing_count: nextProcessingCount, messages: nextMessages };
     } catch (error) {
       const elapsed = Date.now() - startedAt;
       const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
@@ -727,7 +750,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   async function submit(event: FormEvent) {
     event.preventDefault();
     const text = input.trim();
-    if ((!text && attachments.length === 0) || isSending || isProcessing) return;
+    if ((!text && attachments.length === 0) || isSending) return;
     if (attachments.length > 0 && !canAttachImages(executor)) {
       showImageInputBlocked();
       return;
@@ -741,6 +764,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     pendingReplyScrollRef.current = true;
     pendingReplyTaskIdRef.current = '';
     setIsProcessing(true);
+    setProcessingCount((current) => Math.max(1, current + 1));
     setStatus(outgoingAttachments.length ? '发送图片中...' : '发送中...');
     stickToBottomRef.current = true;
     focusComposerSoon();
@@ -763,18 +787,22 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       transientEmptySessionIdRef.current = '';
       if (result.runnable_command) {
         pendingReplyTaskIdRef.current = '';
-        // 如果是异步执行的 Agent Run（status="processing"），启动轮询
-        if (result.status === 'processing' && result.run_id) {
-          setStatus('Agent 执行中...');
+        const resultRunId = runnableResultRunId(result);
+        const resultRunStatus = runnableResultStatus(result);
+        const runnableLabel = result.workflow_run_id ? 'Workflow' : 'Agent';
+        if (resultRunStatus === 'processing' && resultRunId) {
+          setStatus(`${runnableLabel} 执行中...`);
           stickToBottomRef.current = true;
           await refreshMessages();
-          // 启动轮询等待 Agent Run 完成
-          await pollAgentRunCompletion(result.run_id);
+          pollAgentRunInBackground(resultRunId);
           return;
         }
-        // 同步完成的 Workflow Run 或其他情况
         pendingReplyScrollRef.current = false;
-        setStatus(result.agent_run_id || result.workflow_run_id ? 'Agent/Workflow Run 已完成。' : result.error || 'Agent/Workflow 指令已处理。');
+        setStatus(resultRunStatus === 'approval_required'
+          ? `${runnableLabel} 等待审批...`
+          : resultRunId
+            ? `${runnableLabel} Run 已处理。`
+            : result.error || 'Agent/Workflow 指令已处理。');
         await refreshMessages();
         await loadSessions();
         return;
@@ -795,6 +823,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setStatus(error instanceof Error ? error.message : '发送失败');
       isProcessingRef.current = false;
       setIsProcessing(false);
+      setProcessingCount(0);
     } finally {
       setIsSending(false);
       focusComposerSoon();
@@ -838,7 +867,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     if (event.key !== 'Enter' || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
     if (isImeComposing(event, composerComposingRef.current)) return;
     event.preventDefault();
-    if (isProcessing) return;
     event.currentTarget.form?.requestSubmit();
   }
 
@@ -1043,6 +1071,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setSelectedGroupAgentIds([]);
       isProcessingRef.current = false;
       setIsProcessing(false);
+      setProcessingCount(0);
       setStatus('群组已创建');
       await loadSessions();
       await refreshMessages({ allowDuringTransition: true });
@@ -1073,6 +1102,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setSessionContext(null);
       isProcessingRef.current = false;
       setIsProcessing(false);
+      setProcessingCount(0);
       setStatus('新对话已创建');
       await loadSessions();
     } catch (error) {
@@ -1088,8 +1118,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const result = await apiPost<MessagesPayload & { cancelled_tasks?: number }>('/ui/chat/session/cancel');
       if (result.ok === false) throw new Error(result.error || '取消失败');
       setMessages(result.messages || []);
-      isProcessingRef.current = Boolean(result.is_processing);
-      setIsProcessing(Boolean(result.is_processing));
+      const nextProcessingCount = Math.max(0, Number(result.processing_count || 0));
+      const nextProcessing = Boolean(result.is_processing || nextProcessingCount > 0);
+      isProcessingRef.current = nextProcessing;
+      setIsProcessing(nextProcessing);
+      setProcessingCount(nextProcessingCount);
       setStatus(result.cancelled_tasks ? `已取消 ${result.cancelled_tasks} 个任务` : '没有可取消任务');
       await loadSessions();
     } catch (error) {
@@ -1103,19 +1136,27 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       try {
         const run = await getRun(runId);
-        const status = run.status || '';
+        const status = normalizeRunStatus(run.status);
         if (status === 'completed' || status === 'failed' || status === 'approval_required') {
           // 执行完成，刷新消息
-          await refreshMessages();
+          const refreshed = await refreshMessages();
           await loadSessions();
+          const chatStillProcessing = Boolean(refreshed?.is_processing);
+          const chatProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));
           if (status === 'approval_required') {
             isProcessingRef.current = true;
             setIsProcessing(true);
-            setStatus('等待审批...');
+            setProcessingCount(Math.max(1, chatProcessingCount));
+            setStatus(nextApprovalStatusText(run));
           } else {
-            isProcessingRef.current = false;
-            setIsProcessing(false);
-            setStatus(status === 'completed' ? 'Agent Run 已完成。' : 'Agent Run 执行失败。');
+            isProcessingRef.current = chatStillProcessing;
+            setIsProcessing(chatStillProcessing);
+            setProcessingCount(chatProcessingCount);
+            if (chatStillProcessing) {
+              setStatus(status === 'completed' ? 'Agent Run 已完成，等待主模型汇总...' : 'Agent Run 执行失败，等待主模型整理结果...');
+            } else {
+              setStatus(status === 'completed' ? 'Agent Run 已完成。' : 'Agent Run 执行失败。');
+            }
           }
           return;
         }
@@ -1129,11 +1170,21 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       await new Promise((resolve) => setTimeout(resolve, interval));
     }
     // 超时
-    await refreshMessages();
+    const refreshed = await refreshMessages();
     await loadSessions();
-    isProcessingRef.current = false;
-    setIsProcessing(false);
-    setStatus('Agent Run 轮询超时');
+    const chatStillProcessing = Boolean(refreshed?.is_processing);
+    const chatProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));
+    isProcessingRef.current = chatStillProcessing;
+    setIsProcessing(chatStillProcessing);
+    setProcessingCount(chatProcessingCount);
+    setStatus(chatStillProcessing ? 'Agent Run 轮询超时，仍在等待后续处理...' : 'Agent Run 轮询超时');
+  }
+
+  function pollAgentRunInBackground(runId: string) {
+    void pollAgentRunCompletion(runId).catch((error) => {
+      console.error('后台轮询 Agent Run 状态失败:', error);
+      setStatus(error instanceof Error ? error.message : 'Agent Run 状态刷新失败');
+    });
   }
 
   async function deleteSession(targetLabel = '对话') {
@@ -1222,6 +1273,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     pendingReplyScrollRef.current = true;
     pendingReplyTaskIdRef.current = '';
     setIsProcessing(true);
+    setProcessingCount((current) => Math.max(1, current || 1));
     stickToBottomRef.current = true;
     try {
       const result = await apiPost<{
@@ -1229,7 +1281,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         error?: string;
         task_id?: string;
         runnable_command?: boolean;
+        agent_run_id?: string;
+        workflow_run_id?: string;
         run_id?: string;
+        run_status?: string;
         status?: string;
       }>('/ui/chat/messages/retry', {
         message_id: message.id,
@@ -1237,14 +1292,21 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       if (result.ok === false) throw new Error(result.error || '重试失败');
       if (result.runnable_command) {
         pendingReplyTaskIdRef.current = '';
-        if (result.status === 'processing' && result.run_id) {
-          setStatus('Agent 执行中...');
+        const resultRunId = runnableResultRunId(result);
+        const resultRunStatus = runnableResultStatus(result);
+        const runnableLabel = result.workflow_run_id ? 'Workflow' : 'Agent';
+        if (resultRunStatus === 'processing' && resultRunId) {
+          setStatus(`${runnableLabel} 执行中...`);
           await refreshMessages();
-          await pollAgentRunCompletion(result.run_id);
+          pollAgentRunInBackground(resultRunId);
           return;
         }
         pendingReplyScrollRef.current = false;
-        setStatus('Agent 指令已处理。');
+        setStatus(resultRunStatus === 'approval_required'
+          ? `${runnableLabel} 等待审批...`
+          : resultRunId
+            ? `${runnableLabel} Run 已处理。`
+            : 'Agent/Workflow 指令已处理。');
         await refreshMessages();
         await loadSessions();
         return;
@@ -1261,6 +1323,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       pendingReplyTaskIdRef.current = '';
       isProcessingRef.current = false;
       setIsProcessing(false);
+      setProcessingCount(0);
       setStatus(error instanceof Error ? error.message : '重试失败');
     } finally {
       setRetryingMessageId('');
@@ -1269,7 +1332,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }
 
   async function resolveApprovalMessage(message: ChatMessage, action: 'approve' | 'reject') {
-    const runId = String(message.metadata?.run_id || '');
+    const runId = messageRunId(message);
     if (!message.id || !runId || approvalActionMessageId) return;
     setApprovalActionMessageId(message.id);
     setStatus(action === 'approve' ? '正在批准工具调用...' : '正在拒绝工具调用...');
@@ -1280,18 +1343,26 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const refreshed = await refreshMessages();
       await loadSessions();
       const chatStillProcessing = Boolean(refreshed?.is_processing);
-      if (run.status === 'processing' || run.status === 'approval_required') {
+      const chatProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));
+      const runStatus = normalizeRunStatus(run.status);
+      if (runStatus === 'processing' || runStatus === 'approval_required') {
         setIsProcessing(true);
         isProcessingRef.current = true;
-        setStatus(run.status === 'approval_required' ? '等待审批...' : 'Agent 执行中...');
-        if (run.status === 'processing') await pollAgentRunCompletion(runId);
+        setProcessingCount(Math.max(1, chatProcessingCount));
+        if (runStatus === 'approval_required') {
+          setStatus(nextApprovalStatusText(run));
+        } else {
+          setStatus('已批准，Agent 正在继续执行...');
+          pollAgentRunInBackground(runId);
+        }
       } else {
         setIsProcessing(chatStillProcessing);
         isProcessingRef.current = chatStillProcessing;
+        setProcessingCount(chatProcessingCount);
         if (chatStillProcessing) {
           setStatus(action === 'approve' ? '已批准，等待主模型汇总...' : '已拒绝，等待主模型整理结果...');
         } else {
-          setStatus(run.status === 'completed' ? '审批后执行完成。' : '审批后执行结束。');
+          setStatus(runStatus === 'completed' ? '审批后执行完成。' : '审批后执行结束。');
         }
       }
     } catch (error) {
@@ -1359,6 +1430,22 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     if (!messageId) return;
     if (node) messageNodeRefs.current.set(messageId, node);
     else messageNodeRefs.current.delete(messageId);
+  }
+
+  function revealMessage(messageId: string | undefined) {
+    if (!messageId) return;
+    if (highlightClearTimerRef.current !== null) {
+      window.clearTimeout(highlightClearTimerRef.current);
+      highlightClearTimerRef.current = null;
+    }
+    highlightedScrollTargetRef.current = messageId;
+    setHighlightedMessageId(messageId);
+  }
+
+  function openRunDetails(runId: string | undefined) {
+    const clean = String(runId || '').trim();
+    if (!clean) return;
+    navigateTo('agents', { run: clean }, ['tab']);
   }
 
   function handleMessageListClick(event: ReactMouseEvent<HTMLDivElement>) {
@@ -1606,6 +1693,20 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     [assistantProfile, input, runnables],
   );
   const headerActivity = latestVisibleActivity(messages);
+  const composerApprovalMessages = useMemo(
+    () => approvalRequiredMessages(messages),
+    [messages],
+  );
+  const composerApprovalMessage = useMemo(() => {
+    if (!composerApprovalMessages.length) return null;
+    const selected = composerApprovalMessages.find((message) => message.id === composerApprovalMessageId);
+    return selected || composerApprovalMessages[composerApprovalMessages.length - 1] || null;
+  }, [composerApprovalMessageId, composerApprovalMessages]);
+  const composerApprovalIndex = composerApprovalMessage
+    ? composerApprovalMessages.findIndex((message) => message.id === composerApprovalMessage.id)
+    : -1;
+  const composerApprovalCount = composerApprovalMessages.length;
+  const composerApprovalDetails = composerApprovalMessage ? approvalRequestDetails(composerApprovalMessage) : null;
   const chatWorkspaceStyle = embedded
     ? undefined
     : ({ '--chat-sidebar-width': `${sidebarWidth}px` } as CSSProperties);
@@ -1623,6 +1724,23 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       return Math.min(Math.max(current, 0), mentionSuggestions.length - 1);
     });
   }, [mentionSuggestions.length]);
+
+  useEffect(() => {
+    setComposerApprovalMessageId((current) => {
+      if (!composerApprovalMessages.length) return '';
+      if (current && composerApprovalMessages.some((message) => message.id === current)) return current;
+      return composerApprovalMessages[composerApprovalMessages.length - 1]?.id || '';
+    });
+  }, [composerApprovalMessages]);
+
+  function selectComposerApproval(offset: number) {
+    if (!composerApprovalCount || composerApprovalIndex < 0) return;
+    const nextIndex = (composerApprovalIndex + offset + composerApprovalCount) % composerApprovalCount;
+    const nextMessage = composerApprovalMessages[nextIndex];
+    if (!nextMessage?.id) return;
+    setComposerApprovalMessageId(nextMessage.id);
+    revealMessage(nextMessage.id);
+  }
 
   return (
     <section className={`${embedded ? '' : 'app-shell '}chat-shell refined-chat-shell open-chat-shell${embedded ? ' embedded-chat-shell' : ''}${initialChatLoading ? ' is-initializing-chat' : ''}`}>
@@ -1712,7 +1830,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                     </span>
                     <span className="chat-item-side">
                       <span className="chat-item-time">
-                        {session.is_processing ? '处理中' : formatShortTime(session.updated_at || session.created_at)}
+                        {sessionSideLabel(session)}
                       </span>
                     </span>
                   </button>
@@ -1748,7 +1866,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                       </span>
                       <span className="chat-item-side">
                         <span className="chat-item-time">
-                          {session.is_processing ? '处理中' : formatShortTime(session.updated_at || session.created_at)}
+                          {sessionSideLabel(session)}
                         </span>
                       </span>
                     </button>
@@ -1802,7 +1920,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                               </span>
                               <span className="chat-item-side">
                                 <span className="chat-item-time">
-                                  {session.is_processing ? '处理中' : formatShortTime(session.updated_at || session.created_at)}
+                                  {sessionSideLabel(session)}
                                 </span>
                               </span>
                             </button>
@@ -1844,7 +1962,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                     </span>
                     <span className="chat-item-side">
                       <span className="chat-item-time">
-                        {session.is_processing ? '处理中' : formatShortTime(session.updated_at || session.created_at)}
+                        {sessionSideLabel(session)}
                       </span>
                     </span>
                   </button>
@@ -1957,6 +2075,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                   onRetry={() => void retryMessage(message)}
                   onApprove={() => void resolveApprovalMessage(message, 'approve')}
                   onReject={() => void resolveApprovalMessage(message, 'reject')}
+                  onOpenRunDetails={openRunDetails}
                   registerMessageNode={registerMessageNode}
                   runnables={runnables}
                 />
@@ -1966,7 +2085,22 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           </section>
 
           <form className="chat-input-area composer refined-composer" onSubmit={submit}>
-            <div className="chat-input-wrapper">
+            {composerApprovalMessage && composerApprovalDetails ? (
+              <ComposerApprovalNotice
+                busy={approvalActionMessageId === composerApprovalMessage.id}
+                currentIndex={composerApprovalIndex}
+                details={composerApprovalDetails}
+                onApprove={() => void resolveApprovalMessage(composerApprovalMessage, 'approve')}
+                onReject={() => void resolveApprovalMessage(composerApprovalMessage, 'reject')}
+                onOpenDetails={() => openRunDetails(messageRunId(composerApprovalMessage))}
+                onPrevious={() => selectComposerApproval(-1)}
+                onReveal={() => revealMessage(composerApprovalMessage.id)}
+                onNext={() => selectComposerApproval(1)}
+                runId={messageRunId(composerApprovalMessage)}
+                total={composerApprovalCount}
+              />
+            ) : null}
+            <div className={`chat-input-wrapper${isProcessing ? ' is-processing' : ''}`}>
               <div className="composer-body">
                 {attachments.length ? (
                   <div className="composer-attachments" aria-label="已添加图片附件">
@@ -2069,15 +2203,25 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
               >
                 <UiIcon name="paperclip" />
               </button>
+              {isProcessing ? (
+                <button
+                  type="button"
+                  className="chat-stop-btn"
+                  aria-label={processingCount > 1 ? `停止当前 ${processingCount} 项任务` : '停止当前任务'}
+                  title={processingCount > 1 ? `停止当前 ${processingCount} 项任务` : '停止当前任务'}
+                  onClick={() => void cancelProcessing()}
+                >
+                  <UiIcon name="stop" />
+                </button>
+              ) : null}
               <button
-                type={isProcessing ? 'button' : 'submit'}
-                className={`chat-send-btn neon-glow${isProcessing ? ' is-stop' : ''}`}
-                disabled={isProcessing ? false : isSending || (!input.trim() && attachments.length === 0)}
-                aria-label={isProcessing ? '停止生成' : '发送消息'}
-                title={isProcessing ? '停止生成' : '发送消息'}
-                onClick={isProcessing ? () => void cancelProcessing() : undefined}
+                type="submit"
+                className="chat-send-btn neon-glow"
+                disabled={isSending || (!input.trim() && attachments.length === 0)}
+                aria-label="发送消息"
+                title={isProcessing ? '继续发送消息' : '发送消息'}
               >
-                <UiIcon name={isProcessing ? 'stop' : 'send'} />
+                <UiIcon name="send" />
               </button>
             </div>
             <input
@@ -2342,7 +2486,8 @@ function CreateGroupDialog({ agentRunnables, assistantProfile, defaultGroupName,
                 <span className="chat-group-member-avatar">{participantAvatarContent(participant, 'A')}</span>
                 <span>
                   <strong>{agent.nickname || agent.name}</strong>
-                  <small>{agent.name}</small>
+                  <small>{groupAgentMetaLine(agent)}</small>
+                  {agent.description ? <em>{agent.description}</em> : null}
                 </span>
               </label>
             );
@@ -2357,6 +2502,15 @@ function CreateGroupDialog({ agentRunnables, assistantProfile, defaultGroupName,
       </form>
     </div>
   );
+}
+
+function groupAgentMetaLine(agent: RunnableSummary): string {
+  const parts = [
+    agent.name,
+    agent.category ? `类别 ${agent.category}` : '',
+    agent.output_contract ? `交付 ${agent.output_contract}` : '',
+  ].filter(Boolean);
+  return parts.join(' · ') || 'Agent';
 }
 
 function SessionIdDialog({ copied, error, sessionId, onClose, onCopy }: {
@@ -2413,7 +2567,7 @@ function SessionIdDialog({ copied, error, sessionId, onClose, onCopy }: {
   );
 }
 
-function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading, copied, copiedCodeBlockKey, displayContent, highlighted, message, retryDisabled, retrying, showRetry, onApprove, onCopy, onReject, onRetry, registerMessageNode, runnables }: {
+function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading, copied, copiedCodeBlockKey, displayContent, highlighted, message, retryDisabled, retrying, showRetry, onApprove, onCopy, onOpenRunDetails, onReject, onRetry, registerMessageNode, runnables }: {
   approvalBusy: boolean;
   assistantProfile: AssistantProfilePayload | null;
   assistantProfileLoading: boolean;
@@ -2427,6 +2581,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   showRetry: boolean;
   onApprove: () => void;
   onCopy: () => void;
+  onOpenRunDetails: (runId: string) => void;
   onReject: () => void;
   onRetry: () => void;
   registerMessageNode: (messageId: string | undefined, node: HTMLElement | null) => void;
@@ -2441,7 +2596,14 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
         ? 'pending'
         : '';
   const isProcessingEmpty = role === 'assistant' && message.status === 'processing' && !displayContent;
-  const showApprovalActions = message.metadata?.run_status === 'approval_required' && Boolean(message.metadata?.run_id);
+  const runId = messageRunId(message);
+  const showApprovalActions = hasActionableApproval(message) && Boolean(runId);
+  const approvalDetails = showApprovalActions ? approvalRequestDetails(message) : null;
+  const showAgentProgress = isProcessingEmpty && Boolean(runId || message.metadata?.runnable_kind === 'agent' || message.metadata?.runnable_kind === 'workflow');
+  const showInlineRunDetails = role === 'assistant' && Boolean(runId) && !approvalDetails && !showAgentProgress;
+  const artifactCount = Number(message.metadata?.run_artifact_count || 0);
+  const duplicateError = Boolean(message.error && displayContent.trim() && message.error.trim() === displayContent.trim());
+  const summaryNotice = groupAgentSummaryNotice(message);
   return (
     <article
       className={`message message--${messageVisualRole(role)} refined-message ${role} ${statusClass}${highlighted ? ' search-highlighted' : ''}`}
@@ -2451,7 +2613,11 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
       <div className="message-avatar">{messageAvatar(message, assistantProfile, assistantProfileLoading, runnables)}</div>
       <div className="message-stack">
         <div className="message-bubble">
-          {isProcessingEmpty ? (
+          {approvalDetails ? (
+            <ApprovalRequestCard copiedCodeBlockKey={copiedCodeBlockKey} details={approvalDetails} messageId={message.id || ''} onOpenDetails={() => onOpenRunDetails(runId)} runId={runId} />
+          ) : showAgentProgress ? (
+            <AgentRunProgressCard message={message} onOpenDetails={() => onOpenRunDetails(runId)} runId={runId} />
+          ) : isProcessingEmpty ? (
             <TypingIndicator />
           ) : (
             <div className="message-content markdown" dangerouslySetInnerHTML={{ __html: renderMarkdown(displayContent, message.id || '', copiedCodeBlockKey) }} />
@@ -2463,7 +2629,8 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
               ))}
             </div>
           ) : null}
-          {message.error ? <div className="message-error">{message.error}</div> : null}
+          {message.error && !duplicateError ? <div className="message-error">{message.error}</div> : null}
+          {summaryNotice ? <div className={`message-summary-status ${summaryNotice.tone}`}>{summaryNotice.text}</div> : null}
         </div>
         <MessageActivityList
           events={message.activity_events || []}
@@ -2482,6 +2649,25 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
         ) : null}
         <div className="message-time">
           <span>{messageMetaText(message, message.status, message.created_at)}</span>
+          {artifactCount > 0 && runId ? (
+            <button
+              className="message-artifact-detail-button"
+              type="button"
+              title={message.metadata?.run_artifacts?.map((artifact) => artifact.path).filter(Boolean).join('\n') || '查看运行产物'}
+              onClick={() => onOpenRunDetails(runId)}
+            >
+              产物 {artifactCount}
+            </button>
+          ) : null}
+          {showInlineRunDetails ? (
+            <button
+              className="message-run-detail-button"
+              type="button"
+              onClick={() => onOpenRunDetails(runId)}
+            >
+              运行详情
+            </button>
+          ) : null}
           {showRetry ? (
             <button
               className={`message-retry-button ${retrying ? 'retrying' : ''}`}
@@ -2525,7 +2711,7 @@ function MessageActivityList({ events, messageStatus, progressLabel }: {
       {visibleRows.map((event, index) => {
         const displayStatus = activityDisplayStatus(event.status, messageStatus);
         return (
-          <div className={`message-activity-row ${activityStatusClass(displayStatus)}`} key={event.event_id || `${event.title}-${index}`}>
+          <div className={`message-activity-row ${activityStatusClass(displayStatus)}`} key={`${event.event_id || event.title || 'activity'}-${index}`}>
             <span className="message-activity-icon" aria-hidden="true">{activityStatusIcon(displayStatus)}</span>
             <span className="message-activity-text">
               <strong>{event.title || event.tool_name || 'Hermes 活动'}</strong>
@@ -2537,6 +2723,246 @@ function MessageActivityList({ events, messageStatus, progressLabel }: {
       })}
     </div>
   );
+}
+
+type ApprovalRequestDetails = {
+  requester: string;
+  tool: string;
+  goal: string;
+  codeLanguage: string;
+  codeText: string;
+  summary: Array<{ label: string; value: string }>;
+};
+
+function ApprovalRequestCard({ copiedCodeBlockKey, details, messageId, onOpenDetails, runId }: {
+  copiedCodeBlockKey: string;
+  details: ApprovalRequestDetails;
+  messageId: string;
+  onOpenDetails: () => void;
+  runId: string;
+}) {
+  const workflowApproval = isWorkflowApprovalDetails(details);
+  return (
+    <div className="message-content message-approval-card">
+      <div className="message-approval-card-header">
+        <span className="message-approval-eyebrow">需要审批</span>
+        <div>
+          <strong>{workflowApproval ? `${details.requester} 等待人工确认` : `${details.requester} 请求执行工具调用`}</strong>
+          <span>{workflowApproval ? '批准后会继续当前 Workflow' : '批准后会继续当前任务'}</span>
+        </div>
+        <span className="message-approval-header-side">
+          <code>{details.tool}</code>
+          {runId ? (
+            <button type="button" onClick={onOpenDetails}>
+              运行详情
+            </button>
+          ) : null}
+        </span>
+      </div>
+      {details.goal ? (
+        <section className="message-approval-section">
+          <span>关联任务</span>
+          <p>{details.goal}</p>
+        </section>
+      ) : null}
+      <section className="message-approval-section">
+        <span>{workflowApproval ? '审批内容' : '请求内容'}</span>
+        {details.summary.length ? (
+          <dl className="message-approval-summary">
+            {details.summary.map((item) => (
+              <div key={`${item.label}:${item.value}`}>
+                <dt>{item.label}</dt>
+                <dd>{item.value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+        {details.codeText ? (
+          <div
+            className="message-approval-code markdown"
+            dangerouslySetInnerHTML={{
+              __html: renderMarkdown(fencedCode(details.codeText, details.codeLanguage), messageId, copiedCodeBlockKey),
+            }}
+          />
+        ) : details.summary.length ? null : <p>没有可展示的参数预览。</p>}
+      </section>
+    </div>
+  );
+}
+
+function ComposerApprovalNotice({ busy, currentIndex, details, onApprove, onNext, onOpenDetails, onPrevious, onReject, onReveal, runId, total }: {
+  busy: boolean;
+  currentIndex: number;
+  details: ApprovalRequestDetails;
+  onApprove: () => void;
+  onNext: () => void;
+  onOpenDetails: () => void;
+  onPrevious: () => void;
+  onReject: () => void;
+  onReveal: () => void;
+  runId?: string;
+  total: number;
+}) {
+  const preview = details.codeText || details.summary.map((item) => item.value).join(' ');
+  const hasMultiple = total > 1 && currentIndex >= 0;
+  const workflowApproval = isWorkflowApprovalDetails(details);
+  return (
+    <div className="composer-approval-notice">
+      <div className="composer-approval-main">
+        <span className="composer-approval-badge">{hasMultiple ? `待审批 ${currentIndex + 1}/${total}` : '待审批'}</span>
+        <div>
+          <strong>{workflowApproval ? `${details.requester} 等待人工确认` : `${details.requester} 请求 ${details.tool}`}</strong>
+          <span>{details.goal || compactStatusText(preview, 86) || (workflowApproval ? '需要确认审批节点后继续执行' : '需要确认工具调用后继续执行')}</span>
+        </div>
+      </div>
+      <div className="composer-approval-actions">
+        {hasMultiple ? (
+          <span className="composer-approval-nav" aria-label="切换待审批请求">
+            <button type="button" disabled={busy} onClick={onPrevious}>上一项</button>
+            <button type="button" disabled={busy} onClick={onNext}>下一项</button>
+          </span>
+        ) : null}
+        <button type="button" onClick={onReveal}>定位消息</button>
+        {runId ? (
+          <button type="button" onClick={onOpenDetails}>运行详情</button>
+        ) : null}
+        <button type="button" className="approve" disabled={busy} onClick={onApprove}>{busy ? '处理中...' : '批准'}</button>
+        <button type="button" className="reject" disabled={busy} onClick={onReject}>拒绝</button>
+      </div>
+    </div>
+  );
+}
+
+function AgentRunProgressCard({ message, onOpenDetails, runId }: {
+  message: ChatMessage;
+  onOpenDetails: () => void;
+  runId: string;
+}) {
+  const sender = message.metadata?.sender;
+  const name = participantDisplayName(sender) || messageRoleLabel(message);
+  const title = String(message.metadata?.run_progress_title || 'Agent 正在执行');
+  const detail = String(message.metadata?.run_progress_detail || `${name} 正在继续处理当前任务。`);
+  return (
+    <div className="message-content message-agent-progress-card">
+      <span className="message-agent-progress-icon loading-ring" aria-hidden="true" />
+      <div>
+        <strong>{title}</strong>
+        <span>{detail}</span>
+        {runId ? (
+          <button type="button" onClick={onOpenDetails}>
+            运行详情
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function approvalRequestDetails(message: ChatMessage): ApprovalRequestDetails {
+  const pending = message.metadata?.pending_approval || {};
+  const preview = pending.input_preview;
+  const tool = String(pending.tool || approvalToolFromContent(message.content || message.text || '') || 'tool');
+  const requester = participantDisplayName(message.metadata?.sender) || messageRoleLabel(message);
+  const goal = String(message.metadata?.delegated_goal || message.metadata?.group_goal || approvalGoalFromContent(message.content || message.text || '') || '').trim();
+  const summary: Array<{ label: string; value: string }> = [];
+  let codeLanguage = tool === 'terminal.run' ? 'bash' : 'text';
+  let codeText = '';
+
+  if (isRecord(preview)) {
+    const command = stringValue(preview.command);
+    if (command) {
+      codeLanguage = 'bash';
+      codeText = command;
+    }
+    if (tool === 'workflow.approval') {
+      const checkpoint = stringValue(preview.checkpoint || preview.node || preview.label);
+      if (checkpoint) summary.push({ label: '审批节点', value: checkpoint });
+      const context = stringValue(preview.context || preview.summary || preview.result);
+      if (context) summary.push({ label: '当前上下文', value: context });
+    }
+    const path = stringValue(preview.path || preview.file || preview.filename);
+    if (path) summary.push({ label: '文件', value: path });
+    const timeout = stringValue(preview.timeout_seconds || preview.timeout || preview.timeout_ms);
+    if (timeout) summary.push({ label: '超时', value: timeout.endsWith('s') ? timeout : `${timeout}s` });
+    const content = stringValue(preview.content || preview.body || preview.patch);
+    if (!codeText && content) {
+      codeLanguage = tool === 'workspace.write_patch' ? detectCodeLanguage(content) || 'text' : 'text';
+      codeText = content;
+    }
+    if (!codeText && !summary.length) {
+      const compact = approvalPreviewFallback(preview);
+      if (compact) summary.push({ label: '参数', value: compact });
+    }
+  } else {
+    const compact = approvalPreviewFallback(preview);
+    if (compact) summary.push({ label: '参数', value: compact });
+  }
+
+  if (!codeText) {
+    const command = approvalCommandFromContent(message.content || message.text || '');
+    if (command) {
+      codeLanguage = 'bash';
+      codeText = command;
+    }
+  }
+
+  return { requester, tool, goal, codeLanguage, codeText, summary };
+}
+
+function isWorkflowApprovalDetails(details: ApprovalRequestDetails) {
+  return details.tool === 'workflow.approval';
+}
+
+function approvalToolFromContent(text: string) {
+  const match = String(text || '').match(/工具[:：]\s*([A-Za-z0-9_.-]+)/);
+  return match?.[1] || '';
+}
+
+function approvalGoalFromContent(text: string) {
+  const match = String(text || '').match(/关联任务[:：]\s*([^\n]+)/);
+  return match?.[1]?.trim() || '';
+}
+
+function approvalCommandFromContent(text: string) {
+  const match = String(text || '').match(/(?:命令|command)[:：]\s*(.+)$/is);
+  return match?.[1]?.trim() || '';
+}
+
+function approvalPreviewFallback(value: unknown) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function nextApprovalStatusText(run: { pending_approval?: { tool?: string; input_preview?: unknown } }) {
+  const tool = String(run.pending_approval?.tool || 'tool');
+  const preview = run.pending_approval?.input_preview;
+  let detail = '';
+  if (isRecord(preview)) {
+    detail = stringValue(preview.command || preview.path || preview.file || preview.filename);
+  } else {
+    detail = stringValue(preview);
+  }
+  const suffix = detail ? `：${compactStatusText(detail, 54)}` : '';
+  return `还有新的工具审批待确认：${tool}${suffix}`;
+}
+
+function stringValue(value: unknown) {
+  if (value === undefined || value === null) return '';
+  return String(value).trim();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function fencedCode(code: string, language: string) {
+  const safeCode = String(code || '').replace(/```/g, '`\\`\\`');
+  return `\`\`\`${language || 'text'}\n${safeCode}\n\`\`\``;
 }
 
 function TypingIndicator() {
@@ -2576,6 +3002,54 @@ function messageErrorText(message: ChatMessage) {
   ).trim();
 }
 
+function groupAgentSummaryNotice(message: ChatMessage): { tone: 'pending' | 'failed'; text: string } | null {
+  const metadata = message.metadata || {};
+  const status = String(metadata.group_agent_summary_status || '').trim();
+  if (status === 'failed') {
+    const error = String(metadata.group_agent_summary_error || '').trim();
+    return {
+      tone: 'failed',
+      text: error ? `主模型整理失败：${error}` : '主模型整理失败，请查看后续消息或重试。',
+    };
+  }
+  if (metadata.group_agent_summary_pending) {
+    return { tone: 'pending', text: '等待主模型整理 Agent 结果...' };
+  }
+  return null;
+}
+
+function latestGroupAgentSummaryNotice(messages: ChatMessage[]) {
+  let pendingNotice: { tone: 'pending' | 'failed'; text: string } | null = null;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const notice = groupAgentSummaryNotice(messages[index]);
+    if (!notice) continue;
+    if (notice.tone === 'failed') return notice;
+    pendingNotice ||= notice;
+  }
+  return pendingNotice;
+}
+
+function normalizeRunStatus(status?: string) {
+  const value = String(status || '').trim();
+  return value === 'running' ? 'processing' : value;
+}
+
+function runnableResultRunId(result: { run_id?: string; agent_run_id?: string; workflow_run_id?: string }) {
+  return String(result.run_id || result.agent_run_id || result.workflow_run_id || '').trim();
+}
+
+function runnableResultStatus(result: { run_status?: string; status?: string }) {
+  return normalizeRunStatus(result.run_status || result.status || '');
+}
+
+function messageRunStatus(message?: ChatMessage | null) {
+  return normalizeRunStatus(message?.metadata?.run_status || message?.metadata?.workflow_status || '');
+}
+
+function messageRunId(message?: ChatMessage | null) {
+  return String(message?.metadata?.run_id || message?.metadata?.workflow_run_id || '').trim();
+}
+
 function latestFailedMessage(messages: ChatMessage[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const status = messages[index]?.status;
@@ -2589,12 +3063,24 @@ function latestFailedMessage(messages: ChatMessage[]) {
 }
 
 function latestApprovalRequiredMessage(messages: ChatMessage[]) {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!message) continue;
-    if (message.metadata?.run_status === 'approval_required') return message;
-  }
-  return null;
+  const approvals = approvalRequiredMessages(messages);
+  return approvals[approvals.length - 1] || null;
+}
+
+function approvalRequiredMessages(messages: ChatMessage[]) {
+  return messages.filter((message) => (
+    hasActionableApproval(message)
+    && Boolean(message.id)
+  ));
+}
+
+function hasActionableApproval(message?: ChatMessage | null) {
+  const pending = message?.metadata?.pending_approval;
+  return (
+    messageRunStatus(message) === 'approval_required'
+    && Boolean(messageRunId(message))
+    && Boolean(pending && typeof pending === 'object' && String(pending.tool || '').trim())
+  );
 }
 
 function isRetryableMessage(message: ChatMessage, messages: ChatMessage[]) {
@@ -2614,13 +3100,17 @@ function compactStatusText(text: string, maxLength = 96) {
   return normalized.length > maxLength ? `${normalized.slice(0, maxLength - 3)}...` : normalized;
 }
 
-function chatStatusLabel(processing: boolean, failed: ChatMessage | null, messages: ChatMessage[]) {
+function chatStatusLabel(processing: boolean, failed: ChatMessage | null, messages: ChatMessage[], processingCount = 0) {
+  const summaryNotice = latestGroupAgentSummaryNotice(messages);
   if (processing) {
     const approval = latestApprovalRequiredMessage(messages);
-    if (approval) return compactStatusText(approval.content || approval.error || '等待审批');
+    if (approval) return nextApprovalStatusText({ pending_approval: approval.metadata?.pending_approval });
+    if (summaryNotice?.tone === 'pending') return summaryNotice.text;
     const latest = latestVisibleActivity(messages);
-    return compactStatusText(activityLabel(latest) || '处理中...');
+    const countLabel = processingCount > 1 ? `${processingCount} 项 · ` : '';
+    return `${countLabel}${compactStatusText(activityLabel(latest) || '处理中...')}`;
   }
+  if (summaryNotice?.tone === 'failed') return summaryNotice.text;
   if (failed) return `处理失败：${compactStatusText(messageErrorText(failed))}`;
   return '就绪';
 }
@@ -2691,20 +3181,22 @@ function allMentionOptions(
   };
   const options: MentionOption[] = [
     main,
-    ...runnables.map((item) => ({
-      id: item.id,
-      name: item.name,
-      nickname: item.nickname,
-      avatar_url: item.avatar_url,
-      kind: item.kind,
-      participants: (item.participants || []).map((participant) => ({
-        id: participant.id,
-        name: participant.name,
-        nickname: participant.nickname,
-        avatar_url: participant.avatar_url,
-        kind: participant.kind,
+    ...runnables
+      .filter((item) => item.kind === 'agent')
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        nickname: item.nickname,
+        avatar_url: item.avatar_url,
+        kind: item.kind,
+        participants: (item.participants || []).map((participant) => ({
+          id: participant.id,
+          name: participant.name,
+          nickname: participant.nickname,
+          avatar_url: participant.avatar_url,
+          kind: participant.kind,
+        })),
       })),
-    })),
   ];
   return options;
 }
@@ -2975,13 +3467,14 @@ function messageRoleLabel(message: ChatMessage) {
 }
 
 function messageMetaText(message: ChatMessage, status?: string, createdAt?: string) {
-  const runStatus = String(message.metadata?.run_status || '');
+  const runStatus = messageRunStatus(message);
+  const hasRunContext = Boolean(messageRunId(message) || message.metadata?.runnable_kind === 'agent' || message.metadata?.runnable_kind === 'workflow');
   const statusText = status === 'pending'
     ? ' · 等待中'
     : runStatus === 'approval_required'
       ? ' · 等待审批'
       : status === 'processing'
-        ? ' · 输入中'
+        ? hasRunContext ? ' · 处理中' : ' · 输入中'
       : status === 'failed'
         ? ' · 失败'
         : '';
@@ -3141,7 +3634,16 @@ function sessionPreview(session: SessionItem) {
   }
   if (session.search_match?.kind === 'session') return session.search_match.snippet || '会话信息匹配';
   const preview = compactStatusText(session.latest_message_preview || sessionTitle(session), 48);
-  if (session.is_processing) return `处理中：${preview || '正在处理'}`;
+  const approvalCount = Number(session.approval_count || 0);
+  if (approvalCount > 0) {
+    const countLabel = approvalCount > 1 ? ` ${approvalCount} 项` : '';
+    return `待审批${countLabel}：${preview || '需要确认工具调用'}`;
+  }
+  if (session.is_processing) {
+    const processingCount = Number(session.processing_count || 0);
+    const countLabel = processingCount > 1 ? ` ${processingCount} 项` : '';
+    return `处理中${countLabel}：${preview || '正在处理'}`;
+  }
   if (session.latest_message_status === 'failed') return `处理失败：${preview || '任务执行失败'}`;
   if (session.conversation_kind === 'workflow') {
     const names = (session.participants || []).map((participant) => participantDisplayName(participant)).filter(Boolean).slice(0, 3);
@@ -3158,6 +3660,12 @@ function sessionPreview(session: SessionItem) {
   if (session.message_count) return `已完成：${preview || sessionTitle(session)}`;
   if (!session.message_count) return session.conversation_kind === 'agent' ? '新的 Agent 对话' : '新对话';
   return preview;
+}
+
+function sessionSideLabel(session: SessionItem) {
+  const approvalCount = Number(session.approval_count || 0);
+  if (approvalCount > 0) return approvalCount > 1 ? `待审批 ${approvalCount}` : '待审批';
+  return session.is_processing ? '处理中' : formatShortTime(session.updated_at || session.created_at);
 }
 
 function firstUserMessageTitle(messages: ChatMessage[]) {
@@ -3305,15 +3813,28 @@ function syncRenderStates(messages: ChatMessage[], states: Map<string, RenderSta
       continue;
     }
     const content = messageText(message);
+    const isApprovalRequired = messageRunStatus(message) === 'approval_required';
     const existing = states.get(message.id);
     if (!existing) {
       states.set(message.id, {
-        shown: message.status === 'processing' ? '' : content,
+        shown: message.status === 'processing' && !isApprovalRequired ? '' : content,
         target: content,
       });
       continue;
     }
+    if (isApprovalRequired) {
+      existing.shown = content;
+      existing.target = content;
+      continue;
+    }
     if (existing.target !== content) {
+      if (message.status === 'processing' && existing.shown) {
+        const shownContainsDispatchPayload = containsGroupDispatchPayload(existing.shown);
+        if (!shownContainsDispatchPayload && (!content || content.length < existing.shown.length || !content.startsWith(existing.shown))) {
+          existing.target = existing.shown;
+          continue;
+        }
+      }
       existing.target = content;
       if (!content.startsWith(existing.shown)) {
         existing.shown = message.status === 'processing' ? '' : content;
@@ -3323,6 +3844,15 @@ function syncRenderStates(messages: ChatMessage[], states: Map<string, RenderSta
   for (const id of Array.from(states.keys())) {
     if (!visibleIds.has(id)) states.delete(id);
   }
+}
+
+function containsGroupDispatchPayload(text: string) {
+  const compact = text.toLowerCase().replace(/[\s_-]+/g, '');
+  return (
+    compact.includes('yachiyogroupdispatch')
+    || compact.includes('dispatchgroupagent')
+    || compact.includes('runyachiyoagent')
+  );
 }
 
 function displayMessageText(message: ChatMessage, states: Map<string, RenderState>) {

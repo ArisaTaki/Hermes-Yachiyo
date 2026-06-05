@@ -139,6 +139,7 @@ export type RunnableSummary = {
   description?: string;
   avatar_url?: string;
   category?: string;
+  output_contract?: 'chat' | 'markdown' | 'diff' | 'report' | 'artifacts' | 'workflow' | string;
   kind: 'agent' | 'workflow';
   enabled?: boolean;
   participants?: RunnableSummary[];
@@ -309,6 +310,10 @@ export async function listRunGroups(): Promise<RunGroupSpec[]> {
   return payload.run_groups || [];
 }
 
+export async function getRunGroup(runGroupId: string): Promise<RunGroupSpec> {
+  return apiGet(`/ui/run-groups/${encodeURIComponent(runGroupId)}`);
+}
+
 export async function getRun(runId: string): Promise<RunSpec> {
   return apiGet(`/ui/runs/${encodeURIComponent(runId)}`);
 }
@@ -324,6 +329,10 @@ export async function createAgentRun(agentId: string, userGoal: string): Promise
 
 export async function createWorkflowRun(workflowId: string, userGoal: string): Promise<RunSpec> {
   return apiPost('/ui/workflow-runs', { workflow_id: workflowId, user_goal: userGoal });
+}
+
+export async function cancelRun(runId: string): Promise<RunSpec> {
+  return apiPost(`/ui/runs/${encodeURIComponent(runId)}/cancel`, {});
 }
 
 export async function approveRunApproval(runId: string): Promise<RunSpec> {

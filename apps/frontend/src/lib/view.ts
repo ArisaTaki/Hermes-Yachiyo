@@ -108,19 +108,23 @@ function isAppView(value: string): value is AppView {
 
 function routeFromHash(hash: string): RouteState | null {
   if (!hash || !hash.startsWith('#/')) return null;
-  const parts = hash.slice(2).split('/').filter(Boolean).map((part) => decodeURIComponent(part));
-  if (!parts.length) return { view: 'main', params: {} };
+  const [pathPart, queryPart = ''] = hash.slice(2).split('?');
+  const queryParams = Object.fromEntries(new URLSearchParams(queryPart).entries());
+  const parts = pathPart.split('/').filter(Boolean).map((part) => decodeURIComponent(part));
+  if (!parts.length) return { view: 'main', params: queryParams };
   const [rawView, rawMode] = parts;
   if (!isAppView(rawView)) return { view: 'main', params: {} };
-  if (rawView === 'settings' && rawMode) return { view: 'settings', params: { mode: rawMode } };
-  if (rawView === 'tools' && rawMode) return { view: 'tools', params: { tool: rawMode } };
+  if (rawView === 'settings' && rawMode) return { view: 'settings', params: { ...queryParams, mode: rawMode } };
+  if (rawView === 'tools' && rawMode) return { view: 'tools', params: { ...queryParams, tool: rawMode } };
   if (rawView === 'agents' && rawMode) {
-    if (isAgentStudioTab(rawMode)) return { view: 'agents', params: rawMode === 'agents' ? {} : { tab: rawMode } };
-    return { view: 'agents', params: { run: rawMode } };
+    if (isAgentStudioTab(rawMode)) {
+      return { view: 'agents', params: rawMode === 'agents' ? queryParams : { ...queryParams, tab: rawMode } };
+    }
+    return { view: 'agents', params: { ...queryParams, run: rawMode } };
   }
-  if (rawView === 'provider' && rawMode) return { view: 'provider', params: { capability: rawMode } };
-  if (rawView === 'activity-detail' && rawMode) return { view: 'activity-detail', params: { event_id: rawMode } };
-  return { view: rawView, params: {} };
+  if (rawView === 'provider' && rawMode) return { view: 'provider', params: { ...queryParams, capability: rawMode } };
+  if (rawView === 'activity-detail' && rawMode) return { view: 'activity-detail', params: { ...queryParams, event_id: rawMode } };
+  return { view: rawView, params: queryParams };
 }
 
 function isAgentStudioTab(value?: string): boolean {

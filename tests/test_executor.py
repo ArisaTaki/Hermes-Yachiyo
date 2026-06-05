@@ -352,6 +352,9 @@ class TestHermesExecutor:
         assert result == dispatch
         assert len(calls) == 1
         assert "群组派活" in calls[0]
+        assert "先用自然语言向用户说明你的安排" in calls[0]
+        assert "<yachiyo_group_dispatch>" in calls[0]
+        assert "只输出 JSON" not in calls[0]
         assert "single chat catalog" not in calls[0]
         assert delegated == []
 

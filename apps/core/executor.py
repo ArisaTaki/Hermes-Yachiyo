@@ -410,11 +410,11 @@ def _yachiyo_group_dispatch_context() -> str:
         "如果用户没有明确 @ 某个 Agent，请先判断应该由你直接回答，还是派给群组上下文里列出的一个或多个 Agent。"
         "只有当用户表达“大家/所有人/分别做”等意图时，才派给多个 Agent。\n"
         "派活不是终端命令，也不是工具调用；不要调用 shell/terminal 来 echo、模拟或包装派活指令。\n"
-        "如果需要派活，只输出 JSON，不要附加其他正文。单个任务格式：\n"
-        '{"action":"dispatch_group_agent","agent":"Agent 名称或昵称","goal":"自包含任务目标"}\n'
-        "多个任务格式：\n"
-        '[{"action":"dispatch_group_agent","agent":"Agent A","goal":"任务 A"},'
-        '{"action":"dispatch_group_agent","agent":"Agent B","goal":"任务 B"}]\n'
+        "如果需要派活，请先用自然语言向用户说明你的安排，再附加一个机器可读派活块，格式如下：\n"
+        "<yachiyo_group_dispatch>\n"
+        '{"tasks":[{"action":"dispatch_group_agent","agent":"Agent 名称或昵称","goal":"自包含任务目标"}]}\n'
+        "</yachiyo_group_dispatch>\n"
+        "可以一次派给多个 Agent，但每个 goal 都要独立完整，不能用“同上”“继续”等省略说法。\n"
         "不要使用 run_yachiyo_agent 或 run_yachiyo_workflow；不要把 JSON 包进 Markdown 代码块。"
         "群组派活会由聊天层接管、隐藏内部 JSON，并显示各 Agent 的执行状态。"
     )

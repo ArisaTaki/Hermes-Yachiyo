@@ -59,6 +59,7 @@ _TOOL_FUNCTION_NAMES = {
 }
 _TOOL_NAME_ALIASES = {value: key for key, value in _TOOL_FUNCTION_NAMES.items()}
 _FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
+_WORKFLOW_NODE_TYPES = {"start", "agent", "approval", "artifact"}
 _SKILL_SOURCE_TYPES = {"hermes_global", "hermes_project", "npx_skills", "hermes_cli", "local_zip", "local_dir"}
 _SHELL_METACHARS = {"&&", "||", "&", ";", "|", ">", ">>", "<", "$(", "`", "\n", "\r"}
 _UNSET = object()
@@ -71,6 +72,83 @@ _DEFAULT_AGENT_IDS = {
     "agent_office",
     "agent_custom",
 }
+
+
+def _agent_output_contract_rules(contract: Any) -> str:
+    value = str(contract or "chat").strip().lower() or "chat"
+    rules = {
+        "chat": (
+            "Return a direct chat response. Include enough detail for the user and the main model to understand "
+            "what was done, what failed, or what needs approval. Do not create an artifact unless the user goal "
+            "explicitly asks for one."
+        ),
+        "markdown": (
+            "Return polished Markdown with clear sections. If the user explicitly asks for a saved document and "
+            "artifact.write is allowed, write the Markdown as an artifact and mention the artifact path; otherwise "
+            "include the Markdown inline."
+        ),
+        "report": (
+            "Return a concise report with task, result, evidence, risks, and next steps. Use artifacts only when "
+            "the user asks for a saved report or the task naturally produces a file."
+        ),
+        "diff": (
+            "Return a change-oriented answer: summarize intended code changes and include a unified diff or patch "
+            "text only when the user asked for a patch. Do not call workspace.write_patch merely because the output "
+            "contract is diff; call it only when the user goal asks you to modify workspace files and the tool is "
+            "allowed. If no file change is requested, provide code inline."
+        ),
+        "artifacts": (
+            "Prefer producing named artifacts for concrete deliverables. If artifact.write is allowed, write each "
+            "deliverable artifact and mention its path in the final answer. If artifact.write is not allowed, state "
+            "that no artifact could be written and provide the content inline."
+        ),
+    }
+    return f"Contract: {value}\nRules: {rules.get(value, rules['chat'])}"
+
+
+def _user_goal_from_agent_messages(messages: list[dict[str, Any]]) -> str:
+    for message in messages:
+        if message.get("role") != "user":
+            continue
+        content = str(message.get("content") or "")
+        match = re.search(r"^# User Goal\s*\n(.*?)(?:\n# |\Z)", content, re.DOTALL | re.MULTILINE)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def _agent_goal_disallows_tool(user_goal: str, tool_name: str) -> str:
+    text = " ".join(str(user_goal or "").split()).strip().lower()
+    if not text:
+        return ""
+
+    no_file_patterns = (
+        r"不(?:需要|用|必|要).{0,12}(?:创建|保存|写入|写|修改|改动).{0,8}文件",
+        r"无需.{0,12}(?:创建|保存|写入|写|修改|改动).{0,8}文件",
+        r"不(?:创建|保存|写入|修改|改动).{0,8}文件",
+        r"只(?:需要)?(?:展示|给出|贴出).{0,12}(?:代码|内容|方案)",
+        r"代码完整展示即可",
+        r"do not (?:create|save|write|modify|change).{0,24}file",
+        r"don't (?:create|save|write|modify|change).{0,24}file",
+        r"without (?:creating|saving|writing|modifying|changing).{0,24}file",
+        r"no file (?:changes?|writes?|creation)",
+        r"(?:inline|show|display) (?:code|content) only",
+    )
+    no_command_patterns = (
+        r"不(?:需要|用|必|要).{0,12}(?:运行|执行).{0,12}(?:命令|脚本|代码|测试)?",
+        r"无需.{0,12}(?:运行|执行).{0,12}(?:命令|脚本|代码|测试)?",
+        r"不要.{0,12}(?:运行|执行).{0,12}(?:命令|脚本|代码|测试)?",
+        r"do not (?:run|execute)",
+        r"don't (?:run|execute)",
+        r"without (?:running|executing)",
+        r"no command execution",
+    )
+
+    if tool_name in {"workspace.write_patch", "artifact.write"} and any(re.search(pattern, text) for pattern in no_file_patterns):
+        return "用户目标明确要求不要创建、保存或修改文件；请改为 inline 交付内容。"
+    if tool_name == "terminal.run" and any(re.search(pattern, text) for pattern in no_command_patterns):
+        return "用户目标明确要求不要运行命令或脚本；请改为给出代码、示例或说明。"
+    return ""
 
 
 def _named_row_factory(cursor: sqlite3.Cursor, row: tuple[Any, ...]) -> dict[str, Any]:
@@ -337,20 +415,53 @@ class ToolBroker:
 
     def workspace_list(self, path: str = ".") -> dict[str, Any]:
         target = self._resolve_workspace_path(path)
+        display_path = path or "."
         if not target.exists():
-            raise AgentRuntimeError("路径不存在")
+            return {
+                "ok": False,
+                "path": display_path,
+                "error": "路径不存在",
+                "hint": "请先用 workspace.list 查看父目录，确认要访问的相对路径。",
+            }
         if not target.is_dir():
-            raise AgentRuntimeError("workspace.list 只能列目录")
+            return {
+                "ok": False,
+                "path": display_path,
+                "error": "workspace.list 只能列目录",
+                "hint": "如果要读取文件内容，请改用 workspace.read。",
+                "suggested_tool": "workspace.read",
+            }
         entries = []
         for child in sorted(target.iterdir(), key=lambda item: item.name.lower())[:200]:
             entries.append({"name": child.name, "type": "dir" if child.is_dir() else "file"})
-        return {"ok": True, "path": path or ".", "entries": entries}
+        return {"ok": True, "path": display_path, "entries": entries}
 
     def workspace_read(self, path: str) -> dict[str, Any]:
         target = self._resolve_workspace_path(path)
+        display_path = path or "."
+        if not target.exists():
+            return {
+                "ok": False,
+                "path": display_path,
+                "error": "路径不存在",
+                "hint": "请先用 workspace.list 查看父目录，确认要读取的文件相对路径。",
+            }
+        if target.is_dir():
+            return {
+                "ok": False,
+                "path": display_path,
+                "error": "workspace.read 只能读取文件",
+                "hint": "这是一个目录；请改用 workspace.list 查看目录内容，或选择目录中的具体文件再读取。",
+                "suggested_tool": "workspace.list",
+            }
         if not target.is_file():
-            raise AgentRuntimeError("workspace.read 只能读取文件")
-        return {"ok": True, "path": path, "content": _read_text(target)}
+            return {
+                "ok": False,
+                "path": display_path,
+                "error": "workspace.read 只能读取文件",
+                "hint": "请选择普通文本文件路径。",
+            }
+        return {"ok": True, "path": display_path, "content": _read_text(target)}
 
     def workspace_write_patch(self, path: str, content: str, *, approved: bool = False) -> dict[str, Any]:
         if not approved and not self.approvals.get("workspace.write_patch"):
@@ -841,11 +952,11 @@ class AgentRuntimeService:
     def _tool_schemas(allowed_tools: list[str]) -> list[dict[str, Any]]:
         specs: dict[str, dict[str, Any]] = {
             "workspace.list": {
-                "description": "List entries in an allowed workspace directory.",
+                "description": "List entries in an allowed workspace directory. Use this before workspace.read when you only know a directory path.",
                 "properties": {"path": {"type": "string", "description": "Relative directory path."}},
             },
             "workspace.read": {
-                "description": "Read a UTF-8 text file from the allowed workspace.",
+                "description": "Read a UTF-8 text file from the allowed workspace. This only accepts file paths; use workspace.list for directories.",
                 "properties": {"path": {"type": "string", "description": "Relative file path."}},
                 "required": ["path"],
             },
@@ -2183,6 +2294,7 @@ class AgentRuntimeService:
         nodes = payload.get("nodes") or []
         edges = payload.get("edges") or []
         self.validate_workflow(nodes, edges)
+        self._validate_workflow_agent_nodes(nodes)
         now = _now()
         workflow_id = str(payload.get("workflow_id") or f"workflow_{_slug(name, 'workflow')}_{uuid4().hex[:8]}")
         self._conn.execute(
@@ -2213,6 +2325,7 @@ class AgentRuntimeService:
             self._ensure_global_name_available(str(payload.get("name") or ""), ignore_workflow_id=workflow_id)
         next_workflow = {**current, **payload}
         self.validate_workflow(next_workflow.get("nodes") or [], next_workflow.get("edges") or [])
+        self._validate_workflow_agent_nodes(next_workflow.get("nodes") or [])
         self._conn.execute(
             """
             UPDATE workflows
@@ -2250,6 +2363,20 @@ class AgentRuntimeService:
         node_ids = [str(node.get("id") or "") for node in nodes]
         if len(set(node_ids)) != len(node_ids) or any(not node_id for node_id in node_ids):
             raise AgentRuntimeError("Workflow 节点 ID 必须唯一")
+        for node in nodes:
+            kind = self._node_kind(node)
+            if kind not in _WORKFLOW_NODE_TYPES:
+                label = str((node.get("data") or {}).get("label") or node.get("id") or "节点").strip() or "节点"
+                raise AgentRuntimeError(f"{label} 使用了未知 Workflow 节点类型：{kind or '空'}")
+            if kind == "artifact":
+                data = node.get("data") or {}
+                artifact_path = str(data.get("artifact_path") or data.get("artifactPath") or "").strip()
+                if artifact_path:
+                    label = str(data.get("label") or node.get("id") or "Artifact").strip() or "Artifact"
+                    try:
+                        _safe_rel_path(artifact_path)
+                    except AgentRuntimeError as exc:
+                        raise AgentRuntimeError(f"Artifact 节点 {label} 的产物路径无效：{exc}") from exc
         starts = [node for node in nodes if self._node_kind(node) == "start"]
         if len(starts) != 1:
             raise AgentRuntimeError("Workflow 必须且只能有一个 Start 节点")
@@ -2290,16 +2417,92 @@ class AgentRuntimeService:
             raise AgentRuntimeError("Workflow v1 必须是一条从 Start 出发的单一路径")
         return {"ok": True}
 
+    def _workflow_agent_for_node(self, node: dict[str, Any]) -> dict[str, Any]:
+        data = node.get("data") or {}
+        label = str(data.get("label") or node.get("id") or "Agent").strip() or "Agent"
+        agent_id = str(data.get("agent_id") or data.get("agentId") or "").strip()
+        if not agent_id:
+            raise AgentRuntimeError(f"Agent 节点 {label} 没有选择 Agent")
+        try:
+            agent = self._get_agent_private(agent_id)
+        except KeyError as exc:
+            raise AgentRuntimeError(f"Agent 节点 {label} 引用了不存在的 Agent") from exc
+        if not agent.get("enabled", True):
+            raise AgentRuntimeError(f"Agent 节点 {label} 选择的 Agent 已停用")
+        return agent
+
+    def _validate_workflow_agent_nodes(self, nodes: list[dict[str, Any]]) -> None:
+        for node in nodes:
+            if self._node_kind(node) == "agent":
+                self._workflow_agent_for_node(node)
+
+    def _validate_agent_run_readiness(
+        self,
+        agent: dict[str, Any],
+        *,
+        label: str = "Agent",
+        require_model_config: bool = False,
+    ) -> None:
+        display = str(label or agent.get("name") or "Agent").strip() or "Agent"
+        if not agent.get("enabled", True):
+            raise AgentRuntimeError(f"{display} 已停用")
+        self._load_agent_skills(agent.get("skill_ids") or [])
+        model_mode = str(agent.get("model_mode") or "profile")
+        model_config = agent.get("model_config") or {}
+        if model_mode == "custom_api":
+            missing = [
+                label
+                for key, label in (
+                    ("base_url", "Base URL"),
+                    ("model", "Model"),
+                    ("api_key", "API Key"),
+                )
+                if not str(model_config.get(key) or "").strip()
+            ]
+            if missing:
+                raise AgentRuntimeError(f"{display} Custom API 配置不完整：缺少 {', '.join(missing)}")
+        elif require_model_config and model_mode != "follow_main" and str(agent.get("agent_id") or "") not in _DEFAULT_AGENT_IDS:
+            if not str(agent.get("model_profile_id") or "").strip():
+                raise AgentRuntimeError(f"{display} 缺少可运行的 Chat Profile")
+        if require_model_config:
+            try:
+                self._agent_model_config_private(agent)
+            except AgentRuntimeError as exc:
+                raise AgentRuntimeError(f"{display} 无法运行：{exc}") from exc
+
+    def _validate_workflow_agent_run_readiness(self, nodes: list[dict[str, Any]]) -> None:
+        for node in nodes:
+            if self._node_kind(node) != "agent":
+                continue
+            data = node.get("data") or {}
+            label = str(data.get("label") or node.get("id") or "Agent").strip() or "Agent"
+            agent = self._workflow_agent_for_node(node)
+            self._validate_agent_run_readiness(
+                agent,
+                label=f"Agent 节点 {label}",
+                require_model_config=True,
+            )
+
+    def _validate_workflow_runnable_steps(self, nodes: list[dict[str, Any]]) -> None:
+        if not any(self._node_kind(node) != "start" for node in nodes):
+            raise AgentRuntimeError("Workflow 至少需要一个可执行节点（Agent、Approval 或 Artifact）")
+
     def list_runs(self, limit: int = 50) -> dict[str, Any]:
         self._ensure_row_factory()
         rows = self._conn.execute(
             """
             SELECT runs.*, run_groups.source AS run_group_source
-              FROM runs
+             FROM runs
               LEFT JOIN run_groups ON run_groups.run_group_id = runs.run_group_id
              WHERE NOT (
                 runs.kind = 'agent_run'
-                AND COALESCE(run_groups.source, '') = 'workflow'
+                AND runs.run_group_id != ''
+                AND EXISTS (
+                    SELECT 1
+                      FROM runs workflow_parent
+                     WHERE workflow_parent.run_group_id = runs.run_group_id
+                       AND workflow_parent.kind = 'workflow_run'
+                )
              )
              ORDER BY runs.updated_at DESC
              LIMIT ?
@@ -2540,7 +2743,7 @@ class AgentRuntimeService:
                 f"Workspace: {json.dumps(workspace_policy, ensure_ascii=False)}",
                 f"# Upstream Context\n{upstream or 'None'}",
                 f"# User Goal\n{user_goal}",
-                f"# Output Contract\n{agent.get('output_contract') or 'chat'}",
+                f"# Output Contract\n{_agent_output_contract_rules(agent.get('output_contract'))}",
             ]
         )
 
@@ -2557,8 +2760,7 @@ class AgentRuntimeService:
         if not user_goal:
             raise AgentRuntimeError("运行目标不能为空")
         agent = self._get_agent_private(agent_id)
-        if not agent.get("enabled", True):
-            raise AgentRuntimeError("Agent 已停用")
+        self._validate_agent_run_readiness(agent)
         run_group_id = str(payload.get("run_group_id") or "").strip()
         root_group = False
         if run_group_id:
@@ -2604,8 +2806,7 @@ class AgentRuntimeService:
         if not user_goal:
             raise AgentRuntimeError("运行目标不能为空")
         agent = self._get_agent_private(agent_id)
-        if not agent.get("enabled", True):
-            raise AgentRuntimeError("Agent 已停用")
+        self._validate_agent_run_readiness(agent)
 
         run_group_id = str(payload.get("run_group_id") or "").strip()
         root_group = False
@@ -2763,6 +2964,11 @@ class AgentRuntimeService:
                 "{\"action\":\"tool\",\"tool\":\"workspace.list\",\"input\":{}}. "
                 "Do not request tools that are not listed as allowed. "
                 "If no tools are allowed, do not request tools. "
+                "Do not request a tool solely because of the output contract; use tools only when the user goal "
+                "or an explicit deliverable requires them. "
+                "If the user asks not to create, save, write, or modify files, provide the content inline and do "
+                "not request file-writing tools. If the user asks not to run or execute commands, do not request "
+                "command-execution tools. "
                 f"Request at most one high-risk tool per turn.\n\nAllowed tools: {allowed_tool_text}"
             )
             messages = [
@@ -2792,7 +2998,33 @@ class AgentRuntimeService:
                 artifacts,
                 next_iteration=iteration + 1,
             )
-        raise AgentRuntimeError("custom_api Agent 工具循环超过上限")
+        raise AgentRuntimeError(f"custom_api Agent 工具循环超过上限；{self._tool_loop_limit_detail(timeline)}")
+
+    @staticmethod
+    def _tool_loop_limit_detail(timeline: list[dict[str, Any]]) -> str:
+        for event in reversed(timeline):
+            if event.get("event") != "agent.tool.call":
+                continue
+            tool_name = str(event.get("detail") or "unknown tool")
+            result = event.get("result") if isinstance(event.get("result"), dict) else {}
+            parts = [f"最后一次工具调用：{tool_name}"]
+            error = str(result.get("error") or "").strip()
+            if error:
+                parts.append(f"错误：{error}")
+            returncode = result.get("returncode")
+            if returncode not in (None, 0, "0"):
+                parts.append(f"退出码：{returncode}")
+            hint = str(result.get("hint") or "").strip()
+            if hint:
+                parts.append(f"建议：{hint}")
+            suggested_tool = str(result.get("suggested_tool") or "").strip()
+            if suggested_tool:
+                parts.append(f"建议工具：{suggested_tool}")
+            stderr = str(result.get("stderr") or "").strip()
+            if stderr and not error:
+                parts.append(f"stderr：{stderr[:500]}")
+            return "；".join(parts)
+        return "没有可用的工具调用详情"
 
     @staticmethod
     def _assistant_message_for_history(message: dict[str, Any]) -> dict[str, Any]:
@@ -2827,7 +3059,21 @@ class AgentRuntimeService:
         *,
         next_iteration: int,
     ) -> None:
+        user_goal = _user_goal_from_agent_messages(messages)
         for index, tool_request in enumerate(tool_requests):
+            tool_name = _normalize_tool_name(tool_request.get("tool"))
+            goal_block_reason = _agent_goal_disallows_tool(user_goal, tool_name)
+            if goal_block_reason:
+                tool_result = {
+                    "ok": False,
+                    "blocked_by_user_goal": True,
+                    "tool": tool_name,
+                    "error": goal_block_reason,
+                    "hint": "Do not ask for approval. Continue with an inline answer that follows the user's stated constraint.",
+                }
+                timeline.append(self._timeline("agent.tool.skipped", tool_name, result=tool_result))
+                self._append_tool_result_message(messages, {**tool_request, "tool": tool_name}, tool_result)
+                continue
             tool_result = self._call_agent_tool(tool_request, allowed_tools, broker, timeline, artifacts=artifacts)
             if tool_result.get("approval_required"):
                 raise AgentApprovalRequired(
@@ -3074,6 +3320,9 @@ class AgentRuntimeService:
         if not workflow.get("enabled", True):
             raise AgentRuntimeError("Workflow 已停用")
         self.validate_workflow(workflow["nodes"], workflow["edges"])
+        self._validate_workflow_agent_nodes(workflow["nodes"])
+        self._validate_workflow_runnable_steps(workflow["nodes"])
+        self._validate_workflow_agent_run_readiness(workflow["nodes"])
         run_group_id = str(payload.get("run_group_id") or "").strip()
         root_group = False
         if run_group_id:
@@ -3087,7 +3336,14 @@ class AgentRuntimeService:
             run_group_id = group["run_group_id"]
             root_group = True
         run = self._insert_run(kind="workflow_run", runnable_id=workflow_id, user_goal=user_goal, run_group_id=run_group_id)
-        timeline = [self._timeline("workflow.run.started", workflow["name"])]
+        timeline = [
+            self._timeline(
+                "workflow.run.started",
+                workflow["name"],
+                workflow_path=self._workflow_path_snapshot(workflow),
+                workflow_snapshot=self._workflow_runtime_snapshot(workflow),
+            )
+        ]
         artifacts: list[dict[str, Any]] = []
         context = user_goal
         return self._continue_workflow_run(
@@ -3171,6 +3427,101 @@ class AgentRuntimeService:
             or child_run_ids[:1] == [workflow_run.get("run_id")]
         )
 
+    @staticmethod
+    def _workflow_child_artifact_refs(child_run: dict[str, Any], label: str) -> list[dict[str, Any]]:
+        child_run_id = str(child_run.get("run_id") or "")
+        if not child_run_id:
+            return []
+        refs: list[dict[str, Any]] = []
+        for artifact in child_run.get("artifacts") or []:
+            if not isinstance(artifact, dict):
+                continue
+            path = str(artifact.get("path") or "").strip()
+            if not path:
+                continue
+            refs.append(
+                {
+                    "kind": "workflow_child_artifact",
+                    "path": path,
+                    "source_run_id": child_run_id,
+                    "source_run_kind": str(child_run.get("kind") or ""),
+                    "source_runnable_id": str(child_run.get("runnable_id") or ""),
+                    "source_runnable_name": str(child_run.get("runnable_name") or child_run.get("runnable_id") or ""),
+                    "workflow_step_label": label,
+                    "artifact_kind": str(artifact.get("kind") or ""),
+                }
+            )
+        return refs
+
+    def _merge_workflow_child_run_outcome(
+        self,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        child_run: dict[str, Any],
+        label: str,
+    ) -> None:
+        child_run_id = str(child_run.get("run_id") or "")
+        if not child_run_id:
+            return
+        child_status = str(child_run.get("status") or "")
+        child_result = str(child_run.get("result") or "")
+        child_artifacts = self._workflow_child_artifact_refs(child_run, label)
+        for event in timeline:
+            if not isinstance(event, dict):
+                continue
+            if event.get("event") != "workflow.node.agent":
+                continue
+            if str(event.get("child_run_id") or "") != child_run_id:
+                continue
+            event["status"] = child_status
+            event["result"] = _tool_input_preview(child_result, limit=1800)
+            event["artifact_count"] = len(child_artifacts)
+        existing_refs = {
+            (
+                str(item.get("kind") or ""),
+                str(item.get("source_run_id") or ""),
+                str(item.get("path") or ""),
+            )
+            for item in artifacts
+            if isinstance(item, dict)
+        }
+        for artifact in child_artifacts:
+            key = (
+                str(artifact.get("kind") or ""),
+                str(artifact.get("source_run_id") or ""),
+                str(artifact.get("path") or ""),
+            )
+            if key not in existing_refs:
+                artifacts.append(artifact)
+                existing_refs.add(key)
+
+    @staticmethod
+    def _workflow_artifact_path(label: str, artifacts: list[dict[str, Any]], configured_path: str = "") -> str:
+        configured = str(configured_path or "").strip()
+        if configured:
+            rel = _safe_rel_path(configured)
+            rel_path = Path(rel)
+            if rel_path.suffix:
+                base = rel_path.with_suffix("")
+                suffix = rel_path.suffix
+            else:
+                base = rel_path
+                suffix = ".md"
+        else:
+            base = Path(_slug(label, "artifact"))
+            suffix = ".md"
+        existing_paths = {
+            str(item.get("path") or "")
+            for item in artifacts
+            if isinstance(item, dict) and item.get("kind") == "workflow_artifact"
+        }
+        candidate = f"{base}{suffix}"
+        index = 2
+        while candidate in existing_paths:
+            candidate = f"{base}-{index}{suffix}"
+            index += 1
+        return candidate
+
     def _resume_parent_workflows_after_child_update(self, child_run: dict[str, Any]) -> None:
         for workflow_run in self._workflow_parent_runs_waiting_for_child(child_run):
             self._resume_parent_workflow_after_child_update(workflow_run, child_run)
@@ -3191,6 +3542,24 @@ class AgentRuntimeService:
         child_result = str(child_run.get("result") or "")
         child_run_id = str(child_run.get("run_id") or "")
         run_group_id = str(workflow_run.get("run_group_id") or "")
+        child_label = str(child_run.get("runnable_name") or child_run.get("runnable_id") or "Agent")
+        child_node_info: dict[str, str] = {}
+        for event in timeline:
+            if (
+                isinstance(event, dict)
+                and event.get("event") == "workflow.node.agent"
+                and str(event.get("child_run_id") or "") == child_run_id
+            ):
+                child_label = str(event.get("detail") or child_label).strip() or child_label
+                node_id = str(event.get("workflow_node_id") or "").strip()
+                if node_id:
+                    child_node_info = {
+                        "workflow_node_id": node_id,
+                        "workflow_node_kind": str(event.get("workflow_node_kind") or "agent"),
+                        "workflow_node_label": str(event.get("workflow_node_label") or child_label),
+                    }
+                break
+        self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, child_label)
         if child_status == "approval_required":
             result = self._update_run(
                 str(workflow_run["run_id"]),
@@ -3218,6 +3587,7 @@ class AgentRuntimeService:
                     detail,
                     child_run_id=child_run_id,
                     status=child_status,
+                    **child_node_info,
                 )
             )
             result = self._update_run(
@@ -3231,7 +3601,7 @@ class AgentRuntimeService:
                 self._update_run_group(run_group_id, status=status, summary=child_result)
             return result
         try:
-            workflow = self.get_workflow(str(workflow_run["runnable_id"]))
+            workflow = self._workflow_for_run_resume(workflow_run)
             start_index = self._workflow_resume_start_index(workflow, workflow_run, child_run_id)
             if start_index is None:
                 return workflow_run
@@ -3276,21 +3646,33 @@ class AgentRuntimeService:
         root_group: bool,
     ) -> dict[str, Any]:
         run_group_id = str(run.get("run_group_id") or "")
+        current_node_info: dict[str, str] = {}
         try:
             workflow_goal = str(run.get("user_goal") or context)
             has_agent_upstream = max(0, start_index) > 0
-            for node in self._workflow_path(workflow)[max(0, start_index) :]:
+            path = self._workflow_path(workflow)
+            for index, node in enumerate(path[max(0, start_index) :], start=max(0, start_index)):
                 kind = self._node_kind(node)
                 label = str((node.get("data") or {}).get("label") or node.get("id"))
+                current_node_info = {
+                    "workflow_node_id": str(node.get("id") or ""),
+                    "workflow_node_kind": kind,
+                    "workflow_node_label": label,
+                }
                 if kind == "start":
-                    timeline.append(self._timeline("workflow.node.start", label))
+                    timeline.append(
+                        self._timeline(
+                            "workflow.node.start",
+                            label,
+                            workflow_node_id=str(node.get("id") or ""),
+                            status="completed",
+                        )
+                    )
                     continue
                 if kind == "agent":
                     data = node.get("data") or {}
-                    agent_id = str(data.get("agent_id") or data.get("agentId") or "")
-                    if not agent_id:
-                        raise AgentRuntimeError(f"Agent 节点 {label} 缺少 agent_id")
-                    agent = self._get_agent_private(agent_id)
+                    agent = self._workflow_agent_for_node(node)
+                    agent_id = str(agent.get("agent_id") or data.get("agent_id") or data.get("agentId") or "")
                     agent_upstream = context if has_agent_upstream else ""
                     child = self._insert_run(
                         kind="agent_run",
@@ -3310,15 +3692,24 @@ class AgentRuntimeService:
                         self._timeline(
                             "workflow.node.agent",
                             label,
+                            workflow_node_id=str(node.get("id") or ""),
+                            workflow_node_kind=kind,
+                            workflow_node_label=label,
                             child_run_id=child["run_id"],
                             status=child["status"],
+                            result=_tool_input_preview(child.get("result") or "", limit=1800),
+                            artifact_count=len(self._workflow_child_artifact_refs(child, label)),
                         )
                     )
+                    self._merge_workflow_child_run_outcome(timeline, artifacts, child, label)
                     if child["status"] == "approval_required":
                         timeline.append(
                             self._timeline(
                                 "workflow.run.approval_required",
                                 label,
+                                workflow_node_id=str(node.get("id") or ""),
+                                workflow_node_kind=kind,
+                                workflow_node_label=label,
                                 child_run_id=child["run_id"],
                             )
                         )
@@ -3344,6 +3735,9 @@ class AgentRuntimeService:
                             self._timeline(
                                 f"workflow.run.{status}",
                                 detail,
+                                workflow_node_id=str(node.get("id") or ""),
+                                workflow_node_kind=kind,
+                                workflow_node_label=label,
                                 child_run_id=child["run_id"],
                                 status=child["status"],
                             )
@@ -3361,18 +3755,78 @@ class AgentRuntimeService:
                         return result
                     continue
                 if kind == "approval":
+                    pending = {
+                        "approval_id": f"approval_{uuid4().hex[:12]}",
+                        "tool": "workflow.approval",
+                        "input_preview": {
+                            "checkpoint": label,
+                            "context": _tool_input_preview(context),
+                        },
+                        "requested_at": _now(),
+                        "workflow_context": context,
+                        "workflow_next_index": index + 1,
+                        "workflow_node_id": str(node.get("id") or ""),
+                        "workflow_node_label": label,
+                    }
                     timeline.append(
-                        self._timeline("workflow.node.approval", f"{label} checkpoint recorded")
+                            self._timeline(
+                                "workflow.node.approval_required",
+                                label,
+                                workflow_node_id=str(node.get("id") or ""),
+                                workflow_node_kind=kind,
+                                workflow_node_label=label,
+                                status="approval_required",
+                                pending_approval=_public_pending_approval(pending),
+                            )
+                        )
+                    result = self._update_run(
+                        str(run["run_id"]),
+                        status="approval_required",
+                        result=f"等待审批：{label}",
+                        timeline=timeline,
+                        artifacts=artifacts,
+                        pending_approval=pending,
                     )
-                    continue
+                    if root_group:
+                        self._update_run_group(
+                            run_group_id,
+                            status="approval_required",
+                            summary=f"等待审批：{label}",
+                        )
+                        result = self.get_run(result["run_id"])
+                    return result
                 if kind == "artifact":
+                    data = node.get("data") or {}
                     broker = ToolBroker(
                         self._default_workspace_policy(),
                         self.workflow_artifacts_dir / str(run["run_id"]),
                     )
-                    artifact = broker.artifact_write(f"{_slug(label, 'artifact')}.md", context)
-                    artifacts.append({"kind": "workflow_artifact", **artifact})
-                    timeline.append(self._timeline("workflow.node.artifact", label))
+                    workflow_node_id = str(node.get("id") or "")
+                    artifact_path = self._workflow_artifact_path(
+                        label,
+                        artifacts,
+                        str(data.get("artifact_path") or data.get("artifactPath") or ""),
+                    )
+                    artifact = broker.artifact_write(artifact_path, context)
+                    artifacts.append(
+                        {
+                            "kind": "workflow_artifact",
+                            "workflow_node_id": workflow_node_id,
+                            "workflow_node_label": label,
+                            **artifact,
+                        }
+                    )
+                    timeline.append(
+                        self._timeline(
+                            "workflow.node.artifact",
+                            label,
+                            workflow_node_id=workflow_node_id,
+                            workflow_node_kind=kind,
+                            workflow_node_label=label,
+                            status="completed",
+                            artifact=artifact,
+                        )
+                    )
                     continue
                 raise AgentRuntimeError(f"未知 Workflow 节点类型：{kind}")
             timeline.append(self._timeline("workflow.run.completed", "Workflow run completed"))
@@ -3388,7 +3842,7 @@ class AgentRuntimeService:
                 result = self.get_run(result["run_id"])
             return result
         except Exception as exc:
-            timeline.append(self._timeline("workflow.run.failed", str(exc)))
+            timeline.append(self._timeline("workflow.run.failed", str(exc), status="failed", **current_node_info))
             result = self._update_run(
                 str(run["run_id"]),
                 status="failed",
@@ -3412,13 +3866,153 @@ class AgentRuntimeService:
             result.append(nodes[current])
         return result
 
+    def _workflow_path_snapshot(self, workflow: dict[str, Any]) -> list[dict[str, str]]:
+        snapshot: list[dict[str, str]] = []
+        planned_artifacts: list[dict[str, Any]] = []
+        for node in self._workflow_path(workflow):
+            data = node.get("data") if isinstance(node.get("data"), dict) else {}
+            kind = self._node_kind(node)
+            node_id = str(node.get("id") or "")
+            label = str(data.get("label") or node_id or kind)
+            item = {
+                "id": node_id,
+                "kind": kind,
+                "label": label,
+            }
+            if kind == "artifact":
+                artifact_path = self._workflow_artifact_path(
+                    label,
+                    planned_artifacts,
+                    str(data.get("artifact_path") or data.get("artifactPath") or ""),
+                )
+                item["artifact_path"] = artifact_path
+                planned_artifacts.append({"kind": "workflow_artifact", "path": artifact_path})
+            snapshot.append(item)
+        return snapshot
+
+    @staticmethod
+    def _workflow_runtime_snapshot(workflow: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "workflow_id": str(workflow.get("workflow_id") or ""),
+            "name": str(workflow.get("name") or "Workflow"),
+            "nodes": _json_load(_json_dump(workflow.get("nodes") or []), []),
+            "edges": _json_load(_json_dump(workflow.get("edges") or []), []),
+        }
+
+    def _workflow_for_run_resume(self, workflow_run: dict[str, Any]) -> dict[str, Any]:
+        for event in workflow_run.get("timeline") or []:
+            if not isinstance(event, dict) or event.get("event") != "workflow.run.started":
+                continue
+            snapshot = event.get("workflow_snapshot")
+            if not isinstance(snapshot, dict):
+                continue
+            nodes = snapshot.get("nodes")
+            edges = snapshot.get("edges")
+            if isinstance(nodes, list) and isinstance(edges, list):
+                return {
+                    "workflow_id": str(snapshot.get("workflow_id") or workflow_run.get("runnable_id") or ""),
+                    "name": str(snapshot.get("name") or "Workflow"),
+                    "nodes": nodes,
+                    "edges": edges,
+                    "enabled": True,
+                }
+        return self.get_workflow(str(workflow_run["runnable_id"]))
+
     def cancel_run(self, run_id: str) -> dict[str, Any]:
         run = self.get_run(run_id)
         if run["status"] in _FINAL_RUN_STATUSES:
             return run
-        timeline = [*run["timeline"], self._timeline("run.cancelled", "Run cancelled")]
-        result = self._update_run(run_id, status="cancelled", timeline=timeline, pending_approval=None)
-        self._update_agent_run_group_if_root(result)
+        timeline = [*run["timeline"]]
+        artifacts: list[dict[str, Any]] | None = None
+        result_text: str | None = None
+        if run.get("kind") == "workflow_run":
+            artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
+            pending = self._pending_approval_private(run_id)
+            node_info: dict[str, str] = {}
+            cancelled_child_run_id = ""
+            label = "Workflow"
+            if pending and str(pending.get("tool") or "") == "workflow.approval":
+                label = str(pending.get("workflow_node_label") or "Approval")
+                node_info = {
+                    "workflow_node_id": str(pending.get("workflow_node_id") or ""),
+                    "workflow_node_kind": "approval",
+                    "workflow_node_label": label,
+                }
+            else:
+                child_run_id = ""
+                for event in reversed(timeline):
+                    if not isinstance(event, dict):
+                        continue
+                    if event.get("event") != "workflow.run.approval_required":
+                        continue
+                    child_run_id = str(event.get("child_run_id") or "").strip()
+                    if child_run_id:
+                        break
+                if child_run_id:
+                    cancelled_child_run_id = child_run_id
+                    for event in timeline:
+                        if (
+                            isinstance(event, dict)
+                            and event.get("event") == "workflow.node.agent"
+                            and str(event.get("child_run_id") or "") == child_run_id
+                        ):
+                            label = str(event.get("detail") or event.get("workflow_node_label") or "Agent").strip() or "Agent"
+                            node_info = {
+                                "workflow_node_id": str(event.get("workflow_node_id") or ""),
+                                "workflow_node_kind": str(event.get("workflow_node_kind") or "agent"),
+                                "workflow_node_label": str(event.get("workflow_node_label") or label),
+                            }
+                            break
+                    try:
+                        child_run = self.get_run(child_run_id)
+                    except KeyError:
+                        child_run = {}
+                    if child_run and str(child_run.get("status") or "") not in _FINAL_RUN_STATUSES:
+                        child_timeline = [
+                            event
+                            for event in child_run.get("timeline") or []
+                            if isinstance(event, dict)
+                        ]
+                        child_timeline.append(self._timeline("run.cancelled", "Parent Workflow cancelled"))
+                        child_run = self._update_run(
+                            child_run_id,
+                            status="cancelled",
+                            result="父 Workflow 已取消",
+                            timeline=child_timeline,
+                            pending_approval=None,
+                        )
+                    if child_run:
+                        self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, label)
+            cancel_event_extra: dict[str, Any] = {"status": "cancelled", **node_info}
+            if cancelled_child_run_id:
+                cancel_event_extra["child_run_id"] = cancelled_child_run_id
+            timeline.append(
+                self._timeline(
+                    "workflow.run.cancelled",
+                    f"{label} cancelled",
+                    **cancel_event_extra,
+                )
+            )
+            result_text = f"Workflow 已取消：{label}"
+        else:
+            timeline.append(self._timeline("run.cancelled", "Run cancelled"))
+        result = self._update_run(
+            run_id,
+            status="cancelled",
+            result=result_text,
+            timeline=timeline,
+            artifacts=artifacts,
+            pending_approval=None,
+        )
+        if result.get("kind") == "workflow_run" and self._workflow_run_is_group_root(result):
+            self._update_run_group(
+                str(result.get("run_group_id") or ""),
+                status="cancelled",
+                summary=str(result.get("result") or "Workflow 已取消"),
+            )
+            result = self.get_run(run_id)
+        else:
+            self._update_agent_run_group_if_root(result)
         self._resume_parent_workflows_after_child_update(result)
         return result
 
@@ -3426,6 +4020,8 @@ class AgentRuntimeService:
         run = self.get_run(run_id)
         if run["status"] != "approval_required":
             raise AgentRuntimeError("Run 当前不在待审批状态")
+        if run["kind"] == "workflow_run":
+            return self._approve_workflow_run_approval(run)
         if run["kind"] != "agent_run":
             raise AgentRuntimeError("当前只支持恢复 Agent Run 的工具审批")
         pending = self._pending_approval_private(run_id)
@@ -3503,10 +4099,93 @@ class AgentRuntimeService:
         self._resume_parent_workflows_after_child_update(result)
         return result
 
+    def _approve_workflow_run_approval(self, run: dict[str, Any]) -> dict[str, Any]:
+        run_id = str(run["run_id"])
+        pending = self._pending_approval_private(run_id)
+        if not pending or str(pending.get("tool") or "") != "workflow.approval":
+            raise AgentRuntimeError("Workflow Run 缺少待审批节点信息")
+        workflow = self._workflow_for_run_resume(run)
+        label = str(pending.get("workflow_node_label") or "Approval")
+        context = str(pending.get("workflow_context") or run.get("result") or run.get("user_goal") or "")
+        try:
+            start_index = int(pending.get("workflow_next_index") or 0)
+        except (TypeError, ValueError):
+            raise AgentRuntimeError("Workflow Run 待审批恢复位置无效")
+        timeline = [
+            event
+            for event in run.get("timeline") or []
+            if isinstance(event, dict)
+        ]
+        workflow_node_id = str(pending.get("workflow_node_id") or "")
+        timeline.append(
+            self._timeline(
+                "workflow.node.approval_approved",
+                f"{label} approved",
+                workflow_node_id=workflow_node_id,
+                workflow_node_kind="approval",
+                workflow_node_label=label,
+                status="completed",
+            )
+        )
+        artifacts = [item for item in run.get("artifacts") or [] if isinstance(item, dict)]
+        root_group = self._workflow_run_is_group_root(run)
+        running = self._update_run(
+            run_id,
+            status="running",
+            result=context,
+            timeline=timeline,
+            artifacts=artifacts,
+            pending_approval=None,
+        )
+        if root_group:
+            self._update_run_group(str(run.get("run_group_id") or ""), status="running", summary=context)
+            running = self.get_run(run_id)
+        return self._continue_workflow_run(
+            running,
+            workflow,
+            context=context,
+            timeline=timeline,
+            artifacts=artifacts,
+            start_index=start_index,
+            root_group=root_group,
+        )
+
     def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
         run = self.get_run(run_id)
         if run["status"] != "approval_required":
             raise AgentRuntimeError("Run 当前不在待审批状态")
+        if run["kind"] == "workflow_run":
+            pending = self._pending_approval_private(run_id)
+            if not pending or str(pending.get("tool") or "") != "workflow.approval":
+                raise AgentRuntimeError("Workflow Run 缺少待审批节点信息")
+            label = str(pending.get("workflow_node_label") or "Approval")
+            detail = redact_secrets(reason).strip() or f"{label} approval rejected"
+            timeline = [
+                *run["timeline"],
+                self._timeline(
+                    "workflow.node.approval_rejected",
+                    detail,
+                    workflow_node_id=str(pending.get("workflow_node_id") or ""),
+                    workflow_node_kind="approval",
+                    workflow_node_label=label,
+                    status="cancelled",
+                ),
+            ]
+            result = self._update_run(
+                run_id,
+                status="cancelled",
+                result=f"Workflow 审批已拒绝：{detail}",
+                timeline=timeline,
+                pending_approval=None,
+            )
+            if self._workflow_run_is_group_root(run):
+                self._update_run_group(
+                    str(run.get("run_group_id") or ""),
+                    status="cancelled",
+                    summary=str(result.get("result") or ""),
+                )
+                result = self.get_run(run_id)
+            return result
         detail = redact_secrets(reason).strip() or "Tool approval rejected"
         timeline = [*run["timeline"], self._timeline("agent.tool.approval_rejected", detail)]
         result = self._update_run(
@@ -3556,6 +4235,7 @@ class AgentRuntimeService:
             "description": agent.get("description") or "",
             "avatar_url": agent.get("avatar_url") or "",
             "category": agent.get("category") or "custom",
+            "output_contract": agent.get("output_contract") or "chat",
             "kind": "agent",
             "enabled": agent["enabled"],
         }

@@ -15,6 +15,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
   attachSkill,
   approveRunApproval,
+  cancelRun,
   createSkillFolder,
   createAgent,
   createAgentRun,
@@ -27,9 +28,11 @@ import {
   detachSkill,
   getRun,
   getRunArtifact,
+  getRunGroup,
   importSkill,
   installSkillCommand,
   listAgents,
+  listRunGroups,
   listRunnables,
   listRuns,
   listSkillFolders,
@@ -45,6 +48,7 @@ import {
   updateWorkflow,
   type AgentSpec,
   type RunnableSummary,
+  type RunGroupSpec,
   type RunSpec,
   type SkillFolderSpec,
   type SkillSourceRoot,
@@ -53,17 +57,43 @@ import {
   type WorkflowSpec,
 } from '../lib/agents';
 import { chooseAvatarImage, chooseSkillSources, openAppView, openPath } from '../lib/bridge';
-import { listModelProfiles, type ModelProfile } from '../lib/modelProfiles';
+import { listModelProfiles, type ModelProfile, type ModelProfileDefaults } from '../lib/modelProfiles';
 import { currentParam, navigateTo } from '../lib/view';
 
 type StudioTab = 'agents' | 'skills' | 'skill-groups' | 'workflows' | 'runs';
 type SkillFolderFilter = 'all' | 'uncategorized' | string;
 type RunKindFilter = 'all' | 'workflow' | 'agent';
+type RunStatusFilter = 'all' | 'completed' | 'failed' | 'active';
 
 type WorkflowChildRunRef = {
   childRunId: string;
   label: string;
   status: string;
+};
+
+type WorkflowStepRef = {
+  key: string;
+  kind: 'start' | 'agent' | 'approval' | 'artifact';
+  nodeId?: string;
+  label: string;
+  status: string;
+  childRunId?: string;
+  payload?: string;
+  artifactPath?: string;
+  artifactCount?: number;
+};
+
+type WorkflowValidationReport = {
+  errors: string[];
+  warnings: string[];
+};
+
+type RunHistoryGroup = {
+  key: string;
+  label: string;
+  subtitle: string;
+  avatarUrl?: string;
+  runs: RunSpec[];
 };
 
 type StudioRefreshOptions = {
@@ -74,6 +104,7 @@ type StudioRefreshOptions = {
   runTarget?: string;
   selectedRunId?: string;
   selectFirstRun?: boolean;
+  statusMessage?: string;
 };
 
 type ConfirmDialogState = {
@@ -145,6 +176,8 @@ type SkillSourceFilter = 'yachiyo' | 'hermes';
 const studioRouteTabs: StudioTab[] = ['agents', 'skills', 'skill-groups', 'workflows', 'runs'];
 const studioTabs: StudioTab[] = ['agents', 'skills', 'workflows', 'runs'];
 const skillFolderNameMaxLength = 120;
+const workflowNodeTypes = new Set(['start', 'agent', 'approval', 'artifact']);
+const workflowRunnableStepRequiredMessage = 'Workflow 至少需要一个可执行节点（Agent、Approval 或 Artifact）';
 
 const starterNodes: Node[] = [
   { id: 'start', type: 'input', position: { x: 40, y: 120 }, data: { label: 'Start', kind: 'start' } },
@@ -363,6 +396,158 @@ function workflowEdges(workflow: WorkflowSpec | null): Edge[] {
   }));
 }
 
+function workflowNodeKind(node: Node): string {
+  return String(node.data?.kind || (node.type === 'input' ? 'start' : node.type === 'output' ? 'artifact' : 'agent'));
+}
+
+function workflowNodeKindLabel(kind: string): string {
+  if (kind === 'agent') return 'Agent';
+  if (kind === 'approval') return 'Approval';
+  if (kind === 'artifact') return 'Artifact';
+  if (kind === 'start') return 'Start';
+  return kind || 'Node';
+}
+
+function isSafeWorkflowArtifactPath(value: string): boolean {
+  const path = value.replace(/\\/g, '/').trim();
+  return Boolean(path) && !path.startsWith('/') && !path.startsWith('../') && !path.includes('/../');
+}
+
+function workflowArtifactBasePath(label: string, configuredPath: string): string {
+  const configured = configuredPath.replace(/\\/g, '/').trim();
+  if (configured) {
+    const filename = configured.slice(configured.lastIndexOf('/') + 1);
+    return filename.includes('.') ? configured : `${configured}.md`;
+  }
+  const slug = label
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'artifact';
+  return `${slug}.md`;
+}
+
+function uniqueWorkflowArtifactPath(basePath: string, existingPaths: Set<string>): string {
+  const slashIndex = basePath.lastIndexOf('/');
+  const directory = slashIndex >= 0 ? `${basePath.slice(0, slashIndex + 1)}` : '';
+  const filename = slashIndex >= 0 ? basePath.slice(slashIndex + 1) : basePath;
+  const dotIndex = filename.lastIndexOf('.');
+  const stem = dotIndex > 0 ? filename.slice(0, dotIndex) : filename;
+  const suffix = dotIndex > 0 ? filename.slice(dotIndex) : '.md';
+  let candidate = `${directory}${stem}${suffix}`;
+  let index = 2;
+  while (existingPaths.has(candidate)) {
+    candidate = `${directory}${stem}-${index}${suffix}`;
+    index += 1;
+  }
+  existingPaths.add(candidate);
+  return candidate;
+}
+
+function validateWorkflowDraft(nodes: Node[], edges: Edge[], agents: AgentSpec[]): WorkflowValidationReport {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!nodes.length) {
+    return { errors: ['Workflow 至少需要一个 Start 节点'], warnings };
+  }
+
+  const nodeIds = nodes.map((node) => String(node.id || '').trim());
+  const nodeIdSet = new Set(nodeIds);
+  if (nodeIds.some((id) => !id) || nodeIdSet.size !== nodeIds.length) {
+    errors.push('Workflow 节点 ID 必须唯一');
+  }
+
+  const startNodes = nodes.filter((node) => workflowNodeKind(node) === 'start');
+  if (startNodes.length !== 1) {
+    errors.push('Workflow 必须且只能有一个 Start 节点');
+  }
+
+  const agentById = new Map(agents.map((agent) => [agent.agent_id, agent]));
+  nodes.forEach((node) => {
+    const kind = workflowNodeKind(node);
+    const label = String(node.data?.label || node.id || workflowNodeKindLabel(kind)).trim();
+    if (!workflowNodeTypes.has(kind)) {
+      errors.push(`${label || '节点'} 使用了未知 Workflow 节点类型：${kind || '空'}`);
+    }
+    if (!label) warnings.push(`${node.id || '节点'} 缺少 Label`);
+    if (kind === 'agent') {
+      const agentId = String(node.data?.agent_id || '').trim();
+      const agent = agentById.get(agentId);
+      if (!agentId) errors.push(`${label} 没有选择 Agent`);
+      else if (!agent) errors.push(`${label} 引用了不存在的 Agent`);
+      else if (agent.enabled === false) errors.push(`${label} 选择的 Agent 已停用`);
+    }
+    if (kind === 'artifact') {
+      const artifactPath = String(node.data?.artifact_path || '').trim();
+      if (artifactPath && !isSafeWorkflowArtifactPath(artifactPath)) {
+        errors.push(`${label} 的产物路径必须是相对路径，且不能越界`);
+      }
+    }
+  });
+
+  const outgoing = new Map<string, string[]>();
+  const incoming = new Map<string, string[]>();
+  nodeIds.forEach((id) => {
+    outgoing.set(id, []);
+    incoming.set(id, []);
+  });
+  edges.forEach((edge) => {
+    const source = String(edge.source || '').trim();
+    const target = String(edge.target || '').trim();
+    if (!nodeIdSet.has(source) || !nodeIdSet.has(target)) {
+      errors.push('Workflow edge 引用了不存在的节点');
+      return;
+    }
+    outgoing.get(source)?.push(target);
+    incoming.get(target)?.push(source);
+  });
+
+  const startId = startNodes.length === 1 ? String(startNodes[0].id || '').trim() : '';
+  if (startId && (incoming.get(startId) || []).length > 0) {
+    errors.push('Start 节点不能有入边');
+  }
+  nodeIds.forEach((nodeId) => {
+    const targets = outgoing.get(nodeId) || [];
+    const sources = incoming.get(nodeId) || [];
+    const node = nodes.find((item) => item.id === nodeId);
+    const label = String(node?.data?.label || nodeId || '节点');
+    if (targets.length > 1) errors.push(`${label} 有多个下一步，Workflow v1 只支持线性流程`);
+    if (nodeId !== startId && sources.length !== 1) errors.push(`${label} 必须且只能有一个上一节点`);
+  });
+
+  if (startId && !errors.some((item) => item.includes('edge 引用'))) {
+    const seen = new Set<string>();
+    const active = new Set<string>();
+    const visit = (nodeId: string) => {
+      if (active.has(nodeId)) {
+        errors.push('Workflow 不能包含环');
+        return;
+      }
+      if (seen.has(nodeId)) return;
+      active.add(nodeId);
+      (outgoing.get(nodeId) || []).forEach(visit);
+      active.delete(nodeId);
+      seen.add(nodeId);
+    };
+    visit(startId);
+    if (seen.size !== nodeIdSet.size) {
+      errors.push('Workflow v1 必须是一条从 Start 出发的单一路径');
+    }
+  }
+
+  if (!nodes.some((node) => workflowNodeKind(node) !== 'start')) {
+    warnings.push('当前只有 Start 节点；运行后不会调用任何 Agent。');
+  }
+
+  return {
+    errors: Array.from(new Set(errors)),
+    warnings: Array.from(new Set(warnings)),
+  };
+}
+
+function workflowHasRunnableSteps(nodes: Node[]): boolean {
+  return nodes.some((node) => workflowNodeKind(node) !== 'start');
+}
+
 function linearEdgesForNodes(nextNodes: Node[]): Edge[] {
   return nextNodes.slice(0, -1).map((node, index) => {
     const target = nextNodes[index + 1];
@@ -418,10 +603,24 @@ function buildPhase4WorkflowNodes(agents: AgentSpec[]): Node[] {
   ];
 }
 
+function normalizeRunStatus(status: string): string {
+  const value = String(status || '').trim();
+  return value === 'running' ? 'processing' : value;
+}
+
+function isActiveRunStatus(status: string): boolean {
+  return ['processing', 'pending', 'approval_required'].includes(normalizeRunStatus(status));
+}
+
+function runStatusLabel(status: string): string {
+  return normalizeRunStatus(status) || 'unknown';
+}
+
 function runStatusTone(status: string): string {
-  if (status === 'completed') return 'ready';
-  if (status === 'failed' || status === 'cancelled') return 'danger';
-  if (status === 'approval_required') return 'approval';
+  const normalized = normalizeRunStatus(status);
+  if (normalized === 'completed') return 'ready';
+  if (normalized === 'failed' || normalized === 'cancelled') return 'danger';
+  if (normalized === 'approval_required') return 'approval';
   return 'running';
 }
 
@@ -429,6 +628,128 @@ function runKindLabel(kind: string): string {
   if (kind === 'agent_run') return 'Agent Run';
   if (kind === 'workflow_run') return 'Workflow Run';
   return kind || 'Run';
+}
+
+function runHistoryGroupKindLabel(run: RunSpec): string {
+  if (run.kind === 'agent_run') return 'Agent';
+  if (run.kind === 'workflow_run') return 'Workflow';
+  return runKindLabel(run.kind);
+}
+
+function runHistoryGroupKey(run: RunSpec): string {
+  if (run.kind === 'agent_run') return `agent:${run.runnable_id || run.runnable_name || 'unknown'}`;
+  if (run.kind === 'workflow_run') return `workflow:${run.runnable_id || run.runnable_name || 'unknown'}`;
+  return `${run.kind || 'run'}:${run.runnable_id || run.runnable_name || 'unknown'}`;
+}
+
+function runHistoryGroupSummary(runs: RunSpec[]): string {
+  const failed = runs.filter((run) => ['failed', 'cancelled'].includes(normalizeRunStatus(run.status))).length;
+  const active = runs.filter((run) => isActiveRunStatus(run.status)).length;
+  const completed = runs.filter((run) => normalizeRunStatus(run.status) === 'completed').length;
+  const parts = [
+    active ? `${active} active` : '',
+    failed ? `${failed} failed` : '',
+    completed ? `${completed} done` : '',
+  ].filter(Boolean);
+  return parts.length ? parts.join(' · ') : `${runs.length} runs`;
+}
+
+function runnableCapabilityLine(item: Pick<RunnableSummary, 'category' | 'description' | 'enabled' | 'kind' | 'output_contract'>): string {
+  const parts = [
+    item.enabled === false ? 'Disabled' : '',
+    item.category ? `Category ${item.category}` : '',
+    item.output_contract ? `Output ${item.output_contract}` : '',
+    item.kind === 'workflow' ? 'Workflow' : '',
+  ].filter(Boolean);
+  return parts.join(' · ') || (item.kind === 'workflow' ? 'Workflow' : 'Agent');
+}
+
+function runnableOptionLabel(item: RunnableSummary): string {
+  return `${item.kind}: ${item.name} · ${runnableCapabilityLine(item)}`;
+}
+
+function agentCapabilityLine(agent: Pick<AgentSpec, 'category' | 'enabled' | 'output_contract'>): string {
+  return [
+    agent.enabled === false ? 'Disabled' : '',
+    agent.category ? `Category ${agent.category}` : '',
+    agent.output_contract ? `Output ${agent.output_contract}` : '',
+  ].filter(Boolean).join(' · ') || 'Agent';
+}
+
+function agentRunReadinessIssue(
+  agent: AgentSpec,
+  chatProfiles: ModelProfile[],
+  modelDefaults: ModelProfileDefaults,
+  skills: SkillSpec[],
+): string {
+  if (agent.enabled === false) return 'Agent 已停用，无法运行。';
+  const disabledMountedSkills = skills.filter((skill) => skill.enabled === false && agent.skill_ids?.includes(skill.skill_id));
+  if (disabledMountedSkills.length) return `有 ${disabledMountedSkills.length} 个已挂载 Skill 当前已停用。`;
+  if (agent.model_mode === 'custom_api') {
+    const config = agent.model_config || {};
+    const missing = [
+      !String(config.base_url || '').trim() ? 'Base URL' : '',
+      !String(config.model || '').trim() ? 'Model' : '',
+      !config.api_key_configured ? 'API Key' : '',
+    ].filter(Boolean);
+    if (missing.length) return `Custom API 配置不完整：缺少 ${missing.join('、')}。`;
+    return '';
+  }
+  if (agent.model_mode === 'follow_main') {
+    const defaultChatProfileId = String(modelDefaults.chat || '').trim();
+    if (!defaultChatProfileId) return '默认 Chat Profile 尚未设置。';
+    if (!chatProfiles.some((profile) => profile.profile_id === defaultChatProfileId)) {
+      return '默认 Chat Profile 不可用或已停用。';
+    }
+    return '';
+  }
+  if (!agent.model_profile_id) return '尚未选择 Chat Profile。';
+  if (!chatProfiles.some((profile) => profile.profile_id === agent.model_profile_id)) {
+    return '当前 Chat Profile 不可用或已停用。';
+  }
+  return '';
+}
+
+function workflowAgentRunReadinessIssue(nodes: Node[], issueByAgentId: Map<string, string>): string {
+  for (const node of nodes) {
+    if (workflowNodeKind(node) !== 'agent') continue;
+    const agentId = String(node.data?.agent_id || '').trim();
+    if (!agentId) continue;
+    const issue = issueByAgentId.get(agentId);
+    if (!issue) continue;
+    const label = String(node.data?.label || node.id || 'Agent').trim() || 'Agent';
+    return `${label}: ${issue}`;
+  }
+  return '';
+}
+
+function runHistoryGroupsFor(runs: RunSpec[], runnables: RunnableSummary[], agents: AgentSpec[]): RunHistoryGroup[] {
+  const runnableById = new Map(runnables.map((runnable) => [runnable.id, runnable]));
+  const agentById = new Map(agents.map((agent) => [agent.agent_id, agent]));
+  const groups = new Map<string, RunHistoryGroup>();
+  runs.forEach((run) => {
+    const key = runHistoryGroupKey(run);
+    const runnable = runnableById.get(run.runnable_id);
+    const agent = agentById.get(run.runnable_id);
+    const label = run.runnable_name || runnable?.nickname || runnable?.name || agent?.nickname || agent?.name || run.runnable_id || runKindLabel(run.kind);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.runs.push(run);
+      return;
+    }
+    groups.set(key, {
+      key,
+      label,
+      subtitle: runHistoryGroupKindLabel(run),
+      avatarUrl: runnable?.avatar_url || agent?.avatar_url,
+      runs: [run],
+    });
+  });
+  return Array.from(groups.values()).sort((a, b) => {
+    const aLatest = Date.parse(a.runs[0]?.updated_at || a.runs[0]?.created_at || '');
+    const bLatest = Date.parse(b.runs[0]?.updated_at || b.runs[0]?.created_at || '');
+    return (Number.isFinite(bLatest) ? bLatest : 0) - (Number.isFinite(aLatest) ? aLatest : 0);
+  });
 }
 
 function isWorkflowChildAgentRun(run: RunSpec): boolean {
@@ -440,6 +761,60 @@ function runMatchesFilter(run: RunSpec, filter: RunKindFilter): boolean {
   if (filter === 'agent') return run.kind === 'agent_run';
   if (filter === 'workflow') return run.kind === 'workflow_run';
   return true;
+}
+
+function runMatchesStatusFilter(run: RunSpec, filter: RunStatusFilter): boolean {
+  const status = normalizeRunStatus(run.status);
+  if (filter === 'completed') return status === 'completed';
+  if (filter === 'failed') return status === 'failed' || status === 'cancelled';
+  if (filter === 'active') return isActiveRunStatus(status);
+  return true;
+}
+
+function compactSearchText(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return '';
+  }
+}
+
+function runSearchHaystack(run: RunSpec): string {
+  const timelineText = (run.timeline || [])
+    .map((event) => compactSearchText(event))
+    .join(' ');
+  const artifactText = (run.artifacts || [])
+    .map((artifact) => compactSearchText(artifact))
+    .join(' ');
+  return [
+    run.run_id,
+    run.run_group_id,
+    run.run_group_source,
+    run.kind,
+    run.runnable_id,
+    run.runnable_name,
+    run.status,
+    runStatusLabel(run.status),
+    runKindLabel(run.kind),
+    run.user_goal,
+    run.result,
+    timelineText,
+    artifactText,
+  ].map(compactSearchText).join(' ').toLowerCase();
+}
+
+function runMatchesSearch(run: RunSpec, query: string): boolean {
+  const terms = query
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!terms.length) return true;
+  const haystack = runSearchHaystack(run);
+  return terms.every((term) => haystack.includes(term));
 }
 
 function formatRunDate(value?: string): string {
@@ -463,6 +838,59 @@ function formatApprovalInput(value: unknown): string {
   }
 }
 
+function approvalPreviewRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function approvalPreviewValue(record: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  }
+  return '';
+}
+
+function RunApprovalRequest({ inputPreview, runGoal = '', runId = '', runLabel = '', tool }: {
+  inputPreview: unknown;
+  runGoal?: string;
+  runId?: string;
+  runLabel?: string;
+  tool: string;
+}) {
+  const preview = approvalPreviewRecord(inputPreview);
+  const checkpoint = approvalPreviewValue(preview, ['checkpoint', 'label', 'approval']);
+  const workdir = approvalPreviewValue(preview, ['cwd', 'workdir', 'working_dir']);
+  const path = approvalPreviewValue(preview, ['path', 'file', 'target']);
+  const command = tool === 'terminal.run' ? approvalPreviewValue(preview, ['command', 'cmd']) : '';
+  const rows = [
+    ['Tool', tool],
+    runId ? ['Run', runLabel ? `${runLabel} · ${runId}` : runId] : null,
+    runGoal ? ['关联任务', runGoal] : null,
+    checkpoint ? ['审批节点', checkpoint] : null,
+    workdir ? ['工作目录', workdir] : null,
+    path ? ['路径', path] : null,
+  ].filter((row): row is string[] => Boolean(row));
+  const contentLabel = command ? 'BASH' : tool === 'workflow.approval' ? '审批上下文' : '请求内容';
+  const content = command || formatApprovalInput(inputPreview);
+  return (
+    <div className="run-approval-request">
+      <div className="run-approval-summary-grid">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <span>{label}</span>
+            <code>{value}</code>
+          </div>
+        ))}
+      </div>
+      <div className="run-approval-request-content">
+        <span>{contentLabel}</span>
+        <pre><code>{content || '无请求内容'}</code></pre>
+      </div>
+    </div>
+  );
+}
+
 function timelineChildRunId(event: Record<string, unknown>): string {
   const value = event.child_run_id;
   return typeof value === 'string' ? value.trim() : '';
@@ -471,6 +899,350 @@ function timelineChildRunId(event: Record<string, unknown>): string {
 function timelineStatus(event: Record<string, unknown>): string {
   const value = event.status;
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function timelineEventTitle(event: Record<string, unknown>): string {
+  const name = String(event.event || 'event');
+  const detail = String(event.detail || '').trim();
+  if (name === 'agent.run.started') return 'Agent started';
+  if (name === 'agent.runtime.compiled') return 'Runtime prepared';
+  if (name === 'agent.artifact.write') return 'Context/artifact written';
+  if (name === 'agent.model.response') return 'Model response';
+  if (name === 'agent.tool.call') return detail ? `Tool call · ${detail}` : 'Tool call';
+  if (name === 'agent.tool.approval_required') return detail ? `Approval requested · ${detail}` : 'Approval requested';
+  if (name === 'agent.tool.approval_rejected') return 'Approval rejected';
+  if (name === 'agent.run.completed') return 'Run completed';
+  if (name === 'agent.run.failed') return 'Run failed';
+  if (name === 'run.cancelled') return 'Run cancelled';
+  if (name === 'workflow.run.started') return 'Workflow started';
+  if (name === 'workflow.node.agent') return detail ? `Agent step · ${detail}` : 'Agent step';
+  if (name === 'workflow.node.approval_required') return detail ? `Manual approval · ${detail}` : 'Manual approval';
+  if (name === 'workflow.node.approval_approved') return 'Approval approved';
+  if (name === 'workflow.node.approval_rejected') return 'Approval rejected';
+  if (name === 'workflow.run.completed') return 'Workflow completed';
+  if (name === 'workflow.run.failed') return 'Workflow failed';
+  if (name === 'workflow.run.cancelled') return 'Workflow cancelled';
+  return name;
+}
+
+function timelineEventTone(event: Record<string, unknown>): string {
+  const name = String(event.event || '');
+  const status = timelineStatus(event);
+  if (status === 'failed' || status === 'cancelled' || name.includes('failed') || name.includes('cancelled')) return 'danger';
+  if (status === 'approval_required' || name.includes('approval')) return 'approval';
+  if (status === 'completed' || name.includes('completed')) return 'ready';
+  if (name.includes('tool')) return 'tool';
+  if (name.includes('model.response')) return 'model';
+  return 'neutral';
+}
+
+function timelineEventCode(event: Record<string, unknown>): string {
+  const name = String(event.event || '');
+  return name.includes('.') ? name.split('.').slice(-2).join('.') : name || 'event';
+}
+
+function timelineEventTime(event: Record<string, unknown>): string {
+  return typeof event.time === 'string' ? event.time : '';
+}
+
+function formatTimelinePayload(value: unknown): string {
+  if (!value) return '';
+  if (typeof value === 'string') return String(value).trim();
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value).trim();
+  }
+}
+
+function timelineEventPayload(event: Record<string, unknown>): string {
+  const result = event.result;
+  if (result) return formatTimelinePayload(result);
+  const pendingApproval = event.pending_approval;
+  if (pendingApproval) return formatTimelinePayload(pendingApproval);
+  return '';
+}
+
+function compactWorkflowStepText(value: unknown, maxLength = 420): string {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function workflowApprovalPayloadSummary(event: Record<string, unknown>): string {
+  const pendingApproval = event.pending_approval;
+  if (!pendingApproval || typeof pendingApproval !== 'object') return timelineEventPayload(event);
+  const raw = pendingApproval as Record<string, unknown>;
+  const preview = raw.input_preview;
+  if (!preview || typeof preview !== 'object') return timelineEventPayload(event);
+  const input = preview as Record<string, unknown>;
+  const lines: string[] = [];
+  const checkpoint = compactWorkflowStepText(input.checkpoint, 180);
+  const context = compactWorkflowStepText(input.context, 520);
+  if (checkpoint) lines.push(`审批节点：${checkpoint}`);
+  if (context) lines.push(`当前上下文：${context}`);
+  return lines.join('\n') || timelineEventPayload(event);
+}
+
+function workflowNodeId(event: Record<string, unknown>): string {
+  const value = event.workflow_node_id;
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function workflowArtifactPath(event: Record<string, unknown>): string {
+  const artifact = event.artifact;
+  if (!artifact || typeof artifact !== 'object') return '';
+  const path = (artifact as Record<string, unknown>).path;
+  return typeof path === 'string' ? path.trim() : '';
+}
+
+function workflowEventNodeKind(event: Record<string, unknown>): WorkflowStepRef['kind'] {
+  const value = String(event.workflow_node_kind || '');
+  if (value === 'start' || value === 'approval' || value === 'artifact') return value;
+  return 'agent';
+}
+
+function workflowSpecNodeKind(node: WorkflowSpec['nodes'][number]): WorkflowStepRef['kind'] {
+  const value = String(node.data?.kind || node.type || 'agent');
+  if (value === 'start' || value === 'approval' || value === 'artifact') return value;
+  return 'agent';
+}
+
+function workflowSpecStepRefs(workflow: WorkflowSpec | null): WorkflowStepRef[] {
+  if (!workflow) return [];
+  const nodesById = new Map(workflow.nodes.map((node) => [String(node.id || ''), node]));
+  const outgoing = new Map<string, string>();
+  workflow.edges.forEach((edge) => {
+    const source = String(edge.source || '');
+    const target = String(edge.target || '');
+    if (source && target && !outgoing.has(source)) outgoing.set(source, target);
+  });
+  const start = workflow.nodes.find((node) => workflowSpecNodeKind(node) === 'start') || workflow.nodes[0];
+  if (!start) return [];
+  const ordered: WorkflowSpec['nodes'] = [];
+  const seen = new Set<string>();
+  let current: WorkflowSpec['nodes'][number] | undefined = start;
+  while (current) {
+    const nodeId = String(current.id || '');
+    if (!nodeId || seen.has(nodeId)) break;
+    ordered.push(current);
+    seen.add(nodeId);
+    const nextId = outgoing.get(nodeId);
+    current = nextId ? nodesById.get(nextId) : undefined;
+  }
+  const existingArtifactPaths = new Set<string>();
+  return ordered.map((node, index) => {
+    const kind = workflowSpecNodeKind(node);
+    const nodeId = String(node.id || '');
+    const label = String(node.data?.label || nodeId || workflowStepKindLabel(kind)).trim();
+    const artifactPath = kind === 'artifact'
+      ? uniqueWorkflowArtifactPath(
+        workflowArtifactBasePath(label, String(node.data?.artifact_path || node.data?.artifactPath || '')),
+        existingArtifactPaths,
+      )
+      : '';
+    return {
+      key: `${kind}:${nodeId || label || index}`,
+      kind,
+      nodeId,
+      label,
+      status: 'pending',
+      artifactPath,
+    };
+  });
+}
+
+function workflowSnapshotStepRefs(run: RunSpec | null): WorkflowStepRef[] {
+  if (!run || run.kind !== 'workflow_run') return [];
+  const startEvent = (run.timeline || []).find((event) => String(event.event || '') === 'workflow.run.started');
+  const snapshot = startEvent?.workflow_path;
+  if (!Array.isArray(snapshot)) return [];
+  return snapshot
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null;
+      const row = item as Record<string, unknown>;
+      const rawKind = String(row.kind || 'agent');
+      const kind: WorkflowStepRef['kind'] = rawKind === 'start' || rawKind === 'approval' || rawKind === 'artifact' ? rawKind : 'agent';
+      const nodeId = String(row.id || '');
+      const label = String(row.label || nodeId || workflowStepKindLabel(kind)).trim();
+      const artifactPath = kind === 'artifact' ? String(row.artifact_path || row.artifactPath || '').trim() : '';
+      return {
+        key: `${kind}:${nodeId || label || index}`,
+        kind,
+        nodeId,
+        label,
+        status: 'pending',
+        artifactPath,
+      } as WorkflowStepRef;
+    })
+    .filter((item): item is WorkflowStepRef => Boolean(item));
+}
+
+function normalizeWorkflowStepLabel(value: string): string {
+  return value.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function workflowSpecAlignsWithObservedSteps(specSteps: WorkflowStepRef[], observedSteps: WorkflowStepRef[]): boolean {
+  if (!specSteps.length) return false;
+  if (!observedSteps.length) return true;
+  let nextSearchIndex = 0;
+  for (const observed of observedSteps) {
+    const matchedIndex = specSteps.findIndex((candidate, index) => {
+      if (index < nextSearchIndex) return false;
+      if (candidate.kind !== observed.kind) return false;
+      if (observed.nodeId) return candidate.nodeId === observed.nodeId;
+      return normalizeWorkflowStepLabel(candidate.label) === normalizeWorkflowStepLabel(observed.label);
+    });
+    if (matchedIndex < 0) return false;
+    nextSearchIndex = matchedIndex + 1;
+  }
+  return true;
+}
+
+function normalizeWorkflowApprovalLabel(name: string, detail: string): string {
+  const clean = detail.trim();
+  if (name === 'workflow.node.approval_approved') {
+    return clean.replace(/\s+approved$/i, '').trim() || 'Approval';
+  }
+  if (name === 'workflow.node.approval_rejected') {
+    return clean.replace(/\s+approval rejected$/i, '').trim() || 'Approval';
+  }
+  return clean || 'Approval';
+}
+
+function upsertWorkflowStep(steps: WorkflowStepRef[], indexByKey: Map<string, number>, next: WorkflowStepRef) {
+  const existingIndex = indexByKey.get(next.key);
+  if (existingIndex === undefined) {
+    indexByKey.set(next.key, steps.length);
+    steps.push(next);
+    return;
+  }
+  const previous = steps[existingIndex];
+  steps[existingIndex] = {
+    ...previous,
+    ...next,
+    label: previous.label || next.label,
+    childRunId: previous.childRunId || next.childRunId,
+    artifactPath: next.artifactPath || previous.artifactPath,
+    artifactCount: next.artifactCount ?? previous.artifactCount,
+    payload: next.payload || previous.payload,
+  };
+}
+
+function workflowStepRefs(run: RunSpec | null, workflow: WorkflowSpec | null = null): WorkflowStepRef[] {
+  if (!run || run.kind !== 'workflow_run') return [];
+  const steps: WorkflowStepRef[] = [];
+  const indexByKey = new Map<string, number>();
+  (run.timeline || []).forEach((event, index) => {
+    const name = String(event.event || '');
+    const detail = String(event.detail || '').trim();
+    const nodeId = workflowNodeId(event);
+    if (name === 'workflow.node.start') {
+      upsertWorkflowStep(steps, indexByKey, {
+        key: `start:${nodeId || detail || index}`,
+        kind: 'start',
+        nodeId,
+        label: detail || 'Start',
+        status: timelineStatus(event) || 'completed',
+      });
+      return;
+    }
+    if (name === 'workflow.node.agent') {
+      const childRunId = timelineChildRunId(event);
+      upsertWorkflowStep(steps, indexByKey, {
+        key: `agent:${nodeId || childRunId || detail || index}`,
+        kind: 'agent',
+        nodeId,
+        label: detail || 'Agent',
+        status: timelineStatus(event) || 'processing',
+        childRunId,
+        payload: timelineEventPayload(event),
+        artifactCount: Number(event.artifact_count || 0),
+      });
+      return;
+    }
+    if (name === 'workflow.node.approval_required' || name === 'workflow.node.approval_approved' || name === 'workflow.node.approval_rejected') {
+      const label = normalizeWorkflowApprovalLabel(name, detail);
+      upsertWorkflowStep(steps, indexByKey, {
+        key: `approval:${nodeId || label}`,
+        kind: 'approval',
+        nodeId,
+        label,
+        status: timelineStatus(event) || (name === 'workflow.node.approval_required' ? 'approval_required' : name === 'workflow.node.approval_rejected' ? 'cancelled' : 'completed'),
+        payload: workflowApprovalPayloadSummary(event),
+      });
+      return;
+    }
+    if (name === 'workflow.node.artifact') {
+      const artifactPath = workflowArtifactPath(event);
+      upsertWorkflowStep(steps, indexByKey, {
+        key: `artifact:${nodeId || artifactPath || detail || index}`,
+        kind: 'artifact',
+        nodeId,
+        label: detail || 'Artifact',
+        status: timelineStatus(event) || 'completed',
+        artifactPath,
+      });
+      return;
+    }
+    if ((name === 'workflow.run.failed' || name === 'workflow.run.cancelled') && nodeId) {
+      const kind = workflowEventNodeKind(event);
+      const label = String(event.workflow_node_label || workflowStepKindLabel(kind)).trim();
+      upsertWorkflowStep(steps, indexByKey, {
+        key: `${kind}:${nodeId}`,
+        kind,
+        nodeId,
+        label,
+        status: name === 'workflow.run.cancelled' ? 'cancelled' : 'failed',
+        payload: detail || timelineEventPayload(event),
+      });
+    }
+  });
+  const specSteps = workflowSnapshotStepRefs(run);
+  const workflowSpecSteps = workflowSpecStepRefs(workflow);
+  const fallbackSpecSteps = specSteps.length
+    ? specSteps
+    : workflowSpecAlignsWithObservedSteps(workflowSpecSteps, steps)
+      ? workflowSpecSteps
+      : [];
+  if (fallbackSpecSteps.length) {
+    const byKey = new Map(steps.map((step) => [step.key, step]));
+    const specKeys = new Set(fallbackSpecSteps.map((step) => step.key));
+    return fallbackSpecSteps
+      .map((step) => byKey.get(step.key) || step)
+      .concat(steps.filter((step) => !specKeys.has(step.key)));
+  }
+  return steps;
+}
+
+function workflowStepKindLabel(kind: WorkflowStepRef['kind']): string {
+  if (kind === 'start') return 'Start';
+  if (kind === 'agent') return 'Agent';
+  if (kind === 'approval') return 'Approval';
+  return 'Artifact';
+}
+
+function workflowStepSummary(step: WorkflowStepRef, childRun: RunSpec | null): string {
+  if (step.status === 'pending') {
+    if (step.kind === 'start') return '等待 Workflow 开始。';
+    if (step.kind === 'approval') return '等待前置节点完成后进入人工审批。';
+    if (step.kind === 'artifact') {
+      return step.artifactPath
+        ? `等待前置节点完成后写出 Workflow artifact：${step.artifactPath}`
+        : '等待前置节点完成后写出 artifact。';
+    }
+    return '等待前置节点完成后执行。';
+  }
+  if (step.kind === 'start') return 'Workflow 开始执行。';
+  if (step.kind === 'approval') {
+    const detail = step.payload ? `\n${step.payload}` : '';
+    if (step.status === 'approval_required') return `等待人工确认后继续。${detail}`;
+    if (step.status === 'cancelled' || step.status === 'failed') return `人工审批已拒绝或取消。${detail}`;
+    return `人工审批已通过。${detail}`;
+  }
+  if (step.kind === 'artifact') {
+    return step.artifactPath ? `写出 Workflow artifact：${step.artifactPath}` : '写出 Workflow artifact。';
+  }
+  return childRun?.result || step.payload || 'No result yet.';
 }
 
 function workflowChildRunRefs(run: RunSpec | null): WorkflowChildRunRef[] {
@@ -489,6 +1261,16 @@ function workflowChildRunRefs(run: RunSpec | null): WorkflowChildRunRef[] {
     });
   });
   return refs;
+}
+
+function workflowPendingApprovalChildRunId(run: RunSpec | null): string {
+  if (!run || run.kind !== 'workflow_run' || run.status !== 'approval_required') return '';
+  const events = [...(run.timeline || [])].reverse();
+  const event = events.find((item) => (
+    String(item.event || '') === 'workflow.run.approval_required'
+    && timelineChildRunId(item)
+  ));
+  return event ? timelineChildRunId(event) : '';
 }
 
 function normalizeStudioTab(value: string): StudioTab {
@@ -521,9 +1303,12 @@ export function AgentStudioView() {
   const [agents, setAgents] = useState<AgentSpec[]>([]);
   const [skills, setSkills] = useState<SkillSpec[]>([]);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
+  const [modelDefaults, setModelDefaults] = useState<ModelProfileDefaults>({});
   const [workflows, setWorkflows] = useState<WorkflowSpec[]>([]);
   const [runnables, setRunnables] = useState<RunnableSummary[]>([]);
   const [runs, setRuns] = useState<RunSpec[]>([]);
+  const [runGroups, setRunGroups] = useState<RunGroupSpec[]>([]);
+  const [runDetailCache, setRunDetailCache] = useState<RunSpec[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
   const [draft, setDraft] = useState<AgentDraft>(emptyAgentDraft);
@@ -549,6 +1334,9 @@ export function AgentStudioView() {
   const [runTarget, setRunTarget] = useState('');
   const [runGoal, setRunGoal] = useState('');
   const [runKindFilter, setRunKindFilter] = useState<RunKindFilter>('all');
+  const [runStatusFilter, setRunStatusFilter] = useState<RunStatusFilter>('all');
+  const [runSearchQuery, setRunSearchQuery] = useState('');
+  const [collapsedRunHistoryGroups, setCollapsedRunHistoryGroups] = useState<Set<string>>(new Set());
   const [selectedRunId, setSelectedRunId] = useState(() => routeRunId);
   const [artifactPreview, setArtifactPreview] = useState<{ path: string; content: string; truncated?: boolean } | null>(null);
   const [status, setStatus] = useState('');
@@ -570,30 +1358,6 @@ export function AgentStudioView() {
     () => workflows.find((workflow) => workflow.workflow_id === selectedWorkflowId) || null,
     [workflows, selectedWorkflowId],
   );
-  const selectedRun = useMemo(
-    () => runs.find((run) => run.run_id === selectedRunId) || null,
-    [runs, selectedRunId],
-  );
-  const runById = useMemo(
-    () => new Map(runs.map((run) => [run.run_id, run])),
-    [runs],
-  );
-  const runFilterCounts = useMemo(
-    () => ({
-      all: runs.filter((run) => runMatchesFilter(run, 'all')).length,
-      workflow: runs.filter((run) => runMatchesFilter(run, 'workflow')).length,
-      agent: runs.filter((run) => runMatchesFilter(run, 'agent')).length,
-    }),
-    [runs],
-  );
-  const filteredRuns = useMemo(
-    () => runs.filter((run) => runMatchesFilter(run, runKindFilter)),
-    [runs, runKindFilter],
-  );
-  const selectedWorkflowChildRefs = useMemo(
-    () => workflowChildRunRefs(selectedRun),
-    [selectedRun],
-  );
   const chatModelProfiles = useMemo(
     () => modelProfiles.filter((profile) => profile.capability === 'chat' && profile.status === 'available' && profile.enabled !== false),
     [modelProfiles],
@@ -602,6 +1366,182 @@ export function AgentStudioView() {
     () => modelProfiles.filter((profile) => profile.capability === 'vision' && profile.status === 'available' && profile.enabled !== false),
     [modelProfiles],
   );
+  const workflowValidation = useMemo(
+    () => validateWorkflowDraft(nodes, edges, agents),
+    [agents, edges, nodes],
+  );
+  const workflowHasErrors = workflowValidation.errors.length > 0;
+  const workflowPrimaryError = workflowValidation.errors[0] || '';
+  const agentRunIssueById = useMemo(() => {
+    const next = new Map<string, string>();
+    agents.forEach((agent) => {
+      const issue = agentRunReadinessIssue(agent, chatModelProfiles, modelDefaults, skills);
+      if (issue) next.set(agent.agent_id, issue);
+    });
+    return next;
+  }, [agents, chatModelProfiles, modelDefaults, skills]);
+  const workflowRunAgentIssue = useMemo(
+    () => workflowAgentRunReadinessIssue(nodes, agentRunIssueById),
+    [agentRunIssueById, nodes],
+  );
+  const runById = useMemo(
+    () => {
+      const next = new Map<string, RunSpec>();
+      runDetailCache.forEach((run) => next.set(run.run_id, run));
+      runs.forEach((run) => next.set(run.run_id, run));
+      return next;
+    },
+    [runDetailCache, runs],
+  );
+  const selectedRun = useMemo(
+    () => selectedRunId ? runById.get(selectedRunId) || null : null,
+    [runById, selectedRunId],
+  );
+  const selectedRunTarget = useMemo(
+    () => runTarget ? runnables.find((item) => item.id === runTarget) || null : null,
+    [runTarget, runnables],
+  );
+  const selectedRunTargetWorkflow = useMemo(
+    () => selectedRunTarget?.kind === 'workflow'
+      ? workflows.find((workflow) => workflow.workflow_id === selectedRunTarget.id) || null
+      : null,
+    [selectedRunTarget, workflows],
+  );
+  const selectedRunTargetWorkflowValidation = useMemo(
+    () => selectedRunTargetWorkflow
+      ? validateWorkflowDraft(workflowNodes(selectedRunTargetWorkflow), workflowEdges(selectedRunTargetWorkflow), agents)
+      : { errors: [], warnings: [] },
+    [agents, selectedRunTargetWorkflow],
+  );
+  const selectedRunTargetWorkflowAgentIssue = useMemo(
+    () => selectedRunTargetWorkflow
+      ? workflowAgentRunReadinessIssue(workflowNodes(selectedRunTargetWorkflow), agentRunIssueById)
+      : '',
+    [agentRunIssueById, selectedRunTargetWorkflow],
+  );
+  const selectedRunTargetDisabled = selectedRunTarget?.enabled === false;
+  const runTargetDisabledReason = useMemo(() => {
+    if (!selectedRunTarget) return '';
+    if (selectedRunTargetDisabled) return '目标已停用，无法运行。';
+    if (selectedRunTarget.kind === 'agent') {
+      const agent = agents.find((item) => item.agent_id === selectedRunTarget.id);
+      if (!agent) return '找不到 Agent 定义，无法运行。';
+      return agentRunIssueById.get(agent.agent_id) || '';
+    }
+    if (selectedRunTarget.kind === 'workflow') {
+      if (!selectedRunTargetWorkflow) return '找不到 Workflow 定义，无法运行。';
+      if (selectedRunTargetWorkflowValidation.errors.length) {
+        return selectedRunTargetWorkflowValidation.errors[0] || '当前 Workflow 存在校验错误。';
+      }
+      if (!workflowHasRunnableSteps(workflowNodes(selectedRunTargetWorkflow))) {
+        return workflowRunnableStepRequiredMessage;
+      }
+      if (selectedRunTargetWorkflowAgentIssue) return selectedRunTargetWorkflowAgentIssue;
+    }
+    return '';
+  }, [agentRunIssueById, agents, selectedRunTarget, selectedRunTargetDisabled, selectedRunTargetWorkflow, selectedRunTargetWorkflowAgentIssue, selectedRunTargetWorkflowValidation.errors]);
+  const workflowRunDisabledReason = useMemo(() => {
+    if (selectedWorkflow?.enabled === false) return '当前 Workflow 已停用，无法运行。';
+    if (workflowHasErrors) return workflowPrimaryError || '当前 Workflow 存在校验错误。';
+    if (!workflowRunGoal.trim()) return '请输入运行目标。';
+    if (!workflowHasRunnableSteps(nodes)) return workflowRunnableStepRequiredMessage;
+    if (workflowRunAgentIssue) return workflowRunAgentIssue;
+    return '';
+  }, [nodes, selectedWorkflow, workflowHasErrors, workflowPrimaryError, workflowRunAgentIssue, workflowRunGoal]);
+  const workflowRunDisabled = busy || Boolean(workflowRunDisabledReason);
+  const runFilterCounts = useMemo(
+    () => ({
+      all: runs.filter((run) => runMatchesFilter(run, 'all')).length,
+      workflow: runs.filter((run) => runMatchesFilter(run, 'workflow')).length,
+      agent: runs.filter((run) => runMatchesFilter(run, 'agent')).length,
+    }),
+    [runs],
+  );
+  const runKindFilteredRuns = useMemo(
+    () => runs.filter((run) => runMatchesFilter(run, runKindFilter)),
+    [runs, runKindFilter],
+  );
+  const runStatusFilterCounts = useMemo(
+    () => ({
+      all: runKindFilteredRuns.length,
+      completed: runKindFilteredRuns.filter((run) => runMatchesStatusFilter(run, 'completed')).length,
+      failed: runKindFilteredRuns.filter((run) => runMatchesStatusFilter(run, 'failed')).length,
+      active: runKindFilteredRuns.filter((run) => runMatchesStatusFilter(run, 'active')).length,
+    }),
+    [runKindFilteredRuns],
+  );
+  const runStatusFilteredRuns = useMemo(
+    () => runKindFilteredRuns.filter((run) => runMatchesStatusFilter(run, runStatusFilter)),
+    [runKindFilteredRuns, runStatusFilter],
+  );
+  const runSearchActive = Boolean(runSearchQuery.trim());
+  const filteredRuns = useMemo(
+    () => runStatusFilteredRuns.filter((run) => runMatchesSearch(run, runSearchQuery)),
+    [runSearchQuery, runStatusFilteredRuns],
+  );
+  const runHistoryGroups = useMemo(
+    () => runHistoryGroupsFor(filteredRuns, runnables, agents),
+    [agents, filteredRuns, runnables],
+  );
+  const selectedRunWorkflow = useMemo(
+    () => (
+      selectedRun?.kind === 'workflow_run'
+        ? workflows.find((workflow) => workflow.workflow_id === selectedRun.runnable_id) || null
+        : null
+    ),
+    [selectedRun, workflows],
+  );
+  const selectedWorkflowSteps = useMemo(
+    () => workflowStepRefs(selectedRun, selectedRunWorkflow),
+    [selectedRun, selectedRunWorkflow],
+  );
+  const selectedWorkflowChildRefs = useMemo(
+    () => workflowChildRunRefs(selectedRun),
+    [selectedRun],
+  );
+  const selectedWorkflowApprovalChildRunId = useMemo(
+    () => workflowPendingApprovalChildRunId(selectedRun),
+    [selectedRun],
+  );
+  const selectedWorkflowApprovalChildRun = selectedWorkflowApprovalChildRunId
+    ? runById.get(selectedWorkflowApprovalChildRunId) || null
+    : null;
+  const selectedWorkflowParentRun = useMemo(() => {
+    if (!selectedRun || !isWorkflowChildAgentRun(selectedRun) || !selectedRun.run_group_id) return null;
+    return Array.from(runById.values()).find((run) => (
+      run.kind === 'workflow_run'
+      && run.run_group_id === selectedRun.run_group_id
+    )) || null;
+  }, [runById, selectedRun]);
+  const selectedWorkflowParentRunId = useMemo(() => {
+    if (selectedWorkflowParentRun) return selectedWorkflowParentRun.run_id;
+    if (!selectedRun || !isWorkflowChildAgentRun(selectedRun) || !selectedRun.run_group_id) return '';
+    const group = runGroups.find((item) => item.run_group_id === selectedRun.run_group_id);
+    const childRunIds = group?.child_run_ids || [];
+    return childRunIds.find((runId) => {
+      const run = runById.get(runId);
+      return run?.kind === 'workflow_run';
+    }) || childRunIds.find((runId) => runId.startsWith('workflow_run_')) || '';
+  }, [runById, runGroups, selectedRun, selectedWorkflowParentRun]);
+  const activeRunPollKey = useMemo(() => {
+    const nextIds = new Set<string>();
+    const maybeAdd = (runId: string) => {
+      if (!runId) return;
+      const run = runById.get(runId);
+      if (!run || isActiveRunStatus(run.status)) nextIds.add(runId);
+    };
+    maybeAdd(selectedRunId);
+    selectedWorkflowChildRefs.forEach((ref) => maybeAdd(ref.childRunId));
+    maybeAdd(selectedWorkflowApprovalChildRunId);
+    return Array.from(nextIds).sort().join('|');
+  }, [runById, selectedRunId, selectedWorkflowApprovalChildRunId, selectedWorkflowChildRefs]);
+  const selectedRunIsLive = Boolean(selectedRunId && activeRunPollKey.split('|').includes(selectedRunId));
+  const selectedRunAvatarUrl = useMemo(() => {
+    if (!selectedRun) return '';
+    const runnable = runnables.find((item) => item.id === selectedRun.runnable_id);
+    const agent = agents.find((item) => item.agent_id === selectedRun.runnable_id);
+    return runnable?.avatar_url || agent?.avatar_url || '';
+  }, [agents, runnables, selectedRun]);
   const mountedSkillCount = useMemo(
     () => skills.filter((skill) => skill.enabled !== false && selectedAgent?.skill_ids?.includes(skill.skill_id)).length,
     [selectedAgent, skills],
@@ -629,6 +1569,85 @@ export function AgentStudioView() {
     () => skills.filter((skill) => skill.enabled === false && selectedAgent?.skill_ids?.includes(skill.skill_id)),
     [selectedAgent, skills],
   );
+  const agentReadinessNotices = useMemo(() => {
+    const notices: Array<{ tone: 'danger' | 'warn' | 'info'; text: string }> = [];
+    const selectedProfileAvailable = draft.model_profile_id
+      ? chatModelProfiles.some((profile) => profile.profile_id === draft.model_profile_id)
+      : false;
+    if (draft.model_mode === 'profile') {
+      if (!draft.model_profile_id) {
+        notices.push({ tone: 'danger', text: '尚未选择 Chat Profile；Agent Run 和 Workflow 节点运行前需要一个可用文本模型。' });
+      } else if (!selectedProfileAvailable) {
+        notices.push({ tone: 'danger', text: '当前 Chat Profile 不可用或已停用；请重新选择可用 Profile。' });
+      }
+    } else {
+      if (!draft.base_url.trim() || !draft.model.trim()) {
+        notices.push({ tone: 'danger', text: 'Custom API 需要 Base URL 和 Model，配置不完整时无法运行。' });
+      }
+      if (!draft.api_key.trim() && !selectedAgent?.model_config?.api_key_configured) {
+        notices.push({ tone: 'danger', text: 'Custom API 尚未保存 API Key；请填写后保存，或切回 Chat Profile。' });
+      }
+    }
+    if (disabledMountedSkills.length) {
+      notices.push({ tone: 'danger', text: `有 ${disabledMountedSkills.length} 个已挂载 Skill 当前已停用；运行会被拦截。` });
+    }
+    if (draft.allow_workspace_write) {
+      notices.push({
+        tone: 'warn',
+        text: draft.writable_scopes.trim()
+          ? '`workspace.write_patch` 已启用；每次写文件都会先进入审批。'
+          : '`workspace.write_patch` 已启用但 Writable Scopes 为空；写入会被工作区策略拒绝。',
+      });
+    }
+    if (draft.allow_terminal) {
+      notices.push({ tone: 'warn', text: '`terminal.run` 已启用；每次运行命令都会先进入审批。' });
+    }
+    if (!draft.allow_workspace_read && !draft.allow_workspace_write && !draft.allow_terminal && !draft.allow_artifacts) {
+      notices.push({ tone: 'info', text: '当前 Agent 只会调用模型，不会获得工作区、命令或 artifact 工具。' });
+    }
+    return notices;
+  }, [
+    chatModelProfiles,
+    disabledMountedSkills.length,
+    draft.allow_artifacts,
+    draft.allow_terminal,
+    draft.allow_workspace_read,
+    draft.allow_workspace_write,
+    draft.api_key,
+    draft.base_url,
+    draft.model,
+    draft.model_mode,
+    draft.model_profile_id,
+    draft.writable_scopes,
+    selectedAgent,
+  ]);
+  const agentQuickRunDisabledReason = useMemo(() => {
+    if (!draft.agent_id) return '请先保存 Agent，再运行。';
+    if (draft.enabled === false || selectedAgent?.enabled === false) return '当前 Agent 已停用，无法运行。';
+    if (draft.model_mode === 'profile') {
+      if (!draft.model_profile_id) return '请选择可用 Chat Profile 后再运行。';
+      if (!chatModelProfiles.some((profile) => profile.profile_id === draft.model_profile_id)) return '当前 Chat Profile 不可用或已停用。';
+    } else {
+      if (!draft.base_url.trim() || !draft.model.trim()) return 'Custom API 配置不完整，请填写 Base URL 和 Model。';
+      if (!draft.api_key.trim() && !selectedAgent?.model_config?.api_key_configured) return 'Custom API 尚未保存 API Key。';
+    }
+    if (disabledMountedSkills.length) return `有 ${disabledMountedSkills.length} 个已挂载 Skill 当前已停用，请先启用或卸载后再运行。`;
+    if (!agentRunGoal.trim()) return '请输入运行目标。';
+    return '';
+  }, [
+    agentRunGoal,
+    chatModelProfiles,
+    disabledMountedSkills.length,
+    draft.agent_id,
+    draft.api_key,
+    draft.base_url,
+    draft.enabled,
+    draft.model,
+    draft.model_mode,
+    draft.model_profile_id,
+    selectedAgent,
+  ]);
+  const agentQuickRunDisabled = busy || Boolean(agentQuickRunDisabledReason);
   const visibleMountSkillIds = useMemo(
     () => filteredMountSkills.map((skill) => skill.skill_id),
     [filteredMountSkills],
@@ -654,14 +1673,35 @@ export function AgentStudioView() {
     [editingSkillFolderId, editingSkillFolderName, skillFolders],
   );
 
+  function upsertRunDetailCache(nextRuns: RunSpec[]) {
+    if (!nextRuns.length) return;
+    setRunDetailCache((current) => {
+      const nextById = new Map(current.map((run) => [run.run_id, run]));
+      nextRuns.forEach((run) => nextById.set(run.run_id, run));
+      return Array.from(nextById.values());
+    });
+    setRuns((current) => {
+      const nextById = new Map(nextRuns.map((run) => [run.run_id, run]));
+      let changed = false;
+      const merged = current.map((run) => {
+        const next = nextById.get(run.run_id);
+        if (!next) return run;
+        changed = true;
+        return next;
+      });
+      return changed ? merged : current;
+    });
+  }
+
   const refresh = useCallback(async (options: StudioRefreshOptions = {}) => {
-    const [nextAgents, nextSkills, nextProfiles, nextWorkflows, nextRunnables, nextRuns, nextSkillSources, nextSkillFolders] = await Promise.all([
+    const [nextAgents, nextSkills, nextProfiles, nextWorkflows, nextRunnables, nextRuns, nextRunGroups, nextSkillSources, nextSkillFolders] = await Promise.all([
       listAgents(),
       listSkills(),
       listModelProfiles(),
       listWorkflows(),
       listRunnables(),
       listRuns(),
+      listRunGroups(),
       listSkillSources(),
       listSkillFolders(),
     ]);
@@ -670,9 +1710,11 @@ export function AgentStudioView() {
     setSkillSources(nextSkillSources);
     setSkillFolders(nextSkillFolders);
     setModelProfiles(nextProfiles.profiles || []);
+    setModelDefaults(nextProfiles.defaults || {});
     setWorkflows(nextWorkflows);
     setRunnables(nextRunnables);
     setRuns(nextRuns);
+    setRunGroups(nextRunGroups);
     setSelectedAgentId((current) => {
       const desired = options.selectedAgentId !== undefined ? options.selectedAgentId : current;
       if (desired && nextAgents.some((agent) => agent.agent_id === desired)) return desired;
@@ -686,7 +1728,7 @@ export function AgentStudioView() {
     setRunTarget((current) => {
       const desired = options.runTarget !== undefined ? options.runTarget : current;
       if (desired && nextRunnables.some((item) => item.id === desired)) return desired;
-      return nextRunnables[0]?.id || '';
+      return '';
     });
     setSelectedRunId((current) => {
       const desired = options.selectedRunId !== undefined ? options.selectedRunId : current;
@@ -697,7 +1739,7 @@ export function AgentStudioView() {
 
   useEffect(() => {
     setLoading(true);
-    refresh({ selectFirstAgent: true, selectFirstWorkflow: true, selectFirstRun: true })
+    refresh()
       .then(() => setError(''))
       .catch((err: unknown) => setError(err instanceof Error ? err.message : '读取 Agent Studio 失败'))
       .finally(() => setLoading(false));
@@ -708,8 +1750,22 @@ export function AgentStudioView() {
     setTab((current) => current === nextTab ? current : nextTab);
     if (routeRunId) {
       setSelectedRunId((current) => current === routeRunId ? current : routeRunId);
+    } else if (routeTab === 'runs') {
+      setSelectedRunId('');
     }
   }, [routeRunId, routeTab]);
+
+  useEffect(() => {
+    if (tab !== 'runs' || !selectedRunId || !selectedRun) return;
+    const visible = (
+      runMatchesFilter(selectedRun, runKindFilter)
+      && runMatchesStatusFilter(selectedRun, runStatusFilter)
+      && runMatchesSearch(selectedRun, runSearchQuery)
+    );
+    if (visible) return;
+    setSelectedRunId('');
+    navigateTo('agents', { tab: 'runs' }, ['run']);
+  }, [runKindFilter, runSearchQuery, runStatusFilter, selectedRun, selectedRunId, tab]);
 
   useEffect(() => {
     if (selectedAgent) setDraft(agentToDraft(selectedAgent));
@@ -719,7 +1775,7 @@ export function AgentStudioView() {
     if (tab !== 'agents' || loading || busyAction || agents.length) return;
     if (!selectedAgentId && !draft.agent_id) return;
     let disposed = false;
-    refresh({ selectFirstAgent: true })
+    refresh()
       .then(() => {
         if (!disposed) setError('');
       })
@@ -736,7 +1792,7 @@ export function AgentStudioView() {
     let disposed = false;
     getRun(selectedRunId)
       .then((run) => {
-        if (!disposed) setRuns((current) => [run, ...current.filter((item) => item.run_id !== run.run_id)]);
+        if (!disposed) upsertRunDetailCache([run]);
       })
       .catch(() => undefined);
     return () => {
@@ -745,28 +1801,92 @@ export function AgentStudioView() {
   }, [selectedRun, selectedRunId]);
 
   useEffect(() => {
-    const missingChildRunIds = selectedWorkflowChildRefs
-      .map((ref) => ref.childRunId)
-      .filter((runId) => !runById.has(runId));
-    if (!missingChildRunIds.length) return;
+    if (!selectedRun || !isWorkflowChildAgentRun(selectedRun) || !selectedRun.run_group_id) return;
+    if (runGroups.some((group) => group.run_group_id === selectedRun.run_group_id)) return;
     let disposed = false;
-    Promise.all(missingChildRunIds.map((runId) => getRun(runId).catch(() => null)))
+    getRunGroup(selectedRun.run_group_id)
+      .then((group) => {
+        if (disposed) return;
+        setRunGroups((current) => {
+          const nextById = new Map(current.map((item) => [item.run_group_id, item]));
+          nextById.set(group.run_group_id, group);
+          return Array.from(nextById.values());
+        });
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [runGroups, selectedRun]);
+
+  useEffect(() => {
+    if (!selectedWorkflowParentRunId || runById.has(selectedWorkflowParentRunId)) return;
+    let disposed = false;
+    getRun(selectedWorkflowParentRunId)
+      .then((run) => {
+        if (!disposed) upsertRunDetailCache([run]);
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [runById, selectedWorkflowParentRunId]);
+
+  useEffect(() => {
+    const childRunIds = [
+      ...selectedWorkflowChildRefs.map((ref) => ref.childRunId),
+      selectedWorkflowApprovalChildRunId,
+    ].filter(Boolean);
+    const uniqueChildRunIds = Array.from(new Set(childRunIds));
+    if (!uniqueChildRunIds.length) return;
+    let disposed = false;
+    Promise.all(uniqueChildRunIds.map((runId) => getRun(runId).catch(() => null)))
       .then((childRuns) => {
         if (disposed) return;
         const loaded = childRuns.filter((run): run is RunSpec => Boolean(run));
         if (!loaded.length) return;
-        setRuns((current) => {
-          const nextById = new Map(current.map((run) => [run.run_id, run]));
-          loaded.forEach((run) => nextById.set(run.run_id, run));
-          return current
-            .map((run) => nextById.get(run.run_id) || run)
-            .concat(loaded.filter((run) => !current.some((item) => item.run_id === run.run_id)));
-        });
+        upsertRunDetailCache(loaded);
       });
     return () => {
       disposed = true;
     };
-  }, [runById, selectedWorkflowChildRefs]);
+  }, [selectedWorkflowApprovalChildRunId, selectedWorkflowChildRefs]);
+
+  useEffect(() => {
+    const pollRunIds = activeRunPollKey.split('|').filter(Boolean);
+    if (!pollRunIds.length) return;
+    let disposed = false;
+    let inFlight = false;
+    const pollRuns = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const loadedRuns = (await Promise.all(pollRunIds.map((runId) => getRun(runId).catch(() => null))))
+          .filter((run): run is RunSpec => Boolean(run));
+        if (disposed || !loadedRuns.length) return;
+        upsertRunDetailCache(loadedRuns);
+        const groupIds = Array.from(new Set(loadedRuns.map((run) => String(run.run_group_id || '')).filter(Boolean)));
+        const loadedGroups = (await Promise.all(groupIds.map((groupId) => getRunGroup(groupId).catch(() => null))))
+          .filter((group): group is RunGroupSpec => Boolean(group));
+        if (disposed || !loadedGroups.length) return;
+        setRunGroups((current) => {
+          const nextById = new Map(current.map((group) => [group.run_group_id, group]));
+          loadedGroups.forEach((group) => nextById.set(group.run_group_id, group));
+          return Array.from(nextById.values());
+        });
+      } finally {
+        inFlight = false;
+      }
+    };
+    void pollRuns();
+    const timer = window.setInterval(() => {
+      void pollRuns();
+    }, 2500);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [activeRunPollKey]);
 
   useEffect(() => {
     setArtifactPreview(null);
@@ -837,7 +1957,7 @@ export function AgentStudioView() {
     setError('');
     navigateTo('agents', nextTab === 'agents' ? {} : { tab: nextTab }, ['run', 'tab']);
     if (nextTab === 'agents') {
-      void refresh({ selectFirstAgent: true }).catch((err: unknown) => {
+      void refresh().catch((err: unknown) => {
         setError(err instanceof Error ? err.message : '刷新 Agent 列表失败');
       });
     }
@@ -855,7 +1975,7 @@ export function AgentStudioView() {
     try {
       const refreshOptions = await action();
       await refresh(refreshOptions || {});
-      setStatus(`${label} 完成`);
+      setStatus(refreshOptions?.statusMessage || `${label} 完成`);
     } catch (err) {
       setError(err instanceof Error ? err.message : `${label} 失败`);
     } finally {
@@ -1132,8 +2252,8 @@ export function AgentStudioView() {
     return { selectedAgentId: saved.agent_id };
   }
 
-  async function saveWorkflow(): Promise<StudioRefreshOptions> {
-    const request: Partial<WorkflowSpec> = {
+  function workflowDraftRequest(): Partial<WorkflowSpec> {
+    return {
       name: workflowName,
       description: workflowDescription,
       nodes: nodes.map((node) => ({
@@ -1149,56 +2269,94 @@ export function AgentStudioView() {
       })),
       enabled: true,
     };
+  }
+
+  async function saveWorkflowDraft(): Promise<WorkflowSpec> {
+    if (workflowValidation.errors.length) {
+      throw new Error(workflowValidation.errors[0]);
+    }
+    const request = workflowDraftRequest();
     const saved = selectedWorkflow ? await updateWorkflow(selectedWorkflow.workflow_id, request) : await createWorkflow(request);
     setSelectedWorkflowId(saved.workflow_id);
+    return saved;
+  }
+
+  async function saveWorkflow(): Promise<StudioRefreshOptions> {
+    const saved = await saveWorkflowDraft();
     return { selectedWorkflowId: saved.workflow_id };
   }
 
   function openRunDetail(runId: string) {
     setSelectedRunId(runId);
     setTab('runs');
+    const run = runs.find((item) => item.run_id === runId);
+    if (run) {
+      const groupKey = runHistoryGroupKey(run);
+      setCollapsedRunHistoryGroups((current) => {
+        if (!current.has(groupKey)) return current;
+        const next = new Set(current);
+        next.delete(groupKey);
+        return next;
+      });
+    }
     navigateTo('agents', { run: runId }, ['tab']);
+  }
+
+  function toggleRunHistoryGroup(groupKey: string) {
+    setCollapsedRunHistoryGroups((current) => {
+      const next = new Set(current);
+      if (next.has(groupKey)) next.delete(groupKey);
+      else next.add(groupKey);
+      return next;
+    });
   }
 
   function selectRunKindFilter(nextFilter: RunKindFilter) {
     setRunKindFilter(nextFilter);
     if (selectedRun && runMatchesFilter(selectedRun, nextFilter)) return;
-    const nextRun = runs.find((run) => runMatchesFilter(run, nextFilter));
-    if (nextRun) {
-      openRunDetail(nextRun.run_id);
-      return;
+    if (selectedRunId) {
+      setSelectedRunId('');
+      setTab('runs');
+      navigateTo('agents', { tab: 'runs' }, ['run']);
     }
-    setSelectedRunId('');
-    setTab('runs');
-    navigateTo('agents', { tab: 'runs' }, ['run']);
+  }
+
+  function selectRunStatusFilter(nextFilter: RunStatusFilter) {
+    setRunStatusFilter(nextFilter);
+    if (selectedRun && runMatchesStatusFilter(selectedRun, nextFilter)) return;
+    if (selectedRunId) {
+      setSelectedRunId('');
+      setTab('runs');
+      navigateTo('agents', { tab: 'runs' }, ['run']);
+    }
   }
 
   async function runCurrentAgent(): Promise<StudioRefreshOptions> {
-    if (!draft.agent_id) throw new Error('请先保存 Agent，再运行。');
+    if (agentQuickRunDisabledReason) throw new Error(agentQuickRunDisabledReason);
+    const agentId = draft.agent_id || '';
     const goal = agentRunGoal.trim();
-    if (!goal) throw new Error('运行目标不能为空');
-    const run = await createAgentRun(draft.agent_id, goal);
+    const run = await createAgentRun(agentId, goal);
     setAgentRunGoal('');
-    setRunTarget(draft.agent_id);
+    setRunTarget(agentId);
     openRunDetail(run.run_id);
-    return { selectedAgentId: draft.agent_id, runTarget: draft.agent_id, selectedRunId: run.run_id };
+    return { selectedAgentId: agentId, runTarget: agentId, selectedRunId: run.run_id };
   }
 
   async function runCurrentWorkflow(): Promise<StudioRefreshOptions> {
-    if (!selectedWorkflow) throw new Error('请先保存 Workflow，再运行。');
+    if (workflowRunDisabledReason) throw new Error(workflowRunDisabledReason);
     const goal = workflowRunGoal.trim();
-    if (!goal) throw new Error('运行目标不能为空');
-    const run = await createWorkflowRun(selectedWorkflow.workflow_id, goal);
+    const saved = await saveWorkflowDraft();
+    const run = await createWorkflowRun(saved.workflow_id, goal);
     setWorkflowRunGoal('');
-    setRunTarget(selectedWorkflow.workflow_id);
+    setRunTarget(saved.workflow_id);
     openRunDetail(run.run_id);
-    return { selectedWorkflowId: selectedWorkflow.workflow_id, runTarget: selectedWorkflow.workflow_id, selectedRunId: run.run_id };
+    return { selectedWorkflowId: saved.workflow_id, runTarget: saved.workflow_id, selectedRunId: run.run_id };
   }
 
   function addFlowNode(kind: 'agent' | 'approval' | 'artifact', agentId = '') {
     const agent = agentId
       ? agents.find((candidate) => candidate.agent_id === agentId)
-      : agents[0];
+      : undefined;
     const nodeSeed = kind === 'agent'
       ? `${kind}-${agent?.agent_id || Date.now().toString(36)}`
       : `${kind}-${Date.now().toString(36)}`;
@@ -1209,7 +2367,7 @@ export function AgentStudioView() {
       type: kind === 'artifact' ? 'output' : 'default',
       position: { x: 120 + nodes.length * 180, y: 140 },
       data: {
-        label: kind === 'agent' ? agent?.name || 'Agent' : kind === 'approval' ? '人工审批' : 'Artifact',
+        label: kind === 'agent' ? agent?.name || '选择 Agent' : kind === 'approval' ? '人工审批' : 'Artifact',
         kind,
         ...(kind === 'agent' && agent ? { agent_id: agent.agent_id } : {}),
       },
@@ -1245,11 +2403,12 @@ export function AgentStudioView() {
     });
   }
 
-  async function openArtifact(run: RunSpec, path: string) {
+  async function openArtifact(run: RunSpec | string, path: string) {
+    const runId = typeof run === 'string' ? run : run.run_id;
     setStatus('读取 artifact...');
     setError('');
     try {
-      const payload = await getRunArtifact(run.run_id, path);
+      const payload = await getRunArtifact(runId, path);
       setArtifactPreview({
         path: payload.path || path,
         content: payload.content || '',
@@ -1261,18 +2420,79 @@ export function AgentStudioView() {
     }
   }
 
+  async function approveRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions> {
+    if (!runId) throw new Error('请选择待审批 Run');
+    const run = await approveRunApproval(runId);
+    const selectedAfterAction = nextSelectedRunId || run.run_id;
+    const updatedRuns = [run];
+    if (nextSelectedRunId && nextSelectedRunId !== run.run_id) {
+      try {
+        updatedRuns.push(await getRun(nextSelectedRunId));
+      } catch {
+        // The normal refresh/polling path will retry; approval already succeeded.
+      }
+    }
+    upsertRunDetailCache(updatedRuns);
+    setSelectedRunId(selectedAfterAction);
+    const status = normalizeRunStatus(run.status);
+    const statusMessage = status === 'processing'
+      ? '已批准，Run 正在继续执行。'
+      : status === 'approval_required'
+        ? '已批准，Run 需要继续处理下一次审批。'
+        : status === 'completed'
+          ? '已批准，Run 已完成。'
+          : status === 'failed'
+            ? '已批准，但 Run 执行失败。'
+            : '已批准，Run 状态已更新。';
+    return { selectedRunId: selectedAfterAction, statusMessage };
+  }
+
+  async function rejectRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions> {
+    if (!runId) throw new Error('请选择待审批 Run');
+    const run = await rejectRunApproval(runId);
+    const selectedAfterAction = nextSelectedRunId || run.run_id;
+    const updatedRuns = [run];
+    if (nextSelectedRunId && nextSelectedRunId !== run.run_id) {
+      try {
+        updatedRuns.push(await getRun(nextSelectedRunId));
+      } catch {
+        // The normal refresh/polling path will retry; rejection already succeeded.
+      }
+    }
+    upsertRunDetailCache(updatedRuns);
+    setSelectedRunId(selectedAfterAction);
+    return { selectedRunId: selectedAfterAction, statusMessage: '已拒绝，Run 已终止。' };
+  }
+
   async function approveSelectedRun(): Promise<StudioRefreshOptions> {
     if (!selectedRun) throw new Error('请选择待审批 Run');
-    const run = await approveRunApproval(selectedRun.run_id);
-    setSelectedRunId(run.run_id);
-    return { selectedRunId: run.run_id };
+    return approveRunById(selectedRun.run_id);
   }
 
   async function rejectSelectedRun(): Promise<StudioRefreshOptions> {
     if (!selectedRun) throw new Error('请选择待审批 Run');
-    const run = await rejectRunApproval(selectedRun.run_id);
+    return rejectRunById(selectedRun.run_id);
+  }
+
+  async function cancelSelectedRun(): Promise<StudioRefreshOptions> {
+    if (!selectedRun) throw new Error('请选择要取消的 Run');
+    if (!isActiveRunStatus(selectedRun.status)) throw new Error('只能取消进行中或待审批的 Run');
+    const run = await cancelRun(selectedRun.run_id);
+    upsertRunDetailCache([run]);
     setSelectedRunId(run.run_id);
     return { selectedRunId: run.run_id };
+  }
+
+  function requestCancelSelectedRun() {
+    if (!selectedRun || !isActiveRunStatus(selectedRun.status)) return;
+    const runName = selectedRun.runnable_name || selectedRun.runnable_id || 'Run';
+    showConfirmDialog({
+      title: `取消「${runName}」？`,
+      description: '这会终止当前进行中或待审批的 Run；如果它正在等待审批，待审批请求也会被清空。',
+      confirmLabel: '取消 Run',
+      variant: 'danger',
+      onConfirm: () => void runAction(cancelSelectedRun, '取消 Run'),
+    });
   }
 
   return (
@@ -1380,7 +2600,7 @@ export function AgentStudioView() {
                   <option value="report">report</option>
                   <option value="artifacts">artifacts</option>
                 </select>
-                <small className="agent-field-help">约束最终回复倾向，不是 Skill 的输出类型。</small>
+                <small className="agent-field-help">约束最终交付形态；diff 不会自动写工作区，artifacts 会优先提示可保存产物。</small>
               </label>
             </div>
             <label>
@@ -1474,6 +2694,13 @@ export function AgentStudioView() {
                   <span>Write artifacts</span>
                 </label>
               </div>
+              {agentReadinessNotices.length ? (
+                <div className="agent-readiness-list" aria-label="Agent 运行状态">
+                  {agentReadinessNotices.map((notice) => (
+                    <span className={notice.tone} key={notice.text}>{notice.text}</span>
+                  ))}
+                </div>
+              ) : null}
             </section>
             <div className="agent-form-row">
               <label>
@@ -1512,7 +2739,16 @@ export function AgentStudioView() {
                     placeholder="例如：检查这个页面还有哪些交互缺口"
                   />
                 </label>
-                <button type="button" className="primary-action" disabled={busy || !agentRunGoal.trim()} onClick={() => void runAction(runCurrentAgent, '运行 Agent')}>
+                {agentQuickRunDisabledReason && agentRunGoal.trim() ? (
+                  <div className="agent-inline-note warn">{agentQuickRunDisabledReason}</div>
+                ) : null}
+                <button
+                  type="button"
+                  className="primary-action"
+                  disabled={agentQuickRunDisabled}
+                  title={agentQuickRunDisabledReason || undefined}
+                  onClick={() => void runAction(runCurrentAgent, '运行 Agent')}
+                >
                   运行当前 Agent
                 </button>
               </section>
@@ -1869,7 +3105,15 @@ export function AgentStudioView() {
               <button type="button" disabled={busy} onClick={() => addFlowNode('agent')}>Agent</button>
               <button type="button" disabled={busy} onClick={() => addFlowNode('approval')}>Approval</button>
               <button type="button" disabled={busy} onClick={() => addFlowNode('artifact')}>Artifact</button>
-              <button type="button" className="primary-action" onClick={() => void runAction(saveWorkflow, '保存 Workflow')}>保存</button>
+              <button
+                type="button"
+                className="primary-action"
+                disabled={busy || workflowHasErrors}
+                title={workflowPrimaryError || undefined}
+                onClick={() => void runAction(saveWorkflow, '保存 Workflow')}
+              >
+                保存
+              </button>
               {selectedWorkflow ? <button type="button" className="danger-action" onClick={requestDeleteWorkflow}>删除</button> : null}
             </div>
             <div className="workflow-agent-palette" aria-label="从 Agents 添加到 Workflow">
@@ -1886,7 +3130,8 @@ export function AgentStudioView() {
                   </span>
                   <span>
                     <strong>{agent.nickname || agent.name}</strong>
-                    <small>{agent.category || 'custom'}</small>
+                    <small>{agentCapabilityLine(agent)}</small>
+                    {agent.description ? <em>{agent.description}</em> : null}
                   </span>
                 </button>
               ))}
@@ -1904,30 +3149,89 @@ export function AgentStudioView() {
                 <h3>节点设置</h3>
                 <span>{nodes.length} nodes / {edges.length} edges</span>
               </div>
-              {nodes.filter((node) => node.data?.kind === 'agent').map((node) => (
-                <div className="workflow-node-setting-row" key={node.id}>
-                  <label>
-                    <span>{String(node.data?.label || node.id)} Agent</span>
-                    <select
-                      className="hy-select"
-                      value={String(node.data?.agent_id || '')}
-                      onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, agent_id: event.target.value, label: agents.find((agent) => agent.agent_id === event.target.value)?.name || item.data?.label } } : item))}
-                    >
-                      <option value="">选择 Agent</option>
-                      {agents.map((agent) => <option value={agent.agent_id} key={agent.agent_id}>{agent.name}</option>)}
-                    </select>
-                  </label>
-                  <button type="button" disabled={busy} onClick={() => removeFlowNode(node.id)}>移除</button>
+              {workflowValidation.errors.length || workflowValidation.warnings.length ? (
+                <div className={`workflow-validation-box ${workflowHasErrors ? 'has-errors' : 'has-warnings'}`}>
+                  {workflowHasErrors ? (
+                    <div>
+                      <strong>需要修复</strong>
+                      {workflowValidation.errors.map((item) => <span key={`error-${item}`}>{item}</span>)}
+                    </div>
+                  ) : null}
+                  {workflowValidation.warnings.length ? (
+                    <div>
+                      <strong>提醒</strong>
+                      {workflowValidation.warnings.map((item) => <span key={`warning-${item}`}>{item}</span>)}
+                    </div>
+                  ) : null}
                 </div>
-              ))}
-              {!nodes.some((node) => node.data?.kind === 'agent') ? (
-                <div className="empty-state inline-empty">点击 Agent 或“全线测试模板”添加可运行节点。</div>
+              ) : null}
+              {nodes.filter((node) => workflowNodeKind(node) !== 'start').map((node) => {
+                const kind = workflowNodeKind(node);
+                const nodeLabel = String(node.data?.label || node.id);
+                const selectedNodeAgent = kind === 'agent'
+                  ? agents.find((agent) => agent.agent_id === String(node.data?.agent_id || '')) || null
+                  : null;
+                const selectedNodeAgentIssue = selectedNodeAgent ? agentRunIssueById.get(selectedNodeAgent.agent_id) || '' : '';
+                return (
+                  <div className="workflow-node-setting-row" key={node.id}>
+                    <div className="workflow-node-setting-main">
+                      <label>
+                        <span>{workflowNodeKindLabel(kind)} Label</span>
+                        <input
+                          className="hy-input"
+                          value={nodeLabel}
+                          onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, label: event.target.value } } : item))}
+                        />
+                      </label>
+                      {kind === 'agent' ? (
+                        <label>
+                          <span>Agent</span>
+                          <select
+                            className="hy-select"
+                            value={String(node.data?.agent_id || '')}
+                            onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, agent_id: event.target.value, label: agents.find((agent) => agent.agent_id === event.target.value)?.name || item.data?.label } } : item))}
+                          >
+                            <option value="">选择 Agent</option>
+                            {agents.map((agent) => (
+                              <option value={agent.agent_id} key={agent.agent_id}>
+                                {agent.name} · {agentCapabilityLine(agent)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
+                      {kind === 'artifact' ? (
+                        <label>
+                          <span>Artifact Path</span>
+                          <input
+                            className="hy-input"
+                            value={String(node.data?.artifact_path || '')}
+                            onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, artifact_path: event.target.value } } : item))}
+                            placeholder="留空则按 Label 自动生成，例如 reports/summary.md"
+                          />
+                        </label>
+                      ) : null}
+                      {selectedNodeAgent ? (
+                        <div className="workflow-node-agent-preview">
+                          <strong>{selectedNodeAgent.nickname || selectedNodeAgent.name}</strong>
+                          <span>{agentCapabilityLine(selectedNodeAgent)}</span>
+                          {selectedNodeAgentIssue ? <span className="workflow-node-agent-issue">{selectedNodeAgentIssue}</span> : null}
+                          {selectedNodeAgent.description ? <p>{selectedNodeAgent.description}</p> : null}
+                        </div>
+                      ) : null}
+                    </div>
+                    <button type="button" disabled={busy} onClick={() => removeFlowNode(node.id)}>移除</button>
+                  </div>
+                );
+              })}
+              {!nodes.some((node) => workflowNodeKind(node) !== 'start') ? (
+                <div className="empty-state inline-empty">点击 Agent、Approval 或 Artifact 添加可配置节点。</div>
               ) : null}
             </div>
             <section className="agent-quick-run">
               <div>
                 <h3>Workflow Run</h3>
-                <p>{selectedWorkflow ? '运行当前已保存 Workflow，完成后自动打开 Runs 详情。' : '新建 Workflow 需要先保存，保存后即可运行。'}</p>
+                <p>{selectedWorkflow ? '先保存当前画布，再运行这个 Workflow，完成后自动打开 Runs 详情。' : '新建 Workflow 会先保存草稿，再立即运行。'}</p>
               </div>
               <label>
                 <span>Goal</span>
@@ -1938,8 +3242,17 @@ export function AgentStudioView() {
                   placeholder="例如：从设计到审查跑一遍这个任务"
                 />
               </label>
-              <button type="button" className="primary-action" disabled={busy || !selectedWorkflow || !workflowRunGoal.trim()} onClick={() => void runAction(runCurrentWorkflow, '运行 Workflow')}>
-                {selectedWorkflow ? '运行当前 Workflow' : '先保存 Workflow'}
+              {workflowRunDisabledReason && workflowRunGoal.trim() ? (
+                <div className="agent-inline-note warn">{workflowRunDisabledReason}</div>
+              ) : null}
+              <button
+                type="button"
+                className="primary-action"
+                disabled={workflowRunDisabled}
+                title={workflowRunDisabledReason || undefined}
+                onClick={() => void runAction(runCurrentWorkflow, '保存并运行 Workflow')}
+              >
+                保存并运行 Workflow
               </button>
             </section>
           </div>
@@ -1953,11 +3266,39 @@ export function AgentStudioView() {
             <label>
               <span>Target</span>
               <select className="hy-select" value={runTarget} onChange={(event) => setRunTarget(event.target.value)}>
-                {runnables.map((item) => <option value={item.id} key={item.id}>{item.kind}: {item.name}</option>)}
+                <option value="">选择 Agent 或 Workflow</option>
+                {runnables.map((item) => (
+                  <option value={item.id} key={item.id} disabled={item.enabled === false}>
+                    {runnableOptionLabel(item)}
+                  </option>
+                ))}
               </select>
             </label>
+            {selectedRunTarget ? (
+              <div className="run-target-preview">
+                <strong>{selectedRunTarget.nickname || selectedRunTarget.name}</strong>
+                <span>{runnableCapabilityLine(selectedRunTarget)}</span>
+                {selectedRunTarget.description ? <p>{selectedRunTarget.description}</p> : null}
+              </div>
+            ) : null}
+            {runTargetDisabledReason ? (
+              <div className="agent-inline-note warn">{runTargetDisabledReason}</div>
+            ) : null}
+            {selectedRunTarget?.kind === 'workflow' && selectedRunTargetWorkflowValidation.errors.length > 1 ? (
+              <div className="workflow-validation-box has-errors">
+                <div>
+                  <strong>Workflow 运行前需要修复</strong>
+                  {selectedRunTargetWorkflowValidation.errors.map((item) => <span key={`run-target-error-${item}`}>{item}</span>)}
+                </div>
+              </div>
+            ) : null}
             <label><span>Goal</span><textarea className="hy-input agent-textarea" value={runGoal} onChange={(event) => setRunGoal(event.target.value)} /></label>
-            <button type="button" className="primary-action" disabled={!runTarget || !runGoal.trim() || busy} onClick={() => void runAction(async () => {
+            <button
+              type="button"
+              className="primary-action"
+              disabled={!runTarget || Boolean(runTargetDisabledReason) || !runGoal.trim() || busy}
+              title={runTargetDisabledReason || undefined}
+              onClick={() => void runAction(async () => {
               const target = runnables.find((item) => item.id === runTarget);
               if (!target) return;
               const run = target.kind === 'agent'
@@ -1966,9 +3307,25 @@ export function AgentStudioView() {
               openRunDetail(run.run_id);
               setRunGoal('');
               return { selectedRunId: run.run_id, runTarget: target.id };
-            }, '创建 Run')}>运行</button>
+            }, '创建 Run')}
+            >
+              运行
+            </button>
             <div className="run-history-toolbar">
-              <span>Run History · {filteredRuns.length}</span>
+              <span>Run History · {filteredRuns.length}{runSearchActive ? ` / ${runStatusFilteredRuns.length}` : ''}</span>
+              <div className="run-history-search">
+                <input
+                  className="hy-input"
+                  type="search"
+                  value={runSearchQuery}
+                  placeholder="搜索目标、Agent、结果、Run ID..."
+                  aria-label="搜索 Run History"
+                  onChange={(event) => setRunSearchQuery(event.target.value)}
+                />
+                {runSearchActive ? (
+                  <button type="button" onClick={() => setRunSearchQuery('')}>清除</button>
+                ) : null}
+              </div>
               <div className="run-filter-tabs" role="group" aria-label="Run history filter">
                 {([
                   ['all', 'All', runFilterCounts.all],
@@ -1985,79 +3342,238 @@ export function AgentStudioView() {
                   </button>
                 ))}
               </div>
+              <div className="run-filter-tabs run-status-filter-tabs" role="group" aria-label="Run status filter">
+                {([
+                  ['all', '全部', runStatusFilterCounts.all],
+                  ['completed', '完成', runStatusFilterCounts.completed],
+                  ['failed', '失败', runStatusFilterCounts.failed],
+                  ['active', '进行中', runStatusFilterCounts.active],
+                ] as const).map(([filter, label, count]) => (
+                  <button
+                    type="button"
+                    key={filter}
+                    className={runStatusFilter === filter ? 'active' : ''}
+                    onClick={() => selectRunStatusFilter(filter)}
+                  >
+                    {label} <span>{count}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="run-list">
-              {filteredRuns.map((run) => (
-                <button
-                  type="button"
-                  className={run.run_id === selectedRunId ? 'run-list-item active' : 'run-list-item'}
-                  key={run.run_id}
-                  onClick={() => openRunDetail(run.run_id)}
-                >
-                  <strong>{run.runnable_name || run.runnable_id}</strong>
-                  <span>{run.kind} · {run.status}</span>
-                  <small>{run.user_goal}</small>
-                </button>
-              ))}
-              {!filteredRuns.length ? <div className="empty-state inline-empty">当前分类下没有 Run。</div> : null}
+            <div className="run-list grouped">
+              {runHistoryGroups.map((group) => {
+                const collapsed = collapsedRunHistoryGroups.has(group.key);
+                const selectedInGroup = group.runs.some((run) => run.run_id === selectedRunId);
+                return (
+                <section className={`run-history-group${selectedInGroup ? ' has-selected-run' : ''}`} key={group.key}>
+                  <button
+                    type="button"
+                    className="run-history-group-head"
+                    aria-expanded={!collapsed}
+                    onClick={() => toggleRunHistoryGroup(group.key)}
+                  >
+                    <AgentAvatar avatarUrl={group.avatarUrl} name={group.label} />
+                    <div>
+                      <strong>{group.label}</strong>
+                      <span>{group.subtitle} · {group.runs.length} runs · {runHistoryGroupSummary(group.runs)}</span>
+                    </div>
+                    <em aria-hidden="true">{collapsed ? '+' : '-'}</em>
+                  </button>
+                  {!collapsed ? (
+                  <div className="run-history-group-list">
+                    {group.runs.map((run) => (
+                      <button
+                        type="button"
+                        className={run.run_id === selectedRunId ? 'run-list-item active' : 'run-list-item'}
+                        key={run.run_id}
+                        onClick={() => openRunDetail(run.run_id)}
+                      >
+                        <span className={`run-list-status-dot ${runStatusTone(run.status)}`} aria-hidden="true" />
+                        <span className="run-list-item-copy">
+                          <strong>{run.user_goal || run.runnable_name || run.runnable_id}</strong>
+                          <span>{runKindLabel(run.kind)} · {runStatusLabel(run.status)} · {formatRunDate(run.updated_at || run.created_at)}</span>
+                          {run.result ? <small>{run.result}</small> : null}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  ) : null}
+                </section>
+                );
+              })}
+              {!filteredRuns.length ? (
+                <div className="empty-state inline-empty">
+                  {runSearchActive && runStatusFilteredRuns.length ? '没有匹配搜索的 Run。' : '当前分类下没有 Run。'}
+                </div>
+              ) : null}
             </div>
           </div>
           <div className="agent-studio-panel">
             <div className="section-heading-row"><h2>Run Detail</h2></div>
             {selectedRun ? (
               <article className="run-detail">
-                <div className="run-detail-title">
-                  <div>
+                <header className="run-detail-hero">
+                  <AgentAvatar avatarUrl={selectedRunAvatarUrl} name={selectedRun.runnable_name || selectedRun.runnable_id || 'Run'} />
+                  <div className="run-detail-title">
+                    <span>{runKindLabel(selectedRun.kind)} · {formatRunDate(selectedRun.created_at)}</span>
                     <h3>{selectedRun.runnable_name || selectedRun.runnable_id}</h3>
-                    <p>{selectedRun.user_goal}</p>
+                    <p>{selectedRun.user_goal || 'No task goal recorded.'}</p>
                   </div>
-                  <span className={`run-status-pill ${runStatusTone(selectedRun.status)}`}>{selectedRun.status}</span>
-                </div>
+                  <span className={`run-status-pill ${runStatusTone(selectedRun.status)}`}>{runStatusLabel(selectedRun.status)}</span>
+                </header>
                 <div className="run-detail-meta">
                   <span>{runKindLabel(selectedRun.kind)}</span>
                   <span>Updated {formatRunDate(selectedRun.updated_at || selectedRun.created_at)}</span>
+                  {selectedRunIsLive ? <span className="run-live-pill">实时更新</span> : null}
                   {selectedRun.run_group_id ? <span>Group {selectedRun.run_group_id}</span> : null}
                   <code>{selectedRun.run_id}</code>
+                  {selectedWorkflowParentRunId ? (
+                    <button type="button" className="run-parent-link" onClick={() => openRunDetail(selectedWorkflowParentRunId)}>
+                      返回 Workflow：{selectedWorkflowParentRun?.runnable_name || selectedWorkflowParentRun?.runnable_id || '父 Workflow'}
+                    </button>
+                  ) : null}
+                  {isActiveRunStatus(selectedRun.status) ? (
+                    <button
+                      type="button"
+                      className="run-cancel-action danger-action"
+                      disabled={busy}
+                      onClick={requestCancelSelectedRun}
+                    >
+                      Cancel Run
+                    </button>
+                  ) : null}
                 </div>
+                {selectedWorkflowApprovalChildRunId ? (
+                  <section className="run-approval-box workflow-approval-bridge">
+                    <div className="workflow-approval-bridge-head">
+                      <div>
+                        <h4>Workflow 正在等待子 Agent 审批</h4>
+                        <p>
+                          {selectedWorkflowApprovalChildRun?.runnable_name || selectedWorkflowApprovalChildRunId}
+                          {' '}需要确认工具调用，处理后 Workflow 会继续执行后续步骤。
+                        </p>
+                      </div>
+                      <span className={`run-status-pill ${runStatusTone(selectedWorkflowApprovalChildRun?.status || 'approval_required')}`}>
+                        {selectedWorkflowApprovalChildRun ? runStatusLabel(selectedWorkflowApprovalChildRun.status) : 'loading'}
+                      </span>
+                    </div>
+                    {selectedWorkflowApprovalChildRun?.pending_approval?.tool ? (
+                      <>
+                        <RunApprovalRequest
+                          inputPreview={selectedWorkflowApprovalChildRun.pending_approval.input_preview}
+                          runGoal={selectedWorkflowApprovalChildRun.user_goal || ''}
+                          runId={selectedWorkflowApprovalChildRun.run_id}
+                          runLabel={selectedWorkflowApprovalChildRun.runnable_name || 'Child Run'}
+                          tool={selectedWorkflowApprovalChildRun.pending_approval.tool}
+                        />
+                        <div className="run-approval-actions">
+                          <button
+                            type="button"
+                            className="primary-action"
+                            disabled={busy}
+                            onClick={() => void runAction(
+                              () => approveRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),
+                              '批准子 Agent 工具调用',
+                            )}
+                          >
+                            Approve Child
+                          </button>
+                          <button
+                            type="button"
+                            className="danger-action"
+                            disabled={busy}
+                            onClick={() => void runAction(
+                              () => rejectRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),
+                              '拒绝子 Agent 工具调用',
+                            )}
+                          >
+                            Reject Child
+                          </button>
+                          <button type="button" className="run-timeline-child" onClick={() => openRunDetail(selectedWorkflowApprovalChildRunId)}>
+                            Open Child Run
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <pre>{selectedWorkflowApprovalChildRun ? (selectedWorkflowApprovalChildRun.result || 'Child run has no approval payload.') : 'Loading child run...'}</pre>
+                        <div className="run-approval-actions">
+                          <button type="button" className="run-timeline-child" onClick={() => openRunDetail(selectedWorkflowApprovalChildRunId)}>
+                            Open Child Run
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </section>
+                ) : null}
                 {selectedRun.status === 'approval_required' && selectedRun.pending_approval?.tool ? (
                   <section className="run-approval-box">
                     <div>
                       <h4>Approval Required · {selectedRun.pending_approval.tool}</h4>
-                      <p>这个工具调用需要人工确认后才会继续当前 Run。</p>
+                      <p>{selectedRun.pending_approval.tool === 'workflow.approval' ? '这个 Workflow 审批节点需要人工确认后才会继续。' : '这个工具调用需要人工确认后才会继续当前 Run。'}</p>
                     </div>
-                    <pre>{formatApprovalInput(selectedRun.pending_approval.input_preview)}</pre>
+                    <RunApprovalRequest
+                      inputPreview={selectedRun.pending_approval.input_preview}
+                      runGoal={selectedRun.user_goal || ''}
+                      runId={selectedRun.run_id}
+                      runLabel={selectedRun.runnable_name || runKindLabel(selectedRun.kind)}
+                      tool={selectedRun.pending_approval.tool}
+                    />
                     <div className="run-approval-actions">
                       <button type="button" className="primary-action" disabled={busy} onClick={() => void runAction(approveSelectedRun, '批准工具调用')}>Approve</button>
                       <button type="button" className="danger-action" disabled={busy} onClick={() => void runAction(rejectSelectedRun, '拒绝工具调用')}>Reject</button>
                     </div>
                   </section>
                 ) : null}
-                <section>
-                  <h4>{selectedRun.kind === 'workflow_run' ? 'Final Result' : 'Result'}</h4>
+                <section className="run-detail-block run-task-block">
+                  <div className="run-detail-section-head">
+                    <div>
+                      <h4>Task</h4>
+                      <span>Agent 收到的完整任务目标</span>
+                    </div>
+                  </div>
+                  <p>{selectedRun.user_goal || 'No task goal recorded.'}</p>
+                </section>
+                <section className={`run-detail-block run-result-block ${runStatusTone(selectedRun.status)}`}>
+                  <div className="run-detail-section-head">
+                    <div>
+                      <h4>{selectedRun.kind === 'workflow_run' ? 'Final Result' : 'Result'}</h4>
+                      <span>{selectedRun.status === 'completed' ? '最终交付内容' : selectedRun.status === 'failed' ? '失败原因或最后输出' : '当前最新输出'}</span>
+                    </div>
+                    <span className={`run-status-pill ${runStatusTone(selectedRun.status)}`}>{runStatusLabel(selectedRun.status)}</span>
+                  </div>
                   <pre>{selectedRun.result || 'No result yet.'}</pre>
                 </section>
                 {selectedRun.kind === 'workflow_run' ? (
-                  <section>
-                    <h4>Workflow Steps · {selectedWorkflowChildRefs.length}</h4>
+                  <section className="run-detail-block">
+                    <div className="run-detail-section-head">
+                      <div>
+                        <h4>Workflow Steps · {selectedWorkflowSteps.length}</h4>
+                        <span>Workflow 中每个节点的执行状态、审批和产物</span>
+                      </div>
+                    </div>
                     <div className="workflow-child-results">
-                      {selectedWorkflowChildRefs.map((ref, index) => {
-                        const childRun = runById.get(ref.childRunId);
-                        const childStatus = childRun?.status || ref.status || 'loading';
+                      {selectedWorkflowSteps.map((step, index) => {
+                        const childRun = step.childRunId ? runById.get(step.childRunId) || null : null;
+                        const childStatus = childRun?.status || step.status || 'loading';
+                        const summary = workflowStepSummary(step, childRun);
                         return (
-                          <article className="workflow-child-result" key={ref.childRunId}>
+                          <article className={`workflow-child-result workflow-step-result ${step.kind}`} key={step.key}>
                             <div className="workflow-child-result-head">
                               <div>
-                                <strong>{index + 1}. {ref.label}</strong>
-                                <span>{childRun?.runnable_name || ref.childRunId}</span>
+                                <strong>{index + 1}. {step.label}</strong>
+                                <span>{workflowStepKindLabel(step.kind)}{childRun?.runnable_name ? ` · ${childRun.runnable_name}` : ''}</span>
                               </div>
                               <div>
-                                <em className={`run-status-pill ${runStatusTone(childStatus)}`}>{childStatus}</em>
-                                <button type="button" className="run-timeline-child" onClick={() => openRunDetail(ref.childRunId)}>
-                                  Open Run
-                                </button>
+                                <em className={`run-status-pill ${runStatusTone(childStatus)}`}>{runStatusLabel(childStatus)}</em>
+                                {step.childRunId ? (
+                                  <button type="button" className="run-timeline-child" onClick={() => openRunDetail(step.childRunId || '')}>
+                                    Open Run
+                                  </button>
+                                ) : null}
                               </div>
                             </div>
-                            <pre>{childRun ? (childRun.result || 'No result yet.') : 'Loading child run...'}</pre>
+                            <pre>{step.childRunId && !childRun ? 'Loading child run...' : summary}</pre>
                             {childRun?.artifacts?.length ? (
                               <div className="run-artifacts compact">
                                 {childRun.artifacts.map((artifact, artifactIndex) => {
@@ -2066,7 +3582,7 @@ export function AgentStudioView() {
                                     <button
                                       type="button"
                                       disabled={!path}
-                                      key={`${ref.childRunId}-${path}-${artifactIndex}`}
+                                      key={`${step.childRunId}-${path}-${artifactIndex}`}
                                       onClick={() => path ? void openArtifact(childRun, path) : undefined}
                                     >
                                       {path || 'artifact'}
@@ -2075,56 +3591,85 @@ export function AgentStudioView() {
                                 })}
                               </div>
                             ) : null}
+                            {step.kind === 'artifact' && step.artifactPath ? (
+                              <div className="run-artifacts compact">
+                                <button type="button" onClick={() => void openArtifact(selectedRun, step.artifactPath || '')}>
+                                  {step.artifactPath}
+                                </button>
+                              </div>
+                            ) : null}
                           </article>
                         );
                       })}
-                      {!selectedWorkflowChildRefs.length ? <span>No child Agent runs</span> : null}
+                      {!selectedWorkflowSteps.length ? <span>No workflow steps</span> : null}
                     </div>
                   </section>
                 ) : null}
-                <section>
-                  <h4>Timeline · {(selectedRun.timeline || []).length}</h4>
-                  <ol className="run-timeline">
+                <section className="run-detail-block run-execution-block">
+                  <div className="run-detail-section-head">
+                    <div>
+                      <h4>Execution · {(selectedRun.timeline || []).length}</h4>
+                      <span>模型响应、工具调用、审批与完成节点</span>
+                    </div>
+                  </div>
+                  <ol className="run-execution-steps">
                     {(selectedRun.timeline || []).map((event, index) => {
                       const childRunId = timelineChildRunId(event);
                       const childRun = childRunId ? runById.get(childRunId) : null;
                       const eventStatus = timelineStatus(event);
+                      const payload = timelineEventPayload(event);
+                      const detail = String(event.detail || '').trim();
                       return (
-                        <li key={`${String(event.event || 'event')}-${index}`}>
-                          <div className="run-timeline-head">
-                            <span>{String(event.event || 'event')}</span>
+                        <li className={`run-execution-step ${timelineEventTone(event)}`} key={`${String(event.event || 'event')}-${index}`}>
+                          <span className="run-step-rail"><i aria-hidden="true" /></span>
+                          <div className="run-step-card">
+                            <div className="run-step-head">
+                              <div>
+                                <strong>{timelineEventTitle(event)}</strong>
+                                <span>{formatRunDate(timelineEventTime(event))}</span>
+                              </div>
+                              <code>{timelineEventCode(event)}</code>
+                            </div>
+                            {detail && detail !== timelineEventTitle(event) ? <p>{detail}</p> : null}
                             {eventStatus ? (
                               <em className={`run-status-pill ${runStatusTone(eventStatus)}`}>{eventStatus}</em>
                             ) : null}
+                            {payload ? <pre>{payload}</pre> : null}
+                            {childRunId ? (
+                              <button
+                                type="button"
+                                className="run-timeline-child"
+                                onClick={() => openRunDetail(childRunId)}
+                              >
+                                Child Run {childRun?.status ? `· ${runStatusLabel(childRun.status)}` : ''} · {childRunId}
+                              </button>
+                            ) : null}
                           </div>
-                          <small>{String(event.detail || '')}</small>
-                          {childRunId ? (
-                            <button
-                              type="button"
-                              className="run-timeline-child"
-                              onClick={() => openRunDetail(childRunId)}
-                            >
-                              Child Run {childRun?.status ? `· ${childRun.status}` : ''} · {childRunId}
-                            </button>
-                          ) : null}
                         </li>
                       );
                     })}
                   </ol>
                 </section>
-                <section>
-                  <h4>Artifacts · {(selectedRun.artifacts || []).length}</h4>
+                <section className="run-detail-block">
+                  <div className="run-detail-section-head">
+                    <div>
+                      <h4>Artifacts · {(selectedRun.artifacts || []).length}</h4>
+                      <span>上下文、工具产物和可预览文件</span>
+                    </div>
+                  </div>
                   <div className="run-artifacts">
                     {(selectedRun.artifacts || []).map((artifact, index) => {
                       const path = String(artifact.path || '');
+                      const sourceRunId = String(artifact.source_run_id || artifact.run_id || selectedRun.run_id);
+                      const sourceLabel = String(artifact.source_runnable_name || artifact.workflow_step_label || '').trim();
                       return (
                         <button
                           type="button"
                           disabled={!path}
                           key={`${path}-${index}`}
-                          onClick={() => path ? void openArtifact(selectedRun, path) : undefined}
+                          onClick={() => path ? void openArtifact(sourceRunId, path) : undefined}
                         >
-                          {path || 'artifact'}
+                          {sourceLabel ? `${sourceLabel} / ${path || 'artifact'}` : path || 'artifact'}
                         </button>
                       );
                     })}

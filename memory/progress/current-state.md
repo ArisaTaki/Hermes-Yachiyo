@@ -2,6 +2,48 @@
 
 ## 已完成
 
+### Milestone 96 — Chat 群组协作与 Workflow 运行可观察性收口
+
+- ✅ 群组对话现在按“长期群组 + 每轮目标独立 RunGroup”运行：用户直接在群里发布目标会交给主模型识别和派发；群内直接 `@Agent` 也会开启当前目标的运行批次，并在完成、失败、取消或审批结束后自动交给主模型整理。
+- ✅ 群组调度上下文已补 Agent 能力摘要：主模型和被派出的 Agent 会看到群成员的类别、交付契约和职责说明，不再只凭昵称/名称猜谁适合接任务；Agent Runtime 的 runnable summary 也会透出 `output_contract`，与主会话自动委派目标信息保持一致。
+- ✅ 群组创建/设置弹窗的 Agent 列表也显示类别、交付偏好和职责摘要，用户添加成员时能判断谁适合进群；群头像支持上传后的 data URL 通过 Bridge create/update route 透传；后端回归锁定群组成员只能是启用 Agent，Workflow 不能通过接口混入群聊成员；Bridge 真实 `/ui/chat/groups` + `/ui/chat/messages` route 已覆盖创建群组、修改群组加入新 Agent 后，给主模型注入最新成员、类别、交付契约和职责说明的路径。
+- ✅ 主模型派发协议已收紧为自然语言说明 + `<yachiyo_group_dispatch>` 机器块；Chat 层会隐藏派发 JSON、兼容常见模型输出变体，并在无效或跳过派发时给主模型整理未执行原因，不再让用户看到协议碎片或卡在“正在派发”；2026-06-05 追加：同一条主模型回复里如果分段输出多个 `<yachiyo_group_dispatch>` 块，Chat 也会全部收集并派发到同一轮 RunGroup，不会只执行第一个标签块；派发解析也兼容 `type/kind=agent`、`agentName/userGoal/taskGoal/objective/runnableId`、`Delegations` 这类模型常见字段变体，避免真实模型字段名偏一点就漏派。
+- ✅ Agent 审批体验改为独立工具请求卡片：关联任务、工具名、请求参数分层展示，`terminal.run` 以 bash 代码块显示；输入框上方会浮出待审批提醒并支持多审批切换，提醒条会同时提供“定位消息”和“运行详情”，方便用户从输入区回到原气泡或打开 Run Detail 确认上下文；批准后会立即释放按钮 busy 并后台轮询 Agent 继续执行进度，完成后才触发主模型汇总。
+- ✅ Chat 输入区在会话处理中不再锁死继续发言：发送按钮和 Enter 都保持发送语义，停止当前任务拆成独立按钮；Agent Run 创建后的前端轮询改为后台进行，用户可以在主模型整理、Agent 执行或等待审批期间继续补充约束/纠偏；Bridge message route 已覆盖图片附件和显式 runnable 目标透传，避免前端发图或 Agent 会话发送时丢上下文；当前会话状态、停止按钮和会话列表都会显示并发处理数量（例如“处理中 2 项”），计数会合并主模型 Task 与 active Agent/Workflow Run；后端回归覆盖重叠消息全部完成后仍能按 user/assistant 配对收束，并清掉会话 processing 状态与计数。
+- ✅ 2026-06-05 追加：群组 Agent 执行期间用户继续发普通群聊/`@主模型` 补充时，后续主模型整理 Prompt 会带上“用户后续补充/纠偏”，覆盖主模型派发多 Agent 和群内直接 `@Agent` 两条路径；补充消息会在保存时记录所属父任务 / Agent 消息，且多个群组任务同时 active 时只归到最近一个 active 或已终态但尚未汇总的目标；接收新的群聊消息前会先静默同步已完成的主模型派发与 Run 状态，但不会抢先创建主模型汇总任务，避免第二批派发刚完成但 UI 尚未刷新时，用户一句“补充”被错误挂到旧任务或来不及进入第二批汇总；群聊里直接 `@Agent` 开新任务也会先静默同步旧 Run，并在新用户消息落库后补建旧 Agent 的主模型汇总任务，避免用户连续点名多个 Agent 时前一个结果迟迟不交给主模型；点名群外 Agent、手动 @Workflow 引导或其他 runnable error/guidance 分支也会在错误/引导消息落库后扫描待汇总 Agent，避免用户误操作后旧结果卡住；另一个独立 `@Agent` 指令、明显新目标提示、以及没有补充/修正语气的 `@主模型` 新请求，不会被误当作当前汇总的补充。
+- ✅ Chat 的“停止当前任务”现在会同步取消当前会话消息里挂载的 active Agent / Workflow Run，并把对应气泡刷新为取消终态；取消接口会回传最新 `processing_count`，用户显式停止时不会再额外启动主模型整理任务导致状态看起来又开始处理。
+- ✅ Chat 的会话列表和 session info 也会先同步当前会话里的主模型 Task / Agent / Workflow Run 状态：即使没有打开消息流，已完成的 Agent / Workflow Run 也会从 processing 刷到完成态，孤儿 processing 消息会被修复为 failed，避免列表和气泡状态互相矛盾。
+- ✅ 会话列表、消息 payload 和 session info 已暴露 `approval_count`；列表预览和右侧状态会优先显示“待审批 / 待审批 N”，审批卡和输入框上方提醒也会同时识别 Agent `run_id/run_status` 与 Workflow `workflow_run_id/workflow_status`，Workflow 自身审批会把 `pending_approval`、审批节点和当前上下文写入聊天消息，避免用户切走群聊后只看到“处理中”而错过或看不懂 Agent/Workflow 的确认请求。
+- ✅ Workflow 因子 Agent 工具审批暂停时，Chat 只把真正有 `pending_approval.tool` 的子 Agent Run 计为待审批；父 Workflow 消息显示“正在等待子 Agent 审批”的进度说明，不再变成第二个可点击但不可操作的审批卡，避免用户连续点批准却不知道下一项是什么。
+- ✅ 2026-06-05 追加：子 Agent 工具审批通过并带动父 Workflow 继续后，Chat 会把子 Agent 消息和父 Workflow 消息一起同步到终态，`processing_count` / `approval_count` 会归零；父 Workflow 终态会按 Workflow 语义展示完成/失败/取消，只有缺少状态上下文的 result 才补 Workflow 标题，避免把子 Agent 输出直接塞成一条不明所以的流程消息。
+- ✅ Chat 里直接触发的 Agent/Workflow 指令结果也统一按 `run_status/status` 和 `run_id/agent_run_id/workflow_run_id` 解释：进行中会后台轮询对应 Run，待审批会优先显示等待审批文案，避免不同返回字段导致前端不跟进。
+- ✅ 聊天消息底部状态也区分主模型流式回复和 Agent/Workflow Run：主模型仍显示“输入中”，挂载 Run metadata 的 Agent/Workflow 消息显示“处理中”，避免用户把后台执行误读成普通打字状态。
+- ✅ 群聊派发与直接 `@Agent` 的异步完成回调都会写回创建它的原会话：用户在派活后切到新会话也不会丢结果，Agent 完成/失败仍会更新原群聊消息，并在原群聊里创建主模型汇总任务。
+- ✅ 群聊中的 Agent 运行中进度会从 Run timeline 提取最新阶段：例如运行环境已准备、正在解析模型响应、正在处理工具结果、已写出产物；聊天气泡仍保持 loading，但进度卡不再只有泛泛的“Agent 正在执行”，也不会把工具调用 JSON 或 `<yachiyo...>` 这类内部协议片段暴露出来。
+- ✅ 聊天气泡已接入 Run Detail：Agent 完成/失败时会显示真实产物数量和运行详情入口，主模型汇总 Prompt 也会带上 Agent 状态、汇报和 artifact 路径摘要，避免用户不知道文件在哪里或哪些 Agent 没有完成。
+- ✅ 群组主模型整理状态现在直接体现在原 Agent / 派发气泡和底部全局状态上：等待时显示“等待主模型整理 Agent 结果”，如果整理任务失败，会在原气泡下显示失败原因；后端回归覆盖直接 `@Agent` 和主模型派发两条路径都会清掉 pending 并写入 `group_agent_summary_status/error`。
+- ✅ Workflow 入口边界按产品讨论收紧：Chat `@` 候选只保留主模型和 Agent，手动 `@Workflow` 或主模型误派发 Workflow 会提示去 Agent Studio 的 Workflow Studio / Runs 执行；Workflow 的设计、保存、保存并运行和 Runs 手动运行仍保持可用，且保存更新后立即运行会使用最新画布节点/连线，不会跑到旧版本；Bridge route 层也覆盖 create/update/run 这条用户实际点击路径。
+- ✅ Workflow Studio 的 Agent palette、节点设置区和 Runs 手动运行目标选择已补能力摘要：会展示 Agent/Workflow 的类别、交付契约和职责说明，Runs 的目标下拉选项本身也带能力摘要，用户设计流程、维护节点或手动选择运行目标时能判断该把任务交给谁，而不是只看到名称。
+- ✅ Workflow / Runs 的能力摘要会标出停用 Agent，Workflow palette 中停用项保持不可点击且有明确 disabled 视觉状态；Runs 手动运行下拉也会禁用停用目标，运行按钮会在目标停用时禁用并提示原因；已有节点绑定到停用 Agent 时，节点设置预览也能看见状态，便于解释为什么校验/运行会被拦截。
+- ✅ Agent Studio 编辑页会直接展示当前 Agent 的运行前状态：缺 Chat Profile / Custom API 配置不完整、挂载停用 Skill、`workspace.write_patch` / `terminal.run` 会进入审批、写入 scope 为空等都会在 Capabilities 下提示；Quick Run 也会在模型配置不可用时提前禁用，减少用户把权限或配置问题误判成 Workflow 链路故障。
+- ✅ 2026-06-05 追加：Runs 手动选择单个 Agent 时也会复用 Agent readiness 提示；后端会在创建 Agent Run 前拦截 Custom API 缺字段、停用 Skill、停用 Agent 等确定的本地配置错误，但保留旧 Profile 缺失 Agent 创建失败 Run 的兼容留档语义。
+- ✅ Agent / Workflow 的近场运行入口也补齐防误触：Agent Quick Run 会在 Agent 停用、已挂载 Skill 停用、目标为空时禁用并给出可见原因；Workflow 保存并运行会在 Workflow 停用、校验错误或目标为空时禁用并提示原因，和 Runs 手动运行入口保持一致。
+- ✅ Runs 手动运行入口也会对选中的 Workflow 复用 Workflow Studio 校验：旧数据或导入数据里若存在断链、缺失 Agent、停用 Agent、未知节点等问题，会在目标预览下提前显示原因并禁用运行按钮，而不是等后端创建 Run 时才报错。
+- ✅ 2026-06-05 追加：Runs 手动运行选择 Workflow 时，如果校验错误不止一条，目标预览下会直接列出完整错误清单；按钮 title 仍保留首条短原因，方便用户一眼知道为什么不能运行、需要同时修哪些节点。
+- ✅ Agent Studio / Workflow Studio / Runs 不再默认选择第一个 Agent / Workflow / Run；Workflow 新草稿保持空选择，节点设置支持 Agent / Approval / Artifact 配置，前后端都会校验线性流程、缺失/停用 Agent、未知节点、环和断链。
+- ✅ Workflow Artifact 节点支持配置产物路径：用户可以在节点设置里指定 `reports/summary.md` 这类相对路径；留空时继续按 Label 自动生成，重复路径会自动去重为 `name-2.md`；Run Detail 的尚未执行步骤也会提前显示预计写出路径，前后端都会拦截越界路径。
+- ✅ Workflow Studio 的保存与保存并运行会在硬校验错误时禁用，并把第一个错误放到按钮 title；只有 Start 节点这类低价值但可保存的状态仍作为 warning 提醒，避免用户在明显无效的 Workflow 上误点保存/运行。
+- ✅ 2026-06-05 追加：Start-only Workflow 仍可作为草稿保存，但所有运行入口都会要求至少存在一个可执行节点（Agent、Approval 或 Artifact）；后端 `create_workflow_run` 和 Bridge `/ui/workflow-runs` route 同步硬拦截，避免空流程直接 completed 造成“已运行但什么也没做”的假阳性。
+- ✅ 2026-06-05 追加：Workflow 运行前会预检节点 Agent 的可运行性：缺 Chat Profile、默认 Chat Profile 不可用、Profile 不可用、Custom API 配置不完整、挂载 Skill 停用等确定失败会在创建 Run 前拦截；Workflow 节点设置预览和 Runs 目标预览也会显示同样原因，减少用户运行后才在详情页看到失败。
+- ✅ Run Detail 已重做为任务、结果、Workflow Steps、Execution Timeline、Artifacts 的层级视图；History 可按 Agent / Workflow 分组、折叠，按完成、失败、进行中筛选，并能搜索目标、结果、Agent 名称、Run ID、timeline 与 artifact 线索，长任务和模型响应不再省略关键细节；主 History 只展示 Workflow 根 Run 与独立 Agent Run，Workflow 内部 child Agent Run 会从主列表隐藏，即使该 Workflow 是通过 delegation/统一委派入口创建，也不会把内部步骤刷进 Agent 历史卡片；Bridge artifact route 已覆盖从父 Workflow Run 的 artifact 列表打开 child Agent artifact，会按 `source_run_id` 读取真实子 Run 产物，避免详情页有按钮但点开 404。
+- ✅ Workflow 子 Agent 审批桥已闭环：父 Workflow 会显示正在等待哪个 child run 的工具审批，可在父详情页批准/拒绝；审批恢复、拒绝、取消和父 Run 取消都会同步更新父子 Run、RunGroup 和步骤状态，避免留下孤儿审批；Run Detail 批准后会按返回状态提示“继续执行 / 需要下一次审批 / 已完成 / 已失败”，不再只显示泛泛的 action 完成；Bridge 审批批准 route 已覆盖暂停后编辑 Workflow 的场景，会继续原 Run 的运行时快照，不会把新画布混进旧 Run；Bridge 取消 route 已覆盖父 Workflow 等待子 Agent 工具审批时的取消路径，会同步取消 child Run 并清空 pending approval。
+- ✅ Run Detail 的待审批区域也改为结构化请求视图：工具名、Run、关联任务、审批节点/路径/工作目录分层展示，`terminal.run` 请求内容按 bash 代码块呈现；父 Workflow 等待子 Agent 审批和普通 Agent / Workflow 审批共用同一套可读结构。
+- ✅ Chat 里的 Workflow 失败/取消终态也会读取 timeline 节点信息：如果后端已记录 `workflow_node_label/kind`，气泡正文会直接显示“失败节点 / 取消节点”，用户不必先打开 Run Detail 才知道该查哪个步骤。
+- ✅ 进行中或待审批 Run 在详情页会轻量轮询并显示“实时更新”，顶部提供带确认弹窗的 `Cancel Run`，取消后刷新详情缓存；后端会把 Workflow 自身审批和等待子 Agent 审批两种状态都清理到终态。
+- ✅ Agent 工具误用更可恢复：`workspace.read` 读目录、`workspace.list` 列文件或路径不存在时会返回 `ok:false`、明确 hint 和建议工具，让模型有机会自我修正；如果工具循环仍超过上限，失败摘要会带上最后一次工具、错误/退出码和建议，越界和未授权仍保持硬拦截，避免用户把可纠正输入错误误判成权限没挂上。
+- ✅ 2026-06-05 追加：Agent Runtime 会尊重用户目标里的显式限制：如果用户说“不需要创建/保存/修改文件”“只展示代码”或英文同义表达，模型误申请 `workspace.write_patch` / `artifact.write` 会被转成可恢复 tool result，引导它 inline 交付而不是弹审批；如果用户说不运行/不执行命令，误申请 `terminal.run` 也会被同样拦截。中文“代码完整展示即可”和 Workflow 子 Agent “不需要运行命令或脚本”已覆盖回归；空工具策略仍不会在 system prompt 暴露具体工具名。
+- ✅ 验证：`.venv/bin/python -m pytest tests/test_chat_api.py tests/test_agent_runtime.py tests/test_executor.py tests/test_ui_bridge_routes.py -q` → 308 passed；`npm --prefix apps/frontend run build` → passed；`git diff --check` → clean；in-app Browser smoke 覆盖 Chat、群组设置、Runs、Workflow Studio、Workflow palette、Workflow 节点设置 Agent 预览、硬错误禁用保存/运行、Runs 不默认选择目标、Agent Quick Run / Workflow Run 空目标禁用、Run Detail 取消确认，以及 Chat 输入区草稿发送按钮可用性，console error 为空。2026-06-05 本轮追加验证再次跑过 `.venv/bin/python -m pytest tests/test_chat_api.py tests/test_agent_runtime.py tests/test_executor.py tests/test_ui_bridge_routes.py -q` → 313 passed；最新 `npm --prefix apps/frontend run build` → passed；重新拉起 Vite 后用 in-app Browser 复查当前 Chat 群聊样本：派发 JSON 未外露、Agent 终态和主模型汇总可见、Run Detail 可从聊天进入、Run History 按 Agent 分组且不默认选中 run、Run Detail 任务/结果/Timeline/Artifacts 完整显示、Workflow Studio 新草稿和 palette 正常、群组设置可打开/关闭且头像上传入口无 URL 栏、会话 ID 弹窗显示可手动选择的只读 ID，console error 为空；最新 `git diff --check` → clean。
+
 ### Milestone 95 — Chat 群组流式、汇总与审批体验收口
 
 - ✅ 群组里 AgentRun 的 processing 气泡恢复为主模型同款三点 loading；不再先插入“已接收任务”文案造成信息噪音。
