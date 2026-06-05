@@ -3196,6 +3196,93 @@ def test_group_main_model_dispatch_accepts_model_field_variants(tmp_path, monkey
         store.close()
 
 
+def test_group_main_model_dispatch_accepts_tool_input_envelopes(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    design = {
+        "id": "agent_design",
+        "name": "Design Agent",
+        "nickname": "Design",
+        "kind": "agent",
+        "enabled": True,
+    }
+    coding = {
+        "id": "agent_coding",
+        "name": "Coding Agent",
+        "nickname": "Code",
+        "kind": "agent",
+        "enabled": True,
+    }
+    calls: list[dict] = []
+
+    class FakeRunnableService:
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            clean_name = str(name or "").lstrip("@")
+            for agent in (design, coding):
+                if runnable_id == agent["id"] or clean_name in {agent["name"], agent["nickname"]}:
+                    return agent
+            return None
+
+        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+            run_group = run_group_id or "run_group_dispatch"
+            calls.append({
+                "runnable_id": runnable_id,
+                "name": name,
+                "user_goal": user_goal,
+                "run_group_id": run_group_id,
+                "actual_run_group_id": run_group,
+            })
+            runnable = design if runnable_id == design["id"] else coding
+            run = {
+                "run_id": f"{runnable_id}_run",
+                "run_group_id": run_group,
+                "status": "processing",
+                "result": "",
+                "runnable": runnable,
+            }
+            if on_complete:
+                on_complete({
+                    **run,
+                    "status": "completed",
+                    "result": f"{runnable['nickname']} done",
+                })
+            return run
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeRunnableService())
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[design["id"], coding["id"]])
+        assert created["ok"] is True
+        sent = api.send_message("@主模型 用工具输入格式派活")
+        assert sent["ok"] is True
+        runtime.state.update_task_status(
+            sent["task_id"],
+            TaskStatus.COMPLETED,
+            result=(
+                "我会按工具输入格式安排。\n"
+                "<yachiyo_group_dispatch>\n"
+                '{"tool":"dispatch_group_agent","input":{"agent":"Design","goal":"整理验收点"}}\n'
+                "</yachiyo_group_dispatch>\n"
+                "<yachiyo_group_dispatch>\n"
+                '{"action":"dispatch_group_agent","arguments":"{\\"agent\\":\\"Code\\",\\"goal\\":\\"写验证脚本\\"}"}\n'
+                "</yachiyo_group_dispatch>"
+            ),
+        )
+
+        messages = api.get_messages()["messages"]
+        assistant_messages = [message for message in messages if message["role"] == "assistant"]
+        parent = next(message for message in assistant_messages if message["task_id"] == sent["task_id"])
+
+        assert [call["runnable_id"] for call in calls] == ["agent_design", "agent_coding"]
+        assert [call["user_goal"] for call in calls] == ["整理验收点", "写验证脚本"]
+        assert calls[0]["run_group_id"] == ""
+        assert calls[1]["run_group_id"] == "run_group_dispatch"
+        assert parent["metadata"]["group_dispatch_count"] == 2
+        assert "我把 2 个任务分别派给 Design、Code 了。" in parent["content"]
+        assert "dispatch_group_agent" not in parent["content"]
+        assert "arguments" not in parent["content"]
+    finally:
+        store.close()
+
+
 def test_group_main_model_dispatch_stream_stays_loading(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))

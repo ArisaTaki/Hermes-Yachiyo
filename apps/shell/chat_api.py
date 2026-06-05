@@ -2876,6 +2876,46 @@ class ChatAPI:
             return result
         if not isinstance(payload, dict):
             return []
+        envelope_keys = {
+            "input",
+            "args",
+            "arguments",
+            "parameters",
+            "params",
+            "payload",
+            "request",
+        }
+        enveloped = cls._payload_value(
+            payload,
+            "input",
+            "args",
+            "arguments",
+            "parameters",
+            "params",
+            "payload",
+            "request",
+        )
+        if isinstance(enveloped, str):
+            try:
+                enveloped = json.loads(enveloped)
+            except (TypeError, json.JSONDecodeError):
+                enveloped = None
+        if isinstance(enveloped, (dict, list)):
+            if isinstance(enveloped, dict):
+                merged = {**payload, **enveloped}
+                for key in list(merged):
+                    if re.sub(r"[\s_-]+", "", str(key or "")).lower() in envelope_keys:
+                        merged.pop(key, None)
+                return cls._group_dispatch_requests_from_payload(merged)
+            result: list[dict[str, str]] = []
+            for item in enveloped:
+                if isinstance(item, dict):
+                    merged = {**payload, **item}
+                    for key in list(merged):
+                        if re.sub(r"[\s_-]+", "", str(key or "")).lower() in envelope_keys:
+                            merged.pop(key, None)
+                    result.extend(cls._group_dispatch_requests_from_payload(merged))
+            return result
         nested = cls._payload_value(payload, "tasks", "agents", "dispatches", "delegations")
         if isinstance(nested, list):
             result = []
