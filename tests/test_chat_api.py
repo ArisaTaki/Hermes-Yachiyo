@@ -3522,7 +3522,7 @@ def test_group_dispatch_expected_request_reports_missing_dispatch(tmp_path, monk
     try:
         created = api.create_group_session(name="demo Channel", participant_ids=[design["id"]])
         assert created["ok"] is True
-        sent = api.send_message("@主模型 帮我把这个目标安排给 Design Agent 做")
+        sent = api.send_message("@主模型 帮我把这个目标安排给 Design 做")
         assert sent["ok"] is True
         runtime.state.update_task_status(
             sent["task_id"],
@@ -3545,6 +3545,50 @@ def test_group_dispatch_expected_request_reports_missing_dispatch(tmp_path, monk
             "主模型没有生成可执行的群组 Agent 派发请求"
         ]
         assert completed["activity_events"][0]["title"] == "群组任务未派发"
+    finally:
+        activity_store.close()
+        store.close()
+
+
+def test_group_dispatch_missing_request_does_not_flag_plain_arrangement(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    design = {
+        "id": "agent_design",
+        "name": "Design Agent",
+        "nickname": "Design",
+        "kind": "agent",
+        "enabled": True,
+    }
+
+    class FakeRunnableService:
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            if runnable_id == design["id"] or name in {design["name"], design["nickname"]}:
+                return design
+            return None
+
+        def create_run_for_runnable_async(self, **_kwargs):
+            raise AssertionError("plain arrangement must not create an Agent run")
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeRunnableService())
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[design["id"]])
+        assert created["ok"] is True
+        sent = api.send_message("@主模型 帮我安排一下今天的计划")
+        assert sent["ok"] is True
+        runtime.state.update_task_status(
+            sent["task_id"],
+            TaskStatus.COMPLETED,
+            result="今天可以先整理目标，再确认优先级，最后留出复盘时间。",
+        )
+
+        completed = next(message for message in api.get_messages()["messages"] if message["role"] == "assistant")
+
+        assert completed["status"] == "completed"
+        assert completed["content"] == "今天可以先整理目标，再确认优先级，最后留出复盘时间。"
+        assert "group_dispatch_handled" not in completed["metadata"]
+        assert completed["activity_events"] == []
     finally:
         activity_store.close()
         store.close()

@@ -2839,13 +2839,22 @@ class ChatAPI:
         compact = re.sub(r"\s+", "", request, flags=re.IGNORECASE)
         if re.search(r"(?:不要|不用|不需要|无需|先不).{0,12}(?:派|派发|派活|安排|分配|指派|交给|agent)", compact, re.IGNORECASE):
             return False
-        return bool(re.search(
-            r"(派发|派活|安排|分配|指派|交给|给.{0,24}Agent|让.{0,24}Agent|"
-            r"其他.{0,12}Agent|群里.{0,12}Agent|群组.{0,12}Agent|多个.{0,12}Agent|"
+        if re.search(r"(派发|派活|委派|dispatch)", request, re.IGNORECASE):
+            return True
+        response = str(response_text or "")
+        target_text = f"{request}\n{response}"
+        participant_names = cls._group_dispatch_agent_names_from_task(task_description)
+        target_cue = bool(re.search(
+            r"(Agent|agent|代理|群成员|群内|群里|群组|其他.{0,12}Agent|多个.{0,12}Agent|"
             r"多.{0,8}Agent|协作|团队)",
-            request,
+            target_text,
             re.IGNORECASE,
         ))
+        if not target_cue:
+            target_cue = any(name and name in target_text for name in participant_names)
+        if not target_cue:
+            return False
+        return bool(re.search(r"(安排|分配|指派|交给|给.{0,24}|让.{0,24})", request, re.IGNORECASE))
 
     @staticmethod
     def _group_dispatch_user_request_from_task(task_description: str) -> str:
@@ -2853,6 +2862,23 @@ class ChatAPI:
         if "[Yachiyo 群组上下文]" in text:
             text = text.split("[Yachiyo 群组上下文]", 1)[0]
         return text.strip()
+
+    @staticmethod
+    def _group_dispatch_agent_names_from_task(task_description: str) -> list[str]:
+        text = str(task_description or "")
+        if "[Yachiyo 群组上下文]" not in text:
+            return []
+        names: list[str] = []
+        for line in text.splitlines():
+            if "（Agent" not in line and "(Agent" not in line:
+                continue
+            match = re.match(r"\s*-\s*([^（(]+)", line)
+            if not match:
+                continue
+            name = match.group(1).strip()
+            if name:
+                names.append(name)
+        return names
 
     @staticmethod
     def _group_dispatch_response_declines_dispatch(response_text: str) -> bool:
