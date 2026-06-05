@@ -50,6 +50,7 @@
 - ✅ 2026-06-05 追加：Workflow Run Detail 会在对应 Workflow 定义仍存在时提供“打开 Workflow Studio”入口，用户从完成/失败/待审批 Run 看完步骤后可以直接回设计画布调整；Run History 分组和组内条目都会按更新时间稳定倒序，刚完成或刚失败的 Run 不会因为后端返回顺序藏到旧记录后面。
 - ✅ 2026-06-05 追加：Run Detail 不再保留任何“刷新后自动选中第一个 Run”的路径，空详情会要求用户明确选择历史或创建新 Run；完成/失败/取消后的详情页新增“准备重跑”和“重新运行”，前者把原目标和任务填回 Runs 面板便于修改，后者会复用当前 Agent Studio 的 Agent/Workflow 可运行性、权限和校验结果直接创建新 Run。
 - ✅ 2026-06-05 追加：Runs History 的状态筛选在窄宽度下改为稳定四列布局，分组 hover/选中态保留横向 padding，避免按钮被挤变形或 hover 紧贴边缘。
+- ✅ 2026-06-05 追加：Runs History 搜索会把 Agent / Workflow 的名称、昵称、类别、描述、交付契约和启停状态一起纳入索引；旧 Run 即使缺少 `runnable_name`，也能按 Agent 能力线索查到对应历史。
 - ✅ 2026-06-05 追加：Run Detail 的 Workflow Steps、Execution 和 Artifacts 区块支持折叠；长节点结果、模型响应和工具 payload 默认收起为可读摘要，展开后显示完整内容且不截断，失败和待审批内容会默认展开，方便用户先扫状态再钻取细节。
 - ✅ Workflow 子 Agent 审批桥已闭环：父 Workflow 会显示正在等待哪个 child run 的工具审批，可在父详情页批准/拒绝；审批恢复、拒绝、取消和父 Run 取消都会同步更新父子 Run、RunGroup 和步骤状态，避免留下孤儿审批；Run Detail 批准后会按返回状态提示“继续执行 / 需要下一次审批 / 已完成 / 已失败”，不再只显示泛泛的 action 完成；Bridge 审批批准 route 已覆盖暂停后编辑 Workflow 的场景，会继续原 Run 的运行时快照，不会把新画布混进旧 Run；Bridge 取消 route 已覆盖父 Workflow 等待子 Agent 工具审批时的取消路径，会同步取消 child Run 并清空 pending approval。
 - ✅ Run Detail 的待审批区域也改为结构化请求视图：工具名、Run、关联任务、审批节点/路径/工作目录分层展示，`terminal.run` 请求内容按 bash 代码块呈现；父 Workflow 等待子 Agent 审批和普通 Agent / Workflow 审批共用同一套可读结构。

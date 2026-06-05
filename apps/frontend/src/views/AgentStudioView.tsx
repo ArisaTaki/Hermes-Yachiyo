@@ -843,7 +843,7 @@ function compactSearchText(value: unknown): string {
   }
 }
 
-function runSearchHaystack(run: RunSpec): string {
+function runSearchHaystack(run: RunSpec, extraText = ''): string {
   const timelineText = (run.timeline || [])
     .map((event) => compactSearchText(event))
     .join(' ');
@@ -864,18 +864,65 @@ function runSearchHaystack(run: RunSpec): string {
     run.result,
     timelineText,
     artifactText,
+    extraText,
   ].map(compactSearchText).join(' ').toLowerCase();
 }
 
-function runMatchesSearch(run: RunSpec, query: string): boolean {
+function runMatchesSearch(run: RunSpec, query: string, extraText = ''): boolean {
   const terms = query
     .trim()
     .toLowerCase()
     .split(/\s+/)
     .filter(Boolean);
   if (!terms.length) return true;
-  const haystack = runSearchHaystack(run);
+  const haystack = runSearchHaystack(run, extraText);
   return terms.every((term) => haystack.includes(term));
+}
+
+function runSearchTextByRunnableIdFor(
+  runnables: RunnableSummary[],
+  agents: AgentSpec[],
+  workflows: WorkflowSpec[],
+): Map<string, string> {
+  const next = new Map<string, string>();
+  const append = (id: string, parts: unknown[]) => {
+    const key = String(id || '').trim();
+    if (!key) return;
+    next.set(key, [next.get(key) || '', ...parts.map(compactSearchText)].join(' '));
+  };
+  runnables.forEach((item) => {
+    append(item.id, [
+      item.kind,
+      item.name,
+      item.nickname,
+      item.description,
+      item.category,
+      item.output_contract,
+      item.enabled === false ? 'disabled 停用' : 'enabled 启用',
+      runnableCapabilityLine(item),
+    ]);
+  });
+  agents.forEach((agent) => {
+    append(agent.agent_id, [
+      'agent',
+      agent.name,
+      agent.nickname,
+      agent.description,
+      agent.category,
+      agent.output_contract,
+      agent.enabled === false ? 'disabled 停用' : 'enabled 启用',
+      agentCapabilityLine(agent),
+    ]);
+  });
+  workflows.forEach((workflow) => {
+    append(workflow.workflow_id, [
+      'workflow',
+      workflow.name,
+      workflow.description,
+      workflow.enabled === false ? 'disabled 停用' : 'enabled 启用',
+    ]);
+  });
+  return next;
 }
 
 function formatRunDate(value?: string): string {
@@ -1691,9 +1738,15 @@ export function AgentStudioView() {
     [runKindFilteredRuns, runStatusFilter],
   );
   const runSearchActive = Boolean(runSearchQuery.trim());
+  const runSearchTextByRunnableId = useMemo(
+    () => runSearchTextByRunnableIdFor(runnables, agents, workflows),
+    [agents, runnables, workflows],
+  );
   const filteredRuns = useMemo(
-    () => runStatusFilteredRuns.filter((run) => runMatchesSearch(run, runSearchQuery)),
-    [runSearchQuery, runStatusFilteredRuns],
+    () => runStatusFilteredRuns.filter((run) => (
+      runMatchesSearch(run, runSearchQuery, runSearchTextByRunnableId.get(run.runnable_id) || '')
+    )),
+    [runSearchQuery, runSearchTextByRunnableId, runStatusFilteredRuns],
   );
   const runHistoryGroups = useMemo(
     () => runHistoryGroupsFor(filteredRuns, runnables, agents),
@@ -1999,12 +2052,12 @@ export function AgentStudioView() {
     const visible = (
       runMatchesFilter(selectedRun, runKindFilter)
       && runMatchesStatusFilter(selectedRun, runStatusFilter)
-      && runMatchesSearch(selectedRun, runSearchQuery)
+      && runMatchesSearch(selectedRun, runSearchQuery, runSearchTextByRunnableId.get(selectedRun.runnable_id) || '')
     );
     if (visible) return;
     setSelectedRunId('');
     navigateTo('agents', { tab: 'runs' }, ['run']);
-  }, [runKindFilter, runSearchQuery, runStatusFilter, selectedRun, selectedRunId, tab]);
+  }, [runKindFilter, runSearchQuery, runSearchTextByRunnableId, runStatusFilter, selectedRun, selectedRunId, tab]);
 
   useEffect(() => {
     if (selectedAgent) setDraft(agentToDraft(selectedAgent));
