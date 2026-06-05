@@ -1339,8 +1339,29 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
 
   async function resolveApprovalMessage(message: ChatMessage, action: 'approve' | 'reject') {
     const runId = messageRunId(message);
-    if (!message.id || !runId || approvalActionMessageId) return;
-    setApprovalActionMessageId(message.id);
+    if (!message.id) return;
+    await resolveApprovalRun({
+      action,
+      busyId: message.id,
+      runId,
+    });
+  }
+
+  async function resolveApprovalItem(item: ComposerApprovalItem, action: 'approve' | 'reject') {
+    await resolveApprovalRun({
+      action,
+      busyId: item.id,
+      runId: item.runId,
+    });
+  }
+
+  async function resolveApprovalRun({ action, busyId, runId }: {
+    action: 'approve' | 'reject';
+    busyId: string;
+    runId: string;
+  }) {
+    if (!runId || approvalActionMessageId) return;
+    setApprovalActionMessageId(busyId);
     setStatus(action === 'approve' ? '正在批准工具调用...' : '正在拒绝工具调用...');
     try {
       const run = action === 'approve'
@@ -1699,20 +1720,20 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     [assistantProfile, input, runnables],
   );
   const headerActivity = latestVisibleActivity(messages);
-  const composerApprovalMessages = useMemo(
-    () => approvalRequiredMessages(messages),
+  const composerApprovalItems = useMemo(
+    () => approvalRequiredItems(messages),
     [messages],
   );
-  const composerApprovalMessage = useMemo(() => {
-    if (!composerApprovalMessages.length) return null;
-    const selected = composerApprovalMessages.find((message) => message.id === composerApprovalMessageId);
-    return selected || composerApprovalMessages[composerApprovalMessages.length - 1] || null;
-  }, [composerApprovalMessageId, composerApprovalMessages]);
-  const composerApprovalIndex = composerApprovalMessage
-    ? composerApprovalMessages.findIndex((message) => message.id === composerApprovalMessage.id)
+  const composerApprovalItem = useMemo(() => {
+    if (!composerApprovalItems.length) return null;
+    const selected = composerApprovalItems.find((item) => item.id === composerApprovalMessageId);
+    return selected || composerApprovalItems[composerApprovalItems.length - 1] || null;
+  }, [composerApprovalMessageId, composerApprovalItems]);
+  const composerApprovalIndex = composerApprovalItem
+    ? composerApprovalItems.findIndex((item) => item.id === composerApprovalItem.id)
     : -1;
-  const composerApprovalCount = composerApprovalMessages.length;
-  const composerApprovalDetails = composerApprovalMessage ? approvalRequestDetails(composerApprovalMessage) : null;
+  const composerApprovalCount = composerApprovalItems.length;
+  const composerApprovalDetails = composerApprovalItem?.details || null;
   const chatWorkspaceStyle = embedded
     ? undefined
     : ({ '--chat-sidebar-width': `${sidebarWidth}px` } as CSSProperties);
@@ -1733,19 +1754,19 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
 
   useEffect(() => {
     setComposerApprovalMessageId((current) => {
-      if (!composerApprovalMessages.length) return '';
-      if (current && composerApprovalMessages.some((message) => message.id === current)) return current;
-      return composerApprovalMessages[composerApprovalMessages.length - 1]?.id || '';
+      if (!composerApprovalItems.length) return '';
+      if (current && composerApprovalItems.some((item) => item.id === current)) return current;
+      return composerApprovalItems[composerApprovalItems.length - 1]?.id || '';
     });
-  }, [composerApprovalMessages]);
+  }, [composerApprovalItems]);
 
   function selectComposerApproval(offset: number) {
     if (!composerApprovalCount || composerApprovalIndex < 0) return;
     const nextIndex = (composerApprovalIndex + offset + composerApprovalCount) % composerApprovalCount;
-    const nextMessage = composerApprovalMessages[nextIndex];
-    if (!nextMessage?.id) return;
-    setComposerApprovalMessageId(nextMessage.id);
-    revealMessage(nextMessage.id);
+    const nextItem = composerApprovalItems[nextIndex];
+    if (!nextItem?.id) return;
+    setComposerApprovalMessageId(nextItem.id);
+    revealMessage(nextItem.messageId);
   }
 
   return (
@@ -2091,18 +2112,18 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           </section>
 
           <form className="chat-input-area composer refined-composer" onSubmit={submit}>
-            {composerApprovalMessage && composerApprovalDetails ? (
+            {composerApprovalItem && composerApprovalDetails ? (
               <ComposerApprovalNotice
-                busy={approvalActionMessageId === composerApprovalMessage.id}
+                busy={approvalActionMessageId === composerApprovalItem.id}
                 currentIndex={composerApprovalIndex}
                 details={composerApprovalDetails}
-                onApprove={() => void resolveApprovalMessage(composerApprovalMessage, 'approve')}
-                onReject={() => void resolveApprovalMessage(composerApprovalMessage, 'reject')}
-                onOpenDetails={() => openRunDetails(messageRunId(composerApprovalMessage))}
+                onApprove={() => void resolveApprovalItem(composerApprovalItem, 'approve')}
+                onReject={() => void resolveApprovalItem(composerApprovalItem, 'reject')}
+                onOpenDetails={() => openRunDetails(composerApprovalItem.runId)}
                 onPrevious={() => selectComposerApproval(-1)}
-                onReveal={() => revealMessage(composerApprovalMessage.id)}
+                onReveal={() => revealMessage(composerApprovalItem.messageId)}
                 onNext={() => selectComposerApproval(1)}
-                runId={messageRunId(composerApprovalMessage)}
+                runId={composerApprovalItem.runId}
                 total={composerApprovalCount}
               />
             ) : null}
@@ -2748,6 +2769,15 @@ type ApprovalRequestDetails = {
   summary: Array<{ label: string; value: string }>;
 };
 
+type ComposerApprovalItem = {
+  id: string;
+  messageId?: string;
+  runId: string;
+  createdAt?: string;
+  details: ApprovalRequestDetails;
+  source: 'message' | 'activity';
+};
+
 function ApprovalRequestCard({ copiedCodeBlockKey, details, messageId, onOpenDetails, runId }: {
   copiedCodeBlockKey: string;
   details: ApprovalRequestDetails;
@@ -2923,6 +2953,26 @@ function approvalRequestDetails(message: ChatMessage): ApprovalRequestDetails {
   return { requester, tool, goal, codeLanguage, codeText, summary };
 }
 
+function approvalRequestDetailsFromActivity(event: ChatActivityEvent): ApprovalRequestDetails {
+  const pending = event.metadata?.pending_approval || {};
+  return approvalRequestDetails({
+    id: event.event_id,
+    role: 'assistant',
+    content: `${event.title || ''}\n${event.detail || ''}`,
+    metadata: {
+      pending_approval: pending as ChatMessageMetadata['pending_approval'],
+      sender: { kind: 'agent', name: activityApprovalRequester(event) },
+    },
+  });
+}
+
+function activityApprovalRequester(event: ChatActivityEvent) {
+  const title = String(event.title || '').trim();
+  return title
+    .replace(/\s*(等待审批|请求执行工具调用|请求工具调用|委派失败|委派完成)\s*$/u, '')
+    .trim() || String(event.tool_name || 'Agent').trim();
+}
+
 function isWorkflowApprovalDetails(details: ApprovalRequestDetails) {
   return details.tool === 'workflow.approval';
 }
@@ -3088,6 +3138,43 @@ function approvalRequiredMessages(messages: ChatMessage[]) {
   ));
 }
 
+function approvalRequiredItems(messages: ChatMessage[]): ComposerApprovalItem[] {
+  const messageApprovals = approvalRequiredMessages(messages).map((message) => ({
+    id: message.id || '',
+    messageId: message.id,
+    runId: messageRunId(message),
+    createdAt: message.created_at,
+    details: approvalRequestDetails(message),
+    source: 'message' as const,
+  })).filter((item) => item.id && item.runId);
+  const messageRunIds = new Set(messageApprovals.map((item) => item.runId));
+  const seenActivityRunIds = new Set<string>();
+  const activityApprovals: ComposerApprovalItem[] = [];
+
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = messages[messageIndex];
+    for (const event of message.activity_events || []) {
+      const runId = activityRunId(event);
+      if (!runId || messageRunIds.has(runId) || seenActivityRunIds.has(runId)) continue;
+      seenActivityRunIds.add(runId);
+      if (!hasActionableActivityApproval(event)) continue;
+      const eventId = String(event.event_id || `${message.id || messageIndex}:${runId}`);
+      activityApprovals.push({
+        id: `activity:${eventId}`,
+        messageId: message.id,
+        runId,
+        createdAt: event.created_at || message.created_at,
+        details: approvalRequestDetailsFromActivity(event),
+        source: 'activity',
+      });
+    }
+  }
+
+  return [...messageApprovals, ...activityApprovals].sort((a, b) => (
+    approvalItemTime(a) - approvalItemTime(b)
+  ));
+}
+
 function hasActionableApproval(message?: ChatMessage | null) {
   const pending = message?.metadata?.pending_approval;
   return (
@@ -3095,6 +3182,20 @@ function hasActionableApproval(message?: ChatMessage | null) {
     && Boolean(messageRunId(message))
     && Boolean(pending && typeof pending === 'object' && String(pending.tool || '').trim())
   );
+}
+
+function hasActionableActivityApproval(event?: ChatActivityEvent | null) {
+  const pending = event?.metadata?.pending_approval;
+  return (
+    (event?.status === 'approval_required' || String(event?.metadata?.run_status || '').trim() === 'approval_required')
+    && Boolean(activityRunId(event))
+    && Boolean(pending && typeof pending === 'object' && String(pending.tool || '').trim())
+  );
+}
+
+function approvalItemTime(item: ComposerApprovalItem) {
+  const value = item.createdAt ? new Date(item.createdAt).getTime() : 0;
+  return Number.isFinite(value) ? value : 0;
 }
 
 function isRetryableMessage(message: ChatMessage, messages: ChatMessage[]) {
