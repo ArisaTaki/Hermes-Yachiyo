@@ -2745,11 +2745,33 @@ class ChatAPI:
             source_text = task.result or msg.content
             requests = self._parse_group_dispatch_requests(source_text)
             if not requests:
+                missing_expected_dispatch = self._group_dispatch_expected_without_requests(
+                    task.description,
+                    source_text,
+                )
                 if metadata.get("group_dispatch_pending") or metadata.get("group_dispatch_stream_visible_content"):
                     cleaned_metadata = dict(metadata)
                     cleaned_metadata.pop("group_dispatch_pending", None)
                     cleaned_metadata.pop("group_dispatch_stream_visible_content", None)
                     visible_content = self._format_group_dispatch_visible_content(source_text, "")
+                    if missing_expected_dispatch:
+                        visible_content = self._format_group_dispatch_missing_dispatch_content(
+                            visible_content or source_text
+                        )
+                        cleaned_metadata.update({
+                            "sender": self._main_model_sender_from_runtime(),
+                            "group_dispatch_handled": True,
+                            "group_dispatch_count": 0,
+                            "group_dispatch_skipped": [self._group_dispatch_missing_request_reason()],
+                            "group_dispatch_missing_request": True,
+                        })
+                        self._record_group_dispatch_activity(
+                            task_id=msg.task_id or "",
+                            title="群组任务未派发",
+                            detail=self._group_dispatch_missing_request_reason(),
+                            status="failed",
+                            event_id=f"{msg.task_id or msg.message_id}-group-dispatch-missing",
+                        )
                     self._session.upsert_assistant_message(
                         task_id=msg.task_id,
                         content=visible_content or source_text,
@@ -2757,6 +2779,27 @@ class ChatAPI:
                         error=msg.error,
                         attachments=msg.attachments,
                         metadata=cleaned_metadata,
+                    )
+                elif missing_expected_dispatch:
+                    visible_content = self._format_group_dispatch_missing_dispatch_content(source_text)
+                    self._record_group_dispatch_activity(
+                        task_id=msg.task_id or "",
+                        title="群组任务未派发",
+                        detail=self._group_dispatch_missing_request_reason(),
+                        status="failed",
+                        event_id=f"{msg.task_id or msg.message_id}-group-dispatch-missing",
+                    )
+                    self._session.update_assistant_message(
+                        msg.message_id,
+                        visible_content,
+                        status=MessageStatus.COMPLETED,
+                        metadata={
+                            "sender": self._main_model_sender_from_runtime(),
+                            "group_dispatch_handled": True,
+                            "group_dispatch_count": 0,
+                            "group_dispatch_skipped": [self._group_dispatch_missing_request_reason()],
+                            "group_dispatch_missing_request": True,
+                        },
                     )
                 continue
             self._dispatch_group_agent_requests(
@@ -2781,6 +2824,58 @@ class ChatAPI:
             seen.add(key)
             deduped.append(item)
         return deduped[:3]
+
+    @staticmethod
+    def _group_dispatch_missing_request_reason() -> str:
+        return "主模型没有生成可执行的群组 Agent 派发请求"
+
+    @classmethod
+    def _group_dispatch_expected_without_requests(cls, task_description: str, response_text: str) -> bool:
+        if cls._group_dispatch_response_declines_dispatch(response_text):
+            return False
+        request = cls._group_dispatch_user_request_from_task(task_description)
+        if not request:
+            return False
+        compact = re.sub(r"\s+", "", request, flags=re.IGNORECASE)
+        if re.search(r"(?:不要|不用|不需要|无需|先不).{0,12}(?:派|派发|派活|安排|分配|指派|交给|agent)", compact, re.IGNORECASE):
+            return False
+        return bool(re.search(
+            r"(派发|派活|安排|分配|指派|交给|给.{0,24}Agent|让.{0,24}Agent|"
+            r"其他.{0,12}Agent|群里.{0,12}Agent|群组.{0,12}Agent|多个.{0,12}Agent|"
+            r"多.{0,8}Agent|协作|团队)",
+            request,
+            re.IGNORECASE,
+        ))
+
+    @staticmethod
+    def _group_dispatch_user_request_from_task(task_description: str) -> str:
+        text = str(task_description or "")
+        if "[Yachiyo 群组上下文]" in text:
+            text = text.split("[Yachiyo 群组上下文]", 1)[0]
+        return text.strip()
+
+    @staticmethod
+    def _group_dispatch_response_declines_dispatch(response_text: str) -> bool:
+        text = str(response_text or "")
+        compact = re.sub(r"\s+", "", text, flags=re.IGNORECASE)
+        if re.search(r"(?:不需要|不用|无需|先不).{0,16}(?:派|派发|派活|安排|分配|交给|其他Agent|Agent)", compact, re.IGNORECASE):
+            return True
+        if re.search(r"(?:我可以|我先|我来)?直接回答", compact):
+            return True
+        return False
+
+    @classmethod
+    def _format_group_dispatch_missing_dispatch_content(cls, source_text: str) -> str:
+        content = cls._normalize_group_dispatch_intro(cls._strip_group_dispatch_payloads(source_text)).strip()
+        notice = (
+            "这次没有实际派出 Agent：主模型没有生成可执行的群组 Agent 派发请求。"
+            "你可以重新说明要交给哪个 Agent，或直接 @ 群内 Agent。"
+        )
+        if not content:
+            return notice
+        if notice in content:
+            return content
+        return f"{content}\n\n{notice}"
 
     def _should_hide_group_dispatch_stream(
         self,

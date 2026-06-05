@@ -650,11 +650,13 @@ def test_workflow_waiting_for_child_agent_approval_counts_only_child(tmp_path, m
         assert child_after["metadata"]["pending_approval"] == {}
         assert workflow_after["status"] == "completed"
         assert workflow_after["content"].startswith("Child Approval Flow 已完成。")
-        assert "产物：1 个，见运行详情。" in workflow_after["content"]
+        assert "产物：" not in workflow_after["content"]
         assert workflow_after["content"].endswith("Child Agent done")
         assert workflow_after["metadata"]["run_status"] == "completed"
         assert workflow_after["metadata"]["workflow_status"] == "completed"
         assert workflow_after["metadata"]["pending_approval"] == {}
+        assert workflow_after["metadata"]["run_artifact_count"] == 0
+        assert workflow_after["metadata"]["run_artifacts"] == []
     finally:
         service.close()
         store.close()
@@ -3490,6 +3492,59 @@ def test_group_dispatch_pending_clears_when_final_message_has_no_dispatch(tmp_pa
         assert completed["content"] == "我想了一下，这个问题我可以直接回答，不需要派给其他 Agent。"
         assert "group_dispatch_pending" not in completed["metadata"]
         assert "group_dispatch_stream_visible_content" not in completed["metadata"]
+    finally:
+        activity_store.close()
+        store.close()
+
+
+def test_group_dispatch_expected_request_reports_missing_dispatch(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    design = {
+        "id": "agent_design",
+        "name": "Design Agent",
+        "nickname": "Design",
+        "kind": "agent",
+        "enabled": True,
+    }
+
+    class FakeRunnableService:
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            if runnable_id == design["id"] or name in {design["name"], design["nickname"]}:
+                return design
+            return None
+
+        def create_run_for_runnable_async(self, **_kwargs):
+            raise AssertionError("missing dispatch must not create an Agent run")
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeRunnableService())
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[design["id"]])
+        assert created["ok"] is True
+        sent = api.send_message("@主模型 帮我把这个目标安排给 Design Agent 做")
+        assert sent["ok"] is True
+        runtime.state.update_task_status(
+            sent["task_id"],
+            TaskStatus.COMPLETED,
+            result="我会安排 Design Agent 处理这个目标。",
+        )
+
+        completed = next(message for message in api.get_messages()["messages"] if message["role"] == "assistant")
+
+        assert completed["status"] == "completed"
+        assert completed["content"] == (
+            "我会安排 Design Agent 处理这个目标。\n\n"
+            "这次没有实际派出 Agent：主模型没有生成可执行的群组 Agent 派发请求。"
+            "你可以重新说明要交给哪个 Agent，或直接 @ 群内 Agent。"
+        )
+        assert completed["metadata"]["group_dispatch_handled"] is True
+        assert completed["metadata"]["group_dispatch_count"] == 0
+        assert completed["metadata"]["group_dispatch_missing_request"] is True
+        assert completed["metadata"]["group_dispatch_skipped"] == [
+            "主模型没有生成可执行的群组 Agent 派发请求"
+        ]
+        assert completed["activity_events"][0]["title"] == "群组任务未派发"
     finally:
         activity_store.close()
         store.close()
