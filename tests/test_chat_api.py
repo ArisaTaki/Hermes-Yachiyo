@@ -908,6 +908,8 @@ def test_manual_group_session_keeps_context_for_agent_mentions(tmp_path, monkeyp
         assert "- Design（Agent；Design Agent） - 类别：design；交付：markdown；职责：负责 UI 方案、视觉验收和信息架构。" in task.description
         assert "- Code（Agent；Coding Agent）" in task.description
         assert "- Code（Agent；Coding Agent） - 类别：coding；交付：diff；职责：负责代码实现、补丁和验证脚本。" in task.description
+        assert "派发时请根据每个 Agent 的类别、职责和交付偏好选择最合适的成员" in task.description
+        assert "不要默认派给所有 Agent" in task.description
         assert "<yachiyo_group_dispatch>" in task.description
         assert '"action":"dispatch_group_agent"' in task.description
         assert "完整、可执行、不可省略的任务说明" in task.description
