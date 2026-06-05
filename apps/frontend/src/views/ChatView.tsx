@@ -90,6 +90,9 @@ type ChatMessageMetadata = {
   workflow_run_id?: string;
   workflow_status?: string;
   workflow_node?: string;
+  workflow_waiting_child_run_id?: string;
+  workflow_waiting_node?: string;
+  workflow_waiting_tool?: string;
   group_agent_summary_pending?: boolean;
   group_agent_summary_status?: string;
   group_agent_summary_error?: string;
@@ -2896,7 +2899,7 @@ type ComposerApprovalItem = {
   runId: string;
   createdAt?: string;
   details: ApprovalRequestDetails;
-  source: 'message' | 'activity';
+  source: 'message' | 'activity' | 'workflow-child';
 };
 
 function ApprovalRequestCard({ copiedCodeBlockKey, details, messageId, onOpenDetails, runId }: {
@@ -3099,6 +3102,27 @@ function approvalRequestDetailsFromActivity(event: ChatActivityEvent): ApprovalR
   });
 }
 
+function approvalRequestDetailsFromWorkflowWaitingChild(message: ChatMessage): ApprovalRequestDetails {
+  const metadata = message.metadata || {};
+  const workflowName = participantDisplayName(metadata.sender) || 'Workflow';
+  const requester = stringValue(metadata.workflow_waiting_node) || '子 Agent';
+  const tool = stringValue(metadata.workflow_waiting_tool) || 'tool';
+  const summary = [
+    { label: '父 Workflow', value: workflowName },
+    { label: 'Workflow 节点', value: requester },
+  ];
+  const runId = stringValue(metadata.workflow_waiting_child_run_id);
+  if (runId) summary.push({ label: '子 Run', value: runId });
+  return {
+    requester,
+    tool,
+    goal: approvalGoalFromContent(message.content || message.text || ''),
+    codeLanguage: tool === 'terminal.run' ? 'bash' : 'text',
+    codeText: '',
+    summary,
+  };
+}
+
 function approvalRequestDetailsFromRun(run: RunSpec, fallbackDetails: ApprovalRequestDetails | null = null): ApprovalRequestDetails {
   const pending = run.pending_approval || {};
   return approvalRequestDetails({
@@ -3167,6 +3191,17 @@ function approvalSignatureFromPending(pending: unknown) {
   const tool = stringValue(pending.tool);
   const preview = approvalPreviewFallback(pending.input_preview).slice(0, 220);
   const raw = [approvalId, requestedAt, tool, preview].filter(Boolean).join('|') || 'pending';
+  return raw.replace(/[^A-Za-z0-9_.:-]+/g, '_').slice(0, 240);
+}
+
+function workflowWaitingChildApprovalSignature(message: ChatMessage) {
+  const metadata = message.metadata || {};
+  const raw = [
+    metadata.workflow_waiting_child_run_id,
+    metadata.workflow_waiting_tool,
+    metadata.workflow_waiting_node,
+    messageRunId(message),
+  ].map(stringValue).filter(Boolean).join('|') || 'workflow-child-approval';
   return raw.replace(/[^A-Za-z0-9_.:-]+/g, '_').slice(0, 240);
 }
 
@@ -3365,7 +3400,31 @@ function approvalRequiredItems(
     }
   }
 
-  return [...messageApprovals, ...activityApprovals].sort((a, b) => (
+  const knownApprovalRunIds = new Set([
+    ...messageRunIds,
+    ...activityApprovals.map((item) => item.runId),
+  ]);
+  const workflowChildApprovals: ComposerApprovalItem[] = [];
+  const seenWorkflowChildRunIds = new Set<string>();
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const message = messages[messageIndex];
+    const runId = workflowWaitingChildApprovalRunId(message);
+    if (!runId || knownApprovalRunIds.has(runId) || seenWorkflowChildRunIds.has(runId)) continue;
+    seenWorkflowChildRunIds.add(runId);
+    const signature = workflowWaitingChildApprovalSignature(message);
+    const itemId = `workflow-child:${message.id || messageIndex}:${signature}`;
+    if (resolved.has(itemId)) continue;
+    workflowChildApprovals.push({
+      id: itemId,
+      messageId: message.id,
+      runId,
+      createdAt: message.created_at,
+      details: approvalRequestDetailsFromWorkflowWaitingChild(message),
+      source: 'workflow-child',
+    });
+  }
+
+  return [...messageApprovals, ...activityApprovals, ...workflowChildApprovals].sort((a, b) => (
     approvalItemTime(a) - approvalItemTime(b)
   ));
 }
@@ -3386,6 +3445,18 @@ function hasActionableActivityApproval(event?: ChatActivityEvent | null) {
     && Boolean(activityRunId(event))
     && Boolean(pending && typeof pending === 'object' && String(pending.tool || '').trim())
   );
+}
+
+function workflowWaitingChildApprovalRunId(message?: ChatMessage | null) {
+  const metadata = message?.metadata || {};
+  const runId = stringValue(metadata.workflow_waiting_child_run_id);
+  if (!runId) return '';
+  const tool = stringValue(metadata.workflow_waiting_tool);
+  if (!tool) return '';
+  const status = messageRunStatus(message);
+  const workflowStatus = normalizeRunStatus(metadata.workflow_status);
+  if (status !== 'processing' && workflowStatus !== 'approval_required') return '';
+  return runId;
 }
 
 function approvalItemTime(item: ComposerApprovalItem) {
