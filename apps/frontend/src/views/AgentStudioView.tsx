@@ -184,12 +184,48 @@ const starterNodes: Node[] = [
 ];
 
 const phase4WorkflowAgentOrder = [
-  { id: 'agent_yachiyo_orchestrator', category: 'orchestrator', nodeId: 'orchestrator', fallbackLabel: 'Yachiyo Orchestrator' },
-  { id: 'agent_research', category: 'research', nodeId: 'research', fallbackLabel: 'Research Agent' },
-  { id: 'agent_design', category: 'design', nodeId: 'design', fallbackLabel: 'Design Agent' },
-  { id: 'agent_coding', category: 'coding', nodeId: 'coding', fallbackLabel: 'Coding Agent' },
-  { id: 'agent_review', category: 'review', nodeId: 'review', fallbackLabel: 'Review Agent' },
-  { id: 'agent_office', category: 'office', nodeId: 'office', fallbackLabel: 'Office Agent' },
+  {
+    id: 'agent_yachiyo_orchestrator',
+    category: 'orchestrator',
+    nodeId: 'orchestrator',
+    fallbackLabel: 'Yachiyo Orchestrator',
+    task: '拆解全局目标，明确后续 Agent 的交付边界、依赖关系、风险和验收口径。',
+  },
+  {
+    id: 'agent_research',
+    category: 'research',
+    nodeId: 'research',
+    fallbackLabel: 'Research Agent',
+    task: '基于全局目标整理事实、约束、参考信息和不确定点，为设计与实现提供依据。',
+  },
+  {
+    id: 'agent_design',
+    category: 'design',
+    nodeId: 'design',
+    fallbackLabel: 'Design Agent',
+    task: '基于研究结果提出信息架构、交互结构、视觉方向和需要交付的设计要点。',
+  },
+  {
+    id: 'agent_coding',
+    category: 'coding',
+    nodeId: 'coding',
+    fallbackLabel: 'Coding Agent',
+    task: '根据上游设计与约束给出实现方案、必要代码或变更计划，并说明验证方式。',
+  },
+  {
+    id: 'agent_review',
+    category: 'review',
+    nodeId: 'review',
+    fallbackLabel: 'Review Agent',
+    task: '审查上游实现或方案，列出问题优先级、风险、缺失测试和可验收结论。',
+  },
+  {
+    id: 'agent_office',
+    category: 'office',
+    nodeId: 'office',
+    fallbackLabel: 'Office Agent',
+    task: '把整条流程的目标、关键决策、产物、风险和后续待办整理成最终汇报。',
+  },
 ];
 
 function AgentStudioLoadingState() {
@@ -588,6 +624,7 @@ function buildPhase4WorkflowNodes(agents: AgentSpec[]): Node[] {
         label: agent.name || item.fallbackLabel,
         kind: 'agent',
         agent_id: agent.agent_id,
+        task: item.task,
       },
     });
   });
@@ -598,7 +635,7 @@ function buildPhase4WorkflowNodes(agents: AgentSpec[]): Node[] {
       id: 'artifact',
       type: 'output',
       position: { x: 260 + agentNodes.length * 220, y: 120 },
-      data: { label: 'Flow Summary', kind: 'artifact' },
+      data: { label: 'Flow Summary', kind: 'artifact', artifact_path: 'reports/phase-4-flow-summary.md' },
     },
   ];
 }

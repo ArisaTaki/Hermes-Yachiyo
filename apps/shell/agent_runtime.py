@@ -810,6 +810,14 @@ class AgentRuntimeService:
         self._seed_workflow_templates()
 
     def _seed_workflow_templates(self) -> None:
+        phase4_tasks = {
+            "orchestrator": "拆解全局目标，明确后续 Agent 的交付边界、依赖关系、风险和验收口径。",
+            "research": "基于全局目标整理事实、约束、参考信息和不确定点，为设计与实现提供依据。",
+            "design": "基于研究结果提出信息架构、交互结构、视觉方向和需要交付的设计要点。",
+            "coding": "根据上游设计与约束给出实现方案、必要代码或变更计划，并说明验证方式。",
+            "review": "审查上游实现或方案，列出问题优先级、风险、缺失测试和可验收结论。",
+            "office": "把整条流程的目标、关键决策、产物、风险和后续待办整理成最终汇报。",
+        }
         workflow_templates = [
             {
                 "workflow_id": "workflow_web_idea_full",
@@ -821,25 +829,40 @@ class AgentRuntimeService:
                         "id": "design",
                         "type": "agent",
                         "position": {"x": 220, "y": 80},
-                        "data": {"label": "Design Agent", "agent_id": "agent_design"},
+                        "data": {
+                            "label": "Design Agent",
+                            "agent_id": "agent_design",
+                            "task": "把网页点子转成可执行设计 brief，包含目标用户、页面结构、关键交互和视觉方向。",
+                        },
                     },
                     {
                         "id": "approval",
                         "type": "approval",
                         "position": {"x": 440, "y": 80},
-                        "data": {"label": "人工审批"},
+                        "data": {
+                            "label": "人工审批",
+                            "criteria": "确认设计 brief 已覆盖目标用户、页面结构、关键交互和验收点，再继续编码。",
+                        },
                     },
                     {
                         "id": "coding",
                         "type": "agent",
                         "position": {"x": 660, "y": 80},
-                        "data": {"label": "Coding Agent", "agent_id": "agent_coding"},
+                        "data": {
+                            "label": "Coding Agent",
+                            "agent_id": "agent_coding",
+                            "task": "根据已审批设计 brief 规划实现方案，产出代码、patch 或明确的实现步骤与验证方法。",
+                        },
                     },
                     {
                         "id": "review",
                         "type": "agent",
                         "position": {"x": 880, "y": 80},
-                        "data": {"label": "Review Agent", "agent_id": "agent_review"},
+                        "data": {
+                            "label": "Review Agent",
+                            "agent_id": "agent_review",
+                            "task": "审查实现结果，列出阻塞问题、风险、缺失测试和是否可以验收。",
+                        },
                     },
                 ],
                 "edges": [
@@ -860,43 +883,71 @@ class AgentRuntimeService:
                         "id": "orchestrator",
                         "type": "agent",
                         "position": {"x": 220, "y": 80},
-                        "data": {"label": "Yachiyo Orchestrator", "agent_id": "agent_yachiyo_orchestrator"},
+                        "data": {
+                            "label": "Yachiyo Orchestrator",
+                            "agent_id": "agent_yachiyo_orchestrator",
+                            "task": phase4_tasks["orchestrator"],
+                        },
                     },
                     {
                         "id": "research",
                         "type": "agent",
                         "position": {"x": 440, "y": 80},
-                        "data": {"label": "Research Agent", "agent_id": "agent_research"},
+                        "data": {
+                            "label": "Research Agent",
+                            "agent_id": "agent_research",
+                            "task": phase4_tasks["research"],
+                        },
                     },
                     {
                         "id": "design",
                         "type": "agent",
                         "position": {"x": 660, "y": 80},
-                        "data": {"label": "Design Agent", "agent_id": "agent_design"},
+                        "data": {
+                            "label": "Design Agent",
+                            "agent_id": "agent_design",
+                            "task": phase4_tasks["design"],
+                        },
                     },
                     {
                         "id": "coding",
                         "type": "agent",
                         "position": {"x": 880, "y": 80},
-                        "data": {"label": "Coding Agent", "agent_id": "agent_coding"},
+                        "data": {
+                            "label": "Coding Agent",
+                            "agent_id": "agent_coding",
+                            "task": phase4_tasks["coding"],
+                        },
                     },
                     {
                         "id": "review",
                         "type": "agent",
                         "position": {"x": 1100, "y": 80},
-                        "data": {"label": "Review Agent", "agent_id": "agent_review"},
+                        "data": {
+                            "label": "Review Agent",
+                            "agent_id": "agent_review",
+                            "task": phase4_tasks["review"],
+                        },
                     },
                     {
                         "id": "office",
                         "type": "agent",
                         "position": {"x": 1320, "y": 80},
-                        "data": {"label": "Office Agent", "agent_id": "agent_office"},
+                        "data": {
+                            "label": "Office Agent",
+                            "agent_id": "agent_office",
+                            "task": phase4_tasks["office"],
+                        },
                     },
                     {
                         "id": "artifact",
                         "type": "artifact",
                         "position": {"x": 1540, "y": 80},
-                        "data": {"label": "Flow Summary", "kind": "artifact"},
+                        "data": {
+                            "label": "Flow Summary",
+                            "kind": "artifact",
+                            "artifact_path": "reports/phase-4-flow-summary.md",
+                        },
                     },
                 ],
                 "edges": [

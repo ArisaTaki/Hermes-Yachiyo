@@ -147,6 +147,14 @@ def test_seed_templates_backfill_default_workflows_when_agents_exist(tmp_path):
 def test_phase4_seeded_workflow_executes_default_agent_line(tmp_path, monkeypatch):
     service = make_service(tmp_path, seed_templates=True)
     calls = []
+    expected_step_tasks = [
+        "拆解全局目标，明确后续 Agent 的交付边界、依赖关系、风险和验收口径。",
+        "基于全局目标整理事实、约束、参考信息和不确定点，为设计与实现提供依据。",
+        "基于研究结果提出信息架构、交互结构、视觉方向和需要交付的设计要点。",
+        "根据上游设计与约束给出实现方案、必要代码或变更计划，并说明验证方式。",
+        "审查上游实现或方案，列出问题优先级、风险、缺失测试和可验收结论。",
+        "把整条流程的目标、关键决策、产物、风险和后续待办整理成最终汇报。",
+    ]
 
     def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
         calls.append(messages)
@@ -165,7 +173,16 @@ def test_phase4_seeded_workflow_executes_default_agent_line(tmp_path, monkeypatc
         assert run["status"] == "completed"
         assert run["result"] == "Step 6 complete"
         assert len(calls) == 6
+        for index, task in enumerate(expected_step_tasks):
+            assert f"# User Goal\n{task}\n\nWorkflow Goal:\n跑一次 Phase 4 全线流通性测试" in calls[index][-1]["content"]
         assert [event["event"] for event in run["timeline"]].count("workflow.node.agent") == 6
+        started_event = next(event for event in run["timeline"] if event["event"] == "workflow.run.started")
+        assert [item.get("task") for item in started_event["workflow_path"] if item.get("kind") == "agent"] == expected_step_tasks
+        assert [
+            item.get("artifact_path")
+            for item in started_event["workflow_path"]
+            if item.get("kind") == "artifact"
+        ] == ["reports/phase-4-flow-summary.md"]
         assert any(artifact.get("kind") == "workflow_artifact" for artifact in run["artifacts"])
         group = service.get_run_group(run["run_group_id"])
         assert group["status"] == "completed"
