@@ -3222,7 +3222,7 @@ function messageErrorText(message: ChatMessage) {
   ).trim();
 }
 
-function groupAgentSummaryNotice(message: ChatMessage): { tone: 'pending' | 'failed'; text: string } | null {
+function groupAgentSummaryNotice(message: ChatMessage): { tone: 'pending' | 'failed' | 'completed'; text: string } | null {
   const metadata = message.metadata || {};
   const status = String(metadata.group_agent_summary_status || '').trim();
   if (status === 'failed') {
@@ -3231,6 +3231,9 @@ function groupAgentSummaryNotice(message: ChatMessage): { tone: 'pending' | 'fai
       tone: 'failed',
       text: error ? `主模型整理失败：${error}` : '主模型整理失败，请查看后续消息或重试。',
     };
+  }
+  if (status === 'completed') {
+    return { tone: 'completed', text: '主模型已整理这条 Agent 结果。' };
   }
   if (metadata.group_agent_summary_pending) {
     return { tone: 'pending', text: '等待主模型整理 Agent 结果...' };
@@ -3257,8 +3260,9 @@ function latestGroupAgentSummaryNotice(messages: ChatMessage[]) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const notice = groupAgentSummaryNotice(messages[index]);
     if (!notice) continue;
+    if (notice.tone === 'completed') continue;
     if (notice.tone === 'failed') return notice;
-    pendingNotice ||= notice;
+    if (notice.tone === 'pending') pendingNotice ||= { tone: 'pending', text: notice.text };
   }
   return pendingNotice;
 }

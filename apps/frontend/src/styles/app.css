@@ -1422,6 +1422,12 @@ button:hover {
   color: oklch(84% 0.08 210);
 }
 
+.message-summary-status.completed {
+  border-color: oklch(78% 0.11 155 / 0.24);
+  background: oklch(78% 0.11 155 / 0.07);
+  color: oklch(84% 0.1 155);
+}
+
 .message-summary-status.failed {
   border-color: oklch(74% 0.14 350 / 0.32);
   background: oklch(72% 0.14 350 / 0.1);

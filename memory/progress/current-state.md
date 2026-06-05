@@ -23,7 +23,7 @@
 - ✅ 群聊派发与直接 `@Agent` 的异步完成回调都会写回创建它的原会话：用户在派活后切到新会话也不会丢结果，Agent 完成/失败仍会更新原群聊消息，并在原群聊里创建主模型汇总任务。
 - ✅ 群聊中的 Agent 运行中进度会从 Run timeline 提取最新阶段：例如运行环境已准备、正在解析模型响应、正在处理工具结果、已写出产物；聊天气泡仍保持 loading，但进度卡不再只有泛泛的“Agent 正在执行”，也不会把工具调用 JSON 或 `<yachiyo...>` 这类内部协议片段暴露出来。
 - ✅ 聊天气泡已接入 Run Detail：Agent 完成/失败时会显示真实产物数量和运行详情入口，主模型汇总 Prompt 也会带上 Agent 状态、汇报和 artifact 路径摘要，避免用户不知道文件在哪里或哪些 Agent 没有完成。
-- ✅ 群组主模型整理状态现在直接体现在原 Agent / 派发气泡和底部全局状态上：等待时显示“等待主模型整理 Agent 结果”，如果整理任务失败，会在原气泡下显示失败原因；后端回归覆盖直接 `@Agent` 和主模型派发两条路径都会清掉 pending 并写入 `group_agent_summary_status/error`。
+- ✅ 群组主模型整理状态现在直接体现在原 Agent / 派发气泡和底部全局状态上：等待时显示“等待主模型整理 Agent 结果”，整理成功后原 Agent 气泡会保留轻量完成提示，如果整理任务失败，会在原气泡下显示失败原因；后端回归覆盖直接 `@Agent` 和主模型派发两条路径都会清掉 pending 并写入 `group_agent_summary_status/error`。
 - ✅ Workflow 入口边界按产品讨论收紧：Chat `@` 候选只保留主模型和 Agent，手动 `@Workflow` 或主模型误派发 Workflow 会提示去 Agent Studio 的 Workflow Studio / Runs 执行；Workflow 的设计、保存、保存并运行和 Runs 手动运行仍保持可用，且保存更新后立即运行会使用最新画布节点/连线，不会跑到旧版本；Bridge route 层也覆盖 create/update/run 这条用户实际点击路径。
 - ✅ Workflow Studio 的 Agent palette、节点设置区和 Runs 手动运行目标选择已补能力摘要：会展示 Agent/Workflow 的类别、交付契约和职责说明，Runs 的目标下拉选项本身也带能力摘要，用户设计流程、维护节点或手动选择运行目标时能判断该把任务交给谁，而不是只看到名称。
 - ✅ 2026-06-05 追加：Workflow Agent 节点支持配置 `Step Task`，运行时会把每个节点自己的任务说明与全局 Workflow Goal 合并后交给对应子 Agent；没有 Step Task 的节点保持旧行为，上游结果仍只进入 `Upstream Context`，避免上下文重复膨胀。运行快照和 timeline 会记录节点任务，Run Detail 的 Workflow Steps 也会显示该 Step Task，用户可以复盘每个 Agent 原本被要求做什么。
