@@ -612,9 +612,10 @@ function uniqueWorkflowNodeId(seed: string, currentNodes: Node[]): string {
 
 function buildPhase4WorkflowNodes(agents: AgentSpec[]): Node[] {
   const agentNodes: Node[] = [];
+  const enabledAgents = agents.filter((agent) => agent.enabled !== false);
   phase4WorkflowAgentOrder.forEach((item) => {
-    const agent = agents.find((candidate) => candidate.agent_id === item.id)
-      || agents.find((candidate) => candidate.category === item.category);
+    const agent = enabledAgents.find((candidate) => candidate.agent_id === item.id)
+      || enabledAgents.find((candidate) => candidate.category === item.category);
     if (!agent) return;
     agentNodes.push({
       id: item.nodeId,
@@ -2047,7 +2048,7 @@ export function AgentStudioView() {
     setWorkflowDescription('依次调用 Orchestrator、Research、Design、Coding、Review、Office，并写出最终 Artifact。');
     setNodes(nextNodes);
     setEdges(linearEdgesForNodes(nextNodes));
-    setStatus(`已生成全线测试模板：${agentNodeCount} 个 Agent 节点`);
+    setStatus(`已生成全线测试模板：${agentNodeCount} 个启用 Agent 节点`);
     setError('');
   }
 
@@ -3257,7 +3258,14 @@ export function AgentStudioView() {
             <div className="workflow-toolbar">
               <input className="hy-input" value={workflowName} onChange={(event) => setWorkflowName(event.target.value)} />
               <input className="hy-input" value={workflowDescription} onChange={(event) => setWorkflowDescription(event.target.value)} placeholder="Description" />
-              <button type="button" className="workflow-template-action" disabled={busy || !agents.length} onClick={loadPhase4WorkflowTemplate}>全线测试模板</button>
+              <button
+                type="button"
+                className="workflow-template-action"
+                disabled={busy || !agents.some((agent) => agent.enabled !== false)}
+                onClick={loadPhase4WorkflowTemplate}
+              >
+                全线测试模板
+              </button>
               <button type="button" disabled={busy} onClick={() => addFlowNode('agent')}>Agent</button>
               <button type="button" disabled={busy} onClick={() => addFlowNode('approval')}>Approval</button>
               <button type="button" disabled={busy} onClick={() => addFlowNode('artifact')}>Artifact</button>
