@@ -93,6 +93,7 @@ type ChatMessageMetadata = {
   group_agent_summary_pending?: boolean;
   group_agent_summary_status?: string;
   group_agent_summary_error?: string;
+  guidance_type?: string;
 };
 
 type MentionOption = {
@@ -1522,6 +1523,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     navigateTo('agents', { run: clean }, ['tab']);
   }
 
+  function openWorkflowStudio() {
+    navigateTo('agents', { tab: 'workflows' }, ['run']);
+  }
+
   function handleMessageListClick(event: ReactMouseEvent<HTMLDivElement>) {
     const target = event.target instanceof Element ? event.target : null;
     const codeCopyButton = target?.closest('[data-code-copy]') as HTMLButtonElement | null;
@@ -2197,6 +2202,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                   onApprove={() => void resolveApprovalMessage(message, 'approve')}
                   onReject={() => void resolveApprovalMessage(message, 'reject')}
                   onOpenRunDetails={openRunDetails}
+                  onOpenWorkflowStudio={openWorkflowStudio}
                   registerMessageNode={registerMessageNode}
                   runnables={runnables}
                 />
@@ -2688,7 +2694,7 @@ function SessionIdDialog({ copied, error, sessionId, onClose, onCopy }: {
   );
 }
 
-function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading, copied, copiedCodeBlockKey, displayContent, highlighted, message, retryDisabled, retrying, showRetry, onApprove, onCopy, onOpenRunDetails, onReject, onRetry, registerMessageNode, runnables }: {
+function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading, copied, copiedCodeBlockKey, displayContent, highlighted, message, retryDisabled, retrying, showRetry, onApprove, onCopy, onOpenRunDetails, onOpenWorkflowStudio, onReject, onRetry, registerMessageNode, runnables }: {
   approvalBusy: boolean;
   assistantProfile: AssistantProfilePayload | null;
   assistantProfileLoading: boolean;
@@ -2703,6 +2709,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   onApprove: () => void;
   onCopy: () => void;
   onOpenRunDetails: (runId: string) => void;
+  onOpenWorkflowStudio: () => void;
   onReject: () => void;
   onRetry: () => void;
   registerMessageNode: (messageId: string | undefined, node: HTMLElement | null) => void;
@@ -2725,6 +2732,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   const artifactCount = Number(message.metadata?.run_artifact_count || 0);
   const duplicateError = Boolean(message.error && displayContent.trim() && message.error.trim() === displayContent.trim());
   const summaryNotice = groupAgentSummaryNotice(message);
+  const showWorkflowStudioAction = message.metadata?.guidance_type === 'workflow_chat_entry_disabled';
   return (
     <article
       className={`message message--${messageVisualRole(role)} refined-message ${role} ${statusClass}${highlighted ? ' search-highlighted' : ''}`}
@@ -2788,6 +2796,15 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
               onClick={() => onOpenRunDetails(runId)}
             >
               运行详情
+            </button>
+          ) : null}
+          {showWorkflowStudioAction ? (
+            <button
+              className="message-run-detail-button"
+              type="button"
+              onClick={onOpenWorkflowStudio}
+            >
+              打开 Workflow Studio
             </button>
           ) : null}
           {showRetry ? (
