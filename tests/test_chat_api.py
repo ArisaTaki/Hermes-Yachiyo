@@ -4377,6 +4377,19 @@ def test_group_multiple_agent_approvals_wait_until_every_delegate_terminal(tmp_p
             TaskStatus.COMPLETED,
             result="收到补充。",
         )
+        natural_followup = api.send_message("@主模型 把验收说明改成按成功、失败、待确认三段输出")
+        assert natural_followup["ok"] is True
+        natural_followup_message = next(
+            message
+            for message in api.get_messages()["messages"]
+            if message["id"] == natural_followup["message_id"]
+        )
+        assert natural_followup_message["metadata"]["group_followup_for_task_ids"] == [sent["task_id"]]
+        runtime.state.update_task_status(
+            natural_followup["task_id"],
+            TaskStatus.COMPLETED,
+            result="收到自然补充。",
+        )
         separate_goal = api.send_message("@主模型 另一个目标：再开一个按钮动效方案")
         assert separate_goal["ok"] is True
         runtime.state.update_task_status(
@@ -4425,6 +4438,7 @@ def test_group_multiple_agent_approvals_wait_until_every_delegate_terminal(tmp_p
         assert summary_task is not None
         assert "用户后续补充/纠偏：" in summary_task.description
         assert "- 补充：最终整理时请把失败项和可验收项分开说" in summary_task.description
+        assert "- @主模型 把验收说明改成按成功、失败、待确认三段输出" in summary_task.description
         assert "另一个目标：再开一个按钮动效方案" not in summary_task.description
         assert "安排第二轮测试目标" not in summary_task.description
         assert "Design：已完成" in summary_task.description
