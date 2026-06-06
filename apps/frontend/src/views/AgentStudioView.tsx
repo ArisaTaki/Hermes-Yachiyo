@@ -3978,7 +3978,11 @@ export function AgentStudioView() {
                     </div>
                     <span className={`run-status-pill ${runStatusTone(selectedRun.status)}`}>{runStatusLabel(selectedRun.status)}</span>
                   </div>
-                  <pre>{selectedRun.result || 'No result yet.'}</pre>
+                  <RunExpandableContent
+                    content={selectedRun.result || 'No result yet.'}
+                    label="展开完整结果"
+                    defaultOpen
+                  />
                 </section>
                 {selectedRun.kind === 'workflow_run' ? (
                   <details className="run-detail-block run-detail-fold" open>
