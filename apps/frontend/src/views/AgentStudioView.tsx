@@ -731,11 +731,42 @@ function runUpdatedTimestamp(run?: RunSpec): number {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
-function runnableCapabilityLine(item: Pick<RunnableSummary, 'category' | 'description' | 'enabled' | 'kind' | 'output_contract'>): string {
+function toolPolicyCapabilityLine(policy: unknown): string {
+  if (!policy || typeof policy !== 'object') return '';
+  const raw = policy as { allowed_tools?: unknown; approval_required?: unknown };
+  const allowedTools = Array.isArray(raw.allowed_tools)
+    ? raw.allowed_tools.map((tool) => String(tool || '').trim()).filter(Boolean)
+    : [];
+  const approvalRequired = raw.approval_required && typeof raw.approval_required === 'object'
+    ? raw.approval_required as Record<string, unknown>
+    : {};
+  const tools = [...allowedTools];
+  Object.keys(approvalRequired).forEach((tool) => {
+    if (approvalRequired[tool] === true && !tools.includes(tool)) tools.push(tool);
+  });
+  if (!tools.length) return '';
+  const labels: string[] = [];
+  const add = (label: string) => {
+    if (!labels.includes(label)) labels.push(label);
+  };
+  const needsApproval = (tool: string) => approvalRequired[tool] === true;
+  if (tools.includes('workspace.read') || tools.includes('workspace.list')) add('读文件');
+  if (tools.includes('workspace.write_patch')) add(needsApproval('workspace.write_patch') ? '写补丁需审批' : '写补丁');
+  if (tools.includes('terminal.run')) add(needsApproval('terminal.run') ? '终端需审批' : '终端');
+  if (tools.includes('artifact.write')) add('产物');
+  tools.forEach((tool) => {
+    if (['workspace.read', 'workspace.list', 'workspace.write_patch', 'terminal.run', 'artifact.write'].includes(tool)) return;
+    add(needsApproval(tool) ? `${tool} 需审批` : tool);
+  });
+  return labels.length ? `工具 ${labels.join('、')}` : '';
+}
+
+function runnableCapabilityLine(item: Pick<RunnableSummary, 'category' | 'description' | 'enabled' | 'kind' | 'output_contract' | 'tool_policy'>): string {
   const parts = [
-    item.enabled === false ? 'Disabled' : '',
-    item.category ? `Category ${item.category}` : '',
-    item.output_contract ? `Output ${item.output_contract}` : '',
+    item.enabled === false ? '停用' : '',
+    item.category ? `类别 ${item.category}` : '',
+    item.output_contract ? `交付 ${item.output_contract}` : '',
+    item.kind === 'agent' ? toolPolicyCapabilityLine(item.tool_policy) : '',
     item.kind === 'workflow' ? 'Workflow' : '',
   ].filter(Boolean);
   return parts.join(' · ') || (item.kind === 'workflow' ? 'Workflow' : 'Agent');
@@ -745,11 +776,12 @@ function runnableOptionLabel(item: RunnableSummary): string {
   return `${item.kind}: ${item.name} · ${runnableCapabilityLine(item)}`;
 }
 
-function agentCapabilityLine(agent: Pick<AgentSpec, 'category' | 'enabled' | 'output_contract'>): string {
+function agentCapabilityLine(agent: Pick<AgentSpec, 'category' | 'enabled' | 'output_contract' | 'tool_policy'>): string {
   return [
-    agent.enabled === false ? 'Disabled' : '',
-    agent.category ? `Category ${agent.category}` : '',
-    agent.output_contract ? `Output ${agent.output_contract}` : '',
+    agent.enabled === false ? '停用' : '',
+    agent.category ? `类别 ${agent.category}` : '',
+    agent.output_contract ? `交付 ${agent.output_contract}` : '',
+    toolPolicyCapabilityLine(agent.tool_policy),
   ].filter(Boolean).join(' · ') || 'Agent';
 }
 
@@ -1512,6 +1544,7 @@ function WorkflowRunPreview({
                 <strong>{step.label}</strong>
                 <em>{workflowStepKindLabel(step.kind)}{agent ? ` · ${agent.nickname || agent.name}` : ''}</em>
                 <p>{detail}</p>
+                {agent ? <small>{agentCapabilityLine(agent)}</small> : null}
                 {agentIssue ? <small>{agentIssue}</small> : null}
               </div>
             </li>

@@ -34,7 +34,7 @@
 - ✅ 2026-06-06 追加：群组主模型整理和 Run 整理里的状态标签统一走用户可读中文，`running/processing/pending/approval_required` 会显示为“进行中 / 等待中 / 等待审批”，避免汇总或异常路径里再次冒出英文内部状态。
 - ✅ Workflow 入口边界按产品讨论收紧：Chat `@` 候选只保留主模型和 Agent，手动 `@Workflow` 或主模型误派发 Workflow 会提示去 Agent Studio 的 Workflow Studio / Runs 执行；Workflow 的设计、保存、保存并运行和 Runs 手动运行仍保持可用，且保存更新后立即运行会使用最新画布节点/连线，不会跑到旧版本；Bridge route 层也覆盖 create/update/run 这条用户实际点击路径。
 - ✅ 2026-06-05 追加：Chat 里直接触发的 Workflow 总结消息和 Workflow 子 Agent 消息都会带真实产物数量与 artifact 摘要 metadata；有产物时气泡正文也会提示“产物 N 个，见运行详情”，让 Workflow 完成后的交付物入口和普通 Agent Run 保持一致。
-- ✅ Workflow Studio 的 Agent palette、节点设置区和 Runs 手动运行目标选择已补能力摘要：会展示 Agent/Workflow 的类别、交付契约和职责说明，Runs 的目标下拉选项本身也带能力摘要，用户设计流程、维护节点或手动选择运行目标时能判断该把任务交给谁，而不是只看到名称。
+- ✅ Workflow Studio 的 Agent palette、节点设置区、Workflow 运行顺序预览和 Runs 手动运行目标选择已补能力摘要：会展示 Agent/Workflow 的类别、交付契约、职责说明、工具权限和审批边界（如读文件、写补丁需审批、终端需审批、产物），Runs 的目标下拉选项本身也带能力摘要且可被 History 搜索命中，用户设计流程、维护节点或手动选择运行目标时能判断该把任务交给谁、哪里可能触发审批，而不是只看到名称。
 - ✅ 2026-06-05 追加：Workflow Agent 节点支持配置 `Step Task`，运行时会把每个节点自己的任务说明与全局 Workflow Goal 合并后交给对应子 Agent；没有 Step Task 的节点保持旧行为，上游结果仍只进入 `Upstream Context`，避免上下文重复膨胀。运行快照和 timeline 会记录节点任务，Run Detail 的 Workflow Steps 也会显示该 Step Task，用户可以复盘每个 Agent 原本被要求做什么。
 - ✅ 2026-06-05 追加：Workflow Approval 节点支持配置 `Approval Criteria`，运行到人工审批时会把审批说明写入 pending approval、timeline 和运行快照；审批卡会把“审批节点 / 审批说明 / 当前上下文”分层展示，Run Detail 的 Workflow Steps 也会保留该说明，让用户知道自己到底在批准什么，而不是只看到一个泛泛的确认按钮。
 - ✅ 2026-06-05 追加：Workflow 的内置 seed 和 Agent Studio “全线测试模板”会预填每个 Agent 的 Step Task、网页点子模板的审批 Criteria，以及 Phase 4 模板的默认 artifact 路径；前端模板只会选择启用 Agent，用户新建模板时能直接看到每个节点要做什么，默认 seed 的回归也确认 6 个子 Agent 收到各自任务而不是同一个裸目标。
