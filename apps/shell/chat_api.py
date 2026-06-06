@@ -1223,15 +1223,20 @@ class ChatAPI:
 
     @staticmethod
     def _workflow_status_label(status: str) -> str:
-        if status == "completed":
+        normalized = ChatAPI._normalize_agent_run_status(status)
+        if normalized == "completed":
             return "已完成"
-        if status == "approval_required":
+        if normalized == "approval_required":
             return "等待审批"
-        if status == "cancelled":
+        if normalized == "cancelled":
             return "已取消"
-        if status == "failed":
+        if normalized == "failed":
             return "执行失败"
-        return f"状态：{status or 'unknown'}"
+        if normalized == "processing":
+            return "进行中"
+        if normalized == "pending":
+            return "等待中"
+        return f"状态：{normalized or '未知状态'}"
 
     @staticmethod
     def _visible_run_artifact_summaries(run_result: dict[str, Any]) -> tuple[int, list[dict[str, str]]]:

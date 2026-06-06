@@ -31,6 +31,7 @@
 - ✅ 群组主模型整理状态现在直接体现在原 Agent / 派发气泡和底部全局状态上：等待、完成和失败都会按上下文区分“这一轮群组任务”和“这条 Agent 结果”，整理成功后原 Agent/派发气泡会保留轻量完成提示，如果整理任务失败，会在原气泡下显示失败原因；后端回归覆盖直接 `@Agent` 和主模型派发两条路径都会清掉 pending 并写入 `group_agent_summary_status/error`。
 - ✅ 2026-06-06 追加：群组主模型整理任务如果被用户取消，原 Agent / 派发气泡会清掉 pending 并标记 `group_agent_summary_status=cancelled`；前端提示“主模型整理已取消”，不再把用户主动停止误显示成主模型整理失败。
 - ✅ 2026-06-06 追加：群组主模型整理（主模型派发与直接 `@Agent`）和普通自动委派 Run 整理的 prompt 会从 Run timeline 提取最近关键执行线索，包括工具调用/跳过/拒绝、审批、失败或取消节点，以及脱敏后的请求内容和执行结果；主模型收尾不再只依赖 Agent 最终一句汇报，也能说明 Agent 具体读写运行了什么。
+- ✅ 2026-06-06 追加：群组主模型整理和 Run 整理里的状态标签统一走用户可读中文，`running/processing/pending/approval_required` 会显示为“进行中 / 等待中 / 等待审批”，避免汇总或异常路径里再次冒出英文内部状态。
 - ✅ Workflow 入口边界按产品讨论收紧：Chat `@` 候选只保留主模型和 Agent，手动 `@Workflow` 或主模型误派发 Workflow 会提示去 Agent Studio 的 Workflow Studio / Runs 执行；Workflow 的设计、保存、保存并运行和 Runs 手动运行仍保持可用，且保存更新后立即运行会使用最新画布节点/连线，不会跑到旧版本；Bridge route 层也覆盖 create/update/run 这条用户实际点击路径。
 - ✅ 2026-06-05 追加：Chat 里直接触发的 Workflow 总结消息和 Workflow 子 Agent 消息都会带真实产物数量与 artifact 摘要 metadata；有产物时气泡正文也会提示“产物 N 个，见运行详情”，让 Workflow 完成后的交付物入口和普通 Agent Run 保持一致。
 - ✅ Workflow Studio 的 Agent palette、节点设置区和 Runs 手动运行目标选择已补能力摘要：会展示 Agent/Workflow 的类别、交付契约和职责说明，Runs 的目标下拉选项本身也带能力摘要，用户设计流程、维护节点或手动选择运行目标时能判断该把任务交给谁，而不是只看到名称。
@@ -63,6 +64,7 @@
 - ✅ 2026-06-06 追加：Runs History 的状态筛选在窄宽度下改为横向滚动的紧凑分段控件，按钮不再被四列 grid 挤成竖排；分组和条目 hover/选中态保留横向 padding，避免 hover 紧贴边缘。
 - ✅ 2026-06-05 追加：Runs History 搜索会把 Agent / Workflow 的名称、昵称、类别、描述、交付契约和启停状态一起纳入索引；旧 Run 即使缺少 `runnable_name`，也能按 Agent 能力线索查到对应历史。
 - ✅ 2026-06-06 追加：Run Detail 的 Result、Workflow Steps、Execution 和 Artifacts 区块支持折叠；长最终结果、节点结果、模型响应和工具 payload 会使用同一套完整内容视图，展开后不截断，失败和待审批内容会默认展开，方便用户先扫状态再钻取细节。
+- ✅ 2026-06-06 追加：Run Detail / Runs History 的状态 pill 和 Execution timeline 标题已中文化，用户看到的是“进行中 / 等待审批 / 工具调用 / 模型响应 / Workflow 已完成”等语义文案，不再把 `processing`、`approval_required` 或英文 timeline 标题当作界面正文。
 - ✅ Workflow 子 Agent 审批桥已闭环：父 Workflow 会显示正在等待哪个 child run 的工具审批，可在父详情页批准/拒绝；2026-06-06 追加：父详情页的子 Agent 审批桥会优先显示对应 Workflow 节点名，并展示 Step Task，用户在批准前能直接看到当前节点被要求做什么；审批恢复、拒绝、取消和父 Run 取消都会同步更新父子 Run、RunGroup 和步骤状态，避免留下孤儿审批；Run Detail 批准后会按返回状态提示“继续执行 / 需要下一次审批 / 已完成 / 已失败”，不再只显示泛泛的 action 完成；Bridge 审批批准 route 已覆盖暂停后编辑 Workflow 的场景，会继续原 Run 的运行时快照，不会把新画布混进旧 Run；Bridge 取消 route 已覆盖父 Workflow 等待子 Agent 工具审批时的取消路径，会同步取消 child Run 并清空 pending approval。
 - ✅ Run Detail 的待审批区域也改为结构化请求视图：工具名、Run、关联任务、审批节点/路径/工作目录分层展示，`terminal.run` 请求内容按 bash 代码块呈现；父 Workflow 等待子 Agent 审批和普通 Agent / Workflow 审批共用同一套可读结构。
 - ✅ Chat 里的 Workflow 失败/取消终态也会读取 timeline 节点信息：如果后端已记录 `workflow_node_label/kind`，气泡正文会直接显示“失败节点 / 取消节点”，用户不必先打开 Run Detail 才知道该查哪个步骤。

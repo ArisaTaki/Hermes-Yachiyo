@@ -678,7 +678,14 @@ function isActiveRunStatus(status: string): boolean {
 }
 
 function runStatusLabel(status: string): string {
-  return normalizeRunStatus(status) || 'unknown';
+  const normalized = normalizeRunStatus(status);
+  if (normalized === 'completed') return '已完成';
+  if (normalized === 'failed') return '执行失败';
+  if (normalized === 'cancelled') return '已取消';
+  if (normalized === 'approval_required') return '等待审批';
+  if (normalized === 'processing') return '进行中';
+  if (normalized === 'pending') return '等待中';
+  return normalized || '未知状态';
 }
 
 function runStatusTone(status: string): string {
@@ -1024,24 +1031,24 @@ function timelineStatus(event: Record<string, unknown>): string {
 function timelineEventTitle(event: Record<string, unknown>): string {
   const name = String(event.event || 'event');
   const detail = String(event.detail || '').trim();
-  if (name === 'agent.run.started') return 'Agent started';
-  if (name === 'agent.runtime.compiled') return 'Runtime prepared';
-  if (name === 'agent.artifact.write') return 'Context/artifact written';
-  if (name === 'agent.model.response') return 'Model response';
-  if (name === 'agent.tool.call') return detail ? `Tool call · ${detail}` : 'Tool call';
-  if (name === 'agent.tool.approval_required') return detail ? `Approval requested · ${detail}` : 'Approval requested';
-  if (name === 'agent.tool.approval_rejected') return 'Approval rejected';
-  if (name === 'agent.run.completed') return 'Run completed';
-  if (name === 'agent.run.failed') return 'Run failed';
-  if (name === 'run.cancelled') return 'Run cancelled';
-  if (name === 'workflow.run.started') return 'Workflow started';
-  if (name === 'workflow.node.agent') return detail ? `Agent step · ${detail}` : 'Agent step';
-  if (name === 'workflow.node.approval_required') return detail ? `Manual approval · ${detail}` : 'Manual approval';
-  if (name === 'workflow.node.approval_approved') return 'Approval approved';
-  if (name === 'workflow.node.approval_rejected') return 'Approval rejected';
-  if (name === 'workflow.run.completed') return 'Workflow completed';
-  if (name === 'workflow.run.failed') return 'Workflow failed';
-  if (name === 'workflow.run.cancelled') return 'Workflow cancelled';
+  if (name === 'agent.run.started') return 'Agent 已启动';
+  if (name === 'agent.runtime.compiled') return '运行环境已准备';
+  if (name === 'agent.artifact.write') return '上下文/产物已写入';
+  if (name === 'agent.model.response') return '模型响应';
+  if (name === 'agent.tool.call') return detail ? `工具调用 · ${detail}` : '工具调用';
+  if (name === 'agent.tool.approval_required') return detail ? `请求审批 · ${detail}` : '请求审批';
+  if (name === 'agent.tool.approval_rejected') return '审批已拒绝';
+  if (name === 'agent.run.completed') return 'Run 已完成';
+  if (name === 'agent.run.failed') return 'Run 执行失败';
+  if (name === 'run.cancelled') return 'Run 已取消';
+  if (name === 'workflow.run.started') return 'Workflow 已启动';
+  if (name === 'workflow.node.agent') return detail ? `Agent 节点 · ${detail}` : 'Agent 节点';
+  if (name === 'workflow.node.approval_required') return detail ? `人工审批 · ${detail}` : '人工审批';
+  if (name === 'workflow.node.approval_approved') return '审批已通过';
+  if (name === 'workflow.node.approval_rejected') return '审批已拒绝';
+  if (name === 'workflow.run.completed') return 'Workflow 已完成';
+  if (name === 'workflow.run.failed') return 'Workflow 执行失败';
+  if (name === 'workflow.run.cancelled') return 'Workflow 已取消';
   return name;
 }
 
@@ -3890,7 +3897,7 @@ export function AgentStudioView() {
                         ) : null}
                       </div>
                       <span className={`run-status-pill ${runStatusTone(selectedWorkflowApprovalChildRun?.status || 'approval_required')}`}>
-                        {selectedWorkflowApprovalChildRun ? runStatusLabel(selectedWorkflowApprovalChildRun.status) : 'loading'}
+                        {selectedWorkflowApprovalChildRun ? runStatusLabel(selectedWorkflowApprovalChildRun.status) : '加载中'}
                       </span>
                     </div>
                     {selectedWorkflowApprovalChildRun?.pending_approval?.tool ? (
@@ -4084,7 +4091,7 @@ export function AgentStudioView() {
                             </div>
                             {detail && detail !== timelineEventTitle(event) ? <p>{detail}</p> : null}
                             {eventStatus ? (
-                              <em className={`run-status-pill ${runStatusTone(eventStatus)}`}>{eventStatus}</em>
+                              <em className={`run-status-pill ${runStatusTone(eventStatus)}`}>{runStatusLabel(eventStatus)}</em>
                             ) : null}
                             {payload ? (
                               <RunExpandableContent

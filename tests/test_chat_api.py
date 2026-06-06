@@ -75,6 +75,14 @@ def _wait_for_assistant_content(runtime: _RuntimeStub, content: str, timeout: fl
     raise TimeoutError(f"Assistant message {content!r} 未在 {timeout} 秒内写入")
 
 
+def test_run_status_labels_are_user_facing_chinese():
+    assert ChatAPI._workflow_status_label("running") == "进行中"
+    assert ChatAPI._workflow_status_label("processing") == "进行中"
+    assert ChatAPI._workflow_status_label("pending") == "等待中"
+    assert ChatAPI._workflow_status_label("approval_required") == "等待审批"
+    assert ChatAPI._workflow_status_label("") == "状态：未知状态"
+
+
 def _chat_message(
     message_id: str,
     role: MessageRole,
