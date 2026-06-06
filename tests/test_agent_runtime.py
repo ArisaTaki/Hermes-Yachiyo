@@ -1818,7 +1818,9 @@ def test_agent_run_executes_native_tool_call_and_continues(tmp_path, monkeypatch
 
         assert run["status"] == "completed"
         assert run["result"] == "Read complete"
-        assert any(event["event"] == "agent.tool.call" and event["detail"] == "workspace.read" for event in run["timeline"])
+        tool_event = next(event for event in run["timeline"] if event["event"] == "agent.tool.call" and event["detail"] == "workspace.read")
+        assert tool_event["input_preview"]["path"] == "README.md"
+        assert tool_event["result"]["ok"] is True
     finally:
         service.close()
 
@@ -2039,7 +2041,9 @@ def test_agent_run_skips_write_tool_when_user_goal_forbids_file_changes(tmp_path
         assert run["status"] == "completed"
         assert run["result"] == "Here is the code inline."
         assert run["pending_approval"] == {}
-        assert any(event["event"] == "agent.tool.skipped" and event["detail"] == "workspace.write_patch" for event in run["timeline"])
+        skipped_event = next(event for event in run["timeline"] if event["event"] == "agent.tool.skipped" and event["detail"] == "workspace.write_patch")
+        assert skipped_event["input_preview"]["path"] == "scripts/demo.py"
+        assert skipped_event["result"]["blocked_by_user_goal"] is True
         assert not any(event["event"] == "agent.tool.approval_required" for event in run["timeline"])
     finally:
         service.close()

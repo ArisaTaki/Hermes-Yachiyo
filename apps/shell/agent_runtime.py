@@ -3120,6 +3120,8 @@ class AgentRuntimeService:
         user_goal = _user_goal_from_agent_messages(messages)
         for index, tool_request in enumerate(tool_requests):
             tool_name = _normalize_tool_name(tool_request.get("tool"))
+            raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+            input_preview = _tool_input_preview(raw_input)
             goal_block_reason = _agent_goal_disallows_tool(user_goal, tool_name)
             if goal_block_reason:
                 tool_result = {
@@ -3129,7 +3131,7 @@ class AgentRuntimeService:
                     "error": goal_block_reason,
                     "hint": "Do not ask for approval. Continue with an inline answer that follows the user's stated constraint.",
                 }
-                timeline.append(self._timeline("agent.tool.skipped", tool_name, result=tool_result))
+                timeline.append(self._timeline("agent.tool.skipped", tool_name, input_preview=input_preview, result=tool_result))
                 self._append_tool_result_message(messages, {**tool_request, "tool": tool_name}, tool_result)
                 continue
             tool_result = self._call_agent_tool(tool_request, allowed_tools, broker, timeline, artifacts=artifacts)
@@ -3155,12 +3157,13 @@ class AgentRuntimeService:
         approved: bool = False,
     ) -> dict[str, Any]:
         tool_name = _normalize_tool_name(tool_request.get("tool"))
-        if tool_name not in allowed_tools:
-            timeline.append(self._timeline("agent.tool.denied", tool_name))
-            raise AgentRuntimeError(f"Agent 试图调用未授权工具：{tool_name}")
         payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        input_preview = _tool_input_preview(payload)
+        if tool_name not in allowed_tools:
+            timeline.append(self._timeline("agent.tool.denied", tool_name, input_preview=input_preview))
+            raise AgentRuntimeError(f"Agent 试图调用未授权工具：{tool_name}")
         tool_result = broker.call(tool_name, payload, approved=approved)
-        timeline.append(self._timeline("agent.tool.call", tool_name, result=tool_result))
+        timeline.append(self._timeline("agent.tool.call", tool_name, input_preview=input_preview, result=tool_result))
         if artifacts is not None and tool_name == "artifact.write" and tool_result.get("ok"):
             artifact = {"kind": "tool_artifact", **tool_result}
             if artifact not in artifacts:

@@ -1075,7 +1075,15 @@ function formatTimelinePayload(value: unknown): string {
 }
 
 function timelineEventPayload(event: Record<string, unknown>): string {
+  const inputPreview = event.input_preview;
   const result = event.result;
+  if (inputPreview && result) {
+    return [
+      `请求内容：\n${formatTimelinePayload(inputPreview)}`,
+      `执行结果：\n${formatTimelinePayload(result)}`,
+    ].join('\n\n');
+  }
+  if (inputPreview) return `请求内容：\n${formatTimelinePayload(inputPreview)}`;
   if (result) return formatTimelinePayload(result);
   const pendingApproval = event.pending_approval;
   if (pendingApproval) return formatTimelinePayload(pendingApproval);
