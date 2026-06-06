@@ -6616,6 +6616,55 @@ def test_list_sessions_syncs_current_agent_run_result(tmp_path, monkeypatch):
         store.close()
 
 
+def test_list_sessions_syncs_legacy_running_run_metadata(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    sender = {"name": "Design Agent", "nickname": "Design"}
+
+    class FakeRunnableService:
+        def get_run(self, run_id):
+            assert run_id == "agent_run_legacy_running"
+            return {
+                "run_id": run_id,
+                "run_group_id": "run_group_design",
+                "kind": "agent_run",
+                "status": "completed",
+                "result": "旧 running metadata 已同步。",
+                "timeline": [],
+                "runnable": {"id": "agent_design", "name": "Design Agent", "kind": "agent"},
+            }
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeRunnableService())
+    try:
+        session_id = runtime.chat_session.session_id
+        runtime.chat_session.add_user_message("请 Design 做个方案")
+        runtime.chat_session.add_assistant_message(
+            "旧的完成态占位",
+            metadata={
+                "sender": sender,
+                "runnable_kind": "agent",
+                "runnable_id": "agent_design",
+                "run_id": "agent_run_legacy_running",
+                "run_group_id": "run_group_design",
+                "run_status": "running",
+            },
+        )
+
+        sessions = api.list_sessions()["sessions"]
+        current = next(item for item in sessions if item["session_id"] == session_id)
+        stored_messages = store.load_messages(session_id)
+        assistant = next(message for message in stored_messages if message.role == MessageRole.ASSISTANT.value)
+        metadata = json.loads(assistant.metadata_json)
+
+        assert current["is_processing"] is False
+        assert current["processing_count"] == 0
+        assert current["latest_message_status"] == "completed"
+        assert assistant.status == MessageStatus.COMPLETED.value
+        assert assistant.content == "旧 running metadata 已同步。"
+        assert metadata["run_status"] == "completed"
+    finally:
+        store.close()
+
+
 def test_list_sessions_syncs_current_workflow_run_result(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
 

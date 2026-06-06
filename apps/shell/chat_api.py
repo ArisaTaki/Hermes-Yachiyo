@@ -97,7 +97,7 @@ _DESKTOP_SNAPSHOT_REQUEST_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _CHAT_VISIBLE_ACTIVITY_PHASES = {"tool_start", "tool_complete"}
-_ACTIVE_RUN_STATUSES = {"pending", "processing", "approval_required"}
+_ACTIVE_RUN_STATUSES = {"pending", "processing", "running", "approval_required"}
 _MAIN_MODEL_ALIASES = (
     "hermes chat",
     "main model",
