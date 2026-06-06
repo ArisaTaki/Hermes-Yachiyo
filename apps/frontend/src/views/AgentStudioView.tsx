@@ -2262,18 +2262,6 @@ export function AgentStudioView() {
   }, [routeRunGoal, routeRunId, routeRunTarget, routeTab]);
 
   useEffect(() => {
-    if (tab !== 'runs' || !selectedRunId || !selectedRun) return;
-    const visible = (
-      runMatchesFilter(selectedRun, runKindFilter)
-      && runMatchesStatusFilter(selectedRun, runStatusFilter)
-      && runMatchesSearch(selectedRun, runSearchQuery, runSearchTextByRunnableId.get(selectedRun.runnable_id) || '')
-    );
-    if (visible) return;
-    setSelectedRunId('');
-    navigateTo('agents', { tab: 'runs' }, ['run', 'target', 'goal']);
-  }, [runKindFilter, runSearchQuery, runSearchTextByRunnableId, runStatusFilter, selectedRun, selectedRunId, tab]);
-
-  useEffect(() => {
     if (selectedAgent) setDraft(agentToDraft(selectedAgent));
   }, [selectedAgent]);
 
@@ -2798,7 +2786,12 @@ export function AgentStudioView() {
     return { selectedWorkflowId: saved.workflow_id };
   }
 
-  function openRunDetail(runId: string) {
+  function openRunDetail(runId: string, options: { revealInHistory?: boolean } = {}) {
+    if (options.revealInHistory) {
+      setRunKindFilter('all');
+      setRunStatusFilter('all');
+      setRunSearchQuery('');
+    }
     setSelectedRunId(runId);
     setTab('runs');
     const run = runs.find((item) => item.run_id === runId);
@@ -2850,7 +2843,7 @@ export function AgentStudioView() {
     const run = await createAgentRun(agentId, goal);
     setAgentRunGoal('');
     setRunTarget(agentId);
-    openRunDetail(run.run_id);
+    openRunDetail(run.run_id, { revealInHistory: true });
     return { selectedAgentId: agentId, runTarget: agentId, selectedRunId: run.run_id };
   }
 
@@ -2861,7 +2854,7 @@ export function AgentStudioView() {
     const run = await createWorkflowRun(saved.workflow_id, goal);
     setWorkflowRunGoal('');
     setRunTarget(saved.workflow_id);
-    openRunDetail(run.run_id);
+    openRunDetail(run.run_id, { revealInHistory: true });
     return { selectedWorkflowId: saved.workflow_id, runTarget: saved.workflow_id, selectedRunId: run.run_id };
   }
 
@@ -2885,7 +2878,7 @@ export function AgentStudioView() {
     const run = selectedRunRerunTarget.kind === 'agent'
       ? await createAgentRun(selectedRunRerunTarget.id, goal)
       : await createWorkflowRun(selectedRunRerunTarget.id, goal);
-    openRunDetail(run.run_id);
+    openRunDetail(run.run_id, { revealInHistory: true });
     if (selectedRunRerunTarget.kind === 'agent') {
       return {
         selectedAgentId: selectedRunRerunTarget.id,
@@ -3909,10 +3902,11 @@ export function AgentStudioView() {
               onClick={() => void runAction(async () => {
               const target = runnables.find((item) => item.id === runTarget);
               if (!target) return;
+              const goal = runGoal.trim();
               const run = target.kind === 'agent'
-                ? await createAgentRun(target.id, runGoal)
-                : await createWorkflowRun(target.id, runGoal);
-              openRunDetail(run.run_id);
+                ? await createAgentRun(target.id, goal)
+                : await createWorkflowRun(target.id, goal);
+              openRunDetail(run.run_id, { revealInHistory: true });
               setRunGoal('');
               return { selectedRunId: run.run_id, runTarget: target.id };
             }, '创建 Run')}

@@ -63,6 +63,7 @@
 - ✅ 2026-06-05 追加：Workflow Run Detail 会在对应 Workflow 定义仍存在时提供“打开 Workflow Studio”入口，用户从完成/失败/待审批 Run 看完步骤后可以直接回设计画布调整；Run History 分组和组内条目都会按更新时间稳定倒序，刚完成或刚失败的 Run 不会因为后端返回顺序藏到旧记录后面。
 - ✅ 2026-06-05 追加：Run Detail 不再保留任何“刷新后自动选中第一个 Run”的路径，空详情会要求用户明确选择历史或创建新 Run；完成/失败/取消后的详情页新增“准备重跑”和“重新运行”，前者把原目标和任务填回 Runs 面板便于修改，后者会复用当前 Agent Studio 的 Agent/Workflow 可运行性、权限和校验结果直接创建新 Run。
 - ✅ 2026-06-06 追加：Runs History 的状态筛选在窄宽度下改为横向滚动的紧凑分段控件，按钮不再被四列 grid 挤成竖排；分组和条目 hover/选中态保留横向 padding，避免 hover 紧贴边缘。
+- ✅ 2026-06-06 追加：Run Detail 选择与 History 筛选解耦，切换“完成/失败/进行中”或搜索时不会把右侧正在查看的 Run 清空；新建、保存并运行、手动运行和重跑 Run 会自动清空 History 筛选与搜索，让刚创建的 Run 能立即在列表中露出。
 - ✅ 2026-06-05 追加：Runs History 搜索会把 Agent / Workflow 的名称、昵称、类别、描述、交付契约和启停状态一起纳入索引；旧 Run 即使缺少 `runnable_name`，也能按 Agent 能力线索查到对应历史。
 - ✅ 2026-06-06 追加：Run Detail 的 Result、Workflow Steps、Execution 和 Artifacts 区块支持折叠；长最终结果、节点结果、模型响应和工具 payload 会使用同一套完整内容视图，展开后不截断，失败和待审批内容会默认展开，方便用户先扫状态再钻取细节。
 - ✅ 2026-06-06 追加：Run Detail / Runs History 的状态 pill 和 Execution timeline 标题已中文化，用户看到的是“进行中 / 等待审批 / 工具调用 / 模型响应 / Workflow 已完成”等语义文案，不再把 `processing`、`approval_required` 或英文 timeline 标题当作界面正文。
