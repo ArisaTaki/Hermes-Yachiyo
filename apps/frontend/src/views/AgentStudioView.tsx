@@ -2131,8 +2131,8 @@ export function AgentStudioView() {
     }
     if (routeRunTarget) {
       setRunTarget((current) => current === routeRunTarget ? current : routeRunTarget);
-    }
-    if (routeRunGoal) {
+      setRunGoal((current) => current === routeRunGoal ? current : routeRunGoal);
+    } else if (routeRunGoal) {
       setRunGoal((current) => current === routeRunGoal ? current : routeRunGoal);
     }
   }, [routeRunGoal, routeRunId, routeRunTarget, routeTab]);
