@@ -433,7 +433,10 @@ function workflowEdges(workflow: WorkflowSpec | null): Edge[] {
 }
 
 function workflowNodeKind(node: Node): string {
-  return String(node.data?.kind || (node.type === 'input' ? 'start' : node.type === 'output' ? 'artifact' : 'agent'));
+  const dataKind = String(node.data?.kind || node.data?.node_type || '').trim();
+  const nodeType = String(node.type || '').trim();
+  if (dataKind && ['', 'input', 'default', 'output'].includes(nodeType)) return dataKind;
+  return nodeType || dataKind;
 }
 
 function workflowNodeKindLabel(kind: string): string {
