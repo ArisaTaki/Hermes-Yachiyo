@@ -4008,6 +4008,16 @@ class ChatAPI:
             lines.append(f"  任务：{goal}")
         if report:
             lines.append(f"  汇报：{report}")
+        run_id = str(metadata.get("run_id") or metadata.get("agent_run_id") or "").strip()
+        if run_id:
+            try:
+                run = get_agent_runtime_service().get_run(run_id)
+            except Exception:
+                run = {}
+            evidence_lines = self._run_execution_evidence_lines(run) if run else []
+            if evidence_lines:
+                lines.append("  执行线索：")
+                lines.extend(f"  - {item}" for item in evidence_lines)
 
         artifacts = metadata.get("run_artifacts") if isinstance(metadata.get("run_artifacts"), list) else []
         artifact_parts: list[str] = []

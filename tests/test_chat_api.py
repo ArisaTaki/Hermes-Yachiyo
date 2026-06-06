@@ -1220,6 +1220,14 @@ def test_direct_group_agent_summary_includes_user_followups(tmp_path, monkeypatc
             **service.runs["agent_run_design"],
             "status": "completed",
             "result": "设计方向已经整理完成。",
+            "timeline": [
+                {
+                    "event": "agent.tool.call",
+                    "detail": "artifact.write",
+                    "input_preview": {"path": "design/mobile-direction.md", "kind": "markdown"},
+                    "result": {"path": "design/mobile-direction.md"},
+                }
+            ],
             "pending_approval": {},
         }
         messages = api.get_messages()["messages"]
@@ -1243,6 +1251,9 @@ def test_direct_group_agent_summary_includes_user_followups(tmp_path, monkeypatc
         assert "另一个目标：再做一个 logo 方向" not in summary_task.description
         assert "安排第二轮视觉目标" not in summary_task.description
         assert "汇报：设计方向已经整理完成。" in summary_task.description
+        assert "执行线索：" in summary_task.description
+        assert "工具调用：artifact.write" in summary_task.description
+        assert "design/mobile-direction.md" in summary_task.description
     finally:
         store.close()
 
