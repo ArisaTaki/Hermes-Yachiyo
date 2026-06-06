@@ -513,7 +513,7 @@ function validateWorkflowDraft(nodes: Node[], edges: Edge[], agents: AgentSpec[]
       else if (agent.enabled === false) errors.push(`${label} 选择的 Agent 已停用`);
     }
     if (kind === 'artifact') {
-      const artifactPath = String(node.data?.artifact_path || '').trim();
+      const artifactPath = String(node.data?.artifact_path || node.data?.artifactPath || '').trim();
       if (artifactPath && !isSafeWorkflowArtifactPath(artifactPath)) {
         errors.push(`${label} 的产物路径必须是相对路径，且不能越界`);
       }
@@ -3568,7 +3568,7 @@ export function AgentStudioView() {
                           <span>Artifact Path</span>
                           <input
                             className="hy-input"
-                            value={String(node.data?.artifact_path || '')}
+                            value={String(node.data?.artifact_path || node.data?.artifactPath || '')}
                             onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, artifact_path: event.target.value } } : item))}
                             placeholder="留空则按 Label 自动生成，例如 reports/summary.md"
                           />

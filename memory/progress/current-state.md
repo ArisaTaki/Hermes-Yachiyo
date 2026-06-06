@@ -44,6 +44,7 @@
 - ✅ 2026-06-05 追加：Runs 手动运行选择 Workflow 时，如果校验错误不止一条，目标预览下会直接列出完整错误清单；按钮 title 仍保留首条短原因，方便用户一眼知道为什么不能运行、需要同时修哪些节点。
 - ✅ Agent Studio / Workflow Studio / Runs 不再默认选择第一个 Agent / Workflow / Run；Workflow 新草稿保持空选择，节点设置支持 Agent / Approval / Artifact 配置，前后端都会校验线性流程、缺失/停用 Agent、未知节点、环和断链。
 - ✅ Workflow Artifact 节点支持配置产物路径：用户可以在节点设置里指定 `reports/summary.md` 这类相对路径；留空时继续按 Label 自动生成，重复路径会自动去重为 `name-2.md`；Run Detail 的尚未执行步骤也会提前显示预计写出路径，前后端都会拦截越界路径。
+- ✅ 2026-06-06 追加：Workflow Studio 前端 Artifact Path 校验和节点设置会同时读取 `artifact_path` / `artifactPath`，与后端运行校验保持一致；导入或旧数据使用 camelCase 时不会出现前端放行、后端运行才拒绝的错位。
 - ✅ Workflow Studio 的保存与保存并运行会在硬校验错误时禁用，并把第一个错误放到按钮 title；2026-06-06 追加：Workflow 名称为空会进入同一个“需要修复”校验框，保存请求会 trim 名称，后端 update 也会 trim 并继续拒绝空名；只有 Start 节点这类低价值但可保存的状态仍作为 warning 提醒，避免用户在明显无效的 Workflow 上误点保存/运行。
 - ✅ 2026-06-05 追加：Workflow 后端节点类型解析已和 ReactFlow 画布形态对齐；当节点 `type` 是 `input/default/output`、真实业务类型在 `data.kind` 时，Bridge 保存与运行仍会按 Start / Agent / Artifact 正确执行，避免导入画布或未清洗节点数据被误判为未知节点类型。
 - ✅ 2026-06-05 追加：Start-only Workflow 仍可作为草稿保存，但所有运行入口都会要求至少存在一个可执行节点（Agent、Approval 或 Artifact）；前端 warning 也会说明“可保存草稿、运行前需添加可执行节点”，后端 `create_workflow_run` 和 Bridge `/ui/workflow-runs` route 同步硬拦截，避免空流程直接 completed 造成“已运行但什么也没做”的假阳性。
