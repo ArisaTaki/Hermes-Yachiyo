@@ -32,7 +32,7 @@
 - ✅ 2026-06-06 追加：群组主模型整理任务如果被用户取消，原 Agent / 派发气泡会清掉 pending 并标记 `group_agent_summary_status=cancelled`；前端提示“主模型整理已取消”，不再把用户主动停止误显示成主模型整理失败。
 - ✅ 2026-06-06 追加：群组主模型整理（主模型派发与直接 `@Agent`）和普通自动委派 Run 整理的 prompt 会从 Run timeline 提取最近关键执行线索，包括工具调用/跳过/拒绝、审批、失败或取消节点，以及脱敏后的请求内容和执行结果；主模型收尾不再只依赖 Agent 最终一句汇报，也能说明 Agent 具体读写运行了什么。
 - ✅ 2026-06-06 追加：群组主模型整理和 Run 整理里的状态标签统一走用户可读中文，`running/processing/pending/approval_required` 会显示为“进行中 / 等待中 / 等待审批”，避免汇总或异常路径里再次冒出英文内部状态。
-- ✅ Workflow 入口边界按产品讨论收紧：Chat `@` 候选只保留主模型和 Agent，手动 `@Workflow` 或主模型误派发 Workflow 会提示去 Agent Studio 的 Workflow Studio / Runs 执行；Workflow 的设计、保存、保存并运行和 Runs 手动运行仍保持可用，且保存更新后立即运行会使用最新画布节点/连线，不会跑到旧版本；Bridge route 层也覆盖 create/update/run 这条用户实际点击路径。
+- ✅ Workflow 入口边界按产品讨论收紧：Chat `@` 候选只保留主模型和 Agent，手动 `@Workflow` 或主模型误派发 Workflow 会提示去 Agent Studio 的 Workflow Studio / Runs 执行；Chat 的 Workflow 指路卡会携带目标 Workflow 和解析出的用户目标，按钮可直接跳到 Runs 面板并预选 target / 填入 Goal；Workflow 的设计、保存、保存并运行和 Runs 手动运行仍保持可用，且保存更新后立即运行会使用最新画布节点/连线，不会跑到旧版本；Bridge route 层也覆盖 create/update/run 这条用户实际点击路径。
 - ✅ 2026-06-05 追加：Chat 里直接触发的 Workflow 总结消息和 Workflow 子 Agent 消息都会带真实产物数量与 artifact 摘要 metadata；有产物时气泡正文也会提示“产物 N 个，见运行详情”，让 Workflow 完成后的交付物入口和普通 Agent Run 保持一致。
 - ✅ Workflow Studio 的 Agent palette、节点设置区、Workflow 运行顺序预览和 Runs 手动运行目标选择已补能力摘要：会展示 Agent/Workflow 的类别、交付契约、职责说明、工具权限和审批边界（如读文件、写补丁需审批、终端需审批、产物），Runs 的目标下拉选项本身也带能力摘要且可被 History 搜索命中，用户设计流程、维护节点或手动选择运行目标时能判断该把任务交给谁、哪里可能触发审批，而不是只看到名称。
 - ✅ 2026-06-05 追加：Workflow Agent 节点支持配置 `Step Task`，运行时会把每个节点自己的任务说明与全局 Workflow Goal 合并后交给对应子 Agent；没有 Step Task 的节点保持旧行为，上游结果仍只进入 `Upstream Context`，避免上下文重复膨胀。运行快照和 timeline 会记录节点任务，Run Detail 的 Workflow Steps 也会显示该 Step Task，用户可以复盘每个 Agent 原本被要求做什么。

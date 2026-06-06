@@ -74,13 +74,25 @@ export function routePath(view: AppView, params: Record<string, string> = {}): s
   if (view === 'main') return '#/';
   if (view === 'settings' && params.mode) return `#/settings/${encodeURIComponent(params.mode)}`;
   if (view === 'tools' && params.tool) return `#/tools/${encodeURIComponent(params.tool)}`;
-  if (view === 'agents' && params.run) return `#/agents/${encodeURIComponent(params.run)}`;
+  if (view === 'agents' && params.run) {
+    return routeWithQuery(`#/agents/${encodeURIComponent(params.run)}`, params, ['run']);
+  }
   if (view === 'agents' && isAgentStudioTab(params.tab) && params.tab !== 'agents') {
-    return `#/agents/${encodeURIComponent(params.tab)}`;
+    return routeWithQuery(`#/agents/${encodeURIComponent(params.tab)}`, params, ['tab']);
   }
   if (view === 'provider' && params.capability) return `#/provider/${encodeURIComponent(params.capability)}`;
   if (view === 'activity-detail' && params.event_id) return `#/activity-detail/${encodeURIComponent(params.event_id)}`;
   return `#/${encodeURIComponent(view)}`;
+}
+
+function routeWithQuery(path: string, params: Record<string, string>, consumed: string[]): string {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (!value || consumed.includes(key)) return;
+    query.set(key, value);
+  });
+  const suffix = query.toString();
+  return suffix ? `${path}?${suffix}` : path;
 }
 
 function isAppView(value: string): value is AppView {

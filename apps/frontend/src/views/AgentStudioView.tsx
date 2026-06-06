@@ -1612,8 +1612,10 @@ function AgentAvatar({ avatarUrl, name }: { avatarUrl?: string; name: string }) 
 
 export function AgentStudioView() {
   const routeRunId = currentParam('run').trim();
+  const routeRunTarget = currentParam('target').trim();
+  const routeRunGoal = currentParam('goal').trim();
   const routeTab = normalizeStudioTab(currentParam('tab'));
-  const [tab, setTab] = useState<StudioTab>(() => routeRunId ? 'runs' : routeTab);
+  const [tab, setTab] = useState<StudioTab>(() => routeRunId || routeRunTarget ? 'runs' : routeTab);
   const [agents, setAgents] = useState<AgentSpec[]>([]);
   const [skills, setSkills] = useState<SkillSpec[]>([]);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
@@ -1645,8 +1647,8 @@ export function AgentStudioView() {
   const [workflowDescription, setWorkflowDescription] = useState('');
   const [agentRunGoal, setAgentRunGoal] = useState('');
   const [workflowRunGoal, setWorkflowRunGoal] = useState('');
-  const [runTarget, setRunTarget] = useState('');
-  const [runGoal, setRunGoal] = useState('');
+  const [runTarget, setRunTarget] = useState(() => routeRunTarget);
+  const [runGoal, setRunGoal] = useState(() => routeRunGoal);
   const [runKindFilter, setRunKindFilter] = useState<RunKindFilter>('all');
   const [runStatusFilter, setRunStatusFilter] = useState<RunStatusFilter>('all');
   const [runSearchQuery, setRunSearchQuery] = useState('');
@@ -2118,14 +2120,22 @@ export function AgentStudioView() {
   }, [refresh]);
 
   useEffect(() => {
-    const nextTab = routeRunId ? 'runs' : routeTab;
+    const nextTab = routeRunId || routeRunTarget ? 'runs' : routeTab;
     setTab((current) => current === nextTab ? current : nextTab);
     if (routeRunId) {
       setSelectedRunId((current) => current === routeRunId ? current : routeRunId);
+    } else if (routeRunTarget) {
+      setSelectedRunId('');
     } else if (routeTab === 'runs') {
       setSelectedRunId('');
     }
-  }, [routeRunId, routeTab]);
+    if (routeRunTarget) {
+      setRunTarget((current) => current === routeRunTarget ? current : routeRunTarget);
+    }
+    if (routeRunGoal) {
+      setRunGoal((current) => current === routeRunGoal ? current : routeRunGoal);
+    }
+  }, [routeRunGoal, routeRunId, routeRunTarget, routeTab]);
 
   useEffect(() => {
     if (tab !== 'runs' || !selectedRunId || !selectedRun) return;
@@ -2136,7 +2146,7 @@ export function AgentStudioView() {
     );
     if (visible) return;
     setSelectedRunId('');
-    navigateTo('agents', { tab: 'runs' }, ['run']);
+    navigateTo('agents', { tab: 'runs' }, ['run', 'target', 'goal']);
   }, [runKindFilter, runSearchQuery, runSearchTextByRunnableId, runStatusFilter, selectedRun, selectedRunId, tab]);
 
   useEffect(() => {
@@ -2333,14 +2343,14 @@ export function AgentStudioView() {
     setTab('workflows');
     setStatus(`已打开 Workflow Studio：${workflow.name || workflow.workflow_id}`);
     setError('');
-    navigateTo('agents', { tab: 'workflows' }, ['run']);
+    navigateTo('agents', { tab: 'workflows' }, ['run', 'target', 'goal']);
   }
 
   function activateTab(nextTab: StudioTab) {
     setTab(nextTab);
     setStatus('');
     setError('');
-    navigateTo('agents', nextTab === 'agents' ? {} : { tab: nextTab }, ['run', 'tab']);
+    navigateTo('agents', nextTab === 'agents' ? {} : { tab: nextTab }, ['run', 'tab', 'target', 'goal']);
     if (nextTab === 'agents') {
       void refresh().catch((err: unknown) => {
         setError(err instanceof Error ? err.message : '刷新 Agent 列表失败');
@@ -2675,7 +2685,7 @@ export function AgentStudioView() {
         return next;
       });
     }
-    navigateTo('agents', { run: runId }, ['tab']);
+    navigateTo('agents', { run: runId }, ['tab', 'target', 'goal']);
   }
 
   function toggleRunHistoryGroup(groupKey: string) {
@@ -2693,7 +2703,7 @@ export function AgentStudioView() {
     if (selectedRunId) {
       setSelectedRunId('');
       setTab('runs');
-      navigateTo('agents', { tab: 'runs' }, ['run']);
+      navigateTo('agents', { tab: 'runs' }, ['run', 'target', 'goal']);
     }
   }
 
@@ -2703,7 +2713,7 @@ export function AgentStudioView() {
     if (selectedRunId) {
       setSelectedRunId('');
       setTab('runs');
-      navigateTo('agents', { tab: 'runs' }, ['run']);
+      navigateTo('agents', { tab: 'runs' }, ['run', 'target', 'goal']);
     }
   }
 

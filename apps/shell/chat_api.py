@@ -587,6 +587,7 @@ class ChatAPI:
                 runnable=runnable,
                 context=current_context,
                 guidance_type="workflow_chat_entry_disabled",
+                suggested_goal=user_goal,
             )
 
         keep_workflow_group = (
@@ -895,6 +896,7 @@ class ChatAPI:
         runnable: dict[str, Any] | None = None,
         context: dict[str, Any] | None = None,
         guidance_type: str = "",
+        suggested_goal: str = "",
     ) -> Dict[str, Any]:
         target = self._participant_for_runnable(runnable) if runnable else self._main_model_sender()
         context = context or self._session_context()
@@ -914,8 +916,11 @@ class ChatAPI:
             metadata={
                 "sender": self._main_model_sender(),
                 "runnable_kind": runnable.get("kind") if runnable else "",
+                "runnable_id": runnable.get("id") if runnable else "",
+                "runnable_name": runnable.get("name") if runnable else "",
                 "run_group_id": context.get("run_group_id") or "",
                 "guidance_type": guidance_type,
+                "suggested_goal": suggested_goal,
             },
         )
         if context.get("conversation_kind") == "group":

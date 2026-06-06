@@ -108,6 +108,7 @@ type ChatMessageMetadata = {
   group_followup_for_task_ids?: string[];
   group_followup_for_agent_message_ids?: string[];
   guidance_type?: string;
+  suggested_goal?: string;
 };
 
 type MentionOption = {
@@ -1618,11 +1619,20 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   function openRunDetails(runId: string | undefined) {
     const clean = String(runId || '').trim();
     if (!clean) return;
-    navigateTo('agents', { run: clean }, ['tab']);
+    navigateTo('agents', { run: clean }, ['tab', 'target', 'goal']);
   }
 
-  function openWorkflowStudio() {
-    navigateTo('agents', { tab: 'workflows' }, ['run']);
+  function openWorkflowStudio(runnableId = '', suggestedGoal = '') {
+    const cleanRunnableId = String(runnableId || '').trim();
+    if (cleanRunnableId) {
+      navigateTo('agents', {
+        tab: 'runs',
+        target: cleanRunnableId,
+        goal: String(suggestedGoal || '').trim(),
+      }, ['run']);
+      return;
+    }
+    navigateTo('agents', { tab: 'workflows' }, ['run', 'target', 'goal']);
   }
 
   function handleMessageListClick(event: ReactMouseEvent<HTMLDivElement>) {
@@ -2820,7 +2830,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
   onApprove: () => void;
   onCopy: () => void;
   onOpenRunDetails: (runId: string) => void;
-  onOpenWorkflowStudio: () => void;
+  onOpenWorkflowStudio: (runnableId?: string, suggestedGoal?: string) => void;
   onReject: () => void;
   onRetry: () => void;
   registerMessageNode: (messageId: string | undefined, node: HTMLElement | null) => void;
@@ -2915,9 +2925,12 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
             <button
               className="message-run-detail-button"
               type="button"
-              onClick={onOpenWorkflowStudio}
+              onClick={() => onOpenWorkflowStudio(
+                String(message.metadata?.runnable_id || ''),
+                String(message.metadata?.suggested_goal || ''),
+              )}
             >
-              打开 Workflow Studio
+              {message.metadata?.runnable_id ? '去 Runs 运行' : '打开 Workflow Studio'}
             </button>
           ) : null}
           {showRetry ? (

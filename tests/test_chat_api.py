@@ -309,6 +309,9 @@ def test_workflow_mention_guides_to_studio_while_workflow_run_still_executes(tmp
         assert "Workflow Studio" in assistant_messages[0]["content"]
         assert "群聊里需要协作" in assistant_messages[0]["content"]
         assert assistant_messages[0]["metadata"]["guidance_type"] == "workflow_chat_entry_disabled"
+        assert assistant_messages[0]["metadata"]["runnable_id"] == workflow["workflow_id"]
+        assert assistant_messages[0]["metadata"]["runnable_name"] == "Web Flow"
+        assert assistant_messages[0]["metadata"]["suggested_goal"] == "做一个网页设计链路"
         current = next(
             item for item in api.list_sessions()["sessions"]
             if item["session_id"] == runtime.chat_session.session_id
