@@ -1278,6 +1278,9 @@ class ChatAPI:
                     "run_id": run_result.get("run_id") or "",
                     "run_group_id": run_result.get("run_group_id") or "",
                     "pending_approval": {},
+                    "workflow_waiting_child_run_id": None,
+                    "workflow_waiting_tool": None,
+                    "workflow_waiting_node": None,
                     "run_progress_title": "审批已通过" if is_workflow_message else "已批准工具调用",
                     "run_progress_detail": (
                         f"{actor_name} 正在继续执行当前流程。"
@@ -1337,6 +1340,9 @@ class ChatAPI:
         }
         if is_workflow_message:
             metadata_update["workflow_status"] = status
+            metadata_update["workflow_waiting_child_run_id"] = None
+            metadata_update["workflow_waiting_tool"] = None
+            metadata_update["workflow_waiting_node"] = None
         if is_group_message and status in {"completed", "failed", "cancelled"}:
             metadata_update.update({
                 "agent_report": agent_report,
@@ -2775,6 +2781,9 @@ class ChatAPI:
                         "run_group_id": run.get("run_group_id") or "",
                         "run_progress_title": title,
                         "run_progress_detail": detail,
+                        "workflow_waiting_child_run_id": None,
+                        "workflow_waiting_tool": None,
+                        "workflow_waiting_node": None,
                     }
                     if metadata.get("runnable_kind") == "workflow" or metadata.get("workflow_status"):
                         metadata_update["workflow_status"] = normalized_status

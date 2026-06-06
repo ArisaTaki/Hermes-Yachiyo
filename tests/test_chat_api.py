@@ -663,6 +663,9 @@ def test_workflow_waiting_for_child_agent_approval_counts_only_child(tmp_path, m
         assert workflow_after["metadata"]["pending_approval"] == {}
         assert workflow_after["metadata"]["run_artifact_count"] == 0
         assert workflow_after["metadata"]["run_artifacts"] == []
+        assert "workflow_waiting_child_run_id" not in workflow_after["metadata"]
+        assert "workflow_waiting_node" not in workflow_after["metadata"]
+        assert "workflow_waiting_tool" not in workflow_after["metadata"]
     finally:
         service.close()
         store.close()
@@ -6609,6 +6612,76 @@ def test_list_sessions_counts_workflow_approval_required(tmp_path, monkeypatch):
         assert metadata["run_status"] == "approval_required"
         assert metadata["workflow_status"] == "approval_required"
         assert metadata["pending_approval"]["tool"] == "workflow.approval"
+    finally:
+        store.close()
+
+
+def test_list_sessions_clears_workflow_child_approval_after_parent_resumes(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+
+    class FakeRunnableService:
+        def get_run(self, run_id):
+            assert run_id == "workflow_run_resumed"
+            return {
+                "run_id": run_id,
+                "run_group_id": "run_group_workflow",
+                "kind": "workflow_run",
+                "status": "processing",
+                "result": "",
+                "timeline": [
+                    {"event": "workflow.run.started", "detail": "Demo Workflow"},
+                    {"event": "workflow.node.agent", "detail": "Coding Agent"},
+                ],
+                "pending_approval": {},
+                "runnable": {"id": "workflow_demo", "name": "Demo Workflow", "kind": "workflow"},
+            }
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeRunnableService())
+    try:
+        session_id = runtime.chat_session.session_id
+        runtime.chat_session.add_user_message("@Demo Workflow 继续跑")
+        assistant_id = runtime.chat_session.add_assistant_message(
+            "Demo Workflow 正在等待子 Agent 审批。",
+            metadata={
+                "sender": {"name": "Demo Workflow", "kind": "workflow"},
+                "runnable_kind": "workflow",
+                "runnable_id": "workflow_demo",
+                "run_id": "workflow_run_resumed",
+                "run_group_id": "run_group_workflow",
+                "run_status": "processing",
+                "workflow_status": "approval_required",
+                "pending_approval": {},
+                "workflow_waiting_child_run_id": "child_run_waiting",
+                "workflow_waiting_node": "Coding Agent",
+                "workflow_waiting_tool": "terminal.run",
+            },
+        )
+        runtime.chat_session.update_assistant_message(
+            assistant_id,
+            "Demo Workflow 正在等待子 Agent 审批。",
+            status=MessageStatus.PROCESSING,
+        )
+
+        payload = api.get_messages()
+        sessions = api.list_sessions()["sessions"]
+        current = next(item for item in sessions if item["session_id"] == session_id)
+        stored_messages = store.load_messages(session_id)
+        assistant = next(message for message in stored_messages if message.role == MessageRole.ASSISTANT.value)
+        metadata = json.loads(assistant.metadata_json)
+
+        assert payload["processing_count"] == 1
+        assert payload["approval_count"] == 0
+        assert current["processing_count"] == 1
+        assert current["approval_count"] == 0
+        assert assistant.status == MessageStatus.PROCESSING.value
+        assert assistant.content == ""
+        assert metadata["run_status"] == "processing"
+        assert metadata["workflow_status"] == "processing"
+        assert metadata["pending_approval"] == {}
+        assert metadata["run_progress_title"]
+        assert "workflow_waiting_child_run_id" not in metadata
+        assert "workflow_waiting_node" not in metadata
+        assert "workflow_waiting_tool" not in metadata
     finally:
         store.close()
 

@@ -501,7 +501,11 @@ class ChatSession:
                     msg.status = status
                     msg.error = error
                     if metadata:
-                        msg.metadata.update(metadata)
+                        for key, value in metadata.items():
+                            if value is None:
+                                msg.metadata.pop(key, None)
+                            else:
+                                msg.metadata[key] = value
                     self._pending_message_id = self._find_active_message_id_locked()
                     self._persist_message(msg)
                     return True
