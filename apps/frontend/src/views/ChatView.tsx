@@ -1240,7 +1240,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         }
         // 更新状态文本
         if (attempt % 10 === 0) {
-          setStatus(`Agent 执行中... (${Math.floor(attempt * interval / 1000)}s)`);
+          setStatus(`${runLabel} 执行中... (${Math.floor(attempt * interval / 1000)}s)`);
         }
       } catch (error) {
         console.error('轮询 Agent Run 状态失败:', error);
@@ -1443,6 +1443,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setStatus(action === 'approve' ? '正在批准工具调用...' : '正在拒绝工具调用...');
     if (action === 'approve') {
       const approvalPromise = approveRunApproval(runId);
+      const approvalTargetLabel = fallbackApprovalDetails && isWorkflowApprovalDetails(fallbackApprovalDetails) ? 'Workflow' : 'Agent';
       if (composerItemId) {
         setResolvedComposerApprovalIds((current) => (
           current.includes(composerItemId) ? current : [...current.slice(-20), composerItemId]
@@ -1452,7 +1453,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setIsProcessing(true);
       isProcessingRef.current = true;
       setProcessingCount((current) => Math.max(1, current || 1));
-      setStatus('已批准，Agent 正在继续执行...');
+      setStatus(`已批准，${approvalTargetLabel} 正在继续执行...`);
       setApprovalActionMessageId('');
       pollAgentRunInBackground(runId, { summarizeDelegatedRun, ignoreInitialApprovalRequired: true });
       void approvalPromise
@@ -1520,7 +1521,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           setStatus(nextApprovalStatusText(run));
         } else {
           forgetRunApprovalDetails(runId);
-          setStatus('已批准，Agent 正在继续执行...');
+          setStatus('已批准，Run 正在继续执行...');
           pollAgentRunInBackground(runId, { summarizeDelegatedRun });
         }
       } else {
