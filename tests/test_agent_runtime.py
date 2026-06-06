@@ -2308,6 +2308,10 @@ def test_agent_run_pauses_for_terminal_approval_and_resumes(tmp_path, monkeypatc
 
         assert resumed["status"] == "completed"
         assert resumed["result"] == "Command complete"
+        approved_event = next(event for event in resumed["timeline"] if event["event"] == "agent.tool.approval_approved")
+        assert approved_event["detail"] == "terminal.run"
+        assert approved_event["input_preview"]["command"] == "printf approved"
+        assert approved_event["status"] == "completed"
         assert service.get_run_group(resumed["run_group_id"])["status"] == "completed"
     finally:
         service.close()
@@ -2726,6 +2730,10 @@ def test_agent_run_rejects_pending_tool(tmp_path, monkeypatch):
         assert rejected["status"] == "cancelled"
         assert rejected["pending_approval"] == {}
         assert "not now" in rejected["result"]
+        rejected_event = next(event for event in rejected["timeline"] if event["event"] == "agent.tool.approval_rejected")
+        assert rejected_event["tool"] == "terminal.run"
+        assert rejected_event["input_preview"]["command"] == "echo blocked"
+        assert rejected_event["status"] == "cancelled"
     finally:
         service.close()
 

@@ -4210,6 +4210,16 @@ class AgentRuntimeService:
         tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
         if not messages or not tool_request:
             raise AgentRuntimeError("Run 待审批上下文不完整，无法恢复")
+        tool_name = str(tool_request.get("tool") or pending.get("tool") or "").strip()
+        tool_input_preview = _tool_input_preview(tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {})
+        timeline.append(
+            self._timeline(
+                "agent.tool.approval_approved",
+                tool_name or "tool",
+                input_preview=tool_input_preview,
+                status="completed",
+            )
+        )
         timeline.append(
             self._timeline(
                 "agent.run.resumed",
@@ -4380,8 +4390,21 @@ class AgentRuntimeService:
                 )
                 result = self.get_run(run_id)
             return result
+        pending = self._pending_approval_private(run_id)
+        tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
+        tool_name = str(tool_request.get("tool") or pending.get("tool") or "").strip()
+        tool_input_preview = _tool_input_preview(tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {})
         detail = redact_secrets(reason).strip() or "Tool approval rejected"
-        timeline = [*run["timeline"], self._timeline("agent.tool.approval_rejected", detail)]
+        timeline = [
+            *run["timeline"],
+            self._timeline(
+                "agent.tool.approval_rejected",
+                detail,
+                tool=tool_name,
+                input_preview=tool_input_preview,
+                status="cancelled",
+            ),
+        ]
         result = self._update_run(
             run_id,
             status="cancelled",

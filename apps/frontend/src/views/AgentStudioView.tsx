@@ -1120,7 +1120,8 @@ function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'agent.model.response') return '模型响应';
   if (name === 'agent.tool.call') return detail ? `工具调用 · ${detail}` : '工具调用';
   if (name === 'agent.tool.approval_required') return detail ? `请求审批 · ${detail}` : '请求审批';
-  if (name === 'agent.tool.approval_rejected') return '审批已拒绝';
+  if (name === 'agent.tool.approval_approved') return detail ? `审批已通过 · ${detail}` : '审批已通过';
+  if (name === 'agent.tool.approval_rejected') return detail ? `审批已拒绝 · ${detail}` : '审批已拒绝';
   if (name === 'agent.run.resumed') return 'Agent 已继续执行';
   if (name === 'agent.run.completed') return 'Run 已完成';
   if (name === 'agent.run.failed') return 'Run 执行失败';
