@@ -1143,8 +1143,8 @@ function timelineEventTone(event: Record<string, unknown>): string {
   const name = String(event.event || '');
   const status = timelineStatus(event);
   if (status === 'failed' || status === 'cancelled' || name.includes('failed') || name.includes('cancelled')) return 'danger';
-  if (status === 'approval_required' || name.includes('approval')) return 'approval';
   if (status === 'completed' || name.includes('completed')) return 'ready';
+  if (status === 'approval_required' || name.includes('approval')) return 'approval';
   if (status === 'running' || status === 'processing' || name.includes('resumed')) return 'running';
   if (name.includes('tool')) return 'tool';
   if (name.includes('model.response')) return 'model';
