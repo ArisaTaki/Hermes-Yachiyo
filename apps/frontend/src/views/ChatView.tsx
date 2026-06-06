@@ -1939,6 +1939,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     : -1;
   const composerApprovalCount = composerApprovalItems.length;
   const composerApprovalDetails = composerApprovalItem?.details || null;
+  const footerStatus = composerApprovalDetails
+    ? composerApprovalStatusText(composerApprovalDetails, composerApprovalIndex, composerApprovalCount)
+    : status;
   const chatWorkspaceStyle = embedded
     ? undefined
     : ({ '--chat-sidebar-width': `${sidebarWidth}px` } as CSSProperties);
@@ -2473,7 +2476,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
               }}
             />
           </form>
-          <footer className="status-line refined-status-line">{status}</footer>
+          <footer className="status-line refined-status-line">{footerStatus}</footer>
         </section>
       </div>
 
@@ -3129,6 +3132,15 @@ function workflowApprovalNoticeSubtitle(details: ApprovalRequestDetails, preview
   const criteria = details.summary.find((item) => item.label === '审批说明')?.value || '';
   const primary = [checkpoint, criteria].filter(Boolean).join('：');
   return compactStatusText(primary || preview || details.goal || '需要确认审批节点后继续执行', 86);
+}
+
+function composerApprovalStatusText(details: ApprovalRequestDetails, currentIndex: number, total: number) {
+  const position = total > 1 && currentIndex >= 0 ? ` ${currentIndex + 1}/${total}` : '';
+  const target = [details.requester, details.tool].filter(Boolean).join(' 请求 ');
+  const preview = details.tool === 'workflow.approval'
+    ? workflowApprovalNoticeSubtitle(details, '')
+    : compactStatusText(details.codeText || details.summary.map((item) => item.value).join(' ') || details.goal, 72);
+  return `待审批${position}：${target || details.tool || '工具调用'}${preview ? ` · ${preview}` : ''}`;
 }
 
 function AgentRunProgressCard({ message, onOpenDetails, runId }: {
