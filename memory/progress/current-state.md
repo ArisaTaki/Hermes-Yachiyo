@@ -5,7 +5,7 @@
 ### Milestone 96 — Chat 群组协作与 Workflow 运行可观察性收口
 
 - ✅ 群组对话现在按“长期群组 + 每轮目标独立 RunGroup”运行：用户直接在群里发布目标会交给主模型识别和派发；群内直接 `@Agent` 也会开启当前目标的运行批次，并在完成、失败、取消或审批结束后自动交给主模型整理。
-- ✅ 群组调度上下文已补 Agent 能力摘要：主模型和被派出的 Agent 会看到群成员的类别、交付契约、职责说明、可用工具和需要审批的工具，不再只凭昵称/名称猜谁适合接任务；主模型调度提示也会要求根据类别、职责和交付偏好选择最合适的成员，除非确实需要协作，不要默认派给所有 Agent；Agent Runtime 的 runnable summary 也会透出 `output_contract` 与工具策略摘要，与主会话自动委派目标信息保持一致。
+- ✅ 群组调度上下文已补 Agent 能力摘要：主模型和被派出的 Agent 会看到群成员的类别、交付契约、职责说明、可用工具和需要审批的工具，不再只凭昵称/名称猜谁适合接任务；主模型调度提示也会要求根据类别、职责、工具权限、审批边界和交付偏好选择最合适的成员，除非确实需要协作，不要默认派给所有 Agent；Agent Runtime 的 runnable summary 也会透出 `output_contract` 与工具策略摘要，与主会话自动委派目标信息保持一致。
 - ✅ 群组创建/设置弹窗的 Agent 列表也显示类别、交付偏好、职责摘要和工具权限提示（读文件、写补丁需审批、终端需审批、产物），用户添加成员时能判断谁适合进群、哪些 Agent 可能触发审批；群头像支持上传后的 data URL 通过 Bridge create/update route 透传；后端回归锁定群组成员只能是启用 Agent，Workflow 不能通过接口混入群聊成员；Bridge 真实 `/ui/chat/groups` + `/ui/chat/messages` route 已覆盖创建群组、修改群组加入新 Agent 后，给主模型注入最新成员、类别、交付契约和职责说明的路径。
 - ✅ 主模型派发协议已收紧为自然语言说明 + `<yachiyo_group_dispatch>` 机器块；Chat 层会隐藏派发 JSON、兼容常见模型输出变体，并在无效或跳过派发时给主模型整理未执行原因，不再让用户看到协议碎片或卡在“正在派发”；2026-06-05 追加：同一条主模型回复里如果分段输出多个 `<yachiyo_group_dispatch>` 块，Chat 也会全部收集并派发到同一轮 RunGroup，不会只执行第一个标签块；派发解析也兼容 `type/kind=agent`、`agentName/userGoal/taskGoal/objective/runnableId`、`Delegations` 这类模型常见字段变体，避免真实模型字段名偏一点就漏派。
 - ✅ 2026-06-05 追加：群组派发解析继续兼容工具调用风格 envelope，例如 `{"tool":"dispatch_group_agent","input":{...}}`、`arguments/parameters/params/payload/request` 包一层，或 arguments 是 JSON 字符串；2026-06-06 追加：`agents: ["Design","Code"]` 这类目标列表，以及 `agents: "Design、Code"` 这类分隔符字符串，也会拆成同一轮 RunGroup 的多条 Agent 任务；如果同时提供 `goals: ["任务 A","任务 B"]`，会按索引给每个 Agent 分配各自任务；`assignments: {"Design":"任务 A","Code":"任务 B"}` 或 `agents` 映射对象即使省略 `action` 也会展开为多条派发；这些真实模型常见格式会被拆出 Agent 和目标并隐藏机器块，不再因为字段形态偏一点就跳过派发。
