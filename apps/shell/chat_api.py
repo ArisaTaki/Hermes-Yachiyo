@@ -4680,8 +4680,8 @@ class ChatAPI:
         return count
 
     def _session_approval_count(self, session_id: str, messages: list[Any] | None = None) -> int:
-        count = 0
-        for _run_id, (_msg, metadata, run) in self._session_active_run_refs(session_id, messages=messages).items():
+        approval_run_ids: set[str] = set()
+        for run_id, (_msg, metadata, run) in self._session_active_run_refs(session_id, messages=messages).items():
             status = self._normalize_agent_run_status(str(run.get("status") or ""))
             if not status:
                 status = self._normalize_agent_run_status(
@@ -4691,8 +4691,14 @@ class ChatAPI:
             if not pending.get("tool") and isinstance(metadata.get("pending_approval"), dict):
                 pending = metadata.get("pending_approval") or {}
             if status == "approval_required" and pending.get("tool"):
-                count += 1
-        return count
+                approval_run_ids.add(run_id)
+                continue
+            if status == "approval_required" and self._workflow_waiting_for_child_approval(run):
+                waiting_context = self._workflow_child_approval_context(run)
+                child_run_id = str(waiting_context.get("child_run_id") or "").strip()
+                if child_run_id:
+                    approval_run_ids.add(child_run_id)
+        return len(approval_run_ids)
 
     def _session_active_run_refs(
         self,

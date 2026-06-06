@@ -671,6 +671,96 @@ def test_workflow_waiting_for_child_agent_approval_counts_only_child(tmp_path, m
         store.close()
 
 
+def test_workflow_child_approval_counts_when_child_message_is_missing(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+
+    class FakeRunnableService:
+        def get_run(self, run_id):
+            if run_id == "workflow_run_parent":
+                return {
+                    "run_id": run_id,
+                    "run_group_id": "run_group_workflow",
+                    "kind": "workflow_run",
+                    "status": "approval_required",
+                    "result": "",
+                    "timeline": [
+                        {"event": "workflow.run.started", "detail": "Demo Workflow"},
+                        {
+                            "event": "workflow.run.approval_required",
+                            "detail": "Coding Agent",
+                            "child_run_id": "child_run_waiting",
+                            "workflow_node_id": "coding",
+                            "workflow_node_kind": "agent",
+                            "workflow_node_label": "Coding Agent",
+                            "status": "approval_required",
+                        },
+                    ],
+                    "pending_approval": {},
+                    "runnable": {"id": "workflow_demo", "name": "Demo Workflow", "kind": "workflow"},
+                }
+            if run_id == "child_run_waiting":
+                return {
+                    "run_id": run_id,
+                    "run_group_id": "run_group_workflow",
+                    "kind": "agent_run",
+                    "status": "approval_required",
+                    "runnable_name": "Coding Agent",
+                    "pending_approval": {
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "python -V"},
+                    },
+                }
+            raise KeyError(run_id)
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeRunnableService())
+    try:
+        session_id = runtime.chat_session.session_id
+        runtime.chat_session.add_user_message("@Demo Workflow 跑一下")
+        assistant_id = runtime.chat_session.add_assistant_message(
+            "",
+            metadata={
+                "sender": {"name": "Demo Workflow", "kind": "workflow"},
+                "runnable_kind": "workflow",
+                "runnable_id": "workflow_demo",
+                "run_id": "workflow_run_parent",
+                "run_group_id": "run_group_workflow",
+                "run_status": "processing",
+                "workflow_status": "approval_required",
+                "pending_approval": {},
+            },
+        )
+        runtime.chat_session.update_assistant_message(
+            assistant_id,
+            "",
+            status=MessageStatus.PROCESSING,
+        )
+
+        payload = api.get_messages()
+        session_info = api.get_session_info()
+        sessions = api.list_sessions()["sessions"]
+        current = next(item for item in sessions if item["session_id"] == session_id)
+        workflow_message = next(
+            message
+            for message in payload["messages"]
+            if message["metadata"].get("runnable_kind") == "workflow"
+        )
+
+        assert payload["processing_count"] == 1
+        assert payload["approval_count"] == 1
+        assert session_info["approval_count"] == 1
+        assert current["approval_count"] == 1
+        assert workflow_message["status"] == "processing"
+        assert "正在等待子 Agent 审批" in workflow_message["content"]
+        assert workflow_message["metadata"]["run_status"] == "processing"
+        assert workflow_message["metadata"]["workflow_status"] == "approval_required"
+        assert workflow_message["metadata"]["pending_approval"] == {}
+        assert workflow_message["metadata"]["workflow_waiting_child_run_id"] == "child_run_waiting"
+        assert workflow_message["metadata"]["workflow_waiting_node"] == "Coding Agent"
+        assert workflow_message["metadata"]["workflow_waiting_tool"] == "terminal.run"
+    finally:
+        store.close()
+
+
 def test_agent_cancelled_message_is_terminal_failed(tmp_path):
     api, _runtime, store = _make_api(tmp_path)
     try:
