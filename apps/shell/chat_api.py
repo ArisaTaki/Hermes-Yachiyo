@@ -3858,9 +3858,12 @@ class ChatAPI:
 
             cleaned_metadata = dict(parent_metadata)
             cleaned_metadata.pop("group_agent_summary_pending", None)
-            cleaned_metadata["group_agent_summary_status"] = (
-                "failed" if summary.status == MessageStatus.FAILED else "completed"
-            )
+            if summary.status == MessageStatus.FAILED:
+                cleaned_metadata["group_agent_summary_status"] = (
+                    "cancelled" if self._message_is_cancelled_task_notice(summary) else "failed"
+                )
+            else:
+                cleaned_metadata["group_agent_summary_status"] = "completed"
             if summary.error:
                 cleaned_metadata["group_agent_summary_error"] = summary.error
             else:
@@ -3883,6 +3886,11 @@ class ChatAPI:
                     error=parent.error,
                     metadata=cleaned_metadata,
                 )
+
+    @staticmethod
+    def _message_is_cancelled_task_notice(message: ChatMessage) -> bool:
+        text = str(message.error or message.content or "").strip()
+        return text == "任务已取消" or text == "⚠️ 任务已取消"
 
     def _delegated_group_agent_children(self, parent_task_id: str) -> list[ChatMessage]:
         return [

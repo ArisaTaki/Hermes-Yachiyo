@@ -1059,6 +1059,37 @@ def test_manual_group_session_keeps_context_for_agent_mentions(tmp_path, monkeyp
         assert updated_second_agent["metadata"]["group_agent_summary_error"] == "主模型整理超时"
         current = next(item for item in api.list_sessions()["sessions"] if item["session_id"] == runtime.chat_session.session_id)
         assert current["run_group_id"] == second["run_group_id"]
+
+        third = api.send_message("@Design 再做一版")
+        assert third["ok"] is True
+        _wait_for_assistant_content(
+            runtime,
+            "Design 已完成任务，已交给主模型整理。\n"
+            "任务：做一版视觉方向\n\n"
+            "Design result",
+        )
+        third_messages = api.get_messages()["messages"]
+        third_agent = next(
+            message
+            for message in third_messages
+            if message["role"] == "assistant"
+            and message["metadata"].get("sender", {}).get("nickname") == "Design"
+            and message["metadata"].get("source_message_id") == third["message_id"]
+        )
+        third_summary = next(
+            message
+            for message in third_messages
+            if message["metadata"].get("group_direct_agent_summary_for_message_id") == third_agent["id"]
+        )
+        runtime.state.update_task_status(third_summary["task_id"], TaskStatus.CANCELLED)
+        updated_third_agent = next(
+            message
+            for message in api.get_messages()["messages"]
+            if message["id"] == third_agent["id"]
+        )
+        assert updated_third_agent["metadata"]["group_agent_summary_pending"] is False
+        assert updated_third_agent["metadata"]["group_agent_summary_status"] == "cancelled"
+        assert updated_third_agent["metadata"]["group_agent_summary_error"] == "任务已取消"
         assert [item["name"] for item in current["participants"] if item["kind"] == "agent"] == [
             "Design Agent",
             "Coding Agent",

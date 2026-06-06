@@ -3337,6 +3337,9 @@ function groupAgentSummaryNotice(message: ChatMessage): { tone: 'pending' | 'fai
   const metadata = message.metadata || {};
   const status = String(metadata.group_agent_summary_status || '').trim();
   const subject = groupAgentSummarySubject(metadata);
+  if (status === 'cancelled') {
+    return { tone: 'failed', text: `主模型整理${subject}已取消。` };
+  }
   if (status === 'failed') {
     const error = String(metadata.group_agent_summary_error || '').trim();
     return {
