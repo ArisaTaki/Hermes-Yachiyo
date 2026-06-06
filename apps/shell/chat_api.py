@@ -1738,6 +1738,53 @@ class ChatAPI:
         return f"{text[:max_chars].rstrip()}..."
 
     @staticmethod
+    def _participant_tool_policy(value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            return {}
+        allowed_tools = value.get("allowed_tools") if isinstance(value.get("allowed_tools"), list) else []
+        approvals = value.get("approval_required") if isinstance(value.get("approval_required"), dict) else {}
+        return {
+            "allowed_tools": [str(tool) for tool in allowed_tools if str(tool)],
+            "approval_required": {
+                str(tool): bool(required)
+                for tool, required in approvals.items()
+                if str(tool)
+            },
+        }
+
+    @staticmethod
+    def _participant_tool_label(tool: str) -> str:
+        labels = {
+            "workspace.list": "列文件",
+            "workspace.read": "读文件",
+            "workspace.write_patch": "写补丁",
+            "terminal.run": "终端",
+            "artifact.write": "产物",
+        }
+        label = labels.get(tool, "")
+        return f"{label}({tool})" if label else ChatAPI._compact_participant_detail(tool, max_chars=48)
+
+    @staticmethod
+    def _participant_tool_policy_details(participant: dict[str, Any]) -> tuple[str, str]:
+        policy = ChatAPI._participant_tool_policy(participant.get("tool_policy"))
+        allowed = [tool for tool in policy.get("allowed_tools", []) if str(tool)]
+        if not allowed:
+            return "", ""
+        tool_text = "、".join(ChatAPI._participant_tool_label(tool) for tool in allowed)
+        allowed_set = set(allowed)
+        approval_required = policy.get("approval_required") or {}
+        approvals = [
+            tool
+            for tool in allowed
+            if tool in allowed_set and approval_required.get(tool)
+        ]
+        approval_text = "、".join(approvals)
+        return (
+            ChatAPI._compact_participant_detail(tool_text, max_chars=180),
+            ChatAPI._compact_participant_detail(approval_text, max_chars=120),
+        )
+
+    @staticmethod
     def _participant_context_line(participant: dict[str, Any]) -> str:
         kind = str(participant.get("kind") or "").strip()
         display_name = str(
@@ -1768,6 +1815,11 @@ class ChatAPI:
         description = ChatAPI._compact_participant_detail(participant.get("description"), max_chars=160)
         if description:
             capability_details.append(f"职责：{description}")
+        tool_text, approval_text = ChatAPI._participant_tool_policy_details(participant)
+        if tool_text:
+            capability_details.append(f"工具：{tool_text}")
+        if approval_text:
+            capability_details.append(f"审批：{approval_text}")
         if capability_details:
             line = f"{line} - {'；'.join(capability_details)}"
         return line
@@ -1870,6 +1922,9 @@ class ChatAPI:
             participant["category"] = str(runnable.get("category") or "")
         if runnable.get("output_contract"):
             participant["output_contract"] = str(runnable.get("output_contract") or "")
+        tool_policy = ChatAPI._participant_tool_policy(runnable.get("tool_policy"))
+        if tool_policy:
+            participant["tool_policy"] = tool_policy
         if kind == "workflow":
             participant["participants"] = ChatAPI._workflow_participants(runnable)
         return participant

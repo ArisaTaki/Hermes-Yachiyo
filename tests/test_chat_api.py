@@ -915,6 +915,10 @@ def test_manual_group_session_keeps_context_for_agent_mentions(tmp_path, monkeyp
         "category": "design",
         "description": "负责 UI 方案、视觉验收和信息架构。",
         "output_contract": "markdown",
+        "tool_policy": {
+            "allowed_tools": ["workspace.list", "workspace.read", "artifact.write"],
+            "approval_required": {"terminal.run": True, "workspace.write_patch": True},
+        },
     }
     coding = {
         "id": "agent_coding",
@@ -925,6 +929,10 @@ def test_manual_group_session_keeps_context_for_agent_mentions(tmp_path, monkeyp
         "category": "coding",
         "description": "负责代码实现、补丁和验证脚本。",
         "output_contract": "diff",
+        "tool_policy": {
+            "allowed_tools": ["workspace.list", "workspace.read", "workspace.write_patch", "terminal.run", "artifact.write"],
+            "approval_required": {"terminal.run": True, "workspace.write_patch": True},
+        },
     }
 
     class FakeRunnableService:
@@ -1113,8 +1121,11 @@ def test_manual_group_session_keeps_context_for_agent_mentions(tmp_path, monkeyp
         assert "- 月見八千代（主模型" in task.description
         assert "- Design（Agent；Design Agent）" in task.description
         assert "- Design（Agent；Design Agent） - 类别：design；交付：markdown；职责：负责 UI 方案、视觉验收和信息架构。" in task.description
+        assert "工具：列文件(workspace.list)、读文件(workspace.read)、产物(artifact.write)" in task.description
         assert "- Code（Agent；Coding Agent）" in task.description
         assert "- Code（Agent；Coding Agent） - 类别：coding；交付：diff；职责：负责代码实现、补丁和验证脚本。" in task.description
+        assert "工具：列文件(workspace.list)、读文件(workspace.read)、写补丁(workspace.write_patch)、终端(terminal.run)、产物(artifact.write)" in task.description
+        assert "审批：workspace.write_patch、terminal.run" in task.description
         assert "派发时请根据每个 Agent 的类别、职责和交付偏好选择最合适的成员" in task.description
         assert "不要默认派给所有 Agent" in task.description
         assert "<yachiyo_group_dispatch>" in task.description
