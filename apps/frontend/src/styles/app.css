@@ -15597,6 +15597,11 @@ button.activity-item {
   background: oklch(78% 0.14 78 / 0.2);
 }
 
+.run-execution-step.running .run-step-rail i {
+  border-color: oklch(72% 0.14 210);
+  background: oklch(70% 0.16 210 / 0.18);
+}
+
 .run-execution-step.tool .run-step-rail i,
 .run-execution-step.model .run-step-rail i {
   border-color: oklch(66% 0.12 188);

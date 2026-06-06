@@ -1070,6 +1070,7 @@ function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'agent.tool.call') return detail ? `工具调用 · ${detail}` : '工具调用';
   if (name === 'agent.tool.approval_required') return detail ? `请求审批 · ${detail}` : '请求审批';
   if (name === 'agent.tool.approval_rejected') return '审批已拒绝';
+  if (name === 'agent.run.resumed') return 'Agent 已继续执行';
   if (name === 'agent.run.completed') return 'Run 已完成';
   if (name === 'agent.run.failed') return 'Run 执行失败';
   if (name === 'run.cancelled') return 'Run 已取消';
@@ -1078,6 +1079,8 @@ function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'workflow.node.approval_required') return detail ? `人工审批 · ${detail}` : '人工审批';
   if (name === 'workflow.node.approval_approved') return '审批已通过';
   if (name === 'workflow.node.approval_rejected') return '审批已拒绝';
+  if (name === 'workflow.run.child_resumed') return '子 Agent 已继续执行';
+  if (name === 'workflow.run.resumed') return 'Workflow 已继续执行';
   if (name === 'workflow.run.completed') return 'Workflow 已完成';
   if (name === 'workflow.run.failed') return 'Workflow 执行失败';
   if (name === 'workflow.run.cancelled') return 'Workflow 已取消';
@@ -1090,6 +1093,7 @@ function timelineEventTone(event: Record<string, unknown>): string {
   if (status === 'failed' || status === 'cancelled' || name.includes('failed') || name.includes('cancelled')) return 'danger';
   if (status === 'approval_required' || name.includes('approval')) return 'approval';
   if (status === 'completed' || name.includes('completed')) return 'ready';
+  if (status === 'running' || status === 'processing' || name.includes('resumed')) return 'running';
   if (name.includes('tool')) return 'tool';
   if (name.includes('model.response')) return 'model';
   return 'neutral';

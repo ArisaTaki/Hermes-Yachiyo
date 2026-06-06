@@ -1186,6 +1186,8 @@ class ChatAPI:
         for event in reversed(timeline):
             event_name = str(event.get("event") or "").strip()
             detail = _compact_preview(str(event.get("detail") or "").strip(), 140)
+            if event_name == "agent.run.resumed":
+                return "已批准工具调用", f"{name} 正在继续执行当前任务。"
             if event_name == "agent.tool.call":
                 tool = detail or "工具"
                 return "正在处理工具结果", f"{name} 已调用 {tool}，正在把结果交回模型判断下一步。"
@@ -1215,6 +1217,8 @@ class ChatAPI:
                 return "Workflow 正在写出产物", f"{name} 正在处理 {detail or 'Artifact 节点'}。"
             if event_name == "workflow.node.approval_required":
                 return "Workflow 等待审批", f"{name} 需要确认 {detail or '人工审批节点'} 后继续。"
+            if event_name == "workflow.run.child_resumed":
+                return "Workflow 子 Agent 已继续", f"{detail or '子 Agent'} 已通过审批并继续执行。"
             if event_name == "workflow.run.resumed":
                 return "Workflow 已继续", f"{name} 已通过审批并继续后续步骤。"
             if event_name == "workflow.run.started":
