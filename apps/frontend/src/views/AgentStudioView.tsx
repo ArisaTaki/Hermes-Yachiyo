@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import type { Connection, Edge, Node } from '@xyflow/react';
 import {
   Background,
@@ -105,7 +105,17 @@ type StudioRefreshOptions = {
   runTarget?: string;
   selectedRunId?: string;
   statusMessage?: string;
+  skipRefresh?: boolean;
 };
+
+type ApprovedApprovalGuard = {
+  signature: string;
+  staleUntil: number;
+};
+
+const approvedApprovalStaleWindowMs = 6000;
+const runApprovalPollAttempts = 100;
+const runApprovalPollIntervalMs = 1200;
 
 type ConfirmDialogState = {
   title: string;
@@ -675,6 +685,47 @@ function normalizeRunStatus(status: string): string {
 
 function isActiveRunStatus(status: string): boolean {
   return ['processing', 'pending', 'approval_required'].includes(normalizeRunStatus(status));
+}
+
+function approvalInputSignature(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function runApprovalSignature(run: RunSpec | null | undefined): string {
+  const pending = run?.pending_approval;
+  if (!pending) return '';
+  const approvalId = String(pending.approval_id || '').trim();
+  if (approvalId) return `id:${approvalId}`;
+  return [
+    String(pending.tool || '').trim(),
+    approvalInputSignature(pending.input_preview),
+  ].join('\n');
+}
+
+function makeRunContinuingAfterApproval(run: RunSpec, result: string): RunSpec {
+  const nextRun: RunSpec = { ...run };
+  delete nextRun.pending_approval;
+  return {
+    ...nextRun,
+    status: 'processing',
+    result,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function approvedRunStatusMessage(run: RunSpec): string {
+  const status = normalizeRunStatus(run.status);
+  if (status === 'processing') return '已批准，Run 正在继续执行。';
+  if (status === 'approval_required') return '已批准，Run 需要继续处理下一次审批。';
+  if (status === 'completed') return '已批准，Run 已完成。';
+  if (status === 'failed') return '已批准，但 Run 执行失败。';
+  return '已批准，Run 状态已更新。';
 }
 
 function runStatusLabel(status: string): string {
@@ -1625,6 +1676,7 @@ export function AgentStudioView() {
   const [runs, setRuns] = useState<RunSpec[]>([]);
   const [runGroups, setRunGroups] = useState<RunGroupSpec[]>([]);
   const [runDetailCache, setRunDetailCache] = useState<RunSpec[]>([]);
+  const approvedApprovalGuardsRef = useRef<Map<string, ApprovedApprovalGuard>>(new Map());
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
   const [draft, setDraft] = useState<AgentDraft>(emptyAgentDraft);
@@ -2047,15 +2099,42 @@ export function AgentStudioView() {
     [editingSkillFolderId, editingSkillFolderName, skillFolders],
   );
 
+  function rememberApprovedRun(run: RunSpec | null | undefined) {
+    if (!run) return;
+    approvedApprovalGuardsRef.current.set(run.run_id, {
+      signature: runApprovalSignature(run),
+      staleUntil: Date.now() + approvedApprovalStaleWindowMs,
+    });
+  }
+
+  function shouldAcceptRunUpdate(run: RunSpec): boolean {
+    const guard = approvedApprovalGuardsRef.current.get(run.run_id);
+    if (!guard) return true;
+    if (normalizeRunStatus(run.status) !== 'approval_required') {
+      approvedApprovalGuardsRef.current.delete(run.run_id);
+      return true;
+    }
+    const signature = runApprovalSignature(run);
+    if (guard.signature && signature === guard.signature) return false;
+    if (!guard.signature && Date.now() < guard.staleUntil) return false;
+    approvedApprovalGuardsRef.current.delete(run.run_id);
+    return true;
+  }
+
+  function acceptedRunUpdates(nextRuns: RunSpec[]): RunSpec[] {
+    return nextRuns.filter((run) => shouldAcceptRunUpdate(run));
+  }
+
   function upsertRunDetailCache(nextRuns: RunSpec[]) {
-    if (!nextRuns.length) return;
+    const visibleRuns = acceptedRunUpdates(nextRuns);
+    if (!visibleRuns.length) return;
     setRunDetailCache((current) => {
       const nextById = new Map(current.map((run) => [run.run_id, run]));
-      nextRuns.forEach((run) => nextById.set(run.run_id, run));
+      visibleRuns.forEach((run) => nextById.set(run.run_id, run));
       return Array.from(nextById.values());
     });
     setRuns((current) => {
-      const nextById = new Map(nextRuns.map((run) => [run.run_id, run]));
+      const nextById = new Map(visibleRuns.map((run) => [run.run_id, run]));
       let changed = false;
       const merged = current.map((run) => {
         const next = nextById.get(run.run_id);
@@ -2065,6 +2144,51 @@ export function AgentStudioView() {
       });
       return changed ? merged : current;
     });
+  }
+
+  async function refreshRunGroupsForRuns(nextRuns: RunSpec[]) {
+    const groupIds = Array.from(new Set(nextRuns.map((run) => String(run.run_group_id || '')).filter(Boolean)));
+    if (!groupIds.length) return;
+    const loadedGroups = (await Promise.all(groupIds.map((groupId) => getRunGroup(groupId).catch(() => null))))
+      .filter((group): group is RunGroupSpec => Boolean(group));
+    if (!loadedGroups.length) return;
+    setRunGroups((current) => {
+      const nextById = new Map(current.map((group) => [group.run_group_id, group]));
+      loadedGroups.forEach((group) => nextById.set(group.run_group_id, group));
+      return Array.from(nextById.values());
+    });
+  }
+
+  async function pollApprovedRunProgress(runId: string, selectedAfterAction: string) {
+    const pollRunIds = Array.from(new Set([runId, selectedAfterAction].filter(Boolean)));
+    if (!pollRunIds.length) return;
+    for (let attempt = 0; attempt < runApprovalPollAttempts; attempt += 1) {
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, attempt === 0 ? 300 : runApprovalPollIntervalMs);
+      });
+      const loadedRuns = (await Promise.all(pollRunIds.map((id) => getRun(id).catch(() => null))))
+        .filter((run): run is RunSpec => Boolean(run));
+      const visibleRuns = acceptedRunUpdates(loadedRuns);
+      if (!visibleRuns.length) continue;
+      upsertRunDetailCache(visibleRuns);
+      await refreshRunGroupsForRuns(visibleRuns);
+      const approvedRun = visibleRuns.find((run) => run.run_id === runId) || null;
+      const selectedRunUpdate = visibleRuns.find((run) => run.run_id === selectedAfterAction) || null;
+      const watchedRun = selectedRunUpdate || approvedRun;
+      if (!watchedRun) continue;
+      const watchedStatus = normalizeRunStatus(watchedRun.status);
+      if (watchedStatus === 'approval_required') {
+        setStatus('Run 需要处理下一次审批。');
+        await refresh({ selectedRunId: selectedAfterAction });
+        return;
+      }
+      if (!isActiveRunStatus(watchedRun.status)) {
+        setStatus(approvedRunStatusMessage(watchedRun));
+        await refresh({ selectedRunId: selectedAfterAction });
+        return;
+      }
+    }
+    await refresh({ selectedRunId: selectedAfterAction });
   }
 
   const refresh = useCallback(async (options: StudioRefreshOptions = {}) => {
@@ -2369,7 +2493,9 @@ export function AgentStudioView() {
     setError('');
     try {
       const refreshOptions = await action();
-      await refresh(refreshOptions || {});
+      if (!refreshOptions?.skipRefresh) {
+        await refresh(refreshOptions || {});
+      }
       setStatus(refreshOptions?.statusMessage || `${label} 完成`);
     } catch (err) {
       setError(err instanceof Error ? err.message : `${label} 失败`);
@@ -2845,29 +2971,47 @@ export function AgentStudioView() {
 
   async function approveRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions> {
     if (!runId) throw new Error('请选择待审批 Run');
-    const run = await approveRunApproval(runId);
-    const selectedAfterAction = nextSelectedRunId || run.run_id;
-    const updatedRuns = [run];
-    if (nextSelectedRunId && nextSelectedRunId !== run.run_id) {
-      try {
-        updatedRuns.push(await getRun(nextSelectedRunId));
-      } catch {
-        // The normal refresh/polling path will retry; approval already succeeded.
-      }
-    }
-    upsertRunDetailCache(updatedRuns);
+    const selectedAfterAction = nextSelectedRunId || runId;
+    const currentRun = runById.get(runId) || null;
+    const selectedAfterRun = selectedAfterAction !== runId ? runById.get(selectedAfterAction) || null : null;
+    const optimisticRuns = [
+      currentRun ? makeRunContinuingAfterApproval(currentRun, '已批准，Run 正在继续执行。') : null,
+      selectedAfterRun && isActiveRunStatus(selectedAfterRun.status)
+        ? makeRunContinuingAfterApproval(selectedAfterRun, '已批准子 Agent，Workflow 正在继续执行。')
+        : null,
+    ].filter((run): run is RunSpec => Boolean(run));
+    upsertRunDetailCache(optimisticRuns);
+    rememberApprovedRun(currentRun);
+    rememberApprovedRun(selectedAfterRun);
     setSelectedRunId(selectedAfterAction);
-    const status = normalizeRunStatus(run.status);
-    const statusMessage = status === 'processing'
-      ? '已批准，Run 正在继续执行。'
-      : status === 'approval_required'
-        ? '已批准，Run 需要继续处理下一次审批。'
-        : status === 'completed'
-          ? '已批准，Run 已完成。'
-          : status === 'failed'
-            ? '已批准，但 Run 执行失败。'
-            : '已批准，Run 状态已更新。';
-    return { selectedRunId: selectedAfterAction, statusMessage };
+    const approvalRequest = approveRunApproval(runId);
+    void pollApprovedRunProgress(runId, selectedAfterAction).catch((err: unknown) => {
+      setError(err instanceof Error ? err.message : '刷新审批后的 Run 进度失败');
+    });
+    void approvalRequest
+      .then(async (run) => {
+        const updatedRuns = [run];
+        if (nextSelectedRunId && nextSelectedRunId !== run.run_id) {
+          try {
+            updatedRuns.push(await getRun(nextSelectedRunId));
+          } catch {
+            // The background polling path will retry; approval already succeeded.
+          }
+        }
+        upsertRunDetailCache(updatedRuns);
+        await refreshRunGroupsForRuns(updatedRuns);
+        setSelectedRunId(selectedAfterAction);
+        setStatus(approvedRunStatusMessage(run));
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : '批准 Run 审批失败');
+        void refresh({ selectedRunId: selectedAfterAction }).catch(() => undefined);
+      });
+    return {
+      selectedRunId: selectedAfterAction,
+      statusMessage: '已批准，Run 正在继续执行。',
+      skipRefresh: true,
+    };
   }
 
   async function rejectRunById(runId: string, nextSelectedRunId?: string): Promise<StudioRefreshOptions> {
