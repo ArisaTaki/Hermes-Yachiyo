@@ -1119,9 +1119,8 @@ function RunExpandableContent({
   );
 }
 
-function compactWorkflowStepText(value: unknown, maxLength = 420): string {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
-  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+function workflowStepDetailText(value: unknown): string {
+  return String(value || '').trim();
 }
 
 function workflowApprovalPayloadSummary(event: Record<string, unknown>): string {
@@ -1132,9 +1131,9 @@ function workflowApprovalPayloadSummary(event: Record<string, unknown>): string 
   if (!preview || typeof preview !== 'object') return timelineEventPayload(event);
   const input = preview as Record<string, unknown>;
   const lines: string[] = [];
-  const checkpoint = compactWorkflowStepText(input.checkpoint, 180);
-  const criteria = compactWorkflowStepText(input.criteria || input.approval_criteria || input.instructions, 520);
-  const context = compactWorkflowStepText(input.context, 520);
+  const checkpoint = workflowStepDetailText(input.checkpoint);
+  const criteria = workflowStepDetailText(input.criteria || input.approval_criteria || input.instructions);
+  const context = workflowStepDetailText(input.context);
   if (checkpoint) lines.push(`审批节点：${checkpoint}`);
   if (criteria) lines.push(`审批说明：${criteria}`);
   if (context) lines.push(`当前上下文：${context}`);
