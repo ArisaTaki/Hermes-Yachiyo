@@ -647,25 +647,56 @@ class ChatAPI:
         if current_context.get("conversation_kind") == "group" and runnable.get("kind") == "agent":
             upstream = self._with_group_context_for_agent_upstream(upstream, current_context, target)
 
-        # 判断是否为 Workflow（同步执行）
         is_workflow = runnable.get("kind") == "workflow"
 
         if is_workflow:
-            # Workflow 保持同步执行
+            sender = self._participant_for_runnable(runnable)
+            is_group_context = current_context.get("conversation_kind") == "group"
+            assistant_id = self._session.add_assistant_message(
+                "",
+                metadata={
+                    "sender": sender,
+                    "runnable_kind": "workflow",
+                    "runnable_id": runnable.get("id") or "",
+                    "run_group_id": run_group_id,
+                    "run_status": "processing",
+                    "workflow_status": "processing",
+                },
+            )
+            self._session.update_assistant_message(
+                assistant_id,
+                "",
+                status=MessageStatus.PROCESSING,
+            )
+            callback_session_id = self._session.session_id
+
+            def _on_workflow_run_complete(run_result: dict[str, Any]) -> None:
+                def _sync_completed_workflow() -> None:
+                    self._sync_runnable_run_status_to_messages()
+                    if is_group_context:
+                        self._create_pending_group_agent_summary_tasks()
+
+                self._with_session(callback_session_id, _sync_completed_workflow)
+                logger.info("Workflow Run 异步完成: run_id=%s, status=%s", run_result.get("run_id"), run_result.get("status"))
+
             try:
-                run = service.create_run_for_runnable(
+                run = service.create_run_for_runnable_async(
                     runnable_id=str(runnable.get("id") or ""),
                     name=name,
                     user_goal=user_goal,
                     run_group_id=run_group_id,
                     upstream=upstream,
+                    on_complete=_on_workflow_run_complete,
                 )
             except AgentRuntimeError as exc:
                 content = str(exc)
                 self._session.mark_message_completed(message_id)
-                assistant_id = self._session.add_assistant_message(
+                self._session.update_assistant_message(
+                    assistant_id,
                     content,
-                    metadata={"sender": self._main_model_sender(), "runnable_kind": "workflow"},
+                    status=MessageStatus.FAILED,
+                    error=content,
+                    metadata={"run_status": "failed", "workflow_status": "failed"},
                 )
                 return {
                     "ok": True,
@@ -684,19 +715,37 @@ class ChatAPI:
                 self._create_pending_group_agent_summary_tasks()
             else:
                 self._bind_session_context("workflow", runnable, run_group_id=str(run.get("run_group_id") or ""))
-            assistant_ids = self._append_workflow_run_messages(service, run, runnable)
+            title, detail = self._workflow_run_progress_from_timeline(sender, run)
+            self._session.update_assistant_message(
+                assistant_id,
+                "",
+                status=MessageStatus.PROCESSING,
+                metadata={
+                    "sender": sender,
+                    "runnable_kind": "workflow",
+                    "runnable_id": runnable.get("id") or run.get("runnable_id") or "",
+                    "run_id": run.get("run_id") or "",
+                    "workflow_run_id": run.get("run_id") or "",
+                    "run_group_id": run.get("run_group_id", ""),
+                    "run_status": "processing",
+                    "workflow_status": "processing",
+                    "pending_approval": {},
+                    "run_progress_title": title,
+                    "run_progress_detail": detail,
+                },
+            )
 
             return {
                 "ok": True,
                 "runnable_command": True,
                 "message_id": message_id,
-                "assistant_message_id": assistant_ids[-1] if assistant_ids else "",
-                "assistant_message_ids": assistant_ids,
+                "assistant_message_id": assistant_id,
+                "assistant_message_ids": [assistant_id],
                 "task_id": "",
-                "status": "completed",
+                "status": "processing",
                 "run_id": run["run_id"],
                 "run_group_id": run.get("run_group_id", ""),
-                "run_status": run["status"],
+                "run_status": "processing",
                 "workflow_run_id": run["run_id"],
             }
 
@@ -717,8 +766,6 @@ class ChatAPI:
                 "source_message_id": message_id if is_group_context else "",
             },
         )
-        # 标记为 processing 状态
-        from apps.core.chat_session import MessageStatus
         self._session.update_assistant_message(
             assistant_id,
             initial_content,

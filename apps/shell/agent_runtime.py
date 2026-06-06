@@ -3417,6 +3417,101 @@ class AgentRuntimeService:
             root_group=root_group,
         )
 
+    def create_workflow_run_async(
+        self,
+        payload: dict[str, Any],
+        on_complete: "Callable[[dict[str, Any]], None] | None" = None,
+    ) -> dict[str, Any]:
+        workflow_id = str(payload.get("workflow_id") or payload.get("runnable_id") or "")
+        user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
+        if not workflow_id:
+            raise AgentRuntimeError("缺少 workflow_id")
+        if not user_goal:
+            raise AgentRuntimeError("运行目标不能为空")
+        workflow = self.get_workflow(workflow_id)
+        if not workflow.get("enabled", True):
+            raise AgentRuntimeError("Workflow 已停用")
+        self.validate_workflow(workflow["nodes"], workflow["edges"])
+        self._validate_workflow_agent_nodes(workflow["nodes"])
+        self._validate_workflow_runnable_steps(workflow["nodes"])
+        self._validate_workflow_agent_run_readiness(workflow["nodes"])
+
+        run_group_id = str(payload.get("run_group_id") or "").strip()
+        root_group = False
+        if run_group_id:
+            self.get_run_group(run_group_id)
+        else:
+            group = self._insert_run_group(
+                title=f"{workflow['name']}: {user_goal[:80]}",
+                source=str(payload.get("source") or "workflow"),
+                workspace_dir="",
+            )
+            run_group_id = group["run_group_id"]
+            root_group = True
+
+        run = self._insert_run(kind="workflow_run", runnable_id=workflow_id, user_goal=user_goal, run_group_id=run_group_id)
+        timeline = [
+            self._timeline(
+                "workflow.run.started",
+                workflow["name"],
+                workflow_path=self._workflow_path_snapshot(workflow),
+                workflow_snapshot=self._workflow_runtime_snapshot(workflow),
+            )
+        ]
+        run = self._update_run(
+            run["run_id"],
+            status="running",
+            timeline=timeline,
+            artifacts=[],
+            pending_approval=None,
+        )
+        result = {
+            **run,
+            "status": "processing",
+            "workflow_run_id": run["run_id"],
+            "runnable": self.resolve_runnable(runnable_id=workflow_id),
+        }
+
+        def _execute_in_background() -> None:
+            try:
+                exec_result = self._continue_workflow_run(
+                    run,
+                    workflow,
+                    context=user_goal,
+                    timeline=list(timeline),
+                    artifacts=[],
+                    start_index=0,
+                    root_group=root_group,
+                )
+                if on_complete:
+                    on_complete(exec_result)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).error(
+                    "异步 Workflow Run 执行失败: %s", exc, exc_info=True
+                )
+                failed = self._update_run(
+                    run["run_id"],
+                    status="failed",
+                    result=str(exc),
+                    timeline=[*timeline, self._timeline("workflow.run.failed", str(exc), status="failed")],
+                    artifacts=[],
+                    pending_approval=None,
+                )
+                if root_group:
+                    self._update_run_group(run_group_id, status="failed", summary=str(exc))
+                if on_complete:
+                    on_complete(failed)
+
+        thread = threading.Thread(
+            target=_execute_in_background,
+            name=f"workflow-run-{run['run_id'][:8]}",
+            daemon=True,
+        )
+        thread.start()
+
+        return result
+
     def _workflow_parent_runs_waiting_for_child(
         self,
         child_run: dict[str, Any],
@@ -4601,10 +4696,7 @@ class AgentRuntimeService:
         upstream: str = "",
         on_complete: "Callable[[dict[str, Any]], None] | None" = None,
     ) -> dict[str, Any]:
-        """创建 Run 并立即返回，异步执行实际任务。
-
-        仅支持 Agent Run；Workflow Run 仍使用同步方式。
-        """
+        """创建 Run 并立即返回，异步执行实际任务。"""
         runnable = self.resolve_runnable(runnable_id=runnable_id, name=name)
         if runnable is None:
             raise AgentRuntimeError("未找到指定 Agent 或 Workflow")
@@ -4626,13 +4718,15 @@ class AgentRuntimeService:
             run["runnable"] = runnable
             return run
 
-        # Workflow Run 保持同步执行
-        run = self.create_workflow_run({
-            "workflow_id": runnable["id"],
-            "user_goal": user_goal,
-            "source": "workflow",
-            "run_group_id": run_group_id,
-        })
+        run = self.create_workflow_run_async(
+            {
+                "workflow_id": runnable["id"],
+                "user_goal": user_goal,
+                "source": "workflow",
+                "run_group_id": run_group_id,
+            },
+            on_complete=on_complete,
+        )
         run["workflow_run_id"] = run["run_id"]
         run["runnable"] = runnable
         return run

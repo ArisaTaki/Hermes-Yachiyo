@@ -57,10 +57,21 @@ def _wait_for_agent_run(service: AgentRuntimeService, run_id: str, timeout: floa
     deadline = time.time() + timeout
     while time.time() < deadline:
         run = service.get_run(run_id)
-        if run["status"] in ("completed", "failed", "approval_required"):
+        if run["status"] in ("completed", "failed", "cancelled", "approval_required"):
             return run
         time.sleep(0.1)
     raise TimeoutError(f"Agent Run {run_id} 未在 {timeout} 秒内完成")
+
+
+def _wait_for_assistant_content_contains(api: ChatAPI, content: str, timeout: float = 5.0) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        payload = api.get_messages()
+        for message in payload["messages"]:
+            if message["role"] == "assistant" and content in str(message["content"] or ""):
+                return message
+        time.sleep(0.05)
+    raise TimeoutError(f"Assistant message containing {content!r} 未在 {timeout} 秒内写入")
 
 
 def _wait_for_assistant_content(runtime: _RuntimeStub, content: str, timeout: float = 5.0) -> None:
@@ -302,14 +313,13 @@ def test_workflow_mention_creates_workflow_run_from_chat(tmp_path, monkeypatch):
         assert workflow_result["ok"] is True
         assert workflow_result["runnable_command"] is True
         assert workflow_result["workflow_run_id"]
-        run = service.get_run(workflow_result["workflow_run_id"])
+        assert workflow_result["status"] == "processing"
+        run = _wait_for_agent_run(service, workflow_result["workflow_run_id"])
         assert run["status"] == "completed"
         assert run["result"] == "Code output"
-        messages = api.get_messages()["messages"]
-        assistant_messages = [message for message in messages if message["role"] == "assistant"]
-        assert [message["content"] for message in assistant_messages[:2]] == ["Design output", "Code output"]
-        assert assistant_messages[-1]["metadata"]["runnable_kind"] == "workflow"
-        assert assistant_messages[-1]["metadata"]["workflow_run_id"] == workflow_result["workflow_run_id"]
+        workflow_message = _wait_for_assistant_content_contains(api, "Code output")
+        assert workflow_message["metadata"]["runnable_kind"] == "workflow"
+        assert workflow_message["metadata"]["workflow_run_id"] == workflow_result["workflow_run_id"]
         current = next(
             item for item in api.list_sessions()["sessions"]
             if item["session_id"] == runtime.chat_session.session_id
@@ -1653,31 +1663,31 @@ def test_manual_group_workflow_run_flushes_previous_completed_agent_summary(tmp_
             return None
 
         def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+            if runnable_id == workflow["id"]:
+                run = {
+                    "run_id": "workflow_run_demo",
+                    "run_group_id": run_group_id or "run_group_workflow",
+                    "kind": "workflow_run",
+                    "runnable_id": workflow["id"],
+                    "runnable_name": workflow["name"],
+                    "status": "completed",
+                    "result": "流程完成。",
+                    "timeline": [
+                        {"event": "workflow.run.started", "detail": workflow["name"]},
+                        {"event": "workflow.run.completed", "detail": workflow["name"]},
+                    ],
+                    "runnable": workflow,
+                }
+                self.runs[run["run_id"]] = run
+                if on_complete:
+                    on_complete(run)
+                return {**run, "status": "processing"}
             run = {
                 "run_id": "agent_run_design",
                 "run_group_id": run_group_id or "run_group_design",
                 "status": "processing",
                 "result": "",
                 "runnable": design,
-            }
-            self.runs[run["run_id"]] = run
-            return run
-
-        def create_run_for_runnable(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream=""):
-            assert runnable_id == workflow["id"]
-            run = {
-                "run_id": "workflow_run_demo",
-                "run_group_id": run_group_id or "run_group_workflow",
-                "kind": "workflow_run",
-                "runnable_id": workflow["id"],
-                "runnable_name": workflow["name"],
-                "status": "completed",
-                "result": "流程完成。",
-                "timeline": [
-                    {"event": "workflow.run.started", "detail": workflow["name"]},
-                    {"event": "workflow.run.completed", "detail": workflow["name"]},
-                ],
-                "runnable": workflow,
             }
             self.runs[run["run_id"]] = run
             return run
@@ -1702,7 +1712,7 @@ def test_manual_group_workflow_run_flushes_previous_completed_agent_summary(tmp_
 
         workflow_result = api.send_message("@Flow 跑一下流程")
         assert workflow_result["ok"] is True
-        assert workflow_result["status"] == "completed"
+        assert workflow_result["status"] == "processing"
         assert workflow_result["workflow_run_id"] == "workflow_run_demo"
 
         messages = api.get_messages()["messages"]
@@ -5465,7 +5475,7 @@ def test_manual_group_workflow_mention_runs_workflow_and_stays_in_group(tmp_path
                     return runnable
             return None
 
-        def create_run_for_runnable(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream=""):
+        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
             assert runnable_id == workflow["id"]
             run = {
                 "run_id": "workflow_run_web",
@@ -5482,7 +5492,9 @@ def test_manual_group_workflow_mention_runs_workflow_and_stays_in_group(tmp_path
                 "runnable": workflow,
             }
             self.runs[run["run_id"]] = run
-            return run
+            if on_complete:
+                on_complete(run)
+            return {**run, "status": "processing"}
 
         def get_run(self, run_id):
             return self.runs[run_id]
@@ -5498,6 +5510,7 @@ def test_manual_group_workflow_mention_runs_workflow_and_stays_in_group(tmp_path
         result = api.send_message("@Web Flow 做一个网页链路")
         assert result["ok"] is True
         assert result["runnable_command"] is True
+        assert result["status"] == "processing"
         assert result["workflow_run_id"] == "workflow_run_web"
 
         current = next(item for item in api.list_sessions()["sessions"] if item["session_id"] == runtime.chat_session.session_id)
