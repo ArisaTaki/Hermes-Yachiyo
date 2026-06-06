@@ -177,6 +177,7 @@ const studioRouteTabs: StudioTab[] = ['agents', 'skills', 'skill-groups', 'workf
 const studioTabs: StudioTab[] = ['agents', 'skills', 'workflows', 'runs'];
 const skillFolderNameMaxLength = 120;
 const workflowNodeTypes = new Set(['start', 'agent', 'approval', 'artifact']);
+const workflowRunnableNodeTypes = new Set(['agent', 'approval', 'artifact']);
 const workflowRunnableStepRequiredMessage = 'Workflow 至少需要一个可执行节点（Agent、Approval 或 Artifact）';
 
 function workflowStepKind(value: unknown): WorkflowStepRef['kind'] {
@@ -579,8 +580,8 @@ function validateWorkflowDraft(nodes: Node[], edges: Edge[], agents: AgentSpec[]
     }
   }
 
-  if (!nodes.some((node) => workflowNodeKind(node) !== 'start')) {
-    warnings.push('当前只有 Start 节点；可以保存草稿，但运行前需要添加 Agent、Approval 或 Artifact。');
+  if (!workflowHasRunnableSteps(nodes)) {
+    warnings.push('当前没有可执行节点；可以保存草稿，但运行前需要添加 Agent、Approval 或 Artifact。');
   }
 
   return {
@@ -590,7 +591,7 @@ function validateWorkflowDraft(nodes: Node[], edges: Edge[], agents: AgentSpec[]
 }
 
 function workflowHasRunnableSteps(nodes: Node[]): boolean {
-  return nodes.some((node) => workflowNodeKind(node) !== 'start');
+  return nodes.some((node) => workflowRunnableNodeTypes.has(workflowNodeKind(node)));
 }
 
 function workflowRequestNodes(nodes: Node[]): WorkflowSpec['nodes'] {
