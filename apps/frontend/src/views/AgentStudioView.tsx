@@ -179,6 +179,12 @@ const skillFolderNameMaxLength = 120;
 const workflowNodeTypes = new Set(['start', 'agent', 'approval', 'artifact']);
 const workflowRunnableStepRequiredMessage = 'Workflow 至少需要一个可执行节点（Agent、Approval 或 Artifact）';
 
+function workflowStepKind(value: unknown): WorkflowStepRef['kind'] {
+  const kind = String(value || '').trim();
+  if (kind === 'start' || kind === 'agent' || kind === 'approval' || kind === 'artifact') return kind;
+  return 'unknown';
+}
+
 const starterNodes: Node[] = [
   { id: 'start', type: 'input', position: { x: 40, y: 120 }, data: { label: 'Start', kind: 'start' } },
 ];
@@ -1148,9 +1154,7 @@ function workflowArtifactPath(event: Record<string, unknown>): string {
 }
 
 function workflowEventNodeKind(event: Record<string, unknown>): WorkflowStepRef['kind'] {
-  const value = String(event.workflow_node_kind || '');
-  if (value === 'start' || value === 'approval' || value === 'artifact') return value;
-  return 'agent';
+  return workflowStepKind(event.workflow_node_kind);
 }
 
 function workflowSpecNodeKind(node: WorkflowSpec['nodes'][number]): WorkflowStepRef['kind'] {
@@ -1160,8 +1164,7 @@ function workflowSpecNodeKind(node: WorkflowSpec['nodes'][number]): WorkflowStep
   const value = dataKind && ['', 'input', 'default', 'output'].includes(nodeType)
     ? dataKind
     : nodeType || dataKind;
-  if (value === 'start' || value === 'agent' || value === 'approval' || value === 'artifact') return value;
-  return 'unknown';
+  return workflowStepKind(value);
 }
 
 function workflowNodeTaskFromData(data: Record<string, unknown> | undefined): string {
@@ -1241,8 +1244,7 @@ function workflowSnapshotStepRefs(run: RunSpec | null): WorkflowStepRef[] {
     .map((item, index) => {
       if (!item || typeof item !== 'object') return null;
       const row = item as Record<string, unknown>;
-      const rawKind = String(row.kind || 'agent');
-      const kind: WorkflowStepRef['kind'] = rawKind === 'start' || rawKind === 'approval' || rawKind === 'artifact' ? rawKind : 'agent';
+      const kind = workflowStepKind(row.kind);
       const nodeId = String(row.id || '');
       const label = String(row.label || nodeId || workflowStepKindLabel(kind)).trim();
       const artifactPath = kind === 'artifact' ? String(row.artifact_path || row.artifactPath || '').trim() : '';
@@ -1423,6 +1425,7 @@ function workflowStepSummary(step: WorkflowStepRef, childRun: RunSpec | null): s
         ? `等待前置节点完成后写出 Workflow artifact：${step.artifactPath}`
         : '等待前置节点完成后写出 artifact。';
     }
+    if (step.kind === 'unknown') return '等待修复或确认未知 Workflow 节点。';
     if (step.task) return `等待前置节点完成后执行：${step.task}`;
     return '等待前置节点完成后执行。';
   }
@@ -1436,6 +1439,7 @@ function workflowStepSummary(step: WorkflowStepRef, childRun: RunSpec | null): s
   if (step.kind === 'artifact') {
     return step.artifactPath ? `写出 Workflow artifact：${step.artifactPath}` : '写出 Workflow artifact。';
   }
+  if (step.kind === 'unknown') return step.payload || '未知 Workflow 节点，建议检查 Workflow 定义或导入数据。';
   return childRun?.result || step.payload || 'No result yet.';
 }
 
@@ -1481,9 +1485,11 @@ function WorkflowRunPreview({
             ? step.task || '接收 Workflow Goal 和上游上下文。'
             : step.kind === 'approval'
               ? step.task || '等待人工确认后继续。'
-              : step.artifactPath
-                ? `写出 artifact：${step.artifactPath}`
-                : '按节点名称自动生成 artifact 路径。';
+              : step.kind === 'artifact'
+                ? step.artifactPath
+                  ? `写出 artifact：${step.artifactPath}`
+                  : '按节点名称自动生成 artifact 路径。'
+                : '未知节点类型，运行前需要修复 Workflow 定义。';
           return (
             <li className={`workflow-run-preview-step ${step.kind}`} key={step.key}>
               <span className="workflow-run-preview-index">{index + 1}</span>

@@ -14198,6 +14198,16 @@ button.activity-item {
   background: oklch(255 0 0 / 0.025);
 }
 
+.workflow-run-preview-step.unknown {
+  border-color: oklch(58% 0.19 24 / 0.28);
+  background: oklch(58% 0.19 24 / 0.045);
+}
+
+.workflow-run-preview-step.unknown .workflow-run-preview-index {
+  border-color: oklch(58% 0.19 24 / 0.34);
+  color: oklch(84% 0.09 24);
+}
+
 .workflow-run-preview-index {
   display: inline-flex;
   align-items: center;
@@ -16086,6 +16096,11 @@ button.activity-item {
 .workflow-step-result.artifact {
   border-color: oklch(68% 0.15 155 / 0.2);
   background: oklch(68% 0.15 155 / 0.035);
+}
+
+.workflow-step-result.unknown {
+  border-color: oklch(58% 0.19 24 / 0.28);
+  background: oklch(58% 0.19 24 / 0.045);
 }
 
 .workflow-child-result-head {
