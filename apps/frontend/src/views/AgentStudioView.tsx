@@ -73,7 +73,7 @@ type WorkflowChildRunRef = {
 
 type WorkflowStepRef = {
   key: string;
-  kind: 'start' | 'agent' | 'approval' | 'artifact';
+  kind: 'start' | 'agent' | 'approval' | 'artifact' | 'unknown';
   nodeId?: string;
   label: string;
   status: string;
@@ -1154,9 +1154,14 @@ function workflowEventNodeKind(event: Record<string, unknown>): WorkflowStepRef[
 }
 
 function workflowSpecNodeKind(node: WorkflowSpec['nodes'][number]): WorkflowStepRef['kind'] {
-  const value = String(node.data?.kind || node.type || 'agent');
-  if (value === 'start' || value === 'approval' || value === 'artifact') return value;
-  return 'agent';
+  const data = node.data || {};
+  const dataKind = String(data.kind || data.node_type || '').trim();
+  const nodeType = String(node.type || '').trim();
+  const value = dataKind && ['', 'input', 'default', 'output'].includes(nodeType)
+    ? dataKind
+    : nodeType || dataKind;
+  if (value === 'start' || value === 'agent' || value === 'approval' || value === 'artifact') return value;
+  return 'unknown';
 }
 
 function workflowNodeTaskFromData(data: Record<string, unknown> | undefined): string {
@@ -1405,7 +1410,8 @@ function workflowStepKindLabel(kind: WorkflowStepRef['kind']): string {
   if (kind === 'start') return 'Start';
   if (kind === 'agent') return 'Agent';
   if (kind === 'approval') return 'Approval';
-  return 'Artifact';
+  if (kind === 'artifact') return 'Artifact';
+  return 'Unknown';
 }
 
 function workflowStepSummary(step: WorkflowStepRef, childRun: RunSpec | null): string {
