@@ -41,6 +41,7 @@
 - ✅ 2026-06-05 追加：Workflow 的内置 seed 和 Agent Studio “全线测试模板”会预填每个 Agent 的 Step Task、网页点子模板的审批 Criteria，以及 Phase 4 模板的默认 artifact 路径；前端模板只会选择启用 Agent，用户新建模板时能直接看到每个节点要做什么，默认 seed 的回归也确认 6 个子 Agent 收到各自任务而不是同一个裸目标。
 - ✅ 2026-06-05 追加：Workflow Studio 的 Workflow Run 区域会按当前画布显示运行顺序预览，Runs 面板手动选择 Workflow 时也会显示保存后流程的同款预览；预览列出将要执行的 Agent / Approval / Artifact 步骤、Step Task、审批说明和预计 artifact 路径，并和保存/校验请求复用同一套节点/连线组装逻辑，减少“画布看到的”“Runs 入口看到的”和“实际保存运行的”不一致。
 - ✅ Workflow / Runs 的能力摘要会标出停用 Agent，Workflow palette 中停用项保持不可点击且有明确 disabled 视觉状态；Runs 手动运行下拉也会禁用停用目标，运行按钮会在目标停用时禁用并提示原因；已有节点绑定到停用 Agent 时，节点设置预览也能看见状态，便于解释为什么校验/运行会被拦截。
+- ✅ 2026-06-06 追加：Workflow Studio 支持显式启用/停用当前 Workflow，保存时不再固定把 `enabled` 写回 `true`；停用 Workflow 的侧边列表会显示“停用”，保存并运行会按当前草稿启停状态给出运行禁用原因，避免打开保存一次就偷偷重新启用旧 Workflow。
 - ✅ Agent Studio 编辑页会直接展示当前 Agent 的运行前状态：缺 Chat Profile / Custom API 配置不完整、挂载停用 Skill、`workspace.write_patch` / `terminal.run` 会进入审批、写入 scope 为空等都会在 Capabilities 下提示；Quick Run 也会在模型配置不可用时提前禁用，减少用户把权限或配置问题误判成 Workflow 链路故障。
 - ✅ 2026-06-05 追加：Runs 手动选择单个 Agent 时也会复用 Agent readiness 提示；后端会在创建 Agent Run 前拦截 Custom API 缺字段、停用 Skill、停用 Agent 等确定的本地配置错误，但保留旧 Profile 缺失 Agent 创建失败 Run 的兼容留档语义。
 - ✅ Agent / Workflow 的近场运行入口也补齐防误触：Agent Quick Run 会在 Agent 停用、已挂载 Skill 停用、目标为空时禁用并给出可见原因；Workflow 保存并运行会在 Workflow 停用、校验错误或目标为空时禁用并提示原因，和 Runs 手动运行入口保持一致。

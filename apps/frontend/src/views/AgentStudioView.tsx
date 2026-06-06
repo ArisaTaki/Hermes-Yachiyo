@@ -1697,6 +1697,7 @@ export function AgentStudioView() {
   const [skillMountSearch, setSkillMountSearch] = useState('');
   const [workflowName, setWorkflowName] = useState('New Workflow');
   const [workflowDescription, setWorkflowDescription] = useState('');
+  const [workflowEnabled, setWorkflowEnabled] = useState(true);
   const [agentRunGoal, setAgentRunGoal] = useState('');
   const [workflowRunGoal, setWorkflowRunGoal] = useState('');
   const [runTarget, setRunTarget] = useState(() => routeRunTarget);
@@ -1834,14 +1835,14 @@ export function AgentStudioView() {
     return '';
   }, [agentRunIssueById, agents, selectedRunTarget, selectedRunTargetDisabled, selectedRunTargetWorkflow, selectedRunTargetWorkflowAgentIssue, selectedRunTargetWorkflowNodes, selectedRunTargetWorkflowValidation.errors]);
   const workflowRunDisabledReason = useMemo(() => {
-    if (selectedWorkflow?.enabled === false) return '当前 Workflow 已停用，无法运行。';
+    if (!workflowEnabled) return '当前 Workflow 已停用，无法运行。';
     if (workflowNameError) return workflowNameError;
     if (workflowHasErrors) return workflowPrimaryError || '当前 Workflow 存在校验错误。';
     if (!workflowRunGoal.trim()) return '请输入运行目标。';
     if (!workflowHasRunnableSteps(nodes)) return workflowRunnableStepRequiredMessage;
     if (workflowRunAgentIssue) return workflowRunAgentIssue;
     return '';
-  }, [nodes, selectedWorkflow, workflowHasErrors, workflowNameError, workflowPrimaryError, workflowRunAgentIssue, workflowRunGoal]);
+  }, [nodes, workflowEnabled, workflowHasErrors, workflowNameError, workflowPrimaryError, workflowRunAgentIssue, workflowRunGoal]);
   const workflowRunDisabled = busy || Boolean(workflowRunDisabledReason);
   const runFilterCounts = useMemo(
     () => ({
@@ -2391,6 +2392,7 @@ export function AgentStudioView() {
     setEdges(workflowEdges(selectedWorkflow));
     setWorkflowName(selectedWorkflow?.name || 'New Workflow');
     setWorkflowDescription(selectedWorkflow?.description || '');
+    setWorkflowEnabled(selectedWorkflow?.enabled !== false);
   }, [selectedWorkflow, setEdges, setNodes]);
 
   const onConnect = useCallback(
@@ -2419,6 +2421,7 @@ export function AgentStudioView() {
     setEdges([]);
     setWorkflowName('New Workflow');
     setWorkflowDescription('');
+    setWorkflowEnabled(true);
     setStatus('正在编辑新的 Workflow 草稿');
     setError('');
   }
@@ -2433,6 +2436,7 @@ export function AgentStudioView() {
     setSelectedWorkflowId('');
     setWorkflowName('Phase 4 Agent 全线流通测试');
     setWorkflowDescription('依次调用 Orchestrator、Research、Design、Coding、Review、Office，并写出最终 Artifact。');
+    setWorkflowEnabled(true);
     setNodes(nextNodes);
     setEdges(linearEdgesForNodes(nextNodes));
     setStatus(`已生成全线测试模板：${agentNodeCount} 个启用 Agent 节点`);
@@ -2767,7 +2771,7 @@ export function AgentStudioView() {
       description: workflowDescription.trim(),
       nodes: workflowRequestNodes(nodes),
       edges: workflowRequestEdges(edges),
-      enabled: true,
+      enabled: workflowEnabled,
     };
   }
 
@@ -3652,7 +3656,7 @@ export function AgentStudioView() {
                   onClick={() => selectWorkflow(workflow.workflow_id)}
                 >
                   <strong>{workflow.name}</strong>
-                  <span>{workflow.nodes.length} nodes · {workflow.edges.length} edges</span>
+                  <span>{workflow.enabled === false ? '停用 · ' : ''}{workflow.nodes.length} nodes · {workflow.edges.length} edges</span>
                 </button>
               ))}
             </div>
@@ -3661,6 +3665,14 @@ export function AgentStudioView() {
             <div className="workflow-toolbar">
               <input className="hy-input" value={workflowName} onChange={(event) => setWorkflowName(event.target.value)} />
               <input className="hy-input" value={workflowDescription} onChange={(event) => setWorkflowDescription(event.target.value)} placeholder="Description" />
+              <label className="agent-checkbox-row workflow-enabled-toggle">
+                <input
+                  type="checkbox"
+                  checked={workflowEnabled}
+                  onChange={(event) => setWorkflowEnabled(event.target.checked)}
+                />
+                <span>启用</span>
+              </label>
               <button
                 type="button"
                 className="workflow-template-action"
