@@ -249,7 +249,7 @@ def test_agent_scoped_session_continues_without_new_mention(tmp_path, monkeypatc
         store.close()
 
 
-def test_workflow_mention_guides_to_studio_while_workflow_run_still_executes(tmp_path, monkeypatch):
+def test_workflow_mention_creates_workflow_run_from_chat(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
@@ -301,40 +301,28 @@ def test_workflow_mention_guides_to_studio_while_workflow_run_still_executes(tmp
 
         assert workflow_result["ok"] is True
         assert workflow_result["runnable_command"] is True
-        assert "workflow_run_id" not in workflow_result
-        assert service.list_runs(limit=20)["runs"] == []
+        assert workflow_result["workflow_run_id"]
+        run = service.get_run(workflow_result["workflow_run_id"])
+        assert run["status"] == "completed"
+        assert run["result"] == "Code output"
         messages = api.get_messages()["messages"]
         assistant_messages = [message for message in messages if message["role"] == "assistant"]
-        assert len(assistant_messages) == 1
-        assert "Workflow Studio" in assistant_messages[0]["content"]
-        assert "群聊里需要协作" in assistant_messages[0]["content"]
-        assert assistant_messages[0]["metadata"]["guidance_type"] == "workflow_chat_entry_disabled"
-        assert assistant_messages[0]["metadata"]["runnable_id"] == workflow["workflow_id"]
-        assert assistant_messages[0]["metadata"]["runnable_name"] == "Web Flow"
-        assert assistant_messages[0]["metadata"]["suggested_goal"] == "做一个网页设计链路"
+        assert [message["content"] for message in assistant_messages[:2]] == ["Design output", "Code output"]
+        assert assistant_messages[-1]["metadata"]["runnable_kind"] == "workflow"
+        assert assistant_messages[-1]["metadata"]["workflow_run_id"] == workflow_result["workflow_run_id"]
         current = next(
             item for item in api.list_sessions()["sessions"]
             if item["session_id"] == runtime.chat_session.session_id
         )
-        assert current["conversation_kind"] == "main"
-        assert current["runnable_id"] == ""
-
-        run = service.create_workflow_run(
-            {
-                "workflow_id": workflow["workflow_id"],
-                "user_goal": "做一个网页设计链路",
-            }
-        )
-
-        assert run["status"] == "completed"
-        assert run["result"] == "Code output"
+        assert current["conversation_kind"] == "workflow"
+        assert current["runnable_id"] == workflow["workflow_id"]
         group = service.get_run_group(run["run_group_id"])
         assert group["status"] == "completed"
         assert run["run_id"] in group["child_run_ids"]
         assert len(group["child_run_ids"]) == 3
         stored = store.get_session(runtime.chat_session.session_id)
         assert stored is not None
-        assert stored.conversation_kind == "main"
+        assert stored.conversation_kind == "workflow"
     finally:
         service.close()
         store.close()
@@ -1629,7 +1617,7 @@ def test_manual_group_agent_error_flushes_previous_completed_agent_summary(tmp_p
         store.close()
 
 
-def test_manual_group_workflow_guidance_flushes_previous_completed_agent_summary(tmp_path, monkeypatch):
+def test_manual_group_workflow_run_flushes_previous_completed_agent_summary(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     design = {
         "id": "agent_design",
@@ -1675,8 +1663,24 @@ def test_manual_group_workflow_guidance_flushes_previous_completed_agent_summary
             self.runs[run["run_id"]] = run
             return run
 
-        def create_run_for_runnable(self, **kwargs):
-            raise AssertionError("group workflow mention should guide to Studio instead of starting a run")
+        def create_run_for_runnable(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream=""):
+            assert runnable_id == workflow["id"]
+            run = {
+                "run_id": "workflow_run_demo",
+                "run_group_id": run_group_id or "run_group_workflow",
+                "kind": "workflow_run",
+                "runnable_id": workflow["id"],
+                "runnable_name": workflow["name"],
+                "status": "completed",
+                "result": "流程完成。",
+                "timeline": [
+                    {"event": "workflow.run.started", "detail": workflow["name"]},
+                    {"event": "workflow.run.completed", "detail": workflow["name"]},
+                ],
+                "runnable": workflow,
+            }
+            self.runs[run["run_id"]] = run
+            return run
 
         def get_run(self, run_id):
             return self.runs[run_id]
@@ -1696,17 +1700,19 @@ def test_manual_group_workflow_guidance_flushes_previous_completed_agent_summary
             "pending_approval": {},
         }
 
-        guidance_result = api.send_message("@Flow 跑一下流程")
-        assert guidance_result["ok"] is True
-        assert guidance_result["status"] == "completed"
+        workflow_result = api.send_message("@Flow 跑一下流程")
+        assert workflow_result["ok"] is True
+        assert workflow_result["status"] == "completed"
+        assert workflow_result["workflow_run_id"] == "workflow_run_demo"
 
         messages = api.get_messages()["messages"]
-        guidance = next(
+        workflow_message = next(
             message
             for message in messages
-            if message["id"] == guidance_result["assistant_message_id"]
+            if message["id"] == workflow_result["assistant_message_id"]
         )
-        assert "Workflow Studio" in guidance["content"]
+        assert workflow_message["metadata"]["runnable_kind"] == "workflow"
+        assert "Flow 已完成" in workflow_message["content"]
 
         summary = next(
             message
@@ -5424,7 +5430,7 @@ def test_retry_delegated_agent_failure_reruns_same_agent(tmp_path, monkeypatch):
         store.close()
 
 
-def test_manual_group_workflow_mention_stays_in_group_and_guides_to_studio(tmp_path, monkeypatch):
+def test_manual_group_workflow_mention_runs_workflow_and_stays_in_group(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     design = {
         "id": "agent_design",
@@ -5442,6 +5448,9 @@ def test_manual_group_workflow_mention_stays_in_group_and_guides_to_studio(tmp_p
     }
 
     class FakeRunnableService:
+        def __init__(self):
+            self.runs: dict[str, dict] = {}
+
         def list_runnables(self):
             return {"runnables": [design, workflow]}
 
@@ -5456,7 +5465,30 @@ def test_manual_group_workflow_mention_stays_in_group_and_guides_to_studio(tmp_p
                     return runnable
             return None
 
-    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeRunnableService())
+        def create_run_for_runnable(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream=""):
+            assert runnable_id == workflow["id"]
+            run = {
+                "run_id": "workflow_run_web",
+                "run_group_id": run_group_id or "run_group_web",
+                "kind": "workflow_run",
+                "runnable_id": workflow["id"],
+                "runnable_name": workflow["name"],
+                "status": "completed",
+                "result": "Web Flow done",
+                "timeline": [
+                    {"event": "workflow.run.started", "detail": workflow["name"]},
+                    {"event": "workflow.run.completed", "detail": workflow["name"]},
+                ],
+                "runnable": workflow,
+            }
+            self.runs[run["run_id"]] = run
+            return run
+
+        def get_run(self, run_id):
+            return self.runs[run_id]
+
+    service = FakeRunnableService()
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
     try:
         created = api.create_group_session(
             name="demo Channel",
@@ -5466,7 +5498,7 @@ def test_manual_group_workflow_mention_stays_in_group_and_guides_to_studio(tmp_p
         result = api.send_message("@Web Flow 做一个网页链路")
         assert result["ok"] is True
         assert result["runnable_command"] is True
-        assert "workflow_run_id" not in result
+        assert result["workflow_run_id"] == "workflow_run_web"
 
         current = next(item for item in api.list_sessions()["sessions"] if item["session_id"] == runtime.chat_session.session_id)
         assert current["conversation_kind"] == "group"
@@ -5477,8 +5509,9 @@ def test_manual_group_workflow_mention_stays_in_group_and_guides_to_studio(tmp_p
         assert "Web Flow" not in participant_names
         messages = api.get_messages()["messages"]
         assistant_messages = [message for message in messages if message["role"] == "assistant"]
-        assert assistant_messages[-1]["metadata"]["guidance_type"] == "workflow_chat_entry_disabled"
-        assert "Workflow Studio" in assistant_messages[-1]["content"]
+        assert assistant_messages[-1]["metadata"]["runnable_kind"] == "workflow"
+        assert assistant_messages[-1]["metadata"]["workflow_run_id"] == "workflow_run_web"
+        assert "Web Flow" in assistant_messages[-1]["content"]
     finally:
         store.close()
 

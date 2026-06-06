@@ -552,7 +552,6 @@ class ChatAPI:
         name = ""
         user_goal = text
         runnable: dict[str, Any] | None = None
-        mentioned_target = False
 
         try:
             if explicit_target:
@@ -562,7 +561,6 @@ class ChatAPI:
                 if parsed is None:
                     return None
                 name, user_goal = parsed
-                mentioned_target = True
                 explicit_target = True
                 runnable = service.resolve_runnable(name=name)
             elif current_context.get("conversation_kind") == "agent":
@@ -574,22 +572,6 @@ class ChatAPI:
         if runnable is None:
             return self._record_runnable_error(text, "未找到指定 Agent 或 Workflow", context=current_context)
 
-        if mentioned_target and runnable.get("kind") == "workflow":
-            workflow_name = str(runnable.get("name") or name or "Workflow").strip() or "Workflow"
-            content = (
-                f"{workflow_name} 是可设计、可复用的 Workflow，不再作为群聊里的 @ 成员直接触发。\n\n"
-                "请在 Agent Studio 的 Workflow Studio 或 Runs 面板选择它，填写目标后运行；"
-                "群聊里需要协作时，请 @主模型 或 @ 群组里的具体 Agent。"
-            )
-            return self._record_runnable_guidance(
-                text,
-                content,
-                runnable=runnable,
-                context=current_context,
-                guidance_type="workflow_chat_entry_disabled",
-                suggested_goal=user_goal,
-            )
-
         keep_workflow_group = (
             explicit_target
             and current_context.get("conversation_kind") == "workflow"
@@ -600,6 +582,11 @@ class ChatAPI:
             explicit_target
             and current_context.get("conversation_kind") == "group"
             and runnable.get("kind") == "agent"
+        )
+        keep_group_workflow = (
+            explicit_target
+            and current_context.get("conversation_kind") == "group"
+            and runnable.get("kind") == "workflow"
         )
         if keep_manual_group:
             if not self._group_context_contains_runnable(
@@ -617,7 +604,7 @@ class ChatAPI:
                     runnable=runnable,
                     context=current_context,
                 )
-        if not keep_workflow_group and not keep_manual_group:
+        if not keep_workflow_group and not keep_manual_group and not keep_group_workflow:
             self._prepare_runnable_session(
                 runnable,
                 explicit_target=explicit_target,
@@ -694,6 +681,7 @@ class ChatAPI:
             runnable = run.get("runnable") or runnable
             if current_context.get("conversation_kind") == "group":
                 self._bind_group_session_context(current_context, run_group_id=str(run.get("run_group_id") or ""))
+                self._create_pending_group_agent_summary_tasks()
             else:
                 self._bind_session_context("workflow", runnable, run_group_id=str(run.get("run_group_id") or ""))
             assistant_ids = self._append_workflow_run_messages(service, run, runnable)

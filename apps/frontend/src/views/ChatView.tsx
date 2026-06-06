@@ -3701,7 +3701,9 @@ function mentionOptionsForQuery(
         .map((participant) => participant.id)
         .filter(Boolean),
     );
-    scopedRunnables = runnables.filter((item) => item.kind === 'agent' && groupAgentIds.has(item.id));
+    scopedRunnables = runnables.filter((item) => (
+      item.kind === 'workflow' || (item.kind === 'agent' && groupAgentIds.has(item.id))
+    ));
   }
   return allMentionOptions(scopedRunnables, assistantProfile)
     .filter((option) => {
@@ -3731,6 +3733,22 @@ function allMentionOptions(
     main,
     ...runnables
       .filter((item) => item.kind === 'agent')
+      .map((item) => ({
+        id: item.id,
+        name: item.name,
+        nickname: item.nickname,
+        avatar_url: item.avatar_url,
+        kind: item.kind,
+        participants: (item.participants || []).map((participant) => ({
+          id: participant.id,
+          name: participant.name,
+          nickname: participant.nickname,
+          avatar_url: participant.avatar_url,
+          kind: participant.kind,
+        })),
+      })),
+    ...runnables
+      .filter((item) => item.kind === 'workflow')
       .map((item) => ({
         id: item.id,
         name: item.name,
