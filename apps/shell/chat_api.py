@@ -121,6 +121,17 @@ def _compact_preview(value: Any, limit: int = 72) -> str:
     return text[: limit - 3].rstrip() + "..."
 
 
+def _compact_structured_preview(value: Any, limit: int = 240) -> str:
+    if value in (None, "", [], {}):
+        return ""
+    if isinstance(value, (dict, list)):
+        try:
+            return _compact_preview(json.dumps(value, ensure_ascii=False, sort_keys=True), limit)
+        except (TypeError, ValueError):
+            pass
+    return _compact_preview(value, limit)
+
+
 def _looks_like_internal_protocol_preview(value: Any) -> bool:
     text = " ".join(str(value or "").split()).strip()
     if not text:
@@ -1243,6 +1254,50 @@ class ChatAPI:
                 }
             )
         return count, summaries
+
+    @staticmethod
+    def _run_execution_evidence_lines(run_result: dict[str, Any], max_events: int = 5) -> list[str]:
+        labels = {
+            "agent.tool.call": "工具调用",
+            "agent.tool.skipped": "工具跳过",
+            "agent.tool.denied": "工具拒绝",
+            "agent.tool.approval_required": "请求审批",
+            "agent.tool.approval_rejected": "审批拒绝",
+            "agent.run.failed": "Agent 失败",
+            "workflow.node.agent": "Workflow Agent 节点",
+            "workflow.node.approval_required": "Workflow 审批",
+            "workflow.node.approval_rejected": "Workflow 审批拒绝",
+            "workflow.run.failed": "Workflow 失败",
+            "workflow.run.cancelled": "Workflow 取消",
+        }
+        candidates: list[str] = []
+        for event in run_result.get("timeline") or []:
+            if not isinstance(event, dict):
+                continue
+            event_name = str(event.get("event") or "").strip()
+            is_failure = event_name.endswith(".failed") or event_name.endswith(".cancelled")
+            if event_name not in labels and not is_failure:
+                continue
+            label = labels.get(event_name) or event_name
+            detail = _compact_preview(str(event.get("detail") or "").strip(), 100)
+            parts = [f"{label}{f'：{detail}' if detail else ''}"]
+            status = _compact_preview(str(event.get("status") or "").strip(), 80)
+            if status:
+                parts.append(f"状态 {status}")
+            input_preview = _compact_structured_preview(event.get("input_preview"), 260)
+            if input_preview:
+                parts.append(f"请求 {input_preview}")
+            result_preview = _compact_structured_preview(event.get("result"), 340)
+            if result_preview:
+                parts.append(f"结果 {result_preview}")
+            approval_preview = _compact_structured_preview(event.get("pending_approval"), 260)
+            if approval_preview:
+                parts.append(f"审批 {approval_preview}")
+            child_run_id = _compact_preview(str(event.get("child_run_id") or "").strip(), 120)
+            if child_run_id:
+                parts.append(f"子 Run {child_run_id}")
+            candidates.append("；".join(parts))
+        return candidates[-max_events:]
 
     @staticmethod
     def _append_artifact_notice(content: str, artifact_count: int) -> str:
@@ -3736,6 +3791,10 @@ class ChatAPI:
             lines.append(f"  任务：{goal}")
         if result:
             lines.append(f"  汇报：{result}")
+        evidence_lines = self._run_execution_evidence_lines(run)
+        if evidence_lines:
+            lines.append("  执行线索：")
+            lines.extend(f"  - {item}" for item in evidence_lines)
         if artifact_summaries:
             artifact_parts = [
                 f"{item.get('path')} ({item.get('kind')})" if item.get("kind") else str(item.get("path") or "")
@@ -4029,6 +4088,16 @@ class ChatAPI:
                 lines.append(f"  任务：{goal}")
             if report:
                 lines.append(f"  汇报：{report}")
+            run_id = str(metadata.get("run_id") or metadata.get("agent_run_id") or "").strip()
+            if run_id:
+                try:
+                    run = get_agent_runtime_service().get_run(run_id)
+                except Exception:
+                    run = {}
+                evidence_lines = self._run_execution_evidence_lines(run) if run else []
+                if evidence_lines:
+                    lines.append("  执行线索：")
+                    lines.extend(f"  - {item}" for item in evidence_lines)
             artifacts = metadata.get("run_artifacts") if isinstance(metadata.get("run_artifacts"), list) else []
             artifact_parts: list[str] = []
             for artifact in artifacts:

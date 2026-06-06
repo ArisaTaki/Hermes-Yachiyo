@@ -4823,6 +4823,14 @@ def test_group_multiple_agent_approvals_wait_until_every_delegate_terminal(tmp_p
                         "tool": "artifact.write",
                         "input_preview": {"path": "design.md"},
                     },
+                    "timeline": [
+                        {
+                            "event": "agent.tool.call",
+                            "detail": "artifact.write",
+                            "input_preview": {"path": "design.md"},
+                            "result": {"ok": True, "path": "design.md"},
+                        }
+                    ],
                     "runnable": design,
                 },
                 "agent_run_coding": {
@@ -4835,6 +4843,14 @@ def test_group_multiple_agent_approvals_wait_until_every_delegate_terminal(tmp_p
                         "tool": "terminal.run",
                         "input_preview": {"command": "python3 verify.py"},
                     },
+                    "timeline": [
+                        {
+                            "event": "agent.tool.call",
+                            "detail": "terminal.run",
+                            "input_preview": {"command": "python3 verify.py"},
+                            "result": {"ok": False, "exit_code": 1, "stderr": "Missing dependency"},
+                        }
+                    ],
                     "runnable": coding,
                 },
             }
@@ -4991,6 +5007,10 @@ def test_group_multiple_agent_approvals_wait_until_every_delegate_terminal(tmp_p
         assert "汇报：UI 验收点已经整理完成。" in summary_task.description
         assert "Coding：执行失败" in summary_task.description
         assert "汇报：验证脚本失败：缺少依赖。" in summary_task.description
+        assert "执行线索：" in summary_task.description
+        assert "terminal.run" in summary_task.description
+        assert "python3 verify.py" in summary_task.description
+        assert "Missing dependency" in summary_task.description
     finally:
         store.close()
 
@@ -5568,6 +5588,14 @@ def test_summarize_delegated_run_creates_main_followup_task(tmp_path, monkeypatc
         "status": "completed",
         "user_goal": "写一个 CLI 工具",
         "result": "CLI 工具已经完成。",
+        "timeline": [
+            {
+                "event": "agent.tool.call",
+                "detail": "artifact.write",
+                "input_preview": {"path": "scripts/tool.py"},
+                "result": {"ok": True, "path": "scripts/tool.py"},
+            }
+        ],
         "artifacts": [
             {"path": "scripts/tool.py", "kind": "code"},
             {"path": "agent-context.md", "kind": "context"},
@@ -5630,6 +5658,9 @@ def test_summarize_delegated_run_creates_main_followup_task(tmp_path, monkeypatc
         assert "Coding Agent：已完成" in summary_task.description
         assert "任务：写一个 CLI 工具" in summary_task.description
         assert "汇报：CLI 工具已经完成。" in summary_task.description
+        assert "执行线索：" in summary_task.description
+        assert "artifact.write" in summary_task.description
+        assert "scripts/tool.py" in summary_task.description
         assert "产物：scripts/tool.py (code)" in summary_task.description
     finally:
         activity_store.close()

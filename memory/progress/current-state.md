@@ -30,6 +30,7 @@
 - ✅ 聊天气泡已接入 Run Detail：Agent 完成/失败时会显示真实产物数量和运行详情入口，主模型汇总 Prompt 也会带上 Agent 状态、汇报和 artifact 路径摘要，避免用户不知道文件在哪里或哪些 Agent 没有完成。
 - ✅ 群组主模型整理状态现在直接体现在原 Agent / 派发气泡和底部全局状态上：等待、完成和失败都会按上下文区分“这一轮群组任务”和“这条 Agent 结果”，整理成功后原 Agent/派发气泡会保留轻量完成提示，如果整理任务失败，会在原气泡下显示失败原因；后端回归覆盖直接 `@Agent` 和主模型派发两条路径都会清掉 pending 并写入 `group_agent_summary_status/error`。
 - ✅ 2026-06-06 追加：群组主模型整理任务如果被用户取消，原 Agent / 派发气泡会清掉 pending 并标记 `group_agent_summary_status=cancelled`；前端提示“主模型整理已取消”，不再把用户主动停止误显示成主模型整理失败。
+- ✅ 2026-06-06 追加：群组主模型整理和普通自动委派 Run 整理的 prompt 会从 Run timeline 提取最近关键执行线索，包括工具调用/跳过/拒绝、审批、失败或取消节点，以及脱敏后的请求内容和执行结果；主模型收尾不再只依赖 Agent 最终一句汇报，也能说明 Agent 具体读写运行了什么。
 - ✅ Workflow 入口边界按产品讨论收紧：Chat `@` 候选只保留主模型和 Agent，手动 `@Workflow` 或主模型误派发 Workflow 会提示去 Agent Studio 的 Workflow Studio / Runs 执行；Workflow 的设计、保存、保存并运行和 Runs 手动运行仍保持可用，且保存更新后立即运行会使用最新画布节点/连线，不会跑到旧版本；Bridge route 层也覆盖 create/update/run 这条用户实际点击路径。
 - ✅ 2026-06-05 追加：Chat 里直接触发的 Workflow 总结消息和 Workflow 子 Agent 消息都会带真实产物数量与 artifact 摘要 metadata；有产物时气泡正文也会提示“产物 N 个，见运行详情”，让 Workflow 完成后的交付物入口和普通 Agent Run 保持一致。
 - ✅ Workflow Studio 的 Agent palette、节点设置区和 Runs 手动运行目标选择已补能力摘要：会展示 Agent/Workflow 的类别、交付契约和职责说明，Runs 的目标下拉选项本身也带能力摘要，用户设计流程、维护节点或手动选择运行目标时能判断该把任务交给谁，而不是只看到名称。
