@@ -1155,7 +1155,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       try {
         const run = await getRun(runId);
         const status = normalizeRunStatus(run.status);
-        if (status === 'completed' || status === 'failed' || status === 'approval_required') {
+        const runLabel = run.kind === 'workflow_run' ? 'Workflow Run' : 'Agent Run';
+        if (status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'approval_required') {
           // 执行完成，刷新消息
           const refreshed = await refreshMessages();
           await loadSessions();
@@ -1173,9 +1174,21 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             setIsProcessing(chatStillProcessing);
             setProcessingCount(chatProcessingCount);
             if (chatStillProcessing) {
-              setStatus(status === 'completed' ? 'Agent Run 已完成，等待主模型汇总...' : 'Agent Run 执行失败，等待主模型整理结果...');
+              setStatus(
+                status === 'completed'
+                  ? `${runLabel} 已完成，等待主模型汇总...`
+                  : status === 'cancelled'
+                    ? `${runLabel} 已取消，等待主模型整理结果...`
+                    : `${runLabel} 执行失败，等待主模型整理结果...`,
+              );
             } else {
-              setStatus(status === 'completed' ? 'Agent Run 已完成。' : 'Agent Run 执行失败。');
+              setStatus(
+                status === 'completed'
+                  ? `${runLabel} 已完成。`
+                  : status === 'cancelled'
+                    ? `${runLabel} 已取消。`
+                    : `${runLabel} 执行失败。`,
+              );
             }
           }
           return;

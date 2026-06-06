@@ -23,6 +23,7 @@
 - ✅ 2026-06-06 追加：Chat 消息 metadata 更新支持删除过期键；父 Workflow 从“等待子 Agent 审批”恢复执行或进入完成/失败/取消终态时，会清理 `workflow_waiting_child_run_id` / `workflow_waiting_node` / `workflow_waiting_tool`，避免输入区继续派生旧审批提醒，也让 Run 详情和列表状态只反映当前真实进度。
 - ✅ 2026-06-05 追加：子 Agent 工具审批通过并带动父 Workflow 继续后，Chat 会把子 Agent 消息和父 Workflow 消息一起同步到终态，`processing_count` / `approval_count` 会归零；父 Workflow 终态会按 Workflow 语义展示完成/失败/取消，只有缺少状态上下文的 result 才补 Workflow 标题，避免把子 Agent 输出直接塞成一条不明所以的流程消息。
 - ✅ Chat 里直接触发的 Agent/Workflow 指令结果也统一按 `run_status/status` 和 `run_id/agent_run_id/workflow_run_id` 解释：进行中会后台轮询对应 Run，待审批会优先显示等待审批文案，避免不同返回字段导致前端不跟进。
+- ✅ 2026-06-06 追加：Chat 前端后台轮询把 `cancelled` 也视为 Run 终态，并按 Agent Run / Workflow Run 区分状态文案，避免 Run 被其他入口取消后输入区一直等到轮询超时。
 - ✅ 聊天消息底部状态也区分主模型流式回复和 Agent/Workflow Run：主模型仍显示“输入中”，挂载 Run metadata 的 Agent/Workflow 消息显示“处理中”，避免用户把后台执行误读成普通打字状态。
 - ✅ 群聊派发与直接 `@Agent` 的异步完成回调都会写回创建它的原会话：用户在派活后切到新会话也不会丢结果，Agent 完成/失败仍会更新原群聊消息，并在原群聊里创建主模型汇总任务。
 - ✅ 群聊中的 Agent 运行中进度会从 Run timeline 提取最新阶段：例如运行环境已准备、正在解析模型响应、正在处理工具结果、已写出产物；聊天气泡仍保持 loading，但进度卡不再只有泛泛的“Agent 正在执行”，也不会把工具调用 JSON 或 `<yachiyo...>` 这类内部协议片段暴露出来。
