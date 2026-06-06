@@ -9612,6 +9612,10 @@ body.electron-window .hy-traffic {
   white-space: nowrap;
 }
 
+.hy-content .open-chat-shell .chat-group-member .chat-group-member-tools {
+  color: oklch(72% 0.11 190 / 0.82);
+}
+
 .hy-content .open-chat-shell .chat-group-member em {
   display: -webkit-box;
   -webkit-box-orient: vertical;

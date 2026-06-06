@@ -142,6 +142,10 @@ export type RunnableSummary = {
   output_contract?: 'chat' | 'markdown' | 'diff' | 'report' | 'artifacts' | 'workflow' | string;
   kind: 'agent' | 'workflow';
   enabled?: boolean;
+  tool_policy?: {
+    allowed_tools?: string[];
+    approval_required?: Record<string, boolean>;
+  };
   participants?: RunnableSummary[];
 };
 

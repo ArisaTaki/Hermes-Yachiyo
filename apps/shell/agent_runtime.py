@@ -4352,6 +4352,13 @@ class AgentRuntimeService:
 
     @staticmethod
     def _agent_runnable_summary(agent: dict[str, Any]) -> dict[str, Any]:
+        tool_policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
+        allowed_tools = tool_policy.get("allowed_tools") if isinstance(tool_policy.get("allowed_tools"), list) else []
+        approval_required = (
+            tool_policy.get("approval_required")
+            if isinstance(tool_policy.get("approval_required"), dict)
+            else {}
+        )
         return {
             "id": agent["agent_id"],
             "name": agent["name"],
@@ -4362,6 +4369,14 @@ class AgentRuntimeService:
             "output_contract": agent.get("output_contract") or "chat",
             "kind": "agent",
             "enabled": agent["enabled"],
+            "tool_policy": {
+                "allowed_tools": [str(item) for item in allowed_tools if str(item)],
+                "approval_required": {
+                    str(tool): bool(required)
+                    for tool, required in approval_required.items()
+                    if str(tool)
+                },
+            },
         }
 
     def _workflow_participants(self, workflow: dict[str, Any]) -> list[dict[str, Any]]:

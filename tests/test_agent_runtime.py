@@ -87,6 +87,8 @@ def test_runtime_restores_row_factory_before_listing_runnables(tmp_path):
         assert result["ok"] is True
         coding = next(item for item in result["runnables"] if item["id"] == "agent_coding")
         assert coding["output_contract"]
+        assert "workspace.read" in coding["tool_policy"]["allowed_tools"]
+        assert coding["tool_policy"]["approval_required"]["terminal.run"] is True
     finally:
         service.close()
 
@@ -1587,6 +1589,8 @@ def test_workflow_canvas_spec_exposes_participants_and_executes(tmp_path, monkey
             "https://example.test/design.png",
             "https://example.test/code.png",
         ]
+        assert all("tool_policy" in participant for participant in runnable["participants"])
+        assert all("artifact.write" in participant["tool_policy"]["allowed_tools"] for participant in runnable["participants"])
         assert run["status"] == "completed"
         assert run["result"] == "Code patch"
         assert [event["event"] for event in run["timeline"]].count("workflow.node.agent") == 2

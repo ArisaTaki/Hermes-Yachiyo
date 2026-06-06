@@ -2661,6 +2661,7 @@ function CreateGroupDialog({ agentRunnables, assistantProfile, defaultGroupName,
                 <span>
                   <strong>{agent.nickname || agent.name}</strong>
                   <small>{groupAgentMetaLine(agent)}</small>
+                  <small className="chat-group-member-tools">{groupAgentToolLine(agent)}</small>
                   {agent.description ? <em>{agent.description}</em> : null}
                 </span>
               </label>
@@ -2685,6 +2686,18 @@ function groupAgentMetaLine(agent: RunnableSummary): string {
     agent.output_contract ? `交付 ${agent.output_contract}` : '',
   ].filter(Boolean);
   return parts.join(' · ') || 'Agent';
+}
+
+function groupAgentToolLine(agent: RunnableSummary): string {
+  const allowedTools = new Set((agent.tool_policy?.allowed_tools || []).map((tool) => String(tool)));
+  const approvals = agent.tool_policy?.approval_required || {};
+  const needsApproval = (tool: string) => Boolean(approvals[tool]);
+  const parts: string[] = [];
+  if (allowedTools.has('workspace.read') || allowedTools.has('workspace.list')) parts.push('读文件');
+  if (allowedTools.has('workspace.write_patch')) parts.push(needsApproval('workspace.write_patch') ? '写补丁需审批' : '写补丁');
+  if (allowedTools.has('terminal.run')) parts.push(needsApproval('terminal.run') ? '终端需审批' : '终端');
+  if (allowedTools.has('artifact.write')) parts.push('产物');
+  return parts.length ? parts.join(' · ') : '仅对话';
 }
 
 function SessionIdDialog({ copied, error, sessionId, onClose, onCopy }: {
