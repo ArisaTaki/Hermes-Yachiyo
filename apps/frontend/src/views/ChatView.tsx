@@ -1180,7 +1180,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
   }
 
-  async function pollAgentRunCompletion(runId: string, options: { summarizeDelegatedRun?: boolean } = {}) {
+  async function pollAgentRunCompletion(runId: string, options: { summarizeDelegatedRun?: boolean; ignoreInitialApprovalRequired?: boolean } = {}) {
     const maxAttempts = 600; // 最多轮询 600 次（约 5 分钟）
     const interval = ACTIVE_POLL_INTERVAL_MS;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -1188,6 +1188,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         const run = await getRun(runId);
         const status = normalizeRunStatus(run.status);
         const runLabel = run.kind === 'workflow_run' ? 'Workflow Run' : 'Agent Run';
+        if (status === 'approval_required' && options.ignoreInitialApprovalRequired && attempt < 3) {
+          await new Promise((resolve) => setTimeout(resolve, interval));
+          continue;
+        }
         if (status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'approval_required') {
           // 执行完成，刷新消息
           const refreshed = await refreshMessages();
@@ -1253,7 +1257,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setStatus(chatStillProcessing ? 'Agent Run 轮询超时，仍在等待后续处理...' : 'Agent Run 轮询超时');
   }
 
-  function pollAgentRunInBackground(runId: string, options: { summarizeDelegatedRun?: boolean } = {}) {
+  function pollAgentRunInBackground(runId: string, options: { summarizeDelegatedRun?: boolean; ignoreInitialApprovalRequired?: boolean } = {}) {
     void pollAgentRunCompletion(runId, options).catch((error) => {
       console.error('后台轮询 Agent Run 状态失败:', error);
       setStatus(error instanceof Error ? error.message : 'Agent Run 状态刷新失败');
@@ -1436,10 +1440,57 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     if (!runId || approvalActionMessageId) return;
     setApprovalActionMessageId(busyId);
     setStatus(action === 'approve' ? '正在批准工具调用...' : '正在拒绝工具调用...');
+    if (action === 'approve') {
+      const approvalPromise = approveRunApproval(runId);
+      if (composerItemId) {
+        setResolvedComposerApprovalIds((current) => (
+          current.includes(composerItemId) ? current : [...current.slice(-20), composerItemId]
+        ));
+      }
+      forgetRunApprovalDetails(runId);
+      setIsProcessing(true);
+      isProcessingRef.current = true;
+      setProcessingCount((current) => Math.max(1, current || 1));
+      setStatus('已批准，Agent 正在继续执行...');
+      setApprovalActionMessageId('');
+      pollAgentRunInBackground(runId, { summarizeDelegatedRun, ignoreInitialApprovalRequired: true });
+      void approvalPromise
+        .then(async (run) => {
+          const refreshed = await refreshMessages();
+          await loadSessions();
+          const chatStillProcessing = Boolean(refreshed?.is_processing);
+          const chatProcessingCount = Math.max(0, Number(refreshed?.processing_count || 0));
+          const runStatus = normalizeRunStatus(run.status);
+          if (runStatus === 'approval_required') {
+            rememberRunApprovalDetails(run, fallbackApprovalDetails);
+            isProcessingRef.current = true;
+            setIsProcessing(true);
+            setProcessingCount(Math.max(1, chatProcessingCount));
+            setStatus(nextApprovalStatusText(run));
+          } else if (runStatus === 'processing') {
+            forgetRunApprovalDetails(runId);
+            isProcessingRef.current = true;
+            setIsProcessing(true);
+            setProcessingCount(Math.max(1, chatProcessingCount));
+          } else if (!chatStillProcessing) {
+            isProcessingRef.current = false;
+            setIsProcessing(false);
+            setProcessingCount(chatProcessingCount);
+          }
+        })
+        .catch(async (error) => {
+          setStatus(error instanceof Error ? error.message : '批准失败');
+          try {
+            await refreshMessages();
+            await loadSessions();
+          } catch {
+            // The approval error itself is the useful user-facing status here.
+          }
+        });
+      return;
+    }
     try {
-      const run = action === 'approve'
-        ? await approveRunApproval(runId)
-        : await rejectRunApproval(runId, 'Rejected from chat');
+      const run = await rejectRunApproval(runId, 'Rejected from chat');
       const refreshed = await refreshMessages();
       await loadSessions();
       const chatStillProcessing = Boolean(refreshed?.is_processing);
@@ -1482,7 +1533,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         } else if (delegatedSummaryError) {
           setStatus(`审批后执行结束，但整理任务未创建：${delegatedSummaryError}`);
         } else if (chatStillProcessing) {
-          setStatus(action === 'approve' ? '已批准，等待主模型汇总...' : '已拒绝，等待主模型整理结果...');
+          setStatus('已拒绝，等待主模型整理结果...');
         } else {
           setStatus(runStatus === 'completed' ? '审批后执行完成。' : '审批后执行结束。');
         }

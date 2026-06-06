@@ -3436,9 +3436,10 @@ class AgentRuntimeService:
                 candidate = self.get_run(run_id)
             except KeyError:
                 continue
+            candidate_status = str(candidate.get("status") or "")
             if (
                 candidate.get("kind") != "workflow_run"
-                or candidate.get("status") != "approval_required"
+                or candidate_status not in {"approval_required", "running", "processing"}
             ):
                 continue
             if any(
@@ -3517,6 +3518,31 @@ class AgentRuntimeService:
             )
         return refs
 
+    @staticmethod
+    def _workflow_child_node_context(
+        timeline: list[dict[str, Any]],
+        child_run: dict[str, Any],
+    ) -> tuple[str, dict[str, str]]:
+        child_run_id = str(child_run.get("run_id") or "")
+        child_label = str(child_run.get("runnable_name") or child_run.get("runnable_id") or "Agent")
+        child_node_info: dict[str, str] = {}
+        for event in timeline:
+            if (
+                isinstance(event, dict)
+                and event.get("event") == "workflow.node.agent"
+                and str(event.get("child_run_id") or "") == child_run_id
+            ):
+                child_label = str(event.get("detail") or child_label).strip() or child_label
+                node_id = str(event.get("workflow_node_id") or "").strip()
+                if node_id:
+                    child_node_info = {
+                        "workflow_node_id": node_id,
+                        "workflow_node_kind": str(event.get("workflow_node_kind") or "agent"),
+                        "workflow_node_label": str(event.get("workflow_node_label") or child_label),
+                    }
+                break
+        return child_label, child_node_info
+
     def _merge_workflow_child_run_outcome(
         self,
         timeline: list[dict[str, Any]],
@@ -3590,6 +3616,49 @@ class AgentRuntimeService:
         for workflow_run in self._workflow_parent_runs_waiting_for_child(child_run):
             self._resume_parent_workflow_after_child_update(workflow_run, child_run)
 
+    def _mark_parent_workflows_child_running(self, child_run: dict[str, Any]) -> None:
+        for workflow_run in self._workflow_parent_runs_waiting_for_child(child_run):
+            root_group = self._workflow_run_is_group_root(workflow_run)
+            timeline = [
+                event
+                for event in workflow_run.get("timeline") or []
+                if isinstance(event, dict)
+            ]
+            artifacts = [item for item in workflow_run.get("artifacts") or [] if isinstance(item, dict)]
+            child_label, child_node_info = self._workflow_child_node_context(timeline, child_run)
+            child_run_id = str(child_run.get("run_id") or "")
+            self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, child_label)
+            if not any(
+                event.get("event") == "workflow.run.child_resumed"
+                and str(event.get("child_run_id") or "") == child_run_id
+                for event in timeline
+                if isinstance(event, dict)
+            ):
+                timeline.append(
+                    self._timeline(
+                        "workflow.run.child_resumed",
+                        f"{child_label} approved and resumed",
+                        child_run_id=child_run_id,
+                        status="running",
+                        **child_node_info,
+                    )
+                )
+            result_text = f"{child_label} 已批准，正在继续执行"
+            result = self._update_run(
+                str(workflow_run["run_id"]),
+                status="running",
+                result=result_text,
+                timeline=timeline,
+                artifacts=artifacts,
+                pending_approval=None,
+            )
+            if root_group:
+                self._update_run_group(
+                    str(result.get("run_group_id") or ""),
+                    status="running",
+                    summary=result_text,
+                )
+
     def _resume_parent_workflow_after_child_update(
         self,
         workflow_run: dict[str, Any],
@@ -3606,23 +3675,7 @@ class AgentRuntimeService:
         child_result = str(child_run.get("result") or "")
         child_run_id = str(child_run.get("run_id") or "")
         run_group_id = str(workflow_run.get("run_group_id") or "")
-        child_label = str(child_run.get("runnable_name") or child_run.get("runnable_id") or "Agent")
-        child_node_info: dict[str, str] = {}
-        for event in timeline:
-            if (
-                isinstance(event, dict)
-                and event.get("event") == "workflow.node.agent"
-                and str(event.get("child_run_id") or "") == child_run_id
-            ):
-                child_label = str(event.get("detail") or child_label).strip() or child_label
-                node_id = str(event.get("workflow_node_id") or "").strip()
-                if node_id:
-                    child_node_info = {
-                        "workflow_node_id": node_id,
-                        "workflow_node_kind": str(event.get("workflow_node_kind") or "agent"),
-                        "workflow_node_label": str(event.get("workflow_node_label") or child_label),
-                    }
-                break
+        child_label, child_node_info = self._workflow_child_node_context(timeline, child_run)
         self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, child_label)
         if child_status == "approval_required":
             result = self._update_run(
@@ -4157,6 +4210,23 @@ class AgentRuntimeService:
         tool_request = pending.get("tool_request") if isinstance(pending.get("tool_request"), dict) else {}
         if not messages or not tool_request:
             raise AgentRuntimeError("Run 待审批上下文不完整，无法恢复")
+        timeline.append(
+            self._timeline(
+                "agent.run.resumed",
+                "Agent resumed after approval",
+                status="running",
+            )
+        )
+        running = self._update_run(
+            run_id,
+            status="running",
+            result="已批准，Agent 正在继续执行",
+            timeline=timeline,
+            artifacts=artifacts,
+            pending_approval=None,
+        )
+        self._update_agent_run_group_if_root(running)
+        self._mark_parent_workflows_child_running(running)
         try:
             tool_result = self._call_agent_tool(tool_request, allowed_tools, broker, timeline, artifacts=artifacts, approved=True)
             self._append_tool_result_message(messages, tool_request, tool_result)

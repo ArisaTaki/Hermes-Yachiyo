@@ -2318,6 +2318,7 @@ def test_workflow_resumes_after_child_agent_approval(tmp_path, monkeypatch):
     workdir = tmp_path / "repo"
     workdir.mkdir()
     calls = []
+    resuming_statuses = []
 
     def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
         calls.append(messages)
@@ -2335,6 +2336,17 @@ def test_workflow_resumes_after_child_agent_approval(tmp_path, monkeypatch):
         if len(calls) == 2:
             assert messages[-1]["role"] == "tool"
             assert "approved" in messages[-1]["content"]
+            parent_during_resume = service.get_run(run["run_id"])
+            child_during_resume = service.get_run(child_run_ids[0])
+            group_during_resume = service.get_run_group(run["run_group_id"])
+            resuming_statuses.append(
+                (
+                    child_during_resume["status"],
+                    parent_during_resume["status"],
+                    group_during_resume["status"],
+                    parent_during_resume["result"],
+                )
+            )
             return {"content": "Agent A complete"}
         return {"content": "Agent B complete"}
 
@@ -2442,7 +2454,11 @@ def test_workflow_resumes_after_child_agent_approval(tmp_path, monkeypatch):
         )
         approved_child = service.approve_run_approval(child["run_id"])
 
+        assert resuming_statuses == [
+            ("running", "running", "running", "Needs Approval 已批准，正在继续执行")
+        ]
         assert approved_child["status"] == "completed"
+        assert any(event["event"] == "agent.run.resumed" for event in approved_child["timeline"])
         resumed_parent = service.get_run(run["run_id"])
         assert resumed_parent["status"] == "completed"
         assert resumed_parent["result"] == "Agent B complete"
@@ -2455,6 +2471,7 @@ def test_workflow_resumes_after_child_agent_approval(tmp_path, monkeypatch):
         assert agent_events[0]["status"] == "completed"
         assert agent_events[0]["result"] == "Agent A complete"
         assert agent_events[1]["workflow_node_label"] == "After Approval"
+        assert any(event["event"] == "workflow.run.child_resumed" for event in resumed_parent["timeline"])
         assert any(event["event"] == "workflow.run.resumed" for event in resumed_parent["timeline"])
         assert any(
             artifact.get("kind") == "workflow_artifact"
