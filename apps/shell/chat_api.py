@@ -1067,6 +1067,8 @@ class ChatAPI:
                 workflow_metadata["workflow_waiting_tool"] = waiting_context["tool"]
             if waiting_context.get("workflow_node_label"):
                 workflow_metadata["workflow_waiting_node"] = waiting_context["workflow_node_label"]
+            if isinstance(waiting_context.get("pending_approval"), dict):
+                workflow_metadata["workflow_waiting_pending_approval"] = waiting_context["pending_approval"]
         workflow_message_id = self._session.add_assistant_message(
             summary,
             error=summary if workflow_status in {"failed", "cancelled"} else None,
@@ -1112,7 +1114,7 @@ class ChatAPI:
         )
 
     @staticmethod
-    def _workflow_child_approval_context(run_result: dict[str, Any], service: Any | None = None) -> dict[str, str]:
+    def _workflow_child_approval_context(run_result: dict[str, Any], service: Any | None = None) -> dict[str, Any]:
         if not ChatAPI._workflow_waiting_for_child_approval(run_result):
             return {}
         timeline = [event for event in (run_result.get("timeline") or []) if isinstance(event, dict)]
@@ -1140,6 +1142,8 @@ class ChatAPI:
                     ).strip()
                     pending = child.get("pending_approval") if isinstance(child.get("pending_approval"), dict) else {}
                     context["tool"] = str(pending.get("tool") or "").strip()
+                    if pending.get("tool"):
+                        context["pending_approval"] = dict(pending)
                 except Exception:
                     logger.debug("读取 Workflow 等待审批子 Run 失败: %s", child_run_id, exc_info=True)
             return context
@@ -1281,6 +1285,7 @@ class ChatAPI:
                     "workflow_waiting_child_run_id": None,
                     "workflow_waiting_tool": None,
                     "workflow_waiting_node": None,
+                    "workflow_waiting_pending_approval": None,
                     "run_progress_title": "审批已通过" if is_workflow_message else "已批准工具调用",
                     "run_progress_detail": (
                         f"{actor_name} 正在继续执行当前流程。"
@@ -1343,6 +1348,7 @@ class ChatAPI:
             metadata_update["workflow_waiting_child_run_id"] = None
             metadata_update["workflow_waiting_tool"] = None
             metadata_update["workflow_waiting_node"] = None
+            metadata_update["workflow_waiting_pending_approval"] = None
         if is_group_message and status in {"completed", "failed", "cancelled"}:
             metadata_update.update({
                 "agent_report": agent_report,
@@ -2747,6 +2753,8 @@ class ChatAPI:
                     metadata_update["workflow_waiting_tool"] = waiting_context["tool"]
                 if waiting_context.get("workflow_node_label"):
                     metadata_update["workflow_waiting_node"] = waiting_context["workflow_node_label"]
+                if isinstance(waiting_context.get("pending_approval"), dict):
+                    metadata_update["workflow_waiting_pending_approval"] = waiting_context["pending_approval"]
                 self._session.update_assistant_message(
                     msg.message_id,
                     summary,
@@ -2784,6 +2792,7 @@ class ChatAPI:
                         "workflow_waiting_child_run_id": None,
                         "workflow_waiting_tool": None,
                         "workflow_waiting_node": None,
+                        "workflow_waiting_pending_approval": None,
                     }
                     if metadata.get("runnable_kind") == "workflow" or metadata.get("workflow_status"):
                         metadata_update["workflow_status"] = normalized_status

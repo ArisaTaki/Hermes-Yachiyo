@@ -625,6 +625,8 @@ def test_workflow_waiting_for_child_agent_approval_counts_only_child(tmp_path, m
         assert workflow_message["metadata"]["workflow_waiting_child_run_id"] == child_run_ids[0]
         assert workflow_message["metadata"]["workflow_waiting_node"] == "Needs Approval"
         assert workflow_message["metadata"]["workflow_waiting_tool"] == "terminal.run"
+        assert workflow_message["metadata"]["workflow_waiting_pending_approval"]["tool"] == "terminal.run"
+        assert workflow_message["metadata"]["workflow_waiting_pending_approval"]["input_preview"]["command"] == "printf waiting"
 
         approved_child = service.approve_run_approval(child_run_ids[0])
         parent_after = service.get_run(run["run_id"])
@@ -666,6 +668,7 @@ def test_workflow_waiting_for_child_agent_approval_counts_only_child(tmp_path, m
         assert "workflow_waiting_child_run_id" not in workflow_after["metadata"]
         assert "workflow_waiting_node" not in workflow_after["metadata"]
         assert "workflow_waiting_tool" not in workflow_after["metadata"]
+        assert "workflow_waiting_pending_approval" not in workflow_after["metadata"]
     finally:
         service.close()
         store.close()
@@ -757,6 +760,8 @@ def test_workflow_child_approval_counts_when_child_message_is_missing(tmp_path, 
         assert workflow_message["metadata"]["workflow_waiting_child_run_id"] == "child_run_waiting"
         assert workflow_message["metadata"]["workflow_waiting_node"] == "Coding Agent"
         assert workflow_message["metadata"]["workflow_waiting_tool"] == "terminal.run"
+        assert workflow_message["metadata"]["workflow_waiting_pending_approval"]["tool"] == "terminal.run"
+        assert workflow_message["metadata"]["workflow_waiting_pending_approval"]["input_preview"]["command"] == "python -V"
     finally:
         store.close()
 
@@ -6772,6 +6777,7 @@ def test_list_sessions_clears_workflow_child_approval_after_parent_resumes(tmp_p
         assert "workflow_waiting_child_run_id" not in metadata
         assert "workflow_waiting_node" not in metadata
         assert "workflow_waiting_tool" not in metadata
+        assert "workflow_waiting_pending_approval" not in metadata
     finally:
         store.close()
 

@@ -93,6 +93,12 @@ type ChatMessageMetadata = {
   workflow_waiting_child_run_id?: string;
   workflow_waiting_node?: string;
   workflow_waiting_tool?: string;
+  workflow_waiting_pending_approval?: {
+    approval_id?: string;
+    tool?: string;
+    input_preview?: unknown;
+    requested_at?: string;
+  };
   group_dispatch_count?: number;
   group_dispatch_run_group_id?: string;
   group_dispatch_skipped?: string[];
@@ -3149,6 +3155,27 @@ function approvalRequestDetailsFromWorkflowWaitingChild(message: ChatMessage): A
   ];
   const runId = stringValue(metadata.workflow_waiting_child_run_id);
   if (runId) summary.push({ label: '子 Run', value: runId });
+  const pending = isRecord(metadata.workflow_waiting_pending_approval)
+    ? metadata.workflow_waiting_pending_approval as ChatMessageMetadata['pending_approval']
+    : null;
+  if (pending?.tool) {
+    const details = approvalRequestDetails({
+      id: message.id,
+      role: 'assistant',
+      content: message.content || message.text || '',
+      metadata: {
+        delegated_goal: approvalGoalFromContent(message.content || message.text || ''),
+        pending_approval: pending,
+        sender: { kind: 'agent', name: requester },
+      },
+    });
+    return {
+      ...details,
+      requester,
+      goal: details.goal,
+      summary: [...summary, ...details.summary],
+    };
+  }
   return {
     requester,
     tool,
@@ -3236,6 +3263,7 @@ function workflowWaitingChildApprovalSignature(message: ChatMessage) {
     metadata.workflow_waiting_child_run_id,
     metadata.workflow_waiting_tool,
     metadata.workflow_waiting_node,
+    approvalSignatureFromPending(metadata.workflow_waiting_pending_approval),
     messageRunId(message),
   ].map(stringValue).filter(Boolean).join('|') || 'workflow-child-approval';
   return raw.replace(/[^A-Za-z0-9_.:-]+/g, '_').slice(0, 240);
