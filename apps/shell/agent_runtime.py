@@ -4318,14 +4318,16 @@ class AgentRuntimeService:
         ]
         workflow_node_id = str(pending.get("workflow_node_id") or "")
         criteria = str(pending.get("workflow_node_approval_criteria") or "").strip()
+        approval_preview = pending.get("input_preview") if isinstance(pending.get("input_preview"), dict) else {}
         timeline.append(
             self._timeline(
                 "workflow.node.approval_approved",
-                f"{label} approved",
+                label,
                 workflow_node_id=workflow_node_id,
                 workflow_node_kind="approval",
                 workflow_node_label=label,
                 workflow_node_approval_criteria=criteria,
+                input_preview=approval_preview,
                 status="completed",
             )
         )
@@ -4362,6 +4364,7 @@ class AgentRuntimeService:
                 raise AgentRuntimeError("Workflow Run 缺少待审批节点信息")
             label = str(pending.get("workflow_node_label") or "Approval")
             criteria = str(pending.get("workflow_node_approval_criteria") or "").strip()
+            approval_preview = pending.get("input_preview") if isinstance(pending.get("input_preview"), dict) else {}
             detail = redact_secrets(reason).strip() or f"{label} approval rejected"
             timeline = [
                 *run["timeline"],
@@ -4372,6 +4375,7 @@ class AgentRuntimeService:
                     workflow_node_kind="approval",
                     workflow_node_label=label,
                     workflow_node_approval_criteria=criteria,
+                    input_preview=approval_preview,
                     status="cancelled",
                 ),
             ]

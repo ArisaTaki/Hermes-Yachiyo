@@ -1180,8 +1180,12 @@ def test_workflow_approval_node_pauses_and_resumes(tmp_path, monkeypatch):
         assert resumed["pending_approval"] == {}
         assert len(calls) == 2
         approval_approved = next(event for event in resumed["timeline"] if event["event"] == "workflow.node.approval_approved")
+        assert approval_approved["detail"] == "人工确认"
         assert approval_approved["workflow_node_id"] == "gate"
         assert approval_approved["workflow_node_approval_criteria"] == "确认设计输出已经覆盖验收点，再继续编码。"
+        assert approval_approved["input_preview"]["checkpoint"] == "人工确认"
+        assert approval_approved["input_preview"]["criteria"] == "确认设计输出已经覆盖验收点，再继续编码。"
+        assert approval_approved["input_preview"]["context"] == "Agent 1 complete"
         assert approval_approved["status"] == "completed"
         assert [event["event"] for event in resumed["timeline"]].count("workflow.node.agent") == 2
         artifact_event = next(event for event in resumed["timeline"] if event["event"] == "workflow.node.artifact")
@@ -1216,7 +1220,14 @@ def test_cancel_workflow_approval_updates_group_and_step_info(tmp_path, monkeypa
                 "nodes": [
                     {"id": "start", "type": "start", "data": {"label": "Start"}},
                     {"id": "a", "type": "agent", "data": {"label": "Before Approval", "agent_id": agent["agent_id"]}},
-                    {"id": "gate", "type": "approval", "data": {"label": "人工确认"}},
+                    {
+                        "id": "gate",
+                        "type": "approval",
+                        "data": {
+                            "label": "人工确认",
+                            "criteria": "确认设计输出已经覆盖验收点，再继续编码。",
+                        },
+                    },
                     {"id": "summary", "type": "artifact", "data": {"label": "Summary"}},
                 ],
                 "edges": [
@@ -1337,7 +1348,14 @@ def test_workflow_approval_node_reject_cancels_run(tmp_path, monkeypatch):
                 "nodes": [
                     {"id": "start", "type": "start", "data": {"label": "Start"}},
                     {"id": "a", "type": "agent", "data": {"label": "Before Approval", "agent_id": agent["agent_id"]}},
-                    {"id": "gate", "type": "approval", "data": {"label": "人工确认"}},
+                    {
+                        "id": "gate",
+                        "type": "approval",
+                        "data": {
+                            "label": "人工确认",
+                            "criteria": "确认设计输出已经覆盖验收点，再继续编码。",
+                        },
+                    },
                     {"id": "summary", "type": "artifact", "data": {"label": "Summary"}},
                 ],
                 "edges": [
@@ -1360,6 +1378,10 @@ def test_workflow_approval_node_reject_cancels_run(tmp_path, monkeypatch):
         assert rejected_event["workflow_node_id"] == "gate"
         assert rejected_event["workflow_node_kind"] == "approval"
         assert rejected_event["workflow_node_label"] == "人工确认"
+        assert rejected_event["workflow_node_approval_criteria"] == "确认设计输出已经覆盖验收点，再继续编码。"
+        assert rejected_event["input_preview"]["checkpoint"] == "人工确认"
+        assert rejected_event["input_preview"]["criteria"] == "确认设计输出已经覆盖验收点，再继续编码。"
+        assert rejected_event["input_preview"]["context"] == "First step complete"
         assert rejected_event["status"] == "cancelled"
         group = service.get_run_group(run["run_group_id"])
         assert group["status"] == "cancelled"

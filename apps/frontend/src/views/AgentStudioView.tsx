@@ -1129,8 +1129,8 @@ function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'workflow.run.started') return 'Workflow 已启动';
   if (name === 'workflow.node.agent') return detail ? `Agent 节点 · ${detail}` : 'Agent 节点';
   if (name === 'workflow.node.approval_required') return detail ? `人工审批 · ${detail}` : '人工审批';
-  if (name === 'workflow.node.approval_approved') return '审批已通过';
-  if (name === 'workflow.node.approval_rejected') return '审批已拒绝';
+  if (name === 'workflow.node.approval_approved') return detail ? `审批已通过 · ${detail}` : '审批已通过';
+  if (name === 'workflow.node.approval_rejected') return detail ? `审批已拒绝 · ${detail}` : '审批已拒绝';
   if (name === 'workflow.run.child_resumed') return '子 Agent 已继续执行';
   if (name === 'workflow.run.resumed') return 'Workflow 已继续执行';
   if (name === 'workflow.run.completed') return 'Workflow 已完成';
