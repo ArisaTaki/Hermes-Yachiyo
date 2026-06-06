@@ -1148,7 +1148,33 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
   }
 
-  async function pollAgentRunCompletion(runId: string) {
+  async function createDelegatedRunSummary(runId: string) {
+    try {
+      const summary = await apiPost<{
+        ok?: boolean;
+        error?: string;
+        summary_created?: boolean;
+        task_id?: string;
+      }>('/ui/chat/delegated-run-summary', { run_id: runId });
+      if (summary.ok === false) throw new Error(summary.error || '创建主模型整理任务失败');
+      const taskId = String(summary.task_id || '');
+      const created = Boolean(summary.summary_created && taskId);
+      if (created) {
+        expectPendingAssistantReply(taskId);
+        await refreshMessages();
+        await loadSessions();
+      }
+      return { created, error: '', taskId };
+    } catch (error) {
+      return {
+        created: false,
+        error: error instanceof Error ? error.message : '创建主模型整理任务失败',
+        taskId: '',
+      };
+    }
+  }
+
+  async function pollAgentRunCompletion(runId: string, options: { summarizeDelegatedRun?: boolean } = {}) {
     const maxAttempts = 600; // 最多轮询 600 次（约 5 分钟）
     const interval = ACTIVE_POLL_INTERVAL_MS;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -1170,10 +1196,18 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             setStatus(nextApprovalStatusText(run));
           } else {
             forgetRunApprovalDetails(runId);
-            isProcessingRef.current = chatStillProcessing;
-            setIsProcessing(chatStillProcessing);
-            setProcessingCount(chatProcessingCount);
-            if (chatStillProcessing) {
+            const delegatedSummary = options.summarizeDelegatedRun
+              ? await createDelegatedRunSummary(runId)
+              : { created: false, error: '', taskId: '' };
+            const nextProcessing = chatStillProcessing || delegatedSummary.created;
+            isProcessingRef.current = nextProcessing;
+            setIsProcessing(nextProcessing);
+            setProcessingCount(delegatedSummary.created ? Math.max(1, chatProcessingCount) : chatProcessingCount);
+            if (delegatedSummary.created) {
+              setStatus(`${runLabel} 已结束，等待主模型整理委派结果...`);
+            } else if (delegatedSummary.error) {
+              setStatus(`审批后执行结束，但整理任务未创建：${delegatedSummary.error}`);
+            } else if (chatStillProcessing) {
               setStatus(
                 status === 'completed'
                   ? `${runLabel} 已完成，等待主模型汇总...`
@@ -1213,8 +1247,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setStatus(chatStillProcessing ? 'Agent Run 轮询超时，仍在等待后续处理...' : 'Agent Run 轮询超时');
   }
 
-  function pollAgentRunInBackground(runId: string) {
-    void pollAgentRunCompletion(runId).catch((error) => {
+  function pollAgentRunInBackground(runId: string, options: { summarizeDelegatedRun?: boolean } = {}) {
+    void pollAgentRunCompletion(runId, options).catch((error) => {
       console.error('后台轮询 Agent Run 状态失败:', error);
       setStatus(error instanceof Error ? error.message : 'Agent Run 状态刷新失败');
     });
@@ -1409,24 +1443,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       let delegatedSummaryError = '';
       let delegatedSummaryTaskId = '';
       if (summarizeDelegatedRun && ['completed', 'failed', 'cancelled'].includes(runStatus)) {
-        try {
-          const summary = await apiPost<{
-            ok?: boolean;
-            error?: string;
-            summary_created?: boolean;
-            task_id?: string;
-          }>('/ui/chat/delegated-run-summary', { run_id: runId });
-          if (summary.ok === false) throw new Error(summary.error || '创建主模型整理任务失败');
-          delegatedSummaryTaskId = String(summary.task_id || '');
-          delegatedSummaryCreated = Boolean(summary.summary_created && delegatedSummaryTaskId);
-          if (delegatedSummaryCreated) {
-            expectPendingAssistantReply(delegatedSummaryTaskId);
-            await refreshMessages();
-            await loadSessions();
-          }
-        } catch (error) {
-          delegatedSummaryError = error instanceof Error ? error.message : '创建主模型整理任务失败';
-        }
+        const summary = await createDelegatedRunSummary(runId);
+        delegatedSummaryCreated = summary.created;
+        delegatedSummaryError = summary.error;
+        delegatedSummaryTaskId = summary.taskId;
       }
       if (composerItemId && runStatus !== 'approval_required') {
         setResolvedComposerApprovalIds((current) => (
@@ -1443,7 +1463,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         } else {
           forgetRunApprovalDetails(runId);
           setStatus('已批准，Agent 正在继续执行...');
-          pollAgentRunInBackground(runId);
+          pollAgentRunInBackground(runId, { summarizeDelegatedRun });
         }
       } else {
         forgetRunApprovalDetails(runId);

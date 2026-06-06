@@ -66,6 +66,7 @@
 - ✅ 2026-06-05 追加：普通主会话的 Yachiyo 自动委派解析也补齐容错：可识别 `<yachiyo_delegation>`、智能引号、`type/kind=agent/workflow`、`agentName/userGoal/objective/runnableId` 等字段变体，并会扫描长回复里的多个 JSON 对象，找到第一个有效委派请求；群组协调任务仍会禁用这条自动委派路径，交给群组派发协议处理。
 - ✅ 2026-06-05 追加：普通主会话自动委派的子 Run 如果进入 `approval_required`，父链路不再把它当失败活动展示；`pending_approval` 会随委派结果写回主模型后续上下文，activity 事件也会记录 `run_id/run_status/pending_approval`，Chat 活动行可在有 Run ID 时直接打开 Run Detail，并用独立待审批样式提示用户；输入框上方的待审批提醒队列也会合并消息审批和 activity 审批，批准/拒绝成功后会本地抑制刚处理过的 composer approval item，避免旧 activity 审批继续浮在输入区；activity 来源审批后的 delegated Run 到达 completed/failed/cancelled 后，Chat 会创建一条主模型整理任务，把原用户请求、主模型委派上下文、Run 结果和产物摘要交回主模型收尾，避免用户批准后只看到子 Run 结束但对话没有汇总。
 - ✅ 2026-06-05 追加：activity 来源审批触发主模型整理任务时，前端会把新 task 注册为“等待回复”并保持消息列表跟随到底部，用户批准后能自然看到主模型收尾气泡出现，而不是只靠状态栏猜测后台在整理。
+- ✅ 2026-06-06 追加：activity 来源审批如果批准后 Run 先回到 `processing`，前端后台轮询到 completed/failed/cancelled 时也会继续创建 delegated Run 主模型整理任务；不再只覆盖“批准接口立刻返回终态”的情况。
 - ✅ 2026-06-05 追加：输入框上方待审批 item 已改为“消息/活动 + 当前审批签名”维度，本地 suppression 不再误伤同一 Run 后续审批；审批 action 或后台轮询拿到新的 `pending_approval` 时，会用 Run 当前工具和参数覆盖旧 activity 详情，连续审批时用户能看到下一次到底要批准什么。
 - ✅ 2026-06-05 追加验证：`HERMES_HOME=/private/tmp/hermes-yachiyo-pytest .venv/bin/python -m pytest tests/test_chat_api.py` → 112 passed；`git diff --check` → clean。
 - ✅ 2026-06-05 追加验证：`HERMES_HOME=/private/tmp/hermes-yachiyo-pytest .venv/bin/python -m pytest tests/test_agent_runtime.py` → 76 passed；`npm --prefix apps/frontend run build` → passed；`git diff --check` → clean。
