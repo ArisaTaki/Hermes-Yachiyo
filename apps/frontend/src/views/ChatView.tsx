@@ -58,6 +58,7 @@ type ChatMessage = {
   error?: string;
   created_at?: string;
   task_id?: string;
+  token_count?: number;
   progress_label?: string;
   activity_events?: ChatActivityEvent[];
   attachments?: ChatAttachment[];
@@ -68,6 +69,7 @@ type MessagesPayload = {
   error?: string;
   is_processing?: boolean;
   messages?: ChatMessage[];
+  token_count?: number;
   anchor_message_id?: string;
 };
 
@@ -87,6 +89,7 @@ type SessionItem = {
   created_at?: string;
   updated_at?: string;
   message_count?: number;
+  token_count?: number;
   is_processing?: boolean;
   latest_activity?: ChatActivityEvent | null;
   latest_message_preview?: string;
@@ -209,6 +212,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [isSending, setIsSending] = useState(false);
   const [sessions, setSessions] = useState<SessionsPayload | null>(null);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const [conversationTokenCount, setConversationTokenCount] = useState(0);
   const [executor, setExecutor] = useState<ExecutorPayload | null>(null);
   const [assistantProfile, setAssistantProfile] = useState<AssistantProfilePayload | null>(() => cachedAssistantProfile || profileFromSeed(assistantProfileSeed));
   const [assistantProfileLoading, setAssistantProfileLoading] = useState(() => !(cachedAssistantProfile || profileFromSeed(assistantProfileSeed)));
@@ -270,6 +274,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const nextMessages = withResolvedAttachmentUrls(payload.messages || [], baseUrl);
       const processing = Boolean(payload.is_processing);
       const processingChanged = processing !== isProcessingRef.current;
+      setConversationTokenCount(normalizedTokenCount(payload.token_count));
       isProcessingRef.current = processing;
       const failed = latestFailedMessage(nextMessages);
       if (!shouldHoldLoading && isMessageSelectionPaused()) {
@@ -746,6 +751,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       await apiPost('/ui/chat/session/clear');
       renderStateRef.current.clear();
       setMessages([]);
+      setConversationTokenCount(0);
       isProcessingRef.current = false;
       setIsProcessing(false);
       setStatus('新对话已创建');
@@ -763,6 +769,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const result = await apiPost<MessagesPayload & { cancelled_tasks?: number }>('/ui/chat/session/cancel');
       if (result.ok === false) throw new Error(result.error || '取消失败');
       setMessages(result.messages || []);
+      setConversationTokenCount(normalizedTokenCount(result.token_count));
       isProcessingRef.current = Boolean(result.is_processing);
       setIsProcessing(Boolean(result.is_processing));
       setStatus(result.cancelled_tasks ? `已取消 ${result.cancelled_tasks} 个任务` : '没有可取消任务');
@@ -1079,10 +1086,15 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const visibleSessions = sessionItems;
   const currentSession = sessionItems.find((session) => session.session_id === sessions?.current_session_id);
   const currentSessionId = sessions?.current_session_id || '';
+  const currentTokenCount = conversationTokenCount || normalizedTokenCount(currentSession?.token_count);
+  const currentTokenLabel = currentTokenCount ? ` · ${formatTokenCount(currentTokenCount)}` : '';
   const currentTitle = currentSession
     ? sessionTitle(currentSession)
     : firstUserMessageTitle(messages) || assistantProfile?.agent_name || '月見八千代';
   const headerActivity = latestVisibleActivity(messages);
+  const headerStatusText = isProcessing
+    ? `${headerActivity ? `处理中 · ${compactStatusText(activityLabel(headerActivity))}` : '处理中'}${currentTokenLabel}`
+    : `${status} · ${executorLabel(executor)}${currentTokenLabel}`;
   const chatWorkspaceStyle = embedded
     ? undefined
     : ({ '--chat-sidebar-width': `${sidebarWidth}px` } as CSSProperties);
@@ -1140,6 +1152,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                   <span className="chat-item-time">
                     {session.is_processing ? '处理中' : formatShortTime(session.updated_at || session.created_at)}
                   </span>
+                  <span className="chat-item-token">{formatTokenCount(session.token_count)}</span>
                 </span>
               </button>
             )) : (
@@ -1174,7 +1187,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 <div className="chat-header-name">{currentTitle}</div>
                 <div className="chat-header-status">
                   <div className={`status-dot ${isProcessing ? 'processing' : 'completed'}`} />
-                  <span>{isProcessing ? (headerActivity ? `处理中 · ${compactStatusText(activityLabel(headerActivity))}` : '处理中') : `${status} · ${executorLabel(executor)}`}</span>
+                  <span>{headerStatusText}</span>
                 </div>
               </div>
             </div>
@@ -1785,6 +1798,22 @@ function activityDisplayStatus(eventStatus?: string, messageStatus?: string) {
     return messageStatus;
   }
   return eventStatus;
+}
+
+function normalizedTokenCount(value?: number) {
+  const numeric = Number(value || 0);
+  return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : 0;
+}
+
+function formatTokenCount(value?: number) {
+  const count = normalizedTokenCount(value);
+  if (count >= 1_000_000) return `≈${formatCompactNumber(count / 1_000_000)}m tok`;
+  if (count >= 1_000) return `≈${formatCompactNumber(count / 1_000)}k tok`;
+  return `≈${count} tok`;
+}
+
+function formatCompactNumber(value: number) {
+  return value >= 10 ? Math.round(value).toString() : value.toFixed(1).replace(/\.0$/, '');
 }
 
 function formatShortTime(value?: string) {

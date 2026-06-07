@@ -7767,6 +7767,18 @@ body.electron-window .hy-traffic {
   font-size: 10px;
 }
 
+.hy-content .open-chat-shell .chat-item-token {
+  padding: 2px 5px;
+  border: 1px solid oklch(68% 0.11 188 / 0.16);
+  border-radius: 6px;
+  background: oklch(68% 0.11 188 / 0.06);
+  color: var(--hy-teal);
+  font-family: var(--hy-font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .hy-content .open-chat-shell .hy-chat-mainpane {
   grid-template-rows: auto minmax(0, 1fr) auto auto;
   min-height: 0;

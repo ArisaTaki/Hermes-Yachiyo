@@ -252,6 +252,25 @@ def test_list_sessions_search_includes_message_match(tmp_path, monkeypatch):
         store.close()
 
 
+def test_chat_payloads_include_estimated_token_counts(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
+    try:
+        session_id = runtime.chat_session.session_id
+        runtime.chat_session.add_user_message("你好 world")
+        runtime.chat_session.add_assistant_message("收到，开始处理。")
+
+        messages_payload = api.get_messages()
+        assert messages_payload["token_count"] > 0
+        assert all(message["token_count"] > 0 for message in messages_payload["messages"])
+
+        sessions = api.list_sessions()["sessions"]
+        current = next(item for item in sessions if item["session_id"] == session_id)
+        assert current["token_count"] == messages_payload["token_count"]
+    finally:
+        store.close()
+
+
 def test_get_messages_can_load_around_search_anchor(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
