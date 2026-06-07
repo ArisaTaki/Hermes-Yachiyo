@@ -1211,7 +1211,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 <UiIcon name="plus" />
               </button>
               <button type="button" className="chat-action-btn danger-action" title="删除对话" aria-label="删除对话" onClick={() => void deleteSession()} disabled={!sessions?.sessions?.length}>
-                <UiIcon name="close" />
+                <UiIcon name="trash" />
               </button>
             </div>
           </header>
