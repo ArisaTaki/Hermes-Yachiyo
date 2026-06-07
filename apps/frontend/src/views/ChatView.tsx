@@ -12,7 +12,7 @@ import { UiIcon } from '../components/UiIcon';
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiGet, apiPost, bridgeUrl, copyText, openAppView, openExternalUrl } from '../lib/bridge';
-import { currentParam } from '../lib/view';
+import { currentParam, navigateTo } from '../lib/view';
 
 type PendingAttachment = {
   id: string;
@@ -46,6 +46,7 @@ type ChatActivityEvent = {
   status?: string;
   duration_seconds?: number | null;
   created_at?: string;
+  metadata?: Record<string, unknown>;
 };
 
 type ChatMessage = {
@@ -57,6 +58,7 @@ type ChatMessage = {
   error?: string;
   created_at?: string;
   task_id?: string;
+  token_count?: number;
   progress_label?: string;
   activity_events?: ChatActivityEvent[];
   attachments?: ChatAttachment[];
@@ -67,6 +69,7 @@ type MessagesPayload = {
   error?: string;
   is_processing?: boolean;
   messages?: ChatMessage[];
+  token_count?: number;
   anchor_message_id?: string;
 };
 
@@ -86,6 +89,7 @@ type SessionItem = {
   created_at?: string;
   updated_at?: string;
   message_count?: number;
+  token_count?: number;
   is_processing?: boolean;
   latest_activity?: ChatActivityEvent | null;
   latest_message_preview?: string;
@@ -208,6 +212,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [isSending, setIsSending] = useState(false);
   const [sessions, setSessions] = useState<SessionsPayload | null>(null);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
+  const [conversationTokenCount, setConversationTokenCount] = useState(0);
   const [executor, setExecutor] = useState<ExecutorPayload | null>(null);
   const [assistantProfile, setAssistantProfile] = useState<AssistantProfilePayload | null>(() => cachedAssistantProfile || profileFromSeed(assistantProfileSeed));
   const [assistantProfileLoading, setAssistantProfileLoading] = useState(() => !(cachedAssistantProfile || profileFromSeed(assistantProfileSeed)));
@@ -269,14 +274,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const nextMessages = withResolvedAttachmentUrls(payload.messages || [], baseUrl);
       const processing = Boolean(payload.is_processing);
       const processingChanged = processing !== isProcessingRef.current;
+      setConversationTokenCount(normalizedTokenCount(payload.token_count));
       isProcessingRef.current = processing;
       const failed = latestFailedMessage(nextMessages);
-      if (!shouldHoldLoading && isMessageSelectionPaused()) {
-        setIsProcessing(processing);
-        setStatus(chatStatusLabel(processing, failed, nextMessages));
-        if (processingChanged) void loadSessionsRef.current();
-        return;
-      }
       syncRenderStates(nextMessages, renderStateRef.current);
       const elapsed = Date.now() - startedAt;
       const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
@@ -293,7 +293,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       }
       setMessages(nextMessages);
       setIsProcessing(processing);
-      if (shouldTriggerPendingReplyScroll(nextMessages)) {
+      if (!isMessageSelectionPaused() && shouldTriggerPendingReplyScroll(nextMessages)) {
         pendingReplyScrollRef.current = false;
         pendingReplyTaskIdRef.current = '';
         scrollToConversationBottom(true);
@@ -745,6 +745,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       await apiPost('/ui/chat/session/clear');
       renderStateRef.current.clear();
       setMessages([]);
+      setConversationTokenCount(0);
       isProcessingRef.current = false;
       setIsProcessing(false);
       setStatus('新对话已创建');
@@ -762,6 +763,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const result = await apiPost<MessagesPayload & { cancelled_tasks?: number }>('/ui/chat/session/cancel');
       if (result.ok === false) throw new Error(result.error || '取消失败');
       setMessages(result.messages || []);
+      setConversationTokenCount(normalizedTokenCount(result.token_count));
       isProcessingRef.current = Boolean(result.is_processing);
       setIsProcessing(Boolean(result.is_processing));
       setStatus(result.cancelled_tasks ? `已取消 ${result.cancelled_tasks} 个任务` : '没有可取消任务');
@@ -1078,10 +1080,15 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const visibleSessions = sessionItems;
   const currentSession = sessionItems.find((session) => session.session_id === sessions?.current_session_id);
   const currentSessionId = sessions?.current_session_id || '';
+  const currentTokenCount = conversationTokenCount || normalizedTokenCount(currentSession?.token_count);
+  const currentTokenLabel = currentTokenCount ? ` · ${formatTokenCount(currentTokenCount)}` : '';
   const currentTitle = currentSession
     ? sessionTitle(currentSession)
     : firstUserMessageTitle(messages) || assistantProfile?.agent_name || '月見八千代';
   const headerActivity = latestVisibleActivity(messages);
+  const headerStatusText = isProcessing
+    ? `${headerActivity ? `处理中 · ${compactStatusText(activityLabel(headerActivity))}` : '处理中'}${currentTokenLabel}`
+    : `${status} · ${executorLabel(executor)}${currentTokenLabel}`;
   const chatWorkspaceStyle = embedded
     ? undefined
     : ({ '--chat-sidebar-width': `${sidebarWidth}px` } as CSSProperties);
@@ -1139,6 +1146,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                   <span className="chat-item-time">
                     {session.is_processing ? '处理中' : formatShortTime(session.updated_at || session.created_at)}
                   </span>
+                  <span className="chat-item-token">{formatTokenCount(session.token_count)}</span>
                 </span>
               </button>
             )) : (
@@ -1173,7 +1181,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 <div className="chat-header-name">{currentTitle}</div>
                 <div className="chat-header-status">
                   <div className={`status-dot ${isProcessing ? 'processing' : 'completed'}`} />
-                  <span>{isProcessing ? (headerActivity ? `处理中 · ${compactStatusText(activityLabel(headerActivity))}` : '处理中') : `${status} · ${executorLabel(executor)}`}</span>
+                  <span>{headerStatusText}</span>
                 </div>
               </div>
             </div>
@@ -1210,7 +1218,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 <UiIcon name="plus" />
               </button>
               <button type="button" className="chat-action-btn danger-action" title="删除对话" aria-label="删除对话" onClick={() => void deleteSession()} disabled={!sessions?.sessions?.length}>
-                <UiIcon name="close" />
+                <UiIcon name="trash" />
               </button>
             </div>
           </header>
@@ -1445,29 +1453,97 @@ function MessageActivityList({ events, messageStatus, progressLabel }: {
   messageStatus?: string;
   progressLabel?: string;
 }) {
+  const [expandedEventIds, setExpandedEventIds] = useState<Set<string>>(() => new Set());
   const rows = events.slice(0, 4);
   const fallback = progressLabel && !rows.length
     ? [{ title: progressLabel, status: messageStatus || 'running' } as ChatActivityEvent]
     : [];
   const visibleRows = rows.length ? rows : fallback;
   if (!visibleRows.length) return null;
+
+  function toggleExpanded(eventKey: string) {
+    setExpandedEventIds((current) => {
+      const next = new Set(current);
+      if (next.has(eventKey)) next.delete(eventKey);
+      else next.add(eventKey);
+      return next;
+    });
+  }
+
+  function openActivity(event: ChatActivityEvent) {
+    if (event.event_id) {
+      navigateTo('activity-detail', { event_id: event.event_id });
+      return;
+    }
+    navigateTo('activity-all');
+  }
+
   return (
     <div className="message-activity-list" aria-label="执行活动">
       {visibleRows.map((event, index) => {
         const displayStatus = activityDisplayStatus(event.status, messageStatus);
+        const eventKey = activityEventKey(event, index);
+        const metadataText = formatActivityMetadata(event.metadata);
+        const canExpand = Boolean(event.detail || metadataText);
+        const expanded = expandedEventIds.has(eventKey);
         return (
-          <div className={`message-activity-row ${activityStatusClass(displayStatus)}`} key={event.event_id || `${event.title}-${index}`}>
+          <div className={`message-activity-row ${activityStatusClass(displayStatus)}${expanded ? ' expanded' : ''}`} key={eventKey}>
             <span className="message-activity-icon" aria-hidden="true">{activityStatusIcon(displayStatus)}</span>
-            <span className="message-activity-text">
-              <strong>{event.title || event.tool_name || 'Hermes 活动'}</strong>
+            <div className="message-activity-text">
+              <div className="message-activity-heading">
+                <strong>{event.title || event.tool_name || 'Hermes 活动'}</strong>
+                {event.event_id ? (
+                  <button
+                    type="button"
+                    className="message-activity-link"
+                    title="打开活动详情"
+                    aria-label="打开活动详情"
+                    onClick={() => openActivity(event)}
+                  >
+                    <UiIcon name="activity" />
+                    <span>详情</span>
+                  </button>
+                ) : null}
+                {canExpand ? (
+                  <button
+                    type="button"
+                    className="message-activity-link"
+                    title={expanded ? '收起调用记录' : '展开调用记录'}
+                    aria-label={expanded ? '收起调用记录' : '展开调用记录'}
+                    onClick={() => toggleExpanded(eventKey)}
+                  >
+                    <UiIcon name={expanded ? 'close' : 'plus'} />
+                    <span>{expanded ? '收起' : '展开'}</span>
+                  </button>
+                ) : null}
+              </div>
               {event.detail ? <small>{event.detail}</small> : null}
-            </span>
+              {expanded ? (
+                <div className="message-activity-expanded">
+                  {event.detail ? <span>{event.detail}</span> : null}
+                  {metadataText ? <pre>{metadataText}</pre> : null}
+                </div>
+              ) : null}
+            </div>
             <time>{formatShortTime(event.created_at)}</time>
           </div>
         );
       })}
     </div>
   );
+}
+
+function activityEventKey(event: ChatActivityEvent, index: number) {
+  return event.event_id || `${event.created_at || 'activity'}-${event.task_id || event.title || index}-${index}`;
+}
+
+function formatActivityMetadata(metadata?: Record<string, unknown>) {
+  if (!metadata || !Object.keys(metadata).length) return '';
+  try {
+    return JSON.stringify(metadata, null, 2);
+  } catch {
+    return '';
+  }
 }
 
 function TypingIndicator() {
@@ -1718,6 +1794,22 @@ function activityDisplayStatus(eventStatus?: string, messageStatus?: string) {
   return eventStatus;
 }
 
+function normalizedTokenCount(value?: number) {
+  const numeric = Number(value || 0);
+  return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric) : 0;
+}
+
+function formatTokenCount(value?: number) {
+  const count = normalizedTokenCount(value);
+  if (count >= 1_000_000) return `≈${formatCompactNumber(count / 1_000_000)}m tok`;
+  if (count >= 1_000) return `≈${formatCompactNumber(count / 1_000)}k tok`;
+  return `≈${count} tok`;
+}
+
+function formatCompactNumber(value: number) {
+  return value >= 10 ? Math.round(value).toString() : value.toFixed(1).replace(/\.0$/, '');
+}
+
 function formatShortTime(value?: string) {
   if (!value) return '—';
   const date = new Date(value);
@@ -1895,15 +1987,39 @@ function codeBlockStateKey(messageId: string, blockIndex: string) {
   return `${messageId || 'message'}:${blockIndex}`;
 }
 
+function renderCodeBlockHtml(
+  rawCode: string,
+  rawLanguage: string,
+  messageId: string,
+  copiedCodeBlockKey: string,
+  blockIndex: number,
+) {
+  const normalizedBlock = normalizeCodeBlockContent(rawCode, rawLanguage);
+  const code = normalizedBlock.code;
+  const language = normalizedBlock.language || detectCodeLanguage(code);
+  const blockKey = String(blockIndex);
+  const copied = copiedCodeBlockKey === codeBlockStateKey(messageId, blockKey);
+  const languageLabel = language ? `<span class="markdown-code-lang">${escapeHtml(language)}</span>` : '<span class="markdown-code-lang">text</span>';
+  const copyButtonLabel = copied ? '已复制' : '复制代码';
+  const copyButtonIcon = copied ? CODE_CHECK_ICON_HTML : CODE_COPY_ICON_HTML;
+  const blockClass = `markdown-code-block${language ? ` markdown-code-block-${escapeHtml(language)}` : ''}`;
+  return `<div class="${blockClass}" data-code-index="${blockKey}">${languageLabel}<button type="button" class="markdown-code-copy${copied ? ' copied' : ''}" data-code-copy aria-label="${copyButtonLabel}" title="${copyButtonLabel}">${copyButtonIcon}</button><pre><code class="${language ? `language-${escapeHtml(language)}` : ''}">${renderHighlightedCode(code, language)}</code></pre></div>`;
+}
+
 function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
   const source = String(text || '').replace(/\r\n/g, '\n');
   if (!source) return '';
+  const standaloneCode = detectStandaloneCodeBlock(source);
+  if (standaloneCode) {
+    return renderCodeBlockHtml(standaloneCode.code, standaloneCode.language, messageId, copiedCodeBlockKey, 0);
+  }
 
   const lines = source.split('\n');
   let html = '';
   let paragraph: string[] = [];
   let listType: 'ul' | 'ol' | null = null;
   let inCode = false;
+  let codeFenceMarker = '';
   let codeLines: string[] = [];
   let codeLanguage = '';
   let codeBlockIndex = 0;
@@ -1928,31 +2044,28 @@ function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
   }
 
   function flushCode() {
-    const code = codeLines.join('\n');
-    const language = codeLanguage || detectCodeLanguage(code);
-    const blockIndex = String(codeBlockIndex);
-    const copied = copiedCodeBlockKey === codeBlockStateKey(messageId, blockIndex);
-    const languageLabel = language ? `<span class="markdown-code-lang">${escapeHtml(language)}</span>` : '<span class="markdown-code-lang">text</span>';
-    const copyButtonLabel = copied ? '已复制' : '复制代码';
-    const copyButtonIcon = copied ? CODE_CHECK_ICON_HTML : CODE_COPY_ICON_HTML;
-    html += `<div class="markdown-code-block" data-code-index="${blockIndex}">${languageLabel}<button type="button" class="markdown-code-copy${copied ? ' copied' : ''}" data-code-copy aria-label="${copyButtonLabel}" title="${copyButtonLabel}">${copyButtonIcon}</button><pre><code class="${language ? `language-${escapeHtml(language)}` : ''}">${renderHighlightedCode(code, language)}</code></pre></div>`;
+    html += renderCodeBlockHtml(codeLines.join('\n'), codeLanguage, messageId, copiedCodeBlockKey, codeBlockIndex);
     codeLines = [];
     codeLanguage = '';
+    codeFenceMarker = '';
     inCode = false;
     codeBlockIndex += 1;
   }
 
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (line.trim().startsWith('```')) {
+    const fence = parseMarkdownFence(line);
+    if (fence) {
       if (inCode) {
-        flushCode();
+        if (fence.marker === codeFenceMarker) flushCode();
+        else codeLines.push(line);
       } else {
         flushParagraph();
         closeList();
         inCode = true;
+        codeFenceMarker = fence.marker;
         codeLines = [];
-        codeLanguage = normalizeFenceLanguage(line);
+        codeLanguage = normalizeFenceLanguage(fence.info);
       }
       continue;
     }
@@ -2028,9 +2141,74 @@ function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
   return html;
 }
 
-function normalizeFenceLanguage(fenceLine: string) {
-  const raw = fenceLine.trim().slice(3).trim().split(/\s+/)[0] || '';
-  return normalizeCodeLanguage(raw);
+function detectStandaloneCodeBlock(source: string): { code: string; language: string } | null {
+  if (source.includes('```') || source.includes('~~~')) return null;
+  const trimmed = source.trim();
+  if (!trimmed) return null;
+  if (looksLikeResumeDiffTranscript(trimmed) || looksLikeUnifiedDiff(trimmed)) {
+    return { code: trimmed, language: 'diff' };
+  }
+  return null;
+}
+
+function looksLikeResumeDiffTranscript(text: string) {
+  return /resumed session/i.test(text)
+    && /review\s+diff/i.test(text)
+    && looksLikeUnifiedDiff(text);
+}
+
+function looksLikeUnifiedDiff(text: string) {
+  const hasHunk = /(?:^|\n)@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/.test(text);
+  const hasFileHeader = /(?:^|\n)(?:diff --git|---\s+\S+\n\+\+\+\s+\S+)/.test(text);
+  const hasChangedLines = /(?:^|\n)\+[^+\n]/.test(text) && /(?:^|\n)-[^-\n]/.test(text);
+  return (hasHunk || hasFileHeader) && hasChangedLines;
+}
+
+function parseMarkdownFence(line: string) {
+  const match = line.trim().match(/^(```|~~~|:::)\s*(.*)$/);
+  if (!match) return null;
+  return {
+    marker: match[1],
+    info: match[2] || '',
+  };
+}
+
+function normalizeFenceLanguage(fenceInfo: string) {
+  const raw = fenceInfo.trim();
+  const lower = raw.toLowerCase();
+  if (lower === 'review diff' || lower === 'review-diff' || lower.startsWith('review diff ')) return 'diff';
+  if (lower === 'patch' || lower.includes(' diff')) return 'diff';
+  return normalizeCodeLanguage(raw.split(/\s+/)[0] || '');
+}
+
+function normalizeCodeBlockContent(code: string, language: string) {
+  const directLanguage = normalizeCodeLanguage(language);
+  const unwrapped = unwrapReviewDiffFence(code);
+  if (unwrapped) {
+    return {
+      code: unwrapped,
+      language: 'diff',
+    };
+  }
+  return {
+    code,
+    language: directLanguage,
+  };
+}
+
+function unwrapReviewDiffFence(code: string) {
+  const lines = String(code || '').replace(/\r\n/g, '\n').split('\n');
+  while (lines.length && !lines[0].trim()) lines.shift();
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  if (lines.length < 2) return '';
+  const opening = parseMarkdownFence(lines[0]);
+  if (!opening) return '';
+  if (normalizeFenceLanguage(opening.info) !== 'diff') return '';
+  const closing = parseMarkdownFence(lines[lines.length - 1]);
+  const contentLines = closing && closing.marker === opening.marker
+    ? lines.slice(1, -1)
+    : lines.slice(1);
+  return contentLines.join('\n');
 }
 
 function normalizeCodeLanguage(language: string) {
@@ -2063,6 +2241,7 @@ function detectCodeLanguage(code: string) {
       // Keep looking for a better lightweight guess.
     }
   }
+  if (/^@@\s|(?:^|\n)\+[^+\n]/.test(trimmed) && /(?:^|\n)-[^-\n]/.test(trimmed)) return 'diff';
   if (/\bfunc\s+\w+\s*\(|\bpackage\s+main\b|:=/.test(trimmed)) return 'go';
   if (/\b(def|class|from|import)\s+\w+|__name__/.test(trimmed)) return 'python';
   if (/\b(const|let|var|function|interface|type)\s+\w+|=>/.test(trimmed)) return 'typescript';
@@ -2073,6 +2252,7 @@ function detectCodeLanguage(code: string) {
 
 function renderHighlightedCode(code: string, language: string) {
   const normalizedLanguage = normalizeCodeLanguage(language) || detectCodeLanguage(code);
+  if (normalizedLanguage === 'diff') return renderDiffCode(code);
   const keywords = codeKeywordsForLanguage(normalizedLanguage);
   let html = '';
   let index = 0;
@@ -2148,6 +2328,30 @@ function renderHighlightedCode(code: string, language: string) {
   }
 
   return html;
+}
+
+function renderDiffCode(code: string) {
+  const lines = String(code || '').replace(/\r\n/g, '\n').split('\n');
+  return lines.map((line) => {
+    const kind = diffLineKind(line);
+    const marker = diffLineMarker(line, kind);
+    const content = kind === 'add' || kind === 'delete' ? line.slice(1) : line;
+    return `<span class="diff-line diff-line-${kind}"><span class="diff-marker">${escapeHtml(marker)}</span><span class="diff-content">${escapeHtml(content || ' ')}</span></span>`;
+  }).join('');
+}
+
+function diffLineKind(line: string) {
+  if (line.startsWith('@@')) return 'hunk';
+  if (line.startsWith('+++') || line.startsWith('---')) return 'file';
+  if (line.startsWith('+')) return 'add';
+  if (line.startsWith('-')) return 'delete';
+  return 'context';
+}
+
+function diffLineMarker(line: string, kind: string) {
+  if (kind === 'add') return '+';
+  if (kind === 'delete') return '-';
+  return line.startsWith(' ') ? ' ' : '';
 }
 
 function codeKeywordsForLanguage(language: string) {
