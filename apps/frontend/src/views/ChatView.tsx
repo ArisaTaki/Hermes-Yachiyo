@@ -277,12 +277,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setConversationTokenCount(normalizedTokenCount(payload.token_count));
       isProcessingRef.current = processing;
       const failed = latestFailedMessage(nextMessages);
-      if (!shouldHoldLoading && isMessageSelectionPaused()) {
-        setIsProcessing(processing);
-        setStatus(chatStatusLabel(processing, failed, nextMessages));
-        if (processingChanged) void loadSessionsRef.current();
-        return;
-      }
       syncRenderStates(nextMessages, renderStateRef.current);
       const elapsed = Date.now() - startedAt;
       const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
@@ -299,7 +293,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       }
       setMessages(nextMessages);
       setIsProcessing(processing);
-      if (shouldTriggerPendingReplyScroll(nextMessages)) {
+      if (!isMessageSelectionPaused() && shouldTriggerPendingReplyScroll(nextMessages)) {
         pendingReplyScrollRef.current = false;
         pendingReplyTaskIdRef.current = '';
         scrollToConversationBottom(true);

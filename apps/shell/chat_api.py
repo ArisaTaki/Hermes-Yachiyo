@@ -627,6 +627,7 @@ class ChatAPI:
         try:
             # 同步任务状态到消息
             self._sync_task_status_to_messages()
+            self._session.reload_from_store(fail_active_messages=False)
 
             anchor_message_id = str(anchor_message_id or "").strip()
             if anchor_message_id:
