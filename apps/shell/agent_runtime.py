@@ -143,10 +143,20 @@ def _agent_goal_disallows_tool(user_goal: str, tool_name: str) -> str:
         r"without (?:running|executing)",
         r"no command execution",
     )
+    explicit_terminal_patterns = (
+        r"(?:必须|需要|请求|调用|使用).{0,24}terminal\.run",
+        r"只(?:需要|使用|调用).{0,12}terminal\.run",
+        r"(?:must|should|please).{0,24}(?:use|call|request).{0,24}terminal\.run",
+        r"(?:only|just).{0,12}(?:use|call).{0,12}terminal\.run",
+    )
 
     if tool_name in {"workspace.write_patch", "artifact.write"} and any(re.search(pattern, text) for pattern in no_file_patterns):
         return "用户目标明确要求不要创建、保存或修改文件；请改为 inline 交付内容。"
-    if tool_name == "terminal.run" and any(re.search(pattern, text) for pattern in no_command_patterns):
+    if (
+        tool_name == "terminal.run"
+        and not any(re.search(pattern, text) for pattern in explicit_terminal_patterns)
+        and any(re.search(pattern, text) for pattern in no_command_patterns)
+    ):
         return "用户目标明确要求不要运行命令或脚本；请改为给出代码、示例或说明。"
     return ""
 
@@ -3085,6 +3095,31 @@ class AgentRuntimeService:
         return "没有可用的工具调用详情"
 
     @staticmethod
+    def _fatal_tool_failure_detail(tool_name: str, tool_request: dict[str, Any], tool_result: dict[str, Any]) -> str:
+        if tool_name != "terminal.run":
+            return ""
+        if tool_result.get("ok") or tool_result.get("approval_required") or tool_result.get("blocked_by_user_goal"):
+            return ""
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        command = str(payload.get("command") or "").strip()
+        parts = ["terminal.run 执行失败"]
+        if command:
+            parts.append(f"命令：{command}")
+        returncode = tool_result.get("returncode")
+        if returncode not in (None, ""):
+            parts.append(f"退出码：{returncode}")
+        error = str(tool_result.get("error") or "").strip()
+        if error:
+            parts.append(f"错误：{error}")
+        stdout = str(tool_result.get("stdout") or "").strip()
+        if stdout:
+            parts.append(f"stdout：{stdout[:1000]}")
+        stderr = str(tool_result.get("stderr") or "").strip()
+        if stderr:
+            parts.append(f"stderr：{stderr[:1000]}")
+        return "；".join(parts)
+
+    @staticmethod
     def _assistant_message_for_history(message: dict[str, Any]) -> dict[str, Any]:
         history = {"role": "assistant", "content": message.get("content") or ""}
         tool_calls = message.get("tool_calls")
@@ -3144,6 +3179,18 @@ class AgentRuntimeService:
                         remaining_tool_requests=tool_requests[index + 1 :],
                     )
                 )
+            fatal_failure = self._fatal_tool_failure_detail(tool_name, tool_request, tool_result)
+            if fatal_failure:
+                timeline.append(
+                    self._timeline(
+                        "agent.tool.failed",
+                        tool_name,
+                        input_preview=input_preview,
+                        result=tool_result,
+                        status="failed",
+                    )
+                )
+                raise AgentRuntimeError(fatal_failure)
             self._append_tool_result_message(messages, tool_request, tool_result)
 
     def _call_agent_tool(
@@ -3773,6 +3820,15 @@ class AgentRuntimeService:
         child_label, child_node_info = self._workflow_child_node_context(timeline, child_run)
         self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, child_label)
         if child_status == "approval_required":
+            timeline.append(
+                self._timeline(
+                    "workflow.run.approval_required",
+                    child_label,
+                    child_run_id=child_run_id,
+                    status="approval_required",
+                    **child_node_info,
+                )
+            )
             result = self._update_run(
                 str(workflow_run["run_id"]),
                 status="approval_required",
@@ -4334,6 +4390,18 @@ class AgentRuntimeService:
         self._mark_parent_workflows_child_running(running)
         try:
             tool_result = self._call_agent_tool(tool_request, allowed_tools, broker, timeline, artifacts=artifacts, approved=True)
+            fatal_failure = self._fatal_tool_failure_detail(tool_name, tool_request, tool_result)
+            if fatal_failure:
+                timeline.append(
+                    self._timeline(
+                        "agent.tool.failed",
+                        tool_name or "tool",
+                        input_preview=tool_input_preview,
+                        result=tool_result,
+                        status="failed",
+                    )
+                )
+                raise AgentRuntimeError(fatal_failure)
             self._append_tool_result_message(messages, tool_request, tool_result)
             remaining = pending.get("remaining_tool_requests")
             remaining_requests = [item for item in remaining if isinstance(item, dict)] if isinstance(remaining, list) else []
@@ -4465,6 +4533,16 @@ class AgentRuntimeService:
                 *run["timeline"],
                 self._timeline(
                     "workflow.node.approval_rejected",
+                    detail,
+                    workflow_node_id=str(pending.get("workflow_node_id") or ""),
+                    workflow_node_kind="approval",
+                    workflow_node_label=label,
+                    workflow_node_approval_criteria=criteria,
+                    input_preview=approval_preview,
+                    status="cancelled",
+                ),
+                self._timeline(
+                    "workflow.run.cancelled",
                     detail,
                     workflow_node_id=str(pending.get("workflow_node_id") or ""),
                     workflow_node_kind="approval",
@@ -4730,6 +4808,62 @@ class AgentRuntimeService:
         run["workflow_run_id"] = run["run_id"]
         run["runnable"] = runnable
         return run
+
+    def rerun_run(self, run_id: str) -> dict[str, Any]:
+        original = self.get_run(run_id)
+        original_status = str(original.get("status") or "")
+        if original_status not in _FINAL_RUN_STATUSES:
+            raise AgentRuntimeError("当前 Run 还在进行中，不能重跑")
+        user_goal = str(original.get("user_goal") or "").strip()
+        if not user_goal:
+            raise AgentRuntimeError("原 Run 没有记录任务目标，无法重跑")
+        kind = str(original.get("kind") or "")
+        runnable_id = str(original.get("runnable_id") or "")
+        if kind == "agent_run":
+            rerun = self.create_agent_run(
+                {
+                    "agent_id": runnable_id,
+                    "user_goal": user_goal,
+                    "source": "rerun",
+                }
+            )
+            rerun_key = "agent_run_id"
+        elif kind == "workflow_run":
+            rerun = self.create_workflow_run(
+                {
+                    "workflow_id": runnable_id,
+                    "user_goal": user_goal,
+                    "source": "rerun",
+                }
+            )
+            rerun_key = "workflow_run_id"
+        else:
+            raise AgentRuntimeError("不支持重跑这个 Run 类型")
+
+        rerun_event = self._timeline(
+            "run.rerun.started",
+            f"Rerun of {original.get('runnable_name') or runnable_id}",
+            rerun_of_run_id=str(original.get("run_id") or ""),
+            rerun_of_kind=kind,
+            rerun_of_status=original_status,
+            rerun_of_runnable_id=runnable_id,
+            rerun_of_runnable_name=str(original.get("runnable_name") or ""),
+            original_created_at=str(original.get("created_at") or ""),
+            original_updated_at=str(original.get("updated_at") or ""),
+            input_preview={
+                "original_run_id": str(original.get("run_id") or ""),
+                "original_status": original_status,
+                "original_target": str(original.get("runnable_name") or runnable_id),
+                "original_goal": user_goal,
+            },
+        )
+        updated = self._update_run(
+            str(rerun["run_id"]),
+            timeline=[rerun_event, *[event for event in rerun.get("timeline") or [] if isinstance(event, dict)]],
+        )
+        updated[rerun_key] = updated["run_id"]
+        updated["runnable"] = self.resolve_runnable(runnable_id=runnable_id)
+        return updated
 
     def delegate_runnable(
         self,

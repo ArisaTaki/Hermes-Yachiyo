@@ -420,6 +420,113 @@ def test_workflow_failed_summary_message_includes_failed_node_hint(tmp_path):
         store.close()
 
 
+def test_workflow_tool_failure_writes_child_and_parent_failure_hints(tmp_path, monkeypatch):
+    api, _runtime, store = _make_api(tmp_path)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        seed_templates=False,
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+        assert any((tool.get("function") or {}).get("name") == "workspace_read" for tool in tools or [])
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_terminal",
+                    "type": "function",
+                    "function": {
+                        "name": "terminal_run",
+                        "arguments": json.dumps({"command": "python3 dangerous.py"}),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Tool Failing Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {"allowed_tools": ["workspace.read"]},
+            }
+        )
+        workflow = service.create_workflow(
+            {
+                "name": "Tool Failure Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "agent",
+                        "type": "agent",
+                        "data": {"label": "Tool Failing Agent", "agent_id": agent["agent_id"]},
+                    },
+                    {"id": "summary", "type": "artifact", "data": {"label": "Summary"}},
+                ],
+                "edges": [
+                    {"source": "start", "target": "agent"},
+                    {"source": "agent", "target": "summary"},
+                ],
+            }
+        )
+        run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "Run risky workflow"})
+        runnable = service.resolve_runnable(runnable_id=workflow["workflow_id"]) or {}
+        group = service.get_run_group(run["run_group_id"])
+        child_run_id = next(run_id for run_id in group["child_run_ids"] if run_id != run["run_id"])
+        child = service.get_run(child_run_id)
+
+        assert run["status"] == "failed"
+        assert run["result"] == "Agent 试图调用未授权工具：terminal.run"
+        failed_event = next(event for event in run["timeline"] if event["event"] == "workflow.run.failed")
+        assert failed_event["workflow_node_id"] == "agent"
+        assert failed_event["workflow_node_kind"] == "agent"
+        assert failed_event["workflow_node_label"] == "Tool Failing Agent"
+        assert failed_event["child_run_id"] == child_run_id
+        denied_event = next(event for event in child["timeline"] if event["event"] == "agent.tool.denied")
+        assert denied_event["detail"] == "terminal.run"
+
+        assistant_ids = api._append_workflow_run_messages(service, run, runnable)
+        messages = api.get_messages()["messages"]
+        child_message = next(
+            message
+            for message in messages
+            if message["id"] in assistant_ids and message["metadata"].get("runnable_kind") == "agent"
+        )
+        workflow_message = next(
+            message
+            for message in messages
+            if message["id"] in assistant_ids and message["metadata"].get("runnable_kind") == "workflow"
+        )
+
+        assert child_message["status"] == "failed"
+        assert child_message["content"] == "Agent 试图调用未授权工具：terminal.run"
+        assert child_message["error"] == child_message["content"]
+        assert child_message["metadata"]["run_id"] == child_run_id
+        assert child_message["metadata"]["workflow_run_id"] == run["run_id"]
+        assert child_message["metadata"]["workflow_node"] == "Tool Failing Agent"
+        assert child_message["metadata"]["run_status"] == "failed"
+        assert workflow_message["status"] == "failed"
+        assert workflow_message["content"] == (
+            "Tool Failure Flow 执行失败。\n"
+            "失败节点：Tool Failing Agent（agent）\n\n"
+            "Agent 试图调用未授权工具：terminal.run"
+        )
+        assert workflow_message["error"] == workflow_message["content"]
+        assert workflow_message["metadata"]["run_id"] == run["run_id"]
+        assert workflow_message["metadata"]["run_status"] == "failed"
+        assert workflow_message["metadata"]["workflow_status"] == "failed"
+    finally:
+        service.close()
+        store.close()
+
+
 def test_workflow_chat_messages_carry_artifact_metadata(tmp_path):
     api, _runtime, store = _make_api(tmp_path)
 
@@ -678,6 +785,142 @@ def test_workflow_waiting_for_child_agent_approval_counts_only_child(tmp_path, m
         assert "workflow_waiting_node" not in workflow_after["metadata"]
         assert "workflow_waiting_tool" not in workflow_after["metadata"]
         assert "workflow_waiting_pending_approval" not in workflow_after["metadata"]
+    finally:
+        service.close()
+        store.close()
+
+
+def test_workflow_child_consecutive_approvals_keep_chat_prompt_visible(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        seed_templates=False,
+    )
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls: list[list[dict]] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_first_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf workflow-chat-first"}),
+                        },
+                    },
+                    {
+                        "id": "call_second_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf workflow-chat-second"}),
+                        },
+                    },
+                ],
+            }
+        tool_messages = [message for message in messages if message.get("role") == "tool"]
+        assert any("workflow-chat-first" in message.get("content", "") for message in tool_messages)
+        assert any("workflow-chat-second" in message.get("content", "") for message in tool_messages)
+        return {"content": "Workflow child chat approvals completed"}
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent({
+            "name": "Consecutive Approval Child",
+            "model_mode": "custom_api",
+            "model_config": {
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-secret",
+            },
+            "tool_policy": {"allowed_tools": ["terminal.run"]},
+            "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+        })
+        workflow = service.create_workflow(
+            {
+                "name": "Child Consecutive Approval Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "agent",
+                        "type": "agent",
+                        "data": {"label": "Consecutive Approval Child", "agent_id": agent["agent_id"]},
+                    },
+                ],
+                "edges": [{"source": "start", "target": "agent"}],
+            }
+        )
+        run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "跑两次工具审批"})
+        runnable = service.resolve_runnable(runnable_id=workflow["workflow_id"])
+
+        assert run["status"] == "approval_required"
+        api._append_workflow_run_messages(service, run, runnable or {})
+        group = service.get_run_group(run["run_group_id"])
+        child_run_id = next(run_id for run_id in group["child_run_ids"] if run_id != run["run_id"])
+
+        first_payload = api.get_messages()
+        first_workflow = next(
+            message for message in first_payload["messages"]
+            if message["metadata"].get("runnable_kind") == "workflow"
+        )
+        assert first_payload["approval_count"] == 1
+        assert first_workflow["metadata"]["workflow_waiting_pending_approval"]["input_preview"]["command"] == (
+            "printf workflow-chat-first"
+        )
+
+        after_first = service.approve_run_approval(child_run_id)
+        assert after_first["status"] == "approval_required"
+        second_payload = api.get_messages()
+        second_messages = second_payload["messages"]
+        second_child = next(
+            message for message in second_messages
+            if message["metadata"].get("runnable_kind") == "agent"
+        )
+        second_workflow = next(
+            message for message in second_messages
+            if message["metadata"].get("runnable_kind") == "workflow"
+        )
+        current = next(
+            item for item in api.list_sessions()["sessions"]
+            if item["session_id"] == runtime.chat_session.session_id
+        )
+
+        assert second_payload["processing_count"] == 2
+        assert second_payload["approval_count"] == 1
+        assert api.get_session_info()["approval_count"] == 1
+        assert current["approval_count"] == 1
+        assert second_child["status"] == "processing"
+        assert second_child["metadata"]["run_status"] == "approval_required"
+        assert second_child["metadata"]["pending_approval"]["input_preview"]["command"] == "printf workflow-chat-second"
+        assert second_workflow["status"] == "processing"
+        assert "正在等待子 Agent 审批" in second_workflow["content"]
+        assert second_workflow["metadata"]["workflow_status"] == "approval_required"
+        assert second_workflow["metadata"]["workflow_waiting_child_run_id"] == child_run_id
+        assert second_workflow["metadata"]["workflow_waiting_pending_approval"]["input_preview"]["command"] == (
+            "printf workflow-chat-second"
+        )
+
+        after_second = service.approve_run_approval(child_run_id)
+        assert after_second["status"] == "completed"
+        final_payload = api.get_messages()
+        final_workflow = next(
+            message for message in final_payload["messages"]
+            if message["metadata"].get("runnable_kind") == "workflow"
+        )
+
+        assert final_payload["processing_count"] == 0
+        assert final_payload["approval_count"] == 0
+        assert final_workflow["status"] == "completed"
+        assert final_workflow["metadata"]["workflow_status"] == "completed"
+        assert "workflow_waiting_pending_approval" not in final_workflow["metadata"]
     finally:
         service.close()
         store.close()
@@ -2640,6 +2883,143 @@ def test_group_main_model_dispatch_result_creates_agent_run_messages(tmp_path, m
         store.close()
 
 
+def test_group_dispatch_resolves_member_short_alias_and_category(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    coding = {
+        "id": "agent_coding",
+        "name": "Coding Agent",
+        "nickname": "编码Agent Iroha",
+        "kind": "agent",
+        "enabled": True,
+        "category": "coding",
+    }
+    calls: list[dict] = []
+
+    class FakeRunnableService:
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            clean_name = str(name or "").lstrip("@")
+            if runnable_id == coding["id"] or clean_name in {coding["name"], coding["nickname"]}:
+                return coding
+            return None
+
+        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+            calls.append({
+                "runnable_id": runnable_id,
+                "name": name,
+                "user_goal": user_goal,
+                "run_group_id": run_group_id,
+            })
+            run = {
+                "run_id": f"{runnable_id}_run_{len(calls)}",
+                "run_group_id": run_group_id or "run_group_alias",
+                "status": "processing",
+                "result": "",
+                "runnable": coding,
+            }
+            if on_complete:
+                on_complete({
+                    **run,
+                    "status": "completed",
+                    "result": "alias matched",
+                })
+            return run
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeRunnableService())
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[coding["id"]])
+        assert created["ok"] is True
+
+        sent = api.send_message("@主模型 安排别名解析测试")
+        assert sent["ok"] is True
+        runtime.state.update_task_status(
+            sent["task_id"],
+            TaskStatus.COMPLETED,
+            result=(
+                '{"action":"dispatch_group_agent","agent":"Iroha","goal":"请求终端审批"}\n'
+                '{"action":"dispatch_group_agent","agent":"coding","goal":"再做一次"}'
+            ),
+        )
+
+        payload = api.get_messages()
+
+        assert [call["runnable_id"] for call in calls] == ["agent_coding", "agent_coding"]
+        assert [call["user_goal"] for call in calls] == ["请求终端审批", "再做一次"]
+        parent = next(
+            message
+            for message in payload["messages"]
+            if message["role"] == "assistant" and message["task_id"] == sent["task_id"]
+        )
+        assert parent["metadata"]["group_dispatch_count"] == 2
+        assert "未找到群组 Agent" not in parent["content"]
+        assert parent["metadata"]["group_dispatch_skipped"] == []
+    finally:
+        store.close()
+
+
+def test_group_dispatch_hides_protocol_meta_intro_lines(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    design = {
+        "id": "agent_design",
+        "name": "Design Agent",
+        "nickname": "Design",
+        "kind": "agent",
+        "enabled": True,
+    }
+
+    class FakeRunnableService:
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            if runnable_id == design["id"] or name in {design["name"], design["nickname"]}:
+                return design
+            return None
+
+        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+            run = {
+                "run_id": f"{runnable_id}_run",
+                "run_group_id": run_group_id or "run_group_dispatch",
+                "status": "processing",
+                "result": "",
+                "runnable": design,
+            }
+            if on_complete:
+                on_complete({
+                    **run,
+                    "status": "completed",
+                    "result": "Design done",
+                })
+            return run
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeRunnableService())
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[design["id"]])
+        assert created["ok"] is True
+        sent = api.send_message("@主模型 安排一下")
+        assert sent["ok"] is True
+        runtime.state.update_task_status(
+            sent["task_id"],
+            TaskStatus.COMPLETED,
+            result=(
+                "好，我来安排。\n"
+                "看来派活协议需要直接在回复里输出。让我重新来——\n"
+                '{"action":"dispatch_group_agent","agent":"Design","goal":"做视觉测试"}'
+            ),
+        )
+
+        payload = api.get_messages()
+
+        parent = next(
+            message
+            for message in payload["messages"]
+            if message["role"] == "assistant" and message["task_id"] == sent["task_id"]
+        )
+        assert "好，我来安排。" in parent["content"]
+        assert "我把这个任务派给 Design 了。" in parent["content"]
+        assert "派活协议" not in parent["content"]
+        assert "让我重新来" not in parent["content"]
+        assert "dispatch_group_agent" not in parent["content"]
+    finally:
+        store.close()
+
+
 def test_plain_group_message_can_dispatch_agents_via_main_model_result(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     design = {
@@ -2730,6 +3110,375 @@ def test_plain_group_message_can_dispatch_agents_via_main_model_result(tmp_path,
         assert "用户原始请求：我想让群里合适的 Agent 做个视觉测试" in summary_task.description
         assert "Design：已完成" in summary_task.description
         assert "汇报：视觉方案已经整理好。" in summary_task.description
+    finally:
+        store.close()
+
+
+def test_plain_group_goal_dispatches_two_agents_and_summarizes(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    design = {
+        "id": "agent_design",
+        "name": "Design Agent",
+        "nickname": "Design",
+        "kind": "agent",
+        "enabled": True,
+    }
+    coding = {
+        "id": "agent_coding",
+        "name": "Coding Agent",
+        "nickname": "Coding",
+        "kind": "agent",
+        "enabled": True,
+    }
+    results = {
+        "agent_design": "设计验收点已经整理好。",
+        "agent_coding": "验证脚本方案已经整理好。",
+    }
+    calls: list[dict] = []
+
+    class FakeRunnableService:
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            clean_name = str(name or "").lstrip("@")
+            for agent in (design, coding):
+                if runnable_id == agent["id"] or clean_name in {agent["name"], agent["nickname"]}:
+                    return agent
+            return None
+
+        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+            run_group = run_group_id or "run_group_plain_acceptance"
+            calls.append({
+                "runnable_id": runnable_id,
+                "name": name,
+                "user_goal": user_goal,
+                "run_group_id": run_group_id,
+                "actual_run_group_id": run_group,
+                "upstream": upstream,
+            })
+            runnable = design if runnable_id == design["id"] else coding
+            run = {
+                "run_id": f"{runnable_id}_run",
+                "run_group_id": run_group,
+                "status": "processing",
+                "result": "",
+                "runnable": runnable,
+            }
+            if on_complete:
+                on_complete({
+                    **run,
+                    "status": "completed",
+                    "result": results[runnable_id],
+                })
+            return run
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeRunnableService())
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[design["id"], coding["id"]])
+        assert created["ok"] is True
+
+        sent = api.send_message("我想让群里合适的 Agent 分别做 UI 验收和验证脚本方案")
+        assert sent["ok"] is True
+        main_task = runtime.state.get_task(sent["task_id"])
+        assert main_task is not None
+        assert main_task.description.startswith("我想让群里合适的 Agent 分别做 UI 验收和验证脚本方案")
+        assert "[Yachiyo 群组上下文]" in main_task.description
+        assert "Design Agent" in main_task.description
+        assert "Coding Agent" in main_task.description
+
+        runtime.state.update_task_status(
+            sent["task_id"],
+            TaskStatus.COMPLETED,
+            result=(
+                "我会把 UI 验收交给 Design，把验证脚本方案交给 Coding。\n"
+                "<yachiyo_group_dispatch>\n"
+                '{"tasks":['
+                '{"action":"dispatch_group_agent","agent":"Design","goal":"整理 UI 验收点"},'
+                '{"action":"dispatch_group_agent","agent":"Coding","goal":"整理验证脚本方案"}'
+                "]}\n"
+                "</yachiyo_group_dispatch>"
+            ),
+        )
+
+        payload = api.get_messages()
+        assistant_messages = [message for message in payload["messages"] if message["role"] == "assistant"]
+        parent = next(message for message in assistant_messages if message["task_id"] == sent["task_id"])
+        delegated = [
+            message
+            for message in assistant_messages
+            if message["metadata"].get("delegated_by_task_id") == sent["task_id"]
+        ]
+        summary_message = next(
+            message
+            for message in assistant_messages
+            if message["metadata"].get("group_agent_summary_for_task_id") == sent["task_id"]
+        )
+
+        assert [call["runnable_id"] for call in calls] == ["agent_design", "agent_coding"]
+        assert [call["user_goal"] for call in calls] == ["整理 UI 验收点", "整理验证脚本方案"]
+        assert calls[0]["run_group_id"] == ""
+        assert calls[1]["run_group_id"] == "run_group_plain_acceptance"
+        assert all("[Yachiyo 群组执行约定]" in call["upstream"] for call in calls)
+        assert parent["metadata"]["group_dispatch_handled"] is True
+        assert parent["metadata"]["group_dispatch_count"] == 2
+        assert parent["metadata"]["group_agent_summary_pending"] is True
+        assert "我把 2 个任务分别派给 Design、Coding 了。" in parent["content"]
+        assert "yachiyo_group_dispatch" not in parent["content"]
+        assert "dispatch_group_agent" not in parent["content"]
+        assert [message["metadata"]["delegated_goal"] for message in delegated] == [
+            "整理 UI 验收点",
+            "整理验证脚本方案",
+        ]
+        assert [message["metadata"]["agent_report"] for message in delegated] == [
+            "设计验收点已经整理好。",
+            "验证脚本方案已经整理好。",
+        ]
+
+        summary_task = runtime.state.get_task(summary_message["task_id"])
+        assert summary_task is not None
+        assert summary_message["status"] == "processing"
+        assert "用户原始请求：我想让群里合适的 Agent 分别做 UI 验收和验证脚本方案" in summary_task.description
+        assert "Design：已完成" in summary_task.description
+        assert "Coding：已完成" in summary_task.description
+        assert "汇报：设计验收点已经整理好。" in summary_task.description
+        assert "汇报：验证脚本方案已经整理好。" in summary_task.description
+        assert "不要再派发新的 Agent 任务" in summary_task.description
+
+        runtime.state.update_task_status(
+            summary_message["task_id"],
+            TaskStatus.COMPLETED,
+            result="我已经整合好 Design 和 Coding 的结果。",
+        )
+        completed_payload = api.get_messages()
+        completed_parent = next(
+            message
+            for message in completed_payload["messages"]
+            if message["role"] == "assistant" and message["task_id"] == sent["task_id"]
+        )
+        completed_summary = next(
+            message
+            for message in completed_payload["messages"]
+            if message["role"] == "assistant" and message["task_id"] == summary_message["task_id"]
+        )
+        assert "group_agent_summary_pending" not in completed_parent["metadata"]
+        assert completed_parent["metadata"]["group_agent_summary_status"] == "completed"
+        assert completed_summary["content"] == "我已经整合好 Design 和 Coding 的结果。"
+    finally:
+        store.close()
+
+
+def test_plain_group_goal_mixed_agent_outcomes_waits_and_summarizes(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    design = {
+        "id": "agent_design",
+        "name": "Design Agent",
+        "nickname": "Design",
+        "kind": "agent",
+        "enabled": True,
+    }
+    coding = {
+        "id": "agent_coding",
+        "name": "Coding Agent",
+        "nickname": "Coding",
+        "kind": "agent",
+        "enabled": True,
+    }
+    calls: list[dict] = []
+
+    class FakeRunnableService:
+        def __init__(self):
+            self.runs = {
+                "agent_run_design": {
+                    "run_id": "agent_run_design",
+                    "run_group_id": "run_group_plain_mixed",
+                    "status": "approval_required",
+                    "result": "等待审批：artifact.write",
+                    "pending_approval": {
+                        "approval_id": "approval_design",
+                        "tool": "artifact.write",
+                        "input_preview": {"path": "design/plain-mixed.md"},
+                    },
+                    "timeline": [
+                        {
+                            "event": "agent.tool.call",
+                            "detail": "artifact.write",
+                            "input_preview": {"path": "design/plain-mixed.md"},
+                            "result": {"ok": True, "path": "design/plain-mixed.md"},
+                        }
+                    ],
+                    "runnable": design,
+                },
+                "agent_run_coding": {
+                    "run_id": "agent_run_coding",
+                    "run_group_id": "run_group_plain_mixed",
+                    "status": "approval_required",
+                    "result": "等待审批：terminal.run",
+                    "pending_approval": {
+                        "approval_id": "approval_coding",
+                        "tool": "terminal.run",
+                        "input_preview": {"command": "python3 verify_plain_group.py"},
+                    },
+                    "timeline": [
+                        {
+                            "event": "agent.tool.call",
+                            "detail": "terminal.run",
+                            "input_preview": {"command": "python3 verify_plain_group.py"},
+                            "result": {"ok": False, "exit_code": 2, "stderr": "plain group verify failed"},
+                        }
+                    ],
+                    "runnable": coding,
+                },
+            }
+
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            clean_name = str(name or "").lstrip("@")
+            for agent in (design, coding):
+                if runnable_id == agent["id"] or clean_name in {agent["name"], agent["nickname"]}:
+                    return agent
+            return None
+
+        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+            run_id = "agent_run_design" if runnable_id == design["id"] else "agent_run_coding"
+            run_group = run_group_id or self.runs[run_id]["run_group_id"]
+            calls.append({
+                "runnable_id": runnable_id,
+                "user_goal": user_goal,
+                "run_group_id": run_group_id,
+                "actual_run_group_id": run_group,
+                "upstream": upstream,
+            })
+            run = {
+                **self.runs[run_id],
+                "run_group_id": run_group,
+            }
+            self.runs[run_id] = run
+            if on_complete:
+                on_complete(run)
+            return run
+
+        def get_run(self, run_id):
+            return self.runs[run_id]
+
+    service = FakeRunnableService()
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[design["id"], coding["id"]])
+        assert created["ok"] is True
+
+        sent = api.send_message("请让群里合适的 Agent 分别整理 UI 验收点和运行验证脚本")
+        assert sent["ok"] is True
+        assert runtime.state.get_task(sent["task_id"]) is not None
+        runtime.state.update_task_status(
+            sent["task_id"],
+            TaskStatus.COMPLETED,
+            result=(
+                "我会让 Design 整理验收点，让 Coding 运行验证脚本。\n"
+                "<yachiyo_group_dispatch>\n"
+                '{"tasks":['
+                '{"action":"dispatch_group_agent","agent":"Design","goal":"整理 UI 验收点"},'
+                '{"action":"dispatch_group_agent","agent":"Coding","goal":"运行验证脚本"}'
+                "]}\n"
+                "</yachiyo_group_dispatch>"
+            ),
+        )
+
+        approval_payload = api.get_messages()
+        approval_messages = [message for message in approval_payload["messages"] if message["role"] == "assistant"]
+        parent = next(message for message in approval_messages if message["task_id"] == sent["task_id"])
+        delegated = {
+            message["metadata"].get("sender", {}).get("nickname"): message
+            for message in approval_messages
+            if message["metadata"].get("delegated_by_task_id") == sent["task_id"]
+        }
+        assert [call["runnable_id"] for call in calls] == ["agent_design", "agent_coding"]
+        assert calls[0]["run_group_id"] == ""
+        assert calls[1]["run_group_id"] == "run_group_plain_mixed"
+        assert all("[Yachiyo 群组执行约定]" in call["upstream"] for call in calls)
+        assert parent["metadata"]["group_dispatch_count"] == 2
+        assert "dispatch_group_agent" not in parent["content"]
+        assert approval_payload["approval_count"] == 2
+        assert delegated["Design"]["metadata"]["run_status"] == "approval_required"
+        assert delegated["Coding"]["metadata"]["run_status"] == "approval_required"
+        assert not any(
+            message["metadata"].get("group_agent_summary_for_task_id") == sent["task_id"]
+            for message in approval_messages
+        )
+
+        service.runs["agent_run_design"] = {
+            **service.runs["agent_run_design"],
+            "status": "completed",
+            "result": "UI 验收点已经整理完成。",
+            "pending_approval": {},
+        }
+        partial_payload = api.get_messages()
+        partial_messages = [message for message in partial_payload["messages"] if message["role"] == "assistant"]
+        partial_delegated = {
+            message["metadata"].get("sender", {}).get("nickname"): message
+            for message in partial_messages
+            if message["metadata"].get("delegated_by_task_id") == sent["task_id"]
+        }
+        assert partial_payload["approval_count"] == 1
+        assert partial_delegated["Design"]["status"] == "completed"
+        assert partial_delegated["Coding"]["metadata"]["run_status"] == "approval_required"
+        assert not any(
+            message["metadata"].get("group_agent_summary_for_task_id") == sent["task_id"]
+            for message in partial_messages
+        )
+
+        service.runs["agent_run_coding"] = {
+            **service.runs["agent_run_coding"],
+            "status": "failed",
+            "result": "验证脚本失败：plain group verify failed",
+            "pending_approval": {},
+        }
+        final_payload = api.get_messages()
+        final_messages = [message for message in final_payload["messages"] if message["role"] == "assistant"]
+        final_delegated = {
+            message["metadata"].get("sender", {}).get("nickname"): message
+            for message in final_messages
+            if message["metadata"].get("delegated_by_task_id") == sent["task_id"]
+        }
+        summary_message = next(
+            message
+            for message in final_messages
+            if message["metadata"].get("group_agent_summary_for_task_id") == sent["task_id"]
+        )
+        summary_task = runtime.state.get_task(summary_message["task_id"])
+        assert summary_task is not None
+        assert final_payload["approval_count"] == 0
+        assert final_delegated["Design"]["metadata"]["agent_report_status"] == "completed"
+        assert final_delegated["Coding"]["metadata"]["agent_report_status"] == "failed"
+        assert "用户原始请求：请让群里合适的 Agent 分别整理 UI 验收点和运行验证脚本" in summary_task.description
+        assert "Design：已完成" in summary_task.description
+        assert "汇报：UI 验收点已经整理完成。" in summary_task.description
+        assert "Coding：执行失败" in summary_task.description
+        assert "汇报：验证脚本失败：plain group verify failed" in summary_task.description
+        assert "执行线索：" in summary_task.description
+        assert "terminal.run" in summary_task.description
+        assert "python3 verify_plain_group.py" in summary_task.description
+        assert "plain group verify failed" in summary_task.description
+        assert "回复必须明确区分：成功项、失败/取消/拒绝项、失败原因、未执行派活、可验收内容/产物、用户下一步可选动作。" in summary_task.description
+
+        runtime.state.update_task_status(
+            summary_message["task_id"],
+            TaskStatus.COMPLETED,
+            result="最终汇总：Design 完成；Coding 失败，原因是验证脚本失败。",
+        )
+        settled_payload = api.get_messages()
+        settled_parent = next(
+            message
+            for message in settled_payload["messages"]
+            if message["role"] == "assistant" and message.get("task_id") == sent["task_id"]
+        )
+        settled_summary = next(
+            message
+            for message in settled_payload["messages"]
+            if message["role"] == "assistant" and message.get("task_id") == summary_message["task_id"]
+        )
+        assert "group_agent_summary_pending" not in settled_parent["metadata"]
+        assert settled_parent["metadata"]["group_agent_summary_status"] == "completed"
+        assert settled_summary["content"] == "最终汇总：Design 完成；Coding 失败，原因是验证脚本失败。"
+        assert settled_payload["approval_count"] == 0
+        assert settled_payload["processing_count"] == 0
+        assert settled_payload["is_processing"] is False
     finally:
         store.close()
 
@@ -2985,7 +3734,7 @@ def test_group_dispatch_reports_skipped_agent_not_in_group(tmp_path, monkeypatch
         )
         summary_task = runtime.state.get_task(summary_message["task_id"])
         assert summary_task is not None
-        assert "哪些派活没有执行" in summary_task.description
+        assert "未执行派活" in summary_task.description
         assert "未执行派活：" in summary_task.description
         assert "- Ghost: 不在当前群组中" in summary_task.description
         assert "汇报：Design done" in summary_task.description
@@ -3254,6 +4003,80 @@ def test_group_main_model_dispatch_tagged_tasks_block_is_hidden_and_dispatched(t
         assert assistant_messages[0]["content"] == "我会先让 Design 做视觉测试。\n\n我把这个任务派给 Design 了。"
         assert "yachiyo_group_dispatch" not in assistant_messages[0]["content"]
         assert "dispatch_group_agent" not in assistant_messages[0]["content"]
+        assert assistant_messages[1]["content"] == (
+            "Design 已完成，并把结果交给主模型汇总。\n"
+            "任务：做视觉测试\n\n"
+            "视觉测试完成。"
+        )
+    finally:
+        store.close()
+
+
+def test_group_main_model_dispatch_bare_json_block_is_hidden_and_dispatched(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    design = {
+        "id": "agent_design",
+        "name": "Design Agent",
+        "nickname": "Design",
+        "kind": "agent",
+        "enabled": True,
+    }
+    calls: list[dict] = []
+
+    class FakeRunnableService:
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            clean_name = str(name or "").lstrip("@")
+            if runnable_id == design["id"] or clean_name in {design["name"], design["nickname"]}:
+                return design
+            return None
+
+        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+            calls.append({
+                "runnable_id": runnable_id,
+                "name": name,
+                "user_goal": user_goal,
+                "run_group_id": run_group_id,
+            })
+            run = {
+                "run_id": "agent_design_bare_json_run",
+                "run_group_id": run_group_id or "run_group_dispatch",
+                "status": "processing",
+                "result": "",
+                "runnable": design,
+            }
+            if on_complete:
+                on_complete({
+                    **run,
+                    "status": "completed",
+                    "result": "视觉测试完成。",
+                })
+            return run
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeRunnableService())
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[design["id"]])
+        assert created["ok"] is True
+        sent = api.send_message("@主模型 安排一下")
+        assert sent["ok"] is True
+        runtime.state.update_task_status(
+            sent["task_id"],
+            TaskStatus.COMPLETED,
+            result=(
+                "我会先让 Design 做视觉测试。\n"
+                '{"action":"dispatch_group_agent","agent":"Design","goal":"做视觉测试"}'
+            ),
+        )
+
+        messages = api.get_messages()["messages"]
+        assistant_messages = [message for message in messages if message["role"] == "assistant"]
+
+        assert len(calls) == 1
+        assert calls[0]["runnable_id"] == "agent_design"
+        assert calls[0]["user_goal"] == "做视觉测试"
+        assert assistant_messages[0]["content"] == "我会先让 Design 做视觉测试。\n\n我把这个任务派给 Design 了。"
+        assert "dispatch_group_agent" not in assistant_messages[0]["content"]
+        assert '"action"' not in assistant_messages[0]["content"]
+        assert '{"action"' not in assistant_messages[0]["content"]
         assert assistant_messages[1]["content"] == (
             "Design 已完成，并把结果交给主模型汇总。\n"
             "任务：做视觉测试\n\n"
@@ -3770,6 +4593,49 @@ def test_group_main_model_dispatch_stream_hides_partial_json_without_rewind(tmp_
         )
         second_assistant = next(message for message in api.get_messages()["messages"] if message["role"] == "assistant")
         assert second_assistant["content"] == intro
+    finally:
+        activity_store.close()
+        store.close()
+
+
+def test_group_main_model_dispatch_stream_hides_open_json_fence_prefix(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    design = {
+        "id": "agent_design",
+        "name": "Design Agent",
+        "nickname": "Design",
+        "kind": "agent",
+        "enabled": True,
+    }
+
+    class FakeRunnableService:
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            if runnable_id == design["id"] or name in {design["name"], design["nickname"]}:
+                return design
+            return None
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeRunnableService())
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[design["id"]])
+        assert created["ok"] is True
+        sent = api.send_message("@主模型 安排一下")
+        assert sent["ok"] is True
+        runtime.state.update_task_status(sent["task_id"], TaskStatus.RUNNING)
+        intro = "我会先交给 Design 做测试。"
+        runtime.chat_session.upsert_assistant_message(
+            sent["task_id"],
+            f"{intro}\n```json\n{{",
+            MessageStatus.PROCESSING,
+        )
+
+        assistant = next(message for message in api.get_messages()["messages"] if message["role"] == "assistant")
+
+        assert assistant["content"] == intro
+        assert "```" not in assistant["content"]
+        assert "{" not in assistant["content"]
+        assert assistant["metadata"]["group_dispatch_stream_visible_content"] == intro
     finally:
         activity_store.close()
         store.close()
@@ -4438,6 +5304,189 @@ def test_group_agent_approval_completion_creates_main_summary(tmp_path, monkeypa
         store.close()
 
 
+def test_plain_group_goal_approval_flow_continues_to_main_summary(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    coding = {
+        "id": "agent_coding",
+        "name": "Coding Agent",
+        "nickname": "Coding",
+        "kind": "agent",
+        "enabled": True,
+    }
+
+    class FakeRunnableService:
+        def __init__(self):
+            self.run = {
+                "run_id": "agent_run_coding_waiting",
+                "run_group_id": "run_group_dispatch",
+                "status": "processing",
+                "result": "",
+                "runnable": coding,
+            }
+
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            clean_name = str(name or "").lstrip("@")
+            if runnable_id == coding["id"] or clean_name in {coding["name"], coding["nickname"]}:
+                return coding
+            return None
+
+        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+            self.run = {
+                **self.run,
+                "run_group_id": run_group_id or "run_group_dispatch",
+            }
+            if on_complete:
+                self.run = {
+                    **self.run,
+                    "status": "approval_required",
+                    "result": "等待审批：terminal.run",
+                    "pending_approval": {
+                        "approval_id": "approval_terminal",
+                        "tool": "terminal.run",
+                        "input_preview": {
+                            "command": "python3 scripts/verify_group.py",
+                            "cwd": "/workspace/demo",
+                        },
+                    },
+                }
+                on_complete(self.run)
+            return self.run
+
+        def get_run(self, run_id):
+            assert run_id == "agent_run_coding_waiting"
+            return self.run
+
+    service = FakeRunnableService()
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[coding["id"]])
+        assert created["ok"] is True
+        sent = api.send_message("请让群里合适的 Agent 跑一下验证脚本")
+        assert sent["ok"] is True
+        runtime.state.update_task_status(
+            sent["task_id"],
+            TaskStatus.COMPLETED,
+            result=(
+                "我会让 Coding 运行验证脚本。\n"
+                "<yachiyo_group_dispatch>\n"
+                '{"action":"dispatch_group_agent","agent":"Coding","goal":"运行验证脚本"}\n'
+                "</yachiyo_group_dispatch>"
+            ),
+        )
+
+        approval_payload = api.get_messages()
+        approval_messages = [message for message in approval_payload["messages"] if message["role"] == "assistant"]
+        parent = next(message for message in approval_messages if message["task_id"] == sent["task_id"])
+        agent_message = next(
+            message
+            for message in approval_messages
+            if message["metadata"].get("sender", {}).get("nickname") == "Coding"
+        )
+        assert parent["metadata"]["group_dispatch_count"] == 1
+        assert "group_agent_summary_pending" not in parent["metadata"]
+        assert not any(
+            message["metadata"].get("group_agent_summary_for_task_id") == sent["task_id"]
+            for message in approval_messages
+        )
+        assert "yachiyo_group_dispatch" not in parent["content"]
+        assert agent_message["status"] == "processing"
+        assert agent_message["metadata"]["run_status"] == "approval_required"
+        assert agent_message["metadata"]["pending_approval"]["tool"] == "terminal.run"
+        assert agent_message["metadata"]["pending_approval"]["input_preview"]["command"] == "python3 scripts/verify_group.py"
+        assert agent_message["content"] == (
+            "Coding 需要你确认一次工具调用，批准后会继续执行当前任务。\n"
+            "工具：terminal.run\n"
+            "关联任务：运行验证脚本\n"
+            "请求摘要：命令：python3 scripts/verify_group.py"
+        )
+        assert approval_payload["approval_count"] == 1
+        assert api.get_session_info()["approval_count"] == 1
+        current = next(
+            item for item in api.list_sessions()["sessions"]
+            if item["session_id"] == runtime.chat_session.session_id
+        )
+        assert current["approval_count"] == 1
+
+        service.run = {
+            **service.run,
+            "status": "processing",
+            "result": "",
+            "pending_approval": {},
+        }
+        processing_payload = api.get_messages()
+        processing_agent = next(
+            message
+            for message in processing_payload["messages"]
+            if message["metadata"].get("sender", {}).get("nickname") == "Coding"
+        )
+        assert processing_payload["approval_count"] == 0
+        assert processing_agent["id"] == agent_message["id"]
+        assert processing_agent["status"] == "processing"
+        assert processing_agent["content"] == ""
+        assert processing_agent["metadata"]["run_status"] == "processing"
+        assert processing_agent["metadata"]["pending_approval"] == {}
+        assert processing_agent["metadata"]["run_progress_title"] == "已批准工具调用"
+        assert "正在继续执行当前任务" in processing_agent["metadata"]["run_progress_detail"]
+        assert not any(
+            message["metadata"].get("group_agent_summary_for_task_id") == sent["task_id"]
+            for message in processing_payload["messages"]
+            if message["role"] == "assistant"
+        )
+
+        service.run = {
+            **service.run,
+            "status": "completed",
+            "result": "验证脚本运行通过。",
+            "pending_approval": {},
+        }
+        completed_payload = api.get_messages()
+        completed_messages = [message for message in completed_payload["messages"] if message["role"] == "assistant"]
+        completed_agent = next(
+            message
+            for message in completed_messages
+            if message["metadata"].get("sender", {}).get("nickname") == "Coding"
+        )
+        summary_message = next(
+            message
+            for message in completed_messages
+            if message["metadata"].get("group_agent_summary_for_task_id") == sent["task_id"]
+        )
+        summary_task = runtime.state.get_task(summary_message["task_id"])
+        assert completed_payload["approval_count"] == 0
+        assert completed_agent["status"] == "completed"
+        assert completed_agent["metadata"]["agent_report"] == "验证脚本运行通过。"
+        assert completed_agent["content"] == (
+            "Coding 已完成，并把结果交给主模型汇总。\n"
+            "任务：运行验证脚本\n\n"
+            "验证脚本运行通过。"
+        )
+        assert summary_task is not None
+        assert "Coding：已完成" in summary_task.description
+        assert "汇报：验证脚本运行通过。" in summary_task.description
+
+        runtime.state.update_task_status(
+            summary_message["task_id"],
+            TaskStatus.COMPLETED,
+            result="验证脚本已经跑完，可以继续下一步。",
+        )
+        final_payload = api.get_messages()
+        final_parent = next(
+            message
+            for message in final_payload["messages"]
+            if message["role"] == "assistant" and message["task_id"] == sent["task_id"]
+        )
+        final_summary = next(
+            message
+            for message in final_payload["messages"]
+            if message["role"] == "assistant" and message["task_id"] == summary_message["task_id"]
+        )
+        assert "group_agent_summary_pending" not in final_parent["metadata"]
+        assert final_parent["metadata"]["group_agent_summary_status"] == "completed"
+        assert final_summary["content"] == "验证脚本已经跑完，可以继续下一步。"
+    finally:
+        store.close()
+
+
 def test_group_agent_consecutive_approval_updates_pending_request(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     design = {
@@ -4504,6 +5553,8 @@ def test_group_agent_consecutive_approval_updates_pending_request(tmp_path, monk
             for message in api.get_messages()["messages"]
             if message["role"] == "assistant" and message["metadata"].get("sender", {}).get("nickname") == "Design"
         ][0]
+        assert api.get_messages()["approval_count"] == 1
+        assert api.get_session_info()["approval_count"] == 1
         assert first_message["metadata"]["pending_approval"]["approval_id"] == "approval_first"
         assert first_message["metadata"]["pending_approval"]["input_preview"]["command"] == "python3 first.py"
         assert "python3 first.py" in first_message["content"]
@@ -4524,11 +5575,93 @@ def test_group_agent_consecutive_approval_updates_pending_request(tmp_path, monk
             for message in api.get_messages()["messages"]
             if message["role"] == "assistant" and message["metadata"].get("sender", {}).get("nickname") == "Design"
         ][0]
+        assert api.get_messages()["approval_count"] == 1
+        assert api.get_session_info()["approval_count"] == 1
         assert second_message["id"] == first_message["id"]
         assert second_message["metadata"]["pending_approval"]["approval_id"] == "approval_second"
         assert second_message["metadata"]["pending_approval"]["input_preview"]["command"] == "python3 second.py && python3 verify.py"
         assert "python3 second.py" in second_message["content"]
         assert "python3 first.py" not in second_message["content"]
+    finally:
+        store.close()
+
+
+def test_group_direct_agent_completion_keeps_full_goal_in_chat(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    design = {
+        "id": "agent_design",
+        "name": "Design Agent",
+        "nickname": "Design",
+        "kind": "agent",
+        "enabled": True,
+    }
+    long_goal = (
+        "请做一个很长的移动端验收方案，包含信息架构、状态层级、审批提醒、"
+        "失败提示、运行详情入口、产物入口、连续审批提示、长文本完整展示、"
+        "主模型最终整理和用户下一步动作，并保留结尾标记 long-goal-tail-marker-917263"
+    )
+
+    class FakeRunnableService:
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            if runnable_id == design["id"] or str(name or "").lstrip("@") in {design["name"], design["nickname"]}:
+                return design
+            return None
+
+        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+            run = {
+                "run_id": "agent_run_long_goal",
+                "run_group_id": run_group_id or "run_group_direct_long_goal",
+                "status": "completed",
+                "result": "长目标验收方案已经整理完成。",
+                "pending_approval": {},
+                "runnable": design,
+            }
+            if on_complete:
+                on_complete(run)
+            return run
+
+        def get_run(self, run_id):
+            assert run_id == "agent_run_long_goal"
+            return {
+                "run_id": "agent_run_long_goal",
+                "run_group_id": "run_group_direct_long_goal",
+                "status": "completed",
+                "result": "长目标验收方案已经整理完成。",
+                "pending_approval": {},
+                "runnable": design,
+            }
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeRunnableService())
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[design["id"]])
+        assert created["ok"] is True
+
+        sent = api.send_message(long_goal, runnable_id=design["id"])
+        assert sent["ok"] is True
+        payload = api.get_messages()
+        agent_message = next(
+            message
+            for message in payload["messages"]
+            if message["role"] == "assistant" and message["metadata"].get("sender", {}).get("nickname") == "Design"
+        )
+
+        assert agent_message["status"] == "completed"
+        assert "任务：" in agent_message["content"]
+        assert long_goal in agent_message["content"]
+        assert "long-goal-tail-marker-917263" in agent_message["content"]
+        assert "任务：请做一个很长的移动端验收方案" in agent_message["content"]
+        assert "..." not in agent_message["content"].split("长目标验收方案已经整理完成。", 1)[0]
+        assert agent_message["metadata"]["agent_report"] == "长目标验收方案已经整理完成。"
+        assert agent_message["metadata"]["group_agent_summary_pending"] is True
+        summary_message = next(
+            message
+            for message in payload["messages"]
+            if message["role"] == "assistant"
+            and message["metadata"].get("group_direct_agent_summary_for_message_id") == agent_message["id"]
+        )
+        summary_task = runtime.state.get_task(summary_message["task_id"])
+        assert summary_task is not None
+        assert long_goal in summary_task.description
     finally:
         store.close()
 
@@ -5047,6 +6180,8 @@ def test_group_multiple_agent_approvals_wait_until_every_delegate_terminal(tmp_p
         )
         summary_task = runtime.state.get_task(summary_message["task_id"])
         assert summary_task is not None
+        assert "回复必须明确区分：成功项、失败/取消/拒绝项、失败原因、未执行派活、可验收内容/产物、用户下一步可选动作。" in summary_task.description
+        assert "如果有的 Agent 成功、有的 Agent 失败或被拒绝，不要把整轮任务说成单纯成功或单纯失败" in summary_task.description
         assert "用户后续补充/纠偏：" in summary_task.description
         assert "- 补充：最终整理时请把失败项和可验收项分开说" in summary_task.description
         assert "- @主模型 把验收说明改成按成功、失败、待确认三段输出" in summary_task.description
@@ -5060,6 +6195,30 @@ def test_group_multiple_agent_approvals_wait_until_every_delegate_terminal(tmp_p
         assert "terminal.run" in summary_task.description
         assert "python3 verify.py" in summary_task.description
         assert "Missing dependency" in summary_task.description
+
+        runtime.state.update_task_status(
+            summary_message["task_id"],
+            TaskStatus.COMPLETED,
+            result="最终汇总：Design 完成；Coding 失败，原因是缺少依赖。",
+        )
+        settled_payload = api.get_messages()
+        settled_parent = next(
+            message
+            for message in settled_payload["messages"]
+            if message["role"] == "assistant" and message.get("task_id") == sent["task_id"]
+        )
+        settled_summary = next(
+            message
+            for message in settled_payload["messages"]
+            if message["role"] == "assistant" and message.get("task_id") == summary_message["task_id"]
+        )
+        assert settled_summary["status"] == "completed"
+        assert settled_summary["content"] == "最终汇总：Design 完成；Coding 失败，原因是缺少依赖。"
+        assert "group_agent_summary_pending" not in settled_parent["metadata"]
+        assert settled_parent["metadata"]["group_agent_summary_status"] == "completed"
+        assert settled_payload["approval_count"] == 0
+        assert settled_payload["processing_count"] == 0
+        assert settled_payload["is_processing"] is False
     finally:
         store.close()
 
@@ -5341,6 +6500,254 @@ def test_group_followup_after_unsynced_completed_dispatch_enters_summary(tmp_pat
         assert summary_task is not None
         assert "验证脚本完成。" in summary_task.description
         assert "- 补充：第二批汇总时请说明怎么验收" in summary_task.description
+    finally:
+        store.close()
+
+
+def test_group_followup_dispatch_payload_is_ignored_and_stays_in_current_summary(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    design = {
+        "id": "agent_design",
+        "name": "Design Agent",
+        "nickname": "Design",
+        "kind": "agent",
+        "enabled": True,
+    }
+
+    class FakeRunnableService:
+        def __init__(self):
+            self.created_goals: list[str] = []
+            self.run = {
+                "run_id": "agent_run_design_followup_ignore",
+                "run_group_id": "run_group_followup_ignore",
+                "status": "processing",
+                "result": "",
+                "pending_approval": {},
+                "runnable": design,
+            }
+
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            clean_name = str(name or "").lstrip("@")
+            if runnable_id == design["id"] or clean_name in {design["name"], design["nickname"]}:
+                return design
+            return None
+
+        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+            self.created_goals.append(user_goal)
+            self.run = {
+                **self.run,
+                "run_group_id": run_group_id or self.run["run_group_id"],
+            }
+            return self.run
+
+        def get_run(self, run_id):
+            assert run_id == "agent_run_design_followup_ignore"
+            return self.run
+
+    service = FakeRunnableService()
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[design["id"]])
+        assert created["ok"] is True
+
+        sent = api.send_message("请让群里合适的 Agent 做移动端验收方案")
+        assert sent["ok"] is True
+        runtime.state.update_task_status(
+            sent["task_id"],
+            TaskStatus.COMPLETED,
+            result=(
+                "我会交给 Design 做移动端验收方案。\n"
+                "<yachiyo_group_dispatch>\n"
+                '{"action":"dispatch_group_agent","agent":"Design","goal":"整理移动端验收方案"}\n'
+                "</yachiyo_group_dispatch>"
+            ),
+        )
+        api.get_messages()
+        assert service.created_goals == ["整理移动端验收方案"]
+
+        followup = api.send_message("补充：最终整理时请强调不要暴露 JSON")
+        assert followup["ok"] is True
+        followup_message = next(
+            message
+            for message in api.get_messages()["messages"]
+            if message["id"] == followup["message_id"]
+        )
+        assert followup_message["metadata"]["group_followup_for_task_ids"] == [sent["task_id"]]
+        followup_task = runtime.state.get_task(followup["task_id"])
+        assert followup_task is not None
+        assert "[Yachiyo 群组补充/纠偏]" in followup_task.description
+        runtime.state.update_task_status(
+            followup["task_id"],
+            TaskStatus.COMPLETED,
+            result=(
+                "明白，我把补充重新派给 Design。\n"
+                "<yachiyo_group_dispatch>\n"
+                '{"action":"dispatch_group_agent","agent":"Design","goal":"补充不要暴露 JSON"}\n'
+                "</yachiyo_group_dispatch>"
+            ),
+        )
+        followup_payload = api.get_messages()
+        followup_assistant = next(
+            message
+            for message in followup_payload["messages"]
+            if message["role"] == "assistant" and message.get("task_id") == followup["task_id"]
+        )
+        assert service.created_goals == ["整理移动端验收方案"]
+        assert followup_assistant["content"] == ChatAPI._group_followup_ack_content()
+        assert followup_assistant["metadata"]["group_followup_dispatch_ignored"] is True
+        assert followup_assistant["metadata"]["group_dispatch_count"] == 0
+        assert not any(
+            message["metadata"].get("delegated_by_task_id") == followup["task_id"]
+            for message in followup_payload["messages"]
+            if message["role"] == "assistant"
+        )
+
+        service.run = {
+            **service.run,
+            "status": "completed",
+            "result": "移动端验收方案已经完成。",
+            "pending_approval": {},
+        }
+        final_messages = [
+            message
+            for message in api.get_messages()["messages"]
+            if message["role"] == "assistant"
+        ]
+        summary_message = next(
+            message
+            for message in final_messages
+            if message["metadata"].get("group_agent_summary_for_task_id") == sent["task_id"]
+        )
+        summary_task = runtime.state.get_task(summary_message["task_id"])
+        assert summary_task is not None
+        assert "- 补充：最终整理时请强调不要暴露 JSON" in summary_task.description
+        assert "补充不要暴露 JSON" not in summary_task.description
+    finally:
+        store.close()
+
+
+def test_plain_group_followup_during_running_agent_enters_main_summary(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    design = {
+        "id": "agent_design",
+        "name": "Design Agent",
+        "nickname": "Design",
+        "kind": "agent",
+        "enabled": True,
+    }
+
+    class FakeRunnableService:
+        def __init__(self):
+            self.run = {
+                "run_id": "agent_run_design_followup",
+                "run_group_id": "run_group_plain_followup",
+                "status": "processing",
+                "result": "",
+                "pending_approval": {},
+                "runnable": design,
+            }
+
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            clean_name = str(name or "").lstrip("@")
+            if runnable_id == design["id"] or clean_name in {design["name"], design["nickname"]}:
+                return design
+            return None
+
+        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+            self.run = {
+                **self.run,
+                "run_group_id": run_group_id or self.run["run_group_id"],
+            }
+            return self.run
+
+        def get_run(self, run_id):
+            assert run_id == "agent_run_design_followup"
+            return self.run
+
+    service = FakeRunnableService()
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[design["id"]])
+        assert created["ok"] is True
+
+        sent = api.send_message("请让群里合适的 Agent 做移动端验收方案")
+        assert sent["ok"] is True
+        runtime.state.update_task_status(
+            sent["task_id"],
+            TaskStatus.COMPLETED,
+            result=(
+                "我会交给 Design 做移动端验收方案。\n"
+                "<yachiyo_group_dispatch>\n"
+                '{"action":"dispatch_group_agent","agent":"Design","goal":"整理移动端验收方案"}\n'
+                "</yachiyo_group_dispatch>"
+            ),
+        )
+        running_payload = api.get_messages()
+        running_messages = [message for message in running_payload["messages"] if message["role"] == "assistant"]
+        agent_message = next(
+            message
+            for message in running_messages
+            if message["metadata"].get("delegated_by_task_id") == sent["task_id"]
+        )
+        assert agent_message["metadata"]["run_status"] == "processing"
+        assert not any(
+            message["metadata"].get("group_agent_summary_for_task_id") == sent["task_id"]
+            for message in running_messages
+        )
+
+        followup = api.send_message("补充：最终整理时请优先列出移动端验收风险")
+        assert followup["ok"] is True
+        followup_message = next(
+            message
+            for message in api.get_messages()["messages"]
+            if message["id"] == followup["message_id"]
+        )
+        assert followup_message["metadata"]["group_followup_for_task_ids"] == [sent["task_id"]]
+        runtime.state.update_task_status(
+            followup["task_id"],
+            TaskStatus.COMPLETED,
+            result="收到补充。",
+        )
+
+        separate_goal = api.send_message("@主模型 另一个目标：再做桌面端验收方案")
+        assert separate_goal["ok"] is True
+        separate_message = next(
+            message
+            for message in api.get_messages()["messages"]
+            if message["id"] == separate_goal["message_id"]
+        )
+        assert "group_followup_for_task_ids" not in separate_message["metadata"]
+        runtime.state.update_task_status(
+            separate_goal["task_id"],
+            TaskStatus.COMPLETED,
+            result="桌面端目标单独处理。",
+        )
+
+        service.run = {
+            **service.run,
+            "status": "completed",
+            "result": "移动端验收方案已经完成。",
+            "pending_approval": {},
+        }
+        final_messages = [
+            message
+            for message in api.get_messages()["messages"]
+            if message["role"] == "assistant"
+        ]
+        summary_message = next(
+            message
+            for message in final_messages
+            if message["metadata"].get("group_agent_summary_for_task_id") == sent["task_id"]
+        )
+        summary_task = runtime.state.get_task(summary_message["task_id"])
+        assert summary_task is not None
+        assert "用户原始请求：请让群里合适的 Agent 做移动端验收方案" in summary_task.description
+        assert "用户后续补充/纠偏：" in summary_task.description
+        assert "- 补充：最终整理时请优先列出移动端验收风险" in summary_task.description
+        assert "另一个目标：再做桌面端验收方案" not in summary_task.description
+        assert "Design：已完成" in summary_task.description
+        assert "任务：整理移动端验收方案" in summary_task.description
+        assert "汇报：移动端验收方案已经完成。" in summary_task.description
     finally:
         store.close()
 
@@ -5818,6 +7225,24 @@ def test_get_messages_hides_internal_reasoning_activity(tmp_path, monkeypatch):
             title="Yachiyo 开始处理",
             detail="普通回复",
             status="running",
+        )
+        activity_store.record_event(
+            session_id=runtime.chat_session.session_id,
+            task_id=task_id,
+            tool_name="send_message",
+            phase="tool_start",
+            title="正在调用send message",
+            detail='to ?: "<yachiyo_group_dispatch>{\\"tasks\\":[]}"',
+            status="running",
+        )
+        activity_store.record_event(
+            session_id=runtime.chat_session.session_id,
+            task_id=task_id,
+            tool_name="send_message",
+            phase="tool_complete",
+            title="send message调用完成",
+            detail='{"error":"Both target and message are required"}',
+            status="completed",
         )
         runtime.chat_session.upsert_assistant_message(
             task_id=task_id,

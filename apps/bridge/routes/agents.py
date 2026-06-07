@@ -369,6 +369,16 @@ async def get_run(run_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Run 不存在") from exc
 
 
+@router.post("/runs/{run_id}/rerun")
+async def rerun_run(run_id: str) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(get_agent_runtime_service().rerun_run, run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
 @router.post("/runs/{run_id}/cancel")
 async def cancel_run(run_id: str) -> dict[str, Any]:
     try:

@@ -178,7 +178,23 @@ def _search_snippet(value: str, query: str, *, limit: int = 96) -> str:
 def _is_chat_visible_activity(event: dict[str, Any]) -> bool:
     phase = str(event.get("phase") or "")
     tool_name = str(event.get("tool_name") or "")
-    return phase in _CHAT_VISIBLE_ACTIVITY_PHASES and bool(tool_name)
+    if phase not in _CHAT_VISIBLE_ACTIVITY_PHASES or not tool_name:
+        return False
+    normalized_tool = re.sub(r"[\s_.-]+", "", tool_name.strip().lower())
+    if normalized_tool in {"sendmessage", "messagesend"}:
+        return False
+    text = " ".join(str(event.get(key) or "") for key in ("title", "detail"))
+    lowered = text.lower()
+    internal_markers = (
+        "<yachiyo_group_dispatch",
+        "yachiyo_group_dispatch",
+        "dispatch_group_agent",
+        "run_yachiyo_agent",
+        "run_yachiyo_workflow",
+    )
+    if any(marker in lowered for marker in internal_markers):
+        return False
+    return True
 
 
 def _attachment_root() -> Path:
@@ -427,7 +443,9 @@ class ChatAPI:
                 saved_attachments,
                 should_attach=should_attach_desktop_snapshot,
             )
+            user_metadata = self._group_followup_metadata_for_user_message(text, current_context)
             task_description = self._with_group_context_for_main_model(task_description, current_context)
+            task_description = self._with_group_followup_context(task_description, user_metadata)
             if saved_attachments and not raw_attachments and self._should_enforce_image_capability():
                 image_input = get_current_hermes_image_input_capability()
                 if image_input.get("can_attach_images") is False:
@@ -438,7 +456,6 @@ class ChatAPI:
                     }
 
             # 1. 添加用户消息
-            user_metadata = self._group_followup_metadata_for_user_message(text, current_context)
             message_id = self._session.add_user_message(
                 text,
                 saved_attachments,
@@ -1510,9 +1527,12 @@ class ChatAPI:
         else:
             intro = f"{name} 已完成任务，已交给主模型整理。"
         lines = [intro]
-        goal_text = _compact_preview(goal, 140)
+        goal_text = str(goal or "").strip()
         if goal_text:
-            lines.append(f"任务：{goal_text}")
+            if "\n" in goal_text:
+                lines.extend(["任务：", goal_text])
+            else:
+                lines.append(f"任务：{goal_text}")
         if artifact_notice_count > 0:
             lines.append(f"产物：{artifact_notice_count} 个，见运行详情。")
         body = str(content or "").strip()
@@ -1895,6 +1915,47 @@ class ChatAPI:
             "被派出的 Agent 会在群聊里发布接收任务、执行结果、失败原因或待审批内容；你不要把派活 JSON 当作给用户阅读的正文。"
         )
         base = (task_description or "").strip()
+        return f"{base}\n\n{note}" if base else note
+
+    @staticmethod
+    def _is_group_followup_task_description(task_description: str) -> bool:
+        return "[Yachiyo 群组补充/纠偏]" in str(task_description or "")
+
+    @staticmethod
+    def _group_followup_ack_content() -> str:
+        return "收到补充，我会把它纳入当前群组任务的最终整理，不会另起派发。"
+
+    def _with_group_followup_context(
+        self,
+        task_description: str,
+        metadata: dict[str, Any],
+    ) -> str:
+        if not metadata:
+            return task_description
+        target_task_ids = [
+            str(item or "").strip()
+            for item in metadata.get("group_followup_for_task_ids", [])
+            if str(item or "").strip()
+        ] if isinstance(metadata.get("group_followup_for_task_ids"), list) else []
+        target_agent_message_ids = [
+            str(item or "").strip()
+            for item in metadata.get("group_followup_for_agent_message_ids", [])
+            if str(item or "").strip()
+        ] if isinstance(metadata.get("group_followup_for_agent_message_ids"), list) else []
+        target_lines: list[str] = []
+        if target_task_ids:
+            target_lines.append(f"关联主模型派发任务：{', '.join(target_task_ids)}")
+        if target_agent_message_ids:
+            target_lines.append(f"关联 Agent 消息：{', '.join(target_agent_message_ids)}")
+        note_lines = [
+            "[Yachiyo 群组补充/纠偏]",
+            "这条用户消息是对当前正在执行、待审批或等待汇总的群组 Agent 批次的补充，不是新目标。",
+            "不要派发新的 Agent 任务，不要输出 yachiyo_group_dispatch 或任何机器可读派活 JSON。",
+            "你只需要简短确认已收到；最终整理时会把这条补充并入当前批次。",
+            *target_lines,
+        ]
+        base = (task_description or "").strip()
+        note = "\n".join(note_lines)
         return f"{base}\n\n{note}" if base else note
 
     def _with_group_context_for_agent_upstream(
@@ -2993,6 +3054,33 @@ class ChatAPI:
                 continue
             source_text = task.result or msg.content
             requests = self._parse_group_dispatch_requests(source_text)
+            if requests and self._is_group_followup_task_description(task.description):
+                cleaned_metadata = dict(metadata)
+                cleaned_metadata.pop("group_dispatch_pending", None)
+                cleaned_metadata.pop("group_dispatch_stream_visible_content", None)
+                cleaned_metadata.update({
+                    "sender": self._main_model_sender_from_runtime(),
+                    "group_dispatch_handled": True,
+                    "group_dispatch_count": 0,
+                    "group_dispatch_skipped": ["用户补充消息不会另起群组派发"],
+                    "group_followup_dispatch_ignored": True,
+                })
+                self._record_group_dispatch_activity(
+                    task_id=msg.task_id or "",
+                    title="群组补充已收下",
+                    detail="补充会进入当前群组任务汇总，不会另起派发。",
+                    status="completed",
+                    event_id=f"{msg.task_id or msg.message_id}-group-followup-ignored-dispatch",
+                )
+                self._session.upsert_assistant_message(
+                    task_id=msg.task_id,
+                    content=self._group_followup_ack_content(),
+                    status=MessageStatus.COMPLETED,
+                    error=None,
+                    attachments=msg.attachments,
+                    metadata=cleaned_metadata,
+                )
+                continue
             if not requests:
                 missing_expected_dispatch = self._group_dispatch_expected_without_requests(
                     task.description,
@@ -3606,6 +3694,100 @@ class ChatAPI:
             deduped.append(target)
         return deduped
 
+    @staticmethod
+    def _normalize_group_agent_alias(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        text = text.lstrip("@")
+        text = re.sub(r"[`\"'“”‘’<>《》()（）\[\]【】{}]", " ", text)
+        text = re.sub(r"[/\\|,，、:：;；._-]+", " ", text)
+        return " ".join(text.split())
+
+    @classmethod
+    def _group_agent_alias_tokens(cls, value: Any) -> set[str]:
+        normalized = cls._normalize_group_agent_alias(value)
+        if not normalized:
+            return set()
+        generic = {"agent", "assistant", "main", "group", "member", "成员", "群成员", "主模型"}
+        return {item for item in normalized.split() if len(item) > 1 and item not in generic}
+
+    @classmethod
+    def _group_agent_participant_aliases(cls, participant: dict[str, Any]) -> set[str]:
+        aliases: set[str] = set()
+        for key in ("id", "name", "nickname", "category"):
+            normalized = cls._normalize_group_agent_alias(participant.get(key))
+            if normalized:
+                aliases.add(normalized)
+            aliases.update(cls._group_agent_alias_tokens(participant.get(key)))
+        category = cls._normalize_group_agent_alias(participant.get("category"))
+        category_aliases = {
+            "coding": {"coding", "coding agent", "code", "coder", "dev", "developer", "编码", "代码", "开发"},
+            "design": {"design", "design agent", "designer", "ui", "ux", "设计"},
+            "research": {"research", "research agent", "researcher", "调研", "研究"},
+            "review": {"review", "review agent", "reviewer", "审查", "评审", "复核"},
+            "office": {"office", "office agent", "文档", "办公"},
+            "orchestrator": {"orchestrator", "主控", "协调", "调度"},
+        }
+        aliases.update(category_aliases.get(category, set()))
+        aliases.discard("")
+        return aliases
+
+    @classmethod
+    def _group_agent_participant_matches_target(cls, participant: dict[str, Any], target: str) -> bool:
+        target_alias = cls._normalize_group_agent_alias(target)
+        if not target_alias:
+            return False
+        generic = {"agent", "assistant", "main", "group", "member", "成员", "群成员", "主模型"}
+        if target_alias in generic:
+            return False
+        aliases = cls._group_agent_participant_aliases(participant)
+        if target_alias in aliases:
+            return True
+        target_tokens = cls._group_agent_alias_tokens(target_alias)
+        if target_tokens & aliases:
+            return True
+        target_compact = target_alias.replace(" ", "")
+        for alias in aliases:
+            alias_compact = alias.replace(" ", "")
+            if len(target_compact) >= 3 and target_compact in alias_compact:
+                return True
+            if len(alias_compact) >= 3 and alias_compact in target_compact:
+                return True
+        return False
+
+    def _resolve_group_dispatch_runnable(
+        self,
+        service: Any,
+        context: dict[str, Any],
+        request: dict[str, str],
+    ) -> dict[str, Any] | None:
+        runnable = service.resolve_runnable(
+            runnable_id=request.get("runnable_id", ""),
+            name=request.get("target", ""),
+        )
+        if runnable is not None:
+            return runnable
+        target = str(request.get("target") or request.get("runnable_id") or "").strip()
+        if not target:
+            return None
+        participants = [
+            item
+            for item in (context.get("participants") or [])
+            if isinstance(item, dict) and item.get("kind") == "agent"
+        ]
+        matched = [
+            participant
+            for participant in participants
+            if self._group_agent_participant_matches_target(participant, target)
+        ]
+        if len(matched) > 1:
+            raise AgentRuntimeError("群组 Agent 名称不唯一")
+        if not matched:
+            return None
+        participant_id = str(matched[0].get("id") or "").strip()
+        if not participant_id:
+            return None
+        return service.resolve_runnable(runnable_id=participant_id)
+
     def _dispatch_group_agent_requests(
         self,
         assistant_message: ChatMessage,
@@ -3621,10 +3803,7 @@ class ChatAPI:
         for request in requests:
             request_kind = str(request.get("kind") or "").strip()
             try:
-                runnable = service.resolve_runnable(
-                    runnable_id=request.get("runnable_id", ""),
-                    name=request.get("target", ""),
-                )
+                runnable = self._resolve_group_dispatch_runnable(service, context, request)
             except AgentRuntimeError as exc:
                 skipped.append(f"{request.get('target') or request.get('runnable_id')}: {exc}")
                 continue
@@ -4100,7 +4279,8 @@ class ChatAPI:
             "[Yachiyo 群组直接 Agent 汇总]",
             "你是这个群组的主模型。用户刚刚直接点名了某个 Agent，Agent 已把执行结果交给你，请由你整理后回复用户。",
             "不要再派发新的 Agent 任务，不要输出 yachiyo_group_dispatch 或任何机器可读派活 JSON。",
-            "回复需要说明：Agent 完成/失败/取消了什么、关键结果是什么、是否有产物，以及用户下一步可以验收或继续做什么。",
+            "回复必须明确区分：成功项、失败/取消/拒绝项、失败原因、可验收内容/产物、用户下一步可选动作。",
+            "如果有失败或取消，不要把已经完成的部分说成整体失败；先说明已完成内容，再说明未完成原因和可继续动作。",
         ]
         if user_request:
             lines.extend(["", f"用户原始请求：{user_request}"])
@@ -4164,7 +4344,8 @@ class ChatAPI:
             "[Yachiyo 群组 Agent 汇总]",
             "你是这个群组的主模型。群内 Agent 已把执行结果交给你，请由你整合后回复用户。",
             "不要再派发新的 Agent 任务，不要输出 yachiyo_group_dispatch 或任何机器可读派活 JSON。",
-            "回复需要说明：完成了什么、各 Agent 的关键结论、哪些派活没有执行、是否需要用户验收或继续批准下一步。",
+            "回复必须明确区分：成功项、失败/取消/拒绝项、失败原因、未执行派活、可验收内容/产物、用户下一步可选动作。",
+            "如果有的 Agent 成功、有的 Agent 失败或被拒绝，不要把整轮任务说成单纯成功或单纯失败；先说明已完成内容，再说明失败原因和可继续动作。",
         ]
         if user_request:
             lines.extend(["", f"用户原始请求：{user_request}"])
@@ -4512,7 +4693,13 @@ class ChatAPI:
             candidates.append(tag_match.start())
         for match in re.finditer(r"(^|\n)\s*```(?:json)?\s*", text, re.IGNORECASE):
             tail = text[match.end():]
-            if re.search(r"dispatch|run_yachiyo|runyachiyo|\"(?:action|tasks|agents?|goal)\"", tail, re.IGNORECASE):
+            stripped_tail = tail.strip()
+            if (
+                not stripped_tail
+                or stripped_tail in {"{", "["}
+                or re.match(r"^[\[{]\s*$", stripped_tail)
+                or re.search(r"dispatch|run_yachiyo|runyachiyo|\"(?:action|tasks|agents?|goal)\"", tail, re.IGNORECASE)
+            ):
                 candidates.append(match.start())
         for match in re.finditer(r"(^|\n)(?P<prefix>\s*)[\[{]", text):
             start = match.start() + len(match.group(1))
@@ -4544,6 +4731,19 @@ class ChatAPI:
             if clean in {"```", "```json"}:
                 continue
             if re.fullmatch(r"</?\s*yachiyo[\s_-]*group[\s_-]*dispatch\s*>", clean, re.IGNORECASE):
+                continue
+            lowered = clean.lower()
+            if any(
+                marker in lowered
+                for marker in (
+                    "派活协议",
+                    "派发协议",
+                    "机器派发协议",
+                    "机器块",
+                    "yachiyo_group_dispatch",
+                    "dispatch_group_agent",
+                )
+            ):
                 continue
             lines.append(line.rstrip())
         text = "\n".join(lines).strip()

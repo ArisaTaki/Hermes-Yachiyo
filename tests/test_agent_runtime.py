@@ -1383,6 +1383,14 @@ def test_workflow_approval_node_reject_cancels_run(tmp_path, monkeypatch):
         assert rejected_event["input_preview"]["criteria"] == "确认设计输出已经覆盖验收点，再继续编码。"
         assert rejected_event["input_preview"]["context"] == "First step complete"
         assert rejected_event["status"] == "cancelled"
+        cancelled_event = next(event for event in rejected["timeline"] if event["event"] == "workflow.run.cancelled")
+        assert cancelled_event["detail"] == "先暂停"
+        assert cancelled_event["workflow_node_id"] == "gate"
+        assert cancelled_event["workflow_node_kind"] == "approval"
+        assert cancelled_event["workflow_node_label"] == "人工确认"
+        assert cancelled_event["workflow_node_approval_criteria"] == "确认设计输出已经覆盖验收点，再继续编码。"
+        assert cancelled_event["input_preview"]["checkpoint"] == "人工确认"
+        assert cancelled_event["status"] == "cancelled"
         group = service.get_run_group(run["run_group_id"])
         assert group["status"] == "cancelled"
         assert group["summary"] == "Workflow 审批已拒绝：先暂停"
@@ -1704,6 +1712,50 @@ def test_list_runs_hides_workflow_child_agents_for_delegated_workflows(tmp_path,
 
         assert service.get_run_group(delegated["run_group_id"])["source"] == "delegation"
         assert delegated["run_id"] in listed_ids
+        assert child_agent_run_ids
+        assert not any(run_id in listed_ids for run_id in child_agent_run_ids)
+    finally:
+        service.close()
+
+
+def test_list_runs_hides_workflow_child_agents_for_custom_workflow_sources(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", lambda *_args, **_kwargs: {"content": "OK"})
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        agent = service.create_agent({"name": "Custom Source Workflow Agent", "model_mode": "custom_api", "model_config": model_config})
+        workflow = service.create_workflow(
+            {
+                "name": "Custom Source Workflow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {"id": "agent", "type": "agent", "data": {"label": "Agent", "agent_id": agent["agent_id"]}},
+                ],
+                "edges": [{"source": "start", "target": "agent"}],
+            }
+        )
+
+        workflow_run = service.create_workflow_run(
+            {
+                "workflow_id": workflow["workflow_id"],
+                "user_goal": "Run workflow from a specific smoke source",
+                "source": "workflow_child_artifact_smoke",
+            }
+        )
+        group = service.get_run_group(workflow_run["run_group_id"])
+        child_agent_run_ids = [
+            run_id
+            for run_id in group["child_run_ids"]
+            if service.get_run(run_id)["kind"] == "agent_run"
+        ]
+        listed_ids = {run["run_id"] for run in service.list_runs(limit=20)["runs"]}
+
+        assert group["source"] == "workflow_child_artifact_smoke"
+        assert workflow_run["run_id"] in listed_ids
         assert child_agent_run_ids
         assert not any(run_id in listed_ids for run_id in child_agent_run_ids)
     finally:
@@ -2176,6 +2228,49 @@ def test_workflow_child_agent_no_run_goal_does_not_request_terminal_approval(tmp
         service.close()
 
 
+def test_agent_run_explicit_terminal_goal_not_blocked_by_downstream_no_execute_text(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_terminal",
+                    "type": "function",
+                    "function": {
+                        "name": "terminal_run",
+                        "arguments": json.dumps({"command": "printf terminal-explicit-smoke; exit 7"}),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Explicit Terminal Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({
+            "agent_id": agent["agent_id"],
+            "user_goal": "必须请求 terminal.run 执行命令。不要执行后续 artifact 节点，只使用 terminal.run。",
+        })
+
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"]["tool"] == "terminal.run"
+        assert not any(event["event"] == "agent.tool.skipped" and event["detail"] == "terminal.run" for event in run["timeline"])
+    finally:
+        service.close()
+
+
 def test_agent_run_denies_unallowed_tool(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     monkeypatch.setattr(
@@ -2335,6 +2430,133 @@ def test_agent_run_pauses_for_terminal_approval_and_resumes(tmp_path, monkeypatc
         assert approved_event["input_preview"]["command"] == "printf approved"
         assert approved_event["status"] == "completed"
         assert service.get_run_group(resumed["run_group_id"])["status"] == "completed"
+    finally:
+        service.close()
+
+
+def test_agent_run_consecutive_terminal_approvals_update_pending_request(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_first_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf first-approved"}),
+                        },
+                    },
+                    {
+                        "id": "call_second_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf second-approved"}),
+                        },
+                    },
+                ],
+            }
+        tool_messages = [message for message in messages if message.get("role") == "tool"]
+        assert any("first-approved" in message.get("content", "") for message in tool_messages)
+        assert any("second-approved" in message.get("content", "") for message in tool_messages)
+        return {"content": "Both terminal approvals completed"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Consecutive Terminal Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Run both commands"})
+
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"]["tool"] == "terminal.run"
+        assert run["pending_approval"]["input_preview"]["command"] == "printf first-approved"
+
+        after_first = service.approve_run_approval(run["run_id"])
+        assert after_first["status"] == "approval_required"
+        assert after_first["result"] == "等待审批：terminal.run"
+        assert after_first["pending_approval"]["tool"] == "terminal.run"
+        assert after_first["pending_approval"]["input_preview"]["command"] == "printf second-approved"
+        assert len(calls) == 1
+
+        after_second = service.approve_run_approval(run["run_id"])
+        assert after_second["status"] == "completed"
+        assert after_second["result"] == "Both terminal approvals completed"
+        assert after_second["pending_approval"] == {}
+        assert len(calls) == 2
+
+        approved_events = [event for event in after_second["timeline"] if event["event"] == "agent.tool.approval_approved"]
+        assert [event["input_preview"]["command"] for event in approved_events] == [
+            "printf first-approved",
+            "printf second-approved",
+        ]
+        assert service.get_run_group(after_second["run_group_id"])["status"] == "completed"
+    finally:
+        service.close()
+
+
+def test_agent_run_fails_when_approved_terminal_returns_nonzero(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_terminal",
+                    "type": "function",
+                    "function": {
+                        "name": "terminal_run",
+                        "arguments": json.dumps({"command": "printf terminal-failure-smoke; exit 7"}),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Failing Terminal Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Run failing command"})
+
+        assert run["status"] == "approval_required"
+        resumed = service.approve_run_approval(run["run_id"])
+
+        assert resumed["status"] == "failed"
+        assert "terminal.run 执行失败" in resumed["result"]
+        assert "退出码：7" in resumed["result"]
+        assert "terminal-failure-smoke" in resumed["result"]
+        assert len(calls) == 1
+        failed_event = next(event for event in resumed["timeline"] if event["event"] == "agent.tool.failed")
+        assert failed_event["status"] == "failed"
+        assert failed_event["result"]["returncode"] == 7
+        assert failed_event["result"]["stdout"] == "terminal-failure-smoke"
+        assert service.get_run_group(resumed["run_group_id"])["status"] == "failed"
     finally:
         service.close()
 
@@ -2504,6 +2726,88 @@ def test_workflow_resumes_after_child_agent_approval(tmp_path, monkeypatch):
             for artifact in resumed_parent["artifacts"]
         )
         assert service.get_run_group(run["run_group_id"])["status"] == "completed"
+    finally:
+        service.close()
+
+
+def test_workflow_fails_when_child_terminal_returns_nonzero_after_approval(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_terminal",
+                    "type": "function",
+                    "function": {
+                        "name": "terminal_run",
+                        "arguments": json.dumps({"command": "printf workflow-child-failure-smoke; exit 7"}),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        agent = service.create_agent(
+            {
+                "name": "Failing Child",
+                "model_mode": "custom_api",
+                "model_config": model_config,
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        workflow = service.create_workflow(
+            {
+                "name": "Child Terminal Failure Flow",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {"id": "a", "type": "agent", "data": {"label": "Failing Child", "agent_id": agent["agent_id"]}},
+                    {
+                        "id": "artifact",
+                        "type": "artifact",
+                        "data": {"label": "Should Not Run", "artifact_path": "reports/should-not-run.md"},
+                    },
+                ],
+                "edges": [
+                    {"source": "start", "target": "a"},
+                    {"source": "a", "target": "artifact"},
+                ],
+            }
+        )
+        run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "Run failing child"})
+
+        assert run["status"] == "approval_required"
+        group = service.get_run_group(run["run_group_id"])
+        child_run_ids = [run_id for run_id in group["child_run_ids"] if run_id != run["run_id"]]
+        assert len(child_run_ids) == 1
+        child = service.get_run(child_run_ids[0])
+
+        resumed_child = service.approve_run_approval(child["run_id"])
+        resumed_parent = service.get_run(run["run_id"])
+
+        assert resumed_child["status"] == "failed"
+        assert resumed_parent["status"] == "failed"
+        assert "workflow-child-failure-smoke" in resumed_parent["result"]
+        assert not any(artifact.get("path") == "reports/should-not-run.md" for artifact in resumed_parent["artifacts"])
+        failed_event = next(event for event in resumed_parent["timeline"] if event["event"] == "workflow.run.failed")
+        assert failed_event["workflow_node_id"] == "a"
+        assert failed_event["workflow_node_kind"] == "agent"
+        assert failed_event["workflow_node_label"] == "Failing Child"
+        assert failed_event["child_run_id"] == child["run_id"]
+        assert service.get_run_group(run["run_group_id"])["status"] == "failed"
+        assert len(calls) == 1
     finally:
         service.close()
 
@@ -2962,6 +3266,153 @@ async def test_workflow_routes_update_then_run_latest_graph(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_workflow_routes_save_and_run_latest_canvas_with_step_approval_and_artifact(tmp_path, monkeypatch):
+    from apps.bridge.routes import agents as agent_routes
+
+    service = make_service(tmp_path)
+    contexts: list[str] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        contexts.append(messages[-1]["content"])
+        return {"content": "Mobile acceptance risks ready"}
+
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        old_agent = service.create_agent({"name": "Canvas Old", "model_mode": "custom_api", "model_config": model_config})
+        design_agent = service.create_agent({"name": "Canvas Design", "model_mode": "custom_api", "model_config": model_config})
+
+        workflow = await agent_routes.create_workflow(
+            agent_routes.WorkflowRequest(
+                name="Canvas Save And Run",
+                nodes=[
+                    {"id": "start", "type": "input", "data": {"label": "Start", "kind": "start"}},
+                    {
+                        "id": "old",
+                        "type": "default",
+                        "data": {"label": "Old Agent", "kind": "agent", "agent_id": old_agent["agent_id"]},
+                    },
+                ],
+                edges=[{"source": "start", "target": "old"}],
+            )
+        )
+        updated = await agent_routes.update_workflow(
+            workflow["workflow_id"],
+            agent_routes.WorkflowRequest(
+                nodes=[
+                    {"id": "start", "type": "input", "data": {"label": "Start", "kind": "start"}},
+                    {
+                        "id": "design",
+                        "type": "default",
+                        "data": {
+                            "label": "Mobile Design",
+                            "kind": "agent",
+                            "agent_id": design_agent["agent_id"],
+                            "step_task": "List mobile acceptance risks and the checks to verify them.",
+                        },
+                    },
+                    {
+                        "id": "gate",
+                        "type": "default",
+                        "data": {
+                            "label": "Review Gate",
+                            "kind": "approval",
+                            "approval_criteria": "Confirm the mobile risks are specific enough before writing the report.",
+                        },
+                    },
+                    {
+                        "id": "report",
+                        "type": "output",
+                        "data": {
+                            "label": "Risk Report",
+                            "kind": "artifact",
+                            "artifact_path": "reports/mobile-risk.md",
+                        },
+                    },
+                ],
+                edges=[
+                    {"source": "start", "target": "design"},
+                    {"source": "design", "target": "gate"},
+                    {"source": "gate", "target": "report"},
+                ],
+            ),
+        )
+        run = await agent_routes.create_workflow_run(
+            agent_routes.WorkflowRunRequest(
+                workflow_id=updated["workflow_id"],
+                user_goal="Prepare mobile release acceptance",
+            )
+        )
+
+        assert run["status"] == "approval_required"
+        assert len(contexts) == 1
+        assert "# User Goal\nList mobile acceptance risks and the checks to verify them." in contexts[0]
+        assert "Workflow Goal:\nPrepare mobile release acceptance" in contexts[0]
+        assert "# Upstream Context\nNone" in contexts[0]
+        assert "Old Agent" not in contexts[0]
+        started_event = next(event for event in run["timeline"] if event["event"] == "workflow.run.started")
+        assert started_event["workflow_path"] == [
+            {"id": "start", "kind": "start", "label": "Start"},
+            {
+                "id": "design",
+                "kind": "agent",
+                "label": "Mobile Design",
+                "task": "List mobile acceptance risks and the checks to verify them.",
+            },
+            {
+                "id": "gate",
+                "kind": "approval",
+                "label": "Review Gate",
+                "criteria": "Confirm the mobile risks are specific enough before writing the report.",
+            },
+            {
+                "id": "report",
+                "kind": "artifact",
+                "label": "Risk Report",
+                "artifact_path": "reports/mobile-risk.md",
+            },
+        ]
+        assert run["pending_approval"]["input_preview"]["criteria"] == (
+            "Confirm the mobile risks are specific enough before writing the report."
+        )
+        agent_event = next(event for event in run["timeline"] if event["event"] == "workflow.node.agent")
+        assert agent_event["workflow_node_id"] == "design"
+        assert agent_event["workflow_node_task"] == "List mobile acceptance risks and the checks to verify them."
+        approval_event = next(event for event in run["timeline"] if event["event"] == "workflow.node.approval_required")
+        assert approval_event["workflow_node_id"] == "gate"
+        assert approval_event["workflow_node_approval_criteria"] == (
+            "Confirm the mobile risks are specific enough before writing the report."
+        )
+        group = service.get_run_group(run["run_group_id"])
+        child_runs = [
+            service.get_run(run_id)
+            for run_id in group["child_run_ids"]
+            if run_id != run["run_id"]
+        ]
+        assert [child["runnable_id"] for child in child_runs] == [design_agent["agent_id"]]
+        assert child_runs[0]["user_goal"] == (
+            "List mobile acceptance risks and the checks to verify them.\n\n"
+            "Workflow Goal:\n"
+            "Prepare mobile release acceptance"
+        )
+
+        resumed = await agent_routes.approve_run_approval(run["run_id"])
+
+        assert resumed["status"] == "completed"
+        artifact_event = next(event for event in resumed["timeline"] if event["event"] == "workflow.node.artifact")
+        assert artifact_event["workflow_node_id"] == "report"
+        assert artifact_event["artifact"]["path"] == "reports/mobile-risk.md"
+        assert service.read_run_artifact(resumed["run_id"], "reports/mobile-risk.md")["content"] == "Mobile acceptance risks ready"
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
 async def test_workflow_routes_accept_reactflow_node_types(tmp_path, monkeypatch):
     from apps.bridge.routes import agents as agent_routes
 
@@ -3212,6 +3663,335 @@ async def test_workflow_cancel_route_cancels_child_agent_approval(tmp_path, monk
 
 
 @pytest.mark.asyncio
+async def test_workflow_child_approval_route_approve_resumes_parent_workflow(tmp_path, monkeypatch):
+    from apps.bridge.routes import agents as agent_routes
+
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls: list[list[dict]] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert any((tool.get("function") or {}).get("name") == "terminal_run" for tool in tools or [])
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf route-approved"}),
+                        },
+                    }
+                ],
+            }
+        assert messages[-1]["role"] == "tool"
+        assert "route-approved" in messages[-1]["content"]
+        return {"content": "Route child approved result"}
+
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Route Approval Child",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        workflow = await agent_routes.create_workflow(
+            agent_routes.WorkflowRequest(
+                name="Route Child Approval Resume Flow",
+                nodes=[
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "agent",
+                        "type": "agent",
+                        "data": {"label": "Route Approval Child", "agent_id": agent["agent_id"]},
+                    },
+                    {"id": "summary", "type": "artifact", "data": {"label": "Summary"}},
+                ],
+                edges=[
+                    {"source": "start", "target": "agent"},
+                    {"source": "agent", "target": "summary"},
+                ],
+            )
+        )
+        run = await agent_routes.create_workflow_run(
+            agent_routes.WorkflowRunRequest(workflow_id=workflow["workflow_id"], user_goal="Run route approval flow")
+        )
+        group = await agent_routes.get_run_group(run["run_group_id"])
+        child_run_id = next(run_id for run_id in group["child_run_ids"] if run_id != run["run_id"])
+        child = await agent_routes.get_any_run(child_run_id)
+
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"] == {}
+        assert child["status"] == "approval_required"
+        assert child["pending_approval"]["tool"] == "terminal.run"
+        assert child["pending_approval"]["input_preview"]["command"] == "printf route-approved"
+
+        approved_child = await agent_routes.approve_run_approval(child_run_id)
+        parent = await agent_routes.get_workflow_run(run["run_id"])
+        completed_group = await agent_routes.get_run_group(run["run_group_id"])
+
+        assert approved_child["status"] == "completed"
+        assert approved_child["pending_approval"] == {}
+        assert approved_child["result"] == "Route child approved result"
+        assert parent["status"] == "completed"
+        assert parent["result"] == "Route child approved result"
+        assert completed_group["status"] == "completed"
+        assert any(event["event"] == "workflow.run.child_resumed" for event in parent["timeline"])
+        assert any(event["event"] == "workflow.run.resumed" for event in parent["timeline"])
+        agent_event = next(event for event in parent["timeline"] if event["event"] == "workflow.node.agent")
+        assert agent_event["workflow_node_id"] == "agent"
+        assert agent_event["workflow_node_label"] == "Route Approval Child"
+        assert agent_event["child_run_id"] == child_run_id
+        assert agent_event["status"] == "completed"
+        artifact_event = next(event for event in parent["timeline"] if event["event"] == "workflow.node.artifact")
+        assert artifact_event["workflow_node_id"] == "summary"
+        assert artifact_event["status"] == "completed"
+        assert artifact_event["artifact"]["path"] == "summary.md"
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_workflow_child_consecutive_approvals_keep_parent_waiting(tmp_path, monkeypatch):
+    from apps.bridge.routes import agents as agent_routes
+
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls: list[list[dict]] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert any((tool.get("function") or {}).get("name") == "terminal_run" for tool in tools or [])
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_first_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf workflow-first-approved"}),
+                        },
+                    },
+                    {
+                        "id": "call_second_terminal",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf workflow-second-approved"}),
+                        },
+                    },
+                ],
+            }
+        tool_messages = [message for message in messages if message.get("role") == "tool"]
+        assert any("workflow-first-approved" in message.get("content", "") for message in tool_messages)
+        assert any("workflow-second-approved" in message.get("content", "") for message in tool_messages)
+        return {"content": "Workflow child consecutive approvals completed"}
+
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Route Consecutive Approval Child",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        workflow = await agent_routes.create_workflow(
+            agent_routes.WorkflowRequest(
+                name="Route Child Consecutive Approval Flow",
+                nodes=[
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "agent",
+                        "type": "agent",
+                        "data": {"label": "Route Consecutive Approval Child", "agent_id": agent["agent_id"]},
+                    },
+                    {"id": "summary", "type": "artifact", "data": {"label": "Summary"}},
+                ],
+                edges=[
+                    {"source": "start", "target": "agent"},
+                    {"source": "agent", "target": "summary"},
+                ],
+            )
+        )
+        run = await agent_routes.create_workflow_run(
+            agent_routes.WorkflowRunRequest(workflow_id=workflow["workflow_id"], user_goal="Run two child approvals")
+        )
+        group = await agent_routes.get_run_group(run["run_group_id"])
+        child_run_id = next(run_id for run_id in group["child_run_ids"] if run_id != run["run_id"])
+        child = await agent_routes.get_any_run(child_run_id)
+
+        assert run["status"] == "approval_required"
+        assert child["status"] == "approval_required"
+        assert child["pending_approval"]["input_preview"]["command"] == "printf workflow-first-approved"
+
+        after_first = await agent_routes.approve_run_approval(child_run_id)
+        parent_after_first = await agent_routes.get_workflow_run(run["run_id"])
+        group_after_first = await agent_routes.get_run_group(run["run_group_id"])
+
+        assert after_first["status"] == "approval_required"
+        assert after_first["pending_approval"]["input_preview"]["command"] == "printf workflow-second-approved"
+        assert parent_after_first["status"] == "approval_required"
+        assert parent_after_first["pending_approval"] == {}
+        assert parent_after_first["result"] == "等待审批：terminal.run"
+        assert group_after_first["status"] == "approval_required"
+        assert group_after_first["summary"] == "等待审批：terminal.run"
+        approval_events = [
+            event for event in parent_after_first["timeline"]
+            if event["event"] == "workflow.run.approval_required"
+        ]
+        assert len(approval_events) == 2
+        assert approval_events[-1]["child_run_id"] == child_run_id
+        assert approval_events[-1]["workflow_node_id"] == "agent"
+        assert approval_events[-1]["workflow_node_label"] == "Route Consecutive Approval Child"
+        agent_event = next(event for event in parent_after_first["timeline"] if event["event"] == "workflow.node.agent")
+        assert agent_event["status"] == "approval_required"
+        assert agent_event["child_run_id"] == child_run_id
+
+        after_second = await agent_routes.approve_run_approval(child_run_id)
+        parent_after_second = await agent_routes.get_workflow_run(run["run_id"])
+        group_after_second = await agent_routes.get_run_group(run["run_group_id"])
+
+        assert after_second["status"] == "completed"
+        assert after_second["pending_approval"] == {}
+        assert after_second["result"] == "Workflow child consecutive approvals completed"
+        assert parent_after_second["status"] == "completed"
+        assert parent_after_second["result"] == "Workflow child consecutive approvals completed"
+        assert group_after_second["status"] == "completed"
+        completed_agent_event = next(
+            event for event in parent_after_second["timeline"] if event["event"] == "workflow.node.agent"
+        )
+        assert completed_agent_event["status"] == "completed"
+        approved_events = [
+            event for event in after_second["timeline"] if event["event"] == "agent.tool.approval_approved"
+        ]
+        assert [event["input_preview"]["command"] for event in approved_events] == [
+            "printf workflow-first-approved",
+            "printf workflow-second-approved",
+        ]
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_workflow_child_approval_route_reject_cancels_parent_workflow(tmp_path, monkeypatch):
+    from apps.bridge.routes import agents as agent_routes
+
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+        assert any((tool.get("function") or {}).get("name") == "terminal_run" for tool in tools or [])
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_terminal",
+                    "type": "function",
+                    "function": {
+                        "name": "terminal_run",
+                        "arguments": json.dumps({"command": "printf route-blocked"}),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Route Reject Child",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        workflow = await agent_routes.create_workflow(
+            agent_routes.WorkflowRequest(
+                name="Route Child Approval Reject Flow",
+                nodes=[
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "agent",
+                        "type": "agent",
+                        "data": {"label": "Route Reject Child", "agent_id": agent["agent_id"]},
+                    },
+                    {"id": "summary", "type": "artifact", "data": {"label": "Summary"}},
+                ],
+                edges=[
+                    {"source": "start", "target": "agent"},
+                    {"source": "agent", "target": "summary"},
+                ],
+            )
+        )
+        run = await agent_routes.create_workflow_run(
+            agent_routes.WorkflowRunRequest(workflow_id=workflow["workflow_id"], user_goal="Run route rejection flow")
+        )
+        group = await agent_routes.get_run_group(run["run_group_id"])
+        child_run_id = next(run_id for run_id in group["child_run_ids"] if run_id != run["run_id"])
+        child = await agent_routes.get_any_run(child_run_id)
+
+        assert run["status"] == "approval_required"
+        assert child["status"] == "approval_required"
+        assert child["pending_approval"]["tool"] == "terminal.run"
+
+        rejected_child = await agent_routes.reject_run_approval(
+            child_run_id,
+            agent_routes.ApprovalRejectRequest(reason="not now"),
+        )
+        parent = await agent_routes.get_workflow_run(run["run_id"])
+        cancelled_group = await agent_routes.get_run_group(run["run_group_id"])
+
+        assert rejected_child["status"] == "cancelled"
+        assert rejected_child["pending_approval"] == {}
+        assert "not now" in rejected_child["result"]
+        assert parent["status"] == "cancelled"
+        assert cancelled_group["status"] == "cancelled"
+        agent_event = next(event for event in parent["timeline"] if event["event"] == "workflow.node.agent")
+        assert agent_event["workflow_node_id"] == "agent"
+        assert agent_event["workflow_node_kind"] == "agent"
+        assert agent_event["workflow_node_label"] == "Route Reject Child"
+        assert agent_event["status"] == "cancelled"
+        cancelled_event = next(event for event in parent["timeline"] if event["event"] == "workflow.run.cancelled")
+        assert cancelled_event["workflow_node_id"] == "agent"
+        assert cancelled_event["workflow_node_kind"] == "agent"
+        assert cancelled_event["workflow_node_label"] == "Route Reject Child"
+        assert cancelled_event["child_run_id"] == child_run_id
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
 async def test_workflow_child_artifact_route_reads_source_run_artifact(tmp_path, monkeypatch):
     from apps.bridge.routes import agents as agent_routes
 
@@ -3285,6 +4065,128 @@ async def test_workflow_child_artifact_route_reads_source_run_artifact(tmp_path,
         assert artifact["content"] == "route design artifact"
         assert design_ref["source_runnable_name"] == "Route Design Artifact Agent"
         assert design_ref["workflow_step_label"] == "Design"
+    finally:
+        service.close()
+
+
+@pytest.mark.asyncio
+async def test_workflow_artifact_review_route_exposes_outputs_and_reruns(tmp_path, monkeypatch):
+    from apps.bridge.routes import agents as agent_routes
+
+    service = make_service(tmp_path)
+    calls: list[list[dict]] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        calls.append(messages)
+        if len(calls) in {1, 4}:
+            return {
+                "content": json.dumps(
+                    {
+                        "action": "tool",
+                        "tool": "artifact.write",
+                        "input": {
+                            "path": "design.md",
+                            "content": f"design artifact run {1 if len(calls) == 1 else 2}",
+                        },
+                    }
+                )
+            }
+        if len(calls) in {2, 5}:
+            assert "Tool result for artifact.write" in messages[-1]["content"]
+            return {"content": f"Design done run {1 if len(calls) == 2 else 2}"}
+        return {"content": f"Code final result run {1 if len(calls) == 3 else 2}"}
+
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        model_config = {
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+        design_agent = service.create_agent(
+            {
+                "name": "Route Design Artifact Agent",
+                "model_mode": "custom_api",
+                "model_config": model_config,
+                "tool_policy": {"allowed_tools": ["artifact.write"]},
+            }
+        )
+        coding_agent = service.create_agent(
+            {"name": "Route Coding Final Agent", "model_mode": "custom_api", "model_config": model_config}
+        )
+        workflow = await agent_routes.create_workflow(
+            agent_routes.WorkflowRequest(
+                name="Route Artifact Review Flow",
+                nodes=[
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {"id": "design", "type": "agent", "data": {"label": "Design", "agent_id": design_agent["agent_id"]}},
+                    {"id": "code", "type": "agent", "data": {"label": "Code", "agent_id": coding_agent["agent_id"]}},
+                    {
+                        "id": "report",
+                        "type": "artifact",
+                        "data": {"label": "Final Report", "artifact_path": "reports/final.md"},
+                    },
+                ],
+                edges=[
+                    {"source": "start", "target": "design"},
+                    {"source": "design", "target": "code"},
+                    {"source": "code", "target": "report"},
+                ],
+            )
+        )
+        run = await agent_routes.create_workflow_run(
+            agent_routes.WorkflowRunRequest(workflow_id=workflow["workflow_id"], user_goal="Ship artifact review")
+        )
+        parent = await agent_routes.get_workflow_run(run["run_id"])
+
+        assert parent["status"] == "completed"
+        assert parent["result"] == "Code final result run 1"
+        assert parent["runnable_id"] == workflow["workflow_id"]
+        assert parent["user_goal"] == "Ship artifact review"
+        child_ref = next(
+            artifact
+            for artifact in parent["artifacts"]
+            if artifact.get("kind") == "workflow_child_artifact" and artifact.get("path") == "design.md"
+        )
+        workflow_ref = next(
+            artifact
+            for artifact in parent["artifacts"]
+            if artifact.get("kind") == "workflow_artifact" and artifact.get("path") == "reports/final.md"
+        )
+        assert child_ref["workflow_step_label"] == "Design"
+        assert child_ref["source_runnable_name"] == "Route Design Artifact Agent"
+        assert workflow_ref["workflow_node_id"] == "report"
+        assert workflow_ref["workflow_node_label"] == "Final Report"
+
+        child_artifact = await agent_routes.get_run_artifact(child_ref["source_run_id"], child_ref["path"])
+        workflow_artifact = await agent_routes.get_run_artifact(parent["run_id"], workflow_ref["path"])
+
+        assert child_artifact["content"] == "design artifact run 1"
+        assert workflow_artifact["content"] == "Code final result run 1"
+        steps = [event for event in parent["timeline"] if str(event.get("event") or "").startswith("workflow.node.")]
+        assert [(event["event"], event.get("workflow_node_id"), event.get("status")) for event in steps] == [
+            ("workflow.node.start", "start", "completed"),
+            ("workflow.node.agent", "design", "completed"),
+            ("workflow.node.agent", "code", "completed"),
+            ("workflow.node.artifact", "report", "completed"),
+        ]
+
+        rerun = await agent_routes.rerun_run(parent["run_id"])
+        rerun_artifact = await agent_routes.get_run_artifact(rerun["run_id"], "reports/final.md")
+        rerun_group = service.get_run_group(rerun["run_group_id"])
+        rerun_event = rerun["timeline"][0]
+
+        assert rerun["run_id"] != parent["run_id"]
+        assert rerun["status"] == "completed"
+        assert rerun["result"] == "Code final result run 2"
+        assert rerun["workflow_run_id"] == rerun["run_id"]
+        assert rerun_group["source"] == "rerun"
+        assert rerun_event["event"] == "run.rerun.started"
+        assert rerun_event["rerun_of_run_id"] == parent["run_id"]
+        assert rerun_event["input_preview"]["original_status"] == "completed"
+        assert rerun_event["input_preview"]["original_goal"] == parent["user_goal"]
+        assert rerun_artifact["content"] == "Code final result run 2"
     finally:
         service.close()
 
