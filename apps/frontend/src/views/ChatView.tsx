@@ -1987,9 +1987,32 @@ function codeBlockStateKey(messageId: string, blockIndex: string) {
   return `${messageId || 'message'}:${blockIndex}`;
 }
 
+function renderCodeBlockHtml(
+  rawCode: string,
+  rawLanguage: string,
+  messageId: string,
+  copiedCodeBlockKey: string,
+  blockIndex: number,
+) {
+  const normalizedBlock = normalizeCodeBlockContent(rawCode, rawLanguage);
+  const code = normalizedBlock.code;
+  const language = normalizedBlock.language || detectCodeLanguage(code);
+  const blockKey = String(blockIndex);
+  const copied = copiedCodeBlockKey === codeBlockStateKey(messageId, blockKey);
+  const languageLabel = language ? `<span class="markdown-code-lang">${escapeHtml(language)}</span>` : '<span class="markdown-code-lang">text</span>';
+  const copyButtonLabel = copied ? '已复制' : '复制代码';
+  const copyButtonIcon = copied ? CODE_CHECK_ICON_HTML : CODE_COPY_ICON_HTML;
+  const blockClass = `markdown-code-block${language ? ` markdown-code-block-${escapeHtml(language)}` : ''}`;
+  return `<div class="${blockClass}" data-code-index="${blockKey}">${languageLabel}<button type="button" class="markdown-code-copy${copied ? ' copied' : ''}" data-code-copy aria-label="${copyButtonLabel}" title="${copyButtonLabel}">${copyButtonIcon}</button><pre><code class="${language ? `language-${escapeHtml(language)}` : ''}">${renderHighlightedCode(code, language)}</code></pre></div>`;
+}
+
 function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
   const source = String(text || '').replace(/\r\n/g, '\n');
   if (!source) return '';
+  const standaloneCode = detectStandaloneCodeBlock(source);
+  if (standaloneCode) {
+    return renderCodeBlockHtml(standaloneCode.code, standaloneCode.language, messageId, copiedCodeBlockKey, 0);
+  }
 
   const lines = source.split('\n');
   let html = '';
@@ -2021,16 +2044,7 @@ function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
   }
 
   function flushCode() {
-    const normalizedBlock = normalizeCodeBlockContent(codeLines.join('\n'), codeLanguage);
-    const code = normalizedBlock.code;
-    const language = normalizedBlock.language || detectCodeLanguage(code);
-    const blockIndex = String(codeBlockIndex);
-    const copied = copiedCodeBlockKey === codeBlockStateKey(messageId, blockIndex);
-    const languageLabel = language ? `<span class="markdown-code-lang">${escapeHtml(language)}</span>` : '<span class="markdown-code-lang">text</span>';
-    const copyButtonLabel = copied ? '已复制' : '复制代码';
-    const copyButtonIcon = copied ? CODE_CHECK_ICON_HTML : CODE_COPY_ICON_HTML;
-    const blockClass = `markdown-code-block${language ? ` markdown-code-block-${escapeHtml(language)}` : ''}`;
-    html += `<div class="${blockClass}" data-code-index="${blockIndex}">${languageLabel}<button type="button" class="markdown-code-copy${copied ? ' copied' : ''}" data-code-copy aria-label="${copyButtonLabel}" title="${copyButtonLabel}">${copyButtonIcon}</button><pre><code class="${language ? `language-${escapeHtml(language)}` : ''}">${renderHighlightedCode(code, language)}</code></pre></div>`;
+    html += renderCodeBlockHtml(codeLines.join('\n'), codeLanguage, messageId, copiedCodeBlockKey, codeBlockIndex);
     codeLines = [];
     codeLanguage = '';
     codeFenceMarker = '';
@@ -2125,6 +2139,29 @@ function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
   flushParagraph();
   closeList();
   return html;
+}
+
+function detectStandaloneCodeBlock(source: string): { code: string; language: string } | null {
+  if (source.includes('```') || source.includes('~~~')) return null;
+  const trimmed = source.trim();
+  if (!trimmed) return null;
+  if (looksLikeResumeDiffTranscript(trimmed) || looksLikeUnifiedDiff(trimmed)) {
+    return { code: trimmed, language: 'diff' };
+  }
+  return null;
+}
+
+function looksLikeResumeDiffTranscript(text: string) {
+  return /resumed session/i.test(text)
+    && /review\s+diff/i.test(text)
+    && looksLikeUnifiedDiff(text);
+}
+
+function looksLikeUnifiedDiff(text: string) {
+  const hasHunk = /(?:^|\n)@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@/.test(text);
+  const hasFileHeader = /(?:^|\n)(?:diff --git|---\s+\S+\n\+\+\+\s+\S+)/.test(text);
+  const hasChangedLines = /(?:^|\n)\+[^+\n]/.test(text) && /(?:^|\n)-[^-\n]/.test(text);
+  return (hasHunk || hasFileHeader) && hasChangedLines;
 }
 
 function parseMarkdownFence(line: string) {
