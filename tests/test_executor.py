@@ -248,6 +248,38 @@ class TestHermesExecutor:
         assert "不要擅自推送 github，需要获得许可再推送" in context
         assert "历史会话 2026-05-20" in context
 
+    def test_cross_session_memory_context_scans_full_long_sessions(self):
+        session = types.SimpleNamespace(session_id="long", created_at="2026-05-20T10:00:00+00:00")
+        old_memory = types.SimpleNamespace(
+            role="user",
+            content="请记住：以后不要擅自推送 GitHub，必须先获得许可。",
+            created_at="2026-05-20T10:01:00+00:00",
+        )
+        later_messages = [
+            types.SimpleNamespace(
+                role="user",
+                content=f"普通后续消息 {index}",
+                created_at=f"2026-05-20T10:{index % 60:02d}:00+00:00",
+            )
+            for index in range(100)
+        ]
+        requested_limits: list[int] = []
+
+        def load_messages(_session_id, limit=80):
+            requested_limits.append(limit)
+            messages = [old_memory, *later_messages]
+            return messages if limit <= 0 else messages[-limit:]
+
+        store = types.SimpleNamespace(
+            list_sessions=lambda limit=80: [session],
+            load_messages=load_messages,
+        )
+
+        context = build_cross_session_memory_context("new", store=store)
+
+        assert requested_limits == [0]
+        assert "不要擅自推送 GitHub，必须先获得许可" in context
+
     def test_format_environment_context_includes_local_time_period(self):
         local_tz = datetime.now().astimezone().tzinfo
         now = datetime(2026, 4, 27, 15, 20, tzinfo=local_tz)

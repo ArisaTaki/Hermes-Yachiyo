@@ -139,8 +139,7 @@ _DEFAULT_TITLE_TIMEOUT_SECONDS = 8.0
 _GENERATED_TITLE_MAX_CHARS = 28
 _TITLE_REFRESH_TASKS: dict[str, asyncio.Task[None]] = {}
 _MEMORY_CONTEXT_MAX_ITEMS = 8
-_MEMORY_CONTEXT_MAX_SESSIONS = 80
-_MEMORY_CONTEXT_MAX_MESSAGES_PER_SESSION = 80
+_MEMORY_CONTEXT_MAX_SESSIONS = 200
 _MEMORY_CONTEXT_ITEM_MAX_CHARS = 180
 _MEMORY_CONTEXT_TOTAL_MAX_CHARS = 1400
 _MEMORY_MARKERS = (
@@ -460,7 +459,7 @@ def build_cross_session_memory_context(
         try:
             messages = store.load_messages(
                 session_id,
-                limit=_MEMORY_CONTEXT_MAX_MESSAGES_PER_SESSION,
+                limit=0,
             )
         except Exception:
             logger.debug("读取长期记忆候选消息失败: %s", session_id, exc_info=True)
