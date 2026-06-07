@@ -40,6 +40,7 @@ import {
   listSkills,
   listWorkflows,
   rejectRunApproval,
+  rerunRun,
   syncHermesSkills,
   testAgentModel,
   updateAgent,
@@ -188,6 +189,15 @@ const studioTabs: StudioTab[] = ['agents', 'skills', 'workflows', 'runs'];
 const skillFolderNameMaxLength = 120;
 const workflowNodeTypes = new Set(['start', 'agent', 'approval', 'artifact']);
 const workflowRunnableNodeTypes = new Set(['agent', 'approval', 'artifact']);
+const defaultAgentIds = new Set([
+  'agent_yachiyo_orchestrator',
+  'agent_coding',
+  'agent_design',
+  'agent_review',
+  'agent_research',
+  'agent_office',
+  'agent_custom',
+]);
 const workflowRunnableStepRequiredMessage = 'Workflow 至少需要一个可执行节点（Agent、Approval 或 Artifact）';
 
 function workflowStepKind(value: unknown): WorkflowStepRef['kind'] {
@@ -432,12 +442,16 @@ function agentToDraft(agent: AgentSpec): AgentDraft {
 
 function workflowNodes(workflow: WorkflowSpec | null): Node[] {
   if (!workflow) return starterNodes;
-  return workflow.nodes.map((node) => ({
-    id: node.id,
-    type: node.type === 'start' ? 'input' : node.type === 'artifact' ? 'output' : 'default',
-    position: node.position || { x: 0, y: 0 },
-    data: node.data || { label: node.id, kind: node.type || 'agent' },
-  }));
+  return workflow.nodes.map((node) => {
+    const rawData = node.data || {};
+    const kind = String(rawData.kind || rawData.node_type || node.type || 'agent');
+    return {
+      id: node.id,
+      type: kind === 'start' ? 'input' : kind === 'artifact' ? 'output' : 'default',
+      position: node.position || { x: 0, y: 0 },
+      data: { label: node.id, ...rawData, kind },
+    };
+  });
 }
 
 function workflowEdges(workflow: WorkflowSpec | null): Edge[] {
@@ -855,7 +869,7 @@ function agentRunReadinessIssue(
     if (missing.length) return `Custom API 配置不完整：缺少 ${missing.join('、')}。`;
     return '';
   }
-  if (agent.model_mode === 'follow_main') {
+  if (agent.model_mode === 'follow_main' || defaultAgentIds.has(agent.agent_id || '')) {
     const defaultChatProfileId = String(modelDefaults.chat || '').trim();
     if (!defaultChatProfileId) return '默认 Chat Profile 尚未设置。';
     if (!chatProfiles.some((profile) => profile.profile_id === defaultChatProfileId)) {
@@ -915,6 +929,15 @@ function runHistoryGroupsFor(runs: RunSpec[], runnables: RunnableSummary[], agen
 
 function isWorkflowChildAgentRun(run: RunSpec): boolean {
   return run.kind === 'agent_run' && run.run_group_source === 'workflow';
+}
+
+function isPotentialWorkflowChildAgentRun(run: RunSpec | null): run is RunSpec {
+  return Boolean(run && run.kind === 'agent_run' && run.run_group_id);
+}
+
+function workflowRunHasChildRun(workflowRun: RunSpec, childRunId: string): boolean {
+  if (!childRunId || workflowRun.kind !== 'workflow_run') return false;
+  return workflowChildRunRefs(workflowRun).some((ref) => ref.childRunId === childRunId);
 }
 
 function runMatchesFilter(run: RunSpec, filter: RunKindFilter): boolean {
@@ -1126,6 +1149,7 @@ function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'agent.run.completed') return 'Run 已完成';
   if (name === 'agent.run.failed') return 'Run 执行失败';
   if (name === 'run.cancelled') return 'Run 已取消';
+  if (name === 'run.rerun.started') return '从原 Run 重跑';
   if (name === 'workflow.run.started') return 'Workflow 已启动';
   if (name === 'workflow.node.agent') return detail ? `Agent 节点 · ${detail}` : 'Agent 节点';
   if (name === 'workflow.node.approval_required') return detail ? `人工审批 · ${detail}` : '人工审批';
@@ -1390,6 +1414,40 @@ function workflowSpecAlignsWithObservedSteps(specSteps: WorkflowStepRef[], obser
   return true;
 }
 
+function workflowStepRefMatches(candidate: WorkflowStepRef, observed: WorkflowStepRef): boolean {
+  if (candidate.key === observed.key) return true;
+  if (candidate.kind !== observed.kind) return false;
+  if (candidate.nodeId && observed.nodeId) return candidate.nodeId === observed.nodeId;
+  if (candidate.childRunId && observed.childRunId) return candidate.childRunId === observed.childRunId;
+  if (candidate.artifactPath && observed.artifactPath) return candidate.artifactPath === observed.artifactPath;
+  return normalizeWorkflowStepLabel(candidate.label) === normalizeWorkflowStepLabel(observed.label);
+}
+
+function mergeWorkflowStepRefs(specSteps: WorkflowStepRef[], observedSteps: WorkflowStepRef[]): WorkflowStepRef[] {
+  const usedObservedIndexes = new Set<number>();
+  const merged = specSteps.map((specStep) => {
+    const observedIndex = observedSteps.findIndex((observed, index) => (
+      !usedObservedIndexes.has(index) && workflowStepRefMatches(specStep, observed)
+    ));
+    if (observedIndex < 0) return specStep;
+    usedObservedIndexes.add(observedIndex);
+    const observed = observedSteps[observedIndex];
+    return {
+      ...specStep,
+      ...observed,
+      key: specStep.key,
+      nodeId: specStep.nodeId || observed.nodeId,
+      label: observed.label || specStep.label,
+      childRunId: observed.childRunId || specStep.childRunId,
+      artifactPath: observed.artifactPath || specStep.artifactPath,
+      artifactCount: observed.artifactCount ?? specStep.artifactCount,
+      payload: observed.payload || specStep.payload,
+      task: observed.task || specStep.task,
+    };
+  });
+  return merged.concat(observedSteps.filter((_step, index) => !usedObservedIndexes.has(index)));
+}
+
 function normalizeWorkflowApprovalLabel(name: string, detail: string): string {
   const clean = detail.trim();
   if (name === 'workflow.node.approval_approved') {
@@ -1502,11 +1560,7 @@ function workflowStepRefs(run: RunSpec | null, workflow: WorkflowSpec | null = n
       ? workflowSpecSteps
       : [];
   if (fallbackSpecSteps.length) {
-    const byKey = new Map(steps.map((step) => [step.key, step]));
-    const specKeys = new Set(fallbackSpecSteps.map((step) => step.key));
-    return fallbackSpecSteps
-      .map((step) => byKey.get(step.key) || step)
-      .concat(steps.filter((step) => !specKeys.has(step.key)));
+    return mergeWorkflowStepRefs(fallbackSpecSteps, steps);
   }
   return steps;
 }
@@ -1912,7 +1966,14 @@ export function AgentStudioView() {
     ? selectedWorkflowSteps.find((step) => step.childRunId === selectedWorkflowApprovalChildRunId) || null
     : null;
   const selectedWorkflowParentRun = useMemo(() => {
-    if (!selectedRun || !isWorkflowChildAgentRun(selectedRun) || !selectedRun.run_group_id) return null;
+    if (!isPotentialWorkflowChildAgentRun(selectedRun)) return null;
+    const timelineParent = Array.from(runById.values()).find((run) => (
+      run.kind === 'workflow_run'
+      && run.run_group_id === selectedRun.run_group_id
+      && workflowRunHasChildRun(run, selectedRun.run_id)
+    ));
+    if (timelineParent) return timelineParent;
+    if (!isWorkflowChildAgentRun(selectedRun)) return null;
     return Array.from(runById.values()).find((run) => (
       run.kind === 'workflow_run'
       && run.run_group_id === selectedRun.run_group_id
@@ -1920,12 +1981,12 @@ export function AgentStudioView() {
   }, [runById, selectedRun]);
   const selectedWorkflowParentRunId = useMemo(() => {
     if (selectedWorkflowParentRun) return selectedWorkflowParentRun.run_id;
-    if (!selectedRun || !isWorkflowChildAgentRun(selectedRun) || !selectedRun.run_group_id) return '';
+    if (!isPotentialWorkflowChildAgentRun(selectedRun)) return '';
     const group = runGroups.find((item) => item.run_group_id === selectedRun.run_group_id);
     const childRunIds = group?.child_run_ids || [];
     return childRunIds.find((runId) => {
       const run = runById.get(runId);
-      return run?.kind === 'workflow_run';
+      return run?.kind === 'workflow_run' && workflowRunHasChildRun(run, selectedRun.run_id);
     }) || childRunIds.find((runId) => runId.startsWith('workflow_run_')) || '';
   }, [runById, runGroups, selectedRun, selectedWorkflowParentRun]);
   const activeRunPollKey = useMemo(() => {
@@ -2297,10 +2358,12 @@ export function AgentStudioView() {
   }, [selectedRun, selectedRunId]);
 
   useEffect(() => {
-    if (!selectedRun || !isWorkflowChildAgentRun(selectedRun) || !selectedRun.run_group_id) return;
-    if (runGroups.some((group) => group.run_group_id === selectedRun.run_group_id)) return;
+    if (!isPotentialWorkflowChildAgentRun(selectedRun)) return;
+    const runGroupId = selectedRun.run_group_id || '';
+    if (!runGroupId) return;
+    if (runGroups.some((group) => group.run_group_id === runGroupId)) return;
     let disposed = false;
-    getRunGroup(selectedRun.run_group_id)
+    getRunGroup(runGroupId)
       .then((group) => {
         if (disposed) return;
         setRunGroups((current) => {
@@ -2879,10 +2942,7 @@ export function AgentStudioView() {
     if (!selectedRun) throw new Error('请选择要重跑的 Run');
     if (selectedRunRerunDisabledReason) throw new Error(selectedRunRerunDisabledReason);
     if (!selectedRunRerunTarget) throw new Error('找不到原 Run 对应的 Agent 或 Workflow，无法重跑。');
-    const goal = selectedRun.user_goal?.trim() || '';
-    const run = selectedRunRerunTarget.kind === 'agent'
-      ? await createAgentRun(selectedRunRerunTarget.id, goal)
-      : await createWorkflowRun(selectedRunRerunTarget.id, goal);
+    const run = await rerunRun(selectedRun.run_id);
     openRunDetail(run.run_id, { revealInHistory: true });
     if (selectedRunRerunTarget.kind === 'agent') {
       return {
@@ -4077,7 +4137,7 @@ export function AgentStudioView() {
                       disabled={busy}
                       onClick={requestCancelSelectedRun}
                     >
-                      Cancel Run
+                      取消 Run
                     </button>
                   ) : null}
                 </div>
@@ -4117,7 +4177,7 @@ export function AgentStudioView() {
                               '批准子 Agent 工具调用',
                             )}
                           >
-                            Approve Child
+                            批准子 Agent
                           </button>
                           <button
                             type="button"
@@ -4128,10 +4188,10 @@ export function AgentStudioView() {
                               '拒绝子 Agent 工具调用',
                             )}
                           >
-                            Reject Child
+                            拒绝子 Agent
                           </button>
                           <button type="button" className="run-timeline-child" onClick={() => openRunDetail(selectedWorkflowApprovalChildRunId)}>
-                            Open Child Run
+                            打开子 Run
                           </button>
                         </div>
                       </>
@@ -4140,7 +4200,7 @@ export function AgentStudioView() {
                         <pre>{selectedWorkflowApprovalChildRun ? (selectedWorkflowApprovalChildRun.result || 'Child run has no approval payload.') : 'Loading child run...'}</pre>
                         <div className="run-approval-actions">
                           <button type="button" className="run-timeline-child" onClick={() => openRunDetail(selectedWorkflowApprovalChildRunId)}>
-                            Open Child Run
+                            打开子 Run
                           </button>
                         </div>
                       </>
@@ -4161,8 +4221,8 @@ export function AgentStudioView() {
                       tool={selectedRun.pending_approval.tool}
                     />
                     <div className="run-approval-actions">
-                      <button type="button" className="primary-action" disabled={busy} onClick={() => void runAction(approveSelectedRun, '批准工具调用')}>Approve</button>
-                      <button type="button" className="danger-action" disabled={busy} onClick={() => void runAction(rejectSelectedRun, '拒绝工具调用')}>Reject</button>
+                      <button type="button" className="primary-action" disabled={busy} onClick={() => void runAction(approveSelectedRun, '批准工具调用')}>批准</button>
+                      <button type="button" className="danger-action" disabled={busy} onClick={() => void runAction(rejectSelectedRun, '拒绝工具调用')}>拒绝</button>
                     </div>
                   </section>
                 ) : null}

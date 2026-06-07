@@ -335,6 +335,10 @@ export async function createWorkflowRun(workflowId: string, userGoal: string): P
   return apiPost('/ui/workflow-runs', { workflow_id: workflowId, user_goal: userGoal });
 }
 
+export async function rerunRun(runId: string): Promise<RunSpec> {
+  return apiPost(`/ui/runs/${encodeURIComponent(runId)}/rerun`, {});
+}
+
 export async function cancelRun(runId: string): Promise<RunSpec> {
   return apiPost(`/ui/runs/${encodeURIComponent(runId)}/cancel`, {});
 }

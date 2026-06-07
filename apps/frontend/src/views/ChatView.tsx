@@ -3532,14 +3532,19 @@ function approvalRequiredItems(
   runApprovalOverrides: Record<string, RunApprovalDetailOverride> = {},
 ): ComposerApprovalItem[] {
   const resolved = new Set(resolvedItemIds);
-  const messageApprovals = approvalRequiredMessages(messages).map((message) => ({
-    id: `message:${message.id || ''}:${messageApprovalSignature(message)}`,
-    messageId: message.id,
-    runId: messageRunId(message),
-    createdAt: message.created_at,
-    details: approvalRequestDetails(message),
-    source: 'message' as const,
-  })).filter((item) => item.id && item.runId && !resolved.has(item.id));
+  const messageApprovals = approvalRequiredMessages(messages).map((message) => {
+    const runId = messageRunId(message);
+    const override = runId ? runApprovalOverrides[runId] : undefined;
+    const signature = override?.signature || messageApprovalSignature(message);
+    return {
+      id: `message:${message.id || ''}:${signature}`,
+      messageId: message.id,
+      runId,
+      createdAt: override?.createdAt || message.created_at,
+      details: override?.details || approvalRequestDetails(message),
+      source: 'message' as const,
+    };
+  }).filter((item) => item.id && item.runId && !resolved.has(item.id));
   const messageRunIds = new Set(messageApprovals.map((item) => item.runId));
   const seenActivityRunIds = new Set<string>();
   const activityApprovals: ComposerApprovalItem[] = [];
