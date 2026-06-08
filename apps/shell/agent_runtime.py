@@ -3066,6 +3066,21 @@ class AgentRuntimeService:
                 artifacts,
                 next_iteration=iteration + 1,
             )
+        artifact_completion = self._tool_loop_limit_artifact_completion(timeline, artifacts)
+        if artifact_completion:
+            timeline.append(
+                self._timeline(
+                    "agent.tool.loop_limit_completed",
+                    "artifact.write completed before model final output",
+                    artifact_paths=[
+                        str(artifact.get("path") or "")
+                        for artifact in artifacts
+                        if artifact.get("kind") != "context" and str(artifact.get("path") or "").strip()
+                    ],
+                    loop_limit_detail=self._tool_loop_limit_detail(timeline),
+                )
+            )
+            return artifact_completion
         raise AgentRuntimeError(f"custom_api Agent 工具循环超过上限；{self._tool_loop_limit_detail(timeline)}")
 
     @staticmethod
@@ -3093,6 +3108,33 @@ class AgentRuntimeService:
                 parts.append(f"stderr：{stderr[:500]}")
             return "；".join(parts)
         return "没有可用的工具调用详情"
+
+    @staticmethod
+    def _tool_loop_limit_artifact_completion(timeline: list[dict[str, Any]], artifacts: list[dict[str, Any]]) -> str | None:
+        last_tool_event = next((event for event in reversed(timeline) if event.get("event") == "agent.tool.call"), None)
+        if not last_tool_event or str(last_tool_event.get("detail") or "") != "artifact.write":
+            return None
+        result = last_tool_event.get("result") if isinstance(last_tool_event.get("result"), dict) else {}
+        if not result.get("ok"):
+            return None
+        paths: list[str] = []
+        for artifact in artifacts:
+            if artifact.get("kind") == "context":
+                continue
+            path = str(artifact.get("path") or "").strip()
+            if path and path not in paths:
+                paths.append(path)
+        if not paths:
+            path = str(result.get("path") or "").strip()
+            if path:
+                paths.append(path)
+        if not paths:
+            return None
+        return (
+            "已写入产物，但模型在工具循环上限前没有返回最终总结。\n"
+            f"产物：{', '.join(paths)}\n"
+            f"{AgentRuntimeService._tool_loop_limit_detail(timeline)}"
+        )
 
     @staticmethod
     def _fatal_tool_failure_detail(tool_name: str, tool_request: dict[str, Any], tool_result: dict[str, Any]) -> str:
@@ -4926,7 +4968,13 @@ class AgentRuntimeService:
                 if remainder and not remainder[0].isspace():
                     continue
                 return name, self._chat_mention_goal(prefix, remainder, remaining_lines)
-        return self.parse_chat_runnable(value)
+        parsed = self.parse_chat_runnable(value)
+        if parsed is None:
+            return None
+        raw_name = str(parsed[0] or "").strip().lower()
+        if raw_name in {"agent", "agents", "workflow", "workflows", "runnable", "runnables"}:
+            return None
+        return parsed
 
     @staticmethod
     def parse_chat_runnable(text: str) -> tuple[str, str] | None:

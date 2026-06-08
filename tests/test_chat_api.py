@@ -2075,6 +2075,41 @@ def test_create_group_session_default_name_uses_main_and_agent_nicknames(tmp_pat
         store.close()
 
 
+def test_manual_group_generic_workflow_mention_stays_plain_message(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        seed_templates=False,
+    )
+    design = service.create_agent(
+        {
+            "agent_id": "agent_design",
+            "name": "Design Agent",
+            "nickname": "Design",
+            "model_mode": "follow_main",
+        }
+    )
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[design["agent_id"]])
+        assert created["ok"] is True
+
+        result = api.send_message("普通说明：这次不使用 @Workflow，只说明应该去 Workflow Studio 运行。")
+
+        assert result["ok"] is True
+        assert "runnable_command" not in result
+        task = runtime.state.get_task(result["task_id"])
+        assert task is not None
+        assert "普通说明：这次不使用 @Workflow" in task.description
+        assert "[Yachiyo 群组上下文]" in task.description
+        messages = api.get_messages()["messages"]
+        assert not any(message.get("content") == "未找到指定 Agent 或 Workflow" for message in messages)
+    finally:
+        service.close()
+        store.close()
+
+
 def test_group_session_rejects_workflow_participants(tmp_path, monkeypatch):
     api, _runtime, store = _make_api(tmp_path)
     design = {
@@ -3245,7 +3280,10 @@ def test_plain_group_goal_dispatches_two_agents_and_summarizes(tmp_path, monkeyp
         runtime.state.update_task_status(
             summary_message["task_id"],
             TaskStatus.COMPLETED,
-            result="我已经整合好 Design 和 Coding 的结果。",
+            result=(
+                "我已经整合好 Design 和 Coding 的结果。\n"
+                '{"tasks":[{"action":"dispatch_group_agent","agent":"Design","goal":"重复派发"}]}'
+            ),
         )
         completed_payload = api.get_messages()
         completed_parent = next(
@@ -3260,7 +3298,10 @@ def test_plain_group_goal_dispatches_two_agents_and_summarizes(tmp_path, monkeyp
         )
         assert "group_agent_summary_pending" not in completed_parent["metadata"]
         assert completed_parent["metadata"]["group_agent_summary_status"] == "completed"
-        assert completed_summary["content"] == "我已经整合好 Design 和 Coding 的结果。"
+        assert "我已经整合好 Design 和 Coding 的结果。" in completed_summary["content"]
+        assert "dispatch_group_agent" not in completed_summary["content"]
+        assert "重复派发" not in completed_summary["content"]
+        assert "内部派发协议，已隐藏" in completed_summary["content"]
     finally:
         store.close()
 
@@ -4694,7 +4735,7 @@ def test_group_dispatch_pending_clears_when_final_message_has_no_dispatch(tmp_pa
         store.close()
 
 
-def test_group_dispatch_expected_request_reports_missing_dispatch(tmp_path, monkeypatch):
+def test_group_dispatch_expected_request_falls_back_to_explicit_agent_mention(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
     monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
@@ -4707,15 +4748,49 @@ def test_group_dispatch_expected_request_reports_missing_dispatch(tmp_path, monk
     }
 
     class FakeRunnableService:
+        def __init__(self):
+            self.calls = []
+            self.runs = {}
+
         def resolve_runnable(self, *, runnable_id="", name=""):
             if runnable_id == design["id"] or name in {design["name"], design["nickname"]}:
                 return design
             return None
 
-        def create_run_for_runnable_async(self, **_kwargs):
-            raise AssertionError("missing dispatch must not create an Agent run")
+        def create_run_for_runnable_async(
+            self,
+            *,
+            runnable_id="",
+            name="",
+            user_goal="",
+            run_group_id="",
+            upstream="",
+            on_complete=None,
+        ):
+            self.calls.append({
+                "runnable_id": runnable_id,
+                "name": name,
+                "user_goal": user_goal,
+                "run_group_id": run_group_id,
+                "upstream": upstream,
+            })
+            run = {
+                "run_id": "agent_run_design_fallback",
+                "run_group_id": run_group_id or "run_group_fallback",
+                "status": "completed",
+                "result": "设计任务已经真实完成。",
+                "runnable": design,
+            }
+            self.runs[run["run_id"]] = run
+            if on_complete:
+                on_complete(run)
+            return run
 
-    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeRunnableService())
+        def get_run(self, run_id):
+            return self.runs[run_id]
+
+    service = FakeRunnableService()
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
     try:
         created = api.create_group_session(name="demo Channel", participant_ids=[design["id"]])
         assert created["ok"] is True
@@ -4727,23 +4802,298 @@ def test_group_dispatch_expected_request_reports_missing_dispatch(tmp_path, monk
             result="我会安排 Design Agent 处理这个目标。",
         )
 
-        completed = next(message for message in api.get_messages()["messages"] if message["role"] == "assistant")
-
-        assert completed["status"] == "completed"
-        assert completed["content"] == (
-            "我会安排 Design Agent 处理这个目标。\n\n"
-            "这次没有实际派出 Agent：主模型没有生成可执行的群组 Agent 派发请求。"
-            "你可以重新说明要交给哪个 Agent，或直接 @ 群内 Agent。"
+        messages = api.get_messages()["messages"]
+        completed = next(
+            message
+            for message in messages
+            if message["role"] == "assistant" and message["task_id"] == sent["task_id"]
         )
+        delegated = next(
+            message
+            for message in messages
+            if message["metadata"].get("delegated_by_task_id") == sent["task_id"]
+        )
+
+        assert service.calls
+        assert service.calls[0]["runnable_id"] == design["id"]
+        assert "主模型说明了分工但没有生成机器派发请求" in service.calls[0]["user_goal"]
+        assert "帮我把这个目标安排给 Design 做" in service.calls[0]["user_goal"]
+        assert completed["status"] == "completed"
+        assert "我已根据用户明确提到的群内 Agent 创建真实任务" in completed["content"]
+        assert "我把这个任务派给 Design 了。" in completed["content"]
+        assert "这次没有实际派出 Agent" not in completed["content"]
         assert completed["metadata"]["group_dispatch_handled"] is True
-        assert completed["metadata"]["group_dispatch_count"] == 0
-        assert completed["metadata"]["group_dispatch_missing_request"] is True
-        assert completed["metadata"]["group_dispatch_skipped"] == [
-            "主模型没有生成可执行的群组 Agent 派发请求"
-        ]
-        assert completed["activity_events"][0]["title"] == "群组任务未派发"
+        assert completed["metadata"]["group_dispatch_count"] == 1
+        assert completed["metadata"]["group_dispatch_run_group_id"] == "run_group_fallback"
+        assert completed["metadata"]["group_dispatch_skipped"] == []
+        assert completed["activity_events"][0]["title"] == "群组任务已派发"
+        assert delegated["status"] == "completed"
+        assert delegated["metadata"]["run_id"] == "agent_run_design_fallback"
+        assert delegated["metadata"]["delegated_goal"] == service.calls[0]["user_goal"]
+        assert delegated["content"].startswith("Design 已完成，并把结果交给主模型汇总。")
+        assert "这是群组自然目标的兜底派发" in delegated["content"]
+        assert "你的身份：Design" in delegated["content"]
+        assert "帮我把这个目标安排给 Design 做" in delegated["content"]
+        assert "设计任务已经真实完成。" in delegated["content"]
     finally:
         activity_store.close()
+        store.close()
+
+
+def test_group_dispatch_partial_request_falls_back_to_missing_explicit_agent(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    design = {
+        "id": "agent_design",
+        "name": "Design Agent",
+        "nickname": "Design",
+        "kind": "agent",
+        "enabled": True,
+    }
+    coding = {
+        "id": "agent_coding",
+        "name": "Coding Agent",
+        "nickname": "furina",
+        "kind": "agent",
+        "enabled": True,
+    }
+
+    class FakeRunnableService:
+        def __init__(self):
+            self.calls = []
+            self.runs = {}
+
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            for runnable in (design, coding):
+                if runnable_id == runnable["id"] or name in {runnable["name"], runnable["nickname"]}:
+                    return runnable
+            return None
+
+        def create_run_for_runnable_async(
+            self,
+            *,
+            runnable_id="",
+            name="",
+            user_goal="",
+            run_group_id="",
+            upstream="",
+            on_complete=None,
+        ):
+            self.calls.append({
+                "runnable_id": runnable_id,
+                "name": name,
+                "user_goal": user_goal,
+                "run_group_id": run_group_id,
+                "upstream": upstream,
+            })
+            run = {
+                "run_id": f"agent_run_{runnable_id}",
+                "run_group_id": run_group_id or "run_group_partial",
+                "status": "completed",
+                "result": f"{runnable_id} 完成。",
+                "runnable": design if runnable_id == design["id"] else coding,
+            }
+            self.runs[run["run_id"]] = run
+            if on_complete:
+                on_complete(run)
+            return run
+
+        def get_run(self, run_id):
+            return self.runs[run_id]
+
+    service = FakeRunnableService()
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[design["id"], coding["id"]])
+        assert created["ok"] is True
+        sent = api.send_message("Design Agent 和 Coding Agent 适合怎么分工做一个小项目？")
+        assert sent["ok"] is True
+        runtime.state.update_task_status(
+            sent["task_id"],
+            TaskStatus.COMPLETED,
+            result=(
+                "我先让 Design Agent 出规格，然后让 Coding Agent 基于规格实现。\n"
+                '{"tasks":[{"action":"dispatch_group_agent","agent":"Design","goal":"产出项目规格"}]}'
+            ),
+        )
+
+        messages = api.get_messages()["messages"]
+        completed = next(
+            message
+            for message in messages
+            if message["role"] == "assistant" and message["task_id"] == sent["task_id"]
+        )
+        delegated = [
+            message
+            for message in messages
+            if message["metadata"].get("delegated_by_task_id") == sent["task_id"]
+        ]
+
+        assert [call["runnable_id"] for call in service.calls] == [design["id"], coding["id"]]
+        assert service.calls[0]["run_group_id"] == ""
+        assert service.calls[1]["run_group_id"] == "run_group_partial"
+        assert service.calls[0]["user_goal"] == "产出项目规格"
+        assert "这是群组自然目标的兜底派发" in service.calls[1]["user_goal"]
+        assert "Design Agent 和 Coding Agent 适合怎么分工做一个小项目？" in service.calls[1]["user_goal"]
+        assert completed["status"] == "completed"
+        assert "主模型只生成了部分群组派发请求" in completed["content"]
+        assert "我把 2 个任务分别派给 Design、furina 了。" in completed["content"]
+        assert completed["metadata"]["group_dispatch_handled"] is True
+        assert completed["metadata"]["group_dispatch_count"] == 2
+        assert completed["metadata"]["group_dispatch_run_group_id"] == "run_group_partial"
+        assert len(delegated) == 2
+        assert {message["metadata"]["run_id"] for message in delegated} == {
+            "agent_run_agent_design",
+            "agent_run_agent_coding",
+        }
+    finally:
+        activity_store.close()
+        store.close()
+
+
+def test_group_explicit_agent_goal_dispatches_directly_without_main_model(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    design = {
+        "id": "agent_design",
+        "name": "Design Agent",
+        "nickname": "Design",
+        "kind": "agent",
+        "enabled": True,
+        "category": "design",
+        "description": "负责设计说明。",
+    }
+    coding = {
+        "id": "agent_coding",
+        "name": "Coding Agent",
+        "nickname": "furina",
+        "kind": "agent",
+        "enabled": True,
+        "category": "coding",
+        "description": "负责实现代码。",
+    }
+
+    class FakeRunnableService:
+        def __init__(self):
+            self.calls = []
+            self.runs = {}
+
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            for runnable in (design, coding):
+                if runnable_id == runnable["id"] or name in {runnable["name"], runnable["nickname"]}:
+                    return runnable
+            return None
+
+        def create_run_for_runnable_async(
+            self,
+            *,
+            runnable_id="",
+            name="",
+            user_goal="",
+            run_group_id="",
+            upstream="",
+            on_complete=None,
+        ):
+            self.calls.append({
+                "runnable_id": runnable_id,
+                "name": name,
+                "user_goal": user_goal,
+                "run_group_id": run_group_id,
+                "upstream": upstream,
+            })
+            run = {
+                "run_id": f"agent_run_{runnable_id}",
+                "run_group_id": run_group_id or "run_group_direct",
+                "status": "completed",
+                "result": f"{runnable_id} 完成。",
+                "runnable": design if runnable_id == design["id"] else coding,
+            }
+            self.runs[run["run_id"]] = run
+            if on_complete:
+                on_complete(run)
+            return run
+
+        def get_run(self, run_id):
+            return self.runs[run_id]
+
+    service = FakeRunnableService()
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[design["id"], coding["id"]])
+        assert created["ok"] is True
+        sent = api.send_message("请 Design Agent 和 Coding Agent 一起做一个小项目")
+        assert sent["ok"] is True
+        assert sent["status"] == "completed"
+
+        parent_task = runtime.state.get_task(sent["task_id"])
+        assert parent_task.status == TaskStatus.COMPLETED
+        assert [call["runnable_id"] for call in service.calls] == [design["id"], coding["id"]]
+        assert service.calls[0]["run_group_id"] == ""
+        assert service.calls[1]["run_group_id"] == "run_group_direct"
+        assert "这是群组用户消息的直接派发" in service.calls[0]["user_goal"]
+        assert "请 Design Agent 和 Coding Agent 一起做一个小项目" in service.calls[1]["user_goal"]
+
+        messages = api.get_messages()["messages"]
+        parent = next(
+            message
+            for message in messages
+            if message["role"] == "assistant" and message["task_id"] == sent["task_id"]
+        )
+        delegated = [
+            message
+            for message in messages
+            if message["metadata"].get("delegated_by_task_id") == sent["task_id"]
+        ]
+        assert parent["status"] == "completed"
+        assert parent["metadata"]["group_dispatch_direct"] is True
+        assert parent["metadata"]["group_dispatch_count"] == 2
+        assert parent["metadata"]["group_dispatch_run_group_id"] == "run_group_direct"
+        assert "用户已明确点名群内 Agent" in parent["content"]
+        assert "我把 2 个任务分别派给 Design、furina 了。" in parent["content"]
+        assert len(delegated) == 2
+        assert {message["metadata"]["run_id"] for message in delegated} == {
+            "agent_run_agent_design",
+            "agent_run_agent_coding",
+        }
+    finally:
+        activity_store.close()
+        store.close()
+
+
+def test_group_agent_capability_question_does_not_dispatch_directly(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    design = {
+        "id": "agent_design",
+        "name": "Design Agent",
+        "nickname": "Design",
+        "kind": "agent",
+        "enabled": True,
+    }
+
+    class FakeRunnableService:
+        def __init__(self):
+            self.calls = []
+
+        def resolve_runnable(self, **_kwargs):
+            return design
+
+        def create_run_for_runnable_async(self, **kwargs):
+            self.calls.append(kwargs)
+            raise AssertionError("capability question must not dispatch directly")
+
+    service = FakeRunnableService()
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    try:
+        created = api.create_group_session(name="demo Channel", participant_ids=[design["id"]])
+        assert created["ok"] is True
+        sent = api.send_message("Design Agent 是谁？能做什么？")
+        assert sent["ok"] is True
+        assert sent["status"] == "pending"
+        assert service.calls == []
+        assert runtime.state.get_task(sent["task_id"]).status == TaskStatus.PENDING
+    finally:
         store.close()
 
 

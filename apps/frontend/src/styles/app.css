@@ -1308,6 +1308,83 @@ button:hover {
   height: 17px;
 }
 
+.markdown-internal-task-json {
+  margin: 0.35em 0 0.65em;
+  color: #7f8a9d;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.markdown-internal-task-json:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-internal-task-json summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+  color: #8a94a6;
+  cursor: pointer;
+  list-style: none;
+}
+
+.markdown-internal-task-json summary::-webkit-details-marker {
+  display: none;
+}
+
+.markdown-internal-task-json summary::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg);
+  opacity: 0.62;
+}
+
+.markdown-internal-task-json[open] summary::after {
+  transform: translateY(-2px) rotate(45deg);
+}
+
+.markdown-internal-task-json-label {
+  color: #667286;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.markdown-internal-task-json-preview,
+.markdown-internal-task-json pre code {
+  display: block;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #8a94a6;
+  font-family: var(--hy-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.markdown-internal-task-json-preview {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.markdown-internal-task-json pre {
+  margin: 7px 0 0;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.markdown-internal-task-json pre code {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .syntax-comment {
   color: #778399;
 }
@@ -16071,6 +16148,11 @@ button.activity-item {
   min-height: 26px;
   padding: 4px 8px;
   font-size: 11px;
+}
+
+.run-artifacts .workflow-artifact-plan {
+  border-style: dashed;
+  color: var(--hy-faint);
 }
 
 .workflow-child-results {

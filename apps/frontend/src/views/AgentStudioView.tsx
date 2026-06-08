@@ -1607,6 +1607,28 @@ function workflowStepArtifacts(childRun: RunSpec | null) {
   ));
 }
 
+function workflowRunArtifactForStep(run: RunSpec | null, step: WorkflowStepRef) {
+  if (!run || run.kind !== 'workflow_run' || step.kind !== 'artifact') return null;
+  const stepPath = String(step.artifactPath || '').trim();
+  if (!stepPath) return null;
+  const stepNodeId = String(step.nodeId || '').trim();
+  return (run.artifacts || []).find((artifact) => {
+    const kind = String(artifact.kind || '').trim();
+    const path = String(artifact.path || '').trim();
+    if (kind !== 'workflow_artifact' || path !== stepPath) return false;
+    const artifactNodeId = String(artifact.workflow_node_id || '').trim();
+    return !stepNodeId || !artifactNodeId || artifactNodeId === stepNodeId;
+  }) || null;
+}
+
+function skippedWorkflowArtifactLabel(run: RunSpec | null, step: WorkflowStepRef) {
+  const runStatus = String(run?.status || '').trim();
+  const stepStatus = String(step.status || '').trim();
+  if (stepStatus === 'failed' || stepStatus === 'cancelled') return '未生成';
+  if ((runStatus === 'failed' || runStatus === 'cancelled') && stepStatus === 'pending') return '已跳过';
+  return '计划中';
+}
+
 function WorkflowRunPreview({
   agents,
   agentIssueById,
@@ -4263,6 +4285,7 @@ export function AgentStudioView() {
                         const childStatus = childRun?.status || step.status || 'loading';
                         const summary = workflowStepSummary(step, childRun);
                         const childArtifacts = workflowStepArtifacts(childRun);
+                        const workflowArtifact = workflowRunArtifactForStep(selectedRun, step);
                         return (
                           <article className={`workflow-child-result workflow-step-result ${step.kind}`} key={step.key}>
                             <div className="workflow-child-result-head">
@@ -4309,9 +4332,15 @@ export function AgentStudioView() {
                             ) : null}
                             {step.kind === 'artifact' && step.artifactPath ? (
                               <div className="run-artifacts compact">
-                                <button type="button" onClick={() => void openArtifact(selectedRun, step.artifactPath || '')}>
-                                  {step.artifactPath}
-                                </button>
+                                {workflowArtifact ? (
+                                  <button type="button" onClick={() => void openArtifact(selectedRun, step.artifactPath || '')}>
+                                    {step.artifactPath}
+                                  </button>
+                                ) : (
+                                  <span className="workflow-artifact-plan">
+                                    {skippedWorkflowArtifactLabel(selectedRun, step)} · {step.artifactPath}
+                                  </span>
+                                )}
                               </div>
                             ) : null}
                           </article>

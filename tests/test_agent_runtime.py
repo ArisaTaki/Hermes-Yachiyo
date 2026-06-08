@@ -2008,6 +2008,45 @@ def test_agent_tool_loop_limit_includes_last_tool_detail(tmp_path, monkeypatch):
         service.close()
 
 
+def test_agent_tool_loop_limit_after_artifact_write_completes_with_artifact(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        return {
+            "content": json.dumps(
+                {
+                    "action": "tool",
+                    "tool": "artifact.write",
+                    "input": {"path": "done.md", "content": "done"},
+                }
+            )
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Looping Writer",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["artifact.write"]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Write artifact"})
+
+        assert run["status"] == "completed"
+        assert "模型在工具循环上限前没有返回最终总结" in run["result"]
+        assert "done.md" in run["result"]
+        assert any(artifact.get("path") == "done.md" for artifact in run["artifacts"])
+        assert service.read_run_artifact(run["run_id"], "done.md")["content"] == "done"
+        assert any(event["event"] == "agent.tool.loop_limit_completed" for event in run["timeline"])
+        assert len(calls) == 6
+    finally:
+        service.close()
+
+
 def test_agent_run_json_fallback_writes_artifact(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     calls = []

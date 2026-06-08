@@ -14,7 +14,7 @@ import logoUrl from '../../../../docs/open-design/logo.png';
 import { type AssistantProfileSeed, useAssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { approveRunApproval, listRunnables, type RunnableSummary, type RunSpec, getRun, rejectRunApproval } from '../lib/agents';
 import { apiGet, apiPatch, apiPost, bridgeUrl, chooseAvatarImage, copyText, openExternalUrl, restartDesktopBridge } from '../lib/bridge';
-import { currentParam, navigateTo } from '../lib/view';
+import { ROUTE_CHANGE_EVENT, currentParam, navigateTo } from '../lib/view';
 
 type PendingAttachment = {
   id: string;
@@ -310,6 +310,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [notice, setNotice] = useState<ChatNotice | null>(null);
   const [sessionQuery, setSessionQuery] = useState('');
   const [debouncedSessionQuery, setDebouncedSessionQuery] = useState('');
+  const [routeSessionId, setRouteSessionId] = useState(() => currentParam('session_id').trim());
   const [copiedMessageId, setCopiedMessageId] = useState('');
   const [copiedCodeBlockKey, setCopiedCodeBlockKey] = useState('');
   const [copiedSessionId, setCopiedSessionId] = useState('');
@@ -553,7 +554,20 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }, [sessionQuery]);
 
   useEffect(() => {
-    const requestedSessionId = currentParam('session_id').trim();
+    const syncRouteSessionId = () => setRouteSessionId(currentParam('session_id').trim());
+    window.addEventListener('hashchange', syncRouteSessionId);
+    window.addEventListener('popstate', syncRouteSessionId);
+    window.addEventListener(ROUTE_CHANGE_EVENT, syncRouteSessionId);
+    syncRouteSessionId();
+    return () => {
+      window.removeEventListener('hashchange', syncRouteSessionId);
+      window.removeEventListener('popstate', syncRouteSessionId);
+      window.removeEventListener(ROUTE_CHANGE_EVENT, syncRouteSessionId);
+    };
+  }, []);
+
+  useEffect(() => {
+    const requestedSessionId = routeSessionId;
     void (async () => {
       await Promise.all([loadAssistantProfile(), loadExecutor()]);
       if (requestedSessionId) {
@@ -568,7 +582,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       }
       await Promise.all([refreshMessages(), loadSessions()]);
     })();
-  }, [loadAssistantProfile, loadExecutor, loadSessions, refreshMessages]);
+  }, [loadAssistantProfile, loadExecutor, loadSessions, refreshMessages, routeSessionId]);
 
   useEffect(() => {
     const interval = isProcessing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
@@ -3099,7 +3113,7 @@ function ComposerApprovalNotice({ busy, currentIndex, details, onApprove, onNext
   const workflowApproval = isWorkflowApprovalDetails(details);
   const subtitle = workflowApproval
     ? workflowApprovalNoticeSubtitle(details, preview)
-    : details.goal || compactStatusText(preview, 86) || '需要确认工具调用后继续执行';
+    : compactStatusText(preview, 86) || details.goal || '需要确认工具调用后继续执行';
   return (
     <div className="composer-approval-notice">
       <div className="composer-approval-main">
@@ -3583,15 +3597,16 @@ function approvalRequiredItems(
     const runId = workflowWaitingChildApprovalRunId(message);
     if (!runId || knownApprovalRunIds.has(runId) || seenWorkflowChildRunIds.has(runId)) continue;
     seenWorkflowChildRunIds.add(runId);
-    const signature = workflowWaitingChildApprovalSignature(message);
+    const override = runApprovalOverrides[runId];
+    const signature = override?.signature || workflowWaitingChildApprovalSignature(message);
     const itemId = `workflow-child:${message.id || messageIndex}:${signature}`;
     if (resolved.has(itemId)) continue;
     workflowChildApprovals.push({
       id: itemId,
       messageId: message.id,
       runId,
-      createdAt: message.created_at,
-      details: approvalRequestDetailsFromWorkflowWaitingChild(message),
+      createdAt: override?.createdAt || message.created_at,
+      details: override?.details || approvalRequestDetailsFromWorkflowWaitingChild(message),
       source: 'workflow-child',
     });
   }
@@ -4558,6 +4573,14 @@ function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
 
   function flushCode() {
     const code = codeLines.join('\n');
+    if (isInternalTaskJsonText(code)) {
+      html += renderInternalTaskJsonBlock(code);
+      codeLines = [];
+      codeLanguage = '';
+      inCode = false;
+      codeBlockIndex += 1;
+      return;
+    }
     const language = codeLanguage || detectCodeLanguage(code);
     const blockIndex = String(codeBlockIndex);
     const copied = copiedCodeBlockKey === codeBlockStateKey(messageId, blockIndex);
@@ -4594,6 +4617,13 @@ function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
     if (!line.trim()) {
       flushParagraph();
       closeList();
+      continue;
+    }
+
+    if (isInternalTaskJsonText(line)) {
+      flushParagraph();
+      closeList();
+      html += renderInternalTaskJsonBlock(line);
       continue;
     }
 
@@ -4655,6 +4685,40 @@ function renderMarkdown(text: string, messageId = '', copiedCodeBlockKey = '') {
   flushParagraph();
   closeList();
   return html;
+}
+
+function isInternalTaskJsonText(value: string) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  const compact = text.toLowerCase().replace(/[\s_"'`.-]+/g, '');
+  if (
+    !compact.includes('dispatchgroupagent')
+    && !compact.includes('runyachiyoagent')
+    && !compact.includes('yachiyogroupdispatch')
+  ) {
+    return false;
+  }
+  return text.startsWith('{') || text.startsWith('[') || text.startsWith('<');
+}
+
+function renderInternalTaskJsonBlock(value: string) {
+  const raw = String(value || '').trim();
+  let display = raw;
+  try {
+    display = JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    // Keep model output readable even when it is a partial or non-standard JSON fragment.
+  }
+  const preview = raw.replace(/\s+/g, ' ');
+  return (
+    '<details class="markdown-internal-task-json">'
+    + '<summary>'
+    + '<span class="markdown-internal-task-json-label">内部任务 JSON</span>'
+    + `<code class="markdown-internal-task-json-preview">${escapeHtml(preview)}</code>`
+    + '</summary>'
+    + `<pre><code>${escapeHtml(display)}</code></pre>`
+    + '</details>'
+  );
 }
 
 function normalizeFenceLanguage(fenceLine: string) {

@@ -446,6 +446,16 @@ class ChatAPI:
             user_metadata = self._group_followup_metadata_for_user_message(text, current_context)
             task_description = self._with_group_context_for_main_model(task_description, current_context)
             task_description = self._with_group_followup_context(task_description, user_metadata)
+            direct_group_dispatch_requests: list[dict[str, str]] = []
+            if (
+                current_context.get("conversation_kind") == "group"
+                and not saved_attachments
+                and not user_metadata
+            ):
+                direct_group_dispatch_requests = self._direct_group_dispatch_requests(
+                    text,
+                    current_context,
+                )
             if saved_attachments and not raw_attachments and self._should_enforce_image_capability():
                 image_input = get_current_hermes_image_input_capability()
                 if image_input.get("can_attach_images") is False:
@@ -473,6 +483,46 @@ class ChatAPI:
 
             # 3. 关联消息与任务
             self._session.link_message_to_task(message_id, task_id)
+            if direct_group_dispatch_requests:
+                source_text = self._format_group_dispatch_direct_source()
+                self._state.update_task_status(
+                    task_id,
+                    TaskStatus.COMPLETED,
+                    result=source_text,
+                    progress_label="已派发",
+                )
+                assistant_id = self._session.upsert_assistant_message(
+                    task_id=task_id,
+                    content=source_text,
+                    status=MessageStatus.PROCESSING,
+                    metadata={
+                        "sender": self._main_model_sender_from_runtime(),
+                        "group_dispatch_pending": True,
+                        "group_dispatch_direct": True,
+                    },
+                )
+                assistant_message = self._session.get_assistant_message_for_task(task_id)
+                if assistant_message is not None:
+                    self._dispatch_group_agent_requests(
+                        assistant_message,
+                        direct_group_dispatch_requests,
+                        current_context,
+                        source_text=source_text,
+                    )
+                logger.info(
+                    "群组消息已直接派发: message_id=%s, task_id=%s, count=%d",
+                    message_id,
+                    task_id,
+                    len(direct_group_dispatch_requests),
+                )
+                return {
+                    "ok": True,
+                    "message_id": message_id,
+                    "task_id": task_id,
+                    "assistant_message_id": assistant_id,
+                    "status": "completed",
+                    "attachments": self._serialize_attachments(saved_attachments),
+                }
             if current_context.get("conversation_kind") == "group":
                 self._create_pending_group_agent_summary_tasks()
 
@@ -2839,7 +2889,29 @@ class ChatAPI:
             synced_task_ids.add(msg.task_id)
 
             if task.status == TaskStatus.COMPLETED:
+                assistant = self._session.get_assistant_message_for_task(msg.task_id)
+                assistant_metadata = assistant.metadata if assistant and isinstance(assistant.metadata, dict) else {}
+                is_group_summary_message = bool(
+                    assistant_metadata.get("group_agent_summary_for_task_id")
+                    or assistant_metadata.get("group_direct_agent_summary_for_message_id")
+                )
+                if (
+                    assistant is not None
+                    and assistant_metadata.get("group_dispatch_handled")
+                    and not is_group_summary_message
+                ):
+                    self._session.upsert_assistant_message(
+                        task_id=msg.task_id,
+                        content=assistant.content,
+                        status=assistant.status,
+                        error=assistant.error,
+                        attachments=assistant.attachments,
+                        metadata=assistant_metadata,
+                    )
+                    continue
                 result = task.result or "[任务已完成，无输出]"
+                metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
+                result = self._sanitize_group_summary_result(result, metadata, current_context)
                 self._session.upsert_assistant_message(
                     task_id=msg.task_id,
                     content=result,
@@ -2908,6 +2980,26 @@ class ChatAPI:
 
         self._sync_group_dispatches_from_completed_tasks(notify_group_summary=notify_group_summary)
         self._sync_group_agent_summary_parent_statuses()
+
+    def _sanitize_group_summary_result(
+        self,
+        result: str,
+        metadata: dict[str, Any],
+        context: dict[str, Any],
+    ) -> str:
+        if context.get("conversation_kind") != "group":
+            return result
+        if not metadata.get("group_agent_summary_for_task_id") and not metadata.get("group_direct_agent_summary_for_message_id"):
+            return result
+        if not self._parse_group_dispatch_requests(result):
+            return result
+        visible = self._normalize_group_dispatch_intro(self._strip_group_dispatch_payloads(result)).strip()
+        notice = "主模型汇总返回了内部派发协议，已隐藏；请参考上方 Agent 结果，或让主模型重新整理。"
+        if not visible:
+            return notice
+        if notice in visible:
+            return visible
+        return f"{visible}\n\n{notice}"
 
     def _sync_current_session_status(self, *, notify_group_summary: bool = True) -> None:
         """同步当前会话里的主模型任务和 Agent/Workflow Run 消息状态。"""
@@ -3086,6 +3178,21 @@ class ChatAPI:
                     task.description,
                     source_text,
                 )
+                fallback_requests = (
+                    self._fallback_group_dispatch_requests(task.description, source_text, context)
+                    if missing_expected_dispatch
+                    else []
+                )
+                if fallback_requests:
+                    fallback_source = self._format_group_dispatch_fallback_source()
+                    self._dispatch_group_agent_requests(
+                        msg,
+                        fallback_requests,
+                        context,
+                        source_text=fallback_source,
+                        notify_group_summary=notify_group_summary,
+                    )
+                    continue
                 if metadata.get("group_dispatch_pending") or metadata.get("group_dispatch_stream_visible_content"):
                     cleaned_metadata = dict(metadata)
                     cleaned_metadata.pop("group_dispatch_pending", None)
@@ -3139,6 +3246,14 @@ class ChatAPI:
                         },
                     )
                 continue
+            fallback_requests = self._missing_group_dispatch_fallback_requests(
+                requests,
+                self._fallback_group_dispatch_requests(task.description, source_text, context),
+                context,
+            )
+            if fallback_requests:
+                requests = [*requests, *fallback_requests][:3]
+                source_text = self._format_group_dispatch_partial_fallback_source(source_text)
             self._dispatch_group_agent_requests(
                 msg,
                 requests,
@@ -3165,6 +3280,250 @@ class ChatAPI:
     @staticmethod
     def _group_dispatch_missing_request_reason() -> str:
         return "主模型没有生成可执行的群组 Agent 派发请求"
+
+    @classmethod
+    def _fallback_group_dispatch_requests(
+        cls,
+        task_description: str,
+        response_text: str,
+        context: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        request = cls._group_dispatch_user_request_from_task(task_description)
+        if not request:
+            return []
+        if cls._group_dispatch_response_declines_dispatch(response_text):
+            return []
+        participants = [
+            item
+            for item in (context.get("participants") or [])
+            if isinstance(item, dict) and item.get("kind") == "agent"
+        ]
+        if not participants:
+            return []
+        target_text = f"{request}\n{response_text}"
+        matched = [
+            participant
+            for participant in participants
+            if cls._fallback_group_dispatch_participant_mentioned(participant, target_text)
+        ]
+        requests: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for participant in matched[:3]:
+            participant_id = str(participant.get("id") or "").strip()
+            if not participant_id or participant_id in seen:
+                continue
+            seen.add(participant_id)
+            display_name = str(
+                participant.get("nickname")
+                or participant.get("name")
+                or participant_id
+            ).strip()
+            requests.append({
+                "kind": "agent",
+                "target": display_name,
+                "runnable_id": participant_id,
+                "goal": cls._fallback_group_dispatch_goal(request, participant),
+            })
+        return requests
+
+    @classmethod
+    def _direct_group_dispatch_requests(
+        cls,
+        user_text: str,
+        context: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        request = str(user_text or "").strip()
+        if cls._parse_main_model_mention(request) is not None:
+            return []
+        if not request or not cls._group_user_text_has_direct_dispatch_intent(request):
+            return []
+        participants = [
+            item
+            for item in (context.get("participants") or [])
+            if isinstance(item, dict) and item.get("kind") == "agent"
+        ]
+        if not participants:
+            return []
+        matched = [
+            participant
+            for participant in participants
+            if cls._fallback_group_dispatch_participant_mentioned(participant, request)
+        ]
+        requests: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for participant in matched[:3]:
+            participant_id = str(participant.get("id") or "").strip()
+            if not participant_id or participant_id in seen:
+                continue
+            seen.add(participant_id)
+            display_name = str(
+                participant.get("nickname")
+                or participant.get("name")
+                or participant_id
+            ).strip()
+            requests.append({
+                "kind": "agent",
+                "target": display_name,
+                "runnable_id": participant_id,
+                "goal": cls._direct_group_dispatch_goal(request, participant),
+            })
+        return requests
+
+    @staticmethod
+    def _group_user_text_has_direct_dispatch_intent(user_text: str) -> bool:
+        text = str(user_text or "").strip()
+        if not text:
+            return False
+        compact = re.sub(r"\s+", "", text)
+        if re.search(r"(?:不要|不用|不需要|无需|先不).{0,16}(?:派|派发|派活|安排|分配|指派|交给|让|Agent|agent)", compact, re.IGNORECASE):
+            return False
+        directive = re.search(
+            r"(请|帮我?|麻烦|劳烦|让|安排|派发?|派活|委派|分配|指派|交给|分别|一起|协作|配合|"
+            r"please|ask|have|let|assign|dispatch|delegate)",
+            text,
+            re.IGNORECASE,
+        )
+        if not directive:
+            return False
+        action = re.search(
+            r"(做|处理|产出|输出|实现|编写|写|运行|验证|整理|设计|开发|修复|修改|审批|"
+            r"build|create|implement|write|run|review|design|code|fix|verify)",
+            text,
+            re.IGNORECASE,
+        )
+        collaboration = re.search(r"(一起|分别|协作|配合|并行|同时|together|parallel)", text, re.IGNORECASE)
+        return bool(action or collaboration)
+
+    @classmethod
+    def _direct_group_dispatch_goal(cls, request: str, participant: dict[str, Any]) -> str:
+        display_name = str(
+            participant.get("nickname")
+            or participant.get("name")
+            or participant.get("id")
+            or "Agent"
+        ).strip() or "Agent"
+        details = []
+        category = str(participant.get("category") or "").strip()
+        if category:
+            details.append(f"类别：{category}")
+        description = str(participant.get("description") or "").strip()
+        if description:
+            details.append(f"职责：{description}")
+        detail_text = f"（{'；'.join(details)}）" if details else ""
+        return (
+            "这是群组用户消息的直接派发：用户明确点名你参与执行。"
+            "请实际完成你负责的部分，不要只复述安排。\n\n"
+            f"你的身份：{display_name}{detail_text}\n\n"
+            f"用户原始目标：\n{request}"
+        )
+
+    @staticmethod
+    def _format_group_dispatch_direct_source() -> str:
+        return "用户已明确点名群内 Agent；我会直接派发真实任务，等待 Agent 完成后再汇总。"
+
+    @classmethod
+    def _missing_group_dispatch_fallback_requests(
+        cls,
+        requests: list[dict[str, str]],
+        fallback_requests: list[dict[str, str]],
+        context: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        if not requests or not fallback_requests:
+            return []
+        participants = [
+            item
+            for item in (context.get("participants") or [])
+            if isinstance(item, dict) and item.get("kind") == "agent"
+        ]
+        dispatched_ids: set[str] = set()
+        for request in requests:
+            runnable_id = str(request.get("runnable_id") or "").strip()
+            if runnable_id:
+                dispatched_ids.add(runnable_id)
+            target_text = "\n".join(
+                str(request.get(key) or "")
+                for key in ("target", "agent", "name", "nickname", "runnable_id")
+            )
+            for participant in participants:
+                participant_id = str(participant.get("id") or "").strip()
+                if participant_id and cls._fallback_group_dispatch_participant_mentioned(participant, target_text):
+                    dispatched_ids.add(participant_id)
+        missing: list[dict[str, str]] = []
+        seen: set[str] = set(dispatched_ids)
+        for request in fallback_requests:
+            runnable_id = str(request.get("runnable_id") or "").strip()
+            if not runnable_id or runnable_id in seen:
+                continue
+            seen.add(runnable_id)
+            missing.append(request)
+        return missing
+
+    @classmethod
+    def _fallback_group_dispatch_participant_mentioned(
+        cls,
+        participant: dict[str, Any],
+        text: str,
+    ) -> bool:
+        normalized_text = cls._normalize_group_agent_alias(text)
+        if not normalized_text:
+            return False
+        compact_text = normalized_text.replace(" ", "")
+        aliases: set[str] = set()
+        for key in ("id", "name", "nickname"):
+            normalized = cls._normalize_group_agent_alias(participant.get(key))
+            if normalized:
+                aliases.add(normalized)
+            aliases.update(cls._group_agent_alias_tokens(participant.get(key)))
+        aliases.discard("")
+        generic = {"agent", "assistant", "main", "group", "member", "成员", "群成员", "主模型"}
+        aliases -= generic
+        for alias in aliases:
+            if alias in normalized_text:
+                return True
+            compact_alias = alias.replace(" ", "")
+            if len(compact_alias) >= 3 and compact_alias in compact_text:
+                return True
+        return False
+
+    @classmethod
+    def _fallback_group_dispatch_goal(cls, request: str, participant: dict[str, Any]) -> str:
+        display_name = str(
+            participant.get("nickname")
+            or participant.get("name")
+            or participant.get("id")
+            or "Agent"
+        ).strip() or "Agent"
+        details = []
+        category = str(participant.get("category") or "").strip()
+        if category:
+            details.append(f"类别：{category}")
+        description = str(participant.get("description") or "").strip()
+        if description:
+            details.append(f"职责：{description}")
+        detail_text = f"（{'；'.join(details)}）" if details else ""
+        return (
+            "这是群组自然目标的兜底派发：主模型说明了分工但没有生成机器派发请求。"
+            "请实际执行你负责的部分，不要沿用主模型声称已经完成的结果。\n\n"
+            f"你的身份：{display_name}{detail_text}\n\n"
+            f"用户原始目标：\n{request}"
+        )
+
+    @staticmethod
+    def _format_group_dispatch_fallback_source() -> str:
+        return (
+            "主模型没有生成可执行的群组派发请求；"
+            "我已根据用户明确提到的群内 Agent 创建真实任务，等待 Agent 完成后再汇总。"
+        )
+
+    @classmethod
+    def _format_group_dispatch_partial_fallback_source(cls, source_text: str) -> str:
+        visible = cls._normalize_group_dispatch_intro(cls._strip_group_dispatch_payloads(source_text)).strip()
+        notice = "主模型只生成了部分群组派发请求；我已根据用户明确提到的群内 Agent 补齐遗漏任务。"
+        if not visible:
+            return notice
+        if notice in visible:
+            return visible
+        return f"{visible}\n\n{notice}"
 
     @classmethod
     def _group_dispatch_expected_without_requests(cls, task_description: str, response_text: str) -> bool:
