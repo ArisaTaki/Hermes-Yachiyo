@@ -208,7 +208,10 @@ class ChatStore:
             conn.commit()
 
     def list_sessions(self, limit: int = 20) -> List[StoredSession]:
-        """列出最近的会话"""
+        """列出最近的会话；limit <= 0 时返回全部可见会话。"""
+        sql_limit = int(limit or 0)
+        if sql_limit <= 0:
+            sql_limit = -1
         with self._lock:
             conn = self._get_conn()
             rows = conn.execute(
@@ -233,7 +236,7 @@ class ChatStore:
                 ORDER BY COALESCE(last_message_at, s.created_at) DESC, s.created_at DESC
                 LIMIT ?
                 """,
-                (limit,),
+                (sql_limit,),
             ).fetchall()
         return [
             StoredSession(
@@ -261,7 +264,11 @@ class ChatStore:
                 for session in self.list_sessions(limit=limit)
             ]
         like = f"%{_escape_like(normalized_query)}%"
-        limit = max(1, min(int(limit or 50), 200))
+        sql_limit = int(limit or 0)
+        if sql_limit <= 0:
+            sql_limit = -1
+        else:
+            sql_limit = min(sql_limit, 200)
         with self._lock:
             conn = self._get_conn()
             rows = conn.execute(
@@ -322,7 +329,7 @@ class ChatStore:
                          vs.created_at DESC
                 LIMIT ?
                 """,
-                (like, like, like, like, like, like, like, limit),
+                (like, like, like, like, like, like, like, sql_limit),
             ).fetchall()
         return [
             StoredSessionSearchResult(

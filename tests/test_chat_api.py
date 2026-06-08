@@ -7658,6 +7658,31 @@ def test_list_sessions_search_includes_message_match(tmp_path, monkeypatch):
         store.close()
 
 
+def test_list_sessions_limit_zero_returns_all_search_matches(tmp_path, monkeypatch):
+    api, _runtime, store = _make_api(tmp_path)
+    monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
+    try:
+        for index in range(3):
+            session_id = f"search-{index}"
+            store.create_session(session_id)
+            store.save_message(StoredMessage(
+                message_id=f"search-message-{index}",
+                session_id=session_id,
+                role="user",
+                content=f"共同搜索词 {index}",
+                status="completed",
+                task_id=None,
+                error=None,
+                created_at=f"2026-01-01T00:00:0{index}+00:00",
+            ))
+
+        sessions = api.list_sessions(limit=0, query="共同搜索词")["sessions"]
+
+        assert len(sessions) == 3
+    finally:
+        store.close()
+
+
 def test_chat_payloads_include_estimated_token_counts(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)

@@ -50,6 +50,24 @@ class TestChatStore:
 
         assert [session.session_id for session in sessions] == ["older", "newer"]
 
+    def test_list_sessions_limit_zero_returns_all(self, store: ChatStore):
+        for index in range(25):
+            session_id = f"s{index:02d}"
+            store.create_session(session_id)
+            store.save_message(StoredMessage(
+                message_id=f"m{index:02d}",
+                session_id=session_id,
+                role="user",
+                content=f"消息 {index}",
+                status="completed",
+                task_id=None,
+                error=None,
+                created_at=f"2026-01-01T00:00:{index:02d}+00:00",
+            ))
+
+        assert len(store.list_sessions()) == 20
+        assert len(store.list_sessions(limit=0)) == 25
+
     def test_save_and_load_messages(self, store: ChatStore):
         store.create_session("s1")
         msg = StoredMessage(
@@ -282,6 +300,24 @@ class TestChatStore:
         assert results[0].match_message_id == "m1"
         assert results[0].match_content == "这里提到了聊天记录搜索"
         assert results[0].match_count == 1
+
+    def test_search_sessions_limit_zero_returns_all_matches(self, store: ChatStore):
+        for index in range(3):
+            session_id = f"s{index}"
+            store.create_session(session_id)
+            store.save_message(StoredMessage(
+                message_id=f"m{index}",
+                session_id=session_id,
+                role="user",
+                content=f"共同关键词 {index}",
+                status="completed",
+                task_id=None,
+                error=None,
+                created_at=f"2026-01-01T00:00:0{index}+00:00",
+            ))
+
+        assert len(store.search_sessions("共同关键词", limit=1)) == 1
+        assert len(store.search_sessions("共同关键词", limit=0)) == 3
 
     def test_load_messages_around_returns_anchor_context(self, store: ChatStore):
         store.create_session("s1")

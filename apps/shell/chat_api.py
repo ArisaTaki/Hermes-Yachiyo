@@ -5253,7 +5253,8 @@ class ChatAPI:
         normalized_query = " ".join(str(query or "").split()).strip()
         current_session = self._runtime.chat_session
         current_session_id = current_session.session_id
-        search_results = store.search_sessions(normalized_query, limit=max(limit, 50)) if normalized_query else []
+        search_limit = limit if limit <= 0 else max(limit, 50)
+        search_results = store.search_sessions(normalized_query, limit=search_limit) if normalized_query else []
         sessions = [] if normalized_query else store.list_sessions(limit=limit)
         session_items = []
         iterable_sessions = [result.session for result in search_results] if normalized_query else sessions
