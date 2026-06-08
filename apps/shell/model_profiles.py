@@ -34,7 +34,23 @@ class ModelProfileError(RuntimeError):
     """Raised when a model profile operation cannot be completed."""
 
 
-OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS = 60
+_OPENAI_COMPATIBLE_CHAT_TIMEOUT_ENV = "HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS"
+OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS = 180
+
+
+def read_openai_compatible_chat_timeout() -> float:
+    raw_value = os.getenv(_OPENAI_COMPATIBLE_CHAT_TIMEOUT_ENV, "").strip()
+    if not raw_value:
+        return float(OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS)
+    try:
+        timeout = float(raw_value)
+    except ValueError:
+        return float(OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS)
+    return timeout if timeout > 0 else float(OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS)
+
+
+def _format_timeout_seconds(timeout: float) -> str:
+    return str(int(timeout)) if timeout.is_integer() else f"{timeout:g}"
 
 
 def _now() -> str:
@@ -1482,6 +1498,7 @@ def _openai_compatible_chat_payload(
     tools: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     url = f"{base_url.rstrip('/')}/chat/completions"
+    timeout = read_openai_compatible_chat_timeout()
     payload: dict[str, Any] = {"model": model, "messages": messages, "temperature": 0.2}
     if tools:
         payload["tools"] = tools
@@ -1494,7 +1511,7 @@ def _openai_compatible_chat_payload(
         headers=_openai_compatible_auth_headers(base_url, api_key),
     )
     try:
-        with urlopen_with_bundled_ca(request, timeout=OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS) as response:
+        with urlopen_with_bundled_ca(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urlerror.HTTPError as exc:
         detail = ""
@@ -1506,7 +1523,13 @@ def _openai_compatible_chat_payload(
         raise ModelProfileError(
             f"OpenAI-compatible Profile 调用失败：HTTP {exc.code} {exc.reason}（POST /chat/completions）{suffix}"
         ) from exc
-    except (urlerror.URLError, TimeoutError, json.JSONDecodeError) as exc:
+    except TimeoutError as exc:
+        raise ModelProfileError(
+            "OpenAI-compatible Profile 调用超时："
+            f"等待响应超过 {_format_timeout_seconds(timeout)} 秒；"
+            f"可通过 {_OPENAI_COMPATIBLE_CHAT_TIMEOUT_ENV} 调整。"
+        ) from exc
+    except (urlerror.URLError, json.JSONDecodeError) as exc:
         raise ModelProfileError(f"OpenAI-compatible Profile 调用失败：{exc}") from exc
     return payload
 

@@ -15,6 +15,7 @@ from apps.shell.model_profiles import (
     ModelProfileService,
     openai_compatible_chat,
     openai_compatible_chat_message,
+    read_openai_compatible_chat_timeout,
 )
 
 
@@ -412,6 +413,34 @@ def test_openai_compatible_chat_reads_reasoning_content_and_xiaomi_api_key_heade
     )
 
     assert result == "red, blue"
+
+
+def test_openai_compatible_chat_timeout_is_configurable(monkeypatch):
+    monkeypatch.delenv("HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS", raising=False)
+    assert OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS == 180
+    assert read_openai_compatible_chat_timeout() == 180
+
+    monkeypatch.setenv("HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS", "240.5")
+    assert read_openai_compatible_chat_timeout() == 240.5
+
+    monkeypatch.setenv("HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS", "invalid")
+    assert read_openai_compatible_chat_timeout() == 180
+
+
+def test_openai_compatible_chat_timeout_error_reports_limit(monkeypatch):
+    monkeypatch.setenv("HERMES_YACHIYO_MODEL_TIMEOUT_SECONDS", "12")
+    monkeypatch.setattr(
+        "apps.shell.model_profiles.urlrequest.urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("read operation timed out")),
+    )
+
+    with pytest.raises(ModelProfileError, match="等待响应超过 12 秒"):
+        openai_compatible_chat(
+            "https://api.example.test/v1",
+            "demo-model",
+            "sk-demo",
+            [{"role": "user", "content": "hello"}],
+        )
 
 
 def test_openai_compatible_chat_message_returns_tool_calls(monkeypatch):

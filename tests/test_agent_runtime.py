@@ -231,6 +231,68 @@ def test_agent_crud_and_api_key_redaction(tmp_path):
         service.close()
 
 
+def test_agents_receive_isolated_default_workdirs(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        coding = service.create_agent({"name": "Default Writer", "category": "coding"})
+        reader = service.create_agent({"name": "Default Reader"})
+
+        coding_workdir = Path(coding["workspace_policy"]["default_workdir"])
+        reader_workdir = Path(reader["workspace_policy"]["default_workdir"])
+        assert coding_workdir == service.agent_workspaces_dir / coding["agent_id"]
+        assert reader_workdir == service.agent_workspaces_dir / reader["agent_id"]
+        assert coding_workdir.is_dir()
+        assert reader_workdir.is_dir()
+        assert coding["workspace_policy"]["writable_scopes"] == ["."]
+        assert reader["workspace_policy"]["writable_scopes"] == []
+    finally:
+        service.close()
+
+
+def test_runtime_migrates_blank_agent_workdirs(tmp_path):
+    service = make_service(tmp_path)
+    try:
+        agent = service.create_agent({"name": "Legacy Writer", "category": "coding"})
+        service._conn.execute(
+            "UPDATE agents SET workspace_policy_json=? WHERE agent_id=?",
+            (json.dumps({"default_workdir": "", "readable_scopes": ["."], "writable_scopes": []}), agent["agent_id"]),
+        )
+        service._conn.commit()
+    finally:
+        service.close()
+
+    service = make_service(tmp_path)
+    try:
+        migrated = service.get_agent(agent["agent_id"])
+        assert Path(migrated["workspace_policy"]["default_workdir"]) == service.agent_workspaces_dir / agent["agent_id"]
+        assert migrated["workspace_policy"]["writable_scopes"] == ["."]
+    finally:
+        service.close()
+
+
+def test_explicit_agent_workdir_preserves_empty_writable_scopes(tmp_path):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "custom-workdir"
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Explicit Writer",
+                "category": "coding",
+                "workspace_policy": {
+                    "default_workdir": str(workdir),
+                    "readable_scopes": ["."],
+                    "writable_scopes": [],
+                },
+            }
+        )
+
+        assert agent["workspace_policy"]["default_workdir"] == str(workdir)
+        assert agent["workspace_policy"]["writable_scopes"] == []
+        assert not workdir.exists()
+    finally:
+        service.close()
+
+
 def test_agent_and_workflow_names_are_globally_unique(tmp_path):
     service = make_service(tmp_path)
     try:

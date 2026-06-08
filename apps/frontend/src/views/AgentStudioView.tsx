@@ -2176,7 +2176,9 @@ export function AgentStudioView() {
         tone: 'warn',
         text: draft.writable_scopes.trim()
           ? '`workspace.write_patch` 已启用；每次写文件都会先进入审批。'
-          : '`workspace.write_patch` 已启用但 Writable Scopes 为空；写入会被工作区策略拒绝。',
+          : draft.default_workdir.trim()
+            ? '`workspace.write_patch` 已启用但 Writable Scopes 为空；写入会被工作区策略拒绝。'
+            : '`workspace.write_patch` 已启用；保存后会自动分配独立工作目录，并允许在该目录内写入。',
       });
     }
     if (draft.allow_terminal) {
@@ -3609,8 +3611,8 @@ export function AgentStudioView() {
             <div className="agent-form-row">
               <label>
                 <span>Default Workdir</span>
-                <input className="hy-input" value={draft.default_workdir} onChange={(event) => setDraft({ ...draft, default_workdir: event.target.value })} />
-                <small className="agent-field-help">工具相对路径的基准目录；留空就是当前 Hermes-Yachiyo 工作区。</small>
+                <input className="hy-input" value={draft.default_workdir} onChange={(event) => setDraft({ ...draft, default_workdir: event.target.value })} placeholder="保存后自动分配独立目录" />
+                <small className="agent-field-help">工具相对路径的基准目录；留空时保存后自动分配到 Yachiyo 的 Agent 工作区。</small>
               </label>
               <label>
                 <span>Writable Scopes</span>
