@@ -3,6 +3,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 
+import { useConfirmDialog } from '../components/ConfirmDialog';
 import {
   apiGet,
   apiPost,
@@ -219,6 +220,7 @@ export function InstallerView() {
   const terminalTaskRef = useRef<DesktopTerminalTask | null>(null);
   const actionsPanelRef = useRef<HTMLElement | null>(null);
   const configPanelRef = useRef<HTMLElement | null>(null);
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
   usePageLoading(busy === 'recheck');
 
   const loadHermesConfig = useCallback(async (options: { forceFormSync?: boolean } = {}) => {
@@ -524,11 +526,22 @@ export function InstallerView() {
     }
   }
 
-  async function stopEmbeddedTerminal() {
+  async function stopEmbeddedTerminalNow() {
     const id = terminalIdRef.current;
     if (!id) return;
     setTerminalMessage('正在停止终端任务…');
     await killDesktopTerminal(id);
+  }
+
+  async function requestStopEmbeddedTerminal() {
+    if (!terminalIdRef.current) return;
+    requestConfirm({
+      title: '停止当前终端任务？',
+      description: '停止安装、配置或基础工具准备终端可能会让当前步骤中断。只有确认任务卡住或不再需要时再停止。',
+      confirmLabel: '停止终端',
+      variant: 'danger',
+      onConfirm: () => void stopEmbeddedTerminalNow(),
+    });
   }
 
   async function startInstall() {
@@ -793,12 +806,7 @@ export function InstallerView() {
     return !provider || !model || (Boolean(apiKeyName) && !apiKeyConfigured && !configForm.api_key.trim());
   }
 
-  async function initializeWorkspace() {
-    if (shouldWarnBeforeWorkspaceInit() && !window.confirm('当前 Hermes 模型/API Key 尚未完整配置。直接初始化工作空间可能导致首次对话不可用；之后仍可在主控台补充配置。仍要继续吗？')) {
-      setStatus('已取消初始化；请先在模型配置向导补全 Provider、模型和 API Key');
-      scrollToHermesConfig();
-      return;
-    }
+  async function initializeWorkspaceNow() {
     setBusy('init');
     setLogLines(['开始初始化 Yachiyo 工作空间…']);
     setStatus('正在初始化工作空间…');
@@ -813,6 +821,20 @@ export function InstallerView() {
     } finally {
       setBusy('');
     }
+  }
+
+  async function initializeWorkspace() {
+    if (shouldWarnBeforeWorkspaceInit()) {
+      requestConfirm({
+        title: '继续初始化工作空间？',
+        description: '当前 Hermes 模型/API Key 尚未完整配置。直接初始化工作空间可能导致首次对话不可用；之后仍可在主控台补充配置。',
+        confirmLabel: '继续初始化',
+        variant: 'danger',
+        onConfirm: () => void initializeWorkspaceNow(),
+      });
+      return;
+    }
+    await initializeWorkspaceNow();
   }
 
   async function importBackup() {
@@ -970,12 +992,13 @@ export function InstallerView() {
           session={terminalSession}
           status={terminalStatus}
           supported={hasEmbeddedTerminal()}
-          onStop={stopEmbeddedTerminal}
+          onStop={requestStopEmbeddedTerminal}
         />
       ) : null}
 
       {!ready && backupStatus ? <BackupImportPanel status={backupStatus} /> : null}
       {!ready && (logLines.length || installProgress?.running) ? <InstallLog lines={logLines} progress={installProgress} /> : null}
+      {confirmDialog}
     </main>
   );
 }

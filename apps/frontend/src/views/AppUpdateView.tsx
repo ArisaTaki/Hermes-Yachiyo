@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { useConfirmDialog } from '../components/ConfirmDialog';
 import {
   type AppUpdateCheckResult,
   type AppUpdateDownloadProgress,
@@ -15,7 +16,7 @@ import {
   onAppUpdateDownloadProgress,
   openExternalUrl,
 } from '../lib/bridge';
-import { navigateTo } from '../lib/view';
+import { navigateTo, type AppView } from '../lib/view';
 import { usePageLoading } from './OpenDesignView';
 
 type UpdateAction = '' | 'check' | 'download' | 'install';
@@ -29,6 +30,7 @@ export function AppUpdateView() {
   const [status, setStatus] = useState('正在检查应用更新...');
   const mountedRef = useRef(true);
   const downloadingRef = useRef(false);
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
 
   usePageLoading(action === 'check' && !check && !info);
 
@@ -57,16 +59,25 @@ export function AppUpdateView() {
   useEffect(() => {
     const guard = (nextView: string) => {
       if (!downloadingRef.current || nextView === 'app-update') return true;
-      const shouldLeave = window.confirm('应用更新仍在下载中。离开更新页会取消本次下载并清空进度，下次启动将重新检查更新。继续离开吗？');
-      if (shouldLeave) void cancelAppUpdateDownload();
-      return shouldLeave;
+      requestConfirm({
+        title: '离开更新页？',
+        description: '应用更新仍在下载中。离开更新页会取消本次下载并清空进度，下次启动将重新检查更新。',
+        confirmLabel: '离开并取消',
+        variant: 'danger',
+        onConfirm: () => {
+          downloadingRef.current = false;
+          void cancelAppUpdateDownload();
+          navigateTo(nextView as AppView);
+        },
+      });
+      return false;
     };
     window.hermesRouteLeaveGuard = guard;
     return () => {
       if (window.hermesRouteLeaveGuard === guard) delete window.hermesRouteLeaveGuard;
       if (downloadingRef.current) void cancelAppUpdateDownload();
     };
-  }, []);
+  }, [requestConfirm]);
 
   useEffect(() => {
     let disposed = false;
@@ -168,14 +179,13 @@ export function AppUpdateView() {
     }
   }
 
-  async function runInstall() {
+  async function installDownloadedUpdate() {
     if (action) return;
     const dmgPath = downloaded?.path || info?.downloaded_dmg_path || '';
     if (!dmgPath) {
       setStatus('请先下载应用更新');
       return;
     }
-    if (!window.confirm('将退出 Hermes-Yachiyo，用已下载的 DMG 覆盖当前应用，然后重新打开。继续吗？')) return;
     setAction('install');
     setStatus('正在准备安装更新，应用将退出并重新打开...');
     try {
@@ -185,6 +195,17 @@ export function AppUpdateView() {
       setStatus(err instanceof Error ? err.message : '启动更新安装失败');
       setAction('');
     }
+  }
+
+  function requestInstallDownloadedUpdate() {
+    if (action) return;
+    requestConfirm({
+      title: '安装并重启 Hermes-Yachiyo？',
+      description: '应用将退出，用已下载的 DMG 覆盖当前应用，然后重新打开。',
+      confirmLabel: '安装并重启',
+      variant: 'danger',
+      onConfirm: () => void installDownloadedUpdate(),
+    });
   }
 
   return (
@@ -216,7 +237,7 @@ export function AppUpdateView() {
         </div>
         <div className="app-update-actions">
           {downloaded?.ok ? (
-            <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(action)} onClick={() => void runInstall()}>
+            <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(action)} onClick={requestInstallDownloadedUpdate}>
               {action === 'install' ? '准备中...' : '安装并重启'}
             </button>
           ) : isDownloading ? (
@@ -260,6 +281,7 @@ export function AppUpdateView() {
       </section>
 
       {changelog ? <UpdateChangelog changelog={changelog} /> : null}
+      {confirmDialog}
     </section>
   );
 }

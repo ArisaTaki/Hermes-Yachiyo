@@ -389,6 +389,306 @@ def format_persona_description(
     return "\n\n".join(parts)
 
 
+def _yachiyo_delegation_catalog_context() -> str:
+    try:
+        from apps.shell.agent_runtime import get_agent_runtime_service
+
+        targets = get_agent_runtime_service().list_delegation_targets()
+    except Exception:
+        logger.debug("读取 Yachiyo 委派目标失败", exc_info=True)
+        return ""
+    entries: list[str] = []
+    for agent in targets.get("agents") or []:
+        entries.append(
+            "- Agent: "
+            f"{agent.get('name')} | category={agent.get('category') or 'custom'} | "
+            f"output={agent.get('output_contract') or 'chat'} | "
+            f"description={agent.get('description') or ''}"
+        )
+    for workflow in targets.get("workflows") or []:
+        entries.append(
+            "- Workflow: "
+            f"{workflow.get('name')} | nodes={workflow.get('nodes') or 0} | "
+            f"description={workflow.get('description') or ''}"
+        )
+    if not entries:
+        return ""
+    return (
+        "[Yachiyo 持久 Agent 委派]\n"
+        "你可以把明确的子任务委派给 Agent Studio 中已保存的持久 Agent 或 Workflow。"
+        "这些不是 Hermes 临时 delegate_task 子 Agent，而是有固定职责、Skills、模型和审计记录的岗位。\n"
+        "当你需要委派时，只输出一个 JSON 对象，不要附加其他正文：\n"
+        '{"action":"run_yachiyo_agent","agent":"Agent 名称","goal":"自包含任务目标"}\n'
+        "或：\n"
+        '{"action":"run_yachiyo_workflow","workflow":"Workflow 名称","goal":"自包含任务目标"}\n'
+        "委派结果会返回给你，然后你再继续整合最终回复。每轮最多委派 3 次。\n"
+        "可用目标：\n"
+        + "\n".join(entries[:40])
+    )
+
+
+def _is_yachiyo_group_coordinator_task(description: str) -> bool:
+    return "[Yachiyo 群组上下文]" in (description or "")
+
+
+def _yachiyo_group_dispatch_context() -> str:
+    return (
+        "[Yachiyo 群组派活]\n"
+        "当前会话是群组。你是默认协调者，不要默认让所有 Agent 参与。"
+        "如果用户没有明确 @ 某个 Agent，请先判断应该由你直接回答，还是派给群组上下文里列出的一个或多个 Agent。"
+        "只有当用户表达“大家/所有人/分别做”等意图时，才派给多个 Agent。\n"
+        "派活不是终端命令，也不是工具调用；不要调用 shell/terminal 来 echo、模拟或包装派活指令。\n"
+        "如果需要派活，请先用自然语言向用户说明你的安排，再附加一个机器可读派活块，格式如下：\n"
+        "<yachiyo_group_dispatch>\n"
+        '{"tasks":[{"action":"dispatch_group_agent","agent":"Agent 名称或昵称","goal":"自包含任务目标"}]}\n'
+        "</yachiyo_group_dispatch>\n"
+        "可以一次派给多个 Agent，但每个 goal 都要独立完整，不能用“同上”“继续”等省略说法。\n"
+        "不要使用 run_yachiyo_agent 或 run_yachiyo_workflow；不要把 JSON 包进 Markdown 代码块。"
+        "群组派活会由聊天层接管、隐藏内部 JSON，并显示各 Agent 的执行状态。"
+    )
+
+
+def _append_yachiyo_delegation_context(profile_context: str, *, group_coordinator: bool = False) -> str:
+    catalog = _yachiyo_group_dispatch_context() if group_coordinator else _yachiyo_delegation_catalog_context()
+    if not catalog:
+        return profile_context
+    base = (profile_context or "").strip()
+    return f"{base}\n\n{catalog}" if base else catalog
+
+
+def _payload_value(payload: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in payload and payload[key] not in (None, ""):
+            return payload[key]
+    normalized_keys = {
+        re.sub(r"[\s_-]+", "", str(key or "")).lower()
+        for key in keys
+        if str(key or "").strip()
+    }
+    for raw_key, value in payload.items():
+        if value in (None, ""):
+            continue
+        normalized = re.sub(r"[\s_-]+", "", str(raw_key or "")).lower()
+        if normalized in normalized_keys:
+            return value
+    return None
+
+
+def _json_candidate_texts(text: str) -> list[str]:
+    candidates = [text]
+    normalized = (
+        text.replace("“", '"')
+        .replace("”", '"')
+        .replace("„", '"')
+        .replace("＂", '"')
+    )
+    if normalized != text:
+        candidates.append(normalized)
+    return candidates
+
+
+def _json_objects_from_text(text: str) -> list[dict[str, Any]]:
+    text = (text or "").strip()
+    if not text:
+        return []
+    match = re.search(r"<yachiyo_delegation>\s*(.*?)\s*</yachiyo_delegation>", text, re.DOTALL | re.IGNORECASE)
+    if match:
+        text = match.group(1).strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.DOTALL).strip()
+
+    payloads: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for candidate in _json_candidate_texts(text):
+        candidate = candidate.strip()
+        decoder = json.JSONDecoder()
+        index = 0
+        while index < len(candidate):
+            if candidate[index] != "{":
+                index += 1
+                continue
+            try:
+                payload, offset = decoder.raw_decode(candidate[index:])
+            except json.JSONDecodeError:
+                index += 1
+                continue
+            if isinstance(payload, dict):
+                key = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+                if key not in seen:
+                    payloads.append(payload)
+                    seen.add(key)
+            index += max(offset, 1)
+    return payloads
+
+
+def _normalize_yachiyo_delegation_action(value: str) -> str:
+    compact = re.sub(r"[\s_\-./]+", "", str(value or "").strip().lower())
+    if compact in {
+        "agent",
+        "agentrun",
+        "runagent",
+        "delegateagent",
+        "delegatetoagent",
+        "assignagent",
+        "runyachiyoagent",
+        "yachiyoagent",
+    }:
+        return "agent"
+    if compact in {
+        "workflow",
+        "workflowrun",
+        "runworkflow",
+        "delegateworkflow",
+        "delegatetoworkflow",
+        "assignworkflow",
+        "runyachiyoworkflow",
+        "yachiyoworkflow",
+    }:
+        return "workflow"
+    return ""
+
+
+def _parse_yachiyo_delegation_request(content: str) -> dict[str, str] | None:
+    for payload in _json_objects_from_text(content):
+        request = _yachiyo_delegation_request_from_payload(payload)
+        if request:
+            return request
+    return None
+
+
+def _yachiyo_delegation_request_from_payload(payload: dict[str, Any]) -> dict[str, str] | None:
+    action = _normalize_yachiyo_delegation_action(str(
+        _payload_value(payload, "action", "tool", "kind", "type", "target_kind", "runnable_kind")
+        or ""
+    ))
+    if action not in {"agent", "workflow"}:
+        return None
+    goal = str(
+        _payload_value(
+            payload,
+            "goal",
+            "user_goal",
+            "userGoal",
+            "task",
+            "task_goal",
+            "taskGoal",
+            "objective",
+            "instruction",
+            "instructions",
+            "prompt",
+        )
+        or ""
+    ).strip()
+    if not goal:
+        return None
+    if action == "agent":
+        name = str(
+            _payload_value(
+                payload,
+                "agent",
+                "agent_name",
+                "agentName",
+                "name",
+                "target",
+                "target_name",
+                "targetName",
+                "runnable",
+                "runnable_name",
+                "runnableName",
+            )
+            or ""
+        ).strip()
+        runnable_id = str(_payload_value(payload, "agent_id", "agentId", "runnable_id", "runnableId", "id") or "").strip()
+        kind = "agent"
+    else:
+        name = str(
+            _payload_value(
+                payload,
+                "workflow",
+                "workflow_name",
+                "workflowName",
+                "name",
+                "target",
+                "target_name",
+                "targetName",
+                "runnable",
+                "runnable_name",
+                "runnableName",
+            )
+            or ""
+        ).strip()
+        runnable_id = str(_payload_value(payload, "workflow_id", "workflowId", "runnable_id", "runnableId", "id") or "").strip()
+        kind = "workflow"
+    if not name and not runnable_id:
+        return None
+    return {"kind": kind, "name": name, "runnable_id": runnable_id, "goal": goal}
+
+
+def _run_yachiyo_delegation(request: dict[str, str]) -> dict[str, Any]:
+    from apps.shell.agent_runtime import get_agent_runtime_service
+
+    return get_agent_runtime_service().delegate_runnable(
+        kind=request.get("kind", ""),
+        name=request.get("name", ""),
+        runnable_id=request.get("runnable_id", ""),
+        user_goal=request.get("goal", ""),
+    )
+
+
+def _format_yachiyo_delegation_result(result: dict[str, Any]) -> str:
+    runnable = result.get("runnable") or {}
+    lines = [
+        f"Runnable: {runnable.get('kind') or ''} {runnable.get('name') or runnable.get('id') or ''}",
+        f"Run: {result.get('run_id') or ''}",
+        f"Status: {result.get('status') or ''}",
+    ]
+    pending = result.get("pending_approval") if isinstance(result.get("pending_approval"), dict) else {}
+    if pending:
+        lines.append("Pending approval:")
+        tool = str(pending.get("tool") or "").strip()
+        if tool:
+            lines.append(f"- Tool: {tool}")
+        preview = pending.get("input_preview")
+        if preview:
+            try:
+                preview_text = json.dumps(preview, ensure_ascii=False, indent=2)
+            except TypeError:
+                preview_text = str(preview)
+            lines.append(f"- Request:\n{preview_text[:2000]}")
+    lines.append(f"Result:\n{result.get('result') or ''}")
+    return "\n".join(lines).strip()
+
+
+def _yachiyo_delegation_activity_status(result: dict[str, Any]) -> str:
+    status = str(result.get("status") or "").strip()
+    if status == "approval_required":
+        return "approval_required"
+    return "completed" if result.get("ok") else "failed"
+
+
+def _yachiyo_delegation_activity_title(target: str, result: dict[str, Any]) -> str:
+    status = str(result.get("status") or "").strip()
+    if status == "approval_required":
+        return f"{target} 等待审批"
+    return f"{target} 委派完成" if result.get("ok") else f"{target} 委派失败"
+
+
+def _build_yachiyo_delegation_followup(
+    original_prompt: str,
+    delegation_request_text: str,
+    delegation_result: str,
+) -> str:
+    return (
+        f"{original_prompt}\n\n"
+        "[Yachiyo 委派请求]\n"
+        f"{delegation_request_text.strip()[:4000]}\n\n"
+        "[Yachiyo 委派结果]\n"
+        f"{delegation_result[:12000]}\n\n"
+        "请基于以上委派结果继续处理用户请求。若仍需委派，可再次输出同样 JSON；"
+        "否则直接给出最终回复，不要重复委派 JSON。"
+    )
+
+
 def _task_image_paths(task: TaskInfo) -> list[str]:
     paths: list[str] = []
     for attachment in getattr(task, "attachments", []) or []:
@@ -1691,6 +1991,11 @@ class HermesExecutor(ExecutionStrategy):
                 profile_context = self._profile_context_getter()
             except Exception:
                 logger.debug("读取助手/用户资料失败", exc_info=True)
+        group_coordinator = _is_yachiyo_group_coordinator_task(task.description)
+        profile_context = _append_yachiyo_delegation_context(
+            profile_context,
+            group_coordinator=group_coordinator,
+        )
         description = format_persona_description(
             task.description,
             persona_prompt,
@@ -1762,45 +2067,112 @@ class HermesExecutor(ExecutionStrategy):
                 except Exception:
                     logger.debug("Hermes 活动占位消息更新失败", exc_info=True)
 
-        started_at = time.monotonic()
-        invoke_result = await invoke_hermes_cli(
-            description,
-            hermes_session_id=hermes_sid,
-            on_update=on_update if chat_session is not None else None,
-            on_activity=on_activity,
-            image_paths=image_paths,
-        )
-        elapsed = time.monotonic() - started_at
+        max_delegations = 3
+        delegation_count = 0
+        current_description = description
+        while True:
+            started_at = time.monotonic()
+            invoke_result = await invoke_hermes_cli(
+                current_description,
+                hermes_session_id=hermes_sid,
+                on_update=on_update if chat_session is not None else None,
+                on_activity=on_activity,
+                image_paths=image_paths,
+            )
+            elapsed = time.monotonic() - started_at
 
-        if invoke_result.success:
-            logger.debug(
-                "[Hermes] 调用成功: returncode=%d, elapsed=%.2fs, stdout_len=%d, session=%s",
+            if invoke_result.success:
+                logger.debug(
+                    "[Hermes] 调用成功: returncode=%d, elapsed=%.2fs, stdout_len=%d, session=%s",
+                    invoke_result.returncode,
+                    elapsed,
+                    len(invoke_result.stdout),
+                    invoke_result.hermes_session_id,
+                )
+                if invoke_result.hermes_session_id:
+                    hermes_sid = invoke_result.hermes_session_id
+                    if chat_session is not None:
+                        chat_session.set_hermes_session_id(invoke_result.hermes_session_id)
+                output = invoke_result.output
+                delegation_request = None if group_coordinator else _parse_yachiyo_delegation_request(output)
+                if delegation_request:
+                    if delegation_count >= max_delegations:
+                        on_activity(
+                            {
+                                "phase": "subagent",
+                                "title": "Yachiyo 委派已停止",
+                                "detail": "单轮自动委派超过 3 次上限",
+                                "status": "failed",
+                                "tool_name": "yachiyo.delegation",
+                            }
+                        )
+                        return "Yachiyo 自动委派已达到 3 次上限，已停止以避免循环调用。"
+                    delegation_count += 1
+                    target = delegation_request.get("name") or delegation_request.get("runnable_id") or "Yachiyo Agent"
+                    on_activity(
+                        {
+                            "phase": "subagent",
+                            "title": f"正在委派给 {target}",
+                            "detail": delegation_request.get("goal", ""),
+                            "status": "running",
+                            "tool_name": "yachiyo.delegation",
+                        }
+                    )
+                    try:
+                        delegation_result = _run_yachiyo_delegation(delegation_request)
+                    except Exception as exc:
+                        delegation_text = f"Yachiyo delegation failed: {exc}"
+                        on_activity(
+                            {
+                                "phase": "subagent",
+                                "title": f"{target} 委派失败",
+                                "detail": str(exc),
+                                "status": "failed",
+                                "tool_name": "yachiyo.delegation",
+                            }
+                        )
+                    else:
+                        delegation_text = _format_yachiyo_delegation_result(delegation_result)
+                        activity_status = _yachiyo_delegation_activity_status(delegation_result)
+                        on_activity(
+                            {
+                                "phase": "subagent",
+                                "title": _yachiyo_delegation_activity_title(target, delegation_result),
+                                "detail": delegation_text[:500],
+                                "status": activity_status,
+                                "tool_name": "yachiyo.delegation",
+                                "metadata": {
+                                    "run_id": delegation_result.get("run_id", ""),
+                                    "run_group_id": delegation_result.get("run_group_id", ""),
+                                    "run_status": delegation_result.get("status", ""),
+                                    "pending_approval": delegation_result.get("pending_approval", {}),
+                                },
+                            }
+                        )
+                    current_description = _build_yachiyo_delegation_followup(
+                        description,
+                        output,
+                        delegation_text,
+                    )
+                    continue
+                _schedule_session_title_refresh(
+                    chat_session,
+                    assistant_text=output,
+                )
+                return output
+
+            # 失败：结构化日志 + 结构化异常
+            logger.warning(
+                "[Hermes] 调用失败: returncode=%d, elapsed=%.2fs | %s",
                 invoke_result.returncode,
                 elapsed,
-                len(invoke_result.stdout),
-                invoke_result.hermes_session_id,
+                invoke_result.error_message,
             )
-            # 记录 session_id 以便后续 --resume
-            if invoke_result.hermes_session_id and chat_session is not None:
-                chat_session.set_hermes_session_id(invoke_result.hermes_session_id)
-            _schedule_session_title_refresh(
-                chat_session,
-                assistant_text=invoke_result.output,
+            raise HermesCallError(
+                invoke_result.error_message,
+                returncode=invoke_result.returncode,
+                stderr=invoke_result.stderr,
             )
-            return invoke_result.output
-
-        # 失败：结构化日志 + 结构化异常
-        logger.warning(
-            "[Hermes] 调用失败: returncode=%d, elapsed=%.2fs | %s",
-            invoke_result.returncode,
-            elapsed,
-            invoke_result.error_message,
-        )
-        raise HermesCallError(
-            invoke_result.error_message,
-            returncode=invoke_result.returncode,
-            stderr=invoke_result.stderr,
-        )
 
     def _chat_session_for_task(self, task: TaskInfo) -> Optional["ChatSession"]:
         session_id = str(getattr(task, "chat_session_id", "") or "")

@@ -76,5 +76,5 @@ Mode settings should stay grouped by mode instead of growing a single mixed sett
 
 ## Hapi responsibilities
 
-- Codex CLI workflows
-- coding/project writing execution chain
+- external automation workflows outside Yachiyo core
+- project execution chains owned by their own service boundary

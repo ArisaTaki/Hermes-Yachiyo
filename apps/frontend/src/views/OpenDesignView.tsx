@@ -1,6 +1,7 @@
 import { Suspense, createContext, lazy, FormEvent, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type PointerEvent as ReactPointerEvent } from 'react';
 
 import logoUrl from '../../../../docs/open-design/logo.png';
+import { useConfirmDialog } from '../components/ConfirmDialog';
 import { UiIcon, type UiIconName } from '../components/UiIcon';
 import { AssistantProfileSeedContext, type AssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiDelete, apiGet, apiPost, checkAppUpdate, openDesktopMode, openExternalUrl, openPath, quitApp } from '../lib/bridge';
@@ -223,9 +224,10 @@ const NAV_GROUPS: Array<{
       label: '日常桌面',
       items: [
         { view: 'chat', label: '对话', icon: 'chat' },
+        { view: 'agents', label: 'Agent Studio', icon: 'model' },
         { view: 'bubble', label: '气泡模式', icon: 'bubble' },
         { view: 'live2d', label: 'Live2D 模式', icon: 'live2d' },
-        { view: 'proactive-tts', label: 'GPT-SoVITS', icon: 'voice' },
+        { view: 'proactive-tts', label: '主动关怀', icon: 'voice' },
       ],
     },
     {
@@ -238,7 +240,8 @@ const NAV_GROUPS: Array<{
     {
       label: '维护',
       items: [
-        { view: 'diagnostics', label: '诊断工具', icon: 'diagnostics' },
+        { view: 'tools', label: '能力中心', icon: 'resources' },
+        { view: 'diagnostics', label: '诊断详情', icon: 'diagnostics' },
         { view: 'settings', label: '设置', icon: 'settings' },
       ],
     },
@@ -265,7 +268,7 @@ const TOOL_CARD_DEFS: Array<Omit<ToolCard, 'status' | 'statusTone'> & { status?:
   { view: 'chat' as AppView, icon: 'chat', title: '对话', detail: '与八千代对话，支持文本和图片输入。' },
   { view: 'bubble' as AppView, icon: 'bubble', title: '气泡模式', detail: '桌面悬浮气泡，随时对话，支持拖拽和边缘吸附。', status: '就绪', statusTone: 'ready' },
   { view: 'live2d' as AppView, icon: 'live2d', title: 'Live2D 模式', detail: '虚拟形象互动，口型同步，表情动作。' },
-  { view: 'proactive-tts' as AppView, icon: 'voice', title: 'GPT-SoVITS', detail: '语音合成，让八千代开口说话。', status: '就绪', statusTone: 'ready' },
+  { view: 'proactive-tts' as AppView, icon: 'voice', title: '主动关怀', detail: '桌面观察、提醒触发和语音播报设置。', status: '就绪', statusTone: 'ready' },
 ];
 
 const TWEAK_ACCENTS = [
@@ -1668,10 +1671,10 @@ export function ToolsAllPage() {
   const allTools = [
     { view: 'bubble' as AppView, icon: 'bubble' as UiIconName, title: '气泡模式', detail: '桌面悬浮气泡，随时对话，支持拖拽和边缘吸附。', status: '就绪', statusTone: 'ready' },
     { view: 'live2d' as AppView, icon: 'live2d' as UiIconName, title: 'Live2D 模式', detail: '虚拟形象互动，口型同步，表情动作。', ...live2dStatus },
-    { view: 'proactive-tts' as AppView, icon: 'voice' as UiIconName, title: 'GPT-SoVITS', detail: '语音合成，让八千代开口说话。', status: '就绪', statusTone: 'ready' },
+    { view: 'proactive-tts' as AppView, icon: 'voice' as UiIconName, title: '主动关怀', detail: '桌面观察、提醒触发和语音播报设置。', status: '就绪', statusTone: 'ready' },
     { view: 'resources' as AppView, icon: 'resources' as UiIconName, title: '资源管理', detail: '管理 Live2D 模型、语音、壁纸等资源文件。', status: '就绪', statusTone: 'ready' },
     { view: 'workspace' as AppView, icon: 'workspace' as UiIconName, title: '工作区', detail: '管理对话记录、项目文件和工作区配置。', status: '已初始化', statusTone: 'ready' },
-    { view: 'diagnostics' as AppView, icon: 'diagnostics' as UiIconName, title: '诊断工具', detail: '系统检测、日志查看和工具能力入口。', status: '就绪', statusTone: 'ready' },
+    { view: 'diagnostics' as AppView, icon: 'diagnostics' as UiIconName, title: '诊断详情', detail: 'Doctor 输出、运行时日志和本地能力探测。', status: '就绪', statusTone: 'ready' },
     { view: 'provider' as AppView, icon: 'provider' as UiIconName, title: '模型配置', detail: '配置 AI 模型提供商和 API Key。', status: '就绪', statusTone: 'ready' },
     { view: 'chat' as AppView, icon: 'chat' as UiIconName, title: '对话', detail: '与八千代对话，支持文本和图片输入。', status: '就绪', statusTone: 'ready' },
   ];
@@ -1710,6 +1713,7 @@ export function ActivityAllPage() {
   const [availablePhases, setAvailablePhases] = useState<string[]>([]);
   const [selectedActivityIds, setSelectedActivityIds] = useState<Set<string>>(() => new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
 
   async function reloadActivityList(shouldApply: () => boolean = () => true) {
     setActivityLoading(true);
@@ -1790,7 +1794,6 @@ export function ActivityAllPage() {
   async function deleteSelectedActivities() {
     const ids = [...selectedActivityIds];
     if (!ids.length || bulkDeleting) return;
-    if (!window.confirm(`删除选中的 ${ids.length} 条活动日志？此操作不可恢复。`)) return;
     setBulkDeleting(true);
     try {
       const result = await apiDelete<{ ok?: boolean; error?: string; deleted?: number }>('/ui/activity', {
@@ -1805,6 +1808,18 @@ export function ActivityAllPage() {
     } finally {
       setBulkDeleting(false);
     }
+  }
+
+  function requestDeleteSelectedActivities() {
+    const ids = [...selectedActivityIds];
+    if (!ids.length || bulkDeleting) return;
+    requestConfirm({
+      title: `删除选中的 ${ids.length} 条活动日志？`,
+      description: '这些活动日志会从本机记录中删除，此操作不可恢复。',
+      confirmLabel: '删除日志',
+      variant: 'danger',
+      onConfirm: () => void deleteSelectedActivities(),
+    });
   }
 
   return (
@@ -1852,7 +1867,7 @@ export function ActivityAllPage() {
             type="button"
             className="hy-btn activity-danger-btn"
             disabled={!selectedCount || bulkDeleting}
-            onClick={() => void deleteSelectedActivities()}
+            onClick={requestDeleteSelectedActivities}
           >
             {bulkDeleting ? '删除中...' : '删除选中日志'}
           </button>
@@ -1881,6 +1896,7 @@ export function ActivityAllPage() {
           <div className="inline-empty">暂无活动记录</div>
         ) : null}
       </div>
+      {confirmDialog}
     </section>
   );
 }
@@ -1890,6 +1906,7 @@ export function ActivityDetailPage() {
   const [payload, setPayload] = useState<ActivityDetailPayload | null>(null);
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
   const [expandedTraceIds, setExpandedTraceIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
@@ -1947,7 +1964,6 @@ export function ActivityDetailPage() {
 
   async function deleteCurrentEvent() {
     if (!eventId || deleting) return;
-    if (!window.confirm('删除这条活动日志？此操作不可恢复。')) return;
     setDeleting(true);
     try {
       const result = await apiDelete<{ ok?: boolean; error?: string }>(`/ui/activity/${encodeURIComponent(eventId)}`);
@@ -1959,6 +1975,17 @@ export function ActivityDetailPage() {
     } finally {
       setDeleting(false);
     }
+  }
+
+  function requestDeleteCurrentEvent() {
+    if (!eventId || deleting) return;
+    requestConfirm({
+      title: '删除这条活动日志？',
+      description: '这条活动日志会从本机记录中删除，此操作不可恢复。',
+      confirmLabel: '删除日志',
+      variant: 'danger',
+      onConfirm: () => void deleteCurrentEvent(),
+    });
   }
 
   function toggleTraceExpanded(traceId: string) {
@@ -1992,7 +2019,7 @@ export function ActivityDetailPage() {
             type="button"
             className="hy-btn hy-btn-ghost activity-delete-btn danger-action"
             disabled={deleting}
-            onClick={() => void deleteCurrentEvent()}
+            onClick={requestDeleteCurrentEvent}
           >
             {deleting ? '删除中...' : '删除日志'}
           </button>
@@ -2106,6 +2133,7 @@ export function ActivityDetailPage() {
           </section>
         </>
       ) : null}
+      {confirmDialog}
     </section>
   );
 }
@@ -2724,6 +2752,7 @@ function groupActivitiesByDay(rows: ActivityRowData[]): Array<{ label: string; i
 function routeTitle(view: AppView, settingsMode = ''): string {
   if (view === 'main') return 'Hermes Yachiyo — 主控台';
   if (view === 'chat') return 'Hermes Yachiyo — 对话';
+  if (view === 'agents') return 'Hermes Yachiyo — Agent Studio';
   if (view === 'provider') return 'Hermes Yachiyo — 模型配置';
   if (view === 'bubble') return 'Hermes Yachiyo — 气泡模式';
   if (view === 'live2d') return 'Hermes Yachiyo — Live2D 模式';
@@ -2733,6 +2762,7 @@ function routeTitle(view: AppView, settingsMode = ''): string {
   if (view === 'activity-all') return 'Hermes Yachiyo — 活动日志';
   if (view === 'activity-detail') return 'Hermes Yachiyo — 活动详情';
   if (view === 'app-update') return 'Hermes Yachiyo — 应用更新';
+  if (view === 'proactive-tts') return 'Hermes Yachiyo — 主动关怀';
   if (view === 'settings' && settingsMode === 'live2d') return 'Hermes Yachiyo — Live2D 设置';
   if (view === 'settings' && settingsMode === 'bubble') return 'Hermes Yachiyo — 气泡设置';
   return 'Hermes Yachiyo';

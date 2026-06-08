@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 
+import { useConfirmDialog } from '../components/ConfirmDialog';
 import {
   apiGet,
   apiPost,
@@ -10,6 +11,7 @@ import {
   openPath,
 } from '../lib/bridge';
 import { navigateTo } from '../lib/view';
+import { syncTtsProviderSource } from '../lib/modelProfiles';
 import {
   emptyTtsForm,
   formFromTtsSettings,
@@ -141,6 +143,7 @@ export function ProactiveTtsSettingsView() {
   const [proactiveResult, setProactiveResult] = useState<ProactiveActionResult | null>(null);
   const [testText, setTestText] = useState('八千代语音测试成功。主动关怀播报已经可以正常调用。');
   const [testResult, setTestResult] = useState<TtsTestResult | null>(null);
+  const [ttsRegistryReady, setTtsRegistryReady] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<TtsRuntimeStatus | null>(null);
   const [voiceResource, setVoiceResource] = useState<TtsVoiceResource | null>(null);
   const [serviceStatus, setServiceStatus] = useState<GptSovitsServiceStatus | null>(null);
@@ -149,6 +152,7 @@ export function ProactiveTtsSettingsView() {
   const [busyAction, setBusyAction] = useState('');
   const [resourceBusy, setResourceBusy] = useState(false);
   const [status, setStatus] = useState('');
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
   const provider = form.provider || 'none';
 
   useEffect(() => {
@@ -237,6 +241,7 @@ export function ProactiveTtsSettingsView() {
       return next;
     });
     setTestResult(null);
+    setTtsRegistryReady(false);
     if (status && /保存|TTS|语音/.test(status)) setStatus('');
   }
 
@@ -336,7 +341,19 @@ export function ProactiveTtsSettingsView() {
     setBusyAction('save');
     setStatus('正在保存主动关怀语音设置...');
     try {
-      await persistSettings('主动关怀语音设置已保存');
+      const next = await persistSettings('');
+      if (shouldSyncTtsRegistry(next, ttsRegistryReady)) {
+        setStatus('语音设置已保存，正在同步到模型配置...');
+        const result = await syncTtsProviderSource(ttsRegistryPayload(next));
+        if (result.ok === false || result.success === false) {
+          throw new Error(result.message || '同步文字转语音源失败');
+        }
+        setTtsRegistryReady(false);
+        setStatus(result.message || '已同步到模型配置的文字转语音源');
+        window.setTimeout(() => navigateTo('provider', { capability: 'tts' }, ['mode', 'tool', 'run', 'event_id']), 300);
+        return;
+      }
+      setStatus('主动关怀语音设置已保存');
       window.setTimeout(() => void openAppView('main'), 700);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '保存主动关怀语音设置失败');
@@ -367,6 +384,7 @@ export function ProactiveTtsSettingsView() {
       const result = await apiPost<TtsTestResult>('/ui/tts/test', { text: testText });
       setTestResult(result);
       setRuntimeStatus(result);
+      setTtsRegistryReady(Boolean(result.success && next.enabled && next.provider === 'gpt-sovits'));
       setStatus(result.success ? result.message || '测试语音已完成' : result.error || result.message || '测试语音失败');
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '保存并测试主动关怀语音失败');
@@ -379,6 +397,7 @@ export function ProactiveTtsSettingsView() {
     setForm(savedForm);
     setStatus('已恢复到上次保存的语音设置');
     setTestResult(null);
+    setTtsRegistryReady(false);
   }
 
   async function importVoiceArchive() {
@@ -403,6 +422,7 @@ export function ProactiveTtsSettingsView() {
       }));
       setVoiceResource(result.resource || voiceResource);
       setTestResult(null);
+      setTtsRegistryReady(false);
       const displayPath = result.imported_path_display ? `：${result.imported_path_display}` : '';
       setStatus(`${result.message || '音色包已导入，等待保存 TTS 设置'}${displayPath}`);
     } catch (err) {
@@ -522,12 +542,6 @@ export function ProactiveTtsSettingsView() {
 
   async function adoptGsvLaunchAgent() {
     if (interactionBusy) return;
-    const agent = firstExternalGsvLaunchAgent(serviceStatus);
-    const label = agent?.label || '外部 GPT-SoVITS 服务';
-    const confirmed = window.confirm(
-      `将停用外部 GPT-SoVITS LaunchAgent（${label}），保留服务目录和模型文件，并安装 Hermes-Yachiyo 自己的后台/自启。继续吗？`,
-    );
-    if (!confirmed) return;
     setBusyAction('service-adopt');
     setStatus('正在接管 GPT-SoVITS 后台服务...');
     try {
@@ -561,9 +575,21 @@ export function ProactiveTtsSettingsView() {
     }
   }
 
+  function requestAdoptGsvLaunchAgent() {
+    if (interactionBusy) return;
+    const agent = firstExternalGsvLaunchAgent(serviceStatus);
+    const label = agent?.label || '外部 GPT-SoVITS 服务';
+    requestConfirm({
+      title: '接管外部 GPT-SoVITS 服务？',
+      description: `将停用外部 GPT-SoVITS LaunchAgent（${label}），保留服务目录和模型文件，并安装 Hermes-Yachiyo 自己的后台/自启。`,
+      confirmLabel: '交由 Yachiyo 管理',
+      variant: 'danger',
+      onConfirm: () => void adoptGsvLaunchAgent(),
+    });
+  }
+
   async function uninstallGsvLaunchAgent() {
     if (interactionBusy) return;
-    if (!window.confirm('将停止并移除 GPT-SoVITS 开机自启服务，不会删除模型文件。继续吗？')) return;
     setBusyAction('service-uninstall');
     setStatus('正在停止 GPT-SoVITS 后台服务并移除开机自启...');
     try {
@@ -576,6 +602,17 @@ export function ProactiveTtsSettingsView() {
     } finally {
       setBusyAction('');
     }
+  }
+
+  function requestUninstallGsvLaunchAgent() {
+    if (interactionBusy) return;
+    requestConfirm({
+      title: '停止 GPT-SoVITS 本地后台？',
+      description: '将停止并移除 GPT-SoVITS 开机自启服务，不会删除模型文件。',
+      confirmLabel: '停止后台',
+      variant: 'danger',
+      onConfirm: () => void uninstallGsvLaunchAgent(),
+    });
   }
 
   async function openGsvServiceTerminal() {
@@ -605,9 +642,6 @@ export function ProactiveTtsSettingsView() {
 
   async function openGsvSetupTerminal() {
     if (interactionBusy) return;
-    if (!window.confirm(
-      '将打开系统终端并尝试克隆 GPT-SoVITS、创建本地 Python 3.11 环境并安装依赖。部署完成后不会直接占用 9880 端口；需要运行服务时请使用本地后台服务或调试终端。继续吗？',
-    )) return;
     setBusyAction('service-setup');
     setStatus('正在打开 GPT-SoVITS 本地依赖部署终端...');
     try {
@@ -636,6 +670,17 @@ export function ProactiveTtsSettingsView() {
     }
   }
 
+  function requestOpenGsvSetupTerminal() {
+    if (interactionBusy) return;
+    requestConfirm({
+      title: '部署 GPT-SoVITS 运行时？',
+      description: '将打开系统终端并尝试克隆 GPT-SoVITS、创建本地 Python 3.11 环境并安装依赖。部署完成后不会直接占用 9880 端口；需要运行服务时请使用本地后台服务或调试终端。',
+      confirmLabel: '打开部署终端',
+      variant: 'danger',
+      onConfirm: () => void openGsvSetupTerminal(),
+    });
+  }
+
   const enabled = Boolean(form.enabled && provider !== 'none');
   const isGsvProvider = provider === 'gpt-sovits';
   const isDirty = JSON.stringify(form) !== JSON.stringify(savedForm);
@@ -645,14 +690,15 @@ export function ProactiveTtsSettingsView() {
   const interactionBusy = busy || loading || resourceBusy;
   const externalGsvServiceDetected = hasExternalGsvService(serviceStatus);
   const externalGsvAgent = firstExternalGsvLaunchAgent(serviceStatus);
+  const registryReady = shouldSyncTtsRegistry(form, ttsRegistryReady);
 
   return (
     <section className="hy-route-page hy-tts-page">
       <header className="hy-page-header hy-tts-page-header hy-stagger">
         <div>
-          <span className="hy-eyebrow">GPT-SoVITS · Voice Core</span>
-          <h2>语音中枢</h2>
-          <p>配置八千代主动关怀播报链路、音色资源与本地 GPT-SoVITS 服务。普通聊天回复仍保持文本，不会自动转语音。</p>
+          <span className="hy-eyebrow">Proactive Care · Desktop Watch</span>
+          <h2>主动关怀与桌面观察</h2>
+          <p>配置八千代主动关怀、桌面观察触发、语音播报链路、音色资源与本地 GPT-SoVITS 服务。普通聊天回复仍保持文本，不会自动转语音。</p>
           <div className="hy-tts-hero-actions">
             <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('diagnostics')}>诊断工具</button>
           </div>
@@ -934,7 +980,7 @@ export function ProactiveTtsSettingsView() {
                         type="button"
                         className={busyAction === 'service-setup' ? 'loading-button' : undefined}
                         disabled={interactionBusy}
-                        onClick={() => void openGsvSetupTerminal()}
+                        onClick={requestOpenGsvSetupTerminal}
                       >
                         {busyAction === 'service-setup' ? '部署中...' : '部署运行时/基础模型'}
                       </button>
@@ -960,7 +1006,7 @@ export function ProactiveTtsSettingsView() {
                         type="button"
                         className={busyAction === 'service-uninstall' ? 'loading-button danger-action' : 'danger-action'}
                         disabled={interactionBusy || !serviceStatus?.launch_agent_installed}
-                        onClick={() => void uninstallGsvLaunchAgent()}
+                        onClick={requestUninstallGsvLaunchAgent}
                       >
                         {busyAction === 'service-uninstall' ? '停止中...' : '停止本地后台'}
                       </button>
@@ -984,7 +1030,7 @@ export function ProactiveTtsSettingsView() {
                           type="button"
                           className={busyAction === 'service-adopt' ? 'loading-button' : undefined}
                           disabled={interactionBusy}
-                          onClick={() => void adoptGsvLaunchAgent()}
+                          onClick={requestAdoptGsvLaunchAgent}
                         >
                           {busyAction === 'service-adopt' ? '接管中...' : '交由 Yachiyo 管理'}
                         </button>
@@ -1242,6 +1288,7 @@ export function ProactiveTtsSettingsView() {
                       onChange={(event) => {
                         setTestText(event.target.value);
                         setTestResult(null);
+                        setTtsRegistryReady(false);
                       }}
                     />
                   </label>
@@ -1258,7 +1305,7 @@ export function ProactiveTtsSettingsView() {
             ) : null}
 
             <div className="settings-savebar hy-tts-savebar">
-              <span>{isDirty ? '有未保存的语音设置' : enabled ? '语音设置已同步' : '主动关怀将只发送文字'}</span>
+              <span>{registryReady ? '语音测试已通过，保存后同步到模型配置' : isDirty ? '有未保存的语音设置' : enabled ? '语音设置已同步' : '主动关怀将只发送文字'}</span>
               <button type="button" className="hy-btn hy-btn-ghost" disabled={interactionBusy || !isDirty} onClick={resetDraft}>重置草稿</button>
               <button
                 type="button"
@@ -1273,14 +1320,38 @@ export function ProactiveTtsSettingsView() {
                 className={busyAction === 'save' ? 'hy-btn hy-btn-primary loading-button' : 'hy-btn hy-btn-primary'}
                 disabled={interactionBusy}
               >
-                {busyAction === 'save' ? '保存中...' : '保存语音设置'}
+                {busyAction === 'save' ? '保存中...' : registryReady ? '保存并登记语音源' : '保存语音设置'}
               </button>
             </div>
           </form>
         </article>
       </section>
+      {confirmDialog}
     </section>
   );
+}
+
+function shouldSyncTtsRegistry(form: TtsForm, registryReady: boolean): boolean {
+  return Boolean(registryReady && form.enabled && form.provider === 'gpt-sovits');
+}
+
+function ttsRegistryPayload(form: TtsForm) {
+  return {
+    enabled: form.enabled,
+    provider: form.provider,
+    base_url: form.gsv_base_url,
+    voice: form.voice || 'default-voice',
+    options: {
+      gsv_base_url: form.gsv_base_url,
+      gsv_service_workdir: form.gsv_service_workdir,
+      gsv_gpt_weights_path: form.gsv_gpt_weights_path,
+      gsv_sovits_weights_path: form.gsv_sovits_weights_path,
+      gsv_ref_audio_path: form.gsv_ref_audio_path,
+      gsv_ref_audio_language: form.gsv_ref_audio_language,
+      gsv_text_language: form.gsv_text_language,
+      gsv_media_type: form.gsv_media_type,
+    },
+  };
 }
 
 function ttsFromSettings(settings: SettingsData | null): TtsSettings | undefined {

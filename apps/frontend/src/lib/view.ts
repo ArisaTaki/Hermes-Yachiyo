@@ -1,6 +1,7 @@
 export type AppView =
   | 'main'
   | 'chat'
+  | 'agents'
   | 'settings'
   | 'installer'
   | 'provider'
@@ -73,14 +74,32 @@ export function routePath(view: AppView, params: Record<string, string> = {}): s
   if (view === 'main') return '#/';
   if (view === 'settings' && params.mode) return `#/settings/${encodeURIComponent(params.mode)}`;
   if (view === 'tools' && params.tool) return `#/tools/${encodeURIComponent(params.tool)}`;
+  if (view === 'agents' && params.run) {
+    return routeWithQuery(`#/agents/${encodeURIComponent(params.run)}`, params, ['run']);
+  }
+  if (view === 'agents' && isAgentStudioTab(params.tab) && params.tab !== 'agents') {
+    return routeWithQuery(`#/agents/${encodeURIComponent(params.tab)}`, params, ['tab']);
+  }
+  if (view === 'provider' && params.capability) return `#/provider/${encodeURIComponent(params.capability)}`;
   if (view === 'activity-detail' && params.event_id) return `#/activity-detail/${encodeURIComponent(params.event_id)}`;
   return `#/${encodeURIComponent(view)}`;
+}
+
+function routeWithQuery(path: string, params: Record<string, string>, consumed: string[]): string {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (!value || consumed.includes(key)) return;
+    query.set(key, value);
+  });
+  const suffix = query.toString();
+  return suffix ? `${path}?${suffix}` : path;
 }
 
 function isAppView(value: string): value is AppView {
   return [
     'main',
     'chat',
+    'agents',
     'settings',
     'installer',
     'provider',
@@ -101,12 +120,25 @@ function isAppView(value: string): value is AppView {
 
 function routeFromHash(hash: string): RouteState | null {
   if (!hash || !hash.startsWith('#/')) return null;
-  const parts = hash.slice(2).split('/').filter(Boolean).map((part) => decodeURIComponent(part));
-  if (!parts.length) return { view: 'main', params: {} };
+  const [pathPart, queryPart = ''] = hash.slice(2).split('?');
+  const queryParams = Object.fromEntries(new URLSearchParams(queryPart).entries());
+  const parts = pathPart.split('/').filter(Boolean).map((part) => decodeURIComponent(part));
+  if (!parts.length) return { view: 'main', params: queryParams };
   const [rawView, rawMode] = parts;
   if (!isAppView(rawView)) return { view: 'main', params: {} };
-  if (rawView === 'settings' && rawMode) return { view: 'settings', params: { mode: rawMode } };
-  if (rawView === 'tools' && rawMode) return { view: 'tools', params: { tool: rawMode } };
-  if (rawView === 'activity-detail' && rawMode) return { view: 'activity-detail', params: { event_id: rawMode } };
-  return { view: rawView, params: {} };
+  if (rawView === 'settings' && rawMode) return { view: 'settings', params: { ...queryParams, mode: rawMode } };
+  if (rawView === 'tools' && rawMode) return { view: 'tools', params: { ...queryParams, tool: rawMode } };
+  if (rawView === 'agents' && rawMode) {
+    if (isAgentStudioTab(rawMode)) {
+      return { view: 'agents', params: rawMode === 'agents' ? queryParams : { ...queryParams, tab: rawMode } };
+    }
+    return { view: 'agents', params: { ...queryParams, run: rawMode } };
+  }
+  if (rawView === 'provider' && rawMode) return { view: 'provider', params: { ...queryParams, capability: rawMode } };
+  if (rawView === 'activity-detail' && rawMode) return { view: 'activity-detail', params: { ...queryParams, event_id: rawMode } };
+  return { view: rawView, params: queryParams };
+}
+
+function isAgentStudioTab(value?: string): boolean {
+  return Boolean(value && ['agents', 'skills', 'skill-groups', 'workflows', 'runs'].includes(value));
 }

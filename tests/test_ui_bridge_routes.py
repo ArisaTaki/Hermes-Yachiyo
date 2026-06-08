@@ -11,8 +11,12 @@ import pytest
 import apps.locald.screenshot as screenshot_mod
 import apps.shell.config as config_mod
 import apps.shell.live2d_resources as live2d_resources
+import apps.shell.chat_api as chat_api_mod
 from apps.bridge.routes import ui
+from apps.core.chat_session import ChatSession
+from apps.core.chat_store import ChatStore
 from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID
+from apps.core.state import AppState
 from apps.shell.config import AppConfig
 
 
@@ -21,6 +25,19 @@ def _create_live2d_model_dir(root: Path, model_name: str = "demo") -> Path:
     (root / f"{model_name}.model3.json").write_text("{}", encoding="utf-8")
     (root / f"{model_name}.moc3").write_text("stub", encoding="utf-8")
     return root
+
+
+class _ChatRouteRuntime:
+    def __init__(self, store: ChatStore) -> None:
+        self.store = store
+        self.state = AppState()
+        self.chat_session = ChatSession(session_id="route-chat")
+        self.chat_session.attach_store(store, load_existing=False)
+
+    def start_new_session(self) -> str:
+        self.chat_session = ChatSession()
+        self.chat_session.attach_store(self.store, load_existing=False)
+        return self.chat_session.session_id
 
 
 @pytest.mark.asyncio
@@ -64,6 +81,29 @@ async def test_settings_route_forwards_changes(monkeypatch):
     assert await ui.update_settings(request) == {
         "ok": True,
         "changes": {"display_mode": "bubble"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_clipboard_route_copies_text(monkeypatch):
+    copied: list[str] = []
+
+    monkeypatch.setattr(ui, "_copy_text_to_system_clipboard", copied.append)
+
+    assert await ui.copy_clipboard_text(ui.ClipboardTextRequest(text="047e43ac")) == {"ok": True}
+    assert copied == ["047e43ac"]
+
+
+@pytest.mark.asyncio
+async def test_clipboard_route_reports_system_failure(monkeypatch):
+    def fail_copy(_text: str) -> None:
+        raise RuntimeError("no clipboard")
+
+    monkeypatch.setattr(ui, "_copy_text_to_system_clipboard", fail_copy)
+
+    assert await ui.copy_clipboard_text(ui.ClipboardTextRequest(text="047e43ac")) == {
+        "ok": False,
+        "error": "no clipboard",
     }
 
 
@@ -254,10 +294,22 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
             return {"messages": [], "limit": limit, "anchor_message_id": anchor_message_id}
 
         def send_message(self, text, attachments=None, runnable_id=""):
-            return {"ok": True, "text": text, "attachments": attachments or []}
+            return {"ok": True, "text": text, "attachments": attachments or [], "runnable_id": runnable_id}
 
         def retry_message(self, message_id):
             return {"ok": True, "message_id": message_id}
+
+        def create_group_session(self, *, name="", avatar_url="", participant_ids=None):
+            return {"ok": True, "name": name, "avatar_url": avatar_url, "participant_ids": participant_ids or []}
+
+        def update_group_session(self, session_id, *, name="", avatar_url="", participant_ids=None):
+            return {
+                "ok": True,
+                "session_id": session_id,
+                "name": name,
+                "avatar_url": avatar_url,
+                "participant_ids": participant_ids or [],
+            }
 
         def get_session_info(self):
             return {"session_id": "session-1"}
@@ -291,10 +343,52 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         "ok": True,
         "text": "hello",
         "attachments": [],
+        "runnable_id": "",
+    }
+    image_attachment = {
+        "id": "pending-image",
+        "name": "sketch.png",
+        "mime_type": "image/png",
+        "data_url": "data:image/png;base64,abc",
+    }
+    assert await ui.send_chat_message(
+        ui.SendChatMessageRequest(text="给 Design 看这张图", attachments=[image_attachment], runnable_id="agent_design")
+    ) == {
+        "ok": True,
+        "text": "给 Design 看这张图",
+        "attachments": [image_attachment],
+        "runnable_id": "agent_design",
     }
     assert await ui.retry_chat_message(ui.RetryChatMessageRequest(message_id="m1")) == {
         "ok": True,
         "message_id": "m1",
+    }
+    assert await ui.create_chat_group(ui.CreateChatGroupRequest(name="demo", avatar_url="https://example.test/g.png", participant_ids=["a1"])) == {
+        "ok": True,
+        "name": "demo",
+        "avatar_url": "https://example.test/g.png",
+        "participant_ids": ["a1"],
+    }
+    assert await ui.update_chat_group("group-1", ui.UpdateChatGroupRequest(name="new", avatar_url="https://example.test/n.png", participant_ids=["a1"])) == {
+        "ok": True,
+        "session_id": "group-1",
+        "name": "new",
+        "avatar_url": "https://example.test/n.png",
+        "participant_ids": ["a1"],
+    }
+    uploaded_avatar = "data:image/png;base64," + ("a" * 4096)
+    assert await ui.create_chat_group(ui.CreateChatGroupRequest(name="uploaded", avatar_url=uploaded_avatar, participant_ids=["a1"])) == {
+        "ok": True,
+        "name": "uploaded",
+        "avatar_url": uploaded_avatar,
+        "participant_ids": ["a1"],
+    }
+    assert await ui.update_chat_group("group-1", ui.UpdateChatGroupRequest(name="uploaded-new", avatar_url=uploaded_avatar, participant_ids=["a1"])) == {
+        "ok": True,
+        "session_id": "group-1",
+        "name": "uploaded-new",
+        "avatar_url": uploaded_avatar,
+        "participant_ids": ["a1"],
     }
     assert await ui.get_chat_session() == {"session_id": "session-1"}
     assert await ui.clear_chat_session() == {"ok": True}
@@ -313,6 +407,78 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         "executor": "HermesExecutor",
         "available": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_chat_group_routes_create_real_group_context(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _ChatRouteRuntime(store)
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+    design = {
+        "id": "agent_design",
+        "name": "Design Agent",
+        "nickname": "Design",
+        "kind": "agent",
+        "enabled": True,
+        "category": "design",
+        "description": "负责 UI 方案与视觉验收。",
+        "output_contract": "markdown",
+    }
+    coding = {
+        "id": "agent_coding",
+        "name": "Coding Agent",
+        "nickname": "Code",
+        "kind": "agent",
+        "enabled": True,
+        "category": "coding",
+        "description": "负责前端实现与代码修改。",
+        "output_contract": "diff",
+    }
+
+    class FakeRunnableService:
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            for agent in (design, coding):
+                if runnable_id == agent["id"] or name in {agent["name"], agent["nickname"]}:
+                    return agent
+            return None
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeRunnableService())
+    try:
+        created = await ui.create_chat_group(
+            ui.CreateChatGroupRequest(name="设计群", participant_ids=[design["id"]])
+        )
+        assert created["ok"] is True
+        assert created["session_context"]["conversation_kind"] == "group"
+        assert [item["nickname"] for item in created["session_context"]["participants"]] == [
+            "月見八千代",
+            "Design",
+        ]
+        updated = await ui.update_chat_group(
+            created["session_id"],
+            ui.UpdateChatGroupRequest(name="设计实现群", participant_ids=[design["id"], coding["id"]]),
+        )
+
+        assert updated["ok"] is True
+        assert updated["session_context"]["runnable_name"] == "设计实现群"
+        assert [item["nickname"] for item in updated["session_context"]["participants"]] == [
+            "月見八千代",
+            "Design",
+            "Code",
+        ]
+
+        sent = await ui.send_chat_message(ui.SendChatMessageRequest(text="帮我安排一个登录页视觉方案"))
+
+        assert sent["ok"] is True
+        task = runtime.state.get_task(sent["task_id"])
+        assert task is not None
+        assert task.chat_session_id == runtime.chat_session.session_id
+        assert "[Yachiyo 群组上下文]" in task.description
+        assert "- Design（Agent；Design Agent） - 类别：design；交付：markdown" in task.description
+        assert "- Code（Agent；Coding Agent） - 类别：coding；交付：diff" in task.description
+        assert "负责 UI 方案与视觉验收。" in task.description
+        assert "负责前端实现与代码修改。" in task.description
+    finally:
+        store.close()
 
 
 @pytest.mark.asyncio
