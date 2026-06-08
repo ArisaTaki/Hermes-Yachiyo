@@ -328,6 +328,16 @@ async def get_any_run(run_id: str) -> dict[str, Any]:
     return await get_run(run_id)
 
 
+@router.delete("/runs/{run_id}")
+async def delete_run(run_id: str) -> dict[str, Any]:
+    try:
+        return await asyncio.to_thread(get_agent_runtime_service().delete_run, run_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
 @router.get("/runs/{run_id}/artifacts/{artifact_path:path}")
 async def get_run_artifact(run_id: str, artifact_path: str) -> dict[str, Any]:
     try:

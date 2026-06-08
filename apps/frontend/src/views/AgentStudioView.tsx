@@ -22,6 +22,7 @@ import {
   createWorkflow,
   createWorkflowRun,
   deleteAgent,
+  deleteRun,
   deleteSkillFolder,
   deleteSkill,
   deleteWorkflow,
@@ -340,6 +341,19 @@ function isHermesSkill(skill: SkillSpec): boolean {
 
 function isYachiyoSkill(skill: SkillSpec): boolean {
   return !isHermesSkill(skill);
+}
+
+function toggleSelectedId(current: string[], id: string): string[] {
+  if (!id) return current;
+  if (current.includes(id)) return current.filter((item) => item !== id);
+  return [...current, id];
+}
+
+function pruneSelectedIds(current: string[], availableIds: string[]): string[] {
+  const available = new Set(availableIds);
+  const next = current.filter((id) => available.has(id));
+  if (next.length === current.length) return current;
+  return next;
 }
 
 function skillMatchesSourceFilter(skill: SkillSpec, filter: SkillSourceFilter): boolean {
@@ -1756,6 +1770,14 @@ export function AgentStudioView() {
   const approvedApprovalGuardsRef = useRef<Map<string, ApprovedApprovalGuard>>(new Map());
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  const [selectedWorkflowIds, setSelectedWorkflowIds] = useState<string[]>([]);
+  const [selectedRunIds, setSelectedRunIds] = useState<string[]>([]);
+  const [agentManagementMode, setAgentManagementMode] = useState(false);
+  const [skillManagementMode, setSkillManagementMode] = useState(false);
+  const [workflowManagementMode, setWorkflowManagementMode] = useState(false);
+  const [runHistoryManagementMode, setRunHistoryManagementMode] = useState(false);
   const [draft, setDraft] = useState<AgentDraft>(emptyAgentDraft);
   const [skillSources, setSkillSources] = useState<SkillSourceRoot[]>([]);
   const [skillFolders, setSkillFolders] = useState<SkillFolderSpec[]>([]);
@@ -1804,6 +1826,26 @@ export function AgentStudioView() {
     () => workflows.find((workflow) => workflow.workflow_id === selectedWorkflowId) || null,
     [workflows, selectedWorkflowId],
   );
+  const agentIds = useMemo(
+    () => agents.map((agent) => agent.agent_id).filter(Boolean),
+    [agents],
+  );
+  const workflowIds = useMemo(
+    () => workflows.map((workflow) => workflow.workflow_id).filter(Boolean),
+    [workflows],
+  );
+  const selectedAgentIdSet = useMemo(() => new Set(selectedAgentIds), [selectedAgentIds]);
+  const selectedWorkflowIdSet = useMemo(() => new Set(selectedWorkflowIds), [selectedWorkflowIds]);
+  const selectedAgents = useMemo(
+    () => agents.filter((agent) => selectedAgentIdSet.has(agent.agent_id)),
+    [agents, selectedAgentIdSet],
+  );
+  const selectedWorkflows = useMemo(
+    () => workflows.filter((workflow) => selectedWorkflowIdSet.has(workflow.workflow_id)),
+    [workflows, selectedWorkflowIdSet],
+  );
+  const allAgentsSelected = agentIds.length > 0 && selectedAgents.length === agentIds.length;
+  const allWorkflowsSelected = workflowIds.length > 0 && selectedWorkflows.length === workflowIds.length;
   const chatModelProfiles = useMemo(
     () => modelProfiles.filter((profile) => profile.capability === 'chat' && profile.status === 'available' && profile.enabled !== false),
     [modelProfiles],
@@ -1957,6 +1999,23 @@ export function AgentStudioView() {
     )),
     [runSearchQuery, runSearchTextByRunnableId, runStatusFilteredRuns],
   );
+  const filteredRunIds = useMemo(
+    () => filteredRuns.map((run) => run.run_id).filter(Boolean),
+    [filteredRuns],
+  );
+  const selectedRunIdSet = useMemo(() => new Set(selectedRunIds), [selectedRunIds]);
+  const selectedHistoryRuns = useMemo(
+    () => filteredRuns.filter((run) => selectedRunIdSet.has(run.run_id)),
+    [filteredRuns, selectedRunIdSet],
+  );
+  const selectedHistoryActiveRunCount = useMemo(
+    () => selectedHistoryRuns.filter((run) => isActiveRunStatus(run.status)).length,
+    [selectedHistoryRuns],
+  );
+  const runBulkDeleteDisabledReason = selectedHistoryActiveRunCount
+    ? `有 ${selectedHistoryActiveRunCount} 个 Run 仍在进行中或待审批，请先取消或等待结束后再删除。`
+    : '';
+  const allHistoryRunsSelected = filteredRunIds.length > 0 && selectedHistoryRuns.length === filteredRunIds.length;
   const runHistoryGroups = useMemo(
     () => runHistoryGroupsFor(filteredRuns, runnables, agents),
     [agents, filteredRuns, runnables],
@@ -2068,6 +2127,16 @@ export function AgentStudioView() {
     )),
     [skills, skillLibraryFilter, skillLibraryFolderFilter, skillLibrarySearch],
   );
+  const filteredLibrarySkillIds = useMemo(
+    () => filteredLibrarySkills.map((skill) => skill.skill_id).filter(Boolean),
+    [filteredLibrarySkills],
+  );
+  const selectedSkillIdSet = useMemo(() => new Set(selectedSkillIds), [selectedSkillIds]);
+  const selectedLibrarySkills = useMemo(
+    () => filteredLibrarySkills.filter((skill) => selectedSkillIdSet.has(skill.skill_id)),
+    [filteredLibrarySkills, selectedSkillIdSet],
+  );
+  const allLibrarySkillsSelected = filteredLibrarySkillIds.length > 0 && selectedLibrarySkills.length === filteredLibrarySkillIds.length;
   const filteredMountSkills = useMemo(
     () => enabledSkills.filter((skill) => (
       skillMatchesSourceFilter(skill, skillMountFilter)
@@ -2347,6 +2416,22 @@ export function AgentStudioView() {
   }, [routeRunGoal, routeRunId, routeRunTarget, routeTab]);
 
   useEffect(() => {
+    setSelectedAgentIds((current) => pruneSelectedIds(current, agentIds));
+  }, [agentIds]);
+
+  useEffect(() => {
+    setSelectedSkillIds((current) => pruneSelectedIds(current, filteredLibrarySkillIds));
+  }, [filteredLibrarySkillIds]);
+
+  useEffect(() => {
+    setSelectedWorkflowIds((current) => pruneSelectedIds(current, workflowIds));
+  }, [workflowIds]);
+
+  useEffect(() => {
+    setSelectedRunIds((current) => pruneSelectedIds(current, filteredRunIds));
+  }, [filteredRunIds]);
+
+  useEffect(() => {
     if (selectedAgent) setDraft(agentToDraft(selectedAgent));
   }, [selectedAgent]);
 
@@ -2487,6 +2572,42 @@ export function AgentStudioView() {
     },
     [setEdges],
   );
+
+  function toggleAgentSelected(agentId: string) {
+    setSelectedAgentIds((current) => toggleSelectedId(current, agentId));
+  }
+
+  function toggleSkillSelected(skillId: string) {
+    setSelectedSkillIds((current) => toggleSelectedId(current, skillId));
+  }
+
+  function toggleWorkflowSelected(workflowId: string) {
+    setSelectedWorkflowIds((current) => toggleSelectedId(current, workflowId));
+  }
+
+  function toggleRunSelected(runId: string) {
+    setSelectedRunIds((current) => toggleSelectedId(current, runId));
+  }
+
+  function finishAgentManagement() {
+    setAgentManagementMode(false);
+    setSelectedAgentIds([]);
+  }
+
+  function finishSkillManagement() {
+    setSkillManagementMode(false);
+    setSelectedSkillIds([]);
+  }
+
+  function finishWorkflowManagement() {
+    setWorkflowManagementMode(false);
+    setSelectedWorkflowIds([]);
+  }
+
+  function finishRunHistoryManagement() {
+    setRunHistoryManagementMode(false);
+    setSelectedRunIds([]);
+  }
 
   function startNewAgent() {
     setSelectedAgentId('');
@@ -2733,10 +2854,36 @@ export function AgentStudioView() {
       variant: 'danger',
       onConfirm: () => void runAction(async () => {
         await deleteAgent(agentId);
+        setSelectedAgentIds((current) => current.filter((id) => id !== agentId));
         setSelectedAgentId('');
         setDraft({ ...emptyAgentDraft });
         return { selectedAgentId: '' };
       }, '删除 Agent'),
+    });
+  }
+
+  function requestDeleteSelectedAgents() {
+    const targets = selectedAgents.slice();
+    if (!targets.length) return;
+    const targetIds = new Set(targets.map((agent) => agent.agent_id));
+    const deletingCurrent = Boolean(selectedAgentId && targetIds.has(selectedAgentId));
+    showConfirmDialog({
+      title: `删除 ${targets.length} 个 Agent？`,
+      description: '这些 Agent 的定义会从 Agent Studio 移除；已生成的历史 Run 不会被删除。',
+      confirmLabel: `删除 ${targets.length} 个 Agent`,
+      variant: 'danger',
+      onConfirm: () => void runAction(async () => {
+        for (const agent of targets) {
+          await deleteAgent(agent.agent_id);
+        }
+        setSelectedAgentIds((current) => current.filter((id) => !targetIds.has(id)));
+        if (deletingCurrent) {
+          setSelectedAgentId('');
+          setDraft({ ...emptyAgentDraft });
+          return { selectedAgentId: '' };
+        }
+        return undefined;
+      }, '批量删除 Agent'),
     });
   }
 
@@ -2748,7 +2895,35 @@ export function AgentStudioView() {
         : 'Yachiyo 管理区里的本地 Skill 副本会被删除，已挂载它的 Agent 会失去这个 Skill。',
       confirmLabel: '删除 Skill',
       variant: 'danger',
-      onConfirm: () => void runAction(async () => { await deleteSkill(skill.skill_id); }, '删除 Skill'),
+      onConfirm: () => void runAction(async () => {
+        await deleteSkill(skill.skill_id);
+        setSelectedSkillIds((current) => current.filter((id) => id !== skill.skill_id));
+      }, '删除 Skill'),
+    });
+  }
+
+  function requestDeleteSelectedSkills() {
+    const targets = selectedLibrarySkills.slice();
+    if (!targets.length) return;
+    const targetIds = new Set(targets.map((skill) => skill.skill_id));
+    const hasHermesSkills = targets.some(isHermesSkill);
+    const hasYachiyoSkills = targets.some(isYachiyoSkill);
+    const description = hasHermesSkills && hasYachiyoSkills
+      ? 'Yachiyo 管理区里的本地 Skill 副本会被删除；Hermes Agent Skill 只会删除 Yachiyo 中的登记和挂载关系，不会删除 Hermes 原始文件。'
+      : hasHermesSkills
+        ? '这些 Hermes Agent Skill 只会删除 Yachiyo 中的登记和挂载关系，不会删除 Hermes 原始文件。'
+        : 'Yachiyo 管理区里的本地 Skill 副本会被删除，已挂载它们的 Agent 会失去这些 Skill。';
+    showConfirmDialog({
+      title: `删除 ${targets.length} 个 Skill？`,
+      description,
+      confirmLabel: `删除 ${targets.length} 个 Skill`,
+      variant: 'danger',
+      onConfirm: () => void runAction(async () => {
+        for (const skill of targets) {
+          await deleteSkill(skill.skill_id);
+        }
+        setSelectedSkillIds((current) => current.filter((id) => !targetIds.has(id)));
+      }, '批量删除 Skill'),
     });
   }
 
@@ -2763,9 +2938,63 @@ export function AgentStudioView() {
       variant: 'danger',
       onConfirm: () => void runAction(async () => {
         await deleteWorkflow(workflowId);
+        setSelectedWorkflowIds((current) => current.filter((id) => id !== workflowId));
         startNewWorkflow();
         return { selectedWorkflowId: '' };
       }, '删除 Workflow'),
+    });
+  }
+
+  function requestDeleteSelectedWorkflows() {
+    const targets = selectedWorkflows.slice();
+    if (!targets.length) return;
+    const targetIds = new Set(targets.map((workflow) => workflow.workflow_id));
+    const deletingCurrent = Boolean(selectedWorkflowId && targetIds.has(selectedWorkflowId));
+    showConfirmDialog({
+      title: `删除 ${targets.length} 个 Workflow？`,
+      description: '这些 Workflow 定义会从 Workflow Studio 移除；已生成的历史 Run 不会被删除。',
+      confirmLabel: `删除 ${targets.length} 个 Workflow`,
+      variant: 'danger',
+      onConfirm: () => void runAction(async () => {
+        for (const workflow of targets) {
+          await deleteWorkflow(workflow.workflow_id);
+        }
+        setSelectedWorkflowIds((current) => current.filter((id) => !targetIds.has(id)));
+        if (deletingCurrent) {
+          startNewWorkflow();
+          return { selectedWorkflowId: '' };
+        }
+        return undefined;
+      }, '批量删除 Workflow'),
+    });
+  }
+
+  function requestDeleteSelectedRuns() {
+    const targets = selectedHistoryRuns.slice();
+    if (!targets.length || selectedHistoryActiveRunCount) return;
+    showConfirmDialog({
+      title: `删除 ${targets.length} 条 Run History？`,
+      description: '这些 Run 记录会从 Runs History 移除，对应 artifacts 也会删除；Workflow Run 会连带删除同一次 Workflow 的子 Agent Run。',
+      confirmLabel: `删除 ${targets.length} 条记录`,
+      variant: 'danger',
+      onConfirm: () => void runAction(async () => {
+        const deletedRunIds = new Set<string>();
+        for (const run of targets) {
+          const result = await deleteRun(run.run_id);
+          const resultIds = Array.isArray(result.deleted_run_ids) ? result.deleted_run_ids : [run.run_id];
+          resultIds.forEach((id) => {
+            if (id) deletedRunIds.add(id);
+          });
+        }
+        setSelectedRunIds((current) => current.filter((id) => !deletedRunIds.has(id)));
+        if (selectedRunId && deletedRunIds.has(selectedRunId)) {
+          setSelectedRunId('');
+          setArtifactPreview(null);
+          navigateTo('agents', { tab: 'runs' }, ['run', 'target', 'goal']);
+          return { selectedRunId: '' };
+        }
+        return undefined;
+      }, '批量删除 Run History'),
     });
   }
 
@@ -3182,29 +3411,57 @@ export function AgentStudioView() {
           <aside className="agent-studio-panel">
             <div className="section-heading-row">
               <h2>Agents</h2>
-              <button type="button" disabled={busy} onClick={startNewAgent}>新建</button>
+              <div className="studio-heading-actions">
+                {agents.length && !agentManagementMode ? (
+                  <button type="button" disabled={busy} onClick={() => setAgentManagementMode(true)}>管理</button>
+                ) : null}
+                <button type="button" disabled={busy} onClick={startNewAgent}>新建</button>
+              </div>
             </div>
-            <div className="agent-list">
-              {agents.map((agent) => (
-                <button
-                  type="button"
-                  className={agent.agent_id === selectedAgentId ? 'active' : ''}
-                  key={agent.agent_id}
-                  onClick={() => selectAgent(agent.agent_id)}
-                >
-                  <span className="agent-list-profile">
-                    <AgentAvatar avatarUrl={agent.avatar_url} name={agent.nickname || agent.name} />
-                    <span>
-                      <strong className="agent-list-name">{agent.nickname || agent.name}</strong>
-                      <small className="agent-list-base-name">{agent.name}</small>
-                    </span>
-                  </span>
-                  <span className="agent-list-meta">
-                    <span className="agent-list-category">{agent.category || 'custom'}</span>
-                    <span className="agent-list-separator">·</span>
-                    <span className="agent-list-profile-type">{agent.model_mode === 'custom_api' ? 'Custom API' : 'Chat Profile'}</span>
-                  </span>
+            {agents.length && agentManagementMode ? (
+              <div className="studio-bulk-actions" aria-label="Agent 批量操作">
+                <span>{selectedAgents.length ? `已选择 ${selectedAgents.length} / ${agents.length}` : `${agents.length} agents`}</span>
+                <button type="button" disabled={busy} onClick={() => setSelectedAgentIds(allAgentsSelected ? [] : agentIds)}>
+                  {allAgentsSelected ? '取消全选' : '全选当前列表'}
                 </button>
+                <button type="button" disabled={busy || !selectedAgents.length} onClick={() => setSelectedAgentIds([])}>清空</button>
+                <button type="button" className="danger-action" disabled={busy || !selectedAgents.length} onClick={requestDeleteSelectedAgents}>删除所选</button>
+                <button type="button" disabled={busy} onClick={finishAgentManagement}>完成</button>
+              </div>
+            ) : null}
+            <div className={agentManagementMode ? 'agent-list managing' : 'agent-list'}>
+              {agents.map((agent) => (
+                <div
+                  className={agent.agent_id === selectedAgentId ? 'agent-list-item active' : 'agent-list-item'}
+                  key={agent.agent_id}
+                >
+                  <label className="agent-list-select" aria-label={`选择 Agent ${agent.nickname || agent.name}`}>
+                    <input
+                      type="checkbox"
+                      checked={selectedAgentIdSet.has(agent.agent_id)}
+                      disabled={busy || !agentManagementMode}
+                      onChange={() => toggleAgentSelected(agent.agent_id)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="agent-list-main"
+                    onClick={() => selectAgent(agent.agent_id)}
+                  >
+                    <span className="agent-list-profile">
+                      <AgentAvatar avatarUrl={agent.avatar_url} name={agent.nickname || agent.name} />
+                      <span>
+                        <strong className="agent-list-name">{agent.nickname || agent.name}</strong>
+                        <small className="agent-list-base-name">{agent.name}</small>
+                      </span>
+                    </span>
+                    <span className="agent-list-meta">
+                      <span className="agent-list-category">{agent.category || 'custom'}</span>
+                      <span className="agent-list-separator">·</span>
+                      <span className="agent-list-profile-type">{agent.model_mode === 'custom_api' ? 'Custom API' : 'Chat Profile'}</span>
+                    </span>
+                  </button>
+                </div>
               ))}
               {!agents.length ? <span className="agent-empty-inline">暂无 Agent。点击“新建”创建一个 Agent。</span> : null}
             </div>
@@ -3564,7 +3821,12 @@ export function AgentStudioView() {
           <div className="agent-studio-panel">
             <div className="section-heading-row">
               <h2>{skillLibraryFilter === 'hermes' ? 'Hermes Skill Library' : 'Yachiyo Skill Library'}</h2>
-              <span className="agent-section-count">{yachiyoSkillCount} Yachiyo / {hermesSkillCount} Hermes</span>
+              <div className="studio-heading-actions">
+                <span className="agent-section-count">{yachiyoSkillCount} Yachiyo / {hermesSkillCount} Hermes</span>
+                {filteredLibrarySkills.length && !skillManagementMode ? (
+                  <button type="button" disabled={busy} onClick={() => setSkillManagementMode(true)}>管理</button>
+                ) : null}
+              </div>
             </div>
             <div className="skill-filter-bar">
               <div className="skill-filter-tabs">
@@ -3589,6 +3851,17 @@ export function AgentStudioView() {
                 placeholder="搜索 Skill 名称、路径或摘要"
               />
             </div>
+            {filteredLibrarySkills.length && skillManagementMode ? (
+              <div className="studio-bulk-actions" aria-label="Skill 批量操作">
+                <span>{selectedLibrarySkills.length ? `已选择 ${selectedLibrarySkills.length} / ${filteredLibrarySkills.length}` : `${filteredLibrarySkills.length} skills`}</span>
+                <button type="button" disabled={busy} onClick={() => setSelectedSkillIds(allLibrarySkillsSelected ? [] : filteredLibrarySkillIds)}>
+                  {allLibrarySkillsSelected ? '取消全选' : '全选当前列表'}
+                </button>
+                <button type="button" disabled={busy || !selectedLibrarySkills.length} onClick={() => setSelectedSkillIds([])}>清空</button>
+                <button type="button" className="danger-action" disabled={busy || !selectedLibrarySkills.length} onClick={requestDeleteSelectedSkills}>删除所选</button>
+                <button type="button" disabled={busy} onClick={finishSkillManagement}>完成</button>
+              </div>
+            ) : null}
             <div className="skill-list">
               {filteredLibrarySkills.map((skill) => (
                 <SkillCard
@@ -3598,7 +3871,10 @@ export function AgentStudioView() {
                   onDelete={() => requestDeleteSkill(skill)}
                   onMoveFolder={(folderId) => runAction(async () => { await updateSkill(skill.skill_id, { folder_id: folderId }); }, '移动 Skill')}
                   onOpenLocation={() => runAction(async () => { await openPath(skill.local_path || ''); }, '打开 Skill 路径')}
+                  onSelectionChange={() => toggleSkillSelected(skill.skill_id)}
                   onToggleEnabled={() => runAction(async () => { await updateSkill(skill.skill_id, { enabled: skill.enabled === false }); }, skill.enabled === false ? '启用 Skill' : '停用 Skill')}
+                  managing={skillManagementMode}
+                  selected={selectedSkillIdSet.has(skill.skill_id)}
                   skill={skill}
                 />
               ))}
@@ -3728,19 +4004,47 @@ export function AgentStudioView() {
           <aside className="agent-studio-panel">
             <div className="section-heading-row">
               <h2>Workflows</h2>
-              <button type="button" disabled={busy} onClick={startNewWorkflow}>新建</button>
+              <div className="studio-heading-actions">
+                {workflows.length && !workflowManagementMode ? (
+                  <button type="button" disabled={busy} onClick={() => setWorkflowManagementMode(true)}>管理</button>
+                ) : null}
+                <button type="button" disabled={busy} onClick={startNewWorkflow}>新建</button>
+              </div>
             </div>
-            <div className="agent-list">
-              {workflows.map((workflow) => (
-                <button
-                  type="button"
-                  className={workflow.workflow_id === selectedWorkflowId ? 'active' : ''}
-                  key={workflow.workflow_id}
-                  onClick={() => selectWorkflow(workflow.workflow_id)}
-                >
-                  <strong>{workflow.name}</strong>
-                  <span>{workflow.enabled === false ? '停用 · ' : ''}{workflow.nodes.length} nodes · {workflow.edges.length} edges</span>
+            {workflows.length && workflowManagementMode ? (
+              <div className="studio-bulk-actions" aria-label="Workflow 批量操作">
+                <span>{selectedWorkflows.length ? `已选择 ${selectedWorkflows.length} / ${workflows.length}` : `${workflows.length} workflows`}</span>
+                <button type="button" disabled={busy} onClick={() => setSelectedWorkflowIds(allWorkflowsSelected ? [] : workflowIds)}>
+                  {allWorkflowsSelected ? '取消全选' : '全选当前列表'}
                 </button>
+                <button type="button" disabled={busy || !selectedWorkflows.length} onClick={() => setSelectedWorkflowIds([])}>清空</button>
+                <button type="button" className="danger-action" disabled={busy || !selectedWorkflows.length} onClick={requestDeleteSelectedWorkflows}>删除所选</button>
+                <button type="button" disabled={busy} onClick={finishWorkflowManagement}>完成</button>
+              </div>
+            ) : null}
+            <div className={workflowManagementMode ? 'agent-list managing' : 'agent-list'}>
+              {workflows.map((workflow) => (
+                <div
+                  className={workflow.workflow_id === selectedWorkflowId ? 'agent-list-item active' : 'agent-list-item'}
+                  key={workflow.workflow_id}
+                >
+                  <label className="agent-list-select" aria-label={`选择 Workflow ${workflow.name}`}>
+                    <input
+                      type="checkbox"
+                      checked={selectedWorkflowIdSet.has(workflow.workflow_id)}
+                      disabled={busy || !workflowManagementMode}
+                      onChange={() => toggleWorkflowSelected(workflow.workflow_id)}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className="agent-list-main"
+                    onClick={() => selectWorkflow(workflow.workflow_id)}
+                  >
+                    <strong>{workflow.name}</strong>
+                    <span>{workflow.enabled === false ? '停用 · ' : ''}{workflow.nodes.length} nodes · {workflow.edges.length} edges</span>
+                  </button>
+                </div>
               ))}
             </div>
           </aside>
@@ -4009,7 +4313,12 @@ export function AgentStudioView() {
               运行
             </button>
             <div className="run-history-toolbar">
-              <span>Run History · {filteredRuns.length}{runSearchActive ? ` / ${runStatusFilteredRuns.length}` : ''}</span>
+              <div className="run-history-head">
+                <span>Run History · {filteredRuns.length}{runSearchActive ? ` / ${runStatusFilteredRuns.length}` : ''}</span>
+                {filteredRuns.length && !runHistoryManagementMode ? (
+                  <button type="button" disabled={busy} onClick={() => setRunHistoryManagementMode(true)}>管理</button>
+                ) : null}
+              </div>
               <div className="run-history-search">
                 <input
                   className="hy-input"
@@ -4056,6 +4365,25 @@ export function AgentStudioView() {
                   </button>
                 ))}
               </div>
+              {filteredRuns.length && runHistoryManagementMode ? (
+                <div className="studio-bulk-actions" aria-label="Run History 批量操作">
+                  <span>{selectedHistoryRuns.length ? `已选择 ${selectedHistoryRuns.length} / ${filteredRuns.length}` : `${filteredRuns.length} runs`}</span>
+                  <button type="button" disabled={busy} onClick={() => setSelectedRunIds(allHistoryRunsSelected ? [] : filteredRunIds)}>
+                    {allHistoryRunsSelected ? '取消全选' : '全选当前列表'}
+                  </button>
+                  <button type="button" disabled={busy || !selectedHistoryRuns.length} onClick={() => setSelectedRunIds([])}>清空</button>
+                  <button
+                    type="button"
+                    className="danger-action"
+                    disabled={busy || !selectedHistoryRuns.length || Boolean(runBulkDeleteDisabledReason)}
+                    title={runBulkDeleteDisabledReason || undefined}
+                    onClick={requestDeleteSelectedRuns}
+                  >
+                    删除所选
+                  </button>
+                  <button type="button" disabled={busy} onClick={finishRunHistoryManagement}>完成</button>
+                </div>
+              ) : null}
             </div>
             <div className="run-list grouped">
               {runHistoryGroups.map((group) => {
@@ -4077,21 +4405,33 @@ export function AgentStudioView() {
                     <em aria-hidden="true">{collapsed ? '+' : '-'}</em>
                   </button>
                   {!collapsed ? (
-                  <div className="run-history-group-list">
+                  <div className={runHistoryManagementMode ? 'run-history-group-list managing' : 'run-history-group-list'}>
                     {group.runs.map((run) => (
-                      <button
-                        type="button"
-                        className={run.run_id === selectedRunId ? 'run-list-item active' : 'run-list-item'}
+                      <div
+                        className={run.run_id === selectedRunId ? 'run-list-row active' : 'run-list-row'}
                         key={run.run_id}
-                        onClick={() => openRunDetail(run.run_id)}
                       >
-                        <span className={`run-list-status-dot ${runStatusTone(run.status)}`} aria-hidden="true" />
-                        <span className="run-list-item-copy">
-                          <strong>{run.user_goal || run.runnable_name || run.runnable_id}</strong>
-                          <span>{runKindLabel(run.kind)} · {runStatusLabel(run.status)} · {formatRunDate(run.updated_at || run.created_at)}</span>
-                          {run.result ? <small>{run.result}</small> : null}
-                        </span>
-                      </button>
+                        <label className="run-list-select" aria-label={`选择 Run ${run.run_id}`}>
+                          <input
+                            type="checkbox"
+                            checked={selectedRunIdSet.has(run.run_id)}
+                            disabled={busy || !runHistoryManagementMode}
+                            onChange={() => toggleRunSelected(run.run_id)}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className={run.run_id === selectedRunId ? 'run-list-item active' : 'run-list-item'}
+                          onClick={() => openRunDetail(run.run_id)}
+                        >
+                          <span className={`run-list-status-dot ${runStatusTone(run.status)}`} aria-hidden="true" />
+                          <span className="run-list-item-copy">
+                            <strong>{run.user_goal || run.runnable_name || run.runnable_id}</strong>
+                            <span>{runKindLabel(run.kind)} · {runStatusLabel(run.status)} · {formatRunDate(run.updated_at || run.created_at)}</span>
+                            {run.result ? <small>{run.result}</small> : null}
+                          </span>
+                        </button>
+                      </div>
                     ))}
                   </div>
                   ) : null}
@@ -4458,27 +4798,48 @@ export function AgentStudioView() {
 function SkillCard({
   busy,
   folders,
+  managing,
   onDelete,
   onMoveFolder,
   onOpenLocation,
+  onSelectionChange,
   onToggleEnabled,
+  selected,
   skill,
 }: {
   busy: boolean;
   folders: SkillFolderSpec[];
+  managing: boolean;
   onDelete: () => Promise<void> | void;
   onMoveFolder: (folderId: string) => Promise<void>;
   onOpenLocation: () => Promise<void>;
+  onSelectionChange: () => void;
   onToggleEnabled: () => Promise<void>;
+  selected: boolean;
   skill: SkillSpec;
 }) {
   const enabled = skill.enabled !== false;
+  const cardClassName = [
+    'skill-card',
+    enabled ? '' : 'disabled',
+    managing ? 'managing' : '',
+  ].filter(Boolean).join(' ');
   return (
-    <article className={enabled ? 'skill-card' : 'skill-card disabled'}>
+    <article className={cardClassName}>
       <div className="section-heading-row skill-card-head">
-        <div>
-          <h3>{skill.name}</h3>
-          <span className="skill-source-tag">{skillSourceTypeLabel(skill.source_type)}</span>
+        <div className="skill-card-title">
+          <label className="skill-card-select" aria-label={`选择 Skill ${skill.name}`}>
+            <input
+              type="checkbox"
+              checked={selected}
+              disabled={busy || !managing}
+              onChange={onSelectionChange}
+            />
+          </label>
+          <div>
+            <h3>{skill.name}</h3>
+            <span className="skill-source-tag">{skillSourceTypeLabel(skill.source_type)}</span>
+          </div>
         </div>
         <label className={enabled ? 'skill-enable-switch active' : 'skill-enable-switch'}>
           <input

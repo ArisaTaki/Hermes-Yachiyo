@@ -13798,7 +13798,8 @@ button.activity-item {
   gap: 9px;
 }
 
-.agent-list button {
+.agent-list-item,
+.agent-list button:not(.agent-list-main) {
   display: grid;
   gap: 5px;
   width: 100%;
@@ -13810,10 +13811,72 @@ button.activity-item {
   text-align: left;
 }
 
-.agent-list button.active,
-.agent-list button:hover {
+.agent-list-item {
+  grid-template-columns: 0 minmax(0, 1fr);
+  align-items: center;
+  gap: 0;
+  transition: grid-template-columns 180ms ease, gap 180ms ease;
+}
+
+.agent-list.managing .agent-list-item {
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 9px;
+}
+
+.agent-list-item.active,
+.agent-list-item:hover,
+.agent-list-item:focus-within,
+.agent-list button:not(.agent-list-main).active,
+.agent-list button:not(.agent-list-main):hover {
   border-color: oklch(66% 0.12 188 / 0.34);
   background: oklch(66% 0.12 188 / 0.08);
+}
+
+.agent-list-main {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--hy-fg);
+  text-align: left;
+}
+
+.agent-list-main:hover,
+.agent-list-main:focus {
+  background: transparent;
+}
+
+.agent-list-select,
+.skill-card-select {
+  display: inline-grid !important;
+  width: 0;
+  height: 24px;
+  place-items: center;
+  cursor: pointer;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateX(-6px);
+  transition: opacity 160ms ease, transform 180ms ease, width 180ms ease;
+}
+
+.agent-list.managing .agent-list-select,
+.skill-card.managing .skill-card-select {
+  width: 24px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.agent-list-select input,
+.skill-card-select input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: oklch(68% 0.15 155);
 }
 
 .agent-list strong {
@@ -14471,6 +14534,33 @@ button.activity-item {
   font-size: 11px;
 }
 
+.studio-heading-actions,
+.run-history-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.studio-heading-actions button,
+.run-history-head button {
+  min-height: 28px;
+  padding: 5px 9px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+  color: var(--hy-muted);
+}
+
+.studio-heading-actions button:hover:not(:disabled),
+.run-history-head button:hover:not(:disabled) {
+  border-color: oklch(66% 0.12 188 / 0.3);
+  color: var(--hy-fg);
+}
+
+.studio-bulk-actions,
 .agent-skill-bulk-actions {
   display: flex;
   flex-wrap: wrap;
@@ -14479,12 +14569,34 @@ button.activity-item {
   justify-content: flex-end;
 }
 
+.studio-bulk-actions {
+  padding: 8px 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+  animation: studio-bulk-actions-in 160ms ease-out;
+}
+
+@keyframes studio-bulk-actions-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.studio-bulk-actions span,
 .agent-skill-bulk-actions span {
   margin-right: auto;
   color: var(--hy-faint);
   font-size: 11px;
 }
 
+.studio-bulk-actions button,
 .agent-skill-bulk-actions button {
   min-height: 28px;
   padding: 5px 9px;
@@ -14494,6 +14606,7 @@ button.activity-item {
   color: var(--hy-muted);
 }
 
+.studio-bulk-actions button:hover:not(:disabled),
 .agent-skill-bulk-actions button:hover:not(:disabled) {
   border-color: oklch(66% 0.12 188 / 0.3);
   color: var(--hy-fg);
@@ -15034,6 +15147,27 @@ button.activity-item {
   align-items: start;
 }
 
+.skill-card-title {
+  display: grid;
+  grid-template-columns: 0 minmax(0, 1fr);
+  gap: 0;
+  align-items: start;
+  min-width: 0;
+  transition: grid-template-columns 180ms ease, gap 180ms ease;
+}
+
+.skill-card.managing .skill-card-title {
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.skill-card-title h3 {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .skill-source-tag {
   display: inline-flex;
   width: max-content;
@@ -15169,9 +15303,14 @@ button.activity-item {
   gap: 8px;
 }
 
-.run-history-toolbar>span {
+.run-history-toolbar>span,
+.run-history-head span {
   color: var(--hy-faint);
   font-size: 11px;
+}
+
+.run-history-head {
+  justify-content: space-between;
 }
 
 .run-history-search {
@@ -15350,6 +15489,25 @@ button.activity-item {
   padding-inline: 4px;
 }
 
+.run-list-row {
+  display: grid;
+  grid-template-columns: 0 minmax(0, 1fr);
+  align-items: start;
+  gap: 0;
+  width: 100%;
+  padding: 11px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+  color: var(--hy-fg);
+  transition: grid-template-columns 180ms ease, gap 180ms ease;
+}
+
+.run-history-group-list.managing .run-list-row {
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 9px;
+}
+
 .run-list-item {
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr);
@@ -15362,6 +15520,40 @@ button.activity-item {
   background: oklch(255 0 0 / 0.025);
   color: var(--hy-fg);
   text-align: left;
+}
+
+.run-list-row .run-list-item {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.run-list-select {
+  display: inline-grid !important;
+  width: 0;
+  height: 24px;
+  place-items: center;
+  cursor: pointer;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateX(-6px);
+  transition: opacity 160ms ease, transform 180ms ease, width 180ms ease;
+}
+
+.run-history-group-list.managing .run-list-select {
+  width: 24px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+}
+
+.run-list-select input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: oklch(68% 0.15 155);
 }
 
 .run-list-status-dot {
@@ -15393,10 +15585,19 @@ button.activity-item {
   box-shadow: 0 0 0 4px oklch(78% 0.14 78 / 0.12);
 }
 
+.run-list-row.active,
+.run-list-row:hover,
+.run-list-row:focus-within,
 .run-list-item.active,
 .run-list-item:hover {
   border-color: oklch(66% 0.12 188 / 0.34);
   background: oklch(66% 0.12 188 / 0.08);
+}
+
+.run-list-row .run-list-item.active,
+.run-list-row .run-list-item:hover,
+.run-list-row .run-list-item:focus {
+  background: transparent;
 }
 
 .run-list-item-copy {

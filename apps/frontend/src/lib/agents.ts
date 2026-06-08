@@ -322,6 +322,10 @@ export async function getRun(runId: string): Promise<RunSpec> {
   return apiGet(`/ui/runs/${encodeURIComponent(runId)}`);
 }
 
+export async function deleteRun(runId: string): Promise<{ ok?: boolean; deleted_run_ids?: string[]; deleted_run_count?: number }> {
+  return apiDelete(`/ui/runs/${encodeURIComponent(runId)}`);
+}
+
 export async function getRunArtifact(runId: string, path: string): Promise<{ ok?: boolean; path?: string; content?: string; truncated?: boolean }> {
   const encodedPath = path.split('/').map((part) => encodeURIComponent(part)).join('/');
   return apiGet(`/ui/runs/${encodeURIComponent(runId)}/artifacts/${encodedPath}`);

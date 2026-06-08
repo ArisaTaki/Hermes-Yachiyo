@@ -74,6 +74,10 @@ _DEFAULT_AGENT_IDS = {
 }
 
 
+def _is_active_run_status(status: str) -> bool:
+    return (status.strip() or "running") not in _FINAL_RUN_STATUSES
+
+
 def _agent_output_contract_rules(contract: Any) -> str:
     value = str(contract or "chat").strip().lower() or "chat"
     rules = {
@@ -2611,6 +2615,90 @@ class AgentRuntimeService:
         if row is None:
             raise KeyError(run_id)
         return self._row_to_run(row)
+
+    def _delete_run_artifacts(self, run: dict[str, Any]) -> None:
+        run_id = str(run.get("run_id") or "")
+        if not run_id:
+            return
+        root = self.agent_artifacts_dir if run.get("kind") == "agent_run" else self.workflow_artifacts_dir
+        target = (root / run_id).resolve()
+        if _is_within(target, root) and target.exists():
+            shutil.rmtree(target, ignore_errors=True)
+
+    def _runs_in_group(self, run_group_id: str) -> list[dict[str, Any]]:
+        if not run_group_id:
+            return []
+        self._ensure_row_factory()
+        rows = self._conn.execute(
+            "SELECT * FROM runs WHERE run_group_id=? ORDER BY created_at ASC",
+            (run_group_id,),
+        ).fetchall()
+        return [self._row_to_run(row) for row in rows]
+
+    def _delete_run_rows(self, runs: list[dict[str, Any]]) -> list[str]:
+        deleted_run_ids: list[str] = []
+        for run in runs:
+            run_id = str(run.get("run_id") or "")
+            if not run_id:
+                continue
+            self._delete_run_artifacts(run)
+            self._conn.execute("DELETE FROM runs WHERE run_id=?", (run_id,))
+            deleted_run_ids.append(run_id)
+        return deleted_run_ids
+
+    def _remove_run_ids_from_group(self, run_group_id: str, run_ids: set[str]) -> None:
+        if not run_group_id or not run_ids:
+            return
+        try:
+            group = self.get_run_group(run_group_id)
+        except KeyError:
+            return
+        child_run_ids = [
+            str(item)
+            for item in group.get("child_run_ids") or []
+            if str(item) and str(item) not in run_ids
+        ]
+        remaining_count = self._conn.execute(
+            "SELECT COUNT(*) AS count FROM runs WHERE run_group_id=?",
+            (run_group_id,),
+        ).fetchone()
+        if not child_run_ids or int(remaining_count["count"] if remaining_count else 0) <= 0:
+            self._conn.execute("DELETE FROM run_groups WHERE run_group_id=?", (run_group_id,))
+            return
+        self._conn.execute(
+            """
+            UPDATE run_groups
+               SET child_run_ids_json=?, updated_at=?
+             WHERE run_group_id=?
+            """,
+            (_json_dump(child_run_ids), _now(), run_group_id),
+        )
+
+    def delete_run(self, run_id: str) -> dict[str, Any]:
+        run = self.get_run(run_id)
+        if _is_active_run_status(str(run.get("status") or "")):
+            raise AgentRuntimeError("Run 仍在进行中或待审批，取消或完成后才能删除")
+        run_group_id = str(run.get("run_group_id") or "")
+        targets = [run]
+        delete_group = False
+        if run.get("kind") == "workflow_run" and run_group_id:
+            group_runs = self._runs_in_group(run_group_id)
+            if any(_is_active_run_status(str(item.get("status") or "")) for item in group_runs):
+                raise AgentRuntimeError("这个 Workflow Run 仍有进行中或待审批的子 Run，取消或完成后才能删除")
+            targets = group_runs or [run]
+            delete_group = True
+        deleted_run_ids = self._delete_run_rows(targets)
+        deleted_ids = set(deleted_run_ids)
+        if delete_group and run_group_id:
+            self._conn.execute("DELETE FROM run_groups WHERE run_group_id=?", (run_group_id,))
+        else:
+            self._remove_run_ids_from_group(run_group_id, deleted_ids)
+        self._conn.commit()
+        return {
+            "ok": True,
+            "deleted_run_ids": deleted_run_ids,
+            "deleted_run_count": len(deleted_run_ids),
+        }
 
     def _pending_approval_json(self, run_id: str) -> str:
         self._ensure_row_factory()
