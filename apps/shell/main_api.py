@@ -2065,7 +2065,7 @@ class MainWindowAPI:
 
             return {
                 "app": {
-                    "version": status.get("version", "0.1.0"),
+                    "version": status.get("version", "0.4.0"),
                     "running": status.get("running", False),
                     "uptime_seconds": round(status.get("uptime_seconds", 0), 1),
                 },
@@ -2190,7 +2190,7 @@ class MainWindowAPI:
                     "hapi": snap.hapi.to_dict(),
                 },
                 "app": {
-                    "version": status.get("version", "0.1.0"),
+                    "version": status.get("version", "0.4.0"),
                     "log_level": self._config.log_level,
                     "start_minimized": self._config.start_minimized,
                     "tray_enabled": self._config.tray_enabled,

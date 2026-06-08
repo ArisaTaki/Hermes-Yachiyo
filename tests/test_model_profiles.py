@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import ssl
 
 import pytest
 
@@ -393,8 +394,9 @@ def test_openai_compatible_chat_reads_reasoning_content_and_xiaomi_api_key_heade
         def read(self):
             return json.dumps({"choices": [{"message": {"content": "", "reasoning_content": "red, blue"}}]}).encode("utf-8")
 
-    def fake_urlopen(request, timeout):
+    def fake_urlopen(request, timeout, context):
         assert timeout == OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS
+        assert isinstance(context, ssl.SSLContext)
         assert request.full_url == "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
         assert request.get_header("Authorization") == "Bearer sk-xiaomi"
         assert request.get_header("Api-key") == "sk-xiaomi"
@@ -440,9 +442,10 @@ def test_openai_compatible_chat_message_returns_tool_calls(monkeypatch):
                 }
             ).encode("utf-8")
 
-    def fake_urlopen(request, timeout):
+    def fake_urlopen(request, timeout, context):
         body = json.loads(request.data.decode("utf-8"))
         assert timeout == OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS
+        assert isinstance(context, ssl.SSLContext)
         assert body["tools"][0]["function"]["name"] == "workspace_read"
         return FakeResponse()
 
@@ -660,8 +663,9 @@ def test_fetch_source_models_reads_openai_compatible_list(monkeypatch, tmp_path)
                 }
             ).encode("utf-8")
 
-    def fake_urlopen(request, timeout):
+    def fake_urlopen(request, timeout, context):
         assert timeout == 20
+        assert isinstance(context, ssl.SSLContext)
         assert request.full_url == "https://api.deepseek.com/models"
         assert request.get_header("Authorization") == "Bearer sk-source-secret"
         return FakeResponse()
@@ -711,8 +715,9 @@ def test_fetch_xiaomi_models_marks_known_vision_capabilities(monkeypatch, tmp_pa
                 }
             ).encode("utf-8")
 
-    def fake_urlopen(request, timeout):
+    def fake_urlopen(request, timeout, context):
         assert timeout == 20
+        assert isinstance(context, ssl.SSLContext)
         assert request.full_url == "https://api.mimo-v2.com/v1/models"
         assert request.get_header("Authorization") == "Bearer sk-source-secret"
         assert request.get_header("Api-key") == "sk-source-secret"
@@ -771,8 +776,9 @@ def test_fetch_source_models_preserves_openrouter_metadata(monkeypatch, tmp_path
                 }
             ).encode("utf-8")
 
-    def fake_urlopen(request, timeout):
+    def fake_urlopen(request, timeout, context):
         assert timeout == 20
+        assert isinstance(context, ssl.SSLContext)
         assert request.full_url == "https://openrouter.ai/api/v1/models"
         assert request.get_header("Authorization") is None
         return FakeResponse()

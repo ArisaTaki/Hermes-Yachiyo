@@ -9757,6 +9757,7 @@ body.electron-window .hy-traffic {
 
 .hy-content .open-chat-shell .chat-group-member {
   display: grid;
+  flex: 0 0 auto;
   grid-template-columns: 16px 30px minmax(0, 1fr);
   align-items: start;
   gap: 8px;
@@ -9811,6 +9812,7 @@ body.electron-window .hy-traffic {
   flex-direction: column;
   gap: 1px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .hy-content .open-chat-shell .chat-group-member strong,
@@ -15544,7 +15546,10 @@ button.activity-item {
 
 .run-history-toolbar {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
+  min-width: 0;
+  width: 100%;
 }
 
 .run-history-toolbar>span,
@@ -15646,6 +15651,8 @@ button.activity-item {
 
 .run-list.grouped {
   gap: 14px;
+  min-width: 0;
+  width: 100%;
 }
 
 .run-history-group {

@@ -464,7 +464,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const loadSessions = useCallback(async () => {
     try {
       const query = new URLSearchParams();
-      query.set('limit', debouncedSessionQuery ? '80' : '20');
+      query.set('limit', '0');
       if (debouncedSessionQuery) query.set('query', debouncedSessionQuery);
       const payload = await apiGet<SessionsPayload>(`/ui/chat/sessions?${query.toString()}`);
       if (payload.ok === false) throw new Error('读取会话失败');
@@ -2313,7 +2313,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 <UiIcon name="plus" />
               </button>
               <button type="button" className="chat-action-btn danger-action" title={`删除${deleteTarget}`} aria-label={`删除${deleteTarget}`} onClick={requestDeleteSession} disabled={!sessions?.sessions?.length}>
-                <UiIcon name="close" />
+                <UiIcon name="trash" />
               </button>
             </div>
           </header>

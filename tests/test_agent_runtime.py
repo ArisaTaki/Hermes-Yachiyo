@@ -1968,6 +1968,76 @@ def test_agent_run_can_recover_from_workspace_tool_shape_error(tmp_path, monkeyp
         service.close()
 
 
+def test_agent_run_recovers_from_absolute_workspace_path_with_terminal(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    external_file = tmp_path / "external.txt"
+    external_file.write_text("outside workspace", encoding="utf-8")
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert "Never pass absolute paths to workspace tools" in messages[0]["content"]
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_bad_read",
+                        "type": "function",
+                        "function": {"name": "workspace_read", "arguments": json.dumps({"path": str(external_file)})},
+                    }
+                ],
+            }
+        if len(calls) == 2:
+            assert messages[-1]["role"] == "tool"
+            assert "suggested_tool" in messages[-1]["content"]
+            assert "terminal.run" in messages[-1]["content"]
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_terminal",
+                        "type": "function",
+                        "function": {"name": "terminal_run", "arguments": json.dumps({"command": f"cat {external_file}"})},
+                    }
+                ],
+            }
+        assert messages[-1]["role"] == "tool"
+        assert "outside workspace" in messages[-1]["content"]
+        return {"content": "Recovered with terminal"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "External Path Reader",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["workspace.read", "terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Read the external file"})
+
+        assert run["status"] == "approval_required"
+        workspace_event = next(
+            event
+            for event in run["timeline"]
+            if event["event"] == "agent.tool.call" and event["detail"] == "workspace.read"
+        )
+        assert workspace_event["result"]["ok"] is False
+        assert workspace_event["result"]["suggested_tool"] == "terminal.run"
+
+        resumed = service.approve_run_approval(run["run_id"])
+
+        assert resumed["status"] == "completed"
+        assert resumed["result"] == "Recovered with terminal"
+    finally:
+        service.close()
+
+
 def test_agent_tool_loop_limit_includes_last_tool_detail(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
@@ -2042,7 +2112,7 @@ def test_agent_tool_loop_limit_after_artifact_write_completes_with_artifact(tmp_
         assert any(artifact.get("path") == "done.md" for artifact in run["artifacts"])
         assert service.read_run_artifact(run["run_id"], "done.md")["content"] == "done"
         assert any(event["event"] == "agent.tool.loop_limit_completed" for event in run["timeline"])
-        assert len(calls) == 6
+        assert len(calls) == 50
     finally:
         service.close()
 
@@ -2544,6 +2614,57 @@ def test_agent_run_consecutive_terminal_approvals_update_pending_request(tmp_pat
             "printf second-approved",
         ]
         assert service.get_run_group(after_second["run_group_id"])["status"] == "completed"
+    finally:
+        service.close()
+
+
+def test_agent_run_supports_more_than_six_terminal_turns(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    calls = []
+    terminal_turns = 8
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        turn = len(calls)
+        if turn <= terminal_turns:
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": f"call_terminal_{turn}",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": f"printf terminal-turn-{turn}"}),
+                        },
+                    }
+                ],
+            }
+        return {"content": "All terminal turns completed"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Long Terminal Agent",
+                "model_mode": "custom_api",
+                "model_config": {"base_url": "https://api.example.test/v1", "model": "demo-model", "api_key": "sk-secret"},
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+        run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Run all terminal checks"})
+
+        for turn in range(terminal_turns):
+            assert run["status"] == "approval_required"
+            assert run["pending_approval"]["input_preview"]["command"] == f"printf terminal-turn-{turn + 1}"
+            run = service.approve_run_approval(run["run_id"])
+
+        assert run["status"] == "completed"
+        assert run["result"] == "All terminal turns completed"
+        assert len(calls) == terminal_turns + 1
     finally:
         service.close()
 

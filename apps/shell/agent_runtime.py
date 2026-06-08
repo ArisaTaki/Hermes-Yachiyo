@@ -21,6 +21,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 from uuid import uuid4
 
+from apps.core.tls import urlopen_with_bundled_ca
 from apps.shell.model_profiles import (
     OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS,
     get_model_profile_service,
@@ -58,6 +59,7 @@ _TOOL_FUNCTION_NAMES = {
     "artifact.write": "artifact_write",
 }
 _TOOL_NAME_ALIASES = {value: key for key, value in _TOOL_FUNCTION_NAMES.items()}
+_MAX_AGENT_TOOL_ITERATIONS = 50
 _FINAL_RUN_STATUSES = {"completed", "failed", "cancelled"}
 _WORKFLOW_NODE_TYPES = {"start", "agent", "approval", "artifact"}
 _SKILL_SOURCE_TYPES = {"hermes_global", "hermes_project", "npx_skills", "hermes_cli", "local_zip", "local_dir"}
@@ -3125,6 +3127,10 @@ class AgentRuntimeService:
                 "If the user asks not to create, save, write, or modify files, provide the content inline and do "
                 "not request file-writing tools. If the user asks not to run or execute commands, do not request "
                 "command-execution tools. "
+                "Workspace tools only accept paths relative to the configured Default Workdir. Never pass absolute "
+                "paths to workspace tools. If a required target is outside that workspace and terminal.run is "
+                "allowed, use terminal.run instead. A failed workspace tool call is recoverable: follow its hint "
+                "or switch tools instead of stopping or retrying the same invalid path. "
                 f"Request at most one high-risk tool per turn.\n\nAllowed tools: {allowed_tool_text}"
             )
             messages = [
@@ -3132,7 +3138,7 @@ class AgentRuntimeService:
                 {"role": "user", "content": context},
             ]
         tools = self._tool_schemas(allowed_tools)
-        for iteration in range(max(0, int(start_iteration or 0)), 6):
+        for iteration in range(max(0, int(start_iteration or 0)), _MAX_AGENT_TOOL_ITERATIONS):
             message = openai_compatible_chat_message(base_url, model, api_key, messages, tools=tools)
             content = _message_content_text(message)
             tool_requests = self._tool_requests_from_message(message, content)
@@ -3339,7 +3345,27 @@ class AgentRuntimeService:
         if tool_name not in allowed_tools:
             timeline.append(self._timeline("agent.tool.denied", tool_name, input_preview=input_preview))
             raise AgentRuntimeError(f"Agent 试图调用未授权工具：{tool_name}")
-        tool_result = broker.call(tool_name, payload, approved=approved)
+        try:
+            tool_result = broker.call(tool_name, payload, approved=approved)
+        except AgentRuntimeError as exc:
+            if not tool_name.startswith("workspace."):
+                raise
+            terminal_hint = (
+                " If the required target is outside the configured workspace, use terminal.run and wait for approval."
+                if "terminal.run" in allowed_tools
+                else ""
+            )
+            tool_result = {
+                "ok": False,
+                "tool": tool_name,
+                "error": str(exc),
+                "hint": (
+                    "Workspace tools only accept relative paths within the configured Default Workdir. "
+                    "Use a valid relative path and do not retry the same invalid path."
+                    f"{terminal_hint}"
+                ),
+                **({"suggested_tool": "terminal.run"} if "terminal.run" in allowed_tools else {}),
+            }
         timeline.append(self._timeline("agent.tool.call", tool_name, input_preview=input_preview, result=tool_result))
         if artifacts is not None and tool_name == "artifact.write" and tool_result.get("ok"):
             artifact = {"kind": "tool_artifact", **tool_result}
@@ -3365,7 +3391,7 @@ class AgentRuntimeService:
             "messages": messages,
             "tool_request": tool_request,
             "remaining_tool_requests": remaining_tool_requests,
-            "next_iteration": max(0, min(int(next_iteration or 0), 6)),
+            "next_iteration": max(0, min(int(next_iteration or 0), _MAX_AGENT_TOOL_ITERATIONS)),
         }
 
     def _tool_requests_from_message(self, message: dict[str, Any], content: str) -> list[dict[str, Any]]:
@@ -3477,7 +3503,7 @@ class AgentRuntimeService:
             },
         )
         try:
-            with urlrequest.urlopen(request, timeout=OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS) as response:
+            with urlopen_with_bundled_ca(request, timeout=OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except (urlerror.URLError, TimeoutError, json.JSONDecodeError) as exc:
             raise AgentRuntimeError(f"custom_api 调用失败：{redact_secrets(exc)}") from exc

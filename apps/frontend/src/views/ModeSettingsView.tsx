@@ -586,7 +586,7 @@ function ReferenceSettingsHome() {
     }
   }
 
-  const appVersion = payload?.app?.version || '0.1.0';
+  const appVersion = payload?.app?.version || '0.4.0';
   const trayEnabled = payload?.app?.tray_enabled !== false;
   const startMinimized = Boolean(payload?.app?.start_minimized);
   const providerOptions = hermesConfig?.provider_options?.length ? hermesConfig.provider_options : FALLBACK_PROVIDER_OPTIONS;
@@ -2177,7 +2177,7 @@ function SystemSettingsView() {
         </SettingsSection>
 
         <SettingsSection title="更新">
-          <SettingsItem label="应用更新" description={`Hermes Yachiyo v${payload?.app?.version || '0.1.0'} · 下载进度和版本差异在更新页处理`}>
+          <SettingsItem label="应用更新" description={`Hermes Yachiyo v${payload?.app?.version || '0.4.0'} · 下载进度和版本差异在更新页处理`}>
             <SettingsActionButton onClick={() => navigateTo('app-update')}>打开更新页</SettingsActionButton>
           </SettingsItem>
           <SettingsItem label="Hermes Agent 更新" description="Hermes 自身功能、toolset 和 provider 能力在工具中心更新并重新同步">

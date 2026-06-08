@@ -3513,7 +3513,7 @@ export function AgentStudioView() {
               <small className="agent-field-help">写任务边界、工作方法、必须遵守的功能要求。</small>
             </label>
             <label>
-              <span>Persona Prompt</span>
+              <span>Personal Prompt</span>
               <textarea className="hy-input agent-textarea compact" value={draft.persona_prompt} onChange={(event) => setDraft({ ...draft, persona_prompt: event.target.value })} />
               <small className="agent-field-help">写人设、口吻、角色偏好；运行时会和功能要求分段放进 Agent context。</small>
             </label>

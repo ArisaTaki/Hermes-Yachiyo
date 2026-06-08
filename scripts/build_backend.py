@@ -9,7 +9,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 ENTRYPOINT = ROOT / "packaging" / "backend_entry.py"
 DIST_DIR = ROOT / "dist" / "backend"
@@ -73,6 +72,8 @@ def build_backend(clean: bool = False) -> Path:
         str(BUILD_DIR),
         "--additional-hooks-dir",
         str(PYINSTALLER_HOOKS_DIR),
+        "--collect-data",
+        "certifi",
     ]
     for data_arg in data_args:
         command.extend(["--add-data", data_arg])

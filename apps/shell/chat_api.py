@@ -1273,6 +1273,225 @@ class ChatAPI:
         assistant_ids.append(workflow_message_id)
         return assistant_ids
 
+    def _sync_workflow_child_run_messages(
+        self,
+        service: Any,
+        workflow_run: dict[str, Any],
+    ) -> tuple[str, str] | None:
+        workflow_run_id = str(workflow_run.get("run_id") or "").strip()
+        if not workflow_run_id:
+            return None
+
+        group_run_ids: list[str] = []
+        run_group_id = str(workflow_run.get("run_group_id") or "").strip()
+        if run_group_id and hasattr(service, "get_run_group"):
+            try:
+                group = service.get_run_group(run_group_id)
+                group_run_ids.extend(
+                    str(run_id or "").strip()
+                    for run_id in group.get("child_run_ids") or []
+                    if str(run_id or "").strip() and str(run_id or "").strip() != workflow_run_id
+                )
+            except Exception:
+                logger.debug("读取 Workflow Run Group 失败: %s", run_group_id, exc_info=True)
+
+        timeline = [event for event in (workflow_run.get("timeline") or []) if isinstance(event, dict)]
+        child_ids: list[str] = []
+        node_event_by_child_id: dict[str, dict[str, Any]] = {}
+        planned_agent_nodes: list[dict[str, Any]] = []
+        for event in timeline:
+            if str(event.get("event") or "") == "workflow.run.started":
+                planned_agent_nodes = [
+                    item
+                    for item in event.get("workflow_path") or []
+                    if isinstance(item, dict) and str(item.get("kind") or "") == "agent"
+                ]
+            if str(event.get("event") or "") != "workflow.node.agent":
+                continue
+            child_run_id = str(event.get("child_run_id") or "").strip()
+            if not child_run_id:
+                continue
+            node_event_by_child_id[child_run_id] = event
+            if child_run_id not in child_ids:
+                child_ids.append(child_run_id)
+
+        workflow_status = self._normalize_agent_run_status(str(workflow_run.get("status") or ""))
+        if workflow_status in {"processing", "pending"}:
+            # The parent timeline records an Agent node after it settles. While
+            # it is running, discover only the next unknown Agent Run from the
+            # workflow-owned group; later manual @Agent follow-ups must not be
+            # mistaken for Workflow nodes.
+            for candidate_run_id in group_run_ids:
+                if candidate_run_id in child_ids:
+                    continue
+                try:
+                    candidate = service.get_run(candidate_run_id)
+                except Exception:
+                    continue
+                if str(candidate.get("kind") or "") == "agent_run":
+                    child_ids.append(candidate_run_id)
+                    break
+
+        existing_by_run_id: dict[str, ChatMessage] = {}
+        for message in self._session.get_all_messages():
+            if message.role != MessageRole.ASSISTANT:
+                continue
+            metadata = message.metadata if isinstance(message.metadata, dict) else {}
+            parent_run_id = str(metadata.get("workflow_parent_run_id") or metadata.get("workflow_run_id") or "").strip()
+            if parent_run_id != workflow_run_id or metadata.get("runnable_kind") != "agent":
+                continue
+            child_run_id = str(metadata.get("run_id") or "").strip()
+            if child_run_id:
+                existing_by_run_id[child_run_id] = message
+
+        active_progress: tuple[str, str] | None = None
+        agent_index = 0
+        for child_run_id in child_ids:
+            try:
+                child = service.get_run(child_run_id)
+            except Exception:
+                logger.debug("读取 Workflow 子 Agent Run 失败: %s", child_run_id, exc_info=True)
+                continue
+            if str(child.get("kind") or "") != "agent_run":
+                continue
+            node_info = dict(node_event_by_child_id.get(child_run_id) or {})
+            if not node_info and agent_index < len(planned_agent_nodes):
+                planned = planned_agent_nodes[agent_index]
+                node_info = {
+                    "workflow_node_id": planned.get("id") or "",
+                    "workflow_node_kind": planned.get("kind") or "agent",
+                    "workflow_node_label": planned.get("label") or "",
+                    "workflow_node_task": planned.get("task") or "",
+                }
+            agent_index += 1
+            try:
+                child_runnable = service.resolve_runnable(runnable_id=str(child.get("runnable_id") or "")) or {}
+            except Exception:
+                logger.debug("读取 Workflow 子 Agent 失败: %s", child.get("runnable_id"), exc_info=True)
+                child_runnable = {}
+            sender = self._participant_for_runnable(child_runnable) or {
+                "kind": "agent",
+                "id": str(child.get("runnable_id") or ""),
+                "name": str(child.get("runnable_name") or child.get("runnable_id") or "Agent"),
+            }
+            message = existing_by_run_id.get(child_run_id)
+            if message is None:
+                message_id = self._session.add_assistant_message(
+                    "",
+                    metadata={
+                        "sender": sender,
+                        "runnable_kind": "agent",
+                        "runnable_id": child_runnable.get("id") or child.get("runnable_id") or "",
+                        "run_id": child_run_id,
+                        "run_group_id": workflow_run.get("run_group_id") or child.get("run_group_id") or "",
+                        "run_status": "processing",
+                        "workflow_run_id": workflow_run_id,
+                        "workflow_parent_run_id": workflow_run_id,
+                    },
+                )
+            else:
+                message_id = message.message_id
+            self._update_workflow_child_run_message(message_id, sender, child, node_info)
+            if self._normalize_agent_run_status(str(child.get("status") or "")) in _ACTIVE_RUN_STATUSES:
+                active_progress = self._workflow_child_run_progress(sender, child, node_info)
+        return active_progress
+
+    def _update_workflow_child_run_message(
+        self,
+        message_id: str,
+        sender: dict[str, Any],
+        child_run: dict[str, Any],
+        node_info: dict[str, Any],
+    ) -> None:
+        status = self._normalize_agent_run_status(str(child_run.get("status") or "processing"))
+        node_label = str(node_info.get("workflow_node_label") or node_info.get("detail") or "").strip()
+        node_task = str(node_info.get("workflow_node_task") or "").strip()
+        if not node_task:
+            node_task = str(child_run.get("user_goal") or "").strip()
+        pending_approval = child_run.get("pending_approval") if isinstance(child_run.get("pending_approval"), dict) else {}
+        artifact_count, artifact_summaries = self._visible_run_artifact_summaries(child_run)
+        metadata = {
+            "sender": sender,
+            "runnable_kind": "agent",
+            "runnable_id": child_run.get("runnable_id") or "",
+            "run_id": child_run.get("run_id") or "",
+            "run_group_id": child_run.get("run_group_id") or "",
+            "run_status": status,
+            "pending_approval": pending_approval,
+            "workflow_parent_run_id": str(node_info.get("workflow_parent_run_id") or "") or None,
+            "workflow_node": node_label,
+            "workflow_node_task": node_task,
+            "run_artifact_count": artifact_count,
+            "run_artifacts": artifact_summaries,
+        }
+        existing = self._message_metadata(message_id)
+        workflow_parent_run_id = str(
+            existing.get("workflow_parent_run_id")
+            or existing.get("workflow_run_id")
+            or node_info.get("workflow_parent_run_id")
+            or ""
+        ).strip()
+        metadata["workflow_parent_run_id"] = workflow_parent_run_id
+        metadata["workflow_run_id"] = workflow_parent_run_id
+
+        if status == "approval_required":
+            content = self._approval_required_content(sender, child_run, goal=node_task)
+            self._session.update_assistant_message(
+                message_id,
+                content,
+                status=MessageStatus.PROCESSING,
+                error=None,
+                metadata=metadata,
+            )
+            return
+        if status in {"processing", "pending"}:
+            title, detail = self._workflow_child_run_progress(sender, child_run, node_info)
+            self._session.update_assistant_message(
+                message_id,
+                "",
+                status=MessageStatus.PROCESSING,
+                error=None,
+                metadata={
+                    **metadata,
+                    "run_progress_title": title,
+                    "run_progress_detail": detail,
+                },
+            )
+            return
+
+        result = str(child_run.get("result") or "").strip()
+        content = self._workflow_child_terminal_content(
+            sender,
+            status,
+            result,
+            node_label=node_label,
+            node_task=node_task,
+            artifact_notice_count=artifact_count,
+        )
+        self._session.update_assistant_message(
+            message_id,
+            content,
+            status=self._message_status_for_run_status(status),
+            error=content if status in {"failed", "cancelled"} else None,
+            metadata=metadata,
+        )
+
+    @staticmethod
+    def _workflow_child_run_progress(
+        sender: dict[str, Any],
+        child_run: dict[str, Any],
+        node_info: dict[str, Any],
+    ) -> tuple[str, str]:
+        name = str(sender.get("nickname") or sender.get("name") or child_run.get("runnable_name") or "Agent").strip() or "Agent"
+        node_label = str(node_info.get("workflow_node_label") or node_info.get("detail") or "").strip()
+        node_task = str(node_info.get("workflow_node_task") or child_run.get("user_goal") or "").strip()
+        task_preview = _compact_preview(node_task, 160)
+        node_text = f"节点「{node_label}」" if node_label else "当前 Workflow 节点"
+        detail = f"{name} 正在执行{node_text}"
+        if task_preview:
+            detail = f"{detail}：{task_preview}"
+        return "Workflow 正在执行 Agent", detail
+
     @staticmethod
     def _run_status_sentence(name: str, status: str) -> str:
         normalized = "processing" if status == "running" else status
@@ -1400,7 +1619,18 @@ class ChatAPI:
             if event_name == "workflow.run.resumed":
                 return "Workflow 已继续", f"{name} 已通过审批并继续后续步骤。"
             if event_name == "workflow.run.started":
-                return "Workflow 已开始", f"{name} 已收到目标，正在按流程执行。"
+                path_labels = [
+                    str(item.get("label") or "").strip()
+                    for item in event.get("workflow_path") or []
+                    if isinstance(item, dict)
+                    and str(item.get("kind") or "") not in {"", "start"}
+                    and str(item.get("label") or "").strip()
+                ]
+                plan = " → ".join(path_labels)
+                detail = f"{name} 已收到目标，正在按流程执行。"
+                if plan:
+                    detail = f"执行计划：{_compact_preview(plan, 180)}。{detail}"
+                return "Workflow 已开始", detail
         return "Workflow 正在执行", f"{name} 正在继续处理当前流程。"
 
     @staticmethod
@@ -1690,6 +1920,39 @@ class ChatAPI:
         if artifact_notice_count > 0:
             lines.append(f"产物：{artifact_notice_count} 个，见运行详情。")
         if body and lines[0] != body:
+            lines.extend(["", body])
+        return "\n".join(lines)
+
+    @classmethod
+    def _workflow_child_terminal_content(
+        cls,
+        sender: dict[str, Any],
+        status: str,
+        content: str,
+        *,
+        node_label: str = "",
+        node_task: str = "",
+        artifact_notice_count: int = 0,
+    ) -> str:
+        name = str(sender.get("nickname") or sender.get("name") or "Agent").strip() or "Agent"
+        if status == "failed":
+            intro = f"{name} 的 Workflow 节点执行失败。"
+        elif status == "cancelled":
+            intro = f"{name} 的 Workflow 节点已取消。"
+        else:
+            intro = f"{name} 已完成 Workflow 节点。"
+        lines = [intro]
+        if node_label:
+            lines.append(f"节点：{node_label}")
+        if node_task:
+            if "\n" in node_task:
+                lines.extend(["任务：", node_task])
+            else:
+                lines.append(f"任务：{node_task}")
+        if artifact_notice_count > 0:
+            lines.append(f"产物：{artifact_notice_count} 个，见运行详情。")
+        body = str(content or "").strip()
+        if body:
             lines.extend(["", body])
         return "\n".join(lines)
 
@@ -3105,12 +3368,19 @@ class ChatAPI:
             logger.debug("读取 Run 状态失败", exc_info=True)
             return
         for msg, metadata in candidates:
+            if metadata.get("workflow_parent_run_id"):
+                # Workflow child messages are synchronized together with their
+                # parent so node/task context is preserved in the chat timeline.
+                continue
             run_id = str(metadata.get("run_id") or metadata.get("workflow_run_id") or "").strip()
             try:
                 run = service.get_run(run_id)
             except Exception:
                 logger.debug("读取 Run 失败: %s", run_id, exc_info=True)
                 continue
+            workflow_child_progress = None
+            if metadata.get("runnable_kind") == "workflow":
+                workflow_child_progress = self._sync_workflow_child_run_messages(service, run)
             status = str(run.get("status") or "").strip()
             normalized_status = self._normalize_agent_run_status(status)
             if (
@@ -3162,7 +3432,7 @@ class ChatAPI:
                     continue
                 sender = metadata.get("sender") if isinstance(metadata.get("sender"), dict) else {}
                 if metadata.get("runnable_kind") == "workflow":
-                    title, detail = self._workflow_run_progress_from_timeline(sender, run)
+                    title, detail = workflow_child_progress or self._workflow_run_progress_from_timeline(sender, run)
                 else:
                     title, detail = self._agent_run_progress_from_timeline(sender, run)
                 if (
@@ -5253,7 +5523,8 @@ class ChatAPI:
         normalized_query = " ".join(str(query or "").split()).strip()
         current_session = self._runtime.chat_session
         current_session_id = current_session.session_id
-        search_results = store.search_sessions(normalized_query, limit=max(limit, 50)) if normalized_query else []
+        search_limit = limit if limit <= 0 else max(limit, 50)
+        search_results = store.search_sessions(normalized_query, limit=search_limit) if normalized_query else []
         sessions = [] if normalized_query else store.list_sessions(limit=limit)
         session_items = []
         iterable_sessions = [result.session for result in search_results] if normalized_query else sessions

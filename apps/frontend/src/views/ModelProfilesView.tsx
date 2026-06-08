@@ -666,6 +666,7 @@ export function ModelProfilesView() {
   const [sourceDraft, setSourceDraft] = useState<SourceDraft>(emptySourceDraft);
   const [modelDraft, setModelDraft] = useState<ModelDraft>(emptyModelDraft);
   const [modelCatalog, setModelCatalog] = useState<RemoteModelInfo[]>([]);
+  const [modelCatalogFetched, setModelCatalogFetched] = useState(false);
   const [modelCatalogQuery, setModelCatalogQuery] = useState('');
   const [providerMenuOpen, setProviderMenuOpen] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -818,6 +819,7 @@ export function ModelProfilesView() {
     setSelectedModelId(firstModel?.profile_id || '');
     setModelDraft(firstModel ? modelToDraft(firstModel) : { ...emptyModelDraft, capability: activeCapability, model: defaultModelName(sourceToDraft(source as ModelSourceView), activeCapability) });
     setModelCatalog([]);
+    setModelCatalogFetched(false);
     setModelCatalogQuery('');
     setProviderMenuOpen(false);
   }
@@ -841,6 +843,7 @@ export function ModelProfilesView() {
       setSourceDraft(draft);
       setModelDraft({ ...emptyModelDraft, capability: activeCapability, model: defaultModelName(draft, activeCapability) });
       setModelCatalog([]);
+      setModelCatalogFetched(false);
       setModelCatalogQuery('');
       setProviderMenuOpen(false);
       setStatus('');
@@ -854,6 +857,7 @@ export function ModelProfilesView() {
     setSourceDraft(draft);
     setModelDraft({ ...emptyModelDraft, capability: activeCapability, model: defaultModelName(draft, activeCapability) });
     setModelCatalog([]);
+    setModelCatalogFetched(false);
     setModelCatalogQuery('');
     setProviderMenuOpen(false);
     setStatus('');
@@ -899,6 +903,7 @@ export function ModelProfilesView() {
       setSourceDraft(nextDraft);
       setModelDraft({ ...emptyModelDraft, capability: activeCapability, model: defaultModelName(nextDraft, activeCapability) });
       setModelCatalog([]);
+      setModelCatalogFetched(false);
       setModelCatalogQuery('');
       setProviderMenuOpen(false);
       setStatus('');
@@ -916,6 +921,7 @@ export function ModelProfilesView() {
       setSourceDraft(draft);
       setModelDraft({ ...emptyModelDraft, capability, model: defaultModelName(draft, capability) });
       setModelCatalog([]);
+      setModelCatalogFetched(false);
       setModelCatalogQuery('');
       setProviderMenuOpen(false);
       return;
@@ -926,6 +932,7 @@ export function ModelProfilesView() {
     setSelectedModelId(firstModel?.profile_id || '');
     setModelDraft(firstModel ? modelToDraft(firstModel) : { ...emptyModelDraft, capability, model: defaultModelName(sourceToDraft(source), capability) });
     setModelCatalog([]);
+    setModelCatalogFetched(false);
     setModelCatalogQuery('');
     setProviderMenuOpen(false);
   }
@@ -955,8 +962,16 @@ export function ModelProfilesView() {
       ? current
       : { ...current, model: defaultModelName(nextDraft, current.capability) });
     setModelCatalog([]);
+    setModelCatalogFetched(false);
     setModelCatalogQuery('');
     setProviderMenuOpen(false);
+  }
+
+  function updateSourceConnectionDraft(nextDraft: SourceDraft) {
+    setSourceDraft(nextDraft);
+    setModelCatalog([]);
+    setModelCatalogFetched(false);
+    setModelCatalogQuery('');
   }
 
   async function saveSource(): Promise<ModelSource> {
@@ -1003,12 +1018,14 @@ export function ModelProfilesView() {
       setStatus('TTS 提供商使用独立语音数据源，不从 OpenRouter 模型列表获取。');
       return;
     }
+    setModelCatalogFetched(false);
     setBusy('models-fetch');
     setStatus('正在保存源并获取模型列表...');
     try {
       const saved = await saveSource();
       if (saved.enabled === false) {
         setModelCatalog([]);
+        setModelCatalogFetched(false);
         setModelCatalogQuery('');
         setStatus('提供商源已暂停，状态已保存；恢复使用后才能获取模型列表或测试模型。');
         await refresh(saved.source_id, selectedModelId, activeCapability);
@@ -1017,6 +1034,7 @@ export function ModelProfilesView() {
       const result = await fetchModelSourceModels(saved.source_id);
       const models = result.models || [];
       setModelCatalog(models);
+      setModelCatalogFetched(true);
       setModelCatalogQuery('');
       const usableCount = activeCapability === 'vision'
         ? models.filter((model) => modelSupportsCapability(model, 'vision')).length
@@ -1102,6 +1120,10 @@ export function ModelProfilesView() {
 
   async function runModelTest(profileId?: string) {
     if (busy) return;
+    if (!profileId && activeCapability !== 'tts' && !modelCatalogFetched) {
+      setStatus('请先保存并获取模型列表，再测试连接并保存模型。');
+      return;
+    }
     if (sourceDraft.enabled === false) {
       setStatus('提供商源已暂停，恢复使用后才能测试模型。');
       return;
@@ -1158,6 +1180,9 @@ export function ModelProfilesView() {
     setBusy('source-delete');
     try {
       await deleteModelSource(sourceDraft.source_id);
+      setModelCatalog([]);
+      setModelCatalogFetched(false);
+      setModelCatalogQuery('');
       setStatus('提供商源已删除');
       await refresh('', '');
     } catch (err) {
@@ -1415,15 +1440,15 @@ export function ModelProfilesView() {
                     </label>
                     <label>
                       <span>{activeCapability === 'tts' ? 'Endpoint' : 'Base URL'}</span>
-                      <input className="hy-input" value={sourceDraft.base_url} disabled={Boolean(busy)} onChange={(event) => setSourceDraft({ ...sourceDraft, base_url: event.target.value })} placeholder={providerPreset(sourceDraft.provider).baseUrl || (activeCapability === 'tts' ? 'http://127.0.0.1:9880' : 'https://api.example.com/v1')} />
+                      <input className="hy-input" value={sourceDraft.base_url} disabled={Boolean(busy)} onChange={(event) => updateSourceConnectionDraft({ ...sourceDraft, base_url: event.target.value })} placeholder={providerPreset(sourceDraft.provider).baseUrl || (activeCapability === 'tts' ? 'http://127.0.0.1:9880' : 'https://api.example.com/v1')} />
                     </label>
                     <label>
                       <span>{activeCapability === 'tts' ? 'Token / Key' : 'API Key'}</span>
-                      <input className="hy-input" type="password" value={sourceDraft.api_key} disabled={Boolean(busy)} onChange={(event) => setSourceDraft({ ...sourceDraft, api_key: event.target.value })} placeholder={selectedSource?.api_key_configured ? '已配置，留空不覆盖' : '仅保存在本机后端'} />
+                      <input className="hy-input" type="password" value={sourceDraft.api_key} disabled={Boolean(busy)} onChange={(event) => updateSourceConnectionDraft({ ...sourceDraft, api_key: event.target.value })} placeholder={selectedSource?.api_key_configured ? '已配置，留空不覆盖' : '仅保存在本机后端'} />
                     </label>
                   </div>
                   <label className={sourceDraft.enabled ? 'model-profile-toggle' : 'model-profile-toggle paused'}>
-                    <input type="checkbox" checked={sourceDraft.enabled} disabled={Boolean(busy)} onChange={(event) => setSourceDraft({ ...sourceDraft, enabled: event.target.checked })} />
+                    <input type="checkbox" checked={sourceDraft.enabled} disabled={Boolean(busy)} onChange={(event) => updateSourceConnectionDraft({ ...sourceDraft, enabled: event.target.checked })} />
                     <span>{sourceDraft.enabled ? '正在使用这个提供商源' : '已暂停这个提供商源'}</span>
                   </label>
                   <div className="agent-editor-actions">
@@ -1459,7 +1484,7 @@ export function ModelProfilesView() {
                     {activeCapability === 'tts' ? (
                       <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>{modelDraft.profile_id ? '保存语音配置' : '添加语音配置'}</button>
                     ) : (
-                      <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy) || sourceDraft.enabled === false}>{busy === 'model-test' ? '测试中...' : '测试连接并保存'}</button>
+                      <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy) || sourceDraft.enabled === false || !modelCatalogFetched}>{busy === 'model-test' ? '测试中...' : '测试连接并保存'}</button>
                     )}
                   </form>
 

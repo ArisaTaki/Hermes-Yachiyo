@@ -24,6 +24,7 @@ from urllib import request as urlrequest
 from urllib.parse import urlparse
 from uuid import uuid4
 
+from apps.core.tls import urlopen_with_bundled_ca
 from apps.shell.hermes_capabilities import lookup_model_supports_vision
 from apps.shell.model_provider_adapters import resolve_provider_adapter
 from apps.shell.provider_catalog_sync import cached_model_metadata, cached_provider_models
@@ -917,7 +918,7 @@ class ModelProfileService:
             headers["Accept"] = "application/json"
         request = urlrequest.Request(models_url, method="GET", headers=headers)
         try:
-            with urlrequest.urlopen(request, timeout=20) as response:
+            with urlopen_with_bundled_ca(request, timeout=20) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except (urlerror.URLError, TimeoutError, json.JSONDecodeError) as exc:
             cached_models = cached_provider_models(provider, base_url=base_url)
@@ -1493,7 +1494,7 @@ def _openai_compatible_chat_payload(
         headers=_openai_compatible_auth_headers(base_url, api_key),
     )
     try:
-        with urlrequest.urlopen(request, timeout=OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS) as response:
+        with urlopen_with_bundled_ca(request, timeout=OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urlerror.HTTPError as exc:
         detail = ""
