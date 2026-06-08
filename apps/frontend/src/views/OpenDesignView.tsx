@@ -56,6 +56,7 @@ type DashboardData = {
 
 type ActivityEvent = {
   event_id?: string;
+  trace_event_ids?: string[];
   session_id?: string;
   task_id?: string;
   tool_name?: string;
@@ -1906,6 +1907,7 @@ export function ActivityDetailPage() {
   const [error, setError] = useState('');
   const [deleting, setDeleting] = useState(false);
   const { confirmDialog, requestConfirm } = useConfirmDialog();
+  const [expandedTraceIds, setExpandedTraceIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     if (!eventId) {
@@ -1931,11 +1933,26 @@ export function ActivityDetailPage() {
     };
   }, [eventId]);
 
+  useEffect(() => {
+    setExpandedTraceIds(new Set());
+  }, [eventId]);
+
   const event = payload?.event || null;
-  const trace = payload?.trace || [];
+  const trace = compactActivityTrace(activityTraceSource(payload?.trace || [], event));
   const metadataText = formatMetadata(event?.metadata);
   const detailLoading = !error && !payload;
   usePageLoading(detailLoading);
+
+  useEffect(() => {
+    if (!payload || !eventId) return undefined;
+    const timer = window.setTimeout(() => {
+      document.getElementById(activityTraceDomId(eventId))?.scrollIntoView({
+        block: 'center',
+        behavior: 'smooth',
+      });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [payload, eventId]);
 
   function returnFromActivityDetail() {
     if (window.history.length > 1) {
@@ -1968,6 +1985,15 @@ export function ActivityDetailPage() {
       confirmLabel: '删除日志',
       variant: 'danger',
       onConfirm: () => void deleteCurrentEvent(),
+    });
+  }
+
+  function toggleTraceExpanded(traceId: string) {
+    setExpandedTraceIds((current) => {
+      const next = new Set(current);
+      if (next.has(traceId)) next.delete(traceId);
+      else next.add(traceId);
+      return next;
     });
   }
 
@@ -2052,17 +2078,55 @@ export function ActivityDetailPage() {
           <section className="activity-detail-body">
             <h3>完整过程</h3>
             <div className="activity-trace-list">
-              {trace.length ? trace.map((item) => (
-                <article className={`activity-trace-row activity-item-${activityTone(item.status)}`} key={item.event_id || `${item.created_at}-${item.title}`}>
-                  <span className="activity-icon">{activityIcon(item)}</span>
-                  <div className="activity-content">
-                    <strong>{item.title || item.tool_name || 'Hermes 活动'}</strong>
-                    <small>{activityDetail(item)}</small>
-                    <em>{activityPhaseLabel(item.phase)}</em>
-                  </div>
-                  <time className="activity-time">{formatFullDateTime(item.created_at)}</time>
-                </article>
-              )) : (
+              {trace.length ? trace.map((item, index) => {
+                const traceId = activityTraceKey(item, index);
+                const itemMetadataText = formatMetadata(item.metadata);
+                const canExpand = Boolean(item.detail || itemMetadataText);
+                const expanded = expandedTraceIds.has(traceId);
+                const focused = activityTraceContainsEvent(item, eventId);
+                return (
+                  <article
+                    id={focused ? activityTraceDomId(eventId) : item.event_id ? activityTraceDomId(item.event_id) : undefined}
+                    className={`activity-trace-row activity-item-${activityTone(item.status)}${expanded ? ' expanded' : ''}${focused ? ' focused' : ''}`}
+                    key={traceId}
+                  >
+                    <span className="activity-icon">{activityIcon(item)}</span>
+                    <div className="activity-content">
+                      <div className="activity-trace-heading">
+                        <strong>{item.title || item.tool_name || 'Hermes 活动'}</strong>
+                        {canExpand ? (
+                          <button
+                            type="button"
+                            className="activity-trace-expand"
+                            title={expanded ? '收起全文' : '查看全文'}
+                            aria-label={expanded ? '收起全文' : '查看全文'}
+                            onClick={() => toggleTraceExpanded(traceId)}
+                          >
+                            <UiIcon name={expanded ? 'close' : 'plus'} />
+                            <span>{expanded ? '收起' : '全文'}</span>
+                          </button>
+                        ) : null}
+                      </div>
+                      <small>{compactActivityDetail(item)}</small>
+                      {expanded ? (
+                        <div className="activity-trace-expanded">
+                          {item.detail ? (
+                            <div>
+                              <span>完整摘要</span>
+                              <p>{item.detail}</p>
+                            </div>
+                          ) : null}
+                          {itemMetadataText ? (
+                            <pre>{itemMetadataText}</pre>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      <em>{activityPhaseLabel(item.phase)}</em>
+                    </div>
+                    <time className="activity-time">{formatFullDateTime(item.created_at)}</time>
+                  </article>
+                );
+              }) : (
                 <div className="inline-empty">暂无同任务过程</div>
               )}
             </div>
@@ -2483,6 +2547,95 @@ function activityEventRow(event: ActivityEvent, fullTime: boolean): ActivityRowD
     taskId: event.task_id,
     phase: event.phase,
   };
+}
+
+function activityTraceKey(event: ActivityEvent, index: number) {
+  return event.event_id || `${event.created_at || 'trace'}-${event.title || event.tool_name || 'activity'}-${index}`;
+}
+
+function activityTraceDomId(eventId: string) {
+  return `activity-trace-${eventId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+}
+
+function activityTraceIds(event: ActivityEvent) {
+  const ids = event.trace_event_ids || [];
+  if (!event.event_id) return ids;
+  return ids.includes(event.event_id) ? ids : [event.event_id, ...ids];
+}
+
+function activityTraceContainsEvent(event: ActivityEvent, eventId: string) {
+  return Boolean(eventId && activityTraceIds(event).includes(eventId));
+}
+
+function activityTraceSource(events: ActivityEvent[], event: ActivityEvent | null) {
+  if (!event?.event_id) return events;
+  if (events.some((item) => activityTraceContainsEvent(item, event.event_id || ''))) return events;
+  const targetTime = activityEventTimestamp(event);
+  const next = [...events];
+  if (targetTime === null) {
+    next.push(event);
+    return next;
+  }
+  const insertAt = next.findIndex((item) => {
+    const itemTime = activityEventTimestamp(item);
+    return itemTime !== null && itemTime > targetTime;
+  });
+  if (insertAt === -1) next.push(event);
+  else next.splice(insertAt, 0, event);
+  return next;
+}
+
+function activityEventTimestamp(event: ActivityEvent) {
+  const value = Date.parse(event.created_at || '');
+  return Number.isFinite(value) ? value : null;
+}
+
+function compactActivityTrace(events: ActivityEvent[]) {
+  const compacted: ActivityEvent[] = [];
+  events.forEach((event) => {
+    const last = compacted[compacted.length - 1];
+    if (last && shouldMergeTraceEvents(last, event)) {
+      last.detail = mergeTraceDetail(last.detail || '', event.detail || '', event.phase || '');
+      last.duration_seconds = traceDuration(last.duration_seconds, event.duration_seconds);
+      last.trace_event_ids = mergeTraceIds(activityTraceIds(last), activityTraceIds(event));
+      return;
+    }
+    compacted.push({ ...event, trace_event_ids: activityTraceIds(event) });
+  });
+  return compacted;
+}
+
+function mergeTraceIds(previous: string[], next: string[]) {
+  return Array.from(new Set([...previous, ...next]));
+}
+
+function shouldMergeTraceEvents(previous: ActivityEvent, next: ActivityEvent) {
+  const phase = String(next.phase || '');
+  if (!['thinking', 'reasoning', 'tool_progress'].includes(phase)) return false;
+  return previous.phase === next.phase
+    && previous.status === next.status
+    && previous.title === next.title
+    && previous.tool_name === next.tool_name
+    && previous.session_id === next.session_id
+    && previous.task_id === next.task_id;
+}
+
+function mergeTraceDetail(previous: string, next: string, phase: string) {
+  if (!previous) return next;
+  if (!next) return previous;
+  if (phase === 'thinking' || phase === 'reasoning') return `${previous}${next}`;
+  return `${previous}\n${next}`;
+}
+
+function traceDuration(previous?: number | null, next?: number | null) {
+  const values = [previous, next].filter((value): value is number => typeof value === 'number');
+  return values.length ? values.reduce((total, value) => total + value, 0) : previous ?? next ?? null;
+}
+
+function compactActivityDetail(event: ActivityEvent, maxLength = 220) {
+  const detail = activityDetail(event);
+  if (detail.length <= maxLength) return detail;
+  return `${detail.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
 function activityDetail(event: ActivityEvent) {

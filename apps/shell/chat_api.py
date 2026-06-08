@@ -52,6 +52,7 @@ _MAX_ATTACHMENT_CACHE_AGE_SECONDS = int(
     os.getenv("HERMES_YACHIYO_ATTACHMENT_CACHE_AGE_SECONDS", str(30 * 24 * 60 * 60))
 )
 _DATA_URL_RE = re.compile(r"^data:(image/[A-Za-z0-9.+-]+);base64,(.*)$", re.DOTALL)
+_VISION_ATTACHMENT_TOKEN_ESTIMATE = 85
 _IMAGE_EXTENSIONS_BY_MIME = {
     "image/png": ".png",
     "image/jpeg": ".jpg",
@@ -60,6 +61,76 @@ _IMAGE_EXTENSIONS_BY_MIME = {
     "image/gif": ".gif",
     "image/bmp": ".bmp",
 }
+
+
+def estimate_chat_message_tokens(message: Any) -> int:
+    """Return a local token estimate for a stored or in-memory chat message."""
+    content = str(getattr(message, "content", "") or "")
+    attachments = _message_attachments(message)
+    return _estimate_text_tokens(content) + _estimate_attachment_tokens(attachments)
+
+
+def estimate_chat_tokens(messages: list[Any]) -> int:
+    return sum(estimate_chat_message_tokens(message) for message in messages)
+
+
+def _estimate_text_tokens(text: str) -> int:
+    if not text:
+        return 0
+
+    tokens = 0
+    ascii_run = 0
+
+    def flush_ascii_run() -> None:
+        nonlocal ascii_run, tokens
+        if ascii_run:
+            tokens += max(1, (ascii_run + 3) // 4)
+            ascii_run = 0
+
+    for char in text:
+        if char.isspace():
+            flush_ascii_run()
+            continue
+        codepoint = ord(char)
+        if (
+            0x3040 <= codepoint <= 0x30FF
+            or 0x3400 <= codepoint <= 0x9FFF
+            or 0xAC00 <= codepoint <= 0xD7AF
+        ):
+            flush_ascii_run()
+            tokens += 1
+        elif char.isalnum() or char in "_-":
+            ascii_run += 1
+        else:
+            flush_ascii_run()
+            tokens += 1
+    flush_ascii_run()
+    return tokens
+
+
+def _estimate_attachment_tokens(attachments: list[dict]) -> int:
+    total = 0
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        if str(attachment.get("kind") or "").lower() == "image":
+            total += _VISION_ATTACHMENT_TOKEN_ESTIMATE
+        spoken_text = str(attachment.get("spoken_text") or "")
+        if spoken_text:
+            total += _estimate_text_tokens(spoken_text)
+    return total
+
+
+def _message_attachments(message: Any) -> list[dict]:
+    attachments = getattr(message, "attachments", None)
+    if isinstance(attachments, list):
+        return [item for item in attachments if isinstance(item, dict)]
+    raw = getattr(message, "attachments_json", "[]")
+    try:
+        parsed = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return []
+    return [item for item in parsed if isinstance(item, dict)] if isinstance(parsed, list) else []
 _AUDIO_MIME_BY_EXTENSION = {
     ".wav": "audio/wav",
     ".mp3": "audio/mpeg",
@@ -2581,8 +2652,9 @@ class ChatAPI:
             {"ok": True, "session_id": str, "messages": [...], "is_processing": bool}
         """
         try:
-            # 同步任务状态到消息
+            # 同步主模型任务和 Agent/Workflow Run 状态，再刷新持久化快照。
             self._sync_current_session_status()
+            self._session.reload_from_store(fail_active_messages=False)
 
             anchor_message_id = str(anchor_message_id or "").strip()
             if anchor_message_id:
@@ -2598,6 +2670,7 @@ class ChatAPI:
             serialized_messages = self._serialize_chat_messages(sorted_msgs, activity_by_task)
             processing_count = self._session_processing_count(self._session.session_id, messages=sorted_msgs)
             approval_count = self._session_approval_count(self._session.session_id, messages=sorted_msgs)
+            all_messages = self._session.get_all_messages()
             return {
                 "ok": True,
                 "session_id": self._session.session_id,
@@ -2606,6 +2679,7 @@ class ChatAPI:
                 "processing_count": processing_count,
                 "approval_count": approval_count,
                 "messages": serialized_messages,
+                "token_count": estimate_chat_tokens(all_messages),
                 "anchor_message_id": anchor_message_id,
             }
 
@@ -2682,6 +2756,7 @@ class ChatAPI:
                     "created_at": m.created_at.isoformat(),
                     "attachments": self._serialize_attachments(m.attachments),
                     "metadata": m.metadata or {},
+                    "token_count": estimate_chat_message_tokens(m),
                     "progress_label": self._task_progress_label(m.task_id) if activity_events else "",
                     "activity_events": activity_events,
                 }
@@ -3146,7 +3221,7 @@ class ChatAPI:
                 continue
             source_text = task.result or msg.content
             requests = self._parse_group_dispatch_requests(source_text)
-            if requests and self._is_group_followup_task_description(task.description):
+            if self._is_group_followup_task_description(task.description):
                 cleaned_metadata = dict(metadata)
                 cleaned_metadata.pop("group_dispatch_pending", None)
                 cleaned_metadata.pop("group_dispatch_stream_visible_content", None)
@@ -5201,6 +5276,7 @@ class ChatAPI:
                 "is_processing": processing_count > 0,
                 "processing_count": processing_count,
                 "approval_count": approval_count,
+                "token_count": self._session_token_count(store, session.session_id, messages, session.message_count),
                 "latest_activity": self._latest_activity_for_session(session.session_id),
                 "latest_message_preview": self._session_latest_user_turn(messages),
                 "latest_message_status": self._session_latest_status(messages),
@@ -5229,6 +5305,12 @@ class ChatAPI:
                     "is_processing": processing_count > 0,
                     "processing_count": processing_count,
                     "approval_count": approval_count,
+                    "token_count": self._session_token_count(
+                        store,
+                        current_session_id,
+                        current_messages,
+                        stored_current.message_count if stored_current else 0,
+                    ),
                     "latest_activity": self._latest_activity_for_session(current_session_id),
                     "latest_message_preview": self._session_latest_user_turn(current_messages),
                     "latest_message_status": self._session_latest_status(current_messages),
@@ -5539,6 +5621,15 @@ class ChatAPI:
             if status:
                 return status
         return ""
+
+    @staticmethod
+    def _session_token_count(store: Any, session_id: str, messages: list[Any], message_count: int) -> int:
+        try:
+            if int(message_count or 0) > len(messages):
+                messages = store.load_messages(session_id, limit=0)
+        except Exception:
+            logger.debug("读取完整会话消息以估算 token 失败: %s", session_id, exc_info=True)
+        return estimate_chat_tokens(messages)
 
     def delete_current_session(self) -> Dict[str, Any]:
         """删除当前会话，并切换到剩余最近会话或新建空会话。"""

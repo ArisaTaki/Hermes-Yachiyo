@@ -813,7 +813,7 @@ function ReferenceSettingsHome() {
             </SettingsItem>
             <SettingsItem
               label="资料同步"
-              description={`记忆范围：${assistantProfile?.memory_enabled ? '已启用' : '暂未启用'} · ${assistantProfile?.memory_scope || 'local_only'}`}
+              description={`记忆范围：${assistantProfile?.memory_enabled ? '已启用' : '暂未启用'} · ${assistantProfile?.memory_scope || 'local_chat_history'}`}
             >
               <span className={`status-pill ${/失败|错误/.test(assistantStatus) ? 'warn' : assistantStatus ? 'ok' : 'warn'}`}>
                 {assistantStatus || '读取自 Bridge'}

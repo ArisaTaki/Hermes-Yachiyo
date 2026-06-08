@@ -28,6 +28,7 @@ from apps.core.executor import (
     _build_session_title_prompt,
     _sanitize_generated_session_title,
     _should_refresh_generated_title,
+    build_cross_session_memory_context,
     resolve_hermes_stream_bridge_script,
     format_persona_description,
     describe_hermes_unavailable,
@@ -253,6 +254,62 @@ class TestHermesExecutor:
         assert wrapped.index("[用户资料]") < wrapped.index("[人设设定]")
         assert "偏好：回答简洁" in wrapped
         assert wrapped.endswith("帮我总结")
+
+    def test_cross_session_memory_context_collects_explicit_preferences(self):
+        session = types.SimpleNamespace(session_id="old", created_at="2026-05-20T10:00:00+00:00")
+        store = types.SimpleNamespace(
+            list_sessions=lambda limit=80: [session],
+            load_messages=lambda _session_id, limit=80: [
+                types.SimpleNamespace(
+                    role="user",
+                    content="请记住：不要擅自推送 github，需要获得许可再推送。",
+                    created_at="2026-05-20T10:01:00+00:00",
+                ),
+                types.SimpleNamespace(
+                    role="assistant",
+                    content="记住了",
+                    created_at="2026-05-20T10:01:05+00:00",
+                ),
+            ],
+        )
+
+        context = build_cross_session_memory_context("new", store=store)
+
+        assert "[长期记忆]" in context
+        assert "不要擅自推送 github，需要获得许可再推送" in context
+        assert "历史会话 2026-05-20" in context
+
+    def test_cross_session_memory_context_scans_full_long_sessions(self):
+        session = types.SimpleNamespace(session_id="long", created_at="2026-05-20T10:00:00+00:00")
+        old_memory = types.SimpleNamespace(
+            role="user",
+            content="请记住：以后不要擅自推送 GitHub，必须先获得许可。",
+            created_at="2026-05-20T10:01:00+00:00",
+        )
+        later_messages = [
+            types.SimpleNamespace(
+                role="user",
+                content=f"普通后续消息 {index}",
+                created_at=f"2026-05-20T10:{index % 60:02d}:00+00:00",
+            )
+            for index in range(100)
+        ]
+        requested_limits: list[int] = []
+
+        def load_messages(_session_id, limit=80):
+            requested_limits.append(limit)
+            messages = [old_memory, *later_messages]
+            return messages if limit <= 0 else messages[-limit:]
+
+        store = types.SimpleNamespace(
+            list_sessions=lambda limit=80: [session],
+            load_messages=load_messages,
+        )
+
+        context = build_cross_session_memory_context("new", store=store)
+
+        assert requested_limits == [0]
+        assert "不要擅自推送 GitHub，必须先获得许可" in context
 
     def test_format_environment_context_includes_local_time_period(self):
         local_tz = datetime.now().astimezone().tzinfo
@@ -990,6 +1047,7 @@ class TestConsumeStreamBridgeRobustness:
         *,
         returncode: int = 0,
         stderr: str = "",
+        hang_after_output: bool = False,
     ):
         """构造一个返回指定行序列的假进程。"""
         encoded = b"\n".join(line.encode() for line in lines) + b"\n"
@@ -1026,12 +1084,23 @@ class TestConsumeStreamBridgeRobustness:
             stdin = FakeStdin()
 
             def __init__(self, stdout_data: bytes):
-                self.returncode = returncode
+                self.returncode = None if hang_after_output else returncode
                 self.stdout = FakeStream(stdout_data)
                 self.stderr = FakeStream(stderr_encoded)
+                self._exit_event = asyncio.Event()
 
             async def wait(self) -> int:
-                return returncode
+                if self.returncode is None:
+                    await self._exit_event.wait()
+                return self.returncode if self.returncode is not None else returncode
+
+            def terminate(self) -> None:
+                self.returncode = returncode
+                self._exit_event.set()
+
+            def kill(self) -> None:
+                self.returncode = returncode
+                self._exit_event.set()
 
         return FakeProc(encoded)
 
@@ -1152,6 +1221,25 @@ class TestConsumeStreamBridgeRobustness:
         assert result.success is True
         assert result.stdout == "完整回复"
         assert result.hermes_session_id == "s3"
+
+    @pytest.mark.asyncio
+    async def test_done_event_finishes_even_if_bridge_process_hangs(self, monkeypatch):
+        """done 事件已经给出最终回复时，不再让子进程清理卡住聊天完成态。"""
+        monkeypatch.setattr(executor_mod, "_STREAM_BRIDGE_DONE_EXIT_GRACE", 0.01)
+        lines = [
+            json.dumps({"type": "done", "response": "已经完成", "session_id": "s-done"}),
+        ]
+        proc = self._make_proc_from_lines(lines, hang_after_output=True)
+
+        result = await executor_mod._consume_stream_bridge(
+            proc,  # type: ignore[arg-type]
+            {"description": "test"},
+            lambda _: None,
+        )
+
+        assert result.success is True
+        assert result.stdout == "已经完成"
+        assert result.hermes_session_id == "s-done"
 
     @pytest.mark.asyncio
     async def test_done_event_with_failed_flag_marks_failure(self):

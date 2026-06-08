@@ -32,8 +32,8 @@ def test_get_assistant_profile_returns_shared_persona(monkeypatch):
     assert result.user_address == "老师"
     assert result.user_name == "测试用户"
     assert result.user_profile == "喜欢简洁说明"
-    assert result.memory_enabled is False
-    assert result.memory_scope == "local_only"
+    assert result.memory_enabled is True
+    assert result.memory_scope == "local_chat_history"
     assert result.prompt_order == [
         "agent_profile",
         "persona",

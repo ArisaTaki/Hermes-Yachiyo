@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 _DB_FILENAME = "activity.db"
 _DETAIL_MAX_CHARS = 600
 _TITLE_MAX_CHARS = 140
-_METADATA_MAX_CHARS = 4000
+_METADATA_VALUE_MAX_CHARS = 1800
+_METADATA_MAX_CHARS = 12000
 _NOISY_PHASES = ("thinking", "reasoning", "tool_progress")
 _KEY_PHASES = (
     "task_start",
@@ -118,7 +119,7 @@ def _sanitize_metadata(value: Any, *, depth: int = 0) -> Any:
         return [_sanitize_metadata(item, depth=depth + 1) for item in list(value)[:40]]
     if isinstance(value, (int, float, bool)) or value is None:
         return value
-    return redact_sensitive_text(value, limit=300)
+    return redact_sensitive_text(value, limit=_METADATA_VALUE_MAX_CHARS)
 
 
 def _metadata_json(value: Any) -> str:

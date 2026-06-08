@@ -134,6 +134,11 @@ class ChatSession:
         self._dedupe_assistant_messages_locked()
         self._pending_message_id = None
 
+    def reload_from_store(self, *, fail_active_messages: bool = False) -> None:
+        """刷新当前会话的持久化消息快照。"""
+        with self._lock:
+            self._load_messages_from_store(fail_active_messages=fail_active_messages)
+
     def _persist_message(self, msg: ChatMessage) -> None:
         """将消息写入持久化层（若已绑定）"""
         if self._store is None:
