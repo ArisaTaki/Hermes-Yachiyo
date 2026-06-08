@@ -15,6 +15,8 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 from urllib.parse import urlparse
 
+from apps.core.tls import urlopen_with_bundled_ca
+
 logger = logging.getLogger(__name__)
 
 _CONFIG_TIMEOUT_SECONDS = 3.0
@@ -256,7 +258,7 @@ def _call_openai_compatible_title_api(config: TitleLLMConfig, prompt: str, timeo
         method="POST",
     )
     try:
-        with urlrequest.urlopen(request, timeout=timeout) as response:
+        with urlopen_with_bundled_ca(request, timeout=timeout) as response:
             body = response.read().decode("utf-8", errors="replace")
     except urlerror.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:300]

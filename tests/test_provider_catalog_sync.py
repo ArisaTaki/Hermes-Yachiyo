@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 from urllib import error as urlerror
 
 from apps.shell.model_profiles import ModelProfileService
@@ -56,8 +57,9 @@ def test_sync_provider_catalogs_writes_cache(monkeypatch, tmp_path):
         def read(self):
             return json.dumps({"data": [{"id": "deepseek-chat", "owned_by": "deepseek"}]}).encode("utf-8")
 
-    def fake_urlopen(request, timeout):
+    def fake_urlopen(request, timeout, context):
         assert timeout == 20.0
+        assert isinstance(context, ssl.SSLContext)
         assert request.full_url == "https://api.deepseek.com/v1/models"
         assert request.get_header("Authorization") == "Bearer sk-deepseek"
         return FakeResponse()

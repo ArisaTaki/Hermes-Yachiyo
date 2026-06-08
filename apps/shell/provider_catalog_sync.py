@@ -20,6 +20,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 from urllib.parse import urlparse
 
+from apps.core.tls import urlopen_with_bundled_ca
 from apps.shell.model_provider_adapters import (
     HERMES_PROVIDER_API_KEY_NAMES,
     HERMES_PROVIDER_LABELS,
@@ -245,7 +246,7 @@ def _fetch_adapter_models(adapter: ProviderCatalogAdapter, *, timeout: float) ->
     models_url = f"{base_url}{adapter.models_path}"
     request = urlrequest.Request(models_url, method="GET", headers=_auth_headers(base_url, api_key))
     started = time.time()
-    with urlrequest.urlopen(request, timeout=timeout) as response:
+    with urlopen_with_bundled_ca(request, timeout=timeout) as response:
         payload = json.loads(response.read().decode("utf-8"))
     models = normalize_provider_models(payload, provider=adapter.provider, source_url=models_url)
     return {

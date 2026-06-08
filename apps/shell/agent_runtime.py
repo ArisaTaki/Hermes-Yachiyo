@@ -21,6 +21,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 from uuid import uuid4
 
+from apps.core.tls import urlopen_with_bundled_ca
 from apps.shell.model_profiles import (
     OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS,
     get_model_profile_service,
@@ -3477,7 +3478,7 @@ class AgentRuntimeService:
             },
         )
         try:
-            with urlrequest.urlopen(request, timeout=OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS) as response:
+            with urlopen_with_bundled_ca(request, timeout=OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except (urlerror.URLError, TimeoutError, json.JSONDecodeError) as exc:
             raise AgentRuntimeError(f"custom_api 调用失败：{redact_secrets(exc)}") from exc

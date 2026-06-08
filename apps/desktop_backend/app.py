@@ -55,6 +55,10 @@ def main() -> None:
     _setup_logging()
     os.environ["HERMES_YACHIYO_DESKTOP_BACKEND"] = "1"
 
+    from apps.core.tls import install_bundled_ca_env
+
+    install_bundled_ca_env()
+
     from apps.bridge.deps import set_runtime
     from apps.bridge.server import start_bridge, stop_bridge
     from apps.core.activity_store import close_activity_store

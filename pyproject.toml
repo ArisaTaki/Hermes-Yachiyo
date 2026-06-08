@@ -8,6 +8,7 @@ dependencies = [
     "Pillow>=10.0.0",
     "fastapi>=0.110.0",
     "uvicorn>=0.29.0",
+    "certifi>=2024.7.4",
 ]
 
 [project.optional-dependencies]
