@@ -30,12 +30,15 @@ from apps.core.executor import (
     _should_refresh_generated_title,
     build_cross_session_memory_context,
     resolve_hermes_stream_bridge_script,
-    select_executor,
     format_persona_description,
+    describe_hermes_unavailable,
+    select_executor,
+    user_task_unavailable_reason,
 )
 import apps.core.executor as executor_mod
 import apps.core.hermes_stream_bridge as bridge_mod
 from apps.core.chat_session import ChatSession, MessageStatus
+from apps.core.activity_store import ActivityStore
 from apps.core.chat_store import ChatStore
 from packages.protocol.enums import RiskLevel, TaskStatus, TaskType
 from packages.protocol.schemas import TaskInfo
@@ -154,11 +157,39 @@ class TestHermesUnavailableExecutor:
     async def test_run_fails_without_simulated_result(self):
         executor = HermesUnavailableExecutor("Hermes Agent 当前不可用")
 
-        with pytest.raises(HermesCallError) as excinfo:
+        with pytest.raises(HermesCallError, match="Hermes Agent 当前不可用") as excinfo:
             await executor.run(_make_task("测试任务"))
 
-        assert "Hermes Agent 当前不可用" in str(excinfo.value)
         assert "[模拟结果]" not in excinfo.value.to_error_string()
+
+    def test_user_task_unavailable_reason_allows_hermes_executor(self):
+        runtime = types.SimpleNamespace(
+            task_runner=types.SimpleNamespace(executor=types.SimpleNamespace(name="HermesExecutor"))
+        )
+
+        assert user_task_unavailable_reason(runtime) is None
+
+    def test_user_task_unavailable_reason_returns_executor_reason(self):
+        runtime = types.SimpleNamespace(
+            task_runner=types.SimpleNamespace(
+                executor=types.SimpleNamespace(
+                    name="HermesUnavailableExecutor",
+                    reason="Hermes Agent 当前不可用",
+                )
+            )
+        )
+
+        assert user_task_unavailable_reason(runtime) == "Hermes Agent 当前不可用"
+
+    def test_describe_hermes_unavailable_uses_install_error(self):
+        runtime = types.SimpleNamespace(
+            hermes_install_info=types.SimpleNamespace(
+                error_message="缺少模型配置",
+                status="not_ready",
+            )
+        )
+
+        assert "缺少模型配置" in describe_hermes_unavailable(runtime)
 
     def test_select_executor_returns_unavailable_when_runtime_not_ready(self):
         runtime = types.SimpleNamespace(
@@ -303,6 +334,183 @@ class TestHermesExecutor:
         assert wrapped.index("[当前环境]") < wrapped.index("[人设设定]")
         assert wrapped.index("[人设设定]") < wrapped.index("[用户称呼]")
         assert wrapped.index("[用户称呼]") < wrapped.index("[用户请求]")
+
+    def test_parse_yachiyo_delegation_request(self):
+        request = executor_mod._parse_yachiyo_delegation_request(
+            '{"action":"run_yachiyo_agent","agent":"Research Agent","goal":"核对事实"}'
+        )
+
+        assert request == {
+            "kind": "agent",
+            "name": "Research Agent",
+            "runnable_id": "",
+            "goal": "核对事实",
+        }
+
+    def test_parse_yachiyo_delegation_request_accepts_model_field_variants(self):
+        agent_request = executor_mod._parse_yachiyo_delegation_request(
+            "<yachiyo_delegation>"
+            "{”type”:”agent”,”agentName”:”Research Agent”,”userGoal”:”核对事实”}"
+            "</yachiyo_delegation>"
+        )
+        workflow_request = executor_mod._parse_yachiyo_delegation_request(
+            "我会先跑流程："
+            '{"note":"先说明一下"}'
+            '{"kind":"workflow","runnableId":"workflow_release","objective":"执行发布检查"}'
+        )
+
+        assert agent_request == {
+            "kind": "agent",
+            "name": "Research Agent",
+            "runnable_id": "",
+            "goal": "核对事实",
+        }
+        assert workflow_request == {
+            "kind": "workflow",
+            "name": "",
+            "runnable_id": "workflow_release",
+            "goal": "执行发布检查",
+        }
+
+    def test_format_yachiyo_delegation_result_includes_pending_approval(self):
+        result = executor_mod._format_yachiyo_delegation_result({
+            "ok": False,
+            "runnable": {"kind": "agent", "name": "Coding Agent"},
+            "run_id": "agent_run_waiting",
+            "status": "approval_required",
+            "result": "",
+            "pending_approval": {
+                "tool": "terminal.run",
+                "input_preview": {"command": "python3 fibonacci.py 5"},
+            },
+        })
+
+        assert "Status: approval_required" in result
+        assert "Pending approval:" in result
+        assert "- Tool: terminal.run" in result
+        assert "python3 fibonacci.py 5" in result
+
+    @pytest.mark.asyncio
+    async def test_call_hermes_runs_yachiyo_delegation_before_final_reply(self, monkeypatch):
+        calls: list[str] = []
+
+        async def fake_invoke(description, **_kwargs):
+            calls.append(description)
+            if len(calls) == 1:
+                return HermesInvokeResult(
+                    success=True,
+                    stdout='{"action":"run_yachiyo_agent","agent":"Research Agent","goal":"核对事实"}',
+                    returncode=0,
+                    hermes_session_id="sid",
+                )
+            return HermesInvokeResult(success=True, stdout="最终回复", returncode=0, hermes_session_id="sid")
+
+        monkeypatch.setattr(executor_mod, "invoke_hermes_cli", fake_invoke)
+        monkeypatch.setattr(executor_mod, "_yachiyo_delegation_catalog_context", lambda: "catalog")
+        monkeypatch.setattr(
+            executor_mod,
+            "_run_yachiyo_delegation",
+            lambda request: {
+                "ok": True,
+                "runnable": {"kind": request["kind"], "name": request["name"], "id": "agent_research"},
+                "run_id": "agent_run_1",
+                "run_group_id": "run_group_1",
+                "status": "completed",
+                "result": "事实核对完成",
+            },
+        )
+
+        result = await HermesExecutor().run(_make_task("需要研究"))
+
+        assert result == "最终回复"
+        assert len(calls) == 2
+        assert "catalog" in calls[0]
+        assert "事实核对完成" in calls[1]
+
+    @pytest.mark.asyncio
+    async def test_call_hermes_records_delegation_approval_activity(self, tmp_path, monkeypatch):
+        calls: list[str] = []
+        activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+
+        async def fake_invoke(description, **_kwargs):
+            calls.append(description)
+            if len(calls) == 1:
+                return HermesInvokeResult(
+                    success=True,
+                    stdout='{"action":"run_yachiyo_agent","agent":"Coding Agent","goal":"写一个 CLI 工具"}',
+                    returncode=0,
+                    hermes_session_id="sid",
+                )
+            return HermesInvokeResult(success=True, stdout="需要审批后继续。", returncode=0, hermes_session_id="sid")
+
+        monkeypatch.setattr(executor_mod, "invoke_hermes_cli", fake_invoke)
+        monkeypatch.setattr(executor_mod, "_yachiyo_delegation_catalog_context", lambda: "catalog")
+        monkeypatch.setattr("apps.core.activity_store.get_activity_store", lambda: activity_store)
+        monkeypatch.setattr(
+            executor_mod,
+            "_run_yachiyo_delegation",
+            lambda request: {
+                "ok": False,
+                "runnable": {"kind": request["kind"], "name": request["name"], "id": "agent_coding"},
+                "run_id": "agent_run_waiting",
+                "run_group_id": "run_group_waiting",
+                "status": "approval_required",
+                "result": "",
+                "pending_approval": {
+                    "tool": "terminal.run",
+                    "input_preview": {"command": "python3 fibonacci.py 5"},
+                },
+            },
+        )
+        task = _make_task("需要写代码")
+        task.chat_session_id = "chat-session-1"
+
+        try:
+            result = await HermesExecutor(chat_session=ChatSession(session_id="chat-session-1")).run(task)
+            events = activity_store.list_events(session_id="chat-session-1", limit=5, key_only=True)
+        finally:
+            activity_store.close()
+
+        approval_event = next(event for event in events if event.status == "approval_required")
+        metadata = approval_event.to_dict()["metadata"]
+        assert result == "需要审批后继续。"
+        assert approval_event.title == "Coding Agent 等待审批"
+        assert approval_event.tool_name == "yachiyo.delegation"
+        assert metadata["run_id"] == "agent_run_waiting"
+        assert metadata["run_status"] == "approval_required"
+        assert metadata["pending_approval"]["tool"] == "terminal.run"
+
+    def test_call_hermes_group_mode_returns_dispatch_for_chat_layer(self, monkeypatch):
+        calls: list[str] = []
+        delegated: list[dict] = []
+        dispatch = '{"action":"run_yachiyo_agent","agent":"Research Agent","goal":"核对事实"}'
+
+        async def fake_invoke(description, **_kwargs):
+            calls.append(description)
+            return HermesInvokeResult(success=True, stdout=dispatch, returncode=0, hermes_session_id="sid")
+
+        monkeypatch.setattr(executor_mod, "invoke_hermes_cli", fake_invoke)
+        monkeypatch.setattr(executor_mod, "_yachiyo_delegation_catalog_context", lambda: "single chat catalog")
+        monkeypatch.setattr(
+            executor_mod,
+            "_run_yachiyo_delegation",
+            lambda request: delegated.append(request),
+        )
+
+        async def run_case() -> str:
+            return await HermesExecutor().run(
+                _make_task("[Yachiyo 群组上下文]\n群成员包括：\n- Research Agent（Agent）\n\n请安排")
+            )
+
+        result = asyncio.run(run_case())
+        assert result == dispatch
+        assert len(calls) == 1
+        assert "群组派活" in calls[0]
+        assert "先用自然语言向用户说明你的安排" in calls[0]
+        assert "<yachiyo_group_dispatch>" in calls[0]
+        assert "只输出 JSON" not in calls[0]
+        assert "single chat catalog" not in calls[0]
+        assert delegated == []
 
     @pytest.mark.asyncio
     async def test_call_hermes_injects_user_address(self, monkeypatch):

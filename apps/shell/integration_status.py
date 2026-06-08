@@ -196,9 +196,9 @@ def get_astrbot_status(bridge_status: BridgeStatus) -> AstrBotStatus:
 # ── Hapi 接入状态 ──────────────────────────────────────────────────────────────
 
 HAPI_STATES = {
-    "not_configured":           ("⚪ 未配置", "Hapi / Codex 执行后端尚未接入"),
+    "not_configured":           ("⚪ 未配置", "Hapi 外部执行后端尚未接入"),
     "configured_not_connected": ("⏳ 已配置但未连接", "Hapi 已配置但无法访问"),
-    "connected":                ("✅ 已连接", "Hapi 正在提供 Codex CLI 执行服务"),
+    "connected":                ("✅ 已连接", "Hapi 正在提供外部执行服务"),
     "unknown":                  ("❓ 状态未知", "无法确定 Hapi 连接状态"),
 }
 

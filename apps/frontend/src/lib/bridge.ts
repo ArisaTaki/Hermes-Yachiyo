@@ -134,6 +134,7 @@ declare global {
       chooseAvatarImage?: () => Promise<AvatarImageSelection | string | null>;
       chooseLive2DArchive?: () => Promise<string | null>;
       chooseLive2DModelDirectory?: () => Promise<string | null>;
+      chooseSkillSources?: () => Promise<string[]>;
       checkAppUpdate?: () => Promise<AppUpdateCheckResult>;
       copyText?: (text: string) => Promise<void>;
       downloadAppUpdate?: () => Promise<AppUpdateDownloadResult>;
@@ -278,6 +279,7 @@ function isAppView(value: string): value is AppView {
   return [
     'main',
     'chat',
+    'agents',
     'settings',
     'installer',
     'provider',
@@ -346,6 +348,13 @@ export async function chooseLive2DArchive(): Promise<string | null> {
   return window.hermesDesktop.chooseLive2DArchive();
 }
 
+export async function chooseSkillSources(): Promise<string[]> {
+  if (!window.hermesDesktop?.chooseSkillSources) {
+    throw new Error('当前环境没有桌面文件选择器入口，请在页面中输入 Skill 目录或 ZIP 路径');
+  }
+  return window.hermesDesktop.chooseSkillSources();
+}
+
 export function hasDesktopAvatarPicker(): boolean {
   return Boolean(window.hermesDesktop?.chooseAvatarImage);
 }
@@ -395,25 +404,66 @@ export async function setLauncherHitRegions(
 }
 
 export async function copyText(text: string): Promise<void> {
+  const errors: string[] = [];
   if (window.hermesDesktop?.copyText) {
-    await window.hermesDesktop.copyText(text);
+    try {
+      await window.hermesDesktop.copyText(text);
+      return;
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : 'desktop clipboard failed');
+    }
+  }
+  try {
+    copyTextWithSelection(text);
     return;
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : 'fallback copy failed');
   }
   if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : 'web clipboard failed');
+    }
   }
+  try {
+    const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/clipboard', { text });
+    if (result.ok === false) throw new Error(result.error || 'bridge clipboard failed');
+    return;
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : 'bridge clipboard failed');
+  }
+  const detail = errors.filter(Boolean).join('；');
+  throw new Error(detail ? `复制失败：${detail}` : '复制失败');
+}
+
+function copyTextWithSelection(text: string): void {
   const area = document.createElement('textarea');
+  const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   area.value = text;
   area.setAttribute('readonly', '');
   area.style.position = 'fixed';
   area.style.left = '-9999px';
+  area.style.top = '0';
+  area.style.opacity = '0';
   document.body.appendChild(area);
-  area.focus();
-  area.select();
-  const ok = document.execCommand('copy');
-  document.body.removeChild(area);
-  if (!ok) throw new Error('复制失败');
+  try {
+    window.focus();
+    area.focus();
+    area.select();
+    area.setSelectionRange(0, area.value.length);
+    if (typeof document.execCommand !== 'function' || !document.execCommand('copy')) {
+      throw new Error('fallback copy failed');
+    }
+  } finally {
+    document.body.removeChild(area);
+    try {
+      activeElement?.focus({ preventScroll: true });
+    } catch {
+      // Restoring focus is best-effort after the browser has accepted the copy command.
+    }
+  }
 }
 
 export async function quitApp(): Promise<void> {
@@ -539,7 +589,7 @@ async function parseResponse<T>(response: Response): Promise<T> {
       : typeof data?.error === 'string'
         ? data.error
         : `HTTP ${response.status}`;
-    throw new Error(message);
+    throw new Error(message.includes(`HTTP ${response.status}`) ? message : `HTTP ${response.status}: ${message}`);
   }
   return data as T;
 }

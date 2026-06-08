@@ -52,6 +52,7 @@ from apps.shell.mode_settings import (
     effective_display_mode,
     serialize_mode_settings,
 )
+from apps.shell.model_provider_adapters import provider_api_key_names, resolve_provider_adapter
 
 if TYPE_CHECKING:
     from apps.core.runtime import HermesRuntime
@@ -1364,6 +1365,39 @@ def _provider_api_key_name(provider: str) -> str:
     return names[0] if names else ""
 
 
+def _model_profile_config_for_hermes(profile_id: str, capability: str) -> dict[str, str]:
+    from apps.shell.model_profiles import get_model_profile_service
+
+    profile = get_model_profile_service().get_profile_private(profile_id)
+    actual_capability = str(profile.get("capability") or "chat")
+    if actual_capability != capability:
+        raise ValueError(f"{capability} Profile 类型不匹配")
+    if str(profile.get("status") or "") != "available":
+        raise ValueError("只能选择已通过连接测试的模型 Profile")
+    if not profile.get("enabled", True):
+        raise ValueError("不能选择已暂停的模型 Profile")
+    provider = str(profile.get("provider") or "openai_compatible").strip()
+    model = str(profile.get("model") or "").strip()
+    base_url = str(profile.get("base_url") or "").strip()
+    api_key = str(profile.get("api_key") or "").strip()
+    missing = [
+        key
+        for key, value in (("provider", provider), ("model", model), ("base_url", base_url), ("api_key", api_key))
+        if not value
+    ]
+    if missing:
+        raise ValueError(f"模型 Profile 配置不完整：缺少 {', '.join(missing)}")
+    provider = _model_profile_provider_for_hermes(provider, base_url, model)
+    if not provider:
+        raise ValueError("当前模型源不能映射到 Hermes 支持的 Provider")
+    return {
+        "provider": provider,
+        "model": model,
+        "base_url": base_url,
+        "api_key": api_key,
+    }
+
+
 def _provider_api_key_names(provider: str) -> tuple[str, ...]:
     normalized = provider.strip().lower()
     if not normalized:
@@ -1371,7 +1405,12 @@ def _provider_api_key_names(provider: str) -> tuple[str, ...]:
     preset = _PROVIDER_PRESET_BY_ID.get(normalized)
     if preset:
         return tuple(str(item) for item in preset.get("api_key_names", ()) if item)
-    return (f"{normalized.upper().replace('-', '_')}_API_KEY",)
+    return provider_api_key_names(normalized)
+
+
+def _model_profile_provider_for_hermes(provider: str, base_url: str = "", model: str = "") -> str:
+    adapter = resolve_provider_adapter(provider, base_url, model)
+    return str(adapter.get("hermes_provider") or "")
 
 
 def _configured_api_key_name(
@@ -1930,11 +1969,12 @@ def _doctor_status_for_tool(summary: dict[str, Any], tool_id: str) -> tuple[str,
 def _parse_hermes_version_output(output: str) -> dict[str, Any]:
     text = _ANSI_RE.sub("", output or "")
     first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
-    version_match = re.search(r"Hermes Agent\s+v?([0-9][^\s]*)", text)
+    version_match = re.search(r"Hermes Agent\s+v?([0-9][^\s(]*)\s*(?:\(([^)]+)\))?", text)
     behind_match = re.search(r"(\d+)\s+commits?\s+behind", text, re.I)
     return {
         "summary": first_line,
         "version": version_match.group(1) if version_match else "",
+        "release_date": version_match.group(2).strip() if version_match and version_match.group(2) else "",
         "update_available": bool(re.search(r"update available", text, re.I) or behind_match),
         "behind_commits": int(behind_match.group(1)) if behind_match else 0,
     }
@@ -2032,6 +2072,7 @@ class MainWindowAPI:
                 "hermes": {
                     "status": hermes_info.get("install_status", "unknown"),
                     "version": hermes_info.get("version"),
+                    "release_date": hermes_info.get("release_date"),
                     "platform": hermes_info.get("platform", "unknown"),
                     "command_exists": hermes_info.get("command_exists", False),
                     "hermes_home": hermes_info.get("hermes_home", ""),
@@ -2085,6 +2126,7 @@ class MainWindowAPI:
                 "hermes": {
                     "status": hermes_info.get("install_status", "unknown"),
                     "version": hermes_info.get("version"),
+                    "release_date": hermes_info.get("release_date"),
                     "platform": hermes_info.get("platform", "unknown"),
                     "command_exists": hermes_info.get("command_exists", False),
                     "hermes_home": hermes_info.get("hermes_home", ""),
@@ -2799,18 +2841,54 @@ class MainWindowAPI:
         model = str(changes.get("model") or "").strip()
         base_url = str(changes.get("base_url") or "").strip()
         api_key = str(changes.get("api_key") or "").strip()
+        chat_profile_id = str(changes.get("chat_profile_id") or "").strip()
+        vision_profile_id = str(changes.get("vision_profile_id") or "").strip()
         image_input_mode = _normalize_image_input_mode(changes.get("image_input_mode"))
         vision_provider = str(changes.get("vision_provider") or "").strip()
         vision_model = str(changes.get("vision_model") or "").strip()
         vision_base_url = str(changes.get("vision_base_url") or "").strip()
         vision_api_key = str(changes.get("vision_api_key") or "").strip()
+        try:
+            if chat_profile_id:
+                profile_config = _model_profile_config_for_hermes(chat_profile_id, "chat")
+                provider = profile_config["provider"]
+                model = profile_config["model"]
+                base_url = profile_config["base_url"]
+                api_key = profile_config["api_key"]
+            if vision_profile_id:
+                profile_config = _model_profile_config_for_hermes(vision_profile_id, "vision")
+                vision_provider = profile_config["provider"]
+                vision_model = profile_config["model"]
+                vision_base_url = profile_config["base_url"]
+                vision_api_key = profile_config["api_key"]
+        except (KeyError, ValueError) as exc:
+            return {"ok": False, "error": str(exc)}
+
+        hermes_path, needs_env_refresh = locate_hermes_binary()
+        if hermes_path is None:
+            return {
+                "ok": False,
+                "error": "hermes 命令未找到，请先安装 Hermes Agent",
+                "needs_env_refresh": needs_env_refresh,
+            }
+        if not provider or not model:
+            current_config_path = _run_config_path_command(hermes_path, "path")
+            current_model = _read_hermes_model_config(current_config_path)
+            current_provider = _effective_provider_id(
+                str(current_model.get("provider") or ""),
+                str(current_model.get("base_url") or ""),
+                str(current_model.get("default") or ""),
+            )
+            provider = provider or current_provider or str(current_model.get("provider") or "")
+            model = model or str(current_model.get("default") or "")
+            base_url = base_url or str(current_model.get("base_url") or "")
         if not provider:
             return {"ok": False, "error": "Provider 不能为空"}
         if not model:
             return {"ok": False, "error": "模型名称不能为空"}
         has_vision_changes = any(
             key in changes
-            for key in ("vision_provider", "vision_model", "vision_base_url", "vision_api_key")
+            for key in ("vision_profile_id", "vision_provider", "vision_model", "vision_base_url", "vision_api_key")
         )
         if has_vision_changes and "image_input_mode" in changes and image_input_mode == "text" and not (
             vision_provider or provider
@@ -2828,14 +2906,6 @@ class MainWindowAPI:
                     vision_model,
                 )
 
-        hermes_path, needs_env_refresh = locate_hermes_binary()
-        if hermes_path is None:
-            return {
-                "ok": False,
-                "error": "hermes 命令未找到，请先安装 Hermes Agent",
-                "needs_env_refresh": needs_env_refresh,
-            }
-
         effective_provider = _effective_provider_id(provider, base_url, model)
         provider_for_config = (
             effective_provider
@@ -2852,11 +2922,11 @@ class MainWindowAPI:
         api_key_name = _provider_api_key_name(effective_provider or provider)
         if api_key:
             commands.append((api_key_name, api_key))
-        if "vision_provider" in changes:
+        if "vision_provider" in changes or vision_profile_id:
             commands.append(("auxiliary.vision.provider", vision_provider))
-        if "vision_model" in changes:
+        if "vision_model" in changes or vision_profile_id:
             commands.append(("auxiliary.vision.model", vision_model))
-        if "vision_base_url" in changes:
+        if "vision_base_url" in changes or vision_profile_id:
             commands.append(("auxiliary.vision.base_url", vision_base_url))
         if vision_api_key:
             vision_key_provider = _effective_provider_id(
@@ -3194,6 +3264,7 @@ class MainWindowAPI:
             "update_available": bool(parsed["update_available"]),
             "behind_commits": int(parsed["behind_commits"]),
             "version": parsed["version"],
+            "release_date": parsed.get("release_date", ""),
             "summary": parsed["summary"],
             "version_output": version_output,
             "check_output": check_output,

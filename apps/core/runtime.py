@@ -216,6 +216,11 @@ class HermesRuntime:
                     if self._hermes_install_info.version_info
                     else None
                 ),
+                "release_date": (
+                    self._hermes_install_info.version_info.build_date
+                    if self._hermes_install_info.version_info
+                    else None
+                ),
                 "hermes_home": self._hermes_install_info.hermes_home,
                 "readiness_level": self._hermes_install_info.readiness_level,
                 "available_tools": self._hermes_install_info.available_tools,

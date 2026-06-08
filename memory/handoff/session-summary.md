@@ -1,5 +1,37 @@
 # Session Summary
 
+## Milestone 85/86/87/88 — ToolBroker 闭环与 Agent/Skill Studio 更新
+
+### 核心结果
+
+本轮完成 Phase 4 的 ToolBroker 真实执行层，并继续把 Agent Studio 推进为可长期使用的本地 Agent 管理界面：Run 可以处理 OpenAI-compatible 原生 `tool_calls`，高风险工具会停在可审批/可恢复状态；Agent 定义补齐头像、昵称、人设 prompt；Skill Library 从本地上传扩展为 Yachiyo / Hermes 双库、受限安装命令、来源筛选和一层 Skill Folder 管理体验。最新实现提交 `bb4436b` 已收口 Skill Groups TODO，便于 2026-05-25 到公司继续接手。
+
+### 主要变更
+
+- `apps/shell/agent_runtime.py`：新增 OpenAI `message.tool_calls` 解析、JSON fallback、tool loop、`approval_required`、`pending_approval_json`、approve/reject 后继续 Run、未授权工具拒绝和高风险工具审批边界；Skill 支持 Yachiyo / Hermes 来源隔离、Hermes Global 原路径引用、旧 Hermes 拷贝路径自动修复、hash 去重/更新、受限安装入口和 Skill Folder 元数据归类；Skill Folder 创建/重命名现在拒绝重复名和超过 120 字符的名称。
+- `apps/shell/model_profiles.py`：保留 `openai_compatible_chat` 文本返回行为，并提供完整 chat completion message helper 给 Agent Runtime 读取 tool calls。
+- `apps/bridge/routes/agents.py`：新增 approve/reject route，Agent 请求支持 `nickname` / `persona_prompt`，Skill 支持 `enabled` PATCH，并增加 `/ui/skills/sources`、`/ui/skills/sync`、`/ui/skills/install`。
+- `apps/frontend/src/views/AgentStudioView.tsx`：Runs 详情支持审批按钮；Agent 表单新增头像、昵称、Persona Prompt 和字段说明；Skill Library 支持 Yachiyo / Hermes 分类筛选、Hermes roots 展示/同步、来源式安装输入、不确定安装进度、本地上传、导入结果、启停、删除、打开本地路径、Skill Folder 新建/删除/移动和 Agent Mounted Skills 文件夹筛选；Skill Groups 可通过 `#/agents/skill-groups` 直达，删除前确认并拆分显示“无需分组”的 Yachiyo/Hermes 计数。
+- `apps/frontend/electron/main.ts`、`apps/frontend/electron/preload.cts`、`apps/frontend/src/lib/bridge.ts`：新增多选 Skill 来源文件选择器；头像选择沿用现有图片 picker。
+- `tests/test_agent_runtime.py`、`tests/test_chat_api.py`、`tests/test_model_profiles.py`：补齐 tool_calls、fallback、审批恢复、审批拒绝、未授权工具、路径越界、Agent persona context、Skill enabled、Hermes roots 同步与受限安装等覆盖。
+- `docs/phase-4-hermes-sync-plan.md`、`docs/todo-skill-groups-page.md`、`memory/progress/current-state.md`、`memory/progress/next-steps.md`：同步记录 Batch 12/13/14/15、Skill Groups TODO 收口状态和 2026-05-25 继续处理建议。
+
+### 验证结果
+
+- `.venv/bin/python -m pytest tests/test_agent_runtime.py tests/test_chat_api.py tests/test_ui_bridge_routes.py -q` → 97 passed。
+- `npm --prefix apps/frontend run build` → passed。
+- `git diff --check` → passed。
+- Browser 冒烟：`http://127.0.0.1:5174/#/agents/skill-groups` 可直达 Skill Groups，切换 Skill Library 后 URL 为 `#/agents/skills`，console error 为空。
+
+### 后续建议
+
+1. 明天继续前先处理分支同步：本地 `phase-4/develop` 比 `origin/phase-4/develop` ahead 1；`origin/develop` 还有 `8f690de fix： GPT-SoVITS 部署脚本以及状态检查bug` 尚未进入本分支。
+2. 做一次真实 Electron Agent Studio 冒烟：Skill Groups 新建/重命名/删除、Skill Library 导入目标选择、Mounted Skills 文件夹筛选与批量全选/清空。
+3. 补 Workflow 子 Run 审批完成后的父 Workflow 恢复。
+4. 规划直接与某个 Agent 聊天的入口，复用 `nickname`、`avatar_url` 和 `persona_prompt`。
+
+---
+
 ## Milestone 79 — macOS 发布链路、应用更新器与更新日志
 
 ### 核心结果

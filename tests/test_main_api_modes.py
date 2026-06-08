@@ -15,6 +15,7 @@ from apps.core.chat_store import ChatStore
 from apps.core.state import AppState
 from apps.shell.config import AppConfig
 from apps.shell.main_api import MainWindowAPI
+from apps.shell.model_profiles import ModelProfileService
 
 
 @dataclass
@@ -849,6 +850,260 @@ def test_update_hermes_configuration_writes_vision_chain_settings(tmp_path, monk
         store.close()
 
 
+def test_update_hermes_configuration_syncs_chat_profile(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    profile_service = ModelProfileService(db_path=tmp_path / "profiles.db", workspace_dir=tmp_path / "profiles")
+    calls = []
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    config_path.write_text("", encoding="utf-8")
+    env_path.write_text("", encoding="utf-8")
+    try:
+        source = profile_service.create_source(
+            {
+                "name": "OpenRouter",
+                "provider": "openrouter",
+                "base_url": "https://openrouter.ai/api/v1",
+                "api_key": "sk-profile-secret",
+            }
+        )
+        profile = profile_service.create_profile(
+            {
+                "source_id": source["source_id"],
+                "name": "Main",
+                "capability": "chat",
+                "model": "openai/gpt-4.1-mini",
+            }
+        )
+        profile_service._record_test_result(profile["profile_id"], ok=True, message="OK")
+        monkeypatch.setattr("apps.shell.model_profiles.get_model_profile_service", lambda: profile_service)
+        monkeypatch.setattr("apps.shell.main_api.locate_hermes_binary", lambda: ("/bin/hermes", False))
+
+        def fake_run(argv, **_kwargs):
+            calls.append(argv)
+            if argv[1:3] == ["config", "set"]:
+                return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            if argv[-1] == "path":
+                return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
+            if argv[-1] == "env-path":
+                return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv[-2:] == ["tools", "list"]:
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.update_hermes_configuration({"chat_profile_id": profile["profile_id"]})
+
+        assert result["ok"] is True
+        set_calls = [call for call in calls if call[1:3] == ["config", "set"]]
+        assert [call[3] for call in set_calls[:4]] == [
+            "model.provider",
+            "model.default",
+            "model.base_url",
+            "OPENROUTER_API_KEY",
+        ]
+        assert set_calls[0][4] == "openrouter"
+        assert set_calls[1][4] == "openai/gpt-4.1-mini"
+        assert set_calls[3][4] == "sk-profile-secret"
+    finally:
+        profile_service.close()
+        store.close()
+
+
+def test_update_hermes_configuration_syncs_xiaomi_mimo_profile_as_hermes_xiaomi(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    profile_service = ModelProfileService(db_path=tmp_path / "profiles.db", workspace_dir=tmp_path / "profiles")
+    calls = []
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    config_path.write_text("", encoding="utf-8")
+    env_path.write_text("", encoding="utf-8")
+    try:
+        source = profile_service.create_source(
+            {
+                "name": "Xiaomi MiMo",
+                "provider": "xiaomi_mimo",
+                "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+                "api_key": "tp-profile-secret",
+            }
+        )
+        profile = profile_service.create_profile(
+            {
+                "source_id": source["source_id"],
+                "name": "MiMo Main",
+                "capability": "chat",
+                "model": "mimo-v2-pro",
+            }
+        )
+        profile_service._record_test_result(profile["profile_id"], ok=True, message="OK")
+        monkeypatch.setattr("apps.shell.model_profiles.get_model_profile_service", lambda: profile_service)
+        monkeypatch.setattr("apps.shell.main_api.locate_hermes_binary", lambda: ("/bin/hermes", False))
+
+        def fake_run(argv, **_kwargs):
+            calls.append(argv)
+            if argv[1:3] == ["config", "set"]:
+                return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            if argv[-1] == "path":
+                return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
+            if argv[-1] == "env-path":
+                return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv[-2:] == ["tools", "list"]:
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.update_hermes_configuration({"chat_profile_id": profile["profile_id"]})
+
+        assert result["ok"] is True
+        set_calls = [call for call in calls if call[1:3] == ["config", "set"]]
+        assert [call[3] for call in set_calls[:4]] == [
+            "model.provider",
+            "model.default",
+            "model.base_url",
+            "XIAOMI_API_KEY",
+        ]
+        assert set_calls[0][4] == "xiaomi"
+        assert set_calls[1][4] == "mimo-v2-pro"
+        assert set_calls[3][4] == "tp-profile-secret"
+    finally:
+        profile_service.close()
+        store.close()
+
+
+def test_update_hermes_configuration_maps_unknown_compatible_profile_to_custom(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    profile_service = ModelProfileService(db_path=tmp_path / "profiles.db", workspace_dir=tmp_path / "profiles")
+    calls = []
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    config_path.write_text("", encoding="utf-8")
+    env_path.write_text("", encoding="utf-8")
+    try:
+        source = profile_service.create_source(
+            {
+                "name": "SiliconFlow",
+                "provider": "siliconflow",
+                "base_url": "https://api.siliconflow.cn/v1",
+                "api_key": "sk-profile-secret",
+            }
+        )
+        profile = profile_service.create_profile(
+            {
+                "source_id": source["source_id"],
+                "name": "SiliconFlow Chat",
+                "capability": "chat",
+                "model": "Qwen/Qwen2.5-72B-Instruct",
+            }
+        )
+        profile_service._record_test_result(profile["profile_id"], ok=True, message="OK")
+        monkeypatch.setattr("apps.shell.model_profiles.get_model_profile_service", lambda: profile_service)
+        monkeypatch.setattr("apps.shell.main_api.locate_hermes_binary", lambda: ("/bin/hermes", False))
+
+        def fake_run(argv, **_kwargs):
+            calls.append(argv)
+            if argv[1:3] == ["config", "set"]:
+                return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            if argv[-1] == "path":
+                return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
+            if argv[-1] == "env-path":
+                return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv[-2:] == ["tools", "list"]:
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.update_hermes_configuration({"chat_profile_id": profile["profile_id"]})
+
+        assert result["ok"] is True
+        set_calls = [call for call in calls if call[1:3] == ["config", "set"]]
+        assert [call[3] for call in set_calls[:4]] == [
+            "model.provider",
+            "model.default",
+            "model.base_url",
+            "CUSTOM_API_KEY",
+        ]
+        assert set_calls[0][4] == "custom"
+        assert set_calls[3][4] == "sk-profile-secret"
+    finally:
+        profile_service.close()
+        store.close()
+
+
+def test_update_hermes_configuration_syncs_vision_profile(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _RuntimeStub(store)
+    profile_service = ModelProfileService(db_path=tmp_path / "profiles.db", workspace_dir=tmp_path / "profiles")
+    calls = []
+    config_path = tmp_path / "config.yaml"
+    env_path = tmp_path / ".env"
+    config_path.write_text(
+        "model:\n"
+        "  provider: deepseek\n"
+        "  default: deepseek-chat\n"
+        "  base_url: https://api.deepseek.com/v1\n",
+        encoding="utf-8",
+    )
+    env_path.write_text("", encoding="utf-8")
+    try:
+        source = profile_service.create_source(
+            {
+                "name": "Vision",
+                "capability": "vision",
+                "provider": "openrouter",
+                "base_url": "https://openrouter.ai/api/v1",
+                "api_key": "sk-vision-secret",
+            }
+        )
+        profile = profile_service.create_profile(
+            {
+                "source_id": source["source_id"],
+                "name": "Vision",
+                "capability": "vision",
+                "model": "openai/gpt-4.1-mini",
+                "options": {"remote_model": {"id": "openai/gpt-4.1-mini", "input_modalities": ["text", "image"]}},
+            }
+        )
+        profile_service._record_test_result(profile["profile_id"], ok=True, message="OK")
+        monkeypatch.setattr("apps.shell.model_profiles.get_model_profile_service", lambda: profile_service)
+        monkeypatch.setattr("apps.shell.main_api.locate_hermes_binary", lambda: ("/bin/hermes", False))
+
+        def fake_run(argv, **_kwargs):
+            calls.append(argv)
+            if argv[1:3] == ["config", "set"]:
+                return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+            if argv[-1] == "path":
+                return SimpleNamespace(returncode=0, stdout=f"{config_path}\n", stderr="")
+            if argv[-1] == "env-path":
+                return SimpleNamespace(returncode=0, stdout=f"{env_path}\n", stderr="")
+            if argv[-2:] == ["tools", "list"]:
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            raise AssertionError(argv)
+
+        monkeypatch.setattr("apps.shell.main_api.subprocess.run", fake_run)
+
+        api = MainWindowAPI(runtime, AppConfig())
+        result = api.update_hermes_configuration({"vision_profile_id": profile["profile_id"]})
+
+        assert result["ok"] is True
+        set_calls = [call for call in calls if call[1:3] == ["config", "set"]]
+        assert ("auxiliary.vision.provider", "openrouter") in [(call[3], call[4]) for call in set_calls]
+        assert ("auxiliary.vision.model", "openai/gpt-4.1-mini") in [(call[3], call[4]) for call in set_calls]
+        assert ("auxiliary.vision.base_url", "https://openrouter.ai/api/v1") in [(call[3], call[4]) for call in set_calls]
+        assert ("OPENROUTER_API_KEY", "sk-vision-secret") in [(call[3], call[4]) for call in set_calls]
+    finally:
+        profile_service.close()
+        store.close()
+
+
 def test_update_hermes_configuration_normalizes_xiaomi_text_vision_model(tmp_path, monkeypatch):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _RuntimeStub(store)
@@ -1140,6 +1395,7 @@ def test_check_hermes_update_reports_available_update(tmp_path, monkeypatch):
         assert result["update_available"] is True
         assert result["behind_commits"] == 190
         assert result["version"] == "0.11.0"
+        assert result["release_date"] == "2026.4.23"
     finally:
         store.close()
 

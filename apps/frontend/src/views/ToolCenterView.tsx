@@ -3,6 +3,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 
+import { useConfirmDialog } from '../components/ConfirmDialog';
+import { UiIcon } from '../components/UiIcon';
 import {
   apiGet,
   apiPost,
@@ -17,11 +19,11 @@ import {
   type DesktopTerminalTask,
 } from '../lib/bridge';
 import { currentParam, navigateTo } from '../lib/view';
-import { UiIcon } from '../components/UiIcon';
 
 type HermesStatus = {
   status?: string;
   version?: string;
+  release_date?: string;
   platform?: string;
   command_exists?: boolean;
   hermes_home?: string;
@@ -172,7 +174,8 @@ type HermesUpdateResult = {
   message?: string;
   update_available?: boolean;
   behind_commits?: number;
-  version?: string | { version?: string; update_available?: boolean; behind_commits?: number; summary?: string };
+  release_date?: string;
+  version?: string | { version?: string; release_date?: string; update_available?: boolean; behind_commits?: number; summary?: string };
   summary?: string;
   output?: string;
   check_output?: string;
@@ -187,6 +190,25 @@ type HermesUpdateResult = {
 };
 
 type ConfigFieldValue = string | boolean;
+type WorkflowTarget = 'live2d' | 'proactive-tts' | 'chat' | 'bubble' | 'settings' | 'tools';
+type YachiyoWorkflowDefinition = {
+  id: string;
+  title: string;
+  summary: string;
+  primaryAction: {
+    label: string;
+    target: WorkflowTarget;
+    params?: Record<string, string>;
+  };
+  requiredCapabilities: string[];
+  ownedSettingsRoute: string;
+  externalRecommendations: string[];
+};
+type WorkflowCapabilityStatus = {
+  id: string;
+  label: string;
+  status: ToolStatus;
+};
 type PendingNavigation =
   | { type: 'tool'; toolId: string }
   | { type: 'overview' }
@@ -197,7 +219,7 @@ type ToolAttentionItem = {
   reason: 'limited' | 'disabled' | 'unknown';
   detail?: string;
 };
-type HermesUpdateMode = 'check' | 'run' | null;
+type HermesUpdateMode = 'check' | 'run' | 'refresh' | null;
 type EmbeddedTerminalStatus = 'idle' | 'starting' | 'running' | 'exited' | 'error';
 type EmbeddedTerminalSession = {
   id: string;
@@ -269,6 +291,14 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
     category: '本地工作',
     description: '运行受控代码片段，处理数据或验证逻辑。',
     requirement: '需要 Hermes 代码执行环境',
+  },
+  {
+    id: 'computer_use',
+    label: 'Computer Use',
+    category: '本地工作',
+    description: '让 Hermes 控制本机桌面应用和窗口交互。',
+    requirement: '需要 Hermes computer_use 工具集与 macOS 权限',
+    aliases: ['computer-use', 'computer'],
   },
   {
     id: 'memory',
@@ -375,6 +405,40 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
 
 const HIDDEN_HERMES_TOOLS = new Set(['vision', 'vision_analyze']);
 
+const YACHIYO_WORKFLOWS: YachiyoWorkflowDefinition[] = [
+  {
+    id: 'desktop-companion',
+    title: '桌面伴随',
+    summary: '把 Live2D、气泡、TTS 和对话串成八千代的第一层存在感；这里管理的是 Yachiyo 自己的桌面体验。',
+    primaryAction: { label: '配置 Live2D', target: 'live2d' },
+    requiredCapabilities: ['tts', 'memory', 'computer_use'],
+    ownedSettingsRoute: 'Live2D 模式 / 气泡模式 / 主动关怀语音',
+    externalRecommendations: ['Agent Studio 可编排专用 Agent', 'Skill Library 可注入本地能力包'],
+  },
+  {
+    id: 'proactive-care',
+    title: '主动关怀',
+    summary: '围绕提醒、待办、语音播报和情绪化反馈，做成 Yachiyo 主动出现的轻工作链路。',
+    primaryAction: { label: '配置主动关怀语音', target: 'proactive-tts' },
+    requiredCapabilities: ['tts', 'todo', 'cronjob', 'memory'],
+    ownedSettingsRoute: '主动关怀语音 / 对话',
+    externalRecommendations: ['Hermes 自动化工具集', '本机 TTS 或 GPT-SoVITS'],
+  },
+  {
+    id: 'context-awareness',
+    title: '上下文感知',
+    summary: '让八千代能理解当前工作、历史会话和本机状态，再把结果交给聊天、资源与工作区体验。',
+    primaryAction: { label: '打开对话', target: 'chat' },
+    requiredCapabilities: ['browser', 'file', 'session_search', 'computer_use'],
+    ownedSettingsRoute: '对话 / 资源管理 / 工作区',
+    externalRecommendations: ['Codex Runtime 可增强代码 review', 'Browser/CDP 可增强网页上下文'],
+  },
+];
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 export function ToolCenterView() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [diagnosticCache, setDiagnosticCache] = useState<DiagnosticCache | null>(null);
@@ -403,6 +467,7 @@ export function ToolCenterView() {
   const updateTerminalRef = useRef<Terminal | null>(null);
   const updateFitAddonRef = useRef<FitAddon | null>(null);
   const updateTerminalIdRef = useRef<string | null>(null);
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
 
   useEffect(() => {
     let disposed = false;
@@ -498,6 +563,23 @@ export function ToolCenterView() {
   }, [updateTerminalSession]);
 
   useEffect(() => {
+    if (!updateTerminalSession) return undefined;
+    const previousGuard = window.hermesRouteLeaveGuard;
+    const guard: NonNullable<typeof window.hermesRouteLeaveGuard> = (nextView) => {
+      if (nextView === 'tools') return previousGuard ? previousGuard(nextView) : true;
+      setActionStatus('Hermes 更新正在运行，完成或停止前暂不切换页面。');
+      scrollToHermesUpdateTerminal();
+      return false;
+    };
+    window.hermesRouteLeaveGuard = guard;
+    return () => {
+      if (window.hermesRouteLeaveGuard === guard) {
+        window.hermesRouteLeaveGuard = previousGuard;
+      }
+    };
+  }, [updateTerminalSession]);
+
+  useEffect(() => {
     if (!hasEmbeddedTerminal()) return undefined;
     const offData = onDesktopTerminalData((payload) => {
       if (payload.id !== updateTerminalIdRef.current) return;
@@ -510,21 +592,22 @@ export function ToolCenterView() {
       setUpdateTerminalSession(null);
       setUpdateTerminalStatus(succeeded ? 'exited' : 'error');
       setUpdateTerminalMessage(hermesUpdateTerminalExitMessage(succeeded, payload.exitCode));
-      setUpdateBusy(false);
-      setUpdateMode(null);
-      setUpdateStartedAt(null);
       if (succeeded) {
+        setUpdateBusy(true);
+        setUpdateMode('refresh');
+        setUpdateStartedAt(Date.now());
         setActionStatus('Hermes 更新已结束，正在刷新工具清单和 Doctor 状态...');
         void refreshAfterHermesUpdateTerminal();
       } else {
+        setUpdateBusy(false);
+        setUpdateMode(null);
+        setUpdateStartedAt(null);
         setActionStatus(`Hermes 更新异常结束（exit=${payload.exitCode}），请查看终端输出。`);
       }
     });
     return () => {
-      const activeId = updateTerminalIdRef.current;
       offData();
       offExit();
-      if (activeId) void killDesktopTerminal(activeId);
       updateTerminalRef.current?.dispose();
       updateTerminalRef.current = null;
       updateFitAddonRef.current = null;
@@ -546,18 +629,48 @@ export function ToolCenterView() {
     });
   }, [selectedToolId]);
 
+  async function refreshToolCenterState(options: {
+    checkUpdate?: boolean;
+    runDoctor?: boolean;
+    retries?: number;
+    retryDelayMs?: number;
+  } = {}) {
+    const retries = Math.max(1, options.retries || 1);
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < retries; attempt += 1) {
+      if (attempt > 0) await wait(options.retryDelayMs || 900);
+      try {
+        const check = options.checkUpdate
+          ? await apiPost<HermesUpdateResult>('/ui/hermes/update/check').catch(() => null)
+          : null;
+        const doctor = options.runDoctor
+          ? await apiPost<DiagnosticResult>('/ui/hermes/diagnostic-command', { command: 'hermes doctor' }).catch(() => null)
+          : null;
+        const [payload, cache, config] = await Promise.all([
+          apiPost<DashboardData>('/ui/hermes/recheck'),
+          apiGet<DiagnosticCache>('/ui/hermes/diagnostics/cache').catch(() => doctor?.diagnostic_cache || null),
+          apiGet<ToolConfigPayload>('/ui/hermes/tools/config').catch(() => null),
+        ]);
+        if (check) setHermesUpdate(check);
+        setData(payload);
+        setDiagnosticCache(cache);
+        setToolConfig(config);
+        setToolConfigLoaded(true);
+        setError('');
+        return { check, doctor, payload, cache, config };
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('刷新工具状态失败');
+  }
+
   async function recheckHermes() {
     if (busy) return;
     setBusy(true);
     setActionStatus('正在重新检测 Hermes 工具状态...');
     try {
-      const payload = await apiPost<DashboardData>('/ui/hermes/recheck');
-      const cache = await apiGet<DiagnosticCache>('/ui/hermes/diagnostics/cache').catch(() => null);
-      const config = await apiGet<ToolConfigPayload>('/ui/hermes/tools/config').catch(() => null);
-      setData(payload);
-      setDiagnosticCache(cache);
-      setToolConfig(config);
-      setError('');
+      await refreshToolCenterState();
       setActionStatus('工具状态已刷新');
     } catch (err) {
       setActionStatus(err instanceof Error ? err.message : '重新检测 Hermes 失败');
@@ -606,6 +719,7 @@ export function ToolCenterView() {
       if (result.tool_config) setToolConfig(result.tool_config);
       if (result.diagnostic_cache) setDiagnosticCache(result.diagnostic_cache);
       if (result.dashboard) setData(result.dashboard);
+      await refreshToolCenterState({ checkUpdate: true, runDoctor: true, retries: 8, retryDelayMs: 1200 });
       if (!result.ok) throw new Error(result.error || result.message || 'Hermes 更新失败');
       setActionStatus(result.message || 'Hermes 更新完成，工具状态已刷新');
     } catch (err) {
@@ -729,34 +843,40 @@ export function ToolCenterView() {
     }
   }
 
-  async function stopHermesUpdateTerminal(options: { confirm?: boolean } = {}) {
+  async function stopHermesUpdateTerminalNow() {
     const id = updateTerminalIdRef.current;
     if (!id) return;
-    if (options.confirm !== false) {
-      const ok = window.confirm('Hermes 更新仍在运行。停止终端会中断 Hermes 更新，确定要停止吗？');
-      if (!ok) return;
-    }
     setUpdateTerminalMessage('正在停止 Hermes 更新终端...');
     await killDesktopTerminal(id);
   }
 
+  async function stopHermesUpdateTerminal(options: { confirm?: boolean } = {}) {
+    if (options.confirm === false) {
+      await stopHermesUpdateTerminalNow();
+      return;
+    }
+    requestConfirm({
+      title: '停止 Hermes 更新终端？',
+      description: 'Hermes 更新仍在运行。停止终端会中断 Hermes 更新。',
+      confirmLabel: '停止终端',
+      variant: 'danger',
+      onConfirm: () => void stopHermesUpdateTerminalNow(),
+    });
+  }
+
   async function refreshAfterHermesUpdateTerminal() {
     try {
-      const check = await apiPost<HermesUpdateResult>('/ui/hermes/update/check').catch(() => null);
-      const doctor = await apiPost<DiagnosticResult>('/ui/hermes/diagnostic-command', { command: 'hermes doctor' }).catch(() => null);
-      const [payload, cache, config] = await Promise.all([
-        apiPost<DashboardData>('/ui/hermes/recheck'),
-        apiGet<DiagnosticCache>('/ui/hermes/diagnostics/cache').catch(() => doctor?.diagnostic_cache || null),
-        apiGet<ToolConfigPayload>('/ui/hermes/tools/config').catch(() => null),
-      ]);
-      if (check) setHermesUpdate(check);
-      setData(payload);
-      setDiagnosticCache(cache);
-      setToolConfig(config);
-      setError('');
+      setUpdateTerminalMessage('Hermes 更新命令已结束，正在等待 Bridge 和 Hermes gateway 恢复。');
+      await refreshToolCenterState({ checkUpdate: true, runDoctor: true, retries: 10, retryDelayMs: 1300 });
       setActionStatus('Hermes 更新完成，工具清单和 Doctor 状态已刷新');
+      setUpdateTerminalMessage('Hermes 更新完成，工具清单和 Doctor 状态已刷新。');
     } catch (err) {
       setActionStatus(err instanceof Error ? err.message : 'Hermes 更新结束，但刷新工具状态失败');
+      setUpdateTerminalMessage('Hermes 更新结束，但自动刷新失败；请点击重新检测。');
+    } finally {
+      setUpdateBusy(false);
+      setUpdateMode(null);
+      setUpdateStartedAt(null);
     }
   }
 
@@ -768,9 +888,9 @@ export function ToolCenterView() {
 
   function requestNavigation(next: PendingNavigation) {
     if (updateTerminalSession) {
-      const ok = window.confirm('Hermes 更新仍在运行。离开工具中心会中断更新，确定要离开吗？');
-      if (!ok) return;
-      void stopHermesUpdateTerminal({ confirm: false });
+      setActionStatus('Hermes 更新正在运行，完成或停止前暂不切换页面。');
+      scrollToHermesUpdateTerminal();
+      return;
     }
     if (hasUnsavedChanges) {
       setPendingNavigation(next);
@@ -1039,8 +1159,8 @@ export function ToolCenterView() {
     <main className="app-shell tools-shell">
       <header className="topbar dashboard-topbar">
         <div>
-          <h1>工具中心</h1>
-          <p>集中查看 Hermes toolset、Doctor 受限项和 Yachiyo 后续扩展方向。</p>
+          <h1>能力中心</h1>
+          <p>从 Yachiyo 自己的桌面伴随、主动关怀和上下文感知开始；外部工具只作为推荐环境显示。</p>
         </div>
         <div className="topbar-actions">
           <button type="button" onClick={() => requestNavigation({ type: 'main' })}>主控台</button>
@@ -1066,11 +1186,22 @@ export function ToolCenterView() {
       {error ? <div className="notice danger">{error}</div> : null}
       {actionStatus ? <div className={/失败|错误|无法|未通过/.test(actionStatus) ? 'notice danger' : 'notice'}>{actionStatus}</div> : null}
 
+      <YachiyoWorkflowPanel
+        workflows={YACHIYO_WORKFLOWS}
+        hermes={hermes}
+        hermesToolsets={toolConfig?.hermes_toolsets || []}
+        limitedTools={limitedToolNames}
+        availableTools={availableToolNames}
+        limitedToolDetails={limitedToolDetails}
+        cacheStale={cacheStale}
+        checked={checked}
+      />
+
       <section className="tool-center-panel">
         <div className="section-heading-row">
           <div>
-            <h2>工具概览</h2>
-            <p className="section-caption">Doctor 结果会优先覆盖旧的 ready 汇总；配置变更后请重新运行 Doctor。</p>
+            <h2>基础设施状态</h2>
+            <p className="section-caption">Hermes 更新、Doctor 和 tools list 继续保留在这里；排障详情仍由诊断页承接。</p>
           </div>
           <StatusPill
             active={!attentionCount && checked}
@@ -1091,6 +1222,7 @@ export function ToolCenterView() {
 
         <HermesUpdatePanel
           version={hermes?.version}
+          releaseDate={hermes?.release_date}
           result={hermesUpdate}
           busy={updateBusy}
           mode={updateMode}
@@ -1177,7 +1309,91 @@ export function ToolCenterView() {
         />
       </section>
       {unsavedDialog}
+      {confirmDialog}
     </main>
+  );
+}
+
+function YachiyoWorkflowPanel({
+  workflows,
+  hermes,
+  hermesToolsets,
+  limitedTools,
+  availableTools,
+  limitedToolDetails,
+  cacheStale,
+  checked,
+}: {
+  workflows: YachiyoWorkflowDefinition[];
+  hermes?: HermesStatus;
+  hermesToolsets: HermesToolsetItem[];
+  limitedTools: string[];
+  availableTools: string[];
+  limitedToolDetails: Record<string, string>;
+  cacheStale: boolean;
+  checked: boolean;
+}) {
+  return (
+    <section className="yachiyo-workflow-panel">
+      <div className="section-heading-row">
+        <div>
+          <h2>Yachiyo 工作链路</h2>
+          <p className="section-caption">先看八千代自己能陪你完成什么；Hermes toolset 是这些链路的底座，不是这里的主角。</p>
+        </div>
+        <button type="button" onClick={() => navigateTo('settings')}>打开设置</button>
+      </div>
+      <div className="yachiyo-workflow-grid">
+        {workflows.map((workflow) => {
+          const capabilities = workflow.requiredCapabilities.map((capability) => workflowCapabilityStatus(
+            capability,
+            hermes,
+            hermesToolsets,
+            limitedTools,
+            availableTools,
+            limitedToolDetails,
+            checked,
+            cacheStale,
+          ));
+          const status = workflowStatusFromCapabilities(capabilities, checked, cacheStale);
+          return (
+            <article className={`yachiyo-workflow-card ${status.kind}`} key={workflow.id}>
+              <div className="yachiyo-workflow-head">
+                <div>
+                  <strong>{workflow.title}</strong>
+                  <span>{workflow.ownedSettingsRoute}</span>
+                </div>
+                <span className={`tool-status-pill ${status.kind}`}>{status.label}</span>
+              </div>
+              <p>{workflow.summary}</p>
+              <div className="workflow-capability-list" aria-label={`${workflow.title} 依赖能力`}>
+                {capabilities.map((capability) => (
+                  <span
+                    className={`workflow-capability-pill ${capability.status.kind}`}
+                    title={capability.status.detail}
+                    key={`${workflow.id}-${capability.id}`}
+                  >
+                    {capability.label}
+                  </span>
+                ))}
+              </div>
+              <div className="workflow-recommendations">
+                {workflow.externalRecommendations.map((item) => <span key={item}>{item}</span>)}
+              </div>
+              <div className="workflow-card-actions">
+                <button
+                  type="button"
+                  className="primary-action"
+                  onClick={() => navigateTo(workflow.primaryAction.target, workflow.primaryAction.params || {})}
+                >
+                  {workflow.primaryAction.label}
+                </button>
+                <small>{status.detail}</small>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -1558,8 +1774,16 @@ function ToolSummaryCard({
   );
 }
 
+function formatHermesVersion(version?: string, releaseDate?: string): string {
+  const cleanVersion = String(version || '').trim();
+  const cleanDate = String(releaseDate || '').trim();
+  if (cleanVersion && cleanDate && !cleanVersion.includes(cleanDate)) return `${cleanVersion} · ${cleanDate}`;
+  return cleanVersion || cleanDate || '未知版本';
+}
+
 function HermesUpdatePanel({
   version,
+  releaseDate,
   result,
   busy,
   mode,
@@ -1572,6 +1796,7 @@ function HermesUpdatePanel({
   onUpdate,
 }: {
   version?: string;
+  releaseDate?: string;
   result: HermesUpdateResult | null;
   busy: boolean;
   mode: HermesUpdateMode;
@@ -1584,6 +1809,7 @@ function HermesUpdatePanel({
   onUpdate: () => void;
 }) {
   const versionText = typeof result?.version === 'object' ? result.version.version : result?.version;
+  const dateText = result?.release_date || (typeof result?.version === 'object' ? result.version.release_date : '') || releaseDate || '';
   const updateAvailable = Boolean(result?.update_available || (typeof result?.version === 'object' && result.version.update_available));
   const behind = result?.behind_commits || (typeof result?.version === 'object' ? result.version.behind_commits : 0) || 0;
   const delta = result?.toolset_delta;
@@ -1599,10 +1825,10 @@ function HermesUpdatePanel({
               ? `可更新${behind ? `，落后 ${behind} commits` : ''}`
               : '未发现更新'
             : version
-              ? `当前 ${version}`
+              ? `当前 ${formatHermesVersion(version, releaseDate)}`
               : '可检查 Hermes 版本与工具清单变化'}
         </span>
-        {versionText ? <small>{versionText}</small> : null}
+        {versionText ? <small>{formatHermesVersion(versionText, dateText)}</small> : null}
         {changedCount ? (
           <small>
             工具清单变化：新增 {delta?.added?.length || 0}，移除 {delta?.removed?.length || 0}，状态变化 {delta?.changed?.length || 0}
@@ -1648,6 +1874,10 @@ function HermesUpdatePanel({
 function hermesUpdateBusyText(mode: HermesUpdateMode, elapsedSeconds: number): string {
   if (mode === 'check') {
     return elapsedSeconds >= 15 ? '仍在检查远端版本，网络较慢时会多等一会儿。' : '正在检查 Hermes 远端版本。';
+  }
+  if (mode === 'refresh') {
+    if (elapsedSeconds >= 12) return '仍在等待 Bridge/Hermes gateway 恢复，恢复后会自动同步工具清单。';
+    return '更新命令已完成，正在重新读取版本、Doctor 和工具清单。';
   }
   if (elapsedSeconds >= 90) {
     return '仍在更新 Hermes；可能正在下载依赖或刷新工具清单。';
@@ -1733,6 +1963,86 @@ function toolCategoryGroups(items: HermesToolCatalogItem[]): Array<[string, Herm
   return Array.from(groups.entries());
 }
 
+function workflowCapabilityStatus(
+  capabilityId: string,
+  hermes: HermesStatus | undefined,
+  hermesToolsets: HermesToolsetItem[],
+  limitedTools: string[],
+  availableTools: string[],
+  limitedToolDetails: Record<string, string>,
+  checked: boolean,
+  cacheStale: boolean,
+): WorkflowCapabilityStatus {
+  const item = catalogItemForCapability(capabilityId);
+  if (!item) {
+    return {
+      id: capabilityId,
+      label: capabilityId,
+      status: {
+        kind: 'pending',
+        label: '待同步',
+        detail: 'Hermes tools list 暂未暴露这个能力，Yachiyo 会先按规划展示。',
+      },
+    };
+  }
+  if (!toolsetEnabledForItem(item, hermesToolsets)) {
+    return {
+      id: capabilityId,
+      label: item.label,
+      status: {
+        kind: 'limited',
+        label: '未启用',
+        detail: 'Hermes tools list 显示此工具组当前已禁用。',
+      },
+    };
+  }
+  return {
+    id: capabilityId,
+    label: item.label,
+    status: toolStatusFor(item, hermes, limitedTools, availableTools, limitedToolDetails, checked, cacheStale),
+  };
+}
+
+function workflowStatusFromCapabilities(
+  capabilities: WorkflowCapabilityStatus[],
+  checked: boolean,
+  cacheStale: boolean,
+): ToolStatus {
+  if (cacheStale || !checked) {
+    return {
+      kind: 'pending',
+      label: '待检测',
+      detail: '运行 Doctor 后会刷新这条链路的依赖状态。',
+    };
+  }
+  const limited = capabilities.find((capability) => capability.status.kind === 'limited');
+  if (limited) {
+    return {
+      kind: 'limited',
+      label: '部分受限',
+      detail: `${limited.label} 需要处理；链路仍可部分使用，但体验会降级。`,
+    };
+  }
+  const pending = capabilities.find((capability) => capability.status.kind === 'pending');
+  if (pending) {
+    return {
+      kind: 'pending',
+      label: '待确认',
+      detail: `${pending.label} 尚未给出可用性结论。`,
+    };
+  }
+  return {
+    kind: 'ready',
+    label: '可推进',
+    detail: '依赖能力已就绪，可以进入 Yachiyo 自有配置页继续调体验。',
+  };
+}
+
+function catalogItemForCapability(capabilityId: string): HermesToolCatalogItem | undefined {
+  const canonical = canonicalToolName(capabilityId);
+  return HERMES_TOOL_CATALOG.find((item) => toolNameAliases(item).some((alias) => canonicalToolName(alias) === canonical));
+}
+
 function catalogForHermesToolsets(
   catalog: HermesToolCatalogItem[],
   toolsets?: HermesToolsetItem[],
@@ -1746,13 +2056,28 @@ function catalogForHermesToolsets(
       .map((item) => canonicalToolName(item.canonical_id || item.id)),
   );
   const referenced = new Set((doctorReferencedTools || []).filter((tool) => !isHiddenHermesTool(tool)).map(canonicalToolName));
-  return baseCatalog.filter((item) => {
+  const visible = baseCatalog.filter((item) => {
     const aliases = toolNameAliases(item).map(canonicalToolName);
     if (item.id === 'browser-cdp') {
       return supported.has('browser') || supported.has('browser-cdp') || referenced.has('browser-cdp');
     }
     return aliases.some((alias) => supported.has(alias) || referenced.has(alias));
   });
+  const knownAliases = new Set(visible.flatMap((item) => toolNameAliases(item).map(canonicalToolName)));
+  for (const toolset of toolsets || []) {
+    const canonical = canonicalToolName(toolset.canonical_id || toolset.id);
+    if (!canonical || isHiddenHermesTool(canonical) || knownAliases.has(canonical)) continue;
+    visible.push({
+      id: canonical,
+      label: toolset.label || toolset.id || canonical,
+      category: 'Hermes 新增工具',
+      description: 'Hermes tools list 中发现的新工具；Yachiyo 会先展示状态，专属配置入口可后续补齐。',
+      requirement: '随 Hermes 更新同步',
+      aliases: [toolset.id, toolset.canonical_id || ''].filter((value): value is string => Boolean(value)),
+    });
+    knownAliases.add(canonical);
+  }
+  return visible;
 }
 
 function toolsetEnabledForItem(item: HermesToolCatalogItem, toolsets?: HermesToolsetItem[]): boolean {

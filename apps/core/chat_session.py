@@ -61,6 +61,7 @@ class ChatMessage:
     task_id: Optional[str] = None  # 关联的任务 ID（仅 user 消息）
     error: Optional[str] = None    # 失败原因
     attachments: list[dict] = field(default_factory=list)
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -111,6 +112,7 @@ class ChatSession:
 
             error = stored.error
             attachments = _parse_attachments_json(stored.attachments_json)
+            metadata = _parse_metadata_json(getattr(stored, "metadata_json", "{}"))
             if fail_active_messages and status in (MessageStatus.PENDING, MessageStatus.PROCESSING):
                 status = MessageStatus.FAILED
                 error = error or "应用已重启，原任务状态不可恢复"
@@ -125,6 +127,7 @@ class ChatSession:
                 task_id=stored.task_id,
                 error=error,
                 attachments=attachments,
+                metadata=metadata,
             ))
 
         self.messages = restored
@@ -151,6 +154,7 @@ class ChatSession:
             error=msg.error,
             created_at=msg.created_at.isoformat(),
             attachments_json=json.dumps(msg.attachments or [], ensure_ascii=False),
+            metadata_json=json.dumps(msg.metadata or {}, ensure_ascii=False),
         ))
 
     def _ensure_summary_title_locked(self, content: str, attachments: list[dict] | None = None) -> None:
@@ -165,7 +169,12 @@ class ChatSession:
         if title:
             self._store.set_session_title_if_empty(self.session_id, title)
     
-    def add_user_message(self, content: str, attachments: list[dict] | None = None) -> str:
+    def add_user_message(
+        self,
+        content: str,
+        attachments: list[dict] | None = None,
+        metadata: dict | None = None,
+    ) -> str:
         """添加用户消息，返回 message_id"""
         normalized_attachments = list(attachments or [])
         with self._lock:
@@ -177,6 +186,7 @@ class ChatSession:
                 status=MessageStatus.PENDING,
                 created_at=datetime.now(timezone.utc),
                 attachments=normalized_attachments,
+                metadata=dict(metadata or {}),
             )
             self.messages.append(msg)
             self._pending_message_id = msg_id
@@ -205,6 +215,7 @@ class ChatSession:
         content: str,
         task_id: Optional[str] = None,
         error: Optional[str] = None,
+        metadata: dict | None = None,
     ) -> str:
         """添加 assistant 回复消息（向后兼容）
 
@@ -222,6 +233,7 @@ class ChatSession:
                 created_at=datetime.now(timezone.utc),
                 task_id=task_id,
                 error=error,
+                metadata=dict(metadata or {}),
             )
             self.messages.append(msg)
 
@@ -247,6 +259,7 @@ class ChatSession:
         status: MessageStatus = MessageStatus.COMPLETED,
         error: Optional[str] = None,
         attachments: list[dict] | None = None,
+        metadata: dict | None = None,
     ) -> str:
         """原子性地创建或更新 task_id 对应的 assistant 消息。
 
@@ -277,6 +290,8 @@ class ChatSession:
                 existing.error = error
                 if attachments is not None:
                     existing.attachments = list(attachments)
+                if metadata is not None:
+                    existing.metadata = dict(metadata)
                 self._persist_message(existing)
                 msg_id = existing.message_id
                 logger.debug(
@@ -294,6 +309,7 @@ class ChatSession:
                     task_id=task_id,
                     error=error,
                     attachments=list(attachments or []),
+                    metadata=dict(metadata or {}),
                 )
                 self.messages.append(new_msg)
                 self._persist_message(new_msg)
@@ -419,7 +435,7 @@ class ChatSession:
                 self._persist_message(msg)
                 break
     
-    def add_system_message(self, content: str) -> str:
+    def add_system_message(self, content: str, metadata: dict | None = None) -> str:
         """添加系统消息（提示、状态更新等）"""
         with self._lock:
             msg_id = uuid4().hex[:12]
@@ -429,6 +445,7 @@ class ChatSession:
                 content=content,
                 status=MessageStatus.COMPLETED,
                 created_at=datetime.now(timezone.utc),
+                metadata=dict(metadata or {}),
             )
             self.messages.append(msg)
             self._persist_message(msg)
@@ -446,6 +463,18 @@ class ChatSession:
                     return True
         return False
 
+    def mark_message_completed(self, message_id: str) -> bool:
+        """Mark a synthetic Agent/Workflow command as completed."""
+        with self._lock:
+            for msg in self.messages:
+                if msg.message_id == message_id:
+                    msg.status = MessageStatus.COMPLETED
+                    msg.error = None
+                    self._pending_message_id = self._find_active_message_id_locked()
+                    self._persist_message(msg)
+                    return True
+        return False
+
     def mark_message_processing(self, message_id: str) -> bool:
         """标记用户消息进入执行中状态。"""
         with self._lock:
@@ -453,6 +482,36 @@ class ChatSession:
                 if msg.message_id == message_id:
                     msg.status = MessageStatus.PROCESSING
                     self._pending_message_id = message_id
+                    self._persist_message(msg)
+                    return True
+        return False
+
+    def update_assistant_message(
+        self,
+        message_id: str,
+        content: str,
+        *,
+        status: MessageStatus = MessageStatus.COMPLETED,
+        error: str | None = None,
+        metadata: dict | None = None,
+    ) -> bool:
+        """更新 assistant 消息的内容和状态。
+
+        用于异步 Agent Run 完成后更新消息。
+        """
+        with self._lock:
+            for msg in self.messages:
+                if msg.message_id == message_id:
+                    msg.content = content
+                    msg.status = status
+                    msg.error = error
+                    if metadata:
+                        for key, value in metadata.items():
+                            if value is None:
+                                msg.metadata.pop(key, None)
+                            else:
+                                msg.metadata[key] = value
+                    self._pending_message_id = self._find_active_message_id_locked()
                     self._persist_message(msg)
                     return True
         return False
@@ -564,6 +623,7 @@ class ChatSession:
                         "error": m.error,
                         "created_at": m.created_at.isoformat(),
                         "attachments": m.attachments,
+                        "metadata": m.metadata,
                     }
                     for m in self.messages
                 ],
@@ -646,6 +706,7 @@ def _chat_message_from_stored(stored, *, fail_active_message: bool = True) -> Ch
         task_id=stored.task_id,
         error=error,
         attachments=_parse_attachments_json(stored.attachments_json),
+        metadata=_parse_metadata_json(getattr(stored, "metadata_json", "{}")),
     )
 
 
@@ -659,6 +720,16 @@ def _parse_attachments_json(value: str | None) -> list[dict]:
     if not isinstance(data, list):
         return []
     return [item for item in data if isinstance(item, dict)]
+
+
+def _parse_metadata_json(value: str | None) -> dict:
+    if not value:
+        return {}
+    try:
+        data = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def reset_chat_session() -> ChatSession:

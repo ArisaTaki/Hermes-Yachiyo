@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 
+import { useConfirmDialog } from '../components/ConfirmDialog';
 import {
   apiGet,
   apiPatch,
@@ -19,6 +20,13 @@ import {
   restartDesktopBridge,
   type AvatarImageSelection,
 } from '../lib/bridge';
+import {
+  listModelProfiles,
+  syncHermesProfileDefault,
+  updateModelProfileDefaults,
+  type ModelProfile,
+  type ModelProfileDefaults,
+} from '../lib/modelProfiles';
 import { currentParam, navigateTo } from '../lib/view';
 
 type SettingsPayload = {
@@ -165,6 +173,13 @@ type BackupStatus = {
   total_size_display?: string;
 };
 
+type HermesSettingsConfig = {
+  model?: { provider?: string; default?: string; base_url?: string };
+  provider_options?: Array<{ id: string; label?: string; api_key_configured?: boolean; auth_type?: string }>;
+  api_key?: { configured?: boolean; display?: string };
+  vision?: { effective_provider?: string; model?: string; base_url_configured?: boolean; api_key_configured?: boolean };
+};
+
 type UninstallTarget = {
   id?: string;
   label?: string;
@@ -308,11 +323,11 @@ function ReferenceSettingsHome() {
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [modelLoading, setModelLoading] = useState(true);
   const [assistantLoading, setAssistantLoading] = useState(true);
-  const [hermesConfig, setHermesConfig] = useState<{
-    model?: { provider?: string };
-    provider_options?: Array<{ id: string; label?: string; api_key_configured?: boolean; auth_type?: string }>;
-    api_key?: { configured?: boolean; display?: string };
-  } | null>(null);
+  const [hermesConfig, setHermesConfig] = useState<HermesSettingsConfig | null>(null);
+  const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
+  const [modelDefaults, setModelDefaults] = useState<ModelProfileDefaults>({});
+  const [modelProfileStatus, setModelProfileStatus] = useState('');
+  const [profileApplying, setProfileApplying] = useState<'chat' | 'vision' | ''>('');
   const [connectionTestResult, setConnectionTestResult] = useState<{ success?: boolean; ok?: boolean; error?: string; message?: string } | null>(null);
   const [connectionTesting, setConnectionTesting] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
@@ -330,9 +345,10 @@ function ReferenceSettingsHome() {
     let disposed = false;
     void Promise.allSettled([
       apiGet<GeneralSettingsPayload>('/ui/settings'),
-      apiGet<{ model?: { provider?: string }; provider_options?: Array<{ id: string; label?: string; api_key_configured?: boolean; auth_type?: string }>; api_key?: { configured?: boolean; display?: string } }>('/ui/hermes/config'),
+      apiGet<HermesSettingsConfig>('/ui/hermes/config'),
       apiGet<AssistantProfilePayload>('/assistant/profile'),
-    ]).then(([settingsResult, configResult, profileResult]) => {
+      listModelProfiles(),
+    ]).then(([settingsResult, configResult, profileResult, modelProfileResult]) => {
       if (disposed) return;
       if (settingsResult.status === 'fulfilled') setPayload(settingsResult.value);
       if (configResult.status === 'fulfilled') {
@@ -341,6 +357,10 @@ function ReferenceSettingsHome() {
       if (profileResult.status === 'fulfilled') {
         setAssistantProfile(profileResult.value);
         setAssistantDraft(assistantDraftFromProfile(profileResult.value));
+      }
+      if (modelProfileResult.status === 'fulfilled') {
+        setModelProfiles(modelProfileResult.value.profiles || []);
+        setModelDefaults(modelProfileResult.value.defaults || {});
       }
       setSettingsLoading(false);
       setModelLoading(false);
@@ -522,6 +542,29 @@ function ReferenceSettingsHome() {
     }
   }
 
+  async function applyModelProfileDefault(capability: 'chat' | 'vision', profileId: string) {
+    if (!profileId || profileApplying) return;
+    setProfileApplying(capability);
+    setModelProfileStatus(capability === 'chat' ? '正在同步主模型...' : '正在同步图片识别模型...');
+    try {
+      const sync = await syncHermesProfileDefault(capability, profileId);
+      if (sync.ok === false) throw new Error(sync.error || sync.message || '同步 Hermes 配置失败');
+      const defaults = await updateModelProfileDefaults({ [capability]: profileId });
+      setModelDefaults(defaults.defaults || {});
+      const [nextConfig, nextProfiles] = await Promise.all([
+        apiGet<HermesSettingsConfig>('/ui/hermes/config'),
+        listModelProfiles(),
+      ]);
+      setHermesConfig(nextConfig);
+      setModelProfiles(nextProfiles.profiles || []);
+      setModelProfileStatus(capability === 'chat' ? '主模型已同步' : '图片识别模型已同步');
+    } catch (err) {
+      setModelProfileStatus(err instanceof Error ? err.message : '模型配置同步失败');
+    } finally {
+      setProfileApplying('');
+    }
+  }
+
   async function runUpdateCheck() {
     if (updateChecking) return;
     setUpdateChecking(true);
@@ -552,6 +595,12 @@ function ReferenceSettingsHome() {
   const currentProviderOption = providerOptions.find((opt) => opt.id === currentProvider);
   const apiKeyConfigured = currentProviderOption?.api_key_configured ?? hermesConfig?.api_key?.configured ?? false;
   const apiKeyDisplay = hermesConfig?.api_key?.display || '';
+  const availableChatProfiles = modelProfiles.filter((profile) => profile.capability === 'chat' && profile.status === 'available' && profile.enabled !== false && profile.can_use_as_hermes !== false);
+  const availableVisionProfiles = modelProfiles.filter((profile) => profile.capability === 'vision' && profile.status === 'available' && profile.enabled !== false && profile.can_use_as_hermes !== false);
+  const selectedChatProfileId = modelDefaults.chat || '';
+  const selectedVisionProfileId = modelDefaults.vision || '';
+  const selectedChatProfile = availableChatProfiles.find((profile) => profile.profile_id === selectedChatProfileId);
+  const selectedVisionProfile = availableVisionProfiles.find((profile) => profile.profile_id === selectedVisionProfileId);
 
   const connectionTestOk = connectionTestResult?.success ?? connectionTestResult?.ok;
   const connectionTestMessage = connectionTestResult?.error || connectionTestResult?.message || '连接失败，请检查模型配置';
@@ -593,7 +642,7 @@ function ReferenceSettingsHome() {
         ) : (
           <>
             <SettingsItem
-              label="Agent 信息"
+              label="主 Agent 信息"
               description="侧边栏、待机状态和对话头像使用这里的资料"
               wide
             >
@@ -785,23 +834,53 @@ function ReferenceSettingsHome() {
           <SettingsLoadingRows count={3} />
         ) : (
           <>
-            <SettingsItem label="模型提供商" description={currentProviderOption?.label || currentProvider || '未读取到模型配置'}>
-              <SettingsActionButton onClick={() => navigateTo('provider')}>打开模型配置</SettingsActionButton>
-            </SettingsItem>
-            <SettingsItem label="API Key" description={apiKeyConfigured ? `已配置${apiKeyDisplay ? `：${apiKeyDisplay}` : ''}` : '未配置，前往模型配置可设置'}>
-              <SettingsActionButton onClick={() => navigateTo('provider')}>{apiKeyConfigured ? '查看' : '配置'}</SettingsActionButton>
+            <SettingsItem label="模型组管理" description="统一保存、测试并复用文本、图片识别和 TTS 模型配置">
+              <SettingsActionButton onClick={() => navigateTo('provider')}>打开新版模型配置</SettingsActionButton>
             </SettingsItem>
             <SettingsItem
-              label="连接测试"
-              description={connectionTestResult ? (connectionTestOk ? '连接正常' : `连接失败：${connectionTestMessage}`) : '测试模型服务连接状态'}
+              label="当前主模型"
+              description={selectedChatProfile ? `${selectedChatProfile.name} · ${selectedChatProfile.model || '未记录模型 ID'}` : `${currentProviderOption?.label || currentProvider || '未读取到模型配置'} · ${apiKeyConfigured ? `密钥已配置${apiKeyDisplay ? `：${apiKeyDisplay}` : ''}` : '密钥未配置'}`}
             >
-              <SettingsActionButton
-                loading={connectionTesting}
-                onClick={() => void runConnectionTest()}
+              <select
+                className="settings-select settings-profile-select"
+                value={selectedChatProfileId}
+                disabled={profileApplying === 'chat'}
+                onChange={(event) => void applyModelProfileDefault('chat', event.target.value)}
               >
-                {connectionTesting ? '测试中…' : '测试连接'}
-              </SettingsActionButton>
+                <option value="">选择已测试主模型</option>
+                {availableChatProfiles.map((profile) => (
+                  <option key={profile.profile_id} value={profile.profile_id}>{profile.name} · {profile.model}</option>
+                ))}
+              </select>
+              <SettingsActionButton onClick={() => navigateTo('provider')}>管理</SettingsActionButton>
             </SettingsItem>
+            <SettingsItem
+              label="图片识别模型"
+              description={selectedVisionProfile ? `${selectedVisionProfile.name} · ${selectedVisionProfile.model || '未记录模型 ID'}` : hermesConfig?.vision?.model ? `${hermesConfig.vision.effective_provider || 'vision'} · ${hermesConfig.vision.model}` : '选择已通过多模态测试的 vision Profile'}
+            >
+              <select
+                className="settings-select settings-profile-select"
+                value={selectedVisionProfileId}
+                disabled={profileApplying === 'vision'}
+                onChange={(event) => void applyModelProfileDefault('vision', event.target.value)}
+              >
+                <option value="">选择已测试视觉模型</option>
+                {availableVisionProfiles.map((profile) => (
+                  <option key={profile.profile_id} value={profile.profile_id}>{profile.name} · {profile.model}</option>
+                ))}
+              </select>
+              <SettingsActionButton onClick={() => navigateTo('provider')}>管理</SettingsActionButton>
+            </SettingsItem>
+            <SettingsItem label="Agent 模型" description="Agent Studio 只引用已验证的文本与图片识别模型组，不再在每个 Agent 里重复保存 API Key">
+              <SettingsActionButton onClick={() => navigateTo('agents')}>打开 Agent Studio</SettingsActionButton>
+            </SettingsItem>
+            {modelProfileStatus ? (
+              <SettingsItem label="模型同步状态" description={modelProfileStatus}>
+                <span className={`status-pill ${/失败|错误|不能为空|不存在/.test(modelProfileStatus) ? 'warn' : 'ok'}`}>
+                  {profileApplying ? '同步中' : '完成'}
+                </span>
+              </SettingsItem>
+            ) : null}
           </>
         )}
       </SettingsSection>
@@ -814,6 +893,9 @@ function ReferenceSettingsHome() {
           >
             {updateChecking ? '检查中…' : updateResult?.update_available ? '前往更新' : '检查更新'}
           </SettingsActionButton>
+        </SettingsItem>
+        <SettingsItem label="Hermes Agent 更新" description="更新 Hermes 后会刷新工具清单、Doctor 结果和 Yachiyo 的工具配置入口">
+          <SettingsActionButton onClick={() => navigateTo('tools')}>打开工具中心</SettingsActionButton>
         </SettingsItem>
         <SettingsItem label="项目主页" description="github.com/kuguya-AI-app-develop/Hermes-Yachiyo">
           <SettingsActionButton onClick={() => void openExternalUrl('https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo')}>打开</SettingsActionButton>
@@ -910,10 +992,10 @@ function AvatarEditorModal({
 function SpecificModeSettingsView({ mode }: { mode: string }) {
   const [activationPending, setActivationPending] = useState(
     mode === 'live2d'
-      && (
-        currentParam('reason') === 'live2d-resource-required'
-        || window.sessionStorage.getItem(LIVE2D_ACTIVATION_DRAFT_KEY) === '1'
-      ),
+    && (
+      currentParam('reason') === 'live2d-resource-required'
+      || window.sessionStorage.getItem(LIVE2D_ACTIVATION_DRAFT_KEY) === '1'
+    ),
   );
   const [payload, setPayload] = useState<SettingsPayload | null>(null);
   const [form, setForm] = useState<ModeForm>({});
@@ -1579,6 +1661,7 @@ function SystemSettingsView() {
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
   const [bridgeRestarting, setBridgeRestarting] = useState(false);
+  const { confirmDialog, requestConfirm } = useConfirmDialog();
 
   const changes = useMemo(() => buildGeneralSettingsChanges(payload, form), [payload, form]);
   const pendingCount = useMemo(() => countGeneralSettingsPendingChanges(payload, form), [payload, form]);
@@ -1767,7 +1850,6 @@ function SystemSettingsView() {
 
   async function createBackup(overwriteLatest = false) {
     if (backupBusy) return;
-    if (overwriteLatest && !window.confirm('将生成新备份并替换最近一次备份，继续吗？')) return;
     setBackupAction(overwriteLatest ? 'backup-overwrite' : 'backup-create');
     setStatus(overwriteLatest ? '正在覆盖最近一次备份…' : '正在生成备份…');
     try {
@@ -1782,9 +1864,22 @@ function SystemSettingsView() {
     }
   }
 
+  function requestCreateBackup(overwriteLatest = false) {
+    if (!overwriteLatest) {
+      void createBackup(false);
+      return;
+    }
+    requestConfirm({
+      title: '覆盖最近一次备份？',
+      description: '将生成新备份并替换最近一次备份。旧的最近备份记录会被覆盖。',
+      confirmLabel: '覆盖备份',
+      variant: 'danger',
+      onConfirm: () => void createBackup(true),
+    });
+  }
+
   async function restoreBackup(backupPath = '') {
     if (backupBusy) return;
-    if (!window.confirm('恢复备份会覆盖当前本地资料并安排应用重启，继续吗？')) return;
     setBackupAction(backupPath ? `backup-restore:${backupPath}` : 'backup-restore');
     setStatus('正在恢复备份…');
     try {
@@ -1798,9 +1893,19 @@ function SystemSettingsView() {
     }
   }
 
+  function requestRestoreBackup(backupPath = '') {
+    requestConfirm({
+      title: backupPath ? '恢复这份备份？' : '恢复最近备份？',
+      description: '恢复备份会覆盖当前本地资料，并按需要安排应用重启。',
+      confirmLabel: '恢复备份',
+      variant: 'danger',
+      onConfirm: () => void restoreBackup(backupPath),
+    });
+  }
+
   async function deleteBackup(backupPath: string) {
     if (backupBusy) return;
-    if (!backupPath || !window.confirm('确认删除这份备份吗？')) return;
+    if (!backupPath) return;
     setBackupAction(`backup-delete:${backupPath}`);
     setStatus('正在删除备份…');
     try {
@@ -1813,6 +1918,17 @@ function SystemSettingsView() {
     } finally {
       setBackupAction('');
     }
+  }
+
+  function requestDeleteBackup(backupPath: string) {
+    if (!backupPath) return;
+    requestConfirm({
+      title: '删除这份备份？',
+      description: '这份备份会从本机备份目录删除，此操作不可撤销。',
+      confirmLabel: '删除备份',
+      variant: 'danger',
+      onConfirm: () => void deleteBackup(backupPath),
+    });
   }
 
   async function openBackupLocation(backupPath = '') {
@@ -1835,7 +1951,6 @@ function SystemSettingsView() {
       setStatus(`请输入确认短语 ${uninstallConfirmPhrase}`);
       return;
     }
-    if (!window.confirm('卸载会删除所选本机资料，此操作不可撤销。确认继续吗？')) return;
     setUninstallRunning(true);
     setStatus('正在卸载…');
     try {
@@ -1857,6 +1972,21 @@ function SystemSettingsView() {
       setStatus(err instanceof Error ? err.message : '卸载失败');
       setUninstallRunning(false);
     }
+  }
+
+  function requestRunUninstall() {
+    if (uninstallRunning) return;
+    if (!uninstallConfirmValid) {
+      setStatus(`请输入确认短语 ${uninstallConfirmPhrase}`);
+      return;
+    }
+    requestConfirm({
+      title: '确认卸载 Hermes-Yachiyo？',
+      description: '卸载会删除所选本机资料，此操作不可撤销。请确认卸载范围、备份选项和 GPT-SoVITS 选项无误。',
+      confirmLabel: '确认卸载',
+      variant: 'danger',
+      onConfirm: () => void runUninstall(),
+    });
   }
 
   async function refreshUninstallPreview() {
@@ -1967,7 +2097,7 @@ function SystemSettingsView() {
             <SettingsActionButton
               disabled={backupBusy}
               loading={backupAction === 'backup-create'}
-              onClick={() => void createBackup(false)}
+              onClick={() => requestCreateBackup(false)}
             >
               {backupAction === 'backup-create' ? '生成中…' : '生成备份'}
             </SettingsActionButton>
@@ -1984,14 +2114,14 @@ function SystemSettingsView() {
                 <SettingsActionButton
                   disabled={backupBusy}
                   loading={backupAction === 'backup-overwrite'}
-                  onClick={() => void createBackup(true)}
+                  onClick={() => requestCreateBackup(true)}
                 >
                   {backupAction === 'backup-overwrite' ? '覆盖中…' : '覆盖最近一次'}
                 </SettingsActionButton>
                 <SettingsActionButton
                   disabled={backupBusy}
                   loading={backupAction === 'backup-restore'}
-                  onClick={() => void restoreBackup()}
+                  onClick={() => requestRestoreBackup()}
                 >
                   {backupAction === 'backup-restore' ? '恢复中…' : '恢复最近备份'}
                 </SettingsActionButton>
@@ -2016,7 +2146,7 @@ function SystemSettingsView() {
                         <SettingsActionButton
                           disabled={backupBusy}
                           loading={backupAction === `backup-restore:${item.path || ''}`}
-                          onClick={() => void restoreBackup(item.path || '')}
+                          onClick={() => requestRestoreBackup(item.path || '')}
                         >
                           {backupAction === `backup-restore:${item.path || ''}` ? '恢复中…' : '恢复'}
                         </SettingsActionButton>
@@ -2031,7 +2161,7 @@ function SystemSettingsView() {
                           variant="danger"
                           disabled={backupBusy}
                           loading={backupAction === `backup-delete:${item.path || ''}`}
-                          onClick={() => void deleteBackup(item.path || '')}
+                          onClick={() => requestDeleteBackup(item.path || '')}
                         >
                           {backupAction === `backup-delete:${item.path || ''}` ? '删除中…' : '删除'}
                         </SettingsActionButton>
@@ -2050,6 +2180,9 @@ function SystemSettingsView() {
           <SettingsItem label="应用更新" description={`Hermes Yachiyo v${payload?.app?.version || '0.1.0'} · 下载进度和版本差异在更新页处理`}>
             <SettingsActionButton onClick={() => navigateTo('app-update')}>打开更新页</SettingsActionButton>
           </SettingsItem>
+          <SettingsItem label="Hermes Agent 更新" description="Hermes 自身功能、toolset 和 provider 能力在工具中心更新并重新同步">
+            <SettingsActionButton onClick={() => navigateTo('tools')}>打开工具中心</SettingsActionButton>
+          </SettingsItem>
         </SettingsSection>
 
         <SettingsSection title="卸载">
@@ -2058,7 +2191,7 @@ function SystemSettingsView() {
               variant="danger"
               disabled={uninstallRunning || !uninstallConfirmValid}
               loading={uninstallRunning}
-              onClick={() => void runUninstall()}
+              onClick={requestRunUninstall}
             >
               {uninstallRunning ? '正在卸载…' : '卸载'}
             </SettingsActionButton>
@@ -2134,6 +2267,7 @@ function SystemSettingsView() {
           </SettingsActionButton>
         </div>
       </form>
+      {confirmDialog}
     </main>
   );
 }
@@ -2597,7 +2731,7 @@ const BUBBLE_FIELD_SECTIONS: ModeFieldSection[] = [
   },
   {
     title: '主动关怀',
-    note: '这些字段只影响气泡模式；统一开关可以在 GPT-SoVITS 页面同步写入 Bubble 和 Live2D。',
+    note: '这些字段只影响气泡模式；统一开关可以在主动关怀页面同步写入 Bubble 和 Live2D。',
     fields: [
       { key: 'bubble_mode.proactive_enabled', sourceKey: 'proactive_enabled', label: '启用主动关怀', kind: 'checkbox', wide: true },
       { key: 'bubble_mode.proactive_desktop_watch_enabled', sourceKey: 'proactive_desktop_watch_enabled', label: '启用桌面观察', kind: 'checkbox', wide: true },
@@ -2714,7 +2848,7 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
   },
   {
     title: '主动关怀',
-    note: '这些字段只影响 Live2D 模式；桌面观察权限和立即测试可在 GPT-SoVITS 页面执行。',
+    note: '这些字段只影响 Live2D 模式；桌面观察权限和立即测试可在主动关怀页面执行。',
     fields: [
       { key: 'live2d_mode.proactive_enabled', sourceKey: 'proactive_enabled', label: '启用主动关怀', kind: 'checkbox', wide: true },
       { key: 'live2d_mode.proactive_desktop_watch_enabled', sourceKey: 'proactive_desktop_watch_enabled', label: '启用桌面观察', kind: 'checkbox', wide: true },
