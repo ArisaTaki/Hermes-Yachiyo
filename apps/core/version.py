@@ -8,7 +8,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 _PACKAGE_NAME = "hermes-yachiyo"
-_FALLBACK_VERSION = "0.1.0"
+_FALLBACK_VERSION = "0.4.0"
 
 
 def project_root() -> Path:

@@ -119,7 +119,7 @@ workspace = "yachiyo"
 
 [yachiyo]
 # Yachiyo 应用配置
-version = "0.1.0"
+version = "0.4.0"
 """
                 config_file.write_text(config_content, encoding="utf-8")
             

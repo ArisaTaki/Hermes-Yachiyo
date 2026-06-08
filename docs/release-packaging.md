@@ -93,11 +93,16 @@ Hermes-Yachiyo.app/Contents/Resources/backend/hermes-yachiyo-backend
 Release tag 格式：
 
 ```text
-stable-v<发布版本>-<短SHA>
-experimental-v<发布版本>-<短SHA>
+stable-v<产品版本>-build.<构建号>-<短SHA>
+experimental-v<产品版本>-build.<构建号>-<短SHA>
 ```
 
-发布版本由 `pyproject.toml` 的基础版本加上 `GITHUB_RUN_NUMBER` 生成，例如基础版本 `0.1.0` 在第 20 次 workflow 运行时会生成 `0.1.20`。
+产品版本由 `pyproject.toml` 管理，采用 SemVer，例如 Phase 4 对应 `0.4.0`。每次 workflow 运行只更新 `build_number`，不会再把 `GITHUB_RUN_NUMBER` 加进 patch 版本；同一产品版本下的不同构建由 `build_number`、短 SHA 和 tag 区分。需要升级产品版本时运行：
+
+```bash
+python scripts/app_version.py set 0.4.0
+python scripts/app_version.py check
+```
 
 固定下载链接：
 
