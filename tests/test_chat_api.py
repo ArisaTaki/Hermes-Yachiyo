@@ -320,6 +320,15 @@ def test_workflow_mention_creates_workflow_run_from_chat(tmp_path, monkeypatch):
         workflow_message = _wait_for_assistant_content_contains(api, "Code output")
         assert workflow_message["metadata"]["runnable_kind"] == "workflow"
         assert workflow_message["metadata"]["workflow_run_id"] == workflow_result["workflow_run_id"]
+        workflow_messages = api.get_messages()["messages"]
+        child_messages = [
+            message
+            for message in workflow_messages
+            if message["metadata"].get("workflow_parent_run_id") == workflow_result["workflow_run_id"]
+        ]
+        assert [message["metadata"]["sender"]["nickname"] for message in child_messages] == ["Design", "Code"]
+        assert child_messages[0]["content"].startswith("Design 已完成 Workflow 节点。")
+        assert child_messages[1]["content"].startswith("Code 已完成 Workflow 节点。")
         current = next(
             item for item in api.list_sessions()["sessions"]
             if item["session_id"] == runtime.chat_session.session_id
@@ -335,6 +344,197 @@ def test_workflow_mention_creates_workflow_run_from_chat(tmp_path, monkeypatch):
         assert stored.conversation_kind == "workflow"
     finally:
         service.close()
+        store.close()
+
+
+def test_workflow_chat_syncs_child_agents_as_group_timeline_messages(tmp_path, monkeypatch):
+    api, _runtime, store = _make_api(tmp_path)
+    workflow_run_id = "workflow_run_visible"
+    run_group_id = "run_group_visible"
+    design_run_id = "agent_run_design"
+    coding_run_id = "agent_run_coding"
+    manual_run_id = "agent_run_manual_followup"
+    workflow = {"id": "workflow_visible", "name": "Visible Workflow", "nickname": "Visible Flow", "kind": "workflow"}
+    design = {"id": "agent_design", "name": "Design Agent", "nickname": "Design", "kind": "agent"}
+    coding = {"id": "agent_coding", "name": "Coding Agent", "nickname": "Code", "kind": "agent"}
+    started_event = {
+        "event": "workflow.run.started",
+        "detail": workflow["name"],
+        "workflow_path": [
+            {"id": "start", "kind": "start", "label": "Start"},
+            {"id": "design", "kind": "agent", "label": "设计方案", "task": "整理页面结构"},
+            {"id": "coding", "kind": "agent", "label": "编码实现", "task": "实现并验证功能"},
+        ],
+    }
+
+    class FakeWorkflowService:
+        def __init__(self):
+            self.runs = {
+                workflow_run_id: {
+                    "run_id": workflow_run_id,
+                    "run_group_id": run_group_id,
+                    "kind": "workflow_run",
+                    "runnable_id": workflow["id"],
+                    "runnable_name": workflow["name"],
+                    "status": "processing",
+                    "result": "",
+                    "timeline": [
+                        started_event,
+                        {
+                            "event": "workflow.node.agent",
+                            "detail": "设计方案",
+                            "workflow_node_id": "design",
+                            "workflow_node_kind": "agent",
+                            "workflow_node_label": "设计方案",
+                            "workflow_node_task": "整理页面结构",
+                            "child_run_id": design_run_id,
+                            "status": "completed",
+                        },
+                    ],
+                },
+                design_run_id: {
+                    "run_id": design_run_id,
+                    "run_group_id": run_group_id,
+                    "kind": "agent_run",
+                    "runnable_id": design["id"],
+                    "runnable_name": design["name"],
+                    "user_goal": "整理页面结构",
+                    "status": "completed",
+                    "result": "页面结构已经整理完成。",
+                    "timeline": [],
+                    "artifacts": [],
+                    "pending_approval": {},
+                },
+                coding_run_id: {
+                    "run_id": coding_run_id,
+                    "run_group_id": run_group_id,
+                    "kind": "agent_run",
+                    "runnable_id": coding["id"],
+                    "runnable_name": coding["name"],
+                    "user_goal": "实现并验证功能",
+                    "status": "running",
+                    "result": "",
+                    "timeline": [{"event": "agent.run.started", "detail": coding["name"]}],
+                    "artifacts": [],
+                    "pending_approval": {},
+                },
+                manual_run_id: {
+                    "run_id": manual_run_id,
+                    "run_group_id": run_group_id,
+                    "kind": "agent_run",
+                    "runnable_id": coding["id"],
+                    "runnable_name": coding["name"],
+                    "user_goal": "这是后续手动任务，不属于 Workflow",
+                    "status": "running",
+                    "result": "",
+                    "timeline": [],
+                    "artifacts": [],
+                    "pending_approval": {},
+                },
+            }
+
+        def get_run(self, run_id):
+            return self.runs[run_id]
+
+        def get_run_group(self, group_id):
+            assert group_id == run_group_id
+            return {
+                "run_group_id": run_group_id,
+                "child_run_ids": [workflow_run_id, design_run_id, coding_run_id, manual_run_id],
+            }
+
+        def resolve_runnable(self, *, runnable_id="", name=""):
+            return {workflow["id"]: workflow, design["id"]: design, coding["id"]: coding}.get(runnable_id)
+
+    service = FakeWorkflowService()
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    try:
+        initial_title, initial_detail = api._workflow_run_progress_from_timeline(
+            api._participant_for_runnable(workflow),
+            {**service.runs[workflow_run_id], "timeline": [started_event]},
+        )
+        assert initial_title == "Workflow 已开始"
+        assert "设计方案 → 编码实现" in initial_detail
+
+        workflow_message_id = api._session.add_assistant_message(
+            "",
+            metadata={
+                "sender": api._participant_for_runnable(workflow),
+                "runnable_kind": "workflow",
+                "runnable_id": workflow["id"],
+                "run_id": workflow_run_id,
+                "workflow_run_id": workflow_run_id,
+                "run_group_id": run_group_id,
+                "run_status": "processing",
+                "workflow_status": "processing",
+            },
+        )
+        api._session.update_assistant_message(workflow_message_id, "", status=MessageStatus.PROCESSING)
+
+        first = api.get_messages()["messages"]
+        workflow_message = next(message for message in first if message["id"] == workflow_message_id)
+        child_messages = [
+            message for message in first
+            if message["metadata"].get("workflow_parent_run_id") == workflow_run_id
+        ]
+        design_message = next(message for message in child_messages if message["metadata"]["run_id"] == design_run_id)
+        coding_message = next(message for message in child_messages if message["metadata"]["run_id"] == coding_run_id)
+
+        assert len(child_messages) == 2
+        assert workflow_message["metadata"]["run_progress_title"] == "Workflow 正在执行 Agent"
+        assert "节点「编码实现」：实现并验证功能" in workflow_message["metadata"]["run_progress_detail"]
+        assert design_message["status"] == "completed"
+        assert design_message["content"] == (
+            "Design 已完成 Workflow 节点。\n"
+            "节点：设计方案\n"
+            "任务：整理页面结构\n\n"
+            "页面结构已经整理完成。"
+        )
+        assert coding_message["status"] == "processing"
+        assert coding_message["content"] == ""
+        assert coding_message["metadata"]["run_progress_title"] == "Workflow 正在执行 Agent"
+        assert "节点「编码实现」：实现并验证功能" in coding_message["metadata"]["run_progress_detail"]
+
+        second = api.get_messages()["messages"]
+        assert len([
+            message for message in second
+            if message["metadata"].get("workflow_parent_run_id") == workflow_run_id
+        ]) == 2
+
+        service.runs[coding_run_id] = {
+            **service.runs[coding_run_id],
+            "status": "completed",
+            "result": "编码与验证完成。",
+        }
+        service.runs[workflow_run_id] = {
+            **service.runs[workflow_run_id],
+            "status": "completed",
+            "result": "编码与验证完成。",
+            "timeline": [
+                *service.runs[workflow_run_id]["timeline"],
+                {
+                    "event": "workflow.node.agent",
+                    "detail": "编码实现",
+                    "workflow_node_id": "coding",
+                    "workflow_node_kind": "agent",
+                    "workflow_node_label": "编码实现",
+                    "workflow_node_task": "实现并验证功能",
+                    "child_run_id": coding_run_id,
+                    "status": "completed",
+                },
+                {"event": "workflow.run.completed", "detail": workflow["name"]},
+            ],
+        }
+
+        completed = api.get_messages()["messages"]
+        completed_coding = next(message for message in completed if message["metadata"].get("run_id") == coding_run_id)
+        completed_workflow = next(message for message in completed if message["id"] == workflow_message_id)
+
+        assert completed_coding["status"] == "completed"
+        assert completed_coding["content"].endswith("编码与验证完成。")
+        assert completed_workflow["status"] == "completed"
+        assert completed_workflow["content"].startswith("Visible Flow 已完成。")
+    finally:
         store.close()
 
 
@@ -769,7 +969,12 @@ def test_workflow_waiting_for_child_agent_approval_counts_only_child(tmp_path, m
         assert payload_after["approval_count"] == 0
         assert api.get_session_info()["approval_count"] == 0
         assert child_after["status"] == "completed"
-        assert child_after["content"] == "Child Agent done"
+        assert child_after["content"] == (
+            "Needs Approval 已完成 Workflow 节点。\n"
+            "节点：Needs Approval\n"
+            "任务：跑需要工具审批的流程\n\n"
+            "Child Agent done"
+        )
         assert child_after["metadata"]["run_status"] == "completed"
         assert child_after["metadata"]["pending_approval"] == {}
         assert workflow_after["status"] == "completed"
