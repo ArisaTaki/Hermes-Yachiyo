@@ -23,9 +23,9 @@ from uuid import uuid4
 
 from apps.core.tls import urlopen_with_bundled_ca
 from apps.shell.model_profiles import (
-    OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS,
     get_model_profile_service,
     openai_compatible_chat_message,
+    read_openai_compatible_chat_timeout,
     supports_openai_compatible_api,
 )
 
@@ -556,16 +556,19 @@ class AgentRuntimeService:
         self.skill_installs_hermes_home = self.skill_installs_dir / "hermes-home"
         self.agent_artifacts_dir = root / "artifacts" / "agent-runs"
         self.workflow_artifacts_dir = root / "artifacts" / "workflow-runs"
+        self.agent_workspaces_dir = root / "workspaces" / "agents"
         self.skills_dir.mkdir(parents=True, exist_ok=True)
         self.skill_installs_dir.mkdir(parents=True, exist_ok=True)
         self.skill_installs_hermes_home.mkdir(parents=True, exist_ok=True)
         self.agent_artifacts_dir.mkdir(parents=True, exist_ok=True)
         self.workflow_artifacts_dir.mkdir(parents=True, exist_ok=True)
+        self.agent_workspaces_dir.mkdir(parents=True, exist_ok=True)
         self._db_lock = threading.RLock()
         raw_conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn = _LockedConnection(raw_conn, self._db_lock)
         self._conn.row_factory = _named_row_factory
         self._init_db()
+        self._migrate_agent_workspace_policies()
         if seed_templates:
             self._seed_templates()
 
@@ -1015,6 +1018,54 @@ class AgentRuntimeService:
     def _default_workspace_policy() -> dict[str, Any]:
         return {"default_workdir": "", "readable_scopes": ["."], "writable_scopes": []}
 
+    def _default_agent_workdir(self, agent_id: str) -> Path:
+        raw_id = str(agent_id or "")
+        clean_id = re.sub(r"[^A-Za-z0-9._-]+", "-", raw_id).strip(".-")[:80]
+        if not clean_id:
+            clean_id = "agent"
+        if clean_id != raw_id:
+            clean_id = f"{clean_id}-{hashlib.sha256(raw_id.encode('utf-8')).hexdigest()[:8]}"
+        workdir = self.agent_workspaces_dir / clean_id
+        workdir.mkdir(parents=True, exist_ok=True)
+        return workdir
+
+    def _assign_default_agent_workdir(
+        self,
+        agent_id: str,
+        workspace_policy: dict[str, Any],
+        tool_policy: dict[str, Any],
+    ) -> dict[str, Any]:
+        if str(workspace_policy.get("default_workdir") or "").strip():
+            return workspace_policy
+        assigned = {**workspace_policy, "default_workdir": str(self._default_agent_workdir(agent_id))}
+        if "workspace.write_patch" in (tool_policy.get("allowed_tools") or []) and not assigned.get("writable_scopes"):
+            assigned["writable_scopes"] = ["."]
+        return assigned
+
+    def _migrate_agent_workspace_policies(self) -> None:
+        rows = self._conn.execute(
+            "SELECT agent_id, category, tool_policy_json, workspace_policy_json FROM agents"
+        ).fetchall()
+        changed = False
+        for row in rows:
+            tool_policy = self._compile_tool_policy(
+                str(row["category"] or "custom"),
+                _json_load(row["tool_policy_json"], {}),
+            )
+            workspace_policy = self._compile_workspace_policy(
+                _json_load(row["workspace_policy_json"], self._default_workspace_policy())
+            )
+            if str(workspace_policy.get("default_workdir") or "").strip():
+                continue
+            workspace_policy = self._assign_default_agent_workdir(str(row["agent_id"]), workspace_policy, tool_policy)
+            self._conn.execute(
+                "UPDATE agents SET workspace_policy_json=?, updated_at=? WHERE agent_id=?",
+                (_json_dump(workspace_policy), _now(), row["agent_id"]),
+            )
+            changed = True
+        if changed:
+            self._conn.commit()
+
     @staticmethod
     def _tool_schemas(allowed_tools: list[str]) -> list[dict[str, Any]]:
         specs: dict[str, dict[str, Any]] = {
@@ -1341,6 +1392,7 @@ class AgentRuntimeService:
         execution_backend = _normalize_execution_backend(payload.get("execution_backend"), model_mode=model_mode)
         tool_policy = self._compile_tool_policy(category, payload.get("tool_policy"))
         workspace_policy = self._compile_workspace_policy(payload.get("workspace_policy"))
+        workspace_policy = self._assign_default_agent_workdir(agent_id, workspace_policy, tool_policy)
         self._conn.execute(
             """
             INSERT INTO agents (
@@ -1397,6 +1449,7 @@ class AgentRuntimeService:
         execution_backend = _normalize_execution_backend(next_agent.get("execution_backend"), model_mode=model_mode)
         tool_policy = self._compile_tool_policy(category, next_agent.get("tool_policy"))
         workspace_policy = self._compile_workspace_policy(next_agent.get("workspace_policy"))
+        workspace_policy = self._assign_default_agent_workdir(agent_id, workspace_policy, tool_policy)
         self._conn.execute(
             """
             UPDATE agents
@@ -3492,6 +3545,7 @@ class AgentRuntimeService:
     @staticmethod
     def _openai_compatible_chat(base_url: str, model: str, api_key: str, messages: list[dict[str, str]]) -> str:
         url = f"{base_url.rstrip('/')}/chat/completions"
+        timeout = read_openai_compatible_chat_timeout()
         body = json.dumps({"model": model, "messages": messages, "temperature": 0.2}).encode("utf-8")
         request = urlrequest.Request(
             url,
@@ -3503,9 +3557,11 @@ class AgentRuntimeService:
             },
         )
         try:
-            with urlopen_with_bundled_ca(request, timeout=OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS) as response:
+            with urlopen_with_bundled_ca(request, timeout=timeout) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-        except (urlerror.URLError, TimeoutError, json.JSONDecodeError) as exc:
+        except TimeoutError as exc:
+            raise AgentRuntimeError(f"custom_api 调用超时：等待响应超过 {timeout:g} 秒") from exc
+        except (urlerror.URLError, json.JSONDecodeError) as exc:
             raise AgentRuntimeError(f"custom_api 调用失败：{redact_secrets(exc)}") from exc
         return str(payload.get("choices", [{}])[0].get("message", {}).get("content") or "")
 
