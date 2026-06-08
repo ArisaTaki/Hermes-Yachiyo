@@ -15546,7 +15546,10 @@ button.activity-item {
 
 .run-history-toolbar {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
+  min-width: 0;
+  width: 100%;
 }
 
 .run-history-toolbar>span,
@@ -15648,6 +15651,8 @@ button.activity-item {
 
 .run-list.grouped {
   gap: 14px;
+  min-width: 0;
+  width: 100%;
 }
 
 .run-history-group {
