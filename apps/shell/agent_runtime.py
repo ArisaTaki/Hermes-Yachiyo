@@ -666,6 +666,12 @@ class AgentRuntimeService:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS studio_deletions (
+                item_type TEXT NOT NULL,
+                item_key TEXT NOT NULL,
+                deleted_at TEXT NOT NULL,
+                PRIMARY KEY (item_type, item_key)
+            );
             CREATE TABLE IF NOT EXISTS run_groups (
                 run_group_id TEXT PRIMARY KEY,
                 title TEXT NOT NULL DEFAULT '',
@@ -746,6 +752,44 @@ class AgentRuntimeService:
         if "pending_approval_json" not in run_columns:
             self._conn.execute("ALTER TABLE runs ADD COLUMN pending_approval_json TEXT NOT NULL DEFAULT '{}'")
 
+    def _record_studio_deletion(self, item_type: str, item_key: str) -> None:
+        clean_key = str(item_key or "").strip()
+        if not clean_key:
+            return
+        self._conn.execute(
+            """
+            INSERT INTO studio_deletions (item_type, item_key, deleted_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(item_type, item_key) DO UPDATE SET deleted_at=excluded.deleted_at
+            """,
+            (item_type, clean_key, _now()),
+        )
+
+    def _clear_studio_deletion(self, item_type: str, item_key: str) -> None:
+        self._conn.execute(
+            "DELETE FROM studio_deletions WHERE item_type=? AND item_key=?",
+            (item_type, str(item_key or "").strip()),
+        )
+
+    def _has_studio_deletion(self, item_type: str, item_key: str) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM studio_deletions WHERE item_type=? AND item_key=?",
+            (item_type, str(item_key or "").strip()),
+        ).fetchone()
+        return row is not None
+
+    @staticmethod
+    def _skill_deletion_key(source_type: str, origin_path: str) -> str:
+        clean_origin = str(origin_path or "").strip()
+        if not clean_origin:
+            return ""
+        library = "hermes" if source_type in {"hermes_global", "hermes_project"} else "yachiyo"
+        try:
+            clean_origin = str(Path(clean_origin).expanduser().resolve())
+        except OSError:
+            pass
+        return f"{library}:{clean_origin}"
+
     def _seed_templates(self) -> None:
         templates = [
             (
@@ -809,7 +853,11 @@ class AgentRuntimeService:
         existing_agent_ids = {str(row["agent_id"]) for row in agent_rows}
         existing_agent_names = {str(row["name"]).strip().lower() for row in agent_rows}
         for agent_id, name, description, category, instructions, output_contract in templates:
-            if agent_id in existing_agent_ids or name.strip().lower() in existing_agent_names:
+            if (
+                agent_id in existing_agent_ids
+                or name.strip().lower() in existing_agent_names
+                or self._has_studio_deletion("agent", agent_id)
+            ):
                 continue
             self.create_agent(
                 {
@@ -991,7 +1039,11 @@ class AgentRuntimeService:
         for workflow in workflow_templates:
             workflow_id = str(workflow["workflow_id"])
             name = str(workflow["name"])
-            if workflow_id in existing_workflow_ids or name.strip().lower() in existing_workflow_names:
+            if (
+                workflow_id in existing_workflow_ids
+                or name.strip().lower() in existing_workflow_names
+                or self._has_studio_deletion("workflow", workflow_id)
+            ):
                 continue
             referenced_agents = [
                 str((node.get("data") or {}).get("agent_id") or "")
@@ -1428,6 +1480,8 @@ class AgentRuntimeService:
                 now,
             ),
         )
+        if not seed:
+            self._clear_studio_deletion("agent", agent_id)
         self._conn.commit()
         return self.get_agent(agent_id)
 
@@ -1488,6 +1542,8 @@ class AgentRuntimeService:
         return self.get_agent(agent_id)
 
     def delete_agent(self, agent_id: str) -> dict[str, Any]:
+        if self._conn.execute("SELECT 1 FROM agents WHERE agent_id=?", (agent_id,)).fetchone() is not None:
+            self._record_studio_deletion("agent", agent_id)
         self._conn.execute("DELETE FROM agents WHERE agent_id=?", (agent_id,))
         self._conn.commit()
         return {"ok": True}
@@ -1706,7 +1762,7 @@ class AgentRuntimeService:
         else:
             source_root = source
         try:
-            return self._import_skill_root(
+            imported = self._import_skill_root(
                 source_root,
                 source_path=f"local:{source.name}",
                 source_type=source_type,
@@ -1715,6 +1771,12 @@ class AgentRuntimeService:
                 sync_status="imported",
                 folder_id=target_folder_id,
             )
+            self._clear_studio_deletion(
+                "skill_source",
+                self._skill_deletion_key(source_type, origin_path),
+            )
+            self._conn.commit()
+            return imported
         finally:
             if temp_dir is not None:
                 shutil.rmtree(temp_dir, ignore_errors=True)
@@ -1728,10 +1790,16 @@ class AgentRuntimeService:
         record_source_type: str = "npx_skills",
         folder_id: str | None = None,
         source_ref_override: str = "",
+        restore_deleted: bool = False,
     ) -> dict[str, Any]:
         source_type = record_source_type if record_source_type in {"npx_skills", "hermes_cli"} else "npx_skills"
         roots = self._yachiyo_skill_root_specs(source_type=source_type, source_ref_override=source_ref_override)
-        return self._sync_skill_roots(roots, library="yachiyo", folder_id=folder_id)
+        return self._sync_skill_roots(
+            roots,
+            library="yachiyo",
+            folder_id=folder_id,
+            restore_deleted=restore_deleted,
+        )
 
     def _sync_skill_roots(
         self,
@@ -1739,6 +1807,7 @@ class AgentRuntimeService:
         *,
         library: str,
         folder_id: str | None = None,
+        restore_deleted: bool = False,
     ) -> dict[str, Any]:
         results: list[dict[str, Any]] = []
         now = _now()
@@ -1790,6 +1859,19 @@ class AgentRuntimeService:
                     or root_spec.get("source_ref_override")
                     or source_ref
                 )
+                deletion_key = self._skill_deletion_key(source_type, str(source_root.resolve()))
+                has_deletion = self._has_studio_deletion("skill_source", deletion_key)
+                restore_deletion = restore_deleted and has_deletion
+                if has_deletion and not restore_deletion:
+                    results.append({
+                        "source": str(source_root),
+                        "source_type": source_type,
+                        "library": library,
+                        "source_ref": source_ref,
+                        "status": "skipped",
+                        "message": "用户已删除，跳过同步；可通过显式导入或重新安装恢复",
+                    })
+                    continue
                 try:
                     result = self._import_skill_root(
                         source_root,
@@ -1802,6 +1884,9 @@ class AgentRuntimeService:
                         copy_to_managed=False,
                         folder_id=target_folder_id,
                     )
+                    if restore_deletion:
+                        self._clear_studio_deletion("skill_source", deletion_key)
+                        self._conn.commit()
                     results.append({
                         "source": str(source_root),
                         "source_type": source_type,
@@ -1866,6 +1951,7 @@ class AgentRuntimeService:
                 record_source_type=installer,
                 folder_id=target_folder_id,
                 source_ref_override=source_ref,
+                restore_deleted=True,
             )
             if completed.returncode == 0
             else None
@@ -2379,7 +2465,15 @@ class AgentRuntimeService:
 
     def delete_skill(self, skill_id: str) -> dict[str, Any]:
         self._ensure_row_factory()
-        skill_row = self._conn.execute("SELECT local_path, source_type FROM skills WHERE skill_id=?", (skill_id,)).fetchone()
+        skill_row = self._conn.execute(
+            "SELECT local_path, source_type, origin_path FROM skills WHERE skill_id=?",
+            (skill_id,),
+        ).fetchone()
+        if skill_row is not None:
+            self._record_studio_deletion(
+                "skill_source",
+                self._skill_deletion_key(str(skill_row["source_type"]), str(skill_row["origin_path"])),
+            )
         self._conn.execute("DELETE FROM skills WHERE skill_id=?", (skill_id,))
         rows = self._conn.execute("SELECT agent_id, skill_ids_json FROM agents").fetchall()
         for row in rows:
@@ -2436,6 +2530,8 @@ class AgentRuntimeService:
                 now,
             ),
         )
+        if not seed:
+            self._clear_studio_deletion("workflow", workflow_id)
         self._conn.commit()
         return self.get_workflow(workflow_id)
 
@@ -2471,6 +2567,8 @@ class AgentRuntimeService:
         return self.get_workflow(workflow_id)
 
     def delete_workflow(self, workflow_id: str) -> dict[str, Any]:
+        if self._conn.execute("SELECT 1 FROM workflows WHERE workflow_id=?", (workflow_id,)).fetchone() is not None:
+            self._record_studio_deletion("workflow", workflow_id)
         self._conn.execute("DELETE FROM workflows WHERE workflow_id=?", (workflow_id,))
         self._conn.commit()
         return {"ok": True}

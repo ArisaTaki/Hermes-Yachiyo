@@ -146,6 +146,25 @@ def test_seed_templates_backfill_default_workflows_when_agents_exist(tmp_path):
         service.close()
 
 
+def test_deleted_seed_templates_do_not_return_after_restart(tmp_path):
+    service = make_service(tmp_path, seed_templates=True)
+    try:
+        service.delete_agent("agent_coding")
+        service.delete_workflow("workflow_web_idea_full")
+    finally:
+        service.close()
+
+    service = make_service(tmp_path, seed_templates=True)
+    try:
+        agent_ids = {agent["agent_id"] for agent in service.list_agents()["agents"]}
+        workflow_ids = {workflow["workflow_id"] for workflow in service.list_workflows()["workflows"]}
+
+        assert "agent_coding" not in agent_ids
+        assert "workflow_web_idea_full" not in workflow_ids
+    finally:
+        service.close()
+
+
 def test_phase4_seeded_workflow_executes_default_agent_line(tmp_path, monkeypatch):
     service = make_service(tmp_path, seed_templates=True)
     calls = []
@@ -491,6 +510,114 @@ def test_sync_hermes_skills_imports_skips_and_updates(tmp_path):
         assert "Updated instruction" in skills[0]["skill_markdown"]
         service.delete_skill(skill["skill_id"])
         assert skill_root.exists()
+    finally:
+        service.close()
+
+
+def test_deleted_synced_skill_stays_deleted_after_restart_and_sync(tmp_path):
+    hermes_root = tmp_path / ".hermes" / "skills"
+    skill_root = hermes_root / "research" / "deleted-skill"
+    skill_root.mkdir(parents=True)
+    (skill_root / "SKILL.md").write_text("# Deleted Skill\n\nDo not restore automatically.", encoding="utf-8")
+
+    service = make_service(tmp_path)
+    try:
+        synced = service.sync_hermes_skills(
+            roots=[{"path": str(hermes_root), "source_type": "hermes_global"}]
+        )
+        skill_id = synced["results"][0]["skill_id"]
+        service.delete_skill(skill_id)
+    finally:
+        service.close()
+
+    service = make_service(tmp_path, seed_templates=True)
+    try:
+        synced = service.sync_hermes_skills(
+            roots=[{"path": str(hermes_root), "source_type": "hermes_global"}]
+        )
+
+        assert service.list_skills()["skills"] == []
+        assert synced["summary"]["imported"] == 0
+        assert synced["results"][0]["status"] == "skipped"
+        assert "用户已删除" in synced["results"][0]["message"]
+    finally:
+        service.close()
+
+
+def test_explicit_skill_import_restores_deleted_synced_skill(tmp_path):
+    hermes_root = tmp_path / ".hermes" / "skills"
+    skill_root = hermes_root / "research" / "restored-skill"
+    skill_root.mkdir(parents=True)
+    (skill_root / "SKILL.md").write_text("# Restored Skill\n\nRestore explicitly.", encoding="utf-8")
+
+    service = make_service(tmp_path)
+    try:
+        synced = service.sync_hermes_skills(
+            roots=[{"path": str(hermes_root), "source_type": "hermes_global"}]
+        )
+        service.delete_skill(synced["results"][0]["skill_id"])
+
+        restored = service.import_skill(str(skill_root))
+
+        assert restored["name"] == "Restored Skill"
+        assert service.get_skill(restored["skill_id"])["source_type"] == "local_dir"
+    finally:
+        service.close()
+
+
+def test_failed_skill_reimport_keeps_deletion_record(tmp_path):
+    hermes_root = tmp_path / ".hermes" / "skills"
+    skill_root = hermes_root / "research" / "failed-restore-skill"
+    skill_root.mkdir(parents=True)
+    skill_md = skill_root / "SKILL.md"
+    skill_md.write_text("# Failed Restore Skill\n\nKeep deletion.", encoding="utf-8")
+
+    service = make_service(tmp_path)
+    try:
+        synced = service.sync_hermes_skills(
+            roots=[{"path": str(hermes_root), "source_type": "hermes_global"}]
+        )
+        service.delete_skill(synced["results"][0]["skill_id"])
+        skill_md.unlink()
+
+        with pytest.raises(AgentRuntimeError, match="SKILL.md"):
+            service.import_skill(str(skill_root))
+
+        skill_md.write_text("# Failed Restore Skill\n\nKeep deletion.", encoding="utf-8")
+        resynced = service.sync_hermes_skills(
+            roots=[{"path": str(hermes_root), "source_type": "hermes_global"}]
+        )
+
+        assert resynced["summary"]["imported"] == 0
+        assert service.list_skills()["skills"] == []
+    finally:
+        service.close()
+
+
+def test_explicit_skill_reinstall_restores_deleted_installed_skill(tmp_path):
+    service = make_service(tmp_path)
+    skill_root = service.skill_installs_hermes_home / "skills" / "restored-installed-skill"
+    skill_root.mkdir(parents=True)
+    (skill_root / "SKILL.md").write_text(
+        "# Restored Installed Skill\n\nRestore through reinstall.",
+        encoding="utf-8",
+    )
+    try:
+        synced = service.sync_yachiyo_installed_skills()
+        synced_skill = next(result for result in synced["results"] if result.get("skill_id"))
+        service.delete_skill(synced_skill["skill_id"])
+
+        skipped = service.sync_yachiyo_installed_skills()
+        skill_root.mkdir(parents=True)
+        (skill_root / "SKILL.md").write_text(
+            "# Restored Installed Skill\n\nRestore through reinstall.",
+            encoding="utf-8",
+        )
+        restored = service.sync_yachiyo_installed_skills(restore_deleted=True)
+
+        assert skipped["summary"]["imported"] == 0
+        assert restored["summary"]["imported"] == 1
+        assert service.list_skills()["skills"][0]["name"] == "Restored Installed Skill"
     finally:
         service.close()
 
