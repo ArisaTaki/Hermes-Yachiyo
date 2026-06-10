@@ -697,29 +697,43 @@ def _stream_chunk_text(chunk: Any) -> str:
     return _message_content_text(chunk)
 
 
-def _stream_chunk_tool_calls(chunk: Any) -> list[Any]:
+def _stream_choice_index(choice: Any, fallback: int) -> int:
+    try:
+        value = _message_field(choice, "index")
+        return int(value) if value is not None else fallback
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _stream_chunk_tool_calls(chunk: Any) -> list[tuple[int, int, Any]]:
     direct = _message_field(chunk, "tool_calls")
     if isinstance(direct, list):
-        return direct
+        return [(0, index, call) for index, call in enumerate(direct)]
     choices = _message_field(chunk, "choices")
     if not isinstance(choices, list):
         return []
-    calls: list[Any] = []
-    for choice in choices:
+    calls: list[tuple[int, int, Any]] = []
+    for choice_position, choice in enumerate(choices):
+        choice_index = _stream_choice_index(choice, choice_position)
         delta = _message_field(choice, "delta")
         if delta is not None:
             delta_calls = _message_field(delta, "tool_calls")
             if isinstance(delta_calls, list):
-                calls.extend(delta_calls)
+                calls.extend((choice_index, index, call) for index, call in enumerate(delta_calls))
         message = _message_field(choice, "message")
         if message is not None:
             message_calls = _message_field(message, "tool_calls")
             if isinstance(message_calls, list):
-                calls.extend(message_calls)
+                calls.extend((choice_index, index, call) for index, call in enumerate(message_calls))
     return calls
 
 
-def _merge_stream_tool_call_delta(accumulator: dict[int, dict[str, Any]], raw_call: Any, fallback_index: int) -> None:
+def _merge_stream_tool_call_delta(
+    accumulator: dict[tuple[int, int], dict[str, Any]],
+    raw_call: Any,
+    choice_index: int,
+    fallback_index: int,
+) -> None:
     if raw_call is None:
         return
     raw_index = _message_field(raw_call, "index")
@@ -727,7 +741,7 @@ def _merge_stream_tool_call_delta(accumulator: dict[int, dict[str, Any]], raw_ca
         index = int(raw_index) if raw_index is not None else fallback_index
     except (TypeError, ValueError):
         index = fallback_index
-    entry = accumulator.setdefault(index, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+    entry = accumulator.setdefault((choice_index, index), {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
     call_id = _message_field(raw_call, "id")
     if call_id:
         entry["id"] = str(call_id)
@@ -746,14 +760,14 @@ def _merge_stream_tool_call_delta(accumulator: dict[int, dict[str, Any]], raw_ca
         function["arguments"] = f"{function.get('arguments') or ''}{arguments}"
 
 
-def _coalesced_stream_tool_calls(accumulator: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+def _coalesced_stream_tool_calls(accumulator: dict[tuple[int, int], dict[str, Any]]) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
-    for index in sorted(accumulator):
-        call = accumulator[index]
+    for choice_index, tool_index in sorted(accumulator):
+        call = accumulator[(choice_index, tool_index)]
         function = call.get("function") if isinstance(call.get("function"), dict) else {}
         calls.append(
             {
-                "id": str(call.get("id") or f"call_{index}"),
+                "id": str(call.get("id") or f"call_{choice_index}_{tool_index}"),
                 "type": str(call.get("type") or "function"),
                 "function": {
                     "name": str(function.get("name") or ""),
@@ -808,18 +822,15 @@ def _coalesce_model_message(message: Any) -> dict[str, Any]:
 
     content_parts: list[str] = []
     tool_calls: list[dict[str, Any]] | None = None
-    tool_call_deltas: dict[int, dict[str, Any]] = {}
+    tool_call_deltas: dict[tuple[int, int], dict[str, Any]] = {}
     for chunk in message:
         content = _stream_chunk_text(chunk)
         if content:
             content_parts.append(content)
         chunk_tool_calls = _stream_chunk_tool_calls(chunk)
         if isinstance(chunk_tool_calls, list):
-            if chunk_tool_calls and any(_message_field(call, "index") is not None for call in chunk_tool_calls):
-                for index, call in enumerate(chunk_tool_calls):
-                    _merge_stream_tool_call_delta(tool_call_deltas, call, index)
-            elif chunk_tool_calls:
-                tool_calls = _coerce_tool_calls(chunk_tool_calls) or []
+            for choice_index, fallback_index, call in chunk_tool_calls:
+                _merge_stream_tool_call_delta(tool_call_deltas, call, choice_index, fallback_index)
 
     result: dict[str, Any] = {"role": "assistant", "content": "".join(content_parts)}
     if tool_call_deltas:
