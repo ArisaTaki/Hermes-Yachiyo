@@ -2615,11 +2615,15 @@ class WorkflowContinuationCoordinator:
             return result
         except Exception as exc:
             safe_error = redact_secrets(exc)
-            timeline.append(engine._timeline("workflow.run.failed", safe_error, status="failed", **current_node_info))
+            safe_node_info = {
+                key: redact_secrets(value)
+                for key, value in current_node_info.items()
+            }
+            timeline.append(engine._timeline("workflow.run.failed", safe_error, status="failed", **safe_node_info))
             engine.append_run_event(
                 str(run["run_id"]),
                 "workflow.run.failed",
-                {"error": safe_error, **current_node_info},
+                {"error": safe_error, **safe_node_info},
             )
             result = engine._update_run(
                 str(run["run_id"]),

@@ -464,6 +464,124 @@ def test_workflow_continuation_coordinator_pauses_for_approval_node():
     ]
 
 
+def test_workflow_continuation_coordinator_fails_unknown_node_without_secret_leak():
+    leaked_secret = "sk-workflow-continuation-secret123456"
+
+    class FakeEngine:
+        def __init__(self):
+            self.events: list[tuple[str, str, dict[str, object]]] = []
+            self.run_updates: list[tuple[str, dict[str, object]]] = []
+            self.group_updates: list[tuple[str, dict[str, object]]] = []
+
+        def _workflow_path(self, workflow):
+            return workflow["nodes"]
+
+        def _node_kind(self, node):
+            return node["type"]
+
+        def _timeline(self, event, detail, **payload):
+            return {"event": event, "detail": detail, **payload}
+
+        def append_run_event(self, run_id, event_type, payload):
+            self.events.append((run_id, event_type, payload))
+
+        def _update_run(self, run_id, **fields):
+            self.run_updates.append((run_id, fields))
+            return {"run_id": run_id, "run_group_id": "run_group", **fields}
+
+        def _update_run_group(self, run_group_id, **fields):
+            self.group_updates.append((run_group_id, fields))
+
+        def get_run(self, run_id):
+            assert run_id == "workflow_run"
+            assert self.run_updates
+            return {
+                "run_id": run_id,
+                "run_group_id": "run_group",
+                **self.run_updates[-1][1],
+            }
+
+    engine = FakeEngine()
+    coordinator = WorkflowContinuationCoordinator(engine)
+    timeline: list[dict[str, object]] = []
+    artifacts: list[dict[str, object]] = []
+    workflow = {
+        "nodes": [
+            {
+                "id": "bad",
+                "type": f"custom_api_key={leaked_secret}",
+                "data": {"label": "Bad Node"},
+            }
+        ]
+    }
+
+    result = coordinator.continue_run(
+        {"run_id": "workflow_run", "run_group_id": "run_group", "user_goal": "Ship workflow"},
+        workflow,
+        context="previous context",
+        timeline=timeline,
+        artifacts=artifacts,
+        start_index=0,
+        root_group=True,
+    )
+
+    serialized = json.dumps(
+        {
+            "result": result,
+            "timeline": timeline,
+            "events": engine.events,
+            "run_updates": engine.run_updates,
+            "group_updates": engine.group_updates,
+        },
+        ensure_ascii=False,
+    )
+    assert result["status"] == "failed"
+    assert leaked_secret not in serialized
+    assert "[redacted]" in result["result"]
+    assert timeline == [
+        {
+            "event": "workflow.run.failed",
+            "detail": result["result"],
+            "status": "failed",
+            "workflow_node_id": "bad",
+            "workflow_node_kind": "custom_api_key=[redacted]",
+            "workflow_node_label": "Bad Node",
+        }
+    ]
+    assert engine.events == [
+        (
+            "workflow_run",
+            "workflow.run.failed",
+            {
+                "error": result["result"],
+                "workflow_node_id": "bad",
+                "workflow_node_kind": "custom_api_key=[redacted]",
+                "workflow_node_label": "Bad Node",
+            },
+        )
+    ]
+    assert engine.run_updates == [
+        (
+            "workflow_run",
+            {
+                "status": "failed",
+                "result": result["result"],
+                "timeline": timeline,
+                "artifacts": artifacts,
+            },
+        )
+    ]
+    assert engine.group_updates == [
+        (
+            "run_group",
+            {
+                "status": "failed",
+                "summary": result["result"],
+            },
+        )
+    ]
+
+
 class FakeDefaultProfileService:
     def get_defaults(self):
         return {"chat": "profile_default"}
