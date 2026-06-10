@@ -327,6 +327,129 @@ async def test_task_runner_main_chat_native_tool_approval_roundtrip(tmp_path, mo
 
 
 @pytest.mark.asyncio
+async def test_task_runner_main_chat_approval_timeout_clears_chat_and_activity_projection(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    workdir = tmp_path / "workspace"
+    (workdir / "src").mkdir(parents=True)
+    (workdir / "src" / "app.txt").write_text("before\n", encoding="utf-8")
+    session = ChatSession(session_id="main-chat-approval-timeout-session")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    task = state.create_task(
+        task_type=TaskType.GENERAL,
+        description="请把 src/app.txt 改成 after，但审批会超时",
+        chat_session_id=session.session_id,
+    )
+    user_message_id = session.add_user_message(task.description)
+    session.link_message_to_task(user_message_id, task.task_id)
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        assert messages[-1]["role"] == "user"
+        assert any((tool.get("function") or {}).get("name") == "workspace_write_patch" for tool in tools or [])
+        return {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_patch_timeout",
+                    "type": "function",
+                    "function": {
+                        "name": "workspace_write_patch",
+                        "arguments": json.dumps(
+                            {
+                                "path": "src/app.txt",
+                                "patch": "--- src/app.txt\n+++ src/app.txt\n@@ -1 +1 @@\n-before\n+after\n",
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr(chat_store_mod, "get_chat_store", lambda: store)
+    monkeypatch.setattr(activity_store_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr("apps.shell.agent_runtime.get_model_profile_service", lambda: _FakeDefaultProfileService())
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    monkeypatch.setattr(
+        NativeAgentExecutor,
+        "_approval_wait_timeout_seconds",
+        staticmethod(lambda: 0.05),
+    )
+
+    executor = NativeAgentExecutor(
+        chat_session=session,
+        runtime_service_getter=lambda: service,
+        tool_policy_getter=lambda: {
+            "allowed_tools": ["workspace.read", "workspace.write_patch"],
+            "approval_required": {"workspace.write_patch": True},
+        },
+        workspace_policy_getter=lambda: {
+            "default_workdir": str(workdir),
+            "readable_scopes": ["."],
+            "writable_scopes": ["."],
+        },
+    )
+    runner = TaskRunner(state, executor=executor, activity_store=activity_store)
+    api = ChatAPI(SimpleNamespace(state=state, chat_session=session, store=store, agent_runtime_service=service))
+    runner_task: asyncio.Task | None = None
+    try:
+        runner_task = asyncio.create_task(runner._execute_with_state(task.task_id))
+        run = await _wait_for(lambda: service.get_run(service.get_task_run_link(task.task_id)["run_id"]))
+        assert run["status"] == "approval_required"
+
+        waiting_payload = api.get_messages()
+        waiting_assistant = next(message for message in waiting_payload["messages"] if message["role"] == "assistant")
+        assert waiting_payload["approval_count"] == 1
+        assert waiting_assistant["metadata"]["run_status"] == "approval_required"
+        assert waiting_assistant["metadata"]["pending_approval"]["tool"] == "workspace.write_patch"
+
+        await runner_task
+
+        updated = state.get_task(task.task_id)
+        assert updated is not None
+        assert updated.status == TaskStatus.FAILED
+        assert "工具审批已超时：approval_wait_timeout" in str(updated.error)
+        assert (workdir / "src" / "app.txt").read_text(encoding="utf-8") == "before\n"
+
+        timed_out_run = service.get_run(run["run_id"])
+        assert timed_out_run["status"] == "cancelled"
+        assert timed_out_run["pending_approval"] == {}
+        event_types = [event["event_type"] for event in service.list_run_events(run["run_id"])["events"]]
+        assert event_types.count("approval.timeout") == 1
+        assert "run.completed" not in event_types
+
+        final_payload = api.get_messages()
+        final_assistant = next(message for message in final_payload["messages"] if message["role"] == "assistant")
+        assert final_payload["approval_count"] == 0
+        assert final_assistant["status"] == "failed"
+        assert "工具审批已超时：approval_wait_timeout" in final_assistant["content"]
+        assert final_assistant["metadata"]["run_status"] == "failed"
+        assert final_assistant["metadata"]["pending_approval"] == {}
+        assert final_assistant["activity_events"][0]["status"] == "failed"
+        assert any(
+            event.title == "Yachiyo 回复失败" and event.status == "failed"
+            for event in activity_store.latest_for_task(task.task_id, limit=8)
+        )
+    finally:
+        if runner_task is not None and not runner_task.done():
+            runner_task.cancel()
+            await asyncio.gather(runner_task, return_exceptions=True)
+        service.close()
+        activity_store.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_task_runner_main_chat_auto_delegation_uses_native_runtime(tmp_path, monkeypatch):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))

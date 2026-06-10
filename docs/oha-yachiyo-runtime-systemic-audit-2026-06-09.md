@@ -1371,6 +1371,7 @@ RunEvent sequence:
 - release artifact verifier 覆盖当前 release-facing 文件通过、旧产品 token 报错、旧 build metadata 文件名报错。
 - 主聊天工具审批等待超时现在通过 `NativeRunEngine.timeout_run_approval()` 写入 `approval.timeout` RunEvent，清理 pending approval projection，并保持重复 timeout 无副作用。
 - `NativeAgentExecutor` 审批等待超时优先调用运行时 timeout 边界，不再把已 timeout/cancelled 的 Run 覆盖成普通 `run.failed`。
+- `NativeAgentExecutor` 审批等待超时现在保留 runtime 返回的 `工具审批已超时：approval_wait_timeout` 作为用户可见失败文案；TaskRunner 产品路径回归覆盖 Task 进入 failed、ChatSession assistant 失败态清理 `pending_approval`、`approval_count` 回到 0、ActivityStore 写入 failed 里程碑、RunEvent 只保留一条 `approval.timeout` 且目标 workspace 文件未被修改。
 - ChatAPI 主聊天审批投影修复 `_linked_main_chat_run_for_task()` 错误 staticmethod，确保 RUNNING Task 可通过当前 runtime service 的 Task↔Run link 读取 main_chat_run，并把 `approval_required` 稳定投影到 ChatSession metadata、ActivityStore 和 `approval_count`。
 - NativeRunEngine 执行预算新增直接回归：`max_run_duration_seconds` 过期后会在执行工具前中断 Run，返回结构化失败并避免继续消费工具调用；`budget` focused suite 同时覆盖模型/工具/terminal/output/context 预算。
 - `terminal.run` ToolBroker 边界新增直接回归：

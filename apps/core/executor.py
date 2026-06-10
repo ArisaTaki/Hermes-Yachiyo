@@ -1300,14 +1300,21 @@ class NativeAgentExecutor(ExecutionStrategy):
                 return result
             await asyncio.sleep(0.5)
         try:
+            timeout_result: dict[str, Any] = {}
             timeout_approval = getattr(service, "timeout_run_approval", None)
             if callable(timeout_approval):
-                await asyncio.to_thread(timeout_approval, run_id, reason="approval_wait_timeout")
+                result = await asyncio.to_thread(timeout_approval, run_id, reason="approval_wait_timeout")
+                timeout_result = result if isinstance(result, dict) else {}
             else:
                 await asyncio.to_thread(service.cancel_run, run_id)
         except Exception:
             logger.debug("Native Run 审批等待超时后取消失败: %s", run_id, exc_info=True)
-        raise NativeAgentError("Native Agent 等待工具审批超时", reason="approval_timeout")
+            timeout_result = {}
+        timeout_message = str(timeout_result.get("result") or "").strip()
+        raise NativeAgentError(
+            timeout_message or "Native Agent 等待工具审批超时",
+            reason="approval_timeout",
+        )
 
     @staticmethod
     def _approval_wait_timeout_seconds() -> float:

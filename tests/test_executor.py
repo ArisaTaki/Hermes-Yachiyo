@@ -569,6 +569,7 @@ class TestNativeAgentExecutor:
             await executor.run(_make_task("需要审批但无人处理"))
 
         assert excinfo.value.reason == "approval_timeout"
+        assert str(excinfo.value) == "工具审批已超时：approval_wait_timeout"
         assert calls[0:2] == ["start", "execute_loop"]
         assert "timeout:approval_wait_timeout" in calls
         assert not any(call == "cancel" for call in calls)
