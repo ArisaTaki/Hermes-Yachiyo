@@ -3056,6 +3056,68 @@ def test_main_chat_workspace_patch_secret_payload_is_rejected_before_approval(tm
     assert verify_secret_redaction(paths=[tmp_path]) == []
 
 
+def test_main_chat_artifact_secret_payload_is_rejected_before_write(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    leaked_secret = "sk-artifact-tool-secret123456"
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+        assert any((tool.get("function") or {}).get("name") == "artifact_write" for tool in tools or [])
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_artifact_secret",
+                    "type": "function",
+                    "function": {
+                        "name": "artifact_write",
+                        "arguments": json.dumps(
+                            {
+                                "path": "reports/secret.md",
+                                "content": f"api_key={leaked_secret}\nwrite a report",
+                            }
+                        ),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-artifact-secret",
+            session_id="session-artifact-secret",
+            user_goal="Write artifact",
+        )
+
+        with pytest.raises(AgentRuntimeError, match="参数包含敏感凭据"):
+            service.execute_main_chat_model_loop(
+                run["run_id"],
+                [{"role": "user", "content": "Write artifact"}],
+                tool_policy={"allowed_tools": ["artifact.write"]},
+            )
+
+        failed = service.get_run(run["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        persisted_projection = json.dumps({"run": failed, "events": events}, ensure_ascii=False)
+        artifact_path = service.agent_artifacts_dir / run["run_id"] / "reports" / "secret.md"
+
+        assert failed["status"] == "failed"
+        assert failed["artifacts"] == []
+        assert not artifact_path.exists()
+        assert "agent.tool.call" not in [event["event_type"] for event in events]
+        assert leaked_secret not in persisted_projection
+        assert "api_key=" not in persisted_projection
+        assert "敏感凭据" in persisted_projection
+    finally:
+        service.close()
+
+    assert verify_secret_redaction(paths=[tmp_path]) == []
+
+
 def test_main_chat_default_tools_use_trusted_product_workspace(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     product_workspace = tmp_path / "oha-workspace"
