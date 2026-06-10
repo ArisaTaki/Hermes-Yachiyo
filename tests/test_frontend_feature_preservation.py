@@ -181,6 +181,39 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
     )
 
 
+def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() -> None:
+    _assert_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            "function openRunDetails(runId: string | undefined)",
+            "const clean = String(runId || '').trim();",
+            "navigateTo('agents', { run: clean }, ['tab', 'target', 'goal']);",
+            "onOpenRunDetails={openRunDetails}",
+            "onOpenDetails={() => onOpenRunDetails(runId)}",
+            "onOpenDetails={() => openRunDetails(composerApprovalItem.runId)}",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        [
+            "const routeRunId = currentParam('run').trim();",
+            "const [tab, setTab] = useState<StudioTab>(() => routeRunId || routeRunTarget ? 'runs' : routeTab);",
+            "const [selectedRunId, setSelectedRunId] = useState(() => routeRunId);",
+            "const nextTab = routeRunId || routeRunTarget ? 'runs' : routeTab;",
+            "setSelectedRunId((current) => current === routeRunId ? current : routeRunId);",
+            "if (!selectedRunId || selectedRun) return;",
+            "getRun(selectedRunId)",
+            "if (!selectedRunId) return;",
+            "getRunEvents(selectedRunId, 0, RUN_EVENT_REPLAY_PAGE_SIZE)",
+            "[selectedRunId]: {",
+            "events: current[selectedRunId]?.events || [],",
+            "events: current[selectedRunId]?.events || currentEvents,",
+            "selectedRunExecutionEvents",
+            "RunEvent replay facts",
+        ],
+    )
+
+
 def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
     _assert_contains(
         "apps/frontend/src/views/ChatView.tsx",
