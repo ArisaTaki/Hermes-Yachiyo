@@ -73,6 +73,18 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must run the release verifier before dependency installation",
     ),
     (
+        "Import macOS self-signing certificate",
+        "macOS release workflow must import the signing certificate before building the DMG",
+    ),
+    (
+        "MACOS_SIGNING_ENABLED",
+        "macOS release workflow must pass signing state into the Electron DMG build",
+    ),
+    (
+        "scripts/build_macos_self_signed_dmg.sh",
+        "macOS release workflow must use the signed app build path when signing is configured",
+    ),
+    (
         "package_scan_paths=(dist/backend)",
         "macOS release workflow must scan the packaged backend binary",
     ),
@@ -324,6 +336,15 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             Finding(
                 workflow_path,
                 "macOS release workflow must verify release guards before installing dependencies",
+            )
+        )
+    signing_import = workflow.find("Import macOS self-signing certificate")
+    build_dmg = workflow.find("Build Electron DMG")
+    if signing_import >= 0 and build_dmg >= 0 and signing_import > build_dmg:
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must import signing material before building the DMG",
             )
         )
     return findings

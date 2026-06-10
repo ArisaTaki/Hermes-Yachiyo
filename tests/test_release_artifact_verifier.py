@@ -184,6 +184,12 @@ def test_verifier_requires_release_workflow_guard_before_dependency_install(tmp_
         "          package_scan_paths=(dist/backend)\n"
         "          find dist/electron -path '*/Oha-Yachiyo.app/Contents/Resources'\n"
         "          python scripts/verify_release_artifacts.py --allow-binary \"${package_scan_paths[@]}\"\n"
+        "      - name: Import macOS self-signing certificate\n"
+        "        run: echo imported\n"
+        "      - name: Build Electron DMG\n"
+        "        env:\n"
+        "          MACOS_SIGNING_ENABLED: true\n"
+        "        run: scripts/build_macos_self_signed_dmg.sh \"Oha-Yachiyo Self Signed\"\n"
         "      - name: Verify packaged release artifacts\n"
         "        run: python scripts/verify_release_artifacts.py --allow-binary release\n",
         encoding="utf-8",
@@ -197,6 +203,40 @@ def test_verifier_requires_release_workflow_guard_before_dependency_install(tmp_
             "macOS release workflow must verify release guards before installing dependencies",
         )
     ]
+
+
+def test_verifier_requires_release_workflow_signing_path_before_dmg_build(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "name: Build macOS DMG\n"
+        "jobs:\n"
+        "  package-macos:\n"
+        "    steps:\n"
+        "      - name: Verify release-facing product identity and security guards\n"
+        "        run: python scripts/verify_release_artifacts.py\n"
+        "      - name: Install Python dependencies\n"
+        "        run: python -m pip install -e .\n"
+        "      - name: Build Electron DMG\n"
+        "        run: npm --prefix apps/frontend run dist:mac\n"
+        "      - name: Import macOS self-signing certificate\n"
+        "        run: echo too-late\n"
+        "      - name: Verify packaged app resources\n"
+        "        run: |\n"
+        "          package_scan_paths=(dist/backend)\n"
+        "          find dist/electron -path '*/Oha-Yachiyo.app/Contents/Resources'\n"
+        "          python scripts/verify_release_artifacts.py --allow-binary \"${package_scan_paths[@]}\"\n"
+        "      - name: Verify packaged release artifacts\n"
+        "        run: python scripts/verify_release_artifacts.py --allow-binary release\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert "macOS release workflow must pass signing state into the Electron DMG build" in messages
+    assert "macOS release workflow must use the signed app build path when signing is configured" in messages
+    assert "macOS release workflow must import signing material before building the DMG" in messages
 
 
 def test_verifier_rejects_legacy_build_metadata_filename(tmp_path):
