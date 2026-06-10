@@ -303,6 +303,43 @@ def test_stream_smoke_fails_when_expected_content_or_tool_is_missing(monkeypatch
         )
 
 
+def test_stream_smoke_requires_expected_finish_reason(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+    monkeypatch.setattr(
+        "apps.shell.model_profiles.urlrequest.urlopen",
+        lambda *_args, **_kwargs: FakeResponse(),
+    )
+
+    summary = smoke.run_stream_smoke(
+        base_url="https://api.example.test/v1",
+        model="demo-model",
+        api_key="sk-stream-smoke-secret123456",
+        require_content=True,
+        expect_finish_reasons=["stop"],
+    )
+
+    assert summary["ok"] is True
+    assert summary["finish_reasons"] == ["stop"]
+
+    with pytest.raises(RuntimeError, match="expected finish_reason 'tool_calls'"):
+        smoke.run_stream_smoke(
+            base_url="https://api.example.test/v1",
+            model="demo-model",
+            api_key="sk-stream-smoke-secret123456",
+            expect_finish_reasons=["tool_calls"],
+        )
+
+
 def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, capsys):
     calls: list[dict] = []
 
@@ -325,6 +362,8 @@ def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, caps
             "workspace_read",
             "--expect-tool-argument-substring",
             "README.md",
+            "--expect-finish-reason",
+            "tool_calls",
         ]
     )
 
@@ -334,6 +373,7 @@ def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, caps
     assert calls[0]["require_content"] is True
     assert calls[0]["expect_tool_name"] == "workspace_read"
     assert calls[0]["expect_tool_argument_substrings"] == ["README.md"]
+    assert calls[0]["expect_finish_reasons"] == ["tool_calls"]
     assert "sk-stream" not in captured.out
 
 

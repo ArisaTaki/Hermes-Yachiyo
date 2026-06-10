@@ -180,6 +180,7 @@ def run_stream_smoke(
     require_content: bool = False,
     expect_tool_name: str = "",
     expect_tool_argument_substrings: Iterable[str] | None = None,
+    expect_finish_reasons: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     base_url = str(base_url or "").strip()
     model = str(model or "").strip()
@@ -200,6 +201,11 @@ def run_stream_smoke(
     expected_argument_substrings = [
         str(value).strip()
         for value in (expect_tool_argument_substrings or [])
+        if str(value or "").strip()
+    ]
+    expected_finish_reasons = [
+        str(value).strip()
+        for value in (expect_finish_reasons or [])
         if str(value or "").strip()
     ]
     tool_call = tool_call or require_tool_call or bool(expected_name) or bool(expected_argument_substrings)
@@ -236,6 +242,11 @@ def run_stream_smoke(
                 raise RuntimeError("stream completed without expected tool call argument substring")
         for call in summary["tool_calls"]:
             call.pop("arguments", None)
+    if expected_finish_reasons:
+        finish_reasons = {str(reason) for reason in summary["finish_reasons"]}
+        for expected_reason in expected_finish_reasons:
+            if expected_reason not in finish_reasons:
+                raise RuntimeError(f"stream completed without expected finish_reason {expected_reason!r}")
     return summary
 
 
@@ -265,6 +276,12 @@ def main(argv: list[str] | None = None) -> int:
         default=[],
         help="Fail unless at least one streamed tool call argument contains this substring. May be repeated.",
     )
+    parser.add_argument(
+        "--expect-finish-reason",
+        action="append",
+        default=[],
+        help="Fail unless the stream emits this finish_reason. May be repeated.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -283,6 +300,7 @@ def main(argv: list[str] | None = None) -> int:
             require_content=args.require_content,
             expect_tool_name=args.expect_tool_name,
             expect_tool_argument_substrings=args.expect_tool_argument_substring,
+            expect_finish_reasons=args.expect_finish_reason,
         )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
