@@ -1152,24 +1152,39 @@ function timelineStatus(event: Record<string, unknown>): string {
 function timelineEventTitle(event: Record<string, unknown>): string {
   const name = String(event.event || 'event');
   const detail = String(event.detail || '').trim();
+  if (name === 'run.started') return 'Run 已启动';
+  if (name === 'task.linked') return 'Task 已关联';
+  if (name === 'model.request.started') return detail ? `模型请求 · ${detail}` : '模型请求已开始';
+  if (name === 'model.request.failed') return '模型请求失败';
+  if (name === 'model.output.ready') return '模型输出已就绪';
+  if (name === 'model.output.completed') return '模型输出完成';
   if (name === 'agent.run.started') return 'Agent 已启动';
   if (name === 'agent.runtime.compiled') return '运行环境已准备';
   if (name === 'agent.artifact.write') return '上下文/产物已写入';
   if (name === 'agent.model.response') return '模型响应';
   if (name === 'agent.tool.call') return detail ? `工具调用 · ${detail}` : '工具调用';
+  if (name === 'agent.tool.skipped') return detail ? `工具已跳过 · ${detail}` : '工具已跳过';
+  if (name === 'agent.tool.denied') return detail ? `工具已拒绝 · ${detail}` : '工具已拒绝';
+  if (name === 'agent.tool.failed') return detail ? `工具调用失败 · ${detail}` : '工具调用失败';
   if (name === 'agent.tool.approval_required') return detail ? `请求审批 · ${detail}` : '请求审批';
   if (name === 'agent.tool.approval_approved') return detail ? `审批已通过 · ${detail}` : '审批已通过';
   if (name === 'agent.tool.approval_rejected') return detail ? `审批已拒绝 · ${detail}` : '审批已拒绝';
+  if (name === 'approval.timeout') return '审批已超时';
   if (name === 'agent.run.resumed') return 'Agent 已继续执行';
   if (name === 'agent.run.completed') return 'Run 已完成';
   if (name === 'agent.run.failed') return 'Run 执行失败';
   if (name === 'run.cancelled') return 'Run 已取消';
+  if (name === 'run.completed') return 'Run 已完成';
+  if (name === 'run.failed') return 'Run 执行失败';
   if (name === 'run.rerun.started') return '从原 Run 重跑';
   if (name === 'workflow.run.started') return 'Workflow 已启动';
+  if (name === 'workflow.node.start') return 'Workflow 起点';
   if (name === 'workflow.node.agent') return detail ? `Agent 节点 · ${detail}` : 'Agent 节点';
+  if (name === 'workflow.node.artifact') return detail ? `产物节点 · ${detail}` : '产物节点';
   if (name === 'workflow.node.approval_required') return detail ? `人工审批 · ${detail}` : '人工审批';
   if (name === 'workflow.node.approval_approved') return detail ? `审批已通过 · ${detail}` : '审批已通过';
   if (name === 'workflow.node.approval_rejected') return detail ? `审批已拒绝 · ${detail}` : '审批已拒绝';
+  if (name === 'workflow.run.approval_required') return 'Workflow 等待审批';
   if (name === 'workflow.run.child_resumed') return '子 Agent 已继续执行';
   if (name === 'workflow.run.resumed') return 'Workflow 已继续执行';
   if (name === 'workflow.run.completed') return 'Workflow 已完成';
@@ -1181,12 +1196,12 @@ function timelineEventTitle(event: Record<string, unknown>): string {
 function timelineEventTone(event: Record<string, unknown>): string {
   const name = String(event.event || '');
   const status = timelineStatus(event);
-  if (status === 'failed' || status === 'cancelled' || name.includes('failed') || name.includes('cancelled')) return 'danger';
+  if (status === 'failed' || status === 'cancelled' || name.includes('failed') || name.includes('cancelled') || name.includes('timeout') || name.includes('denied')) return 'danger';
   if (status === 'completed' || name.includes('completed')) return 'ready';
   if (status === 'approval_required' || name.includes('approval')) return 'approval';
   if (status === 'running' || status === 'processing' || name.includes('resumed')) return 'running';
   if (name.includes('tool')) return 'tool';
-  if (name.includes('model.response')) return 'model';
+  if (name.startsWith('model.') || name.includes('model.response')) return 'model';
   return 'neutral';
 }
 
