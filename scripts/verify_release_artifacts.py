@@ -265,6 +265,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Chat API flows",
     ),
     (
+        "tests/test_activity_store.py",
+        "macOS release workflow smoke tests must cover ActivityStore feed and redaction",
+    ),
+    (
         "tests/test_ui_bridge_routes.py",
         "macOS release workflow smoke tests must cover mature UI bridge routes",
     ),
