@@ -477,6 +477,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Chat image NativeRunEngine replay roundtrip",
     ),
     (
+        "tests/test_bridge_server.py::test_chat_approval_bridge_route_projects_failed_approved_tool",
+        "macOS release workflow smoke tests must cover Chat approval failed tool HTTP roundtrip",
+    ),
+    (
         "tests/test_bridge_server.py::test_agent_run_http_routes_roundtrip_approval_detail_and_replay",
         "macOS release workflow smoke tests must cover Agent approval Run Detail HTTP roundtrip",
     ),

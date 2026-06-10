@@ -428,6 +428,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover mutating Bridge token guard" in messages
     assert "macOS release workflow smoke tests must cover Chat image HTTP roundtrip" in messages
     assert "macOS release workflow smoke tests must cover Chat image NativeRunEngine replay roundtrip" in messages
+    assert "macOS release workflow smoke tests must cover Chat approval failed tool HTTP roundtrip" in messages
     assert "macOS release workflow smoke tests must cover Agent approval Run Detail HTTP roundtrip" in messages
     assert "macOS release workflow smoke tests must cover Workflow approval Run Detail HTTP roundtrip" in messages
     assert "macOS release workflow smoke tests must cover Workflow child approval Run Detail HTTP roundtrip" in messages

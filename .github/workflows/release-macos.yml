@@ -110,6 +110,7 @@ jobs:
             tests/test_bridge_server.py::test_all_registered_mutating_routes_require_bridge_token \
             tests/test_bridge_server.py::test_chat_message_image_attachment_http_roundtrip_maps_idempotency_and_file_response \
             tests/test_bridge_server.py::test_chat_image_bridge_route_reaches_native_run_events \
+            tests/test_bridge_server.py::test_chat_approval_bridge_route_projects_failed_approved_tool \
             tests/test_bridge_server.py::test_agent_run_http_routes_roundtrip_approval_detail_and_replay \
             tests/test_bridge_server.py::test_workflow_approval_node_http_roundtrip_approve_detail_and_replay \
             tests/test_bridge_server.py::test_workflow_run_http_routes_roundtrip_child_approval_detail_and_replay \

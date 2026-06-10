@@ -1606,6 +1606,176 @@ def test_chat_approval_bridge_route_resumes_native_run(tmp_path, monkeypatch):
         store.close()
 
 
+def test_chat_approval_bridge_route_projects_failed_approved_tool(tmp_path, monkeypatch):
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    workdir = tmp_path / "workspace"
+    workdir.mkdir()
+    session = ChatSession(session_id="bridge-approval-failure-session")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    model_calls: list[list[dict]] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        model_calls.append(messages)
+        assert any((tool.get("function") or {}).get("name") == "terminal_run" for tool in tools or [])
+        return {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_terminal_failure",
+                    "type": "function",
+                    "function": {
+                        "name": "terminal_run",
+                        "arguments": json.dumps(
+                            {
+                                "command": "printf bridge-terminal-failure; exit 7",
+                                "shell": True,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr(chat_store_mod, "get_chat_store", lambda: store)
+    monkeypatch.setattr(activity_store_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeDefaultProfileService(),
+    )
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+
+    executor = NativeAgentExecutor(
+        chat_session=session,
+        runtime_service_getter=lambda: service,
+        tool_policy_getter=lambda: {
+            "allowed_tools": ["terminal.run"],
+            "approval_required": {"terminal.run": True},
+        },
+        workspace_policy_getter=lambda: {
+            "default_workdir": str(workdir),
+            "readable_scopes": ["."],
+        },
+        activity_store_getter=lambda: activity_store,
+    )
+    runner = TaskRunner(state, executor=executor, activity_store=activity_store)
+    runtime = SimpleNamespace(
+        state=state,
+        chat_session=session,
+        store=store,
+        task_runner=runner,
+        agent_runtime_service=service,
+    )
+    monkeypatch.setattr(ui_routes, "get_runtime", lambda: runtime)
+
+    async def scenario():
+        sent = await ui_routes.send_chat_message(
+            ui_routes.SendChatMessageRequest(
+                text="请运行一个会失败的命令",
+                client_message_id="bridge-approval-failure-client-1",
+            )
+        )
+        assert sent["ok"] is True
+        task = state.get_task(sent["task_id"])
+        assert task is not None
+        runner_task = asyncio.create_task(runner._execute_with_state(task.task_id))
+        try:
+            run = None
+            for _ in range(150):
+                try:
+                    candidate = service.get_run(service.get_task_run_link(task.task_id)["run_id"])
+                except KeyError:
+                    await asyncio.sleep(0.02)
+                    continue
+                if candidate["status"] == "approval_required":
+                    run = candidate
+                    break
+                await asyncio.sleep(0.02)
+            assert run is not None
+
+            waiting_messages = await ui_routes.get_chat_messages()
+            assistant = next(message for message in waiting_messages["messages"] if message["role"] == "assistant")
+            assert waiting_messages["approval_count"] == 1
+            assert assistant["status"] == "processing"
+            assert assistant["metadata"]["run_id"] == run["run_id"]
+            assert assistant["metadata"]["run_status"] == "approval_required"
+            assert assistant["metadata"]["pending_approval"]["tool"] == "terminal.run"
+
+            approved = await agent_routes.approve_run_approval(run["run_id"])
+            assert approved["status"] == "failed"
+            assert approved["pending_approval"] == {}
+            assert "terminal.run 执行失败" in approved["result"]
+            assert "退出码：7" in approved["result"]
+            assert "bridge-terminal-failure" in approved["result"]
+            await runner_task
+
+            updated = state.get_task(task.task_id)
+            assert updated is not None
+            assert updated.status == TaskStatus.FAILED
+            assert updated.error is not None
+            assert "terminal.run 执行失败" in updated.error
+
+            detail = await agent_routes.get_any_run(run["run_id"])
+            assert detail["status"] == "failed"
+            assert detail["pending_approval"] == {}
+            assert detail["task_id"] == task.task_id
+            assert detail["task_run_link_run_status"] == "failed"
+
+            replay = await run_routes.list_run_events(run["run_id"], after_sequence=0, limit=200)
+            event_types = [event["event_type"] for event in replay["events"]]
+            assert "agent.tool.approval_required" in event_types
+            assert "agent.tool.approval_approved" in event_types
+            assert "agent.tool.call" in event_types
+            assert "agent.run.failed" in event_types
+            failed_fact = next(event for event in replay["events"] if event["event_type"] == "agent.run.failed")
+            assert "terminal.run 执行失败" in failed_fact["payload"]["error"]
+            tool_fact = next(
+                event
+                for event in replay["events"]
+                if event["event_type"] == "agent.tool.call" and event["payload"].get("approved") is True
+            )
+            assert tool_fact["payload"]["tool"] == "terminal.run"
+            assert tool_fact["payload"]["result"]["ok"] is False
+            assert tool_fact["payload"]["result"]["returncode"] == 7
+
+            final_messages = await ui_routes.get_chat_messages()
+            final_assistant = next(
+                message
+                for message in final_messages["messages"]
+                if message["role"] == "assistant" and message["task_id"] == task.task_id
+            )
+            assert final_messages["approval_count"] == 0
+            assert final_assistant["status"] == "failed"
+            assert final_assistant["metadata"].get("run_status") == "failed"
+            assert final_assistant["metadata"].get("pending_approval") == {}
+            assert len(model_calls) == 1
+        finally:
+            if not runner_task.done():
+                runner_task.cancel()
+                await asyncio.gather(runner_task, return_exceptions=True)
+
+    try:
+        asyncio.run(scenario())
+    finally:
+        service.close()
+        activity_store.close()
+        store.close()
+
+
 def test_chat_delegated_summary_bridge_route_runs_native_followup(tmp_path, monkeypatch):
     monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
