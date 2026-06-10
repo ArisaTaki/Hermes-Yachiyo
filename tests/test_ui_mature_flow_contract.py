@@ -1342,7 +1342,16 @@ def test_agent_studio_bridge_contract_preserves_run_detail_workflow_artifact_and
             return {
                 "runs": [
                     {"run_id": "run_agent_1", "kind": "agent_run"},
-                    {"run_id": "run_workflow_1", "kind": "workflow_run"},
+                    {
+                        "run_id": "run_workflow_1",
+                        "kind": "workflow_run",
+                        "task_id": "task-workflow-1",
+                        "session_id": "session-workflow-1",
+                        "task_run_link_created_at": "2026-06-10T00:00:00+00:00",
+                        "task_run_link_updated_at": "2026-06-10T00:00:05+00:00",
+                        "task_run_link_run_status": "completed",
+                        "task_run_link_last_event_sequence": 42,
+                    },
                 ]
             }
 
@@ -1363,6 +1372,12 @@ def test_agent_studio_bridge_contract_preserves_run_detail_workflow_artifact_and
             return {
                 "run_id": run_id,
                 "status": "completed",
+                "task_id": "task-workflow-1",
+                "session_id": "session-workflow-1",
+                "task_run_link_created_at": "2026-06-10T00:00:00+00:00",
+                "task_run_link_updated_at": "2026-06-10T00:00:05+00:00",
+                "task_run_link_run_status": "completed",
+                "task_run_link_last_event_sequence": 42,
                 "timeline": [{"event": "workflow.node.artifact", "status": "completed"}],
                 "artifacts": [{"path": "reports/final.md", "kind": "workflow_artifact"}],
             }
@@ -1425,7 +1440,19 @@ def test_agent_studio_bridge_contract_preserves_run_detail_workflow_artifact_and
         "run_group_id": "group-1",
     }
     assert [item["run_id"] for item in runs["runs"]] == ["run_agent_1", "run_workflow_1"]
+    listed_workflow = runs["runs"][1]
+    assert listed_workflow["task_id"] == "task-workflow-1"
+    assert listed_workflow["session_id"] == "session-workflow-1"
+    assert listed_workflow["task_run_link_run_status"] == "completed"
+    assert listed_workflow["task_run_link_last_event_sequence"] == 42
     assert run_groups["run_groups"][0]["child_run_ids"] == ["run_workflow_1", "run_agent_1"]
+    assert run_detail["task_id"] == "task-workflow-1"
+    assert run_detail["session_id"] == "session-workflow-1"
+    assert run_detail["task_run_link_created_at"] == "2026-06-10T00:00:00+00:00"
+    assert run_detail["task_run_link_updated_at"] == "2026-06-10T00:00:05+00:00"
+    assert run_detail["task_run_link_run_status"] == "completed"
+    assert run_detail["task_run_link_last_event_sequence"] == 42
+    assert workflow_detail["task_run_link_last_event_sequence"] == 42
     assert run_detail["artifacts"][0]["path"] == "reports/final.md"
     assert workflow_detail["timeline"][0]["event"] == "workflow.node.artifact"
     assert group == {"run_group_id": "group-1", "status": "completed"}
