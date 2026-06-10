@@ -7,6 +7,7 @@ execution-kernel cleanup must not delete mature UI surfaces.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -21,6 +22,27 @@ def _assert_contains(relative_path: str, fragments: list[str]) -> None:
     text = _read(relative_path)
     missing = [fragment for fragment in fragments if fragment not in text]
     assert not missing, f"{relative_path} is missing preserved feature fragments: {missing!r}"
+
+
+def _extract_async_function(text: str, name: str) -> str:
+    match = re.search(rf"export async function {re.escape(name)}\b[^\n]*\{{", text)
+    assert match, f"missing exported async function {name}"
+    depth = 0
+    for index in range(match.end() - 1, len(text)):
+        char = text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[match.start() : index + 1]
+    raise AssertionError(f"unterminated exported async function {name}")
+
+
+def _assert_function_contains(relative_path: str, function_name: str, fragments: list[str]) -> None:
+    body = _extract_async_function(_read(relative_path), function_name)
+    missing = [fragment for fragment in fragments if fragment not in body]
+    assert not missing, f"{relative_path}:{function_name} is missing fragments: {missing!r}"
 
 
 def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
@@ -349,6 +371,62 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "selectedAgentDeletable",
             "系统 Agent 只能查看，不能删除。",
             "系统 Agent 由 oha-yachiyo 管理",
+        ],
+    )
+
+
+def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> None:
+    agents_lib = "apps/frontend/src/lib/agents.ts"
+    _assert_function_contains(
+        agents_lib,
+        "getRunEvents",
+        [
+            "after_sequence: String(Math.max(0, afterSequence))",
+            "limit: String(Math.max(1, limit))",
+            "apiGet(`/runs/${encodeURIComponent(runId)}/events?${query.toString()}`)",
+        ],
+    )
+    _assert_function_contains(
+        agents_lib,
+        "createAgentRun",
+        [
+            "apiPost('/ui/agent-runs'",
+            "agent_id: agentId",
+            "user_goal: userGoal",
+            "client_run_id: createClientRunId()",
+        ],
+    )
+    _assert_function_contains(
+        agents_lib,
+        "createWorkflowRun",
+        [
+            "apiPost('/ui/workflow-runs'",
+            "workflow_id: workflowId",
+            "user_goal: userGoal",
+            "client_run_id: createClientRunId()",
+        ],
+    )
+    _assert_function_contains(
+        agents_lib,
+        "rerunRun",
+        ["apiPost(`/ui/runs/${encodeURIComponent(runId)}/rerun`, {})"],
+    )
+    _assert_function_contains(
+        agents_lib,
+        "cancelRun",
+        ["apiPost(`/ui/runs/${encodeURIComponent(runId)}/cancel`, {})"],
+    )
+    _assert_function_contains(
+        agents_lib,
+        "approveRunApproval",
+        ["apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/approve`, {})"],
+    )
+    _assert_function_contains(
+        agents_lib,
+        "rejectRunApproval",
+        [
+            "apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/reject`",
+            "reason ? { reason } : {}",
         ],
     )
 
