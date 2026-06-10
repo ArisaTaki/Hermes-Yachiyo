@@ -738,6 +738,48 @@ def test_openai_compatible_chat_message_streams_coalesced_sse_frames(monkeypatch
     assert [chunk["choices"][0]["delta"]["content"] for chunk in chunks] == ["hello ", "world"]
 
 
+def test_openai_compatible_chat_message_streams_multiline_sse_data_event(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield (
+                b"id: chunk-1\r\n"
+                b"event: completion.chunk\r\n"
+                b'data: {"choices":[{"delta":{"content":"multi line"}\r\n'
+                b'data: ,"finish_reason":"stop"}]}\r\n\r\n'
+                b"data: [DONE]\r\n\r\n"
+            )
+
+    def fake_urlopen(request, timeout, context):
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["stream"] is True
+        assert timeout == OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS
+        assert isinstance(context, ssl.SSLContext)
+        assert request.get_header("Accept") == "text/event-stream"
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    chunks = list(
+        openai_compatible_chat_message(
+            "https://api.example.test/v1",
+            "demo-model",
+            "sk-demo",
+            [{"role": "user", "content": "hello"}],
+            stream=True,
+        )
+    )
+
+    assert len(chunks) == 1
+    assert chunks[0]["choices"][0]["delta"]["content"] == "multi line"
+    assert chunks[0]["choices"][0]["finish_reason"] == "stop"
+
+
 def test_openai_compatible_chat_message_streams_split_sse_frame_chunks(monkeypatch):
     class FakeResponse:
         def __enter__(self):
