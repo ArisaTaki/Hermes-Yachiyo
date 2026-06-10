@@ -289,6 +289,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Workflow child approval Run Detail HTTP roundtrip",
     ),
     (
+        "tests/test_bridge_server.py::test_workflow_rerun_http_roundtrip_detail_artifact_and_replay",
+        "macOS release workflow smoke tests must cover Workflow rerun artifact replay HTTP roundtrip",
+    ),
+    (
         "tests/test_bridge_server.py::test_chat_group_dispatch_bridge_route_runs_native_summary",
         "macOS release workflow smoke tests must cover group chat Native summary flow",
     ),
