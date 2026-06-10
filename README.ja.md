@@ -1,10 +1,10 @@
 <div align="center">
 
-# 🌸 Hermes-Yachiyo
+# Oha-Yachiyo
 
-**デスクトップファーストのローカルパーソナルエージェントアプリケーション**
+デスクトップファーストのローカルパーソナルエージェントアプリケーション
 
-[Hermes Agent](https://github.com/NousResearch/hermes-agent) をベースに構築されたインテリジェントデスクトップアシスタント
+リポジトリ内の Native Agent runtime を中心に、八千代をデスクトップアシスタント、フローティングバブル、Live2D キャラクターとして常駐させます。
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -16,278 +16,185 @@
 
 ---
 
-## ✨ 特長
+## はじめに
 
-- 🖥️ **デスクトップファースト** — ローカル実行のデスクトップアプリ、システムトレイ常駐、サーバー不要
-- 🔄 **3つの表示モード** — ウィンドウ / フローティングバブル / Live2D キャラクター
-- 🤖 **スマートタスクシステム** — プラガブルな実行戦略、シミュレーションと Hermes CLI 実行に対応
-- 🎨 **Live2D 対応準備完了** — モデル設定・ディレクトリスキャン・バリデーション体系を完備
-- ⚙️ **完全な設定システム** — 即時反映/再起動必要の段階的フィードバック
-- 🔌 **QQ ブリッジ** — AstrBot プラグインによるリモート制御（`/y` コマンド群）
-- 🏗️ **厳格なレイヤリング** — Shell / Core / Bridge / Locald / Protocol の明確な責務分離
+Oha-Yachiyo はまだソース開発形態です。すべての環境向けの通常のデスクトップインストーラーではありません。
 
-## 📸 表示モード
+ソースから実行するには次が必要です。
 
-| ウィンドウモード | バブルモード | Live2D モード |
-|:---:|:---:|:---:|
-| 560×520 フルダッシュボード | 320×280 フローティングステータス | 380×560 キャラクタースケルトン |
-| タスク統計・設定パネル | 自動更新・ワンクリック展開 | モーション占位・設定入口 |
+- Python 3.11 以上
+- Node.js 20.19 以上
+- npm
+- Git
 
-## 🏛️ アーキテクチャ
+`oha-yachiyo` コマンドは Electron + React フロントエンドと Python バックエンドを起動します。フロントエンド依存がない場合、ランチャーは `apps/frontend/node_modules` をインストールできますが、Node.js 本体はインストールしません。
 
-```
-┌────────────────────────────────────────────────┐
-│          Hermes-Yachiyo デスクトップアプリ        │
-│                                                │
-│  ┌── App Shell (apps/shell) ────────────────┐  │
-│  │  エントリ・システムトレイ・ウィンドウ管理    │  │
-│  │  表示モード: window / bubble / live2d     │  │
-│  │  設定・効果ポリシー・統合ステータス         │  │
-│  └───────────────────────────────────────────┘  │
-│                      │                         │
-│  ┌── Core Runtime (apps/core) ───────────────┐  │
-│  │  Hermes Agent ラッパー・タスク状態管理      │  │
-│  │  TaskRunner・実行戦略・HTTP 非公開         │  │
-│  └───────────────────────────────────────────┘  │
-│                      │                         │
-│  ┌── Local (apps/locald) ────────────────────┐  │
-│  │  スクリーンショット・アクティブウィンドウ    │  │
-│  └───────────────────────────────────────────┘  │
-│                      │                         │
-│  ┌── Bridge (apps/bridge) ───────────────────┐  │
-│  │  内部 FastAPI・UI と AstrBot 専用          │  │
-│  │  再起動可能・設定ドリフト検出・状態機械     │  │
-│  └───────────────────────────────────────────┘  │
-└────────────────────────────────────────────────┘
-           ↑ HTTP（ローカル、オプション）
-  ┌────────┴───────┐        ┌───────────┐
-  │  AstrBot Plugin │  ───→  │   Hapi    │
-  │  (QQ ブリッジ)   │        │  (Codex)  │
-  └────────────────┘        └───────────┘
+## できること
+
+Oha-Yachiyo はホスト型チャットページではなく、ローカルデスクトップシェルです。
+
+- ダッシュボード: Native Agent readiness、Model Profiles、会話、ツール、設定、バックアップ、アンインストール。
+- Chat Window: ChatSession と TaskRunner に接続された完全な会話画面。
+- Bubble モード: 共通 Chat Window を開く軽量デスクトップ入口。
+- Live2D モード: ローカルリソースを取り込めるキャラクター型デスクトップ入口。
+- Local Bridge: フロントエンドと任意の AstrBot 連携向けのループバック専用 HTTP API。
+
+実行経路:
+
+```text
+Chat UI / Bridge
+-> AppRuntime / AppState
+-> TaskRunner
+-> NativeAgentExecutor
+-> NativeRunEngine
+-> Model Profiles / ToolBroker / PolicyGate / ApprovalCoordinator / RunEvent
 ```
 
-## 🚀 クイックスタート
+Task は製品レベルのタスク契約です。Run は Native Agent の実行記録です。NativeAgentExecutor が Task と Run の対応を管理します。
 
-### 動作環境
-
-- Python 3.11+
-- macOS / Linux / Windows (WSL2)
-- [Hermes Agent](https://github.com/NousResearch/hermes-agent)（アプリ内でインストールガイド提供）
-
-### インストールと起動
+## クイックスタート
 
 ```bash
-# クローンしてインストール
 git clone <repo-url>
-cd Hermes-Yachiyo
+cd oha-yachiyo
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 pip install -e .
-
-# デスクトップアプリを起動
-hermes-yachiyo
-# または
-python -m apps.shell.app
 ```
 
-### 初回起動フロー
-
-アプリは Hermes Agent の状態を自動検出し、セットアップをガイドします：
-
-```
-Hermes 未インストール → インストールガイド UI（ワンクリックインストール）
-    ↓
-インストール済み・未初期化 → ワークスペース初期化ウィザード
-    ↓
-準備完了 → ノーマルモードへ → 現在の表示モード
-```
-
-## ⚙️ 設定システム
-
-設定ファイルは `~/.hermes-yachiyo/config.json` に保存され、設定 UI から視覚的に編集できます。
-
-| 設定項目 | デフォルト | 効果ポリシー |
-|---------|----------|------------|
-| `display_mode` | `bubble` | アプリ再起動が必要 |
-| `bridge_enabled` | `true` | Bridge 再起動が必要 |
-| `bridge_host` | `127.0.0.1` | Bridge 再起動が必要 |
-| `bridge_port` | `8420` | Bridge 再起動が必要 |
-| `tray_enabled` | `true` | アプリ再起動が必要 |
-| `live2d_mode.model_name` | 自動検出 | 即時反映 |
-| `live2d_mode.model_path` | 空（ユーザー資産ディレクトリを自動走査） | モード再起動が必要 |
-| `live2d_mode.enable_expressions` | `false` | 即時反映 |
-| `live2d_mode.enable_physics` | `false` | 即時反映 |
-| `live2d_mode.window_on_top` | `true` | モード再起動が必要 |
-
-保存後、各設定の効果ステータスヒントが即座に表示されます。
-
-## 🤖 タスクシステム
-
-タスクライフサイクル：`PENDING → RUNNING → COMPLETED / CANCELLED / FAILED`
-
-**実行戦略：**
-
-- **SimulatedExecutor** — MVP テスト用のモック実行
-- **HermesExecutor** — `hermes chat -q <prompt> -Q --source tool` の実際の CLI 呼び出し（自動検出）
+テストや開発ツールも入れる場合:
 
 ```bash
-# Bridge API 経由
-curl http://127.0.0.1:8420/tasks -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"description": "現在のディレクトリ構造を分析"}'
-
-# QQ 経由
-/y do 現在のディレクトリ構造を分析
-/y check abc123
-/y cancel abc123
+pip install -e ".[dev]"
 ```
 
-## 🔌 QQ ブリッジ（AstrBot プラグイン）
+デスクトップアプリを起動:
 
-AstrBot プラグインを介して QQ と連携します。すべてのコマンドは `/y` で始まります：
+```bash
+oha-yachiyo
+```
+
+バックエンドのみの開発:
+
+```bash
+oha-yachiyo-backend
+```
+
+## 初回起動
+
+初回起動では、本機設定とモデル設定を完了してから主控台に入ります。
+
+```text
+モデルソース / デフォルト Chat モデルを設定
+  -> Oha-Yachiyo ワークスペースを初期化
+  -> 必要に応じて Live2D / TTS リソースを導入
+  -> ダッシュボードへ
+```
+
+モデル未設定時、Chat と Agent Run は構造化された `native_agent_not_ready / model_profile_required` エラーを返します。外部実行カーネルは不要です。
+
+よくある確認点:
+
+- モデル接続に失敗する: Base URL、モデル名、API Key を確認します。
+- Bridge に接続できない: デスクトップバックエンドが起動しており、ローカルポートが空いているか確認します。
+- macOS でスクリーンショットが使えない: Oha-Yachiyo に画面収録権限を付与します。
+
+## ローカルデータ
+
+主なユーザースコープのパス:
+
+```text
+~/.oha-yachiyo/
+~/.oha-yachiyo-config/
+```
+
+ローカルデータをリセットする前に、これらのパスをバックアップしてください。
+
+## Live2D リソース
+
+Live2D アセットは任意で、メインリポジトリには含めません。
+
+リソース release:
+
+<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases>
+
+推奨パス:
+
+```text
+~/.oha-yachiyo/assets/live2d/
+```
+
+ダッシュボードからリソース ZIP を取り込むか、モデルディレクトリを選択できます。詳細は [docs/live2d-assets.md](docs/live2d-assets.md) を参照してください。
+
+## 八千代 GPT-SoVITS 音色リソース
+
+八千代 GPT-SoVITS 音色パッケージはアプリ DMG とは別に公開します。
+
+<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
+
+プロアクティブケア / デスクトップ観察ページから `Oha-Yachiyo-yachiyo-gpt-sovits-v4.zip` を取り込みます。このパッケージには音色重みと参考音声のみが含まれ、GPT-SoVITS API サービス本体はユーザーがローカルで起動します。詳細は [docs/tts-voice-assets.md](docs/tts-voice-assets.md) を参照してください。
+
+## 任意の QQ / AstrBot ブリッジ
+
+AstrBot プラグインは QQ コマンドをローカル Bridge に転送します。プラグイン自体はローカルマシン制御を実装しません。
 
 | コマンド | 説明 |
 |---------|------|
-| `/y status` | システム状態を表示 |
+| `/y status` | 状態を表示 |
 | `/y tasks` | タスク一覧 |
 | `/y do <説明>` | タスクを作成 |
-| `/y check <id>` | タスク詳細を照会 |
+| `/y check <id>` | タスク詳細 |
 | `/y cancel <id>` | タスクをキャンセル |
 | `/y screen` | スクリーンショット情報 |
-| `/y window` | 現在のアクティブウィンドウ |
-| `/y codex <説明>` | Codex 実行（Hapi、近日公開） |
-| `/y help` | コマンドヘルプ |
+| `/y window` | アクティブウィンドウ情報 |
+| `/y help` | ヘルプ |
 
-プラグインはコマンドルーティングのみを担当し、ローカルロジックは実装しません。エラーメッセージは接続失敗、タイムアウト、サービス利用不可などをカバーしています。
+## プロジェクト構成
 
-## 🎨 Live2D サポート
+```text
+apps/
+  frontend/           Electron + React/Vite/TypeScript フロントエンド
+  desktop_backend/    ヘッドレス Python バックエンド入口
+  desktop_launcher.py ソース開発ランチャー
+  shell/              設定、Native runtime、デスクトップバックエンド UI アダプター
+  core/               AppRuntime、タスク状態、チャット状態
+  bridge/             ローカル FastAPI Bridge
+  locald/             スクリーンショット、アクティブウィンドウアダプター
+  installer/          ワークスペース初期化、バックアップ、復元、アンインストール
+packages/
+  protocol/           クロスレイヤーデータモデル
+integrations/
+  astrbot-plugin/     QQ ブリッジプラグイン
+tests/                pytest スイート
+docs/                 アーキテクチャとリソース文書
+```
 
-現段階では完全な設定・バリデーションフレームワークを提供しています（レンダラー SDK は未統合）：
-
-- **5段階バリデーション**：未設定 → パス無効 → モデルディレクトリではない → パス有効 → ロード済み
-- **ディレクトリ自動スキャン**：`.moc3` / `.model3.json` ファイルを検出（Cubism 3/4 対応）
-- **モデルサマリー抽出**：主要候補ファイル、ソースディレクトリ、レンダラーエントリポイント
-- **設定ページで編集可能**：モデル名、パス、アイドルモーショングループ、表情/物理トグル
-- **即時更新**：保存後すぐに再バリデーションして表示を更新
-
-## 🔗 Bridge API
-
-UI と AstrBot 向けの内部 FastAPI サービス：
-
-| エンドポイント | メソッド | 説明 |
-|-------------|--------|------|
-| `/status` | GET | 実行状態とタスク統計 |
-| `/tasks` | GET | タスク一覧 |
-| `/tasks` | POST | タスク作成 |
-| `/tasks/{id}` | GET | タスク詳細 |
-| `/tasks/{id}/cancel` | POST | タスクキャンセル |
-| `/screen/current` | GET | スクリーンショット（base64） |
-| `/system/active-window` | GET | アクティブウィンドウ情報 |
-| `/hermes/install-info` | GET | Hermes インストール状態 |
-
-Bridge はランタイム再起動、設定ドリフト検出、状態機械管理（disabled / enabled_not_started / running / failed）をサポートしています。
-
-## 🧪 テスト
+## 開発コマンド
 
 ```bash
-# テスト依存関係をインストール
+source .venv/bin/activate
+source ~/.nvm/nvm.sh
+nvm use 20.19.0
+
+npm --prefix apps/frontend run build
+pytest -q
+oha-yachiyo
+```
+
+## テスト
+
+```bash
 pip install -e ".[dev]"
-
-# すべてのテストを実行
-.venv/bin/python -m pytest tests/ -v
-
-# テスト数は現在の pytest 収集結果に従います
+pytest -q
 ```
 
-| テストモジュール | カバレッジ |
-|---------------|---------|
-| `test_protocol` | 列挙型、データモデル、リクエスト/レスポンス |
-| `test_state` | タスクライフサイクル、終端状態保護 |
-| `test_executor` | エグゼキューターモデル、シミュレーション実行 |
-| `test_chat_store` | SQLite セッション/メッセージ CRUD |
-| `test_chat_session` | セッション復元、クリア後の永続化、孤立タスクメッセージ |
-| `test_chat_api` | メッセージ送信、タスク状態同期、assistant 返信の重複防止 |
-| `test_effect_policy` | 設定効果ポリシー |
-| `test_integration_status` | Bridge/AstrBot/Hapi ステータス |
-| `test_astrbot_handlers` | 全ハンドラー出力とエラーフォーマット |
-| `test_startup` | 起動デシジョンツリー |
+主な対象は protocol model、AppState、TaskRunner、NativeAgentExecutor、NativeRunEngine、Chat API、Bridge routes、Model Profiles、approval flow、Workflow、release guard、frontend feature-preservation contract です。
 
-## 📁 プロジェクト構成
+## パッケージング方針
 
-```
-apps/
-  frontend/           # Electron + React/Vite/TypeScript フロントエンド
-  desktop_backend/    # ヘッドレス Python バックエンド入口
-  desktop_launcher.py # 開発ランチャー
-  shell/              # 設定、インストーラー、UI データアダプター
-    config.py           # 設定管理 + Live2D バリデーション
-    effect_policy.py    # 設定効果ポリシー
-    integration_status.py  # 統合ステータス統一ソース
-    main_api.py         # ダッシュボード / メンテナンス API
-    settings.py         # 設定ページビルダー
-    tray.py             # システムトレイ
-    modes/              # 表示モード
-      bubble.py           # フローティングバブルモード
-      live2d.py           # Live2D キャラクターモード
-  core/               # コアランタイム（HTTP 非公開）
-    runtime.py          # Hermes ランタイムラッパー
-    state.py            # タスク状態管理
-    executor.py         # 実行戦略（シミュレーション / Hermes CLI）
-    task_runner.py      # タスクスケジューリングポーラー
-  bridge/             # 内部通信ブリッジ
-    server.py           # FastAPI サーバー（再起動可能）
-    deps.py             # 依存性注入
-    routes/             # API ルート
-  locald/             # ローカル機能アダプター
-    screenshot.py       # スクリーンショット (macOS)
-    active_window.py    # アクティブウィンドウ (macOS)
-  installer/          # Hermes インストールガイド
-    hermes_check.py     # インストール検出
-    hermes_install.py   # インストール実行
-    workspace_init.py   # ワークスペース初期化
-packages/
-  protocol/           # クロスレイヤーデータ定義
-    enums.py            # 列挙型
-    schemas.py          # リクエスト/レスポンスモデル
-    install.py          # インストールモデル
-integrations/
-  astrbot-plugin/     # QQ ブリッジプラグイン
-    main.py             # エントリポイントと ACL
-    command_router.py   # コマンドルーティング
-    api_client.py       # HTTP クライアント
-    handlers/           # コマンドハンドラー
-tests/                # テストスイート（105 テスト）
-```
+リリースパッケージは、グローバル Python、Node.js、編集可能な checkout に依存しない形にします。macOS では React renderer をビルドし、Python backend を `oha-yachiyo-backend` として凍結し、Electron に同梱し、リリース成果物を product identity と security regression の観点で検査します。
 
-## 🔧 開発ガイド
-
-### 厳格な境界
-
-| モジュール | 許可 | 禁止 |
-|----------|------|------|
-| `apps/core` | ランタイム、状態、エグゼキューター | HTTP の公開 |
-| `apps/bridge` | 内部 API、DI | ビジネスロジックの実装 |
-| `apps/shell` | プロダクトエントリ、UI、設定 | Bridge 外の状態アクセス |
-| `apps/locald` | プラットフォームアダプター | ビジネスロジック |
-| `astrbot-plugin` | コマンドルーティング、フォーマット | ローカルマシン制御 |
-
-### 新機能の追加
-
-1. **新しいローカル機能** → `apps/locald/` にアダプター追加 → `apps/bridge/routes/` でエンドポイント公開
-2. **新しいタスクタイプ** → `packages/protocol/enums.py` に列挙型追加 → `apps/core/state.py` で処理
-3. **新しい表示モード** → `apps/shell/modes/` に実装 → `startup.py` で統合
-
-## 📋 ロードマップ
-
-- [ ] Live2D Cubism SDK レンダラー統合
-- [ ] HermesExecutor 実機 CLI テスト
-- [ ] Hapi Codex バックエンド連携
-- [ ] タスク永続化（現在はメモリ内ストレージ）
-- [ ] クロスプラットフォーム対応（Windows / Linux）
-- [ ] AstrBot 実環境 QQ テスト
-- [ ] Bridge HTTPS + 認証
-- [x] Electron + React デスクトップシェル
-
-## 📄 ライセンス
+## ライセンス
 
 MIT
