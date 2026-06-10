@@ -2092,6 +2092,117 @@ def test_agent_and_workflow_run_http_routes_map_idempotency_key_header(monkeypat
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_run_detail_management_http_routes_use_app_runtime_service(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "agents.py"
+        spec = importlib.util.spec_from_file_location("_oha_agent_run_detail_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        agent_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = agent_route_module
+        spec.loader.exec_module(agent_route_module)
+
+        class FakeRuntimeService:
+            def __init__(self):
+                self.calls: list[tuple[str, dict[str, object]]] = []
+
+            def list_run_groups(self, limit):
+                self.calls.append(("list_run_groups", {"limit": limit}))
+                return {
+                    "run_groups": [
+                        {
+                            "run_group_id": "group-http-1",
+                            "child_run_ids": ["run-http-1", "run-http-child"],
+                        }
+                    ],
+                    "limit": limit,
+                }
+
+            def get_run_group(self, run_group_id):
+                self.calls.append(("get_run_group", {"run_group_id": run_group_id}))
+                return {"run_group_id": run_group_id, "status": "completed"}
+
+            def read_run_artifact(self, run_id, artifact_path):
+                self.calls.append(
+                    (
+                        "read_run_artifact",
+                        {"run_id": run_id, "artifact_path": artifact_path},
+                    )
+                )
+                return {"ok": True, "run_id": run_id, "path": artifact_path, "content": "# Final"}
+
+            def rerun_run(self, run_id):
+                self.calls.append(("rerun_run", {"run_id": run_id}))
+                return {"run_id": "run-http-2", "rerun_of_run_id": run_id, "status": "completed"}
+
+            def delete_run(self, run_id):
+                self.calls.append(("delete_run", {"run_id": run_id}))
+                return {
+                    "ok": True,
+                    "deleted_run_ids": [run_id, "run-http-child"],
+                    "deleted_run_count": 2,
+                }
+
+        service = FakeRuntimeService()
+        monkeypatch.setattr(
+            agent_route_module,
+            "get_agent_runtime_service",
+            lambda: (_ for _ in ()).throw(AssertionError("agent routes should use AppRuntime service")),
+        )
+        route_app = FastAPI()
+        route_app.state.runtime = SimpleNamespace(agent_runtime_service=service)
+        route_app.include_router(agent_route_module.router)
+
+        with TestClient(route_app) as client:
+            groups_response = client.get("/ui/run-groups?limit=7")
+            group_response = client.get("/ui/run-groups/group-http-1")
+            artifact_response = client.get("/ui/runs/run-http-1/artifacts/reports/final.md")
+            rerun_response = client.post("/ui/runs/run-http-1/rerun")
+            delete_response = client.delete("/ui/runs/run-http-1")
+
+        assert groups_response.status_code == 200
+        assert groups_response.json()["limit"] == 7
+        assert groups_response.json()["run_groups"][0]["child_run_ids"] == ["run-http-1", "run-http-child"]
+        assert group_response.status_code == 200
+        assert group_response.json() == {"run_group_id": "group-http-1", "status": "completed"}
+        assert artifact_response.status_code == 200
+        assert artifact_response.json() == {
+            "ok": True,
+            "run_id": "run-http-1",
+            "path": "reports/final.md",
+            "content": "# Final",
+        }
+        assert rerun_response.status_code == 200
+        assert rerun_response.json() == {
+            "run_id": "run-http-2",
+            "rerun_of_run_id": "run-http-1",
+            "status": "completed",
+        }
+        assert delete_response.status_code == 200
+        assert delete_response.json() == {
+            "ok": True,
+            "deleted_run_ids": ["run-http-1", "run-http-child"],
+            "deleted_run_count": 2,
+        }
+        assert service.calls == [
+            ("list_run_groups", {"limit": 7}),
+            ("get_run_group", {"run_group_id": "group-http-1"}),
+            ("read_run_artifact", {"run_id": "run-http-1", "artifact_path": "reports/final.md"}),
+            ("rerun_run", {"run_id": "run-http-1"}),
+            ("delete_run", {"run_id": "run-http-1"}),
+        ]
+    finally:
+        sys.modules.pop("_oha_agent_run_detail_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_agent_run_http_routes_roundtrip_approval_detail_and_replay(tmp_path, monkeypatch):
     saved_modules = _unload_module_prefixes(("fastapi",))
     try:
