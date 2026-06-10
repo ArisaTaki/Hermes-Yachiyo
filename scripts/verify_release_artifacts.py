@@ -265,6 +265,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover mature UI bridge routes",
     ),
     (
+        "tests/test_frontend_feature_preservation.py",
+        "macOS release workflow smoke tests must cover mature frontend feature preservation",
+    ),
+    (
+        "tests/test_ui_mature_flow_contract.py",
+        "macOS release workflow smoke tests must cover mature UI flow contracts",
+    ),
+    (
         "tests/test_tts.py",
         "macOS release workflow smoke tests must cover manual TTS",
     ),

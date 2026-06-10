@@ -65,6 +65,8 @@ jobs:
             tests/test_chat_session.py \
             tests/test_chat_api.py \
             tests/test_ui_bridge_routes.py \
+            tests/test_frontend_feature_preservation.py \
+            tests/test_ui_mature_flow_contract.py \
             tests/test_tts.py \
             tests/test_mode_settings.py
 
