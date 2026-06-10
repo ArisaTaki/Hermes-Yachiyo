@@ -333,6 +333,48 @@ def test_stream_smoke_accepts_message_level_content_and_reasoning_frames(monkeyp
     assert private_reasoning not in json.dumps(summary)
 
 
+def test_stream_smoke_accepts_content_part_arrays(monkeypatch):
+    requests: list[dict] = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield (
+                b'data: {"choices":[{"delta":{"content":'
+                b'[{"type":"text","text":"content-part "}]}}]}\n\n'
+            )
+            yield (
+                b'data: {"choices":[{"message":{"role":"assistant","content":'
+                b'[{"type":"text","text":"smoke output"}]},"finish_reason":"stop"}]}\n\n'
+            )
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(request, *_args, **_kwargs):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    summary = smoke.run_stream_smoke(
+        base_url="https://api.example.test/v1",
+        model="demo-content-part-model",
+        api_key="sk-stream-smoke-secret123456",
+        require_content=True,
+        expect_finish_reasons=["stop"],
+    )
+
+    assert requests[0]["stream"] is True
+    assert summary["ok"] is True
+    assert summary["content_chars"] == len("content-part smoke output")
+    assert summary["finish_reasons"] == ["stop"]
+    assert "content-part smoke output" not in json.dumps(summary)
+
+
 def test_stream_smoke_keeps_multi_choice_tool_call_deltas_separate():
     chunks = [
         {
