@@ -29,16 +29,42 @@ def _field(value: Any, name: str) -> Any:
     return getattr(value, name, None)
 
 
+def _content_part_type(value: Any) -> str:
+    return str(_field(value, "type") or "").strip().lower()
+
+
+def _is_reasoning_content_part(value: Any) -> bool:
+    return _content_part_type(value) in {"reasoning", "reasoning_content", "thinking", "thought"}
+
+
+def _raw_part_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "\n".join(text for item in value if (text := _raw_part_text(item)))
+    nested = _field(value, "content")
+    if nested is not None:
+        text = _raw_part_text(nested)
+        if text:
+            return text
+    text = _field(value, "text")
+    return str(text) if text is not None else ""
+
+
 def _content_text(value: Any) -> str:
     if isinstance(value, str):
         return value
     if isinstance(value, list):
         parts: list[str] = []
         for item in value:
+            if _is_reasoning_content_part(item):
+                continue
             text = _content_text(item)
             if text:
                 parts.append(text)
         return "\n".join(parts)
+    if _is_reasoning_content_part(value):
+        return ""
     nested = _field(value, "content")
     if nested is not None:
         text = _content_text(nested)
@@ -49,9 +75,17 @@ def _content_text(value: Any) -> str:
 
 
 def _reasoning_text(value: Any) -> str:
+    if isinstance(value, list):
+        return "".join(_reasoning_text(item) for item in value)
+    if _is_reasoning_content_part(value):
+        return _raw_part_text(value)
     reasoning = _field(value, "reasoning_content")
     if reasoning is None:
         reasoning = _field(value, "reasoning")
+    if reasoning is None:
+        content = _field(value, "content")
+        if content is not None:
+            return _reasoning_text(content)
     return str(reasoning) if reasoning else ""
 
 

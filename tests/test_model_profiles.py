@@ -536,6 +536,45 @@ def test_openai_compatible_chat_reads_reasoning_content_and_xiaomi_api_key_heade
     assert result == "red, blue"
 
 
+def test_openai_compatible_chat_skips_reasoning_content_parts(monkeypatch):
+    private_reasoning = "private non-stream reasoning"
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": [
+                                    {"type": "reasoning", "text": private_reasoning},
+                                    {"type": "text", "text": "visible answer"},
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ).encode("utf-8")
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", lambda *_args, **_kwargs: FakeResponse())
+
+    result = openai_compatible_chat(
+        "https://api.example.test/v1",
+        "demo-model",
+        "sk-demo",
+        [{"role": "user", "content": "hello"}],
+    )
+
+    assert result == "visible answer"
+    assert private_reasoning not in result
+
+
 def test_openai_compatible_chat_timeout_is_configurable(monkeypatch):
     monkeypatch.delenv("OHA_YACHIYO_MODEL_TIMEOUT_SECONDS", raising=False)
     assert OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS == 180

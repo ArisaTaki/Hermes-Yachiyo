@@ -639,8 +639,18 @@ def _message_field(value: Any, name: str) -> Any:
     return getattr(value, name, None)
 
 
+def _message_content_part_type(value: Any) -> str:
+    return str(_message_field(value, "type") or "").strip().lower()
+
+
+def _is_reasoning_content_part(value: Any) -> bool:
+    return _message_content_part_type(value) in {"reasoning", "reasoning_content", "thinking", "thought"}
+
+
 def _message_content_text(content: Any) -> str:
     if isinstance(content, dict):
+        if _is_reasoning_content_part(content):
+            return ""
         nested = _message_content_text(content.get("content"))
         if nested:
             return nested
@@ -654,6 +664,8 @@ def _message_content_text(content: Any) -> str:
     if isinstance(content, list):
         parts = []
         for item in content:
+            if _is_reasoning_content_part(item):
+                continue
             if isinstance(item, dict) and isinstance(item.get("text"), str):
                 parts.append(item["text"])
             elif isinstance(getattr(item, "text", None), str):
@@ -675,6 +687,8 @@ def _message_content_text(content: Any) -> str:
 
 def _message_visible_content_text(content: Any) -> str:
     if isinstance(content, dict):
+        if _is_reasoning_content_part(content):
+            return ""
         nested = _message_visible_content_text(content.get("content"))
         if nested:
             return nested
@@ -685,6 +699,8 @@ def _message_visible_content_text(content: Any) -> str:
     if isinstance(content, list):
         parts = []
         for item in content:
+            if _is_reasoning_content_part(item):
+                continue
             if isinstance(item, dict) and isinstance(item.get("text"), str):
                 parts.append(item["text"])
             elif isinstance(getattr(item, "text", None), str):

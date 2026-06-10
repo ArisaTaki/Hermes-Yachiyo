@@ -1609,6 +1609,11 @@ def _message_content_text(content: Any) -> str:
     if isinstance(content, list):
         parts = []
         for item in content:
+            item_type = ""
+            if isinstance(item, dict):
+                item_type = str(item.get("type") or "").strip().lower()
+            if item_type in {"reasoning", "reasoning_content", "thinking", "thought"}:
+                continue
             if isinstance(item, dict) and isinstance(item.get("text"), str):
                 parts.append(item["text"])
         return "\n".join(parts)

@@ -375,6 +375,54 @@ def test_stream_smoke_accepts_content_part_arrays(monkeypatch):
     assert "content-part smoke output" not in json.dumps(summary)
 
 
+def test_stream_smoke_counts_reasoning_content_parts_without_visible_leak(monkeypatch):
+    requests: list[dict] = []
+    private_reasoning = "hidden planhidden thought"
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield (
+                b'data: {"choices":[{"delta":{"content":'
+                b'[{"type":"reasoning","text":"hidden plan"},'
+                b'{"type":"text","text":"visible "}]}}]}\n\n'
+            )
+            yield (
+                b'data: {"choices":[{"message":{"role":"assistant","content":'
+                b'[{"type":"thinking","text":"hidden thought"},'
+                b'{"type":"text","text":"answer"}]},"finish_reason":"stop"}]}\n\n'
+            )
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(request, *_args, **_kwargs):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    summary = smoke.run_stream_smoke(
+        base_url="https://api.example.test/v1",
+        model="demo-reasoning-content-part-model",
+        api_key="sk-stream-smoke-secret123456",
+        require_content=True,
+        require_reasoning=True,
+        expect_finish_reasons=["stop"],
+    )
+
+    assert requests[0]["stream"] is True
+    assert summary["ok"] is True
+    assert summary["content_chars"] == len("visible answer")
+    assert summary["reasoning_chars"] == len(private_reasoning)
+    assert summary["finish_reasons"] == ["stop"]
+    assert private_reasoning not in json.dumps(summary)
+    assert "visible answer" not in json.dumps(summary)
+
+
 def test_stream_smoke_keeps_multi_choice_tool_call_deltas_separate():
     chunks = [
         {

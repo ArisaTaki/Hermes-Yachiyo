@@ -1703,6 +1703,7 @@ def test_main_chat_model_consumes_multiline_openai_compatible_sse_data_event(tmp
 def test_main_chat_model_consumes_openai_compatible_sse_content_parts(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     requests = []
+    private_reasoning_parts = ["hidden content-part reasoning", "hidden content-part thinking"]
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: FakeDefaultProfileService(),
@@ -1719,11 +1720,13 @@ def test_main_chat_model_consumes_openai_compatible_sse_content_parts(tmp_path, 
             yield b'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'
             yield (
                 b'data: {"choices":[{"delta":{"content":'
-                b'[{"type":"text","text":"content-part "}]}}]}\n\n'
+                b'[{"type":"reasoning","text":"hidden content-part reasoning"},'
+                b'{"type":"text","text":"content-part "}]}}]}\n\n'
             )
             yield (
                 b'data: {"choices":[{"message":{"role":"assistant","content":'
-                b'[{"type":"text","text":"stream output"}]},"finish_reason":"stop"}]}\n\n'
+                b'[{"type":"thinking","text":"hidden content-part thinking"},'
+                b'{"type":"text","text":"stream output"}]},"finish_reason":"stop"}]}\n\n'
             )
             yield b"data: [DONE]\n\n"
 
@@ -1753,6 +1756,9 @@ def test_main_chat_model_consumes_openai_compatible_sse_content_parts(tmp_path, 
         assert len(requests) == 1
         assert output_events[-1]["payload"]["content"] == "content-part stream output"
         assert output_events[-1]["payload"]["output_chars"] == len("content-part stream output")
+        for private_reasoning in private_reasoning_parts:
+            assert private_reasoning not in result
+            assert private_reasoning not in json.dumps(output_events)
         assert not any(str(event["event_type"]).endswith(".delta") for event in events)
     finally:
         service.close()
