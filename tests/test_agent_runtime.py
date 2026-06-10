@@ -325,6 +325,64 @@ def test_main_chat_model_loop_coalesces_stream_chunks_before_persisting(tmp_path
         service.close()
 
 
+def test_main_chat_model_consumes_openai_compatible_sse_stream(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    chunks = ["native ", "http ", "sse"]
+    expected = "".join(chunks)
+    requests = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            for chunk in chunks:
+                payload = json.dumps({"choices": [{"delta": {"content": chunk}}]})
+                yield f"data: {payload}\n\n".encode("utf-8")
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        assert "tools" not in body
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-http-sse-stream",
+            session_id="session-main-http-sse-stream",
+            user_goal="Use native HTTP SSE stream",
+        )
+        result = service.call_main_chat_model(
+            run["run_id"],
+            [{"role": "user", "content": "Use native HTTP SSE stream"}],
+        )
+        rows = service._conn.execute(
+            "SELECT event_type, payload_json FROM run_events WHERE run_id=? ORDER BY sequence",
+            (run["run_id"],),
+        ).fetchall()
+        output_rows = [row for row in rows if row["event_type"] == "model.output.completed"]
+
+        assert result == expected
+        assert len(requests) == 1
+        assert len(output_rows) == 1
+        assert json.loads(output_rows[0]["payload_json"])["content"] == expected
+        assert not any(str(row["event_type"]).endswith(".delta") for row in rows)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_coalesces_openai_sdk_object_stream_before_persisting(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     chunks = [f"sdk-object-chunk-{index};" for index in range(180)]
