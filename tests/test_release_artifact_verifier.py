@@ -374,6 +374,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover mature frontend feature preservation" in messages
     assert "macOS release workflow smoke tests must cover mature UI flow contracts" in messages
     assert "macOS release workflow smoke tests must cover Bridge Host Origin and session token guard" in messages
+    assert "macOS release workflow smoke tests must cover Bridge loopback bind guard" in messages
     assert "macOS release workflow smoke tests must cover mutating Bridge token guard" in messages
     assert "macOS release workflow smoke tests must cover Chat image HTTP roundtrip" in messages
     assert "macOS release workflow smoke tests must cover Agent approval Run Detail HTTP roundtrip" in messages
