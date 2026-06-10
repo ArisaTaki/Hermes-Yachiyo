@@ -663,6 +663,45 @@ event_types:
 
 这一步和上一条 composer reject smoke 合起来覆盖 Chat 两处审批 UI 的拒绝入口：message card 与 composer approval notice 都会调用同一 Run approval reject route，清空 Chat approval UI，并让 Native Run 以 cancelled 终态和 replay facts 收敛。
 
+### Browser Chat approval to Run Detail handoff E2E
+
+本轮继续补 Chat 审批卡跨页面 handoff：从真实 Chat 页面触发 `terminal.run` 审批后，点击 message approval card 的 `运行详情`，确认 Agent Studio Run Detail 打开同一个 Native `main_chat_run` 并展示 RunEvent replay。
+
+```text
+./node_modules/.bin/vite --host 127.0.0.1 --port 5174 --strictPort  # cwd=apps/frontend
+source Bridge: http://127.0.0.1:8420  # isolated OHA_YACHIYO_HOME, no session token for source Browser
+fake provider: http://127.0.0.1:18772/v1  # profile test returns JSON OK, first chat stream requests terminal_run
+Browser route: http://127.0.0.1:5174/#/chat
+```
+
+验证内容：
+
+- 在隔离 `OHA_YACHIYO_HOME=/tmp/oha-yachiyo-browser-run-detail-20260611043019` 中创建默认 Chat ModelProfile，并通过 `/ui/model-profiles/{profile_id}/test` 与 `/ui/native-agent/recheck` 让 Bridge 进程内 TaskRunner 刷新为 `NativeAgentExecutor`。
+- Browser 打开 Chat 后显示 `模型配置 ok`，使用真实键盘输入 `please request terminal approval for run detail browser smoke` 并点击 Chat 发送按钮。
+- fake provider streaming 返回 `terminal_run` tool call；Chat 页面出现 message approval card 与 composer approval notice，本轮点击 message card 的 `chat-message-approval-open-run-detail`。
+- 页面跳转到 `http://127.0.0.1:5174/#/agents/main_chat_run_300ebe0a11b9`，Agent Studio Run Detail 真实展示同一个 `main_chat_run`、同一个 Task/Session、`Approval Required · terminal.run`、`Task link 等待审批` 和 `Execution · 5` replay facts。
+- Browser console error 为空。
+- Bridge API 复核同一 Run：
+
+```text
+run_id: main_chat_run_300ebe0a11b9
+task_id: 8eada114f772
+session_id: a913eaf6
+status: approval_required
+pending_tool: terminal.run
+task_run_link_run_status: approval_required
+task_run_link_last_event_sequence: 5
+chat_approval_count: 1
+event_types:
+  run.started
+  task.linked
+  model.request.started
+  agent.tool.call
+  agent.tool.approval_required
+```
+
+这一步把此前同步 UI flow contract 中的“Chat approval card 跳转 Run Detail / replay handoff”推进到真实 Browser 点击验证：Chat message approval card、route navigation、Agent Studio Run selection、Task↔Run metadata 和 `/runs/{run_id}/events` replay API 都指向同一个 Native `main_chat_run`。
+
 ### Chat cancel late-output hardening
 
 本轮继续推进主聊天取消路径，先用慢速 OpenAI-compatible fake model 做真实 UI 取消 smoke，发现一个真实生命周期 bug：
