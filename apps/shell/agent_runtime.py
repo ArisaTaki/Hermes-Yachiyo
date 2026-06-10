@@ -2450,6 +2450,19 @@ class WorkflowParentResumeCoordinator:
             child_run_id,
         ):
             return workflow_run
+        if child_status == "approval_required" and self._timeline_has_child_event(
+            timeline,
+            "workflow.run.approval_required",
+            child_run_id,
+        ):
+            return workflow_run
+        terminal_child_status = "cancelled" if child_status == "cancelled" else "failed"
+        if child_status not in {"completed", "approval_required"} and self._timeline_has_child_event(
+            timeline,
+            f"workflow.run.{terminal_child_status}",
+            child_run_id,
+        ):
+            return workflow_run
         child_label, child_node_info = self._workflow_child_node_context(timeline, child_run)
         self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, child_label)
         if child_status == "approval_required":
@@ -2491,7 +2504,7 @@ class WorkflowParentResumeCoordinator:
                 )
             return result
         if child_status != "completed":
-            status = "cancelled" if child_status == "cancelled" else "failed"
+            status = terminal_child_status
             detail = (
                 f"{child_run.get('runnable_name') or child_run.get('runnable_id')}: "
                 f"{child_result}"

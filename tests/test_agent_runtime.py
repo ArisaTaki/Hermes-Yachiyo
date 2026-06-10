@@ -383,6 +383,106 @@ def test_workflow_parent_resume_coordinator_does_not_resume_completed_child_twic
     assert workflow_run["artifacts"] == [{"kind": "workflow_artifact", "path": "summary.md"}]
 
 
+def test_workflow_parent_resume_coordinator_does_not_project_child_approval_twice():
+    workflow_run = {
+        "run_id": "workflow_parent",
+        "run_group_id": "run_group_parent",
+        "status": "approval_required",
+        "timeline": [
+            {
+                "event": "workflow.run.approval_required",
+                "child_run_id": "child_run",
+                "status": "approval_required",
+                "workflow_node_id": "agent",
+            },
+        ],
+        "artifacts": [],
+        "result": "Child needs approval",
+    }
+    child_run = {
+        "run_id": "child_run",
+        "status": "approval_required",
+        "result": "Child needs approval",
+        "runnable_name": "Research Agent",
+    }
+
+    coordinator = WorkflowParentResumeCoordinator(
+        parent_runs_waiting_for_child=lambda _child: [workflow_run],
+        workflow_run_is_group_root=lambda _run: True,
+        workflow_child_node_context=lambda *_args: pytest.fail("already projected child approval should not re-project"),
+        merge_workflow_child_run_outcome=lambda *_args: pytest.fail("already projected child approval should not merge again"),
+        workflow_for_run_resume=lambda *_args: pytest.fail("approval child should not load workflow"),
+        workflow_resume_start_index=lambda *_args: pytest.fail("approval child should not compute start index"),
+        continue_workflow_run=lambda *_args, **_kwargs: pytest.fail("approval child should not continue workflow"),
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+        append_run_event=lambda *_args: pytest.fail("already projected child approval should not append replay facts"),
+        update_run=lambda *_args, **_kwargs: pytest.fail("already projected child approval should not update parent"),
+        update_run_group=lambda *_args, **_kwargs: pytest.fail("already projected child approval should not update group"),
+    )
+
+    result = coordinator.resume_parent_after_child_update(workflow_run, child_run)
+
+    assert result is workflow_run
+    assert workflow_run["timeline"] == [
+        {
+            "event": "workflow.run.approval_required",
+            "child_run_id": "child_run",
+            "status": "approval_required",
+            "workflow_node_id": "agent",
+        },
+    ]
+
+
+def test_workflow_parent_resume_coordinator_does_not_project_child_cancel_twice():
+    workflow_run = {
+        "run_id": "workflow_parent",
+        "run_group_id": "run_group_parent",
+        "status": "cancelled",
+        "timeline": [
+            {
+                "event": "workflow.run.cancelled",
+                "child_run_id": "child_run",
+                "status": "cancelled",
+                "workflow_node_id": "agent",
+            },
+        ],
+        "artifacts": [],
+        "result": "Child cancelled",
+    }
+    child_run = {
+        "run_id": "child_run",
+        "status": "cancelled",
+        "result": "Child cancelled",
+        "runnable_name": "Research Agent",
+    }
+
+    coordinator = WorkflowParentResumeCoordinator(
+        parent_runs_waiting_for_child=lambda _child: [workflow_run],
+        workflow_run_is_group_root=lambda _run: True,
+        workflow_child_node_context=lambda *_args: pytest.fail("already projected child cancellation should not re-project"),
+        merge_workflow_child_run_outcome=lambda *_args: pytest.fail("already projected child cancellation should not merge again"),
+        workflow_for_run_resume=lambda *_args: pytest.fail("cancelled child should not load workflow"),
+        workflow_resume_start_index=lambda *_args: pytest.fail("cancelled child should not compute start index"),
+        continue_workflow_run=lambda *_args, **_kwargs: pytest.fail("cancelled child should not continue workflow"),
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+        append_run_event=lambda *_args: pytest.fail("already projected child cancellation should not append replay facts"),
+        update_run=lambda *_args, **_kwargs: pytest.fail("already projected child cancellation should not update parent"),
+        update_run_group=lambda *_args, **_kwargs: pytest.fail("already projected child cancellation should not update group"),
+    )
+
+    result = coordinator.resume_parent_after_child_update(workflow_run, child_run)
+
+    assert result is workflow_run
+    assert workflow_run["timeline"] == [
+        {
+            "event": "workflow.run.cancelled",
+            "child_run_id": "child_run",
+            "status": "cancelled",
+            "workflow_node_id": "agent",
+        },
+    ]
+
+
 def test_workflow_continuation_coordinator_pauses_for_approval_node():
     class FakeEngine:
         def __init__(self):
