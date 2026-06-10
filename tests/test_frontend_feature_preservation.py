@@ -81,8 +81,13 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
         "apps/frontend/src/views/ChatView.tsx",
         [
             "apiGet<MessagesPayload>(`/ui/chat/messages?",
+            "apiGet<SessionsPayload>(`/ui/chat/sessions?",
             "apiPost<",
             "'/ui/chat/messages'",
+            "'/ui/chat/session/clear'",
+            "'/ui/chat/session/delete'",
+            "'/ui/chat/session/discard-empty'",
+            "'/ui/chat/sessions/load'",
             "client_message_id",
             "attachments: outgoingAttachments",
             "canAttachImages(executor)",

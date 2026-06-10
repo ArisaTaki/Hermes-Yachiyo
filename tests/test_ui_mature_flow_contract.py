@@ -110,6 +110,104 @@ def test_chat_ui_bridge_contract_preserves_message_image_idempotency_attachment_
     assert [name for name, _payload in calls] == ["send", "send", "get_attachment_file", "cancel"]
 
 
+def test_chat_ui_bridge_contract_preserves_session_lifecycle(monkeypatch):
+    runtime = SimpleNamespace(name="runtime")
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+
+    class FakeChatAPI:
+        def __init__(self, received_runtime):
+            assert received_runtime is runtime
+
+        def get_session_info(self):
+            calls.append(("get_session_info", {}))
+            return {
+                "ok": True,
+                "session_id": "session-current",
+                "session_context": {"conversation_kind": "main"},
+                "message_count": 2,
+                "is_processing": False,
+                "processing_count": 0,
+                "approval_count": 0,
+            }
+
+        def list_sessions(self, limit=20, query=""):
+            calls.append(("list_sessions", {"limit": limit, "query": query}))
+            return {
+                "ok": True,
+                "current_session_id": "session-current",
+                "query": query,
+                "sessions": [
+                    {
+                        "session_id": "session-current",
+                        "title": "NativeRunEngine 验收",
+                        "conversation_kind": "main",
+                    }
+                ],
+            }
+
+        def load_session(self, session_id):
+            calls.append(("load_session", {"session_id": session_id}))
+            return {"ok": True, "session_id": session_id, "message_count": 4}
+
+        def clear_session(self):
+            calls.append(("clear_session", {}))
+            return {
+                "ok": True,
+                "session_id": "session-new",
+                "previous_session_id": "session-current",
+                "cancelled_tasks": 0,
+            }
+
+        def discard_empty_current_session(self):
+            calls.append(("discard_empty_current_session", {}))
+            return {
+                "ok": True,
+                "discarded": True,
+                "deleted_session_id": "session-new",
+                "session_id": "session-current",
+                "empty": False,
+            }
+
+        def delete_current_session(self):
+            calls.append(("delete_current_session", {}))
+            return {
+                "ok": True,
+                "deleted_session_id": "session-current",
+                "session_id": "session-after-delete",
+                "cancelled_tasks": 1,
+                "remaining_sessions": 0,
+                "empty": True,
+            }
+
+    monkeypatch.setattr(ui, "ChatAPI", FakeChatAPI)
+
+    info = asyncio.run(ui.get_chat_session())
+    sessions = asyncio.run(ui.list_chat_sessions(limit=0, query="NativeRunEngine 验收"))
+    loaded = asyncio.run(
+        ui.load_chat_session(ui.LoadChatSessionRequest(session_id="session-archived"))
+    )
+    cleared = asyncio.run(ui.clear_chat_session())
+    discarded = asyncio.run(ui.discard_empty_chat_session())
+    deleted = asyncio.run(ui.delete_chat_session())
+
+    assert info["session_id"] == "session-current"
+    assert sessions["query"] == "NativeRunEngine 验收"
+    assert sessions["sessions"][0]["title"] == "NativeRunEngine 验收"
+    assert loaded == {"ok": True, "session_id": "session-archived", "message_count": 4}
+    assert cleared["previous_session_id"] == "session-current"
+    assert discarded["discarded"] is True
+    assert deleted["cancelled_tasks"] == 1
+    assert calls == [
+        ("get_session_info", {}),
+        ("list_sessions", {"limit": 0, "query": "NativeRunEngine 验收"}),
+        ("load_session", {"session_id": "session-archived"}),
+        ("clear_session", {}),
+        ("discard_empty_current_session", {}),
+        ("delete_current_session", {}),
+    ]
+
+
 def test_chat_ui_bridge_contract_preserves_group_and_delegated_summary(monkeypatch):
     runtime = SimpleNamespace(name="runtime")
     calls: list[tuple[str, dict]] = []
