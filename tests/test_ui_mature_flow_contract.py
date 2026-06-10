@@ -209,7 +209,31 @@ def test_chat_ui_bridge_contract_preserves_session_lifecycle(monkeypatch):
 
 
 def test_chat_ui_bridge_contract_preserves_group_and_delegated_summary(monkeypatch):
-    runtime = SimpleNamespace(name="runtime")
+    runtime = SimpleNamespace(
+        name="runtime",
+        config=SimpleNamespace(
+            bubble_mode=SimpleNamespace(
+                summary_count=2,
+                default_display="summary",
+                show_unread_dot=True,
+                auto_hide=False,
+                opacity=0.9,
+            ),
+            live2d_mode=SimpleNamespace(
+                show_reply_bubble=True,
+                enable_quick_input=True,
+                click_action="open_chat",
+                default_open_behavior="reply_bubble",
+                position_anchor="right_bottom",
+                scale=1.0,
+                mouse_follow_enabled=True,
+                render_quality_preset="balanced",
+                render_fps=24,
+                render_resolution=1.25,
+                hit_region_precision="medium",
+            ),
+        ),
+    )
     calls: list[tuple[str, dict]] = []
     monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
 
@@ -245,7 +269,58 @@ def test_chat_ui_bridge_contract_preserves_group_and_delegated_summary(monkeypat
                 "task_id": "summary-task-1",
             }
 
+    class FakeChatBridge:
+        def __init__(self, received_runtime):
+            assert received_runtime is runtime
+
+        def get_conversation_overview(self, summary_count, session_limit):
+            calls.append(
+                (
+                    "conversation_overview",
+                    {"summary_count": summary_count, "session_limit": session_limit},
+                )
+            )
+            return {
+                "ok": True,
+                "session_id": "group-1",
+                "empty": False,
+                "is_processing": False,
+                "status_label": f"最近 {summary_count} 条",
+                "latest_reply": "群聊总结已同步。",
+                "latest_reply_full": "群聊总结已同步到 Bubble / Live2D。",
+                "recent_sessions": [
+                    {
+                        "session_id": "group-1",
+                        "conversation_kind": "group",
+                        "summary": "产品群聊：Design / Coding 已完成派发，委派总结已创建。",
+                    },
+                    {
+                        "session_id": "main",
+                        "conversation_kind": "main",
+                        "summary": "自动委派 Run 汇总：summary-task-1 processing。",
+                    },
+                ],
+            }
+
     monkeypatch.setattr(ui, "ChatAPI", FakeChatAPI)
+    monkeypatch.setattr(ui, "ChatBridge", FakeChatBridge)
+    monkeypatch.setattr(
+        ui,
+        "_launcher_proactive_state",
+        lambda _runtime, mode_id, _mode_config: {
+            "ok": True,
+            "status": "disabled",
+            "mode": mode_id,
+            "has_attention": False,
+        },
+    )
+    monkeypatch.setattr(ui, "_maybe_trigger_proactive_tts", lambda *_args: {})
+    monkeypatch.setattr(ui, "_bubble_avatar_url", lambda _config: "data:image/png;base64,AAAA")
+    monkeypatch.setattr(ui, "_live2d_preview_url", lambda _config: "data:image/png;base64,BBBB")
+    monkeypatch.setattr(ui, "_live2d_resource_payload", lambda _config: {"state": "ready"})
+    monkeypatch.setattr(ui, "_live2d_renderer_payload", lambda _config, _resource: {"enabled": True})
+    ui._launcher_notifications.clear()
+    ui._launcher_proactive_services.clear()
 
     created = asyncio.run(
         ui.create_chat_group(
@@ -271,6 +346,8 @@ def test_chat_ui_bridge_contract_preserves_group_and_delegated_summary(monkeypat
             ui.SummarizeDelegatedRunRequest(run_id="run_delegate_1")
         )
     )
+    bubble_launcher = asyncio.run(ui.get_launcher_view(mode="bubble"))
+    live2d_launcher = asyncio.run(ui.get_launcher_view(mode="live2d"))
 
     assert created["session_id"] == "group-1"
     assert created["participant_ids"] == ["agent_design", "agent_coding"]
@@ -282,10 +359,25 @@ def test_chat_ui_bridge_contract_preserves_group_and_delegated_summary(monkeypat
         "run_id": "run_delegate_1",
         "task_id": "summary-task-1",
     }
+    assert bubble_launcher["mode"] == "bubble"
+    assert bubble_launcher["chat"]["recent_sessions"][0]["conversation_kind"] == "group"
+    assert "委派总结已创建" in bubble_launcher["chat"]["recent_sessions"][0]["summary"]
+    assert bubble_launcher["launcher"]["status_label"] == "最近 2 条"
+    assert bubble_launcher["launcher"]["latest_reply"] == "群聊总结已同步。"
+    assert live2d_launcher["mode"] == "live2d"
+    assert live2d_launcher["chat"]["recent_sessions"][1]["summary"].startswith("自动委派 Run 汇总")
+    assert live2d_launcher["launcher"]["status_label"] == "最近 3 条"
+    assert live2d_launcher["launcher"]["renderer"]["enabled"] is True
     assert [name for name, _payload in calls] == [
         "create_group",
         "update_group",
         "summarize_delegated_run",
+        "conversation_overview",
+        "conversation_overview",
+    ]
+    assert calls[-2:] == [
+        ("conversation_overview", {"summary_count": 2, "session_limit": 3}),
+        ("conversation_overview", {"summary_count": 3, "session_limit": 3}),
     ]
 
 
