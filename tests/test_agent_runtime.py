@@ -3294,36 +3294,29 @@ def test_main_chat_model_loop_executes_provider_message_tool_calls(tmp_path, mon
         calls.append(messages)
         if len(calls) == 1:
             assert tools is not None
-
-            def stream():
-                yield {
-                    "choices": [
-                        {
-                            "message": {
-                                "role": "assistant",
-                                "content": "",
-                                "tool_calls": [
-                                    {
-                                        "id": "call_provider_read",
-                                        "type": "function",
-                                        "function": {
-                                            "name": "workspace_read",
-                                            "arguments": '{"path": "README.md"}',
-                                        },
-                                    }
-                                ],
-                            }
-                        }
-                    ]
-                }
-
-            return stream()
+            return {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_provider_read",
+                        "type": "function",
+                        "function": {
+                            "name": "workspace_read",
+                            "arguments": {"path": "README.md"},
+                        },
+                    }
+                ],
+            }
 
         assistant_tool_messages = [
             message for message in messages if message.get("role") == "assistant" and message.get("tool_calls")
         ]
         tool_messages = [message for message in messages if message.get("role") == "tool"]
         assert assistant_tool_messages[-1]["tool_calls"][0]["id"] == "call_provider_read"
+        arguments = assistant_tool_messages[-1]["tool_calls"][0]["function"]["arguments"]
+        assert isinstance(arguments, str)
+        assert json.loads(arguments) == {"path": "README.md"}
         assert tool_messages[-1]["tool_call_id"] == "call_provider_read"
         assert "provider message tool content" in tool_messages[-1]["content"]
         return {"role": "assistant", "content": "Provider message tool call complete"}
@@ -3379,7 +3372,7 @@ def test_main_chat_model_loop_executes_openai_sdk_object_message_tool_calls(tmp_
                         type="function",
                         function=SimpleNamespace(
                             name="workspace_read",
-                            arguments='{"path": "README.md"}',
+                            arguments={"path": "README.md"},
                         ),
                     )
                 ],
@@ -3390,6 +3383,9 @@ def test_main_chat_model_loop_executes_openai_sdk_object_message_tool_calls(tmp_
         ]
         tool_messages = [message for message in messages if message.get("role") == "tool"]
         assert assistant_tool_messages[-1]["tool_calls"][0]["id"] == "call_sdk_object_read"
+        arguments = assistant_tool_messages[-1]["tool_calls"][0]["function"]["arguments"]
+        assert isinstance(arguments, str)
+        assert json.loads(arguments) == {"path": "README.md"}
         assert tool_messages[-1]["tool_call_id"] == "call_sdk_object_read"
         assert "sdk object message tool content" in tool_messages[-1]["content"]
         return {"role": "assistant", "content": "SDK object message tool call complete"}

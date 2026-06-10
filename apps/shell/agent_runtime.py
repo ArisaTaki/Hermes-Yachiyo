@@ -895,7 +895,7 @@ def _coerce_tool_call(value: Any, index: int) -> dict[str, Any] | None:
         "type": str(_message_field(value, "type") or "function"),
         "function": {
             "name": str(function_name),
-            "arguments": arguments if arguments is not None else "{}",
+            "arguments": _tool_arguments_text(arguments) if arguments is not None else "{}",
         },
     }
 
@@ -923,7 +923,7 @@ def _coerce_function_call(value: Any, index: int = 0) -> dict[str, Any] | None:
         "type": "function",
         "function": {
             "name": str(name),
-            "arguments": arguments if arguments is not None else "{}",
+            "arguments": _tool_arguments_text(arguments) if arguments is not None else "{}",
         },
     }
 
