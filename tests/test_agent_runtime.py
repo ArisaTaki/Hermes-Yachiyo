@@ -1314,6 +1314,60 @@ def test_main_chat_model_consumes_split_openai_compatible_sse_frame_chunks(tmp_p
         service.close()
 
 
+def test_main_chat_model_consumes_multiline_openai_compatible_sse_data_event(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    requests = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield (
+                b"id: runtime-chunk-1\r\n"
+                b"event: completion.chunk\r\n"
+                b'data: {"choices":[{"delta":{"content":"runtime multiline"}\r\n'
+                b'data: ,"finish_reason":"stop"}]}\r\n\r\n'
+                b"data: [DONE]\r\n\r\n"
+            )
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-http-multiline-sse-data",
+            session_id="session-main-http-multiline-sse-data",
+            user_goal="Use multiline native HTTP SSE data event",
+        )
+        result = service.call_main_chat_model(
+            run["run_id"],
+            [{"role": "user", "content": "Use multiline native HTTP SSE data event"}],
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        output_events = [event for event in events if event["event_type"] == "model.output.completed"]
+
+        assert result == "runtime multiline"
+        assert len(requests) == 1
+        assert output_events[-1]["payload"]["content"] == "runtime multiline"
+        assert not any(str(event["event_type"]).endswith(".delta") for event in events)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_executes_openai_compatible_sse_tool_calls(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
