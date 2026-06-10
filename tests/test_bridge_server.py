@@ -2470,6 +2470,158 @@ def test_workflow_rerun_http_roundtrip_detail_artifact_and_replay(tmp_path, monk
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_workflow_delete_http_roundtrip_removes_group_child_runs_and_artifacts(tmp_path, monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_root = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes"
+        agent_spec = importlib.util.spec_from_file_location(
+            "_oha_workflow_delete_http_roundtrip_under_test",
+            route_root / "agents.py",
+        )
+        run_spec = importlib.util.spec_from_file_location(
+            "_oha_workflow_delete_run_http_roundtrip_under_test",
+            route_root / "runs.py",
+        )
+        assert agent_spec is not None and agent_spec.loader is not None
+        assert run_spec is not None and run_spec.loader is not None
+        agent_route_module = importlib.util.module_from_spec(agent_spec)
+        run_route_module = importlib.util.module_from_spec(run_spec)
+        sys.modules[agent_spec.name] = agent_route_module
+        sys.modules[run_spec.name] = run_route_module
+        agent_spec.loader.exec_module(agent_route_module)
+        run_spec.loader.exec_module(run_route_module)
+
+        service = AgentRuntimeService(
+            db_path=tmp_path / "agent-runtime.db",
+            workspace_dir=tmp_path / "runtime",
+            credential_store=MemoryCredentialStore(),
+            seed_templates=False,
+        )
+        model_calls: list[list[dict[str, object]]] = []
+
+        def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+            model_calls.append(messages)
+            return {"content": "Workflow HTTP delete result"}
+
+        monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+        monkeypatch.setattr(
+            agent_route_module,
+            "get_agent_runtime_service",
+            lambda: (_ for _ in ()).throw(AssertionError("agent routes should use AppRuntime service")),
+        )
+        monkeypatch.setattr(
+            run_route_module,
+            "get_native_run_engine",
+            lambda: (_ for _ in ()).throw(AssertionError("run routes should use AppRuntime service")),
+        )
+
+        route_app = FastAPI()
+        route_app.state.runtime = SimpleNamespace(agent_runtime_service=service)
+        route_app.include_router(agent_route_module.router)
+        route_app.include_router(run_route_module.router)
+        try:
+            with TestClient(route_app) as client:
+                agent_response = client.post(
+                    "/ui/agents",
+                    json={
+                        "name": "HTTP Workflow Delete Agent",
+                        "model_mode": "custom_api",
+                        "model_config": {
+                            "base_url": "https://api.example.test/v1",
+                            "model": "demo-model",
+                            "api_key": "sk-secret",
+                        },
+                    },
+                )
+                agent_response.raise_for_status()
+                agent_id = agent_response.json()["agent_id"]
+
+                workflow_response = client.post(
+                    "/ui/workflows",
+                    json={
+                        "name": "HTTP Workflow Delete Flow",
+                        "nodes": [
+                            {"id": "start", "type": "start", "data": {"label": "Start"}},
+                            {
+                                "id": "agent",
+                                "type": "agent",
+                                "data": {"label": "Delete Agent", "agent_id": agent_id},
+                            },
+                            {"id": "summary", "type": "artifact", "data": {"label": "Summary"}},
+                        ],
+                        "edges": [
+                            {"source": "start", "target": "agent"},
+                            {"source": "agent", "target": "summary"},
+                        ],
+                    },
+                )
+                workflow_response.raise_for_status()
+                workflow_id = workflow_response.json()["workflow_id"]
+
+                run_response = client.post(
+                    "/ui/workflow-runs",
+                    json={"workflow_id": workflow_id, "user_goal": "Delete workflow run through HTTP"},
+                    headers={"Idempotency-Key": "http-workflow-delete-1"},
+                )
+                run_response.raise_for_status()
+                run = run_response.json()
+                run_id = run["run_id"]
+                run_group_id = run["run_group_id"]
+
+                group_before = client.get(f"/ui/run-groups/{run_group_id}")
+                group_before.raise_for_status()
+                child_run_id = next(
+                    child_id
+                    for child_id in group_before.json()["child_run_ids"]
+                    if child_id != run_id
+                )
+                artifact_before = client.get(f"/ui/runs/{run_id}/artifacts/summary.md")
+                parent_replay_before = client.get(f"/runs/{run_id}/events?after_sequence=0&limit=200")
+                child_detail_before = client.get(f"/ui/runs/{child_run_id}")
+                delete_response = client.delete(f"/ui/runs/{run_id}")
+                parent_after = client.get(f"/ui/runs/{run_id}")
+                child_after = client.get(f"/ui/runs/{child_run_id}")
+                group_after = client.get(f"/ui/run-groups/{run_group_id}")
+                artifact_after = client.get(f"/ui/runs/{run_id}/artifacts/summary.md")
+                replay_after = client.get(f"/runs/{run_id}/events?after_sequence=0&limit=200")
+
+            assert run["client_request_id"] == "http-workflow-delete-1"
+            assert run["status"] == "completed"
+            assert group_before.json()["status"] == "completed"
+            assert artifact_before.status_code == 200
+            assert artifact_before.json()["content"] == "Workflow HTTP delete result"
+            assert parent_replay_before.status_code == 200
+            assert "workflow.run.completed" in [
+                event["event_type"] for event in parent_replay_before.json()["events"]
+            ]
+            assert child_detail_before.status_code == 200
+            assert child_detail_before.json()["status"] == "completed"
+
+            assert delete_response.status_code == 200
+            deleted = delete_response.json()
+            assert deleted["ok"] is True
+            assert deleted["deleted_run_count"] == 2
+            assert set(deleted["deleted_run_ids"]) == {run_id, child_run_id}
+            assert parent_after.status_code == 404
+            assert child_after.status_code == 404
+            assert group_after.status_code == 404
+            assert artifact_after.status_code == 404
+            assert replay_after.status_code == 404
+            assert len(model_calls) == 1
+        finally:
+            service.close()
+    finally:
+        sys.modules.pop("_oha_workflow_delete_http_roundtrip_under_test", None)
+        sys.modules.pop("_oha_workflow_delete_run_http_roundtrip_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_agent_run_http_routes_roundtrip_approval_detail_and_replay(tmp_path, monkeypatch):
     saved_modules = _unload_module_prefixes(("fastapi",))
     try:
