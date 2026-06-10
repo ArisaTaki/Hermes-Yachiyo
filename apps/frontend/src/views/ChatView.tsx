@@ -2414,12 +2414,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 {attachments.length ? (
                   <div className="composer-attachments" aria-label="已添加图片附件">
                     {attachments.map((attachment) => (
-                      <figure className="composer-attachment" key={attachment.id}>
+                      <figure className="composer-attachment" data-testid="chat-composer-attachment-preview" key={attachment.id}>
                         <img src={attachment.data_url} alt={attachment.name} />
                         <figcaption>{attachment.name}</figcaption>
                         <button
                           type="button"
                           aria-label={`移除 ${attachment.name}`}
+                          data-testid="chat-composer-attachment-remove"
                           onClick={() => removeAttachment(attachment.id)}
                         >
                           ×
