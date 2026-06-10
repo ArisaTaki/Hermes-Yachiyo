@@ -1718,7 +1718,7 @@ function WorkflowRunPreview({
   const visibleSteps = steps.filter((step) => step.kind !== 'start');
   if (!visibleSteps.length) return null;
   return (
-    <div className="workflow-run-preview">
+    <div className="workflow-run-preview" data-testid="workflow-run-preview">
       <div className="workflow-run-preview-head">
         <strong>运行顺序</strong>
         <span>{visibleSteps.length} steps</span>
@@ -1745,7 +1745,7 @@ function WorkflowRunPreview({
                   : '按节点名称自动生成 artifact 路径。'
                 : '未知节点类型，运行前需要修复 Workflow 定义。';
           return (
-            <li className={`workflow-run-preview-step ${step.kind}`} key={step.key}>
+            <li className={`workflow-run-preview-step ${step.kind}`} data-testid="workflow-run-preview-step" key={step.key}>
               <span className="workflow-run-preview-index">{index + 1}</span>
               <div>
                 <strong>{step.label}</strong>
@@ -4257,37 +4257,39 @@ export function AgentStudioView() {
       ) : null}
 
       {!loading && tab === 'workflows' ? (
-        <section className="agent-studio-grid workflow-studio-grid">
+        <section className="agent-studio-grid workflow-studio-grid" data-testid="workflow-studio">
           <aside className="agent-studio-panel">
             <div className="section-heading-row">
               <h2>Workflows</h2>
               <div className="studio-heading-actions">
                 {workflows.length && !workflowManagementMode ? (
-                  <button type="button" disabled={busy} onClick={() => setWorkflowManagementMode(true)}>管理</button>
+                  <button type="button" data-testid="workflow-list-manage" disabled={busy} onClick={() => setWorkflowManagementMode(true)}>管理</button>
                 ) : null}
-                <button type="button" disabled={busy} onClick={startNewWorkflow}>新建</button>
+                <button type="button" data-testid="workflow-new" disabled={busy} onClick={startNewWorkflow}>新建</button>
               </div>
             </div>
             {workflows.length && workflowManagementMode ? (
-              <div className="studio-bulk-actions" aria-label="Workflow 批量操作">
+              <div className="studio-bulk-actions" aria-label="Workflow 批量操作" data-testid="workflow-bulk-actions">
                 <span>{selectedWorkflows.length ? `已选择 ${selectedWorkflows.length} / ${workflows.length}` : `${workflows.length} workflows`}</span>
-                <button type="button" disabled={busy} onClick={() => setSelectedWorkflowIds(allWorkflowsSelected ? [] : workflowIds)}>
+                <button type="button" data-testid="workflow-select-all" disabled={busy} onClick={() => setSelectedWorkflowIds(allWorkflowsSelected ? [] : workflowIds)}>
                   {allWorkflowsSelected ? '取消全选' : '全选当前列表'}
                 </button>
-                <button type="button" disabled={busy || !selectedWorkflows.length} onClick={() => setSelectedWorkflowIds([])}>清空</button>
-                <button type="button" className="danger-action" disabled={busy || !selectedWorkflows.length} onClick={requestDeleteSelectedWorkflows}>删除所选</button>
-                <button type="button" disabled={busy} onClick={finishWorkflowManagement}>完成</button>
+                <button type="button" data-testid="workflow-clear-selection" disabled={busy || !selectedWorkflows.length} onClick={() => setSelectedWorkflowIds([])}>清空</button>
+                <button type="button" className="danger-action" data-testid="workflow-delete-selected" disabled={busy || !selectedWorkflows.length} onClick={requestDeleteSelectedWorkflows}>删除所选</button>
+                <button type="button" data-testid="workflow-finish-management" disabled={busy} onClick={finishWorkflowManagement}>完成</button>
               </div>
             ) : null}
-            <div className={workflowManagementMode ? 'agent-list managing' : 'agent-list'}>
+            <div className={workflowManagementMode ? 'agent-list managing' : 'agent-list'} data-testid="workflow-list">
               {workflows.map((workflow) => (
                 <div
                   className={workflow.workflow_id === selectedWorkflowId ? 'agent-list-item active' : 'agent-list-item'}
+                  data-testid="workflow-list-item"
                   key={workflow.workflow_id}
                 >
                   <label className="agent-list-select" aria-label={`选择 Workflow ${workflow.name}`}>
                     <input
                       type="checkbox"
+                      data-testid="workflow-list-checkbox"
                       checked={selectedWorkflowIdSet.has(workflow.workflow_id)}
                       disabled={busy || !workflowManagementMode}
                       onChange={() => toggleWorkflowSelected(workflow.workflow_id)}
@@ -4296,6 +4298,7 @@ export function AgentStudioView() {
                   <button
                     type="button"
                     className="agent-list-main"
+                    data-testid="workflow-list-open"
                     onClick={() => selectWorkflow(workflow.workflow_id)}
                   >
                     <strong>{workflow.name}</strong>
@@ -4305,11 +4308,11 @@ export function AgentStudioView() {
               ))}
             </div>
           </aside>
-          <div className="agent-studio-panel workflow-editor">
-            <div className="workflow-toolbar">
-              <input className="hy-input" value={workflowName} onChange={(event) => setWorkflowName(event.target.value)} />
-              <input className="hy-input" value={workflowDescription} onChange={(event) => setWorkflowDescription(event.target.value)} placeholder="Description" />
-              <label className="agent-checkbox-row workflow-enabled-toggle">
+          <div className="agent-studio-panel workflow-editor" data-testid="workflow-editor">
+            <div className="workflow-toolbar" data-testid="workflow-toolbar">
+              <input className="hy-input" data-testid="workflow-name-input" value={workflowName} onChange={(event) => setWorkflowName(event.target.value)} />
+              <input className="hy-input" data-testid="workflow-description-input" value={workflowDescription} onChange={(event) => setWorkflowDescription(event.target.value)} placeholder="Description" />
+              <label className="agent-checkbox-row workflow-enabled-toggle" data-testid="workflow-enabled-toggle">
                 <input
                   type="checkbox"
                   checked={workflowEnabled}
@@ -4320,30 +4323,33 @@ export function AgentStudioView() {
               <button
                 type="button"
                 className="workflow-template-action"
+                data-testid="workflow-template-button"
                 disabled={busy || !agents.some((agent) => agent.enabled !== false)}
                 onClick={loadPhase4WorkflowTemplate}
               >
                 全线测试模板
               </button>
-              <button type="button" disabled={busy} onClick={() => addFlowNode('agent')}>Agent</button>
-              <button type="button" disabled={busy} onClick={() => addFlowNode('approval')}>Approval</button>
-              <button type="button" disabled={busy} onClick={() => addFlowNode('artifact')}>Artifact</button>
+              <button type="button" data-testid="workflow-add-agent-node" disabled={busy} onClick={() => addFlowNode('agent')}>Agent</button>
+              <button type="button" data-testid="workflow-add-approval-node" disabled={busy} onClick={() => addFlowNode('approval')}>Approval</button>
+              <button type="button" data-testid="workflow-add-artifact-node" disabled={busy} onClick={() => addFlowNode('artifact')}>Artifact</button>
               <button
                 type="button"
                 className="primary-action"
+                data-testid="workflow-save"
                 disabled={busy || workflowHasErrors}
                 title={workflowPrimaryError || undefined}
                 onClick={() => void runAction(saveWorkflow, '保存 Workflow')}
               >
                 保存
               </button>
-              {selectedWorkflow ? <button type="button" className="danger-action" onClick={requestDeleteWorkflow}>删除</button> : null}
+              {selectedWorkflow ? <button type="button" className="danger-action" data-testid="workflow-delete" onClick={requestDeleteWorkflow}>删除</button> : null}
             </div>
-            <div className="workflow-agent-palette" aria-label="从 Agents 添加到 Workflow">
+            <div className="workflow-agent-palette" aria-label="从 Agents 添加到 Workflow" data-testid="workflow-agent-palette">
               <span>添加 Agent</span>
               {agents.map((agent) => (
                 <button
                   type="button"
+                  data-testid="workflow-agent-palette-item"
                   disabled={busy || agent.enabled === false}
                   key={agent.agent_id}
                   onClick={() => addFlowNode('agent', agent.agent_id)}
@@ -4360,20 +4366,20 @@ export function AgentStudioView() {
               ))}
               {!agents.length ? <small>暂无可添加 Agent</small> : null}
             </div>
-            <div className="workflow-canvas">
+            <div className="workflow-canvas" data-testid="workflow-canvas">
               <ReactFlow nodes={nodes} edges={edges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} fitView>
                 <MiniMap />
                 <Controls />
                 <Background />
               </ReactFlow>
             </div>
-            <div className="workflow-node-settings">
+            <div className="workflow-node-settings" data-testid="workflow-node-settings">
               <div className="agent-skill-mounts-head">
                 <h3>节点设置</h3>
                 <span>{nodes.length} nodes / {edges.length} edges</span>
               </div>
               {workflowErrors.length || workflowValidation.warnings.length ? (
-                <div className={`workflow-validation-box ${workflowHasErrors ? 'has-errors' : 'has-warnings'}`}>
+                <div className={`workflow-validation-box ${workflowHasErrors ? 'has-errors' : 'has-warnings'}`} data-testid="workflow-validation">
                   {workflowHasErrors ? (
                     <div>
                       <strong>需要修复</strong>
@@ -4396,12 +4402,13 @@ export function AgentStudioView() {
                   : null;
                 const selectedNodeAgentIssue = selectedNodeAgent ? agentRunIssueById.get(selectedNodeAgent.agent_id) || '' : '';
                 return (
-                  <div className="workflow-node-setting-row" key={node.id}>
+                  <div className="workflow-node-setting-row" data-testid="workflow-node-setting-row" key={node.id}>
                     <div className="workflow-node-setting-main">
                       <label>
                         <span>{workflowNodeKindLabel(kind)} Label</span>
                         <input
                           className="hy-input"
+                          data-testid="workflow-node-label-input"
                           value={nodeLabel}
                           onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, label: event.target.value } } : item))}
                         />
@@ -4412,6 +4419,7 @@ export function AgentStudioView() {
                             <span>Agent</span>
                             <select
                               className="hy-select"
+                              data-testid="workflow-node-agent-select"
                               value={String(node.data?.agent_id || '')}
                               onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, agent_id: event.target.value, label: agents.find((agent) => agent.agent_id === event.target.value)?.name || item.data?.label } } : item))}
                             >
@@ -4427,6 +4435,7 @@ export function AgentStudioView() {
                             <span>Step Task</span>
                             <textarea
                               className="hy-input agent-textarea compact"
+                              data-testid="workflow-node-task-input"
                               value={String(node.data?.task || '')}
                               onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, task: event.target.value } } : item))}
                             />
@@ -4438,6 +4447,7 @@ export function AgentStudioView() {
                           <span>Artifact Path</span>
                           <input
                             className="hy-input"
+                            data-testid="workflow-node-artifact-path-input"
                             value={String(node.data?.artifact_path || node.data?.artifactPath || '')}
                             onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, artifact_path: event.target.value } } : item))}
                             placeholder="留空则按 Label 自动生成，例如 reports/summary.md"
@@ -4449,6 +4459,7 @@ export function AgentStudioView() {
                           <span>Approval Criteria</span>
                           <textarea
                             className="hy-input agent-textarea compact"
+                            data-testid="workflow-node-approval-criteria-input"
                             value={String(node.data?.criteria || '')}
                             onChange={(event) => setNodes((current) => current.map((item) => item.id === node.id ? { ...item, data: { ...item.data, criteria: event.target.value } } : item))}
                           />
@@ -4463,7 +4474,7 @@ export function AgentStudioView() {
                         </div>
                       ) : null}
                     </div>
-                    <button type="button" disabled={busy} onClick={() => removeFlowNode(node.id)}>移除</button>
+                    <button type="button" data-testid="workflow-node-remove" disabled={busy} onClick={() => removeFlowNode(node.id)}>移除</button>
                   </div>
                 );
               })}
@@ -4471,7 +4482,7 @@ export function AgentStudioView() {
                 <div className="empty-state inline-empty">点击 Agent、Approval 或 Artifact 添加可配置节点。</div>
               ) : null}
             </div>
-            <section className="agent-quick-run">
+            <section className="agent-quick-run" data-testid="workflow-quick-run">
               <div>
                 <h3>Workflow Run</h3>
                 <p>{selectedWorkflow ? '先保存当前画布，再运行这个 Workflow，完成后自动打开 Runs 详情。' : '新建 Workflow 会先保存草稿，再立即运行。'}</p>
@@ -4480,6 +4491,7 @@ export function AgentStudioView() {
                 <span>Goal</span>
                 <textarea
                   className="hy-input agent-run-textarea"
+                  data-testid="workflow-run-goal-input"
                   value={workflowRunGoal}
                   onChange={(event) => setWorkflowRunGoal(event.target.value)}
                   placeholder="例如：从设计到审查跑一遍这个任务"
@@ -4497,6 +4509,7 @@ export function AgentStudioView() {
               <button
                 type="button"
                 className="primary-action"
+                data-testid="workflow-save-and-run"
                 disabled={workflowRunDisabled}
                 title={workflowRunDisabledReason || undefined}
                 onClick={() => void runAction(runCurrentWorkflow, '保存并运行 Workflow')}

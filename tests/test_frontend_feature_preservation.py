@@ -495,6 +495,54 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
     )
 
 
+def test_workflow_studio_exposes_stable_e2e_selectors_for_edit_and_run_flow() -> None:
+    _assert_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        [
+            "data-testid=\"workflow-studio\"",
+            "data-testid=\"workflow-list\"",
+            "data-testid=\"workflow-list-item\"",
+            "data-testid=\"workflow-list-open\"",
+            "data-testid=\"workflow-list-checkbox\"",
+            "data-testid=\"workflow-list-manage\"",
+            "data-testid=\"workflow-bulk-actions\"",
+            "data-testid=\"workflow-select-all\"",
+            "data-testid=\"workflow-clear-selection\"",
+            "data-testid=\"workflow-delete-selected\"",
+            "data-testid=\"workflow-finish-management\"",
+            "data-testid=\"workflow-new\"",
+            "data-testid=\"workflow-editor\"",
+            "data-testid=\"workflow-toolbar\"",
+            "data-testid=\"workflow-name-input\"",
+            "data-testid=\"workflow-description-input\"",
+            "data-testid=\"workflow-enabled-toggle\"",
+            "data-testid=\"workflow-template-button\"",
+            "data-testid=\"workflow-add-agent-node\"",
+            "data-testid=\"workflow-add-approval-node\"",
+            "data-testid=\"workflow-add-artifact-node\"",
+            "data-testid=\"workflow-save\"",
+            "data-testid=\"workflow-delete\"",
+            "data-testid=\"workflow-agent-palette\"",
+            "data-testid=\"workflow-agent-palette-item\"",
+            "data-testid=\"workflow-canvas\"",
+            "data-testid=\"workflow-node-settings\"",
+            "data-testid=\"workflow-validation\"",
+            "data-testid=\"workflow-node-setting-row\"",
+            "data-testid=\"workflow-node-label-input\"",
+            "data-testid=\"workflow-node-agent-select\"",
+            "data-testid=\"workflow-node-task-input\"",
+            "data-testid=\"workflow-node-artifact-path-input\"",
+            "data-testid=\"workflow-node-approval-criteria-input\"",
+            "data-testid=\"workflow-node-remove\"",
+            "data-testid=\"workflow-quick-run\"",
+            "data-testid=\"workflow-run-goal-input\"",
+            "data-testid=\"workflow-run-preview\"",
+            "data-testid=\"workflow-run-preview-step\"",
+            "data-testid=\"workflow-save-and-run\"",
+        ],
+    )
+
+
 def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> None:
     agents_lib = "apps/frontend/src/lib/agents.ts"
     _assert_function_contains(
