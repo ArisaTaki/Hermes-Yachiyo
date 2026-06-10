@@ -526,6 +526,64 @@ def test_chat_retry_http_route_returns_retry_projection(monkeypatch):
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_chat_attachment_http_route_streams_file_and_maps_missing(monkeypatch, tmp_path):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "ui.py"
+        spec = importlib.util.spec_from_file_location("_oha_ui_attachment_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        ui_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = ui_route_module
+        spec.loader.exec_module(ui_route_module)
+
+        image_path = tmp_path / "screen.png"
+        image_path.write_bytes(b"\x89PNG\r\n\x1a\nfake-image")
+        calls: list[str] = []
+
+        class FakeChatAPI:
+            def __init__(self, runtime):
+                assert runtime is fake_runtime
+
+            def get_attachment_file(self, attachment_id):
+                calls.append(attachment_id)
+                if attachment_id == "screen-image":
+                    return {
+                        "ok": True,
+                        "path": str(image_path),
+                        "mime_type": "image/png",
+                        "name": "screen.png",
+                    }
+                return {"ok": False, "error": "附件不存在"}
+
+        fake_runtime = SimpleNamespace()
+        monkeypatch.setattr(ui_route_module, "get_runtime", lambda: fake_runtime)
+        monkeypatch.setattr(ui_route_module, "ChatAPI", FakeChatAPI)
+        route_app = FastAPI()
+        route_app.include_router(ui_route_module.router)
+
+        with TestClient(route_app) as client:
+            response = client.get("/ui/chat/attachments/screen-image")
+            missing = client.get("/ui/chat/attachments/missing-image")
+
+        assert response.status_code == 200
+        assert response.content == image_path.read_bytes()
+        assert response.headers["content-type"].startswith("image/png")
+        assert "screen.png" in response.headers.get("content-disposition", "")
+        assert missing.status_code == 404
+        assert missing.json() == {"detail": "附件不存在"}
+        assert calls == ["screen-image", "missing-image"]
+    finally:
+        sys.modules.pop("_oha_ui_attachment_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_chat_cancel_http_route_returns_ui_cancel_projection(monkeypatch):
     saved_modules = _unload_module_prefixes(("fastapi",))
     try:
