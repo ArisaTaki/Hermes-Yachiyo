@@ -1481,6 +1481,100 @@ def test_main_chat_model_loop_executes_openai_compatible_sse_tool_calls(tmp_path
         service.close()
 
 
+def test_main_chat_model_loop_executes_multiline_openai_compatible_sse_tool_call(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("multiline http sse tool content", encoding="utf-8")
+    requests = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    class FakeResponse:
+        def __init__(self, chunks):
+            self._chunks = chunks
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            for chunk in self._chunks:
+                yield chunk
+
+    first_response = FakeResponse(
+        [
+            (
+                b"id: multiline-tool-1\r\n"
+                b"event: completion.chunk\r\n"
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_http_sse_multiline_read",\r\n'
+                b'data: "type":"function","function":{"name":"workspace_","arguments":"{\\"path\\": \\"READ"}}]}}]}\r\n\r\n'
+            ),
+            (
+                b"id: multiline-tool-2\r\n"
+                b"event: completion.chunk\r\n"
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,\r\n'
+                b'data: "function":{"name":"read","arguments":"ME.md\\"}"}}]},"finish_reason":"tool_calls"}]}\r\n\r\n'
+            ),
+            b"data: [DONE]\r\n\r\n",
+        ]
+    )
+    second_response = FakeResponse(
+        [
+            (
+                b"id: multiline-completion\r\n"
+                b"event: completion.chunk\r\n"
+                b'data: {"choices":[{"delta":{"content":"Multiline HTTP SSE tool call complete"}\r\n'
+                b'data: ,"finish_reason":"stop"}]}\r\n\r\n'
+            ),
+            b"data: [DONE]\r\n\r\n",
+        ]
+    )
+    responses = [first_response, second_response]
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return responses.pop(0)
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-multiline-http-sse-tool-call",
+            session_id="session-main-multiline-http-sse-tool-call",
+            user_goal="Read README through multiline HTTP SSE tool call",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Read README"}],
+            tool_policy={"allowed_tools": ["workspace.read"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."]},
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+
+        assert updated["result"] == "Multiline HTTP SSE tool call complete"
+        assert len(requests) == 2
+        assert requests[1]["body"]["messages"][-1]["role"] == "tool"
+        assert requests[1]["body"]["messages"][-1]["tool_call_id"] == "call_http_sse_multiline_read"
+        assert "multiline http sse tool content" in requests[1]["body"]["messages"][-1]["content"]
+        assert tool_event["payload"]["tool"] == "workspace.read"
+        assert tool_event["payload"]["input_preview"]["path"] == "README.md"
+        assert event_types.count("agent.tool.call") == 1
+        assert event_types.count("model.output.completed") == 1
+        assert not any(str(event_type).endswith(".delta") for event_type in event_types)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_executes_split_openai_compatible_sse_tool_call_frames(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
