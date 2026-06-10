@@ -654,6 +654,55 @@ def test_openai_compatible_chat_message_streams_sse_chunks(monkeypatch):
     assert chunks[2]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] == "workspace_read"
 
 
+def test_openai_compatible_chat_message_streams_legacy_function_call_sse(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"checking "}}]}\n\n'
+            yield (
+                b'data: {"choices":[{"delta":{"function_call":'
+                b'{"name":"workspace_","arguments":"{\\"path\\":\\"READ"}}}]}\n\n'
+            )
+            yield (
+                b'data: {"choices":[{"delta":{"function_call":'
+                b'{"name":"read","arguments":"ME.md\\"}"}},'
+                b'"finish_reason":"function_call"}]}\n\n'
+            )
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(request, timeout, context):
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["stream"] is True
+        assert timeout == OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS
+        assert isinstance(context, ssl.SSLContext)
+        assert request.get_header("Accept") == "text/event-stream"
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    chunks = list(
+        openai_compatible_chat_message(
+            "https://api.example.test/v1",
+            "demo-model",
+            "sk-demo",
+            [{"role": "user", "content": "hello"}],
+            stream=True,
+        )
+    )
+
+    assert chunks[0]["choices"][0]["delta"]["content"] == "checking "
+    assert chunks[1]["choices"][0]["delta"]["function_call"]["name"] == "workspace_"
+    assert chunks[1]["choices"][0]["delta"]["function_call"]["arguments"] == '{"path":"READ'
+    assert chunks[2]["choices"][0]["delta"]["function_call"]["name"] == "read"
+    assert chunks[2]["choices"][0]["delta"]["function_call"]["arguments"] == 'ME.md"}'
+    assert chunks[2]["choices"][0]["finish_reason"] == "function_call"
+
+
 def test_openai_compatible_chat_message_streams_coalesced_sse_frames(monkeypatch):
     class FakeResponse:
         def __enter__(self):
