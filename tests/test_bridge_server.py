@@ -1418,6 +1418,207 @@ def test_agent_and_workflow_run_http_routes_map_idempotency_key_header(monkeypat
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_agent_studio_crud_http_routes_use_app_runtime_service(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "agents.py"
+        spec = importlib.util.spec_from_file_location("_oha_agent_crud_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        agent_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = agent_route_module
+        spec.loader.exec_module(agent_route_module)
+
+        class FakeRuntimeService:
+            def __init__(self):
+                self.calls: list[str] = []
+
+            def list_agents(self):
+                self.calls.append("list_agents")
+                return {"agents": [{"agent_id": "agent-1"}]}
+
+            def create_agent(self, payload):
+                self.calls.append("create_agent")
+                return {"agent_id": "agent-1", **payload}
+
+            def get_agent(self, agent_id):
+                self.calls.append("get_agent")
+                return {"agent_id": agent_id}
+
+            def update_agent(self, agent_id, payload):
+                self.calls.append("update_agent")
+                return {"agent_id": agent_id, **payload}
+
+            def delete_agent(self, agent_id):
+                self.calls.append("delete_agent")
+                return {"ok": True, "agent_id": agent_id}
+
+            def test_agent_model(self, agent_id):
+                self.calls.append("test_agent_model")
+                return {"ok": True, "agent_id": agent_id}
+
+            def attach_skill(self, agent_id, skill_id):
+                self.calls.append("attach_skill")
+                return {"ok": True, "agent_id": agent_id, "skill_id": skill_id}
+
+            def detach_skill(self, agent_id, skill_id):
+                self.calls.append("detach_skill")
+                return {"ok": True, "agent_id": agent_id, "skill_id": skill_id}
+
+            def list_skills(self):
+                self.calls.append("list_skills")
+                return {"skills": [{"skill_id": "skill-1"}]}
+
+            def import_skill(self, source_path, folder_id):
+                self.calls.append("import_skill")
+                return {"ok": True, "source_path": source_path, "folder_id": folder_id}
+
+            def list_native_skill_sources(self):
+                self.calls.append("list_native_skill_sources")
+                return {"sources": [{"source": "installed"}]}
+
+            def list_skill_folders(self):
+                self.calls.append("list_skill_folders")
+                return {"folders": [{"folder_id": "folder-1"}]}
+
+            def create_skill_folder(self, payload):
+                self.calls.append("create_skill_folder")
+                return {"folder_id": "folder-1", **payload}
+
+            def update_skill_folder(self, folder_id, payload):
+                self.calls.append("update_skill_folder")
+                return {"folder_id": folder_id, **payload}
+
+            def delete_skill_folder(self, folder_id, *, delete_skills=False):
+                self.calls.append("delete_skill_folder")
+                return {"ok": True, "folder_id": folder_id, "delete_skills": delete_skills}
+
+            def sync_native_skills(self):
+                self.calls.append("sync_native_skills")
+                return {"ok": True}
+
+            def install_skill_command(self, command, folder_id):
+                self.calls.append("install_skill_command")
+                return {"ok": True, "command": command, "folder_id": folder_id}
+
+            def get_skill(self, skill_id):
+                self.calls.append("get_skill")
+                return {"skill_id": skill_id}
+
+            def update_skill(self, skill_id, payload):
+                self.calls.append("update_skill")
+                return {"skill_id": skill_id, **payload}
+
+            def delete_skill(self, skill_id):
+                self.calls.append("delete_skill")
+                return {"ok": True, "skill_id": skill_id}
+
+            def list_workflows(self):
+                self.calls.append("list_workflows")
+                return {"workflows": [{"workflow_id": "workflow-1"}]}
+
+            def create_workflow(self, payload):
+                self.calls.append("create_workflow")
+                return {"workflow_id": "workflow-1", **payload}
+
+            def get_workflow(self, workflow_id):
+                self.calls.append("get_workflow")
+                return {"workflow_id": workflow_id}
+
+            def update_workflow(self, workflow_id, payload):
+                self.calls.append("update_workflow")
+                return {"workflow_id": workflow_id, **payload}
+
+            def delete_workflow(self, workflow_id):
+                self.calls.append("delete_workflow")
+                return {"ok": True, "workflow_id": workflow_id}
+
+            def list_runnables(self):
+                self.calls.append("list_runnables")
+                return {"runnables": [{"id": "agent-1"}]}
+
+        service = FakeRuntimeService()
+        monkeypatch.setattr(
+            agent_route_module,
+            "get_agent_runtime_service",
+            lambda: (_ for _ in ()).throw(AssertionError("agent studio CRUD routes should use AppRuntime service")),
+        )
+        route_app = FastAPI()
+        route_app.state.runtime = SimpleNamespace(agent_runtime_service=service)
+        route_app.include_router(agent_route_module.router)
+
+        with TestClient(route_app) as client:
+            responses = [
+                client.get("/ui/agents"),
+                client.post("/ui/agents", json={"name": "Agent 1"}),
+                client.get("/ui/agents/agent-1"),
+                client.patch("/ui/agents/agent-1", json={"name": "Agent 2"}),
+                client.delete("/ui/agents/agent-1"),
+                client.post("/ui/agents/agent-1/test-model"),
+                client.post("/ui/agents/agent-1/skills", json={"skill_id": "skill-1"}),
+                client.delete("/ui/agents/agent-1/skills/skill-1"),
+                client.get("/ui/skills"),
+                client.post("/ui/skills", json={"source_path": "/tmp/skill.md", "folder_id": "folder-1"}),
+                client.post("/ui/skills/import", json={"source_path": "/tmp/skill-2.md"}),
+                client.get("/ui/skills/sources"),
+                client.get("/ui/skill-folders"),
+                client.post("/ui/skill-folders", json={"name": "Folder"}),
+                client.patch("/ui/skill-folders/folder-1", json={"name": "Folder 2"}),
+                client.delete("/ui/skill-folders/folder-1?delete_skills=true"),
+                client.post("/ui/skills/sync"),
+                client.post("/ui/skills/install", json={"command": "install skill", "folder_id": "folder-1"}),
+                client.get("/ui/skills/skill-1"),
+                client.patch("/ui/skills/skill-1", json={"enabled": False}),
+                client.delete("/ui/skills/skill-1"),
+                client.get("/ui/workflows"),
+                client.post("/ui/workflows", json={"name": "Workflow 1"}),
+                client.get("/ui/workflows/workflow-1"),
+                client.patch("/ui/workflows/workflow-1", json={"name": "Workflow 2"}),
+                client.delete("/ui/workflows/workflow-1"),
+                client.get("/ui/runnables"),
+            ]
+
+        assert all(response.status_code == 200 for response in responses)
+        assert service.calls == [
+            "list_agents",
+            "create_agent",
+            "get_agent",
+            "update_agent",
+            "delete_agent",
+            "test_agent_model",
+            "attach_skill",
+            "detach_skill",
+            "list_skills",
+            "import_skill",
+            "import_skill",
+            "list_native_skill_sources",
+            "list_skill_folders",
+            "create_skill_folder",
+            "update_skill_folder",
+            "delete_skill_folder",
+            "sync_native_skills",
+            "install_skill_command",
+            "get_skill",
+            "update_skill",
+            "delete_skill",
+            "list_workflows",
+            "create_workflow",
+            "get_workflow",
+            "update_workflow",
+            "delete_workflow",
+            "list_runnables",
+        ]
+    finally:
+        sys.modules.pop("_oha_agent_crud_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_run_cancel_route_handler_is_idempotent(tmp_path, monkeypatch):
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",

@@ -132,30 +132,41 @@ def _agent_runtime_service(request: Request | None = None) -> Any:
 
 
 @router.get("/agents")
-async def list_agents() -> dict[str, Any]:
-    return await asyncio.to_thread(get_agent_runtime_service().list_agents)
+async def list_agents(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    return await asyncio.to_thread(_agent_runtime_service(http_request).list_agents)
 
 
 @router.post("/agents")
-async def create_agent(request: AgentRequest) -> dict[str, Any]:
+async def create_agent(
+    request: AgentRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().create_agent, _payload(request))
+        return await asyncio.to_thread(_agent_runtime_service(http_request).create_agent, _payload(request))
     except AgentRuntimeError as exc:
         raise _bad_request(exc) from exc
 
 
 @router.get("/agents/{agent_id}")
-async def get_agent(agent_id: str) -> dict[str, Any]:
+async def get_agent(agent_id: str, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().get_agent, agent_id)
+        return await asyncio.to_thread(_agent_runtime_service(http_request).get_agent, agent_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Agent 不存在") from exc
 
 
 @router.patch("/agents/{agent_id}")
-async def update_agent(agent_id: str, request: AgentRequest) -> dict[str, Any]:
+async def update_agent(
+    agent_id: str,
+    request: AgentRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().update_agent, agent_id, _payload(request))
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).update_agent,
+            agent_id,
+            _payload(request),
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Agent 不存在") from exc
     except AgentRuntimeError as exc:
@@ -163,14 +174,14 @@ async def update_agent(agent_id: str, request: AgentRequest) -> dict[str, Any]:
 
 
 @router.delete("/agents/{agent_id}")
-async def delete_agent(agent_id: str) -> dict[str, Any]:
-    return await asyncio.to_thread(get_agent_runtime_service().delete_agent, agent_id)
+async def delete_agent(agent_id: str, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    return await asyncio.to_thread(_agent_runtime_service(http_request).delete_agent, agent_id)
 
 
 @router.post("/agents/{agent_id}/test-model")
-async def test_agent_model(agent_id: str) -> dict[str, Any]:
+async def test_agent_model(agent_id: str, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().test_agent_model, agent_id)
+        return await asyncio.to_thread(_agent_runtime_service(http_request).test_agent_model, agent_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Agent 不存在") from exc
     except AgentRuntimeError as exc:
@@ -178,9 +189,17 @@ async def test_agent_model(agent_id: str) -> dict[str, Any]:
 
 
 @router.post("/agents/{agent_id}/skills")
-async def attach_agent_skill(agent_id: str, request: AgentSkillRequest) -> dict[str, Any]:
+async def attach_agent_skill(
+    agent_id: str,
+    request: AgentSkillRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().attach_skill, agent_id, request.skill_id)
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).attach_skill,
+            agent_id,
+            request.skill_id,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Agent 或 Skill 不存在") from exc
     except AgentRuntimeError as exc:
@@ -188,53 +207,82 @@ async def attach_agent_skill(agent_id: str, request: AgentSkillRequest) -> dict[
 
 
 @router.delete("/agents/{agent_id}/skills/{skill_id}")
-async def detach_agent_skill(agent_id: str, skill_id: str) -> dict[str, Any]:
+async def detach_agent_skill(
+    agent_id: str,
+    skill_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().detach_skill, agent_id, skill_id)
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).detach_skill,
+            agent_id,
+            skill_id,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Agent 不存在") from exc
 
 
 @router.get("/skills")
-async def list_skills() -> dict[str, Any]:
-    return await asyncio.to_thread(get_agent_runtime_service().list_skills)
+async def list_skills(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    return await asyncio.to_thread(_agent_runtime_service(http_request).list_skills)
 
 
 @router.post("/skills")
-async def import_skill_from_post(request: SkillImportRequest) -> dict[str, Any]:
-    return await import_skill(request)
+async def import_skill_from_post(
+    request: SkillImportRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await import_skill(request, http_request)
 
 
 @router.post("/skills/import")
-async def import_skill(request: SkillImportRequest) -> dict[str, Any]:
+async def import_skill(
+    request: SkillImportRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().import_skill, request.source_path, request.folder_id)
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).import_skill,
+            request.source_path,
+            request.folder_id,
+        )
     except AgentRuntimeError as exc:
         raise _bad_request(exc) from exc
 
 
 @router.get("/skills/sources")
-async def list_skill_sources() -> dict[str, Any]:
-    return await asyncio.to_thread(get_agent_runtime_service().list_native_skill_sources)
+async def list_skill_sources(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    return await asyncio.to_thread(_agent_runtime_service(http_request).list_native_skill_sources)
 
 
 @router.get("/skill-folders")
-async def list_skill_folders() -> dict[str, Any]:
-    return await asyncio.to_thread(get_agent_runtime_service().list_skill_folders)
+async def list_skill_folders(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    return await asyncio.to_thread(_agent_runtime_service(http_request).list_skill_folders)
 
 
 @router.post("/skill-folders")
-async def create_skill_folder(request: SkillFolderRequest) -> dict[str, Any]:
+async def create_skill_folder(
+    request: SkillFolderRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().create_skill_folder, _payload(request))
+        return await asyncio.to_thread(_agent_runtime_service(http_request).create_skill_folder, _payload(request))
     except AgentRuntimeError as exc:
         raise _bad_request(exc) from exc
 
 
 @router.patch("/skill-folders/{folder_id}")
-async def update_skill_folder(folder_id: str, request: SkillFolderRequest) -> dict[str, Any]:
+async def update_skill_folder(
+    folder_id: str,
+    request: SkillFolderRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().update_skill_folder, folder_id, _payload(request))
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).update_skill_folder,
+            folder_id,
+            _payload(request),
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Skill 文件夹不存在") from exc
     except AgentRuntimeError as exc:
@@ -242,10 +290,14 @@ async def update_skill_folder(folder_id: str, request: SkillFolderRequest) -> di
 
 
 @router.delete("/skill-folders/{folder_id}")
-async def delete_skill_folder(folder_id: str, delete_skills: bool = False) -> dict[str, Any]:
+async def delete_skill_folder(
+    folder_id: str,
+    delete_skills: bool = False,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
         return await asyncio.to_thread(
-            get_agent_runtime_service().delete_skill_folder,
+            _agent_runtime_service(http_request).delete_skill_folder,
             folder_id,
             delete_skills=delete_skills,
         )
@@ -254,33 +306,48 @@ async def delete_skill_folder(folder_id: str, delete_skills: bool = False) -> di
 
 
 @router.post("/skills/sync")
-async def sync_native_skills() -> dict[str, Any]:
+async def sync_native_skills(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().sync_native_skills)
+        return await asyncio.to_thread(_agent_runtime_service(http_request).sync_native_skills)
     except AgentRuntimeError as exc:
         raise _bad_request(exc) from exc
 
 
 @router.post("/skills/install")
-async def install_skill(request: SkillInstallRequest) -> dict[str, Any]:
+async def install_skill(
+    request: SkillInstallRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().install_skill_command, request.command, request.folder_id)
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).install_skill_command,
+            request.command,
+            request.folder_id,
+        )
     except AgentRuntimeError as exc:
         raise _bad_request(exc) from exc
 
 
 @router.get("/skills/{skill_id}")
-async def get_skill(skill_id: str) -> dict[str, Any]:
+async def get_skill(skill_id: str, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().get_skill, skill_id)
+        return await asyncio.to_thread(_agent_runtime_service(http_request).get_skill, skill_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Skill 不存在") from exc
 
 
 @router.patch("/skills/{skill_id}")
-async def update_skill(skill_id: str, request: SkillUpdateRequest) -> dict[str, Any]:
+async def update_skill(
+    skill_id: str,
+    request: SkillUpdateRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().update_skill, skill_id, _payload(request))
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).update_skill,
+            skill_id,
+            _payload(request),
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Skill 不存在") from exc
     except AgentRuntimeError as exc:
@@ -288,35 +355,46 @@ async def update_skill(skill_id: str, request: SkillUpdateRequest) -> dict[str, 
 
 
 @router.delete("/skills/{skill_id}")
-async def delete_skill(skill_id: str) -> dict[str, Any]:
-    return await asyncio.to_thread(get_agent_runtime_service().delete_skill, skill_id)
+async def delete_skill(skill_id: str, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    return await asyncio.to_thread(_agent_runtime_service(http_request).delete_skill, skill_id)
 
 
 @router.get("/workflows")
-async def list_workflows() -> dict[str, Any]:
-    return await asyncio.to_thread(get_agent_runtime_service().list_workflows)
+async def list_workflows(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    return await asyncio.to_thread(_agent_runtime_service(http_request).list_workflows)
 
 
 @router.post("/workflows")
-async def create_workflow(request: WorkflowRequest) -> dict[str, Any]:
+async def create_workflow(
+    request: WorkflowRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().create_workflow, _payload(request))
+        return await asyncio.to_thread(_agent_runtime_service(http_request).create_workflow, _payload(request))
     except AgentRuntimeError as exc:
         raise _bad_request(exc) from exc
 
 
 @router.get("/workflows/{workflow_id}")
-async def get_workflow(workflow_id: str) -> dict[str, Any]:
+async def get_workflow(workflow_id: str, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().get_workflow, workflow_id)
+        return await asyncio.to_thread(_agent_runtime_service(http_request).get_workflow, workflow_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Workflow 不存在") from exc
 
 
 @router.patch("/workflows/{workflow_id}")
-async def update_workflow(workflow_id: str, request: WorkflowRequest) -> dict[str, Any]:
+async def update_workflow(
+    workflow_id: str,
+    request: WorkflowRequest,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().update_workflow, workflow_id, _payload(request))
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).update_workflow,
+            workflow_id,
+            _payload(request),
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Workflow 不存在") from exc
     except AgentRuntimeError as exc:
@@ -324,13 +402,16 @@ async def update_workflow(workflow_id: str, request: WorkflowRequest) -> dict[st
 
 
 @router.delete("/workflows/{workflow_id}")
-async def delete_workflow(workflow_id: str) -> dict[str, Any]:
-    return await asyncio.to_thread(get_agent_runtime_service().delete_workflow, workflow_id)
+async def delete_workflow(
+    workflow_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await asyncio.to_thread(_agent_runtime_service(http_request).delete_workflow, workflow_id)
 
 
 @router.get("/runnables")
-async def list_runnables() -> dict[str, Any]:
-    return await asyncio.to_thread(get_agent_runtime_service().list_runnables)
+async def list_runnables(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    return await asyncio.to_thread(_agent_runtime_service(http_request).list_runnables)
 
 
 @router.get("/runs")
