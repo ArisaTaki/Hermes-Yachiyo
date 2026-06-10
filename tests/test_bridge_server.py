@@ -903,6 +903,247 @@ def test_chat_delegated_summary_bridge_route_runs_native_followup(tmp_path, monk
         store.close()
 
 
+def test_chat_group_dispatch_bridge_route_runs_native_summary(tmp_path, monkeypatch):
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="bridge-group-dispatch-session")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    model_calls: list[list[dict]] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        model_calls.append(messages)
+        last_content = str(messages[-1]["content"])
+        if "[Yachiyo 群组 Agent 汇总]" in last_content:
+            assert "Coding：已完成" in last_content
+            assert "汇报：Coding bridge dispatch result" in last_content
+            return {"role": "assistant", "content": "群组总结：Coding 已完成 Bridge route Native 派发。"}
+        if "# Agent\nName: Coding Agent" in last_content:
+            assert "# User Goal\n做 Bridge route Native 群聊派发验证" in last_content
+            assert "[Yachiyo 群组执行约定]" in last_content
+            assert "你在群内身份是：Coding" in last_content
+            return {"role": "assistant", "content": "Coding bridge dispatch result"}
+        assert "请安排 Coding 做 Bridge route Native 群聊派发验证" in last_content
+        assert "oha.group_dispatch" in str(messages[0]["content"])
+        return {
+            "role": "assistant",
+            "content": (
+                "我会让 Coding 处理这件事。\n"
+                '{"tool":"oha.group_dispatch","input":{"tasks":[{"kind":"agent","target":"Coding",'
+                '"goal":"做 Bridge route Native 群聊派发验证"}]}}'
+            ),
+        }
+
+    monkeypatch.setattr(chat_store_mod, "get_chat_store", lambda: store)
+    monkeypatch.setattr(activity_store_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeDefaultProfileService(),
+    )
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+
+    coding = service.create_agent(
+        {
+            "name": "Coding Agent",
+            "nickname": "Coding",
+            "description": "runs native group dispatch route tests",
+            "model_mode": "custom_api",
+            "model_config": {
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-secret",
+            },
+        }
+    )
+    executor = NativeAgentExecutor(
+        chat_session=session,
+        runtime_service_getter=lambda: service,
+        tool_policy_getter=lambda: {"allowed_tools": []},
+        workspace_policy_getter=lambda: {},
+        activity_store_getter=lambda: activity_store,
+    )
+    runner = TaskRunner(state, executor=executor, activity_store=activity_store)
+    runtime = SimpleNamespace(
+        state=state,
+        chat_session=session,
+        store=store,
+        task_runner=runner,
+        activity_store=activity_store,
+        agent_runtime_service=service,
+    )
+    monkeypatch.setattr(ui_routes, "get_runtime", lambda: runtime)
+
+    async def wait_for(condition):
+        last = None
+        for _ in range(150):
+            try:
+                last = condition()
+            except Exception as exc:
+                last = exc
+            if last:
+                return last
+            await asyncio.sleep(0.02)
+        raise AssertionError(f"condition not met; last={last!r}")
+
+    async def scenario():
+        created = await ui_routes.create_chat_group(
+            ui_routes.CreateChatGroupRequest(
+                name="Bridge Native Dispatch Group",
+                participant_ids=[coding["agent_id"]],
+            )
+        )
+        assert created["ok"] is True
+        assert created["session_context"]["conversation_kind"] == "group"
+        assert created["session_context"]["participants"][1]["id"] == coding["agent_id"]
+
+        sent = await ui_routes.send_chat_message(
+            ui_routes.SendChatMessageRequest(
+                text="@主模型 请安排 Coding 做 Bridge route Native 群聊派发验证",
+                client_message_id="bridge-group-dispatch-client-1",
+            )
+        )
+        assert sent["ok"] is True
+        await runner._execute_with_state(sent["task_id"])
+
+        main_task = state.get_task(sent["task_id"])
+        assert main_task is not None
+        assert main_task.status == TaskStatus.COMPLETED
+        main_run = service.get_run(service.get_task_run_link(sent["task_id"])["run_id"])
+        assert main_run["kind"] == "main_chat_run"
+        assert main_run["status"] == "completed"
+
+        dispatch_payload = await ui_routes.get_chat_messages()
+        parent = next(
+            message
+            for message in dispatch_payload["messages"]
+            if message["role"] == "assistant" and message["task_id"] == sent["task_id"]
+        )
+        agent_message = next(
+            message
+            for message in dispatch_payload["messages"]
+            if message["role"] == "assistant"
+            and message["metadata"].get("sender", {}).get("nickname") == "Coding"
+        )
+        assert parent["metadata"]["group_dispatch_count"] == 1
+        assert parent["metadata"]["group_dispatch_run_group_id"] == agent_message["metadata"]["run_group_id"]
+        assert "oha.group_dispatch" not in parent["content"]
+        assert agent_message["metadata"]["runnable_id"] == coding["agent_id"]
+        assert agent_message["metadata"]["delegated_by_task_id"] == sent["task_id"]
+        assert agent_message["metadata"]["delegated_goal"] == "做 Bridge route Native 群聊派发验证"
+
+        agent_run_id = agent_message["metadata"]["run_id"]
+        agent_run = await wait_for(
+            lambda: (
+                service.get_run(agent_run_id)
+                if service.get_run(agent_run_id)["status"] in {"completed", "failed", "cancelled", "approval_required"}
+                else None
+            )
+        )
+        assert agent_run["status"] == "completed"
+        assert agent_run["runnable_id"] == coding["agent_id"]
+        assert agent_run["result"] == "Coding bridge dispatch result"
+
+        completed_agent = None
+        for _ in range(150):
+            payload = await ui_routes.get_chat_messages()
+            completed_agent = next(
+                (
+                    message
+                    for message in payload["messages"]
+                    if message["role"] == "assistant"
+                    and "Coding bridge dispatch result" in str(message["content"] or "")
+                ),
+                None,
+            )
+            if completed_agent is not None:
+                break
+            await asyncio.sleep(0.02)
+        assert completed_agent is not None
+        assert completed_agent["metadata"]["run_id"] == agent_run_id
+        assert completed_agent["metadata"]["run_status"] == "completed"
+        assert completed_agent["metadata"]["agent_report"] == "Coding bridge dispatch result"
+
+        final_payload = await ui_routes.get_chat_messages()
+        summary_message = next(
+            message
+            for message in final_payload["messages"]
+            if message["metadata"].get("group_agent_summary_for_task_id") == sent["task_id"]
+        )
+        summary_task = state.get_task(summary_message["task_id"])
+        assert summary_message["status"] == "processing"
+        assert summary_task is not None
+        assert summary_task.chat_session_id == runtime.chat_session.session_id
+        assert "[Yachiyo 群组 Agent 汇总]" in summary_task.description
+        assert "Coding：已完成" in summary_task.description
+        assert "汇报：Coding bridge dispatch result" in summary_task.description
+
+        await runner._execute_with_state(summary_task.task_id)
+
+        completed_summary_task = state.get_task(summary_task.task_id)
+        assert completed_summary_task is not None
+        assert completed_summary_task.status == TaskStatus.COMPLETED
+        assert completed_summary_task.result == "群组总结：Coding 已完成 Bridge route Native 派发。"
+        summary_run = service.get_run(service.get_task_run_link(summary_task.task_id)["run_id"])
+        detail = await agent_routes.get_any_run(summary_run["run_id"])
+        replay = await run_routes.list_run_events(summary_run["run_id"], after_sequence=0, limit=200)
+        summary_event_types = [event["event_type"] for event in replay["events"]]
+        assert summary_run["kind"] == "main_chat_run"
+        assert summary_run["status"] == "completed"
+        assert summary_run["run_id"] != main_run["run_id"]
+        assert detail["task_id"] == summary_task.task_id
+        assert detail["session_id"] == runtime.chat_session.session_id
+        assert "task.linked" in summary_event_types
+        assert summary_event_types.count("model.output.completed") == 1
+        assert "run.completed" in summary_event_types
+
+        settled_parent = None
+        settled_summary = None
+        for _ in range(150):
+            settled_payload = await ui_routes.get_chat_messages()
+            settled_parent = next(
+                message
+                for message in settled_payload["messages"]
+                if message["role"] == "assistant" and message["task_id"] == sent["task_id"]
+            )
+            settled_summary = next(
+                message
+                for message in settled_payload["messages"]
+                if message["task_id"] == summary_task.task_id
+            )
+            if (
+                "group_agent_summary_pending" not in settled_parent["metadata"]
+                and settled_parent["metadata"].get("group_agent_summary_status") == "completed"
+                and settled_summary["status"] == "completed"
+            ):
+                break
+            await asyncio.sleep(0.02)
+        assert settled_parent is not None
+        assert settled_summary is not None
+        assert "group_agent_summary_pending" not in settled_parent["metadata"]
+        assert settled_parent["metadata"]["group_agent_summary_status"] == "completed"
+        assert settled_summary["status"] == "completed"
+        assert settled_summary["content"] == "群组总结：Coding 已完成 Bridge route Native 派发。"
+
+    try:
+        asyncio.run(scenario())
+        assert len(model_calls) == 3
+    finally:
+        service.close()
+        activity_store.close()
+        store.close()
+
+
 def test_chat_cancel_bridge_route_cancels_native_run_and_ignores_late_output(tmp_path, monkeypatch):
     monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
