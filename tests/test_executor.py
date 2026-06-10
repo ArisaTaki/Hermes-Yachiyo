@@ -203,6 +203,55 @@ class TestNativeAgentExecutor:
         model_messages = calls[1][1]["messages"]
         assert model_messages[-1] == {"role": "user", "content": "原生任务"}
 
+    def test_run_uses_injected_runtime_service_for_delegation_catalog(self, monkeypatch):
+        calls: list[tuple[str, object]] = []
+
+        class FakeRuntimeService:
+            def list_delegation_targets(self):
+                calls.append(("catalog", {}))
+                return {
+                    "agents": [
+                        {
+                            "name": "Injected Agent",
+                            "category": "research",
+                            "output_contract": "chat",
+                            "description": "uses injected runtime service",
+                        }
+                    ],
+                    "workflows": [],
+                }
+
+            def start_main_chat_run(self, **payload):
+                calls.append(("start", payload))
+                return {"run_id": "main_chat_run_injected_catalog"}
+
+            def call_main_chat_model(self, run_id, messages, **_kwargs):
+                calls.append(("model", {"run_id": run_id, "messages": messages}))
+                return "Native injected catalog reply"
+
+            def complete_main_chat_run(self, run_id, result):
+                calls.append(("complete", {"run_id": run_id, "result": result}))
+                return {"status": "completed", "result": result}
+
+            def fail_main_chat_run(self, _run_id, _error):
+                raise AssertionError("should not fail")
+
+        service = FakeRuntimeService()
+        monkeypatch.setattr(
+            "apps.shell.agent_runtime.get_agent_runtime_service",
+            lambda: (_ for _ in ()).throw(AssertionError("delegation catalog should use injected runtime service")),
+        )
+        executor = NativeAgentExecutor(runtime_service_getter=lambda: service)
+
+        result = asyncio.run(executor.run(_make_task("需要读取委派目录")))
+
+        assert result == "Native injected catalog reply"
+        assert [name for name, _payload in calls] == ["start", "catalog", "model", "complete"]
+        model_messages = calls[2][1]["messages"]
+        system_prompt = model_messages[0]["content"]
+        assert "Injected Agent" in system_prompt
+        assert "uses injected runtime service" in system_prompt
+
     @pytest.mark.asyncio
     async def test_run_passes_recent_chat_history_and_excludes_current_task(self, monkeypatch):
         calls: list[tuple[str, object]] = []
@@ -544,7 +593,7 @@ class TestNativeAgentExecutor:
             def fail_main_chat_run(self, _run_id, _error):
                 raise AssertionError("should not fail")
 
-        monkeypatch.setattr(executor_mod, "_oha_delegation_catalog_context", lambda: "catalog")
+        monkeypatch.setattr(executor_mod, "_oha_delegation_catalog_context", lambda *_args, **_kwargs: "catalog")
         monkeypatch.setattr(
             executor_mod,
             "_run_oha_delegation",
@@ -586,7 +635,11 @@ class TestNativeAgentExecutor:
                 raise AssertionError("should not fail")
 
         delegated: list[dict] = []
-        monkeypatch.setattr(executor_mod, "_oha_delegation_catalog_context", lambda: "single chat catalog")
+        monkeypatch.setattr(
+            executor_mod,
+            "_oha_delegation_catalog_context",
+            lambda *_args, **_kwargs: "single chat catalog",
+        )
         monkeypatch.setattr(
             executor_mod,
             "_run_oha_delegation",

@@ -163,11 +163,13 @@ def format_persona_description(
     return "\n\n".join(parts)
 
 
-def _oha_delegation_catalog_context() -> str:
+def _oha_delegation_catalog_context(service: Any | None = None) -> str:
     try:
-        from apps.shell.agent_runtime import get_agent_runtime_service
+        if service is None:
+            from apps.shell.agent_runtime import get_agent_runtime_service
 
-        targets = get_agent_runtime_service().list_delegation_targets()
+            service = get_agent_runtime_service()
+        targets = service.list_delegation_targets()
     except Exception:
         logger.debug("读取 OHA 委派目标失败", exc_info=True)
         return ""
@@ -220,8 +222,17 @@ def _oha_group_dispatch_context() -> str:
     )
 
 
-def _append_oha_delegation_context(profile_context: str, *, group_coordinator: bool = False) -> str:
-    catalog = _oha_group_dispatch_context() if group_coordinator else _oha_delegation_catalog_context()
+def _append_oha_delegation_context(
+    profile_context: str,
+    *,
+    group_coordinator: bool = False,
+    runtime_service: Any | None = None,
+) -> str:
+    catalog = (
+        _oha_group_dispatch_context()
+        if group_coordinator
+        else _oha_delegation_catalog_context(runtime_service)
+    )
     if not catalog:
         return profile_context
     base = (profile_context or "").strip()
@@ -999,7 +1010,12 @@ class NativeAgentExecutor(ExecutionStrategy):
             )
             run_id = str(run.get("run_id") or "")
             image_paths = _task_image_paths(task)
-            messages = self._messages_for_task(task, chat_session, image_paths=image_paths)
+            messages = self._messages_for_task(
+                task,
+                chat_session,
+                image_paths=image_paths,
+                runtime_service=service,
+            )
             if image_paths:
                 from apps.shell.native_capabilities import get_native_image_input_capability
 
@@ -1025,7 +1041,12 @@ class NativeAgentExecutor(ExecutionStrategy):
                         profile_id=str(image_capability.get("profile_id") or ""),
                         capability="vision",
                     )
-                    messages = self._messages_for_task(task, chat_session, image_paths=[])
+                    messages = self._messages_for_task(
+                        task,
+                        chat_session,
+                        image_paths=[],
+                        runtime_service=service,
+                    )
                     messages[-1]["content"] = (
                         f"{task.description}\n\n[图片识别结果]\n{vision_result}"
                     )
@@ -1127,6 +1148,7 @@ class NativeAgentExecutor(ExecutionStrategy):
         chat_session: Optional["ChatSession"],
         *,
         image_paths: list[str] | None = None,
+        runtime_service: Any | None = None,
     ) -> list[dict[str, Any]]:
         persona_prompt = self._safe_get(self._persona_prompt_getter)
         user_address = self._safe_get(self._user_address_getter)
@@ -1134,6 +1156,7 @@ class NativeAgentExecutor(ExecutionStrategy):
         profile_context = _append_oha_delegation_context(
             profile_context,
             group_coordinator=_is_yachiyo_group_coordinator_task(task.description),
+            runtime_service=runtime_service,
         )
         system_prompt = format_persona_description(
             "请直接处理当前用户请求，并返回适合展示给用户的最终回复。",
