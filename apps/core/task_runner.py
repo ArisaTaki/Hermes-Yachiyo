@@ -32,6 +32,14 @@ _TASK_TERMINAL_PROGRESS_METADATA_KEYS: tuple[str, ...] = (
     "run_progress_title",
     "run_progress_detail",
 )
+_GROUP_SUMMARY_METADATA_KEYS: tuple[str, ...] = (
+    "group_agent_summary_for_task_id",
+    "group_direct_agent_summary_for_message_id",
+)
+_TASK_TERMINAL_METADATA_KEYS: tuple[str, ...] = (
+    *_TASK_TERMINAL_PROGRESS_METADATA_KEYS,
+    *_GROUP_SUMMARY_METADATA_KEYS,
+)
 
 
 def _terminal_task_message_metadata(assistant: Any | None, run_status: str) -> dict[str, Any] | None:
@@ -39,10 +47,11 @@ def _terminal_task_message_metadata(assistant: Any | None, run_status: str) -> d
     metadata = getattr(assistant, "metadata", None)
     if not isinstance(metadata, dict):
         return None
-    if not any(key in metadata for key in _TASK_TERMINAL_PROGRESS_METADATA_KEYS):
+    if not any(key in metadata for key in _TASK_TERMINAL_METADATA_KEYS):
         return None
     next_metadata = dict(metadata)
-    next_metadata["pending_approval"] = {}
+    if any(key in metadata for key in _TASK_TERMINAL_PROGRESS_METADATA_KEYS):
+        next_metadata["pending_approval"] = {}
     if "run_status" in next_metadata:
         next_metadata["run_status"] = run_status
     next_metadata.pop("run_progress_title", None)

@@ -447,7 +447,7 @@ async def test_task_runner_group_dispatch_summary_uses_native_runtime(tmp_path, 
     def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
         model_calls.append(messages)
         last_content = str(messages[-1]["content"])
-        if "[Yachiyo 群组 Agent 汇总]" in last_content:
+        if "[Oha-Yachiyo 群组 Agent 汇总]" in last_content:
             assert "不要再派发新的 Agent 任务" in last_content
             assert "Coding：已完成" in last_content
             assert "汇报：Coding native dispatch result" in last_content
@@ -568,7 +568,7 @@ async def test_task_runner_group_dispatch_summary_uses_native_runtime(tmp_path, 
         assert summary_message["status"] == "processing"
         assert summary_task is not None
         assert summary_task.chat_session_id == session.session_id
-        assert "[Yachiyo 群组 Agent 汇总]" in summary_task.description
+        assert "[Oha-Yachiyo 群组 Agent 汇总]" in summary_task.description
         assert "Coding：已完成" in summary_task.description
         assert "汇报：Coding native dispatch result" in summary_task.description
 
@@ -638,7 +638,7 @@ async def test_task_runner_direct_group_agent_summary_uses_native_runtime(tmp_pa
     def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
         model_calls.append(messages)
         last_content = str(messages[-1]["content"])
-        if "[Yachiyo 群组直接 Agent 汇总]" in last_content:
+        if "[Oha-Yachiyo 群组直接 Agent 汇总]" in last_content:
             assert "Design：已完成" in last_content
             assert "汇报：Design native direct result" in last_content
             assert "不要再派发新的 Agent 任务" in last_content
@@ -719,7 +719,7 @@ async def test_task_runner_direct_group_agent_summary_uses_native_runtime(tmp_pa
         summary_task = state.get_task(summary_message["task_id"])
         assert summary_task is not None
         assert summary_task.chat_session_id == session.session_id
-        assert "[Yachiyo 群组直接 Agent 汇总]" in summary_task.description
+        assert "[Oha-Yachiyo 群组直接 Agent 汇总]" in summary_task.description
         assert "Design：已完成" in summary_task.description
         assert "汇报：Design native direct result" in summary_task.description
 
@@ -785,7 +785,7 @@ async def test_task_runner_direct_group_agent_rejected_summary_uses_native_runti
     def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
         model_calls.append(messages)
         last_content = str(messages[-1]["content"])
-        if "[Yachiyo 群组直接 Agent 汇总]" in last_content:
+        if "[Oha-Yachiyo 群组直接 Agent 汇总]" in last_content:
             assert "Design：已取消" in last_content
             assert "汇报：工具审批已拒绝：Rejected by user" in last_content
             assert "不要再派发新的 Agent 任务" in last_content
@@ -896,7 +896,7 @@ async def test_task_runner_direct_group_agent_rejected_summary_uses_native_runti
         summary_task = state.get_task(summary_message["task_id"])
         assert summary_task is not None
         assert summary_task.chat_session_id == session.session_id
-        assert "[Yachiyo 群组直接 Agent 汇总]" in summary_task.description
+        assert "[Oha-Yachiyo 群组直接 Agent 汇总]" in summary_task.description
         assert "Design：已取消" in summary_task.description
         assert "汇报：工具审批已拒绝：Rejected by user" in summary_task.description
 
