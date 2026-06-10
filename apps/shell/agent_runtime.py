@@ -794,8 +794,22 @@ def _merge_stream_tool_call_delta(
         index = int(raw_index) if raw_index is not None else fallback_index
     except (TypeError, ValueError):
         index = fallback_index
-    entry = accumulator.setdefault((choice_index, index), {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
     call_id = _message_field(raw_call, "id")
+    key = (choice_index, index)
+    if call_id:
+        call_id_text = str(call_id)
+        for existing_key, existing in accumulator.items():
+            if existing_key[0] == choice_index and str(existing.get("id") or "") == call_id_text:
+                key = existing_key
+                break
+        else:
+            existing = accumulator.get(key)
+            if raw_index is None and existing and str(existing.get("id") or "") not in {"", call_id_text}:
+                occupied = {tool_index for existing_choice, tool_index in accumulator if existing_choice == choice_index}
+                while index in occupied:
+                    index += 1
+                key = (choice_index, index)
+    entry = accumulator.setdefault(key, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
     if call_id:
         entry["id"] = str(call_id)
     call_type = _message_field(raw_call, "type")

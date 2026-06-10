@@ -573,6 +573,93 @@ def test_stream_smoke_coalesces_indexless_tool_call_deltas():
     ]
 
 
+def test_stream_smoke_coalesces_indexless_interleaved_tool_call_deltas_by_id():
+    chunks = [
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "id": "call_indexless_readme",
+                                "type": "function",
+                                "function": {
+                                    "name": "workspace_",
+                                    "arguments": '{"path":"READ',
+                                },
+                            },
+                            {
+                                "id": "call_indexless_notes",
+                                "type": "function",
+                                "function": {
+                                    "name": "workspace_",
+                                    "arguments": '{"path":"NOT',
+                                },
+                            },
+                        ]
+                    },
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "id": "call_indexless_notes",
+                                "function": {
+                                    "name": "read",
+                                    "arguments": 'ES.md"}',
+                                },
+                            }
+                        ]
+                    },
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "id": "call_indexless_readme",
+                                "function": {
+                                    "name": "read",
+                                    "arguments": 'ME.md"}',
+                                },
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ]
+        },
+    ]
+
+    summary = smoke.summarize_stream_chunks(chunks, include_tool_arguments=True)
+
+    assert summary["ok"] is True
+    assert summary["tool_call_delta_count"] == 4
+    assert summary["tool_call_count"] == 2
+    assert summary["finish_reasons"] == ["tool_calls"]
+    assert summary["tool_calls"] == [
+        {
+            "id": "call_indexless_readme",
+            "name": "workspace_read",
+            "argument_chars": len('{"path":"README.md"}'),
+            "arguments": '{"path":"README.md"}',
+        },
+        {
+            "id": "call_indexless_notes",
+            "name": "workspace_read",
+            "argument_chars": len('{"path":"NOTES.md"}'),
+            "arguments": '{"path":"NOTES.md"}',
+        },
+    ]
+
+
 def test_stream_smoke_summarizes_message_level_tool_calls():
     chunks = [
         {

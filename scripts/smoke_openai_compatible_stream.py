@@ -197,9 +197,22 @@ def _merge_tool_delta(
 ) -> None:
     raw_index = _field(raw_call, "index")
     index = _normalized_index(raw_index, fallback_index)
-    key = (choice_index, index)
-    entry = accumulator.setdefault(key, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
     call_id = _field(raw_call, "id")
+    key = (choice_index, index)
+    if call_id:
+        call_id_text = str(call_id)
+        for existing_key, existing in accumulator.items():
+            if existing_key[0] == choice_index and str(existing.get("id") or "") == call_id_text:
+                key = existing_key
+                break
+        else:
+            existing = accumulator.get(key)
+            if raw_index is None and existing and str(existing.get("id") or "") not in {"", call_id_text}:
+                occupied = {tool_index for existing_choice, tool_index in accumulator if existing_choice == choice_index}
+                while index in occupied:
+                    index += 1
+                key = (choice_index, index)
+    entry = accumulator.setdefault(key, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
     if call_id:
         entry["id"] = str(call_id)
     call_type = _field(raw_call, "type")
