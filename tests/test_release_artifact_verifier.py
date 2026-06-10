@@ -103,21 +103,35 @@ def test_verifier_requires_packaging_to_exclude_rebuilt_node_pty(tmp_path):
     )
 
     findings = verifier._verify_release_packaging_guards(tmp_path)
+    messages = [finding.message for finding in findings]
 
-    assert findings == [
-        verifier.Finding(
-            config,
-            "macOS release packaging must disable local native dependency rebuilds",
-        ),
-        verifier.Finding(
-            config,
-            "macOS release packaging must exclude rebuilt node-pty native artifacts",
-        ),
-        verifier.Finding(
-            config,
-            "macOS release packaging must exclude Vite cache artifacts",
-        ),
-    ]
+    assert "macOS release packaging must disable local native dependency rebuilds" in messages
+    assert "macOS release packaging must exclude rebuilt node-pty native artifacts" in messages
+    assert "macOS release packaging must exclude Vite cache artifacts" in messages
+
+
+def test_verifier_requires_packaging_macos_entitlements_and_usage_descriptions(tmp_path):
+    config = tmp_path / verifier.PACKAGING_CONFIG_FILE
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        "productName: Oha-Yachiyo\n"
+        "npmRebuild: false\n"
+        "files:\n"
+        "  - '!node_modules/node-pty/build/**'\n"
+        "  - '!**/.vite/**'\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_packaging_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert "macOS release packaging must enable hardened runtime for the app bundle" in messages
+    assert "macOS release packaging must use the checked-in app entitlements" in messages
+    assert "macOS release packaging must use the checked-in inherited entitlements" in messages
+    assert "macOS release packaging must include Apple Events permission copy" in messages
+    assert "macOS release packaging must include Documents folder permission copy" in messages
+    assert "macOS release packaging must include Downloads folder permission copy" in messages
+    assert "macOS release packaging must include microphone permission copy" in messages
 
 
 def test_verifier_reports_tracked_vite_cache(monkeypatch, tmp_path):

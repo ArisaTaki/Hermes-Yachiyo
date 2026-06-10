@@ -65,6 +65,34 @@ PACKAGING_CONFIG_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "- '!**/.vite/**'",
         "macOS release packaging must exclude Vite cache artifacts",
     ),
+    (
+        "hardenedRuntime: true",
+        "macOS release packaging must enable hardened runtime for the app bundle",
+    ),
+    (
+        "entitlements: ../../packaging/entitlements.mac.plist",
+        "macOS release packaging must use the checked-in app entitlements",
+    ),
+    (
+        "entitlementsInherit: ../../packaging/entitlements.mac.plist",
+        "macOS release packaging must use the checked-in inherited entitlements",
+    ),
+    (
+        "NSAppleEventsUsageDescription",
+        "macOS release packaging must include Apple Events permission copy",
+    ),
+    (
+        "NSDocumentsFolderUsageDescription",
+        "macOS release packaging must include Documents folder permission copy",
+    ),
+    (
+        "NSDownloadsFolderUsageDescription",
+        "macOS release packaging must include Downloads folder permission copy",
+    ),
+    (
+        "NSMicrophoneUsageDescription",
+        "macOS release packaging must include microphone permission copy",
+    ),
 )
 RELEASE_WORKFLOW_FILE = Path(".github/workflows/release-macos.yml")
 RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
