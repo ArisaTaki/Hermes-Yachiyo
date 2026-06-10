@@ -175,6 +175,21 @@ export type RunSpec = {
   workflow_run_id?: string;
 };
 
+export type RunEventSpec = {
+  run_id: string;
+  sequence: number;
+  event_type: string;
+  payload?: Record<string, unknown>;
+  created_at?: string;
+};
+
+export type RunEventsPage = {
+  run_id: string;
+  after_sequence: number;
+  limit: number;
+  events: RunEventSpec[];
+};
+
 export type RunGroupSpec = {
   run_group_id: string;
   title: string;
@@ -322,6 +337,14 @@ export async function getRunGroup(runGroupId: string): Promise<RunGroupSpec> {
 
 export async function getRun(runId: string): Promise<RunSpec> {
   return apiGet(`/ui/runs/${encodeURIComponent(runId)}`);
+}
+
+export async function getRunEvents(runId: string, afterSequence = 0, limit = 200): Promise<RunEventsPage> {
+  const query = new URLSearchParams({
+    after_sequence: String(Math.max(0, afterSequence)),
+    limit: String(Math.max(1, limit)),
+  });
+  return apiGet(`/runs/${encodeURIComponent(runId)}/events?${query.toString()}`);
 }
 
 export async function deleteRun(runId: string): Promise<{ ok?: boolean; deleted_run_ids?: string[]; deleted_run_count?: number }> {

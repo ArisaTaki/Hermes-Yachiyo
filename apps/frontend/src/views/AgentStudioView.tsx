@@ -29,6 +29,7 @@ import {
   detachSkill,
   getRun,
   getRunArtifact,
+  getRunEvents,
   getRunGroup,
   importSkill,
   installSkillCommand,
@@ -51,6 +52,7 @@ import {
   type AgentSpec,
   type RunnableSummary,
   type RunGroupSpec,
+  type RunEventSpec,
   type RunSpec,
   type SkillFolderSpec,
   type SkillSourceRoot,
@@ -1223,6 +1225,34 @@ function timelineEventPayload(event: Record<string, unknown>): string {
   return '';
 }
 
+function runEventReplayToTimelineEvent(event: RunEventSpec): Record<string, unknown> {
+  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  const detail = typeof payload.tool === 'string'
+    ? payload.tool
+    : typeof payload.model === 'string'
+      ? payload.model
+      : typeof payload.result === 'string'
+        ? payload.result
+        : typeof payload.error === 'string'
+          ? payload.error
+          : '';
+  return {
+    event: event.event_type,
+    detail,
+    status: typeof payload.status === 'string' ? payload.status : '',
+    time: event.created_at || '',
+    sequence: event.sequence,
+    input_preview: payload.input_preview,
+    result: payload.result || payload.content || payload.error || '',
+    pending_approval: payload.pending_approval || payload,
+    child_run_id: payload.child_run_id,
+    workflow_node_id: payload.workflow_node_id,
+    workflow_node_kind: payload.workflow_node_kind,
+    workflow_node_label: payload.workflow_node_label,
+    payload,
+  };
+}
+
 function payloadLineCount(value: string): number {
   if (!value) return 0;
   return value.split(/\r?\n/).length;
@@ -1766,6 +1796,7 @@ export function AgentStudioView() {
   const [runs, setRuns] = useState<RunSpec[]>([]);
   const [runGroups, setRunGroups] = useState<RunGroupSpec[]>([]);
   const [runDetailCache, setRunDetailCache] = useState<RunSpec[]>([]);
+  const [runEventsByRunId, setRunEventsByRunId] = useState<Record<string, RunEventSpec[]>>({});
   const approvedApprovalGuardsRef = useRef<Map<string, ApprovedApprovalGuard>>(new Map());
   const [selectedAgentId, setSelectedAgentId] = useState('');
   const [selectedWorkflowId, setSelectedWorkflowId] = useState('');
@@ -1902,6 +1933,16 @@ export function AgentStudioView() {
   const selectedRun = useMemo(
     () => selectedRunId ? runById.get(selectedRunId) || null : null,
     [runById, selectedRunId],
+  );
+  const selectedRunReplayEvents = useMemo(
+    () => selectedRunId ? runEventsByRunId[selectedRunId] || [] : [],
+    [runEventsByRunId, selectedRunId],
+  );
+  const selectedRunExecutionEvents = useMemo(
+    () => selectedRunReplayEvents.length
+      ? selectedRunReplayEvents.map(runEventReplayToTimelineEvent)
+      : selectedRun?.timeline || [],
+    [selectedRun, selectedRunReplayEvents],
   );
   const selectedRunTarget = useMemo(
     () => runTarget ? runnables.find((item) => item.id === runTarget) || null : null,
@@ -2472,6 +2513,21 @@ export function AgentStudioView() {
       disposed = true;
     };
   }, [selectedRun, selectedRunId]);
+
+  useEffect(() => {
+    if (!selectedRunId || runEventsByRunId[selectedRunId]) return;
+    let disposed = false;
+    getRunEvents(selectedRunId)
+      .then((page) => {
+        if (!disposed) {
+          setRunEventsByRunId((current) => ({ ...current, [selectedRunId]: page.events || [] }));
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+    };
+  }, [runEventsByRunId, selectedRunId]);
 
   useEffect(() => {
     if (!isPotentialWorkflowChildAgentRun(selectedRun)) return;
@@ -4719,12 +4775,12 @@ export function AgentStudioView() {
                 <details className="run-detail-block run-detail-fold run-execution-block" open>
                   <summary className="run-detail-section-head">
                     <div>
-                      <h4>Execution · {(selectedRun.timeline || []).length}</h4>
-                      <span>模型响应、工具调用、审批与完成节点</span>
+                      <h4>Execution · {selectedRunExecutionEvents.length}</h4>
+                      <span>{selectedRunReplayEvents.length ? 'RunEvent replay facts' : '模型响应、工具调用、审批与完成节点'}</span>
                     </div>
                   </summary>
                   <ol className="run-detail-fold-body run-execution-steps">
-                    {(selectedRun.timeline || []).map((event, index) => {
+                    {selectedRunExecutionEvents.map((event, index) => {
                       const childRunId = timelineChildRunId(event);
                       const childRun = childRunId ? runById.get(childRunId) : null;
                       const eventStatus = timelineStatus(event);

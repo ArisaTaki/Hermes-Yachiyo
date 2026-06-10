@@ -14,7 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import apps.locald.screenshot as screenshot_mod
-from apps.bridge.routes import agents, ui
+from apps.bridge.routes import agents, runs as run_routes, ui
 
 
 def _load_screen_route_module():
@@ -421,6 +421,43 @@ def test_agent_studio_bridge_contract_preserves_run_detail_workflow_artifact_and
         ("read_run_artifact", {"run_id": "run_workflow_1", "artifact_path": "reports/final.md"}),
         ("rerun_run", {"run_id": "run_workflow_1"}),
     ]
+
+
+def test_run_detail_bridge_contract_preserves_replay_events(monkeypatch):
+    calls: list[dict] = []
+
+    class FakeRuntimeService:
+        def list_run_events(self, run_id, *, after_sequence=0, limit=200):
+            calls.append({"run_id": run_id, "after_sequence": after_sequence, "limit": limit})
+            return {
+                "run_id": run_id,
+                "after_sequence": after_sequence,
+                "limit": limit,
+                "events": [
+                    {
+                        "run_id": run_id,
+                        "sequence": after_sequence + 1,
+                        "event_type": "agent.tool.call",
+                        "payload": {
+                            "tool": "workspace.read",
+                            "input_preview": {"path": "README.md"},
+                            "result": {"ok": True},
+                        },
+                        "created_at": "2026-06-10T00:00:00+00:00",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: FakeRuntimeService())
+
+    replay = asyncio.run(run_routes.list_run_events("run_detail_1", after_sequence=7, limit=50))
+
+    assert replay["run_id"] == "run_detail_1"
+    assert replay["after_sequence"] == 7
+    assert replay["limit"] == 50
+    assert replay["events"][0]["event_type"] == "agent.tool.call"
+    assert replay["events"][0]["payload"]["tool"] == "workspace.read"
+    assert calls == [{"run_id": "run_detail_1", "after_sequence": 7, "limit": 50}]
 
 
 def test_desktop_presence_bridge_contract_preserves_screenshot_tts_proactive_and_live2d(monkeypatch):
