@@ -203,3 +203,29 @@ def test_verifier_reports_stable_channel_that_still_allows_dev_features(monkeypa
 
     assert any("stable metadata must be treated as release-like" in finding.message for finding in findings)
     assert any("stable metadata must disable development features" in finding.message for finding in findings)
+
+
+def test_verifier_reports_release_debug_routes_and_dev_credential_fallback(monkeypatch):
+    from apps.bridge import server as bridge_server
+    from apps.shell import credential_store
+
+    class FakeDevFileCredentialStore:
+        def __init__(self, _path):
+            return None
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr(bridge_server, "_DEBUG_ROUTE_MODULES", ("apps.bridge.routes.debug",))
+    monkeypatch.setattr(bridge_server, "debug_routes_enabled", lambda: True)
+    monkeypatch.setattr(credential_store, "development_credential_fallback_enabled", lambda: True)
+    monkeypatch.setattr(credential_store, "DevFileCredentialStore", FakeDevFileCredentialStore)
+
+    findings = verifier.verify_release_artifacts(paths=[], check_required_files=False)
+    messages = [finding.message for finding in findings]
+
+    assert "release builds must not register debug route modules" in messages
+    for channel in verifier.RELEASE_SECURITY_CHANNELS:
+        assert f"{channel} metadata must disable debug routes even when OHA_YACHIYO_DEV=1" in messages
+        assert f"{channel} metadata must disable development credential fallback" in messages
+        assert f"{channel} metadata must not allow DevFileCredentialStore" in messages
