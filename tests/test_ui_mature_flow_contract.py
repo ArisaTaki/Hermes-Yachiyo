@@ -878,6 +878,121 @@ def test_workflow_child_approval_reject_bridge_contract_preserves_parent_child_r
     ]
 
 
+def test_workflow_child_cancel_bridge_contract_preserves_parent_child_replay_refresh(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeRuntimeService:
+        def cancel_run(self, run_id):
+            calls.append(("cancel", {"run_id": run_id}))
+            return {
+                "run_id": run_id,
+                "kind": "agent_run",
+                "status": "cancelled",
+                "pending_approval": {},
+                "result": "Run cancelled",
+            }
+
+        def get_run(self, run_id):
+            calls.append(("get_run", {"run_id": run_id}))
+            if run_id == "run_child_approval":
+                return {
+                    "run_id": run_id,
+                    "kind": "agent_run",
+                    "status": "cancelled",
+                    "pending_approval": {},
+                    "result": "Run cancelled",
+                    "timeline": [{"event": "run.cancelled", "status": "cancelled"}],
+                }
+            return {
+                "run_id": run_id,
+                "kind": "workflow_run",
+                "status": "cancelled",
+                "result": "Run cancelled",
+                "timeline": [
+                    {
+                        "event": "workflow.run.cancelled",
+                        "child_run_id": "run_child_approval",
+                        "status": "cancelled",
+                    }
+                ],
+            }
+
+        def list_run_events(self, run_id, *, after_sequence=0, limit=200):
+            calls.append(
+                (
+                    "list_run_events",
+                    {"run_id": run_id, "after_sequence": after_sequence, "limit": limit},
+                )
+            )
+            if run_id == "run_workflow_parent":
+                events = [
+                    {
+                        "run_id": run_id,
+                        "sequence": after_sequence + 1,
+                        "event_type": "workflow.run.cancelled",
+                        "payload": {"child_run_id": "run_child_approval", "result": "Run cancelled"},
+                    }
+                ]
+            else:
+                events = [
+                    {
+                        "run_id": run_id,
+                        "sequence": after_sequence + 1,
+                        "event_type": "agent.tool.approval_required",
+                        "payload": {"tool": "workspace.write_patch"},
+                    },
+                    {
+                        "run_id": run_id,
+                        "sequence": after_sequence + 2,
+                        "event_type": "run.cancelled",
+                        "payload": {"result": "Run cancelled"},
+                    },
+                ]
+            return {
+                "run_id": run_id,
+                "after_sequence": after_sequence,
+                "limit": limit,
+                "events": events,
+            }
+
+    service = FakeRuntimeService()
+    monkeypatch.setattr(agents, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
+
+    cancelled_child = asyncio.run(agents.cancel_run("run_child_approval"))
+    refreshed_child = asyncio.run(agents.get_any_run("run_child_approval"))
+    refreshed_parent = asyncio.run(agents.get_workflow_run("run_workflow_parent"))
+    child_replay = asyncio.run(run_routes.list_run_events("run_child_approval", after_sequence=0, limit=200))
+    parent_replay = asyncio.run(run_routes.list_run_events("run_workflow_parent", after_sequence=0, limit=200))
+
+    assert cancelled_child["status"] == "cancelled"
+    assert cancelled_child["pending_approval"] == {}
+    assert cancelled_child["result"] == "Run cancelled"
+    assert refreshed_child["timeline"][0]["event"] == "run.cancelled"
+    assert refreshed_parent["timeline"][0]["event"] == "workflow.run.cancelled"
+    assert refreshed_parent["timeline"][0]["child_run_id"] == "run_child_approval"
+    assert [event["event_type"] for event in child_replay["events"]] == [
+        "agent.tool.approval_required",
+        "run.cancelled",
+    ]
+    assert parent_replay["events"][0]["event_type"] == "workflow.run.cancelled"
+    assert parent_replay["events"][0]["payload"]["child_run_id"] == "run_child_approval"
+    assert parent_replay["events"][0]["payload"]["result"] == "Run cancelled"
+    assert calls == [
+        ("cancel", {"run_id": "run_child_approval"}),
+        ("get_run", {"run_id": "run_child_approval"}),
+        ("get_run", {"run_id": "run_workflow_parent"}),
+        (
+            "list_run_events",
+            {"run_id": "run_child_approval", "after_sequence": 0, "limit": 200},
+        ),
+        (
+            "list_run_events",
+            {"run_id": "run_workflow_parent", "after_sequence": 0, "limit": 200},
+        ),
+    ]
+
+
 def test_agent_studio_bridge_contract_preserves_agent_definition_lifecycle(monkeypatch):
     calls: list[tuple[str, dict]] = []
 
