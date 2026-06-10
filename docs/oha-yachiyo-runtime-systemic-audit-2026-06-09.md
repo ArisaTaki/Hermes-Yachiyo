@@ -1255,6 +1255,22 @@ Info.plist uses Oha-Yachiyo identifiers and permission strings
 1 passed
 ```
 
+### Terminal approval secret payload guard
+
+本轮补一条审批 UI 前置清洗回归：主聊天模型请求 `terminal.run`，且命令参数里包含 API key / token 形态的敏感值时，NativeRunEngine 会在生成 `pending_approval` 之前拒绝该工具请求。Run 进入 failed，`run_approvals` 不创建记录，`agent.tool.approval_required` 不写入 replay，Run projection / RunEvent / SQLite 扫描都不能看到原始 secret 或原始 `OPENAI_API_KEY` 命令前缀。
+
+已运行：
+
+```text
+.venv/bin/python -m pytest tests/test_agent_runtime.py::test_main_chat_terminal_secret_payload_is_rejected_before_approval -q
+```
+
+结果：
+
+```text
+1 passed
+```
+
 ## 设计书差距
 
 ### 已基本满足
@@ -1316,7 +1332,7 @@ Info.plist uses Oha-Yachiyo identifiers and permission strings
 - ApprovalCoordinator 已承接 approve/reject/timeout 的通用状态转换；ApprovalResumeCoordinator 已承接批准后的工具执行，并已有 coordinator 级成功续跑 / fatal tool failure 阻断回归；WorkflowParentResumeCoordinator 已承接父子 Run 联动，并已有 completed child replay / continuation handoff 的 coordinator 级回归；WorkflowContinuationCoordinator 已承接具体 Workflow step continuation，并已有 approval node pause / public pending projection / RunGroup handoff、artifact node write / completion handoff、failure replay payload secret 清洗的 coordinator 级回归。
 - 主聊天自动委派和群聊派活都已引入内部结构化 directive；自动委派已收敛到 `run_oha_agent` / `run_oha_workflow`，并已有 TaskRunner 级 NativeRunEngine 闭环回归，群聊主提示与 parser 已收敛到 `oha.group_dispatch` / `<oha_group_dispatch>` / native 命名，并已有 ChatAPI + 真实 NativeRunEngine 闭环回归；旧 `run_yachiyo_*`、`<yachiyo_delegation>` 和 `<yachiyo_group_dispatch>` 不再作为有效入口。
 - Workflow 与主聊天共享 NativeRunEngine 的路径已存在，已有 focused 回归、UI 入口 guard、同步 UI flow contract、浏览器级 route smoke、部分按钮级 smoke、无模型 Chat readiness 浏览器 E2E、可用 fake 模型 Chat 浏览器 E2E，以及 slow fake model 的 Chat 取消 late-output Bridge 复验；主聊天多轮/图片已补 executor/API/Bridge 合同、TaskRunner 级图片 roundtrip、live source Bridge 图片 E2E 和 Run Detail/RunEvent route projection，主聊天审批等待、approval roundtrip、live source Bridge 审批 E2E 和重复 approval 防重复执行已补回归，Chat 图片粘贴/上传/移除、停止生成、消息审批卡与 composer 审批卡、委派 Run 结束后 summary task processing 状态已补 source-level UI wiring guard，Workflow 节点执行与审批等待 facts 已接入 RunEvent replay，并新增真实 HTTP route roundtrip 覆盖 Agent/Workflow approval、Run Detail、RunEvent replay 和 artifact 读取；但仍需要恢复浏览器 runner 后补图片/审批/取消按钮级 E2E，以及群聊/委派/Workflow/Run Detail 的完整交互 E2E。
-- Secret 清洗已补主路径回归、旧 chat.db 迁移清洗、标准 logging、桌面后端 excepthook、crash 文件生成扫描、HTTPException detail、UI JSON error/message、provider catalog 失败缓存、artifact 文件清洗、provider/tool exception 端到端落盘扫描、approval reject/cancelled RunEvent payload 清洗、Workflow continuation failure replay payload 清洗和默认 runtime 落盘扫描；仍建议继续补真实 provider / terminal / tool 集成环境下的异常日志联调。
+- Secret 清洗已补主路径回归、旧 chat.db 迁移清洗、标准 logging、桌面后端 excepthook、crash 文件生成扫描、HTTPException detail、UI JSON error/message、provider catalog 失败缓存、artifact 文件清洗、provider/tool exception 端到端落盘扫描、terminal approval secret payload 审批前拒绝与落盘扫描、approval reject/cancelled RunEvent payload 清洗、Workflow continuation failure replay payload 清洗和默认 runtime 落盘扫描；仍建议继续补真实 provider / terminal / tool 集成环境下的异常日志联调。
 - `workspace.write_patch` 已收敛为单文件 UTF-8 unified diff patch；content 全量写入已从 tool schema 移除，并在 validator / ToolBroker direct 入口拒绝。
 - Runtime 发起的 skill 安装子进程已复用敏感环境变量清洗，避免 `SSH_AUTH_SOCK`、`GITHUB_TOKEN`、云厂商凭据和 `*_API_KEY` / `*_TOKEN` / `*_SECRET` / `*_PASSWORD` 从旁路传入外部命令；`terminal.run` 与 skill install 现在使用同一套 env scrub helper。
 - release/alpha/stable 源码级 guard、release-facing verifier、packaged app resources scan、签名导入/签名构建 workflow guard、签名脚本 runtime options / entitlements / verify guard、Gatekeeper 首启说明/当前 notarization 状态/屏幕录制权限 release notes guard、macOS hardened runtime / entitlements / usage descriptions guard、release metadata JSON 发布 guard、latest JSON 更新字段 guard、release DMG/SHA staging/upload guard 与 release 目录 binary-safe artifact scan 已覆盖；workflow 会排除本地 `node-pty/build` native artifact 并只打包 clean prebuilds，release verifier 也会阻断 tracked `.vite` cache 和 packaging config 丢失 `.vite` 排除；本地 unsigned `.app` / DMG 产物已验证不包含旧产品身份 token。Electron Framework 内部自带的通用 `Hermes` 字符串不属于本项目产品身份或执行内核残留。

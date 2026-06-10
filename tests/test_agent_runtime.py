@@ -2913,6 +2913,70 @@ def test_main_chat_tool_exception_is_redacted_from_tool_messages_events_and_stor
     assert verify_secret_redaction(paths=[tmp_path]) == []
 
 
+def test_main_chat_terminal_secret_payload_is_rejected_before_approval(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    leaked_secret = "sk-terminal-command-secret123456"
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+        assert any((tool.get("function") or {}).get("name") == "terminal_run" for tool in tools or [])
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_terminal_secret",
+                    "type": "function",
+                    "function": {
+                        "name": "terminal_run",
+                        "arguments": json.dumps(
+                            {
+                                "command": f"OPENAI_API_KEY={leaked_secret} python3 scripts/deploy.py",
+                            }
+                        ),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-terminal-secret-command",
+            session_id="session-terminal-secret-command",
+            user_goal="Run terminal command",
+        )
+
+        with pytest.raises(AgentRuntimeError, match="参数包含敏感凭据"):
+            service.execute_main_chat_model_loop(
+                run["run_id"],
+                [{"role": "user", "content": "Run terminal command"}],
+                tool_policy={"allowed_tools": ["terminal.run"]},
+                workspace_policy={"default_workdir": str(tmp_path), "readable_scopes": ["."]},
+            )
+
+        failed = service.get_run(run["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        persisted_projection = json.dumps({"run": failed, "events": events}, ensure_ascii=False)
+
+        assert failed["status"] == "failed"
+        assert failed["pending_approval"] == {}
+        assert not service._conn.execute(
+            "SELECT 1 FROM run_approvals WHERE run_id=?",
+            (run["run_id"],),
+        ).fetchone()
+        assert "agent.tool.approval_required" not in [event["event_type"] for event in events]
+        assert leaked_secret not in persisted_projection
+        assert "OPENAI_API_KEY" not in persisted_projection
+        assert "敏感凭据" in persisted_projection
+    finally:
+        service.close()
+
+    assert verify_secret_redaction(paths=[tmp_path]) == []
+
+
 def test_main_chat_default_tools_use_trusted_product_workspace(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     product_workspace = tmp_path / "oha-workspace"
