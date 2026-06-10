@@ -3329,6 +3329,139 @@ def test_main_chat_approval_timeout_records_replayable_fact_and_is_idempotent(tm
         service.close()
 
 
+def test_main_chat_reject_and_timeout_use_approval_coordinator_boundaries(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_write",
+                    "type": "function",
+                    "function": {
+                        "name": "workspace_write_patch",
+                        "arguments": json.dumps(
+                            {
+                                "path": "out.txt",
+                                "patch": "--- out.txt\n+++ out.txt\n@@ -1 +1 @@\n-before\n+after\n",
+                            }
+                        ),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    reject_calls: list[dict[str, object]] = []
+    timeout_calls: list[dict[str, object]] = []
+    original_reject = service.approvals.reject_tool_run
+    original_timeout = service.approvals.timeout_tool_run
+
+    def spy_reject_tool_run(
+        run_id,
+        *,
+        timeline,
+        reason,
+        tool_name,
+        input_preview,
+    ):
+        reject_calls.append(
+            {
+                "run_id": run_id,
+                "timeline_events": [event.get("event") for event in timeline if isinstance(event, dict)],
+                "reason": reason,
+                "tool_name": tool_name,
+                "input_preview": input_preview,
+            }
+        )
+        return original_reject(
+            run_id,
+            timeline=timeline,
+            reason=reason,
+            tool_name=tool_name,
+            input_preview=input_preview,
+        )
+
+    def spy_timeout_tool_run(
+        run_id,
+        *,
+        timeline,
+        reason,
+        tool_name,
+        input_preview,
+    ):
+        timeout_calls.append(
+            {
+                "run_id": run_id,
+                "timeline_events": [event.get("event") for event in timeline if isinstance(event, dict)],
+                "reason": reason,
+                "tool_name": tool_name,
+                "input_preview": input_preview,
+            }
+        )
+        return original_timeout(
+            run_id,
+            timeline=timeline,
+            reason=reason,
+            tool_name=tool_name,
+            input_preview=input_preview,
+        )
+
+    monkeypatch.setattr(service.approvals, "reject_tool_run", spy_reject_tool_run)
+    monkeypatch.setattr(service.approvals, "timeout_tool_run", spy_timeout_tool_run)
+
+    def start_waiting_run(suffix: str) -> dict[str, object]:
+        run = service.start_main_chat_run(
+            task_id=f"task-main-approval-{suffix}",
+            session_id=f"session-main-approval-{suffix}",
+            user_goal="Write",
+        )
+        waiting = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Write out.txt"}],
+            tool_policy={"allowed_tools": ["workspace.write_patch"]},
+            workspace_policy={
+                "default_workdir": str(workdir),
+                "readable_scopes": ["."],
+                "writable_scopes": ["."],
+            },
+        )
+        assert waiting["status"] == "approval_required"
+        assert waiting["pending_approval"]["tool"] == "workspace.write_patch"
+        return run
+
+    try:
+        rejected_run = start_waiting_run("reject-boundary")
+        timed_out_run = start_waiting_run("timeout-boundary")
+
+        rejected = service.reject_run_approval(rejected_run["run_id"], "not now")
+        timed_out = service.timeout_run_approval(timed_out_run["run_id"], reason="approval_wait_timeout")
+
+        assert rejected["status"] == "cancelled"
+        assert timed_out["status"] == "cancelled"
+        assert len(reject_calls) == 1
+        assert len(timeout_calls) == 1
+        assert reject_calls[0]["run_id"] == rejected_run["run_id"]
+        assert reject_calls[0]["reason"] == "not now"
+        assert reject_calls[0]["tool_name"] == "workspace.write_patch"
+        assert "agent.tool.approval_required" in reject_calls[0]["timeline_events"]
+        assert reject_calls[0]["input_preview"]["path"] == "out.txt"
+        assert timeout_calls[0]["run_id"] == timed_out_run["run_id"]
+        assert timeout_calls[0]["reason"] == "approval_wait_timeout"
+        assert timeout_calls[0]["tool_name"] == "workspace.write_patch"
+        assert "agent.tool.approval_required" in timeout_calls[0]["timeline_events"]
+        assert timeout_calls[0]["input_preview"]["path"] == "out.txt"
+    finally:
+        service.close()
+
+
 def test_main_chat_repeated_approval_does_not_execute_tool_twice(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     monkeypatch.setattr(
