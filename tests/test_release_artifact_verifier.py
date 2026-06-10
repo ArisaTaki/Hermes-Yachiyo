@@ -328,6 +328,53 @@ def test_verifier_requires_release_workflow_release_scan_after_metadata(tmp_path
     ) in findings
 
 
+def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "name: Build macOS DMG\n"
+        "jobs:\n"
+        "  package-macos:\n"
+        "    steps:\n"
+        "      - name: Verify release-facing product identity and security guards\n"
+        "        run: python scripts/verify_release_artifacts.py\n"
+        "      - name: Install Python dependencies\n"
+        "        run: python -m pip install -e .\n"
+        "      - name: Build packaged backend\n"
+        "        run: python scripts/build_backend.py --clean\n"
+        "      - name: Build Electron DMG\n"
+        "        env:\n"
+        "          MACOS_SIGNING_ENABLED: true\n"
+        "        run: scripts/build_macos_self_signed_dmg.sh \"Oha-Yachiyo Self Signed\"\n"
+        "      - name: Run smoke tests\n"
+        "        run: python -m pytest tests/test_chat_api.py\n"
+        "      - name: Verify packaged app resources\n"
+        "        run: |\n"
+        "          package_scan_paths=(dist/backend)\n"
+        "          find dist/electron -path '*/Oha-Yachiyo.app/Contents/Resources'\n"
+        "          python scripts/verify_release_artifacts.py --allow-binary \"${package_scan_paths[@]}\"\n"
+        "      - name: Prepare release metadata\n"
+        "        run: |\n"
+        "          echo \"未使用 Apple Developer ID 签名或 notarization\"\n"
+        "          echo \"首次启动应用时仍会显示未知开发者 / Gatekeeper 提示\"\n"
+        "          echo \"主动桌面观察需要在 macOS 系统设置中允许 Oha-Yachiyo 使用屏幕录制权限\"\n"
+        "      - name: Verify packaged release artifacts\n"
+        "        run: python scripts/verify_release_artifacts.py --allow-binary release\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert "macOS release workflow must run smoke tests before packaged backend and DMG builds" in messages
+    assert "macOS release workflow smoke tests must cover screenshot behavior" in messages
+    assert "macOS release workflow smoke tests must cover proactive care" in messages
+    assert "macOS release workflow smoke tests must cover ChatSession persistence" in messages
+    assert "macOS release workflow smoke tests must cover mature UI bridge routes" in messages
+    assert "macOS release workflow smoke tests must cover manual TTS" in messages
+    assert "macOS release workflow smoke tests must cover Live2D and mode settings" in messages
+
+
 def test_verifier_requires_release_workflow_to_publish_metadata_json(tmp_path):
     workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
     workflow.parent.mkdir(parents=True)

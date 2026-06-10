@@ -239,6 +239,40 @@ RELEASE_WORKFLOW_METADATA_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow latest JSON must include the DMG download URL",
     ),
 )
+RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "Run smoke tests",
+        "macOS release workflow must run smoke tests before packaging",
+    ),
+    (
+        "tests/test_screenshot.py",
+        "macOS release workflow smoke tests must cover screenshot behavior",
+    ),
+    (
+        "tests/test_proactive.py",
+        "macOS release workflow smoke tests must cover proactive care",
+    ),
+    (
+        "tests/test_chat_session.py",
+        "macOS release workflow smoke tests must cover ChatSession persistence",
+    ),
+    (
+        "tests/test_chat_api.py",
+        "macOS release workflow smoke tests must cover Chat API flows",
+    ),
+    (
+        "tests/test_ui_bridge_routes.py",
+        "macOS release workflow smoke tests must cover mature UI bridge routes",
+    ),
+    (
+        "tests/test_tts.py",
+        "macOS release workflow smoke tests must cover manual TTS",
+    ),
+    (
+        "tests/test_mode_settings.py",
+        "macOS release workflow smoke tests must cover Live2D and mode settings",
+    ),
+)
 _BUILD_GUARD_ENV_KEYS: tuple[str, ...] = (
     "OHA_YACHIYO_DEV",
     "OHA_YACHIYO_BUILD_METADATA",
@@ -492,6 +526,9 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
     for required_text, message in RELEASE_WORKFLOW_METADATA_REQUIRED_TEXT:
         if required_text not in workflow:
             findings.append(Finding(workflow_path, message))
+    for required_text, message in RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT:
+        if required_text not in workflow:
+            findings.append(Finding(workflow_path, message))
 
     preinstall_guard = workflow.find("Verify release-facing product identity and security guards")
     install_deps = workflow.find("Install Python dependencies")
@@ -505,7 +542,22 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             )
         )
     signing_import = workflow.find("Import macOS self-signing certificate")
+    smoke_tests = workflow.find("Run smoke tests")
+    build_backend = workflow.find("Build packaged backend")
     build_dmg = workflow.find("Build Electron DMG")
+    if (
+        smoke_tests < 0
+        or build_backend < 0
+        or build_dmg < 0
+        or smoke_tests > build_backend
+        or smoke_tests > build_dmg
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must run smoke tests before packaged backend and DMG builds",
+            )
+        )
     if signing_import >= 0 and build_dmg >= 0 and signing_import > build_dmg:
         findings.append(
             Finding(
