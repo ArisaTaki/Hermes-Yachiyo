@@ -1,6 +1,7 @@
 """Bridge Server 测试。"""
 
 import asyncio
+import base64
 import importlib.util
 import inspect
 import json
@@ -11,10 +12,13 @@ from types import SimpleNamespace
 
 import pytest
 
+import apps.core.activity_store as activity_store_mod
+import apps.core.chat_store as chat_store_mod
 import apps.locald.screenshot as screenshot_mod
 from apps.bridge.routes import agents as agent_routes
 from apps.bridge.routes import live2d as live2d_route
 from apps.bridge.routes import model_profiles as model_profile_routes
+from apps.bridge.routes import runs as run_routes
 from apps.bridge.routes import ui as ui_routes
 from apps.bridge.server import (
     _bridge_access_log_enabled,
@@ -24,8 +28,34 @@ from apps.bridge.server import (
     get_live2d_asset_token,
     regenerate_live2d_asset_token,
 )
+import apps.shell.chat_api as chat_api_mod
+from apps.core.activity_store import ActivityStore
+from apps.core.chat_session import ChatSession
+from apps.core.chat_store import ChatStore
+from apps.core.executor import NativeAgentExecutor
+from apps.core.state import AppState
+from apps.core.task_runner import TaskRunner
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
+from packages.protocol.enums import TaskStatus
+
+
+class _FakeDefaultProfileService:
+    def get_defaults(self):
+        return {"chat": "profile_default"}
+
+    def get_profile_private(self, profile_id):
+        assert profile_id == "profile_default"
+        return {
+            "profile_id": profile_id,
+            "provider": "openai_compatible",
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+            "capability": "chat",
+            "status": "available",
+            "enabled": True,
+        }
 
 
 def _load_status_route_module():
@@ -391,6 +421,144 @@ def test_chat_message_http_route_maps_idempotency_key_header(monkeypatch):
     finally:
         sys.modules.pop("_oha_ui_route_http_under_test", None)
         _restore_module_prefixes(("fastapi",), saved_modules)
+
+
+def test_chat_image_bridge_route_reaches_native_run_events(tmp_path, monkeypatch):
+    try:
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+    except ModuleNotFoundError:
+        FastAPI = None  # type: ignore[assignment]
+        TestClient = None  # type: ignore[assignment]
+
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
+    monkeypatch.setenv("OHA_YACHIYO_BRIDGE_URL", "http://127.0.0.1:9999")
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="http-chat-image-session")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    captured_messages: list[list[dict]] = []
+    image_bytes = b"fake-http-image"
+    data_url = "data:image/png;base64," + base64.b64encode(image_bytes).decode("ascii")
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        captured_messages.append(messages)
+        content = messages[-1]["content"]
+        assert isinstance(content, list)
+        assert content[0] == {"type": "text", "text": "请从 HTTP route 看图"}
+        image_parts = [part for part in content if part.get("type") == "image_url"]
+        assert len(image_parts) == 1
+        assert image_parts[0]["image_url"]["url"] == data_url
+        return {"role": "assistant", "content": "HTTP route image reply"}
+
+    monkeypatch.setattr(chat_store_mod, "get_chat_store", lambda: store)
+    monkeypatch.setattr(activity_store_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
+    monkeypatch.setattr(chat_api_mod, "get_native_image_input_capability", lambda: {"can_attach_images": True, "route": "chat"})
+    monkeypatch.setattr(
+        "apps.shell.native_capabilities.get_native_image_input_capability",
+        lambda: {"can_attach_images": True, "route": "chat"},
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeDefaultProfileService(),
+    )
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+
+    executor = NativeAgentExecutor(
+        chat_session=session,
+        runtime_service_getter=lambda: service,
+        tool_policy_getter=lambda: {"allowed_tools": []},
+        workspace_policy_getter=lambda: {},
+        activity_store_getter=lambda: activity_store,
+    )
+    runner = TaskRunner(state, executor=executor, activity_store=activity_store)
+    runtime = SimpleNamespace(
+        state=state,
+        chat_session=session,
+        store=store,
+        task_runner=runner,
+        agent_runtime_service=service,
+    )
+    monkeypatch.setattr(ui_routes, "get_runtime", lambda: runtime)
+
+    try:
+        if FastAPI is not None and TestClient is not None:
+            route_app = FastAPI()
+            route_app.include_router(ui_routes.router)
+            route_app.include_router(run_routes.router)
+            with TestClient(route_app) as client:
+                sent = client.post(
+                    "/ui/chat/messages",
+                    json={
+                        "text": "请从 HTTP route 看图",
+                        "attachments": [{"name": "screen.png", "data_url": data_url}],
+                        "client_message_id": "http-image-client-1",
+                    },
+                )
+                assert sent.status_code == 200
+                payload = sent.json()
+        else:
+            payload = asyncio.run(
+                ui_routes.send_chat_message(
+                    ui_routes.SendChatMessageRequest(
+                        text="请从 HTTP route 看图",
+                        attachments=[{"name": "screen.png", "data_url": data_url}],
+                        client_message_id="http-image-client-1",
+                    )
+                )
+            )
+
+        assert payload["ok"] is True
+        assert payload["status"] == "pending"
+        assert payload["attachments"][0]["url"].startswith("http://127.0.0.1:9999/ui/chat/attachments/")
+        assert "path" not in payload["attachments"][0]
+
+        task = state.get_task(payload["task_id"])
+        assert task is not None
+        assert task.attachments[0]["kind"] == "image"
+
+        asyncio.run(runner._execute_with_state(task.task_id))
+
+        updated = state.get_task(task.task_id)
+        assert updated is not None
+        assert updated.status == TaskStatus.COMPLETED
+        assert updated.result == "HTTP route image reply"
+        run = service.get_run(service.get_task_run_link(task.task_id)["run_id"])
+
+        if FastAPI is not None and TestClient is not None:
+            route_app = FastAPI()
+            route_app.include_router(ui_routes.router)
+            route_app.include_router(run_routes.router)
+            with TestClient(route_app) as client:
+                replay_payload = client.get(f"/runs/{run['run_id']}/events?after_sequence=0&limit=200").json()
+                messages_payload = client.get("/ui/chat/messages").json()
+        else:
+            replay_payload = asyncio.run(run_routes.list_run_events(run["run_id"], after_sequence=0, limit=200))
+            messages_payload = asyncio.run(ui_routes.get_chat_messages())
+
+        assert len(captured_messages) == 1
+        event_types = [event["event_type"] for event in replay_payload["events"]]
+        assert "task.linked" in event_types
+        assert event_types.count("model.output.completed") == 1
+        assert "run.completed" in event_types
+        assistant = next(message for message in messages_payload["messages"] if message["role"] == "assistant")
+        assert assistant["task_id"] == task.task_id
+        assert assistant["content"] == "HTTP route image reply"
+        assert assistant["status"] == "completed"
+    finally:
+        service.close()
+        activity_store.close()
+        store.close()
 
 
 def test_agent_and_workflow_run_http_routes_map_idempotency_key_header(monkeypatch):
