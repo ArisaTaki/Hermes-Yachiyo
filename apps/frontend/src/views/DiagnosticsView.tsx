@@ -47,7 +47,7 @@ type DiagnosticCache = {
 
 type DashboardStatus = {
   bridge?: { state?: string; status?: string; running?: string; url?: string };
-  hermes?: {
+  native_agent?: {
     ready?: boolean;
     command_exists?: boolean;
     readiness_level?: string;
@@ -79,7 +79,7 @@ type RuntimeStatus = {
   version?: string;
   uptime_seconds?: number;
   task_counts?: Record<string, number>;
-  hermes_ready?: boolean;
+  native_agent_ready?: boolean;
 };
 
 type TaskInfo = {
@@ -132,7 +132,7 @@ type DiagnosticOverviewItem = {
   status: 'passed' | 'warning' | 'error';
 };
 
-type HermesToolCatalogItem = {
+type NativeToolCatalogItem = {
   id: string;
   label: string;
   category: string;
@@ -170,7 +170,7 @@ type ToolConfigItem = {
   configurable?: boolean;
 };
 
-type HermesToolsetItem = {
+type NativeToolsetItem = {
   id: string;
   canonical_id?: string;
   label?: string;
@@ -181,12 +181,12 @@ type ToolConfigPayload = {
   ok?: boolean;
   command_exists?: boolean;
   needs_env_refresh?: boolean;
-  hermes_toolsets?: HermesToolsetItem[];
+  native_toolsets?: NativeToolsetItem[];
   tools?: ToolConfigItem[];
 };
 
 type DiagnosticToolCard = {
-  item: HermesToolCatalogItem;
+  item: NativeToolCatalogItem;
   status: ToolStatus;
   config?: ToolConfigItem;
   enabledByToolsList: boolean;
@@ -197,30 +197,30 @@ const DIAGNOSTIC_ACTIONS: DiagnosticAction[] = [
   {
     id: 'config-check',
     label: '检查配置结构',
-    command: 'hermes config check',
+    command: 'native config check',
     description: '检查缺失或过期配置，不会发起模型请求。',
   },
   {
     id: 'doctor',
     label: '运行 Doctor',
-    command: 'hermes doctor',
-    description: '检查 Hermes 依赖、配置和运行环境。',
+    command: 'native doctor',
+    description: '检查 Native Runtime、模型配置和本地运行环境。',
   },
   {
     id: 'auth-list',
     label: '查看凭据池',
-    command: 'hermes auth list',
-    description: '查看 Hermes 记录的 provider 凭据状态；输出会脱敏。',
+    command: 'native auth list',
+    description: '查看 Model Profile 记录的 provider 凭据状态；输出会脱敏。',
   },
 ];
 
-const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
+const NATIVE_TOOL_CATALOG: NativeToolCatalogItem[] = [
   {
     id: 'web',
     label: '联网与网页读取',
     category: '信息检索',
-    description: '搜索、读取网页内容并把结果交给 Hermes 推理。',
-    requirement: '需要 Hermes web/search 工具可用',
+    description: '搜索、读取网页内容并把结果交给 Native 推理。',
+    requirement: '需要 Native web/search 工具可用',
     aliases: ['search'],
   },
   {
@@ -228,7 +228,7 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
     label: '浏览器自动化',
     category: '信息检索',
     description: '通过浏览器会话访问需要交互的页面。',
-    requirement: '需要 Hermes browser 工具可用',
+    requirement: '需要 Native browser 工具可用',
   },
   {
     id: 'browser-cdp',
@@ -246,30 +246,30 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
   },
   {
     id: 'tts',
-    label: 'Hermes 文本转语音',
+    label: 'Native 文本转语音',
     category: '多模态',
-    description: 'Hermes Agent 自己暴露的文本转音频工具；不等同于 Yachiyo 主动关怀的 GPT-SoVITS 播报配置。',
-    requirement: '需要 Hermes tts 工具集启用',
+    description: 'Native Agent 自己暴露的文本转音频工具；不等同于 Yachiyo 主动关怀的 GPT-SoVITS 播报配置。',
+    requirement: '需要 Native tts 工具启用',
   },
   {
     id: 'terminal',
     label: '终端执行',
     category: '本地工作',
-    description: '在 Hermes 允许范围内执行命令和读取结果。',
-    requirement: '需要 Hermes 本地执行权限',
+    description: '经过 Native PolicyGate 和审批后执行命令并读取结果。',
+    requirement: '需要 Native terminal.run 工具权限',
   },
   {
     id: 'file',
     label: '文件读写',
     category: '本地工作',
     description: '读取、生成和修改本地工作文件。',
-    requirement: '需要 Hermes 文件工具权限',
+    requirement: '需要 Native 文件工具权限',
   },
   {
     id: 'skills',
     label: '技能加载',
     category: '本地工作',
-    description: '加载 Hermes 或项目内定义的技能工作流。',
+    description: '加载 Native 或项目内定义的技能工作流。',
     requirement: '需要技能目录或插件可读取',
   },
   {
@@ -277,13 +277,13 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
     label: '代码执行',
     category: '本地工作',
     description: '运行受控代码片段，处理数据或验证逻辑。',
-    requirement: '需要 Hermes 代码执行环境',
+    requirement: '需要 Native 代码执行环境',
   },
   {
     id: 'memory',
     label: '记忆',
     category: '长期上下文',
-    description: '读取和维护 Hermes 记忆信息。',
+    description: '读取和维护 Native 记忆信息。',
     requirement: '需要 memory 工具集启用',
   },
   {
@@ -297,28 +297,28 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
     id: 'todo',
     label: '任务清单',
     category: '长期上下文',
-    description: '维护 Hermes 内部的待办与计划状态。',
+    description: '维护 Native 内部的待办与计划状态。',
     requirement: '需要 todo 工具集启用',
   },
   {
     id: 'cronjob',
     label: '定时任务',
     category: '自动化',
-    description: '创建或管理 Hermes 侧的定时自动化。',
+    description: '创建或管理 Native 侧的定时自动化。',
     requirement: '需要 cronjob 工具集配置',
   },
   {
     id: 'clarify',
     label: '澄清问题',
     category: '自动化',
-    description: '让 Hermes 在缺少关键信息时向用户提问。',
+    description: '让 Native 在缺少关键信息时向用户提问。',
     requirement: '需要 clarify 工具集启用',
   },
   {
     id: 'delegation',
     label: '任务委派',
     category: '自动化',
-    description: '让 Hermes 将任务拆分给子 agent 或协作流程。',
+    description: '让 Native 将任务拆分给子 agent 或协作流程。',
     requirement: '需要 delegation 工具集启用',
   },
   {
@@ -354,22 +354,22 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
     id: 'yuanbao',
     label: '腾讯元宝',
     category: '第三方扩展',
-    description: '连接 Hermes 的元宝扩展能力。',
-    requirement: '需要 hermes-yuanbao 配置',
-    aliases: ['hermes-yuanbao'],
+    description: '连接 Native 的元宝扩展能力。',
+    requirement: '需要 Native yuanbao 配置',
+    aliases: ['yuanbao'],
   },
   {
     id: 'moa',
     label: 'MoA',
     category: '第三方扩展',
-    description: '使用 Hermes 的多模型协作能力。',
+    description: '使用 Native 的多模型协作能力。',
     requirement: '需要实验工具或额外 provider 配置',
   },
   {
     id: 'rl',
     label: 'RL',
     category: '第三方扩展',
-    description: '连接 Hermes 实验性强化学习相关能力。',
+    description: '连接 Native 实验性强化学习相关能力。',
     requirement: '需要实验工具开关或额外依赖',
   },
   {
@@ -382,7 +382,7 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
   },
 ];
 
-const HIDDEN_HERMES_TOOLS = new Set(['vision', 'vision_analyze']);
+const HIDDEN_NATIVE_TOOLS = new Set(['vision', 'vision_analyze']);
 
 export function DiagnosticsView() {
   const initialCommand = normalizeDiagnosticCommand(currentParam('command'));
@@ -415,12 +415,13 @@ export function DiagnosticsView() {
     (toolConfig?.tools || []).forEach((tool) => map.set(canonicalToolName(tool.id), tool));
     return map;
   }, [toolConfig]);
+  const nativeToolsets = toolConfig?.native_toolsets || [];
   const toolCards = useMemo(() => {
     const doctorState = diagnosticDoctorState(overview, diagnosticCache);
-    return HERMES_TOOL_CATALOG
-      .filter((item) => !isHiddenHermesTool(item.id))
-      .map((item) => diagnosticToolCardFor(item, doctorState, toolConfig?.hermes_toolsets || [], toolConfigById));
-  }, [diagnosticCache, overview, toolConfig?.hermes_toolsets, toolConfigById]);
+    return NATIVE_TOOL_CATALOG
+      .filter((item) => !isHiddenNativeTool(item.id))
+      .map((item) => diagnosticToolCardFor(item, doctorState, nativeToolsets, toolConfigById));
+  }, [diagnosticCache, nativeToolsets, overview, toolConfigById]);
   const attentionToolCount = toolCards.filter((card) => card.status.kind === 'limited' || !card.enabledByToolsList).length;
   const configuredToolCount = toolCards.filter((card) => card.config).length;
   const initialLoading = overviewLoading || toolsLoading || (runtimeBusy === 'refresh' && !runtimeStatus);
@@ -487,7 +488,7 @@ export function DiagnosticsView() {
 
   async function loadDiagnosticCache(actionId: string) {
     try {
-      const cache = await apiGet<DiagnosticCache>('/ui/hermes/diagnostics/cache');
+      const cache = await apiGet<DiagnosticCache>('/ui/native-agent/diagnostics/cache');
       setDiagnosticCache(cache);
       const cachedResult = cache.commands?.[actionId];
       if (cachedResult) {
@@ -506,7 +507,7 @@ export function DiagnosticsView() {
     setBusy(true);
     setStatus(`正在执行：${action.command}`);
     try {
-      const payload = await apiPost<DiagnosticResult>('/ui/hermes/diagnostic-command', { command: action.command });
+      const payload = await apiPost<DiagnosticResult>('/ui/native-agent/diagnostic-command', { command: action.command });
       setResult(payload);
       if (payload.diagnostic_cache) setDiagnosticCache(payload.diagnostic_cache);
       setStatus(payload.success ? payload.message || `${action.label} 完成` : payload.error || `${action.label} 失败`);
@@ -545,7 +546,7 @@ export function DiagnosticsView() {
   async function refreshToolConfig(isDisposed: () => boolean = () => false) {
     setToolsLoading(true);
     try {
-      const payload = await apiGet<ToolConfigPayload>('/ui/hermes/tools/config');
+      const payload = await apiGet<ToolConfigPayload>('/ui/native-agent/tools/config');
       if (!isDisposed()) setToolConfig(payload);
     } catch {
       if (!isDisposed()) setToolConfig(null);
@@ -707,7 +708,7 @@ export function DiagnosticsView() {
         <div className="section-heading-row">
           <div>
             <h2>工具配置入口</h2>
-            <p className="section-caption">Hermes 更新、Doctor 摘要和工具清单入口已经下沉到能力中心的基础设施区；这里保留 raw output 和排障详情。</p>
+            <p className="section-caption">Native Runtime、Doctor 摘要和工具清单入口已经下沉到能力中心的基础设施区；这里保留 raw output 和排障详情。</p>
           </div>
           <StatusPill active={!attentionToolCount && !toolsLoading} label={toolsLoading ? '同步中' : `${attentionToolCount} 个需处理`} />
         </div>
@@ -719,13 +720,13 @@ export function DiagnosticsView() {
         <div className="hy-diagnostics-routing-grid">
           <article className="hy-diagnostics-route-card">
             <strong>能力中心</strong>
-            <span>Hermes 更新、工具清单同步、Provider 配置、Agent Runtime 与 API 测试。</span>
+            <span>Native Runtime、工具清单同步、Provider 配置、Agent Runtime 与 API 测试。</span>
             <button type="button" className="hy-btn hy-btn-primary" onClick={() => navigateTo('tools')}>打开能力中心</button>
           </article>
           <article className="hy-diagnostics-route-card">
             <strong>诊断详情</strong>
             <span>Doctor raw output、配置检查、Bridge runtime、任务队列和本地探测仍在这里。</span>
-            <button type="button" className="hy-btn hy-btn-ghost" disabled={busy} onClick={() => void runDiagnostic('hermes doctor')}>
+            <button type="button" className="hy-btn hy-btn-ghost" disabled={busy} onClick={() => void runDiagnostic('native doctor')}>
               {busy ? '运行中...' : '运行 Doctor'}
             </button>
           </article>
@@ -736,7 +737,7 @@ export function DiagnosticsView() {
         <div className="section-heading-row">
           <div>
             <h2>运行状态</h2>
-            <p className="section-caption">读取 /status 与 /tasks，显示 Bridge Runtime、Hermes ready 和任务计数。</p>
+            <p className="section-caption">读取 /status 与 /tasks，显示 Bridge Runtime、Native ready 和任务计数。</p>
           </div>
           <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(runtimeBusy)} onClick={() => void loadRuntimeSnapshot()}>
             {runtimeBusy === 'refresh' ? '刷新中...' : '刷新'}
@@ -746,7 +747,7 @@ export function DiagnosticsView() {
           <span>服务：{runtimeStatus?.service || '—'}</span>
           <span>版本：{runtimeStatus?.version || '—'}</span>
           <span>Uptime：{formatDuration(runtimeStatus?.uptime_seconds)}</span>
-          <span>Hermes：{runtimeStatus?.hermes_ready ? 'ready' : 'not ready'}</span>
+          <span>Native Agent：{runtimeStatus?.native_agent_ready ? 'ready' : 'not ready'}</span>
           <span>任务：{formatTaskCounts(runtimeStatus?.task_counts)}</span>
         </div>
       </section>
@@ -759,7 +760,7 @@ export function DiagnosticsView() {
           </div>
           <span>{tasks.length} 项</span>
         </div>
-        <div className="hermes-config-form-grid">
+        <div className="native-config-form-grid">
           <label className="settings-field wide" htmlFor="diagnostics-task-description">
             <span>任务描述</span>
             <input
@@ -833,7 +834,7 @@ export function DiagnosticsView() {
             <p className="section-caption">默认先 dry-run；执行按钮会调用 /assistant/intent 创建低风险任务。</p>
           </div>
         </div>
-        <div className="hermes-config-form-grid">
+        <div className="native-config-form-grid">
           <label className="settings-field wide" htmlFor="diagnostics-intent-text">
             <span>输入文本</span>
             <input
@@ -929,7 +930,7 @@ function diagnosticResultLabel(result: DiagnosticResult | null, busy: boolean): 
 }
 
 function diagnosticOutput(result: DiagnosticResult | null, busy: boolean): string {
-  if (busy && !result) return '正在等待 Hermes 输出...';
+  if (busy && !result) return '正在等待 Native 输出...';
   if (!result) return '选择一个诊断命令后，结果会显示在这里。';
   return result.output || result.stdout || result.stderr || '命令没有输出。';
 }
@@ -996,10 +997,10 @@ function diagnosticLoadingLabel({
   runtimeBusy: string;
   toolsLoading: boolean;
 }) {
-  if (busy) return '正在运行 Hermes 诊断命令';
+  if (busy) return '正在运行 Native 诊断命令';
   if (runtimeBusy === 'refresh') return '正在刷新运行时状态';
   if (runtimeBusy) return '正在执行本地探测任务';
-  if (toolsLoading) return '正在同步 Hermes 工具清单';
+  if (toolsLoading) return '正在同步 Native 工具清单';
   if (initialLoading) return '正在整理诊断状态';
   return '诊断状态已同步';
 }
@@ -1007,21 +1008,21 @@ function diagnosticLoadingLabel({
 type DiagnosticDoctorState = {
   checked: boolean;
   cacheStale: boolean;
-  hermes?: DashboardStatus['hermes'];
+  nativeAgent?: DashboardStatus['native_agent'];
   availableTools: string[];
   limitedTools: string[];
   limitedToolDetails: Record<string, string>;
 };
 
 function diagnosticDoctorState(data: DashboardStatus | null, cache: DiagnosticCache | null): DiagnosticDoctorState {
-  const hermes = data?.hermes;
+  const nativeAgent = data?.native_agent;
   const cacheStale = Boolean(cache?.stale);
   const doctorSummary = cacheStale ? undefined : cache?.commands?.doctor?.doctor_summary;
-  const rawLimitedTools = doctorSummary ? doctorSummary.limited_tools || [] : hermes?.limited_tools || [];
-  const rawAvailableTools = doctorSummary?.available_tools?.length ? doctorSummary.available_tools : hermes?.available_tools || [];
-  const rawLimitedDetails = doctorSummary ? doctorSummary.limited_tool_details || {} : hermes?.limited_tool_details || {};
+  const rawLimitedTools = doctorSummary ? doctorSummary.limited_tools || [] : nativeAgent?.limited_tools || [];
+  const rawAvailableTools = doctorSummary?.available_tools?.length ? doctorSummary.available_tools : nativeAgent?.available_tools || [];
+  const rawLimitedDetails = doctorSummary ? doctorSummary.limited_tool_details || {} : nativeAgent?.limited_tool_details || {};
   const limitedToolDetails = Object.fromEntries(
-    Object.entries(rawLimitedDetails).filter(([tool]) => !isHiddenHermesTool(tool)),
+    Object.entries(rawLimitedDetails).filter(([tool]) => !isHiddenNativeTool(tool)),
   );
   const checked = Boolean(
     !cacheStale
@@ -1029,34 +1030,34 @@ function diagnosticDoctorState(data: DashboardStatus | null, cache: DiagnosticCa
       doctorSummary
       || rawAvailableTools.length
       || rawLimitedTools.length
-      || (hermes?.readiness_level && hermes.readiness_level !== 'unknown')
+      || (nativeAgent?.readiness_level && nativeAgent.readiness_level !== 'unknown')
     ),
   );
 
   return {
     checked,
     cacheStale,
-    hermes,
-    availableTools: rawAvailableTools.filter((tool) => !isHiddenHermesTool(tool)),
-    limitedTools: rawLimitedTools.filter((tool) => !isHiddenHermesTool(tool)),
+    nativeAgent,
+    availableTools: rawAvailableTools.filter((tool) => !isHiddenNativeTool(tool)),
+    limitedTools: rawLimitedTools.filter((tool) => !isHiddenNativeTool(tool)),
     limitedToolDetails,
   };
 }
 
 function diagnosticToolCardFor(
-  item: HermesToolCatalogItem,
+  item: NativeToolCatalogItem,
   state: DiagnosticDoctorState,
-  hermesToolsets: HermesToolsetItem[],
+  nativeToolsets: NativeToolsetItem[],
   configById: Map<string, ToolConfigItem>,
 ): DiagnosticToolCard {
   const config = configForCatalogItem(item, configById);
-  const enabledByToolsList = toolsetEnabledForItem(item, hermesToolsets);
+  const enabledByToolsList = toolsetEnabledForItem(item, nativeToolsets);
   const status = enabledByToolsList
     ? toolStatusFor(item, state)
     : {
         kind: 'limited' as const,
         label: '未启用',
-        detail: 'Hermes tools list 显示此工具组当前已禁用。',
+        detail: 'Native tools list 显示此工具组当前已禁用。',
       };
   return {
     item,
@@ -1067,7 +1068,7 @@ function diagnosticToolCardFor(
   };
 }
 
-function toolStatusFor(item: HermesToolCatalogItem, state: DiagnosticDoctorState): ToolStatus {
+function toolStatusFor(item: NativeToolCatalogItem, state: DiagnosticDoctorState): ToolStatus {
   if (item.planned) {
     return {
       kind: 'planned',
@@ -1082,7 +1083,7 @@ function toolStatusFor(item: HermesToolCatalogItem, state: DiagnosticDoctorState
       detail: limitedDetailFor(item, state.limitedToolDetails) || 'Doctor 已标记该工具不可用或缺少配置。',
     };
   }
-  if (state.cacheStale || !state.hermes?.command_exists || !state.checked) {
+  if (state.cacheStale || !state.nativeAgent?.command_exists || !state.checked) {
     return {
       kind: 'pending',
       label: '待检测',
@@ -1096,7 +1097,7 @@ function toolStatusFor(item: HermesToolCatalogItem, state: DiagnosticDoctorState
       detail: 'Doctor 已确认该工具可用。',
     };
   }
-  if (!state.availableTools.length && state.hermes.ready && state.hermes.readiness_level && state.hermes.readiness_level !== 'unknown') {
+  if (!state.availableTools.length && state.nativeAgent.ready && state.nativeAgent.readiness_level && state.nativeAgent.readiness_level !== 'unknown') {
     return {
       kind: 'ready',
       label: '可用',
@@ -1110,7 +1111,7 @@ function toolStatusFor(item: HermesToolCatalogItem, state: DiagnosticDoctorState
   };
 }
 
-function toolsetEnabledForItem(item: HermesToolCatalogItem, toolsets?: HermesToolsetItem[]): boolean {
+function toolsetEnabledForItem(item: NativeToolCatalogItem, toolsets?: NativeToolsetItem[]): boolean {
   if (!toolsets?.length) return true;
   const records = new Map(toolsets.map((toolset) => [canonicalToolName(toolset.canonical_id || toolset.id), toolset]));
   if (item.id === 'browser-cdp') return records.get('browser')?.enabled !== false;
@@ -1120,7 +1121,7 @@ function toolsetEnabledForItem(item: HermesToolCatalogItem, toolsets?: HermesToo
   return match?.enabled !== false;
 }
 
-function configForCatalogItem(item: HermesToolCatalogItem, configById: Map<string, ToolConfigItem>): ToolConfigItem | undefined {
+function configForCatalogItem(item: NativeToolCatalogItem, configById: Map<string, ToolConfigItem>): ToolConfigItem | undefined {
   return toolNameAliases(item)
     .map((alias) => configById.get(canonicalToolName(alias)))
     .find(Boolean);
@@ -1144,27 +1145,27 @@ function fieldIsVisibleWithSavedValues(field: ToolConfigField, fields: ToolConfi
   return true;
 }
 
-function isToolLimited(item: HermesToolCatalogItem, limitedTools?: string[]): boolean {
+function isToolLimited(item: NativeToolCatalogItem, limitedTools?: string[]): boolean {
   const limited = new Set((limitedTools || []).map(canonicalToolName));
   return toolNameAliases(item).some((alias) => limited.has(canonicalToolName(alias)));
 }
 
-function isToolAvailable(item: HermesToolCatalogItem, availableTools?: string[]): boolean {
+function isToolAvailable(item: NativeToolCatalogItem, availableTools?: string[]): boolean {
   const available = new Set((availableTools || []).map(canonicalToolName));
   return toolNameAliases(item).some((alias) => available.has(canonicalToolName(alias)));
 }
 
-function limitedDetailFor(item: HermesToolCatalogItem, details: Record<string, string>): string {
+function limitedDetailFor(item: NativeToolCatalogItem, details: Record<string, string>): string {
   const aliases = new Set(toolNameAliases(item).map(canonicalToolName));
   const match = Object.entries(details || {}).find(([key]) => aliases.has(canonicalToolName(key)));
   return match?.[1] || '';
 }
 
-function isHiddenHermesTool(tool: string | undefined): boolean {
-  return Boolean(tool && HIDDEN_HERMES_TOOLS.has(canonicalToolName(tool)));
+function isHiddenNativeTool(tool: string | undefined): boolean {
+  return Boolean(tool && HIDDEN_NATIVE_TOOLS.has(canonicalToolName(tool)));
 }
 
-function toolNameAliases(item: HermesToolCatalogItem): string[] {
+function toolNameAliases(item: NativeToolCatalogItem): string[] {
   return [item.id, ...(item.aliases || [])];
 }
 
@@ -1179,10 +1180,11 @@ function diagnosticOverviewItems(
 ): DiagnosticOverviewItem[] {
   const bridge = data?.bridge?.state || data?.bridge?.status || data?.bridge?.running || '';
   const bridgeOk = /running|listening|ready|ok/i.test(bridge);
-  const hermesReady = Boolean(data?.hermes?.ready);
-  const commandExists = Boolean(data?.hermes?.command_exists);
+  const nativeAgent = data?.native_agent;
+  const nativeAgentReady = Boolean(nativeAgent?.ready);
+  const commandExists = Boolean(nativeAgent?.command_exists);
   const workspaceReady = Boolean(data?.workspace?.initialized);
-  const doctorIssues = Number(data?.hermes?.doctor_issues_count || 0);
+  const doctorIssues = Number(nativeAgent?.doctor_issues_count || 0);
   const hasDoctorCache = Boolean(cache?.commands?.doctor);
   const live2d = live2dDiagnosticStatus(settings);
   const tts = ttsDiagnosticStatus(settings);
@@ -1191,7 +1193,7 @@ function diagnosticOverviewItems(
     {
       label: 'Python',
       status: commandExists ? 'passed' : 'warning',
-      detail: data?.hermes?.platform || '随 Hermes 环境检测',
+      detail: nativeAgent?.platform || '随 Native Runtime 检测',
     },
     {
       label: 'Node.js',
@@ -1205,8 +1207,8 @@ function diagnosticOverviewItems(
     },
     {
       label: '模型',
-      status: hermesReady ? 'passed' : commandExists ? 'warning' : 'error',
-      detail: hermesReady ? '基础链路可用' : commandExists ? '需要连接测试' : '未检测到 hermes',
+      status: nativeAgentReady ? 'passed' : commandExists ? 'warning' : 'error',
+      detail: nativeAgentReady ? '基础链路可用' : commandExists ? '需要连接测试' : 'Native Agent 未就绪',
     },
     {
       label: 'GPU',

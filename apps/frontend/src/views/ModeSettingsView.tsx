@@ -22,7 +22,6 @@ import {
 } from '../lib/bridge';
 import {
   listModelProfiles,
-  syncHermesProfileDefault,
   updateModelProfileDefaults,
   type ModelProfile,
   type ModelProfileDefaults,
@@ -112,17 +111,6 @@ type GeneralSettingsPayload = {
     configured_mode?: string;
     available_modes?: Array<{ id: string; name?: string; label?: string; description?: string }>;
   };
-  hermes?: {
-    status?: string;
-    version?: string;
-    platform?: string;
-    ready?: boolean;
-    readiness_level?: string;
-    command_exists?: boolean;
-    hermes_home?: string;
-    limited_tools?: string[];
-    doctor_issues_count?: number;
-  };
   integrations?: { astrbot?: StatusRecord; hapi?: StatusRecord };
   mode_settings?: Record<string, { id?: string; title?: string; summary?: string; config?: ModeConfig }>;
   workspace?: { path?: string; initialized?: boolean; created_at?: string; dirs?: Record<string, string> };
@@ -173,7 +161,7 @@ type BackupStatus = {
   total_size_display?: string;
 };
 
-type HermesSettingsConfig = {
+type NativeSettingsConfig = {
   model?: { provider?: string; default?: string; base_url?: string };
   provider_options?: Array<{ id: string; label?: string; api_key_configured?: boolean; auth_type?: string }>;
   api_key?: { configured?: boolean; display?: string };
@@ -202,7 +190,8 @@ type UninstallPlan = {
 };
 
 type UninstallPreviewResult = { ok?: boolean; error?: string; plan?: UninstallPlan };
-const LIVE2D_ACTIVATION_DRAFT_KEY = 'hermes-yachiyo-live2d-activation-draft';
+const LIVE2D_ACTIVATION_DRAFT_KEY = 'oha-yachiyo-live2d-activation-draft';
+const ASSISTANT_PROFILE_UPDATED_EVENT = 'oha-assistant-profile-updated';
 
 type GeneralSettingsForm = {
   persona_prompt: string;
@@ -323,7 +312,7 @@ function ReferenceSettingsHome() {
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [modelLoading, setModelLoading] = useState(true);
   const [assistantLoading, setAssistantLoading] = useState(true);
-  const [hermesConfig, setHermesConfig] = useState<HermesSettingsConfig | null>(null);
+  const [nativeConfig, setNativeConfig] = useState<NativeSettingsConfig | null>(null);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [modelDefaults, setModelDefaults] = useState<ModelProfileDefaults>({});
   const [modelProfileStatus, setModelProfileStatus] = useState('');
@@ -345,14 +334,14 @@ function ReferenceSettingsHome() {
     let disposed = false;
     void Promise.allSettled([
       apiGet<GeneralSettingsPayload>('/ui/settings'),
-      apiGet<HermesSettingsConfig>('/ui/hermes/config'),
+      apiGet<NativeSettingsConfig>('/ui/native-agent/config'),
       apiGet<AssistantProfilePayload>('/assistant/profile'),
       listModelProfiles(),
     ]).then(([settingsResult, configResult, profileResult, modelProfileResult]) => {
       if (disposed) return;
       if (settingsResult.status === 'fulfilled') setPayload(settingsResult.value);
       if (configResult.status === 'fulfilled') {
-        setHermesConfig(configResult.value);
+        setNativeConfig(configResult.value);
       }
       if (profileResult.status === 'fulfilled') {
         setAssistantProfile(profileResult.value);
@@ -406,7 +395,7 @@ function ReferenceSettingsHome() {
         },
       } : current);
       setAssistantStatus(result.message || '助手资料已保存');
-      window.dispatchEvent(new CustomEvent('hermes-assistant-profile-updated'));
+      window.dispatchEvent(new CustomEvent(ASSISTANT_PROFILE_UPDATED_EVENT));
     } catch (err) {
       setAssistantStatus(err instanceof Error ? err.message : '保存助手资料失败');
     } finally {
@@ -432,7 +421,7 @@ function ReferenceSettingsHome() {
       },
     } : current);
     setAssistantStatus(result.message || '头像已更新');
-    window.dispatchEvent(new CustomEvent('hermes-assistant-profile-updated'));
+    window.dispatchEvent(new CustomEvent(ASSISTANT_PROFILE_UPDATED_EVENT));
   }
 
   function openAvatarEditor(target: AvatarTarget, selection: AvatarImageSelection) {
@@ -533,7 +522,7 @@ function ReferenceSettingsHome() {
     setConnectionTesting(true);
     setConnectionTestResult(null);
     try {
-      const result = await apiPost<{ success?: boolean; ok?: boolean; error?: string; message?: string }>('/ui/hermes/connection-test', {});
+      const result = await apiPost<{ success?: boolean; ok?: boolean; error?: string; message?: string }>('/ui/native-agent/connection-test', {});
       setConnectionTestResult(result);
     } catch (err) {
       setConnectionTestResult({ success: false, error: err instanceof Error ? err.message : '连接失败，请检查模型配置' });
@@ -545,19 +534,13 @@ function ReferenceSettingsHome() {
   async function applyModelProfileDefault(capability: 'chat' | 'vision', profileId: string) {
     if (!profileId || profileApplying) return;
     setProfileApplying(capability);
-    setModelProfileStatus(capability === 'chat' ? '正在同步主模型...' : '正在同步图片识别模型...');
+    setModelProfileStatus(capability === 'chat' ? '正在设置主模型...' : '正在设置图片识别模型...');
     try {
-      const sync = await syncHermesProfileDefault(capability, profileId);
-      if (sync.ok === false) throw new Error(sync.error || sync.message || '同步 Hermes 配置失败');
       const defaults = await updateModelProfileDefaults({ [capability]: profileId });
       setModelDefaults(defaults.defaults || {});
-      const [nextConfig, nextProfiles] = await Promise.all([
-        apiGet<HermesSettingsConfig>('/ui/hermes/config'),
-        listModelProfiles(),
-      ]);
-      setHermesConfig(nextConfig);
+      const nextProfiles = await listModelProfiles();
       setModelProfiles(nextProfiles.profiles || []);
-      setModelProfileStatus(capability === 'chat' ? '主模型已同步' : '图片识别模型已同步');
+      setModelProfileStatus(capability === 'chat' ? '主模型已设置' : '图片识别模型已设置');
     } catch (err) {
       setModelProfileStatus(err instanceof Error ? err.message : '模型配置同步失败');
     } finally {
@@ -589,14 +572,14 @@ function ReferenceSettingsHome() {
   const appVersion = payload?.app?.version || '0.4.0';
   const trayEnabled = payload?.app?.tray_enabled !== false;
   const startMinimized = Boolean(payload?.app?.start_minimized);
-  const providerOptions = hermesConfig?.provider_options?.length ? hermesConfig.provider_options : FALLBACK_PROVIDER_OPTIONS;
-  const realProvider = hermesConfig?.model?.provider || '';
+  const providerOptions = nativeConfig?.provider_options?.length ? nativeConfig.provider_options : FALLBACK_PROVIDER_OPTIONS;
+  const realProvider = nativeConfig?.model?.provider || '';
   const currentProvider = realProvider || providerOptions[0]?.id || 'openai';
   const currentProviderOption = providerOptions.find((opt) => opt.id === currentProvider);
-  const apiKeyConfigured = currentProviderOption?.api_key_configured ?? hermesConfig?.api_key?.configured ?? false;
-  const apiKeyDisplay = hermesConfig?.api_key?.display || '';
-  const availableChatProfiles = modelProfiles.filter((profile) => profile.capability === 'chat' && profile.status === 'available' && profile.enabled !== false && profile.can_use_as_hermes !== false);
-  const availableVisionProfiles = modelProfiles.filter((profile) => profile.capability === 'vision' && profile.status === 'available' && profile.enabled !== false && profile.can_use_as_hermes !== false);
+  const apiKeyConfigured = currentProviderOption?.api_key_configured ?? nativeConfig?.api_key?.configured ?? false;
+  const apiKeyDisplay = nativeConfig?.api_key?.display || '';
+  const availableChatProfiles = modelProfiles.filter((profile) => profile.capability === 'chat' && profile.status === 'available' && profile.enabled !== false);
+  const availableVisionProfiles = modelProfiles.filter((profile) => profile.capability === 'vision' && profile.status === 'available' && profile.enabled !== false);
   const selectedChatProfileId = modelDefaults.chat || '';
   const selectedVisionProfileId = modelDefaults.vision || '';
   const selectedChatProfile = availableChatProfiles.find((profile) => profile.profile_id === selectedChatProfileId);
@@ -607,7 +590,7 @@ function ReferenceSettingsHome() {
 
   const updateDescription = updateResult?.checked
     ? (updateResult.update_available ? (updateResult.reason || '发现可用更新') : (updateResult.reason || '当前已是最新版本'))
-    : `Hermes Yachiyo v${appVersion}`;
+    : `Oha Yachiyo v${appVersion}`;
   const avatarEditorModal = avatarEditor ? (
     <AvatarEditorModal
       editor={avatarEditor}
@@ -625,7 +608,7 @@ function ReferenceSettingsHome() {
     <main className="app-shell settings-page">
       <div className="settings-page-header">
         <div className="settings-page-title">设置</div>
-        <div className="settings-page-subtitle">配置 Hermes Yachiyo 的各项参数</div>
+        <div className="settings-page-subtitle">配置 Oha Yachiyo 的各项参数</div>
       </div>
 
       <SettingsSection title="通用">
@@ -856,7 +839,7 @@ function ReferenceSettingsHome() {
             </SettingsItem>
             <SettingsItem
               label="图片识别模型"
-              description={selectedVisionProfile ? `${selectedVisionProfile.name} · ${selectedVisionProfile.model || '未记录模型 ID'}` : hermesConfig?.vision?.model ? `${hermesConfig.vision.effective_provider || 'vision'} · ${hermesConfig.vision.model}` : '选择已通过多模态测试的 vision Profile'}
+              description={selectedVisionProfile ? `${selectedVisionProfile.name} · ${selectedVisionProfile.model || '未记录模型 ID'}` : nativeConfig?.vision?.model ? `${nativeConfig.vision.effective_provider || 'vision'} · ${nativeConfig.vision.model}` : '选择已通过多模态测试的 vision Profile'}
             >
               <select
                 className="settings-select settings-profile-select"
@@ -894,11 +877,11 @@ function ReferenceSettingsHome() {
             {updateChecking ? '检查中…' : updateResult?.update_available ? '前往更新' : '检查更新'}
           </SettingsActionButton>
         </SettingsItem>
-        <SettingsItem label="Hermes Agent 更新" description="更新 Hermes 后会刷新工具清单、Doctor 结果和 Yachiyo 的工具配置入口">
-          <SettingsActionButton onClick={() => navigateTo('tools')}>打开工具中心</SettingsActionButton>
+        <SettingsItem label="Native Runtime" description="模型、工具与 readiness 状态在模型配置和能力中心查看。">
+          <SettingsActionButton onClick={() => navigateTo('provider')}>打开模型配置</SettingsActionButton>
         </SettingsItem>
-        <SettingsItem label="项目主页" description="github.com/kuguya-AI-app-develop/Hermes-Yachiyo">
-          <SettingsActionButton onClick={() => void openExternalUrl('https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo')}>打开</SettingsActionButton>
+        <SettingsItem label="项目主页" description="github.com/kuguya-AI-app-develop/oha-yachiyo">
+          <SettingsActionButton onClick={() => void openExternalUrl('https://github.com/kuguya-AI-app-develop/oha-yachiyo')}>打开</SettingsActionButton>
         </SettingsItem>
       </SettingsSection>
 
@@ -1000,7 +983,7 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
   const [payload, setPayload] = useState<SettingsPayload | null>(null);
   const [form, setForm] = useState<ModeForm>({});
   const [manualModelPath, setManualModelPath] = useState('');
-  const [manualArchivePath, setManualArchivePath] = useState('~/Downloads/hermes-yachiyo-live2d-yachiyo-20260423.zip');
+  const [manualArchivePath, setManualArchivePath] = useState('~/Downloads/oha-yachiyo-live2d-yachiyo-20260423.zip');
   const [status, setStatus] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -1492,7 +1475,7 @@ function Live2DResourceInfo({
             <input
               id="manual-live2d-archive-path"
               value={manualArchivePath}
-              placeholder="~/Downloads/hermes-yachiyo-live2d-yachiyo-20260423.zip"
+              placeholder="~/Downloads/oha-yachiyo-live2d-yachiyo-20260423.zip"
               onChange={(event) => onManualArchivePathChange(event.target.value)}
             />
           </div>
@@ -1652,7 +1635,7 @@ function SystemSettingsView() {
   const [backupStatus, setBackupStatus] = useState<BackupStatus | null>(null);
   const [backupManagerOpen, setBackupManagerOpen] = useState(false);
   const [backupAction, setBackupAction] = useState('');
-  const [uninstallScope, setUninstallScope] = useState('yachiyo_only');
+  const [uninstallScope, setUninstallScope] = useState('oha_only');
   const [uninstallKeepConfig, setUninstallKeepConfig] = useState(true);
   const [uninstallGptSovits, setUninstallGptSovits] = useState(false);
   const [uninstallPreview, setUninstallPreview] = useState<UninstallPlan | null>(null);
@@ -1836,7 +1819,7 @@ function SystemSettingsView() {
         const result = await apiPost<{ ok?: boolean; error?: string; desktop_restart_backend_required?: boolean }>('/ui/bridge/restart');
         if (result.ok === false) throw new Error(result.error || 'Bridge 重启失败');
         if (result.desktop_restart_backend_required) {
-          throw new Error(result.error || desktopResult.error || '当前环境无法自动重启 Bridge，请重启 Hermes-Yachiyo');
+          throw new Error(result.error || desktopResult.error || '当前环境无法自动重启 Bridge，请重启 Oha-Yachiyo');
         }
       }
       await refreshGeneralSettings();
@@ -1965,7 +1948,7 @@ function SystemSettingsView() {
       setStatus(`卸载已执行。${backupText} 正在删除应用本体并退出…`);
       const removeResult = await removeAppBundleAndQuit();
       if (!removeResult.success) {
-        throw new Error(removeResult.error || '本地资料已删除，但无法自动删除应用本体；请从 Applications 中手动移除 Hermes-Yachiyo');
+        throw new Error(removeResult.error || '本地资料已删除，但无法自动删除应用本体；请从 Applications 中手动移除 Oha-Yachiyo');
       }
       return;
     } catch (err) {
@@ -1981,7 +1964,7 @@ function SystemSettingsView() {
       return;
     }
     requestConfirm({
-      title: '确认卸载 Hermes-Yachiyo？',
+      title: '确认卸载 Oha-Yachiyo？',
       description: '卸载会删除所选本机资料，此操作不可撤销。请确认卸载范围、备份选项和 GPT-SoVITS 选项无误。',
       confirmLabel: '确认卸载',
       variant: 'danger',
@@ -2177,11 +2160,11 @@ function SystemSettingsView() {
         </SettingsSection>
 
         <SettingsSection title="更新">
-          <SettingsItem label="应用更新" description={`Hermes Yachiyo v${payload?.app?.version || '0.4.0'} · 下载进度和版本差异在更新页处理`}>
+          <SettingsItem label="应用更新" description={`Oha Yachiyo v${payload?.app?.version || '0.4.0'} · 下载进度和版本差异在更新页处理`}>
             <SettingsActionButton onClick={() => navigateTo('app-update')}>打开更新页</SettingsActionButton>
           </SettingsItem>
-          <SettingsItem label="Hermes Agent 更新" description="Hermes 自身功能、toolset 和 provider 能力在工具中心更新并重新同步">
-            <SettingsActionButton onClick={() => navigateTo('tools')}>打开工具中心</SettingsActionButton>
+          <SettingsItem label="Native Runtime" description="Oha-Yachiyo 使用内置 Native Runtime，不再更新外部 Native 执行内核。">
+            <SettingsActionButton onClick={() => navigateTo('provider')}>打开模型配置</SettingsActionButton>
           </SettingsItem>
         </SettingsSection>
 
@@ -2201,8 +2184,7 @@ function SystemSettingsView() {
               <div className="settings-field">
                 <label htmlFor="uninstall-scope">卸载范围</label>
                 <select id="uninstall-scope" value={uninstallScope} onChange={(event) => setUninstallScope(event.target.value)}>
-                  <option value="yachiyo_only">仅卸载 Hermes-Yachiyo</option>
-                  <option value="include_hermes">也卸载 Hermes Agent 架构</option>
+                  <option value="oha_only">卸载 Oha-Yachiyo 本地资料</option>
                 </select>
               </div>
               <label className="settings-check" htmlFor="uninstall-keep-config">
@@ -2277,7 +2259,7 @@ function modeLabel(mode: string) {
   return mode === 'live2d' ? 'Live2D' : 'Bubble';
 }
 
-function hermesReadinessLabel(level?: string): string {
+function nativeReadinessLabel(level?: string): string {
   const labels: Record<string, string> = {
     full_ready: 'Doctor 完整就绪',
     core_ready: '核心能力就绪',

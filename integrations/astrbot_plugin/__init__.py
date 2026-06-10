@@ -1,1 +1,1 @@
-"""Hermes-Yachiyo AstrBot 桥接插件"""
+"""Oha-Yachiyo AstrBot 桥接插件"""

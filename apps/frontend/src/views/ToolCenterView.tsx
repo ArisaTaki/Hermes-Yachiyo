@@ -14,19 +14,16 @@ import {
   onDesktopTerminalExit,
   openAppView,
   resizeDesktopTerminal,
-  startDesktopTerminal,
   writeDesktopTerminal,
-  type DesktopTerminalTask,
 } from '../lib/bridge';
 import { currentParam, navigateTo } from '../lib/view';
 
-type HermesStatus = {
+type NativeStatus = {
   status?: string;
   version?: string;
   release_date?: string;
   platform?: string;
   command_exists?: boolean;
-  hermes_home?: string;
   ready?: boolean;
   readiness_level?: string;
   available_tools?: string[];
@@ -36,7 +33,7 @@ type HermesStatus = {
 };
 
 type DashboardData = {
-  hermes?: HermesStatus;
+  native_agent?: NativeStatus;
 };
 
 type DoctorSummary = {
@@ -64,7 +61,7 @@ type DiagnosticCache = {
   commands?: Record<string, DiagnosticResult>;
 };
 
-type HermesToolCatalogItem = {
+type NativeToolCatalogItem = {
   id: string;
   label: string;
   category: string;
@@ -114,7 +111,7 @@ type ToolConfigItem = {
   terminal_command?: string;
 };
 
-type HermesToolsetItem = {
+type NativeToolsetItem = {
   id: string;
   canonical_id?: string;
   label?: string;
@@ -127,7 +124,7 @@ type ToolConfigPayload = {
   needs_env_refresh?: boolean;
   config_path?: string;
   env_path?: string;
-  hermes_toolsets?: HermesToolsetItem[];
+  native_toolsets?: NativeToolsetItem[];
   tools?: ToolConfigItem[];
 };
 
@@ -167,7 +164,7 @@ type ToolConfigTestResult = {
   tool_config?: ToolConfigPayload;
 };
 
-type HermesUpdateResult = {
+type NativeUpdateResult = {
   ok?: boolean;
   success?: boolean;
   error?: string;
@@ -219,21 +216,21 @@ type ToolAttentionItem = {
   reason: 'limited' | 'disabled' | 'unknown';
   detail?: string;
 };
-type HermesUpdateMode = 'check' | 'run' | 'refresh' | null;
+type NativeUpdateMode = 'check' | 'run' | 'refresh' | null;
 type EmbeddedTerminalStatus = 'idle' | 'starting' | 'running' | 'exited' | 'error';
 type EmbeddedTerminalSession = {
   id: string;
-  task: DesktopTerminalTask;
+  task: string;
   title: string;
 };
 
-const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
+const NATIVE_TOOL_CATALOG: NativeToolCatalogItem[] = [
   {
     id: 'web',
     label: '联网与网页读取',
     category: '信息检索',
-    description: '搜索、读取网页内容并把结果交给 Hermes 推理。',
-    requirement: '需要 Hermes web/search 工具可用',
+    description: '搜索、读取网页内容并把结果交给 Native 推理。',
+    requirement: '需要 Native web/search 工具可用',
     aliases: ['search'],
   },
   {
@@ -241,7 +238,7 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
     label: '浏览器自动化',
     category: '信息检索',
     description: '通过浏览器会话访问需要交互的页面。',
-    requirement: '需要 Hermes browser 工具可用',
+    requirement: '需要 Native browser 工具可用',
   },
   {
     id: 'browser-cdp',
@@ -259,30 +256,30 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
   },
   {
     id: 'tts',
-    label: 'Hermes 文本转语音',
+    label: 'Native 文本转语音',
     category: '多模态',
-    description: 'Hermes Agent 自己暴露的文本转音频工具；不等同于 Yachiyo 主动关怀的 GPT-SoVITS 播报配置。',
-    requirement: '需要 Hermes tts 工具集启用',
+    description: 'Native Agent 自己暴露的文本转音频工具；不等同于 Yachiyo 主动关怀的 GPT-SoVITS 播报配置。',
+    requirement: '需要 Native tts 工具启用',
   },
   {
     id: 'terminal',
     label: '终端执行',
     category: '本地工作',
-    description: '在 Hermes 允许范围内执行命令和读取结果。',
-    requirement: '需要 Hermes 本地执行权限',
+    description: '经过 Native PolicyGate 和审批后执行命令并读取结果。',
+    requirement: '需要 Native terminal.run 工具权限',
   },
   {
     id: 'file',
     label: '文件读写',
     category: '本地工作',
     description: '读取、生成和修改本地工作文件。',
-    requirement: '需要 Hermes 文件工具权限',
+    requirement: '需要 Native 文件工具权限',
   },
   {
     id: 'skills',
     label: '技能加载',
     category: '本地工作',
-    description: '加载 Hermes 或项目内定义的技能工作流。',
+    description: '加载 Native 或项目内定义的技能工作流。',
     requirement: '需要技能目录或插件可读取',
   },
   {
@@ -290,21 +287,21 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
     label: '代码执行',
     category: '本地工作',
     description: '运行受控代码片段，处理数据或验证逻辑。',
-    requirement: '需要 Hermes 代码执行环境',
+    requirement: '需要 Native 代码执行环境',
   },
   {
     id: 'computer_use',
     label: 'Computer Use',
     category: '本地工作',
-    description: '让 Hermes 控制本机桌面应用和窗口交互。',
-    requirement: '需要 Hermes computer_use 工具集与 macOS 权限',
+    description: '让 Native 控制本机桌面应用和窗口交互。',
+    requirement: '需要 Native computer_use 工具集与 macOS 权限',
     aliases: ['computer-use', 'computer'],
   },
   {
     id: 'memory',
     label: '记忆',
     category: '长期上下文',
-    description: '读取和维护 Hermes 记忆信息。',
+    description: '读取和维护 Native 记忆信息。',
     requirement: '需要 memory 工具集启用',
   },
   {
@@ -318,28 +315,28 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
     id: 'todo',
     label: '任务清单',
     category: '长期上下文',
-    description: '维护 Hermes 内部的待办与计划状态。',
+    description: '维护 Native 内部的待办与计划状态。',
     requirement: '需要 todo 工具集启用',
   },
   {
     id: 'cronjob',
     label: '定时任务',
     category: '自动化',
-    description: '创建或管理 Hermes 侧的定时自动化。',
+    description: '创建或管理 Native 侧的定时自动化。',
     requirement: '需要 cronjob 工具集配置',
   },
   {
     id: 'clarify',
     label: '澄清问题',
     category: '自动化',
-    description: '让 Hermes 在缺少关键信息时向用户提问。',
+    description: '让 Native 在缺少关键信息时向用户提问。',
     requirement: '需要 clarify 工具集启用',
   },
   {
     id: 'delegation',
     label: '任务委派',
     category: '自动化',
-    description: '让 Hermes 将任务拆分给子 agent 或协作流程。',
+    description: '让 Native 将任务拆分给子 agent 或协作流程。',
     requirement: '需要 delegation 工具集启用',
   },
   {
@@ -375,22 +372,22 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
     id: 'yuanbao',
     label: '腾讯元宝',
     category: '第三方扩展',
-    description: '连接 Hermes 的元宝扩展能力。',
-    requirement: '需要 hermes-yuanbao 配置',
-    aliases: ['hermes-yuanbao'],
+    description: '连接 Native 的元宝扩展能力。',
+    requirement: '需要 Native yuanbao 配置',
+    aliases: ['yuanbao'],
   },
   {
     id: 'moa',
     label: 'MoA',
     category: '第三方扩展',
-    description: '使用 Hermes 的多模型协作能力。',
+    description: '使用 Native 的多模型协作能力。',
     requirement: '需要实验工具或额外 provider 配置',
   },
   {
     id: 'rl',
     label: 'RL',
     category: '第三方扩展',
-    description: '连接 Hermes 实验性强化学习相关能力。',
+    description: '连接 Native 实验性强化学习相关能力。',
     requirement: '需要实验工具开关或额外依赖',
   },
   {
@@ -403,7 +400,7 @@ const HERMES_TOOL_CATALOG: HermesToolCatalogItem[] = [
   },
 ];
 
-const HIDDEN_HERMES_TOOLS = new Set(['vision', 'vision_analyze']);
+const HIDDEN_NATIVE_TOOLS = new Set(['vision', 'vision_analyze']);
 
 const YACHIYO_WORKFLOWS: YachiyoWorkflowDefinition[] = [
   {
@@ -422,7 +419,7 @@ const YACHIYO_WORKFLOWS: YachiyoWorkflowDefinition[] = [
     primaryAction: { label: '配置主动关怀语音', target: 'proactive-tts' },
     requiredCapabilities: ['tts', 'todo', 'cronjob', 'memory'],
     ownedSettingsRoute: '主动关怀语音 / 对话',
-    externalRecommendations: ['Hermes 自动化工具集', '本机 TTS 或 GPT-SoVITS'],
+    externalRecommendations: ['Native 自动化工具集', '本机 TTS 或 GPT-SoVITS'],
   },
   {
     id: 'context-awareness',
@@ -449,18 +446,18 @@ export function ToolCenterView() {
   const [savedDraftSnapshot, setSavedDraftSnapshot] = useState('');
   const [pendingNavigation, setPendingNavigation] = useState<PendingNavigation | null>(null);
   const [toolTestResult, setToolTestResult] = useState<ToolConfigTestResult | null>(null);
-  const [hermesUpdate, setHermesUpdate] = useState<HermesUpdateResult | null>(null);
+  const [nativeUpdate, setNativeUpdate] = useState<NativeUpdateResult | null>(null);
   const [error, setError] = useState('');
   const [actionStatus, setActionStatus] = useState('');
   const [busy, setBusy] = useState(false);
   const [configBusy, setConfigBusy] = useState(false);
   const [updateBusy, setUpdateBusy] = useState(false);
-  const [updateMode, setUpdateMode] = useState<HermesUpdateMode>(null);
+  const [updateMode, setUpdateMode] = useState<NativeUpdateMode>(null);
   const [updateStartedAt, setUpdateStartedAt] = useState<number | null>(null);
   const [updateElapsedSeconds, setUpdateElapsedSeconds] = useState(0);
   const [updateWithFullBackup, setUpdateWithFullBackup] = useState(false);
   const [updateTerminalStatus, setUpdateTerminalStatus] = useState<EmbeddedTerminalStatus>('idle');
-  const [updateTerminalMessage, setUpdateTerminalMessage] = useState('更新终端会显示 Hermes 的实时输出。');
+  const [updateTerminalMessage, setUpdateTerminalMessage] = useState('更新终端会显示 Native 的实时输出。');
   const [updateTerminalSession, setUpdateTerminalSession] = useState<EmbeddedTerminalSession | null>(null);
   const updateTerminalPanelRef = useRef<HTMLElement | null>(null);
   const updateTerminalHostRef = useRef<HTMLDivElement | null>(null);
@@ -475,8 +472,8 @@ export function ToolCenterView() {
       try {
         const [payload, cache, config] = await Promise.all([
           apiGet<DashboardData>('/ui/dashboard'),
-          apiGet<DiagnosticCache>('/ui/hermes/diagnostics/cache').catch(() => null),
-          apiGet<ToolConfigPayload>('/ui/hermes/tools/config').catch(() => null),
+          apiGet<DiagnosticCache>('/ui/native-agent/diagnostics/cache').catch(() => null),
+          apiGet<ToolConfigPayload>('/ui/native-agent/tools/config').catch(() => null),
         ]);
         if (!disposed) {
           setData(payload);
@@ -556,7 +553,7 @@ export function ToolCenterView() {
     if (!updateTerminalSession) return undefined;
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault();
-      event.returnValue = 'Hermes 更新仍在运行，关闭窗口会中断更新。';
+      event.returnValue = 'Native Runtime仍在运行，关闭窗口会中断更新。';
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
@@ -564,17 +561,17 @@ export function ToolCenterView() {
 
   useEffect(() => {
     if (!updateTerminalSession) return undefined;
-    const previousGuard = window.hermesRouteLeaveGuard;
-    const guard: NonNullable<typeof window.hermesRouteLeaveGuard> = (nextView) => {
+    const previousGuard = window.ohaRouteLeaveGuard;
+    const guard: NonNullable<typeof window.ohaRouteLeaveGuard> = (nextView) => {
       if (nextView === 'tools') return previousGuard ? previousGuard(nextView) : true;
-      setActionStatus('Hermes 更新正在运行，完成或停止前暂不切换页面。');
-      scrollToHermesUpdateTerminal();
+      setActionStatus('Native Runtime正在运行，完成或停止前暂不切换页面。');
+      scrollToNativeUpdateTerminal();
       return false;
     };
-    window.hermesRouteLeaveGuard = guard;
+    window.ohaRouteLeaveGuard = guard;
     return () => {
-      if (window.hermesRouteLeaveGuard === guard) {
-        window.hermesRouteLeaveGuard = previousGuard;
+      if (window.ohaRouteLeaveGuard === guard) {
+        window.ohaRouteLeaveGuard = previousGuard;
       }
     };
   }, [updateTerminalSession]);
@@ -591,18 +588,18 @@ export function ToolCenterView() {
       updateTerminalIdRef.current = null;
       setUpdateTerminalSession(null);
       setUpdateTerminalStatus(succeeded ? 'exited' : 'error');
-      setUpdateTerminalMessage(hermesUpdateTerminalExitMessage(succeeded, payload.exitCode));
+      setUpdateTerminalMessage(nativeUpdateTerminalExitMessage(succeeded, payload.exitCode));
       if (succeeded) {
         setUpdateBusy(true);
         setUpdateMode('refresh');
         setUpdateStartedAt(Date.now());
-        setActionStatus('Hermes 更新已结束，正在刷新工具清单和 Doctor 状态...');
-        void refreshAfterHermesUpdateTerminal();
+        setActionStatus('Native Runtime已结束，正在刷新工具清单和 Doctor 状态...');
+        void refreshAfterNativeUpdateTerminal();
       } else {
         setUpdateBusy(false);
         setUpdateMode(null);
         setUpdateStartedAt(null);
-        setActionStatus(`Hermes 更新异常结束（exit=${payload.exitCode}），请查看终端输出。`);
+        setActionStatus(`Native Runtime异常结束（exit=${payload.exitCode}），请查看终端输出。`);
       }
     });
     return () => {
@@ -617,7 +614,7 @@ export function ToolCenterView() {
 
   useEffect(() => {
     if (!hasEmbeddedTerminal()) return undefined;
-    const onResize = () => fitHermesUpdateTerminal();
+    const onResize = () => fitNativeUpdateTerminal();
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
@@ -641,17 +638,17 @@ export function ToolCenterView() {
       if (attempt > 0) await wait(options.retryDelayMs || 900);
       try {
         const check = options.checkUpdate
-          ? await apiPost<HermesUpdateResult>('/ui/hermes/update/check').catch(() => null)
+          ? await apiPost<NativeUpdateResult>('/ui/native-agent/update/check').catch(() => null)
           : null;
         const doctor = options.runDoctor
-          ? await apiPost<DiagnosticResult>('/ui/hermes/diagnostic-command', { command: 'hermes doctor' }).catch(() => null)
+          ? await apiPost<DiagnosticResult>('/ui/native-agent/diagnostic-command', { command: 'native doctor' }).catch(() => null)
           : null;
         const [payload, cache, config] = await Promise.all([
-          apiPost<DashboardData>('/ui/hermes/recheck'),
-          apiGet<DiagnosticCache>('/ui/hermes/diagnostics/cache').catch(() => doctor?.diagnostic_cache || null),
-          apiGet<ToolConfigPayload>('/ui/hermes/tools/config').catch(() => null),
+          apiPost<DashboardData>('/ui/native-agent/recheck'),
+          apiGet<DiagnosticCache>('/ui/native-agent/diagnostics/cache').catch(() => doctor?.diagnostic_cache || null),
+          apiGet<ToolConfigPayload>('/ui/native-agent/tools/config').catch(() => null),
         ]);
-        if (check) setHermesUpdate(check);
+        if (check) setNativeUpdate(check);
         setData(payload);
         setDiagnosticCache(cache);
         setToolConfig(config);
@@ -665,33 +662,33 @@ export function ToolCenterView() {
     throw lastError instanceof Error ? lastError : new Error('刷新工具状态失败');
   }
 
-  async function recheckHermes() {
+  async function recheckNative() {
     if (busy) return;
     setBusy(true);
-    setActionStatus('正在重新检测 Hermes 工具状态...');
+    setActionStatus('正在重新检测 Native 工具状态...');
     try {
       await refreshToolCenterState();
       setActionStatus('工具状态已刷新');
     } catch (err) {
-      setActionStatus(err instanceof Error ? err.message : '重新检测 Hermes 失败');
+      setActionStatus(err instanceof Error ? err.message : '重新检测 Native 失败');
     } finally {
       setBusy(false);
     }
   }
 
-  async function checkHermesUpdate() {
+  async function checkNativeUpdate() {
     if (updateBusy) return;
     setUpdateBusy(true);
     setUpdateMode('check');
     setUpdateStartedAt(Date.now());
-    setActionStatus('正在检查 Hermes 更新...');
+    setActionStatus('正在检查 Native Runtime...');
     try {
-      const result = await apiPost<HermesUpdateResult>('/ui/hermes/update/check');
-      setHermesUpdate(result);
-      if (!result.ok) throw new Error(result.error || 'Hermes 更新检查失败');
-      setActionStatus(result.update_available ? '发现 Hermes 更新' : 'Hermes 已是当前版本');
+      const result = await apiPost<NativeUpdateResult>('/ui/native-agent/update/check');
+      setNativeUpdate(result);
+      if (!result.ok) throw new Error(result.error || 'Native Runtime检查失败');
+      setActionStatus(result.update_available ? '发现 Native Runtime' : 'Native 已是当前版本');
     } catch (err) {
-      setActionStatus(err instanceof Error ? err.message : 'Hermes 更新检查失败');
+      setActionStatus(err instanceof Error ? err.message : 'Native Runtime检查失败');
     } finally {
       setUpdateBusy(false);
       setUpdateMode(null);
@@ -699,31 +696,31 @@ export function ToolCenterView() {
     }
   }
 
-  async function updateHermesAgent() {
+  async function updateNativeAgent() {
     if (updateBusy) return;
     if (hasEmbeddedTerminal()) {
-      await startHermesUpdateTerminal();
+      await startNativeUpdateTerminal();
       return;
     }
-    await updateHermesAgentViaBridge();
+    await updateNativeAgentViaBridge();
   }
 
-  async function updateHermesAgentViaBridge() {
+  async function updateNativeAgentViaBridge() {
     setUpdateBusy(true);
     setUpdateMode('run');
     setUpdateStartedAt(Date.now());
-    setActionStatus('正在更新 Hermes，并在完成后刷新工具清单...');
+    setActionStatus('正在更新 Native，并在完成后刷新工具清单...');
     try {
-      const result = await apiPost<HermesUpdateResult>('/ui/hermes/update/run', { backup: updateWithFullBackup });
-      setHermesUpdate(result);
+      const result = await apiPost<NativeUpdateResult>('/ui/native-agent/update/run', { backup: updateWithFullBackup });
+      setNativeUpdate(result);
       if (result.tool_config) setToolConfig(result.tool_config);
       if (result.diagnostic_cache) setDiagnosticCache(result.diagnostic_cache);
       if (result.dashboard) setData(result.dashboard);
       await refreshToolCenterState({ checkUpdate: true, runDoctor: true, retries: 8, retryDelayMs: 1200 });
-      if (!result.ok) throw new Error(result.error || result.message || 'Hermes 更新失败');
-      setActionStatus(result.message || 'Hermes 更新完成，工具状态已刷新');
+      if (!result.ok) throw new Error(result.error || result.message || 'Native Runtime失败');
+      setActionStatus(result.message || 'Native Runtime完成，工具状态已刷新');
     } catch (err) {
-      setActionStatus(err instanceof Error ? err.message : 'Hermes 更新失败');
+      setActionStatus(err instanceof Error ? err.message : 'Native Runtime失败');
     } finally {
       setUpdateBusy(false);
       setUpdateMode(null);
@@ -731,7 +728,7 @@ export function ToolCenterView() {
     }
   }
 
-  function ensureHermesUpdateTerminal(): Terminal {
+  function ensureNativeUpdateTerminal(): Terminal {
     if (updateTerminalRef.current) return updateTerminalRef.current;
     const host = updateTerminalHostRef.current;
     if (!host) throw new Error('更新终端区域尚未准备好');
@@ -766,11 +763,11 @@ export function ToolCenterView() {
     });
     updateTerminalRef.current = terminal;
     updateFitAddonRef.current = fitAddon;
-    fitHermesUpdateTerminal();
+    fitNativeUpdateTerminal();
     return terminal;
   }
 
-  function fitHermesUpdateTerminal() {
+  function fitNativeUpdateTerminal() {
     const terminal = updateTerminalRef.current;
     const fitAddon = updateFitAddonRef.current;
     if (!terminal || !fitAddon) return;
@@ -783,13 +780,13 @@ export function ToolCenterView() {
     });
   }
 
-  function scrollToHermesUpdateTerminal() {
+  function scrollToNativeUpdateTerminal() {
     window.requestAnimationFrame(() => {
       updateTerminalPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   }
 
-  async function waitForHermesUpdateTerminalHost() {
+  async function waitForNativeUpdateTerminalHost() {
     for (let attempt = 0; attempt < 10; attempt += 1) {
       if (updateTerminalHostRef.current) return;
       await new Promise<void>((resolve) => {
@@ -799,80 +796,50 @@ export function ToolCenterView() {
     throw new Error('更新终端区域尚未准备好');
   }
 
-  async function startHermesUpdateTerminal() {
+  async function startNativeUpdateTerminal() {
     if (updateTerminalIdRef.current) {
-      setActionStatus('Hermes 更新终端已经在运行，请先等待完成或停止当前任务。');
-      scrollToHermesUpdateTerminal();
+      setActionStatus('Native Runtime终端已经在运行，请先等待完成或停止当前任务。');
+      scrollToNativeUpdateTerminal();
       return;
     }
-    setUpdateBusy(true);
-    setUpdateMode('run');
-    setUpdateStartedAt(Date.now());
-    setUpdateTerminalStatus('starting');
-    setUpdateTerminalMessage('正在启动 Hermes 更新终端...');
-    setActionStatus('正在打开 Hermes 更新终端...');
-    scrollToHermesUpdateTerminal();
-    try {
-      await waitForHermesUpdateTerminalHost();
-      const terminal = ensureHermesUpdateTerminal();
-      scrollToHermesUpdateTerminal();
-      terminal.clear();
-      terminal.focus();
-      terminal.write('\x1b[1;36m更新 Hermes Agent\x1b[0m\r\n');
-      fitHermesUpdateTerminal();
-      const task: DesktopTerminalTask = updateWithFullBackup ? 'update-hermes-backup' : 'update-hermes';
-      const result = await startDesktopTerminal(task, terminal.cols || 100, terminal.rows || 28);
-      if (!result.success || !result.id) throw new Error(result.error || '无法启动 Hermes 更新终端');
-      updateTerminalIdRef.current = result.id;
-      setUpdateTerminalSession({ id: result.id, task, title: result.title || (updateWithFullBackup ? '更新 Hermes Agent（完整备份）' : '更新 Hermes Agent') });
-      setUpdateTerminalStatus('running');
-      setUpdateTerminalMessage(updateWithFullBackup
-        ? 'Hermes 更新正在内置终端运行；已启用完整备份，目录较大时可能需要更久。关闭或停止会中断更新。'
-        : 'Hermes 更新正在内置终端运行；输出会实时显示，关闭或停止会中断更新。');
-      setActionStatus('Hermes 更新终端已启动');
-      fitHermesUpdateTerminal();
-    } catch (err) {
-      updateTerminalIdRef.current = null;
-      setUpdateTerminalSession(null);
-      setUpdateTerminalStatus('error');
-      setUpdateTerminalMessage(err instanceof Error ? err.message : 'Hermes 更新终端启动失败');
-      setUpdateBusy(false);
-      setUpdateMode(null);
-      setUpdateStartedAt(null);
-      setActionStatus(err instanceof Error ? err.message : 'Hermes 更新终端启动失败');
-    }
+    setUpdateBusy(false);
+    setUpdateMode(null);
+    setUpdateStartedAt(null);
+    setUpdateTerminalStatus('error');
+    setUpdateTerminalMessage('Native updater 已移除；Oha-Yachiyo 使用内置 Native Runtime，不再启动 Native Runtime。');
+    setActionStatus('Native updater 已移除；请使用模型配置与 Native Runtime readiness。');
   }
 
-  async function stopHermesUpdateTerminalNow() {
+  async function stopNativeUpdateTerminalNow() {
     const id = updateTerminalIdRef.current;
     if (!id) return;
-    setUpdateTerminalMessage('正在停止 Hermes 更新终端...');
+    setUpdateTerminalMessage('正在停止 Native Runtime终端...');
     await killDesktopTerminal(id);
   }
 
-  async function stopHermesUpdateTerminal(options: { confirm?: boolean } = {}) {
+  async function stopNativeUpdateTerminal(options: { confirm?: boolean } = {}) {
     if (options.confirm === false) {
-      await stopHermesUpdateTerminalNow();
+      await stopNativeUpdateTerminalNow();
       return;
     }
     requestConfirm({
-      title: '停止 Hermes 更新终端？',
-      description: 'Hermes 更新仍在运行。停止终端会中断 Hermes 更新。',
+      title: '停止 Native Runtime终端？',
+      description: 'Native Runtime仍在运行。停止终端会中断 Native Runtime。',
       confirmLabel: '停止终端',
       variant: 'danger',
-      onConfirm: () => void stopHermesUpdateTerminalNow(),
+      onConfirm: () => void stopNativeUpdateTerminalNow(),
     });
   }
 
-  async function refreshAfterHermesUpdateTerminal() {
+  async function refreshAfterNativeUpdateTerminal() {
     try {
-      setUpdateTerminalMessage('Hermes 更新命令已结束，正在等待 Bridge 和 Hermes gateway 恢复。');
+      setUpdateTerminalMessage('Native Runtime命令已结束，正在等待 Bridge 和 Native gateway 恢复。');
       await refreshToolCenterState({ checkUpdate: true, runDoctor: true, retries: 10, retryDelayMs: 1300 });
-      setActionStatus('Hermes 更新完成，工具清单和 Doctor 状态已刷新');
-      setUpdateTerminalMessage('Hermes 更新完成，工具清单和 Doctor 状态已刷新。');
+      setActionStatus('Native Runtime完成，工具清单和 Doctor 状态已刷新');
+      setUpdateTerminalMessage('Native Runtime完成，工具清单和 Doctor 状态已刷新。');
     } catch (err) {
-      setActionStatus(err instanceof Error ? err.message : 'Hermes 更新结束，但刷新工具状态失败');
-      setUpdateTerminalMessage('Hermes 更新结束，但自动刷新失败；请点击重新检测。');
+      setActionStatus(err instanceof Error ? err.message : 'Native Runtime结束，但刷新工具状态失败');
+      setUpdateTerminalMessage('Native Runtime结束，但自动刷新失败；请点击重新检测。');
     } finally {
       setUpdateBusy(false);
       setUpdateMode(null);
@@ -880,7 +847,7 @@ export function ToolCenterView() {
     }
   }
 
-  function selectToolConfig(item: HermesToolCatalogItem) {
+  function selectToolConfig(item: NativeToolCatalogItem) {
     const config = configForCatalogItem(item, toolConfigById);
     if (!config) return;
     requestNavigation({ type: 'tool', toolId: config.id });
@@ -888,8 +855,8 @@ export function ToolCenterView() {
 
   function requestNavigation(next: PendingNavigation) {
     if (updateTerminalSession) {
-      setActionStatus('Hermes 更新正在运行，完成或停止前暂不切换页面。');
-      scrollToHermesUpdateTerminal();
+      setActionStatus('Native Runtime正在运行，完成或停止前暂不切换页面。');
+      scrollToNativeUpdateTerminal();
       return;
     }
     if (hasUnsavedChanges) {
@@ -931,7 +898,7 @@ export function ToolCenterView() {
       const visibleChanges = Object.fromEntries(
         Object.entries(configDraft).filter(([key]) => visibleKeys.has(key)),
       );
-      const result = await apiPost<ToolConfigUpdateResult>('/ui/hermes/tools/config', {
+      const result = await apiPost<ToolConfigUpdateResult>('/ui/native-agent/tools/config', {
         tool_id: selectedToolConfig.id,
         changes: visibleChanges,
       });
@@ -962,7 +929,7 @@ export function ToolCenterView() {
     setActionStatus('正在测试工具配置...');
     setToolTestResult(null);
     try {
-      const result = await apiPost<ToolConfigTestResult>('/ui/hermes/tools/config/test', { tool_id: toolId });
+      const result = await apiPost<ToolConfigTestResult>('/ui/native-agent/tools/config/test', { tool_id: toolId });
       if (result.tool_config) setToolConfig(result.tool_config);
       setToolTestResult(result);
       if (!result.ok) throw new Error(result.error || '工具配置测试失败');
@@ -990,7 +957,7 @@ export function ToolCenterView() {
     setConfigBusy(true);
     setActionStatus('正在启动或连接 Chrome 调试端口...');
     try {
-      const result = await apiPost<BrowserCdpLaunchResult>('/ui/hermes/tools/browser-cdp/launch');
+      const result = await apiPost<BrowserCdpLaunchResult>('/ui/native-agent/tools/browser-cdp/launch');
       if (!result.ok) {
         const manual = result.manual_command ? ` 手动命令：${result.manual_command}` : '';
         throw new Error(`${result.error || 'Chrome 调试端口连接失败'}${manual}`);
@@ -1015,20 +982,20 @@ export function ToolCenterView() {
   async function openTerminalWizard(command: string) {
     if (!command || configBusy) return;
     setConfigBusy(true);
-    setActionStatus('正在打开 Hermes 原生向导...');
+    setActionStatus('正在打开 Native 原生向导...');
     try {
-      const result = await apiPost<{ success?: boolean; error?: string }>('/ui/hermes/terminal-command', { command });
-      if (!result.success) throw new Error(result.error || '无法打开 Hermes 原生向导');
-      setActionStatus('Hermes 原生向导已打开');
+      const result = await apiPost<{ success?: boolean; error?: string }>('/ui/native-agent/terminal-command', { command });
+      if (!result.success) throw new Error(result.error || '无法打开 Native 原生向导');
+      setActionStatus('Native 原生向导已打开');
     } catch (err) {
-      setActionStatus(err instanceof Error ? err.message : '无法打开 Hermes 原生向导');
+      setActionStatus(err instanceof Error ? err.message : '无法打开 Native 原生向导');
     } finally {
       setConfigBusy(false);
     }
   }
 
-  const hermes = data?.hermes;
-  const commandExists = Boolean(hermes?.command_exists);
+  const nativeAgent = data?.native_agent;
+  const commandExists = Boolean(nativeAgent?.command_exists);
   const doctorCache = diagnosticCache?.commands?.doctor;
   const cacheStale = Boolean(diagnosticCache?.stale);
   const doctorSummary = !cacheStale ? doctorCache?.doctor_summary : undefined;
@@ -1036,33 +1003,34 @@ export function ToolCenterView() {
     ? []
     : doctorSummary
       ? doctorSummary.limited_tools || []
-      : hermes?.limited_tools || [];
-  const limitedToolNames = rawLimitedToolNames.filter((tool) => !isHiddenHermesTool(tool));
+      : nativeAgent?.limited_tools || [];
+  const limitedToolNames = rawLimitedToolNames.filter((tool) => !isHiddenNativeTool(tool));
   const rawAvailableToolNames = cacheStale
     ? []
     : doctorSummary?.available_tools?.length
       ? doctorSummary.available_tools
-      : hermes?.available_tools || [];
-  const availableToolNames = rawAvailableToolNames.filter((tool) => !isHiddenHermesTool(tool));
+      : nativeAgent?.available_tools || [];
+  const availableToolNames = rawAvailableToolNames.filter((tool) => !isHiddenNativeTool(tool));
   const rawLimitedToolDetails = cacheStale
     ? {}
     : doctorSummary
       ? doctorSummary.limited_tool_details || {}
-      : hermes?.limited_tool_details || {};
+      : nativeAgent?.limited_tool_details || {};
   const limitedToolDetails = Object.fromEntries(
-    Object.entries(rawLimitedToolDetails).filter(([tool]) => !isHiddenHermesTool(tool)),
+    Object.entries(rawLimitedToolDetails).filter(([tool]) => !isHiddenNativeTool(tool)),
   );
-  const hiddenLimitedCount = rawLimitedToolNames.filter((tool) => isHiddenHermesTool(tool)).length;
-  const rawIssueCount = doctorSummary?.doctor_issues_count ?? hermes?.doctor_issues_count ?? 0;
+  const hiddenLimitedCount = rawLimitedToolNames.filter((tool) => isHiddenNativeTool(tool)).length;
+  const rawIssueCount = doctorSummary?.doctor_issues_count ?? nativeAgent?.doctor_issues_count ?? 0;
   const issueCount = cacheStale ? 0 : Math.max(0, rawIssueCount - hiddenLimitedCount);
   const doctorReferencedTools = [
     ...limitedToolNames,
     ...availableToolNames,
     ...Object.keys(limitedToolDetails),
   ];
-  const visibleToolCatalog = catalogForHermesToolsets(
-    HERMES_TOOL_CATALOG,
-    toolConfig?.hermes_toolsets,
+  const nativeToolsets = toolConfig?.native_toolsets || [];
+  const visibleToolCatalog = catalogForNativeToolsets(
+    NATIVE_TOOL_CATALOG,
+    nativeToolsets,
     doctorReferencedTools,
   );
   const selectedCatalogItem = selectedToolId
@@ -1072,7 +1040,7 @@ export function ToolCenterView() {
   const attentionItems = attentionItemsForTools(
     visibleToolCatalog,
     limitedToolNames,
-    toolConfig?.hermes_toolsets || [],
+    nativeToolsets,
     limitedToolDetails,
   );
   const visibleConfigCount = visibleToolCatalog.filter((item) => configForCatalogItem(item, toolConfigById)).length;
@@ -1083,7 +1051,7 @@ export function ToolCenterView() {
       doctorSummary
       || availableToolNames.length
       || limitedToolNames.length
-      || (hermes?.readiness_level && hermes.readiness_level !== 'unknown')
+      || (nativeAgent?.readiness_level && nativeAgent.readiness_level !== 'unknown')
     ),
   );
   const unsavedDialog = pendingNavigation ? (
@@ -1101,7 +1069,7 @@ export function ToolCenterView() {
         <header className="topbar dashboard-topbar">
           <div>
             <h1>{selectedToolConfig?.title || selectedCatalogItem?.label || '工具配置'}</h1>
-            <p>{selectedToolConfig?.summary || selectedCatalogItem?.requirement || '读取 Hermes 工具配置中。'}</p>
+            <p>{selectedToolConfig?.summary || selectedCatalogItem?.requirement || '读取 Native 工具配置中。'}</p>
           </div>
           <div className="topbar-actions">
             <button type="button" onClick={() => requestNavigation({ type: 'overview' })}>返回工具概览</button>
@@ -1127,19 +1095,19 @@ export function ToolCenterView() {
             onSaveAndTest={() => void saveAndTestSelectedToolConfig()}
             onLaunchBrowserCdp={() => void launchBrowserCdp()}
             onOpenTerminalWizard={(command) => void openTerminalWizard(command)}
-            onRunDoctor={() => void openAppView('diagnostics', { command: 'hermes doctor', return_to: 'tools' })}
+            onRunDoctor={() => void openAppView('diagnostics', { command: 'native doctor', return_to: 'tools' })}
           />
         ) : selectedCatalogItem?.id === 'tts' ? (
           <section className="tool-config-panel empty">
             <strong>Yachiyo 主动关怀语音在独立页面配置</strong>
             <span>
-              这里的 TTS 是 Hermes Agent 的工具能力；Bubble/Live2D 主动播报请到“主动关怀语音”页配置 GPT-SoVITS、HTTP 或本地命令。
+              这里的 TTS 是 Native Agent 的工具能力；Bubble/Live2D 主动播报请到“主动关怀语音”页配置 GPT-SoVITS、HTTP 或本地命令。
             </span>
             <div className="tool-config-actions">
               <button type="button" className="primary-action" onClick={() => navigateTo('proactive-tts')}>
                 打开主动关怀语音
               </button>
-              <button type="button" onClick={() => void openAppView('diagnostics', { command: 'hermes doctor', return_to: 'tools' })}>
+              <button type="button" onClick={() => void openAppView('diagnostics', { command: 'native doctor', return_to: 'tools' })}>
                 运行 Doctor
               </button>
             </div>
@@ -1168,7 +1136,7 @@ export function ToolCenterView() {
             type="button"
             className="primary-action"
             disabled={!commandExists}
-            onClick={() => void openAppView('diagnostics', { command: 'hermes doctor', return_to: 'tools' })}
+            onClick={() => void openAppView('diagnostics', { command: 'native doctor', return_to: 'tools' })}
           >
             运行 Doctor
           </button>
@@ -1176,7 +1144,7 @@ export function ToolCenterView() {
             type="button"
             className={busy ? 'attention-action' : undefined}
             disabled={busy}
-            onClick={() => void recheckHermes()}
+            onClick={() => void recheckNative()}
           >
             {busy ? '检测中...' : '重新检测'}
           </button>
@@ -1188,8 +1156,8 @@ export function ToolCenterView() {
 
       <YachiyoWorkflowPanel
         workflows={YACHIYO_WORKFLOWS}
-        hermes={hermes}
-        hermesToolsets={toolConfig?.hermes_toolsets || []}
+        nativeAgent={nativeAgent}
+        nativeToolsets={nativeToolsets}
         limitedTools={limitedToolNames}
         availableTools={availableToolNames}
         limitedToolDetails={limitedToolDetails}
@@ -1201,7 +1169,7 @@ export function ToolCenterView() {
         <div className="section-heading-row">
           <div>
             <h2>基础设施状态</h2>
-            <p className="section-caption">Hermes 更新、Doctor 和 tools list 继续保留在这里；排障详情仍由诊断页承接。</p>
+            <p className="section-caption">Native Runtime、Doctor 和 tools list 继续保留在这里；排障详情仍由诊断页承接。</p>
           </div>
           <StatusPill
             active={!attentionCount && checked}
@@ -1210,20 +1178,20 @@ export function ToolCenterView() {
         </div>
 
         <div className="tool-center-summary" aria-label="工具概览">
-          <ToolSummaryCard label="Hermes 工具组" value={`${visibleToolCatalog.length}`} detail={toolConfig?.hermes_toolsets?.length ? '来自 hermes tools list' : '等待 Hermes 工具清单'} />
+          <ToolSummaryCard label="Native 工具组" value={`${visibleToolCatalog.length}`} detail={nativeToolsets.length ? '来自 Native 工具投影' : '等待 Native 工具投影'} />
           <ToolSummaryCard
             label="Doctor 受限"
             value={cacheStale ? '需重检' : `${attentionCount}`}
             detail={doctorCache?.cached_at ? `上次检查 ${formatShortDateTime(doctorCache.cached_at)}` : checked ? `${issueCount} 项诊断提示` : '尚未完成 Doctor 分级'}
             warn={Boolean(cacheStale || attentionCount)}
           />
-          <ToolSummaryCard label="配置入口" value={`${visibleConfigCount}`} detail={toolConfig?.env_path ? '已连接 Hermes 配置' : '等待 Hermes 配置路径'} muted />
+          <ToolSummaryCard label="配置入口" value={`${visibleConfigCount}`} detail={toolConfig?.env_path ? '已连接 Native 配置' : '等待 Native 配置路径'} muted />
         </div>
 
-        <HermesUpdatePanel
-          version={hermes?.version}
-          releaseDate={hermes?.release_date}
-          result={hermesUpdate}
+        <NativeUpdatePanel
+          version={nativeAgent?.version}
+          releaseDate={nativeAgent?.release_date}
+          result={nativeUpdate}
           busy={updateBusy}
           mode={updateMode}
           elapsedSeconds={updateElapsedSeconds}
@@ -1231,19 +1199,19 @@ export function ToolCenterView() {
           terminalSupported={hasEmbeddedTerminal()}
           commandExists={commandExists}
           onFullBackupChange={setUpdateWithFullBackup}
-          onCheck={() => void checkHermesUpdate()}
-          onUpdate={() => void updateHermesAgent()}
+          onCheck={() => void checkNativeUpdate()}
+          onUpdate={() => void updateNativeAgent()}
         />
 
         {(updateTerminalStatus !== 'idle' || updateTerminalSession) ? (
-          <HermesUpdateTerminalPanel
+          <NativeUpdateTerminalPanel
             panelRef={updateTerminalPanelRef}
             hostRef={updateTerminalHostRef}
             message={updateTerminalMessage}
             session={updateTerminalSession}
             status={updateTerminalStatus}
             supported={hasEmbeddedTerminal()}
-            onStop={() => stopHermesUpdateTerminal()}
+            onStop={() => stopNativeUpdateTerminal()}
           />
         ) : null}
 
@@ -1278,26 +1246,26 @@ export function ToolCenterView() {
             type="button"
             className="primary-action"
             disabled={!commandExists}
-            onClick={() => void openAppView('diagnostics', { command: 'hermes doctor', return_to: 'tools' })}
+            onClick={() => void openAppView('diagnostics', { command: 'native doctor', return_to: 'tools' })}
           >
             运行 Doctor 并查看结果
           </button>
           <button
             type="button"
             disabled={!commandExists}
-            onClick={() => void openAppView('diagnostics', { command: 'hermes config check', return_to: 'tools' })}
+            onClick={() => void openAppView('diagnostics', { command: 'native config check', return_to: 'tools' })}
           >
             检查配置结构
           </button>
-          <button type="button" disabled={busy} onClick={() => void recheckHermes()}>
+          <button type="button" disabled={busy} onClick={() => void recheckNative()}>
             {busy ? '检测中...' : '重新检测'}
           </button>
         </div>
 
         <ToolCategoryList
           catalog={visibleToolCatalog}
-          hermesToolsets={toolConfig?.hermes_toolsets || []}
-          hermes={hermes}
+          nativeToolsets={nativeToolsets}
+          nativeAgent={nativeAgent}
           limitedTools={limitedToolNames}
           availableTools={availableToolNames}
           limitedToolDetails={limitedToolDetails}
@@ -1316,8 +1284,8 @@ export function ToolCenterView() {
 
 function YachiyoWorkflowPanel({
   workflows,
-  hermes,
-  hermesToolsets,
+  nativeAgent,
+  nativeToolsets,
   limitedTools,
   availableTools,
   limitedToolDetails,
@@ -1325,8 +1293,8 @@ function YachiyoWorkflowPanel({
   checked,
 }: {
   workflows: YachiyoWorkflowDefinition[];
-  hermes?: HermesStatus;
-  hermesToolsets: HermesToolsetItem[];
+  nativeAgent?: NativeStatus;
+  nativeToolsets: NativeToolsetItem[];
   limitedTools: string[];
   availableTools: string[];
   limitedToolDetails: Record<string, string>;
@@ -1338,7 +1306,7 @@ function YachiyoWorkflowPanel({
       <div className="section-heading-row">
         <div>
           <h2>Yachiyo 工作链路</h2>
-          <p className="section-caption">先看八千代自己能陪你完成什么；Hermes toolset 是这些链路的底座，不是这里的主角。</p>
+          <p className="section-caption">先看八千代自己能陪你完成什么；Native toolset 是这些链路的底座，不是这里的主角。</p>
         </div>
         <button type="button" onClick={() => navigateTo('settings')}>打开设置</button>
       </div>
@@ -1346,8 +1314,8 @@ function YachiyoWorkflowPanel({
         {workflows.map((workflow) => {
           const capabilities = workflow.requiredCapabilities.map((capability) => workflowCapabilityStatus(
             capability,
-            hermes,
-            hermesToolsets,
+            nativeAgent,
+            nativeToolsets,
             limitedTools,
             availableTools,
             limitedToolDetails,
@@ -1399,8 +1367,8 @@ function YachiyoWorkflowPanel({
 
 function ToolCategoryList({
   catalog,
-  hermesToolsets,
-  hermes,
+  nativeToolsets,
+  nativeAgent,
   limitedTools,
   availableTools,
   limitedToolDetails,
@@ -1410,9 +1378,9 @@ function ToolCategoryList({
   selectedToolId,
   onSelectConfig,
 }: {
-  catalog: HermesToolCatalogItem[];
-  hermesToolsets: HermesToolsetItem[];
-  hermes?: HermesStatus;
+  catalog: NativeToolCatalogItem[];
+  nativeToolsets: NativeToolsetItem[];
+  nativeAgent?: NativeStatus;
   limitedTools: string[];
   availableTools: string[];
   limitedToolDetails: Record<string, string>;
@@ -1420,7 +1388,7 @@ function ToolCategoryList({
   checked: boolean;
   configById: Map<string, ToolConfigItem>;
   selectedToolId: string;
-  onSelectConfig: (item: HermesToolCatalogItem) => void;
+  onSelectConfig: (item: NativeToolCatalogItem) => void;
 }) {
   return (
     <div className="tool-category-list">
@@ -1433,13 +1401,13 @@ function ToolCategoryList({
           <div className="tool-grid">
             {items.map((item) => {
               const config = configForCatalogItem(item, configById);
-              const enabledByToolsList = toolsetEnabledForItem(item, hermesToolsets);
+              const enabledByToolsList = toolsetEnabledForItem(item, nativeToolsets);
               const status = enabledByToolsList
-                ? toolStatusFor(item, hermes, limitedTools, availableTools, limitedToolDetails, checked, cacheStale)
+                ? toolStatusFor(item, nativeAgent, limitedTools, availableTools, limitedToolDetails, checked, cacheStale)
                 : {
                     kind: 'limited' as const,
                     label: '未启用',
-                    detail: 'Hermes tools list 显示此工具组当前已禁用。',
+                    detail: 'Native tools list 显示此工具组当前已禁用。',
                   };
               const selected = config && canonicalToolName(config.id) === canonicalToolName(selectedToolId);
               const configCount = config ? visibleConfiguredCount(config) : { configured: 0, total: 0 };
@@ -1476,7 +1444,7 @@ function ToolCategoryList({
   );
 }
 
-function ToolConfigLoadingPanel({ catalogItem }: { catalogItem?: HermesToolCatalogItem }) {
+function ToolConfigLoadingPanel({ catalogItem }: { catalogItem?: NativeToolCatalogItem }) {
   return (
     <section className="tool-config-panel tool-config-loading" aria-busy="true">
       <div className="tool-config-loading-head">
@@ -1485,7 +1453,7 @@ function ToolConfigLoadingPanel({ catalogItem }: { catalogItem?: HermesToolCatal
         </span>
         <div>
           <strong>正在读取工具配置</strong>
-          <span>{catalogItem?.label ? `准备 ${catalogItem.label} 的配置项` : '正在同步 Hermes 工具配置。'}</span>
+          <span>{catalogItem?.label ? `准备 ${catalogItem.label} 的配置项` : '正在同步 Native 工具配置。'}</span>
         </div>
       </div>
       <div className="tool-config-skeleton-grid" aria-hidden="true">
@@ -1514,7 +1482,7 @@ function ToolConfigPanel({
   onRunDoctor,
 }: {
   tool?: ToolConfigItem;
-  catalogItem?: HermesToolCatalogItem;
+  catalogItem?: NativeToolCatalogItem;
   draft: Record<string, ConfigFieldValue>;
   busy: boolean;
   dirty?: boolean;
@@ -1542,7 +1510,7 @@ function ToolConfigPanel({
       <div className="tool-config-head">
         <div>
           <strong>{tool.title || catalogItem?.label || tool.id}</strong>
-          <span>{tool.summary || catalogItem?.requirement || 'Hermes 工具配置'}</span>
+          <span>{tool.summary || catalogItem?.requirement || 'Native 工具配置'}</span>
         </div>
         <span className={dirty ? 'tool-config-count dirty' : 'tool-config-count'}>
           {dirty ? '未保存' : `${configuredCount}/${visibleFields.length} 已配置`}
@@ -1570,8 +1538,8 @@ function ToolConfigPanel({
         </div>
       ) : (
         <div className="tool-config-empty">
-          <strong>此工具需要 Hermes 原生授权流程</strong>
-          <span>{tool.summary || '请通过 Hermes setup 完成。'}</span>
+          <strong>此工具需要 Native 原生授权流程</strong>
+          <span>{tool.summary || '请通过 Native setup 完成。'}</span>
         </div>
       )}
 
@@ -1591,7 +1559,7 @@ function ToolConfigPanel({
           ) : null}
           {tool.terminal_command ? (
             <button type="button" disabled={busy} onClick={() => onOpenTerminalWizard(tool.terminal_command || '')}>
-              打开 Hermes 向导
+              打开 Native 向导
             </button>
           ) : null}
           {visibleFields.length ? (
@@ -1774,14 +1742,14 @@ function ToolSummaryCard({
   );
 }
 
-function formatHermesVersion(version?: string, releaseDate?: string): string {
+function formatNativeVersion(version?: string, releaseDate?: string): string {
   const cleanVersion = String(version || '').trim();
   const cleanDate = String(releaseDate || '').trim();
   if (cleanVersion && cleanDate && !cleanVersion.includes(cleanDate)) return `${cleanVersion} · ${cleanDate}`;
   return cleanVersion || cleanDate || '未知版本';
 }
 
-function HermesUpdatePanel({
+function NativeUpdatePanel({
   version,
   releaseDate,
   result,
@@ -1797,9 +1765,9 @@ function HermesUpdatePanel({
 }: {
   version?: string;
   releaseDate?: string;
-  result: HermesUpdateResult | null;
+  result: NativeUpdateResult | null;
   busy: boolean;
-  mode: HermesUpdateMode;
+  mode: NativeUpdateMode;
   elapsedSeconds: number;
   fullBackup: boolean;
   terminalSupported: boolean;
@@ -1814,28 +1782,28 @@ function HermesUpdatePanel({
   const behind = result?.behind_commits || (typeof result?.version === 'object' ? result.version.behind_commits : 0) || 0;
   const delta = result?.toolset_delta;
   const changedCount = (delta?.added?.length || 0) + (delta?.removed?.length || 0) + (delta?.changed?.length || 0);
-  const busyText = busy ? hermesUpdateBusyText(mode, elapsedSeconds) : '';
+  const busyText = busy ? nativeUpdateBusyText(mode, elapsedSeconds) : '';
   return (
-    <div className={updateAvailable ? 'hermes-update-panel attention' : 'hermes-update-panel'}>
+    <div className={updateAvailable ? 'native-update-panel attention' : 'native-update-panel'}>
       <div>
-        <strong>Hermes 更新</strong>
+        <strong>Native Runtime</strong>
         <span>
           {result
             ? updateAvailable
               ? `可更新${behind ? `，落后 ${behind} commits` : ''}`
               : '未发现更新'
             : version
-              ? `当前 ${formatHermesVersion(version, releaseDate)}`
-              : '可检查 Hermes 版本与工具清单变化'}
+              ? `当前 ${formatNativeVersion(version, releaseDate)}`
+              : '可检查 Native 版本与工具清单变化'}
         </span>
-        {versionText ? <small>{formatHermesVersion(versionText, dateText)}</small> : null}
+        {versionText ? <small>{formatNativeVersion(versionText, dateText)}</small> : null}
         {changedCount ? (
           <small>
             工具清单变化：新增 {delta?.added?.length || 0}，移除 {delta?.removed?.length || 0}，状态变化 {delta?.changed?.length || 0}
           </small>
         ) : null}
-        <small>更新通道：Hermes 官方 updater 使用当前 checkout 的 origin/main；Release tag 仅作为保守参考，Yachiyo 暂不自动切换 tag。</small>
-        <label className="settings-field checkbox-field hermes-update-backup-option">
+        <small>更新通道：Native 官方 updater 使用当前 checkout 的 origin/main；Release tag 仅作为保守参考，Yachiyo 暂不自动切换 tag。</small>
+        <label className="settings-field checkbox-field native-update-backup-option">
           <input
             type="checkbox"
             checked={fullBackup}
@@ -1843,23 +1811,23 @@ function HermesUpdatePanel({
             onChange={(event) => onFullBackupChange(event.currentTarget.checked)}
           />
           <span>
-            完整备份后更新
-            <small>{fullBackup ? '会运行 hermes update --gateway --yes --backup，可能在 Creating pre-update backup 停留较久。' : '默认运行 hermes update --gateway --yes --no-backup，速度更快；Hermes 仍会保留自身的轻量状态快照。'}</small>
+            Native Runtime 无需外部 updater
+            <small>Oha-Yachiyo 不再运行 Native Runtime 更新；后续能力通过应用更新和模型配置生效。</small>
           </span>
         </label>
         {busy ? (
-          <div className="hermes-update-progress" role="status" aria-live="polite">
+          <div className="native-update-progress" role="status" aria-live="polite">
             <div>
               <span>{busyText}</span>
               <small>{elapsedSeconds}s</small>
             </div>
-            <div className="hermes-update-progress-track" aria-hidden="true">
+            <div className="native-update-progress-track" aria-hidden="true">
               <span />
             </div>
           </div>
         ) : null}
       </div>
-      <div className="hermes-update-actions">
+      <div className="native-update-actions">
         <button type="button" disabled={!commandExists || busy} onClick={onCheck}>
           {busy && mode === 'check' ? `检查中 ${elapsedSeconds}s...` : '检查更新'}
         </button>
@@ -1871,27 +1839,27 @@ function HermesUpdatePanel({
   );
 }
 
-function hermesUpdateBusyText(mode: HermesUpdateMode, elapsedSeconds: number): string {
+function nativeUpdateBusyText(mode: NativeUpdateMode, elapsedSeconds: number): string {
   if (mode === 'check') {
-    return elapsedSeconds >= 15 ? '仍在检查远端版本，网络较慢时会多等一会儿。' : '正在检查 Hermes 远端版本。';
+    return elapsedSeconds >= 15 ? '仍在检查远端版本，网络较慢时会多等一会儿。' : '正在检查 Native 远端版本。';
   }
   if (mode === 'refresh') {
-    if (elapsedSeconds >= 12) return '仍在等待 Bridge/Hermes gateway 恢复，恢复后会自动同步工具清单。';
+    if (elapsedSeconds >= 12) return '仍在等待 Bridge/Native gateway 恢复，恢复后会自动同步工具清单。';
     return '更新命令已完成，正在重新读取版本、Doctor 和工具清单。';
   }
   if (elapsedSeconds >= 90) {
-    return '仍在更新 Hermes；可能正在下载依赖或刷新工具清单。';
+    return '仍在更新 Native；可能正在下载依赖或刷新工具清单。';
   }
   if (elapsedSeconds >= 30) {
-    return 'Hermes 更新仍在运行，完成后会自动刷新 Doctor 与工具清单。';
+    return 'Native Runtime仍在运行，完成后会自动刷新 Doctor 与工具清单。';
   }
   if (elapsedSeconds >= 10) {
-    return '正在执行 Hermes gateway 更新流程，请保持窗口打开。';
+    return '正在执行 Native gateway 更新流程，请保持窗口打开。';
   }
-  return '正在启动 Hermes 更新，请查看更新终端输出。';
+  return '正在启动 Native Runtime，请查看更新终端输出。';
 }
 
-function HermesUpdateTerminalPanel({
+function NativeUpdateTerminalPanel({
   panelRef,
   hostRef,
   message,
@@ -1912,8 +1880,8 @@ function HermesUpdateTerminalPanel({
     <section ref={panelRef} className="panel settings-section embedded-terminal-panel tool-update-terminal-panel">
       <div className="section-heading-row">
         <div>
-          <h2>Hermes 更新终端</h2>
-          <p className="section-caption">{session?.title || '实时查看 Hermes update 输出'}</p>
+          <h2>Native Runtime终端</h2>
+          <p className="section-caption">{session?.title || '实时查看 Native update 输出'}</p>
         </div>
         <div className="terminal-heading-actions">
           <span className={`terminal-status ${status}`}>{toolTerminalStatusLabel(status, supported)}</span>
@@ -1927,7 +1895,7 @@ function HermesUpdateTerminalPanel({
         <div ref={hostRef} className="embedded-terminal" />
         {status === 'idle' ? (
           <div className="embedded-terminal-placeholder">
-            {supported ? '点击“打开更新终端”后，这里会显示 Hermes 的实时输出。' : '当前环境不支持内置终端，将使用普通更新请求。'}
+            {supported ? '点击“打开更新终端”后，这里会显示 Native 的实时输出。' : '当前环境不支持内置终端，将使用普通更新请求。'}
           </div>
         ) : null}
       </div>
@@ -1944,17 +1912,17 @@ function toolTerminalStatusLabel(status: EmbeddedTerminalStatus, supported: bool
   return '待命';
 }
 
-function hermesUpdateTerminalExitMessage(succeeded: boolean, exitCode: number): string {
-  if (succeeded) return 'Hermes 更新命令已结束，正在刷新工具清单和 Doctor 状态。';
-  return `Hermes 更新终端异常结束，退出码 ${exitCode}。输出仍保留在这里，便于排查。`;
+function nativeUpdateTerminalExitMessage(succeeded: boolean, exitCode: number): string {
+  if (succeeded) return 'Native Runtime命令已结束，正在刷新工具清单和 Doctor 状态。';
+  return `Native Runtime终端异常结束，退出码 ${exitCode}。输出仍保留在这里，便于排查。`;
 }
 
 function StatusPill({ active, label }: { active: boolean; label: string }) {
   return <span className={active ? 'status-pill ok' : 'status-pill warn'}>{label}</span>;
 }
 
-function toolCategoryGroups(items: HermesToolCatalogItem[]): Array<[string, HermesToolCatalogItem[]]> {
-  const groups = new Map<string, HermesToolCatalogItem[]>();
+function toolCategoryGroups(items: NativeToolCatalogItem[]): Array<[string, NativeToolCatalogItem[]]> {
+  const groups = new Map<string, NativeToolCatalogItem[]>();
   for (const item of items) {
     const entries = groups.get(item.category) || [];
     entries.push(item);
@@ -1965,8 +1933,8 @@ function toolCategoryGroups(items: HermesToolCatalogItem[]): Array<[string, Herm
 
 function workflowCapabilityStatus(
   capabilityId: string,
-  hermes: HermesStatus | undefined,
-  hermesToolsets: HermesToolsetItem[],
+  oha: NativeStatus | undefined,
+  nativeToolsets: NativeToolsetItem[],
   limitedTools: string[],
   availableTools: string[],
   limitedToolDetails: Record<string, string>,
@@ -1981,25 +1949,25 @@ function workflowCapabilityStatus(
       status: {
         kind: 'pending',
         label: '待同步',
-        detail: 'Hermes tools list 暂未暴露这个能力，Yachiyo 会先按规划展示。',
+        detail: 'Native tools list 暂未暴露这个能力，Yachiyo 会先按规划展示。',
       },
     };
   }
-  if (!toolsetEnabledForItem(item, hermesToolsets)) {
+  if (!toolsetEnabledForItem(item, nativeToolsets)) {
     return {
       id: capabilityId,
       label: item.label,
       status: {
         kind: 'limited',
         label: '未启用',
-        detail: 'Hermes tools list 显示此工具组当前已禁用。',
+        detail: 'Native tools list 显示此工具组当前已禁用。',
       },
     };
   }
   return {
     id: capabilityId,
     label: item.label,
-    status: toolStatusFor(item, hermes, limitedTools, availableTools, limitedToolDetails, checked, cacheStale),
+    status: toolStatusFor(item, oha, limitedTools, availableTools, limitedToolDetails, checked, cacheStale),
   };
 }
 
@@ -2038,24 +2006,24 @@ function workflowStatusFromCapabilities(
   };
 }
 
-function catalogItemForCapability(capabilityId: string): HermesToolCatalogItem | undefined {
+function catalogItemForCapability(capabilityId: string): NativeToolCatalogItem | undefined {
   const canonical = canonicalToolName(capabilityId);
-  return HERMES_TOOL_CATALOG.find((item) => toolNameAliases(item).some((alias) => canonicalToolName(alias) === canonical));
+  return NATIVE_TOOL_CATALOG.find((item) => toolNameAliases(item).some((alias) => canonicalToolName(alias) === canonical));
 }
 
-function catalogForHermesToolsets(
-  catalog: HermesToolCatalogItem[],
-  toolsets?: HermesToolsetItem[],
+function catalogForNativeToolsets(
+  catalog: NativeToolCatalogItem[],
+  toolsets?: NativeToolsetItem[],
   doctorReferencedTools?: string[],
-): HermesToolCatalogItem[] {
-  const baseCatalog = catalog.filter((item) => !item.planned && !isHiddenHermesTool(item.id));
+): NativeToolCatalogItem[] {
+  const baseCatalog = catalog.filter((item) => !item.planned && !isHiddenNativeTool(item.id));
   if (!toolsets?.length && !doctorReferencedTools?.length) return baseCatalog;
   const supported = new Set(
     (toolsets || [])
-      .filter((item) => !isHiddenHermesTool(item.canonical_id || item.id))
+      .filter((item) => !isHiddenNativeTool(item.canonical_id || item.id))
       .map((item) => canonicalToolName(item.canonical_id || item.id)),
   );
-  const referenced = new Set((doctorReferencedTools || []).filter((tool) => !isHiddenHermesTool(tool)).map(canonicalToolName));
+  const referenced = new Set((doctorReferencedTools || []).filter((tool) => !isHiddenNativeTool(tool)).map(canonicalToolName));
   const visible = baseCatalog.filter((item) => {
     const aliases = toolNameAliases(item).map(canonicalToolName);
     if (item.id === 'browser-cdp') {
@@ -2066,13 +2034,13 @@ function catalogForHermesToolsets(
   const knownAliases = new Set(visible.flatMap((item) => toolNameAliases(item).map(canonicalToolName)));
   for (const toolset of toolsets || []) {
     const canonical = canonicalToolName(toolset.canonical_id || toolset.id);
-    if (!canonical || isHiddenHermesTool(canonical) || knownAliases.has(canonical)) continue;
+    if (!canonical || isHiddenNativeTool(canonical) || knownAliases.has(canonical)) continue;
     visible.push({
       id: canonical,
       label: toolset.label || toolset.id || canonical,
-      category: 'Hermes 新增工具',
-      description: 'Hermes tools list 中发现的新工具；Yachiyo 会先展示状态，专属配置入口可后续补齐。',
-      requirement: '随 Hermes 更新同步',
+      category: 'Native 新增工具',
+      description: 'Native tools list 中发现的新工具；Yachiyo 会先展示状态，专属配置入口可后续补齐。',
+      requirement: '随 Native Runtime同步',
       aliases: [toolset.id, toolset.canonical_id || ''].filter((value): value is string => Boolean(value)),
     });
     knownAliases.add(canonical);
@@ -2080,7 +2048,7 @@ function catalogForHermesToolsets(
   return visible;
 }
 
-function toolsetEnabledForItem(item: HermesToolCatalogItem, toolsets?: HermesToolsetItem[]): boolean {
+function toolsetEnabledForItem(item: NativeToolCatalogItem, toolsets?: NativeToolsetItem[]): boolean {
   if (!toolsets?.length) return true;
   const records = new Map(toolsets.map((toolset) => [canonicalToolName(toolset.canonical_id || toolset.id), toolset]));
   if (item.id === 'browser-cdp') return records.get('browser')?.enabled !== false;
@@ -2091,8 +2059,8 @@ function toolsetEnabledForItem(item: HermesToolCatalogItem, toolsets?: HermesToo
 }
 
 function toolStatusFor(
-  item: HermesToolCatalogItem,
-  hermes: HermesStatus | undefined,
+  item: NativeToolCatalogItem,
+  oha: NativeStatus | undefined,
   limitedTools: string[],
   availableTools: string[],
   limitedToolDetails: Record<string, string>,
@@ -2113,7 +2081,7 @@ function toolStatusFor(
       detail: limitedDetailFor(item, limitedToolDetails) || 'Doctor 已标记该工具不可用或缺少配置。',
     };
   }
-  if (cacheStale || !hermes?.command_exists || !checked) {
+  if (cacheStale || !oha?.command_exists || !checked) {
     return {
       kind: 'pending',
       label: '待检测',
@@ -2127,7 +2095,7 @@ function toolStatusFor(
       detail: 'Doctor 已确认该工具可用。',
     };
   }
-  if (!availableTools.length && hermes.ready && hermes.readiness_level && hermes.readiness_level !== 'unknown') {
+  if (!availableTools.length && oha?.ready && oha.readiness_level && oha.readiness_level !== 'unknown') {
     return {
       kind: 'ready',
       label: '可用',
@@ -2153,20 +2121,20 @@ function formatShortDateTime(value?: string) {
   });
 }
 
-function isToolLimited(item: HermesToolCatalogItem, limitedTools?: string[]): boolean {
+function isToolLimited(item: NativeToolCatalogItem, limitedTools?: string[]): boolean {
   const limited = new Set((limitedTools || []).map(canonicalToolName));
   return toolNameAliases(item).some((alias) => limited.has(canonicalToolName(alias)));
 }
 
-function isToolAvailable(item: HermesToolCatalogItem, availableTools?: string[]): boolean {
+function isToolAvailable(item: NativeToolCatalogItem, availableTools?: string[]): boolean {
   const available = new Set((availableTools || []).map(canonicalToolName));
   return toolNameAliases(item).some((alias) => available.has(canonicalToolName(alias)));
 }
 
 function attentionItemsForTools(
-  catalog: HermesToolCatalogItem[],
+  catalog: NativeToolCatalogItem[],
   limitedTools: string[],
-  hermesToolsets: HermesToolsetItem[],
+  nativeToolsets: NativeToolsetItem[],
   limitedToolDetails: Record<string, string>,
 ): ToolAttentionItem[] {
   const items: ToolAttentionItem[] = [];
@@ -2174,7 +2142,7 @@ function attentionItemsForTools(
 
   for (const item of catalog) {
     const aliases = toolNameAliases(item).map(canonicalToolName);
-    const disabled = !toolsetEnabledForItem(item, hermesToolsets);
+    const disabled = !toolsetEnabledForItem(item, nativeToolsets);
     const limited = isToolLimited(item, limitedTools);
     if (!disabled && !limited) continue;
 
@@ -2184,7 +2152,7 @@ function attentionItemsForTools(
       label: item.label,
       reason: disabled ? 'disabled' : 'limited',
       detail: disabled
-        ? 'Hermes tools list 显示此工具组当前已禁用。'
+        ? 'Native tools list 显示此工具组当前已禁用。'
         : limitedDetailFor(item, limitedToolDetails) || 'Doctor 已标记该工具不可用或缺少配置。',
     });
   }
@@ -2205,17 +2173,17 @@ function attentionItemsForTools(
   return items;
 }
 
-function isHiddenHermesTool(tool: string | undefined): boolean {
-  return Boolean(tool && HIDDEN_HERMES_TOOLS.has(canonicalToolName(tool)));
+function isHiddenNativeTool(tool: string | undefined): boolean {
+  return Boolean(tool && HIDDEN_NATIVE_TOOLS.has(canonicalToolName(tool)));
 }
 
-function limitedDetailFor(item: HermesToolCatalogItem, details: Record<string, string>): string {
+function limitedDetailFor(item: NativeToolCatalogItem, details: Record<string, string>): string {
   const aliases = new Set(toolNameAliases(item).map(canonicalToolName));
   const match = Object.entries(details || {}).find(([key]) => aliases.has(canonicalToolName(key)));
   return match?.[1] || '';
 }
 
-function configForCatalogItem(item: HermesToolCatalogItem, configById: Map<string, ToolConfigItem>): ToolConfigItem | undefined {
+function configForCatalogItem(item: NativeToolCatalogItem, configById: Map<string, ToolConfigItem>): ToolConfigItem | undefined {
   return toolNameAliases(item)
     .map((alias) => configById.get(canonicalToolName(alias)))
     .find(Boolean);
@@ -2297,7 +2265,7 @@ function draftSignature(draft: Record<string, ConfigFieldValue>): string {
   );
 }
 
-function toolNameAliases(item: HermesToolCatalogItem): string[] {
+function toolNameAliases(item: NativeToolCatalogItem): string[] {
   return [item.id, ...(item.aliases || [])];
 }
 

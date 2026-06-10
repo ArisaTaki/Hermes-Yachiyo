@@ -9,7 +9,7 @@ The plugin is a QQ bridge, not the main runtime.
 ## Responsibilities
 - parse QQ commands
 - validate sender and permissions
-- call Hermes-Yachiyo HTTP APIs
+- call Oha-Yachiyo HTTP APIs
 - route /y codex to Hapi
 - return formatted responses to QQ
 

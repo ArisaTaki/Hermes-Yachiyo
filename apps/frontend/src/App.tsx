@@ -20,9 +20,6 @@ const AgentStudioView = lazy(() =>
 const DiagnosticsView = lazy(() =>
   import('./views/DiagnosticsView').then((module) => ({ default: module.DiagnosticsView })),
 );
-const InstallerView = lazy(() =>
-  import('./views/InstallerView').then((module) => ({ default: module.InstallerView })),
-);
 const ModeSettingsView = lazy(() =>
   import('./views/ModeSettingsView').then((module) => ({ default: module.ModeSettingsView })),
 );
@@ -85,7 +82,6 @@ export function App() {
   if (view === 'chat') page = <ChatView />;
   else if (view === 'agents') page = <AgentStudioView />;
   else if (view === 'settings') page = <ModeSettingsView />;
-  else if (view === 'installer') page = <InstallerView />;
   else if (view === 'diagnostics') page = <DiagnosticsView />;
   else if (view === 'tools') page = <ToolCenterView />;
   else if (view === 'proactive-tts') page = <ProactiveTtsSettingsView />;

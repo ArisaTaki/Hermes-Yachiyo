@@ -14,7 +14,7 @@ export type LauncherHitRegionPayload = {
     height: number;
   };
 };
-export type DesktopTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup' | 'update-hermes' | 'update-hermes-backup';
+export type DesktopTerminalTask = 'mac-prerequisites';
 export type DesktopTerminalStartResult = {
   success?: boolean;
   id?: string;
@@ -129,7 +129,7 @@ export type AvatarImageSelection = {
 
 declare global {
   interface Window {
-    hermesDesktop?: {
+    ohaDesktop?: {
       cancelAppUpdateDownload?: () => Promise<{ ok?: boolean; cancelled?: boolean; error?: string }>;
       chooseAvatarImage?: () => Promise<AvatarImageSelection | string | null>;
       chooseLive2DArchive?: () => Promise<string | null>;
@@ -140,6 +140,7 @@ declare global {
       downloadAppUpdate?: () => Promise<AppUpdateDownloadResult>;
       getAppUpdateInfo?: () => Promise<AppUpdateInfo>;
       getBridgeUrl: () => Promise<string>;
+      getBridgeToken?: () => Promise<string>;
       installAppUpdate?: (dmgPath?: string) => Promise<AppUpdateInstallResult>;
       getLauncherPointerState?: (mode: string) => Promise<{ ok?: boolean; x?: number; y?: number; width?: number; height?: number; inside?: boolean; updated_at?: number }>;
       moveLauncherWindow?: (deltaX: number, deltaY: number) => Promise<boolean>;
@@ -166,6 +167,7 @@ declare global {
 }
 
 let cachedBridgeUrl: string | null = null;
+let cachedBridgeToken: string | null = null;
 
 export async function bridgeUrl(): Promise<string> {
   if (cachedBridgeUrl) return cachedBridgeUrl;
@@ -174,12 +176,28 @@ export async function bridgeUrl(): Promise<string> {
     cachedBridgeUrl = urlFromQuery.replace(/\/$/, '');
     return cachedBridgeUrl;
   }
-  if (window.hermesDesktop?.getBridgeUrl) {
-    cachedBridgeUrl = (await window.hermesDesktop.getBridgeUrl()).replace(/\/$/, '');
+  if (window.ohaDesktop?.getBridgeUrl) {
+    cachedBridgeUrl = (await window.ohaDesktop.getBridgeUrl()).replace(/\/$/, '');
     return cachedBridgeUrl;
   }
   cachedBridgeUrl = 'http://127.0.0.1:8420';
   return cachedBridgeUrl;
+}
+
+async function bridgeToken(): Promise<string> {
+  if (cachedBridgeToken !== null) return cachedBridgeToken;
+  cachedBridgeToken = window.ohaDesktop?.getBridgeToken
+    ? await window.ohaDesktop.getBridgeToken()
+    : '';
+  return cachedBridgeToken;
+}
+
+async function bridgeJsonHeaders(): Promise<Record<string, string>> {
+  const token = await bridgeToken();
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { 'X-Oha-Yachiyo-Bridge-Token': token } : {}),
+  };
 }
 
 export async function apiGet<T = ApiRecord>(path: string): Promise<T> {
@@ -195,11 +213,12 @@ export async function apiGet<T = ApiRecord>(path: string): Promise<T> {
 
 export async function apiPost<T = ApiRecord>(path: string, body?: unknown): Promise<T> {
   const baseUrl = await bridgeUrl();
+  const headers = await bridgeJsonHeaders();
   let response: Response;
   try {
     response = await fetch(`${baseUrl}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
@@ -210,11 +229,12 @@ export async function apiPost<T = ApiRecord>(path: string, body?: unknown): Prom
 
 export async function apiPatch<T = ApiRecord>(path: string, body?: unknown): Promise<T> {
   const baseUrl = await bridgeUrl();
+  const headers = await bridgeJsonHeaders();
   let response: Response;
   try {
     response = await fetch(`${baseUrl}${path}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
@@ -225,11 +245,15 @@ export async function apiPatch<T = ApiRecord>(path: string, body?: unknown): Pro
 
 export async function apiDelete<T = ApiRecord>(path: string, body?: unknown): Promise<T> {
   const baseUrl = await bridgeUrl();
+  const token = await bridgeToken();
   let response: Response;
   try {
     response = await fetch(`${baseUrl}${path}`, {
       method: 'DELETE',
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      headers: {
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(token ? { 'X-Oha-Yachiyo-Bridge-Token': token } : {}),
+      },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
@@ -242,8 +266,8 @@ export async function openAppView(
   view: string,
   params: Record<string, string> = {},
 ): Promise<void> {
-  if (window.hermesDesktop?.openView) {
-    await window.hermesDesktop.openView(view, params);
+  if (window.ohaDesktop?.openView) {
+    await window.ohaDesktop.openView(view, params);
     return;
   }
   const targetUrl = appViewUrl(view, params);
@@ -281,7 +305,6 @@ function isAppView(value: string): value is AppView {
     'chat',
     'agents',
     'settings',
-    'installer',
     'provider',
     'resources',
     'workspace',
@@ -299,80 +322,80 @@ function isAppView(value: string): value is AppView {
 }
 
 export async function openDesktopMode(mode?: string): Promise<void> {
-  if (window.hermesDesktop?.openDesktopMode) {
-    await window.hermesDesktop.openDesktopMode(mode);
+  if (window.ohaDesktop?.openDesktopMode) {
+    await window.ohaDesktop.openDesktopMode(mode);
     return;
   }
   if (mode === 'live2d' || mode === 'bubble') location.assign(appViewUrl(mode));
 }
 
 export async function openLauncherMenu(mode?: string): Promise<void> {
-  if (window.hermesDesktop?.openLauncherMenu) {
-    await window.hermesDesktop.openLauncherMenu(mode);
+  if (window.ohaDesktop?.openLauncherMenu) {
+    await window.ohaDesktop.openLauncherMenu(mode);
   }
 }
 
 export async function moveLauncherWindow(deltaX: number, deltaY: number): Promise<void> {
-  if (window.hermesDesktop?.moveLauncherWindow) {
-    await window.hermesDesktop.moveLauncherWindow(deltaX, deltaY);
+  if (window.ohaDesktop?.moveLauncherWindow) {
+    await window.ohaDesktop.moveLauncherWindow(deltaX, deltaY);
   }
 }
 
 export async function getLauncherPointerState(
   mode: string,
 ): Promise<{ ok?: boolean; x?: number; y?: number; width?: number; height?: number; inside?: boolean; updated_at?: number }> {
-  if (window.hermesDesktop?.getLauncherPointerState) {
-    return window.hermesDesktop.getLauncherPointerState(mode);
+  if (window.ohaDesktop?.getLauncherPointerState) {
+    return window.ohaDesktop.getLauncherPointerState(mode);
   }
   return { ok: false, inside: false, x: 0, y: 0 };
 }
 
 export async function chooseLive2DModelDirectory(): Promise<string | null> {
-  if (!window.hermesDesktop?.chooseLive2DModelDirectory) {
+  if (!window.ohaDesktop?.chooseLive2DModelDirectory) {
     throw new Error('当前环境没有桌面文件选择器入口，请在页面中输入模型目录路径');
   }
-  return window.hermesDesktop.chooseLive2DModelDirectory();
+  return window.ohaDesktop.chooseLive2DModelDirectory();
 }
 
 export async function chooseAvatarImage(): Promise<AvatarImageSelection | string | null> {
-  if (!window.hermesDesktop?.chooseAvatarImage) {
+  if (!window.ohaDesktop?.chooseAvatarImage) {
     throw new Error('当前环境没有桌面图片选择器入口');
   }
-  return window.hermesDesktop.chooseAvatarImage();
+  return window.ohaDesktop.chooseAvatarImage();
 }
 
 export async function chooseLive2DArchive(): Promise<string | null> {
-  if (!window.hermesDesktop?.chooseLive2DArchive) {
+  if (!window.ohaDesktop?.chooseLive2DArchive) {
     throw new Error('当前环境没有桌面文件选择器入口，请在页面中输入 ZIP 路径');
   }
-  return window.hermesDesktop.chooseLive2DArchive();
+  return window.ohaDesktop.chooseLive2DArchive();
 }
 
 export async function chooseSkillSources(): Promise<string[]> {
-  if (!window.hermesDesktop?.chooseSkillSources) {
+  if (!window.ohaDesktop?.chooseSkillSources) {
     throw new Error('当前环境没有桌面文件选择器入口，请在页面中输入 Skill 目录或 ZIP 路径');
   }
-  return window.hermesDesktop.chooseSkillSources();
+  return window.ohaDesktop.chooseSkillSources();
 }
 
 export function hasDesktopAvatarPicker(): boolean {
-  return Boolean(window.hermesDesktop?.chooseAvatarImage);
+  return Boolean(window.ohaDesktop?.chooseAvatarImage);
 }
 
 export function hasDesktopFilePicker(): boolean {
-  return Boolean(window.hermesDesktop?.chooseLive2DArchive && window.hermesDesktop?.chooseLive2DModelDirectory);
+  return Boolean(window.ohaDesktop?.chooseLive2DArchive && window.ohaDesktop?.chooseLive2DModelDirectory);
 }
 
 export async function openPath(path: string): Promise<void> {
-  if (!window.hermesDesktop?.openPath) {
+  if (!window.ohaDesktop?.openPath) {
     throw new Error('当前环境没有桌面文件管理器入口');
   }
-  await window.hermesDesktop.openPath(path);
+  await window.ohaDesktop.openPath(path);
 }
 
 export async function openExternalUrl(url: string): Promise<void> {
-  if (window.hermesDesktop?.openExternalUrl) {
-    await window.hermesDesktop.openExternalUrl(url);
+  if (window.ohaDesktop?.openExternalUrl) {
+    await window.ohaDesktop.openExternalUrl(url);
     return;
   }
   window.open(url, '_blank', 'noopener,noreferrer');
@@ -382,8 +405,8 @@ export async function setLauncherPointerInteractive(
   mode: string,
   interactive: boolean,
 ): Promise<void> {
-  if (window.hermesDesktop?.setLauncherPointerInteractive) {
-    await window.hermesDesktop.setLauncherPointerInteractive(mode, interactive);
+  if (window.ohaDesktop?.setLauncherPointerInteractive) {
+    await window.ohaDesktop.setLauncherPointerInteractive(mode, interactive);
   }
 }
 
@@ -391,8 +414,8 @@ export async function setLauncherHitRegions(
   mode: string,
   regions: LauncherHitRegionRect[],
 ): Promise<boolean> {
-  if (window.hermesDesktop?.setLauncherHitRegions) {
-    return window.hermesDesktop.setLauncherHitRegions(mode, {
+  if (window.ohaDesktop?.setLauncherHitRegions) {
+    return window.ohaDesktop.setLauncherHitRegions(mode, {
       regions,
       viewport: {
         width: Math.max(window.innerWidth || 1, 1),
@@ -405,9 +428,9 @@ export async function setLauncherHitRegions(
 
 export async function copyText(text: string): Promise<void> {
   const errors: string[] = [];
-  if (window.hermesDesktop?.copyText) {
+  if (window.ohaDesktop?.copyText) {
     try {
-      await window.hermesDesktop.copyText(text);
+      await window.ohaDesktop.copyText(text);
       return;
     } catch (error) {
       errors.push(error instanceof Error ? error.message : 'desktop clipboard failed');
@@ -467,84 +490,84 @@ function copyTextWithSelection(text: string): void {
 }
 
 export async function quitApp(): Promise<void> {
-  if (window.hermesDesktop?.quit) {
-    await window.hermesDesktop.quit();
+  if (window.ohaDesktop?.quit) {
+    await window.ohaDesktop.quit();
     return;
   }
   window.close();
 }
 
 export async function removeAppBundleAndQuit(): Promise<{ success?: boolean; appBundlePath?: string; error?: string }> {
-  if (!window.hermesDesktop?.removeAppBundleAndQuit) {
+  if (!window.ohaDesktop?.removeAppBundleAndQuit) {
     throw new Error('当前环境无法自动删除应用本体');
   }
-  return window.hermesDesktop.removeAppBundleAndQuit();
+  return window.ohaDesktop.removeAppBundleAndQuit();
 }
 
 export async function restartApp(): Promise<void> {
-  if (window.hermesDesktop?.restartApp) {
-    await window.hermesDesktop.restartApp();
+  if (window.ohaDesktop?.restartApp) {
+    await window.ohaDesktop.restartApp();
     return;
   }
   window.location.reload();
 }
 
 export async function getAppUpdateInfo(): Promise<AppUpdateInfo> {
-  if (!window.hermesDesktop?.getAppUpdateInfo) {
+  if (!window.ohaDesktop?.getAppUpdateInfo) {
     return { supported: false, packaged: false, error: '当前环境不支持应用更新' };
   }
-  return window.hermesDesktop.getAppUpdateInfo();
+  return window.ohaDesktop.getAppUpdateInfo();
 }
 
 export async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
-  if (!window.hermesDesktop?.checkAppUpdate) {
+  if (!window.ohaDesktop?.checkAppUpdate) {
     return { ok: false, supported: false, packaged: false, update_available: false, error: '当前环境不支持应用更新' };
   }
-  return window.hermesDesktop.checkAppUpdate();
+  return window.ohaDesktop.checkAppUpdate();
 }
 
 export async function downloadAppUpdate(): Promise<AppUpdateDownloadResult> {
-  if (!window.hermesDesktop?.downloadAppUpdate) {
+  if (!window.ohaDesktop?.downloadAppUpdate) {
     return { ok: false, error: '当前环境不支持应用更新' };
   }
-  return window.hermesDesktop.downloadAppUpdate();
+  return window.ohaDesktop.downloadAppUpdate();
 }
 
 export async function cancelAppUpdateDownload(): Promise<{ ok?: boolean; cancelled?: boolean; error?: string }> {
-  if (!window.hermesDesktop?.cancelAppUpdateDownload) {
+  if (!window.ohaDesktop?.cancelAppUpdateDownload) {
     return { ok: false, cancelled: false, error: '当前环境不支持取消应用更新下载' };
   }
-  return window.hermesDesktop.cancelAppUpdateDownload();
+  return window.ohaDesktop.cancelAppUpdateDownload();
 }
 
 export async function installAppUpdate(dmgPath?: string): Promise<AppUpdateInstallResult> {
-  if (!window.hermesDesktop?.installAppUpdate) {
+  if (!window.ohaDesktop?.installAppUpdate) {
     return { success: false, error: '当前环境不支持应用更新' };
   }
-  return window.hermesDesktop.installAppUpdate(dmgPath);
+  return window.ohaDesktop.installAppUpdate(dmgPath);
 }
 
 export function onAppUpdateDownloadProgress(callback: (payload: AppUpdateDownloadProgress) => void): () => void {
-  return window.hermesDesktop?.onAppUpdateDownloadProgress?.(callback) || (() => {});
+  return window.ohaDesktop?.onAppUpdateDownloadProgress?.(callback) || (() => {});
 }
 
 export async function restartDesktopBridge(bridgeUrl?: string): Promise<{ success?: boolean; bridgeUrl?: string; error?: string }> {
-  if (!window.hermesDesktop?.restartBackend) {
-    return { success: false, error: '当前环境不支持自动重启 Bridge，请重启 Hermes-Yachiyo' };
+  if (!window.ohaDesktop?.restartBackend) {
+    return { success: false, error: '当前环境不支持自动重启 Bridge，请重启 Oha-Yachiyo' };
   }
-  const result = await window.hermesDesktop.restartBackend({ bridgeUrl });
+  const result = await window.ohaDesktop.restartBackend({ bridgeUrl });
   if (result.bridgeUrl) cachedBridgeUrl = result.bridgeUrl.replace(/\/$/, '');
   return result;
 }
 
 export function hasEmbeddedTerminal(): boolean {
   return Boolean(
-    window.hermesDesktop?.terminalStart
-    && window.hermesDesktop?.terminalWrite
-    && window.hermesDesktop?.terminalResize
-    && window.hermesDesktop?.terminalKill
-    && window.hermesDesktop?.onTerminalData
-    && window.hermesDesktop?.onTerminalExit,
+    window.ohaDesktop?.terminalStart
+    && window.ohaDesktop?.terminalWrite
+    && window.ohaDesktop?.terminalResize
+    && window.ohaDesktop?.terminalKill
+    && window.ohaDesktop?.onTerminalData
+    && window.ohaDesktop?.onTerminalExit,
   );
 }
 
@@ -553,31 +576,31 @@ export async function startDesktopTerminal(
   cols: number,
   rows: number,
 ): Promise<DesktopTerminalStartResult> {
-  if (!window.hermesDesktop?.terminalStart) throw new Error('当前环境不支持内置终端');
-  return window.hermesDesktop.terminalStart(task, cols, rows);
+  if (!window.ohaDesktop?.terminalStart) throw new Error('当前环境不支持内置终端');
+  return window.ohaDesktop.terminalStart(task, cols, rows);
 }
 
 export async function writeDesktopTerminal(id: string, data: string): Promise<void> {
-  if (!window.hermesDesktop?.terminalWrite) return;
-  await window.hermesDesktop.terminalWrite(id, data);
+  if (!window.ohaDesktop?.terminalWrite) return;
+  await window.ohaDesktop.terminalWrite(id, data);
 }
 
 export async function resizeDesktopTerminal(id: string, cols: number, rows: number): Promise<void> {
-  if (!window.hermesDesktop?.terminalResize) return;
-  await window.hermesDesktop.terminalResize(id, cols, rows);
+  if (!window.ohaDesktop?.terminalResize) return;
+  await window.ohaDesktop.terminalResize(id, cols, rows);
 }
 
 export async function killDesktopTerminal(id: string): Promise<void> {
-  if (!window.hermesDesktop?.terminalKill) return;
-  await window.hermesDesktop.terminalKill(id);
+  if (!window.ohaDesktop?.terminalKill) return;
+  await window.ohaDesktop.terminalKill(id);
 }
 
 export function onDesktopTerminalData(callback: (payload: DesktopTerminalDataPayload) => void): () => void {
-  return window.hermesDesktop?.onTerminalData?.(callback) || (() => {});
+  return window.ohaDesktop?.onTerminalData?.(callback) || (() => {});
 }
 
 export function onDesktopTerminalExit(callback: (payload: DesktopTerminalExitPayload) => void): () => void {
-  return window.hermesDesktop?.onTerminalExit?.(callback) || (() => {});
+  return window.ohaDesktop?.onTerminalExit?.(callback) || (() => {});
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {

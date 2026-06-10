@@ -4,11 +4,11 @@ applyTo: "apps/**,packages/**,docs/**"
 
 # Core and Desktop App Instructions
 
-Hermes-Yachiyo is the main system.
+Oha-Yachiyo is the main system.
 
 ## Architectural intent
 
-Hermes-Yachiyo is a desktop-first local application.
+Oha-Yachiyo is a desktop-first local application.
 
 It should be split into:
 
@@ -20,13 +20,13 @@ It should be split into:
 ## Responsibilities
 
 - app shell: window, tray, display mode, settings entry, local UX
-- core runtime: Hermes integration, task orchestration, state, memory/tool coordination
+- core runtime: Native Agent execution, task orchestration, state, memory/tool coordination
 - local capability layer: screenshots, active-window, local machine capabilities
 - optional bridge/API: local communication for UI and AstrBot bridge
 
 ## Rules
 
-- Do not design Hermes-Yachiyo as a pure FastAPI service.
+- Do not design Oha-Yachiyo as a pure FastAPI service.
 - FastAPI or similar local APIs may exist only as internal bridge layers.
 - Define product shape and module boundaries before deep implementation.
 - Keep modules small and typed.

@@ -37,9 +37,11 @@ def _ensure_bridge_mocks() -> None:
             self.headers = headers or {}
 
     class _MockFileResponse(_MockResponse):
-        def __init__(self, path, media_type=None, headers=None):
+        def __init__(self, path, media_type=None, headers=None, filename=None, content_disposition_type=None, **_kwargs):
             super().__init__(content=path, media_type=media_type, headers=headers)
             self.path = path
+            self.filename = filename
+            self.content_disposition_type = content_disposition_type
 
     class _MockAPIRouter:
         def __init__(self, **_kw):
@@ -78,7 +80,6 @@ def _ensure_bridge_mocks() -> None:
     }
     route_modules = [
         "apps.bridge.routes",
-        "apps.bridge.routes.hermes",
         "apps.bridge.routes.screen",
         "apps.bridge.routes.status",
         "apps.bridge.routes.system",

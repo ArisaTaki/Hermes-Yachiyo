@@ -15,7 +15,7 @@ NODE_VERSION = "v20.19.0"
 MIN_NODE_VERSION = (20, 19, 0)
 REQUIRED_FRONTEND_BINS = ("concurrently", "electron", "tsc", "vite")
 FRONTEND_DEV_URL = "http://127.0.0.1:5174"
-BRIDGE_URL_ENV = "HERMES_YACHIYO_BRIDGE_URL"
+BRIDGE_URL_ENV = "OHA_YACHIYO_BRIDGE_URL"
 DEV_BRIDGE_URL = "http://127.0.0.1:8420"
 PACKAGED_BRIDGE_URL = "http://127.0.0.1:18420"
 
@@ -218,7 +218,7 @@ def main() -> None:
     project_root = Path(__file__).resolve().parents[1]
     frontend_dir = project_root / "apps" / "frontend"
     node_bin = _node_bin_dir()
-    env = {**os.environ, "HERMES_YACHIYO_PYTHON": sys.executable}
+    env = {**os.environ, "OHA_YACHIYO_PYTHON": sys.executable}
     _prepare_development_bridge_env(env)
     if node_bin is not None:
         env["PATH"] = f"{node_bin}{os.pathsep}{env.get('PATH', '')}"
@@ -230,7 +230,7 @@ def main() -> None:
         bridge_url = env[BRIDGE_URL_ENV]
         if _bridge_server_ready(bridge_url):
             print(f"[desktop] Reusing existing Python Bridge at {bridge_url}.")
-            env["HERMES_YACHIYO_SKIP_BACKEND"] = "1"
+            env["OHA_YACHIYO_SKIP_BACKEND"] = "1"
         _run_electron_against_existing_vite(project_root, frontend_dir, env)
         return
     _run_frontend_dev(project_root, frontend_dir, npm, env)

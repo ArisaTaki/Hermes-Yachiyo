@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 
-from ..api_client import HermesClient
+from ..api_client import OhaClient
 from ..config import PluginConfig
 from .utils import fmt_dt, fmt_status
 
@@ -19,7 +19,7 @@ async def handle(args: str, config: PluginConfig) -> str:
     if not task_id:
         return "用法: /y check <任务ID>"
 
-    client = HermesClient(config)
+    client = OhaClient(config)
     data = await client.get_task(task_id)
 
     task    = data.get("task", {})

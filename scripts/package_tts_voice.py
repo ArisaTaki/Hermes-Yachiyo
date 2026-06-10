@@ -87,12 +87,12 @@ def build_voice_package(output_dir: Path = DEFAULT_OUTPUT_DIR) -> Path:
     )
     (staging / "README.md").write_text(
         "# 八千代 GPT-SoVITS 语音包\n\n"
-        "在 Hermes-Yachiyo 的“主动关怀语音”页面导入此 ZIP，保存后即可填入 GPT-SoVITS 权重和参考音频路径。\n"
+        "在 Oha-Yachiyo 的“主动关怀语音”页面导入此 ZIP，保存后即可填入 GPT-SoVITS 权重和参考音频路径。\n"
         "此包只包含八千代音色资源，不包含 GPT-SoVITS 服务本体；仍需用户本机启动 GPT-SoVITS API 服务。\n",
         encoding="utf-8",
     )
 
-    archive = output_dir / f"Hermes-Yachiyo-{slug}.zip"
+    archive = output_dir / f"Oha-Yachiyo-{slug}.zip"
     archive.unlink(missing_ok=True)
     with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
         for path in sorted(staging.rglob("*")):

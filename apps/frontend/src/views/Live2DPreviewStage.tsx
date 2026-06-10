@@ -419,14 +419,14 @@ function resolveLive2DScriptUrl(value: string, baseUrl: string) {
 }
 
 function loadClassicScript(script: Live2DRuntimeScript) {
-  if (document.querySelector(`script[data-hermes-live2d="${script.id}"][data-loaded="1"]`)) {
+  if (document.querySelector(`script[data-oha-live2d="${script.id}"][data-loaded="1"]`)) {
     return Promise.resolve();
   }
   return new Promise<void>((resolve, reject) => {
     const node = document.createElement('script');
     node.src = script.url;
     node.async = false;
-    node.dataset.hermesLive2d = script.id;
+    node.dataset.ohaLive2d = script.id;
     node.onload = () => {
       node.dataset.loaded = '1';
       resolve();

@@ -1,4 +1,4 @@
-"""Hermes-Yachiyo Bridge / Hapi HTTP 客户端。
+"""Oha-Yachiyo Bridge / Hapi HTTP 客户端。
 
 依赖 httpx（需在 AstrBot 宿主环境中可用）。
 仅封装 HTTP 操作，不处理业务逻辑。
@@ -28,8 +28,8 @@ def _raise_readable(resp: httpx.Response) -> None:
     raise RuntimeError(f"[{resp.status_code}] {msg}")
 
 
-class HermesClient:
-    """Hermes-Yachiyo Bridge API 客户端。
+class OhaClient:
+    """Oha-Yachiyo Bridge API 客户端。
 
     端点映射：
       GET  /status              → get_status()
@@ -41,7 +41,7 @@ class HermesClient:
     """
 
     def __init__(self, config: PluginConfig) -> None:
-        self._base = config.hermes_url.rstrip("/")
+        self._base = config.oha_url.rstrip("/")
         self._timeout = config.timeout
 
     async def _get(self, path: str) -> Dict[str, Any]:

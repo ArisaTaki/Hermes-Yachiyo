@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from ..api_client import HermesClient
+from ..api_client import OhaClient
 from ..config import PluginConfig
 from .utils import fmt_dt
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 async def handle(args: str, config: PluginConfig) -> str:
-    client = HermesClient(config)
+    client = OhaClient(config)
     data = await client.get_active_window()
 
     title    = data.get("title") or "（无标题）"

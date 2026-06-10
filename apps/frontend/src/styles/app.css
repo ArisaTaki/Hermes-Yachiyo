@@ -82,7 +82,7 @@ body,
 .hy-chat-session-list,
 .image-viewer-stage,
 .diagnostic-output,
-.hermes-test-result pre,
+.native-test-result pre,
 .installer-guidance-list pre,
 .installer-log,
 .json-panel pre {
@@ -1960,12 +1960,12 @@ button:hover {
   min-height: 34px;
 }
 
-.hermes-config-center {
+.native-config-center {
   display: grid;
   gap: 12px;
 }
 
-.hermes-config-alert {
+.native-config-alert {
   display: grid;
   gap: 4px;
   border: 1px solid rgba(225, 185, 92, 0.42);
@@ -1975,36 +1975,36 @@ button:hover {
   padding: 10px 12px;
 }
 
-.hermes-config-alert.danger {
+.native-config-alert.danger {
   border-color: rgba(232, 125, 132, 0.46);
   background: rgba(232, 125, 132, 0.12);
   color: #f2a4aa;
 }
 
-.hermes-config-alert strong {
+.native-config-alert strong {
   color: var(--text);
   font-size: 13px;
 }
 
-.hermes-config-alert span {
+.native-config-alert span {
   color: inherit;
   font-size: 12px;
   line-height: 1.45;
 }
 
-.hermes-test-strip {
+.native-test-strip {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
   gap: 8px;
 }
 
-.hermes-command-grid {
+.native-command-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
-.hermes-visual-config {
+.native-visual-config {
   display: grid;
   gap: 10px;
   border: 1px solid rgba(120, 166, 247, 0.16);
@@ -2013,26 +2013,26 @@ button:hover {
   padding: 12px;
 }
 
-.hermes-subsection-title,
-.hermes-config-footer {
+.native-subsection-title,
+.native-config-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.hermes-subsection-title strong {
+.native-subsection-title strong {
   font-size: 13px;
 }
 
-.hermes-subsection-title span,
-.hermes-config-footer span {
+.native-subsection-title span,
+.native-config-footer span {
   color: var(--muted);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 
-.hermes-form-actions {
+.native-form-actions {
   display: flex;
   flex: 0 0 auto;
   flex-wrap: wrap;
@@ -2040,22 +2040,22 @@ button:hover {
   gap: 8px;
 }
 
-.hermes-config-form-grid {
+.native-config-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
-.hermes-config-form-grid.compact {
+.native-config-form-grid.compact {
   gap: 9px;
 }
 
-.hermes-config-form-grid.proactive-settings-grid {
+.native-config-form-grid.proactive-settings-grid {
   grid-template-columns: 1fr;
   gap: 12px;
 }
 
-.hermes-config-footer button {
+.native-config-footer button {
   flex: 0 0 auto;
 }
 
@@ -2098,20 +2098,20 @@ button:hover {
   margin-top: 0;
 }
 
-.hermes-command-button {
+.native-command-button {
   display: grid;
   gap: 4px;
   min-height: 82px;
   text-align: left;
 }
 
-.hermes-command-button span {
+.native-command-button span {
   color: var(--text);
   font-weight: 700;
 }
 
-.hermes-command-button small,
-.hermes-command-button em {
+.native-command-button small,
+.native-command-button em {
   color: var(--muted);
   font-size: 12px;
   font-style: normal;
@@ -2424,7 +2424,7 @@ button:hover {
   line-height: 1.35;
 }
 
-.hermes-update-panel {
+.native-update-panel {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2435,38 +2435,38 @@ button:hover {
   padding: 12px;
 }
 
-.hermes-update-panel.attention {
+.native-update-panel.attention {
   border-color: rgba(249, 199, 78, 0.34);
   background: rgba(249, 199, 78, 0.08);
 }
 
-.hermes-update-panel>div:first-child {
+.native-update-panel>div:first-child {
   display: grid;
   gap: 4px;
   flex: 1 1 auto;
   min-width: 0;
 }
 
-.hermes-update-panel strong {
+.native-update-panel strong {
   color: var(--text);
   font-size: 13px;
 }
 
-.hermes-update-panel span,
-.hermes-update-panel small {
+.native-update-panel span,
+.native-update-panel small {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.4;
 }
 
-.hermes-update-actions {
+.native-update-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
 }
 
-.hermes-update-backup-option {
+.native-update-backup-option {
   width: min(620px, 100%);
   margin-top: 4px;
   padding: 8px 10px;
@@ -2474,21 +2474,21 @@ button:hover {
   background: rgba(6, 9, 15, 0.22);
 }
 
-.hermes-update-progress {
+.native-update-progress {
   display: grid;
   gap: 6px;
   min-width: min(420px, 100%);
   margin-top: 4px;
 }
 
-.hermes-update-progress>div:first-child {
+.native-update-progress>div:first-child {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
 }
 
-.hermes-update-progress-track {
+.native-update-progress-track {
   position: relative;
   height: 6px;
   overflow: hidden;
@@ -2496,7 +2496,7 @@ button:hover {
   background: rgba(120, 166, 247, 0.14);
 }
 
-.hermes-update-progress-track span {
+.native-update-progress-track span {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -2504,10 +2504,10 @@ button:hover {
   width: 34%;
   border-radius: inherit;
   background: linear-gradient(90deg, rgba(120, 166, 247, 0.24), rgba(120, 166, 247, 0.92), rgba(120, 166, 247, 0.24));
-  animation: hermes-update-indeterminate 1.35s ease-in-out infinite;
+  animation: native-update-indeterminate 1.35s ease-in-out infinite;
 }
 
-@keyframes hermes-update-indeterminate {
+@keyframes native-update-indeterminate {
   0% {
     transform: translateX(0);
   }
@@ -3193,7 +3193,7 @@ button:hover {
   font-size: 12px;
 }
 
-.hermes-test-result {
+.native-test-result {
   display: grid;
   gap: 5px;
   border: 1px solid rgba(255, 255, 255, 0.09);
@@ -3201,27 +3201,27 @@ button:hover {
   padding: 10px 12px;
 }
 
-.hermes-test-result.success {
+.native-test-result.success {
   border-color: rgba(86, 197, 157, 0.34);
   background: rgba(86, 197, 157, 0.1);
 }
 
-.hermes-test-result.danger {
+.native-test-result.danger {
   border-color: rgba(239, 119, 127, 0.34);
   background: rgba(239, 119, 127, 0.11);
 }
 
-.hermes-test-result strong {
+.native-test-result strong {
   font-size: 13px;
   overflow-wrap: anywhere;
 }
 
-.hermes-test-result span {
+.native-test-result span {
   color: var(--muted);
   font-size: 12px;
 }
 
-.hermes-test-result pre {
+.native-test-result pre {
   max-height: 116px;
   margin: 2px 0 0;
   overflow: auto;
@@ -4638,8 +4638,8 @@ button:hover {
     flex-direction: column;
   }
 
-  .hermes-command-grid,
-  .hermes-test-strip {
+  .native-command-grid,
+  .native-test-strip {
     grid-template-columns: 1fr;
   }
 
@@ -4685,21 +4685,21 @@ button:hover {
     max-width: 94%;
   }
 
-  .hermes-config-form-grid,
+  .native-config-form-grid,
   .capability-settings-grid {
     grid-template-columns: 1fr;
   }
 
-  .hermes-config-footer {
+  .native-config-footer {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .hermes-form-actions {
+  .native-form-actions {
     justify-content: stretch;
   }
 
-  .hermes-form-actions button {
+  .native-form-actions button {
     flex: 1 1 auto;
   }
 
@@ -12477,7 +12477,7 @@ body.electron-window .hy-traffic {
   }
 }
 
-.hy-diagnostics-page .hermes-config-form-grid {
+.hy-diagnostics-page .native-config-form-grid {
   position: relative;
   z-index: 1;
 }
@@ -12864,7 +12864,7 @@ body.electron-window .hy-traffic {
   color: var(--hy-warning);
 }
 
-.hy-tts-page .hermes-test-result {
+.hy-tts-page .native-test-result {
   border-color: var(--hy-border-soft);
   border-radius: var(--hy-radius-card);
   background: oklch(255 0 0 / 0.03);
@@ -17355,7 +17355,7 @@ button.activity-item {
   letter-spacing: 0;
 }
 
-.model-runtime-pill.is-hermes {
+.model-runtime-pill.is-native {
   border-color: oklch(74% 0.16 160 / 0.52);
   background:
     linear-gradient(135deg, oklch(68% 0.16 160 / 0.22), oklch(84% 0.14 82 / 0.13));

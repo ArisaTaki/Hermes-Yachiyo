@@ -8,11 +8,11 @@
 - memory/02-routing-rules.md
 - memory/progress/current-state.md
 
-你当前在开发的项目是 Hermes-Yachiyo。
+你当前在开发的项目是 Oha-Yachiyo。
 
 ## 先纠正产品形态
 
-Hermes-Yachiyo 的最终产品形态不是单纯的 FastAPI 本地服务，而是一个本地可运行、可打包的桌面应用。
+Oha-Yachiyo 的最终产品形态不是单纯的 FastAPI 本地服务，而是一个本地可运行、可打包的桌面应用。
 
 它应当包含：
 - 桌面应用壳
@@ -21,7 +21,7 @@ Hermes-Yachiyo 的最终产品形态不是单纯的 FastAPI 本地服务，而�
 - 可切换显示模式
 - 气泡模式
 - Live2D 模式或至少预留支持
-- 内嵌 Hermes Agent runtime
+- 内嵌 Native Agent runtime
 - 必要时暴露本地 bridge/API 给 AstrBot 插件调用
 
 ## 正确分层
@@ -33,7 +33,7 @@ Hermes-Yachiyo 的最终产品形态不是单纯的 FastAPI 本地服务，而�
    - 设置入口
 
 2. Core Runtime
-   - Hermes Agent 封装
+   - Native Agent runtime
    - 任务管理
    - 状态管理
    - 记忆与工具协调
@@ -49,13 +49,13 @@ Hermes-Yachiyo 的最终产品形态不是单纯的 FastAPI 本地服务，而�
 
 5. AstrBot Plugin
    - QQ bridge
-   - 路由到 Hermes-Yachiyo 或 Hapi
+   - 路由到 Oha-Yachiyo 或 Hapi
 
 ## 严格禁止
 
-- 不要把 Hermes-Yachiyo 设计成纯 FastAPI 服务
+- 不要把 Oha-Yachiyo 设计成纯 FastAPI 服务
 - 不要把 FastAPI 当成产品本体
-- 不要把 Codex CLI 执行搬进 Hermes-Yachiyo
+- 不要把 Codex CLI 执行搬进 Oha-Yachiyo
 - 不要把 AstrBot 插件写成第二个 agent runtime
 - 不要在 AstrBot 里实现本地机器控制
 - 不要先做复杂 UI 视觉细节

@@ -21,7 +21,7 @@ jobs:
     name: Publish existing GPT-SoVITS voice ZIP
     runs-on: ubuntu-latest
     env:
-      DEFAULT_ASSET_NAME: Hermes-Yachiyo-yachiyo-gpt-sovits-v4.zip
+      DEFAULT_ASSET_NAME: Oha-Yachiyo-yachiyo-gpt-sovits-v4.zip
     steps:
       - name: Resolve asset URL
         id: resolve
@@ -59,11 +59,11 @@ jobs:
           cat > release/notes.md <<EOF
           Yachiyo GPT-SoVITS Voice Assets
 
-          This release contains the pre-tuned Yachiyo GPT-SoVITS voice ZIP for Hermes-Yachiyo.
+          This release contains the pre-tuned Yachiyo GPT-SoVITS voice ZIP for Oha-Yachiyo.
 
           - Asset: \`${{ steps.resolve.outputs.asset_name }}\`
           - SHA256: \`${SHA256}\`
-          - Import path: open Hermes-Yachiyo -> 主控台 -> 主动关怀语音 -> 导入语音包 ZIP
+          - Import path: open Oha-Yachiyo -> 主控台 -> 主动关怀语音 -> 导入语音包 ZIP
 
           此资源包只包含已经调配好的八千代音色资源，不包含 GPT-SoVITS 服务本体，也不会参与应用 DMG 的常规构建。
           EOF

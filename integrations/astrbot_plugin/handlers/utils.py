@@ -87,13 +87,13 @@ def fmt_error(exc: Exception, command: str = "") -> str:
 
         if isinstance(exc, (httpx.ConnectError, httpx.RemoteProtocolError)):
             return (
-                "⚠️ 无法连接到 Hermes-Yachiyo\n"
+                "⚠️ 无法连接到 Oha-Yachiyo\n"
                 "请确认桌面应用正在运行，Bridge 已启用"
             )
 
         if isinstance(exc, httpx.ConnectTimeout):
             return (
-                "⚠️ 连接 Hermes-Yachiyo 超时\n"
+                "⚠️ 连接 Oha-Yachiyo 超时\n"
                 "请检查桌面应用是否正常运行"
             )
 
@@ -126,8 +126,8 @@ def _fmt_http_error(status_code: int, detail: str) -> str:
     """HTTP 状态码 + 详情 → QQ 可读文本。"""
     if status_code == 503:
         return (
-            "⚠️ Hermes Agent 未就绪\n"
-            "请在桌面应用中确认 Hermes 安装状态"
+            "⚠️ Native Agent 未就绪\n"
+            "请在桌面应用中确认 Native Agent 配置状态"
         )
     if status_code == 404:
         return f"⚠️ 资源不存在\n{detail or '请求的资源未找到'}"

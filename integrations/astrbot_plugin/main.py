@@ -1,4 +1,4 @@
-"""AstrBot 桥接插件 — Hermes-Yachiyo QQ 接入点
+"""AstrBot 桥接插件 — Oha-Yachiyo QQ 接入点
 
 职责：
 - 解析 /y 命令

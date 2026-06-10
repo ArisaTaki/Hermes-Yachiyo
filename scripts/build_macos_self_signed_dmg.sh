@@ -4,9 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FRONTEND_DIR="${ROOT}/apps/frontend"
 OUTPUT_DIR="${ROOT}/dist/electron"
-APP_NAME="${APP_NAME:-Hermes-Yachiyo}"
-VOLUME_NAME="${VOLUME_NAME:-Hermes-Yachiyo}"
-SIGNING_IDENTITY="${1:-${MACOS_CODESIGN_IDENTITY:-Hermes-Yachiyo Self Signed}}"
+APP_NAME="${APP_NAME:-Oha-Yachiyo}"
+VOLUME_NAME="${VOLUME_NAME:-Oha-Yachiyo}"
+SIGNING_IDENTITY="${1:-${MACOS_CODESIGN_IDENTITY:-Oha-Yachiyo Self Signed}}"
 ENTITLEMENTS="${ENTITLEMENTS:-${ROOT}/packaging/entitlements.mac.plist}"
 TMP_BASE="${RUNNER_TEMP:-/tmp}"
 
@@ -54,7 +54,7 @@ case "${ARCH}" in
   *) DMG_ARCH="${ARCH}" ;;
 esac
 
-DMG_STAGING="$(mktemp -d "${TMP_BASE}/hermes-yachiyo-dmg.XXXXXX")"
+DMG_STAGING="$(mktemp -d "${TMP_BASE}/oha-yachiyo-dmg.XXXXXX")"
 trap 'rm -rf "${DMG_STAGING}"' EXIT
 
 cp -R "${APP_PATH}" "${DMG_STAGING}/"

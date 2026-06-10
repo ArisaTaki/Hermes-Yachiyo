@@ -42,7 +42,7 @@ import {
   listWorkflows,
   rejectRunApproval,
   rerunRun,
-  syncHermesSkills,
+  syncNativeSkills,
   testAgentModel,
   updateAgent,
   updateSkill,
@@ -184,7 +184,7 @@ type SkillImportResult = {
   message: string;
 };
 
-type SkillSourceFilter = 'yachiyo' | 'hermes';
+type SkillSourceFilter = 'installed' | 'native';
 const studioRouteTabs: StudioTab[] = ['agents', 'skills', 'skill-groups', 'workflows', 'runs'];
 const studioTabs: StudioTab[] = ['agents', 'skills', 'workflows', 'runs'];
 const skillFolderNameMaxLength = 120;
@@ -315,7 +315,7 @@ function skillPathLabel(skill: SkillSpec): string {
 function skillSourceLabel(skill: SkillSpec): string {
   const sourceRef = String(skill.source_ref || '').trim();
   const sourceType = String(skill.source_type || '');
-  if (sourceRef && (sourceType === 'npx_skills' || sourceType === 'hermes_cli')) return sourceRef;
+  if (sourceRef && sourceType === 'npx_skills') return sourceRef;
   if (sourceRef && /^https?:\/\//.test(sourceRef)) return sourceRef;
   return skill.origin_path || skill.source_path || sourceRef;
 }
@@ -327,20 +327,19 @@ function localSourceAlias(source: string): string {
 }
 
 function skillSourceTypeLabel(value?: string): string {
-  if (value === 'hermes_global') return 'Hermes Global';
-  if (value === 'hermes_project') return 'Hermes Project';
+  if (value === 'native_global') return 'Native Global';
+  if (value === 'native_project') return 'Native Project';
   if (value === 'npx_skills') return 'npx skills';
-  if (value === 'hermes_cli') return 'Hermes CLI';
-  if (value === 'local_zip') return 'Yachiyo ZIP';
-  return 'Yachiyo Skill';
+  if (value === 'local_zip') return 'Installed ZIP';
+  return 'Installed Skill';
 }
 
-function isHermesSkill(skill: SkillSpec): boolean {
-  return skill.source_type === 'hermes_global' || skill.source_type === 'hermes_project';
+function isNativeSkill(skill: SkillSpec): boolean {
+  return skill.source_type === 'native_global' || skill.source_type === 'native_project';
 }
 
-function isYachiyoSkill(skill: SkillSpec): boolean {
-  return !isHermesSkill(skill);
+function isInstalledSkill(skill: SkillSpec): boolean {
+  return !isNativeSkill(skill);
 }
 
 function toggleSelectedId(current: string[], id: string): string[] {
@@ -357,7 +356,7 @@ function pruneSelectedIds(current: string[], availableIds: string[]): string[] {
 }
 
 function skillMatchesSourceFilter(skill: SkillSpec, filter: SkillSourceFilter): boolean {
-  return filter === 'hermes' ? isHermesSkill(skill) : isYachiyoSkill(skill);
+  return filter === 'native' ? isNativeSkill(skill) : isInstalledSkill(skill);
 }
 
 function skillMatchesFolderFilter(skill: SkillSpec, filter: SkillFolderFilter): boolean {
@@ -1788,10 +1787,10 @@ export function AgentStudioView() {
   const [skillTargetFolderId, setSkillTargetFolderId] = useState('');
   const [skillInstallCommand, setSkillInstallCommand] = useState('');
   const [skillImportResults, setSkillImportResults] = useState<SkillImportResult[]>([]);
-  const [skillLibraryFilter, setSkillLibraryFilter] = useState<SkillSourceFilter>('yachiyo');
+  const [skillLibraryFilter, setSkillLibraryFilter] = useState<SkillSourceFilter>('installed');
   const [skillLibraryFolderFilter, setSkillLibraryFolderFilter] = useState<SkillFolderFilter>('all');
   const [skillLibrarySearch, setSkillLibrarySearch] = useState('');
-  const [skillMountFilter, setSkillMountFilter] = useState<SkillSourceFilter>('yachiyo');
+  const [skillMountFilter, setSkillMountFilter] = useState<SkillSourceFilter>('installed');
   const [skillMountFolderFilter, setSkillMountFolderFilter] = useState<SkillFolderFilter>('all');
   const [skillMountSearch, setSkillMountSearch] = useState('');
   const [workflowName, setWorkflowName] = useState('New Workflow');
@@ -1822,6 +1821,8 @@ export function AgentStudioView() {
     () => agents.find((agent) => agent.agent_id === selectedAgentId) || null,
     [agents, selectedAgentId],
   );
+  const selectedAgentReadOnly = Boolean(selectedAgent && (selectedAgent.system || selectedAgent.editable === false));
+  const selectedAgentDeletable = Boolean(selectedAgent && !selectedAgent.system && selectedAgent.deletable !== false);
   const selectedWorkflow = useMemo(
     () => workflows.find((workflow) => workflow.workflow_id === selectedWorkflowId) || null,
     [workflows, selectedWorkflowId],
@@ -1839,6 +1840,10 @@ export function AgentStudioView() {
   const selectedAgents = useMemo(
     () => agents.filter((agent) => selectedAgentIdSet.has(agent.agent_id)),
     [agents, selectedAgentIdSet],
+  );
+  const selectedDeletableAgents = useMemo(
+    () => selectedAgents.filter((agent) => !agent.system && agent.deletable !== false),
+    [selectedAgents],
   );
   const selectedWorkflows = useMemo(
     () => workflows.filter((workflow) => selectedWorkflowIdSet.has(workflow.workflow_id)),
@@ -2117,8 +2122,8 @@ export function AgentStudioView() {
     [selectedAgent, skills],
   );
   const enabledSkills = useMemo(() => skills.filter((skill) => skill.enabled !== false), [skills]);
-  const yachiyoSkillCount = useMemo(() => skills.filter(isYachiyoSkill).length, [skills]);
-  const hermesSkillCount = useMemo(() => skills.filter(isHermesSkill).length, [skills]);
+  const installedSkillCount = useMemo(() => skills.filter(isInstalledSkill).length, [skills]);
+  const nativeSkillCount = useMemo(() => skills.filter(isNativeSkill).length, [skills]);
   const filteredLibrarySkills = useMemo(
     () => skills.filter((skill) => (
       skillMatchesSourceFilter(skill, skillLibraryFilter)
@@ -2205,6 +2210,7 @@ export function AgentStudioView() {
   ]);
   const agentQuickRunDisabledReason = useMemo(() => {
     if (!draft.agent_id) return '请先保存 Agent，再运行。';
+    if (selectedAgentReadOnly) return '系统 Agent 只能查看，不能从 Agent Studio 直接运行。';
     if (draft.enabled === false || selectedAgent?.enabled === false) return '当前 Agent 已停用，无法运行。';
     if (draft.model_mode === 'profile') {
       if (!draft.model_profile_id) return '请选择可用 Chat Profile 后再运行。';
@@ -2228,6 +2234,7 @@ export function AgentStudioView() {
     draft.model_mode,
     draft.model_profile_id,
     selectedAgent,
+    selectedAgentReadOnly,
   ]);
   const agentQuickRunDisabled = busy || Boolean(agentQuickRunDisabledReason);
   const visibleMountSkillIds = useMemo(
@@ -2242,8 +2249,8 @@ export function AgentStudioView() {
     const ungrouped = skills.filter((skill) => !skill.folder_id);
     return {
       total: ungrouped.length,
-      yachiyo: ungrouped.filter(isYachiyoSkill).length,
-      hermes: ungrouped.filter(isHermesSkill).length,
+      installed: ungrouped.filter(isInstalledSkill).length,
+      native: ungrouped.filter(isNativeSkill).length,
     };
   }, [skills]);
   const newSkillFolderError = useMemo(
@@ -2762,8 +2769,8 @@ export function AgentStudioView() {
     setSkillImportResults(results);
   }
 
-  async function syncHermesSkillLibrary(): Promise<StudioRefreshOptions | void> {
-    const result = await syncHermesSkills();
+  async function syncNativeSkillLibrary(): Promise<StudioRefreshOptions | void> {
+    const result = await syncNativeSkills();
     setSkillImportResults(syncResultsToImportResults(result.results || []));
     if (result.roots) setSkillSources(result.roots);
   }
@@ -2847,6 +2854,10 @@ export function AgentStudioView() {
 
   function requestDeleteAgent() {
     if (!draft.agent_id) return;
+    if (!selectedAgentDeletable) {
+      setStatus('系统 Agent 只能查看，不能删除。');
+      return;
+    }
     const agentId = draft.agent_id;
     const agentName = draft.name || selectedAgent?.name || 'Agent';
     showConfirmDialog({
@@ -2865,7 +2876,7 @@ export function AgentStudioView() {
   }
 
   function requestDeleteSelectedAgents() {
-    const targets = selectedAgents.slice();
+    const targets = selectedDeletableAgents.slice();
     if (!targets.length) return;
     const targetIds = new Set(targets.map((agent) => agent.agent_id));
     const deletingCurrent = Boolean(selectedAgentId && targetIds.has(selectedAgentId));
@@ -2892,9 +2903,9 @@ export function AgentStudioView() {
   function requestDeleteSkill(skill: SkillSpec) {
     showConfirmDialog({
       title: `删除 Skill「${skill.name}」？`,
-      description: isHermesSkill(skill)
-        ? '这只会删除 Yachiyo 中的登记和挂载关系，不会删除 Hermes Agent 原始 Skill 文件。'
-        : 'Yachiyo 管理区里的本地 Skill 副本会被删除，已挂载它的 Agent 会失去这个 Skill。',
+      description: isNativeSkill(skill)
+        ? '这只会删除 Oha-Yachiyo 中的登记和挂载关系，不会删除 Native Skill Library 原始文件。'
+        : 'Installed Skill 管理区里的本地 Skill 副本会被删除，已挂载它的 Agent 会失去这个 Skill。',
       confirmLabel: '删除 Skill',
       variant: 'danger',
       onConfirm: () => void runAction(async () => {
@@ -2908,13 +2919,13 @@ export function AgentStudioView() {
     const targets = selectedLibrarySkills.slice();
     if (!targets.length) return;
     const targetIds = new Set(targets.map((skill) => skill.skill_id));
-    const hasHermesSkills = targets.some(isHermesSkill);
-    const hasYachiyoSkills = targets.some(isYachiyoSkill);
-    const description = hasHermesSkills && hasYachiyoSkills
-      ? 'Yachiyo 管理区里的本地 Skill 副本会被删除；Hermes Agent Skill 只会删除 Yachiyo 中的登记和挂载关系，不会删除 Hermes 原始文件。'
-      : hasHermesSkills
-        ? '这些 Hermes Agent Skill 只会删除 Yachiyo 中的登记和挂载关系，不会删除 Hermes 原始文件。'
-        : 'Yachiyo 管理区里的本地 Skill 副本会被删除，已挂载它们的 Agent 会失去这些 Skill。';
+    const hasNativeSkills = targets.some(isNativeSkill);
+    const hasInstalledSkills = targets.some(isInstalledSkill);
+    const description = hasNativeSkills && hasInstalledSkills
+      ? 'Installed Skill 管理区里的本地 Skill 副本会被删除；Native Skill 只会删除 Oha-Yachiyo 中的登记和挂载关系，不会删除原始文件。'
+      : hasNativeSkills
+        ? '这些 Native Skill 只会删除 Oha-Yachiyo 中的登记和挂载关系，不会删除原始文件。'
+        : 'Installed Skill 管理区里的本地 Skill 副本会被删除，已挂载它们的 Agent 会失去这些 Skill。';
     showConfirmDialog({
       title: `删除 ${targets.length} 个 Skill？`,
       description,
@@ -3005,7 +3016,7 @@ export function AgentStudioView() {
     if (deleteSkills) {
       showConfirmDialog({
         title: `删除「${folder.name}」和其中 ${count} 个 Skill？`,
-        description: 'Yachiyo 安装或上传的 Skill 本地副本会被删除；Hermes Agent Skill 只会删除 Yachiyo 的登记，不会删除 Hermes 原始文件。',
+        description: 'Installed Skill 本地副本会被删除；Native Skill 只会删除 Oha-Yachiyo 的登记，不会删除原始文件。',
         confirmLabel: '连带删除',
         variant: 'danger',
         onConfirm: () => void runAction(
@@ -3036,18 +3047,30 @@ export function AgentStudioView() {
 
   async function mountVisibleSkills(): Promise<StudioRefreshOptions | void> {
     if (!draft.agent_id || !selectedAgent) return;
+    if (selectedAgentReadOnly) {
+      setStatus('系统 Agent 只能查看，不能修改 Skill 挂载。');
+      return;
+    }
     const nextSkillIds = Array.from(new Set([...(selectedAgent.skill_ids || []), ...visibleMountSkillIds]));
     await updateAgent(draft.agent_id, { skill_ids: nextSkillIds });
   }
 
   async function unmountVisibleSkills(): Promise<StudioRefreshOptions | void> {
     if (!draft.agent_id || !selectedAgent) return;
+    if (selectedAgentReadOnly) {
+      setStatus('系统 Agent 只能查看，不能修改 Skill 挂载。');
+      return;
+    }
     const visible = new Set(visibleMountSkillIds);
     const nextSkillIds = (selectedAgent.skill_ids || []).filter((skillId) => !visible.has(skillId));
     await updateAgent(draft.agent_id, { skill_ids: nextSkillIds });
   }
 
   async function saveAgent(): Promise<StudioRefreshOptions> {
+    if (selectedAgentReadOnly) {
+      setStatus('系统 Agent 只能查看，不能修改。');
+      return { selectedAgentId };
+    }
     const request: Partial<AgentSpec> = {
       name: draft.name,
       nickname: draft.nickname,
@@ -3427,7 +3450,7 @@ export function AgentStudioView() {
                   {allAgentsSelected ? '取消全选' : '全选当前列表'}
                 </button>
                 <button type="button" disabled={busy || !selectedAgents.length} onClick={() => setSelectedAgentIds([])}>清空</button>
-                <button type="button" className="danger-action" disabled={busy || !selectedAgents.length} onClick={requestDeleteSelectedAgents}>删除所选</button>
+                <button type="button" className="danger-action" disabled={busy || !selectedDeletableAgents.length} onClick={requestDeleteSelectedAgents}>删除所选</button>
                 <button type="button" disabled={busy} onClick={finishAgentManagement}>完成</button>
               </div>
             ) : null}
@@ -3471,8 +3494,9 @@ export function AgentStudioView() {
           <form className="agent-studio-panel agent-editor" onSubmit={(event) => { event.preventDefault(); void runAction(saveAgent, '保存 Agent'); }}>
             <div className="section-heading-row">
               <h2>{draft.agent_id ? '编辑 Agent' : '新建 Agent'}</h2>
-              {draft.agent_id ? <button type="button" className="danger-action" disabled={busy} onClick={requestDeleteAgent}>删除</button> : null}
+              {draft.agent_id && selectedAgentDeletable ? <button type="button" className="danger-action" disabled={busy} onClick={requestDeleteAgent}>删除</button> : null}
             </div>
+            {selectedAgentReadOnly ? <div className="agent-inline-note">系统 Agent 由 oha-yachiyo 管理，可查看但不能编辑、删除或直接挂载 Skill。</div> : null}
             <div className="agent-profile-editor">
               <AgentAvatar avatarUrl={draft.avatar_url} name={draft.nickname || draft.name || 'Agent'} />
               <div className="agent-profile-fields">
@@ -3627,8 +3651,8 @@ export function AgentStudioView() {
             </label>
             <div className="agent-inline-note">可行性验证：保存后先用“测试模型”检查模型连接，再用 Quick Run 做端到端验证；工具权限和 scopes 会在运行时强制校验。</div>
             <div className="agent-editor-actions">
-              <button type="submit" className="primary-action" disabled={busy}>保存 Agent</button>
-              {draft.agent_id ? <button type="button" disabled={busy} onClick={() => void runAction(async () => { const result = await testAgentModel(draft.agent_id || ''); setStatus(result.message || (result.ok ? '模型测试通过' : '模型测试失败')); }, '测试模型')}>测试模型</button> : null}
+              <button type="submit" className="primary-action" disabled={busy || selectedAgentReadOnly}>保存 Agent</button>
+              {draft.agent_id ? <button type="button" disabled={busy || selectedAgentReadOnly} onClick={() => void runAction(async () => { const result = await testAgentModel(draft.agent_id || ''); setStatus(result.message || (result.ok ? '模型测试通过' : '模型测试失败')); }, '测试模型')}>测试模型</button> : null}
             </div>
             {draft.agent_id ? (
               <section className="agent-quick-run">
@@ -3674,8 +3698,8 @@ export function AgentStudioView() {
                 ) : null}
                 <div className="skill-filter-bar">
                   <div className="skill-filter-tabs">
-                    <button type="button" className={skillMountFilter === 'yachiyo' ? 'active' : ''} onClick={() => setSkillMountFilter('yachiyo')}>Yachiyo</button>
-                    <button type="button" className={skillMountFilter === 'hermes' ? 'active' : ''} onClick={() => setSkillMountFilter('hermes')}>Hermes Agent</button>
+                    <button type="button" className={skillMountFilter === 'installed' ? 'active' : ''} onClick={() => setSkillMountFilter('installed')}>Installed</button>
+                    <button type="button" className={skillMountFilter === 'native' ? 'active' : ''} onClick={() => setSkillMountFilter('native')}>Native</button>
                   </div>
                   <select
                     className="hy-select"
@@ -3699,14 +3723,14 @@ export function AgentStudioView() {
                   <span>{visibleMountedCount} / {filteredMountSkills.length} 当前筛选已挂载</span>
                   <button
                     type="button"
-                    disabled={busy || !filteredMountSkills.length || visibleMountedCount === filteredMountSkills.length}
+                    disabled={busy || selectedAgentReadOnly || !filteredMountSkills.length || visibleMountedCount === filteredMountSkills.length}
                     onClick={() => void runAction(mountVisibleSkills, '挂载当前筛选 Skills')}
                   >
                     全选当前筛选
                   </button>
                   <button
                     type="button"
-                    disabled={busy || !visibleMountedCount}
+                    disabled={busy || selectedAgentReadOnly || !visibleMountedCount}
                     onClick={() => void runAction(unmountVisibleSkills, '移除当前筛选 Skills')}
                   >
                     清空当前筛选
@@ -3742,9 +3766,9 @@ export function AgentStudioView() {
         <section className="agent-studio-grid">
           <div className="agent-studio-panel skill-import-panel">
             <div className="section-heading-row">
-              <h2>Yachiyo Skills</h2>
+              <h2>Installed Skills</h2>
             </div>
-            <p className="agent-section-help">从 Hermes-Yachiyo 安装或上传的 Skills 会进入 Yachiyo 管理区；它们和 Hermes Agent 自带 Skills 分开展示和挂载。</p>
+            <p className="agent-section-help">从安装命令或上传入口导入的 Skills 会进入 Installed Skill 管理区；它们和 Native Skill Library 分开展示和挂载。</p>
             <div className="skill-import-target">
               <label>
                 <span>导入到文件夹</span>
@@ -3775,10 +3799,10 @@ export function AgentStudioView() {
               <button type="button" disabled={busy || !skillInstallCommand.trim()} onClick={() => void runAction(installSkillFromCommand, '安装 Skill')}>
                 {installingSkill ? '安装中...' : '安装并同步'}
               </button>
-              <small>可以直接输入 Skill 来源，也可以输入 <code>skills@latest add ...</code> 或 <code>npx skills add ...</code>。Yachiyo 会固定使用 <code>hermes-agent</code> 目标并补上 <code>--copy -y</code>，在 Yachiyo 的 Skill 工作区执行，不写入 Hermes 全局库。</small>
+              <small>可以直接输入 Skill 来源，也可以输入 <code>skills@latest add ...</code> 或 <code>npx skills add ...</code>。Oha-Yachiyo 会固定使用 <code>oha-yachiyo</code> 目标并补上 <code>--copy -y</code>，在 Installed Skill 工作区执行，不写入 Native 全局库。</small>
             </div>
             <div className="section-heading-row"><h2>上传 Skills</h2></div>
-            <p className="agent-section-help">支持批量上传 zip 技能包，也支持选择本地 Skill 目录；导入后会复制到 Yachiyo 管理区。</p>
+            <p className="agent-section-help">支持批量上传 zip 技能包，也支持选择本地 Skill 目录；导入后会复制到 Installed Skill 管理区。</p>
             <div className="skill-import-hints">
               <span>一次上传多个 zip</span>
               <span>自动校验 SKILL.md</span>
@@ -3794,10 +3818,10 @@ export function AgentStudioView() {
               <button type="button" disabled={busy} onClick={() => void pickSkillSources()}>上传 Skills</button>
             </div>
             <div className="section-heading-row">
-              <h2>Hermes Agent Skills</h2>
-              <button type="button" disabled={busy} onClick={() => void runAction(syncHermesSkillLibrary, '同步 Hermes Skills')}>从 Hermes 同步</button>
+              <h2>Native Skill Library</h2>
+              <button type="button" disabled={busy} onClick={() => void runAction(syncNativeSkillLibrary, '同步 Native Skills')}>从 Native Library 同步</button>
             </div>
-            <p className="agent-section-help">Hermes Agent 的 `~/.hermes/skills` 只登记引用，不复制到 Yachiyo 管理区；项目级 Skills 暂不纳入本页管理。</p>
+            <p className="agent-section-help">Native Skill Library 的 `~/.oha-yachiyo/skill-library/skills` 只登记引用，不复制到 Installed Skill 管理区；项目级 Skills 暂不纳入本页管理。</p>
             <div className="skill-source-roots">
               {skillSources.map((source) => (
                 <div className={source.exists ? 'skill-source-root' : 'skill-source-root missing'} key={`${source.source_type}-${source.path}`}>
@@ -3806,7 +3830,7 @@ export function AgentStudioView() {
                   <code>{source.path}</code>
                 </div>
               ))}
-              {!skillSources.length ? <div className="empty-state inline-empty">暂未检测到 Hermes skills root。</div> : null}
+              {!skillSources.length ? <div className="empty-state inline-empty">暂未检测到 Native skills root。</div> : null}
             </div>
             {skillImportResults.length ? (
               <div className="skill-import-results" aria-label="Skill import results">
@@ -3822,9 +3846,9 @@ export function AgentStudioView() {
           </div>
           <div className="agent-studio-panel">
             <div className="section-heading-row">
-              <h2>{skillLibraryFilter === 'hermes' ? 'Hermes Skill Library' : 'Yachiyo Skill Library'}</h2>
+              <h2>{skillLibraryFilter === 'native' ? 'Native Skill Library' : 'Installed Skill Library'}</h2>
               <div className="studio-heading-actions">
-                <span className="agent-section-count">{yachiyoSkillCount} Yachiyo / {hermesSkillCount} Hermes</span>
+                <span className="agent-section-count">{installedSkillCount} Installed / {nativeSkillCount} Native</span>
                 {filteredLibrarySkills.length && !skillManagementMode ? (
                   <button type="button" disabled={busy} onClick={() => setSkillManagementMode(true)}>管理</button>
                 ) : null}
@@ -3832,8 +3856,8 @@ export function AgentStudioView() {
             </div>
             <div className="skill-filter-bar">
               <div className="skill-filter-tabs">
-                <button type="button" className={skillLibraryFilter === 'yachiyo' ? 'active' : ''} onClick={() => setSkillLibraryFilter('yachiyo')}>Yachiyo</button>
-                <button type="button" className={skillLibraryFilter === 'hermes' ? 'active' : ''} onClick={() => setSkillLibraryFilter('hermes')}>Hermes Agent</button>
+                <button type="button" className={skillLibraryFilter === 'installed' ? 'active' : ''} onClick={() => setSkillLibraryFilter('installed')}>Installed</button>
+                <button type="button" className={skillLibraryFilter === 'native' ? 'active' : ''} onClick={() => setSkillLibraryFilter('native')}>Native</button>
               </div>
               <select
                 className="hy-select"
@@ -3892,7 +3916,7 @@ export function AgentStudioView() {
             <div className="section-heading-row">
               <h2>Skill 分组</h2>
             </div>
-            <p className="agent-section-help">文件夹只用于筛选、导入目标和 Agent 挂载选择，不会移动 Hermes Agent 原始 Skill 路径。</p>
+            <p className="agent-section-help">文件夹只用于筛选、导入目标和 Agent 挂载选择，不会移动 Native Skill Library 原始路径。</p>
             <div className="skill-folder-box">
               <div className="section-heading-row compact">
                 <h3>新建文件夹</h3>
@@ -3913,8 +3937,8 @@ export function AgentStudioView() {
               <strong>无需分组</strong>
               <div className="skill-folder-meta">
                 <span>{ungroupedSkillStats.total} skills</span>
-                <span>{ungroupedSkillStats.yachiyo} Yachiyo</span>
-                <span>{ungroupedSkillStats.hermes} Hermes</span>
+                <span>{ungroupedSkillStats.installed} Installed</span>
+                <span>{ungroupedSkillStats.native} Native</span>
               </div>
               <small>默认分组，不能删除；删除其他文件夹后 Skill 会回到这里。</small>
             </div>
@@ -3945,8 +3969,8 @@ export function AgentStudioView() {
                           <h3>{folder.name}</h3>
                           <div className="skill-folder-meta">
                             <span>{folder.skill_count || 0} skills</span>
-                            <span>{folder.yachiyo_count || 0} Yachiyo</span>
-                            <span>{folder.hermes_count || 0} Hermes</span>
+                            <span>{folder.installed_count || 0} Installed</span>
+                            <span>{folder.native_count || 0} Native</span>
                           </div>
                         </>
                       )}

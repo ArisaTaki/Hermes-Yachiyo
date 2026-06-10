@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manage the Hermes-Yachiyo product version across Python and Electron files."""
+"""Manage the Oha-Yachiyo product version across Python and Electron files."""
 
 from __future__ import annotations
 
@@ -66,14 +66,19 @@ def set_product_version(version: str) -> None:
         rf'\g<1>"{version}"',
     )
     replace_text(
-        ROOT / "apps/installer/hermes_setup.py",
-        r'(version\s*=\s*)"[^"]+"',
+        ROOT / "packages/protocol/schemas.py",
+        r'(version:\s*str\s*=\s*)"[^"]+"',
         rf'\g<1>"{version}"',
     )
     replace_text_all(
         ROOT / "apps/shell/main_api.py",
         r'status\.get\("version", "[^"]+"\)',
         f'status.get("version", "{version}")',
+    )
+    replace_text_all(
+        ROOT / "apps/shell/main_api.py",
+        r'get_status\(\)\.get\("version"\) or "[^"]+"',
+        f'get_status().get("version") or "{version}"',
     )
     replace_text_all(
         ROOT / "apps/frontend/src/views/ModeSettingsView.tsx",
@@ -94,7 +99,7 @@ def set_product_version(version: str) -> None:
         root_package["version"] = version
     write_json(lock_path, lock)
 
-    build_path = ROOT / "apps/frontend/public/hermes-yachiyo-build.json"
+    build_path = ROOT / "apps/frontend/public/oha-yachiyo-build.json"
     if build_path.exists():
         build = read_json(build_path)
         build["version"] = f"{version}-dev"
@@ -117,17 +122,32 @@ def check_product_version() -> None:
     fallback_text = (ROOT / "apps/core/version.py").read_text(encoding="utf-8")
     if f'_FALLBACK_VERSION = "{version}"' not in fallback_text:
         failures.append("apps/core/version.py fallback version is out of sync")
+    protocol_text = (ROOT / "packages/protocol/schemas.py").read_text(encoding="utf-8")
+    if f'version: str = "{version}"' not in protocol_text:
+        failures.append("packages/protocol/schemas.py status response version is out of sync")
     main_api_text = (ROOT / "apps/shell/main_api.py").read_text(encoding="utf-8")
-    if f'status.get("version", "{version}")' not in main_api_text:
-        failures.append("apps/shell/main_api.py fallback version is out of sync")
+    bad_main_api_status_fallbacks = [
+        value
+        for value in re.findall(r'status\.get\("version", "([^"]+)"\)', main_api_text)
+        if value != version
+    ]
+    if bad_main_api_status_fallbacks:
+        failures.append("apps/shell/main_api.py status fallback version is out of sync")
+    bad_main_api_update_fallbacks = [
+        value
+        for value in re.findall(r'get_status\(\)\.get\("version"\) or "([^"]+)"', main_api_text)
+        if value != version
+    ]
+    if bad_main_api_update_fallbacks:
+        failures.append("apps/shell/main_api.py update fallback version is out of sync")
     mode_settings_text = (ROOT / "apps/frontend/src/views/ModeSettingsView.tsx").read_text(encoding="utf-8")
     if f"payload?.app?.version || '{version}'" not in mode_settings_text:
         failures.append("apps/frontend/src/views/ModeSettingsView.tsx fallback version is out of sync")
-    build_path = ROOT / "apps/frontend/public/hermes-yachiyo-build.json"
+    build_path = ROOT / "apps/frontend/public/oha-yachiyo-build.json"
     if build_path.exists():
         build = read_json(build_path)
         if build.get("base_version") != version:
-            failures.append("apps/frontend/public/hermes-yachiyo-build.json base_version is out of sync")
+            failures.append("apps/frontend/public/oha-yachiyo-build.json base_version is out of sync")
     if failures:
         raise SystemExit("\n".join(failures))
     print(version)

@@ -13,9 +13,9 @@ def test_build_backend_collects_certifi_ca_bundle(monkeypatch, tmp_path):
     def fake_run(command, *, cwd, check):
         commands.append((command, cwd, check))
         output_name = (
-            "hermes-yachiyo-backend.exe"
+            "oha-yachiyo-backend.exe"
             if build_backend_mod.os.name == "nt"
-            else "hermes-yachiyo-backend"
+            else "oha-yachiyo-backend"
         )
         (build_backend_mod.DIST_DIR / output_name).write_text("", encoding="utf-8")
 
@@ -29,3 +29,9 @@ def test_build_backend_collects_certifi_ca_bundle(monkeypatch, tmp_path):
     assert check is True
     collect_index = command.index("--collect-data")
     assert command[collect_index + 1] == "certifi"
+    metadata_arg = (
+        f"{build_backend_mod.BUILD_METADATA_FILE}"
+        f"{build_backend_mod._data_separator()}apps/frontend/public"
+    )
+    assert "--add-data" in command
+    assert metadata_arg in command

@@ -291,7 +291,8 @@ const CHAT_SIDEBAR_WIDE_MAX_WIDTH = 360;
 const CHAT_WIDE_VIEWPORT_WIDTH = 1500;
 const COMPOSER_MIN_HEIGHT = 48;
 const COMPOSER_MAX_HEIGHT = 260;
-const COMPOSER_HEIGHT_STORAGE_KEY = 'hermes.chat.composerHeight';
+const COMPOSER_HEIGHT_STORAGE_KEY = 'oha.chat.composerHeight';
+const ASSISTANT_PROFILE_UPDATED_EVENT = 'oha-assistant-profile-updated';
 const CODE_COPY_ICON_HTML = '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="11" height="11" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1"></path></svg>';
 const CODE_CHECK_ICON_HTML = '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.2 4.2L19 7"></path></svg>';
 
@@ -612,8 +613,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
 
   useEffect(() => {
     const refreshProfile = () => void loadAssistantProfile();
-    window.addEventListener('hermes-assistant-profile-updated', refreshProfile);
-    return () => window.removeEventListener('hermes-assistant-profile-updated', refreshProfile);
+    window.addEventListener(ASSISTANT_PROFILE_UPDATED_EVENT, refreshProfile);
+    return () => window.removeEventListener(ASSISTANT_PROFILE_UPDATED_EVENT, refreshProfile);
   }, [loadAssistantProfile]);
 
   useEffect(() => {
@@ -812,6 +813,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setStatus(outgoingAttachments.length ? '发送图片中...' : '发送中...');
     stickToBottomRef.current = true;
     focusComposerSoon();
+    const clientMessageId = createClientMessageId();
     try {
       const result = await apiPost<{
         ok?: boolean;
@@ -826,6 +828,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       }>('/ui/chat/messages', {
         text,
         attachments: outgoingAttachments,
+        client_message_id: clientMessageId,
       });
       if (result.ok === false) throw new Error(result.error || '发送失败');
       transientEmptySessionIdRef.current = '';
@@ -1058,7 +1061,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setStatus('Bridge 正在重启以加载群组编辑接口...');
       const restartResult = await restartDesktopBridge();
       if (!restartResult.success) {
-        throw new Error('当前 Bridge 尚未加载群组编辑接口，请重启 Hermes-Yachiyo 后重试');
+        throw new Error('当前 Bridge 尚未加载群组编辑接口，请重启 Oha-Yachiyo 后重试');
       }
       return await updateCurrentGroupSession();
     }
@@ -3053,7 +3056,7 @@ function MessageActivityList({ events, messageStatus, onOpenRunDetails, progress
             <span className="message-activity-icon" aria-hidden="true">{activityStatusIcon(displayStatus)}</span>
             <div className="message-activity-text">
               <div className="message-activity-heading">
-                <strong>{event.title || event.tool_name || 'Hermes 活动'}</strong>
+                <strong>{event.title || event.tool_name || 'Native 活动'}</strong>
                 {event.event_id ? (
                   <button
                     type="button"
@@ -4166,9 +4169,15 @@ function messageMetaText(message: ChatMessage, status?: string, createdAt?: stri
   return `${messageRoleLabel(message)}${timeText !== '—' ? ` · ${timeText}` : ''}${statusText}`;
 }
 
+function createClientMessageId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 function executorLabel(executor: ExecutorPayload | null) {
   if (!executor?.available) return '未就绪';
-  return executor.executor === 'HermesExecutor' ? 'Hermes' : '不可用';
+  if (executor.executor === 'NativeAgentExecutor') return 'Native Agent';
+  return executor.executor || '可用';
 }
 
 function canAttachImages(executor: ExecutorPayload | null) {
@@ -4555,9 +4564,10 @@ function syncRenderStates(messages: ChatMessage[], states: Map<string, RenderSta
 function containsGroupDispatchPayload(text: string) {
   const compact = text.toLowerCase().replace(/[\s_-]+/g, '');
   return (
-    compact.includes('yachiyogroupdispatch')
+    compact.includes('ohagroupdispatch')
+    || compact.includes('nativegroupdispatch')
     || compact.includes('dispatchgroupagent')
-    || compact.includes('runyachiyoagent')
+    || compact.includes('runohaagent')
   );
 }
 
@@ -4825,8 +4835,9 @@ function isInternalTaskJsonText(value: string) {
   const compact = text.toLowerCase().replace(/[\s_"'`.-]+/g, '');
   if (
     !compact.includes('dispatchgroupagent')
-    && !compact.includes('runyachiyoagent')
-    && !compact.includes('yachiyogroupdispatch')
+    && !compact.includes('runohaagent')
+    && !compact.includes('ohagroupdispatch')
+    && !compact.includes('nativegroupdispatch')
   ) {
     return false;
   }

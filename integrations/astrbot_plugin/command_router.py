@@ -1,7 +1,7 @@
 """命令路由：将 /y <sub> <args> 分发到对应 handler。
 
 路由规则：
-    /y status tasks screen window do ask/chat  → Hermes-Yachiyo Bridge
+    /y status tasks screen window do ask/chat  → Oha-Yachiyo Bridge
   /y codex                          → Hapi（Codex 执行后端）
 """
 
@@ -15,13 +15,13 @@ logger = logging.getLogger(__name__)
 
 # ── 路由表 ────────────────────────────────────────────
 
-HERMES_COMMANDS: frozenset[str] = frozenset({"status", "tasks", "screen", "window", "do", "check", "cancel", "ask", "chat"})
+OHA_COMMANDS: frozenset[str] = frozenset({"status", "tasks", "screen", "window", "do", "check", "cancel", "ask", "chat"})
 HAPI_COMMANDS: frozenset[str] = frozenset({"codex"})
-ALL_COMMANDS: frozenset[str] = HERMES_COMMANDS | HAPI_COMMANDS
+ALL_COMMANDS: frozenset[str] = OHA_COMMANDS | HAPI_COMMANDS
 
 HELP_TEXT = (
     "Yachiyo 命令列表：\n"
-    "  /y status           — 查看 Hermes Agent 运行状态\n"
+    "  /y status           — 查看 Native Agent 运行状态\n"
     "  /y tasks            — 查看任务列表\n"
     "  /y do <任务>        — 创建新任务\n"
     "  /y ask <内容>       — 低风险自然语言入口\n"

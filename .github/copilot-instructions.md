@@ -1,16 +1,16 @@
-# GitHub Copilot Instructions for Hermes-Yachiyo
+# GitHub Copilot Instructions for Oha-Yachiyo
 
-You are working on Hermes-Yachiyo.
+You are working on Oha-Yachiyo.
 
-Hermes-Yachiyo is a **desktop-first local agent application** built around Hermes Agent.
+Oha-Yachiyo is a **desktop-first local agent application** built around its Native Agent Runtime.
 It is not a backend-first service product.
 
 AstrBot is not the system core. AstrBot is only a QQ bridge plugin host.
-Hapi remains the existing Codex execution backend and should not be reimplemented inside Hermes-Yachiyo.
+Hapi remains the existing Codex execution backend and should not be reimplemented inside Oha-Yachiyo.
 
 ## Product shape
 
-Hermes-Yachiyo should ultimately be a packaged local desktop app that can be launched directly by the user.
+Oha-Yachiyo should ultimately be a packaged local desktop app that can be launched directly by the user.
 
 The app should provide:
 - a local desktop shell
@@ -19,17 +19,17 @@ The app should provide:
 - bubble mode
 - Live2D mode as a future-capable mode or placeholder
 - settings UI or WebUI
-- embedded Hermes runtime
+- embedded Native Agent Runtime
 - optional local bridge/API for AstrBot integration
 
 ## Architecture rules
 
-- Hermes-Yachiyo must run locally without QQ.
-- Hermes-Yachiyo must be designed as a desktop app first.
+- Oha-Yachiyo must run locally without QQ.
+- Oha-Yachiyo must be designed as a desktop app first.
 - Internal APIs may exist, but they are not the product itself.
 - AstrBot must remain a thin bridge that forwards QQ requests.
 - Do not move machine-local control logic into AstrBot.
-- Do not move Codex CLI execution into Hermes-Yachiyo.
+- Do not move Codex CLI execution into Oha-Yachiyo.
 - Do not create a second agent brain inside the AstrBot plugin.
 
 ## Delivery order

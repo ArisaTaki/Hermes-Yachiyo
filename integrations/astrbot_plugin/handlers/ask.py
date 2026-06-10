@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from ..api_client import HermesClient
+from ..api_client import OhaClient
 from ..config import PluginConfig
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ async def handle(args: str, config: PluginConfig, sender_id: str = "") -> str:
     if not text:
         return "用法: /y ask <内容>"
 
-    client = HermesClient(config)
+    client = OhaClient(config)
     data = await client.assistant_intent(text, source="astrbot", sender_id=sender_id)
 
     if not data.get("ok"):

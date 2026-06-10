@@ -72,9 +72,9 @@ export function AppUpdateView() {
       });
       return false;
     };
-    window.hermesRouteLeaveGuard = guard;
+    window.ohaRouteLeaveGuard = guard;
     return () => {
-      if (window.hermesRouteLeaveGuard === guard) delete window.hermesRouteLeaveGuard;
+      if (window.ohaRouteLeaveGuard === guard) delete window.ohaRouteLeaveGuard;
       if (downloadingRef.current) void cancelAppUpdateDownload();
     };
   }, [requestConfirm]);
@@ -200,7 +200,7 @@ export function AppUpdateView() {
   function requestInstallDownloadedUpdate() {
     if (action) return;
     requestConfirm({
-      title: '安装并重启 Hermes-Yachiyo？',
+      title: '安装并重启 Oha-Yachiyo？',
       description: '应用将退出，用已下载的 DMG 覆盖当前应用，然后重新打开。',
       confirmLabel: '安装并重启',
       variant: 'danger',
@@ -215,7 +215,7 @@ export function AppUpdateView() {
           <button type="button" className="page-back-link app-update-back-link" onClick={() => navigateTo('settings')}>← 返回设置</button>
           <span className="hy-eyebrow">Update Channel · {channelLabel}</span>
           <h2>应用更新</h2>
-          <p>检查 Hermes Yachiyo 桌面应用版本差距，下载 DMG，并在校验后安装重启。</p>
+          <p>检查 Oha Yachiyo 桌面应用版本差距，下载 DMG，并在校验后安装重启。</p>
         </div>
         <div className="hy-action-row">
           <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(action)} onClick={() => void runCheck()}>

@@ -1,0 +1,13 @@
+{
+  "name": "Oha-Yachiyo",
+  "channel": "experimental",
+  "branch": "develop",
+  "version": "0.4.0-dev",
+  "base_version": "0.4.0",
+  "commit": "dev",
+  "short_commit": "dev",
+  "build_number": 0,
+  "repository": "kuguya-AI-app-develop/oha-yachiyo",
+  "latest_json_url": "https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/download/develop-latest/Oha-Yachiyo-develop-latest.json",
+  "built_at": "dev"
+}

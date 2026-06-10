@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 # 默认后端地址
-DEFAULT_HERMES_URL = "http://127.0.0.1:8420"
+DEFAULT_OHA_URL = "http://127.0.0.1:8420"
 DEFAULT_HAPI_URL = "http://127.0.0.1:8430"
 
 
@@ -16,8 +16,8 @@ class PluginConfig:
     可由 AstrBot 宿主注入，也可直接用默认值实例化。
     """
 
-    # Hermes-Yachiyo Bridge 地址
-    hermes_url: str = DEFAULT_HERMES_URL
+    # Oha-Yachiyo Bridge 地址
+    oha_url: str = DEFAULT_OHA_URL
     # Hapi（Codex 执行后端）地址
     hapi_url: str = DEFAULT_HAPI_URL
     # 允许使用命令的发送者 QQ 号列表；空列表 = 不限制

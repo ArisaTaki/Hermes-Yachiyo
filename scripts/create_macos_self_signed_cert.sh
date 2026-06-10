@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IDENTITY="Hermes-Yachiyo Self Signed"
+IDENTITY="Oha-Yachiyo Self Signed"
 OUTPUT_DIR="${ROOT}/dist/signing"
 DAYS="825"
 IMPORT_CERT="true"
@@ -30,7 +30,7 @@ while [[ "$#" -gt 0 ]]; do
 Usage: scripts/create_macos_self_signed_cert.sh [options]
 
 Options:
-  --identity NAME     Certificate common name. Default: Hermes-Yachiyo Self Signed
+  --identity NAME     Certificate common name. Default: Oha-Yachiyo Self Signed
   --output-dir DIR    Output directory. Default: dist/signing
   --days DAYS         Certificate validity period. Default: 825
   --no-import         Do not import the generated p12 into the login keychain

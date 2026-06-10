@@ -79,7 +79,7 @@ from astrbot_plugin.main import on_y_command, parse_y_command
 
 @pytest.fixture()
 def config():
-    return PluginConfig(hermes_url="http://test:8420")
+    return PluginConfig(oha_url="http://test:8420")
 
 
 # ── parse_y_command ──────────────────────────────────────
@@ -165,20 +165,20 @@ class TestStatusHandler:
     @pytest.mark.asyncio
     async def test_output_format(self, config):
         mock_data = {
-            "version": "0.1.0",
+            "version": "0.4.0",
             "uptime_seconds": 3661,
-            "hermes_ready": True,
+            "native_agent_ready": True,
             "task_counts": {"pending": 2, "running": 1, "completed": 5, "failed": 0},
         }
         with patch(
-            "astrbot_plugin.handlers.status.HermesClient"
+            "astrbot_plugin.handlers.status.OhaClient"
         ) as MockClient:
             MockClient.return_value.get_status = AsyncMock(return_value=mock_data)
             from astrbot_plugin.handlers.status import handle
             result = await handle("", config)
 
         assert "📊" in result
-        assert "v0.1.0" in result
+        assert "v0.4.0" in result
         assert "1h" in result
         assert "已就绪" in result
 
@@ -194,7 +194,7 @@ class TestDoHandler:
             }
         }
         with patch(
-            "astrbot_plugin.handlers.do.HermesClient"
+            "astrbot_plugin.handlers.do.OhaClient"
         ) as MockClient:
             MockClient.return_value.create_task = AsyncMock(return_value=mock_data)
             from astrbot_plugin.handlers.do import handle
@@ -218,9 +218,9 @@ class TestAskHandler:
             "ok": True,
             "action": "create_low_risk_task",
             "task_id": "ask12345abc",
-            "message": "已创建低风险 Hermes 任务",
+            "message": "已创建低风险 Native Agent 任务",
         }
-        with patch("astrbot_plugin.handlers.ask.HermesClient") as MockClient:
+        with patch("astrbot_plugin.handlers.ask.OhaClient") as MockClient:
             MockClient.return_value.assistant_intent = AsyncMock(return_value=mock_data)
             from astrbot_plugin.handlers.ask import handle
             result = await handle("帮我看看桌面", config)
@@ -232,12 +232,12 @@ class TestAskHandler:
 
     @pytest.mark.asyncio
     async def test_chat_alias_routes_to_ask_handler(self, config):
-        mock_data = {"ok": True, "action": "status", "message": "Hermes 已就绪"}
-        with patch("astrbot_plugin.handlers.ask.HermesClient") as MockClient:
+        mock_data = {"ok": True, "action": "status", "message": "Native Agent 已就绪"}
+        with patch("astrbot_plugin.handlers.ask.OhaClient") as MockClient:
             MockClient.return_value.assistant_intent = AsyncMock(return_value=mock_data)
             result = await on_y_command("/y chat 状态", sender_id="user-1", config=config)
 
-        assert "Hermes 已就绪" in result
+        assert "Native Agent 已就绪" in result
         MockClient.return_value.assistant_intent.assert_awaited_once_with(
             "状态",
             source="astrbot",
@@ -266,7 +266,7 @@ class TestCheckHandler:
             }
         }
         with patch(
-            "astrbot_plugin.handlers.check.HermesClient"
+            "astrbot_plugin.handlers.check.OhaClient"
         ) as MockClient:
             MockClient.return_value.get_task = AsyncMock(return_value=mock_data)
             from astrbot_plugin.handlers.check import handle
@@ -290,7 +290,7 @@ class TestCheckHandler:
             }
         }
         with patch(
-            "astrbot_plugin.handlers.check.HermesClient"
+            "astrbot_plugin.handlers.check.OhaClient"
         ) as MockClient:
             MockClient.return_value.get_task = AsyncMock(return_value=mock_data)
             from astrbot_plugin.handlers.check import handle
@@ -317,7 +317,7 @@ class TestCancelHandler:
             }
         }
         with patch(
-            "astrbot_plugin.handlers.cancel.HermesClient"
+            "astrbot_plugin.handlers.cancel.OhaClient"
         ) as MockClient:
             MockClient.return_value.cancel_task = AsyncMock(return_value=mock_data)
             from astrbot_plugin.handlers.cancel import handle
@@ -338,7 +338,7 @@ class TestTasksHandler:
     async def test_empty_list(self, config):
         mock_data = {"tasks": [], "total": 0}
         with patch(
-            "astrbot_plugin.handlers.tasks.HermesClient"
+            "astrbot_plugin.handlers.tasks.OhaClient"
         ) as MockClient:
             MockClient.return_value.list_tasks = AsyncMock(return_value=mock_data)
             from astrbot_plugin.handlers.tasks import handle
@@ -366,7 +366,7 @@ class TestTasksHandler:
             "total": 2,
         }
         with patch(
-            "astrbot_plugin.handlers.tasks.HermesClient"
+            "astrbot_plugin.handlers.tasks.OhaClient"
         ) as MockClient:
             MockClient.return_value.list_tasks = AsyncMock(return_value=mock_data)
             from astrbot_plugin.handlers.tasks import handle
@@ -400,7 +400,7 @@ class TestScreenHandler:
             "image_base64": "abc",
         }
         with patch(
-            "astrbot_plugin.handlers.screen.HermesClient"
+            "astrbot_plugin.handlers.screen.OhaClient"
         ) as MockClient:
             MockClient.return_value.get_screen = AsyncMock(return_value=mock_data)
             from astrbot_plugin.handlers.screen import handle
@@ -420,7 +420,7 @@ class TestWindowHandler:
             "queried_at": "2025-01-15T10:00:00Z",
         }
         with patch(
-            "astrbot_plugin.handlers.window.HermesClient"
+            "astrbot_plugin.handlers.window.OhaClient"
         ) as MockClient:
             MockClient.return_value.get_active_window = AsyncMock(return_value=mock_data)
             from astrbot_plugin.handlers.window import handle

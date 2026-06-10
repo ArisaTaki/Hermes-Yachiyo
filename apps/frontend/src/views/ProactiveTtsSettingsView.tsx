@@ -101,7 +101,7 @@ type GptSovitsServiceStatus = {
     label?: string;
     path_display?: string;
     working_directory?: string;
-    managed_by_hermes?: boolean;
+    managed_by_oha?: boolean;
     running?: boolean;
   }>;
   platform_supported?: boolean;
@@ -566,7 +566,7 @@ export function ProactiveTtsSettingsView() {
       setStatus(
         readyStatus?.reachable
           ? 'GPT-SoVITS API 已就绪，可以保存并测试语音链路'
-          : result.message || 'GPT-SoVITS 后台服务已交由 Hermes-Yachiyo 管理，但 API 暂未就绪',
+          : result.message || 'GPT-SoVITS 后台服务已交由 Oha-Yachiyo 管理，但 API 暂未就绪',
       );
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '接管 GPT-SoVITS 后台服务失败');
@@ -581,7 +581,7 @@ export function ProactiveTtsSettingsView() {
     const label = agent?.label || '外部 GPT-SoVITS 服务';
     requestConfirm({
       title: '接管外部 GPT-SoVITS 服务？',
-      description: `将停用外部 GPT-SoVITS LaunchAgent（${label}），保留服务目录和模型文件，并安装 Hermes-Yachiyo 自己的后台/自启。`,
+      description: `将停用外部 GPT-SoVITS LaunchAgent（${label}），保留服务目录和模型文件，并安装 Oha-Yachiyo 自己的后台/自启。`,
       confirmLabel: '交由 Yachiyo 管理',
       variant: 'danger',
       onConfirm: () => void adoptGsvLaunchAgent(),
@@ -628,7 +628,7 @@ export function ProactiveTtsSettingsView() {
     setBusyAction('service');
     setStatus('正在打开 GPT-SoVITS 调试终端...');
     try {
-      const result = await apiPost<{ success?: boolean; error?: string }>('/ui/hermes/terminal-command', {
+      const result = await apiPost<{ success?: boolean; error?: string }>('/ui/native-agent/terminal-command', {
         command: buildGsvServiceTerminalCommand(form),
       });
       if (!result.success) throw new Error(result.error || '无法打开 GPT-SoVITS 调试终端');
@@ -654,7 +654,7 @@ export function ProactiveTtsSettingsView() {
       if (!form.gsv_service_command.trim()) {
         updateField('gsv_service_command', command);
       }
-      const result = await apiPost<{ success?: boolean; error?: string }>('/ui/hermes/terminal-command', {
+      const result = await apiPost<{ success?: boolean; error?: string }>('/ui/native-agent/terminal-command', {
         command: buildGsvSetupTerminalCommand(workdir, command, voiceResource?.service_project_url),
       });
       if (!result.success) throw new Error(result.error || '无法打开 GPT-SoVITS 本地依赖部署终端');
@@ -745,7 +745,7 @@ export function ProactiveTtsSettingsView() {
           </div>
 
           <div className="tts-settings-form hy-tts-form">
-            <div className="hermes-config-form-grid hy-tts-form-grid">
+            <div className="native-config-form-grid hy-tts-form-grid">
               <label className="settings-check wide" htmlFor="proactive-enabled-page">
                 <input
                   id="proactive-enabled-page"
@@ -809,7 +809,7 @@ export function ProactiveTtsSettingsView() {
             </div>
 
             {proactiveResult ? (
-              <div className={`hermes-test-result ${proactiveResult.success || proactiveResult.ok || proactiveResult.allowed ? 'success' : 'danger'}`}>
+              <div className={`native-test-result ${proactiveResult.success || proactiveResult.ok || proactiveResult.allowed ? 'success' : 'danger'}`}>
                 <strong>{proactiveResult.error || proactiveResult.message || (proactiveResult.allowed ? '权限可用' : '主动关怀已触发')}</strong>
                 <span>{proactiveResult.mode || proactiveForm.target_mode}</span>
                 {proactiveResult.response || proactiveResult.prompt ? <pre>{proactiveResult.response || proactiveResult.prompt}</pre> : null}
@@ -842,7 +842,7 @@ export function ProactiveTtsSettingsView() {
             <div>
               <h2>语音开关</h2>
               <p className="section-caption">
-                这里配置的是 Yachiyo 主动关怀播报链路；Tools 里的“文本转语音”是 Hermes Agent 自己的工具能力，二者互不覆盖。
+                这里配置的是 Yachiyo 主动关怀播报链路；Tools 里的“文本转语音”是 Native Agent 自己的工具能力，二者互不覆盖。
               </p>
             </div>
             <span className={enabled ? 'hy-tts-pill active' : 'hy-tts-pill'}>{loading ? '读取中' : enabled ? `已启用：${ttsProviderLabel(provider)}` : '只发文本'}</span>
@@ -855,7 +855,7 @@ export function ProactiveTtsSettingsView() {
               void saveSettings();
             }}
           >
-            <div className="hermes-config-form-grid hy-tts-form-grid">
+            <div className="native-config-form-grid hy-tts-form-grid">
               <label className="settings-check wide" htmlFor="proactive-tts-enabled">
                 <input
                   id="proactive-tts-enabled"
@@ -962,7 +962,7 @@ export function ProactiveTtsSettingsView() {
                         <input
                           id="tts-voice-archive-path-page"
                           value={manualVoiceArchivePath}
-                          placeholder="~/Downloads/Hermes-Yachiyo-yachiyo-gpt-sovits-v4.zip"
+                          placeholder="~/Downloads/Oha-Yachiyo-yachiyo-gpt-sovits-v4.zip"
                           disabled={interactionBusy}
                           onChange={(event) => setManualVoiceArchivePath(event.target.value)}
                         />
@@ -1016,7 +1016,7 @@ export function ProactiveTtsSettingsView() {
                       <div className="settings-resource-fallback">
                         <p className="settings-note">
                           检测到外部 GPT-SoVITS 服务：{externalGsvAgent?.label || '未知 LaunchAgent'}。
-                          复用会保留原服务；接管会停用该自启项并改由 Hermes-Yachiyo 管理。
+                          复用会保留原服务；接管会停用该自启项并改由 Oha-Yachiyo 管理。
                         </p>
                         <button
                           type="button"
@@ -1297,7 +1297,7 @@ export function ProactiveTtsSettingsView() {
             </div>
 
             {testResult ? (
-              <div className={`hermes-test-result ${testResult.success ? 'success' : 'danger'}`}>
+              <div className={`native-test-result ${testResult.success ? 'success' : 'danger'}`}>
                 <strong>{testResult.success ? testResult.message || '测试语音已完成' : testResult.error || testResult.message || '测试语音失败'}</strong>
                 <span>{testResult.provider ? `Provider: ${ttsProviderLabel(testResult.provider)}` : '—'}</span>
                 {testResult.spoken_text ? <pre>{testResult.spoken_text}</pre> : null}
@@ -1459,7 +1459,7 @@ function buildGsvServiceTerminalCommand(form: TtsForm): string {
   const workdirAssignment = buildShellPathAssignment('WORKDIR', form.gsv_service_workdir.trim());
   const serviceCommand = form.gsv_service_command.trim();
   return [
-    'echo "Hermes-Yachiyo GPT-SoVITS 服务启动"',
+    'echo "Oha-Yachiyo GPT-SoVITS 服务启动"',
     workdirAssignment,
     'cd "$WORKDIR"',
     'if [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi',
@@ -1475,7 +1475,7 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
   const quotedProjectUrl = shellQuote(projectUrl || 'https://github.com/RVC-Boss/GPT-SoVITS');
   const configuredCommand = serviceCommand.trim() || 'python api_v2.py -a 127.0.0.1 -p 9880';
   return [
-    'echo "Hermes-Yachiyo GPT-SoVITS 一键部署"',
+    'echo "Oha-Yachiyo GPT-SoVITS 一键部署"',
     'echo "此流程会克隆 GPT-SoVITS、创建 .venv、安装依赖并准备预训练模型；不会直接启动本地 API。"',
     'echo "下载体积可能较大；脚本会优先准备 Homebrew python@3.11、ffmpeg、mecab 与 unzip。"',
     'printf "继续执行部署？[y/N] "',
@@ -1565,7 +1565,7 @@ function buildGsvSetupTerminalCommand(workdir: string, serviceCommand: string, p
     '  INSTALL_REQUIREMENTS_FILE="requirements.txt"',
     '  if [ "$(uname -s)" = "Darwin" ] && { [ "$PYTHON_MACHINE" = "x86_64" ] || [ "$PYTHON_MACHINE" = "AMD64" ]; }; then',
     "    if grep -q '^onnxruntime-gpu' requirements.txt; then",
-    '      INSTALL_REQUIREMENTS_FILE="$(mktemp "${TMPDIR:-/tmp}/hermes-gsv-req.XXXXXX.txt")"',
+    '      INSTALL_REQUIREMENTS_FILE="$(mktemp "${TMPDIR:-/tmp}/oha-gsv-req.XXXXXX.txt")"',
     "      grep -v '^onnxruntime-gpu' requirements.txt > \"$INSTALL_REQUIREMENTS_FILE\"",
     "      if ! grep -Eq '^onnxruntime([<>= ;]|$)' \"$INSTALL_REQUIREMENTS_FILE\"; then echo 'onnxruntime' >> \"$INSTALL_REQUIREMENTS_FILE\"; fi",
     '      echo "检测到 Python 架构为 x86_64：onnxruntime-gpu 无可用发行包，自动改为 onnxruntime（CPU）。"',
@@ -1598,7 +1598,7 @@ function buildGsvPretrainedModelSetupLines(): string[] {
     'if [ "$MISSING_PRETRAINED" -eq 1 ]; then',
     '  echo "检测到 GPT-SoVITS 预训练模型不完整，开始下载 pretrained_models.zip"',
     urls,
-    '  PRETRAINED_ZIP="$(mktemp "${TMPDIR:-/tmp}/hermes-gsv-pretrained.XXXXXX")"',
+    '  PRETRAINED_ZIP="$(mktemp "${TMPDIR:-/tmp}/oha-gsv-pretrained.XXXXXX")"',
     '  DOWNLOAD_OK=0',
     '  for PRETRAINED_URL in "${PRETRAINED_MODEL_URLS[@]}"; do',
     '    echo "下载：$PRETRAINED_URL"',
@@ -1625,7 +1625,7 @@ function buildGsvG2pwModelSetupLines(): string[] {
     'if [ ! -s "$G2PW_DIR/g2pW.onnx" ]; then',
     '  echo "检测到中文 G2PW 模型不完整，开始下载 G2PWModel.zip"',
     urls,
-    '  G2PW_ZIP="$(mktemp "${TMPDIR:-/tmp}/hermes-gsv-g2pw.XXXXXX")"',
+    '  G2PW_ZIP="$(mktemp "${TMPDIR:-/tmp}/oha-gsv-g2pw.XXXXXX")"',
     '  DOWNLOAD_OK=0',
     '  for G2PW_URL in "${G2PW_MODEL_URLS[@]}"; do',
     '    echo "下载：$G2PW_URL"',
@@ -1664,7 +1664,7 @@ function gsvServiceStatusText(status: GptSovitsServiceStatus | null): string {
   if (status.reachable && status.api_process?.running && !status.launch_agent_installed) {
     const agent = firstExternalGsvLaunchAgent(status);
     if (agent?.label) return `API 已可达；检测到正在运行的服务进程，由其他 LaunchAgent 管理：${agent.label}。`;
-    return 'API 已可达；检测到正在运行的服务进程，但不是由 Hermes-Yachiyo 后台服务管理。';
+    return 'API 已可达；检测到正在运行的服务进程，但不是由 Oha-Yachiyo 后台服务管理。';
   }
   if (status.reachable) return 'API 已可达；可以保存并测试语音链路。';
   if (!status.workdir_exists) return '请先填写 GPT-SoVITS 服务目录，或先安装 GPT-SoVITS 本体。';
@@ -1697,7 +1697,7 @@ function formatGsvApiProcess(process?: GptSovitsServiceStatus['api_process']): s
 
 function formatGsvLaunchAgentStatus(status: GptSovitsServiceStatus): string {
   if (status.launch_agent_installed) {
-    return status.launch_agent_running ? 'Hermes 已安装并运行' : 'Hermes 已安装，待启动';
+    return status.launch_agent_running ? 'Native 已安装并运行' : 'Native 已安装，待启动';
   }
   const agent = firstExternalGsvLaunchAgent(status);
   if (agent?.label) {
@@ -1711,7 +1711,7 @@ function hasExternalGsvService(status: GptSovitsServiceStatus | null): boolean {
 }
 
 function firstExternalGsvLaunchAgent(status: GptSovitsServiceStatus | null | undefined) {
-  return status?.related_launch_agents?.find((agent) => !agent.managed_by_hermes);
+  return status?.related_launch_agents?.find((agent) => !agent.managed_by_oha);
 }
 
 function formatGsvModels(models?: Record<string, boolean>): string {

@@ -4,7 +4,7 @@ import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import './styles/app.css';
 
-if (window.hermesDesktop) {
+if (window.ohaDesktop) {
   document.body.classList.add('electron-window');
 }
 

@@ -1,4 +1,4 @@
-"""Hermes-Yachiyo 卸载计划与执行。"""
+"""Oha-Yachiyo uninstall planning and execution."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from apps.installer import backup as backup_mod
-from apps.installer.hermes_setup import HermesEnvironmentSetup
 from apps.shell import config as config_mod
 from apps.shell import gpt_sovits_service
 from apps.shell.assets import project_display_path
@@ -24,8 +23,7 @@ UNINSTALL_CONFIRM_PHRASE = "UNINSTALL"
 class UninstallScope(StrEnum):
     """卸载范围。"""
 
-    YACHIYO_ONLY = "yachiyo_only"
-    INCLUDE_HERMES = "include_hermes"
+    OHA_ONLY = "oha_only"
 
 
 @dataclass(frozen=True)
@@ -66,8 +64,8 @@ class UninstallPlan:
     keep_config_snapshot: bool
     confirm_phrase: str
     app_config_dir: str
-    hermes_home: str
-    yachiyo_workspace: str
+    native_home: str
+    oha_workspace: str
     targets: list[UninstallTarget]
     backup: BackupPlan
     warnings: list[str] = field(default_factory=list)
@@ -138,40 +136,22 @@ def _is_relative_to(path: Path, root: Path) -> bool:
         return False
 
 
-def _looks_like_hermes_home(path: Path) -> bool:
-    markers = (
-        "bin/hermes",
-        "config.yaml",
-        "config.yml",
-        "config.json",
-        "yachiyo",
-    )
-    return any((path / marker).exists() for marker in markers)
-
-
 def _normalize_confirm_text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _is_safe_hermes_home(path: Path) -> tuple[bool, str]:
+def _is_safe_native_home(path: Path) -> tuple[bool, str]:
     resolved = path.expanduser().resolve()
     if backup_mod.is_protected_path(resolved):
         return False, "受保护路径，已跳过"
     if not _is_relative_to(resolved, Path.home().expanduser()):
-        return False, "Hermes Home 不在当前用户目录下，已跳过"
-    if not _looks_like_hermes_home(resolved):
-        return False, "路径不像 Hermes Home，已跳过"
-    return True, ""
-
-
-def _is_safe_hermes_binary(path: Path) -> tuple[bool, str]:
-    resolved = path.expanduser().resolve()
-    if resolved.name != "hermes":
-        return False, "可执行文件名称不符合预期，已跳过"
-    if not _is_relative_to(resolved, Path.home().expanduser()):
-        return False, "Hermes 命令位于系统或共享路径，第一版不自动删除"
-    if backup_mod.is_protected_path(resolved.parent):
-        return False, "Hermes 命令位于受保护路径，已跳过"
+        return False, "Oha-Yachiyo runtime 不在当前用户目录下，已跳过"
+    if resolved.name != ".oha-yachiyo":
+        return False, "路径不像 Oha-Yachiyo runtime，已跳过"
+    if _path_exists(resolved):
+        safe, reason = backup_mod.is_safe_oha_workspace(resolved)
+        if not safe:
+            return False, reason
     return True, ""
 
 
@@ -231,39 +211,12 @@ def _app_config_dir() -> Path:
     return Path(getattr(config_mod, "_CONFIG_DIR")).expanduser()
 
 
-def _hermes_home_dir() -> Path:
-    return Path(HermesEnvironmentSetup.get_effective_hermes_home()).expanduser()
+def _oha_yachiyo_home_dir() -> Path:
+    return Path(os.getenv("OHA_YACHIYO_HOME", "~/.oha-yachiyo")).expanduser()
 
 
 def _backup_root(backup_root: str | Path | None = None) -> Path:
     return backup_mod.default_backup_root(backup_root)
-
-
-def _discover_hermes_binary_paths() -> list[Path]:
-    import shutil as _shutil
-
-    candidates: list[Path] = []
-    found = _shutil.which("hermes")
-    if found:
-        candidates.append(Path(found))
-
-    try:
-        from apps.installer.hermes_check import HERMES_COMMON_INSTALL_PATHS
-
-        candidates.extend(Path(os.path.expanduser(item)) for item in HERMES_COMMON_INSTALL_PATHS)
-    except Exception:
-        pass
-
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        expanded = candidate.expanduser()
-        key = str(expanded)
-        if key in seen or not _path_exists(expanded):
-            continue
-        seen.add(key)
-        unique.append(expanded)
-    return unique
 
 
 def _load_current_config() -> config_mod.AppConfig:
@@ -300,7 +253,7 @@ def _gpt_sovits_installed(app_config: config_mod.AppConfig) -> bool:
 
 
 def build_uninstall_plan(
-    scope: str | UninstallScope = UninstallScope.YACHIYO_ONLY,
+    scope: str | UninstallScope = UninstallScope.OHA_ONLY,
     *,
     keep_config_snapshot: bool = True,
     include_gpt_sovits: bool = False,
@@ -309,49 +262,25 @@ def build_uninstall_plan(
     """生成卸载计划，不修改文件系统。"""
     parsed_scope = _parse_scope(scope)
     app_config = _app_config_dir()
-    hermes_home = _hermes_home_dir()
-    yachiyo_workspace = hermes_home / "yachiyo"
+    native_home = _oha_yachiyo_home_dir()
+    oha_workspace = native_home
     app_config_data = _load_current_config()
     targets = [
         _make_target(
             target_id="app_config_dir",
-            label="Hermes-Yachiyo 应用配置",
+            label="Oha-Yachiyo 应用配置",
             path=app_config,
             kind="directory",
             safe_check=backup_mod.is_safe_app_config_dir,
-        )
+        ),
+        _make_target(
+            target_id="oha_workspace",
+            label="Oha-Yachiyo 工作空间",
+            path=oha_workspace,
+            kind="directory",
+            safe_check=_is_safe_native_home,
+        ),
     ]
-
-    if parsed_scope == UninstallScope.YACHIYO_ONLY:
-        targets.append(
-            _make_target(
-                target_id="yachiyo_workspace",
-                label="Hermes-Yachiyo 工作空间",
-                path=yachiyo_workspace,
-                kind="directory",
-                safe_check=backup_mod.is_safe_yachiyo_workspace,
-            )
-        )
-    else:
-        targets.append(
-            _make_target(
-                target_id="hermes_home",
-                label="Hermes Agent Home 与 Yachiyo 工作空间",
-                path=hermes_home,
-                kind="directory",
-                safe_check=_is_safe_hermes_home,
-            )
-        )
-        for index, binary_path in enumerate(_discover_hermes_binary_paths(), start=1):
-            targets.append(
-                _make_target(
-                    target_id=f"hermes_binary_{index}",
-                    label="Hermes Agent 命令",
-                    path=binary_path,
-                    kind="file",
-                    safe_check=_is_safe_hermes_binary,
-                )
-            )
 
     if include_gpt_sovits:
         targets.append(
@@ -380,7 +309,7 @@ def build_uninstall_plan(
     warnings = []
     if keep_config_snapshot:
         warnings.append(
-            "卸载前备份将保存 Hermes-Yachiyo 配置、工作空间、"
+            "卸载前备份将保存 Oha-Yachiyo 配置、工作空间、"
             "聊天数据库、缓存、日志与导入资源。"
         )
     for target in targets:
@@ -399,14 +328,14 @@ def build_uninstall_plan(
         keep_config_snapshot=keep_config_snapshot,
         confirm_phrase=UNINSTALL_CONFIRM_PHRASE,
         app_config_dir=str(app_config),
-        hermes_home=str(hermes_home),
-        yachiyo_workspace=str(yachiyo_workspace),
+        native_home=str(native_home),
+        oha_workspace=str(oha_workspace),
         targets=targets,
         backup=BackupPlan(
             enabled=keep_config_snapshot,
             backup_root=str(backup_root_path),
             backup_root_display=_display_path(backup_root_path),
-            note="卸载前生成可随时导入的 Hermes-Yachiyo ZIP 备份",
+            note="卸载前生成可随时导入的 Oha-Yachiyo ZIP 备份",
         ),
         warnings=warnings,
     )
@@ -436,7 +365,7 @@ def _remove_path(path: Path) -> None:
 
 
 def execute_uninstall(
-    scope: str | UninstallScope = UninstallScope.YACHIYO_ONLY,
+    scope: str | UninstallScope = UninstallScope.OHA_ONLY,
     *,
     keep_config_snapshot: bool = True,
     include_gpt_sovits: bool = False,

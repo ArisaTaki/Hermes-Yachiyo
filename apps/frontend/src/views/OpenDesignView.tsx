@@ -12,6 +12,17 @@ const Live2DPreviewStage = lazy(() =>
   import('./Live2DPreviewStage').then((module) => ({ default: module.Live2DPreviewStage })),
 );
 
+type NativeRuntimeStatus = {
+  status?: string;
+  version?: string;
+  platform?: string;
+  command_exists?: boolean;
+  ready?: boolean;
+  readiness_level?: string;
+  limited_tools?: string[];
+  doctor_issues_count?: number;
+};
+
 type DashboardData = {
   app?: { uptime_seconds?: number; version?: string; running?: boolean };
   bridge?: { state?: string; status?: string; running?: string; url?: string; config_dirty?: boolean };
@@ -34,17 +45,7 @@ type DashboardData = {
     agent_nickname?: string;
     agent_avatar_url?: string;
   };
-  hermes?: {
-    status?: string;
-    version?: string;
-    platform?: string;
-    command_exists?: boolean;
-    ready?: boolean;
-    readiness_level?: string;
-    hermes_home?: string;
-    limited_tools?: string[];
-    doctor_issues_count?: number;
-  };
+  native_agent?: NativeRuntimeStatus;
   integrations?: {
     astrbot?: StatusRecord;
     hapi?: StatusRecord;
@@ -96,7 +97,7 @@ type StatusRecord = {
   blockers?: string[];
 };
 
-type HermesProviderOption = {
+type NativeProviderOption = {
   id: string;
   label?: string;
   base_url?: string;
@@ -110,14 +111,14 @@ type HermesProviderOption = {
   source?: string;
 };
 
-type HermesVisualConfig = {
+type NativeVisualConfig = {
   ok?: boolean;
   error?: string;
   command_exists?: boolean;
   config_path?: string;
   env_path?: string;
   model?: { provider?: string; default?: string; base_url?: string };
-  provider_options?: HermesProviderOption[];
+  provider_options?: NativeProviderOption[];
   api_key?: { name?: string; configured?: boolean; display?: string };
   connection_validation?: {
     verified?: boolean;
@@ -147,7 +148,7 @@ type HermesVisualConfig = {
   };
 };
 
-type HermesConfigForm = {
+type NativeConfigForm = {
   provider: string;
   model: string;
   base_url: string;
@@ -159,7 +160,7 @@ type HermesConfigForm = {
   vision_api_key: string;
 };
 
-type HermesConnectionTestResult = {
+type NativeConnectionTestResult = {
   ok?: boolean;
   success?: boolean;
   error?: string;
@@ -174,7 +175,7 @@ type SettingsData = {
   assistant?: { persona_prompt?: string; user_address?: string };
   backup?: { auto_cleanup_enabled?: boolean; retention_count?: number };
   display?: { current_mode?: string; available_modes?: Array<{ id: string; name?: string; label?: string }> };
-  hermes?: DashboardData['hermes'];
+  native_agent?: DashboardData['native_agent'];
   mode_settings?: Record<string, { id?: string; title?: string; summary?: string; config?: Record<string, unknown> }>;
   workspace?: { path?: string; initialized?: boolean; created_at?: string; dirs?: Record<string, string> };
 };
@@ -213,10 +214,9 @@ const NAV_GROUPS: Array<{
   items: Array<{ view: AppView; label: string; icon: UiIconName; badge?: string; mode?: string }>;
 }> = [
     {
-      label: '初始化',
+      label: '启动',
       items: [
         { view: 'main', label: '主控台', icon: 'dashboard' },
-        { view: 'installer', label: '安装器', icon: 'installer' },
         { view: 'provider', label: '模型配置', icon: 'provider' },
       ],
     },
@@ -296,8 +296,9 @@ const PARTICLES = Array.from({ length: 80 }, (_, index) => {
     } as CSSProperties,
   };
 });
-const ACTIVITY_LOG_CHANGED_EVENT = 'hermes-activity-log-changed';
-const SIDEBAR_COLLAPSED_STORAGE_KEY = 'hermes.shell.sidebarCollapsed';
+const ACTIVITY_LOG_CHANGED_EVENT = 'oha-activity-log-changed';
+const SIDEBAR_COLLAPSED_STORAGE_KEY = 'oha.shell.sidebarCollapsed';
+const ASSISTANT_PROFILE_UPDATED_EVENT = 'oha-assistant-profile-updated';
 
 let bridgeBootReady = false;
 let bootDashboardCache: DashboardData | null = null;
@@ -478,10 +479,10 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
           if (!disposed) setDashboard(null);
         });
     };
-    window.addEventListener('hermes-assistant-profile-updated', refreshDashboard);
+    window.addEventListener(ASSISTANT_PROFILE_UPDATED_EVENT, refreshDashboard);
     return () => {
       disposed = true;
-      window.removeEventListener('hermes-assistant-profile-updated', refreshDashboard);
+      window.removeEventListener(ASSISTANT_PROFILE_UPDATED_EVENT, refreshDashboard);
     };
   }, []);
 
@@ -589,7 +590,7 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
               <span className="hy-brand-mark" aria-hidden="true">
                 <img src={logoUrl} alt="" className="hy-brand-logo" />
               </span>
-              <span>Hermes Yachiyo</span>
+              <span>Oha Yachiyo</span>
             </button>
             <button
               type="button"
@@ -646,7 +647,7 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
             <UiIcon name="retry" />
             <span>检查更新</span>
           </button>
-          <button type="button" onClick={() => void openExternalUrl('https://www.hermes-yachiyo.dev/guide/')} title="帮助" aria-label="帮助" {...sidebarTooltipProps('帮助')}>
+          <button type="button" onClick={() => void openExternalUrl('https://www.oha-yachiyo.dev/guide/')} title="帮助" aria-label="帮助" {...sidebarTooltipProps('帮助')}>
             <UiIcon name="help" />
             <span>帮助</span>
           </button>
@@ -722,9 +723,9 @@ function BootLoadingOverlay({ hidden, slow }: { hidden: boolean; slow: boolean }
     <div className={hidden ? 'hy-loading-overlay hidden' : 'hy-loading-overlay'} aria-hidden={hidden}>
       <img src={logoUrl} alt="" className="hy-loading-logo" />
       <div className="hy-loading-copy">
-        <div className="hy-loading-text">HERMES YACHIYO</div>
+        <div className="hy-loading-text">OHA YACHIYO</div>
         <div className="hy-loading-subtext">
-          {slow ? 'Bridge 启动时间较长，仍在等待本机服务。' : '正在唤醒 Hermes Bridge'}
+          {slow ? 'Bridge 启动时间较长，仍在等待本机服务。' : '正在唤醒 Native Bridge'}
         </div>
       </div>
       <div className="hy-loading-bar">
@@ -822,12 +823,13 @@ export function DashboardPage() {
   }, []);
 
   const bridge = bridgeState(data);
-  const modelReady = Boolean(data?.hermes?.ready || data?.hermes?.command_exists);
+  const nativeAgent = dashboardNativeAgent(data);
+  const modelReady = Boolean(nativeAgent?.ready || nativeAgent?.command_exists);
   const workspaceReady = Boolean(data?.workspace?.initialized);
   const dataLoaded = data !== null;
   const activityData = data ? { ...data, activities: recentActivityEvents ?? data.activities } : data;
   const activities = recentActivities(activityData);
-  const modelLabel = data?.hermes?.version || (modelReady ? 'Hermes · 文本+视觉' : 'Hermes 待检测');
+  const modelLabel = nativeAgent?.version || (modelReady ? 'Native · 文本+视觉' : 'Native 待检测');
   const toolCards = dashboardToolCards(data, live2dLauncher);
 
   return (
@@ -854,8 +856,8 @@ export function DashboardPage() {
 
       <section className="hy-status-grid hy-stagger">
         <StatusCard tone="success" label="Bridge 状态" value={bridge} detail={data?.bridge?.url || '127.0.0.1 本机桥接'} icon="activity" />
-        <StatusCard tone={!dataLoaded ? 'info' : modelReady ? 'info' : 'warning'} label="模型连接" value={!dataLoaded ? '加载中' : modelReady ? '已连接' : '待配置'} detail={!dataLoaded ? '正在读取状态' : hermesReadinessLabel(data?.hermes?.readiness_level)} icon="model" />
-        <StatusCard tone={!dataLoaded ? 'info' : workspaceReady ? 'success' : 'warning'} label="工作区" value={!dataLoaded ? '加载中' : workspaceReady ? '已初始化' : '待初始化'} detail={data?.workspace?.path || '~/Hermes-Yachiyo/workspace'} icon="folder" />
+        <StatusCard tone={!dataLoaded ? 'info' : modelReady ? 'info' : 'warning'} label="模型连接" value={!dataLoaded ? '加载中' : modelReady ? '已连接' : '待配置'} detail={!dataLoaded ? '正在读取状态' : nativeReadinessLabel(nativeAgent?.readiness_level)} icon="model" />
+        <StatusCard tone={!dataLoaded ? 'info' : workspaceReady ? 'success' : 'warning'} label="工作区" value={!dataLoaded ? '加载中' : workspaceReady ? '已初始化' : '待初始化'} detail={data?.workspace?.path || '~/Oha-Yachiyo/workspace'} icon="folder" />
       </section>
 
       <section className="hy-section hy-stagger">
@@ -916,6 +918,10 @@ function dashboardToolCards(data: DashboardData | null, live2dLauncher: Launcher
   });
 }
 
+function dashboardNativeAgent(data: DashboardData | null | undefined): NativeRuntimeStatus | undefined {
+  return data?.native_agent;
+}
+
 function chatToolStatus(data: DashboardData | null): Pick<ToolCard, 'status' | 'statusTone'> {
   if (data?.chat?.is_processing) return { status: '处理中', statusTone: 'pending' };
   if (data?.chat?.recent_sessions?.length) return { status: '就绪', statusTone: 'ready' };
@@ -944,12 +950,12 @@ function live2dRenderPresetLabel(value?: string): string {
 }
 
 export function ProviderPage() {
-  const [config, setConfig] = useState<HermesVisualConfig | null>(null);
-  const [form, setForm] = useState<HermesConfigForm>(() => emptyHermesForm());
+  const [config, setConfig] = useState<NativeVisualConfig | null>(null);
+  const [form, setForm] = useState<NativeConfigForm>(() => emptyNativeForm());
   const [status, setStatus] = useState('正在读取模型配置...');
   const [busy, setBusy] = useState('');
-  const [testResult, setTestResult] = useState<HermesConnectionTestResult | null>(null);
-  const [imageTestResult, setImageTestResult] = useState<HermesConnectionTestResult | null>(null);
+  const [testResult, setTestResult] = useState<NativeConnectionTestResult | null>(null);
+  const [imageTestResult, setImageTestResult] = useState<NativeConnectionTestResult | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   usePageLoading(initialLoading || !!busy);
 
@@ -957,10 +963,10 @@ export function ProviderPage() {
     let disposed = false;
     async function load() {
       try {
-        const payload = await apiGet<HermesVisualConfig>('/ui/hermes/config');
+        const payload = await apiGet<NativeVisualConfig>('/ui/native-agent/config');
         if (!disposed) {
           setConfig(payload);
-          setForm(formFromHermesConfig(payload));
+          setForm(formFromNativeConfig(payload));
           setStatus(payload.ok === false ? payload.error || '读取配置失败' : '');
           setInitialLoading(false);
         }
@@ -1002,15 +1008,15 @@ export function ProviderPage() {
     setForm((current) => applyVisionProviderPreset(config, current, providerId));
   }
 
-  async function persistHermesConfig() {
+  async function persistNativeConfig() {
     if (!form.provider.trim() || !form.model.trim()) {
       throw new Error('Provider 和模型名称不能为空');
     }
-    const result = await apiPost<{ ok?: boolean; error?: string; configuration?: HermesVisualConfig }>('/ui/hermes/config', form);
+    const result = await apiPost<{ ok?: boolean; error?: string; configuration?: NativeVisualConfig }>('/ui/native-agent/config', form);
     if (result.ok === false) throw new Error(result.error || '保存配置失败');
     if (result.configuration) {
       setConfig(result.configuration);
-      setForm(formFromHermesConfig(result.configuration));
+      setForm(formFromNativeConfig(result.configuration));
     }
   }
 
@@ -1021,7 +1027,7 @@ export function ProviderPage() {
     setImageTestResult(null);
     setStatus('正在保存配置...');
     try {
-      await persistHermesConfig();
+      await persistNativeConfig();
       setStatus('模型配置已保存');
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '保存配置失败');
@@ -1036,8 +1042,8 @@ export function ProviderPage() {
     setTestResult(null);
     setStatus('正在保存配置并测试文本模型...');
     try {
-      await persistHermesConfig();
-      const test = await apiPost<HermesConnectionTestResult>('/ui/hermes/connection-test');
+      await persistNativeConfig();
+      const test = await apiPost<NativeConnectionTestResult>('/ui/native-agent/connection-test');
       setTestResult(test);
       setStatus(test.success ? test.message || '模型连接测试通过' : test.error || '模型连接测试失败');
     } catch (err) {
@@ -1053,8 +1059,8 @@ export function ProviderPage() {
     setImageTestResult(null);
     setStatus('正在保存配置并测试图片链路...');
     try {
-      await persistHermesConfig();
-      const test = await apiPost<HermesConnectionTestResult>('/ui/hermes/image-connection-test');
+      await persistNativeConfig();
+      const test = await apiPost<NativeConnectionTestResult>('/ui/native-agent/image-connection-test');
       setImageTestResult(test);
       setStatus(test.success ? test.message || '图片链路测试通过' : test.error || '图片链路测试失败');
     } catch (err) {
@@ -1072,7 +1078,7 @@ export function ProviderPage() {
           <h2>模型配置</h2>
           <p>配置 AI 模型提供商、API Key 和高级参数。</p>
         </div>
-        <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('installer')}>安装器</button>
+        <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('main')}>返回主控台</button>
       </header>
 
       {status ? <div className={/失败|错误|无法|不能为空/.test(status) ? 'notice danger' : 'notice'}>{status}</div> : null}
@@ -1123,7 +1129,7 @@ export function ProviderPage() {
               <label className="hy-settings-item">
                 <span>
                   <strong>Base URL</strong>
-                  <small>{config?.config_path || 'Hermes 配置路径待读取'}</small>
+                  <small>{config?.config_path || 'Native 配置路径待读取'}</small>
                 </span>
                 <input className="hy-input" value={form.base_url} placeholder={provider?.base_url || 'https://api.openai.com/v1'} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, base_url: event.target.value }))} />
               </label>
@@ -1137,7 +1143,7 @@ export function ProviderPage() {
               <div className="hy-settings-item">
                 <span>
                   <strong>文本连接测试</strong>
-                  <small>保存当前文本配置后调用 `/ui/hermes/connection-test`</small>
+                  <small>保存当前文本配置后调用 `/ui/native-agent/connection-test`</small>
                 </span>
                 <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={() => void runTextConnectionTest()}>{busy === 'text-test' ? '测试中...' : '测试文本'}</button>
               </div>
@@ -1154,7 +1160,7 @@ export function ProviderPage() {
               <label className="hy-settings-item">
                 <span>
                   <strong>图片输入模式</strong>
-                  <small>{config?.image_input?.reason || config?.image_input?.label || '选择图片如何进入 Hermes'}</small>
+                  <small>{config?.image_input?.reason || config?.image_input?.label || '选择图片如何进入 Native'}</small>
                 </span>
                 <select className="hy-select" value={form.image_input_mode} disabled={Boolean(busy)} onChange={(event) => setForm((current) => ({ ...current, image_input_mode: event.target.value }))}>
                   <option value="auto">自动选择</option>
@@ -1205,7 +1211,7 @@ export function ProviderPage() {
               <div className="hy-settings-item">
                 <span>
                   <strong>Vision 连接测试</strong>
-                  <small>保存当前视觉配置后调用 `/ui/hermes/image-connection-test`</small>
+                  <small>保存当前视觉配置后调用 `/ui/native-agent/image-connection-test`</small>
                 </span>
                 <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(busy)} onClick={() => void runImageConnectionTest()}>{busy === 'image-test' ? '测试中...' : '测试图片'}</button>
               </div>
@@ -1456,7 +1462,7 @@ export function ResourcesPage() {
     },
     {
       icon: '🖼',
-      name: 'Hermes Yachiyo Logo',
+      name: 'Oha Yachiyo Logo',
       meta: '壁纸 · docs/open-design/logo.png',
       badge: '已加载',
       tone: 'info',
@@ -1537,7 +1543,7 @@ export function WorkspacePage() {
     };
   }, []);
 
-  const workspacePath = settings?.workspace?.path || '~/.hermes/yachiyo';
+  const workspacePath = settings?.workspace?.path || '~/.oha-yachiyo';
   const dirs = settings?.workspace?.dirs || {};
   const resourcesPath = dirs.assets || `${workspacePath}/assets`;
   const latestBackup = backup?.latest?.display_path || backup?.latest?.path || '暂无备份';
@@ -2042,7 +2048,7 @@ export function ActivityDetailPage() {
             </div>
             <div>
               <span>工具</span>
-              <strong>{event.tool_name || 'Hermes'}</strong>
+              <strong>{event.tool_name || 'Native'}</strong>
             </div>
             <div>
               <span>时间</span>
@@ -2093,7 +2099,7 @@ export function ActivityDetailPage() {
                     <span className="activity-icon">{activityIcon(item)}</span>
                     <div className="activity-content">
                       <div className="activity-trace-heading">
-                        <strong>{item.title || item.tool_name || 'Hermes 活动'}</strong>
+                        <strong>{item.title || item.tool_name || 'Native 活动'}</strong>
                         {canExpand ? (
                           <button
                             type="button"
@@ -2360,7 +2366,7 @@ function InfoPanel({ title, rows, action }: { title: string; rows: Array<[string
   );
 }
 
-function ConnectionResult({ result }: { result: HermesConnectionTestResult }) {
+function ConnectionResult({ result }: { result: NativeConnectionTestResult }) {
   const preview = result.output_preview || result.stderr_preview || '';
   const success = result.success ?? result.ok;
   return (
@@ -2372,7 +2378,7 @@ function ConnectionResult({ result }: { result: HermesConnectionTestResult }) {
   );
 }
 
-function emptyHermesForm(): HermesConfigForm {
+function emptyNativeForm(): NativeConfigForm {
   return {
     provider: '',
     model: '',
@@ -2386,7 +2392,7 @@ function emptyHermesForm(): HermesConfigForm {
   };
 }
 
-function formFromHermesConfig(config: HermesVisualConfig | null): HermesConfigForm {
+function formFromNativeConfig(config: NativeVisualConfig | null): NativeConfigForm {
   const providerId = config?.model?.provider || config?.provider_options?.[0]?.id || '';
   const provider = providerOptionById(config, providerId);
   const visionProviderId = config?.vision?.provider || '';
@@ -2411,28 +2417,28 @@ function normalizeImageInputMode(mode?: string): string {
   return 'auto';
 }
 
-function providerOptionById(config: HermesVisualConfig | null, provider: string): HermesProviderOption | undefined {
+function providerOptionById(config: NativeVisualConfig | null, provider: string): NativeProviderOption | undefined {
   return config?.provider_options?.find((option) => option.id === provider);
 }
 
-function defaultTextModel(option: HermesProviderOption | undefined): string {
+function defaultTextModel(option: NativeProviderOption | undefined): string {
   return option?.default_model || option?.models?.[0] || '';
 }
 
-function defaultVisionModel(option: HermesProviderOption | undefined): string {
+function defaultVisionModel(option: NativeProviderOption | undefined): string {
   return option?.default_vision_model || option?.vision_models?.[0] || option?.default_model || option?.models?.[0] || '';
 }
 
-function textModelOptions(option: HermesProviderOption | undefined, currentModel: string): string[] {
+function textModelOptions(option: NativeProviderOption | undefined, currentModel: string): string[] {
   return uniqueOptions([currentModel, defaultTextModel(option), ...(option?.models || [])]);
 }
 
-function visionModelSelectOptions(option: HermesProviderOption | undefined, currentModel: string): string[] {
+function visionModelSelectOptions(option: NativeProviderOption | undefined, currentModel: string): string[] {
   const models = option?.vision_models?.length ? option.vision_models : option?.models || [];
   return uniqueOptions([currentModel, defaultVisionModel(option), ...models]);
 }
 
-function applyTextProviderPreset(config: HermesVisualConfig | null, current: HermesConfigForm, providerId: string): HermesConfigForm {
+function applyTextProviderPreset(config: NativeVisualConfig | null, current: NativeConfigForm, providerId: string): NativeConfigForm {
   const option = providerOptionById(config, providerId);
   return {
     ...current,
@@ -2443,7 +2449,7 @@ function applyTextProviderPreset(config: HermesVisualConfig | null, current: Her
   };
 }
 
-function applyVisionProviderPreset(config: HermesVisualConfig | null, current: HermesConfigForm, providerId: string): HermesConfigForm {
+function applyVisionProviderPreset(config: NativeVisualConfig | null, current: NativeConfigForm, providerId: string): NativeConfigForm {
   if (!providerId) {
     return {
       ...current,
@@ -2471,14 +2477,14 @@ function isBridgeUnavailableMessage(message: string): boolean {
   return /无法连接本地 Bridge|本地 Bridge 正在启动|Failed to fetch|fetch failed|NetworkError|Load failed/i.test(message);
 }
 
-function hermesReadinessLabel(level?: string): string {
+function nativeReadinessLabel(level?: string): string {
   if (level === 'full_ready') return '完整就绪';
   if (level === 'basic_ready') return '基础可用';
   if (level === 'unknown') return '等待 Doctor 分级';
   return level || '等待连接测试';
 }
 
-function providerLabel(option: HermesProviderOption): string {
+function providerLabel(option: NativeProviderOption): string {
   const state = option.api_key_configured ? '已配置' : option.auth_type && option.auth_type !== 'api_key' ? '外部授权' : '未配置';
   return `${option.label || option.id} (${option.id}) · ${state}`;
 }
@@ -2537,7 +2543,7 @@ function formatFullDateTime(value?: string) {
 function activityEventRow(event: ActivityEvent, fullTime: boolean): ActivityRowData {
   return {
     icon: activityIcon(event),
-    title: event.title || event.tool_name || 'Hermes 活动',
+    title: event.title || event.tool_name || 'Native 活动',
     detail: activityDetail(event),
     time: fullTime ? formatFullDateTime(event.created_at) : formatShortDateTime(event.created_at),
     tone: activityTone(event.status),
@@ -2750,22 +2756,22 @@ function groupActivitiesByDay(rows: ActivityRowData[]): Array<{ label: string; i
 }
 
 function routeTitle(view: AppView, settingsMode = ''): string {
-  if (view === 'main') return 'Hermes Yachiyo — 主控台';
-  if (view === 'chat') return 'Hermes Yachiyo — 对话';
-  if (view === 'agents') return 'Hermes Yachiyo — Agent Studio';
-  if (view === 'provider') return 'Hermes Yachiyo — 模型配置';
-  if (view === 'bubble') return 'Hermes Yachiyo — 气泡模式';
-  if (view === 'live2d') return 'Hermes Yachiyo — Live2D 模式';
-  if (view === 'resources') return 'Hermes Yachiyo — 资源管理';
-  if (view === 'workspace') return 'Hermes Yachiyo — 工作区';
-  if (view === 'tools-all') return 'Hermes Yachiyo — 桌面工具';
-  if (view === 'activity-all') return 'Hermes Yachiyo — 活动日志';
-  if (view === 'activity-detail') return 'Hermes Yachiyo — 活动详情';
-  if (view === 'app-update') return 'Hermes Yachiyo — 应用更新';
-  if (view === 'proactive-tts') return 'Hermes Yachiyo — 主动关怀';
-  if (view === 'settings' && settingsMode === 'live2d') return 'Hermes Yachiyo — Live2D 设置';
-  if (view === 'settings' && settingsMode === 'bubble') return 'Hermes Yachiyo — 气泡设置';
-  return 'Hermes Yachiyo';
+  if (view === 'main') return 'Oha Yachiyo — 主控台';
+  if (view === 'chat') return 'Oha Yachiyo — 对话';
+  if (view === 'agents') return 'Oha Yachiyo — Agent Studio';
+  if (view === 'provider') return 'Oha Yachiyo — 模型配置';
+  if (view === 'bubble') return 'Oha Yachiyo — 气泡模式';
+  if (view === 'live2d') return 'Oha Yachiyo — Live2D 模式';
+  if (view === 'resources') return 'Oha Yachiyo — 资源管理';
+  if (view === 'workspace') return 'Oha Yachiyo — 工作区';
+  if (view === 'tools-all') return 'Oha Yachiyo — 桌面工具';
+  if (view === 'activity-all') return 'Oha Yachiyo — 活动日志';
+  if (view === 'activity-detail') return 'Oha Yachiyo — 活动详情';
+  if (view === 'app-update') return 'Oha Yachiyo — 应用更新';
+  if (view === 'proactive-tts') return 'Oha Yachiyo — 主动关怀';
+  if (view === 'settings' && settingsMode === 'live2d') return 'Oha Yachiyo — Live2D 设置';
+  if (view === 'settings' && settingsMode === 'bubble') return 'Oha Yachiyo — 气泡设置';
+  return 'Oha Yachiyo';
 }
 
 function isNavActive(activeView: AppView, settingsMode: string, itemView: AppView): boolean {
@@ -2777,6 +2783,6 @@ function isNavActive(activeView: AppView, settingsMode: string, itemView: AppVie
 
 function navBadge(view: AppView, data: DashboardData | null): string {
   if (view === 'workspace' && data?.workspace?.initialized) return 'ok';
-  if (view === 'provider' && data?.hermes?.ready) return 'ok';
+  if (view === 'provider' && dashboardNativeAgent(data)?.ready) return 'ok';
   return '';
 }

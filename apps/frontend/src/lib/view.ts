@@ -3,7 +3,6 @@ export type AppView =
   | 'chat'
   | 'agents'
   | 'settings'
-  | 'installer'
   | 'provider'
   | 'resources'
   | 'workspace'
@@ -25,11 +24,11 @@ type RouteState = {
 
 declare global {
   interface Window {
-    hermesRouteLeaveGuard?: (nextView: AppView) => boolean;
+    ohaRouteLeaveGuard?: (nextView: AppView) => boolean;
   }
 }
 
-export const ROUTE_CHANGE_EVENT = 'hermes-route-change';
+export const ROUTE_CHANGE_EVENT = 'oha-route-change';
 
 export function currentView(): AppView {
   return currentRoute().view;
@@ -56,7 +55,7 @@ export function navigateTo(
   extraParams: Record<string, string> = {},
   removeParams: string[] = [],
 ) {
-  if (window.hermesRouteLeaveGuard && !window.hermesRouteLeaveGuard(view)) return;
+  if (window.ohaRouteLeaveGuard && !window.ohaRouteLeaveGuard(view)) return;
   const current = currentRoute().params;
   const nextParams = { ...current };
   removeParams.forEach((name) => delete nextParams[name]);
@@ -101,7 +100,6 @@ function isAppView(value: string): value is AppView {
     'chat',
     'agents',
     'settings',
-    'installer',
     'provider',
     'resources',
     'workspace',

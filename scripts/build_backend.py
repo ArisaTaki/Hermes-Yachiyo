@@ -1,4 +1,4 @@
-"""Build the packaged Hermes-Yachiyo backend executable with PyInstaller."""
+"""Build the packaged oha-yachiyo backend executable with PyInstaller."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ ENTRYPOINT = ROOT / "packaging" / "backend_entry.py"
 DIST_DIR = ROOT / "dist" / "backend"
 BUILD_DIR = ROOT / "build" / "pyinstaller"
 ASSETS_DIR = ROOT / "apps" / "shell" / "assets"
-BRIDGE_SCRIPT = ROOT / "apps" / "core" / "hermes_stream_bridge.py"
+BUILD_METADATA_FILE = ROOT / "apps" / "frontend" / "public" / "oha-yachiyo-build.json"
 PYINSTALLER_HOOKS_DIR = ROOT / "packaging" / "pyinstaller_hooks"
 PYINSTALLER_EXCLUDED_MODULES = [
     "gunicorn",
@@ -48,12 +48,15 @@ def build_backend(clean: bool = False) -> Path:
     DIST_DIR.mkdir(parents=True, exist_ok=True)
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
 
-    output_name = "hermes-yachiyo-backend.exe" if os.name == "nt" else "hermes-yachiyo-backend"
+    output_name = "oha-yachiyo-backend.exe" if os.name == "nt" else "oha-yachiyo-backend"
     output_path = DIST_DIR / output_name
     data_args = [
         f"{ASSETS_DIR}{_data_separator()}apps/shell/assets",
-        f"{BRIDGE_SCRIPT}{_data_separator()}apps/core",
     ]
+    if BUILD_METADATA_FILE.exists():
+        data_args.append(
+            f"{BUILD_METADATA_FILE}{_data_separator()}apps/frontend/public"
+        )
 
     command = [
         sys.executable,
@@ -63,7 +66,7 @@ def build_backend(clean: bool = False) -> Path:
         "--clean",
         "--onefile",
         "--name",
-        "hermes-yachiyo-backend",
+        "oha-yachiyo-backend",
         "--distpath",
         str(DIST_DIR),
         "--workpath",
@@ -95,7 +98,7 @@ def build_backend(clean: bool = False) -> Path:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build the Hermes-Yachiyo packaged backend.")
+    parser = argparse.ArgumentParser(description="Build the Oha-Yachiyo packaged backend.")
     parser.add_argument("--clean", action="store_true", help="Remove old backend build output first.")
     args = parser.parse_args()
     output_path = build_backend(clean=args.clean)

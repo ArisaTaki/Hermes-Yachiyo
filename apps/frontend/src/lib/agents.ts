@@ -1,10 +1,7 @@
 import { apiDelete, apiGet, apiPatch, apiPost } from './bridge';
 
 export type AgentModelMode = 'follow_main' | 'profile' | 'custom_api';
-// Legacy backend values may be returned by older local databases, but the UI
-// no longer exposes backend selection. Agent Studio agents run through
-// Yachiyo Agent Runtime.
-export type AgentExecutionBackend = 'hermes_profile' | 'yachiyo_profile' | 'external_cli';
+export type AgentExecutionBackend = 'native_profile';
 
 export type AgentSpec = {
   agent_id: string;
@@ -31,6 +28,11 @@ export type AgentSpec = {
   skill_ids?: string[];
   output_contract?: 'chat' | 'markdown' | 'diff' | 'report' | 'artifacts' | string;
   enabled?: boolean;
+  virtual?: boolean;
+  system?: boolean;
+  builtin?: boolean;
+  editable?: boolean;
+  deletable?: boolean;
   created_at?: string;
   updated_at?: string;
 };
@@ -60,7 +62,7 @@ export type SkillSpec = {
 export type SkillSourceRoot = {
   path: string;
   source_type: string;
-  library?: 'hermes' | 'yachiyo' | string;
+  library?: 'native' | 'installed' | string;
   exists?: boolean;
   skill_count?: number;
 };
@@ -69,11 +71,11 @@ export type SkillFolderSpec = {
   folder_id: string;
   name: string;
   description?: string;
-  source_scope?: 'all' | 'yachiyo' | 'hermes' | string;
+  source_scope?: 'all' | 'installed' | 'native' | string;
   sort_order?: number;
   skill_count?: number;
-  yachiyo_count?: number;
-  hermes_count?: number;
+  installed_count?: number;
+  native_count?: number;
   created_at?: string;
   updated_at?: string;
 };
@@ -266,7 +268,7 @@ export async function deleteSkillFolder(folderId: string, options: { deleteSkill
   return apiDelete(`/ui/skill-folders/${encodeURIComponent(folderId)}${query}`);
 }
 
-export async function syncHermesSkills(): Promise<SkillSyncResponse> {
+export async function syncNativeSkills(): Promise<SkillSyncResponse> {
   return apiPost('/ui/skills/sync', {});
 }
 
@@ -332,11 +334,16 @@ export async function getRunArtifact(runId: string, path: string): Promise<{ ok?
 }
 
 export async function createAgentRun(agentId: string, userGoal: string): Promise<RunSpec> {
-  return apiPost('/ui/agent-runs', { agent_id: agentId, user_goal: userGoal });
+  return apiPost('/ui/agent-runs', { agent_id: agentId, user_goal: userGoal, client_run_id: createClientRunId() });
 }
 
 export async function createWorkflowRun(workflowId: string, userGoal: string): Promise<RunSpec> {
-  return apiPost('/ui/workflow-runs', { workflow_id: workflowId, user_goal: userGoal });
+  return apiPost('/ui/workflow-runs', { workflow_id: workflowId, user_goal: userGoal, client_run_id: createClientRunId() });
+}
+
+function createClientRunId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 export async function rerunRun(runId: string): Promise<RunSpec> {

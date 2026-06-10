@@ -17,7 +17,7 @@ import {
 import * as nodePty from 'node-pty';
 import type { IPty } from 'node-pty';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import http, { type IncomingMessage, type RequestOptions } from 'node:http';
 import https from 'node:https';
@@ -31,13 +31,15 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const FRONTEND_DEV_URL = process.env.HERMES_YACHIYO_FRONTEND_DEV_URL || 'http://127.0.0.1:5174';
-const BRIDGE_URL_ENV = 'HERMES_YACHIYO_BRIDGE_URL';
+const FRONTEND_DEV_URL = process.env.OHA_YACHIYO_FRONTEND_DEV_URL || 'http://127.0.0.1:5174';
+const BRIDGE_URL_ENV = 'OHA_YACHIYO_BRIDGE_URL';
+const BRIDGE_TOKEN_ENV = 'OHA_YACHIYO_BRIDGE_TOKEN';
 const DEV_BRIDGE_URL = 'http://127.0.0.1:8420';
 const PACKAGED_BRIDGE_URL = 'http://127.0.0.1:18420';
 let bridgeUrl = initialBridgeUrl();
-const APP_BUILD_METADATA_FILE = 'hermes-yachiyo-build.json';
-const DEFAULT_UPDATE_REPOSITORY = 'kuguya-AI-app-develop/Hermes-Yachiyo';
+let bridgeSessionToken = process.env[BRIDGE_TOKEN_ENV] || randomBytes(32).toString('hex');
+const APP_BUILD_METADATA_FILE = 'oha-yachiyo-build.json';
+const DEFAULT_UPDATE_REPOSITORY = 'kuguya-AI-app-develop/oha-yachiyo';
 const GITHUB_COMPARE_COMMIT_LIMIT = 100;
 const CHANGELOG_CATEGORY_ORDER = [
   '新增/改进',
@@ -88,7 +90,6 @@ type AppView =
   | 'chat'
   | 'agents'
   | 'settings'
-  | 'installer'
   | 'provider'
   | 'resources'
   | 'workspace'
@@ -104,7 +105,7 @@ type AppView =
   | 'live2d';
 type ModeId = 'bubble' | 'live2d';
 type DisplayModeId = ModeId | 'none';
-type InstallerTerminalTask = 'mac-prerequisites' | 'install-hermes' | 'hermes-setup' | 'update-hermes' | 'update-hermes-backup';
+type DesktopTerminalTask = 'mac-prerequisites';
 type MainRoute = { view: AppView; params: Record<string, string> };
 
 type ModeSettings = {
@@ -123,13 +124,6 @@ type UiSettings = {
     height?: number;
     open_chat_on_start?: boolean;
   };
-};
-
-type InstallInfoPayload = {
-  hermes_ready?: boolean;
-  install_info?: {
-    status?: string;
-  } | null;
 };
 
 type AppBuildMetadata = {
@@ -277,7 +271,6 @@ let positionSaveSuppressedUntil = 0;
 let modeWindowIgnoringMouse = false;
 let modeWindowShapeApplied = false;
 let modeWindowTopSuppressed = false;
-let lastInstallReady: boolean | null = null;
 let lastUiSettings: UiSettings | null = null;
 let lastMainWindowRoute: MainRoute | null = null;
 let hasEnteredMainExperience = false;
@@ -293,7 +286,7 @@ const terminalSessions = new Map<string, {
   ownerId: number;
   pty: IPty;
   sender: WebContents;
-  task: InstallerTerminalTask;
+  task: DesktopTerminalTask;
 }>();
 
 type MainWindowOptions = {
@@ -301,7 +294,7 @@ type MainWindowOptions = {
   focusOnReady?: boolean;
 };
 
-app.setName('Hermes-Yachiyo');
+app.setName('Oha-Yachiyo');
 showMacDockIcon();
 
 function projectRoot(): string {
@@ -321,12 +314,12 @@ function rootAssetPath(...segments: string[]): string | null {
 
 function defaultLatestJsonUrl(branch = 'develop', repository = DEFAULT_UPDATE_REPOSITORY): string {
   const latestBranch = branch === 'main' ? 'main' : 'develop';
-  return `https://github.com/${repository}/releases/download/${latestBranch}-latest/Hermes-Yachiyo-${latestBranch}-latest.json`;
+  return `https://github.com/${repository}/releases/download/${latestBranch}-latest/Oha-Yachiyo-${latestBranch}-latest.json`;
 }
 
 function defaultAppBuildMetadata(): AppBuildMetadata {
   return {
-    name: 'Hermes-Yachiyo',
+    name: 'Oha-Yachiyo',
     channel: 'experimental',
     branch: 'develop',
     version: app.getVersion() || '0.0.0-dev',
@@ -409,7 +402,7 @@ function updateDownloadRecordPath(): string {
 }
 
 function safeDmgFileName(value: unknown, branch: string): string {
-  const fallback = `Hermes-Yachiyo-${branch === 'main' ? 'main' : 'develop'}-latest.dmg`;
+  const fallback = `Oha-Yachiyo-${branch === 'main' ? 'main' : 'develop'}-latest.dmg`;
   if (typeof value !== 'string' || !value.trim()) return fallback;
   const name = path.basename(value.trim());
   return /^[A-Za-z0-9._-]+\.dmg$/.test(name) ? name : fallback;
@@ -598,7 +591,7 @@ function fetchJson<T>(url: string, redirects = 5): Promise<T> {
         Accept: 'application/json',
         'Cache-Control': 'no-cache',
         Pragma: 'no-cache',
-        'User-Agent': 'Hermes-Yachiyo-Updater',
+        'User-Agent': 'Oha-Yachiyo-Updater',
       },
     }, (response) => {
       const status = response.statusCode || 0;
@@ -819,7 +812,7 @@ function downloadFile(
     request = httpRequest(parsed, {
       headers: {
         Accept: 'application/octet-stream',
-        'User-Agent': 'Hermes-Yachiyo-Updater',
+        'User-Agent': 'Oha-Yachiyo-Updater',
       },
     }, (response) => {
       if (signal?.aborted) {
@@ -1014,8 +1007,8 @@ function installDownloadedAppUpdate(rawPath: unknown): { success: boolean; appBu
   const dmgPath = normalizedDownloadedDmgPath(rawPath);
   if (!dmgPath) return { success: false, appBundlePath, error: '未找到已下载的更新 DMG' };
   const appName = path.basename(appBundlePath);
-  if (!/^Hermes-Yachiyo.*\.app$/.test(appName)) {
-    return { success: false, appBundlePath, dmgPath, error: `拒绝覆盖非 Hermes-Yachiyo 应用包：${appName}` };
+  if (!/^Oha-Yachiyo.*\.app$/.test(appName)) {
+    return { success: false, appBundlePath, dmgPath, error: `拒绝覆盖非 Oha-Yachiyo 应用包：${appName}` };
   }
   const script = [
     'set -euo pipefail',
@@ -1024,7 +1017,7 @@ function installDownloadedAppUpdate(rawPath: unknown): { success: boolean; appBu
     'app_name="$3"',
     'app_pid="$4"',
     'while kill -0 "$app_pid" >/dev/null 2>&1; do sleep 0.25; done',
-    'mount_dir="$(mktemp -d "${TMPDIR:-/tmp}/hermes-yachiyo-update.XXXXXX")"',
+    'mount_dir="$(mktemp -d "${TMPDIR:-/tmp}/oha-yachiyo-update.XXXXXX")"',
     'cleanup() { /usr/bin/hdiutil detach "$mount_dir" -quiet >/dev/null 2>&1 || true; rmdir "$mount_dir" >/dev/null 2>&1 || true; }',
     'trap cleanup EXIT',
     '/usr/bin/hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_dir" -quiet',
@@ -1040,7 +1033,7 @@ function installDownloadedAppUpdate(rawPath: unknown): { success: boolean; appBu
     '/usr/bin/open "$app_path"',
   ].join('\n');
   try {
-    spawn('/bin/zsh', ['-lc', script, 'hermes-yachiyo-update', appBundlePath, dmgPath, appName, String(process.pid)], {
+    spawn('/bin/zsh', ['-lc', script, 'oha-yachiyo-update', appBundlePath, dmgPath, appName, String(process.pid)], {
       detached: true,
       stdio: 'ignore',
     }).unref();
@@ -1114,144 +1107,47 @@ function enforceWindowTitle(targetWindow: BrowserWindow, title: string): void {
 
 function mainWindowTitle(params: Record<string, string> = {}): string {
   const view = normalizeView(params.view);
-  if (view === 'installer') return 'Hermes-Yachiyo 安装向导';
-  if (view === 'provider') return 'Hermes-Yachiyo 模型配置';
-  if (view === 'agents') return 'Hermes-Yachiyo Agent Studio';
-  if (view === 'resources') return 'Hermes-Yachiyo 资源管理';
-  if (view === 'workspace') return 'Hermes-Yachiyo 工作区';
+  if (view === 'provider') return 'Oha-Yachiyo 模型配置';
+  if (view === 'agents') return 'Oha-Yachiyo Agent Studio';
+  if (view === 'resources') return 'Oha-Yachiyo 资源管理';
+  if (view === 'workspace') return 'Oha-Yachiyo 工作区';
   if (view === 'settings') return params.mode === 'live2d'
-    ? 'Hermes-Yachiyo Live2D 设置'
+    ? 'Oha-Yachiyo Live2D 设置'
     : params.mode === 'bubble'
-      ? 'Hermes-Yachiyo Bubble 设置'
-      : 'Hermes-Yachiyo 应用设置';
-  if (view === 'diagnostics') return 'Hermes-Yachiyo 诊断工具';
-  if (view === 'tools') return 'Hermes-Yachiyo 工具中心';
-  if (view === 'tools-all') return 'Hermes-Yachiyo 桌面工具';
-  if (view === 'activity-all') return 'Hermes-Yachiyo 活动日志';
-  if (view === 'activity-detail') return 'Hermes-Yachiyo 活动详情';
-  if (view === 'app-update') return 'Hermes-Yachiyo 应用更新';
-  if (view === 'proactive-tts') return 'Hermes-Yachiyo 主动关怀语音';
-  if (view === 'chat') return 'Hermes-Yachiyo 对话';
-  return 'Hermes-Yachiyo 主控台';
+      ? 'Oha-Yachiyo Bubble 设置'
+      : 'Oha-Yachiyo 应用设置';
+  if (view === 'diagnostics') return 'Oha-Yachiyo 诊断工具';
+  if (view === 'tools') return 'Oha-Yachiyo 工具中心';
+  if (view === 'tools-all') return 'Oha-Yachiyo 桌面工具';
+  if (view === 'activity-all') return 'Oha-Yachiyo 活动日志';
+  if (view === 'activity-detail') return 'Oha-Yachiyo 活动详情';
+  if (view === 'app-update') return 'Oha-Yachiyo 应用更新';
+  if (view === 'proactive-tts') return 'Oha-Yachiyo 主动关怀语音';
+  if (view === 'chat') return 'Oha-Yachiyo 对话';
+  return 'Oha-Yachiyo 主控台';
 }
 
 function modeWindowTitle(mode: ModeId): string {
-  return mode === 'live2d' ? 'Hermes-Yachiyo Live2D' : 'Hermes-Yachiyo Bubble';
+  return mode === 'live2d' ? 'Oha-Yachiyo Live2D' : 'Oha-Yachiyo Bubble';
 }
 
 function macOSPrerequisiteCommand(): string {
   return [
-    'echo "Hermes-Yachiyo macOS 基础工具检查"',
+    'echo "Oha-Yachiyo macOS 基础工具检查"',
     'if ! xcode-select -p >/dev/null 2>&1; then echo "将打开 Xcode Command Line Tools 安装器"; xcode-select --install || true; else echo "Xcode Command Line Tools 已安装"; fi',
     'if ! command -v brew >/dev/null 2>&1; then echo "正在安装 Homebrew"; /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; fi',
     'if [ -x /opt/homebrew/bin/brew ]; then eval "$(/opt/homebrew/bin/brew shellenv)"; fi',
     'if [ -x /usr/local/bin/brew ]; then eval "$(/usr/local/bin/brew shellenv)"; fi',
     'if command -v brew >/dev/null 2>&1; then brew update && brew install git curl; else echo "未检测到 brew，请根据终端提示完成 Homebrew 安装后重新运行"; fi',
-    'echo "基础工具准备完成。请回到 Hermes-Yachiyo 点击重新检测或安装 Hermes Agent。"',
+    'echo "基础工具准备完成。请回到 Oha-Yachiyo 继续配置模型。"',
   ].join('\n');
 }
 
-function hermesInstallCommand(): string {
-  return [
-    'echo "Hermes Agent 安装开始"',
-    'set -o pipefail',
-    'install_script="$(mktemp -t hermes-agent-install.XXXXXX)" || exit 1',
-    'target_dir="${HERMES_AGENT_INSTALL_DIR:-$HOME/.hermes/hermes-agent}"',
-    'install_lock_dir="${HERMES_AGENT_INSTALL_LOCK_DIR:-$HOME/.hermes/.hermes-agent-install.lock}"',
-    'mkdir -p "$(dirname "$install_lock_dir")" || exit $?',
-    'if ! mkdir "$install_lock_dir" 2>/dev/null; then',
-    '  echo "Hermes Agent 正在被另一个 Hermes-Yachiyo 进程安装或更新，请稍后重试。"',
-    '  exit 75',
-    'fi',
-    'shim_path="$HOME/.local/bin/hermes"',
-    'target_bin="$target_dir/venv/bin/hermes"',
-    'if [ -L "$shim_path" ]; then',
-    '  shim_target="$(readlink "$shim_path" 2>/dev/null || true)"',
-    '  case "$shim_target" in',
-    '    "$target_bin"|*/.hermes/hermes-agent/venv/bin/hermes)',
-    '      rm -f "$shim_path"',
-    '      ;;',
-    '  esac',
-    'fi',
-    'if [ -f "$target_bin" ] && grep -Fq "exec \\"$target_bin\\"" "$target_bin" 2>/dev/null; then',
-    '  printf "检测到损坏的 Hermes 启动脚本，正在清理后重新安装...\\n"',
-    '  rm -rf "$target_dir"',
-    'fi',
-    'target_existed=0',
-    '[ -e "$target_dir" ] && target_existed=1',
-    'trap \'rm -rf "$install_lock_dir"; rm -f "$install_script"\' EXIT',
-    'curl --retry 3 --retry-delay 2 --connect-timeout 20 -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh -o "$install_script"',
-    'curl_exit_code=$?',
-    'if [ "$curl_exit_code" -ne 0 ]; then printf "\\nHermes Agent 安装脚本下载失败，退出码：%s\\n" "$curl_exit_code"; exit "$curl_exit_code"; fi',
-    'export GIT_CONFIG_COUNT=3',
-    'export GIT_CONFIG_KEY_0=http.version',
-    'export GIT_CONFIG_VALUE_0=HTTP/1.1',
-    'export GIT_CONFIG_KEY_1=http.postBuffer',
-    'export GIT_CONFIG_VALUE_1=524288000',
-    'export GIT_CONFIG_KEY_2=http.lowSpeedTime',
-    'export GIT_CONFIG_VALUE_2=60',
-    'last_exit=0',
-    'for attempt in 1 2 3; do',
-    '  printf "\\nHermes Agent 安装尝试 %s/3\\n" "$attempt"',
-    '  bash "$install_script" --skip-setup',
-    '  last_exit=$?',
-    '  if [ "$last_exit" -eq 0 ]; then break; fi',
-    '  if [ "$attempt" -lt 3 ]; then',
-    '    printf "Hermes Agent 安装尝试 %s/3 失败，退出码：%s；即将重试...\\n" "$attempt" "$last_exit"',
-    '    if [ "$target_existed" -eq 0 ] && [ -d "$target_dir" ] && [ ! -x "$target_dir/venv/bin/hermes" ]; then rm -rf "$target_dir"; fi',
-    '    sleep $((attempt * 2))',
-    '  fi',
-    'done',
-    'hermes_install_exit_code="$last_exit"',
-    'printf "\\nHermes Agent 安装命令已结束，退出码：%s\\n" "$hermes_install_exit_code"',
-    'exit "$hermes_install_exit_code"',
-  ].join('\n');
-}
-
-function hermesUpdateCommand(fullBackup = false): string {
-  const backupFlag = fullBackup ? '--backup' : '--no-backup';
-  const updateArgs = `--gateway --yes ${backupFlag}`;
-  const backupNote = fullBackup
-    ? '说明：已启用完整 pre-update backup。Hermes 会压缩整个 ~/.hermes，目录较大时可能长时间停在 Creating pre-update backup；--yes 会自动确认更新过程中的 stash 恢复等提示。'
-    : '说明：Yachiyo 默认跳过完整 pre-update backup；Hermes 原生完整备份会压缩整个 ~/.hermes，目录较大时可能长时间停在 Creating pre-update backup；--yes 会自动确认更新过程中的 stash 恢复等提示。';
-  return [
-    'echo "Hermes Agent 更新开始"',
-    'set -o pipefail',
-    'if ! command -v hermes >/dev/null 2>&1; then echo "未找到 hermes 命令，请先完成 Hermes Agent 安装或刷新 PATH。"; exit 127; fi',
-    'install_lock_dir="${HERMES_AGENT_INSTALL_LOCK_DIR:-$HOME/.hermes/.hermes-agent-install.lock}"',
-    'mkdir -p "$(dirname "$install_lock_dir")" || exit $?',
-    'if ! mkdir "$install_lock_dir" 2>/dev/null; then echo "Hermes Agent 正在被另一个 Hermes-Yachiyo 进程安装或更新，请稍后重试。"; exit 75; fi',
-    'trap \'rm -rf "$install_lock_dir"\' EXIT',
-    'echo "当前版本："',
-    'version_output="$(hermes version 2>&1 || true)"',
-    'printf "%s\\n" "$version_output"',
-    'project_path="$(printf "%s\\n" "$version_output" | awk -F": " \'/^Project:/ {print $2; exit}\')"',
-    'if [ -n "$project_path" ] && [ -d "$project_path/.git" ]; then origin_url="$(git -C "$project_path" remote get-url origin 2>/dev/null || true)"; if [ -n "$origin_url" ]; then echo "更新来源：$origin_url / origin/main"; fi; fi',
-    'echo ""',
-    `echo "运行：hermes update ${updateArgs}"`,
-    `echo "${backupNote}"`,
-    `hermes update ${updateArgs}`,
-    'hermes_update_exit_code=$?',
-    'printf "\\nHermes Agent 更新命令已结束，退出码：%s\\n" "$hermes_update_exit_code"',
-    'if [ "$hermes_update_exit_code" -eq 0 ]; then echo "更新完成。Hermes-Yachiyo 将刷新工具清单。"; fi',
-    'exit "$hermes_update_exit_code"',
-  ].join('\n');
-}
-
-function terminalTaskCommand(task: InstallerTerminalTask): { title: string; command: string } {
+function terminalTaskCommand(task: DesktopTerminalTask): { title: string; command: string } {
   if (task === 'mac-prerequisites') {
     return { title: '准备 macOS 基础工具', command: macOSPrerequisiteCommand() };
   }
-  if (task === 'install-hermes') {
-    return { title: '安装 Hermes Agent', command: hermesInstallCommand() };
-  }
-  if (task === 'update-hermes') {
-    return { title: '更新 Hermes Agent', command: hermesUpdateCommand(false) };
-  }
-  if (task === 'update-hermes-backup') {
-    return { title: '更新 Hermes Agent（完整备份）', command: hermesUpdateCommand(true) };
-  }
-  return { title: '配置 Hermes Agent', command: 'hermes setup' };
+  return { title: '准备 macOS 基础工具', command: macOSPrerequisiteCommand() };
 }
 
 function ensureNodePtySpawnHelperExecutable(): void {
@@ -1274,7 +1170,7 @@ function ensureNodePtySpawnHelperExecutable(): void {
 }
 
 function packagedBackendPath(): string | null {
-  const binaryName = process.platform === 'win32' ? 'hermes-yachiyo-backend.exe' : 'hermes-yachiyo-backend';
+  const binaryName = process.platform === 'win32' ? 'oha-yachiyo-backend.exe' : 'oha-yachiyo-backend';
   const candidate = path.join(process.resourcesPath, 'backend', binaryName);
   return app.isPackaged && fs.existsSync(candidate) ? candidate : null;
 }
@@ -1359,19 +1255,20 @@ async function prepareBridgeUrlForPackagedBackend(): Promise<void> {
 }
 
 function startBackend(): void {
-  if (process.env.HERMES_YACHIYO_SKIP_BACKEND === '1') return;
+  if (process.env.OHA_YACHIYO_SKIP_BACKEND === '1') return;
   if (backendProcess) return;
 
   const backendBinary = packagedBackendPath();
-  const command = backendBinary || process.env.HERMES_YACHIYO_PYTHON || 'python3';
+  const command = backendBinary || process.env.OHA_YACHIYO_PYTHON || 'python3';
   const args = backendBinary ? [] : ['-m', 'apps.desktop_backend.app'];
   backendProcess = spawn(command, args, {
     cwd: backendBinary ? process.resourcesPath : projectRoot(),
     env: {
       ...process.env,
       PYTHONPATH: projectRoot(),
-      HERMES_YACHIYO_DESKTOP_BACKEND: '1',
+      OHA_YACHIYO_DESKTOP_BACKEND: '1',
       [BRIDGE_URL_ENV]: bridgeUrl,
+      [BRIDGE_TOKEN_ENV]: bridgeSessionToken,
     },
   });
 
@@ -1453,6 +1350,7 @@ async function restartBackendProcess(targetBridgeUrl?: unknown): Promise<{ succe
     const nextBridgeUrl = normalizeBridgeUrl(targetBridgeUrl) || bridgeUrl;
     const previousBridgeUrl = bridgeUrl;
     bridgeUrl = nextBridgeUrl;
+    bridgeSessionToken = randomBytes(32).toString('hex');
     await terminateBackend();
     startBackend();
     const settings = await waitForUiSettings();
@@ -1485,6 +1383,13 @@ function rendererUrl(params: Record<string, string> = {}): string {
   if (!app.isPackaged) return `${FRONTEND_DEV_URL}?${query.toString()}${route}`;
   const indexHtml = path.resolve(__dirname, '..', 'dist', 'index.html');
   return `${pathToFileURL(indexHtml).toString()}?${query.toString()}${route}`;
+}
+
+function bridgeJsonHeaders(): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    'X-Oha-Yachiyo-Bridge-Token': bridgeSessionToken,
+  };
 }
 
 function routeHash(params: Record<string, string> = {}): string {
@@ -1574,10 +1479,8 @@ function createMainWindow(
     return;
   }
   if (settings) lastUiSettings = settings;
-  if (normalizeView(params.view) !== 'installer') {
-    hasEnteredMainExperience = true;
-    configureTray(settings || lastUiSettings);
-  }
+  hasEnteredMainExperience = true;
+  configureTray(settings || lastUiSettings);
   const bounds = mainWindowBounds(settings);
   const startHidden = Boolean(options.respectStartMinimized && settings?.app?.start_minimized);
   const focusOnReady = options.focusOnReady !== false;
@@ -1644,10 +1547,8 @@ function showMainWindow(
     return;
   }
   if (settings) lastUiSettings = settings;
-  if (normalizeView(params.view) !== 'installer') {
-    hasEnteredMainExperience = true;
-    configureTray(settings || lastUiSettings);
-  }
+  hasEnteredMainExperience = true;
+  configureTray(settings || lastUiSettings);
   enforceWindowTitle(mainWindow, mainWindowTitle(params));
   ensureMainWindowUsableBounds(settings);
   mainWindow.loadURL(rendererUrl({ view: 'main', ...params }));
@@ -1686,23 +1587,10 @@ function focusMainWindowWithoutNavigation(
 
 function showMainWindowFromAppActivation(): void {
   void (async () => {
-    const installInfo = await waitForInstallInfo();
-    if (installInfo) {
-      const readyNow = installReady(installInfo);
-      if (readyNow) {
-        lastInstallReady = true;
-        hasEnteredMainExperience = true;
-      } else if (!hasEnteredMainExperience && lastInstallReady !== true) {
-        lastInstallReady = false;
-      }
-    }
     const currentRoute = routeForWindow(mainWindow) || lastMainWindowRoute;
-    const shouldShowInstaller = lastInstallReady === false
-      && !hasEnteredMainExperience
-      && currentRoute?.view !== 'main';
     const activationParams = mainActivationRouteParams(currentRoute);
     const canFocusExistingRoute = !currentRoute || activationParams.view === currentRoute.view;
-    if (!shouldShowInstaller && canFocusExistingRoute && mainWindow && !mainWindow.isDestroyed()) {
+    if (canFocusExistingRoute && mainWindow && !mainWindow.isDestroyed()) {
       if (focusMainWindowWithoutNavigation(currentRoute, lastUiSettings)) {
         if (currentRoute?.view === 'main' || !currentRoute) {
           setTimeout(() => void openConfiguredDesktopMode(), 180);
@@ -1710,9 +1598,8 @@ function showMainWindowFromAppActivation(): void {
         return;
       }
     }
-    const params = shouldShowInstaller ? { view: 'installer' } : activationParams;
-    showMainWindow(params, lastUiSettings);
-    if (!shouldShowInstaller && params.view === 'main') {
+    showMainWindow(activationParams, lastUiSettings);
+    if (activationParams.view === 'main') {
       setTimeout(() => void openConfiguredDesktopMode(), 180);
     }
   })();
@@ -1730,7 +1617,7 @@ function trayMenu(): Menu {
     { label: '打开表现态', click: () => void openConfiguredDesktopMode(undefined, lastUiSettings) },
     { label: '应用设置', click: () => showMainWindow({ view: 'settings' }) },
     { type: 'separator' },
-    { label: '退出 Hermes-Yachiyo', click: () => app.quit() },
+    { label: '退出 Oha-Yachiyo', click: () => app.quit() },
   ]);
 }
 
@@ -1743,7 +1630,7 @@ function configureTray(settings: UiSettings | null = lastUiSettings): void {
   }
   if (!tray || tray.isDestroyed()) {
     tray = new Tray(trayIcon());
-    tray.setToolTip('Hermes-Yachiyo');
+    tray.setToolTip('Oha-Yachiyo');
     tray.on('click', () => showMainWindow({ view: 'main' }));
   } else {
     tray.setImage(trayIcon());
@@ -1758,7 +1645,7 @@ function showMacDockIcon(): void {
     const icon = appIconImage('dock');
     if (!icon.isEmpty()) app.dock?.setIcon(icon);
     const aboutIcon = appIconPath('dock');
-    if (aboutIcon) app.setAboutPanelOptions({ applicationName: 'Hermes-Yachiyo', iconPath: aboutIcon });
+    if (aboutIcon) app.setAboutPanelOptions({ applicationName: 'Oha-Yachiyo', iconPath: aboutIcon });
     app.dock?.show();
   } catch {}
 }
@@ -1797,7 +1684,7 @@ function createChatWindow(params: Record<string, string> = {}): void {
   const bounds = chatWindowBounds();
   const minimum = chatWindowMinSize();
   chatWindow = new BrowserWindow({
-    title: 'Hermes-Yachiyo 对话',
+    title: 'Oha-Yachiyo 对话',
     ...bounds,
     icon: appIconPath('window'),
     minWidth: minimum.width,
@@ -1815,7 +1702,7 @@ function createChatWindow(params: Record<string, string> = {}): void {
       nodeIntegration: false,
     },
   });
-  enforceWindowTitle(chatWindow, 'Hermes-Yachiyo 对话');
+  enforceWindowTitle(chatWindow, 'Oha-Yachiyo 对话');
 
   chatWindow.loadURL(rendererUrl({ ...params, view: 'chat' }));
   chatWindow.on('closed', () => {
@@ -1830,7 +1717,7 @@ function navigateMainWindowInPlace(params: Record<string, string>): boolean {
   if (!mainWindow || mainWindow.isDestroyed() || params.session_id) return false;
   const route = routeHash(params);
   mainWindow.webContents.executeJavaScript(
-    `window.history.pushState(null, '', ${JSON.stringify(route)}); window.dispatchEvent(new Event('hermes-route-change'));`,
+    `window.history.pushState(null, '', ${JSON.stringify(route)}); window.dispatchEvent(new Event('oha-route-change'));`,
   ).catch(() => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.loadURL(rendererUrl(params));
   });
@@ -1912,7 +1799,6 @@ function normalizeView(value: unknown): AppView {
     'chat',
     'agents',
     'settings',
-    'installer',
     'provider',
     'resources',
     'workspace',
@@ -2054,7 +1940,7 @@ async function saveLauncherPosition(mode: ModeId, bounds: Rectangle): Promise<vo
   try {
     const response = await fetch(`${bridgeUrl}/ui/launcher/position`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: bridgeJsonHeaders(),
       body: JSON.stringify({
         mode,
         x: bounds.x,
@@ -2505,12 +2391,6 @@ async function fetchUiSettings(): Promise<UiSettings> {
   return (await response.json()) as UiSettings;
 }
 
-async function fetchInstallInfo(): Promise<InstallInfoPayload> {
-  const response = await fetch(`${bridgeUrl}/hermes/install-info`);
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return (await response.json()) as InstallInfoPayload;
-}
-
 async function waitForUiSettings(): Promise<UiSettings | null> {
   for (let attempt = 0; attempt < BRIDGE_SETTINGS_RETRIES; attempt += 1) {
     try {
@@ -2520,21 +2400,6 @@ async function waitForUiSettings(): Promise<UiSettings | null> {
     }
   }
   return null;
-}
-
-async function waitForInstallInfo(): Promise<InstallInfoPayload | null> {
-  for (let attempt = 0; attempt < BRIDGE_SETTINGS_RETRIES; attempt += 1) {
-    try {
-      return await fetchInstallInfo();
-    } catch {
-      await delay(BRIDGE_SETTINGS_RETRY_MS);
-    }
-  }
-  return null;
-}
-
-function installReady(payload: InstallInfoPayload | null): boolean {
-  return Boolean(payload?.hermes_ready || payload?.install_info?.status === 'ready');
 }
 
 function live2dResourceReady(settings: UiSettings | null | undefined): boolean {
@@ -2610,8 +2475,8 @@ function removeCurrentAppBundleAndQuit(): { success: boolean; appBundlePath?: st
   if (!appBundlePath) return { success: false, error: '当前运行环境不是可删除的 macOS .app 包' };
   if (!appBundlePath.endsWith('.app')) return { success: false, error: '拒绝删除非 .app 路径' };
   const bundleName = path.basename(appBundlePath);
-  if (!/^Hermes-Yachiyo.*\.app$/.test(bundleName)) {
-    return { success: false, appBundlePath, error: `拒绝删除非 Hermes-Yachiyo 应用包：${bundleName}` };
+  if (!/^Oha-Yachiyo.*\.app$/.test(bundleName)) {
+    return { success: false, appBundlePath, error: `拒绝删除非 Oha-Yachiyo 应用包：${bundleName}` };
   }
   const script = [
     'target="$1"',
@@ -2631,7 +2496,7 @@ function removeCurrentAppBundleAndQuit(): { success: boolean; appBundlePath?: st
     'fi',
   ].join('\n');
   try {
-    spawn('/bin/zsh', ['-lc', script, 'hermes-yachiyo-uninstall', appBundlePath], {
+    spawn('/bin/zsh', ['-lc', script, 'oha-yachiyo-uninstall', appBundlePath], {
       detached: true,
       stdio: 'ignore',
     }).unref();
@@ -2693,8 +2558,8 @@ async function readAvatarImageSelection(filePath: string | null): Promise<Avatar
   };
 }
 
-function normalizeTerminalTask(value: unknown): InstallerTerminalTask | null {
-  return value === 'mac-prerequisites' || value === 'install-hermes' || value === 'hermes-setup' || value === 'update-hermes' || value === 'update-hermes-backup'
+function normalizeTerminalTask(value: unknown): DesktopTerminalTask | null {
+  return value === 'mac-prerequisites'
     ? value
     : null;
 }
@@ -2751,7 +2616,7 @@ function startInstallerTerminal(
   rawTask: unknown,
   rawCols: unknown,
   rawRows: unknown,
-): { success: boolean; id?: string; task?: InstallerTerminalTask; title?: string; error?: string } {
+): { success: boolean; id?: string; task?: DesktopTerminalTask; title?: string; error?: string } {
   const targetWindow = BrowserWindow.fromWebContents(event.sender);
   if (!targetWindow || targetWindow !== mainWindow) {
     return { success: false, error: '内置终端只能从主窗口启动' };
@@ -2791,31 +2656,32 @@ function startInstallerTerminal(
 
   pty.onData((data) => {
     if (!event.sender.isDestroyed()) {
-      event.sender.send('hermes:terminalData', terminalPayload(id, { data }));
+      event.sender.send('oha:terminalData', terminalPayload(id, { data }));
     }
   });
   pty.onExit(({ exitCode, signal }) => {
     terminalSessions.delete(id);
     if (!event.sender.isDestroyed()) {
-      event.sender.send('hermes:terminalExit', terminalPayload(id, { exitCode, signal, task }));
+      event.sender.send('oha:terminalExit', terminalPayload(id, { exitCode, signal, task }));
     }
   });
   event.sender.once('destroyed', () => cleanupTerminalsForOwner(event.sender.id));
   return { success: true, id, task, title };
 }
 
-ipcMain.handle('hermes:getBridgeUrl', () => bridgeUrl);
-ipcMain.handle('hermes:quit', () => {
+ipcMain.handle('oha:getBridgeUrl', () => bridgeUrl);
+ipcMain.handle('oha:getBridgeToken', () => bridgeSessionToken);
+ipcMain.handle('oha:quit', () => {
   app.quit();
 });
-ipcMain.handle('hermes:restartApp', () => {
+ipcMain.handle('oha:restartApp', () => {
   app.relaunch();
   app.quit();
 });
-ipcMain.handle('hermes:removeAppBundleAndQuit', () => removeCurrentAppBundleAndQuit());
-ipcMain.handle('hermes:getAppUpdateInfo', () => appUpdateInfo());
-ipcMain.handle('hermes:checkAppUpdate', () => checkAppUpdate());
-ipcMain.handle('hermes:downloadAppUpdate', async (event) => {
+ipcMain.handle('oha:removeAppBundleAndQuit', () => removeCurrentAppBundleAndQuit());
+ipcMain.handle('oha:getAppUpdateInfo', () => appUpdateInfo());
+ipcMain.handle('oha:checkAppUpdate', () => checkAppUpdate());
+ipcMain.handle('oha:downloadAppUpdate', async (event) => {
   const sender = event.sender;
   const cancelForDestroyedSender = () => {
     cancelActiveAppUpdateDownload('更新页面已关闭，已取消本次更新下载');
@@ -2823,22 +2689,22 @@ ipcMain.handle('hermes:downloadAppUpdate', async (event) => {
   sender.once('destroyed', cancelForDestroyedSender);
   try {
     return await downloadAppUpdate((progress) => {
-      if (!sender.isDestroyed()) sender.send('hermes:appUpdateDownloadProgress', progress);
+      if (!sender.isDestroyed()) sender.send('oha:appUpdateDownloadProgress', progress);
     });
   } finally {
     sender.removeListener('destroyed', cancelForDestroyedSender);
   }
 });
-ipcMain.handle('hermes:cancelAppUpdateDownload', () => cancelActiveAppUpdateDownload('已取消本次更新下载'));
-ipcMain.handle('hermes:installAppUpdate', (_event, dmgPath: unknown) => installDownloadedAppUpdate(dmgPath));
-ipcMain.handle('hermes:restartBackend', (_event, options: unknown) => {
+ipcMain.handle('oha:cancelAppUpdateDownload', () => cancelActiveAppUpdateDownload('已取消本次更新下载'));
+ipcMain.handle('oha:installAppUpdate', (_event, dmgPath: unknown) => installDownloadedAppUpdate(dmgPath));
+ipcMain.handle('oha:restartBackend', (_event, options: unknown) => {
   const targetBridgeUrl = isRecord(options) ? options.bridgeUrl : undefined;
   return restartBackendProcess(targetBridgeUrl);
 });
-ipcMain.handle('hermes:copyText', (_event, value: unknown) => {
+ipcMain.handle('oha:copyText', (_event, value: unknown) => {
   clipboard.writeText(typeof value === 'string' ? value : '');
 });
-ipcMain.handle('hermes:chooseAvatarImage', async (event) => {
+ipcMain.handle('oha:chooseAvatarImage', async (event) => {
   const selectedPath = await showOpenDialogForSender(event, {
     title: '选择头像图片',
     defaultPath: app.getPath('pictures') || app.getPath('home'),
@@ -2849,12 +2715,12 @@ ipcMain.handle('hermes:chooseAvatarImage', async (event) => {
   });
   return readAvatarImageSelection(selectedPath);
 });
-ipcMain.handle('hermes:chooseLive2DModelDirectory', (event) => showOpenDialogForSender(event, {
+ipcMain.handle('oha:chooseLive2DModelDirectory', (event) => showOpenDialogForSender(event, {
   title: '选择 Live2D 模型目录',
   defaultPath: app.getPath('home'),
   properties: ['openDirectory'],
 }));
-ipcMain.handle('hermes:chooseLive2DArchive', (event) => showOpenDialogForSender(event, {
+ipcMain.handle('oha:chooseLive2DArchive', (event) => showOpenDialogForSender(event, {
   title: '导入 Live2D 资源包 ZIP',
   defaultPath: app.getPath('home'),
   properties: ['openFile'],
@@ -2863,7 +2729,7 @@ ipcMain.handle('hermes:chooseLive2DArchive', (event) => showOpenDialogForSender(
     { name: '压缩包', extensions: ['zip'] },
   ],
 }));
-ipcMain.handle('hermes:chooseSkillSources', (event) => showOpenDialogPathsForSender(event, {
+ipcMain.handle('oha:chooseSkillSources', (event) => showOpenDialogPathsForSender(event, {
   title: '上传 Skills',
   defaultPath: app.getPath('home'),
   properties: ['openFile', 'openDirectory', 'multiSelections'],
@@ -2872,56 +2738,56 @@ ipcMain.handle('hermes:chooseSkillSources', (event) => showOpenDialogPathsForSen
     { name: '所有文件', extensions: ['*'] },
   ],
 }));
-ipcMain.handle('hermes:openPath', async (_event, value: unknown) => {
+ipcMain.handle('oha:openPath', async (_event, value: unknown) => {
   const targetPath = typeof value === 'string' ? value.trim() : '';
   if (!targetPath) throw new Error('路径不能为空');
   const error = await shell.openPath(targetPath);
   if (error) throw new Error(error);
 });
-ipcMain.handle('hermes:openExternalUrl', async (_event, value: unknown) => {
+ipcMain.handle('oha:openExternalUrl', async (_event, value: unknown) => {
   const targetUrl = typeof value === 'string' ? value.trim() : '';
   if (!/^https?:\/\//.test(targetUrl)) throw new Error('仅支持打开 http(s) 链接');
   await shell.openExternal(targetUrl);
 });
-ipcMain.handle('hermes:openView', (_event, view: unknown, params: unknown) => {
+ipcMain.handle('oha:openView', (_event, view: unknown, params: unknown) => {
   openAppView(normalizeView(view), normalizeParams(params));
 });
-ipcMain.handle('hermes:openDesktopMode', (_event, mode: unknown) => openConfiguredDesktopMode(normalizePreferredDisplayMode(mode)));
-ipcMain.handle('hermes:moveLauncherWindow', moveLauncherWindow);
-ipcMain.handle('hermes:getLauncherPointerState', (_event, mode: unknown) => launcherPointerState(mode));
-ipcMain.handle('hermes:terminalStart', startInstallerTerminal);
-ipcMain.handle('hermes:terminalWrite', (_event, rawId: unknown, rawData: unknown) => {
+ipcMain.handle('oha:openDesktopMode', (_event, mode: unknown) => openConfiguredDesktopMode(normalizePreferredDisplayMode(mode)));
+ipcMain.handle('oha:moveLauncherWindow', moveLauncherWindow);
+ipcMain.handle('oha:getLauncherPointerState', (_event, mode: unknown) => launcherPointerState(mode));
+ipcMain.handle('oha:terminalStart', startInstallerTerminal);
+ipcMain.handle('oha:terminalWrite', (_event, rawId: unknown, rawData: unknown) => {
   const id = typeof rawId === 'string' ? rawId : '';
   const session = terminalSessions.get(id);
   if (!session || session.sender.id !== _event.sender.id) return false;
   session.pty.write(typeof rawData === 'string' ? rawData : '');
   return true;
 });
-ipcMain.handle('hermes:terminalResize', (_event, rawId: unknown, rawCols: unknown, rawRows: unknown) => {
+ipcMain.handle('oha:terminalResize', (_event, rawId: unknown, rawCols: unknown, rawRows: unknown) => {
   const id = typeof rawId === 'string' ? rawId : '';
   const session = terminalSessions.get(id);
   if (!session || session.sender.id !== _event.sender.id) return false;
   session.pty.resize(safeTerminalSize(rawCols, session.pty.cols, 40, 240), safeTerminalSize(rawRows, session.pty.rows, 10, 80));
   return true;
 });
-ipcMain.handle('hermes:terminalKill', (_event, rawId: unknown) => {
+ipcMain.handle('oha:terminalKill', (_event, rawId: unknown) => {
   const id = typeof rawId === 'string' ? rawId : '';
   const session = terminalSessions.get(id);
   if (!session || session.sender.id !== _event.sender.id) return false;
   cleanupTerminalSession(id);
   return true;
 });
-ipcMain.handle('hermes:setLauncherHitRegions', (event, mode: unknown, regions: unknown) => {
+ipcMain.handle('oha:setLauncherHitRegions', (event, mode: unknown, regions: unknown) => {
   const targetWindow = BrowserWindow.fromWebContents(event.sender);
   if (!targetWindow || targetWindow !== modeWindow) return false;
   return setModeWindowHitRegions(normalizeMode(mode), regions);
 });
-ipcMain.handle('hermes:setLauncherPointerInteractive', (event, mode: unknown, interactive: unknown) => {
+ipcMain.handle('oha:setLauncherPointerInteractive', (event, mode: unknown, interactive: unknown) => {
   const targetWindow = BrowserWindow.fromWebContents(event.sender);
   if (!targetWindow || targetWindow !== modeWindow) return false;
   return setModeWindowPointerInteractive(normalizeMode(mode), Boolean(interactive));
 });
-ipcMain.handle('hermes:openLauncherMenu', (event, mode: unknown) => {
+ipcMain.handle('oha:openLauncherMenu', (event, mode: unknown) => {
   const modeId = normalizeMode(mode);
   const targetWindow = BrowserWindow.fromWebContents(event.sender) || undefined;
   const menu = Menu.buildFromTemplate([
@@ -2937,7 +2803,7 @@ ipcMain.handle('hermes:openLauncherMenu', (event, mode: unknown) => {
         if (windowToClose && !windowToClose.isDestroyed()) windowToClose.close();
       },
     },
-    { label: '退出 Hermes-Yachiyo', click: () => app.quit() },
+    { label: '退出 Oha-Yachiyo', click: () => app.quit() },
   ]);
   menu.popup({ window: targetWindow });
 });
@@ -2948,12 +2814,6 @@ app.whenReady().then(() => {
     await prepareBridgeUrlForPackagedBackend();
     startBackend();
     createMainWindow({ view: 'main' }, lastUiSettings, { focusOnReady: false });
-    const installInfo = await waitForInstallInfo();
-    lastInstallReady = installReady(installInfo);
-    if (!lastInstallReady) {
-      showMainWindow({ view: 'installer' }, lastUiSettings, { focusOnReady: false });
-      return;
-    }
     hasEnteredMainExperience = true;
     const settings = await waitForUiSettings();
     if (settings) lastUiSettings = settings;

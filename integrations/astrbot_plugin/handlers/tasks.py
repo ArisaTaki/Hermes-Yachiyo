@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from ..api_client import HermesClient
+from ..api_client import OhaClient
 from ..config import PluginConfig
 from .utils import fmt_dt, fmt_status, fmt_status_icon
 
@@ -14,7 +14,7 @@ _MAX_DISPLAY = 10
 
 
 async def handle(args: str, config: PluginConfig) -> str:
-    client = HermesClient(config)
+    client = OhaClient(config)
     data = await client.list_tasks()
 
     tasks = data.get("tasks", [])

@@ -1,1 +1,1 @@
-"""Hermes-Yachiyo Installer — 安装引导层"""
+"""Oha-Yachiyo Installer — 安装引导层"""

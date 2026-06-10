@@ -46,6 +46,9 @@ jobs:
       - name: Validate app version sync
         run: python scripts/app_version.py check
 
+      - name: Verify release-facing product identity and security guards
+        run: python scripts/verify_release_artifacts.py
+
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
@@ -84,7 +87,7 @@ jobs:
             exit 0
           fi
 
-          SIGNING_IDENTITY="${MACOS_CODESIGN_IDENTITY:-Hermes-Yachiyo Self Signed}"
+          SIGNING_IDENTITY="${MACOS_CODESIGN_IDENTITY:-Oha-Yachiyo Self Signed}"
           CERT_PASSWORD="${MACOS_CODESIGN_CERTIFICATE_PASSWORD:-}"
           if [[ -z "${CERT_PASSWORD}" ]]; then
             echo "MACOS_CODESIGN_CERTIFICATE_PASSWORD is required when MACOS_CODESIGN_CERTIFICATE_BASE64 is configured." >&2
@@ -92,10 +95,10 @@ jobs:
             exit 1
           fi
           KEYCHAIN_PASSWORD="$(openssl rand -hex 24)"
-          KEYCHAIN_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.keychain-db"
-          CERT_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.p12"
-          CERT_PEM_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.pem"
-          CERT_X509_PATH="${RUNNER_TEMP}/hermes-yachiyo-signing.crt"
+          KEYCHAIN_PATH="${RUNNER_TEMP}/oha-yachiyo-signing.keychain-db"
+          CERT_PATH="${RUNNER_TEMP}/oha-yachiyo-signing.p12"
+          CERT_PEM_PATH="${RUNNER_TEMP}/oha-yachiyo-signing.pem"
+          CERT_X509_PATH="${RUNNER_TEMP}/oha-yachiyo-signing.crt"
 
           CLEAN_CERT_BASE64="$(printf '%s' "${MACOS_CODESIGN_CERTIFICATE_BASE64}" | tr -d '[:space:]')"
           if ! printf '%s' "${CLEAN_CERT_BASE64}" | base64 --decode > "${CERT_PATH}" 2>/dev/null; then
@@ -182,9 +185,9 @@ jobs:
           fi
 
           mkdir -p apps/frontend/public
-          cat > apps/frontend/public/hermes-yachiyo-build.json <<EOF
+          cat > apps/frontend/public/oha-yachiyo-build.json <<EOF
           {
-            "name": "Hermes-Yachiyo",
+            "name": "Oha-Yachiyo",
             "channel": "${CHANNEL}",
             "branch": "${LATEST_BRANCH}",
             "source_branch": "${GITHUB_REF_NAME}",
@@ -195,7 +198,7 @@ jobs:
             "build_number": ${BUILD_NUMBER},
             "run_number": ${GITHUB_RUN_NUMBER},
             "repository": "${GITHUB_REPOSITORY}",
-            "latest_json_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_BRANCH}-latest/Hermes-Yachiyo-${LATEST_BRANCH}-latest.json",
+            "latest_json_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_BRANCH}-latest/Oha-Yachiyo-${LATEST_BRANCH}-latest.json",
             "built_at": "${STAMP}"
           }
           EOF
@@ -247,12 +250,12 @@ jobs:
           fi
 
           TAG="${CHANNEL}-v${RELEASE_VERSION}-${BUILD_LABEL}-${SHORT_SHA}"
-          TITLE="Hermes-Yachiyo ${CHANNEL_LABEL} v${RELEASE_VERSION} #${BUILD_NUMBER} (${SHORT_SHA})"
+          TITLE="Oha-Yachiyo ${CHANNEL_LABEL} v${RELEASE_VERSION} #${BUILD_NUMBER} (${SHORT_SHA})"
           LATEST_TAG="${LATEST_BRANCH}-latest"
-          LATEST_TITLE="Hermes-Yachiyo ${CHANNEL_LABEL} latest"
-          VERSIONED_DMG="Hermes-Yachiyo-${CHANNEL}-v${RELEASE_VERSION}-${BUILD_LABEL}-${SHORT_SHA}.dmg"
-          LATEST_DMG="Hermes-Yachiyo-${LATEST_BRANCH}-latest.dmg"
-          LATEST_JSON="Hermes-Yachiyo-${LATEST_BRANCH}-latest.json"
+          LATEST_TITLE="Oha-Yachiyo ${CHANNEL_LABEL} latest"
+          VERSIONED_DMG="Oha-Yachiyo-${CHANNEL}-v${RELEASE_VERSION}-${BUILD_LABEL}-${SHORT_SHA}.dmg"
+          LATEST_DMG="Oha-Yachiyo-${LATEST_BRANCH}-latest.dmg"
+          LATEST_JSON="Oha-Yachiyo-${LATEST_BRANCH}-latest.json"
 
           mkdir -p release
           shopt -s nullglob
@@ -283,7 +286,7 @@ jobs:
 
           cat > "release/${LATEST_JSON}" <<EOF
           {
-            "name": "Hermes-Yachiyo",
+            "name": "Oha-Yachiyo",
             "channel": "${CHANNEL}",
             "branch": "${LATEST_BRANCH}",
             "source_branch": "${GITHUB_REF_NAME}",
@@ -306,7 +309,7 @@ jobs:
           EOF
 
           cat > release/notes.md <<EOF
-          Hermes-Yachiyo ${CHANNEL_LABEL}
+          Oha-Yachiyo ${CHANNEL_LABEL}
 
           - Branch: ${GITHUB_REF_NAME}
           - Commit: ${GITHUB_SHA}
@@ -323,11 +326,11 @@ jobs:
 
           GPT-SoVITS 语音资源包不随应用 DMG 发布；请在独立的“Yachiyo GPT-SoVITS Voice Assets”资源 release 中下载。
 
-          首次启动后，主动桌面观察需要在 macOS 系统设置中允许 Hermes-Yachiyo 使用屏幕录制权限。
+          首次启动后，主动桌面观察需要在 macOS 系统设置中允许 Oha-Yachiyo 使用屏幕录制权限。
           EOF
 
           cat > release/latest-notes.md <<EOF
-          Hermes-Yachiyo ${CHANNEL_LABEL} latest
+          Oha-Yachiyo ${CHANNEL_LABEL} latest
 
           This rolling release always points to the latest ${LATEST_BRANCH} DMG.
 
@@ -358,7 +361,7 @@ jobs:
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hermes-yachiyo-${{ steps.meta.outputs.tag }}
+          name: oha-yachiyo-${{ steps.meta.outputs.tag }}
           path: |
             release/*.dmg
             release/*.sha256

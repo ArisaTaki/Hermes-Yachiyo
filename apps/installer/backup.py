@@ -1,9 +1,10 @@
-"""Hermes-Yachiyo 本地资料备份与恢复。"""
+"""Oha-Yachiyo local data backup and restore."""
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
 import sqlite3
@@ -17,14 +18,13 @@ from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
 
-from apps.installer.hermes_setup import HermesEnvironmentSetup
 from apps.shell import config as config_mod
 from apps.shell.assets import project_display_path
 
 logger = logging.getLogger(__name__)
 
-BACKUP_DIR_NAME = "Hermes-Yachiyo-backups"
-BACKUP_FILE_PREFIX = "hermes-yachiyo-backup-"
+BACKUP_DIR_NAME = "Oha-Yachiyo-backups"
+BACKUP_FILE_PREFIX = "oha-yachiyo-backup-"
 BACKUP_SCHEMA_VERSION = 2
 MANIFEST_NAME = "manifest.json"
 DEFAULT_RETENTION_COUNT = 10
@@ -137,9 +137,9 @@ def is_protected_path(path: Path) -> bool:
 
 
 def is_safe_app_config_dir(path: Path) -> tuple[bool, str]:
-    """判断目标路径是否可作为 Hermes-Yachiyo 应用配置目录安全删除或替换。"""
+    """判断目标路径是否可作为 Oha-Yachiyo 应用配置目录安全删除或替换。"""
     original = path.expanduser()
-    if original.name != ".hermes-yachiyo":
+    if original.name != ".oha-yachiyo-config":
         return False, "配置目录名称不符合预期，已跳过"
 
     home = Path.home().expanduser().resolve()
@@ -157,11 +157,11 @@ def is_safe_app_config_dir(path: Path) -> tuple[bool, str]:
     return True, ""
 
 
-def _has_yachiyo_workspace_marker(path: Path) -> bool:
-    init_marker = path / ".yachiyo_init"
-    if init_marker.is_file() and not init_marker.is_symlink():
+def _has_oha_workspace_marker(path: Path) -> bool:
+    native_marker = path / ".oha_yachiyo_init"
+    if native_marker.is_file() and not native_marker.is_symlink():
         return True
-    config_marker = path / "configs" / "yachiyo.json"
+    config_marker = path / "configs" / "oha-yachiyo.json"
     return (
         config_marker.is_file()
         and not config_marker.is_symlink()
@@ -169,18 +169,15 @@ def _has_yachiyo_workspace_marker(path: Path) -> bool:
     )
 
 
-def is_safe_yachiyo_workspace(path: Path) -> tuple[bool, str]:
-    """判断目标路径是否可作为 Yachiyo 工作空间安全删除或替换。"""
+def is_safe_oha_workspace(path: Path) -> tuple[bool, str]:
+    """判断目标路径是否可作为 Oha-Yachiyo 工作空间安全删除或替换。"""
     original = path.expanduser()
-    if original.name != "yachiyo":
+    if original.name != ".oha-yachiyo":
         return False, "工作空间目录名称不符合预期，已跳过"
 
     home = Path.home().expanduser().resolve()
     if not _is_relative_to(original.parent, home):
         return False, "工作空间不在当前用户目录下，已跳过"
-    if original.parent.resolve() == home:
-        return False, "工作空间不能直接指向用户主目录下的通用目录，已跳过"
-
     if original.is_symlink():
         return True, ""
 
@@ -189,8 +186,8 @@ def is_safe_yachiyo_workspace(path: Path) -> tuple[bool, str]:
         return False, "受保护路径，已跳过"
     if not _is_relative_to(resolved, home):
         return False, "工作空间不在当前用户目录下，已跳过"
-    if _path_exists(original) and not _has_yachiyo_workspace_marker(resolved):
-        return False, "工作空间缺少 Yachiyo 初始化标识，已跳过"
+    if _path_exists(original) and not _has_oha_workspace_marker(resolved):
+        return False, "工作空间缺少 Oha-Yachiyo 初始化标识，已跳过"
     return True, ""
 
 
@@ -198,12 +195,12 @@ def _app_config_dir() -> Path:
     return Path(getattr(config_mod, "_CONFIG_DIR")).expanduser()
 
 
-def _hermes_home_dir() -> Path:
-    return Path(HermesEnvironmentSetup.get_effective_hermes_home()).expanduser()
+def _oha_yachiyo_home_dir() -> Path:
+    return Path(os.getenv("OHA_YACHIYO_HOME", "~/.oha-yachiyo")).expanduser()
 
 
-def _yachiyo_workspace_dir() -> Path:
-    return _hermes_home_dir() / "yachiyo"
+def _oha_workspace_dir() -> Path:
+    return _oha_yachiyo_home_dir()
 
 
 def default_backup_root(backup_root: str | Path | None = None) -> Path:
@@ -314,14 +311,14 @@ def create_backup(
     retention_count: int = DEFAULT_RETENTION_COUNT,
     overwrite_latest: bool = False,
 ) -> BackupInfo:
-    """生成可独立触发的 Hermes-Yachiyo 本地资料备份。"""
+    """生成可独立触发的 Oha-Yachiyo 本地资料备份。"""
     root = default_backup_root(backup_root)
     root.mkdir(parents=True, exist_ok=True)
     previous_latest = find_latest_backup(root) if overwrite_latest else None
     archive_path = _unique_backup_archive(root)
     temp_archive_path = root / f".{archive_path.name}.{uuid.uuid4().hex}.tmp"
     archive_published = False
-    staging_root = Path(tempfile.mkdtemp(prefix=".hermes-yachiyo-backup-", dir=str(root)))
+    staging_root = Path(tempfile.mkdtemp(prefix=".oha-yachiyo-backup-", dir=str(root)))
     staging_dir = staging_root / "payload"
     staging_dir.mkdir(parents=True, exist_ok=False)
 
@@ -329,15 +326,15 @@ def create_backup(
         sources: list[tuple[str, str, Path, str]] = [
             (
                 "app_config",
-                "Hermes-Yachiyo 应用配置",
+                "Oha-Yachiyo 应用配置",
                 _app_config_dir(),
                 "app-config",
             ),
             (
-                "yachiyo_workspace",
-                "Yachiyo 工作空间",
-                _yachiyo_workspace_dir(),
-                "yachiyo-workspace",
+                "oha_workspace",
+                "Oha-Yachiyo 工作空间",
+                _oha_workspace_dir(),
+                "oha-workspace",
             ),
         ]
         copied: list[dict[str, str]] = []
@@ -350,17 +347,17 @@ def create_backup(
                 })
 
         if not copied:
-            raise ValueError("未找到可备份的 Hermes-Yachiyo 本地资料")
+            raise ValueError("未找到可备份的 Oha-Yachiyo 本地资料")
 
         manifest = {
             "schema_version": BACKUP_SCHEMA_VERSION,
-            "kind": "hermes-yachiyo-backup",
+            "kind": "oha-yachiyo-backup",
             "format": "zip",
             "created_at": datetime.now(timezone.utc).isoformat(),
             "scope": source_context,
             "entries": copied,
             "note": (
-                "此备份包含 Hermes-Yachiyo 应用配置与 Yachiyo 工作空间，"
+                "此备份包含 Oha-Yachiyo 应用配置与工作空间，"
                 "包括聊天数据库、项目资料、缓存、日志与导入资源。"
             ),
         }
@@ -446,15 +443,15 @@ def _included_ids(path: Path, data: dict[str, Any]) -> list[str]:
     if path.is_dir():
         if (path / "app-config").exists():
             included.append("app_config")
-        if (path / "yachiyo-workspace").exists():
-            included.append("yachiyo_workspace")
+        if (path / "oha-workspace").exists():
+            included.append("oha_workspace")
     elif path.is_file() and zipfile.is_zipfile(path):
         with zipfile.ZipFile(path, "r") as archive:
             names = archive.namelist()
         if any(name.startswith("app-config/") for name in names):
             included.append("app_config")
-        if any(name.startswith("yachiyo-workspace/") for name in names):
-            included.append("yachiyo_workspace")
+        if any(name.startswith("oha-workspace/") for name in names):
+            included.append("oha_workspace")
     return included
 
 
@@ -735,7 +732,7 @@ def _materialized_backup(path: Path) -> Iterator[Path]:
         yield path
         return
 
-    with tempfile.TemporaryDirectory(prefix="hermes-yachiyo-import-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="oha-yachiyo-import-") as temp_dir:
         target_dir = Path(temp_dir) / "payload"
         target_dir.mkdir(parents=True, exist_ok=True)
         _extract_zip_safely(path, target_dir)
@@ -747,7 +744,7 @@ def import_backup(
     *,
     backup_root: str | Path | None = None,
 ) -> BackupImportResult:
-    """导入 Hermes-Yachiyo 备份。"""
+    """导入 Oha-Yachiyo 备份。"""
     if backup_path:
         backup_source = Path(backup_path).expanduser()
         if not _looks_like_backup(backup_source):
@@ -780,50 +777,50 @@ def import_backup(
         app_config_target = _app_config_dir()
         app_config_safe, app_config_reason = is_safe_app_config_dir(app_config_target)
         if not app_config_source.exists():
-            skipped.append({"label": "Hermes-Yachiyo 应用配置", "reason": "备份中不存在"})
+            skipped.append({"label": "Oha-Yachiyo 应用配置", "reason": "备份中不存在"})
         elif not _is_restore_source_dir(app_config_source):
             skipped.append({
-                "label": "Hermes-Yachiyo 应用配置",
+                "label": "Oha-Yachiyo 应用配置",
                 "reason": "备份中的应用配置不是目录",
             })
         elif app_config_safe:
             try:
                 _replace_path(app_config_source, app_config_target)
                 restored.append({
-                    "label": "Hermes-Yachiyo 应用配置",
+                    "label": "Oha-Yachiyo 应用配置",
                     "path": str(app_config_target),
                 })
             except Exception as exc:
                 errors.append(f"应用配置导入失败：{exc}")
         else:
-            skipped.append({"label": "Hermes-Yachiyo 应用配置", "reason": app_config_reason})
+            skipped.append({"label": "Oha-Yachiyo 应用配置", "reason": app_config_reason})
 
-        workspace_source = snapshot_dir / "yachiyo-workspace"
-        workspace_target = _yachiyo_workspace_dir()
-        workspace_safe, workspace_reason = is_safe_yachiyo_workspace(workspace_target)
+        workspace_source = snapshot_dir / "oha-workspace"
+        workspace_target = _oha_workspace_dir()
+        workspace_safe, workspace_reason = is_safe_oha_workspace(workspace_target)
         if not workspace_source.exists():
-            skipped.append({"label": "Hermes-Yachiyo 工作空间", "reason": "备份中不存在"})
+            skipped.append({"label": "Oha-Yachiyo 工作空间", "reason": "备份中不存在"})
         elif not _is_restore_source_dir(workspace_source):
             skipped.append({
-                "label": "Hermes-Yachiyo 工作空间",
+                "label": "Oha-Yachiyo 工作空间",
                 "reason": "备份中的工作空间不是目录",
             })
-        elif not _has_yachiyo_workspace_marker(workspace_source):
+        elif not _has_oha_workspace_marker(workspace_source):
             skipped.append({
-                "label": "Hermes-Yachiyo 工作空间",
+                "label": "Oha-Yachiyo 工作空间",
                 "reason": "备份中的工作空间缺少初始化标识",
             })
         elif workspace_safe:
             try:
                 _replace_path(workspace_source, workspace_target)
                 restored.append({
-                    "label": "Yachiyo 工作空间",
+                    "label": "Oha-Yachiyo 工作空间",
                     "path": str(workspace_target),
                 })
             except Exception as exc:
-                errors.append(f"Yachiyo 工作空间导入失败：{exc}")
+                errors.append(f"Oha-Yachiyo 工作空间导入失败：{exc}")
         else:
-            skipped.append({"label": "Hermes-Yachiyo 工作空间", "reason": workspace_reason})
+            skipped.append({"label": "Oha-Yachiyo 工作空间", "reason": workspace_reason})
 
     return BackupImportResult(
         ok=not errors,

@@ -11,7 +11,6 @@ import {
   deleteModelSource,
   fetchModelSourceModels,
   listModelProfiles,
-  syncHermesProfileDefault,
   testAndSaveModelProfile,
   testModelProfile,
   updateModelProfile,
@@ -54,7 +53,7 @@ type ProviderPreset = {
   baseUrl: string;
   mark: string;
   note: string;
-  hermesProvider?: string;
+  nativeProvider?: string;
   modelHints?: string[];
   route?: AppView;
 };
@@ -72,8 +71,8 @@ const providerPresets: ProviderPreset[] = [
     label: 'OpenRouter',
     baseUrl: 'https://openrouter.ai/api/v1',
     mark: 'OR',
-    hermesProvider: 'openrouter',
-    note: 'OpenRouter 是一个 Hermes provider；下方模型供应商只作为 OpenRouter 模型分组展示。',
+    nativeProvider: 'openrouter',
+    note: 'OpenRouter 是一个 Native provider；下方模型供应商只作为 OpenRouter 模型分组展示。',
     modelHints: [],
   },
   {
@@ -81,8 +80,8 @@ const providerPresets: ProviderPreset[] = [
     label: 'Xiaomi MiMo',
     baseUrl: 'https://api.mimo-v2.com/v1',
     mark: 'Mi',
-    hermesProvider: 'xiaomi',
-    note: 'Hermes 原生 Xiaomi provider。图片转述建议使用 mimo-v2.5 或 mimo-v2-omni。',
+    nativeProvider: 'xiaomi',
+    note: 'Native 原生 Xiaomi provider。图片转述建议使用 mimo-v2.5 或 mimo-v2-omni。',
     modelHints: ['mimo-v2.5-pro', 'mimo-v2.5', 'mimo-v2-omni'],
   },
   {
@@ -90,8 +89,8 @@ const providerPresets: ProviderPreset[] = [
     label: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com/v1',
     mark: 'DS',
-    hermesProvider: 'deepseek',
-    note: 'Hermes 原生 DeepSeek provider。',
+    nativeProvider: 'deepseek',
+    note: 'Native 原生 DeepSeek provider。',
     modelHints: ['deepseek-chat', 'deepseek-reasoner'],
   },
   {
@@ -99,8 +98,8 @@ const providerPresets: ProviderPreset[] = [
     label: 'Google Gemini',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     mark: 'G',
-    hermesProvider: 'gemini',
-    note: 'Hermes 原生 Gemini provider；这里使用 Gemini 的 OpenAI-compatible 端点做模型获取与测试。',
+    nativeProvider: 'gemini',
+    note: 'Native 原生 Gemini provider；这里使用 Gemini 的 OpenAI-compatible 端点做模型获取与测试。',
     modelHints: ['gemini-2.5-flash', 'gemini-2.5-pro'],
   },
   {
@@ -108,8 +107,8 @@ const providerPresets: ProviderPreset[] = [
     label: '阿里云百炼 / Qwen',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     mark: 'Q',
-    hermesProvider: 'alibaba',
-    note: 'Hermes Alibaba provider；用于通义千问 / DashScope 兼容端点。',
+    nativeProvider: 'alibaba',
+    note: 'Native Alibaba provider；用于通义千问 / DashScope 兼容端点。',
     modelHints: ['qwen-plus', 'qwen-turbo', 'qwen-max'],
   },
   {
@@ -117,8 +116,8 @@ const providerPresets: ProviderPreset[] = [
     label: 'Moonshot / Kimi',
     baseUrl: 'https://api.moonshot.ai/v1',
     mark: 'K',
-    hermesProvider: 'kimi-coding',
-    note: 'Hermes Kimi Coding provider；Moonshot 旧源会自动映射到 kimi-coding。',
+    nativeProvider: 'kimi-coding',
+    note: 'Native Kimi Coding provider；Moonshot 旧源会自动映射到 kimi-coding。',
     modelHints: ['kimi-k2.5', 'kimi-k2-thinking'],
   },
   {
@@ -126,8 +125,8 @@ const providerPresets: ProviderPreset[] = [
     label: '智谱 GLM / Z.AI',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
     mark: 'GLM',
-    hermesProvider: 'zai',
-    note: 'Hermes Z.AI provider；智谱旧源会自动映射到 zai。',
+    nativeProvider: 'zai',
+    note: 'Native Z.AI provider；智谱旧源会自动映射到 zai。',
     modelHints: ['glm-4.5-flash', 'glm-4-plus'],
   },
   {
@@ -135,8 +134,8 @@ const providerPresets: ProviderPreset[] = [
     label: 'MiniMax',
     baseUrl: 'https://api.minimax.io/v1',
     mark: 'MM',
-    hermesProvider: 'minimax',
-    note: 'Hermes 原生 MiniMax provider。',
+    nativeProvider: 'minimax',
+    note: 'Native 原生 MiniMax provider。',
     modelHints: ['MiniMax-M2.7', 'MiniMax-M2.5'],
   },
   {
@@ -144,8 +143,8 @@ const providerPresets: ProviderPreset[] = [
     label: '阶跃星辰 StepFun',
     baseUrl: 'https://api.stepfun.com/v1',
     mark: 'S',
-    hermesProvider: 'stepfun',
-    note: 'Hermes 原生 StepFun provider。',
+    nativeProvider: 'stepfun',
+    note: 'Native 原生 StepFun provider。',
     modelHints: ['step-3.5-flash', 'step-2-mini'],
   },
   {
@@ -153,8 +152,8 @@ const providerPresets: ProviderPreset[] = [
     label: 'NVIDIA NIM',
     baseUrl: 'https://integrate.api.nvidia.com/v1',
     mark: 'NV',
-    hermesProvider: 'nvidia',
-    note: 'Hermes 原生 NVIDIA provider。',
+    nativeProvider: 'nvidia',
+    note: 'Native 原生 NVIDIA provider。',
     modelHints: ['nvidia/nemotron-3-super-120b-a12b'],
   },
   {
@@ -162,8 +161,8 @@ const providerPresets: ProviderPreset[] = [
     label: 'xAI',
     baseUrl: 'https://api.x.ai/v1',
     mark: 'x',
-    hermesProvider: 'xai',
-    note: 'Hermes 原生 xAI provider。',
+    nativeProvider: 'xai',
+    note: 'Native 原生 xAI provider。',
     modelHints: ['grok-4', 'grok-code-fast-1'],
   },
   {
@@ -171,8 +170,8 @@ const providerPresets: ProviderPreset[] = [
     label: 'Hugging Face',
     baseUrl: 'https://router.huggingface.co/v1',
     mark: 'HF',
-    hermesProvider: 'huggingface',
-    note: 'Hermes 原生 Hugging Face provider。',
+    nativeProvider: 'huggingface',
+    note: 'Native 原生 Hugging Face provider。',
     modelHints: ['Qwen/Qwen3.5-35B-A3B'],
   },
   {
@@ -180,8 +179,8 @@ const providerPresets: ProviderPreset[] = [
     label: 'LM Studio',
     baseUrl: 'http://127.0.0.1:1234/v1',
     mark: 'LM',
-    hermesProvider: 'lmstudio',
-    note: 'Hermes LM Studio provider，本地服务通常可使用占位 API Key。',
+    nativeProvider: 'lmstudio',
+    note: 'Native LM Studio provider，本地服务通常可使用占位 API Key。',
     modelHints: ['local-model'],
   },
   {
@@ -189,8 +188,8 @@ const providerPresets: ProviderPreset[] = [
     label: 'OpenAI',
     baseUrl: 'https://api.openai.com/v1',
     mark: 'AI',
-    hermesProvider: 'openai',
-    note: 'Hermes OpenAI provider。',
+    nativeProvider: 'openai',
+    note: 'Native OpenAI provider。',
     modelHints: ['gpt-4.1-mini', 'gpt-4o-mini'],
   },
   {
@@ -198,8 +197,8 @@ const providerPresets: ProviderPreset[] = [
     label: '自定义 OpenAI-Compatible',
     baseUrl: 'https://api.example.com/v1',
     mark: 'API',
-    hermesProvider: 'custom',
-    note: '非 Hermes 原生 provider 会写入 Hermes custom；同一时间只能作为一个 custom 主模型使用。',
+    nativeProvider: 'custom',
+    note: '非 Native 原生 provider 会写入 Native custom；同一时间只能作为一个 custom 主模型使用。',
     modelHints: [],
   },
 ];
@@ -398,35 +397,33 @@ function statusClass(status?: string): string {
   return '';
 }
 
-function hermesProviderLabel(provider?: string): string {
-  return provider ? `Hermes: ${provider}` : '不可用于 Hermes';
+function nativeProviderLabel(provider?: string): string {
+  return provider ? `Native: ${provider}` : '不可用于 Native Runtime';
 }
 
 function runtimeProviderLabel(provider?: string): string {
-  return provider ? hermesProviderLabel(provider) : 'Agent 直连';
+  return provider ? nativeProviderLabel(provider) : 'Agent 直连';
 }
 
 function runtimePillClass(provider?: string): string {
-  return provider ? 'model-key-pill model-runtime-pill is-hermes' : 'model-key-pill model-runtime-pill is-direct';
+  return provider ? 'model-key-pill model-runtime-pill is-native' : 'model-key-pill model-runtime-pill is-direct';
 }
 
 function presetRuntimePillClass(provider?: string): string {
-  return provider ? 'model-preset-runtime model-runtime-pill is-hermes' : 'model-preset-runtime model-runtime-pill is-direct';
+  return provider ? 'model-preset-runtime model-runtime-pill is-native' : 'model-preset-runtime model-runtime-pill is-direct';
 }
 
-function sourceHermesProvider(source: ModelSource): string {
-  return source.hermes_provider || source.runtime?.hermes_provider || '';
+function sourceNativeProvider(source: ModelSource): string {
+  return source.native_provider || source.runtime?.native_provider || '';
 }
 
-function profileHermesProvider(profile: ModelProfile): string {
-  return profile.hermes_provider || profile.runtime?.hermes_provider || '';
+function profileNativeProvider(profile: ModelProfile): string {
+  return profile.native_provider || profile.runtime?.native_provider || '';
 }
 
-function profileSelectableForHermes(profile: ModelProfile): boolean {
+function profileSelectableForNative(profile: ModelProfile): boolean {
   return profile.status === 'available'
-    && profile.enabled !== false
-    && profile.can_use_as_hermes !== false
-    && Boolean(profileHermesProvider(profile));
+    && profile.enabled !== false;
 }
 
 function providerPresetsForCapability(capability: ModelCapability): ProviderPreset[] {
@@ -1216,19 +1213,15 @@ export function ModelProfilesView() {
       setStatus('提供商源或模型已暂停，不能设为默认。');
       return;
     }
-    if (!profileSelectableForHermes(profile)) {
-      setStatus('这个 Profile 不能映射到 Hermes 支持的 Provider，不能设为默认。');
+    if (!profileSelectableForNative(profile)) {
+      setStatus('这个 Profile 尚未通过连接测试或已暂停，不能设为默认。');
       return;
     }
     setBusy('default');
     try {
-      if (profile.capability === 'chat' || profile.capability === 'vision') {
-        const sync = await syncHermesProfileDefault(profile.capability, profile.profile_id);
-        if (sync.ok === false) throw new Error(sync.error || sync.message || '同步 Hermes 配置失败');
-      }
       const result = await updateModelProfileDefaults({ [profile.capability]: profile.profile_id });
       setDefaults(result.defaults || {});
-      setStatus(`${capabilityLabels[profile.capability]}默认模型已更新${profile.capability === 'tts' ? '' : '，并已同步到 Hermes 配置'}`);
+      setStatus(`${capabilityLabels[profile.capability]}默认模型已更新`);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '更新默认模型失败');
     } finally {
@@ -1242,10 +1235,10 @@ export function ModelProfilesView() {
     ? 'TTS 使用语音服务专用来源；这里登记 provider、endpoint 和 voice/profile 名称。GPT-SoVITS 完整参数走主动关怀语音页。'
     : activeCapability === 'vision'
       ? '图片转述使用独立视觉来源，不复用对话来源；模型最终以真实图片测试通过为准。'
-      : '对话使用独立文本来源；默认主模型只使用 Hermes 可执行 provider，Agent Studio 可选择已测试通过的文本 Profile。';
+      : '对话使用独立文本来源；默认主模型只使用 Native Runtime 可执行 provider，Agent Studio 可选择已测试通过的文本 Profile。';
   const sourceDraftRuntimeProvider = selectedSource
-    ? sourceHermesProvider(selectedSource)
-    : (providerPreset(sourceDraft.provider).hermesProvider || sourceDraft.provider);
+    ? sourceNativeProvider(selectedSource)
+    : (providerPreset(sourceDraft.provider).nativeProvider || sourceDraft.provider);
 
   return (
     <section className="hy-route-page model-profiles-page">
@@ -1290,7 +1283,7 @@ export function ModelProfilesView() {
                 const preset = providerPreset(source.provider);
                 const configured = Boolean(source.api_key_configured);
                 const hasCapabilityModel = sourceHasCapabilityModel(source, activeCapability);
-                const runtimeProvider = sourceHermesProvider(source);
+                const runtimeProvider = sourceNativeProvider(source);
                 return (
                   <button
                     key={source.source_id}
@@ -1349,7 +1342,7 @@ export function ModelProfilesView() {
                       </span>
                       <strong>{preset.label}</strong>
                       <small>{preset.route ? '打开完整设置页' : preset.baseUrl}</small>
-                      {activeCapability !== 'tts' ? <span className={presetRuntimePillClass(preset.hermesProvider || preset.id)}>{runtimeProviderLabel(preset.hermesProvider || preset.id)}</span> : null}
+                      {activeCapability !== 'tts' ? <span className={presetRuntimePillClass(preset.nativeProvider || preset.id)}>{runtimeProviderLabel(preset.nativeProvider || preset.id)}</span> : null}
                       <em>{preset.note}</em>
                     </button>
                   ))}
@@ -1550,9 +1543,9 @@ export function ModelProfilesView() {
                           <span>{sourceDraft.name}/{model.model}</span>
                         </button>
                         <em className={`status-pill ${statusClass(model.status)}`}>{statusLabel(model.status)}</em>
-                        {model.capability !== 'tts' ? <em className={runtimePillClass(profileHermesProvider(model))}>{runtimeProviderLabel(profileHermesProvider(model))}</em> : null}
+                        {model.capability !== 'tts' ? <em className={runtimePillClass(profileNativeProvider(model))}>{runtimeProviderLabel(profileNativeProvider(model))}</em> : null}
                         {defaults[model.capability] === model.profile_id ? <small>默认</small> : null}
-                        <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || !profileSelectableForHermes(model)} onClick={() => void setDefault(model)}>设为默认</button>
+                        <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || !profileSelectableForNative(model)} onClick={() => void setDefault(model)}>设为默认</button>
                         {model.capability !== 'tts' ? <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || sourceDraft.enabled === false} onClick={() => void runModelTest(model.profile_id)}>重新测试</button> : null}
                         <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={() => requestRemoveModel(model)}>删除</button>
                       </div>

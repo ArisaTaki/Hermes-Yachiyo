@@ -18,9 +18,9 @@ export type ModelProfile = {
   profile_enabled?: boolean;
   source_enabled?: boolean;
   runtime?: ModelProviderRuntime;
-  runtime_scope?: 'hermes' | 'unsupported' | string;
-  hermes_provider?: string;
-  can_use_as_hermes?: boolean;
+  runtime_scope?: 'native' | 'unsupported' | string;
+  native_provider?: string;
+  can_use_as_native?: boolean;
   api_key_name?: string;
   status?: 'untested' | 'available' | 'failed' | string;
   last_tested_at?: string;
@@ -39,9 +39,9 @@ export type ModelSource = {
   options?: Record<string, unknown>;
   enabled?: boolean;
   runtime?: ModelProviderRuntime;
-  runtime_scope?: 'hermes' | 'unsupported' | string;
-  hermes_provider?: string;
-  can_use_as_hermes?: boolean;
+  runtime_scope?: 'native' | 'unsupported' | string;
+  native_provider?: string;
+  can_use_as_native?: boolean;
   api_key_name?: string;
   status?: 'untested' | 'available' | 'failed' | string;
   last_tested_at?: string;
@@ -53,12 +53,12 @@ export type ModelSource = {
 
 export type ModelProviderRuntime = {
   source_provider?: string;
-  hermes_provider?: string;
-  hermes_provider_label?: string;
+  native_provider?: string;
+  native_provider_label?: string;
   api_key_name?: string;
   api_key_names?: string[];
-  runtime_scope?: 'hermes' | 'unsupported' | string;
-  can_use_as_hermes?: boolean;
+  runtime_scope?: 'native' | 'unsupported' | string;
+  can_use_as_native?: boolean;
   note?: string;
 };
 
@@ -216,10 +216,10 @@ export async function syncTtsProviderSource(request: TtsProviderSyncRequest): Pr
   return apiPost('/ui/model-profiles/tts/sync', request);
 }
 
-export async function syncHermesProfileDefault(capability: Extract<ModelCapability, 'chat' | 'vision'>, profileId: string): Promise<{
+export async function syncNativeProfileDefault(capability: Extract<ModelCapability, 'chat' | 'vision'>, profileId: string): Promise<{
   ok?: boolean;
   error?: string;
   message?: string;
 }> {
-  return apiPost('/ui/hermes/config', capability === 'chat' ? { chat_profile_id: profileId } : { vision_profile_id: profileId });
+  return apiPost('/ui/native-agent/config', capability === 'chat' ? { chat_profile_id: profileId } : { vision_profile_id: profileId });
 }
