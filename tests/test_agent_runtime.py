@@ -1756,6 +1756,69 @@ def test_main_chat_model_loop_fails_on_openai_compatible_sse_error(tmp_path, mon
     assert verify_secret_redaction(paths=[tmp_path]) == []
 
 
+def test_main_chat_model_loop_redacts_multiline_openai_compatible_sse_error(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    leaked_secret = "sk-http-sse-multiline-error123456"
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"partial multiline"}}]}\r\n\r\n'
+            yield (
+                b"id: multiline-error-1\r\n"
+                b"event: error\r\n"
+                b'data: {"error":{\r\n'
+                + f'data: "message":"provider stream rejected token={leaked_secret}",\r\n'.encode("utf-8")
+                + b'data: "type":"rate_limit_error","code":"quota_exceeded"}}\r\n\r\n'
+            )
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-http-multiline-sse-error",
+            session_id="session-main-http-multiline-sse-error",
+            user_goal=f"Handle multiline provider error token={leaked_secret}",
+        )
+
+        with pytest.raises(Exception, match="OpenAI-compatible Profile 调用失败"):
+            service.execute_main_chat_model_loop(
+                run["run_id"],
+                [{"role": "user", "content": "Trigger multiline SSE provider error"}],
+            )
+
+        failed = service.get_run(run["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        persisted_projection = json.dumps({"run": failed, "events": events}, ensure_ascii=False)
+
+        assert failed["status"] == "failed"
+        assert "rate_limit_error" in failed["result"]
+        assert "quota_exceeded" in failed["result"]
+        assert leaked_secret not in persisted_projection
+        assert "[redacted]" in persisted_projection
+        assert any(event["event_type"] == "model.request.failed" for event in events)
+        assert not any(event["event_type"] == "model.output.completed" for event in events)
+    finally:
+        service.close()
+
+    assert verify_secret_redaction(paths=[tmp_path]) == []
+
+
 def test_main_chat_model_loop_coalesces_openai_sdk_object_stream_before_persisting(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     chunks = [f"sdk-object-chunk-{index};" for index in range(180)]
