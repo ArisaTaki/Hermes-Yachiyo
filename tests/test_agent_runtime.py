@@ -2776,6 +2776,91 @@ def test_main_chat_model_loop_keeps_multi_choice_same_index_streaming_tool_calls
         service.close()
 
 
+def test_main_chat_model_loop_coalesces_indexless_streaming_tool_call_deltas(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("readme indexless stream content", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert tools is not None
+
+            def stream():
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                tool_calls=[
+                                    SimpleNamespace(
+                                        id="call_indexless_read",
+                                        type="function",
+                                        function=SimpleNamespace(
+                                            name="workspace_",
+                                            arguments='{"path": "READ',
+                                        ),
+                                    )
+                                ]
+                            )
+                        )
+                    ]
+                )
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                tool_calls=[
+                                    SimpleNamespace(
+                                        function=SimpleNamespace(
+                                            name="read",
+                                            arguments='ME.md"}',
+                                        ),
+                                    )
+                                ]
+                            ),
+                            finish_reason="tool_calls",
+                        )
+                    ]
+                )
+
+            return stream()
+        tool_messages = [message for message in messages if message.get("role") == "tool"]
+        assert [message["tool_call_id"] for message in tool_messages] == ["call_indexless_read"]
+        assert "readme indexless stream content" in tool_messages[0]["content"]
+        return {"content": "Indexless streaming tool call complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-indexless-streaming-tool-call",
+            session_id="session-main-indexless-streaming-tool-call",
+            user_goal="Read README through indexless streaming tool call",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Read README"}],
+            tool_policy={"allowed_tools": ["workspace.read"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."]},
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        tool_events = [event for event in events if event["event_type"] == "agent.tool.call"]
+
+        assert updated["result"] == "Indexless streaming tool call complete"
+        assert [event["payload"]["input_preview"]["path"] for event in tool_events] == ["README.md"]
+        assert event_types.count("agent.tool.call") == 1
+        assert event_types.count("model.output.completed") == 1
+        assert not any(str(event_type).endswith(".delta") for event_type in event_types)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_executes_provider_message_tool_calls(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"

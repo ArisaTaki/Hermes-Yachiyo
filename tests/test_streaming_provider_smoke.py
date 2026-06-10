@@ -518,6 +518,61 @@ def test_stream_smoke_keeps_multi_choice_tool_call_deltas_separate():
     ]
 
 
+def test_stream_smoke_coalesces_indexless_tool_call_deltas():
+    chunks = [
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "id": "call_indexless_read",
+                                "type": "function",
+                                "function": {
+                                    "name": "workspace_",
+                                    "arguments": '{"path":"READ',
+                                },
+                            }
+                        ]
+                    },
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "function": {
+                                    "name": "read",
+                                    "arguments": 'ME.md"}',
+                                },
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ]
+        },
+    ]
+
+    summary = smoke.summarize_stream_chunks(chunks, include_tool_arguments=True)
+
+    assert summary["ok"] is True
+    assert summary["tool_call_delta_count"] == 2
+    assert summary["tool_call_count"] == 1
+    assert summary["finish_reasons"] == ["tool_calls"]
+    assert summary["tool_calls"] == [
+        {
+            "id": "call_indexless_read",
+            "name": "workspace_read",
+            "argument_chars": len('{"path":"README.md"}'),
+            "arguments": '{"path":"README.md"}',
+        }
+    ]
+
+
 def test_stream_smoke_summarizes_message_level_tool_calls():
     chunks = [
         {
