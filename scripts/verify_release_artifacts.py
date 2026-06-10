@@ -261,6 +261,22 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover TaskRunner approval timeout projection",
     ),
     (
+        "tests/test_executor.py::TestNativeAgentExecutor::test_run_uses_native_run_and_returns_task_result",
+        "macOS release workflow smoke tests must cover NativeAgentExecutor Task-to-Run boundary",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_main_chat_run_links_task_and_records_replayable_events",
+        "macOS release workflow smoke tests must cover TaskRunLink replay projection",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_runtime_shutdown_cancels_active_runs_rejects_new_runs_and_records_fact",
+        "macOS release workflow smoke tests must cover Native runtime shutdown cancellation facts",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_runtime_shutdown_close_db_closes_runtime_resources",
+        "macOS release workflow smoke tests must cover Native runtime shutdown resource closure",
+    ),
+    (
         "tests/test_streaming_provider_smoke.py",
         "macOS release workflow smoke tests must cover OpenAI-compatible streaming provider contracts",
     ),
