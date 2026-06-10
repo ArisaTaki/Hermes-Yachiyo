@@ -178,6 +178,14 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "python scripts/verify_release_artifacts.py --allow-binary release",
         "macOS release workflow must binary-scan final release artifacts",
     ),
+    (
+        "release/*.json",
+        "macOS release workflow must upload release metadata JSON artifacts",
+    ),
+    (
+        '"release/${LATEST_JSON}"',
+        "macOS release workflow must publish latest channel JSON metadata",
+    ),
 )
 _BUILD_GUARD_ENV_KEYS: tuple[str, ...] = (
     "OHA_YACHIYO_DEV",
@@ -448,6 +456,15 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             Finding(
                 workflow_path,
                 "macOS release workflow must import signing material before building the DMG",
+            )
+        )
+    prepare_release = workflow.find("Prepare release metadata")
+    verify_release = workflow.find("Verify packaged release artifacts")
+    if prepare_release < 0 or verify_release < 0 or verify_release < prepare_release:
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must verify release artifacts after preparing release metadata",
             )
         )
     return findings
