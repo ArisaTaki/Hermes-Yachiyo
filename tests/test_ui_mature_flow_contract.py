@@ -1649,10 +1649,51 @@ def test_run_detail_bridge_contract_preserves_replay_events(monkeypatch):
 
 def test_chat_approval_run_detail_bridge_contract_preserves_detail_and_replay(monkeypatch):
     calls: list[tuple[str, dict]] = []
+    runtime = SimpleNamespace(name="runtime")
+    approved = False
 
     class FakeRuntimeService:
+        def approve_run_approval(self, run_id):
+            nonlocal approved
+            calls.append(("approve", {"run_id": run_id}))
+            approved = True
+            return {
+                "run_id": run_id,
+                "kind": "main_chat_run",
+                "status": "completed",
+                "session_id": "session-chat-approval",
+                "task_id": "task-chat-approval",
+                "task_run_link_run_status": "completed",
+                "task_run_link_last_event_sequence": 16,
+                "pending_approval": {},
+                "result": "Approved from chat and completed",
+            }
+
         def get_run(self, run_id):
             calls.append(("get_run", {"run_id": run_id}))
+            if approved:
+                return {
+                    "run_id": run_id,
+                    "kind": "main_chat_run",
+                    "status": "completed",
+                    "session_id": "session-chat-approval",
+                    "task_id": "task-chat-approval",
+                    "task_run_link_run_status": "completed",
+                    "task_run_link_last_event_sequence": 16,
+                    "pending_approval": {},
+                    "result": "Approved from chat and completed",
+                    "timeline": [
+                        {
+                            "event": "agent.tool.approval_approved",
+                            "status": "running",
+                            "tool": "workspace.write_patch",
+                        },
+                        {
+                            "event": "run.completed",
+                            "status": "completed",
+                        },
+                    ],
+                }
             return {
                 "run_id": run_id,
                 "kind": "main_chat_run",
@@ -1686,15 +1727,91 @@ def test_chat_approval_run_detail_bridge_contract_preserves_detail_and_replay(mo
                 "run_id": run_id,
                 "after_sequence": after_sequence,
                 "limit": limit,
-                "events": [
+                "events": (
+                    [
+                        {
+                            "run_id": run_id,
+                            "sequence": 13,
+                            "event_type": "agent.tool.approval_approved",
+                            "payload": {"tool": "workspace.write_patch", "approval_id": "approval-1"},
+                        },
+                        {
+                            "run_id": run_id,
+                            "sequence": 14,
+                            "event_type": "agent.tool.call",
+                            "payload": {"tool": "workspace.write_patch", "result": {"ok": True}},
+                        },
+                        {
+                            "run_id": run_id,
+                            "sequence": 15,
+                            "event_type": "model.output.completed",
+                            "payload": {"content": "Approved from chat and completed"},
+                        },
+                        {
+                            "run_id": run_id,
+                            "sequence": 16,
+                            "event_type": "run.completed",
+                            "payload": {"status": "completed"},
+                        },
+                    ]
+                    if approved and after_sequence >= 12
+                    else [
+                        {
+                            "run_id": run_id,
+                            "sequence": 12,
+                            "event_type": "agent.tool.approval_required",
+                            "payload": {
+                                "tool": "workspace.write_patch",
+                                "approval_id": "approval-1",
+                                "input_preview": {"path": "docs/demo.md"},
+                            },
+                        }
+                    ]
+                ),
+            }
+
+    class FakeChatAPI:
+        def __init__(self, received_runtime):
+            assert received_runtime is runtime
+
+        def get_messages(self, limit=0, anchor_message_id=""):
+            calls.append(("get_messages", {"limit": limit, "anchor_message_id": anchor_message_id}))
+            if approved:
+                return {
+                    "approval_count": 0,
+                    "processing_count": 0,
+                    "is_processing": False,
+                    "messages": [
+                        {
+                            "id": "assistant-chat-approval",
+                            "role": "assistant",
+                            "status": "completed",
+                            "content": "Approved from chat and completed",
+                            "metadata": {
+                                "run_id": "run_chat_approval",
+                                "run_status": "completed",
+                                "pending_approval": {},
+                            },
+                        }
+                    ],
+                }
+            return {
+                "approval_count": 1,
+                "processing_count": 1,
+                "is_processing": True,
+                "messages": [
                     {
-                        "run_id": run_id,
-                        "sequence": 12,
-                        "event_type": "agent.tool.approval_required",
-                        "payload": {
-                            "tool": "workspace.write_patch",
-                            "approval_id": "approval-1",
-                            "input_preview": {"path": "docs/demo.md"},
+                        "id": "assistant-chat-approval",
+                        "role": "assistant",
+                        "status": "processing",
+                        "content": "",
+                        "metadata": {
+                            "run_id": "run_chat_approval",
+                            "run_status": "approval_required",
+                            "pending_approval": {
+                                "approval_id": "approval-1",
+                                "tool": "workspace.write_patch",
+                            },
                         },
                     }
                 ],
@@ -1703,9 +1820,18 @@ def test_chat_approval_run_detail_bridge_contract_preserves_detail_and_replay(mo
     service = FakeRuntimeService()
     monkeypatch.setattr(agents, "get_agent_runtime_service", lambda: service)
     monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+    monkeypatch.setattr(ui, "ChatAPI", FakeChatAPI)
 
     run_detail = asyncio.run(agents.get_any_run("run_chat_approval"))
     replay = asyncio.run(run_routes.list_run_events("run_chat_approval", after_sequence=0, limit=200))
+    chat_waiting = asyncio.run(ui.get_chat_messages(limit=20))
+    approved_run = asyncio.run(agents.approve_run_approval("run_chat_approval"))
+    chat_completed = asyncio.run(ui.get_chat_messages(limit=20))
+    refreshed_detail = asyncio.run(agents.get_any_run("run_chat_approval"))
+    after_approval_replay = asyncio.run(
+        run_routes.list_run_events("run_chat_approval", after_sequence=12, limit=200)
+    )
 
     assert run_detail["kind"] == "main_chat_run"
     assert run_detail["status"] == "approval_required"
@@ -1714,11 +1840,36 @@ def test_chat_approval_run_detail_bridge_contract_preserves_detail_and_replay(mo
     assert run_detail["pending_approval"]["tool"] == "workspace.write_patch"
     assert replay["events"][0]["event_type"] == "agent.tool.approval_required"
     assert replay["events"][0]["payload"]["input_preview"]["path"] == "docs/demo.md"
+    assert chat_waiting["approval_count"] == 1
+    assert chat_waiting["messages"][0]["metadata"]["pending_approval"]["tool"] == "workspace.write_patch"
+    assert approved_run["status"] == "completed"
+    assert approved_run["pending_approval"] == {}
+    assert chat_completed["approval_count"] == 0
+    assert chat_completed["is_processing"] is False
+    assert chat_completed["messages"][0]["status"] == "completed"
+    assert chat_completed["messages"][0]["metadata"]["pending_approval"] == {}
+    assert refreshed_detail["status"] == "completed"
+    assert refreshed_detail["task_run_link_run_status"] == "completed"
+    assert refreshed_detail["pending_approval"] == {}
+    assert [event["event_type"] for event in after_approval_replay["events"]] == [
+        "agent.tool.approval_approved",
+        "agent.tool.call",
+        "model.output.completed",
+        "run.completed",
+    ]
     assert calls == [
         ("get_run", {"run_id": "run_chat_approval"}),
         (
             "list_run_events",
             {"run_id": "run_chat_approval", "after_sequence": 0, "limit": 200},
+        ),
+        ("get_messages", {"limit": 20, "anchor_message_id": ""}),
+        ("approve", {"run_id": "run_chat_approval"}),
+        ("get_messages", {"limit": 20, "anchor_message_id": ""}),
+        ("get_run", {"run_id": "run_chat_approval"}),
+        (
+            "list_run_events",
+            {"run_id": "run_chat_approval", "after_sequence": 12, "limit": 200},
         ),
     ]
 
