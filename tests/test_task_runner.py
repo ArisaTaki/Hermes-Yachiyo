@@ -252,6 +252,10 @@ async def test_task_runner_main_chat_auto_delegation_uses_native_runtime(tmp_pat
         if "# Agent\nName: Research Agent" in last_content:
             assert "# User Goal\n调研 Native 委派链路" in last_content
             return {"role": "assistant", "content": "Research Agent native delegation result"}
+        if "[Oha-Yachiyo 自动委派 Run 汇总]" in last_content:
+            assert "Research Agent：已完成" in last_content
+            assert "Research Agent native delegation result" in last_content
+            return {"role": "assistant", "content": "总结：Research Agent 的委派结果已整合。"}
         if "[OHA 委派结果]" in last_content:
             assert "Research Agent native delegation result" in last_content
             return {"role": "assistant", "content": "最终结论：Native 委派链路已闭环。"}
@@ -269,6 +273,7 @@ async def test_task_runner_main_chat_auto_delegation_uses_native_runtime(tmp_pat
 
     monkeypatch.setattr(chat_store_mod, "get_chat_store", lambda: store)
     monkeypatch.setattr(activity_store_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
     monkeypatch.setattr("apps.shell.agent_runtime.get_model_profile_service", lambda: _FakeDefaultProfileService())
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     agent = service.create_agent(
@@ -337,6 +342,44 @@ async def test_task_runner_main_chat_auto_delegation_uses_native_runtime(tmp_pat
         assert completed_activity["status"] == "completed"
         assert completed_activity["metadata"]["run_id"] == delegated["run_id"]
         assert completed_activity["metadata"]["run_group_id"] == delegated["run_group_id"]
+
+        summary_api = ChatAPI(SimpleNamespace(state=state, chat_session=session, agent_runtime_service=service))
+        summary_created = summary_api.summarize_delegated_run(delegated["run_id"])
+        assert summary_created["ok"] is True
+        assert summary_created["summary_created"] is True
+        summary_task = state.get_task(summary_created["task_id"])
+        assert summary_task is not None
+        assert summary_task.chat_session_id == session.session_id
+        assert "[Oha-Yachiyo 自动委派 Run 汇总]" in summary_task.description
+        assert "Research Agent：已完成" in summary_task.description
+        assert "汇报：Research Agent native delegation result" in summary_task.description
+
+        await runner._execute_with_state(summary_task.task_id)
+
+        completed_summary_task = state.get_task(summary_task.task_id)
+        assert completed_summary_task is not None
+        assert completed_summary_task.status == TaskStatus.COMPLETED
+        assert completed_summary_task.result == "总结：Research Agent 的委派结果已整合。"
+        summary_link = service.get_task_run_link(summary_task.task_id)
+        summary_run = service.get_run(summary_link["run_id"])
+        assert summary_run["kind"] == "main_chat_run"
+        assert summary_run["status"] == "completed"
+        assert summary_run["result"] == "总结：Research Agent 的委派结果已整合。"
+        assert summary_run["run_id"] != main_run["run_id"]
+        summary_event_types = [event["event_type"] for event in service.list_run_events(summary_run["run_id"])["events"]]
+        assert "task.linked" in summary_event_types
+        assert summary_event_types.count("model.output.completed") == 1
+        assert "run.completed" in summary_event_types
+        summary_assistant = next(
+            message
+            for message in store.load_messages(session.session_id, limit=20)
+            if message.task_id == summary_task.task_id
+        )
+        assert summary_assistant.status == "completed"
+        assert summary_assistant.content == "总结：Research Agent 的委派结果已整合。"
+        assert "run_oha_agent" not in summary_assistant.content
+        assert "<oha_delegation>" not in summary_assistant.content
+        assert len(model_calls) == 4
     finally:
         service.close()
         activity_store.close()
