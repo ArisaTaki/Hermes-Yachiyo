@@ -8163,6 +8163,31 @@ def test_summarize_delegated_run_waits_for_terminal_status(tmp_path, monkeypatch
         store.close()
 
 
+def test_summarize_delegated_run_redacts_runtime_errors(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    leaked_secret = "sk-delegated-summary-secret123456"
+
+    class FakeAgentRuntimeService:
+        def get_run(self, run_id: str):
+            assert run_id == "agent_run_secret"
+            raise AgentRuntimeError(f"provider rejected api_key={leaked_secret}")
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeAgentRuntimeService())
+
+    try:
+        result = api.summarize_delegated_run("agent_run_secret")
+
+        assert result["ok"] is False
+        assert leaked_secret not in result["error"]
+        assert "api_key=[redacted]" in result["error"]
+        assert not any(
+            message.metadata.get("delegated_run_summary_for_run_id") == "agent_run_secret"
+            for message in runtime.chat_session.get_all_messages()
+        )
+    finally:
+        store.close()
+
+
 def test_get_messages_hides_internal_reasoning_activity(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
