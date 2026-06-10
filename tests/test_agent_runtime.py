@@ -18,6 +18,7 @@ from apps.shell.credential_store import MemoryCredentialStore
 from apps.shell.agent_runtime import (
     AgentRuntimeError,
     AgentRuntimeService,
+    ApprovalResumeCoordinator,
     NativeRunEngine,
     ToolApprovalResumeContext,
     ToolBroker,
@@ -36,6 +37,159 @@ def make_service(tmp_path, *, seed_templates: bool = False) -> AgentRuntimeServi
 
 def test_agent_runtime_service_is_native_run_engine_compatibility_name():
     assert AgentRuntimeService is NativeRunEngine
+
+
+def test_approval_resume_coordinator_executes_approved_tool_and_remaining_requests():
+    calls: list[tuple[str, dict[str, object]]] = []
+    broker = SimpleNamespace(name="broker")
+    budget = SimpleNamespace(name="budget")
+    timeline: list[dict[str, object]] = []
+    artifacts: list[dict[str, object]] = []
+    messages: list[dict[str, object]] = [{"role": "user", "content": "run approved tool"}]
+    tool_request = {"name": "terminal.run", "input": {"command": "printf ok"}}
+    remaining_requests = [{"name": "artifact.write", "input": {"path": "report.md"}}]
+
+    def call_agent_tool(
+        request,
+        allowed_tools,
+        tool_broker,
+        run_timeline,
+        *,
+        artifacts,
+        approved,
+        run_id,
+        budget,
+    ):
+        calls.append(
+            (
+                "call_agent_tool",
+                {
+                    "request": request,
+                    "allowed_tools": allowed_tools,
+                    "broker": tool_broker,
+                    "timeline": run_timeline,
+                    "artifacts": artifacts,
+                    "approved": approved,
+                    "run_id": run_id,
+                    "budget": budget,
+                },
+            )
+        )
+        return {"ok": True, "stdout": "ok"}
+
+    def append_tool_result_message(run_messages, request, tool_result):
+        calls.append(("append_tool_result_message", {"request": request, "tool_result": tool_result}))
+        run_messages.append({"role": "tool", "content": json.dumps(tool_result)})
+
+    def run_tool_requests(
+        requests,
+        allowed_tools,
+        tool_broker,
+        run_messages,
+        run_timeline,
+        run_artifacts,
+        *,
+        next_iteration,
+        run_id,
+        budget,
+    ):
+        calls.append(
+            (
+                "run_tool_requests",
+                {
+                    "requests": requests,
+                    "allowed_tools": allowed_tools,
+                    "broker": tool_broker,
+                    "messages": run_messages,
+                    "timeline": run_timeline,
+                    "artifacts": run_artifacts,
+                    "next_iteration": next_iteration,
+                    "run_id": run_id,
+                    "budget": budget,
+                },
+            )
+        )
+
+    coordinator = ApprovalResumeCoordinator(
+        call_agent_tool=call_agent_tool,
+        fatal_tool_failure_detail=lambda *_args: "",
+        append_tool_result_message=append_tool_result_message,
+        run_tool_requests=run_tool_requests,
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+    )
+
+    coordinator.execute_approved_tool(
+        ToolApprovalResumeContext(
+            run_id="run_approved",
+            timeline=timeline,
+            artifacts=artifacts,
+            broker=broker,
+            allowed_tools=["terminal.run", "artifact.write"],
+            budget=budget,
+            messages=messages,
+            tool_request=tool_request,
+            tool_name="terminal.run",
+            input_preview={"command": "printf ok"},
+            remaining_requests=remaining_requests,
+            next_iteration=7,
+        )
+    )
+
+    assert [name for name, _payload in calls] == [
+        "call_agent_tool",
+        "append_tool_result_message",
+        "run_tool_requests",
+    ]
+    assert calls[0][1]["approved"] is True
+    assert calls[0][1]["run_id"] == "run_approved"
+    assert calls[0][1]["broker"] is broker
+    assert calls[0][1]["budget"] is budget
+    assert calls[1][1]["tool_result"] == {"ok": True, "stdout": "ok"}
+    assert calls[2][1]["requests"] == remaining_requests
+    assert calls[2][1]["next_iteration"] == 7
+    assert messages[-1] == {"role": "tool", "content": '{"ok": true, "stdout": "ok"}'}
+
+
+def test_approval_resume_coordinator_stops_on_fatal_tool_failure():
+    calls: list[str] = []
+    timeline: list[dict[str, object]] = []
+
+    coordinator = ApprovalResumeCoordinator(
+        call_agent_tool=lambda *_args, **_kwargs: {"ok": False, "stderr": "denied"},
+        fatal_tool_failure_detail=lambda *_args: "terminal.run failed fatally",
+        append_tool_result_message=lambda *_args: calls.append("append_tool_result_message"),
+        run_tool_requests=lambda *_args, **_kwargs: calls.append("run_tool_requests"),
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+    )
+
+    with pytest.raises(AgentRuntimeError, match="terminal.run failed fatally"):
+        coordinator.execute_approved_tool(
+            ToolApprovalResumeContext(
+                run_id="run_failed",
+                timeline=timeline,
+                artifacts=[],
+                broker=SimpleNamespace(name="broker"),
+                allowed_tools=["terminal.run"],
+                budget=SimpleNamespace(name="budget"),
+                messages=[],
+                tool_request={"name": "terminal.run", "input": {"command": "false"}},
+                tool_name="terminal.run",
+                input_preview={"command": "false"},
+                remaining_requests=[{"name": "artifact.write"}],
+                next_iteration=2,
+            )
+        )
+
+    assert calls == []
+    assert timeline == [
+        {
+            "event": "agent.tool.failed",
+            "detail": "terminal.run",
+            "input_preview": {"command": "false"},
+            "result": {"ok": False, "stderr": "denied"},
+            "status": "failed",
+        }
+    ]
 
 
 class FakeDefaultProfileService:
