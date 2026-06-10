@@ -1966,6 +1966,236 @@ def test_chat_approval_run_detail_bridge_contract_preserves_detail_and_replay(mo
     ]
 
 
+def test_chat_approval_failure_run_detail_bridge_contract_preserves_failed_replay(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+    runtime = SimpleNamespace(name="runtime")
+    approved = False
+    failure = "terminal.run 执行失败；退出码：7；stdout：main-chat-terminal-failure"
+
+    class FakeRuntimeService:
+        def approve_run_approval(self, run_id):
+            nonlocal approved
+            calls.append(("approve", {"run_id": run_id}))
+            approved = True
+            return {
+                "run_id": run_id,
+                "kind": "main_chat_run",
+                "status": "failed",
+                "session_id": "session-chat-approval",
+                "task_id": "task-chat-approval",
+                "task_run_link_run_status": "failed",
+                "task_run_link_last_event_sequence": 15,
+                "pending_approval": {},
+                "result": failure,
+            }
+
+        def get_run(self, run_id):
+            calls.append(("get_run", {"run_id": run_id}))
+            if approved:
+                return {
+                    "run_id": run_id,
+                    "kind": "main_chat_run",
+                    "status": "failed",
+                    "session_id": "session-chat-approval",
+                    "task_id": "task-chat-approval",
+                    "task_run_link_run_status": "failed",
+                    "task_run_link_last_event_sequence": 15,
+                    "pending_approval": {},
+                    "result": failure,
+                    "timeline": [
+                        {
+                            "event": "agent.tool.approval_approved",
+                            "status": "running",
+                            "tool": "terminal.run",
+                        },
+                        {
+                            "event": "agent.tool.call",
+                            "status": "failed",
+                            "tool": "terminal.run",
+                        },
+                        {
+                            "event": "agent.run.failed",
+                            "status": "failed",
+                            "detail": failure,
+                        },
+                    ],
+                }
+            return {
+                "run_id": run_id,
+                "kind": "main_chat_run",
+                "status": "approval_required",
+                "session_id": "session-chat-approval",
+                "task_id": "task-chat-approval",
+                "task_run_link_run_status": "running",
+                "task_run_link_last_event_sequence": 12,
+                "pending_approval": {
+                    "approval_id": "approval-1",
+                    "tool": "terminal.run",
+                    "input_preview": {"command": "printf main-chat-terminal-failure; exit 7"},
+                },
+                "timeline": [
+                    {
+                        "event": "agent.tool.approval_required",
+                        "status": "approval_required",
+                        "tool": "terminal.run",
+                    }
+                ],
+            }
+
+        def list_run_events(self, run_id, *, after_sequence=0, limit=200):
+            calls.append(
+                (
+                    "list_run_events",
+                    {"run_id": run_id, "after_sequence": after_sequence, "limit": limit},
+                )
+            )
+            return {
+                "run_id": run_id,
+                "after_sequence": after_sequence,
+                "limit": limit,
+                "events": (
+                    [
+                        {
+                            "run_id": run_id,
+                            "sequence": 13,
+                            "event_type": "agent.tool.approval_approved",
+                            "payload": {"tool": "terminal.run", "approval_id": "approval-1"},
+                        },
+                        {
+                            "run_id": run_id,
+                            "sequence": 14,
+                            "event_type": "agent.tool.call",
+                            "payload": {
+                                "tool": "terminal.run",
+                                "approved": True,
+                                "result": {"ok": False, "returncode": 7},
+                            },
+                        },
+                        {
+                            "run_id": run_id,
+                            "sequence": 15,
+                            "event_type": "agent.run.failed",
+                            "payload": {"error": failure},
+                        },
+                    ]
+                    if approved and after_sequence >= 12
+                    else [
+                        {
+                            "run_id": run_id,
+                            "sequence": 12,
+                            "event_type": "agent.tool.approval_required",
+                            "payload": {
+                                "tool": "terminal.run",
+                                "approval_id": "approval-1",
+                                "input_preview": {"command": "printf main-chat-terminal-failure; exit 7"},
+                            },
+                        }
+                    ]
+                ),
+            }
+
+    class FakeChatAPI:
+        def __init__(self, received_runtime):
+            assert received_runtime is runtime
+
+        def get_messages(self, limit=0, anchor_message_id=""):
+            calls.append(("get_messages", {"limit": limit, "anchor_message_id": anchor_message_id}))
+            if approved:
+                return {
+                    "approval_count": 0,
+                    "processing_count": 0,
+                    "is_processing": False,
+                    "messages": [
+                        {
+                            "id": "assistant-chat-approval",
+                            "role": "assistant",
+                            "status": "failed",
+                            "content": failure,
+                            "metadata": {
+                                "run_id": "run_chat_approval",
+                                "run_status": "failed",
+                                "pending_approval": {},
+                            },
+                        }
+                    ],
+                }
+            return {
+                "approval_count": 1,
+                "processing_count": 1,
+                "is_processing": True,
+                "messages": [
+                    {
+                        "id": "assistant-chat-approval",
+                        "role": "assistant",
+                        "status": "processing",
+                        "content": "",
+                        "metadata": {
+                            "run_id": "run_chat_approval",
+                            "run_status": "approval_required",
+                            "pending_approval": {
+                                "approval_id": "approval-1",
+                                "tool": "terminal.run",
+                            },
+                        },
+                    }
+                ],
+            }
+
+    service = FakeRuntimeService()
+    monkeypatch.setattr(agents, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+    monkeypatch.setattr(ui, "ChatAPI", FakeChatAPI)
+
+    run_detail = asyncio.run(agents.get_any_run("run_chat_approval"))
+    replay = asyncio.run(run_routes.list_run_events("run_chat_approval", after_sequence=0, limit=200))
+    chat_waiting = asyncio.run(ui.get_chat_messages(limit=20))
+    approved_run = asyncio.run(agents.approve_run_approval("run_chat_approval"))
+    chat_failed = asyncio.run(ui.get_chat_messages(limit=20))
+    refreshed_detail = asyncio.run(agents.get_any_run("run_chat_approval"))
+    after_approval_replay = asyncio.run(
+        run_routes.list_run_events("run_chat_approval", after_sequence=12, limit=200)
+    )
+
+    assert run_detail["status"] == "approval_required"
+    assert run_detail["pending_approval"]["tool"] == "terminal.run"
+    assert replay["events"][0]["event_type"] == "agent.tool.approval_required"
+    assert replay["events"][0]["payload"]["input_preview"]["command"].endswith("exit 7")
+    assert chat_waiting["approval_count"] == 1
+    assert approved_run["status"] == "failed"
+    assert approved_run["pending_approval"] == {}
+    assert chat_failed["approval_count"] == 0
+    assert chat_failed["is_processing"] is False
+    assert chat_failed["messages"][0]["status"] == "failed"
+    assert chat_failed["messages"][0]["metadata"]["pending_approval"] == {}
+    assert refreshed_detail["status"] == "failed"
+    assert refreshed_detail["task_run_link_run_status"] == "failed"
+    assert refreshed_detail["pending_approval"] == {}
+    assert [event["event_type"] for event in after_approval_replay["events"]] == [
+        "agent.tool.approval_approved",
+        "agent.tool.call",
+        "agent.run.failed",
+    ]
+    assert after_approval_replay["events"][1]["payload"]["approved"] is True
+    assert after_approval_replay["events"][1]["payload"]["result"]["ok"] is False
+    assert after_approval_replay["events"][2]["payload"]["error"] == failure
+    assert calls == [
+        ("get_run", {"run_id": "run_chat_approval"}),
+        (
+            "list_run_events",
+            {"run_id": "run_chat_approval", "after_sequence": 0, "limit": 200},
+        ),
+        ("get_messages", {"limit": 20, "anchor_message_id": ""}),
+        ("approve", {"run_id": "run_chat_approval"}),
+        ("get_messages", {"limit": 20, "anchor_message_id": ""}),
+        ("get_run", {"run_id": "run_chat_approval"}),
+        (
+            "list_run_events",
+            {"run_id": "run_chat_approval", "after_sequence": 12, "limit": 200},
+        ),
+    ]
+
+
 def test_desktop_presence_bridge_contract_preserves_screenshot_tts_proactive_and_live2d(monkeypatch):
     config = SimpleNamespace(
         tts=SimpleNamespace(enabled=True, provider="command"),
