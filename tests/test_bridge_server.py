@@ -7,6 +7,7 @@ import inspect
 import json
 import re
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -711,6 +712,131 @@ def test_chat_approval_bridge_route_resumes_native_run(tmp_path, monkeypatch):
     try:
         asyncio.run(scenario())
     finally:
+        service.close()
+        activity_store.close()
+        store.close()
+
+
+def test_chat_cancel_bridge_route_cancels_native_run_and_ignores_late_output(tmp_path, monkeypatch):
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="bridge-cancel-session")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    model_started = threading.Event()
+    release_model = threading.Event()
+    model_calls: list[list[dict]] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        model_calls.append(messages)
+        model_started.set()
+        assert release_model.wait(timeout=3), "test did not release slow model call"
+        return {"role": "assistant", "content": "late model output should be ignored"}
+
+    monkeypatch.setattr(chat_store_mod, "get_chat_store", lambda: store)
+    monkeypatch.setattr(activity_store_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeDefaultProfileService(),
+    )
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+
+    executor = NativeAgentExecutor(
+        chat_session=session,
+        runtime_service_getter=lambda: service,
+        tool_policy_getter=lambda: {"allowed_tools": []},
+        workspace_policy_getter=lambda: {},
+        activity_store_getter=lambda: activity_store,
+    )
+    runner = TaskRunner(state, executor=executor, activity_store=activity_store)
+    runtime = SimpleNamespace(
+        state=state,
+        chat_session=session,
+        store=store,
+        task_runner=runner,
+        agent_runtime_service=service,
+        cancel_task_runner_task=lambda task_id: runner.cancel_task(task_id),
+    )
+    monkeypatch.setattr(ui_routes, "get_runtime", lambda: runtime)
+
+    async def scenario():
+        sent = await ui_routes.send_chat_message(
+            ui_routes.SendChatMessageRequest(
+                text="请开始一个可以被停止的慢请求",
+                client_message_id="bridge-cancel-client-1",
+            )
+        )
+        assert sent["ok"] is True
+        task = state.get_task(sent["task_id"])
+        assert task is not None
+        runner_task = asyncio.create_task(runner._execute_with_state(task.task_id))
+        runner._in_progress[task.task_id] = runner_task
+        runner_task.add_done_callback(lambda _future: runner._in_progress.pop(task.task_id, None))
+        try:
+            assert await asyncio.to_thread(model_started.wait, 3)
+            run = service.get_run(service.get_task_run_link(task.task_id)["run_id"])
+            assert run["status"] == "running"
+
+            cancelled = await ui_routes.cancel_chat_session_tasks()
+            assert cancelled["ok"] is True
+            assert cancelled["cancelled_tasks"] == 1
+            assert cancelled["processing_count"] == 0
+            assert cancelled["is_processing"] is False
+
+            cancelled_task = state.get_task(task.task_id)
+            assert cancelled_task is not None
+            assert cancelled_task.status == TaskStatus.CANCELLED
+            cancelled_assistant = next(message for message in cancelled["messages"] if message["role"] == "assistant")
+            assert cancelled_assistant["task_id"] == task.task_id
+            assert cancelled_assistant["status"] == "failed"
+            assert "任务已取消" in cancelled_assistant["content"]
+
+            for _ in range(150):
+                stored = service.get_run(run["run_id"])
+                if stored["status"] == "cancelled":
+                    break
+                await asyncio.sleep(0.02)
+            else:
+                raise AssertionError("linked Native Run did not enter cancelled state")
+
+            release_model.set()
+            await asyncio.gather(runner_task, return_exceptions=True)
+
+            replay = await run_routes.list_run_events(run["run_id"], after_sequence=0, limit=200)
+            event_types = [event["event_type"] for event in replay["events"]]
+            stored = service.get_run(run["run_id"])
+            assert stored["status"] == "cancelled"
+            assert "run.cancelled" in event_types
+            assert "model.output.completed" not in event_types
+            assert "run.completed" not in event_types
+
+            final_messages = await ui_routes.get_chat_messages()
+            final_assistant = next(message for message in final_messages["messages"] if message["role"] == "assistant")
+            assert final_messages["processing_count"] == 0
+            assert final_assistant["task_id"] == task.task_id
+            assert final_assistant["status"] == "failed"
+            assert "late model output" not in final_assistant["content"]
+        finally:
+            release_model.set()
+            if not runner_task.done():
+                runner_task.cancel()
+                await asyncio.gather(runner_task, return_exceptions=True)
+
+    try:
+        asyncio.run(scenario())
+        assert len(model_calls) == 1
+    finally:
+        release_model.set()
         service.close()
         activity_store.close()
         store.close()
