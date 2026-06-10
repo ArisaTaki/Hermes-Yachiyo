@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from apps.core.executor import ExecutionStrategy, SimulatedExecutor
 from apps.core.state import AppState
@@ -26,6 +26,28 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _POLL_INTERVAL: float = 2.0  # 轮询间隔（秒）
+_TASK_TERMINAL_PROGRESS_METADATA_KEYS: tuple[str, ...] = (
+    "pending_approval",
+    "run_status",
+    "run_progress_title",
+    "run_progress_detail",
+)
+
+
+def _terminal_task_message_metadata(assistant: Any | None, run_status: str) -> dict[str, Any] | None:
+    """Clear stale approval state while preserving unrelated message metadata."""
+    metadata = getattr(assistant, "metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    if not any(key in metadata for key in _TASK_TERMINAL_PROGRESS_METADATA_KEYS):
+        return None
+    next_metadata = dict(metadata)
+    next_metadata["pending_approval"] = {}
+    if "run_status" in next_metadata:
+        next_metadata["run_status"] = run_status
+    next_metadata.pop("run_progress_title", None)
+    next_metadata.pop("run_progress_detail", None)
+    return next_metadata
 
 
 class TaskRunner:
@@ -218,18 +240,22 @@ class TaskRunner:
                 fail_active_messages=False,
             )
             if task.status == TaskStatus.COMPLETED:
+                assistant = session.get_assistant_message_for_task(task.task_id)
                 session.upsert_assistant_message(
                     task_id=task.task_id,
                     content=task.result or "[任务已完成，无输出]",
                     status=MessageStatus.COMPLETED,
+                    metadata=_terminal_task_message_metadata(assistant, "completed"),
                 )
             elif task.status == TaskStatus.FAILED:
                 error = task.error or "任务执行失败"
+                assistant = session.get_assistant_message_for_task(task.task_id)
                 session.upsert_assistant_message(
                     task_id=task.task_id,
                     content=f"❌ {error}",
                     status=MessageStatus.FAILED,
                     error=error,
+                    metadata=_terminal_task_message_metadata(assistant, "failed"),
                 )
             elif task.status == TaskStatus.RUNNING:
                 assistant = session.get_assistant_message_for_task(task.task_id)

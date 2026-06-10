@@ -67,6 +67,24 @@ _IMAGE_EXTENSIONS_BY_MIME = {
     "image/gif": ".gif",
     "image/bmp": ".bmp",
 }
+_TASK_TERMINAL_PROGRESS_METADATA_KEYS: tuple[str, ...] = (
+    "pending_approval",
+    "run_status",
+    "run_progress_title",
+    "run_progress_detail",
+)
+
+
+def _terminal_task_message_metadata(metadata: dict[str, Any], run_status: str) -> dict[str, Any] | None:
+    if not any(key in metadata for key in _TASK_TERMINAL_PROGRESS_METADATA_KEYS):
+        return None
+    next_metadata = dict(metadata)
+    next_metadata["pending_approval"] = {}
+    if "run_status" in next_metadata:
+        next_metadata["run_status"] = run_status
+    next_metadata.pop("run_progress_title", None)
+    next_metadata.pop("run_progress_detail", None)
+    return next_metadata
 
 
 @dataclass(frozen=True)
@@ -3415,24 +3433,31 @@ class ChatAPI:
                     task_id=msg.task_id,
                     content=result,
                     status=MessageStatus.COMPLETED,
+                    metadata=_terminal_task_message_metadata(assistant_metadata, "completed"),
                 )
 
             elif task.status == TaskStatus.FAILED:
                 error = task.error or "任务执行失败"
+                assistant = self._session.get_assistant_message_for_task(msg.task_id)
+                assistant_metadata = assistant.metadata if assistant and isinstance(assistant.metadata, dict) else {}
                 self._session.upsert_assistant_message(
                     task_id=msg.task_id,
                     content=f"❌ {error}",
                     status=MessageStatus.FAILED,
                     error=error,
+                    metadata=_terminal_task_message_metadata(assistant_metadata, "failed"),
                 )
 
             elif task.status == TaskStatus.CANCELLED:
                 error = "任务已取消"
+                assistant = self._session.get_assistant_message_for_task(msg.task_id)
+                assistant_metadata = assistant.metadata if assistant and isinstance(assistant.metadata, dict) else {}
                 self._session.upsert_assistant_message(
                     task_id=msg.task_id,
                     content=f"⚠️ {error}",
                     status=MessageStatus.FAILED,
                     error=error,
+                    metadata=_terminal_task_message_metadata(assistant_metadata, "cancelled"),
                 )
 
             elif task.status == TaskStatus.RUNNING:
