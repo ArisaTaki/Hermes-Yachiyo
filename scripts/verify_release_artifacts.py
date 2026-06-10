@@ -285,6 +285,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Workflow approval Run Detail HTTP roundtrip",
     ),
     (
+        "tests/test_bridge_server.py::test_chat_group_dispatch_bridge_route_runs_native_summary",
+        "macOS release workflow smoke tests must cover group chat Native summary flow",
+    ),
+    (
         "tests/test_tts.py",
         "macOS release workflow smoke tests must cover manual TTS",
     ),
