@@ -1724,7 +1724,31 @@ def _iter_openai_sse_payloads(response: Any) -> Iterator[dict[str, Any]]:
             break
         payload = json.loads(data)
         if isinstance(payload, dict):
+            error_message = _openai_compatible_payload_error(payload)
+            if error_message:
+                raise ModelProfileError(f"OpenAI-compatible Profile 调用失败：{error_message}")
             yield payload
+
+
+def _openai_compatible_payload_error(payload: dict[str, Any]) -> str:
+    error = payload.get("error")
+    if not error:
+        return ""
+    if isinstance(error, dict):
+        message = error.get("message") or error.get("error") or error.get("detail")
+        parts = []
+        error_type = error.get("type")
+        code = error.get("code")
+        if error_type:
+            parts.append(f"type={error_type}")
+        if code:
+            parts.append(f"code={code}")
+        if message:
+            parts.append(str(message))
+        detail = "；".join(parts) if parts else json.dumps(error, ensure_ascii=False)
+    else:
+        detail = str(error)
+    return redact_api_error_text(detail, fallback="provider stream error")
 
 
 def openai_compatible_chat_message(
