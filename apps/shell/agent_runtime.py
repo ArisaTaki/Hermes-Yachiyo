@@ -709,6 +709,9 @@ def _stream_chunk_tool_calls(chunk: Any) -> list[tuple[int, int, Any]]:
     direct = _message_field(chunk, "tool_calls")
     if isinstance(direct, list):
         return [(0, index, call) for index, call in enumerate(direct)]
+    direct_function = _message_field(chunk, "function_call")
+    if direct_function is not None:
+        return [(0, 0, {"index": 0, "type": "function", "function": direct_function})]
     choices = _message_field(chunk, "choices")
     if not isinstance(choices, list):
         return []
@@ -720,11 +723,17 @@ def _stream_chunk_tool_calls(chunk: Any) -> list[tuple[int, int, Any]]:
             delta_calls = _message_field(delta, "tool_calls")
             if isinstance(delta_calls, list):
                 calls.extend((choice_index, index, call) for index, call in enumerate(delta_calls))
+            delta_function = _message_field(delta, "function_call")
+            if delta_function is not None:
+                calls.append((choice_index, 0, {"index": 0, "type": "function", "function": delta_function}))
         message = _message_field(choice, "message")
         if message is not None:
             message_calls = _message_field(message, "tool_calls")
             if isinstance(message_calls, list):
                 calls.extend((choice_index, index, call) for index, call in enumerate(message_calls))
+            message_function = _message_field(message, "function_call")
+            if message_function is not None:
+                calls.append((choice_index, 0, {"index": 0, "type": "function", "function": message_function}))
     return calls
 
 
@@ -807,10 +816,30 @@ def _coerce_tool_calls(value: Any) -> list[dict[str, Any]] | None:
     return calls
 
 
+def _coerce_function_call(value: Any, index: int = 0) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    name = _message_field(value, "name")
+    if not name:
+        return None
+    arguments = _message_field(value, "arguments")
+    return {
+        "id": f"call_{index}",
+        "type": "function",
+        "function": {
+            "name": str(name),
+            "arguments": arguments if arguments is not None else "{}",
+        },
+    }
+
+
 def _coalesce_model_message(message: Any) -> dict[str, Any]:
     if isinstance(message, dict):
         tool_calls = _coerce_tool_calls(message.get("tool_calls"))
-        return {**message, "tool_calls": tool_calls} if tool_calls is not None else message
+        if tool_calls is not None:
+            return {**message, "tool_calls": tool_calls}
+        function_call = _coerce_function_call(message.get("function_call"))
+        return {**message, "tool_calls": [function_call]} if function_call is not None else message
     if isinstance(message, str):
         return {"role": "assistant", "content": message}
     if not isinstance(message, IterableABC):
@@ -818,6 +847,10 @@ def _coalesce_model_message(message: Any) -> dict[str, Any]:
         tool_calls = _coerce_tool_calls(_message_field(message, "tool_calls"))
         if tool_calls is not None:
             result["tool_calls"] = tool_calls
+        else:
+            function_call = _coerce_function_call(_message_field(message, "function_call"))
+            if function_call is not None:
+                result["tool_calls"] = [function_call]
         return result
 
     content_parts: list[str] = []

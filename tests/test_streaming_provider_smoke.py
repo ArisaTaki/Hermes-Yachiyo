@@ -360,6 +360,53 @@ def test_stream_smoke_summarizes_message_level_tool_calls():
     assert "README.md" not in json.dumps(summary)
 
 
+def test_stream_smoke_summarizes_legacy_function_call_deltas():
+    chunks = [
+        {
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "function_call": {
+                            "name": "workspace_",
+                            "arguments": '{"path":"READ',
+                        }
+                    },
+                }
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "function_call": {
+                            "name": "read",
+                            "arguments": 'ME.md"}',
+                        }
+                    },
+                    "finish_reason": "function_call",
+                }
+            ]
+        },
+    ]
+
+    summary = smoke.summarize_stream_chunks(chunks, include_tool_arguments=True)
+
+    assert summary["ok"] is True
+    assert summary["finish_reasons"] == ["function_call"]
+    assert summary["tool_call_delta_count"] == 2
+    assert summary["tool_call_count"] == 1
+    assert summary["tool_calls"] == [
+        {
+            "id": "",
+            "name": "workspace_read",
+            "argument_chars": len('{"path":"README.md"}'),
+            "arguments": '{"path":"README.md"}',
+        }
+    ]
+
+
 def test_stream_smoke_summarizes_openai_sdk_object_tool_call_deltas():
     chunks = [
         SimpleNamespace(

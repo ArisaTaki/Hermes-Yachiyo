@@ -1668,6 +1668,81 @@ def test_main_chat_model_loop_coalesces_streaming_tool_call_deltas(tmp_path, mon
         service.close()
 
 
+def test_main_chat_model_loop_executes_legacy_streaming_function_call(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("legacy function call content", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert tools is not None
+
+            def stream():
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                function_call=SimpleNamespace(
+                                    name="workspace_",
+                                    arguments='{"path": "READ',
+                                )
+                            )
+                        )
+                    ]
+                )
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                function_call=SimpleNamespace(
+                                    name="read",
+                                    arguments='ME.md"}',
+                                )
+                            ),
+                            finish_reason="function_call",
+                        )
+                    ]
+                )
+
+            return stream()
+        assert messages[-1]["role"] == "tool"
+        assert "legacy function call content" in messages[-1]["content"]
+        return {"content": "Legacy streaming function call complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-legacy-streaming-function-call",
+            session_id="session-main-legacy-streaming-function-call",
+            user_goal="Read README through legacy streaming function_call",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Read README"}],
+            tool_policy={"allowed_tools": ["workspace.read"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."]},
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+
+        assert updated["result"] == "Legacy streaming function call complete"
+        assert tool_event["payload"]["tool"] == "workspace.read"
+        assert tool_event["payload"]["input_preview"]["path"] == "README.md"
+        assert event_types.count("agent.tool.call") == 1
+        assert event_types.count("model.output.completed") == 1
+        assert not any(str(event_type).endswith(".delta") for event_type in event_types)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_coalesces_interleaved_streaming_tool_call_deltas(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"
