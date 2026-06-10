@@ -702,6 +702,58 @@ event_types:
 
 这一步把此前同步 UI flow contract 中的“Chat approval card 跳转 Run Detail / replay handoff”推进到真实 Browser 点击验证：Chat message approval card、route navigation、Agent Studio Run selection、Task↔Run metadata 和 `/runs/{run_id}/events` replay API 都指向同一个 Native `main_chat_run`。
 
+### Browser Workflow Studio save-and-run E2E
+
+本轮继续补 Workflow Studio 的 source Browser 跨 UI 运行证据：从真实 Workflow Studio 页面新建最小 Workflow，添加一个 Agent 节点，点击 `保存并运行 Workflow`，确认自动打开同一个 Workflow Run 的 Run Detail，并能看到父 Workflow Run、子 Agent Run、RunGroup 和 RunEvent replay。
+
+```text
+./node_modules/.bin/vite --host 127.0.0.1 --port 5174 --strictPort  # cwd=apps/frontend
+source Bridge: http://127.0.0.1:8420  # isolated OHA_YACHIYO_HOME, no session token for source Browser
+fake provider: http://127.0.0.1:18773/v1  # profile test returns JSON OK, Agent run returns final content
+Browser route: http://127.0.0.1:5174/#/agents/workflows
+```
+
+验证内容：
+
+- 在隔离 `OHA_YACHIYO_HOME=/tmp/oha-yachiyo-browser-workflow-run-20260611044343` 中创建并测试默认 Chat ModelProfile，Bridge 启动后 `/ui/chat/executor` 已是 `NativeAgentExecutor` / `available=true`。
+- Browser 打开 Workflow Studio 后显示 `模型配置 ok`、8 个可添加 Agent、`workflow-studio` / `workflow-editor` / `workflow-agent-palette` / `workflow-save-and-run`。
+- Browser 点击 `workflow-new`，把 workflow 名称改为 `Browser Workflow Studio Smoke`，从 palette 点击 `Coding Agent`，填写运行目标 `Run the Browser Workflow Studio smoke and return a short result.`；UI 显示 1 个可运行 step，`workflow-save-and-run` 从 disabled 变为 enabled。
+- Browser 点击 `workflow-save-and-run` 后自动跳转 `http://127.0.0.1:5174/#/agents/workflow_run_b3574776694d`；Run Detail 显示 `Browser Workflow Studio Smoke`、`Workflow Run · 已完成`、最终结果 `Browser Workflow Studio run complete`、`Workflow Steps · 2`、子 Agent `Open Run` 入口和 `Execution · 4` replay facts。
+- Browser console error 为空。
+- Bridge API 复核：
+
+```text
+workflow_run:
+  run_id: workflow_run_b3574776694d
+  kind: workflow_run
+  status: completed
+  runnable_name: Browser Workflow Studio Smoke
+  result: Browser Workflow Studio run complete
+  run_group_id: run_group_03f0b2c08863
+  event_types:
+    workflow.run.started
+    workflow.node.start
+    workflow.node.agent
+    workflow.run.completed
+child_run:
+  run_id: agent_run_4fdcea46bee3
+  kind: agent_run
+  status: completed
+  runnable_name: Coding Agent
+  result: Browser Workflow Studio run complete
+  event_types:
+    agent.run.started
+    agent.run.completed
+run_group:
+  run_group_id: run_group_03f0b2c08863
+  status: completed
+  child_run_ids:
+    workflow_run_b3574776694d
+    agent_run_4fdcea46bee3
+```
+
+这一步把此前“Workflow Studio 编辑/节点配置/保存并运行路径已暴露稳定 selector”和 HTTP route roundtrip 推进到一次真实 Browser UI 操作：Workflow Studio 保存定义、创建 Workflow Run、父子 RunGroup 投影、Run Detail 自动打开、Workflow Steps 与 RunEvent replay 都在同一 source Bridge 环境下闭环。
+
 ### Chat cancel late-output hardening
 
 本轮继续推进主聊天取消路径，先用慢速 OpenAI-compatible fake model 做真实 UI 取消 smoke，发现一个真实生命周期 bug：
