@@ -667,6 +667,95 @@ def test_run_detail_approval_bridge_contract_preserves_approve_reject_and_cancel
     ]
 
 
+def test_workflow_child_approval_bridge_contract_preserves_parent_child_replay_refresh(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeRuntimeService:
+        def approve_run_approval(self, run_id):
+            calls.append(("approve", {"run_id": run_id}))
+            return {
+                "run_id": run_id,
+                "kind": "agent_run",
+                "status": "running",
+                "pending_approval": {},
+            }
+
+        def get_run(self, run_id):
+            calls.append(("get_run", {"run_id": run_id}))
+            if run_id == "run_child_approval":
+                return {
+                    "run_id": run_id,
+                    "kind": "agent_run",
+                    "status": "running",
+                    "pending_approval": {},
+                    "timeline": [{"event": "agent.run.resumed", "status": "running"}],
+                }
+            return {
+                "run_id": run_id,
+                "kind": "workflow_run",
+                "status": "running",
+                "timeline": [
+                    {
+                        "event": "workflow.run.child_resumed",
+                        "child_run_id": "run_child_approval",
+                        "status": "running",
+                    }
+                ],
+            }
+
+        def list_run_events(self, run_id, *, after_sequence=0, limit=200):
+            calls.append(
+                (
+                    "list_run_events",
+                    {"run_id": run_id, "after_sequence": after_sequence, "limit": limit},
+                )
+            )
+            return {
+                "run_id": run_id,
+                "after_sequence": after_sequence,
+                "limit": limit,
+                "events": [
+                    {
+                        "run_id": run_id,
+                        "sequence": after_sequence + 1,
+                        "event_type": "agent.tool.approval_approved",
+                        "payload": {"tool": "workspace.write_patch"},
+                    },
+                    {
+                        "run_id": run_id,
+                        "sequence": after_sequence + 2,
+                        "event_type": "agent.run.resumed",
+                        "payload": {"parent_run_id": "run_workflow_parent"},
+                    },
+                ],
+            }
+
+    service = FakeRuntimeService()
+    monkeypatch.setattr(agents, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
+
+    approved_child = asyncio.run(agents.approve_run_approval("run_child_approval"))
+    refreshed_child = asyncio.run(agents.get_any_run("run_child_approval"))
+    refreshed_parent = asyncio.run(agents.get_workflow_run("run_workflow_parent"))
+    replay = asyncio.run(run_routes.list_run_events("run_child_approval", after_sequence=0, limit=200))
+
+    assert approved_child["status"] == "running"
+    assert approved_child["pending_approval"] == {}
+    assert refreshed_child["timeline"][0]["event"] == "agent.run.resumed"
+    assert refreshed_parent["timeline"][0]["event"] == "workflow.run.child_resumed"
+    assert replay["events"][0]["event_type"] == "agent.tool.approval_approved"
+    assert replay["events"][1]["event_type"] == "agent.run.resumed"
+    assert calls == [
+        ("approve", {"run_id": "run_child_approval"}),
+        ("get_run", {"run_id": "run_child_approval"}),
+        ("get_run", {"run_id": "run_workflow_parent"}),
+        (
+            "list_run_events",
+            {"run_id": "run_child_approval", "after_sequence": 0, "limit": 200},
+        ),
+    ]
+
+
 def test_agent_studio_bridge_contract_preserves_agent_definition_lifecycle(monkeypatch):
     calls: list[tuple[str, dict]] = []
 
