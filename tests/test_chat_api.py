@@ -8045,6 +8045,77 @@ def test_summarize_delegated_run_uses_native_run_projection(tmp_path, monkeypatc
         store.close()
 
 
+def test_summarize_delegated_run_uses_runtime_injected_activity_store(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    runtime.activity_store = activity_store
+
+    run = {
+        "run_id": "agent_run_injected_activity",
+        "run_group_id": "run_group_injected_activity",
+        "kind": "agent_run",
+        "runnable_id": "agent_injected",
+        "runnable_name": "Injected Agent",
+        "status": "completed",
+        "user_goal": "整理 runtime-injected activity evidence",
+        "result": "Injected activity store was used.",
+        "timeline": [],
+        "artifacts": [],
+    }
+
+    class FakeAgentRuntimeService:
+        def get_run(self, run_id: str):
+            assert run_id == run["run_id"]
+            return run
+
+    runtime.agent_runtime_service = FakeAgentRuntimeService()
+
+    try:
+        sent = api.send_message("请自动委派一个 Agent 检查 activity store")
+        task_id = sent["task_id"]
+        runtime.chat_session.upsert_assistant_message(
+            task_id=task_id,
+            content="我会交给 Injected Agent 处理。",
+            status=MessageStatus.COMPLETED,
+        )
+        activity_store.record_event(
+            session_id=runtime.chat_session.session_id,
+            task_id=task_id,
+            tool_name="oha.delegation",
+            phase="subagent",
+            title="Injected Agent completed",
+            detail=f"run_id={run['run_id']}",
+            status="completed",
+            metadata={
+                "run_id": run["run_id"],
+                "run_group_id": run["run_group_id"],
+                "run_status": "completed",
+            },
+        )
+        monkeypatch.setattr(
+            chat_api_mod,
+            "get_activity_store",
+            lambda: (_ for _ in ()).throw(AssertionError("global activity store must not be used")),
+        )
+        monkeypatch.setattr(
+            chat_api_mod,
+            "get_agent_runtime_service",
+            lambda: (_ for _ in ()).throw(AssertionError("global runtime service must not be used")),
+        )
+
+        result = api.summarize_delegated_run(run["run_id"])
+        summary_task = runtime.state.get_task(result["task_id"])
+
+        assert result["ok"] is True
+        assert result["summary_created"] is True
+        assert summary_task is not None
+        assert "Injected Agent：已完成" in summary_task.description
+        assert "Injected activity store was used." in summary_task.description
+    finally:
+        activity_store.close()
+        store.close()
+
+
 def test_summarize_delegated_run_waits_for_terminal_status(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))

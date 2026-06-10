@@ -514,6 +514,12 @@ class ChatAPI:
 
         return get_chat_store()
 
+    def _activity_store(self):
+        store = getattr(self._runtime, "activity_store", None)
+        if store is not None:
+            return store
+        return get_activity_store()
+
     def _with_session(self, session_id: str, callback):
         """Run a small ChatAPI mutation against a specific persisted session."""
         session_id = str(session_id or "").strip()
@@ -3040,7 +3046,7 @@ class ChatAPI:
 
     def _record_desktop_snapshot_error_activity(self, task_id: str, error: dict[str, Any]) -> None:
         try:
-            get_activity_store().record_event(
+            self._activity_store().record_event(
                 event_id=f"{task_id}-desktop-snapshot-error",
                 session_id=self._session.session_id,
                 task_id=task_id,
@@ -3072,6 +3078,7 @@ class ChatAPI:
             # 同步主模型任务和 Agent/Workflow Run 状态，再刷新持久化快照。
             self._sync_current_session_status()
             self._session.reload_from_store(fail_active_messages=False)
+            self._sync_group_agent_summary_parent_statuses()
 
             anchor_message_id = str(anchor_message_id or "").strip()
             if anchor_message_id:
@@ -3561,15 +3568,14 @@ class ChatAPI:
             return None
         return run
 
-    @staticmethod
-    def _record_main_chat_approval_activity(task: Any, run: dict[str, Any], content: str) -> None:
+    def _record_main_chat_approval_activity(self, task: Any, run: dict[str, Any], content: str) -> None:
         pending = run.get("pending_approval") if isinstance(run.get("pending_approval"), dict) else {}
         tool = str(pending.get("tool") or "").strip()
         if not tool:
             return
         task_id = str(getattr(task, "task_id", "") or "").strip()
         try:
-            get_activity_store().record_event(
+            self._activity_store().record_event(
                 event_id=f"{task_id}-main-chat-approval-required",
                 session_id=str(getattr(task, "chat_session_id", "") or ""),
                 task_id=task_id,
@@ -5092,7 +5098,7 @@ class ChatAPI:
         if not run_id:
             return None
         try:
-            events = get_activity_store().list_events(
+            events = self._activity_store().list_events(
                 session_id=self._session.session_id,
                 query=run_id,
                 tool="oha.delegation",
@@ -5892,7 +5898,7 @@ class ChatAPI:
         if not task_id:
             return
         try:
-            get_activity_store().record_event(
+            self._activity_store().record_event(
                 session_id=self._session.session_id,
                 task_id=task_id,
                 tool_name="oha.group_dispatch",
@@ -6180,7 +6186,7 @@ class ChatAPI:
         if not ids:
             return {}
         try:
-            store = get_activity_store()
+            store = self._activity_store()
             result: dict[str, list[dict[str, Any]]] = {}
             for task_id, events in store.latest_by_task(ids, limit_per_task=limit_per_task, key_only=True).items():
                 visible = [
@@ -6197,7 +6203,7 @@ class ChatAPI:
 
     def _latest_activity_for_session(self, session_id: str) -> dict[str, Any]:
         try:
-            events = get_activity_store().list_events(session_id=session_id, limit=1, key_only=True)
+            events = self._activity_store().list_events(session_id=session_id, limit=1, key_only=True)
             return events[0].to_dict() if events else {}
         except Exception:
             logger.debug("读取会话最新活动失败", exc_info=True)
@@ -6408,7 +6414,7 @@ class ChatAPI:
             task = self._state.get_task(task_id)
             if did_cancel and task is not None and task.status == TaskStatus.CANCELLED:
                 try:
-                    activity_store = get_activity_store()
+                    activity_store = self._activity_store()
                     activity_store.finalize_task_events(task_id, status="cancelled")
                     activity_store.record_event(
                         session_id=self._session.session_id,
