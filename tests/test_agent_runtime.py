@@ -580,6 +580,82 @@ def test_main_chat_model_loop_coalesces_interleaved_streaming_tool_call_deltas(t
         service.close()
 
 
+def test_main_chat_model_loop_executes_provider_message_tool_calls(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("provider message tool content", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert tools is not None
+
+            def stream():
+                yield {
+                    "choices": [
+                        {
+                            "message": {
+                                "role": "assistant",
+                                "content": "",
+                                "tool_calls": [
+                                    {
+                                        "id": "call_provider_read",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "workspace_read",
+                                            "arguments": '{"path": "README.md"}',
+                                        },
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                }
+
+            return stream()
+
+        assistant_tool_messages = [
+            message for message in messages if message.get("role") == "assistant" and message.get("tool_calls")
+        ]
+        tool_messages = [message for message in messages if message.get("role") == "tool"]
+        assert assistant_tool_messages[-1]["tool_calls"][0]["id"] == "call_provider_read"
+        assert tool_messages[-1]["tool_call_id"] == "call_provider_read"
+        assert "provider message tool content" in tool_messages[-1]["content"]
+        return {"role": "assistant", "content": "Provider message tool call complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-provider-message-tool-calls",
+            session_id="session-main-provider-message-tool-calls",
+            user_goal="Read README through provider message tool call",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Read README"}],
+            tool_policy={"allowed_tools": ["workspace.read"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."]},
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+
+        assert updated["result"] == "Provider message tool call complete"
+        assert tool_event["payload"]["tool"] == "workspace.read"
+        assert tool_event["payload"]["input_preview"]["path"] == "README.md"
+        assert event_types.count("agent.tool.call") == 1
+        assert event_types.count("model.output.completed") == 1
+        assert not any(str(event_type).endswith(".delta") for event_type in event_types)
+    finally:
+        service.close()
+
+
 def test_main_chat_provider_exception_is_redacted_from_run_events_and_storage(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     leaked_secret = "sk-provider-exception123456"
