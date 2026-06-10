@@ -245,6 +245,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must run smoke tests before packaging",
     ),
     (
+        "tests/test_protocol.py",
+        "macOS release workflow smoke tests must cover Task API protocol schemas",
+    ),
+    (
+        "tests/test_state.py",
+        "macOS release workflow smoke tests must cover AppState task lifecycle",
+    ),
+    (
         "tests/test_screenshot.py",
         "macOS release workflow smoke tests must cover screenshot behavior",
     ),

@@ -60,6 +60,8 @@ jobs:
       - name: Run smoke tests
         run: |
           python -m pytest \
+            tests/test_protocol.py \
+            tests/test_state.py \
             tests/test_screenshot.py \
             tests/test_proactive.py \
             tests/test_chat_session.py \
