@@ -399,6 +399,117 @@ def test_run_detail_approval_bridge_contract_preserves_approve_reject_and_cancel
     ]
 
 
+def test_agent_studio_bridge_contract_preserves_agent_definition_lifecycle(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeRuntimeService:
+        def list_agents(self):
+            calls.append(("list_agents", {}))
+            return {
+                "agents": [
+                    {
+                        "agent_id": "agent-1",
+                        "name": "Native Agent",
+                        "execution_backend": "native_profile",
+                        "enabled": True,
+                    }
+                ]
+            }
+
+        def create_agent(self, payload):
+            calls.append(("create_agent", payload))
+            return {
+                "agent_id": "agent-1",
+                "execution_backend": "native_profile",
+                **payload,
+            }
+
+        def update_agent(self, agent_id, payload):
+            calls.append(("update_agent", {"agent_id": agent_id, **payload}))
+            return {
+                "agent_id": agent_id,
+                "execution_backend": "native_profile",
+                **payload,
+            }
+
+        def delete_agent(self, agent_id):
+            calls.append(("delete_agent", {"agent_id": agent_id}))
+            return {"ok": True, "agent_id": agent_id}
+
+    monkeypatch.setattr(agents, "get_agent_runtime_service", lambda: FakeRuntimeService())
+
+    agent_request = agents.AgentRequest(
+        name="Native Agent",
+        nickname="Worker",
+        instructions="Use NativeRunEngine.",
+        model_mode="profile",
+        model_profile_id="profile-main",
+        tool_policy={"allowed_tools": ["workspace.read"]},
+        workspace_policy={"readable_scopes": ["workspace"]},
+        skill_ids=["skill-1"],
+        enabled=True,
+    )
+
+    listed = asyncio.run(agents.list_agents())
+    created = asyncio.run(agents.create_agent(agent_request))
+    updated = asyncio.run(
+        agents.update_agent(
+            "agent-1",
+            agents.AgentRequest(
+                name="Native Agent v2",
+                instructions="Updated native instructions.",
+                model_mode="custom_api",
+                model_config={"provider": "openai_compatible", "model": "fake-model"},
+                enabled=False,
+            ),
+        )
+    )
+    deleted = asyncio.run(agents.delete_agent("agent-1"))
+
+    assert listed["agents"][0]["execution_backend"] == "native_profile"
+    assert created["name"] == "Native Agent"
+    assert created["tool_policy"] == {"allowed_tools": ["workspace.read"]}
+    assert updated == {
+        "agent_id": "agent-1",
+        "execution_backend": "native_profile",
+        "name": "Native Agent v2",
+        "instructions": "Updated native instructions.",
+        "model_mode": "custom_api",
+        "model_config": {"provider": "openai_compatible", "model": "fake-model"},
+        "enabled": False,
+    }
+    assert deleted == {"ok": True, "agent_id": "agent-1"}
+    assert calls == [
+        ("list_agents", {}),
+        (
+            "create_agent",
+            {
+                "name": "Native Agent",
+                "nickname": "Worker",
+                "instructions": "Use NativeRunEngine.",
+                "model_mode": "profile",
+                "model_profile_id": "profile-main",
+                "tool_policy": {"allowed_tools": ["workspace.read"]},
+                "workspace_policy": {"readable_scopes": ["workspace"]},
+                "skill_ids": ["skill-1"],
+                "enabled": True,
+            },
+        ),
+        (
+            "update_agent",
+            {
+                "agent_id": "agent-1",
+                "name": "Native Agent v2",
+                "instructions": "Updated native instructions.",
+                "model_mode": "custom_api",
+                "model_config": {"provider": "openai_compatible", "model": "fake-model"},
+                "enabled": False,
+            },
+        ),
+        ("delete_agent", {"agent_id": "agent-1"}),
+    ]
+
+
 def test_workflow_studio_bridge_contract_preserves_definition_lifecycle(monkeypatch):
     calls: list[tuple[str, dict]] = []
 
