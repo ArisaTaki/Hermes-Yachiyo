@@ -257,6 +257,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover TaskRunner native approval roundtrip",
     ),
     (
+        "tests/test_task_runner.py::test_task_runner_main_chat_approval_timeout_clears_chat_and_activity_projection",
+        "macOS release workflow smoke tests must cover TaskRunner approval timeout projection",
+    ),
+    (
         "tests/test_streaming_provider_smoke.py",
         "macOS release workflow smoke tests must cover OpenAI-compatible streaming provider contracts",
     ),

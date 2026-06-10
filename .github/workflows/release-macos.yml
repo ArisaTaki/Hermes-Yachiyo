@@ -63,6 +63,7 @@ jobs:
             tests/test_protocol.py \
             tests/test_state.py \
             tests/test_task_runner.py::test_task_runner_main_chat_native_tool_approval_roundtrip \
+            tests/test_task_runner.py::test_task_runner_main_chat_approval_timeout_clears_chat_and_activity_projection \
             tests/test_streaming_provider_smoke.py \
             tests/test_legacy_kernel_removal.py \
             tests/test_runtime_injection_boundary.py \

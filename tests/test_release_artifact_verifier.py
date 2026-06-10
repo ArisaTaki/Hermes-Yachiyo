@@ -370,6 +370,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover Task API protocol schemas" in messages
     assert "macOS release workflow smoke tests must cover AppState task lifecycle" in messages
     assert "macOS release workflow smoke tests must cover TaskRunner native approval roundtrip" in messages
+    assert "macOS release workflow smoke tests must cover TaskRunner approval timeout projection" in messages
     assert "macOS release workflow smoke tests must cover OpenAI-compatible streaming provider contracts" in messages
     assert "macOS release workflow smoke tests must cover legacy Hermes kernel removal" in messages
     assert "macOS release workflow smoke tests must cover Native runtime injection boundary" in messages
