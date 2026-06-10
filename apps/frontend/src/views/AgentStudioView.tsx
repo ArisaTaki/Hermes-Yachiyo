@@ -3381,6 +3381,8 @@ export function AgentStudioView() {
     if (selectedRunRerunDisabledReason) throw new Error(selectedRunRerunDisabledReason);
     if (!selectedRunRerunTarget) throw new Error('找不到原 Run 对应的 Agent 或 Workflow，无法重跑。');
     const run = await rerunRun(selectedRun.run_id);
+    upsertRunDetailCache([run]);
+    await refreshRunGroupsForRuns([run]);
     openRunDetail(run.run_id, { revealInHistory: true });
     if (selectedRunRerunTarget.kind === 'agent') {
       return {
