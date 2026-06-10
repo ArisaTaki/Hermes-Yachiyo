@@ -673,7 +673,7 @@ def test_stream_smoke_summarizes_message_level_tool_calls():
                                 "type": "function",
                                 "function": {
                                     "name": "workspace_read",
-                                    "arguments": '{"path":"README.md"}',
+                                    "arguments": {"path": "README.md"},
                                 },
                             }
                         ]
@@ -684,7 +684,8 @@ def test_stream_smoke_summarizes_message_level_tool_calls():
         }
     ]
 
-    summary = smoke.summarize_stream_chunks(chunks)
+    public_summary = smoke.summarize_stream_chunks(chunks)
+    summary = smoke.summarize_stream_chunks(chunks, include_tool_arguments=True)
 
     assert summary["ok"] is True
     assert summary["finish_reasons"] == ["tool_calls"]
@@ -694,10 +695,11 @@ def test_stream_smoke_summarizes_message_level_tool_calls():
         {
             "id": "call_message_read",
             "name": "workspace_read",
-            "argument_chars": len('{"path":"README.md"}'),
+            "argument_chars": len('{"path": "README.md"}'),
+            "arguments": '{"path": "README.md"}',
         }
     ]
-    assert "README.md" not in json.dumps(summary)
+    assert "README.md" not in json.dumps(public_summary)
 
 
 def test_stream_smoke_summarizes_legacy_function_call_deltas():

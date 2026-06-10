@@ -2219,7 +2219,7 @@ def test_main_chat_model_loop_executes_message_level_openai_compatible_sse_tool_
                                         "type": "function",
                                         "function": {
                                             "name": "workspace_read",
-                                            "arguments": '{"path": "README.md"}',
+                                            "arguments": {"path": "README.md"},
                                         },
                                     }
                                 ],

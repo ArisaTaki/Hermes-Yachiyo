@@ -676,6 +676,16 @@ def _message_text_value(value: Any) -> str:
     return str(value) if value is not None and not isinstance(value, (list, tuple, set)) else ""
 
 
+def _tool_arguments_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
+
+
 def _message_content_text(content: Any) -> str:
     if isinstance(content, dict):
         if _is_reasoning_content_part(content):
@@ -851,7 +861,7 @@ def _merge_stream_tool_call_delta(
         function["name"] = f"{function.get('name') or ''}{name}"
     arguments = _message_field(raw_function, "arguments")
     if arguments:
-        function["arguments"] = f"{function.get('arguments') or ''}{arguments}"
+        function["arguments"] = f"{function.get('arguments') or ''}{_tool_arguments_text(arguments)}"
 
 
 def _coalesced_stream_tool_calls(accumulator: dict[tuple[int, int], dict[str, Any]]) -> list[dict[str, Any]]:

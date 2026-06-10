@@ -59,6 +59,16 @@ def _text_value(value: Any) -> str:
     return str(value) if value is not None else ""
 
 
+def _tool_arguments_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True)
+    return str(value)
+
+
 def _raw_part_text(value: Any) -> str:
     if isinstance(value, str):
         return value
@@ -249,7 +259,7 @@ def _merge_tool_delta(
         function["name"] = f"{function.get('name') or ''}{name}"
     arguments = _field(function_delta, "arguments")
     if arguments:
-        function["arguments"] = f"{function.get('arguments') or ''}{arguments}"
+        function["arguments"] = f"{function.get('arguments') or ''}{_tool_arguments_text(arguments)}"
 
 
 def summarize_stream_chunks(
