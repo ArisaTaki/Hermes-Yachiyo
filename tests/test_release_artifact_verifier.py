@@ -113,6 +113,31 @@ def test_verifier_requires_packaging_to_exclude_rebuilt_node_pty(tmp_path):
             config,
             "macOS release packaging must exclude rebuilt node-pty native artifacts",
         ),
+        verifier.Finding(
+            config,
+            "macOS release packaging must exclude Vite cache artifacts",
+        ),
+    ]
+
+
+def test_verifier_reports_tracked_vite_cache(monkeypatch, tmp_path):
+    git_dir = tmp_path / ".git"
+    git_dir.mkdir()
+
+    class Completed:
+        returncode = 0
+        stdout = "apps/frontend/.vite/deps/package.json\n"
+        stderr = ""
+
+    monkeypatch.setattr(verifier.subprocess, "run", lambda *_args, **_kwargs: Completed())
+
+    findings = verifier._verify_tracked_generated_artifacts(tmp_path)
+
+    assert findings == [
+        verifier.Finding(
+            tmp_path / "apps/frontend/.vite/deps/package.json",
+            "generated Vite cache artifacts must not be tracked",
+        )
     ]
 
 

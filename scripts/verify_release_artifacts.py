@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -48,6 +49,9 @@ FORBIDDEN_FILES: tuple[Path, ...] = (
 
 RELEASE_SECURITY_CHANNELS: tuple[str, ...] = ("release", "alpha", "stable")
 PACKAGING_CONFIG_FILE = Path("apps/frontend/electron-builder.yml")
+TRACKED_GENERATED_PATHS: tuple[str, ...] = (
+    "apps/frontend/.vite",
+)
 PACKAGING_CONFIG_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "npmRebuild: false",
@@ -56,6 +60,10 @@ PACKAGING_CONFIG_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "- '!node_modules/node-pty/build/**'",
         "macOS release packaging must exclude rebuilt node-pty native artifacts",
+    ),
+    (
+        "- '!**/.vite/**'",
+        "macOS release packaging must exclude Vite cache artifacts",
     ),
 )
 RELEASE_WORKFLOW_FILE = Path(".github/workflows/release-macos.yml")
@@ -164,6 +172,7 @@ def verify_release_artifacts(
 
     if check_release_security_guards:
         findings.extend(_verify_release_security_guards(root_path))
+        findings.extend(_verify_tracked_generated_artifacts(root_path))
         findings.extend(_verify_release_packaging_guards(root_path))
         findings.extend(_verify_release_workflow_guards(root_path))
 
@@ -256,6 +265,28 @@ def _verify_release_security_guards(root: Path) -> list[Finding]:
                         )
                     )
     return findings
+
+
+def _verify_tracked_generated_artifacts(root: Path) -> list[Finding]:
+    if not (root / ".git").exists():
+        return []
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(root), "ls-files", *TRACKED_GENERATED_PATHS],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        return [Finding(root / ".git", f"could not inspect tracked generated artifacts: {exc}")]
+    if completed.returncode != 0:
+        detail = completed.stderr.strip() or f"git exited with {completed.returncode}"
+        return [Finding(root / ".git", f"could not inspect tracked generated artifacts: {detail}")]
+    tracked_paths = [path.strip() for path in completed.stdout.splitlines() if path.strip()]
+    return [
+        Finding(root / path, "generated Vite cache artifacts must not be tracked")
+        for path in tracked_paths
+    ]
 
 
 def _verify_release_packaging_guards(root: Path) -> list[Finding]:

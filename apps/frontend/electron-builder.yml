@@ -18,6 +18,7 @@ files:
   - node_modules/node-pty/prebuilds/darwin-arm64/**
   - node_modules/node-pty/prebuilds/darwin-x64/**
   - node_modules/node-addon-api/**
+  - '!**/.vite/**'
   - '!node_modules/node-pty/build/**'
   - '!node_modules/node-pty/prebuilds/win32*/**'
   - '!node_modules/node-pty/deps/**'
