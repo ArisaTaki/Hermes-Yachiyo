@@ -155,6 +155,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must document Gatekeeper first-launch handling",
     ),
     (
+        "未使用 Apple Developer ID 签名或 notarization",
+        "macOS release workflow must document current notarization status",
+    ),
+    (
         "屏幕录制权限",
         "macOS release workflow must document screen recording permission setup",
     ),

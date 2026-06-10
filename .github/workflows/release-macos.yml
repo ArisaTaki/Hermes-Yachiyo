@@ -345,7 +345,7 @@ jobs:
 
           $(cat release/changelog.md)
 
-          当前免费分发链路只自签名 .app，DMG 保持未签名，以避免 macOS 在挂载 DMG 前直接拒绝。首次启动应用时仍会显示未知开发者 / Gatekeeper 提示；请在 Finder 中按住 Control 点击应用并选择“打开”，或在系统设置的“隐私与安全性”中允许打开。
+          当前免费分发链路只自签名 .app，未使用 Apple Developer ID 签名或 notarization，DMG 保持未签名，以避免 macOS 在挂载 DMG 前直接拒绝。首次启动应用时仍会显示未知开发者 / Gatekeeper 提示；请在 Finder 中按住 Control 点击应用并选择“打开”，或在系统设置的“隐私与安全性”中允许打开。
 
           GPT-SoVITS 语音资源包不随应用 DMG 发布；请在独立的“Yachiyo GPT-SoVITS Voice Assets”资源 release 中下载。
 
@@ -367,7 +367,7 @@ jobs:
 
           $(cat release/changelog.md)
 
-          当前免费分发链路只自签名 .app，DMG 保持未签名；macOS 仍会在首次启动应用时显示未知开发者 / Gatekeeper 提示。
+          当前免费分发链路只自签名 .app，未使用 Apple Developer ID 签名或 notarization，DMG 保持未签名；macOS 仍会在首次启动应用时显示未知开发者 / Gatekeeper 提示。
           EOF
 
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"

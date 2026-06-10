@@ -231,6 +231,7 @@ def test_verifier_requires_release_workflow_guard_before_dependency_install(tmp_
         "        run: scripts/build_macos_self_signed_dmg.sh \"Oha-Yachiyo Self Signed\"\n"
         "      - name: Prepare release metadata\n"
         "        run: |\n"
+        "          echo \"未使用 Apple Developer ID 签名或 notarization\"\n"
         "          echo \"首次启动应用时仍会显示未知开发者 / Gatekeeper 提示\"\n"
         "          echo \"主动桌面观察需要在 macOS 系统设置中允许 Oha-Yachiyo 使用屏幕录制权限\"\n"
         "      - name: Verify packaged release artifacts\n"
@@ -314,6 +315,7 @@ def test_verifier_requires_release_workflow_first_launch_permission_guidance(tmp
     messages = [finding.message for finding in findings]
 
     assert "macOS release workflow must document Gatekeeper first-launch handling" in messages
+    assert "macOS release workflow must document current notarization status" in messages
     assert "macOS release workflow must document screen recording permission setup" in messages
 
 
