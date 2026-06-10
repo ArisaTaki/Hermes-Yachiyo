@@ -22,6 +22,7 @@ from apps.shell.agent_runtime import (
     NativeRunEngine,
     ToolApprovalResumeContext,
     ToolBroker,
+    WorkflowContinuationCoordinator,
     WorkflowParentResumeCoordinator,
 )
 from scripts.verify_secret_redaction import verify_secret_redaction
@@ -320,6 +321,146 @@ def test_workflow_parent_resume_coordinator_continues_completed_child():
                 **child_node_info,
             },
         ),
+    ]
+
+
+def test_workflow_continuation_coordinator_pauses_for_approval_node():
+    class FakeEngine:
+        def __init__(self):
+            self.events: list[tuple[str, str, dict[str, object]]] = []
+            self.run_updates: list[tuple[str, dict[str, object]]] = []
+            self.group_updates: list[tuple[str, dict[str, object]]] = []
+
+        def _workflow_path(self, workflow):
+            return workflow["nodes"]
+
+        def _node_kind(self, node):
+            return node["type"]
+
+        def _workflow_approval_criteria(self, node):
+            return str((node.get("data") or {}).get("criteria") or "")
+
+        def _timeline(self, event, detail, **payload):
+            return {"event": event, "detail": detail, **payload}
+
+        def append_run_event(self, run_id, event_type, payload):
+            self.events.append((run_id, event_type, payload))
+
+        def _update_run(self, run_id, **fields):
+            self.run_updates.append((run_id, fields))
+            return {"run_id": run_id, "run_group_id": "run_group", **fields}
+
+        def _update_run_group(self, run_group_id, **fields):
+            self.group_updates.append((run_group_id, fields))
+
+        def get_run(self, run_id):
+            assert run_id == "workflow_run"
+            assert self.run_updates
+            fields = dict(self.run_updates[-1][1])
+            private_pending = fields.get("pending_approval")
+            if isinstance(private_pending, dict):
+                fields["pending_approval"] = {
+                    "approval_id": str(private_pending.get("approval_id") or ""),
+                    "tool": str(private_pending.get("tool") or ""),
+                    "input_preview": private_pending.get("input_preview") or {},
+                    "requested_at": str(private_pending.get("requested_at") or ""),
+                }
+            return {
+                "run_id": run_id,
+                "run_group_id": "run_group",
+                **fields,
+            }
+
+    engine = FakeEngine()
+    coordinator = WorkflowContinuationCoordinator(engine)
+    timeline: list[dict[str, object]] = []
+    artifacts: list[dict[str, object]] = []
+    run = {
+        "run_id": "workflow_run",
+        "run_group_id": "run_group",
+        "user_goal": "Ship workflow",
+    }
+    workflow = {
+        "nodes": [
+            {
+                "id": "gate",
+                "type": "approval",
+                "data": {
+                    "label": "Human Gate",
+                    "criteria": "Review child output before continuing.",
+                },
+            }
+        ]
+    }
+
+    result = coordinator.continue_run(
+        run,
+        workflow,
+        context="Child result ready",
+        timeline=timeline,
+        artifacts=artifacts,
+        start_index=0,
+        root_group=True,
+    )
+
+    pending = result["pending_approval"]
+    assert result["status"] == "approval_required"
+    assert result["result"] == "等待审批：Human Gate"
+    assert pending["tool"] == "workflow.approval"
+    assert pending["input_preview"] == {
+        "checkpoint": "Human Gate",
+        "context": "Child result ready",
+        "criteria": "Review child output before continuing.",
+    }
+    assert "workflow_context" not in pending
+    assert timeline == [
+        {
+            "event": "workflow.node.approval_required",
+            "detail": "Human Gate",
+            "workflow_node_id": "gate",
+            "workflow_node_kind": "approval",
+            "workflow_node_label": "Human Gate",
+            "workflow_node_approval_criteria": "Review child output before continuing.",
+            "status": "approval_required",
+            "pending_approval": pending,
+        }
+    ]
+    assert engine.events == [
+        (
+            "workflow_run",
+            "workflow.node.approval_required",
+            {
+                "workflow_node_id": "gate",
+                "workflow_node_kind": "approval",
+                "workflow_node_label": "Human Gate",
+                "workflow_node_approval_criteria": "Review child output before continuing.",
+                "status": "approval_required",
+                "pending_approval": pending,
+            },
+        )
+    ]
+    assert len(engine.run_updates) == 1
+    run_id, run_update = engine.run_updates[0]
+    assert run_id == "workflow_run"
+    assert run_update["status"] == "approval_required"
+    assert run_update["result"] == "等待审批：Human Gate"
+    assert run_update["timeline"] is timeline
+    assert run_update["artifacts"] is artifacts
+    private_pending = run_update["pending_approval"]
+    assert private_pending["approval_id"].startswith("approval_")
+    assert private_pending["workflow_context"] == "Child result ready"
+    assert private_pending["workflow_next_index"] == 1
+    assert private_pending["workflow_node_id"] == "gate"
+    assert private_pending["workflow_node_label"] == "Human Gate"
+    assert private_pending["workflow_node_approval_criteria"] == "Review child output before continuing."
+    assert engine.group_updates == [
+        (
+            "run_group",
+            {
+                "status": "approval_required",
+                "summary": "等待审批：Human Gate",
+            },
+        )
     ]
 
 
