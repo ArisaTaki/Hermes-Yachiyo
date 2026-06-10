@@ -416,6 +416,39 @@ def test_model_profiles_ui_preserves_profile_lifecycle_paths() -> None:
     )
 
 
+def test_model_profiles_ui_preserves_source_lifecycle_paths() -> None:
+    _assert_contains(
+        "apps/frontend/src/lib/modelProfiles.ts",
+        [
+            "export async function listModelSources()",
+            "return apiGet('/ui/model-sources');",
+            "export async function createModelSource(",
+            "return apiPost('/ui/model-sources', request);",
+            "export async function updateModelSource(",
+            "apiPatch(`/ui/model-sources/${encodeURIComponent(sourceId)}`, request)",
+            "export async function deleteModelSource(",
+            "apiDelete(`/ui/model-sources/${encodeURIComponent(sourceId)}`)",
+            "export async function testModelSource(",
+            "apiPost(`/ui/model-sources/${encodeURIComponent(sourceId)}/test`, model ? { model } : {})",
+            "export async function fetchModelSourceModels(",
+            "apiPost(`/ui/model-sources/${encodeURIComponent(sourceId)}/models/fetch`)",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/views/ModelProfilesView.tsx",
+        [
+            "const saved = sourceDraft.source_id",
+            "? await updateModelSource(sourceDraft.source_id, payload)",
+            ": await createModelSource(payload);",
+            "async function fetchModelsForSource()",
+            "const result = await fetchModelSourceModels(saved.source_id);",
+            "await deleteModelSource(sourceDraft.source_id);",
+            "function requestRemoveSource()",
+            "onConfirm: () => void removeSource(),",
+        ],
+    )
+
+
 def test_desktop_presence_features_preserve_live2d_screenshot_and_tts_entrypoints() -> None:
     _assert_contains(
         "apps/frontend/src/views/ModeSettingsView.tsx",

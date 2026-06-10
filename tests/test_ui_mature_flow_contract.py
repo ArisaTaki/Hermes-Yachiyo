@@ -486,6 +486,150 @@ def test_model_profiles_bridge_contract_preserves_profile_lifecycle(monkeypatch)
     ]
 
 
+def test_model_profiles_bridge_contract_preserves_source_lifecycle(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeModelProfileService:
+        def list_sources(self):
+            calls.append(("list_sources", {}))
+            return {
+                "ok": True,
+                "sources": [
+                    {
+                        "source_id": "source-openai",
+                        "name": "OpenAI Compatible",
+                        "capability": "chat",
+                        "provider": "openai_compatible",
+                    }
+                ],
+            }
+
+        def create_source(self, payload):
+            calls.append(("create_source", payload))
+            return {
+                "source_id": payload.get("source_id", "source-openai"),
+                **payload,
+            }
+
+        def get_source(self, source_id):
+            calls.append(("get_source", {"source_id": source_id}))
+            return {
+                "source_id": source_id,
+                "name": "OpenAI Compatible",
+                "capability": "chat",
+                "provider": "openai_compatible",
+            }
+
+        def update_source(self, source_id, payload):
+            calls.append(("update_source", {"source_id": source_id, **payload}))
+            return {
+                "source_id": source_id,
+                **payload,
+            }
+
+        def test_source(self, source_id, payload):
+            calls.append(("test_source", {"source_id": source_id, **payload}))
+            return {
+                "ok": True,
+                "success": True,
+                "message": "OK",
+                "source": {"source_id": source_id},
+            }
+
+        def fetch_source_models(self, source_id):
+            calls.append(("fetch_source_models", {"source_id": source_id}))
+            return {
+                "ok": True,
+                "models": [{"id": "gpt-test", "name": "GPT Test"}],
+                "count": 1,
+                "source": {"source_id": source_id},
+            }
+
+        def delete_source(self, source_id):
+            calls.append(("delete_source", {"source_id": source_id}))
+            return {"ok": True, "source_id": source_id}
+
+    monkeypatch.setattr(model_profiles, "get_model_profile_service", lambda: FakeModelProfileService())
+
+    listed = asyncio.run(model_profiles.list_model_sources())
+    created = asyncio.run(
+        model_profiles.create_model_source(
+            model_profiles.ModelSourceRequest(
+                source_id="source-openai",
+                name="OpenAI Compatible",
+                capability="chat",
+                provider="openai_compatible",
+                base_url="https://api.example.test/v1",
+                api_key="placeholder-key",
+                enabled=True,
+                options={"timeout_seconds": 15},
+            )
+        )
+    )
+    fetched = asyncio.run(model_profiles.get_model_source("source-openai"))
+    updated = asyncio.run(
+        model_profiles.update_model_source(
+            "source-openai",
+            model_profiles.ModelSourceRequest(
+                name="OpenAI Compatible v2",
+                enabled=False,
+                options={"timeout_seconds": 5},
+            ),
+        )
+    )
+    tested = asyncio.run(
+        model_profiles.test_model_source(
+            "source-openai",
+            model_profiles.ModelSourceTestRequest(model="gpt-test"),
+        )
+    )
+    models = asyncio.run(model_profiles.fetch_model_source_models("source-openai"))
+    deleted = asyncio.run(model_profiles.delete_model_source("source-openai"))
+
+    assert listed["sources"][0]["source_id"] == "source-openai"
+    assert created["base_url"] == "https://api.example.test/v1"
+    assert created["options"] == {"timeout_seconds": 15}
+    assert fetched["provider"] == "openai_compatible"
+    assert updated == {
+        "source_id": "source-openai",
+        "name": "OpenAI Compatible v2",
+        "enabled": False,
+        "options": {"timeout_seconds": 5},
+    }
+    assert tested["source"]["source_id"] == "source-openai"
+    assert models["models"] == [{"id": "gpt-test", "name": "GPT Test"}]
+    assert deleted == {"ok": True, "source_id": "source-openai"}
+    assert calls == [
+        ("list_sources", {}),
+        (
+            "create_source",
+            {
+                "source_id": "source-openai",
+                "name": "OpenAI Compatible",
+                "capability": "chat",
+                "provider": "openai_compatible",
+                "base_url": "https://api.example.test/v1",
+                "api_key": "placeholder-key",
+                "enabled": True,
+                "options": {"timeout_seconds": 15},
+            },
+        ),
+        ("get_source", {"source_id": "source-openai"}),
+        (
+            "update_source",
+            {
+                "source_id": "source-openai",
+                "name": "OpenAI Compatible v2",
+                "enabled": False,
+                "options": {"timeout_seconds": 5},
+            },
+        ),
+        ("test_source", {"source_id": "source-openai", "model": "gpt-test"}),
+        ("fetch_source_models", {"source_id": "source-openai"}),
+        ("delete_source", {"source_id": "source-openai"}),
+    ]
+
+
 def test_run_detail_approval_bridge_contract_preserves_approve_reject_and_cancel(monkeypatch):
     calls: list[tuple[str, str, str]] = []
 
