@@ -754,6 +754,70 @@ run_group:
 
 这一步把此前“Workflow Studio 编辑/节点配置/保存并运行路径已暴露稳定 selector”和 HTTP route roundtrip 推进到一次真实 Browser UI 操作：Workflow Studio 保存定义、创建 Workflow Run、父子 RunGroup 投影、Run Detail 自动打开、Workflow Steps 与 RunEvent replay 都在同一 source Bridge 环境下闭环。
 
+### Browser group chat dispatch and summary E2E
+
+本轮继续补群聊 / 自动派发 / 会话总结的 source Browser 跨 UI 证据：从真实 Chat 页面创建群组，选择 Coding Agent，向主模型发送群聊派发请求，确认主模型 `oha.group_dispatch`、Coding Agent Run、群组总结 Task 和 Chat transcript 都在同一 Native runtime 下收敛。
+
+```text
+./node_modules/.bin/vite --host 127.0.0.1 --port 5174 --strictPort  # cwd=apps/frontend
+source Bridge: http://127.0.0.1:8420  # isolated OHA_YACHIYO_HOME, no session token for source Browser
+fake provider: http://127.0.0.1:18774/v1  # profile test returns JSON OK, main model dispatches, Coding Agent and summary return final content
+Browser route: http://127.0.0.1:5174/#/chat
+```
+
+验证内容：
+
+- 在隔离 `OHA_YACHIYO_HOME=/tmp/oha-yachiyo-browser-group-dispatch-20260611044908` 中创建并测试默认 Chat ModelProfile；Bridge 启动后 `/ui/chat/executor` 为 `NativeAgentExecutor` / `available=true`。
+- Browser 打开 Chat 后显示 `模型配置 ok`；点击 `群组` tab 和 `创建群组`，在真实群组弹窗中填写 `Browser Group Dispatch Smoke`，选中 `Coding Agent`，点击 `创建`。
+- Chat 自动切到新群组，header 显示 `Browser Group Dispatch Smoke`、`群组 · 2 成员`。
+- Browser 输入并发送 `@主模型 请安排 Coding 做 Browser Native 群聊派发验证`。
+- fake provider 的主模型回复包含 `oha.group_dispatch` JSON，但 Chat transcript 不泄露该 directive；页面展示“我把这个任务派给 Coding Agent 了”。
+- Coding Agent 的 Native Agent Run 完成后，页面展示 `Coding browser native dispatch result` 和 `运行详情` 入口；随后主模型群组总结 Task 自动完成，页面展示 `群组总结：Coding 已完成 Browser Native 群聊派发。`。
+- Browser console error 为空，页面最终不再 processing。
+
+Bridge API / SQLite 复核：
+
+```text
+chat:
+  is_processing: false
+  approval_count: 0
+  parent_status: completed
+  group_dispatch_count: 1
+  group_agent_summary_status: completed
+  group_dispatch_run_group_id: run_group_47d4513c3542
+agent_message:
+  status: completed
+  run_id: agent_run_12bc3d368e65
+  run_status: completed
+  delegated_goal: 做 Browser Native 群聊派发验证
+run_group:
+  run_group_id: run_group_47d4513c3542
+  status: completed
+  child_run_ids:
+    agent_run_12bc3d368e65
+task_run_links:
+  63102dd75b2e -> main_chat_run_9ae531519beb -> completed
+  a3efe3823394 -> main_chat_run_2228f82af586 -> completed
+run_events:
+  main_chat_run_9ae531519beb:
+    run.started
+    task.linked
+    model.request.started
+    model.output.completed
+    run.completed
+  agent_run_12bc3d368e65:
+    agent.run.started
+    agent.run.completed
+  main_chat_run_2228f82af586:
+    run.started
+    task.linked
+    model.request.started
+    model.output.completed
+    run.completed
+```
+
+这一步把此前 ChatAPI / TaskRunner / Bridge route 级群聊派发回归推进到真实 Browser UI：群组创建、成员选择、群聊发送、主模型派发、Agent Run、RunGroup、群组总结 Task、Task↔Run link 和 Chat transcript 都在 source Bridge 环境下闭环，并继续证明内部 `oha.group_dispatch` directive 只作为执行合同，不暴露给用户 transcript。
+
 ### Chat cancel late-output hardening
 
 本轮继续推进主聊天取消路径，先用慢速 OpenAI-compatible fake model 做真实 UI 取消 smoke，发现一个真实生命周期 bug：
