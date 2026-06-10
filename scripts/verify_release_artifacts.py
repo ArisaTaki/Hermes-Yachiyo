@@ -281,6 +281,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover release-like CredentialStore guards",
     ),
     (
+        "tests/test_secret_redaction_verifier.py",
+        "macOS release workflow smoke tests must cover runtime secret redaction verifier",
+    ),
+    (
+        "tests/test_security_logging.py",
+        "macOS release workflow smoke tests must cover security logging redaction",
+    ),
+    (
         "tests/test_screenshot.py",
         "macOS release workflow smoke tests must cover screenshot behavior",
     ),
