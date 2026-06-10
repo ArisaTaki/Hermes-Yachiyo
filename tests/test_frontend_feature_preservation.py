@@ -208,6 +208,8 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "if (name === 'run.started') return 'Run 已启动';",
             "if (name === 'model.output.completed') return '模型输出完成';",
             "if (name === 'approval.timeout') return '审批已超时';",
+            "if (name === 'agent.run.cancelled') return 'Agent 已取消';",
+            "if (name === 'run.rerun.started') return '从原 Run 重跑';",
             "if (name === 'workflow.node.artifact') return detail ? `产物节点 · ${detail}` : '产物节点';",
             "<h2>Run Detail</h2>",
             "Approval Required",

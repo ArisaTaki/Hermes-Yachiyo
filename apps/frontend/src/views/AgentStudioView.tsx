@@ -1181,6 +1181,7 @@ function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'approval.timeout') return '审批已超时';
   if (name === 'agent.run.resumed') return 'Agent 已继续执行';
   if (name === 'agent.run.completed') return 'Run 已完成';
+  if (name === 'agent.run.cancelled') return 'Agent 已取消';
   if (name === 'agent.run.failed') return 'Run 执行失败';
   if (name === 'run.cancelled') return 'Run 已取消';
   if (name === 'run.completed') return 'Run 已完成';
