@@ -532,6 +532,63 @@ def test_chat_cancel_http_route_returns_ui_cancel_projection(monkeypatch):
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_chat_delegated_summary_http_route_returns_followup_projection(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "ui.py"
+        spec = importlib.util.spec_from_file_location("_oha_ui_delegated_summary_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        ui_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = ui_route_module
+        spec.loader.exec_module(ui_route_module)
+
+        class FakeChatAPI:
+            def __init__(self, runtime):
+                assert runtime is fake_runtime
+
+            def summarize_delegated_run(self, run_id):
+                assert run_id == "run_delegate_http"
+                return {
+                    "ok": True,
+                    "summary_created": True,
+                    "run_id": run_id,
+                    "run_status": "completed",
+                    "task_id": "summary-task-http",
+                }
+
+        fake_runtime = SimpleNamespace()
+        monkeypatch.setattr(ui_route_module, "get_runtime", lambda: fake_runtime)
+        monkeypatch.setattr(ui_route_module, "ChatAPI", FakeChatAPI)
+        route_app = FastAPI()
+        route_app.include_router(ui_route_module.router)
+
+        with TestClient(route_app) as client:
+            response = client.post(
+                "/ui/chat/delegated-run-summary",
+                json={"run_id": "run_delegate_http"},
+            )
+
+        payload = response.json()
+        assert response.status_code == 200
+        assert payload == {
+            "ok": True,
+            "summary_created": True,
+            "run_id": "run_delegate_http",
+            "run_status": "completed",
+            "task_id": "summary-task-http",
+        }
+    finally:
+        sys.modules.pop("_oha_ui_delegated_summary_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_chat_image_bridge_route_reaches_native_run_events(tmp_path, monkeypatch):
     try:
         from fastapi import FastAPI
