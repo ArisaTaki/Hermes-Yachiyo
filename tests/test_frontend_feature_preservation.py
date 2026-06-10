@@ -181,6 +181,32 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
     )
 
 
+def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -> None:
+    _assert_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            "data-testid=\"chat-header-image-attach-button\"",
+            "data-testid=\"chat-header-stop-button\"",
+            "data-testid=\"chat-composer-image-attach-button\"",
+            "data-testid=\"chat-composer-stop-button\"",
+            "data-testid=\"chat-image-file-input\"",
+            "data-testid=\"chat-message-approval-card\"",
+            "data-testid=\"chat-message-approval-actions\"",
+            "data-testid=\"chat-message-approval-approve\"",
+            "data-testid=\"chat-message-approval-reject\"",
+            "data-testid=\"chat-message-approval-open-run-detail\"",
+            "data-testid=\"chat-message-open-run-detail\"",
+            "data-testid=\"chat-composer-approval-notice\"",
+            "data-testid=\"chat-composer-approval-approve\"",
+            "data-testid=\"chat-composer-approval-reject\"",
+            "data-testid=\"chat-composer-approval-open-run-detail\"",
+            "data-testid=\"chat-composer-approval-reveal\"",
+            "data-testid=\"chat-composer-approval-previous\"",
+            "data-testid=\"chat-composer-approval-next\"",
+        ],
+    )
+
+
 def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() -> None:
     _assert_contains(
         "apps/frontend/src/views/ChatView.tsx",

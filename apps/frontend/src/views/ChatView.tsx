@@ -2326,12 +2326,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 className="chat-action-btn"
                 title={attachmentHelpText(executor)}
                 aria-label="附加图片"
+                data-testid="chat-header-image-attach-button"
                 disabled={isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <UiIcon name="image" />
               </button>
-              <button type="button" className="chat-action-btn" title="停止生成" aria-label="停止生成" onClick={() => void cancelProcessing()} disabled={!isProcessing}>
+              <button type="button" className="chat-action-btn" title="停止生成" aria-label="停止生成" data-testid="chat-header-stop-button" onClick={() => void cancelProcessing()} disabled={!isProcessing}>
                 <UiIcon name="stop" />
               </button>
               <button type="button" className="chat-action-btn" title="新对话" aria-label="新对话" onClick={() => void clearSession()}>
@@ -2507,6 +2508,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 disabled={isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS}
                 title={attachmentHelpText(executor)}
                 aria-label="添加附件，当前仅支持图片"
+                data-testid="chat-composer-image-attach-button"
                 onClick={() => fileInputRef.current?.click()}
               >
                 <UiIcon name="paperclip" />
@@ -2517,6 +2519,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                   className="chat-stop-btn"
                   aria-label={processingCount > 1 ? `停止当前 ${processingCount} 项任务` : '停止当前任务'}
                   title={processingCount > 1 ? `停止当前 ${processingCount} 项任务` : '停止当前任务'}
+                  data-testid="chat-composer-stop-button"
                   onClick={() => void cancelProcessing()}
                 >
                   <UiIcon name="stop" />
@@ -2538,6 +2541,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
               accept="image/*"
               multiple
               hidden
+              data-testid="chat-image-file-input"
               onChange={(event) => {
                 const files = Array.from(event.target.files || []);
                 event.target.value = '';
@@ -2964,11 +2968,11 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
         />
         {followupNotice ? <div className="message-followup-status">{followupNotice}</div> : null}
         {showApprovalActions ? (
-          <div className="message-approval-actions">
-            <button type="button" className="message-approval-approve" disabled={approvalBusy} onClick={onApprove}>
+          <div className="message-approval-actions" data-testid="chat-message-approval-actions">
+            <button type="button" className="message-approval-approve" data-testid="chat-message-approval-approve" disabled={approvalBusy} onClick={onApprove}>
               {approvalBusy ? '处理中...' : '批准'}
             </button>
-            <button type="button" className="message-approval-reject" disabled={approvalBusy} onClick={onReject}>
+            <button type="button" className="message-approval-reject" data-testid="chat-message-approval-reject" disabled={approvalBusy} onClick={onReject}>
               拒绝
             </button>
           </div>
@@ -2989,6 +2993,7 @@ function MessageBubble({ approvalBusy, assistantProfile, assistantProfileLoading
             <button
               className="message-run-detail-button"
               type="button"
+              data-testid="chat-message-open-run-detail"
               onClick={() => onOpenRunDetails(runId)}
             >
               运行详情
@@ -3158,7 +3163,7 @@ function ApprovalRequestCard({ copiedCodeBlockKey, details, messageId, onOpenDet
 }) {
   const workflowApproval = isWorkflowApprovalDetails(details);
   return (
-    <div className="message-content message-approval-card">
+    <div className="message-content message-approval-card" data-testid="chat-message-approval-card">
       <div className="message-approval-card-header">
         <span className="message-approval-eyebrow">需要审批</span>
         <div>
@@ -3168,7 +3173,7 @@ function ApprovalRequestCard({ copiedCodeBlockKey, details, messageId, onOpenDet
         <span className="message-approval-header-side">
           <code>{details.tool}</code>
           {runId ? (
-            <button type="button" onClick={onOpenDetails}>
+            <button type="button" data-testid="chat-message-approval-open-run-detail" onClick={onOpenDetails}>
               运行详情
             </button>
           ) : null}
@@ -3225,7 +3230,7 @@ function ComposerApprovalNotice({ busy, currentIndex, details, onApprove, onNext
     ? workflowApprovalNoticeSubtitle(details, preview)
     : compactStatusText(preview, 86) || details.goal || '需要确认工具调用后继续执行';
   return (
-    <div className="composer-approval-notice">
+    <div className="composer-approval-notice" data-testid="chat-composer-approval-notice">
       <div className="composer-approval-main">
         <span className="composer-approval-badge">{hasMultiple ? `待审批 ${currentIndex + 1}/${total}` : '待审批'}</span>
         <div>
@@ -3236,16 +3241,16 @@ function ComposerApprovalNotice({ busy, currentIndex, details, onApprove, onNext
       <div className="composer-approval-actions">
         {hasMultiple ? (
           <span className="composer-approval-nav" aria-label="切换待审批请求">
-            <button type="button" disabled={busy} onClick={onPrevious}>上一项</button>
-            <button type="button" disabled={busy} onClick={onNext}>下一项</button>
+            <button type="button" data-testid="chat-composer-approval-previous" disabled={busy} onClick={onPrevious}>上一项</button>
+            <button type="button" data-testid="chat-composer-approval-next" disabled={busy} onClick={onNext}>下一项</button>
           </span>
         ) : null}
-        <button type="button" onClick={onReveal}>定位消息</button>
+        <button type="button" data-testid="chat-composer-approval-reveal" onClick={onReveal}>定位消息</button>
         {runId ? (
-          <button type="button" onClick={onOpenDetails}>运行详情</button>
+          <button type="button" data-testid="chat-composer-approval-open-run-detail" onClick={onOpenDetails}>运行详情</button>
         ) : null}
-        <button type="button" className="approve" disabled={busy} onClick={onApprove}>{busy ? '处理中...' : '批准'}</button>
-        <button type="button" className="reject" disabled={busy} onClick={onReject}>拒绝</button>
+        <button type="button" className="approve" data-testid="chat-composer-approval-approve" disabled={busy} onClick={onApprove}>{busy ? '处理中...' : '批准'}</button>
+        <button type="button" className="reject" data-testid="chat-composer-approval-reject" disabled={busy} onClick={onReject}>拒绝</button>
       </div>
     </div>
   );
