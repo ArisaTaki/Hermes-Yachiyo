@@ -253,6 +253,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover AppState task lifecycle",
     ),
     (
+        "tests/test_task_runner.py::test_task_runner_main_chat_native_tool_approval_roundtrip",
+        "macOS release workflow smoke tests must cover TaskRunner native approval roundtrip",
+    ),
+    (
         "tests/test_screenshot.py",
         "macOS release workflow smoke tests must cover screenshot behavior",
     ),

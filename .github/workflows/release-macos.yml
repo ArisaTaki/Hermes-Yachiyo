@@ -62,6 +62,7 @@ jobs:
           python -m pytest \
             tests/test_protocol.py \
             tests/test_state.py \
+            tests/test_task_runner.py::test_task_runner_main_chat_native_tool_approval_roundtrip \
             tests/test_screenshot.py \
             tests/test_proactive.py \
             tests/test_chat_session.py \

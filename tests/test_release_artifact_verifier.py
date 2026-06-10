@@ -369,6 +369,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow must run smoke tests before packaged backend and DMG builds" in messages
     assert "macOS release workflow smoke tests must cover Task API protocol schemas" in messages
     assert "macOS release workflow smoke tests must cover AppState task lifecycle" in messages
+    assert "macOS release workflow smoke tests must cover TaskRunner native approval roundtrip" in messages
     assert "macOS release workflow smoke tests must cover screenshot behavior" in messages
     assert "macOS release workflow smoke tests must cover proactive care" in messages
     assert "macOS release workflow smoke tests must cover ChatSession persistence" in messages
