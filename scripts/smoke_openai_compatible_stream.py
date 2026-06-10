@@ -154,6 +154,8 @@ def run_stream_smoke(
     prompt: str = "",
     tool_call: bool = False,
     require_tool_call: bool = False,
+    require_content: bool = False,
+    expect_tool_name: str = "",
 ) -> dict[str, Any]:
     base_url = str(base_url or "").strip()
     model = str(model or "").strip()
@@ -170,6 +172,8 @@ def run_stream_smoke(
     if missing:
         raise ValueError(f"Missing {', '.join(missing)}")
 
+    expected_name = str(expect_tool_name or "").strip()
+    tool_call = tool_call or require_tool_call or bool(expected_name)
     if not prompt:
         prompt = (
             "Call workspace_read with path README.md, then stream a short answer."
@@ -185,8 +189,14 @@ def run_stream_smoke(
         stream=True,
     )
     summary = summarize_stream_chunks(chunks if not isinstance(chunks, dict) else [])
+    if require_content and int(summary["content_chars"]) == 0:
+        raise RuntimeError("stream completed without content")
     if require_tool_call and summary["tool_call_count"] == 0:
         raise RuntimeError("stream completed without a tool call")
+    if expected_name:
+        names = {str(call.get("name") or "") for call in summary["tool_calls"]}
+        if expected_name not in names:
+            raise RuntimeError(f"stream completed without expected tool call {expected_name!r}")
     return summary
 
 
@@ -199,10 +209,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--api-key", default=os.getenv(API_KEY_ENV, ""), help=f"API key, or {API_KEY_ENV}.")
     parser.add_argument("--prompt", default="", help="Optional user prompt for the smoke call.")
     parser.add_argument("--tool-call", action="store_true", help="Ask the provider to stream a workspace_read tool call.")
+    parser.add_argument("--require-content", action="store_true", help="Fail if the provider streams no text content.")
     parser.add_argument(
         "--require-tool-call",
         action="store_true",
         help="Fail if the provider streams content but does not emit a tool call.",
+    )
+    parser.add_argument(
+        "--expect-tool-name",
+        default="",
+        help="Fail unless the stream emits a tool call with this function name.",
     )
     args = parser.parse_args(argv)
 
@@ -212,8 +228,10 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             api_key=args.api_key,
             prompt=args.prompt,
-            tool_call=args.tool_call or args.require_tool_call,
+            tool_call=args.tool_call or args.require_tool_call or bool(args.expect_tool_name),
             require_tool_call=args.require_tool_call,
+            require_content=args.require_content,
+            expect_tool_name=args.expect_tool_name,
         )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
