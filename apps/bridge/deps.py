@@ -17,6 +17,14 @@ def set_runtime(runtime: "AppRuntime") -> None:
     """由 Shell 启动时注入 Core Runtime 实例"""
     global _runtime
     _runtime = runtime
+    try:
+        from apps.bridge.server import app
+
+        state = getattr(app, "state", None)
+        if state is not None:
+            state.runtime = runtime
+    except Exception:
+        pass
 
 
 def get_runtime() -> "AppRuntime":

@@ -131,6 +131,40 @@ def test_bridge_bad_request_helpers_redact_secret_details():
     assert "api_key=[redacted]" in model_exc.detail
 
 
+def test_set_runtime_populates_bridge_app_state():
+    deps_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "deps.py"
+    spec = importlib.util.spec_from_file_location("_oha_bridge_deps_under_test", deps_path)
+    assert spec is not None
+    assert spec.loader is not None
+    bridge_deps = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = bridge_deps
+    spec.loader.exec_module(bridge_deps)
+
+    runtime = SimpleNamespace(agent_runtime_service=object())
+    previous_runtime = getattr(bridge_deps, "_runtime", None)
+    state = getattr(app, "state", None)
+    sentinel = object()
+    previous_app_runtime = getattr(state, "runtime", sentinel) if state is not None else sentinel
+
+    try:
+        bridge_deps.set_runtime(runtime)
+
+        assert bridge_deps.get_runtime() is runtime
+        if state is not None:
+            assert state.runtime is runtime
+    finally:
+        bridge_deps._runtime = previous_runtime
+        if state is not None:
+            if previous_app_runtime is sentinel:
+                try:
+                    delattr(state, "runtime")
+                except AttributeError:
+                    pass
+            else:
+                state.runtime = previous_app_runtime
+        sys.modules.pop("_oha_bridge_deps_under_test", None)
+
+
 def test_run_events_http_route_paginates_and_hides_non_user_events(tmp_path, monkeypatch):
     saved_modules = _unload_module_prefixes(("fastapi",))
     try:
