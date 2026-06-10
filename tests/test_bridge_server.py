@@ -469,6 +469,69 @@ def test_chat_message_http_route_maps_idempotency_key_header(monkeypatch):
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_chat_cancel_http_route_returns_ui_cancel_projection(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "ui.py"
+        spec = importlib.util.spec_from_file_location("_oha_ui_cancel_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        ui_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = ui_route_module
+        spec.loader.exec_module(ui_route_module)
+
+        class FakeChatAPI:
+            def __init__(self, runtime):
+                assert runtime is fake_runtime
+
+            def cancel_current_tasks(self):
+                return {
+                    "ok": True,
+                    "cancelled_tasks": 1,
+                    "processing_count": 0,
+                    "is_processing": False,
+                    "token_count": 128,
+                    "messages": [
+                        {
+                            "id": "assistant-cancelled",
+                            "role": "assistant",
+                            "task_id": "task-cancelled",
+                            "status": "failed",
+                            "content": "任务已取消",
+                        }
+                    ],
+                }
+
+        fake_runtime = SimpleNamespace()
+        monkeypatch.setattr(ui_route_module, "get_runtime", lambda: fake_runtime)
+        monkeypatch.setattr(ui_route_module, "ChatAPI", FakeChatAPI)
+        route_app = FastAPI()
+        route_app.include_router(ui_route_module.router)
+
+        with TestClient(route_app) as client:
+            response = client.post("/ui/chat/session/cancel")
+
+        payload = response.json()
+        assert response.status_code == 200
+        assert payload["ok"] is True
+        assert payload["cancelled_tasks"] == 1
+        assert payload["processing_count"] == 0
+        assert payload["is_processing"] is False
+        assert payload["token_count"] == 128
+        assert payload["messages"][0]["task_id"] == "task-cancelled"
+        assert payload["messages"][0]["status"] == "failed"
+        assert "任务已取消" in payload["messages"][0]["content"]
+    finally:
+        sys.modules.pop("_oha_ui_cancel_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_chat_image_bridge_route_reaches_native_run_events(tmp_path, monkeypatch):
     try:
         from fastapi import FastAPI
