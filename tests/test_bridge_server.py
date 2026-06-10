@@ -711,6 +711,102 @@ def test_chat_session_http_routes_preserve_lifecycle_payloads(monkeypatch):
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_activity_http_routes_preserve_feed_detail_and_delete_payloads(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "ui.py"
+        spec = importlib.util.spec_from_file_location("_oha_ui_activity_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        ui_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = ui_route_module
+        spec.loader.exec_module(ui_route_module)
+
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        def fake_list_activity_events(**kwargs):
+            calls.append(("list_activity_events", dict(kwargs)))
+            return {
+                "ok": True,
+                "events": [{"event_id": "activity-1", "phase": "tool_start"}],
+                "statuses": ["running"],
+                "phases": ["tool_start"],
+            }
+
+        def fake_get_activity_event_detail(event_id, *, limit=200):
+            calls.append(("get_activity_event_detail", {"event_id": event_id, "limit": limit}))
+            return {
+                "ok": True,
+                "event": {"event_id": event_id},
+                "trace": [{"event_id": "activity-trace-1"}],
+            }
+
+        def fake_delete_activity_event(event_id):
+            calls.append(("delete_activity_event", {"event_id": event_id}))
+            return {"ok": True, "deleted": True, "event_id": event_id}
+
+        def fake_delete_activity_events(event_ids):
+            calls.append(("delete_activity_events", {"event_ids": event_ids}))
+            return {"ok": True, "deleted": len(event_ids), "requested": len(event_ids)}
+
+        monkeypatch.setattr(ui_route_module, "list_activity_events", fake_list_activity_events)
+        monkeypatch.setattr(ui_route_module, "get_activity_event_detail", fake_get_activity_event_detail)
+        monkeypatch.setattr(ui_route_module, "delete_activity_event", fake_delete_activity_event)
+        monkeypatch.setattr(ui_route_module, "delete_activity_events", fake_delete_activity_events)
+        route_app = FastAPI()
+        route_app.include_router(ui_route_module.router)
+
+        with TestClient(route_app) as client:
+            feed = client.get(
+                "/ui/activity?"
+                "query=terminal&status=running&tool=terminal.run&phase=tool_start&"
+                "session_id=session-1&task_id=task-1&limit=25"
+            )
+            detail = client.get("/ui/activity/activity-1?limit=50")
+            deleted_one = client.delete("/ui/activity/activity-1")
+            deleted_many = client.request(
+                "DELETE",
+                "/ui/activity",
+                json={"event_ids": ["activity-2", "activity-3"]},
+            )
+
+        assert feed.status_code == 200
+        assert feed.json()["events"] == [{"event_id": "activity-1", "phase": "tool_start"}]
+        assert feed.json()["statuses"] == ["running"]
+        assert detail.status_code == 200
+        assert detail.json()["trace"] == [{"event_id": "activity-trace-1"}]
+        assert deleted_one.status_code == 200
+        assert deleted_one.json() == {"ok": True, "deleted": True, "event_id": "activity-1"}
+        assert deleted_many.status_code == 200
+        assert deleted_many.json() == {"ok": True, "deleted": 2, "requested": 2}
+        assert calls == [
+            (
+                "list_activity_events",
+                {
+                    "query": "terminal",
+                    "status": "running",
+                    "tool": "terminal.run",
+                    "phase": "tool_start",
+                    "session_id": "session-1",
+                    "task_id": "task-1",
+                    "limit": 25,
+                },
+            ),
+            ("get_activity_event_detail", {"event_id": "activity-1", "limit": 50}),
+            ("delete_activity_event", {"event_id": "activity-1"}),
+            ("delete_activity_events", {"event_ids": ["activity-2", "activity-3"]}),
+        ]
+    finally:
+        sys.modules.pop("_oha_ui_activity_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_chat_cancel_http_route_returns_ui_cancel_projection(monkeypatch):
     saved_modules = _unload_module_prefixes(("fastapi",))
     try:
