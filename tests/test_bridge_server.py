@@ -2032,17 +2032,22 @@ def test_chat_cancel_bridge_route_cancels_native_run_and_ignores_late_output(tmp
             listed_runs = await agent_routes.list_runs(limit=20)
             detail = await agent_routes.get_any_run(run["run_id"])
             listed = next(item for item in listed_runs["runs"] if item["run_id"] == run["run_id"])
+            replay_last_sequence = replay["events"][-1]["sequence"]
             assert listed["kind"] == "main_chat_run"
             assert listed["status"] == "cancelled"
             assert listed["task_id"] == task.task_id
             assert listed["session_id"] == session.session_id
             assert listed["task_run_link_created_at"]
+            assert listed["task_run_link_run_status"] == "cancelled"
+            assert listed["task_run_link_last_event_sequence"] == replay_last_sequence
             assert detail["run_id"] == run["run_id"]
             assert detail["kind"] == "main_chat_run"
             assert detail["status"] == "cancelled"
             assert detail["task_id"] == task.task_id
             assert detail["session_id"] == session.session_id
             assert detail["task_run_link_created_at"]
+            assert detail["task_run_link_run_status"] == "cancelled"
+            assert detail["task_run_link_last_event_sequence"] == replay_last_sequence
             assert any(event.get("event") == "run.cancelled" for event in detail["timeline"])
 
             final_messages = await ui_routes.get_chat_messages()
