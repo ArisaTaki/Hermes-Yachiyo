@@ -2465,6 +2465,171 @@ def test_agent_run_http_routes_roundtrip_approval_detail_and_replay(tmp_path, mo
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_agent_run_http_routes_roundtrip_reject_detail_and_replay(tmp_path, monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_root = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes"
+        agent_spec = importlib.util.spec_from_file_location(
+            "_oha_agent_route_http_reject_roundtrip_under_test",
+            route_root / "agents.py",
+        )
+        run_spec = importlib.util.spec_from_file_location(
+            "_oha_run_route_http_reject_roundtrip_under_test",
+            route_root / "runs.py",
+        )
+        assert agent_spec is not None and agent_spec.loader is not None
+        assert run_spec is not None and run_spec.loader is not None
+        agent_route_module = importlib.util.module_from_spec(agent_spec)
+        run_route_module = importlib.util.module_from_spec(run_spec)
+        sys.modules[agent_spec.name] = agent_route_module
+        sys.modules[run_spec.name] = run_route_module
+        agent_spec.loader.exec_module(agent_route_module)
+        run_spec.loader.exec_module(run_route_module)
+
+        service = AgentRuntimeService(
+            db_path=tmp_path / "agent-runtime.db",
+            workspace_dir=tmp_path / "runtime",
+            credential_store=MemoryCredentialStore(),
+            seed_templates=False,
+        )
+        workdir = tmp_path / "workspace"
+        workdir.mkdir()
+        model_calls: list[list[dict[str, object]]] = []
+
+        def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+            model_calls.append(messages)
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_terminal_http_reject",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf route-rejected"}),
+                        },
+                    }
+                ],
+            }
+
+        monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+        monkeypatch.setattr(
+            agent_route_module,
+            "get_agent_runtime_service",
+            lambda: (_ for _ in ()).throw(AssertionError("agent routes should use AppRuntime service")),
+        )
+        monkeypatch.setattr(
+            run_route_module,
+            "get_native_run_engine",
+            lambda: (_ for _ in ()).throw(AssertionError("run routes should use AppRuntime service")),
+        )
+
+        route_app = FastAPI()
+        route_app.state.runtime = SimpleNamespace(agent_runtime_service=service)
+        route_app.include_router(agent_route_module.router)
+        route_app.include_router(run_route_module.router)
+        try:
+            with TestClient(route_app) as client:
+                agent_response = client.post(
+                    "/ui/agents",
+                    json={
+                        "name": "HTTP Reject Agent",
+                        "model_mode": "custom_api",
+                        "model_config": {
+                            "base_url": "https://api.example.test/v1",
+                            "model": "demo-model",
+                            "api_key": "sk-secret",
+                        },
+                        "tool_policy": {"allowed_tools": ["terminal.run"]},
+                        "workspace_policy": {
+                            "default_workdir": str(workdir),
+                            "readable_scopes": ["."],
+                        },
+                    },
+                )
+                agent_response.raise_for_status()
+                agent_id = agent_response.json()["agent_id"]
+
+                run_response = client.post(
+                    "/ui/agent-runs",
+                    json={"agent_id": agent_id, "user_goal": "Run rejected command"},
+                    headers={"Idempotency-Key": "http-reject-run-1"},
+                )
+                run_response.raise_for_status()
+                waiting = run_response.json()
+                run_id = waiting["run_id"]
+
+                detail_before = client.get(f"/ui/runs/{run_id}")
+                replay_before = client.get(f"/runs/{run_id}/events?after_sequence=0&limit=200")
+                reject_response = client.post(
+                    f"/ui/runs/{run_id}/approval/reject",
+                    json={"reason": "Rejected from HTTP"},
+                )
+                detail_after = client.get(f"/ui/runs/{run_id}")
+                replay_after = client.get(f"/runs/{run_id}/events?after_sequence=0&limit=200")
+
+            assert waiting["client_request_id"] == "http-reject-run-1"
+            assert waiting["status"] == "approval_required"
+            assert waiting["pending_approval"]["tool"] == "terminal.run"
+            assert detail_before.status_code == 200
+            assert detail_before.json()["status"] == "approval_required"
+            assert detail_before.json()["pending_approval"]["input_preview"]["command"] == "printf route-rejected"
+            assert replay_before.status_code == 200
+            assert "agent.tool.approval_required" in [
+                event["event_type"] for event in replay_before.json()["events"]
+            ]
+
+            assert reject_response.status_code == 200
+            rejected = reject_response.json()
+            assert rejected["status"] == "cancelled"
+            assert rejected["pending_approval"] == {}
+            assert rejected["result"] == "工具审批已拒绝：Rejected from HTTP"
+            assert detail_after.status_code == 200
+            assert detail_after.json()["status"] == "cancelled"
+            assert detail_after.json()["result"] == "工具审批已拒绝：Rejected from HTTP"
+            assert detail_after.json()["pending_approval"] == {}
+
+            replay_after_payload = replay_after.json()
+            replay_after_types = [event["event_type"] for event in replay_after_payload["events"]]
+            assert replay_after.status_code == 200
+            assert replay_after_types.count("agent.tool.approval_required") == 1
+            assert replay_after_types.count("agent.tool.approval_rejected") == 1
+            assert replay_after_types.count("agent.run.cancelled") == 1
+            tool_facts = [
+                event
+                for event in replay_after_payload["events"]
+                if event["event_type"] == "agent.tool.call"
+            ]
+            assert not any(event["payload"].get("approved") is True for event in tool_facts)
+            rejected_fact = next(
+                event
+                for event in replay_after_payload["events"]
+                if event["event_type"] == "agent.tool.approval_rejected"
+            )
+            cancelled_fact = next(
+                event
+                for event in replay_after_payload["events"]
+                if event["event_type"] == "agent.run.cancelled"
+            )
+            assert rejected_fact["payload"]["tool"] == "terminal.run"
+            assert rejected_fact["payload"]["input_preview"]["command"] == "printf route-rejected"
+            assert rejected_fact["payload"]["reason"] == "Rejected from HTTP"
+            assert cancelled_fact["payload"]["result"] == "工具审批已拒绝：Rejected from HTTP"
+            assert len(model_calls) == 1
+        finally:
+            service.close()
+    finally:
+        sys.modules.pop("_oha_agent_route_http_reject_roundtrip_under_test", None)
+        sys.modules.pop("_oha_run_route_http_reject_roundtrip_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_workflow_run_http_routes_roundtrip_child_approval_detail_and_replay(tmp_path, monkeypatch):
     saved_modules = _unload_module_prefixes(("fastapi",))
     try:
