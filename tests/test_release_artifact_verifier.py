@@ -134,6 +134,31 @@ def test_verifier_requires_packaging_macos_entitlements_and_usage_descriptions(t
     assert "macOS release packaging must include microphone permission copy" in messages
 
 
+def test_verifier_requires_macos_signing_script_and_entitlements(tmp_path):
+    script = tmp_path / verifier.MACOS_SIGNING_SCRIPT_FILE
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "#!/usr/bin/env bash\n"
+        "npx electron-builder --config electron-builder.yml --mac dmg\n",
+        encoding="utf-8",
+    )
+    entitlements = tmp_path / verifier.MACOS_ENTITLEMENTS_FILE
+    entitlements.parent.mkdir(parents=True)
+    entitlements.write_text("<plist><dict></dict></plist>\n", encoding="utf-8")
+
+    findings = verifier._verify_macos_signing_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert "macOS signing script must build an unsigned app directory before signing" in messages
+    assert "macOS signing script must sign the app with hardened runtime options" in messages
+    assert "macOS signing script must apply the checked-in entitlements" in messages
+    assert "macOS signing script must verify the signed app bundle" in messages
+    assert "macOS signing script must create the unsigned DMG from the signed app bundle" in messages
+    assert "macOS entitlements must allow JIT for the Electron runtime" in messages
+    assert "macOS entitlements must allow unsigned executable memory for Electron" in messages
+    assert "macOS entitlements must disable library validation for packaged native modules" in messages
+
+
 def test_verifier_reports_tracked_vite_cache(monkeypatch, tmp_path):
     git_dir = tmp_path / ".git"
     git_dir.mkdir()

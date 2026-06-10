@@ -95,6 +95,44 @@ PACKAGING_CONFIG_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     ),
 )
 RELEASE_WORKFLOW_FILE = Path(".github/workflows/release-macos.yml")
+MACOS_SIGNING_SCRIPT_FILE = Path("scripts/build_macos_self_signed_dmg.sh")
+MACOS_ENTITLEMENTS_FILE = Path("packaging/entitlements.mac.plist")
+MACOS_SIGNING_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --config electron-builder.yml --mac dir",
+        "macOS signing script must build an unsigned app directory before signing",
+    ),
+    (
+        "--options runtime",
+        "macOS signing script must sign the app with hardened runtime options",
+    ),
+    (
+        '--entitlements "${ENTITLEMENTS}"',
+        "macOS signing script must apply the checked-in entitlements",
+    ),
+    (
+        'codesign --verify --deep --strict --verbose=2 "${APP_PATH}"',
+        "macOS signing script must verify the signed app bundle",
+    ),
+    (
+        "hdiutil create",
+        "macOS signing script must create the unsigned DMG from the signed app bundle",
+    ),
+)
+MACOS_ENTITLEMENTS_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "com.apple.security.cs.allow-jit",
+        "macOS entitlements must allow JIT for the Electron runtime",
+    ),
+    (
+        "com.apple.security.cs.allow-unsigned-executable-memory",
+        "macOS entitlements must allow unsigned executable memory for Electron",
+    ),
+    (
+        "com.apple.security.cs.disable-library-validation",
+        "macOS entitlements must disable library validation for packaged native modules",
+    ),
+)
 RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "Verify release-facing product identity and security guards",
@@ -222,6 +260,7 @@ def verify_release_artifacts(
         findings.extend(_verify_release_security_guards(root_path))
         findings.extend(_verify_tracked_generated_artifacts(root_path))
         findings.extend(_verify_release_packaging_guards(root_path))
+        findings.extend(_verify_macos_signing_guards(root_path))
         findings.extend(_verify_release_workflow_guards(root_path))
 
     return findings
@@ -348,6 +387,30 @@ def _verify_release_packaging_guards(root: Path) -> list[Finding]:
     for required_text, message in PACKAGING_CONFIG_REQUIRED_TEXT:
         if required_text not in config:
             findings.append(Finding(config_path, message))
+    return findings
+
+
+def _verify_macos_signing_guards(root: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    script_path = _resolve(root, MACOS_SIGNING_SCRIPT_FILE)
+    try:
+        script = script_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        findings.append(Finding(script_path, f"could not read macOS signing script: {exc}"))
+    else:
+        for required_text, message in MACOS_SIGNING_SCRIPT_REQUIRED_TEXT:
+            if required_text not in script:
+                findings.append(Finding(script_path, message))
+
+    entitlements_path = _resolve(root, MACOS_ENTITLEMENTS_FILE)
+    try:
+        entitlements = entitlements_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        findings.append(Finding(entitlements_path, f"could not read macOS entitlements: {exc}"))
+    else:
+        for required_text, message in MACOS_ENTITLEMENTS_REQUIRED_TEXT:
+            if required_text not in entitlements:
+                findings.append(Finding(entitlements_path, message))
     return findings
 
 
