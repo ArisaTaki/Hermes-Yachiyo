@@ -429,6 +429,18 @@ def test_agent_studio_bridge_contract_preserves_run_detail_workflow_artifact_and
                 ]
             }
 
+        def list_run_groups(self, limit):
+            calls.append(("list_run_groups", {"limit": limit}))
+            return {
+                "run_groups": [
+                    {
+                        "run_group_id": "group-1",
+                        "status": "completed",
+                        "child_run_ids": ["run_workflow_1", "run_agent_1"],
+                    }
+                ]
+            }
+
         def get_run(self, run_id):
             calls.append(("get_run", {"run_id": run_id}))
             return {
@@ -450,6 +462,14 @@ def test_agent_studio_bridge_contract_preserves_run_detail_workflow_artifact_and
             calls.append(("rerun_run", {"run_id": run_id}))
             return {"run_id": "run_workflow_2", "rerun_of_run_id": run_id, "status": "completed"}
 
+        def delete_run(self, run_id):
+            calls.append(("delete_run", {"run_id": run_id}))
+            return {
+                "ok": True,
+                "deleted_run_ids": [run_id, "run_agent_1"],
+                "deleted_run_count": 2,
+            }
+
     monkeypatch.setattr(agents, "get_agent_runtime_service", lambda: FakeRuntimeService())
 
     agent_run = asyncio.run(
@@ -468,11 +488,13 @@ def test_agent_studio_bridge_contract_preserves_run_detail_workflow_artifact_and
         )
     )
     runs = asyncio.run(agents.list_runs(limit=20))
+    run_groups = asyncio.run(agents.list_run_groups(limit=20))
     run_detail = asyncio.run(agents.get_any_run("run_workflow_1"))
     workflow_detail = asyncio.run(agents.get_workflow_run("run_workflow_1"))
     group = asyncio.run(agents.get_run_group("group-1"))
     artifact = asyncio.run(agents.get_run_artifact("run_workflow_1", "reports/final.md"))
     rerun = asyncio.run(agents.rerun_run("run_workflow_1"))
+    deleted = asyncio.run(agents.delete_run("run_workflow_1"))
 
     assert agent_run == {
         "run_id": "run_agent_1",
@@ -486,6 +508,7 @@ def test_agent_studio_bridge_contract_preserves_run_detail_workflow_artifact_and
         "run_group_id": "group-1",
     }
     assert [item["run_id"] for item in runs["runs"]] == ["run_agent_1", "run_workflow_1"]
+    assert run_groups["run_groups"][0]["child_run_ids"] == ["run_workflow_1", "run_agent_1"]
     assert run_detail["artifacts"][0]["path"] == "reports/final.md"
     assert workflow_detail["timeline"][0]["event"] == "workflow.node.artifact"
     assert group == {"run_group_id": "group-1", "status": "completed"}
@@ -494,6 +517,11 @@ def test_agent_studio_bridge_contract_preserves_run_detail_workflow_artifact_and
         "run_id": "run_workflow_2",
         "rerun_of_run_id": "run_workflow_1",
         "status": "completed",
+    }
+    assert deleted == {
+        "ok": True,
+        "deleted_run_ids": ["run_workflow_1", "run_agent_1"],
+        "deleted_run_count": 2,
     }
     assert calls == [
         (
@@ -513,11 +541,13 @@ def test_agent_studio_bridge_contract_preserves_run_detail_workflow_artifact_and
             },
         ),
         ("list_runs", {"limit": 20}),
+        ("list_run_groups", {"limit": 20}),
         ("get_run", {"run_id": "run_workflow_1"}),
         ("get_run", {"run_id": "run_workflow_1"}),
         ("get_run_group", {"run_group_id": "group-1"}),
         ("read_run_artifact", {"run_id": "run_workflow_1", "artifact_path": "reports/final.md"}),
         ("rerun_run", {"run_id": "run_workflow_1"}),
+        ("delete_run", {"run_id": "run_workflow_1"}),
     ]
 
 
