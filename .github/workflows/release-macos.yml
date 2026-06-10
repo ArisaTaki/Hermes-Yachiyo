@@ -67,6 +67,7 @@ jobs:
             tests/test_ui_bridge_routes.py \
             tests/test_frontend_feature_preservation.py \
             tests/test_ui_mature_flow_contract.py \
+            tests/test_bridge_server.py::test_bridge_http_middleware_enforces_host_origin_and_session_token \
             tests/test_bridge_server.py::test_all_registered_mutating_routes_require_bridge_token \
             tests/test_bridge_server.py::test_chat_message_image_attachment_http_roundtrip_maps_idempotency_and_file_response \
             tests/test_bridge_server.py::test_agent_run_http_routes_roundtrip_approval_detail_and_replay \

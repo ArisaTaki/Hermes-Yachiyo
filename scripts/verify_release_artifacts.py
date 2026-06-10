@@ -273,6 +273,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover mature UI flow contracts",
     ),
     (
+        "tests/test_bridge_server.py::test_bridge_http_middleware_enforces_host_origin_and_session_token",
+        "macOS release workflow smoke tests must cover Bridge Host Origin and session token guard",
+    ),
+    (
         "tests/test_bridge_server.py::test_all_registered_mutating_routes_require_bridge_token",
         "macOS release workflow smoke tests must cover mutating Bridge token guard",
     ),
