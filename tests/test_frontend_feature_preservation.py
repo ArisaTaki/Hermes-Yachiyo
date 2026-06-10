@@ -25,8 +25,8 @@ def _assert_contains(relative_path: str, fragments: list[str]) -> None:
 
 
 def _extract_async_function(text: str, name: str) -> str:
-    match = re.search(rf"export async function {re.escape(name)}\b[^\n]*\{{", text)
-    assert match, f"missing exported async function {name}"
+    match = re.search(rf"(?:export\s+)?async function {re.escape(name)}\b[^\n]*\{{", text)
+    assert match, f"missing async function {name}"
     depth = 0
     for index in range(match.end() - 1, len(text)):
         char = text[index]
@@ -576,6 +576,30 @@ def test_workflow_studio_exposes_stable_e2e_selectors_for_edit_and_run_flow() ->
             "data-testid=\"workflow-run-preview\"",
             "data-testid=\"workflow-run-preview-step\"",
             "data-testid=\"workflow-save-and-run\"",
+        ],
+    )
+
+
+def test_workflow_studio_save_and_run_uses_persisted_workflow_id() -> None:
+    _assert_function_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        "saveWorkflowDraft",
+        [
+            "const saved = selectedWorkflow ? await updateWorkflow(selectedWorkflow.workflow_id, request) : await createWorkflow(request);",
+            "setSelectedWorkflowId(saved.workflow_id);",
+            "return saved;",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        "runCurrentWorkflow",
+        [
+            "const saved = await saveWorkflowDraft();",
+            "const run = await createWorkflowRun(saved.workflow_id, goal);",
+            "setWorkflowRunGoal('');",
+            "setRunTarget(saved.workflow_id);",
+            "openRunDetail(run.run_id, { revealInHistory: true });",
+            "return { selectedWorkflowId: saved.workflow_id, runTarget: saved.workflow_id, selectedRunId: run.run_id };",
         ],
     )
 
