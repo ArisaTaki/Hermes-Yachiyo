@@ -584,6 +584,133 @@ def test_chat_attachment_http_route_streams_file_and_maps_missing(monkeypatch, t
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_chat_session_http_routes_preserve_lifecycle_payloads(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "ui.py"
+        spec = importlib.util.spec_from_file_location("_oha_ui_session_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        ui_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = ui_route_module
+        spec.loader.exec_module(ui_route_module)
+
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        class FakeChatAPI:
+            def __init__(self, runtime):
+                assert runtime is fake_runtime
+
+            def get_messages(self, limit, anchor_message_id=""):
+                payload = {"limit": limit, "anchor_message_id": anchor_message_id}
+                calls.append(("get_messages", payload))
+                return {"ok": True, "messages": [], **payload}
+
+            def get_session_info(self):
+                calls.append(("get_session_info", {}))
+                return {
+                    "ok": True,
+                    "session_id": "session-current",
+                    "message_count": 2,
+                    "is_processing": False,
+                }
+
+            def list_sessions(self, limit=20, query=""):
+                payload = {"limit": limit, "query": query}
+                calls.append(("list_sessions", payload))
+                return {
+                    "ok": True,
+                    "current_session_id": "session-current",
+                    "sessions": [{"session_id": "session-current", "title": query}],
+                    **payload,
+                }
+
+            def load_session(self, session_id):
+                calls.append(("load_session", {"session_id": session_id}))
+                return {"ok": True, "session_id": session_id, "message_count": 4}
+
+            def clear_session(self):
+                calls.append(("clear_session", {}))
+                return {
+                    "ok": True,
+                    "session_id": "session-new",
+                    "previous_session_id": "session-current",
+                }
+
+            def discard_empty_current_session(self):
+                calls.append(("discard_empty_current_session", {}))
+                return {
+                    "ok": True,
+                    "discarded": True,
+                    "deleted_session_id": "session-new",
+                    "session_id": "session-current",
+                }
+
+            def delete_current_session(self):
+                calls.append(("delete_current_session", {}))
+                return {
+                    "ok": True,
+                    "deleted_session_id": "session-current",
+                    "session_id": "session-after-delete",
+                    "remaining_sessions": 0,
+                }
+
+        fake_runtime = SimpleNamespace()
+        monkeypatch.setattr(ui_route_module, "get_runtime", lambda: fake_runtime)
+        monkeypatch.setattr(ui_route_module, "ChatAPI", FakeChatAPI)
+        route_app = FastAPI()
+        route_app.include_router(ui_route_module.router)
+
+        with TestClient(route_app) as client:
+            messages = client.get("/ui/chat/messages?limit=12&anchor_message_id=message-anchor")
+            info = client.get("/ui/chat/session")
+            sessions = client.get("/ui/chat/sessions?limit=3&query=NativeRunEngine")
+            loaded = client.post("/ui/chat/sessions/load", json={"session_id": "session-archived"})
+            cleared = client.post("/ui/chat/session/clear")
+            discarded = client.post("/ui/chat/session/discard-empty")
+            deleted = client.post("/ui/chat/session/delete")
+
+        assert messages.status_code == 200
+        assert messages.json() == {
+            "ok": True,
+            "messages": [],
+            "limit": 12,
+            "anchor_message_id": "message-anchor",
+        }
+        assert info.status_code == 200
+        assert info.json()["session_id"] == "session-current"
+        assert sessions.status_code == 200
+        assert sessions.json()["limit"] == 3
+        assert sessions.json()["query"] == "NativeRunEngine"
+        assert sessions.json()["sessions"][0]["title"] == "NativeRunEngine"
+        assert loaded.status_code == 200
+        assert loaded.json() == {"ok": True, "session_id": "session-archived", "message_count": 4}
+        assert cleared.status_code == 200
+        assert cleared.json()["previous_session_id"] == "session-current"
+        assert discarded.status_code == 200
+        assert discarded.json()["discarded"] is True
+        assert deleted.status_code == 200
+        assert deleted.json()["session_id"] == "session-after-delete"
+        assert calls == [
+            ("get_messages", {"limit": 12, "anchor_message_id": "message-anchor"}),
+            ("get_session_info", {}),
+            ("list_sessions", {"limit": 3, "query": "NativeRunEngine"}),
+            ("load_session", {"session_id": "session-archived"}),
+            ("clear_session", {}),
+            ("discard_empty_current_session", {}),
+            ("delete_current_session", {}),
+        ]
+    finally:
+        sys.modules.pop("_oha_ui_session_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_chat_cancel_http_route_returns_ui_cancel_projection(monkeypatch):
     saved_modules = _unload_module_prefixes(("fastapi",))
     try:
