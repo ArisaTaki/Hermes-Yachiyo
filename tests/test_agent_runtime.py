@@ -194,6 +194,106 @@ def test_approval_resume_coordinator_stops_on_fatal_tool_failure():
     ]
 
 
+def test_approval_resume_coordinator_continues_custom_api_agent_after_approved_tool():
+    calls: list[tuple[str, dict[str, object]]] = []
+    broker = SimpleNamespace(name="broker")
+    budget = SimpleNamespace(name="budget")
+    timeline: list[dict[str, object]] = []
+    artifacts: list[dict[str, object]] = []
+    messages: list[dict[str, object]] = [{"role": "user", "content": "resume"}]
+    agent = {"agent_id": "agent_resume", "name": "Resume Agent"}
+
+    def call_agent_tool(*_args, **kwargs):
+        calls.append(("call_agent_tool", {"approved": kwargs["approved"]}))
+        return {"ok": True}
+
+    def append_tool_result_message(run_messages, _request, tool_result):
+        calls.append(("append_tool_result_message", {"tool_result": tool_result}))
+        run_messages.append({"role": "tool", "content": json.dumps(tool_result)})
+
+    def run_tool_requests(*_args, **kwargs):
+        calls.append(
+            (
+                "run_tool_requests",
+                {
+                    "next_iteration": kwargs["next_iteration"],
+                    "run_id": kwargs["run_id"],
+                    "budget": kwargs["budget"],
+                },
+            )
+        )
+
+    def continue_custom_api_agent(
+        received_agent,
+        user_goal,
+        tool_broker,
+        run_timeline,
+        run_artifacts,
+        **kwargs,
+    ):
+        calls.append(
+            (
+                "continue_custom_api_agent",
+                {
+                    "agent": received_agent,
+                    "user_goal": user_goal,
+                    "broker": tool_broker,
+                    "timeline": run_timeline,
+                    "artifacts": run_artifacts,
+                    "messages": kwargs["messages"],
+                    "start_iteration": kwargs["start_iteration"],
+                    "run_id": kwargs["run_id"],
+                    "budget": kwargs["budget"],
+                },
+            )
+        )
+        return "resumed model output"
+
+    coordinator = ApprovalResumeCoordinator(
+        call_agent_tool=call_agent_tool,
+        fatal_tool_failure_detail=lambda *_args: "",
+        append_tool_result_message=append_tool_result_message,
+        run_tool_requests=run_tool_requests,
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+        continue_custom_api_agent=continue_custom_api_agent,
+    )
+
+    result = coordinator.continue_custom_api_agent_after_approved_tool(
+        agent,
+        ToolApprovalResumeContext(
+            run_id="run_resume",
+            timeline=timeline,
+            artifacts=artifacts,
+            broker=broker,
+            allowed_tools=["terminal.run"],
+            budget=budget,
+            messages=messages,
+            tool_request={"name": "terminal.run", "input": {"command": "printf ok"}},
+            tool_name="terminal.run",
+            input_preview={"command": "printf ok"},
+            remaining_requests=[],
+            next_iteration=4,
+        ),
+    )
+
+    assert result == "resumed model output"
+    assert [name for name, _payload in calls] == [
+        "call_agent_tool",
+        "append_tool_result_message",
+        "run_tool_requests",
+        "continue_custom_api_agent",
+    ]
+    assert calls[-1][1]["agent"] is agent
+    assert calls[-1][1]["user_goal"] == ""
+    assert calls[-1][1]["broker"] is broker
+    assert calls[-1][1]["timeline"] is timeline
+    assert calls[-1][1]["artifacts"] is artifacts
+    assert calls[-1][1]["messages"] is messages
+    assert calls[-1][1]["start_iteration"] == 4
+    assert calls[-1][1]["run_id"] == "run_resume"
+    assert calls[-1][1]["budget"] is budget
+
+
 def test_workflow_parent_resume_coordinator_continues_completed_child():
     appended_events: list[tuple[str, str, dict[str, object]]] = []
     continued: dict[str, object] = {}

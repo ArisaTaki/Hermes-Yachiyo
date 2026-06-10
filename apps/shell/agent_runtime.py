@@ -2267,12 +2267,14 @@ class ApprovalResumeCoordinator:
         append_tool_result_message: Any,
         run_tool_requests: Any,
         timeline_factory: Any,
+        continue_custom_api_agent: Any | None = None,
     ) -> None:
         self._call_agent_tool = call_agent_tool
         self._fatal_tool_failure_detail = fatal_tool_failure_detail
         self._append_tool_result_message = append_tool_result_message
         self._run_tool_requests = run_tool_requests
         self._timeline = timeline_factory
+        self._continue_custom_api_agent = continue_custom_api_agent
 
     def execute_approved_tool(self, context: ToolApprovalResumeContext) -> None:
         tool_result = self._call_agent_tool(
@@ -2310,6 +2312,28 @@ class ApprovalResumeCoordinator:
             context.timeline,
             context.artifacts,
             next_iteration=context.next_iteration,
+            run_id=context.run_id,
+            budget=context.budget,
+        )
+
+    def continue_custom_api_agent_after_approved_tool(
+        self,
+        agent: dict[str, Any],
+        context: ToolApprovalResumeContext,
+    ) -> str:
+        if self._continue_custom_api_agent is None:
+            raise AgentRuntimeError(
+                "Approval resume coordinator is missing custom API continuation"
+            )
+        self.execute_approved_tool(context)
+        return self._continue_custom_api_agent(
+            agent,
+            "",
+            context.broker,
+            context.timeline,
+            context.artifacts,
+            messages=context.messages,
+            start_iteration=context.next_iteration,
             run_id=context.run_id,
             budget=context.budget,
         )
@@ -3096,6 +3120,7 @@ class NativeRunEngine:
             append_tool_result_message=self._append_tool_result_message,
             run_tool_requests=self._run_tool_requests,
             timeline_factory=self._timeline,
+            continue_custom_api_agent=self._run_custom_api_agent,
         )
         self.workflow_continuation = WorkflowContinuationCoordinator(self)
         self.workflow_parent_resume = WorkflowParentResumeCoordinator(
@@ -7840,17 +7865,9 @@ class NativeRunEngine:
         self._update_agent_run_group_if_root(running)
         self._mark_parent_workflows_child_running(running)
         try:
-            self.approval_resume.execute_approved_tool(resume_context)
-            result_text = self._run_custom_api_agent(
+            result_text = self.approval_resume.continue_custom_api_agent_after_approved_tool(
                 agent,
-                "",
-                resume_context.broker,
-                resume_context.timeline,
-                resume_context.artifacts,
-                messages=resume_context.messages,
-                start_iteration=resume_context.next_iteration,
-                run_id=run_id,
-                budget=resume_context.budget,
+                resume_context,
             )
             resume_context.timeline.append(self._timeline("agent.run.completed", "Agent run completed"))
             self.append_run_event(run_id, "agent.run.completed", {"result": result_text})
@@ -7930,17 +7947,9 @@ class NativeRunEngine:
             running_result="已批准，Yachiyo 正在继续执行",
         )
         try:
-            self.approval_resume.execute_approved_tool(resume_context)
-            result_text = self._run_custom_api_agent(
+            result_text = self.approval_resume.continue_custom_api_agent_after_approved_tool(
                 agent,
-                "",
-                resume_context.broker,
-                resume_context.timeline,
-                resume_context.artifacts,
-                messages=resume_context.messages,
-                start_iteration=resume_context.next_iteration,
-                run_id=run_id,
-                budget=resume_context.budget,
+                resume_context,
             )
             resume_context.timeline.append(
                 self._timeline(
