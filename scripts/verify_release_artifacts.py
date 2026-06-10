@@ -277,6 +277,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Native runtime shutdown resource closure",
     ),
     (
+        "tests/test_agent_runtime.py::test_terminal_run_timeout_kills_process_group",
+        "macOS release workflow smoke tests must cover terminal timeout process-group kill",
+    ),
+    (
         "tests/test_agent_runtime.py::test_main_chat_model_rejects_non_stream_reasoning_only_output",
         "macOS release workflow smoke tests must cover provider reasoning privacy for direct chat calls",
     ),
