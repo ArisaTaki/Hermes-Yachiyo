@@ -24,6 +24,14 @@ def _assert_contains(relative_path: str, fragments: list[str]) -> None:
     assert not missing, f"{relative_path} is missing preserved feature fragments: {missing!r}"
 
 
+def _assert_occurs(relative_path: str, fragment: str, expected_count: int) -> None:
+    text = _read(relative_path)
+    actual = text.count(fragment)
+    assert actual == expected_count, (
+        f"{relative_path} expected {fragment!r} to occur {expected_count} times, got {actual}"
+    )
+
+
 def _extract_async_function(text: str, name: str) -> str:
     match = re.search(rf"(?:export\s+)?async function {re.escape(name)}\b[^\n]*\{{", text)
     assert match, f"missing async function {name}"
@@ -171,8 +179,9 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
 
 
 def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> None:
+    chat_view = "apps/frontend/src/views/ChatView.tsx"
     _assert_contains(
-        "apps/frontend/src/views/ChatView.tsx",
+        chat_view,
         [
             "const [attachments, setAttachments] = useState<PendingAttachment[]>(() => [...retainedComposerDraft.attachments]);",
             "const fileInputRef = useRef<HTMLInputElement>(null);",
@@ -207,6 +216,8 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "(eventStatus === 'approval_required' || String(event?.metadata?.run_status || '').trim() === 'approval_required')",
         ],
     )
+    _assert_occurs(chat_view, "onClick={() => fileInputRef.current?.click()}", 2)
+    _assert_occurs(chat_view, "data-testid=\"chat-image-file-input\"", 1)
 
 
 def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -> None:
