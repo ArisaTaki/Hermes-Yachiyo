@@ -1,6 +1,6 @@
 # Live2D 资源包说明
 
-Hermes-Yachiyo 的 Live2D 模型资源包是可选内容。
+Oha-Yachiyo 的 Live2D 模型资源包是可选内容。
 
 程序本体不会再把大型 Live2D 二进制文件作为主仓库默认依赖。要使用自己的 Live2D 模型，请先下载资源包，再导入到本机用户目录。
 
@@ -8,12 +8,12 @@ Hermes-Yachiyo 的 Live2D 模型资源包是可选内容。
 
 请从 GitHub Releases 下载 Live2D 资源包：
 
-- <https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases>
+- <https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases>
 
 下载后，解压到下面的目录：
 
 ```text
-~/.hermes/yachiyo/assets/live2d/
+~/.oha-yachiyo/assets/live2d/
 ```
 
 ## 默认导入路径
@@ -21,17 +21,17 @@ Hermes-Yachiyo 的 Live2D 模型资源包是可选内容。
 推荐目录：
 
 ```text
-~/.hermes/yachiyo/assets/live2d/
+~/.oha-yachiyo/assets/live2d/
 ```
 
-如果你没有在设置里手动填写模型路径，Hermes-Yachiyo 会默认在这个目录中自动查找可用的 Live2D 模型。
+如果你没有在设置里手动填写模型路径，Oha-Yachiyo 会默认在这个目录中自动查找可用的 Live2D 模型。
 
 如果你把资源包放在别的位置，也可以在 Live2D 设置中手动指定模型路径。设置页支持直接“选择模型目录”以及“导入资源包 ZIP”，不需要用户自己手动查找完整路径。
 
 ## 解压后的目录结构示例
 
 ```text
-~/.hermes/yachiyo/assets/live2d/
+~/.oha-yachiyo/assets/live2d/
 └── yachiyo/
     ├── yachiyo.model3.json
     ├── yachiyo.moc3
@@ -52,7 +52,7 @@ Hermes-Yachiyo 的 Live2D 模型资源包是可选内容。
 
 ## 如何在设置里启用
 
-1. 启动 Hermes-Yachiyo。
+1. 启动 Oha-Yachiyo。
 2. 打开 Control Center。
 3. 点击“Live2D 设置”。
 4. 如果你下载的是 Releases 资源包，直接点击“导入资源包 ZIP”。
@@ -64,7 +64,7 @@ Hermes-Yachiyo 的 Live2D 模型资源包是可选内容。
 
 未导入资源包时，程序仍然可以正常使用：
 
-- Hermes-Yachiyo 正常启动
+- Oha-Yachiyo 正常启动
 - Bubble / Chat Window / Control Center 不受影响
 - Live2D 模式仍然作为角色聊天壳 / 桌面入口存在
 - 设置页会提示你去 Releases 下载资源包
@@ -87,8 +87,8 @@ Hermes-Yachiyo 的 Live2D 模型资源包是可选内容。
 
 ### 1. 未导入资源
 
-1. 确保 `~/.hermes/yachiyo/assets/live2d/` 目录为空，或暂时把资源移走。
-2. 启动 Hermes-Yachiyo 并切到 Live2D 模式。
+1. 确保 `~/.oha-yachiyo/assets/live2d/` 目录为空，或暂时把资源移走。
+2. 启动 Oha-Yachiyo 并切到 Live2D 模式。
 3. 预期结果：
    - 应用正常运行
    - Live2D 模式不崩溃
@@ -96,7 +96,7 @@ Hermes-Yachiyo 的 Live2D 模型资源包是可选内容。
 
 ### 2. 导入资源到默认目录
 
-1. 把资源包解压到 `~/.hermes/yachiyo/assets/live2d/`。
+1. 把资源包解压到 `~/.oha-yachiyo/assets/live2d/`。
 2. 不填写“模型路径”，直接打开 Live2D 设置。
 3. 预期结果：
    - 设置页显示资源已就绪

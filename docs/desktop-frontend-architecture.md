@@ -1,6 +1,6 @@
 # Desktop Frontend Architecture
 
-Hermes-Yachiyo now uses a fixed desktop-first split. React is only the
+Oha-Yachiyo now uses a fixed desktop-first split. React is only the
 renderer layer; the product runtime must be Electron, not a standalone browser
 tab:
 
@@ -12,21 +12,21 @@ tab:
 
 ## Process Model
 
-1. `hermes-yachiyo` runs `apps.desktop_launcher:main`.
+1. `oha-yachiyo` runs `apps.desktop_launcher:main`.
 2. The launcher prefers nvm Node `v20.19.0`, installs frontend dependencies
   when the required `node_modules/.bin` tools are missing, then starts
   `npm --prefix apps/frontend run dev`. It passes the current Python
-  interpreter through `HERMES_YACHIYO_PYTHON`. Before starting the frontend it
+  interpreter through `OHA_YACHIYO_PYTHON`. Before starting the frontend it
   validates that the selected `node` is at least 20.19.0, so Vite engine
   mismatches fail with an actionable message.
 3. Electron starts `python -m apps.desktop_backend.app` as a child process.
-4. The backend starts `HermesRuntime`, injects it into Bridge dependencies, and
-   runs FastAPI on the configured local host/port.
+4. The backend starts `AppRuntime`, injects the shared `NativeRunEngine` service
+   into Bridge dependencies, and runs FastAPI on the configured local host/port.
 5. The renderer reads the Bridge URL from Electron preload IPC or the `bridge`
    query parameter, then calls `/ui/*` endpoints over HTTP.
 
 The development renderer uses fixed port `5174` with Vite strict port mode.
-When `hermes-yachiyo` finds an existing Vite dev server on that port, it reuses
+When `oha-yachiyo` finds an existing Vite dev server on that port, it reuses
 the server and starts Electron directly. If no Vite server is running and the
 port is occupied by something else, startup should fail visibly instead of
 silently moving Electron and Vite to different URLs.
@@ -39,7 +39,7 @@ silently moving Electron and Vite to different URLs.
   IPC surface to renderer.
 - `apps/frontend/src/lib/bridge.ts`: typed fetch helpers for local HTTP Bridge.
 - `apps/frontend/src/lib/view.ts`: hash-route helpers shared by renderer views.
-- `apps/frontend/src/views/`: React screens for dashboard, chat, installer,
+- `apps/frontend/src/views/`: React screens for dashboard, chat,
   launcher modes, and settings.
 - `apps/frontend/src/styles/app.css`: renderer presentation layer.
 
@@ -66,7 +66,7 @@ the final save still flows through `/ui/settings`.
 
 The frontend targets Node `>=20.19.0`. Use nvm Node 20.19+ for installs and
 builds. The Python launcher prefers `~/.nvm/versions/node/v20.19.0/bin` when it
-exists, so `hermes-yachiyo` uses the same fixed Node line from a normal shell.
+exists, so `oha-yachiyo` uses the same fixed Node line from a normal shell.
 
 ## Python Boundary
 
@@ -87,7 +87,7 @@ still accepts the old `?view=` query shape so older Electron `rendererUrl()`
 callers and browser fallback paths keep working during migration.
 
 Electron owns window identity. The main window is for dashboard, settings, and
-installer views. Chat uses a dedicated singleton BrowserWindow; every
+settings views. Chat uses a dedicated singleton BrowserWindow; every
 `openView('chat')` request focuses or reloads that one chat window instead of
 loading ChatView into the main window or a launcher window. The chat window's
 "main dashboard" action calls desktop-aware `openView('main')`, so it focuses
@@ -109,15 +109,14 @@ reads `window_mode.width` / `height`, honors
 
 The UI Bridge exposes settings and maintenance operations through HTTP routes
 rather than duplicating business logic in React. Dashboard/settings renderer actions that
-restart Bridge, recheck Hermes, open Hermes terminal commands, create/restore
-backups, or preview/run uninstall delegate to `MainWindowAPI` via `/ui/*`.
+restart Bridge, check Native Agent readiness, create/restore backups, or
+preview/run uninstall delegate to `MainWindowAPI` via `/ui/*`.
 
-The installer view uses an embedded terminal for guided macOS prerequisites,
-Hermes Agent installation, and `hermes setup`. React renders the terminal with
-xterm.js, while Electron owns the actual PTY through `node-pty` and exposes only
-predefined installer tasks through preload IPC. The older native-terminal Bridge
-routes remain as a fallback for browser/dev environments that do not expose the
-Electron terminal IPC.
+The old external execution-kernel installer flow is no longer part of the
+current startup contract. Electron still owns PTY-backed desktop operations
+through `node-pty` where a guided terminal is useful, and the native-terminal
+Bridge routes remain as a fallback for browser/dev environments that do not
+expose the Electron terminal IPC.
 
 ## Launcher Modes
 
@@ -144,7 +143,7 @@ experimental and disabled by default because the desktop launcher must remain
 clickable and context-menu friendly first. The Live2D stage, character, resource
 hint, reply bubble, and quick input are explicitly marked as Electron `no-drag`
 regions so normal clicks are not swallowed by the transparent drag window. Set
-`HERMES_YACHIYO_LIVE2D_POINTER_PASSTHROUGH=1` to test the alpha-mask passthrough
+`OHA_YACHIYO_LIVE2D_POINTER_PASSTHROUGH=1` to test the alpha-mask passthrough
 path. Electron now supplies global cursor position to the renderer for
 window-outside mouse-follow, and the React launcher uses model manifest metadata
 to trigger idle motion and first available expression on new replies. The
@@ -161,14 +160,14 @@ native menu behavior with Python APIs.
 source ~/.nvm/nvm.sh
 nvm use 20.19.0
 npm --prefix apps/frontend run build
-hermes-yachiyo
+oha-yachiyo
 ```
 
 Manual `npm --prefix apps/frontend install` is optional for development. The
 Python launcher runs `npm ci` automatically when the frontend dependency tools
 are missing and a lockfile is present.
 
-During manual validation, `hermes-yachiyo` should show Vite on
+During manual validation, `oha-yachiyo` should show Vite on
 `127.0.0.1:5174`, then Electron should start the Python backend and Bridge on
 `127.0.0.1:8420`. Packaged DMG builds use `127.0.0.1:18420` by default, and
 fall back to a free local port if that port is already occupied. A terminal exit
@@ -176,14 +175,14 @@ code of 130 means the run was interrupted with Ctrl-C; normal frontend
 child-process failures are reported with a concise launcher message and the
 detailed process logs above it.
 
-If `hermes-yachiyo` does not start the Electron shell after changing the entry
+If `oha-yachiyo` does not start the Electron shell after changing the entry
 point, the active virtualenv has a stale console script. Run `pip install -e .`
 from the repository root to regenerate it.
 
 Backend-only development can use:
 
 ```bash
-hermes-yachiyo-backend
+oha-yachiyo-backend
 ```
 
 ## Packaging Direction

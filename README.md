@@ -1,10 +1,10 @@
 <div align="center">
 
-# Hermes-Yachiyo
+# Oha-Yachiyo
 
 桌面优先的本地个人 Agent 应用
 
-基于 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 构建，让 Hermes 以桌面助手、悬浮气泡或 Live2D 角色的形式常驻在本机。
+内置 Native Agent runtime，让八千代以桌面助手、悬浮气泡或 Live2D 角色的形式常驻在本机。
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-blue.svg)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -18,12 +18,12 @@
 
 ## 先看这里
 
-Hermes-Yachiyo 目前仍是源码开发形态，不是已经打包好的普通桌面安装包。
+Oha-Yachiyo 目前仍是源码开发形态，不是已经打包好的普通桌面安装包。
 
 这意味着：
 
 - `git clone` 下来运行时，需要本机安装 Python、Node.js 和 npm。
-- 启动命令 `hermes-yachiyo` 会启动 Electron + React 前端，也会拉起 Python 后端。
+- 启动命令 `oha-yachiyo` 会启动 Electron + React 前端，也会拉起 Python 后端。
 - 前端依赖缺失时，启动器会自动安装 `apps/frontend/node_modules`，但不会自动安装 Node.js 本体。
 - 未来发布 `.app`、`.exe` 或 Linux 包后，普通用户不应该再需要全局 Python/Node 环境。
 
@@ -31,9 +31,9 @@ Hermes-Yachiyo 目前仍是源码开发形态，不是已经打包好的普通�
 
 ## 它能做什么
 
-Hermes-Yachiyo 不是另一个聊天网页，而是一个本地桌面壳：
+Oha-Yachiyo 不是另一个聊天网页，而是一个本地桌面壳：
 
-- 主控台：查看 Hermes 状态、安装引导、会话中心和设置。
+- 主控台：查看 Native Agent readiness、模型配置、会话中心和设置。
 - Chat Window：完整对话窗口。
 - Bubble 模式：桌面悬浮气泡，点击打开对话。
 - Live2D 模式：桌面角色入口，支持 Live2D 模型资源导入。
@@ -142,7 +142,7 @@ npm --version
 
 ```bash
 git clone <repo-url>
-cd Hermes-Yachiyo
+cd oha-yachiyo
 ```
 
 如果你不是通过 Git 克隆，而是下载 ZIP，也可以解压后进入项目目录。
@@ -155,7 +155,7 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 ```
 
-### 3. 安装 Hermes-Yachiyo 源码包
+### 3. 安装 Oha-Yachiyo 源码包
 
 ```bash
 pip install -e .
@@ -177,7 +177,7 @@ nvm use 20.19.0
 ### 5. 启动桌面应用
 
 ```bash
-hermes-yachiyo
+oha-yachiyo
 ```
 
 第一次启动可能会自动安装前端依赖，耗时取决于网络。启动成功后你会看到 Electron 桌面窗口。
@@ -185,28 +185,27 @@ hermes-yachiyo
 如果只想启动 Python 后端：
 
 ```bash
-hermes-yachiyo-backend
+oha-yachiyo-backend
 ```
 
 ## 第一次打开后怎么做
 
-应用会先检测 Hermes Agent 是否可用，然后按状态引导：
+首次启动后，先完成本机配置，再进入主控台：
 
 ```text
-未安装 Hermes Agent
-  -> 安装 Hermes Agent
-  -> 完成 hermes setup
-  -> 初始化 Yachiyo 工作空间
+配置模型来源 / 默认 Chat 模型
+  -> 初始化 Oha-Yachiyo 工作空间
+  -> 按需导入 Live2D / TTS 资源
   -> 进入主控台
 ```
 
-安装页里有内置终端。你可以直接在应用里看安装输出，也可以在需要输入时直接输入。
+未配置模型时，Chat 和 Agent Run 会返回结构化 `native_agent_not_ready / model_profile_required` 错误，不会引导安装外部执行内核。
 
-如果安装失败，先看终端输出。常见情况：
+常见情况：
 
-- GitHub 克隆中断：通常是网络或代理问题，重新安装即可。
-- `hermes` 命令未找到：安装完成后可能需要打开新终端，或点击“重新检测”。
-- `setup` 没完成：点击“开始配置 Hermes”，在终端里完成 Hermes 的初次配置。
+- 模型连接失败：检查 Base URL、模型名和 API Key。
+- Bridge 无法连接：确认桌面后端已经启动，并且本机端口未被占用。
+- 本地截图不可用：到 macOS“系统设置 -> 隐私与安全性 -> 屏幕录制”给 Oha-Yachiyo 授权。
 
 ## 日常使用入口
 
@@ -214,7 +213,8 @@ hermes-yachiyo-backend
 
 主控台负责状态和设置：
 
-- Hermes Agent 是否安装
+- Native Agent readiness
+- Model Profiles 和工具中心
 - 会话中心
 - 当前显示模式
 - Bubble / Live2D 设置
@@ -245,12 +245,12 @@ Live2D 是角色桌面入口：
 
 为了避免仓库过大，Live2D 模型不直接放进主仓库。资源包从 GitHub Releases 下载：
 
-<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases>
+<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases>
 
 推荐目录：
 
 ```text
-~/.hermes/yachiyo/assets/
+~/.oha-yachiyo/assets/
 ├── bubble/
 │   └── avatars/
 │       └── yachiyo-default.jpg
@@ -271,8 +271,8 @@ Live2D 是角色桌面入口：
 也可以手动解压：
 
 ```bash
-mkdir -p ~/.hermes/yachiyo/assets/live2d
-unzip hermes-yachiyo-live2d-yachiyo-20260423.zip -d ~/.hermes/yachiyo/assets/live2d/
+mkdir -p ~/.oha-yachiyo/assets/live2d
+unzip oha-yachiyo-live2d-yachiyo-20260423.zip -d ~/.oha-yachiyo/assets/live2d/
 ```
 
 更多资源说明见 [docs/live2d-assets.md](docs/live2d-assets.md)。
@@ -281,9 +281,9 @@ unzip hermes-yachiyo-live2d-yachiyo-20260423.zip -d ~/.hermes/yachiyo/assets/liv
 
 主动关怀 TTS 的八千代 GPT-SoVITS 音色包也是可选资源，并且和应用 DMG 分开发布。应用 release 只包含程序本体；音色包放在独立资源 release 中：
 
-<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
+<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
 
-下载 `Hermes-Yachiyo-yachiyo-gpt-sovits-v4.zip` 后，在主控台打开“主动关怀语音”，选择 `GPT-SoVITS 本地服务`，再点击“导入音色包 ZIP”。
+下载 `Oha-Yachiyo-yachiyo-gpt-sovits-v4.zip` 后，在主控台打开“主动关怀语音”，选择 `GPT-SoVITS 本地服务`，再点击“导入音色包 ZIP”。
 
 音色包只包含已经调配好的八千代权重和参考音频，不包含 GPT-SoVITS 服务本体、基础预训练模型或运行时。本地 API 服务仍需在设置页部署并启动，或使用已有 GPT-SoVITS 服务目录。
 
@@ -303,7 +303,7 @@ pip install -e .
 然后重新运行：
 
 ```bash
-hermes-yachiyo
+oha-yachiyo
 ```
 
 ### 提示找不到 Node.js 或 npm
@@ -340,21 +340,8 @@ npm --prefix apps/frontend install
 然后重新运行：
 
 ```bash
-hermes-yachiyo
+oha-yachiyo
 ```
-
-### Hermes 安装时 GitHub clone 失败
-
-常见错误包括：
-
-```text
-RPC failed
-early EOF
-fetch-pack: unexpected disconnect
-invalid index-pack output
-```
-
-通常是网络中断、代理不稳定或 GitHub 连接问题。可以重新点击安装，或换一个网络环境后再试。
 
 ### Live2D 提示未检测到模型
 
@@ -365,8 +352,8 @@ invalid index-pack output
 用户配置和工作目录主要在：
 
 ```text
-~/.hermes-yachiyo/
-~/.hermes/yachiyo/
+~/.oha-yachiyo/
+~/.oha-yachiyo-config/
 ```
 
 删除这些目录会清掉本地配置、资源和会话相关数据。操作前请确认已经备份。
@@ -397,11 +384,11 @@ apps/
   frontend/           Electron + React/Vite/TypeScript 前端
   desktop_backend/    无窗口 Python 后端入口
   desktop_launcher.py 源码开发启动器
-  shell/              配置、安装、桌面后端 UI 数据适配
-  core/               Hermes 运行时封装、任务状态、聊天状态
+  shell/              配置、Native runtime、桌面后端 UI 数据适配
+  core/               AppRuntime、任务状态、聊天状态
   bridge/             本地 FastAPI Bridge
   locald/             截图、活动窗口等本地能力
-  installer/          Hermes 安装检测、安装、工作区初始化
+  installer/          Oha-Yachiyo 工作区初始化、备份、恢复和卸载
 packages/
   protocol/           跨层数据模型
 integrations/
@@ -414,7 +401,7 @@ docs/                 架构与资源文档
 
 - React 前端只负责界面，不直接调用 Python 对象。
 - Electron 负责桌面窗口、托盘、内置终端和原生能力。
-- Python backend 负责运行时、配置、安装检测和本地 Bridge。
+- Python backend 负责 AppRuntime、NativeRunEngine、配置和本地 Bridge。
 - Bridge 只监听本机，供 UI 和插件调用。
 - 旧 pywebview 承载层已移除，新 UI 工作统一放在 `apps/frontend/`。
 
@@ -434,7 +421,7 @@ npm --prefix apps/frontend run build
 pytest -q
 
 # 启动应用
-hermes-yachiyo
+oha-yachiyo
 ```
 
 ### 测试
@@ -452,8 +439,7 @@ pytest -q
 - SQLite 会话
 - Chat API
 - 设置生效策略
-- 安装器
-- 卸载与备份
+- 工作区初始化、卸载与备份
 - 启动决策
 - AstrBot handler
 

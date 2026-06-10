@@ -1,6 +1,6 @@
 # TTS 音色资源包说明
 
-Hermes-Yachiyo 的八千代 GPT-SoVITS 音色包是可选资源，和应用 DMG 分开发布。
+Oha-Yachiyo 的八千代 GPT-SoVITS 音色包是可选资源，和应用 DMG 分开发布。
 
 这个 ZIP 是已经调配好的八千代音色资源，不需要随着 `develop` / `main` 的应用构建重复生成。应用 release 只发布 DMG；音色包放在独立的资源 release 中，用户需要时在“主动关怀与桌面观察”页面导入。
 
@@ -8,17 +8,17 @@ Hermes-Yachiyo 的八千代 GPT-SoVITS 音色包是可选资源，和应用 DMG 
 
 请从 GitHub Releases 的独立资源页下载：
 
-- <https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
+- <https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
 
 资源文件名：
 
 ```text
-Hermes-Yachiyo-yachiyo-gpt-sovits-v4.zip
+Oha-Yachiyo-yachiyo-gpt-sovits-v4.zip
 ```
 
 ## 如何导入
 
-1. 启动 Hermes-Yachiyo。
+1. 启动 Oha-Yachiyo。
 2. 打开主控台。
 3. 打开侧栏“主动关怀”，进入“主动关怀与桌面观察”页面。
 4. 选择 `GPT-SoVITS 本地服务`。

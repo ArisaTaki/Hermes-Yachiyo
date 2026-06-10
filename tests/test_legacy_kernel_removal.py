@@ -13,6 +13,13 @@ SCAN_TARGETS = [
     ROOT / "scripts",
     ROOT / "pyproject.toml",
 ]
+ACTIVE_USER_DOC_TARGETS = [
+    ROOT / "README.md",
+    ROOT / "docs" / "desktop-frontend-architecture.md",
+    ROOT / "docs" / "live2d-assets.md",
+    ROOT / "docs" / "release-packaging.md",
+    ROOT / "docs" / "tts-voice-assets.md",
+]
 IGNORED_DIRS = {
     "__pycache__",
     ".pytest_cache",
@@ -71,6 +78,26 @@ FORBIDDEN_KERNEL_TOKENS = [
     ".yachiyo_init",
     "configs/yachiyo.json",
 ]
+FORBIDDEN_ACTIVE_DOC_TOKENS = [
+    "Hermes",
+    "hermes",
+    "HERMES",
+    "Hermes-Yachiyo",
+    "hermes-yachiyo",
+    "HERMES_YACHIYO",
+    "HermesRuntime",
+    "Hermes Agent",
+    "Hermes installer",
+    "Hermes readiness",
+    "Hermes 状态",
+    "hermes setup",
+    "hermes status",
+    "hermes config",
+    "~/.hermes-yachiyo",
+    "~/.hermes/yachiyo",
+    "github.com/kuguya-AI-app-develop/Hermes-Yachiyo",
+    "github.com/kuguya-AI-app-develop/Oha-Yachiyo",
+]
 
 
 def _iter_source_files():
@@ -93,6 +120,17 @@ def test_runtime_sources_do_not_reintroduce_legacy_hermes_kernel_entrypoints() -
     for path in _iter_source_files():
         text = path.read_text(encoding="utf-8", errors="ignore")
         for token in FORBIDDEN_KERNEL_TOKENS:
+            if token in text:
+                findings.append(f"{path.relative_to(ROOT)} contains {token!r}")
+
+    assert findings == []
+
+
+def test_active_user_facing_docs_do_not_reintroduce_legacy_hermes_identity() -> None:
+    findings: list[str] = []
+    for path in ACTIVE_USER_DOC_TARGETS:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for token in FORBIDDEN_ACTIVE_DOC_TOKENS:
             if token in text:
                 findings.append(f"{path.relative_to(ROOT)} contains {token!r}")
 
