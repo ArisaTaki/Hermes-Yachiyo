@@ -582,6 +582,145 @@ def test_workflow_continuation_coordinator_fails_unknown_node_without_secret_lea
     ]
 
 
+def test_workflow_continuation_coordinator_writes_artifact_node(tmp_path):
+    class FakeEngine:
+        def __init__(self):
+            self.workflow_artifacts_dir = tmp_path / "workflow-artifacts"
+            self.events: list[tuple[str, str, dict[str, object]]] = []
+            self.run_updates: list[tuple[str, dict[str, object]]] = []
+            self.group_updates: list[tuple[str, dict[str, object]]] = []
+
+        def _workflow_path(self, workflow):
+            return workflow["nodes"]
+
+        def _node_kind(self, node):
+            return node["type"]
+
+        def _timeline(self, event, detail, **payload):
+            return {"event": event, "detail": detail, **payload}
+
+        def append_run_event(self, run_id, event_type, payload):
+            self.events.append((run_id, event_type, payload))
+
+        def _update_run(self, run_id, **fields):
+            self.run_updates.append((run_id, fields))
+            return {"run_id": run_id, "run_group_id": "run_group", **fields}
+
+        def _update_run_group(self, run_group_id, **fields):
+            self.group_updates.append((run_group_id, fields))
+
+        def get_run(self, run_id):
+            assert run_id == "workflow_run"
+            assert self.run_updates
+            return {
+                "run_id": run_id,
+                "run_group_id": "run_group",
+                **self.run_updates[-1][1],
+            }
+
+        def _default_workspace_policy(self):
+            return {"default_workdir": "", "readable_scopes": ["."], "writable_scopes": []}
+
+        def _workflow_artifact_path(self, label, artifacts, requested):
+            assert label == "Final Report"
+            assert artifacts == []
+            return requested or "final.md"
+
+    engine = FakeEngine()
+    coordinator = WorkflowContinuationCoordinator(engine)
+    artifact_content = "Final workflow summary"
+    artifact_bytes = len(artifact_content.encode("utf-8"))
+    timeline: list[dict[str, object]] = []
+    artifacts: list[dict[str, object]] = []
+    workflow = {
+        "nodes": [
+            {
+                "id": "report",
+                "type": "artifact",
+                "data": {
+                    "label": "Final Report",
+                    "artifact_path": "reports/final.md",
+                },
+            }
+        ]
+    }
+
+    result = coordinator.continue_run(
+        {"run_id": "workflow_run", "run_group_id": "run_group", "user_goal": "Ship workflow"},
+        workflow,
+        context=artifact_content,
+        timeline=timeline,
+        artifacts=artifacts,
+        start_index=0,
+        root_group=True,
+    )
+
+    artifact_path = tmp_path / "workflow-artifacts" / "workflow_run" / "reports" / "final.md"
+    assert artifact_path.read_text(encoding="utf-8") == artifact_content
+    assert result["status"] == "completed"
+    assert result["result"] == artifact_content
+    assert artifacts == [
+        {
+            "kind": "workflow_artifact",
+            "workflow_node_id": "report",
+            "workflow_node_label": "Final Report",
+            "ok": True,
+            "path": "reports/final.md",
+            "bytes": artifact_bytes,
+        }
+    ]
+    assert timeline == [
+        {
+            "event": "workflow.node.artifact",
+            "detail": "Final Report",
+            "workflow_node_id": "report",
+            "workflow_node_kind": "artifact",
+            "workflow_node_label": "Final Report",
+            "status": "completed",
+            "artifact": {"ok": True, "path": "reports/final.md", "bytes": artifact_bytes},
+        },
+        {
+            "event": "workflow.run.completed",
+            "detail": "Workflow run completed",
+        },
+    ]
+    assert engine.events == [
+        (
+            "workflow_run",
+            "workflow.node.artifact",
+            {
+                "workflow_node_id": "report",
+                "workflow_node_kind": "artifact",
+                "workflow_node_label": "Final Report",
+                "status": "completed",
+                "artifact": {"ok": True, "path": "reports/final.md", "bytes": artifact_bytes},
+            },
+        ),
+        (
+            "workflow_run",
+            "workflow.run.completed",
+            {"result": artifact_content},
+        ),
+    ]
+    assert engine.run_updates == [
+        (
+            "workflow_run",
+            {
+                "status": "completed",
+                "result": artifact_content,
+                "timeline": timeline,
+                "artifacts": artifacts,
+            },
+        )
+    ]
+    assert engine.group_updates == [
+        (
+            "run_group",
+            {"status": "completed", "summary": artifact_content},
+        )
+    ]
+
+
 class FakeDefaultProfileService:
     def get_defaults(self):
         return {"chat": "profile_default"}
