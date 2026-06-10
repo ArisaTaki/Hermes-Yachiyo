@@ -277,6 +277,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Native runtime shutdown resource closure",
     ),
     (
+        "tests/test_agent_runtime.py::test_terminal_run_startup_failure_returns_structured_sanitized_error",
+        "macOS release workflow smoke tests must cover terminal startup structured sanitized errors",
+    ),
+    (
         "tests/test_agent_runtime.py::test_terminal_run_timeout_kills_process_group",
         "macOS release workflow smoke tests must cover terminal timeout process-group kill",
     ),

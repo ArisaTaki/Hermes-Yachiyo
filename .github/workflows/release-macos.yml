@@ -68,6 +68,7 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_run_links_task_and_records_replayable_events \
             tests/test_agent_runtime.py::test_runtime_shutdown_cancels_active_runs_rejects_new_runs_and_records_fact \
             tests/test_agent_runtime.py::test_runtime_shutdown_close_db_closes_runtime_resources \
+            tests/test_agent_runtime.py::test_terminal_run_startup_failure_returns_structured_sanitized_error \
             tests/test_agent_runtime.py::test_terminal_run_timeout_kills_process_group \
             tests/test_agent_runtime.py::test_main_chat_model_rejects_non_stream_reasoning_only_output \
             tests/test_agent_runtime.py::test_main_chat_model_loop_rejects_non_stream_reasoning_only_output \
