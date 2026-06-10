@@ -7179,12 +7179,35 @@ async def test_workflow_child_approval_route_approve_resumes_parent_workflow(tmp
         approved_child = await agent_routes.approve_run_approval(child_run_id)
         parent = await agent_routes.get_workflow_run(run["run_id"])
         completed_group = await agent_routes.get_run_group(run["run_group_id"])
+        child_detail_after = await agent_routes.get_any_run(child_run_id)
+        child_replay_after = await run_routes.list_run_events(child_run_id, after_sequence=0, limit=200)
         parent_replay_after = await run_routes.list_run_events(run["run_id"], after_sequence=0, limit=200)
+        child_replay_after_types = [event["event_type"] for event in child_replay_after["events"]]
         parent_replay_after_types = [event["event_type"] for event in parent_replay_after["events"]]
 
         assert approved_child["status"] == "completed"
         assert approved_child["pending_approval"] == {}
         assert approved_child["result"] == "Route child approved result"
+        assert child_detail_after["status"] == "completed"
+        assert child_detail_after["pending_approval"] == {}
+        assert child_detail_after["result"] == "Route child approved result"
+        assert any(event["event"] == "agent.tool.approval_approved" for event in child_detail_after["timeline"])
+        assert any(event["event"] == "agent.tool.call" and event["detail"] == "terminal.run" for event in child_detail_after["timeline"])
+        assert child_replay_after_types.count("agent.tool.approval_required") == 1
+        assert child_replay_after_types.count("agent.tool.approval_approved") == 1
+        assert "agent.tool.call" in child_replay_after_types
+        assert "agent.run.completed" in child_replay_after_types
+        approved_fact = next(
+            event for event in child_replay_after["events"]
+            if event["event_type"] == "agent.tool.approval_approved"
+        )
+        tool_fact = next(
+            event for event in child_replay_after["events"]
+            if event["event_type"] == "agent.tool.call"
+            and event["payload"].get("tool") == "terminal.run"
+        )
+        assert approved_fact["payload"]["tool"] == "terminal.run"
+        assert "route-approved" in json.dumps(tool_fact["payload"].get("result", {}), ensure_ascii=False)
         assert parent["status"] == "completed"
         assert parent["result"] == "Route child approved result"
         assert completed_group["status"] == "completed"
