@@ -376,6 +376,100 @@ def test_main_chat_model_loop_coalesces_openai_sdk_object_stream_before_persisti
         service.close()
 
 
+def test_main_chat_model_loop_coalesces_streaming_tool_call_deltas(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("streamed tool call content", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert tools is not None
+
+            def stream():
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                tool_calls=[
+                                    SimpleNamespace(
+                                        index=0,
+                                        id="call_stream_read",
+                                        type="function",
+                                        function=SimpleNamespace(name="workspace_", arguments=""),
+                                    )
+                                ]
+                            )
+                        )
+                    ]
+                )
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                tool_calls=[
+                                    SimpleNamespace(
+                                        index=0,
+                                        function=SimpleNamespace(name="read", arguments='{"path": "READ'),
+                                    )
+                                ]
+                            )
+                        )
+                    ]
+                )
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                tool_calls=[
+                                    SimpleNamespace(
+                                        index=0,
+                                        function=SimpleNamespace(arguments='ME.md"}'),
+                                    )
+                                ]
+                            )
+                        )
+                    ]
+                )
+
+            return stream()
+        assert messages[-1]["role"] == "tool"
+        assert "streamed tool call content" in messages[-1]["content"]
+        return {"content": "Streaming tool call complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-streaming-tool-call",
+            session_id="session-main-streaming-tool-call",
+            user_goal="Read README through streaming tool call",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Read README"}],
+            tool_policy={"allowed_tools": ["workspace.read"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."]},
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+
+        assert updated["result"] == "Streaming tool call complete"
+        assert tool_event["payload"]["tool"] == "workspace.read"
+        assert tool_event["payload"]["input_preview"]["path"] == "README.md"
+        assert event_types.count("agent.tool.call") == 1
+        assert event_types.count("model.output.completed") == 1
+        assert not any(str(event_type).endswith(".delta") for event_type in event_types)
+    finally:
+        service.close()
+
+
 def test_main_chat_provider_exception_is_redacted_from_run_events_and_storage(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     leaked_secret = "sk-provider-exception123456"

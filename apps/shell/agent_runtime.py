@@ -696,6 +696,73 @@ def _stream_chunk_text(chunk: Any) -> str:
     return _message_content_text(chunk)
 
 
+def _stream_chunk_tool_calls(chunk: Any) -> list[Any]:
+    direct = _message_field(chunk, "tool_calls")
+    if isinstance(direct, list):
+        return direct
+    choices = _message_field(chunk, "choices")
+    if not isinstance(choices, list):
+        return []
+    calls: list[Any] = []
+    for choice in choices:
+        delta = _message_field(choice, "delta")
+        if delta is not None:
+            delta_calls = _message_field(delta, "tool_calls")
+            if isinstance(delta_calls, list):
+                calls.extend(delta_calls)
+        message = _message_field(choice, "message")
+        if message is not None:
+            message_calls = _message_field(message, "tool_calls")
+            if isinstance(message_calls, list):
+                calls.extend(message_calls)
+    return calls
+
+
+def _merge_stream_tool_call_delta(accumulator: dict[int, dict[str, Any]], raw_call: Any, fallback_index: int) -> None:
+    if raw_call is None:
+        return
+    raw_index = _message_field(raw_call, "index")
+    try:
+        index = int(raw_index) if raw_index is not None else fallback_index
+    except (TypeError, ValueError):
+        index = fallback_index
+    entry = accumulator.setdefault(index, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+    call_id = _message_field(raw_call, "id")
+    if call_id:
+        entry["id"] = str(call_id)
+    call_type = _message_field(raw_call, "type")
+    if call_type:
+        entry["type"] = str(call_type)
+    raw_function = _message_field(raw_call, "function")
+    if raw_function is None:
+        return
+    function = entry.setdefault("function", {"name": "", "arguments": ""})
+    name = _message_field(raw_function, "name")
+    if name:
+        function["name"] = f"{function.get('name') or ''}{name}"
+    arguments = _message_field(raw_function, "arguments")
+    if arguments:
+        function["arguments"] = f"{function.get('arguments') or ''}{arguments}"
+
+
+def _coalesced_stream_tool_calls(accumulator: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+    for index in sorted(accumulator):
+        call = accumulator[index]
+        function = call.get("function") if isinstance(call.get("function"), dict) else {}
+        calls.append(
+            {
+                "id": str(call.get("id") or f"call_{index}"),
+                "type": str(call.get("type") or "function"),
+                "function": {
+                    "name": str(function.get("name") or ""),
+                    "arguments": str(function.get("arguments") or ""),
+                },
+            }
+        )
+    return calls
+
+
 def _coalesce_model_message(message: Any) -> dict[str, Any]:
     if isinstance(message, dict):
         return message
@@ -706,15 +773,22 @@ def _coalesce_model_message(message: Any) -> dict[str, Any]:
 
     content_parts: list[str] = []
     tool_calls: list[dict[str, Any]] | None = None
+    tool_call_deltas: dict[int, dict[str, Any]] = {}
     for chunk in message:
         content = _stream_chunk_text(chunk)
         if content:
             content_parts.append(content)
-        chunk_tool_calls = _message_field(chunk, "tool_calls")
+        chunk_tool_calls = _stream_chunk_tool_calls(chunk)
         if isinstance(chunk_tool_calls, list):
-            tool_calls = chunk_tool_calls
+            if chunk_tool_calls and any(_message_field(call, "index") is not None for call in chunk_tool_calls):
+                for index, call in enumerate(chunk_tool_calls):
+                    _merge_stream_tool_call_delta(tool_call_deltas, call, index)
+            elif chunk_tool_calls:
+                tool_calls = chunk_tool_calls
 
     result: dict[str, Any] = {"role": "assistant", "content": "".join(content_parts)}
+    if tool_call_deltas:
+        tool_calls = _coalesced_stream_tool_calls(tool_call_deltas)
     if tool_calls is not None:
         result["tool_calls"] = tool_calls
     return result

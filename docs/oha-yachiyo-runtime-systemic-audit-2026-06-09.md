@@ -674,7 +674,7 @@ RunEvent sequence:
 - `_coalesce_model_message()`
   - 普通 provider 返回 dict 时行为保持不变。
   - provider 返回 stream iterable 时先在内存中合并 delta 内容，再交给现有 completed-event 持久化路径。
-  - streaming chunk 兼容 dict-style `choices[].delta.content` 和 OpenAI SDK object-style `chunk.choices[0].delta.content`。
+  - streaming chunk 兼容 dict-style `choices[].delta.content`、OpenAI SDK object-style `chunk.choices[0].delta.content`，以及 OpenAI-style `choices[].delta.tool_calls[]` 分片。
   - 当前覆盖主聊天模型 loop；避免未来接入 streaming provider 后退化成 token/delta 级 RunEvent 写入。
 
 - `RunArtifactRepository`
@@ -735,6 +735,7 @@ RunEvent sequence:
 - 主聊天模型长输出回归锁定为单条 `model.output.completed` durable event，不写 token/delta 级 RunEvent。
 - 主聊天模型 loop 的 stream iterator 压力回归锁定为先合并 300 个 delta chunk，再只写一条 `model.output.completed` durable event。
 - 主聊天模型 loop 新增 OpenAI SDK object-style stream chunk 回归：先合并 180 个 `chunk.choices[0].delta.content` 对象 chunk，再只写一条 `model.output.completed` durable event，避免真实 SDK chunk 形态被忽略或退化成逐 token RunEvent。
+- 主聊天模型 loop 新增 OpenAI-style streaming tool_call delta 回归：分片合并 `workspace_read` tool call name 与 JSON arguments，执行 `workspace.read` 后恢复模型，并确认 replay 仍只写完成态事件、不写 token/delta 级 RunEvent。
 - ToolDescriptor schema 与 payload validation 对 `workspace.write_patch.patch`、content 禁用和 hash precondition 保持一致。
 - `workspace.write_patch` 直接覆盖 expected SHA-256、hunk context 校验、单文件 unified diff 应用、多文件/二进制 patch 拒绝和原子写入结果字段。
 - `workspace.write_patch` 现在会在进入 approval 前先做 workspace boundary validation；越界写请求不会生成待审批项，会作为受控工具错误回传给模型继续处理，并保持外部文件不变。
@@ -1033,7 +1034,7 @@ PY
 .venv/bin/python -m pytest tests/test_release_artifact_verifier.py tests/test_build_backend.py tests/test_build_metadata.py tests/test_credential_store.py tests/test_bridge_server.py tests/test_agent_runtime.py
 .venv/bin/python -m pytest tests/test_model_profiles.py tests/test_credential_store.py -q
 .venv/bin/python -m pytest tests/test_agent_runtime.py -k "api_key_redaction or legacy_agent_model_api_key_migration or budget" -q
-.venv/bin/python -m pytest tests/test_agent_runtime.py -k "main_chat_model_persists_batched_output_event_not_token_deltas or main_chat_model_loop_coalesces_stream_chunks_before_persisting or main_chat_model_loop_executes_native_tool_call or main_chat_run_links_task_and_records_replayable_events"
+.venv/bin/python -m pytest tests/test_agent_runtime.py -k "main_chat_model_persists_batched_output_event_not_token_deltas or main_chat_model_loop_coalesces_stream_chunks_before_persisting or main_chat_model_loop_coalesces_openai_sdk_object_stream_before_persisting or main_chat_model_loop_coalesces_streaming_tool_call_deltas or main_chat_model_loop_executes_native_tool_call or main_chat_run_links_task_and_records_replayable_events"
 .venv/bin/python -m pytest tests/test_agent_runtime.py -k "run_events"
 .venv/bin/python -m pytest tests/test_chat_api.py -k "group_dispatch or group_main_model_dispatch or group_agent"
 .venv/bin/python -m pytest tests/test_chat_api.py
@@ -1285,7 +1286,7 @@ Info.plist uses Oha-Yachiyo identifiers and permission strings
 
 ### 仍未完全达成
 
-- 模型输出 durable persistence 已有 batched completed-event 回归、dict-style stream iterator delta 合并压力测试，以及 OpenAI SDK object-style chunk 合并回归；真实 provider 联调仍需做。
+- 模型输出 durable persistence 已有 batched completed-event 回归、dict-style stream iterator delta 合并压力测试、OpenAI SDK object-style content chunk 合并回归，以及 OpenAI-style streaming tool_call delta 合并回归；真实 provider 联调仍需做。
 - ApprovalCoordinator 已承接 approve/reject/timeout 的通用状态转换；ApprovalResumeCoordinator 已承接批准后的工具执行；WorkflowParentResumeCoordinator 已承接父子 Run 联动；WorkflowContinuationCoordinator 已承接具体 Workflow step continuation。
 - 主聊天自动委派和群聊派活都已引入内部结构化 directive；自动委派已收敛到 `run_oha_agent` / `run_oha_workflow`，并已有 TaskRunner 级 NativeRunEngine 闭环回归，群聊主提示与 parser 已收敛到 `oha.group_dispatch` / `<oha_group_dispatch>` / native 命名，并已有 ChatAPI + 真实 NativeRunEngine 闭环回归；旧 `run_yachiyo_*`、`<yachiyo_delegation>` 和 `<yachiyo_group_dispatch>` 不再作为有效入口。
 - Workflow 与主聊天共享 NativeRunEngine 的路径已存在，已有 focused 回归、UI 入口 guard、同步 UI flow contract、浏览器级 route smoke、部分按钮级 smoke、无模型 Chat readiness 浏览器 E2E、可用 fake 模型 Chat 浏览器 E2E，以及 slow fake model 的 Chat 取消 late-output Bridge 复验；主聊天多轮/图片已补 executor/API/Bridge 合同、TaskRunner 级图片 roundtrip、live source Bridge 图片 E2E 和 Run Detail/RunEvent route projection，主聊天审批等待、approval roundtrip、live source Bridge 审批 E2E 和重复 approval 防重复执行已补回归，Chat 图片粘贴/附件与 composer 审批卡已补 source-level UI guard，Workflow 节点执行与审批等待 facts 已接入 RunEvent replay，但仍需要恢复浏览器 runner 后补图片/审批/取消按钮级 E2E，以及群聊/委派/Workflow/Run Detail 的完整交互 E2E。
