@@ -352,10 +352,12 @@ class TestNativeAgentExecutor:
         )
         assert all("fake-png-4" not in part["image_url"]["url"] for part in image_parts)
 
-    def test_select_executor_uses_native_when_ready(self):
+    def test_select_executor_uses_native_when_ready(self, monkeypatch):
+        runtime_service = object()
         runtime = types.SimpleNamespace(
             native_agent_readiness=lambda: {"ready": True},
             chat_session=None,
+            agent_runtime_service=runtime_service,
             main_chat_tool_policy=lambda: {
                 "allowed_tools": ["workspace.write_patch"],
                 "approval_required": {"workspace.write_patch": True},
@@ -366,10 +368,15 @@ class TestNativeAgentExecutor:
                 "writable_scopes": ["."],
             },
         )
+        monkeypatch.setattr(
+            "apps.shell.agent_runtime.get_native_run_engine",
+            lambda: (_ for _ in ()).throw(AssertionError("select_executor should inject AppRuntime service")),
+        )
 
         executor = select_executor(runtime)
 
         assert isinstance(executor, NativeAgentExecutor)
+        assert executor._runtime_service() is runtime_service
         assert executor.capabilities["model"] is True
         assert executor.capabilities["tools"] is True
         assert executor.capabilities["approval"] is True

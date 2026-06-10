@@ -1461,6 +1461,11 @@ def select_executor(runtime: "AppRuntime | None" = None) -> ExecutionStrategy:
                 if runtime is not None and hasattr(runtime, "config")
                 else None
             ),
+            runtime_service_getter=(
+                (lambda: runtime.agent_runtime_service)
+                if runtime is not None and hasattr(runtime, "agent_runtime_service")
+                else None
+            ),
             tool_policy_getter=(
                 (lambda: runtime.main_chat_tool_policy())
                 if runtime is not None and hasattr(runtime, "main_chat_tool_policy")
