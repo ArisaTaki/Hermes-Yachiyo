@@ -654,6 +654,41 @@ def test_openai_compatible_chat_message_streams_sse_chunks(monkeypatch):
     assert chunks[2]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] == "workspace_read"
 
 
+def test_openai_compatible_chat_message_streams_coalesced_sse_frames(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            first = json.dumps({"choices": [{"delta": {"content": "hello "}}]})
+            second = json.dumps({"choices": [{"delta": {"content": "world"}}]})
+            yield f": keepalive\n\ndata: {first}\n\ndata: {second}\n\ndata: [DONE]\n\n".encode("utf-8")
+
+    def fake_urlopen(request, timeout, context):
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["stream"] is True
+        assert timeout == OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS
+        assert isinstance(context, ssl.SSLContext)
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    chunks = list(
+        openai_compatible_chat_message(
+            "https://api.example.test/v1",
+            "demo-model",
+            "sk-demo",
+            [{"role": "user", "content": "hello"}],
+            stream=True,
+        )
+    )
+
+    assert [chunk["choices"][0]["delta"]["content"] for chunk in chunks] == ["hello ", "world"]
+
+
 def test_openai_compatible_chat_message_stream_raises_provider_error(monkeypatch):
     leaked_secret = "sk-stream-provider-error123456"
 

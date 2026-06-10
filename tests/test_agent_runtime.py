@@ -383,6 +383,56 @@ def test_main_chat_model_consumes_openai_compatible_sse_stream(tmp_path, monkeyp
         service.close()
 
 
+def test_main_chat_model_consumes_coalesced_openai_compatible_sse_frames(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    requests = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            first = json.dumps({"choices": [{"delta": {"content": "coalesced "}}]})
+            second = json.dumps({"choices": [{"delta": {"content": "frames"}}]})
+            yield f": keepalive\n\ndata: {first}\n\ndata: {second}\n\ndata: [DONE]\n\n".encode("utf-8")
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-http-coalesced-sse-stream",
+            session_id="session-main-http-coalesced-sse-stream",
+            user_goal="Use coalesced native HTTP SSE stream",
+        )
+        result = service.call_main_chat_model(
+            run["run_id"],
+            [{"role": "user", "content": "Use coalesced native HTTP SSE stream"}],
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        output_events = [event for event in events if event["event_type"] == "model.output.completed"]
+
+        assert result == "coalesced frames"
+        assert len(requests) == 1
+        assert output_events[-1]["payload"]["content"] == "coalesced frames"
+        assert not any(str(event["event_type"]).endswith(".delta") for event in events)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_executes_openai_compatible_sse_tool_calls(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     workdir = tmp_path / "repo"

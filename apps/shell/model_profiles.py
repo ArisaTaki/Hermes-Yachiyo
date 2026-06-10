@@ -1709,25 +1709,47 @@ def _openai_compatible_chat_stream(request: Any, timeout: float) -> Iterator[dic
 
 
 def _iter_openai_sse_payloads(response: Any) -> Iterator[dict[str, Any]]:
-    for raw_line in response:
-        if isinstance(raw_line, bytes):
-            line = raw_line.decode("utf-8", errors="replace")
+    buffer = ""
+    for raw_chunk in response:
+        if isinstance(raw_chunk, bytes):
+            buffer += raw_chunk.decode("utf-8", errors="replace")
         else:
-            line = str(raw_line)
-        line = line.strip()
-        if not line or not line.startswith("data:"):
-            continue
-        data = line[5:].strip()
-        if not data:
-            continue
-        if data == "[DONE]":
-            break
-        payload = json.loads(data)
-        if isinstance(payload, dict):
-            error_message = _openai_compatible_payload_error(payload)
-            if error_message:
-                raise ModelProfileError(f"OpenAI-compatible Profile 调用失败：{error_message}")
+            buffer += str(raw_chunk)
+        buffer = buffer.replace("\r\n", "\n").replace("\r", "\n")
+        while "\n\n" in buffer:
+            raw_event, buffer = buffer.split("\n\n", 1)
+            payload, done = _openai_compatible_sse_event_payload(raw_event)
+            if done:
+                return
+            if payload is not None:
+                yield payload
+    if buffer.strip():
+        payload, done = _openai_compatible_sse_event_payload(buffer)
+        if not done and payload is not None:
             yield payload
+
+
+def _openai_compatible_sse_event_payload(raw_event: str) -> tuple[dict[str, Any] | None, bool]:
+    data_lines: list[str] = []
+    for raw_line in raw_event.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith(":") or not line.startswith("data:"):
+            continue
+        data_lines.append(line[5:].strip())
+    if not data_lines:
+        return None, False
+    data = "\n".join(data_lines).strip()
+    if not data:
+        return None, False
+    if data == "[DONE]":
+        return None, True
+    payload = json.loads(data)
+    if not isinstance(payload, dict):
+        return None, False
+    error_message = _openai_compatible_payload_error(payload)
+    if error_message:
+        raise ModelProfileError(f"OpenAI-compatible Profile 调用失败：{error_message}")
+    return payload, False
 
 
 def _openai_compatible_payload_error(payload: dict[str, Any]) -> str:
