@@ -277,6 +277,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover approval reject route idempotency",
     ),
     (
+        "tests/test_agent_runtime.py::test_concurrent_cancel_run_is_idempotent",
+        "macOS release workflow smoke tests must cover concurrent Run cancellation idempotency",
+    ),
+    (
+        "tests/test_bridge_server.py::test_run_cancel_route_handler_is_idempotent",
+        "macOS release workflow smoke tests must cover UI Run cancel route idempotency",
+    ),
+    (
         "tests/test_executor.py::TestNativeAgentExecutor::test_run_uses_native_run_and_returns_task_result",
         "macOS release workflow smoke tests must cover NativeAgentExecutor Task-to-Run boundary",
     ),
