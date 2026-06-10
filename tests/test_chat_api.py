@@ -3,7 +3,9 @@
 import base64
 import json
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -8061,6 +8063,101 @@ def test_summarize_delegated_run_uses_native_run_projection(tmp_path, monkeypatc
         assert "agent-context.md" not in summary_task.description
     finally:
         native_service.close()
+        activity_store.close()
+        store.close()
+
+
+def test_summarize_delegated_run_concurrent_calls_create_one_followup(tmp_path, monkeypatch):
+    api, runtime, store = _make_api(tmp_path)
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+
+    run = {
+        "run_id": "agent_run_concurrent_summary",
+        "run_group_id": "run_group_concurrent_summary",
+        "kind": "agent_run",
+        "runnable_id": "agent_concurrent",
+        "runnable_name": "Concurrent Agent",
+        "status": "completed",
+        "user_goal": "整理并发 summary evidence",
+        "result": "Concurrent delegated run completed.",
+        "timeline": [],
+        "artifacts": [],
+    }
+
+    class FakeAgentRuntimeService:
+        def get_run(self, run_id: str):
+            assert run_id == run["run_id"]
+            return run
+
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: FakeAgentRuntimeService())
+    original_create_task = runtime.state.create_task
+    release_create_task: threading.Event | None = None
+
+    try:
+        sent = api.send_message("请自动委派一个 Agent 做并发 summary 验证")
+        runtime.chat_session.upsert_assistant_message(
+            task_id=sent["task_id"],
+            content="我会交给 Concurrent Agent 处理。",
+            status=MessageStatus.COMPLETED,
+        )
+        activity_store.record_event(
+            session_id=runtime.chat_session.session_id,
+            task_id=sent["task_id"],
+            tool_name="oha.delegation",
+            phase="subagent",
+            title="Concurrent Agent completed",
+            detail=f"run_id={run['run_id']}",
+            status="completed",
+            metadata={
+                "run_id": run["run_id"],
+                "run_group_id": run["run_group_id"],
+                "run_status": "completed",
+            },
+        )
+
+        create_task_entered = threading.Event()
+        release_create_task = threading.Event()
+        create_task_calls = 0
+        create_task_calls_lock = threading.Lock()
+
+        def slow_create_task(*args, **kwargs):
+            nonlocal create_task_calls
+            with create_task_calls_lock:
+                create_task_calls += 1
+                call_index = create_task_calls
+            if call_index == 1:
+                create_task_entered.set()
+                assert release_create_task.wait(timeout=2)
+            return original_create_task(*args, **kwargs)
+
+        runtime.state.create_task = slow_create_task
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(api.summarize_delegated_run, run["run_id"])
+            assert create_task_entered.wait(timeout=2)
+            second = pool.submit(api.summarize_delegated_run, run["run_id"])
+            release_create_task.set()
+            results = [first.result(timeout=2), second.result(timeout=2)]
+
+        created = [result for result in results if result.get("summary_created") is True]
+        reused = [result for result in results if result.get("summary_created") is False]
+        summary_messages = [
+            message for message in runtime.chat_session.get_all_messages()
+            if message.metadata.get("delegated_run_summary_for_run_id") == run["run_id"]
+        ]
+
+        assert len(created) == 1
+        assert len(reused) == 1
+        assert reused[0]["reason"] == "already_exists"
+        assert create_task_calls == 1
+        assert len(summary_messages) == 1
+        assert len(runtime.state.list_tasks()) == 2
+        assert runtime.state.get_task(created[0]["task_id"]) is not None
+    finally:
+        runtime.state.create_task = original_create_task
+        if release_create_task is not None:
+            release_create_task.set()
         activity_store.close()
         store.close()
 

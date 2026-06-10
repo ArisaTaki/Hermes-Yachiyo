@@ -84,6 +84,7 @@ _GROUP_FOLLOWUP_MARKER = "[Oha-Yachiyo 群组补充/纠偏]"
 _LEGACY_GROUP_FOLLOWUP_MARKER = "[Yachiyo 群组补充/纠偏]"
 _GROUP_FOLLOWUP_MARKERS = (_GROUP_FOLLOWUP_MARKER, _LEGACY_GROUP_FOLLOWUP_MARKER)
 _GROUP_AGENT_UPSTREAM_MARKER = "[Oha-Yachiyo 群组执行约定]"
+_DELEGATED_RUN_SUMMARY_LOCK = threading.RLock()
 
 
 def _has_any_marker(text: str, markers: tuple[str, ...]) -> bool:
@@ -796,49 +797,50 @@ class ChatAPI:
         run_id = str(run_id or "").strip()
         if not run_id:
             return {"ok": False, "error": "Run ID 不能为空"}
-        if self._delegated_run_summary_message(run_id) is not None:
-            return {"ok": True, "summary_created": False, "run_id": run_id, "reason": "already_exists"}
-        try:
-            run = self._agent_runtime_service().get_run(run_id)
-        except KeyError:
-            return {"ok": False, "error": "Run 不存在"}
-        except AgentRuntimeError as exc:
-            return {"ok": False, "error": redact_api_error_text(exc)}
+        with _DELEGATED_RUN_SUMMARY_LOCK:
+            if self._delegated_run_summary_message(run_id) is not None:
+                return {"ok": True, "summary_created": False, "run_id": run_id, "reason": "already_exists"}
+            try:
+                run = self._agent_runtime_service().get_run(run_id)
+            except KeyError:
+                return {"ok": False, "error": "Run 不存在"}
+            except AgentRuntimeError as exc:
+                return {"ok": False, "error": redact_api_error_text(exc)}
 
-        status = self._normalize_agent_run_status(str(run.get("status") or ""))
-        if status not in {"completed", "failed", "cancelled"}:
-            return {"ok": True, "summary_created": False, "run_id": run_id, "run_status": status, "reason": "not_terminal"}
+            status = self._normalize_agent_run_status(str(run.get("status") or ""))
+            if status not in {"completed", "failed", "cancelled"}:
+                return {"ok": True, "summary_created": False, "run_id": run_id, "run_status": status, "reason": "not_terminal"}
 
-        activity = self._delegated_run_activity(run_id)
-        if activity is None:
-            return {"ok": True, "summary_created": False, "run_id": run_id, "run_status": status, "reason": "activity_not_found"}
+            activity = self._delegated_run_activity(run_id)
+            if activity is None:
+                return {"ok": True, "summary_created": False, "run_id": run_id, "run_status": status, "reason": "activity_not_found"}
 
-        task = self._state.create_task(
-            task_type=TaskType.GENERAL,
-            description=self._delegated_run_summary_task_description(run, activity),
-            chat_session_id=self._session.session_id,
-        )
-        message_id = self._session.upsert_assistant_message(
-            task_id=task.task_id,
-            content="",
-            status=MessageStatus.PROCESSING,
-            metadata={
-                "sender": self._main_model_sender_from_runtime(),
-                "delegated_run_summary_for_run_id": run_id,
-                "delegated_run_source_task_id": activity.get("task_id", ""),
+            task = self._state.create_task(
+                task_type=TaskType.GENERAL,
+                description=self._delegated_run_summary_task_description(run, activity),
+                chat_session_id=self._session.session_id,
+            )
+            message_id = self._session.upsert_assistant_message(
+                task_id=task.task_id,
+                content="",
+                status=MessageStatus.PROCESSING,
+                metadata={
+                    "sender": self._main_model_sender_from_runtime(),
+                    "delegated_run_summary_for_run_id": run_id,
+                    "delegated_run_source_task_id": activity.get("task_id", ""),
+                    "run_id": run_id,
+                    "run_group_id": run.get("run_group_id", ""),
+                    "run_status": status,
+                },
+            )
+            return {
+                "ok": True,
+                "summary_created": True,
+                "message_id": message_id,
+                "task_id": task.task_id,
                 "run_id": run_id,
-                "run_group_id": run.get("run_group_id", ""),
                 "run_status": status,
-            },
-        )
-        return {
-            "ok": True,
-            "summary_created": True,
-            "message_id": message_id,
-            "task_id": task.task_id,
-            "run_id": run_id,
-            "run_status": status,
-        }
+            }
 
     def _handle_runnable_command(
         self,
