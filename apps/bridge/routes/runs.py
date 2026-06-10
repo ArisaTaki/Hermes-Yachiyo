@@ -35,6 +35,21 @@ def _create_payload(model: RunCreateRequest, request: Request | None) -> dict[st
     return payload
 
 
+def _native_run_engine(request: Request | None = None) -> Any:
+    state = getattr(getattr(request, "app", None), "state", None)
+    runtime = getattr(state, "runtime", None)
+    if runtime is not None:
+        service = getattr(runtime, "agent_runtime_service", None)
+        if service is not None:
+            return service
+        getter = getattr(runtime, "get_agent_runtime_service", None)
+        if callable(getter):
+            service = getter()
+            if service is not None:
+                return service
+    return get_native_run_engine()
+
+
 @router.post("/runs")
 async def create_run(
     request: RunCreateRequest,
@@ -42,8 +57,9 @@ async def create_run(
 ) -> dict[str, Any]:
     payload = _create_payload(request, http_request)
     try:
+        service = _native_run_engine(http_request)
         return await asyncio.to_thread(
-            get_native_run_engine().create_run_for_runnable,
+            service.create_run_for_runnable,
             runnable_id=str(payload.get("runnable_id") or ""),
             name=str(payload.get("name") or ""),
             user_goal=str(payload.get("user_goal") or payload.get("goal") or ""),
@@ -59,12 +75,14 @@ async def create_run(
 @router.get("/runs/{run_id}/events")
 async def list_run_events(
     run_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
     after_sequence: int = 0,
     limit: int = 200,
 ) -> dict:
     try:
+        service = _native_run_engine(http_request)
         return await asyncio.to_thread(
-            get_native_run_engine().list_run_events,
+            service.list_run_events,
             run_id,
             after_sequence=after_sequence,
             limit=limit,

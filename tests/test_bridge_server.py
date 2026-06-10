@@ -154,8 +154,13 @@ def test_run_events_http_route_paginates_and_hides_non_user_events(tmp_path, mon
             credential_store=MemoryCredentialStore(),
             seed_templates=False,
         )
-        monkeypatch.setattr(run_route_module, "get_native_run_engine", lambda: service)
+        monkeypatch.setattr(
+            run_route_module,
+            "get_native_run_engine",
+            lambda: (_ for _ in ()).throw(AssertionError("run routes should use AppRuntime service")),
+        )
         route_app = FastAPI()
+        route_app.state.runtime = SimpleNamespace(agent_runtime_service=service)
         route_app.include_router(run_route_module.router)
         try:
             run = service._insert_run(kind="main_chat_run", runnable_id="builtin:yachiyo-main", user_goal="http replay")
@@ -216,8 +221,14 @@ def test_post_runs_http_route_maps_idempotency_key(monkeypatch):
                     "client_request_id": kwargs.get("client_run_id") or kwargs.get("client_request_id") or "",
                 }
 
-        monkeypatch.setattr(run_route_module, "get_native_run_engine", lambda: FakeRunEngine())
+        service = FakeRunEngine()
+        monkeypatch.setattr(
+            run_route_module,
+            "get_native_run_engine",
+            lambda: (_ for _ in ()).throw(AssertionError("run routes should use AppRuntime service")),
+        )
         route_app = FastAPI()
+        route_app.state.runtime = SimpleNamespace(agent_runtime_service=service)
         route_app.include_router(run_route_module.router)
 
         with TestClient(route_app) as client:
