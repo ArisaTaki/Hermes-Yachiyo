@@ -6216,6 +6216,84 @@ def test_plain_group_goal_approval_flow_continues_to_main_summary(tmp_path, monk
         store.close()
 
 
+def test_group_direct_agent_summary_concurrent_calls_create_one_followup(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+    runtime.store.update_session_context(
+        runtime.chat_session.session_id,
+        conversation_kind="group",
+        runnable_name="Concurrent Group",
+        participants_json=json.dumps(
+            [
+                {"kind": "main", "id": "main", "name": "Yachiyo"},
+                {"kind": "agent", "id": "agent_design", "name": "Design Agent", "nickname": "Design"},
+            ],
+            ensure_ascii=False,
+        ),
+    )
+    source_message_id = runtime.chat_session.add_user_message("@Design 做并发整理")
+    agent_message_id = runtime.chat_session.add_assistant_message(
+        "Design 并发整理完成",
+        metadata={
+            "sender": {"kind": "agent", "id": "agent_design", "name": "Design Agent", "nickname": "Design"},
+            "conversation_kind": "group",
+            "runnable_kind": "agent",
+            "runnable_id": "agent_design",
+            "run_status": "completed",
+            "agent_report": "Design 并发整理完成",
+            "group_goal": "做并发整理",
+            "source_message_id": source_message_id,
+        },
+    )
+
+    original_create_task = runtime.state.create_task
+    create_task_entered = threading.Event()
+    release_create_task = threading.Event()
+    create_task_calls = 0
+    create_task_calls_lock = threading.Lock()
+
+    def slow_create_task(*args, **kwargs):
+        nonlocal create_task_calls
+        with create_task_calls_lock:
+            create_task_calls += 1
+            call_index = create_task_calls
+        if call_index == 1:
+            create_task_entered.set()
+            assert release_create_task.wait(timeout=2)
+        return original_create_task(*args, **kwargs)
+
+    runtime.state.create_task = slow_create_task
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(api._maybe_create_group_direct_agent_summary_task, agent_message_id)
+            assert create_task_entered.wait(timeout=2)
+            second = pool.submit(api._maybe_create_group_direct_agent_summary_task, agent_message_id)
+            release_create_task.set()
+            first.result(timeout=2)
+            second.result(timeout=2)
+
+        messages = runtime.chat_session.get_all_messages()
+        agent_message = next(message for message in messages if message.message_id == agent_message_id)
+        summary_messages = [
+            message for message in messages
+            if message.metadata.get("group_direct_agent_summary_for_message_id") == agent_message_id
+        ]
+        summary_task_id = agent_message.metadata["group_agent_summary_task_id"]
+        summary_task = runtime.state.get_task(summary_task_id)
+
+        assert create_task_calls == 1
+        assert len(summary_messages) == 1
+        assert agent_message.metadata["group_agent_summary_pending"] is True
+        assert summary_task is not None
+        assert summary_task.chat_session_id == runtime.chat_session.session_id
+        assert "[Oha-Yachiyo 群组直接 Agent 汇总]" in summary_task.description
+        assert "用户原始请求：@Design 做并发整理" in summary_task.description
+    finally:
+        runtime.state.create_task = original_create_task
+        release_create_task.set()
+        store.close()
+
+
 def test_group_dispatch_uses_runtime_native_service_end_to_end(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     service = _make_agent_runtime_service(tmp_path)

@@ -85,6 +85,7 @@ _LEGACY_GROUP_FOLLOWUP_MARKER = "[Yachiyo 群组补充/纠偏]"
 _GROUP_FOLLOWUP_MARKERS = (_GROUP_FOLLOWUP_MARKER, _LEGACY_GROUP_FOLLOWUP_MARKER)
 _GROUP_AGENT_UPSTREAM_MARKER = "[Oha-Yachiyo 群组执行约定]"
 _DELEGATED_RUN_SUMMARY_LOCK = threading.RLock()
+_GROUP_AGENT_SUMMARY_LOCK = threading.RLock()
 
 
 def _has_any_marker(text: str, markers: tuple[str, ...]) -> bool:
@@ -5093,51 +5094,52 @@ class ChatAPI:
         parent_task_id = str(parent_task_id or "").strip()
         if not parent_task_id:
             return
-        context = self._session_context()
-        if context.get("conversation_kind") != "group":
-            return
-        parent = self._session.get_assistant_message_for_task(parent_task_id)
-        if parent is None:
-            return
-        parent_metadata = parent.metadata if isinstance(parent.metadata, dict) else {}
-        if parent_metadata.get("group_agent_summary_task_id"):
-            return
-        children = self._delegated_group_agent_children(parent_task_id)
-        skipped = parent_metadata.get("group_dispatch_skipped")
-        has_skipped = isinstance(skipped, list) and any(str(item or "").strip() for item in skipped)
-        expected_count = int(parent_metadata.get("group_dispatch_count") or 0)
-        if not children and not has_skipped:
-            return
-        if expected_count and len(children) < expected_count:
-            return
-        if any(not self._is_terminal_delegated_agent_message(child) for child in children):
-            return
+        with _GROUP_AGENT_SUMMARY_LOCK:
+            context = self._session_context()
+            if context.get("conversation_kind") != "group":
+                return
+            parent = self._session.get_assistant_message_for_task(parent_task_id)
+            if parent is None:
+                return
+            parent_metadata = parent.metadata if isinstance(parent.metadata, dict) else {}
+            if parent_metadata.get("group_agent_summary_task_id"):
+                return
+            children = self._delegated_group_agent_children(parent_task_id)
+            skipped = parent_metadata.get("group_dispatch_skipped")
+            has_skipped = isinstance(skipped, list) and any(str(item or "").strip() for item in skipped)
+            expected_count = int(parent_metadata.get("group_dispatch_count") or 0)
+            if not children and not has_skipped:
+                return
+            if expected_count and len(children) < expected_count:
+                return
+            if any(not self._is_terminal_delegated_agent_message(child) for child in children):
+                return
 
-        task = self._state.create_task(
-            task_type=TaskType.GENERAL,
-            description=self._group_agent_summary_task_description(parent, children),
-            chat_session_id=self._session.session_id,
-        )
-        self._session.upsert_assistant_message(
-            task_id=task.task_id,
-            content="",
-            status=MessageStatus.PROCESSING,
-            metadata={
-                "sender": self._main_model_sender_from_runtime(),
-                "group_agent_summary_for_task_id": parent_task_id,
-                "group_dispatch_handled": True,
-            },
-        )
-        self._session.update_assistant_message(
-            parent.message_id,
-            parent.content,
-            status=parent.status,
-            error=parent.error,
-            metadata={
-                "group_agent_summary_task_id": task.task_id,
-                "group_agent_summary_pending": True,
-            },
-        )
+            task = self._state.create_task(
+                task_type=TaskType.GENERAL,
+                description=self._group_agent_summary_task_description(parent, children),
+                chat_session_id=self._session.session_id,
+            )
+            self._session.upsert_assistant_message(
+                task_id=task.task_id,
+                content="",
+                status=MessageStatus.PROCESSING,
+                metadata={
+                    "sender": self._main_model_sender_from_runtime(),
+                    "group_agent_summary_for_task_id": parent_task_id,
+                    "group_dispatch_handled": True,
+                },
+            )
+            self._session.update_assistant_message(
+                parent.message_id,
+                parent.content,
+                status=parent.status,
+                error=parent.error,
+                metadata={
+                    "group_agent_summary_task_id": task.task_id,
+                    "group_agent_summary_pending": True,
+                },
+            )
 
     def _delegated_run_summary_message(self, run_id: str) -> ChatMessage | None:
         run_id = str(run_id or "").strip()
@@ -5232,50 +5234,51 @@ class ChatAPI:
         message_id = str(message_id or "").strip()
         if not message_id:
             return
-        context = self._session_context()
-        if context.get("conversation_kind") != "group":
-            return
-        agent_message = next(
-            (msg for msg in self._session.get_all_messages() if msg.message_id == message_id),
-            None,
-        )
-        if agent_message is None or agent_message.role != MessageRole.ASSISTANT:
-            return
-        metadata = agent_message.metadata if isinstance(agent_message.metadata, dict) else {}
-        if metadata.get("delegated_by_task_id"):
-            return
-        if str(metadata.get("runnable_kind") or "") != "agent":
-            return
-        if metadata.get("group_agent_summary_task_id"):
-            return
-        if str(metadata.get("run_status") or "").strip() not in {"completed", "failed", "cancelled"}:
-            return
+        with _GROUP_AGENT_SUMMARY_LOCK:
+            context = self._session_context()
+            if context.get("conversation_kind") != "group":
+                return
+            agent_message = next(
+                (msg for msg in self._session.get_all_messages() if msg.message_id == message_id),
+                None,
+            )
+            if agent_message is None or agent_message.role != MessageRole.ASSISTANT:
+                return
+            metadata = agent_message.metadata if isinstance(agent_message.metadata, dict) else {}
+            if metadata.get("delegated_by_task_id"):
+                return
+            if str(metadata.get("runnable_kind") or "") != "agent":
+                return
+            if metadata.get("group_agent_summary_task_id"):
+                return
+            if str(metadata.get("run_status") or "").strip() not in {"completed", "failed", "cancelled"}:
+                return
 
-        task = self._state.create_task(
-            task_type=TaskType.GENERAL,
-            description=self._group_direct_agent_summary_task_description(agent_message),
-            chat_session_id=self._session.session_id,
-        )
-        self._session.upsert_assistant_message(
-            task_id=task.task_id,
-            content="",
-            status=MessageStatus.PROCESSING,
-            metadata={
-                "sender": self._main_model_sender_from_runtime(),
-                "group_direct_agent_summary_for_message_id": message_id,
-                "group_dispatch_handled": True,
-            },
-        )
-        self._session.update_assistant_message(
-            agent_message.message_id,
-            agent_message.content,
-            status=agent_message.status,
-            error=agent_message.error,
-            metadata={
-                "group_agent_summary_task_id": task.task_id,
-                "group_agent_summary_pending": True,
-            },
-        )
+            task = self._state.create_task(
+                task_type=TaskType.GENERAL,
+                description=self._group_direct_agent_summary_task_description(agent_message),
+                chat_session_id=self._session.session_id,
+            )
+            self._session.upsert_assistant_message(
+                task_id=task.task_id,
+                content="",
+                status=MessageStatus.PROCESSING,
+                metadata={
+                    "sender": self._main_model_sender_from_runtime(),
+                    "group_direct_agent_summary_for_message_id": message_id,
+                    "group_dispatch_handled": True,
+                },
+            )
+            self._session.update_assistant_message(
+                agent_message.message_id,
+                agent_message.content,
+                status=agent_message.status,
+                error=agent_message.error,
+                metadata={
+                    "group_agent_summary_task_id": task.task_id,
+                    "group_agent_summary_pending": True,
+                },
+            )
 
     def _create_pending_group_agent_summary_tasks(self) -> None:
         context = self._session_context()
