@@ -68,6 +68,8 @@ jobs:
             tests/test_agent_runtime.py::test_main_chat_run_links_task_and_records_replayable_events \
             tests/test_agent_runtime.py::test_runtime_shutdown_cancels_active_runs_rejects_new_runs_and_records_fact \
             tests/test_agent_runtime.py::test_runtime_shutdown_close_db_closes_runtime_resources \
+            tests/test_agent_runtime.py::test_agent_run_validates_write_patch_workspace_boundary_before_approval \
+            tests/test_agent_runtime.py::test_tool_broker_rejects_symlink_workspace_escape \
             tests/test_agent_runtime.py::test_terminal_run_uses_workspace_argv_and_scrubbed_environment \
             tests/test_agent_runtime.py::test_terminal_run_startup_failure_returns_structured_sanitized_error \
             tests/test_agent_runtime.py::test_terminal_run_truncates_and_sanitizes_outputs \

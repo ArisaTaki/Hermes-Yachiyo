@@ -277,6 +277,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Native runtime shutdown resource closure",
     ),
     (
+        "tests/test_agent_runtime.py::test_agent_run_validates_write_patch_workspace_boundary_before_approval",
+        "macOS release workflow smoke tests must cover write_patch boundary validation before approval",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_tool_broker_rejects_symlink_workspace_escape",
+        "macOS release workflow smoke tests must cover ToolBroker symlink workspace escape guard",
+    ),
+    (
         "tests/test_agent_runtime.py::test_terminal_run_uses_workspace_argv_and_scrubbed_environment",
         "macOS release workflow smoke tests must cover terminal workspace argv and env scrub",
     ),
