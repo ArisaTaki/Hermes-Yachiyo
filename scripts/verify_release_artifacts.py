@@ -405,6 +405,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover desktop backend Native startup",
     ),
     (
+        "tests/test_desktop_launcher.py",
+        "macOS release workflow smoke tests must cover desktop launcher startup wiring",
+    ),
+    (
+        "tests/test_shell_app_entrypoint.py",
+        "macOS release workflow smoke tests must cover shell app Electron entrypoint",
+    ),
+    (
         "tests/test_build_metadata.py",
         "macOS release workflow smoke tests must cover release-like build metadata guards",
     ),

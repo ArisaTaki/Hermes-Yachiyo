@@ -92,6 +92,8 @@ jobs:
             tests/test_legacy_kernel_removal.py \
             tests/test_runtime_injection_boundary.py \
             tests/test_desktop_backend_app.py \
+            tests/test_desktop_launcher.py \
+            tests/test_shell_app_entrypoint.py \
             tests/test_build_metadata.py \
             tests/test_credential_store.py \
             tests/test_secret_redaction_verifier.py \
