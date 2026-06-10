@@ -223,6 +223,38 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
     )
 
 
+def test_agent_studio_preserves_workflow_child_approval_run_detail_wiring() -> None:
+    _assert_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        [
+            "workflowPendingApprovalChildRunId(selectedRun)",
+            "selectedWorkflowApprovalChildRunId",
+            "selectedWorkflowApprovalChildRun = selectedWorkflowApprovalChildRunId",
+            "selectedWorkflowApprovalStep = selectedWorkflowApprovalChildRunId",
+            "maybeAdd(selectedWorkflowApprovalChildRunId);",
+            "...selectedWorkflowChildRefs.map((ref) => ref.childRunId),",
+            "selectedWorkflowApprovalChildRunId,",
+            "Promise.all(uniqueChildRunIds.map((runId) => getRun(runId).catch(() => null)))",
+            "className=\"run-approval-box workflow-approval-bridge\"",
+            "RunApprovalRequest",
+            "runId={selectedWorkflowApprovalChildRun.run_id}",
+            "() => approveRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),",
+            "() => rejectRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),",
+            "onClick={() => openRunDetail(selectedWorkflowApprovalChildRunId)}",
+            "const selectedAfterAction = nextSelectedRunId || runId;",
+            "const selectedAfterRun = selectedAfterAction !== runId ? runById.get(selectedAfterAction) || null : null;",
+            "makeRunContinuingAfterApproval(selectedAfterRun, '已批准子 Agent，Workflow 正在继续执行。')",
+            "const approvalRequest = approveRunApproval(runId);",
+            "void pollApprovedRunProgress(runId, selectedAfterAction).catch",
+            "updatedRuns.push(await getRun(nextSelectedRunId));",
+            "await refreshRunGroupsForRuns(updatedRuns);",
+            "const run = await rejectRunApproval(runId);",
+            "upsertRunDetailCache(updatedRuns);",
+            "setSelectedRunId(selectedAfterAction);",
+        ],
+    )
+
+
 def test_desktop_presence_features_preserve_live2d_screenshot_and_tts_entrypoints() -> None:
     _assert_contains(
         "apps/frontend/src/views/ModeSettingsView.tsx",
