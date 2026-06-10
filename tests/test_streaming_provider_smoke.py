@@ -109,6 +109,57 @@ def test_stream_smoke_requires_content_and_expected_tool_name(monkeypatch):
     assert summary["tool_call_count"] == 1
 
 
+def test_stream_smoke_tolerates_role_and_usage_only_provider_chunks(monkeypatch):
+    requests: list[dict] = []
+    leaked_secret = "sk-stream-usage-secret123456"
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'
+            yield b": provider heartbeat\n\n"
+            yield b'data: {"choices":[{"delta":{"content":"checking usage "}}]}\n\n'
+            yield (
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_usage",'
+                b'"type":"function","function":{"name":"workspace_read","arguments":"{\\"path\\":\\"README.md\\"}"}}]},'
+                b'"finish_reason":"tool_calls"}]}\n\n'
+            )
+            yield b'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3}}\n\n'
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(request, *_args, **_kwargs):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    summary = smoke.run_stream_smoke(
+        base_url="https://api.example.test/v1",
+        model="demo-model",
+        api_key=leaked_secret,
+        require_content=True,
+        expect_tool_name="workspace_read",
+        expect_tool_argument_substrings=["README.md"],
+    )
+
+    assert requests[0]["stream"] is True
+    assert summary["ok"] is True
+    assert summary["chunk_count"] == 4
+    assert summary["content_chars"] == len("checking usage ")
+    assert summary["finish_reasons"] == ["tool_calls"]
+    assert summary["tool_call_count"] == 1
+    assert summary["tool_calls"] == [
+        {"id": "call_usage", "name": "workspace_read", "argument_chars": len('{"path":"README.md"}')}
+    ]
+    assert leaked_secret not in json.dumps(summary)
+    assert "README.md" not in json.dumps(summary)
+
+
 def test_stream_smoke_fails_when_expected_content_or_tool_is_missing(monkeypatch):
     class FakeResponse:
         def __enter__(self):
