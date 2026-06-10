@@ -261,6 +261,22 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover TaskRunner approval timeout projection",
     ),
     (
+        "tests/test_agent_runtime.py::test_main_chat_repeated_approval_does_not_execute_tool_twice",
+        "macOS release workflow smoke tests must cover main chat repeated approval idempotency",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_main_chat_durable_approval_claim_blocks_duplicate_execution",
+        "macOS release workflow smoke tests must cover durable approval claim across runtime instances",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_run_approval_routes_return_404_and_are_idempotent",
+        "macOS release workflow smoke tests must cover approval approve route idempotency",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_run_approval_reject_route_is_idempotent",
+        "macOS release workflow smoke tests must cover approval reject route idempotency",
+    ),
+    (
         "tests/test_executor.py::TestNativeAgentExecutor::test_run_uses_native_run_and_returns_task_result",
         "macOS release workflow smoke tests must cover NativeAgentExecutor Task-to-Run boundary",
     ),
