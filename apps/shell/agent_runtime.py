@@ -2792,6 +2792,50 @@ class WorkflowContinuationCoordinator:
                 result = engine.get_run(result["run_id"])
             return result
 
+    def resume_after_approval_node(
+        self,
+        run: dict[str, Any],
+        workflow: dict[str, Any],
+        *,
+        context: str,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        start_index: int,
+        root_group: bool,
+        workflow_node_id: str,
+        label: str,
+        criteria: str,
+        input_preview: dict[str, Any],
+    ) -> dict[str, Any]:
+        engine = self._engine
+        run_id = str(run["run_id"])
+        running = engine.approvals.approve_workflow_node(
+            run_id,
+            timeline=timeline,
+            artifacts=artifacts,
+            result_context=context,
+            workflow_node_id=workflow_node_id,
+            label=label,
+            criteria=criteria,
+            input_preview=input_preview,
+        )
+        if root_group:
+            engine._update_run_group(
+                str(run.get("run_group_id") or ""),
+                status="running",
+                summary=context,
+            )
+            running = engine.get_run(run_id)
+        return self.continue_run(
+            running,
+            workflow,
+            context=context,
+            timeline=timeline,
+            artifacts=artifacts,
+            start_index=start_index,
+            root_group=root_group,
+        )
+
     def _run_agent_node(
         self,
         run: dict[str, Any],
@@ -8035,27 +8079,18 @@ class NativeRunEngine:
         root_group = self._workflow_run_is_group_root(run)
         if not self.run_approvals.claim_pending_approval(run_id, pending):
             return self.get_run(run_id)
-        running = self.approvals.approve_workflow_node(
-            run_id,
-            timeline=timeline,
-            artifacts=artifacts,
-            result_context=context,
-            workflow_node_id=workflow_node_id,
-            label=label,
-            criteria=criteria,
-            input_preview=approval_preview,
-        )
-        if root_group:
-            self._update_run_group(str(run.get("run_group_id") or ""), status="running", summary=context)
-            running = self.get_run(run_id)
-        return self._continue_workflow_run(
-            running,
+        return self.workflow_continuation.resume_after_approval_node(
+            run,
             workflow,
             context=context,
             timeline=timeline,
             artifacts=artifacts,
             start_index=start_index,
             root_group=root_group,
+            workflow_node_id=workflow_node_id,
+            label=label,
+            criteria=criteria,
+            input_preview=approval_preview,
         )
 
     def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:

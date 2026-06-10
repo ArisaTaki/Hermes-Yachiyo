@@ -773,6 +773,119 @@ def test_workflow_continuation_coordinator_pauses_for_approval_node():
     ]
 
 
+def test_workflow_continuation_coordinator_resumes_after_approval_node(monkeypatch):
+    calls: list[tuple[str, dict[str, object]]] = []
+    timeline = [{"event": "workflow.node.approval_required"}]
+    artifacts = [{"kind": "workflow_artifact", "path": "notes.md"}]
+    workflow = {"workflow_id": "workflow_resume"}
+    run = {
+        "run_id": "workflow_run",
+        "run_group_id": "run_group",
+        "status": "approval_required",
+    }
+
+    class FakeApprovals:
+        def approve_workflow_node(
+            self,
+            run_id,
+            *,
+            timeline,
+            artifacts,
+            result_context,
+            workflow_node_id,
+            label,
+            criteria,
+            input_preview,
+        ):
+            calls.append(
+                (
+                    "approve_workflow_node",
+                    {
+                        "run_id": run_id,
+                        "timeline": timeline,
+                        "artifacts": artifacts,
+                        "context": result_context,
+                        "workflow_node_id": workflow_node_id,
+                        "label": label,
+                        "criteria": criteria,
+                        "input_preview": input_preview,
+                    },
+                )
+            )
+            return {"run_id": run_id, "run_group_id": "run_group", "status": "running"}
+
+    class FakeEngine:
+        approvals = FakeApprovals()
+
+        def _update_run_group(self, run_group_id, **fields):
+            calls.append(("update_run_group", {"run_group_id": run_group_id, **fields}))
+
+        def get_run(self, run_id):
+            calls.append(("get_run", {"run_id": run_id}))
+            return {
+                "run_id": run_id,
+                "run_group_id": "run_group",
+                "status": "running",
+                "result": "approved context",
+            }
+
+    coordinator = WorkflowContinuationCoordinator(FakeEngine())
+
+    def continue_run(received_run, received_workflow, **kwargs):
+        calls.append(
+            (
+                "continue_run",
+                {
+                    "run": received_run,
+                    "workflow": received_workflow,
+                    **kwargs,
+                },
+            )
+        )
+        return {"run_id": received_run["run_id"], "status": "completed", "result": kwargs["context"]}
+
+    monkeypatch.setattr(coordinator, "continue_run", continue_run)
+
+    result = coordinator.resume_after_approval_node(
+        run,
+        workflow,
+        context="approved context",
+        timeline=timeline,
+        artifacts=artifacts,
+        start_index=3,
+        root_group=True,
+        workflow_node_id="gate",
+        label="Manual Gate",
+        criteria="Check output",
+        input_preview={"checkpoint": "Manual Gate"},
+    )
+
+    assert result == {
+        "run_id": "workflow_run",
+        "status": "completed",
+        "result": "approved context",
+    }
+    assert [name for name, _payload in calls] == [
+        "approve_workflow_node",
+        "update_run_group",
+        "get_run",
+        "continue_run",
+    ]
+    assert calls[0][1]["timeline"] is timeline
+    assert calls[0][1]["artifacts"] is artifacts
+    assert calls[0][1]["workflow_node_id"] == "gate"
+    assert calls[1][1] == {
+        "run_group_id": "run_group",
+        "status": "running",
+        "summary": "approved context",
+    }
+    assert calls[-1][1]["run"]["status"] == "running"
+    assert calls[-1][1]["workflow"] is workflow
+    assert calls[-1][1]["context"] == "approved context"
+    assert calls[-1][1]["start_index"] == 3
+    assert calls[-1][1]["root_group"] is True
+
+
 def test_workflow_continuation_coordinator_fails_unknown_node_without_secret_leak():
     leaked_secret = "sk-workflow-continuation-secret123456"
 
