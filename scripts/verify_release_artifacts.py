@@ -277,6 +277,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover Native runtime shutdown resource closure",
     ),
     (
+        "tests/test_agent_runtime.py::test_main_chat_model_rejects_non_stream_reasoning_only_output",
+        "macOS release workflow smoke tests must cover provider reasoning privacy for direct chat calls",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_main_chat_model_loop_rejects_non_stream_reasoning_only_output",
+        "macOS release workflow smoke tests must cover provider reasoning privacy for main chat loop",
+    ),
+    (
         "tests/test_streaming_provider_smoke.py",
         "macOS release workflow smoke tests must cover OpenAI-compatible streaming provider contracts",
     ),
