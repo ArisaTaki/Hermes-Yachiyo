@@ -94,6 +94,7 @@ jobs:
             tests/test_desktop_backend_app.py \
             tests/test_desktop_launcher.py \
             tests/test_shell_app_entrypoint.py \
+            tests/test_main_api_modes.py \
             tests/test_build_metadata.py \
             tests/test_credential_store.py \
             tests/test_secret_redaction_verifier.py \
