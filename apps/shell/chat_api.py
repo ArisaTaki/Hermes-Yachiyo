@@ -5282,8 +5282,9 @@ class ChatAPI:
                 continue
 
             cleaned_metadata = dict(parent_metadata)
-            cleaned_metadata.pop("group_agent_summary_pending", None)
-            if summary.status == MessageStatus.FAILED:
+            cleaned_metadata["group_agent_summary_pending"] = None
+            summary_status = summary.status.value if isinstance(summary.status, MessageStatus) else str(summary.status or "")
+            if summary_status == MessageStatus.FAILED.value:
                 cleaned_metadata["group_agent_summary_status"] = (
                     "cancelled" if self._message_is_cancelled_task_notice(summary) else "failed"
                 )
@@ -5294,12 +5295,11 @@ class ChatAPI:
             else:
                 cleaned_metadata.pop("group_agent_summary_error", None)
             if parent_task_id:
-                self._session.upsert_assistant_message(
-                    task_id=parent_task_id,
+                self._session.update_assistant_message(
+                    parent.message_id,
                     content=parent.content,
                     status=parent.status,
                     error=parent.error,
-                    attachments=parent.attachments,
                     metadata=cleaned_metadata,
                 )
             else:
