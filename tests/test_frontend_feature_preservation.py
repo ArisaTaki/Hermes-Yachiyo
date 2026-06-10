@@ -189,6 +189,8 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "const outgoingAttachments = attachments;",
             "retainComposerDraft(text, outgoingAttachments);",
             "setAttachments(outgoingAttachments);",
+            "const imageAttachDisabled = isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS;",
+            "disabled={imageAttachDisabled}",
             "onClick={() => fileInputRef.current?.click()}",
             "const files = Array.from(event.target.files || []);",
             "event.target.value = '';",
@@ -218,6 +220,7 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
     )
     _assert_occurs(chat_view, "onClick={() => fileInputRef.current?.click()}", 2)
     _assert_occurs(chat_view, "data-testid=\"chat-image-file-input\"", 1)
+    _assert_occurs(chat_view, "disabled={imageAttachDisabled}", 3)
 
 
 def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -> None:

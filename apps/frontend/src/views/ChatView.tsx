@@ -1991,6 +1991,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const currentTokenCount = conversationTokenCount || normalizedTokenCount(currentSession?.token_count);
   const currentTokenLabel = currentTokenCount ? ` · ${formatTokenCount(currentTokenCount)}` : '';
   const computedHeaderStatusText = `${headerStatusText(isProcessing, headerActivity, status, executor, activeSessionContext)}${currentTokenLabel}`;
+  const imageAttachDisabled = isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS;
   const chatWorkspaceStyle = embedded
     ? undefined
     : ({ '--chat-sidebar-width': `${sidebarWidth}px` } as CSSProperties);
@@ -2327,7 +2328,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                 title={attachmentHelpText(executor)}
                 aria-label="附加图片"
                 data-testid="chat-header-image-attach-button"
-                disabled={isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS}
+                disabled={imageAttachDisabled}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <UiIcon name="image" />
@@ -2506,7 +2507,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
               <button
                 type="button"
                 className="chat-attach-btn"
-                disabled={isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS}
+                disabled={imageAttachDisabled}
                 title={attachmentHelpText(executor)}
                 aria-label="添加附件，当前仅支持图片"
                 data-testid="chat-composer-image-attach-button"
@@ -2542,6 +2543,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
               accept="image/*"
               multiple
               hidden
+              disabled={imageAttachDisabled}
               data-testid="chat-image-file-input"
               onChange={(event) => {
                 const files = Array.from(event.target.files || []);
