@@ -1211,6 +1211,72 @@ def test_main_chat_model_consumes_openai_compatible_sse_stream(tmp_path, monkeyp
         service.close()
 
 
+def test_main_chat_model_consumes_message_level_openai_compatible_sse_frame(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    expected = "message-level HTTP SSE result"
+    private_reasoning = "provider private reasoning"
+    requests = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            payload = {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": expected,
+                            "reasoning_content": private_reasoning,
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            }
+            yield f"data: {json.dumps(payload)}\n\n".encode("utf-8")
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-http-message-level-sse",
+            session_id="session-main-http-message-level-sse",
+            user_goal="Use message-level native HTTP SSE frame",
+        )
+        result = service.call_main_chat_model(
+            run["run_id"],
+            [{"role": "user", "content": "Use message-level native HTTP SSE frame"}],
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        output_events = [event for event in events if event["event_type"] == "model.output.completed"]
+        payload_json = json.dumps(output_events[-1]["payload"], ensure_ascii=False)
+
+        assert result == expected
+        assert len(requests) == 1
+        assert output_events[-1]["payload"]["content"] == expected
+        assert private_reasoning not in result
+        assert private_reasoning not in payload_json
+        assert not any(str(event["event_type"]).endswith(".delta") for event in events)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_consumes_coalesced_openai_compatible_sse_frames(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     requests = []
