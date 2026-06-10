@@ -5959,15 +5959,21 @@ def test_agent_run_rejects_pending_tool(tmp_path, monkeypatch):
             }
         )
         run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Run command"})
-        rejected = service.reject_run_approval(run["run_id"], "not now")
+        leaked_secret = "sk-approval-reject-secret123456"
+        rejected = service.reject_run_approval(run["run_id"], f"not now api_key={leaked_secret}")
 
         assert rejected["status"] == "cancelled"
         assert rejected["pending_approval"] == {}
         assert "not now" in rejected["result"]
+        assert leaked_secret not in json.dumps(rejected, ensure_ascii=False)
         rejected_event = next(event for event in rejected["timeline"] if event["event"] == "agent.tool.approval_rejected")
         assert rejected_event["tool"] == "terminal.run"
         assert rejected_event["input_preview"]["command"] == "echo blocked"
         assert rejected_event["status"] == "cancelled"
+        stored_run = service.get_run(run["run_id"])
+        assert stored_run["status"] == "cancelled"
+        assert "not now" in stored_run["result"]
+        assert leaked_secret not in json.dumps(stored_run, ensure_ascii=False)
         run_events = service.list_run_events(run["run_id"])["events"]
         rejected_fact = next(event for event in run_events if event["event_type"] == "agent.tool.approval_rejected")
         assert rejected_fact["payload"]["tool"] == "terminal.run"
@@ -5976,6 +5982,8 @@ def test_agent_run_rejects_pending_tool(tmp_path, monkeypatch):
         cancelled_fact = next(event for event in run_events if event["event_type"] == "agent.run.cancelled")
         assert "not now" in cancelled_fact["payload"]["reason"]
         assert "not now" in cancelled_fact["payload"]["result"]
+        assert leaked_secret not in json.dumps(run_events, ensure_ascii=False)
+        assert verify_secret_redaction(paths=[tmp_path]) == []
     finally:
         service.close()
 
