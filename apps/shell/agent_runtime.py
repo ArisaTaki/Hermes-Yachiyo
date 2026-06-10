@@ -763,13 +763,47 @@ def _coalesced_stream_tool_calls(accumulator: dict[int, dict[str, Any]]) -> list
     return calls
 
 
+def _coerce_tool_call(value: Any, index: int) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    raw_function = _message_field(value, "function")
+    function_name = _message_field(raw_function, "name") if raw_function is not None else ""
+    if not function_name:
+        return None
+    arguments = _message_field(raw_function, "arguments")
+    return {
+        "id": str(_message_field(value, "id") or f"call_{index}"),
+        "type": str(_message_field(value, "type") or "function"),
+        "function": {
+            "name": str(function_name),
+            "arguments": arguments if arguments is not None else "{}",
+        },
+    }
+
+
+def _coerce_tool_calls(value: Any) -> list[dict[str, Any]] | None:
+    if not isinstance(value, list):
+        return None
+    calls: list[dict[str, Any]] = []
+    for index, item in enumerate(value):
+        call = _coerce_tool_call(item, index)
+        if call is not None:
+            calls.append(call)
+    return calls
+
+
 def _coalesce_model_message(message: Any) -> dict[str, Any]:
     if isinstance(message, dict):
-        return message
+        tool_calls = _coerce_tool_calls(message.get("tool_calls"))
+        return {**message, "tool_calls": tool_calls} if tool_calls is not None else message
     if isinstance(message, str):
         return {"role": "assistant", "content": message}
     if not isinstance(message, IterableABC):
-        return {"role": "assistant", "content": _message_content_text(message)}
+        result = {"role": "assistant", "content": _message_content_text(message)}
+        tool_calls = _coerce_tool_calls(_message_field(message, "tool_calls"))
+        if tool_calls is not None:
+            result["tool_calls"] = tool_calls
+        return result
 
     content_parts: list[str] = []
     tool_calls: list[dict[str, Any]] | None = None
@@ -784,7 +818,7 @@ def _coalesce_model_message(message: Any) -> dict[str, Any]:
                 for index, call in enumerate(chunk_tool_calls):
                     _merge_stream_tool_call_delta(tool_call_deltas, call, index)
             elif chunk_tool_calls:
-                tool_calls = chunk_tool_calls
+                tool_calls = _coerce_tool_calls(chunk_tool_calls) or []
 
     result: dict[str, Any] = {"role": "assistant", "content": "".join(content_parts)}
     if tool_call_deltas:
