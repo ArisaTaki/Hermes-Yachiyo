@@ -2977,6 +2977,85 @@ def test_main_chat_terminal_secret_payload_is_rejected_before_approval(tmp_path,
     assert verify_secret_redaction(paths=[tmp_path]) == []
 
 
+def test_main_chat_workspace_patch_secret_payload_is_rejected_before_approval(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "config.env").write_text("OPENAI_API_KEY=\n", encoding="utf-8")
+    leaked_secret = "sk-workspace-patch-secret123456"
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+        assert any((tool.get("function") or {}).get("name") == "workspace_write_patch" for tool in tools or [])
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_workspace_patch_secret",
+                    "type": "function",
+                    "function": {
+                        "name": "workspace_write_patch",
+                        "arguments": json.dumps(
+                            {
+                                "path": "config.env",
+                                "patch": (
+                                    "--- config.env\n"
+                                    "+++ config.env\n"
+                                    "@@ -1 +1 @@\n"
+                                    "-OPENAI_API_KEY=\n"
+                                    f"+OPENAI_API_KEY={leaked_secret}\n"
+                                ),
+                            }
+                        ),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-workspace-patch-secret",
+            session_id="session-workspace-patch-secret",
+            user_goal="Patch workspace file",
+        )
+
+        with pytest.raises(AgentRuntimeError, match="参数包含敏感凭据"):
+            service.execute_main_chat_model_loop(
+                run["run_id"],
+                [{"role": "user", "content": "Patch config.env"}],
+                tool_policy={"allowed_tools": ["workspace.write_patch"]},
+                workspace_policy={
+                    "default_workdir": str(workdir),
+                    "readable_scopes": ["."],
+                    "writable_scopes": ["."],
+                },
+            )
+
+        failed = service.get_run(run["run_id"])
+        events = service.list_run_events(run["run_id"])["events"]
+        persisted_projection = json.dumps({"run": failed, "events": events}, ensure_ascii=False)
+
+        assert failed["status"] == "failed"
+        assert failed["pending_approval"] == {}
+        assert (workdir / "config.env").read_text(encoding="utf-8") == "OPENAI_API_KEY=\n"
+        assert not service._conn.execute(
+            "SELECT 1 FROM run_approvals WHERE run_id=?",
+            (run["run_id"],),
+        ).fetchone()
+        assert "agent.tool.approval_required" not in [event["event_type"] for event in events]
+        assert leaked_secret not in persisted_projection
+        assert "OPENAI_API_KEY=" not in persisted_projection
+        assert "敏感凭据" in persisted_projection
+    finally:
+        service.close()
+
+    assert verify_secret_redaction(paths=[tmp_path]) == []
+
+
 def test_main_chat_default_tools_use_trusted_product_workspace(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     product_workspace = tmp_path / "oha-workspace"
