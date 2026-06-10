@@ -8,16 +8,20 @@ import pytest
 
 import apps.core.activity_store as activity_store_mod
 import apps.core.chat_store as chat_store_mod
+import apps.shell.proactive as proactive_mod
 import apps.shell.chat_api as chat_api_mod
 from apps.core.activity_store import ActivityStore
 from apps.core.chat_session import ChatSession
 from apps.core.chat_store import ChatStore
 from apps.core.executor import NativeAgentExecutor
+from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID
 from apps.core.state import AppState
 from apps.core.task_runner import TaskRunner
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.chat_api import ChatAPI
+from apps.shell.config import Live2DModeConfig
 from apps.shell.credential_store import MemoryCredentialStore
+from apps.shell.proactive import ProactiveDesktopService
 from packages.protocol.enums import TaskStatus, TaskType
 
 
@@ -1038,6 +1042,129 @@ async def test_task_runner_main_chat_image_attachment_reaches_native_model(tmp_p
         assert page["limit"] == 1
         assert len(page["events"]) == 1
         assert page["events"][0]["sequence"] == 2
+    finally:
+        service.close()
+        activity_store.close()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_task_runner_proactive_screenshot_task_uses_native_runtime(tmp_path, monkeypatch):
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
+    monkeypatch.setenv("OHA_YACHIYO_BRIDGE_URL", "http://127.0.0.1:9999")
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    current_session = ChatSession(session_id="visible-chat-session")
+    current_session.attach_store(store, load_existing=False)
+    state = AppState()
+    captured_messages: list[list[dict]] = []
+    image_bytes = b"fake-proactive-screen"
+
+    def fake_capture(target_path):
+        target_path.write_bytes(image_bytes)
+        return {
+            "path": str(target_path),
+            "mime_type": "image/png",
+            "format": "png",
+            "width": 120,
+            "height": 80,
+            "size": len(image_bytes),
+        }
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        captured_messages.append(messages)
+        content = messages[-1]["content"]
+        assert isinstance(content, list)
+        assert "主动桌面观察" in content[0]["text"]
+        assert "详细对话框阅读" in content[0]["text"]
+        image_parts = [part for part in content if part.get("type") == "image_url"]
+        assert len(image_parts) == 1
+        assert image_parts[0]["image_url"]["url"] == (
+            "data:image/png;base64," + base64.b64encode(image_bytes).decode("ascii")
+        )
+        return {"role": "assistant", "content": "主动观察：建议先保存当前工作。"}
+
+    image_capability = {"can_attach_images": True, "route": "chat"}
+    monkeypatch.setattr(chat_store_mod, "get_chat_store", lambda: store)
+    monkeypatch.setattr(activity_store_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(proactive_mod, "capture_screenshot_to_file", fake_capture)
+    monkeypatch.setattr(proactive_mod, "get_native_image_input_capability", lambda: image_capability)
+    monkeypatch.setattr(
+        "apps.shell.native_capabilities.get_native_image_input_capability",
+        lambda: image_capability,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeDefaultProfileService(),
+    )
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+
+    executor = NativeAgentExecutor(
+        chat_session=current_session,
+        runtime_service_getter=lambda: service,
+        tool_policy_getter=lambda: {"allowed_tools": []},
+        workspace_policy_getter=lambda: {},
+    )
+    runner = TaskRunner(state, executor=executor, activity_store=activity_store)
+    mode_config = Live2DModeConfig(
+        proactive_enabled=True,
+        proactive_desktop_watch_enabled=True,
+        proactive_interval_seconds=300,
+    )
+    runtime = SimpleNamespace(
+        state=state,
+        config=SimpleNamespace(live2d_mode=mode_config),
+        chat_session=current_session,
+        store=store,
+        task_runner=runner,
+        is_native_agent_ready=lambda: True,
+        get_status=lambda: {"native_agent": {"limited_tools": []}},
+    )
+    proactive_service = ProactiveDesktopService(runtime, mode_config)
+    try:
+        scheduled = proactive_service.trigger_now()
+
+        assert scheduled["ok"] is True
+        assert scheduled["status"] == "scheduled"
+        assert scheduled["session_id"] == PROACTIVE_CHAT_SESSION_ID
+        task = state.get_task(scheduled["task_id"])
+        assert task is not None
+        assert task.task_type == TaskType.SCREENSHOT
+        assert task.chat_session_id == PROACTIVE_CHAT_SESSION_ID
+        assert task.attachments[0]["source"] == "proactive_desktop_watch"
+        assert current_session.get_messages(limit=0) == []
+
+        await runner._execute_with_state(task.task_id)
+
+        assert len(captured_messages) == 1
+        updated = state.get_task(task.task_id)
+        assert updated is not None
+        assert updated.status == TaskStatus.COMPLETED
+        assert updated.result == "主动观察：建议先保存当前工作。"
+
+        proactive_session = ChatSession(session_id=PROACTIVE_CHAT_SESSION_ID)
+        proactive_session.attach_store(store, load_existing=True)
+        assistant = proactive_session.get_assistant_message_for_task(task.task_id)
+        assert assistant is not None
+        assert assistant.content == "主动观察：建议先保存当前工作。"
+        assert getattr(assistant.status, "value", assistant.status) == "completed"
+        assert current_session.get_messages(limit=0) == []
+
+        run = service.get_run(service.get_task_run_link(task.task_id)["run_id"])
+        assert run["kind"] == "main_chat_run"
+        assert run["session_id"] == PROACTIVE_CHAT_SESSION_ID
+        assert run["status"] == "completed"
+        assert run["result"] == "主动观察：建议先保存当前工作。"
+        event_types = [event["event_type"] for event in service.list_run_events(run["run_id"])["events"]]
+        assert "task.linked" in event_types
+        assert event_types.count("model.output.completed") == 1
+        assert "run.completed" in event_types
     finally:
         service.close()
         activity_store.close()
