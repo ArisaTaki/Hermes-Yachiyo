@@ -1439,6 +1439,63 @@ def test_main_chat_model_consumes_split_openai_compatible_sse_frame_chunks(tmp_p
         service.close()
 
 
+def test_main_chat_model_consumes_split_utf8_openai_compatible_sse_frame_chunks(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    expected = "跨块 runtime 文本"
+    requests = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            payload = json.dumps({"choices": [{"delta": {"content": expected}}]}, ensure_ascii=False)
+            frame = f"data: {payload}\n\ndata: [DONE]\n\n".encode("utf-8")
+            split_at = frame.index("跨".encode("utf-8")) + 1
+            yield frame[:split_at]
+            yield frame[split_at : split_at + 2]
+            yield frame[split_at + 2 :]
+
+    def fake_urlopen(request, **kwargs):
+        body = json.loads(request.data.decode("utf-8"))
+        requests.append({"request": request, "body": body, "kwargs": kwargs})
+        assert request.full_url == "https://api.example.test/v1/chat/completions"
+        assert request.get_header("Accept") == "text/event-stream"
+        assert body["stream"] is True
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.core.tls.urlrequest.urlopen", fake_urlopen)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-http-split-utf8-sse-frame",
+            session_id="session-main-http-split-utf8-sse-frame",
+            user_goal="Use split UTF-8 native HTTP SSE frame",
+        )
+        result = service.call_main_chat_model(
+            run["run_id"],
+            [{"role": "user", "content": "Use split UTF-8 native HTTP SSE frame"}],
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        output_events = [event for event in events if event["event_type"] == "model.output.completed"]
+        payload_json = json.dumps(output_events[-1]["payload"], ensure_ascii=False)
+
+        assert result == expected
+        assert len(requests) == 1
+        assert output_events[-1]["payload"]["content"] == expected
+        assert "\ufffd" not in result
+        assert "\ufffd" not in payload_json
+        assert not any(str(event["event_type"]).endswith(".delta") for event in events)
+    finally:
+        service.close()
+
+
 def test_main_chat_model_consumes_multiline_openai_compatible_sse_data_event(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     requests = []
