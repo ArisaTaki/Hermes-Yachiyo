@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import importlib.util
+import inspect
 import sys
 import types
 from dataclasses import dataclass
@@ -12,6 +15,29 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+
+_HAS_PYTEST_ASYNCIO = importlib.util.find_spec("pytest_asyncio") is not None
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line("markers", "asyncio: run async test functions on an event loop")
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> bool | None:
+    if _HAS_PYTEST_ASYNCIO or "asyncio" not in pyfuncitem.keywords:
+        return None
+    test_function = pyfuncitem.obj
+    if not inspect.iscoroutinefunction(test_function):
+        return None
+    signature = inspect.signature(test_function)
+    kwargs = {
+        name: pyfuncitem.funcargs[name]
+        for name in signature.parameters
+        if name in pyfuncitem.funcargs
+    }
+    asyncio.run(test_function(**kwargs))
+    return True
 
 
 # ── 在任何 apps.bridge.server 导入前注入 mock ──────────────────────

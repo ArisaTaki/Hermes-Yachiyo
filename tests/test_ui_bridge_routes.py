@@ -525,7 +525,7 @@ async def test_chat_group_routes_create_real_group_context(tmp_path, monkeypatch
         task = runtime.state.get_task(sent["task_id"])
         assert task is not None
         assert task.chat_session_id == runtime.chat_session.session_id
-        assert "[Yachiyo 群组上下文]" in task.description
+        assert "[Oha-Yachiyo 群组上下文]" in task.description
         assert "- Design（Agent；Design Agent） - 类别：design；交付：markdown" in task.description
         assert "- Code（Agent；Coding Agent） - 类别：coding；交付：diff" in task.description
         assert "负责 UI 方案与视觉验收。" in task.description

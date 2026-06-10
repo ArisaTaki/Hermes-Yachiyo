@@ -519,7 +519,7 @@ async def test_task_runner_group_dispatch_summary_uses_native_runtime(tmp_path, 
             return {"role": "assistant", "content": "群组总结：Coding 已完成 Native 群聊派发验证。"}
         if "# Agent\nName: Coding Agent" in last_content:
             assert "# User Goal\n做真实 Native 群聊派发验证" in last_content
-            assert "[Yachiyo 群组执行约定]" in last_content
+            assert "[Oha-Yachiyo 群组执行约定]" in last_content
             assert "你在群内身份是：Coding" in last_content
             return {"role": "assistant", "content": "Coding native dispatch result"}
         assert "请安排 Coding 做真实 Native 群聊派发验证" in last_content
@@ -710,7 +710,7 @@ async def test_task_runner_direct_group_agent_summary_uses_native_runtime(tmp_pa
             return {"role": "assistant", "content": "主模型整理：Design 的直接执行结果已归档。"}
         assert "# Agent\nName: Design Agent" in last_content
         assert "# User Goal\n做真实 Native 直接点名验证" in last_content
-        assert "[Yachiyo 群组执行约定]" in last_content
+        assert "[Oha-Yachiyo 群组执行约定]" in last_content
         assert "你在群内身份是：Design" in last_content
         return {"role": "assistant", "content": "Design native direct result"}
 
