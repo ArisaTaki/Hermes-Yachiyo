@@ -29,36 +29,81 @@ def _field(value: Any, name: str) -> Any:
     return getattr(value, name, None)
 
 
+def _content_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            text = _content_text(item)
+            if text:
+                parts.append(text)
+        return "\n".join(parts)
+    nested = _field(value, "content")
+    if nested is not None:
+        text = _content_text(nested)
+        if text:
+            return text
+    text = _field(value, "text")
+    return str(text) if text is not None else ""
+
+
+def _reasoning_text(value: Any) -> str:
+    reasoning = _field(value, "reasoning_content")
+    if reasoning is None:
+        reasoning = _field(value, "reasoning")
+    return str(reasoning) if reasoning else ""
+
+
 def _chunk_text(chunk: Any) -> str:
+    if isinstance(chunk, str):
+        return chunk
     choices = _field(chunk, "choices")
-    if not isinstance(choices, list):
-        return ""
-    parts: list[str] = []
-    for choice in choices:
-        delta = _field(choice, "delta")
-        if delta is None:
-            continue
-        content = _field(delta, "content")
-        if content:
-            parts.append(str(content))
-    return "".join(parts)
+    if isinstance(choices, list):
+        parts: list[str] = []
+        for choice in choices:
+            for field_name in ("delta", "message"):
+                value = _field(choice, field_name)
+                if value is not None:
+                    text = _content_text(value)
+                    if text:
+                        parts.append(text)
+            text = _field(choice, "text")
+            if text is not None:
+                parts.append(str(text))
+        if parts:
+            return "".join(parts)
+    for field_name in ("delta", "message"):
+        value = _field(chunk, field_name)
+        if value is not None:
+            text = _content_text(value)
+            if text:
+                return text
+    return _content_text(chunk)
 
 
 def _chunk_reasoning_text(chunk: Any) -> str:
     choices = _field(chunk, "choices")
-    if not isinstance(choices, list):
-        return ""
-    parts: list[str] = []
-    for choice in choices:
-        delta = _field(choice, "delta")
-        if delta is None:
-            continue
-        reasoning = _field(delta, "reasoning_content")
-        if reasoning is None:
-            reasoning = _field(delta, "reasoning")
-        if reasoning:
-            parts.append(str(reasoning))
-    return "".join(parts)
+    if isinstance(choices, list):
+        parts: list[str] = []
+        for choice in choices:
+            for field_name in ("delta", "message"):
+                value = _field(choice, field_name)
+                if value is not None:
+                    reasoning = _reasoning_text(value)
+                    if reasoning:
+                        parts.append(reasoning)
+            reasoning = _reasoning_text(choice)
+            if reasoning:
+                parts.append(reasoning)
+        return "".join(parts)
+    for field_name in ("delta", "message"):
+        value = _field(chunk, field_name)
+        if value is not None:
+            reasoning = _reasoning_text(value)
+            if reasoning:
+                return reasoning
+    return _reasoning_text(chunk)
 
 
 def _normalized_index(value: Any, fallback: int) -> int:
