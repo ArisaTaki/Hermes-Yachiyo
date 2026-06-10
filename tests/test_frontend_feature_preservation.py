@@ -385,6 +385,37 @@ def test_agent_studio_preserves_workflow_child_approval_run_detail_wiring() -> N
     )
 
 
+def test_model_profiles_ui_preserves_profile_lifecycle_paths() -> None:
+    _assert_contains(
+        "apps/frontend/src/lib/modelProfiles.ts",
+        [
+            "export async function listModelProfiles()",
+            "return apiGet('/ui/model-profiles');",
+            "export async function createModelProfile(",
+            "return apiPost('/ui/model-profiles', request);",
+            "export async function updateModelProfile(",
+            "apiPatch(`/ui/model-profiles/${encodeURIComponent(profileId)}`, request)",
+            "export async function deleteModelProfile(",
+            "apiDelete(`/ui/model-profiles/${encodeURIComponent(profileId)}`)",
+            "export async function testModelProfile(",
+            "apiPost(`/ui/model-profiles/${encodeURIComponent(profileId)}/test`)",
+            "export async function updateModelProfileDefaults(",
+            "return apiPatch('/ui/model-profiles/defaults', defaults);",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/views/ModelProfilesView.tsx",
+        [
+            "const profilePayload = await listModelProfiles();",
+            "if (modelDraft.profile_id) return updateModelProfile(modelDraft.profile_id, payload);",
+            "return createModelProfile(payload);",
+            "const test = await testModelProfile(model.profile_id);",
+            "await deleteModelProfile(profileId);",
+            "const result = await updateModelProfileDefaults({ [profile.capability]: profile.profile_id });",
+        ],
+    )
+
+
 def test_desktop_presence_features_preserve_live2d_screenshot_and_tts_entrypoints() -> None:
     _assert_contains(
         "apps/frontend/src/views/ModeSettingsView.tsx",

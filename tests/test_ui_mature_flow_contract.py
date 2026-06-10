@@ -14,7 +14,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import apps.locald.screenshot as screenshot_mod
-from apps.bridge.routes import agents, runs as run_routes, ui
+from apps.bridge.routes import agents, model_profiles, runs as run_routes, ui
 
 
 def _load_screen_route_module():
@@ -359,6 +359,130 @@ def test_activity_store_bridge_contract_preserves_feed_detail_and_delete(monkeyp
         ("get_activity_event_detail", {"event_id": "activity-1", "limit": 50}),
         ("delete_activity_event", {"event_id": "activity-1"}),
         ("delete_activity_events", {"event_ids": ["activity-2", "activity-3"]}),
+    ]
+
+
+def test_model_profiles_bridge_contract_preserves_profile_lifecycle(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeModelProfileService:
+        def list_profiles(self):
+            calls.append(("list_profiles", {}))
+            return {
+                "ok": True,
+                "profiles": [
+                    {
+                        "profile_id": "profile-chat",
+                        "name": "Chat Model",
+                        "capability": "chat",
+                        "model": "gpt-test",
+                    }
+                ],
+                "defaults": {"chat": "profile-chat"},
+            }
+
+        def create_profile(self, payload):
+            calls.append(("create_profile", payload))
+            return {
+                "profile_id": "profile-chat",
+                **payload,
+            }
+
+        def get_profile(self, profile_id):
+            calls.append(("get_profile", {"profile_id": profile_id}))
+            return {
+                "profile_id": profile_id,
+                "name": "Chat Model",
+                "capability": "chat",
+            }
+
+        def update_profile(self, profile_id, payload):
+            calls.append(("update_profile", {"profile_id": profile_id, **payload}))
+            return {
+                "profile_id": profile_id,
+                **payload,
+            }
+
+        def set_defaults(self, payload):
+            calls.append(("set_defaults", payload))
+            return {"ok": True, "defaults": payload}
+
+        def test_profile(self, profile_id):
+            calls.append(("test_profile", {"profile_id": profile_id}))
+            return {
+                "ok": True,
+                "success": True,
+                "message": "OK",
+                "profile": {"profile_id": profile_id, "status": "available"},
+            }
+
+        def delete_profile(self, profile_id):
+            calls.append(("delete_profile", {"profile_id": profile_id}))
+            return {"ok": True, "profile_id": profile_id}
+
+    monkeypatch.setattr(model_profiles, "get_model_profile_service", lambda: FakeModelProfileService())
+
+    listed = asyncio.run(model_profiles.list_model_profiles())
+    created = asyncio.run(
+        model_profiles.create_model_profile(
+            model_profiles.ModelProfileRequest(
+                source_id="source-openai",
+                name="Chat Model",
+                capability="chat",
+                provider="openai_compatible",
+                base_url="https://api.example.test/v1",
+                model="gpt-test",
+                enabled=True,
+            )
+        )
+    )
+    fetched = asyncio.run(model_profiles.get_model_profile("profile-chat"))
+    updated = asyncio.run(
+        model_profiles.update_model_profile(
+            "profile-chat",
+            model_profiles.ModelProfileRequest(name="Chat Model v2", model="gpt-test-2", enabled=False),
+        )
+    )
+    defaults = asyncio.run(
+        model_profiles.update_model_profile_defaults(
+            model_profiles.ModelProfileDefaultsRequest(chat="profile-chat", vision="profile-vision")
+        )
+    )
+    tested = asyncio.run(model_profiles.test_model_profile("profile-chat"))
+    deleted = asyncio.run(model_profiles.delete_model_profile("profile-chat"))
+
+    assert listed["defaults"] == {"chat": "profile-chat"}
+    assert created["source_id"] == "source-openai"
+    assert created["model"] == "gpt-test"
+    assert fetched["profile_id"] == "profile-chat"
+    assert updated == {
+        "profile_id": "profile-chat",
+        "name": "Chat Model v2",
+        "model": "gpt-test-2",
+        "enabled": False,
+    }
+    assert defaults == {"ok": True, "defaults": {"chat": "profile-chat", "vision": "profile-vision"}}
+    assert tested["profile"]["status"] == "available"
+    assert deleted == {"ok": True, "profile_id": "profile-chat"}
+    assert calls == [
+        ("list_profiles", {}),
+        (
+            "create_profile",
+            {
+                "source_id": "source-openai",
+                "name": "Chat Model",
+                "capability": "chat",
+                "provider": "openai_compatible",
+                "base_url": "https://api.example.test/v1",
+                "model": "gpt-test",
+                "enabled": True,
+            },
+        ),
+        ("get_profile", {"profile_id": "profile-chat"}),
+        ("update_profile", {"profile_id": "profile-chat", "name": "Chat Model v2", "model": "gpt-test-2", "enabled": False}),
+        ("set_defaults", {"chat": "profile-chat", "vision": "profile-vision"}),
+        ("test_profile", {"profile_id": "profile-chat"}),
+        ("delete_profile", {"profile_id": "profile-chat"}),
     ]
 
 
