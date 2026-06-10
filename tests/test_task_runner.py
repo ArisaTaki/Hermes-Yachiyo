@@ -108,6 +108,39 @@ async def test_task_runner_writes_final_reply_to_original_background_session(tmp
 
 
 @pytest.mark.asyncio
+async def test_task_runner_activity_events_use_injected_activity_store(tmp_path, monkeypatch):
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+
+    def fail_global_activity_store():
+        raise AssertionError("TaskRunner should use the injected ActivityStore")
+
+    monkeypatch.setattr(activity_store_mod, "get_activity_store", fail_global_activity_store)
+    state = AppState()
+    task = state.create_task(
+        task_type=TaskType.GENERAL,
+        description="注入 ActivityStore 的任务",
+    )
+    runner = TaskRunner(
+        state,
+        executor=_InstantExecutor(),  # type: ignore[arg-type]
+        activity_store=activity_store,
+    )
+    try:
+        await runner._execute_with_state(task.task_id)
+
+        updated = state.get_task(task.task_id)
+        assert updated is not None
+        assert updated.status == TaskStatus.COMPLETED
+        events = [event.to_dict() for event in activity_store.latest_for_task(task.task_id, limit=5)]
+        titles = [event["title"] for event in events]
+        assert "Yachiyo 开始处理" in titles
+        assert "Yachiyo 回复完成" in titles
+        assert all(event["tool_name"] == "native_agent" for event in events)
+    finally:
+        activity_store.close()
+
+
+@pytest.mark.asyncio
 async def test_task_runner_main_chat_native_tool_approval_roundtrip(tmp_path, monkeypatch):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))

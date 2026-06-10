@@ -14,10 +14,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
 from apps.core.executor import ExecutionStrategy, SimulatedExecutor
 from apps.core.state import AppState
 from packages.protocol.enums import TaskStatus
+
+if TYPE_CHECKING:
+    from apps.core.activity_store import ActivityStore
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +43,11 @@ class TaskRunner:
         self,
         state: AppState,
         executor: ExecutionStrategy | None = None,
+        activity_store: "ActivityStore | None" = None,
     ) -> None:
         self._state = state
         self._executor: ExecutionStrategy = executor or SimulatedExecutor()
+        self._activity_store = activity_store
         self._in_progress: dict[str, asyncio.Task] = {}
         self._running = False
         self._loop_task: asyncio.Task | None = None
@@ -49,6 +55,10 @@ class TaskRunner:
     @property
     def executor(self) -> ExecutionStrategy:
         return self._executor
+
+    @property
+    def activity_store(self) -> "ActivityStore | None":
+        return self._activity_store
 
     def set_executor(self, executor: ExecutionStrategy) -> str:
         """切换后续任务使用的执行器，返回切换前的执行器名称。"""
@@ -236,9 +246,7 @@ class TaskRunner:
     def _finalize_task_activity(self, task_id: str, status: str) -> None:
         """Mark in-flight activity rows terminal once the owning task finishes."""
         try:
-            from apps.core.activity_store import get_activity_store
-
-            get_activity_store().finalize_task_events(task_id, status=status)
+            self._get_activity_store().finalize_task_events(task_id, status=status)
         except Exception:
             logger.debug("收尾任务活动事件失败: %s", task_id, exc_info=True)
 
@@ -248,9 +256,7 @@ class TaskRunner:
         if task is None:
             return
         try:
-            from apps.core.activity_store import get_activity_store
-
-            get_activity_store().record_event(
+            self._get_activity_store().record_event(
                 session_id=str(getattr(task, "chat_session_id", "") or ""),
                 task_id=task_id,
                 tool_name="native_agent",
@@ -261,3 +267,10 @@ class TaskRunner:
             )
         except Exception:
             logger.debug("记录任务活动节点失败: %s", task_id, exc_info=True)
+
+    def _get_activity_store(self) -> "ActivityStore":
+        if self._activity_store is not None:
+            return self._activity_store
+        from apps.core.activity_store import get_activity_store
+
+        return get_activity_store()

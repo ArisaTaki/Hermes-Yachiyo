@@ -31,6 +31,7 @@ from apps.core.title_generator import (
 )
 
 if TYPE_CHECKING:
+    from apps.core.activity_store import ActivityStore
     from apps.core.chat_session import ChatSession
     from apps.core.runtime import AppRuntime
 
@@ -952,6 +953,7 @@ class NativeAgentExecutor(ExecutionStrategy):
         runtime_service_getter: Optional[Callable[[], Any]] = None,
         tool_policy_getter: Optional[Callable[[], dict[str, Any]]] = None,
         workspace_policy_getter: Optional[Callable[[], dict[str, Any]]] = None,
+        activity_store_getter: Optional[Callable[[], "ActivityStore"]] = None,
     ) -> None:
         self._chat_session = chat_session
         self._persona_prompt_getter = persona_prompt_getter
@@ -960,6 +962,7 @@ class NativeAgentExecutor(ExecutionStrategy):
         self._runtime_service_getter = runtime_service_getter
         self._tool_policy_getter = tool_policy_getter
         self._workspace_policy_getter = workspace_policy_getter
+        self._activity_store_getter = activity_store_getter
 
     @property
     def capabilities(self) -> dict[str, bool]:
@@ -1349,8 +1352,8 @@ class NativeAgentExecutor(ExecutionStrategy):
         except Exception:
             logger.debug("Native Agent processing 消息更新失败", exc_info=True)
 
-    @staticmethod
     def _record_activity(
+        self,
         task: TaskInfo,
         title: str,
         detail: str,
@@ -1359,9 +1362,7 @@ class NativeAgentExecutor(ExecutionStrategy):
         metadata: dict[str, Any] | None = None,
     ) -> None:
         try:
-            from apps.core.activity_store import get_activity_store
-
-            get_activity_store().record_event(
+            self._activity_store().record_event(
                 session_id=str(getattr(task, "chat_session_id", "") or ""),
                 task_id=task.task_id,
                 tool_name="oha.delegation",
@@ -1373,6 +1374,13 @@ class NativeAgentExecutor(ExecutionStrategy):
             )
         except Exception:
             logger.debug("Native Agent 委派活动写入失败", exc_info=True)
+
+    def _activity_store(self) -> "ActivityStore":
+        if self._activity_store_getter is not None:
+            return self._activity_store_getter()
+        from apps.core.activity_store import get_activity_store
+
+        return get_activity_store()
 
     def _chat_session_for_task(self, task: TaskInfo) -> Optional["ChatSession"]:
         session_id = str(getattr(task, "chat_session_id", "") or "")
@@ -1461,6 +1469,11 @@ def select_executor(runtime: "AppRuntime | None" = None) -> ExecutionStrategy:
             workspace_policy_getter=(
                 (lambda: runtime.main_chat_workspace_policy())
                 if runtime is not None and hasattr(runtime, "main_chat_workspace_policy")
+                else None
+            ),
+            activity_store_getter=(
+                (lambda: runtime.activity_store)
+                if runtime is not None and hasattr(runtime, "activity_store")
                 else None
             ),
         )

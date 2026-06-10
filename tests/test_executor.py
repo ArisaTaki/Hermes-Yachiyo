@@ -116,6 +116,59 @@ class TestNativeAgentUnavailableExecutor:
 
 
 class TestNativeAgentExecutor:
+    def test_record_activity_uses_injected_activity_store(self, tmp_path, monkeypatch):
+        activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+
+        def fail_global_activity_store():
+            raise AssertionError("NativeAgentExecutor should use the injected ActivityStore")
+
+        monkeypatch.setattr("apps.core.activity_store.get_activity_store", fail_global_activity_store)
+        executor = NativeAgentExecutor(activity_store_getter=lambda: activity_store)
+        task = _make_task("委派 activity")
+        try:
+            executor._record_activity(
+                task,
+                "正在委派给 Research Agent",
+                "检查 Native 委派链路",
+                "running",
+                metadata={"run_id": "run_1"},
+            )
+
+            events = [event.to_dict() for event in activity_store.latest_for_task(task.task_id, limit=5)]
+            assert len(events) == 1
+            assert events[0]["title"] == "正在委派给 Research Agent"
+            assert events[0]["tool_name"] == "oha.delegation"
+            assert events[0]["phase"] == "subagent"
+            assert events[0]["metadata"]["run_id"] == "run_1"
+        finally:
+            activity_store.close()
+
+    def test_select_executor_passes_runtime_activity_store(self, tmp_path, monkeypatch):
+        activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+        runtime = types.SimpleNamespace(
+            native_agent_readiness=lambda: {"ready": True},
+            chat_session=None,
+            activity_store=activity_store,
+        )
+
+        def fail_global_activity_store():
+            raise AssertionError("select_executor should inject the runtime ActivityStore")
+
+        monkeypatch.setattr("apps.core.activity_store.get_activity_store", fail_global_activity_store)
+        try:
+            executor = select_executor(runtime)
+            assert isinstance(executor, NativeAgentExecutor)
+
+            task = _make_task("委派 activity")
+            executor._record_activity(task, "委派开始", "通过 runtime store", "running")
+
+            events = [event.to_dict() for event in activity_store.latest_for_task(task.task_id, limit=5)]
+            assert len(events) == 1
+            assert events[0]["title"] == "委派开始"
+            assert events[0]["tool_name"] == "oha.delegation"
+        finally:
+            activity_store.close()
+
     @pytest.mark.asyncio
     async def test_run_uses_native_run_and_returns_task_result(self, monkeypatch):
         calls: list[tuple[str, object]] = []

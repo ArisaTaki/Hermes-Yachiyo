@@ -89,6 +89,36 @@ def test_runtime_exposes_and_closes_activity_store(tmp_path, monkeypatch):
     assert activity_store_mod._global_store is None
 
 
+def test_start_task_runner_receives_runtime_activity_store(tmp_path, monkeypatch):
+    runtime = _make_runtime(tmp_path, monkeypatch)
+    created = []
+
+    class FakeTaskRunner:
+        def __init__(self, state, *, executor=None, activity_store=None):
+            self.state = state
+            self.executor = executor
+            self.activity_store = activity_store
+            created.append(self)
+
+        async def start(self):
+            return None
+
+        async def stop(self):
+            return None
+
+    monkeypatch.setattr("apps.core.task_runner.TaskRunner", FakeTaskRunner)
+    monkeypatch.setattr("apps.core.executor.select_executor", lambda rt: SimulatedExecutor())
+
+    runtime._start_task_runner()
+    try:
+        assert len(created) == 1
+        assert created[0].state is runtime.state
+        assert created[0].activity_store is runtime.activity_store
+        assert runtime.task_runner is created[0]
+    finally:
+        runtime._stop_task_runner()
+
+
 def test_refresh_task_runner_executor_without_runner_is_noop(tmp_path, monkeypatch):
     runtime = _make_runtime(tmp_path, monkeypatch)
 

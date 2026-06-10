@@ -132,7 +132,11 @@ class AppRuntime:
         from apps.core.task_runner import TaskRunner
 
         executor = select_executor(self)
-        self._task_runner = TaskRunner(self._state, executor=executor)
+        self._task_runner = TaskRunner(
+            self._state,
+            executor=executor,
+            activity_store=self._activity_store,
+        )
         self._task_runner_loop_ready.clear()
 
         def run_loop():
