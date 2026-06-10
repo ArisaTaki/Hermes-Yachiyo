@@ -3412,6 +3412,183 @@ def test_workflow_approval_node_http_roundtrip_reject_detail_and_replay(tmp_path
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_workflow_approval_node_http_roundtrip_cancel_detail_group_and_replay(tmp_path, monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_root = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes"
+        agent_spec = importlib.util.spec_from_file_location(
+            "_oha_workflow_approval_node_cancel_http_roundtrip_under_test",
+            route_root / "agents.py",
+        )
+        run_spec = importlib.util.spec_from_file_location(
+            "_oha_workflow_approval_node_cancel_run_http_roundtrip_under_test",
+            route_root / "runs.py",
+        )
+        assert agent_spec is not None and agent_spec.loader is not None
+        assert run_spec is not None and run_spec.loader is not None
+        agent_route_module = importlib.util.module_from_spec(agent_spec)
+        run_route_module = importlib.util.module_from_spec(run_spec)
+        sys.modules[agent_spec.name] = agent_route_module
+        sys.modules[run_spec.name] = run_route_module
+        agent_spec.loader.exec_module(agent_route_module)
+        run_spec.loader.exec_module(run_route_module)
+
+        service = AgentRuntimeService(
+            db_path=tmp_path / "agent-runtime.db",
+            workspace_dir=tmp_path / "runtime",
+            credential_store=MemoryCredentialStore(),
+            seed_templates=False,
+        )
+        model_calls: list[list[dict[str, object]]] = []
+
+        def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+            model_calls.append(messages)
+            return {"content": "Should not run after cancelled approval node"}
+
+        monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+        monkeypatch.setattr(
+            agent_route_module,
+            "get_agent_runtime_service",
+            lambda: (_ for _ in ()).throw(AssertionError("agent routes should use AppRuntime service")),
+        )
+        monkeypatch.setattr(
+            run_route_module,
+            "get_native_run_engine",
+            lambda: (_ for _ in ()).throw(AssertionError("run routes should use AppRuntime service")),
+        )
+
+        route_app = FastAPI()
+        route_app.state.runtime = SimpleNamespace(agent_runtime_service=service)
+        route_app.include_router(agent_route_module.router)
+        route_app.include_router(run_route_module.router)
+        try:
+            with TestClient(route_app) as client:
+                agent_response = client.post(
+                    "/ui/agents",
+                    json={
+                        "name": "HTTP Cancelled Workflow Gate Agent",
+                        "model_mode": "custom_api",
+                        "model_config": {
+                            "base_url": "https://api.example.test/v1",
+                            "model": "demo-model",
+                            "api_key": "sk-secret",
+                        },
+                    },
+                )
+                agent_response.raise_for_status()
+                agent_id = agent_response.json()["agent_id"]
+
+                workflow_response = client.post(
+                    "/ui/workflows",
+                    json={
+                        "name": "HTTP Workflow Manual Gate Cancel",
+                        "nodes": [
+                            {"id": "start", "type": "start", "data": {"label": "Start"}},
+                            {
+                                "id": "gate",
+                                "type": "approval",
+                                "data": {
+                                    "label": "HTTP Manual Gate",
+                                    "criteria": "Confirm before running the Agent.",
+                                },
+                            },
+                            {
+                                "id": "agent",
+                                "type": "agent",
+                                "data": {"label": "After Gate", "agent_id": agent_id},
+                            },
+                            {"id": "summary", "type": "artifact", "data": {"label": "Summary"}},
+                        ],
+                        "edges": [
+                            {"source": "start", "target": "gate"},
+                            {"source": "gate", "target": "agent"},
+                            {"source": "agent", "target": "summary"},
+                        ],
+                    },
+                )
+                workflow_response.raise_for_status()
+                workflow_id = workflow_response.json()["workflow_id"]
+
+                run_response = client.post(
+                    "/ui/workflow-runs",
+                    json={"workflow_id": workflow_id, "user_goal": "Cancel workflow gate through HTTP"},
+                    headers={"Idempotency-Key": "http-workflow-gate-cancel-1"},
+                )
+                run_response.raise_for_status()
+                waiting = run_response.json()
+                run_id = waiting["run_id"]
+
+                detail_before = client.get(f"/ui/workflow-runs/{run_id}")
+                replay_before = client.get(f"/runs/{run_id}/events?after_sequence=0&limit=200")
+                cancel_response = client.post(f"/ui/runs/{run_id}/cancel")
+                detail_after = client.get(f"/ui/workflow-runs/{run_id}")
+                group_after = client.get(f"/ui/run-groups/{waiting['run_group_id']}")
+                replay_after = client.get(f"/runs/{run_id}/events?after_sequence=0&limit=200")
+
+            assert waiting["client_request_id"] == "http-workflow-gate-cancel-1"
+            assert waiting["status"] == "approval_required"
+            assert waiting["pending_approval"]["tool"] == "workflow.approval"
+            assert waiting["pending_approval"]["input_preview"]["checkpoint"] == "HTTP Manual Gate"
+            assert detail_before.status_code == 200
+            assert detail_before.json()["status"] == "approval_required"
+            assert detail_before.json()["pending_approval"]["tool"] == "workflow.approval"
+            assert replay_before.status_code == 200
+            replay_before_types = [event["event_type"] for event in replay_before.json()["events"]]
+            assert "workflow.node.approval_required" in replay_before_types
+
+            assert cancel_response.status_code == 200
+            cancelled = cancel_response.json()
+            assert cancelled["status"] == "cancelled"
+            assert cancelled["pending_approval"] == {}
+            assert cancelled["result"] == "Workflow 已取消：HTTP Manual Gate"
+            cancelled_timeline = next(
+                event for event in cancelled["timeline"] if event["event"] == "workflow.run.cancelled"
+            )
+            assert cancelled_timeline["detail"] == "HTTP Manual Gate cancelled"
+            assert cancelled_timeline["workflow_node_id"] == "gate"
+            assert cancelled_timeline["workflow_node_kind"] == "approval"
+            assert cancelled_timeline["workflow_node_label"] == "HTTP Manual Gate"
+            assert detail_after.status_code == 200
+            assert detail_after.json()["status"] == "cancelled"
+            assert detail_after.json()["result"] == "Workflow 已取消：HTTP Manual Gate"
+            assert detail_after.json()["pending_approval"] == {}
+            assert group_after.status_code == 200
+            assert group_after.json()["status"] == "cancelled"
+            assert group_after.json()["summary"] == "Workflow 已取消：HTTP Manual Gate"
+
+            replay_after_payload = replay_after.json()
+            replay_after_types = [event["event_type"] for event in replay_after_payload["events"]]
+            assert replay_after.status_code == 200
+            assert replay_after_types.count("workflow.node.approval_required") == 1
+            assert replay_after_types.count("workflow.run.cancelled") == 1
+            assert "workflow.node.approval_approved" not in replay_after_types
+            assert "workflow.node.approval_rejected" not in replay_after_types
+            assert "workflow.node.agent" not in replay_after_types
+            assert "workflow.node.artifact" not in replay_after_types
+            assert "workflow.run.completed" not in replay_after_types
+            cancelled_fact = next(
+                event
+                for event in replay_after_payload["events"]
+                if event["event_type"] == "workflow.run.cancelled"
+            )
+            assert cancelled_fact["payload"]["kind"] == "workflow_run"
+            assert cancelled_fact["payload"]["status"] == "cancelled"
+            assert cancelled_fact["payload"]["result"] == "Workflow 已取消：HTTP Manual Gate"
+            assert len(model_calls) == 0
+        finally:
+            service.close()
+    finally:
+        sys.modules.pop("_oha_workflow_approval_node_cancel_http_roundtrip_under_test", None)
+        sys.modules.pop("_oha_workflow_approval_node_cancel_run_http_roundtrip_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_agent_studio_crud_http_routes_use_app_runtime_service(monkeypatch):
     saved_modules = _unload_module_prefixes(("fastapi",))
     try:
