@@ -82,6 +82,10 @@ def _chunk_tool_calls(chunk: Any) -> list[tuple[int, int, Any]]:
         delta_calls = _field(delta, "tool_calls") if delta is not None else None
         if isinstance(delta_calls, list):
             calls.extend((choice_index, index, call) for index, call in enumerate(delta_calls))
+        message = _field(choice, "message")
+        message_calls = _field(message, "tool_calls") if message is not None else None
+        if isinstance(message_calls, list):
+            calls.extend((choice_index, index, call) for index, call in enumerate(message_calls))
     return calls
 
 

@@ -319,6 +319,46 @@ def test_stream_smoke_keeps_multi_choice_tool_call_deltas_separate():
     ]
 
 
+def test_stream_smoke_summarizes_message_level_tool_calls():
+    chunks = [
+        {
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "tool_calls": [
+                            {
+                                "id": "call_message_read",
+                                "type": "function",
+                                "function": {
+                                    "name": "workspace_read",
+                                    "arguments": '{"path":"README.md"}',
+                                },
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ]
+        }
+    ]
+
+    summary = smoke.summarize_stream_chunks(chunks)
+
+    assert summary["ok"] is True
+    assert summary["finish_reasons"] == ["tool_calls"]
+    assert summary["tool_call_delta_count"] == 1
+    assert summary["tool_call_count"] == 1
+    assert summary["tool_calls"] == [
+        {
+            "id": "call_message_read",
+            "name": "workspace_read",
+            "argument_chars": len('{"path":"README.md"}'),
+        }
+    ]
+    assert "README.md" not in json.dumps(summary)
+
+
 def test_stream_smoke_fails_when_expected_content_or_tool_is_missing(monkeypatch):
     class FakeResponse:
         def __enter__(self):
