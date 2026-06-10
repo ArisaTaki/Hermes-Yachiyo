@@ -85,6 +85,14 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must use the signed app build path when signing is configured",
     ),
     (
+        "首次启动应用时仍会显示未知开发者 / Gatekeeper 提示",
+        "macOS release workflow must document Gatekeeper first-launch handling",
+    ),
+    (
+        "屏幕录制权限",
+        "macOS release workflow must document screen recording permission setup",
+    ),
+    (
         "package_scan_paths=(dist/backend)",
         "macOS release workflow must scan the packaged backend binary",
     ),
