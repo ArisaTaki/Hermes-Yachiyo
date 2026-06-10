@@ -7708,19 +7708,36 @@ async def test_workflow_artifact_review_route_exposes_outputs_and_reruns(tmp_pat
         assert replay_artifact["payload"]["artifact"]["path"] == "reports/final.md"
 
         rerun = await agent_routes.rerun_run(parent["run_id"])
+        rerun_detail = await agent_routes.get_any_run(rerun["run_id"])
+        rerun_replay = await run_routes.list_run_events(rerun["run_id"], after_sequence=0, limit=200)
         rerun_artifact = await agent_routes.get_run_artifact(rerun["run_id"], "reports/final.md")
         rerun_group = service.get_run_group(rerun["run_group_id"])
         rerun_event = rerun["timeline"][0]
+        rerun_replay_types = [event["event_type"] for event in rerun_replay["events"]]
+        rerun_replay_event = next(
+            event for event in rerun_replay["events"]
+            if event["event_type"] == "run.rerun.started"
+        )
 
         assert rerun["run_id"] != parent["run_id"]
         assert rerun["status"] == "completed"
         assert rerun["result"] == "Code final result run 2"
         assert rerun["workflow_run_id"] == rerun["run_id"]
+        assert rerun_detail["run_id"] == rerun["run_id"]
+        assert rerun_detail["status"] == "completed"
+        assert rerun_detail["run_group_source"] == "rerun"
+        assert rerun_detail["timeline"][0]["event"] == "run.rerun.started"
         assert rerun_group["source"] == "rerun"
         assert rerun_event["event"] == "run.rerun.started"
         assert rerun_event["rerun_of_run_id"] == parent["run_id"]
         assert rerun_event["input_preview"]["original_status"] == "completed"
         assert rerun_event["input_preview"]["original_goal"] == parent["user_goal"]
+        assert rerun_replay_types.count("run.rerun.started") == 1
+        assert "workflow.node.artifact" in rerun_replay_types
+        assert "workflow.run.completed" in rerun_replay_types
+        assert rerun_replay_event["payload"]["rerun_of_run_id"] == parent["run_id"]
+        assert rerun_replay_event["payload"]["input_preview"]["original_status"] == "completed"
+        assert rerun_replay_event["payload"]["input_preview"]["original_goal"] == parent["user_goal"]
         assert rerun_artifact["content"] == "Code final result run 2"
     finally:
         service.close()

@@ -8161,6 +8161,25 @@ class NativeRunEngine:
                 "original_goal": user_goal,
             },
         )
+        self.append_run_event(
+            str(rerun["run_id"]),
+            "run.rerun.started",
+            {
+                "rerun_of_run_id": str(original.get("run_id") or ""),
+                "rerun_of_kind": kind,
+                "rerun_of_status": original_status,
+                "rerun_of_runnable_id": runnable_id,
+                "rerun_of_runnable_name": str(original.get("runnable_name") or ""),
+                "original_created_at": str(original.get("created_at") or ""),
+                "original_updated_at": str(original.get("updated_at") or ""),
+                "input_preview": {
+                    "original_run_id": str(original.get("run_id") or ""),
+                    "original_status": original_status,
+                    "original_target": str(original.get("runnable_name") or runnable_id),
+                    "original_goal": user_goal,
+                },
+            },
+        )
         updated = self._update_run(
             str(rerun["run_id"]),
             timeline=[rerun_event, *[event for event in rerun.get("timeline") or [] if isinstance(event, dict)]],
