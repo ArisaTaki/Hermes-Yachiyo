@@ -22,6 +22,7 @@ from apps.shell.agent_runtime import (
     NativeRunEngine,
     ToolApprovalResumeContext,
     ToolBroker,
+    WorkflowParentResumeCoordinator,
 )
 from scripts.verify_secret_redaction import verify_secret_redaction
 
@@ -189,6 +190,136 @@ def test_approval_resume_coordinator_stops_on_fatal_tool_failure():
             "result": {"ok": False, "stderr": "denied"},
             "status": "failed",
         }
+    ]
+
+
+def test_workflow_parent_resume_coordinator_continues_completed_child():
+    appended_events: list[tuple[str, str, dict[str, object]]] = []
+    continued: dict[str, object] = {}
+    child_node_info = {
+        "workflow_node_id": "agent",
+        "workflow_node_kind": "agent",
+        "workflow_node_label": "Research Agent",
+    }
+    child_artifact = {
+        "kind": "workflow_child_artifact",
+        "source_run_id": "child_run",
+        "path": "reports/result.md",
+    }
+
+    workflow_run = {
+        "run_id": "workflow_parent",
+        "run_group_id": "run_group_parent",
+        "timeline": [
+            {
+                "event": "workflow.run.approval_required",
+                "child_run_id": "child_run",
+                **child_node_info,
+            }
+        ],
+        "artifacts": [],
+    }
+    child_run = {
+        "run_id": "child_run",
+        "status": "completed",
+        "result": "Child Agent completed after approval.",
+        "runnable_name": "Research Agent",
+    }
+
+    def merge_child_outcome(timeline, artifacts, run, label):
+        assert run is child_run
+        assert label == "Research Agent"
+        artifacts.append(dict(child_artifact))
+
+    def continue_workflow_run(
+        run,
+        workflow,
+        *,
+        context,
+        timeline,
+        artifacts,
+        start_index,
+        root_group,
+    ):
+        continued.update(
+            {
+                "run": run,
+                "workflow": workflow,
+                "context": context,
+                "timeline": timeline,
+                "artifacts": artifacts,
+                "start_index": start_index,
+                "root_group": root_group,
+            }
+        )
+        return {"run_id": run["run_id"], "status": "completed", "result": context}
+
+    coordinator = WorkflowParentResumeCoordinator(
+        parent_runs_waiting_for_child=lambda _child: [workflow_run],
+        workflow_run_is_group_root=lambda _run: True,
+        workflow_child_node_context=lambda _timeline, _child: (
+            "Research Agent",
+            dict(child_node_info),
+        ),
+        merge_workflow_child_run_outcome=merge_child_outcome,
+        workflow_for_run_resume=lambda _run: {"workflow_id": "workflow_demo"},
+        workflow_resume_start_index=lambda _workflow, _run, child_run_id: (
+            3 if child_run_id == "child_run" else None
+        ),
+        continue_workflow_run=continue_workflow_run,
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+        append_run_event=lambda run_id, event_type, payload: appended_events.append((run_id, event_type, payload)),
+        update_run=lambda *_args, **_kwargs: pytest.fail(
+            "completed child continuation should not update parent directly"
+        ),
+        update_run_group=lambda *_args, **_kwargs: pytest.fail(
+            "completed child continuation should not update group directly"
+        ),
+    )
+
+    result = coordinator.resume_parent_after_child_update(workflow_run, child_run)
+
+    assert result == {
+        "run_id": "workflow_parent",
+        "status": "completed",
+        "result": "Child Agent completed after approval.",
+    }
+    assert continued["run"] is workflow_run
+    assert continued["workflow"] == {"workflow_id": "workflow_demo"}
+    assert continued["context"] == "Child Agent completed after approval."
+    assert continued["start_index"] == 3
+    assert continued["root_group"] is True
+    assert continued["artifacts"] == [child_artifact]
+    continued_timeline = continued["timeline"]
+    assert isinstance(continued_timeline, list)
+    assert continued_timeline[-1] == {
+        "event": "workflow.run.resumed",
+        "detail": "Workflow resumed after child Agent approval",
+        "child_run_id": "child_run",
+        "status": "running",
+        **child_node_info,
+    }
+    assert appended_events == [
+        (
+            "workflow_parent",
+            "workflow.node.agent",
+            {
+                "child_run_id": "child_run",
+                "status": "completed",
+                "result": "Child Agent completed after approval.",
+                "artifact_count": 1,
+                **child_node_info,
+            },
+        ),
+        (
+            "workflow_parent",
+            "workflow.run.resumed",
+            {
+                "child_run_id": "child_run",
+                "status": "running",
+                **child_node_info,
+            },
+        ),
     ]
 
 
