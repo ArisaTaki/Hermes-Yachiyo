@@ -21,6 +21,7 @@ def test_verifier_reports_legacy_product_tokens(tmp_path):
         root=tmp_path,
         paths=[release_file],
         check_required_files=False,
+        check_release_security_guards=False,
     )
 
     assert len(findings) == 1
@@ -36,6 +37,7 @@ def test_verifier_rejects_non_utf8_targets_by_default(tmp_path):
         root=tmp_path,
         paths=[artifact],
         check_required_files=False,
+        check_release_security_guards=False,
     )
 
     assert findings == [
@@ -53,6 +55,7 @@ def test_verifier_binary_mode_scans_legacy_tokens(tmp_path):
         root=tmp_path,
         paths=[clean_artifact, legacy_artifact],
         check_required_files=False,
+        check_release_security_guards=False,
         allow_binary_targets=True,
     )
 
@@ -61,6 +64,55 @@ def test_verifier_binary_mode_scans_legacy_tokens(tmp_path):
             legacy_artifact,
             f"contains legacy product token {verifier.FORBIDDEN_TOKENS[1]!r}",
         )
+    ]
+
+
+def test_verifier_binary_mode_scans_nested_directories(tmp_path):
+    resources = tmp_path / "Oha-Yachiyo.app" / "Contents" / "Resources"
+    backend = resources / "backend" / "oha-yachiyo-backend"
+    backend.parent.mkdir(parents=True)
+    backend.write_bytes(b"\x00" + verifier.FORBIDDEN_TOKENS[0].encode("utf-8") + b"\xff")
+    clean_asar = resources / "app.asar"
+    clean_asar.write_bytes(b"\xff\x00Oha-Yachiyo\xfe")
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[resources],
+        check_required_files=False,
+        check_release_security_guards=False,
+        allow_binary_targets=True,
+    )
+
+    assert findings == [
+        verifier.Finding(
+            backend,
+            f"contains legacy product token {verifier.FORBIDDEN_TOKENS[0]!r}",
+        )
+    ]
+
+
+def test_verifier_requires_packaging_to_exclude_rebuilt_node_pty(tmp_path):
+    config = tmp_path / verifier.PACKAGING_CONFIG_FILE
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        "productName: Oha-Yachiyo\n"
+        "files:\n"
+        "  - node_modules/node-pty/lib/**\n"
+        "  - node_modules/node-pty/prebuilds/darwin-arm64/**\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_packaging_guards(tmp_path)
+
+    assert findings == [
+        verifier.Finding(
+            config,
+            "macOS release packaging must disable local native dependency rebuilds",
+        ),
+        verifier.Finding(
+            config,
+            "macOS release packaging must exclude rebuilt node-pty native artifacts",
+        ),
     ]
 
 
@@ -74,6 +126,7 @@ def test_verifier_rejects_legacy_build_metadata_filename(tmp_path):
     findings = verifier.verify_release_artifacts(
         root=tmp_path,
         paths=[required],
+        check_release_security_guards=False,
     )
 
     assert any(finding.path == legacy for finding in findings)

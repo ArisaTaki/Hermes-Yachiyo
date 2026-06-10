@@ -5,6 +5,9 @@ copyright: Copyright © 2026 Oha-Yachiyo
 directories:
   output: ../../dist/electron
 
+# Local node-pty rebuilds embed workspace paths in native binaries; package clean prebuilds instead.
+npmRebuild: false
+
 files:
   - dist/**
   - dist-electron/**
@@ -15,6 +18,7 @@ files:
   - node_modules/node-pty/prebuilds/darwin-arm64/**
   - node_modules/node-pty/prebuilds/darwin-x64/**
   - node_modules/node-addon-api/**
+  - '!node_modules/node-pty/build/**'
   - '!node_modules/node-pty/prebuilds/win32*/**'
   - '!node_modules/node-pty/deps/**'
   - '!node_modules/node-pty/src/**'

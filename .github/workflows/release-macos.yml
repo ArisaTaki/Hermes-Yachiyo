@@ -216,6 +216,29 @@ jobs:
             CSC_IDENTITY_AUTO_DISCOVERY=false npm --prefix apps/frontend run dist:mac
           fi
 
+      - name: Verify packaged app resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -d dist/electron ]]; then
+            echo "No Electron package output found under dist/electron" >&2
+            exit 1
+          fi
+
+          package_scan_paths=(dist/backend)
+          app_resource_dirs=()
+          while IFS= read -r -d '' resources_dir; do
+            app_resource_dirs+=("${resources_dir}")
+          done < <(find dist/electron -path '*/Oha-Yachiyo.app/Contents/Resources' -type d -print0)
+
+          if [[ "${#app_resource_dirs[@]}" -eq 0 ]]; then
+            echo "No packaged app resources found under dist/electron" >&2
+            exit 1
+          fi
+
+          package_scan_paths+=("${app_resource_dirs[@]}")
+          python scripts/verify_release_artifacts.py --allow-binary "${package_scan_paths[@]}"
+
       - name: Prepare release metadata
         id: meta
         shell: bash

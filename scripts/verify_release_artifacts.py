@@ -47,6 +47,17 @@ FORBIDDEN_FILES: tuple[Path, ...] = (
 )
 
 RELEASE_SECURITY_CHANNELS: tuple[str, ...] = ("release", "alpha", "stable")
+PACKAGING_CONFIG_FILE = Path("apps/frontend/electron-builder.yml")
+PACKAGING_CONFIG_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "npmRebuild: false",
+        "macOS release packaging must disable local native dependency rebuilds",
+    ),
+    (
+        "- '!node_modules/node-pty/build/**'",
+        "macOS release packaging must exclude rebuilt node-pty native artifacts",
+    ),
+)
 _BUILD_GUARD_ENV_KEYS: tuple[str, ...] = (
     "OHA_YACHIYO_DEV",
     "OHA_YACHIYO_BUILD_METADATA",
@@ -130,6 +141,7 @@ def verify_release_artifacts(
 
     if check_release_security_guards:
         findings.extend(_verify_release_security_guards(root_path))
+        findings.extend(_verify_release_packaging_guards(root_path))
 
     return findings
 
@@ -219,6 +231,20 @@ def _verify_release_security_guards(root: Path) -> list[Finding]:
                             f"{channel} metadata must not allow DevFileCredentialStore",
                         )
                     )
+    return findings
+
+
+def _verify_release_packaging_guards(root: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    config_path = _resolve(root, PACKAGING_CONFIG_FILE)
+    try:
+        config = config_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [Finding(config_path, f"could not read macOS release packaging config: {exc}")]
+
+    for required_text, message in PACKAGING_CONFIG_REQUIRED_TEXT:
+        if required_text not in config:
+            findings.append(Finding(config_path, message))
     return findings
 
 
