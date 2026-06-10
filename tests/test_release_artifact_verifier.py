@@ -375,6 +375,7 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover mature UI flow contracts" in messages
     assert "macOS release workflow smoke tests must cover Chat image HTTP roundtrip" in messages
     assert "macOS release workflow smoke tests must cover Agent approval Run Detail HTTP roundtrip" in messages
+    assert "macOS release workflow smoke tests must cover Workflow approval Run Detail HTTP roundtrip" in messages
     assert "macOS release workflow smoke tests must cover manual TTS" in messages
     assert "macOS release workflow smoke tests must cover Live2D and mode settings" in messages
 
