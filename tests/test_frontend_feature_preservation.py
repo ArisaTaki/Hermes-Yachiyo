@@ -98,6 +98,31 @@ def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
     )
 
 
+def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
+    _assert_contains(
+        "apps/frontend/src/views/launcherTypes.ts",
+        [
+            "export type LauncherRecentSession",
+            "recent_sessions?: LauncherRecentSession[];",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/views/LauncherView.tsx",
+        [
+            "launcherRecentSessions(data?.chat)",
+            "latestLauncherSessionSummary(data?.chat)",
+            'data-testid="bubble-launcher-shell"',
+            'data-testid="bubble-launcher-summary"',
+            'data-testid="live2d-launcher-shell"',
+            'data-testid="live2d-launcher-reply"',
+            'data-testid="live2d-launcher-reply-text"',
+            'data-testid="live2d-launcher-quick-input"',
+            'data-testid={`${mode}-launcher-session-summary-probe`}',
+            'data-testid={`${mode}-launcher-recent-session`}',
+        ],
+    )
+
+
 def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> None:
     _assert_contains(
         "apps/frontend/src/views/ChatView.tsx",

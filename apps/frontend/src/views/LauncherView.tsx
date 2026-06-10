@@ -16,7 +16,7 @@ import {
   type Live2DRenderSettings,
   type Live2DRendererState,
 } from './Live2DPreviewStage';
-import type { LauncherPayload } from './launcherTypes';
+import type { LauncherPayload, LauncherRecentSession } from './launcherTypes';
 
 const ACTIVE_POLL_INTERVAL_MS = 1200;
 const IDLE_POLL_INTERVAL_MS = 5000;
@@ -190,6 +190,10 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
   const idleHidden = Boolean(launcher.auto_hide && !data?.chat?.is_processing && !launcher.has_attention && !proactive.has_attention);
   const displayMode = launcher.default_display || 'summary';
   const statusLabel = normalizedStatusLabel(data?.chat);
+  const recentSessions = launcherRecentSessions(data?.chat);
+  const latestReply = latestAssistantText(data?.chat, launcher);
+  const summaryText = latestReply || latestLauncherSessionSummary(data?.chat) || statusLabel;
+  const showSummary = displayMode !== 'icon' && Boolean(summaryText);
   const title = bubbleTitle(displayMode, hasAttention, statusLabel, proactive);
   const ariaLabel = displayMode === 'icon'
     ? 'Yachiyo Bubble'
@@ -296,14 +300,15 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
   }
 
   return (
-    <main className="launcher-shell bubble-shell" onContextMenu={(event) => handleContextMenu(event, 'bubble')}>
+    <main className="launcher-shell bubble-shell" data-testid="bubble-launcher-shell" onContextMenu={(event) => handleContextMenu(event, 'bubble')}>
       <button
         ref={buttonRef}
         className={`bubble-launcher ${hasAttention ? 'has-unread' : ''} ${proactiveAttention ? 'has-proactive' : ''} ${idleHidden ? 'auto-hidden' : ''}`}
+        data-testid="bubble-launcher-button"
         style={style}
         type="button"
         title={title}
-        aria-label={title}
+        aria-label={ariaLabel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -312,9 +317,12 @@ function BubbleLauncher({ data }: { data: LauncherPayload | null }) {
         onClick={handleClick}
       >
         <span className="portrait" aria-hidden="true"><span className="mouth" /></span>
-        <span className={dotClass} aria-hidden="true" />
-        <span className="bubble-summary hidden" aria-hidden="true" />
+        <span className={dotClass} data-testid="bubble-launcher-status-dot" aria-hidden="true" />
+        <span className={showSummary ? 'bubble-summary' : 'bubble-summary hidden'} data-testid="bubble-launcher-summary">
+          {summaryText}
+        </span>
       </button>
+      <LauncherSessionSummaryProbe mode="bubble" latestReply={latestReply} statusLabel={statusLabel} sessions={recentSessions} />
     </main>
   );
 }
@@ -398,6 +406,8 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   const [rendererReady, setRendererReady] = useState(false);
   const [rendererError, setRendererError] = useState('');
   const latestReply = latestAssistantText(data?.chat, launcher);
+  const statusLabel = normalizedStatusLabel(data?.chat);
+  const recentSessions = launcherRecentSessions(data?.chat);
   const status = launcher.latest_status || (data?.chat?.is_processing ? 'processing' : 'empty');
   const hasAttention = Boolean(data?.notification?.has_unread);
   const proactiveAttention = Boolean(data?.proactive?.has_attention);
@@ -681,6 +691,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
   return (
     <main
       className={`launcher-shell live2d-shell live2d-anchor-${positionAnchor}`}
+      data-testid="live2d-launcher-shell"
       style={previewStyle}
       onContextMenu={(event) => handleContextMenu(event, 'live2d')}
       onPointerDown={handleWindowPointerDown}
@@ -691,6 +702,7 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
     >
       <div
         className="live2d-stage"
+        data-testid="live2d-launcher-stage"
         role="button"
         tabIndex={0}
         title={stageTitle}
@@ -749,8 +761,9 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
         <button
           ref={replyRef}
           className={`live2d-reply ${proactiveAttention ? 'proactive' : ''} ${hasAttention ? 'attention' : ''} ${replyCue.tone}`}
+          data-testid="live2d-launcher-reply"
           type="button"
-          aria-label={replyCue.label}
+          aria-label={replyText ? `${replyCue.label}：${replyText}` : replyCue.label}
           onClick={() => {
             resetLive2DExpression(rendererStateRef.current);
             lastStatusExpressionKeyRef.current = '';
@@ -759,12 +772,14 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
           }}
         >
           <span aria-hidden="true">{replyCue.symbol}</span>
+          <span className="launcher-accessible-text" data-testid="live2d-launcher-reply-text">{replyText}</span>
         </button>
       ) : null}
 
       {launcher.enable_quick_input !== false && quickInputVisible ? (
-        <form ref={quickInputRef} className="live2d-quick-input" onSubmit={sendQuickMessage} onClick={(event) => event.stopPropagation()}>
+        <form ref={quickInputRef} className="live2d-quick-input" data-testid="live2d-launcher-quick-input" onSubmit={sendQuickMessage} onClick={(event) => event.stopPropagation()}>
           <input
+            data-testid="live2d-launcher-quick-input-field"
             value={quickText}
             onChange={(event) => setQuickText(event.target.value)}
             onCompositionEnd={() => {
@@ -780,9 +795,10 @@ function Live2DLauncher({ data, refresh }: { data: LauncherPayload | null; refre
             }}
             placeholder="和八千代说点什么…"
           />
-          <button type="submit" disabled={!quickText.trim()}>发送</button>
+          <button type="submit" data-testid="live2d-launcher-quick-input-submit" disabled={!quickText.trim()}>发送</button>
         </form>
       ) : null}
+      <LauncherSessionSummaryProbe mode="live2d" latestReply={latestReply} statusLabel={statusLabel} sessions={recentSessions} />
     </main>
   );
 }
@@ -842,6 +858,44 @@ function live2dInteractiveTarget(target: EventTarget | null) {
 
 function latestAssistantText(chat: LauncherPayload['chat'], launcher: NonNullable<LauncherPayload['launcher']>) {
   return launcher.latest_reply || chat?.latest_reply || launcher.latest_reply_full || chat?.latest_reply_full || '';
+}
+
+function launcherRecentSessions(chat: LauncherPayload['chat']): LauncherRecentSession[] {
+  return Array.isArray(chat?.recent_sessions) ? chat.recent_sessions.slice(0, 3) : [];
+}
+
+function latestLauncherSessionSummary(chat: LauncherPayload['chat']) {
+  const session = launcherRecentSessions(chat).find((item) => String(item.summary || '').trim());
+  return session ? String(session.summary || '').trim() : '';
+}
+
+function LauncherSessionSummaryProbe({
+  latestReply,
+  mode,
+  sessions,
+  statusLabel,
+}: {
+  latestReply: string;
+  mode: 'bubble' | 'live2d';
+  sessions: LauncherRecentSession[];
+  statusLabel: string;
+}) {
+  return (
+    <div className="launcher-session-summary-probe" data-testid={`${mode}-launcher-session-summary-probe`} hidden>
+      <span data-testid={`${mode}-launcher-latest-reply`}>{latestReply}</span>
+      <span data-testid={`${mode}-launcher-status-label`}>{statusLabel}</span>
+      {sessions.map((session, index) => (
+        <span
+          data-testid={`${mode}-launcher-recent-session`}
+          data-session-id={session.session_id || ''}
+          data-conversation-kind={session.conversation_kind || ''}
+          key={`${session.session_id || 'session'}-${index}`}
+        >
+          {session.summary || ''}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function live2dCharacterClass(

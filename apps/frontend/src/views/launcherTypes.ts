@@ -1,3 +1,12 @@
+export type LauncherRecentSession = {
+  session_id?: string;
+  title?: string;
+  summary?: string;
+  latest_status?: string;
+  conversation_kind?: string;
+  updated_at?: string;
+};
+
 export type LauncherPayload = {
   ok?: boolean;
   mode?: 'bubble' | 'live2d';
@@ -8,6 +17,7 @@ export type LauncherPayload = {
     status_label?: string;
     latest_reply?: string;
     latest_reply_full?: string;
+    recent_sessions?: LauncherRecentSession[];
   };
   notification?: {
     has_unread?: boolean;
