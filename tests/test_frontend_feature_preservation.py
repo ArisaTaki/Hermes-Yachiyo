@@ -496,6 +496,13 @@ def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_f
             "data-testid=\"agent-run-detail-artifact-list\"",
             "data-testid=\"agent-run-detail-artifact\"",
             "data-testid=\"agent-run-detail-artifact-preview\"",
+            "data-testid=\"agent-run-history-manage\"",
+            "data-testid=\"agent-run-history-bulk-actions\"",
+            "data-testid=\"agent-run-history-select-all\"",
+            "data-testid=\"agent-run-history-clear-selection\"",
+            "data-testid=\"agent-run-history-delete-selected\"",
+            "data-testid=\"agent-run-history-finish-management\"",
+            "data-testid=\"agent-run-history-select-run\"",
         ],
     )
 

@@ -4586,7 +4586,7 @@ export function AgentStudioView() {
               <div className="run-history-head">
                 <span>Run History · {filteredRuns.length}{runSearchActive ? ` / ${runStatusFilteredRuns.length}` : ''}</span>
                 {filteredRuns.length && !runHistoryManagementMode ? (
-                  <button type="button" disabled={busy} onClick={() => setRunHistoryManagementMode(true)}>管理</button>
+                  <button type="button" data-testid="agent-run-history-manage" disabled={busy} onClick={() => setRunHistoryManagementMode(true)}>管理</button>
                 ) : null}
               </div>
               <div className="run-history-search">
@@ -4636,22 +4636,23 @@ export function AgentStudioView() {
                 ))}
               </div>
               {filteredRuns.length && runHistoryManagementMode ? (
-                <div className="studio-bulk-actions" aria-label="Run History 批量操作">
+                <div className="studio-bulk-actions" aria-label="Run History 批量操作" data-testid="agent-run-history-bulk-actions">
                   <span>{selectedHistoryRuns.length ? `已选择 ${selectedHistoryRuns.length} / ${filteredRuns.length}` : `${filteredRuns.length} runs`}</span>
-                  <button type="button" disabled={busy} onClick={() => setSelectedRunIds(allHistoryRunsSelected ? [] : filteredRunIds)}>
+                  <button type="button" data-testid="agent-run-history-select-all" disabled={busy} onClick={() => setSelectedRunIds(allHistoryRunsSelected ? [] : filteredRunIds)}>
                     {allHistoryRunsSelected ? '取消全选' : '全选当前列表'}
                   </button>
-                  <button type="button" disabled={busy || !selectedHistoryRuns.length} onClick={() => setSelectedRunIds([])}>清空</button>
+                  <button type="button" data-testid="agent-run-history-clear-selection" disabled={busy || !selectedHistoryRuns.length} onClick={() => setSelectedRunIds([])}>清空</button>
                   <button
                     type="button"
                     className="danger-action"
+                    data-testid="agent-run-history-delete-selected"
                     disabled={busy || !selectedHistoryRuns.length || Boolean(runBulkDeleteDisabledReason)}
                     title={runBulkDeleteDisabledReason || undefined}
                     onClick={requestDeleteSelectedRuns}
                   >
                     删除所选
                   </button>
-                  <button type="button" disabled={busy} onClick={finishRunHistoryManagement}>完成</button>
+                  <button type="button" data-testid="agent-run-history-finish-management" disabled={busy} onClick={finishRunHistoryManagement}>完成</button>
                 </div>
               ) : null}
             </div>
@@ -4683,6 +4684,7 @@ export function AgentStudioView() {
                       >
                         <label className="run-list-select" aria-label={`选择 Run ${run.run_id}`}>
                           <input
+                            data-testid="agent-run-history-select-run"
                             type="checkbox"
                             checked={selectedRunIdSet.has(run.run_id)}
                             disabled={busy || !runHistoryManagementMode}
