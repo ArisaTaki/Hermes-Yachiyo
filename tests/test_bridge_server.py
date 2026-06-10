@@ -696,6 +696,177 @@ def test_chat_group_http_routes_preserve_create_update_payloads(monkeypatch):
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_launcher_http_routes_preserve_session_summary_and_quick_message(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "ui.py"
+        spec = importlib.util.spec_from_file_location("_oha_ui_launcher_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        ui_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = ui_route_module
+        spec.loader.exec_module(ui_route_module)
+
+        calls: list[tuple[str, dict[str, object]]] = []
+        runtime = SimpleNamespace(
+            config=SimpleNamespace(
+                bubble_mode=SimpleNamespace(
+                    summary_count=2,
+                    default_display="summary",
+                    show_unread_dot=True,
+                    auto_hide=False,
+                    opacity=0.9,
+                ),
+                live2d_mode=SimpleNamespace(
+                    show_reply_bubble=True,
+                    enable_quick_input=True,
+                    click_action="open_chat",
+                    default_open_behavior="reply_bubble",
+                ),
+            )
+        )
+
+        class FakeChatBridge:
+            def __init__(self, received_runtime):
+                assert received_runtime is runtime
+
+            def get_conversation_overview(self, summary_count, session_limit):
+                calls.append(
+                    (
+                        "overview",
+                        {"summary_count": summary_count, "session_limit": session_limit},
+                    )
+                )
+                return {
+                    "ok": True,
+                    "session_id": "session-current",
+                    "empty": False,
+                    "is_processing": False,
+                    "status_label": f"最近 {summary_count} 条",
+                    "latest_reply": "短回复",
+                    "latest_reply_full": "完整回复",
+                    "recent_sessions": [
+                        {
+                            "session_id": "session-current",
+                            "summary": "用户：保留会话总结；回复：已同步到 Launcher。",
+                        }
+                    ],
+                }
+
+            def send_quick_message(self, text):
+                calls.append(("quick_message", {"text": text}))
+                return {"ok": True, "text": text, "session_id": "session-current"}
+
+        class FakeChatAPI:
+            def __init__(self, received_runtime):
+                assert received_runtime is runtime
+
+            def load_session(self, session_id):
+                calls.append(("load_session", {"session_id": session_id}))
+                return {"ok": True, "session_id": session_id}
+
+        class FakeNotificationTracker:
+            def update(self, chat, external_attention=False):
+                calls.append(
+                    (
+                        "notification_update",
+                        {
+                            "latest_reply": chat.get("latest_reply", ""),
+                            "external_attention": external_attention,
+                        },
+                    )
+                )
+                return {"has_unread": True, "latest_message": {"status": "completed"}}
+
+            def acknowledge(self, chat=None):
+                calls.append(
+                    (
+                        "notification_ack",
+                        {"session_id": (chat or {}).get("session_id", "")},
+                    )
+                )
+
+        monkeypatch.setattr(ui_route_module, "get_runtime", lambda: runtime)
+        monkeypatch.setattr(ui_route_module, "ChatBridge", FakeChatBridge)
+        monkeypatch.setattr(ui_route_module, "ChatAPI", FakeChatAPI)
+        monkeypatch.setattr(ui_route_module, "LauncherNotificationTracker", FakeNotificationTracker)
+        monkeypatch.setattr(
+            ui_route_module,
+            "_launcher_proactive_state",
+            lambda _runtime, mode_id, _mode_config: {
+                "ok": True,
+                "status": "disabled",
+                "mode": mode_id,
+                "has_attention": False,
+            },
+        )
+        monkeypatch.setattr(ui_route_module, "_maybe_trigger_proactive_tts", lambda *_args: {})
+        monkeypatch.setattr(ui_route_module, "_bubble_avatar_url", lambda _config: "data:image/png;base64,AAAA")
+        monkeypatch.setattr(ui_route_module, "_live2d_preview_url", lambda _config: "data:image/png;base64,BBBB")
+        monkeypatch.setattr(
+            ui_route_module,
+            "_live2d_resource_payload",
+            lambda _config: {"state": "ready", "status_label": "Live2D ready"},
+        )
+        monkeypatch.setattr(
+            ui_route_module,
+            "_live2d_renderer_payload",
+            lambda _config, _resource: {"enabled": True, "model_url": "http://127.0.0.1/live2d.model3.json"},
+        )
+        ui_route_module._launcher_notifications.clear()
+        ui_route_module._launcher_proactive_services.clear()
+        route_app = FastAPI()
+        route_app.include_router(ui_route_module.router)
+
+        with TestClient(route_app) as client:
+            bubble = client.get("/ui/launcher?mode=bubble")
+            live2d = client.get("/ui/launcher?mode=live2d")
+            ack = client.post("/ui/launcher/ack", json={"mode": "live2d"})
+            quick = client.post(
+                "/ui/launcher/quick-message",
+                json={"mode": "live2d", "session_id": "session-current", "text": "继续整理会话"},
+            )
+
+        assert bubble.status_code == 200
+        assert bubble.json()["mode"] == "bubble"
+        assert bubble.json()["chat"]["recent_sessions"][0]["summary"] == "用户：保留会话总结；回复：已同步到 Launcher。"
+        assert bubble.json()["launcher"]["status_label"] == "最近 2 条"
+        assert bubble.json()["launcher"]["latest_reply"] == "短回复"
+        assert bubble.json()["launcher"]["latest_status"] == "completed"
+        assert bubble.json()["launcher"]["avatar_url"].startswith("data:image/")
+
+        assert live2d.status_code == 200
+        assert live2d.json()["mode"] == "live2d"
+        assert live2d.json()["launcher"]["show_reply_bubble"] is True
+        assert live2d.json()["launcher"]["enable_quick_input"] is True
+        assert live2d.json()["launcher"]["status_label"] == "最近 3 条"
+        assert live2d.json()["launcher"]["renderer"]["enabled"] is True
+
+        assert ack.status_code == 200
+        assert ack.json() == {"ok": True, "mode": "live2d", "session_id": "session-current"}
+        assert quick.status_code == 200
+        assert quick.json() == {"ok": True, "text": "继续整理会话", "session_id": "session-current"}
+        assert calls == [
+            ("overview", {"summary_count": 2, "session_limit": 3}),
+            ("notification_update", {"latest_reply": "短回复", "external_attention": False}),
+            ("overview", {"summary_count": 3, "session_limit": 3}),
+            ("notification_update", {"latest_reply": "短回复", "external_attention": False}),
+            ("overview", {"summary_count": 3, "session_limit": 3}),
+            ("notification_ack", {"session_id": "session-current"}),
+            ("load_session", {"session_id": "session-current"}),
+            ("quick_message", {"text": "继续整理会话"}),
+        ]
+    finally:
+        sys.modules.pop("_oha_ui_launcher_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_chat_image_bridge_route_reaches_native_run_events(tmp_path, monkeypatch):
     try:
         from fastapi import FastAPI
