@@ -1131,7 +1131,7 @@ function RunApprovalRequest({ inputPreview, runGoal = '', runId = '', runLabel =
   const contentLabel = command ? 'BASH' : tool === 'workflow.approval' ? '审批上下文' : '请求内容';
   const content = command || formatApprovalInput(inputPreview);
   return (
-    <div className="run-approval-request">
+    <div className="run-approval-request" data-testid="agent-run-approval-request">
       <div className="run-approval-summary-grid">
         {rows.map(([label, value]) => (
           <div key={label}>
@@ -4705,8 +4705,8 @@ export function AgentStudioView() {
           <div className="agent-studio-panel">
             <div className="section-heading-row"><h2>Run Detail</h2></div>
             {selectedRun ? (
-              <article className="run-detail">
-                <header className="run-detail-hero">
+              <article className="run-detail" data-testid="agent-run-detail">
+                <header className="run-detail-hero" data-testid="agent-run-detail-hero">
                   <AgentAvatar avatarUrl={selectedRunAvatarUrl} name={selectedRun.runnable_name || selectedRun.runnable_id || 'Run'} />
                   <div className="run-detail-title">
                     <span>{runKindLabel(selectedRun.kind)} · {formatRunDate(selectedRun.created_at)}</span>
@@ -4715,7 +4715,7 @@ export function AgentStudioView() {
                   </div>
                   <span className={`run-status-pill ${runStatusTone(selectedRun.status)}`}>{runStatusLabel(selectedRun.status)}</span>
                 </header>
-                <div className="run-detail-meta">
+                <div className="run-detail-meta" data-testid="agent-run-detail-meta">
                   <span>{runKindLabel(selectedRun.kind)}</span>
                   <span>Updated {formatRunDate(selectedRun.updated_at || selectedRun.created_at)}</span>
                   {selectedRunIsLive ? <span className="run-live-pill">实时更新</span> : null}
@@ -4733,6 +4733,7 @@ export function AgentStudioView() {
                   <button
                     type="button"
                     className="run-rerun-prepare"
+                    data-testid="agent-run-detail-prepare-rerun"
                     disabled={busy || !selectedRunRerunTarget}
                     title={!selectedRunRerunTarget ? '找不到原目标，无法准备重跑。' : undefined}
                     onClick={prepareSelectedRunRerun}
@@ -4742,6 +4743,7 @@ export function AgentStudioView() {
                   <button
                     type="button"
                     className="run-rerun-action"
+                    data-testid="agent-run-detail-rerun"
                     disabled={busy || Boolean(selectedRunRerunDisabledReason)}
                     title={selectedRunRerunDisabledReason || undefined}
                     onClick={() => void runAction(rerunSelectedRun, '重新运行')}
@@ -4749,12 +4751,12 @@ export function AgentStudioView() {
                     重新运行
                   </button>
                   {selectedWorkflowParentRunId ? (
-                    <button type="button" className="run-parent-link" onClick={() => openRunDetail(selectedWorkflowParentRunId)}>
+                    <button type="button" className="run-parent-link" data-testid="agent-run-detail-open-parent-run" onClick={() => openRunDetail(selectedWorkflowParentRunId)}>
                       返回 Workflow：{selectedWorkflowParentRun?.runnable_name || selectedWorkflowParentRun?.runnable_id || '父 Workflow'}
                     </button>
                   ) : null}
                   {selectedRun.kind === 'workflow_run' && selectedRunWorkflow ? (
-                    <button type="button" className="run-workflow-link" onClick={() => openWorkflowDesign(selectedRunWorkflow.workflow_id)}>
+                    <button type="button" className="run-workflow-link" data-testid="agent-run-detail-open-workflow-studio" onClick={() => openWorkflowDesign(selectedRunWorkflow.workflow_id)}>
                       打开 Workflow Studio
                     </button>
                   ) : null}
@@ -4762,6 +4764,7 @@ export function AgentStudioView() {
                     <button
                       type="button"
                       className="run-cancel-action danger-action"
+                      data-testid="agent-run-detail-cancel"
                       disabled={busy}
                       onClick={requestCancelSelectedRun}
                     >
@@ -4770,8 +4773,8 @@ export function AgentStudioView() {
                   ) : null}
                 </div>
                 {selectedWorkflowApprovalChildRunId ? (
-                  <section className="run-approval-box workflow-approval-bridge">
-                    <div className="workflow-approval-bridge-head">
+                  <section className="run-approval-box workflow-approval-bridge" data-testid="agent-run-detail-workflow-child-approval">
+                    <div className="workflow-approval-bridge-head" data-testid="agent-run-detail-workflow-child-approval-head">
                       <div>
                         <h4>Workflow 正在等待子 Agent 审批</h4>
                         <p>
@@ -4795,10 +4798,11 @@ export function AgentStudioView() {
                           runLabel={selectedWorkflowApprovalChildRun.runnable_name || 'Child Run'}
                           tool={selectedWorkflowApprovalChildRun.pending_approval.tool}
                         />
-                        <div className="run-approval-actions">
+                        <div className="run-approval-actions" data-testid="agent-run-detail-workflow-child-approval-actions">
                           <button
                             type="button"
                             className="primary-action"
+                            data-testid="agent-run-detail-workflow-child-approve"
                             disabled={busy}
                             onClick={() => void runAction(
                               () => approveRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),
@@ -4810,6 +4814,7 @@ export function AgentStudioView() {
                           <button
                             type="button"
                             className="danger-action"
+                            data-testid="agent-run-detail-workflow-child-reject"
                             disabled={busy}
                             onClick={() => void runAction(
                               () => rejectRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),
@@ -4821,6 +4826,7 @@ export function AgentStudioView() {
                           <button
                             type="button"
                             className="danger-action"
+                            data-testid="agent-run-detail-workflow-child-cancel"
                             disabled={busy}
                             onClick={() => void runAction(
                               () => cancelRunById(selectedWorkflowApprovalChildRunId, selectedRun.run_id),
@@ -4829,7 +4835,7 @@ export function AgentStudioView() {
                           >
                             取消子 Run
                           </button>
-                          <button type="button" className="run-timeline-child" onClick={() => openRunDetail(selectedWorkflowApprovalChildRunId)}>
+                          <button type="button" className="run-timeline-child" data-testid="agent-run-detail-workflow-child-open-run" onClick={() => openRunDetail(selectedWorkflowApprovalChildRunId)}>
                             打开子 Run
                           </button>
                         </div>
@@ -4837,8 +4843,8 @@ export function AgentStudioView() {
                     ) : (
                       <>
                         <pre>{selectedWorkflowApprovalChildRun ? (selectedWorkflowApprovalChildRun.result || 'Child run has no approval payload.') : 'Loading child run...'}</pre>
-                        <div className="run-approval-actions">
-                          <button type="button" className="run-timeline-child" onClick={() => openRunDetail(selectedWorkflowApprovalChildRunId)}>
+                        <div className="run-approval-actions" data-testid="agent-run-detail-workflow-child-approval-actions">
+                          <button type="button" className="run-timeline-child" data-testid="agent-run-detail-workflow-child-open-run" onClick={() => openRunDetail(selectedWorkflowApprovalChildRunId)}>
                             打开子 Run
                           </button>
                         </div>
@@ -4847,7 +4853,7 @@ export function AgentStudioView() {
                   </section>
                 ) : null}
                 {selectedRun.status === 'approval_required' && selectedRun.pending_approval?.tool ? (
-                  <section className="run-approval-box">
+                  <section className="run-approval-box" data-testid="agent-run-detail-approval">
                     <div>
                       <h4>Approval Required · {selectedRun.pending_approval.tool}</h4>
                       <p>{selectedRun.pending_approval.tool === 'workflow.approval' ? '这个 Workflow 审批节点需要人工确认后才会继续。' : '这个工具调用需要人工确认后才会继续当前 Run。'}</p>
@@ -4859,13 +4865,13 @@ export function AgentStudioView() {
                       runLabel={selectedRun.runnable_name || runKindLabel(selectedRun.kind)}
                       tool={selectedRun.pending_approval.tool}
                     />
-                    <div className="run-approval-actions">
-                      <button type="button" className="primary-action" disabled={busy} onClick={() => void runAction(approveSelectedRun, '批准工具调用')}>批准</button>
-                      <button type="button" className="danger-action" disabled={busy} onClick={() => void runAction(rejectSelectedRun, '拒绝工具调用')}>拒绝</button>
+                    <div className="run-approval-actions" data-testid="agent-run-detail-approval-actions">
+                      <button type="button" className="primary-action" data-testid="agent-run-detail-approval-approve" disabled={busy} onClick={() => void runAction(approveSelectedRun, '批准工具调用')}>批准</button>
+                      <button type="button" className="danger-action" data-testid="agent-run-detail-approval-reject" disabled={busy} onClick={() => void runAction(rejectSelectedRun, '拒绝工具调用')}>拒绝</button>
                     </div>
                   </section>
                 ) : null}
-                <section className="run-detail-block run-task-block">
+                <section className="run-detail-block run-task-block" data-testid="agent-run-detail-task">
                   <div className="run-detail-section-head">
                     <div>
                       <h4>Task</h4>
@@ -4874,7 +4880,7 @@ export function AgentStudioView() {
                   </div>
                   <p>{selectedRun.user_goal || 'No task goal recorded.'}</p>
                 </section>
-                <section className={`run-detail-block run-result-block ${runStatusTone(selectedRun.status)}`}>
+                <section className={`run-detail-block run-result-block ${runStatusTone(selectedRun.status)}`} data-testid="agent-run-detail-result">
                   <div className="run-detail-section-head">
                     <div>
                       <h4>{selectedRun.kind === 'workflow_run' ? 'Final Result' : 'Result'}</h4>
@@ -4889,7 +4895,7 @@ export function AgentStudioView() {
                   />
                 </section>
                 {selectedRun.kind === 'workflow_run' ? (
-                  <details className="run-detail-block run-detail-fold" open>
+                  <details className="run-detail-block run-detail-fold" data-testid="agent-run-detail-workflow-steps" open>
                     <summary className="run-detail-section-head">
                       <div>
                         <h4>Workflow Steps · {selectedWorkflowSteps.length}</h4>
@@ -4904,7 +4910,7 @@ export function AgentStudioView() {
                         const childArtifacts = workflowStepArtifacts(childRun);
                         const workflowArtifact = workflowRunArtifactForStep(selectedRun, step);
                         return (
-                          <article className={`workflow-child-result workflow-step-result ${step.kind}`} key={step.key}>
+                          <article className={`workflow-child-result workflow-step-result ${step.kind}`} data-testid="agent-run-detail-workflow-step" key={step.key}>
                             <div className="workflow-child-result-head">
                               <div>
                                 <strong>{index + 1}. {step.label}</strong>
@@ -4913,7 +4919,7 @@ export function AgentStudioView() {
                               <div>
                                 <em className={`run-status-pill ${runStatusTone(childStatus)}`}>{runStatusLabel(childStatus)}</em>
                                 {step.childRunId ? (
-                                  <button type="button" className="run-timeline-child" onClick={() => openRunDetail(step.childRunId || '')}>
+                                  <button type="button" className="run-timeline-child" data-testid="agent-run-detail-workflow-step-open-run" onClick={() => openRunDetail(step.childRunId || '')}>
                                     Open Run
                                   </button>
                                 ) : null}
@@ -4967,14 +4973,14 @@ export function AgentStudioView() {
                     </div>
                   </details>
                 ) : null}
-                <details className="run-detail-block run-detail-fold run-execution-block" open>
+                <details className="run-detail-block run-detail-fold run-execution-block" data-testid="agent-run-detail-execution" open>
                   <summary className="run-detail-section-head">
                     <div>
                       <h4>Execution · {selectedRunExecutionEvents.length}</h4>
                       <span>{selectedRunReplayEvents.length ? 'RunEvent replay facts' : '模型响应、工具调用、审批与完成节点'}</span>
                     </div>
                   </summary>
-                  <ol className="run-detail-fold-body run-execution-steps">
+                  <ol className="run-detail-fold-body run-execution-steps" data-testid="agent-run-detail-execution-events">
                     {selectedRunExecutionEvents.map((event, index) => {
                       const childRunId = timelineChildRunId(event);
                       const childRun = childRunId ? runById.get(childRunId) : null;
@@ -4983,7 +4989,7 @@ export function AgentStudioView() {
                       const detail = String(event.detail || '').trim();
                       const eventTone = timelineEventTone(event);
                       return (
-                        <li className={`run-execution-step ${eventTone}`} key={`${String(event.event || 'event')}-${index}`}>
+                        <li className={`run-execution-step ${eventTone}`} data-testid="agent-run-detail-execution-event" key={`${String(event.event || 'event')}-${index}`}>
                           <span className="run-step-rail"><i aria-hidden="true" /></span>
                           <div className="run-step-card">
                             <div className="run-step-head">
@@ -5008,6 +5014,7 @@ export function AgentStudioView() {
                               <button
                                 type="button"
                                 className="run-timeline-child"
+                                data-testid="agent-run-detail-execution-open-child-run"
                                 onClick={() => openRunDetail(childRunId)}
                               >
                                 Child Run {childRun?.status ? `· ${runStatusLabel(childRun.status)}` : ''} · {childRunId}
@@ -5023,6 +5030,7 @@ export function AgentStudioView() {
                     <div className="run-replay-more">
                       <button
                         type="button"
+                        data-testid="agent-run-detail-load-more-events"
                         disabled={selectedRunReplayLoading}
                         onClick={() => void loadMoreSelectedRunEvents()}
                       >
@@ -5031,14 +5039,14 @@ export function AgentStudioView() {
                     </div>
                   ) : null}
                 </details>
-                <details className="run-detail-block run-detail-fold" open>
+                <details className="run-detail-block run-detail-fold" data-testid="agent-run-detail-artifacts" open>
                   <summary className="run-detail-section-head">
                     <div>
                       <h4>Artifacts · {(selectedRun.artifacts || []).length}</h4>
                       <span>上下文、工具产物和可预览文件</span>
                     </div>
                   </summary>
-                  <div className="run-detail-fold-body run-artifacts">
+                  <div className="run-detail-fold-body run-artifacts" data-testid="agent-run-detail-artifact-list">
                     {(selectedRun.artifacts || []).map((artifact, index) => {
                       const path = String(artifact.path || '');
                       const sourceRunId = String(artifact.source_run_id || artifact.run_id || selectedRun.run_id);
@@ -5046,6 +5054,7 @@ export function AgentStudioView() {
                       return (
                         <button
                           type="button"
+                          data-testid="agent-run-detail-artifact"
                           disabled={!path}
                           key={`${path}-${index}`}
                           onClick={() => path ? void openArtifact(sourceRunId, path) : undefined}
@@ -5057,7 +5066,7 @@ export function AgentStudioView() {
                     {!selectedRun.artifacts?.length ? <span>No artifacts</span> : null}
                   </div>
                   {artifactPreview ? (
-                    <div className="run-detail-fold-body artifact-preview">
+                    <div className="run-detail-fold-body artifact-preview" data-testid="agent-run-detail-artifact-preview">
                       <strong>{artifactPreview.path}{artifactPreview.truncated ? ' · truncated' : ''}</strong>
                       <pre>{artifactPreview.content}</pre>
                     </div>

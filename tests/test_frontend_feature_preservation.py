@@ -454,6 +454,47 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
     )
 
 
+def test_agent_studio_exposes_stable_e2e_selectors_for_run_detail_and_approval_flow() -> None:
+    _assert_contains(
+        "apps/frontend/src/views/AgentStudioView.tsx",
+        [
+            "data-testid=\"agent-run-detail\"",
+            "data-testid=\"agent-run-detail-hero\"",
+            "data-testid=\"agent-run-detail-meta\"",
+            "data-testid=\"agent-run-detail-prepare-rerun\"",
+            "data-testid=\"agent-run-detail-rerun\"",
+            "data-testid=\"agent-run-detail-cancel\"",
+            "data-testid=\"agent-run-detail-open-parent-run\"",
+            "data-testid=\"agent-run-detail-open-workflow-studio\"",
+            "data-testid=\"agent-run-detail-approval\"",
+            "data-testid=\"agent-run-detail-approval-actions\"",
+            "data-testid=\"agent-run-detail-approval-approve\"",
+            "data-testid=\"agent-run-detail-approval-reject\"",
+            "data-testid=\"agent-run-approval-request\"",
+            "data-testid=\"agent-run-detail-workflow-child-approval\"",
+            "data-testid=\"agent-run-detail-workflow-child-approval-actions\"",
+            "data-testid=\"agent-run-detail-workflow-child-approve\"",
+            "data-testid=\"agent-run-detail-workflow-child-reject\"",
+            "data-testid=\"agent-run-detail-workflow-child-cancel\"",
+            "data-testid=\"agent-run-detail-workflow-child-open-run\"",
+            "data-testid=\"agent-run-detail-task\"",
+            "data-testid=\"agent-run-detail-result\"",
+            "data-testid=\"agent-run-detail-workflow-steps\"",
+            "data-testid=\"agent-run-detail-workflow-step\"",
+            "data-testid=\"agent-run-detail-workflow-step-open-run\"",
+            "data-testid=\"agent-run-detail-execution\"",
+            "data-testid=\"agent-run-detail-execution-events\"",
+            "data-testid=\"agent-run-detail-execution-event\"",
+            "data-testid=\"agent-run-detail-execution-open-child-run\"",
+            "data-testid=\"agent-run-detail-load-more-events\"",
+            "data-testid=\"agent-run-detail-artifacts\"",
+            "data-testid=\"agent-run-detail-artifact-list\"",
+            "data-testid=\"agent-run-detail-artifact\"",
+            "data-testid=\"agent-run-detail-artifact-preview\"",
+        ],
+    )
+
+
 def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> None:
     agents_lib = "apps/frontend/src/lib/agents.ts"
     _assert_function_contains(
