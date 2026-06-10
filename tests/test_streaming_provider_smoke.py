@@ -160,6 +160,70 @@ def test_stream_smoke_tolerates_role_and_usage_only_provider_chunks(monkeypatch)
     assert "README.md" not in json.dumps(summary)
 
 
+def test_stream_smoke_summarizes_reasoning_without_leaking_text(monkeypatch):
+    requests: list[dict] = []
+    private_reasoning = "private chain of thought"
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"reasoning_content":"private chain "}}]}\n\n'
+            yield b'data: {"choices":[{"delta":{"reasoning":"of thought"}}]}\n\n'
+            yield b'data: {"choices":[{"delta":{"content":"final answer"},"finish_reason":"stop"}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(request, *_args, **_kwargs):
+        requests.append(json.loads(request.data.decode("utf-8")))
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    summary = smoke.run_stream_smoke(
+        base_url="https://api.example.test/v1",
+        model="demo-reasoning-model",
+        api_key="sk-stream-smoke-secret123456",
+        require_content=True,
+        require_reasoning=True,
+        expect_finish_reasons=["stop"],
+    )
+
+    assert requests[0]["stream"] is True
+    assert summary["ok"] is True
+    assert summary["content_chars"] == len("final answer")
+    assert summary["reasoning_chars"] == len(private_reasoning)
+    assert summary["finish_reasons"] == ["stop"]
+    assert private_reasoning not in json.dumps(summary)
+
+    class NoReasoningResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"final answer"},"finish_reason":"stop"}]}\n\n'
+            yield b"data: [DONE]\n\n"
+
+    monkeypatch.setattr(
+        "apps.shell.model_profiles.urlrequest.urlopen",
+        lambda *_args, **_kwargs: NoReasoningResponse(),
+    )
+
+    with pytest.raises(RuntimeError, match="without reasoning"):
+        smoke.run_stream_smoke(
+            base_url="https://api.example.test/v1",
+            model="demo-reasoning-model",
+            api_key="sk-stream-smoke-secret123456",
+            require_reasoning=True,
+        )
+
+
 def test_stream_smoke_keeps_multi_choice_tool_call_deltas_separate():
     chunks = [
         {
@@ -358,6 +422,7 @@ def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, caps
             "--api-key",
             "sk-stream-smoke-secret123456",
             "--require-content",
+            "--require-reasoning",
             "--expect-tool-name",
             "workspace_read",
             "--expect-tool-argument-substring",
@@ -371,6 +436,7 @@ def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, caps
     assert exit_code == 0
     assert calls[0]["tool_call"] is True
     assert calls[0]["require_content"] is True
+    assert calls[0]["require_reasoning"] is True
     assert calls[0]["expect_tool_name"] == "workspace_read"
     assert calls[0]["expect_tool_argument_substrings"] == ["README.md"]
     assert calls[0]["expect_finish_reasons"] == ["tool_calls"]

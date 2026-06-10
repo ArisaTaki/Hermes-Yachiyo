@@ -44,6 +44,23 @@ def _chunk_text(chunk: Any) -> str:
     return "".join(parts)
 
 
+def _chunk_reasoning_text(chunk: Any) -> str:
+    choices = _field(chunk, "choices")
+    if not isinstance(choices, list):
+        return ""
+    parts: list[str] = []
+    for choice in choices:
+        delta = _field(choice, "delta")
+        if delta is None:
+            continue
+        reasoning = _field(delta, "reasoning_content")
+        if reasoning is None:
+            reasoning = _field(delta, "reasoning")
+        if reasoning:
+            parts.append(str(reasoning))
+    return "".join(parts)
+
+
 def _normalized_index(value: Any, fallback: int) -> int:
     try:
         return int(value) if value is not None else fallback
@@ -115,6 +132,7 @@ def summarize_stream_chunks(
 ) -> dict[str, Any]:
     chunk_count = 0
     content_parts: list[str] = []
+    reasoning_parts: list[str] = []
     finish_reasons: list[str] = []
     tool_deltas: dict[tuple[int, int], dict[str, Any]] = {}
     tool_delta_count = 0
@@ -123,6 +141,9 @@ def summarize_stream_chunks(
         content = _chunk_text(chunk)
         if content:
             content_parts.append(content)
+        reasoning = _chunk_reasoning_text(chunk)
+        if reasoning:
+            reasoning_parts.append(reasoning)
         finish_reasons.extend(_chunk_finish_reasons(chunk))
         calls = _chunk_tool_calls(chunk)
         tool_delta_count += len(calls)
@@ -131,6 +152,7 @@ def summarize_stream_chunks(
 
     tool_calls = [tool_deltas[index] for index in sorted(tool_deltas)]
     content = "".join(content_parts)
+    reasoning = "".join(reasoning_parts)
     tool_call_summaries: list[dict[str, Any]] = []
     for call in tool_calls:
         function = call.get("function") or {}
@@ -144,9 +166,10 @@ def summarize_stream_chunks(
         tool_call_summaries.append(item)
 
     return {
-        "ok": chunk_count > 0 and (bool(content) or bool(tool_calls)),
+        "ok": chunk_count > 0 and (bool(content) or bool(reasoning) or bool(tool_calls)),
         "chunk_count": chunk_count,
         "content_chars": len(content),
+        "reasoning_chars": len(reasoning),
         "finish_reasons": finish_reasons,
         "tool_call_delta_count": tool_delta_count,
         "tool_call_count": len(tool_calls),
@@ -178,6 +201,7 @@ def run_stream_smoke(
     tool_call: bool = False,
     require_tool_call: bool = False,
     require_content: bool = False,
+    require_reasoning: bool = False,
     expect_tool_name: str = "",
     expect_tool_argument_substrings: Iterable[str] | None = None,
     expect_finish_reasons: Iterable[str] | None = None,
@@ -229,6 +253,8 @@ def run_stream_smoke(
     )
     if require_content and int(summary["content_chars"]) == 0:
         raise RuntimeError("stream completed without content")
+    if require_reasoning and int(summary["reasoning_chars"]) == 0:
+        raise RuntimeError("stream completed without reasoning")
     if require_tool_call and summary["tool_call_count"] == 0:
         raise RuntimeError("stream completed without a tool call")
     if expected_name:
@@ -260,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--prompt", default="", help="Optional user prompt for the smoke call.")
     parser.add_argument("--tool-call", action="store_true", help="Ask the provider to stream a workspace_read tool call.")
     parser.add_argument("--require-content", action="store_true", help="Fail if the provider streams no text content.")
+    parser.add_argument("--require-reasoning", action="store_true", help="Fail if the provider streams no reasoning_content.")
     parser.add_argument(
         "--require-tool-call",
         action="store_true",
@@ -298,6 +325,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
             require_tool_call=args.require_tool_call,
             require_content=args.require_content,
+            require_reasoning=args.require_reasoning,
             expect_tool_name=args.expect_tool_name,
             expect_tool_argument_substrings=args.expect_tool_argument_substring,
             expect_finish_reasons=args.expect_finish_reason,
