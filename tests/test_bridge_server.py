@@ -31,7 +31,7 @@ from apps.bridge.server import (
 )
 import apps.shell.chat_api as chat_api_mod
 from apps.core.activity_store import ActivityStore
-from apps.core.chat_session import ChatSession
+from apps.core.chat_session import ChatSession, MessageStatus
 from apps.core.chat_store import ChatStore
 from apps.core.executor import NativeAgentExecutor
 from apps.core.state import AppState
@@ -711,6 +711,192 @@ def test_chat_approval_bridge_route_resumes_native_run(tmp_path, monkeypatch):
 
     try:
         asyncio.run(scenario())
+    finally:
+        service.close()
+        activity_store.close()
+        store.close()
+
+
+def test_chat_delegated_summary_bridge_route_runs_native_followup(tmp_path, monkeypatch):
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="bridge-delegated-summary-session")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    captured_messages: list[list[dict]] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        captured_messages.append(messages)
+        content = str(messages[-1].get("content") or "")
+        assert "[Oha-Yachiyo 自动委派 Run 汇总]" in content
+        assert "NativeRunEngine delegated route result." in content
+        assert "run_oha_agent" not in content
+        return {"role": "assistant", "content": "主模型总结：Native delegated route result 已整理。"}
+
+    monkeypatch.setattr(chat_store_mod, "get_chat_store", lambda: store)
+    monkeypatch.setattr(activity_store_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(agent_routes, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeDefaultProfileService(),
+    )
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+
+    executor = NativeAgentExecutor(
+        chat_session=session,
+        runtime_service_getter=lambda: service,
+        tool_policy_getter=lambda: {"allowed_tools": []},
+        workspace_policy_getter=lambda: {},
+        activity_store_getter=lambda: activity_store,
+    )
+    runner = TaskRunner(state, executor=executor, activity_store=activity_store)
+    runtime = SimpleNamespace(
+        state=state,
+        chat_session=session,
+        store=store,
+        task_runner=runner,
+        activity_store=activity_store,
+        agent_runtime_service=service,
+    )
+    monkeypatch.setattr(ui_routes, "get_runtime", lambda: runtime)
+
+    try:
+        run_group = service._insert_run_group(
+            title="Bridge delegated summary",
+            source="delegation",
+        )
+        delegated = service._insert_run(
+            kind="agent_run",
+            runnable_id="agent_bridge_summary",
+            user_goal="整理 Bridge delegated summary evidence",
+            run_group_id=run_group["run_group_id"],
+        )
+        service._update_run(
+            delegated["run_id"],
+            status="completed",
+            result="NativeRunEngine delegated route result.",
+            timeline=[
+                {
+                    "event": "agent.tool.call",
+                    "detail": "artifact.write",
+                    "input_preview": {"path": "reports/bridge-summary.md"},
+                    "result": {"ok": True, "path": "reports/bridge-summary.md"},
+                },
+                {
+                    "event": "agent.run.completed",
+                    "detail": "done",
+                    "result": "NativeRunEngine delegated route result.",
+                },
+            ],
+            artifacts=[
+                {"path": "agent-context.md", "kind": "context"},
+                {"path": "reports/bridge-summary.md", "kind": "report"},
+            ],
+        )
+
+        async def scenario():
+            sent = await ui_routes.send_chat_message(
+                ui_routes.SendChatMessageRequest(
+                    text="请自动委派一个 Agent 整理 Bridge summary evidence",
+                    client_message_id="bridge-delegated-summary-source",
+                )
+            )
+            assert sent["ok"] is True
+            source_task = state.get_task(sent["task_id"])
+            assert source_task is not None
+            state.update_task_status(
+                source_task.task_id,
+                TaskStatus.COMPLETED,
+                result="我会交给 Bridge Summary Agent 处理。",
+            )
+            session.upsert_assistant_message(
+                task_id=source_task.task_id,
+                content=(
+                    "我会交给 Bridge Summary Agent 处理。\n"
+                    '<oha_delegation>{"action":"run_oha_agent","agent":"Bridge Summary Agent",'
+                    '"goal":"整理 Bridge summary evidence"}</oha_delegation>'
+                ),
+                status=MessageStatus.COMPLETED,
+            )
+            activity_store.record_event(
+                session_id=session.session_id,
+                task_id=source_task.task_id,
+                tool_name="oha.delegation",
+                phase="subagent",
+                title="Bridge Summary Agent completed",
+                detail=f"run_id={delegated['run_id']}",
+                status="completed",
+                metadata={
+                    "run_id": delegated["run_id"],
+                    "run_group_id": run_group["run_group_id"],
+                    "run_status": "completed",
+                },
+            )
+
+            summary = await ui_routes.summarize_delegated_run(
+                ui_routes.SummarizeDelegatedRunRequest(run_id=delegated["run_id"])
+            )
+            repeat = await ui_routes.summarize_delegated_run(
+                ui_routes.SummarizeDelegatedRunRequest(run_id=delegated["run_id"])
+            )
+            assert summary["ok"] is True
+            assert summary["summary_created"] is True
+            assert summary["run_status"] == "completed"
+            assert repeat["summary_created"] is False
+            summary_task = state.get_task(summary["task_id"])
+            assert summary_task is not None
+            assert summary_task.chat_session_id == session.session_id
+            assert "[Oha-Yachiyo 自动委派 Run 汇总]" in summary_task.description
+            assert "用户原始请求：请自动委派一个 Agent 整理 Bridge summary evidence" in summary_task.description
+            assert "run_oha_agent" not in summary_task.description
+            assert "agent_bridge_summary：已完成" in summary_task.description
+            assert "reports/bridge-summary.md" in summary_task.description
+            assert "agent-context.md" not in summary_task.description
+
+            await runner._execute_with_state(summary_task.task_id)
+
+            completed_task = state.get_task(summary_task.task_id)
+            assert completed_task is not None
+            assert completed_task.status == TaskStatus.COMPLETED
+            assert completed_task.result == "主模型总结：Native delegated route result 已整理。"
+            summary_run = service.get_run(service.get_task_run_link(summary_task.task_id)["run_id"])
+            detail = await agent_routes.get_any_run(summary_run["run_id"])
+            replay = await run_routes.list_run_events(summary_run["run_id"], after_sequence=0, limit=200)
+            event_types = [event["event_type"] for event in replay["events"]]
+
+            assert summary_run["run_id"] != delegated["run_id"]
+            assert detail["kind"] == "main_chat_run"
+            assert detail["status"] == "completed"
+            assert detail["task_id"] == summary_task.task_id
+            assert detail["session_id"] == session.session_id
+            assert detail["task_run_link_created_at"]
+            assert event_types.count("model.output.completed") == 1
+            assert "task.linked" in event_types
+            assert "run.completed" in event_types
+
+            messages = await ui_routes.get_chat_messages()
+            final_summary = next(
+                message
+                for message in messages["messages"]
+                if message["task_id"] == summary_task.task_id
+            )
+            assert final_summary["status"] == "completed"
+            assert final_summary["content"] == "主模型总结：Native delegated route result 已整理。"
+            assert final_summary["metadata"]["delegated_run_summary_for_run_id"] == delegated["run_id"]
+            assert final_summary["metadata"]["run_status"] == "completed"
+
+        asyncio.run(scenario())
+        assert len(captured_messages) == 1
     finally:
         service.close()
         activity_store.close()
