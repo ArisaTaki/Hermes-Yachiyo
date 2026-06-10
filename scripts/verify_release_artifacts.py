@@ -273,6 +273,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover desktop backend Native startup",
     ),
     (
+        "tests/test_build_metadata.py",
+        "macOS release workflow smoke tests must cover release-like build metadata guards",
+    ),
+    (
+        "tests/test_credential_store.py",
+        "macOS release workflow smoke tests must cover release-like CredentialStore guards",
+    ),
+    (
         "tests/test_screenshot.py",
         "macOS release workflow smoke tests must cover screenshot behavior",
     ),
