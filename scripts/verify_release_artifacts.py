@@ -51,6 +51,8 @@ RELEASE_SECURITY_CHANNELS: tuple[str, ...] = ("release", "alpha", "stable")
 PACKAGING_CONFIG_FILE = Path("apps/frontend/electron-builder.yml")
 TRACKED_GENERATED_PATHS: tuple[str, ...] = (
     "apps/frontend/.vite",
+    "apps/frontend/dist",
+    "apps/frontend/dist-electron",
 )
 PACKAGING_CONFIG_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
@@ -433,7 +435,7 @@ def _verify_tracked_generated_artifacts(root: Path) -> list[Finding]:
         return [Finding(root / ".git", f"could not inspect tracked generated artifacts: {detail}")]
     tracked_paths = [path.strip() for path in completed.stdout.splitlines() if path.strip()]
     return [
-        Finding(root / path, "generated Vite cache artifacts must not be tracked")
+        Finding(root / path, "generated frontend build artifacts must not be tracked")
         for path in tracked_paths
     ]
 

@@ -159,24 +159,47 @@ def test_verifier_requires_macos_signing_script_and_entitlements(tmp_path):
     assert "macOS entitlements must disable library validation for packaged native modules" in messages
 
 
-def test_verifier_reports_tracked_vite_cache(monkeypatch, tmp_path):
+def test_verifier_reports_tracked_frontend_generated_artifacts(monkeypatch, tmp_path):
     git_dir = tmp_path / ".git"
     git_dir.mkdir()
 
+    captured: dict[str, list[str]] = {}
+
     class Completed:
         returncode = 0
-        stdout = "apps/frontend/.vite/deps/package.json\n"
+        stdout = (
+            "apps/frontend/.vite/deps/package.json\n"
+            "apps/frontend/dist/index.html\n"
+            "apps/frontend/dist-electron/main.js\n"
+        )
         stderr = ""
 
-    monkeypatch.setattr(verifier.subprocess, "run", lambda *_args, **_kwargs: Completed())
+    def fake_run(args, *_positional, **_kwargs):
+        captured["args"] = list(args)
+        return Completed()
+
+    monkeypatch.setattr(verifier.subprocess, "run", fake_run)
 
     findings = verifier._verify_tracked_generated_artifacts(tmp_path)
 
+    assert captured["args"][-3:] == [
+        "apps/frontend/.vite",
+        "apps/frontend/dist",
+        "apps/frontend/dist-electron",
+    ]
     assert findings == [
         verifier.Finding(
             tmp_path / "apps/frontend/.vite/deps/package.json",
-            "generated Vite cache artifacts must not be tracked",
-        )
+            "generated frontend build artifacts must not be tracked",
+        ),
+        verifier.Finding(
+            tmp_path / "apps/frontend/dist/index.html",
+            "generated frontend build artifacts must not be tracked",
+        ),
+        verifier.Finding(
+            tmp_path / "apps/frontend/dist-electron/main.js",
+            "generated frontend build artifacts must not be tracked",
+        ),
     ]
 
 
