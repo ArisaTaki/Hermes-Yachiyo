@@ -5532,6 +5532,42 @@ def test_terminal_run_uses_workspace_argv_and_scrubbed_environment(tmp_path, mon
     assert "stderr-secret-123456" not in result["stderr"]
 
 
+def test_terminal_run_startup_failure_returns_structured_sanitized_error(tmp_path, monkeypatch):
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_should_not_leak_to_child")
+
+    def fail_popen(argv, **kwargs):
+        captured["argv"] = argv
+        captured.update(kwargs)
+        raise FileNotFoundError("missing binary token=sk-startup-secret123456789")
+
+    monkeypatch.setattr("apps.shell.agent_runtime.subprocess.Popen", fail_popen)
+    broker = ToolBroker(
+        {
+            "default_workdir": str(workdir),
+            "readable_scopes": ["."],
+            "writable_scopes": ["."],
+        },
+        tmp_path / "artifacts",
+    )
+
+    result = broker.terminal_run("missing-native-tool --flag", approved=True)
+
+    assert captured["argv"] == ["missing-native-tool", "--flag"]
+    assert captured["cwd"] == workdir
+    assert captured["shell"] is False
+    assert "GITHUB_TOKEN" not in captured["env"]
+    assert result["ok"] is False
+    assert result["returncode"] is None
+    assert result["timed_out"] is False
+    assert result["stdout"] == ""
+    assert "sk-startup-secret123456789" not in result["stderr"]
+    assert "[redacted]" in result["stderr"]
+
+
 def test_terminal_run_truncates_and_sanitizes_outputs(tmp_path, monkeypatch):
     workdir = tmp_path / "repo"
     workdir.mkdir()

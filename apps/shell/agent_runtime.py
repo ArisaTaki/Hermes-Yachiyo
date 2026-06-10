@@ -1112,16 +1112,26 @@ class ToolBroker:
         if not shell and not argv:
             return {"ok": False, "error": "terminal.run 命令不能为空"}
         env = _scrubbed_subprocess_env()
-        process = subprocess.Popen(
-            argv,
-            cwd=self.workdir,
-            shell=bool(shell),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=env,
-            start_new_session=True,
-        )
+        try:
+            process = subprocess.Popen(
+                argv,
+                cwd=self.workdir,
+                shell=bool(shell),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+                start_new_session=True,
+            )
+        except OSError as exc:
+            return {
+                "ok": False,
+                "returncode": None,
+                "timed_out": False,
+                "shell": bool(shell),
+                "stdout": "",
+                "stderr": redact_api_error_text(exc),
+            }
         with _TERMINAL_PROCESS_LOCK:
             _TERMINAL_PROCESSES.add(process)
         timed_out = False
