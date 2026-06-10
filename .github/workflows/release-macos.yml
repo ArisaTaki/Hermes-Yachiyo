@@ -68,6 +68,7 @@ jobs:
             tests/test_frontend_feature_preservation.py \
             tests/test_ui_mature_flow_contract.py \
             tests/test_bridge_server.py::test_chat_message_image_attachment_http_roundtrip_maps_idempotency_and_file_response \
+            tests/test_bridge_server.py::test_agent_run_http_routes_roundtrip_approval_detail_and_replay \
             tests/test_tts.py \
             tests/test_mode_settings.py
 
