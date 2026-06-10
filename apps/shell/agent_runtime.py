@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -826,6 +827,31 @@ def _coalesce_model_message(message: Any) -> dict[str, Any]:
     if tool_calls is not None:
         result["tool_calls"] = tool_calls
     return result
+
+
+def _call_model_profile_chat_message(
+    base_url: str,
+    model: str,
+    api_key: str,
+    messages: list[dict[str, Any]],
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    stream: bool = False,
+) -> Any:
+    kwargs: dict[str, Any] = {}
+    if tools is not None:
+        kwargs["tools"] = tools
+    if stream and _callable_accepts_keyword(openai_compatible_chat_message, "stream"):
+        kwargs["stream"] = True
+    return openai_compatible_chat_message(base_url, model, api_key, messages, **kwargs)
+
+
+def _callable_accepts_keyword(func: Any, name: str) -> bool:
+    try:
+        parameters = inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in parameters or any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values())
 
 
 def _tool_input_preview(value: Any, *, limit: int = 1200) -> Any:
@@ -5743,11 +5769,12 @@ class NativeRunEngine:
         )
         try:
             message = _coalesce_model_message(
-                openai_compatible_chat_message(
+                _call_model_profile_chat_message(
                     str(model_config.get("base_url") or ""),
                     str(model_config.get("model") or ""),
                     str(model_config.get("api_key") or ""),
                     messages,
+                    stream=True,
                 )
             )
             content, output_truncated = self._limit_model_output(_message_content_text(message))
@@ -6355,7 +6382,7 @@ class NativeRunEngine:
             self._check_context_budget(budget, messages)
             budget.claim_model_call()
             message = _coalesce_model_message(
-                openai_compatible_chat_message(base_url, model, api_key, messages, tools=tools)
+                _call_model_profile_chat_message(base_url, model, api_key, messages, tools=tools, stream=True)
             )
             content = _message_content_text(message)
             tool_requests = self._tool_requests_from_message(message, content)

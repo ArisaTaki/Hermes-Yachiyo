@@ -17,6 +17,7 @@ import sqlite3
 import struct
 import time
 import zlib
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -1636,20 +1637,28 @@ def _openai_compatible_chat_payload(
     messages: list[dict[str, Any]],
     *,
     tools: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
+    stream: bool = False,
+) -> dict[str, Any] | Iterator[dict[str, Any]]:
     url = f"{base_url.rstrip('/')}/chat/completions"
     timeout = read_openai_compatible_chat_timeout()
     payload: dict[str, Any] = {"model": model, "messages": messages, "temperature": 0.2}
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = "auto"
+    if stream:
+        payload["stream"] = True
+    headers = _openai_compatible_auth_headers(base_url, api_key)
+    if stream:
+        headers["Accept"] = "text/event-stream"
     body = json.dumps(payload).encode("utf-8")
     request = urlrequest.Request(
         url,
         data=body,
         method="POST",
-        headers=_openai_compatible_auth_headers(base_url, api_key),
+        headers=headers,
     )
+    if stream:
+        return _openai_compatible_chat_stream(request, timeout)
     try:
         with urlopen_with_bundled_ca(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
@@ -1674,6 +1683,50 @@ def _openai_compatible_chat_payload(
     return payload
 
 
+def _openai_compatible_chat_stream(request: Any, timeout: float) -> Iterator[dict[str, Any]]:
+    try:
+        with urlopen_with_bundled_ca(request, timeout=timeout) as response:
+            for item in _iter_openai_sse_payloads(response):
+                yield item
+    except urlerror.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            detail = ""
+        suffix = f"：{detail[:300]}" if detail else ""
+        raise ModelProfileError(
+            f"OpenAI-compatible Profile 调用失败：HTTP {exc.code} {exc.reason}（POST /chat/completions）{suffix}"
+        ) from exc
+    except TimeoutError as exc:
+        raise ModelProfileError(
+            "OpenAI-compatible Profile 调用超时："
+            f"等待响应超过 {_format_timeout_seconds(timeout)} 秒；"
+            f"可通过 {_OPENAI_COMPATIBLE_CHAT_TIMEOUT_ENV} 调整。"
+        ) from exc
+    except (urlerror.URLError, json.JSONDecodeError) as exc:
+        raise ModelProfileError(f"OpenAI-compatible Profile 调用失败：{exc}") from exc
+
+
+def _iter_openai_sse_payloads(response: Any) -> Iterator[dict[str, Any]]:
+    for raw_line in response:
+        if isinstance(raw_line, bytes):
+            line = raw_line.decode("utf-8", errors="replace")
+        else:
+            line = str(raw_line)
+        line = line.strip()
+        if not line or not line.startswith("data:"):
+            continue
+        data = line[5:].strip()
+        if not data:
+            continue
+        if data == "[DONE]":
+            break
+        payload = json.loads(data)
+        if isinstance(payload, dict):
+            yield payload
+
+
 def openai_compatible_chat_message(
     base_url: str,
     model: str,
@@ -1681,8 +1734,11 @@ def openai_compatible_chat_message(
     messages: list[dict[str, Any]],
     *,
     tools: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    payload = _openai_compatible_chat_payload(base_url, model, api_key, messages, tools=tools)
+    stream: bool = False,
+) -> dict[str, Any] | Iterator[dict[str, Any]]:
+    payload = _openai_compatible_chat_payload(base_url, model, api_key, messages, tools=tools, stream=stream)
+    if stream:
+        return payload if not isinstance(payload, dict) else iter(())
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices:
         return {}
@@ -1696,6 +1752,8 @@ def openai_compatible_chat_message(
 
 def openai_compatible_chat(base_url: str, model: str, api_key: str, messages: list[dict[str, Any]]) -> str:
     payload = _openai_compatible_chat_payload(base_url, model, api_key, messages)
+    if not isinstance(payload, dict):
+        return ""
     return _chat_response_text(payload)
 
 

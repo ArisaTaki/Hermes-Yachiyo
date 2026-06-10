@@ -612,6 +612,48 @@ def test_openai_compatible_chat_message_returns_tool_calls(monkeypatch):
     assert message["tool_calls"][0]["function"]["name"] == "workspace_read"
 
 
+def test_openai_compatible_chat_message_streams_sse_chunks(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"hello "}}]}\n\n'
+            yield b'data: {"choices":[{"delta":{"content":"world"}}]}\n\n'
+            yield (
+                b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1",'
+                b'"type":"function","function":{"name":"workspace_read","arguments":"{}"}}]}}]}\n\n'
+            )
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(request, timeout, context):
+        body = json.loads(request.data.decode("utf-8"))
+        assert timeout == OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS
+        assert isinstance(context, ssl.SSLContext)
+        assert body["stream"] is True
+        assert request.get_header("Accept") == "text/event-stream"
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    chunks = list(
+        openai_compatible_chat_message(
+            "https://api.example.test/v1",
+            "demo-model",
+            "sk-demo",
+            [{"role": "user", "content": "hello"}],
+            stream=True,
+        )
+    )
+
+    assert chunks[0]["choices"][0]["delta"]["content"] == "hello "
+    assert chunks[1]["choices"][0]["delta"]["content"] == "world"
+    assert chunks[2]["choices"][0]["delta"]["tool_calls"][0]["function"]["name"] == "workspace_read"
+
+
 def test_test_and_save_profile_failure_does_not_persist(monkeypatch, tmp_path):
     service = make_profile_service(tmp_path)
     source = service.create_source(

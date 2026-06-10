@@ -290,8 +290,9 @@ def test_main_chat_model_loop_coalesces_stream_chunks_before_persisting(tmp_path
         lambda: FakeDefaultProfileService(),
     )
 
-    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
         assert tools is not None
+        assert stream is True
 
         def stream():
             for chunk in chunks:
