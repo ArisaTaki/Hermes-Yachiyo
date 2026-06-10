@@ -470,6 +470,116 @@ def test_main_chat_model_loop_coalesces_streaming_tool_call_deltas(tmp_path, mon
         service.close()
 
 
+def test_main_chat_model_loop_coalesces_interleaved_streaming_tool_call_deltas(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    (workdir / "README.md").write_text("readme streamed content", encoding="utf-8")
+    (workdir / "NOTES.md").write_text("notes streamed content", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append(messages)
+        if len(calls) == 1:
+            assert tools is not None
+
+            def stream():
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                tool_calls=[
+                                    SimpleNamespace(
+                                        index=0,
+                                        id="call_stream_readme",
+                                        type="function",
+                                        function=SimpleNamespace(
+                                            name="workspace_read",
+                                            arguments='{"path": "READ',
+                                        ),
+                                    ),
+                                    SimpleNamespace(
+                                        index=1,
+                                        id="call_stream_notes",
+                                        type="function",
+                                        function=SimpleNamespace(
+                                            name="workspace_",
+                                            arguments='{"path": "NOT',
+                                        ),
+                                    ),
+                                ]
+                            )
+                        )
+                    ]
+                )
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                tool_calls=[
+                                    SimpleNamespace(
+                                        index=1,
+                                        function=SimpleNamespace(
+                                            name="read",
+                                            arguments='ES.md"}',
+                                        ),
+                                    ),
+                                    SimpleNamespace(
+                                        index=0,
+                                        function=SimpleNamespace(arguments='ME.md"}'),
+                                    ),
+                                ]
+                            )
+                        )
+                    ]
+                )
+
+            return stream()
+        tool_messages = [message for message in messages if message.get("role") == "tool"]
+        assert [message["tool_call_id"] for message in tool_messages] == [
+            "call_stream_readme",
+            "call_stream_notes",
+        ]
+        assert "readme streamed content" in tool_messages[0]["content"]
+        assert "notes streamed content" in tool_messages[1]["content"]
+        return {"content": "Interleaved streaming tool calls complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-interleaved-streaming-tool-calls",
+            session_id="session-main-interleaved-streaming-tool-calls",
+            user_goal="Read README and NOTES through streaming tool calls",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "Read README and NOTES"}],
+            tool_policy={"allowed_tools": ["workspace.read"]},
+            workspace_policy={"default_workdir": str(workdir), "readable_scopes": ["."]},
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        tool_events = [event for event in events if event["event_type"] == "agent.tool.call"]
+
+        assert updated["result"] == "Interleaved streaming tool calls complete"
+        assert [event["payload"]["tool"] for event in tool_events] == [
+            "workspace.read",
+            "workspace.read",
+        ]
+        assert [event["payload"]["input_preview"]["path"] for event in tool_events] == [
+            "README.md",
+            "NOTES.md",
+        ]
+        assert event_types.count("model.output.completed") == 1
+        assert not any(str(event_type).endswith(".delta") for event_type in event_types)
+    finally:
+        service.close()
+
+
 def test_main_chat_provider_exception_is_redacted_from_run_events_and_storage(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     leaked_secret = "sk-provider-exception123456"
