@@ -870,6 +870,109 @@ def test_chat_cancel_http_route_returns_ui_cancel_projection(monkeypatch):
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_chat_message_image_attachment_http_roundtrip_maps_idempotency_and_file_response(tmp_path, monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "ui.py"
+        spec = importlib.util.spec_from_file_location("_oha_ui_chat_image_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        ui_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = ui_route_module
+        spec.loader.exec_module(ui_route_module)
+
+        attachment_path = tmp_path / "screen.png"
+        attachment_bytes = b"\x89PNG\r\n\x1a\nfake-image"
+        attachment_path.write_bytes(attachment_bytes)
+        calls: list[tuple[str, dict]] = []
+
+        class FakeChatAPI:
+            def __init__(self, runtime):
+                assert runtime is fake_runtime
+
+            def send_message(self, text, attachments=None, runnable_id="", client_message_id=""):
+                calls.append(
+                    (
+                        "send",
+                        {
+                            "text": text,
+                            "attachments": attachments or [],
+                            "runnable_id": runnable_id,
+                            "client_message_id": client_message_id,
+                        },
+                    )
+                )
+                return {"ok": True, **calls[-1][1]}
+
+            def get_attachment_file(self, attachment_id):
+                calls.append(("get_attachment_file", {"attachment_id": attachment_id}))
+                return {
+                    "ok": True,
+                    "path": str(attachment_path),
+                    "mime_type": "image/png",
+                    "name": "screen.png",
+                }
+
+        fake_runtime = SimpleNamespace()
+        monkeypatch.setattr(ui_route_module, "get_runtime", lambda: fake_runtime)
+        monkeypatch.setattr(ui_route_module, "ChatAPI", FakeChatAPI)
+        route_app = FastAPI()
+        route_app.include_router(ui_route_module.router)
+
+        image_attachment = {
+            "id": "pending-image",
+            "name": "screen.png",
+            "mime_type": "image/png",
+            "data_url": "data:image/png;base64,ZmFrZS1pbWFnZQ==",
+        }
+        with TestClient(route_app) as client:
+            sent = client.post(
+                "/ui/chat/messages",
+                json={
+                    "text": "请看这张图",
+                    "attachments": [image_attachment],
+                    "runnable_id": "agent_design",
+                },
+                headers={"Idempotency-Key": "http-image-message-1"},
+            )
+            attachment = client.get("/ui/chat/attachments/pending-image")
+
+        assert sent.status_code == 200
+        assert sent.json() == {
+            "ok": True,
+            "text": "请看这张图",
+            "attachments": [image_attachment],
+            "runnable_id": "agent_design",
+            "client_message_id": "http-image-message-1",
+        }
+        assert attachment.status_code == 200
+        assert attachment.content == attachment_bytes
+        assert attachment.headers["content-type"].startswith("image/png")
+        assert "inline" in attachment.headers["content-disposition"]
+        assert "screen.png" in attachment.headers["content-disposition"]
+        assert calls == [
+            (
+                "send",
+                {
+                    "text": "请看这张图",
+                    "attachments": [image_attachment],
+                    "runnable_id": "agent_design",
+                    "client_message_id": "http-image-message-1",
+                },
+            ),
+            ("get_attachment_file", {"attachment_id": "pending-image"}),
+        ]
+    finally:
+        sys.modules.pop("_oha_ui_chat_image_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_chat_delegated_summary_http_route_returns_followup_projection(monkeypatch):
     saved_modules = _unload_module_prefixes(("fastapi",))
     try:
