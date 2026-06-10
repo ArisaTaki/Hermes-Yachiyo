@@ -689,6 +689,44 @@ def test_openai_compatible_chat_message_streams_coalesced_sse_frames(monkeypatch
     assert [chunk["choices"][0]["delta"]["content"] for chunk in chunks] == ["hello ", "world"]
 
 
+def test_openai_compatible_chat_message_streams_split_sse_frame_chunks(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            payload = json.dumps({"choices": [{"delta": {"content": "split frame"}}]})
+            frame = f"data: {payload}\n\ndata: [DONE]\n\n".encode("utf-8")
+            yield frame[:9]
+            yield frame[9:31]
+            yield frame[31:52]
+            yield frame[52:]
+
+    def fake_urlopen(request, timeout, context):
+        body = json.loads(request.data.decode("utf-8"))
+        assert body["stream"] is True
+        assert timeout == OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS
+        assert isinstance(context, ssl.SSLContext)
+        return FakeResponse()
+
+    monkeypatch.setattr("apps.shell.model_profiles.urlrequest.urlopen", fake_urlopen)
+
+    chunks = list(
+        openai_compatible_chat_message(
+            "https://api.example.test/v1",
+            "demo-model",
+            "sk-demo",
+            [{"role": "user", "content": "hello"}],
+            stream=True,
+        )
+    )
+
+    assert [chunk["choices"][0]["delta"]["content"] for chunk in chunks] == ["split frame"]
+
+
 def test_openai_compatible_chat_message_stream_raises_provider_error(monkeypatch):
     leaked_secret = "sk-stream-provider-error123456"
 
