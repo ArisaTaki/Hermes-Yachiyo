@@ -94,7 +94,11 @@ def _merge_tool_delta(accumulator: dict[int, dict[str, Any]], raw_call: Any, fal
         function["arguments"] = f"{function.get('arguments') or ''}{arguments}"
 
 
-def summarize_stream_chunks(chunks: Iterable[dict[str, Any]]) -> dict[str, Any]:
+def summarize_stream_chunks(
+    chunks: Iterable[dict[str, Any]],
+    *,
+    include_tool_arguments: bool = False,
+) -> dict[str, Any]:
     chunk_count = 0
     content_parts: list[str] = []
     finish_reasons: list[str] = []
@@ -113,6 +117,18 @@ def summarize_stream_chunks(chunks: Iterable[dict[str, Any]]) -> dict[str, Any]:
 
     tool_calls = [tool_deltas[index] for index in sorted(tool_deltas)]
     content = "".join(content_parts)
+    tool_call_summaries: list[dict[str, Any]] = []
+    for call in tool_calls:
+        function = call.get("function") or {}
+        item = {
+            "id": str(call.get("id") or ""),
+            "name": str(function.get("name") or ""),
+            "argument_chars": len(str(function.get("arguments") or "")),
+        }
+        if include_tool_arguments:
+            item["arguments"] = str(function.get("arguments") or "")
+        tool_call_summaries.append(item)
+
     return {
         "ok": chunk_count > 0 and (bool(content) or bool(tool_calls)),
         "chunk_count": chunk_count,
@@ -120,14 +136,7 @@ def summarize_stream_chunks(chunks: Iterable[dict[str, Any]]) -> dict[str, Any]:
         "finish_reasons": finish_reasons,
         "tool_call_delta_count": tool_delta_count,
         "tool_call_count": len(tool_calls),
-        "tool_calls": [
-            {
-                "id": str(call.get("id") or ""),
-                "name": str((call.get("function") or {}).get("name") or ""),
-                "argument_chars": len(str((call.get("function") or {}).get("arguments") or "")),
-            }
-            for call in tool_calls
-        ],
+        "tool_calls": tool_call_summaries,
     }
 
 
@@ -156,6 +165,7 @@ def run_stream_smoke(
     require_tool_call: bool = False,
     require_content: bool = False,
     expect_tool_name: str = "",
+    expect_tool_argument_substrings: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     base_url = str(base_url or "").strip()
     model = str(model or "").strip()
@@ -173,7 +183,12 @@ def run_stream_smoke(
         raise ValueError(f"Missing {', '.join(missing)}")
 
     expected_name = str(expect_tool_name or "").strip()
-    tool_call = tool_call or require_tool_call or bool(expected_name)
+    expected_argument_substrings = [
+        str(value).strip()
+        for value in (expect_tool_argument_substrings or [])
+        if str(value or "").strip()
+    ]
+    tool_call = tool_call or require_tool_call or bool(expected_name) or bool(expected_argument_substrings)
     if not prompt:
         prompt = (
             "Call workspace_read with path README.md, then stream a short answer."
@@ -188,7 +203,10 @@ def run_stream_smoke(
         tools=[_workspace_read_tool()] if tool_call else None,
         stream=True,
     )
-    summary = summarize_stream_chunks(chunks if not isinstance(chunks, dict) else [])
+    summary = summarize_stream_chunks(
+        chunks if not isinstance(chunks, dict) else [],
+        include_tool_arguments=bool(expected_argument_substrings),
+    )
     if require_content and int(summary["content_chars"]) == 0:
         raise RuntimeError("stream completed without content")
     if require_tool_call and summary["tool_call_count"] == 0:
@@ -197,6 +215,13 @@ def run_stream_smoke(
         names = {str(call.get("name") or "") for call in summary["tool_calls"]}
         if expected_name not in names:
             raise RuntimeError(f"stream completed without expected tool call {expected_name!r}")
+    if expected_argument_substrings:
+        arguments = [str(call.get("arguments") or "") for call in summary["tool_calls"]]
+        for expected_argument in expected_argument_substrings:
+            if not any(expected_argument in argument for argument in arguments):
+                raise RuntimeError("stream completed without expected tool call argument substring")
+        for call in summary["tool_calls"]:
+            call.pop("arguments", None)
     return summary
 
 
@@ -220,6 +245,12 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="Fail unless the stream emits a tool call with this function name.",
     )
+    parser.add_argument(
+        "--expect-tool-argument-substring",
+        action="append",
+        default=[],
+        help="Fail unless at least one streamed tool call argument contains this substring. May be repeated.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -228,10 +259,16 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             api_key=args.api_key,
             prompt=args.prompt,
-            tool_call=args.tool_call or args.require_tool_call or bool(args.expect_tool_name),
+            tool_call=(
+                args.tool_call
+                or args.require_tool_call
+                or bool(args.expect_tool_name)
+                or bool(args.expect_tool_argument_substring)
+            ),
             require_tool_call=args.require_tool_call,
             require_content=args.require_content,
             expect_tool_name=args.expect_tool_name,
+            expect_tool_argument_substrings=args.expect_tool_argument_substring,
         )
     except ValueError as exc:
         print(str(exc), file=sys.stderr)

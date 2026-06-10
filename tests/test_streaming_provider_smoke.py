@@ -49,6 +49,7 @@ def test_stream_smoke_summarizes_split_tool_call_without_secrets(monkeypatch):
         api_key=leaked_secret,
         tool_call=True,
         require_tool_call=True,
+        expect_tool_argument_substrings=["README.md"],
     )
 
     assert requests[0]["stream"] is True
@@ -66,6 +67,7 @@ def test_stream_smoke_summarizes_split_tool_call_without_secrets(monkeypatch):
         }
     ]
     assert leaked_secret not in json.dumps(summary)
+    assert "README.md" not in json.dumps(summary)
 
 
 def test_stream_smoke_requires_content_and_expected_tool_name(monkeypatch):
@@ -145,6 +147,15 @@ def test_stream_smoke_fails_when_expected_content_or_tool_is_missing(monkeypatch
             expect_tool_name="workspace_read",
         )
 
+    with pytest.raises(RuntimeError, match="expected tool call argument substring"):
+        smoke.run_stream_smoke(
+            base_url="https://api.example.test/v1",
+            model="demo-model",
+            api_key="sk-stream-smoke-secret123456",
+            tool_call=True,
+            expect_tool_argument_substrings=["README.md"],
+        )
+
 
 def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, capsys):
     calls: list[dict] = []
@@ -166,6 +177,8 @@ def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, caps
             "--require-content",
             "--expect-tool-name",
             "workspace_read",
+            "--expect-tool-argument-substring",
+            "README.md",
         ]
     )
 
@@ -174,6 +187,7 @@ def test_stream_smoke_main_expect_tool_name_requests_tool_call(monkeypatch, caps
     assert calls[0]["tool_call"] is True
     assert calls[0]["require_content"] is True
     assert calls[0]["expect_tool_name"] == "workspace_read"
+    assert calls[0]["expect_tool_argument_substrings"] == ["README.md"]
     assert "sk-stream" not in captured.out
 
 
