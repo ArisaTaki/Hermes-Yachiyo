@@ -8637,6 +8637,47 @@ def test_send_message_accepts_pasted_image_attachment(tmp_path, monkeypatch):
         store.close()
 
 
+def test_send_message_with_only_image_attachment_uses_default_image_prompt(tmp_path, monkeypatch):
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
+    monkeypatch.setenv("OHA_YACHIYO_BRIDGE_URL", "http://127.0.0.1:9999")
+    api, runtime, store = _make_api(tmp_path)
+    try:
+        data_url = "data:image/png;base64," + base64.b64encode(b"fake-png").decode("ascii")
+
+        result = api.send_message(
+            "",
+            attachments=[{
+                "name": "screen.png",
+                "data_url": data_url,
+            }],
+        )
+
+        assert result["ok"] is True
+        assert result["status"] == "pending"
+        assert len(result["attachments"]) == 1
+        assert result["attachments"][0]["url"].startswith("http://127.0.0.1:9999/ui/chat/attachments/")
+        assert "path" not in result["attachments"][0]
+
+        task = runtime.state.get_task(result["task_id"])
+        assert task is not None
+        assert task.description == "请识别并分析这张图片。"
+        assert len(task.attachments) == 1
+        assert task.attachments[0]["kind"] == "image"
+        assert task.attachments[0]["path"].endswith(".png")
+
+        user = runtime.chat_session.get_messages()[0]
+        assert user.content == "请识别并分析这张图片。"
+        assert len(user.attachments) == 1
+        assert user.attachments[0]["kind"] == "image"
+
+        messages = api.get_messages()["messages"]
+        assert messages[0]["content"] == "请识别并分析这张图片。"
+        assert messages[0]["attachments"][0]["url"].startswith("http://127.0.0.1:9999/ui/chat/attachments/")
+        assert "path" not in messages[0]["attachments"][0]
+    finally:
+        store.close()
+
+
 def test_proactive_session_followup_attaches_fresh_desktop_snapshot(tmp_path, monkeypatch):
     monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
     captures = []
