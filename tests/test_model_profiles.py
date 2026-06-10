@@ -553,8 +553,8 @@ def test_openai_compatible_chat_skips_reasoning_content_parts(monkeypatch):
                         {
                             "message": {
                                 "content": [
-                                    {"type": "reasoning", "text": private_reasoning},
-                                    {"type": "text", "text": "visible answer"},
+                                    {"type": "reasoning", "text": {"value": private_reasoning}},
+                                    {"type": "text", "text": {"value": "visible answer"}},
                                 ]
                             }
                         }

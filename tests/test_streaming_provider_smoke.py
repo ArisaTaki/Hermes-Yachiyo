@@ -346,11 +346,11 @@ def test_stream_smoke_accepts_content_part_arrays(monkeypatch):
         def __iter__(self):
             yield (
                 b'data: {"choices":[{"delta":{"content":'
-                b'[{"type":"text","text":"content-part "}]}}]}\n\n'
+                b'[{"type":"text","text":{"value":"content-part "}}]}}]}\n\n'
             )
             yield (
                 b'data: {"choices":[{"message":{"role":"assistant","content":'
-                b'[{"type":"text","text":"smoke output"}]},"finish_reason":"stop"}]}\n\n'
+                b'[{"type":"text","text":{"value":"smoke output"}}]},"finish_reason":"stop"}]}\n\n'
             )
             yield b"data: [DONE]\n\n"
 
@@ -389,13 +389,13 @@ def test_stream_smoke_counts_reasoning_content_parts_without_visible_leak(monkey
         def __iter__(self):
             yield (
                 b'data: {"choices":[{"delta":{"content":'
-                b'[{"type":"reasoning","text":"hidden plan"},'
-                b'{"type":"text","text":"visible "}]}}]}\n\n'
+                b'[{"type":"reasoning","text":{"value":"hidden plan"}},'
+                b'{"type":"text","text":{"value":"visible "}}]}}]}\n\n'
             )
             yield (
                 b'data: {"choices":[{"message":{"role":"assistant","content":'
-                b'[{"type":"thinking","text":"hidden thought"},'
-                b'{"type":"text","text":"answer"}]},"finish_reason":"stop"}]}\n\n'
+                b'[{"type":"thinking","text":{"value":"hidden thought"}},'
+                b'{"type":"text","text":{"value":"answer"}}]},"finish_reason":"stop"}]}\n\n'
             )
             yield b"data: [DONE]\n\n"
 

@@ -647,6 +647,35 @@ def _is_reasoning_content_part(value: Any) -> bool:
     return _message_content_part_type(value) in {"reasoning", "reasoning_content", "thinking", "thought"}
 
 
+def _message_text_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("value", "content", "text"):
+            nested = value.get(key)
+            if nested is not None:
+                text = _message_text_value(nested)
+                if text:
+                    return text
+        return ""
+    nested = _message_field(value, "value")
+    if nested is not None:
+        text = _message_text_value(nested)
+        if text:
+            return text
+    nested = _message_field(value, "content")
+    if nested is not None:
+        text = _message_text_value(nested)
+        if text:
+            return text
+    nested = _message_field(value, "text")
+    if nested is not None:
+        text = _message_text_value(nested)
+        if text:
+            return text
+    return str(value) if value is not None and not isinstance(value, (list, tuple, set)) else ""
+
+
 def _message_content_text(content: Any) -> str:
     if isinstance(content, dict):
         if _is_reasoning_content_part(content):
@@ -658,7 +687,7 @@ def _message_content_text(content: Any) -> str:
         if isinstance(reasoning, str) and reasoning.strip():
             return reasoning
         text = content.get("text")
-        return str(text) if text is not None else ""
+        return _message_text_value(text)
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -666,10 +695,9 @@ def _message_content_text(content: Any) -> str:
         for item in content:
             if _is_reasoning_content_part(item):
                 continue
-            if isinstance(item, dict) and isinstance(item.get("text"), str):
-                parts.append(item["text"])
-            elif isinstance(getattr(item, "text", None), str):
-                parts.append(item.text)
+            text = _message_content_text(item)
+            if text:
+                parts.append(text)
         return "\n".join(parts)
     nested = _message_field(content, "content")
     if nested is not None:
@@ -681,7 +709,7 @@ def _message_content_text(content: Any) -> str:
         return reasoning
     text = _message_field(content, "text")
     if text is not None:
-        return str(text)
+        return _message_text_value(text)
     return ""
 
 
@@ -693,7 +721,7 @@ def _message_visible_content_text(content: Any) -> str:
         if nested:
             return nested
         text = content.get("text")
-        return str(text) if text is not None else ""
+        return _message_text_value(text)
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -701,10 +729,9 @@ def _message_visible_content_text(content: Any) -> str:
         for item in content:
             if _is_reasoning_content_part(item):
                 continue
-            if isinstance(item, dict) and isinstance(item.get("text"), str):
-                parts.append(item["text"])
-            elif isinstance(getattr(item, "text", None), str):
-                parts.append(item.text)
+            text = _message_visible_content_text(item)
+            if text:
+                parts.append(text)
         return "\n".join(parts)
     nested = _message_field(content, "content")
     if nested is not None:
@@ -713,7 +740,7 @@ def _message_visible_content_text(content: Any) -> str:
             return text
     text = _message_field(content, "text")
     if text is not None:
-        return str(text)
+        return _message_text_value(text)
     return ""
 
 

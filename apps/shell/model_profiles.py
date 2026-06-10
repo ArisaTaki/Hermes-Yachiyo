@@ -1604,18 +1604,25 @@ def _openai_compatible_auth_headers(base_url: str, api_key: str) -> dict[str, st
 
 
 def _message_content_text(content: Any) -> str:
+    if isinstance(content, dict):
+        item_type = str(content.get("type") or "").strip().lower()
+        if item_type in {"reasoning", "reasoning_content", "thinking", "thought"}:
+            return ""
+        nested = _message_content_text(content.get("content"))
+        if nested:
+            return nested
+        text = content.get("text")
+        if isinstance(text, dict):
+            return _message_content_text(text.get("value") or text.get("content") or text.get("text"))
+        return str(text) if text is not None else ""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
         parts = []
         for item in content:
-            item_type = ""
-            if isinstance(item, dict):
-                item_type = str(item.get("type") or "").strip().lower()
-            if item_type in {"reasoning", "reasoning_content", "thinking", "thought"}:
-                continue
-            if isinstance(item, dict) and isinstance(item.get("text"), str):
-                parts.append(item["text"])
+            text = _message_content_text(item)
+            if text:
+                parts.append(text)
         return "\n".join(parts)
     return ""
 

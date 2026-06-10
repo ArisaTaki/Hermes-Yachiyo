@@ -2019,13 +2019,13 @@ def test_main_chat_model_consumes_openai_compatible_sse_content_parts(tmp_path, 
             yield b'data: {"choices":[{"delta":{"role":"assistant"}}]}\n\n'
             yield (
                 b'data: {"choices":[{"delta":{"content":'
-                b'[{"type":"reasoning","text":"hidden content-part reasoning"},'
-                b'{"type":"text","text":"content-part "}]}}]}\n\n'
+                b'[{"type":"reasoning","text":{"value":"hidden content-part reasoning"}},'
+                b'{"type":"text","text":{"value":"content-part "}}]}}]}\n\n'
             )
             yield (
                 b'data: {"choices":[{"message":{"role":"assistant","content":'
-                b'[{"type":"thinking","text":"hidden content-part thinking"},'
-                b'{"type":"text","text":"stream output"}]},"finish_reason":"stop"}]}\n\n'
+                b'[{"type":"thinking","text":{"value":"hidden content-part thinking"}},'
+                b'{"type":"text","text":{"value":"stream output"}}]},"finish_reason":"stop"}]}\n\n'
             )
             yield b"data: [DONE]\n\n"
 
