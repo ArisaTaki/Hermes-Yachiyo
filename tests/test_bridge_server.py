@@ -3066,6 +3066,231 @@ def test_workflow_run_http_routes_roundtrip_child_reject_detail_and_replay(tmp_p
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_workflow_run_http_routes_roundtrip_child_cancel_detail_and_replay(tmp_path, monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_root = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes"
+        agent_spec = importlib.util.spec_from_file_location(
+            "_oha_agent_workflow_route_http_child_cancel_roundtrip_under_test",
+            route_root / "agents.py",
+        )
+        run_spec = importlib.util.spec_from_file_location(
+            "_oha_run_workflow_route_http_child_cancel_roundtrip_under_test",
+            route_root / "runs.py",
+        )
+        assert agent_spec is not None and agent_spec.loader is not None
+        assert run_spec is not None and run_spec.loader is not None
+        agent_route_module = importlib.util.module_from_spec(agent_spec)
+        run_route_module = importlib.util.module_from_spec(run_spec)
+        sys.modules[agent_spec.name] = agent_route_module
+        sys.modules[run_spec.name] = run_route_module
+        agent_spec.loader.exec_module(agent_route_module)
+        run_spec.loader.exec_module(run_route_module)
+
+        service = AgentRuntimeService(
+            db_path=tmp_path / "agent-runtime.db",
+            workspace_dir=tmp_path / "runtime",
+            credential_store=MemoryCredentialStore(),
+            seed_templates=False,
+        )
+        workdir = tmp_path / "workspace"
+        workdir.mkdir()
+        model_calls: list[list[dict[str, object]]] = []
+
+        def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+            model_calls.append(messages)
+            assert any((tool.get("function") or {}).get("name") == "terminal_run" for tool in tools or [])
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_workflow_terminal_http_cancel",
+                        "type": "function",
+                        "function": {
+                            "name": "terminal_run",
+                            "arguments": json.dumps({"command": "printf workflow-http-cancelled"}),
+                        },
+                    }
+                ],
+            }
+
+        monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+        monkeypatch.setattr(
+            agent_route_module,
+            "get_agent_runtime_service",
+            lambda: (_ for _ in ()).throw(AssertionError("agent routes should use AppRuntime service")),
+        )
+        monkeypatch.setattr(
+            run_route_module,
+            "get_native_run_engine",
+            lambda: (_ for _ in ()).throw(AssertionError("run routes should use AppRuntime service")),
+        )
+
+        route_app = FastAPI()
+        route_app.state.runtime = SimpleNamespace(agent_runtime_service=service)
+        route_app.include_router(agent_route_module.router)
+        route_app.include_router(run_route_module.router)
+        try:
+            with TestClient(route_app) as client:
+                agent_response = client.post(
+                    "/ui/agents",
+                    json={
+                        "name": "HTTP Workflow Cancel Child",
+                        "model_mode": "custom_api",
+                        "model_config": {
+                            "base_url": "https://api.example.test/v1",
+                            "model": "demo-model",
+                            "api_key": "sk-secret",
+                        },
+                        "tool_policy": {"allowed_tools": ["terminal.run"]},
+                        "workspace_policy": {
+                            "default_workdir": str(workdir),
+                            "readable_scopes": ["."],
+                        },
+                    },
+                )
+                agent_response.raise_for_status()
+                agent_id = agent_response.json()["agent_id"]
+
+                workflow_response = client.post(
+                    "/ui/workflows",
+                    json={
+                        "name": "HTTP Workflow Cancel Child Flow",
+                        "nodes": [
+                            {"id": "start", "type": "start", "data": {"label": "Start"}},
+                            {
+                                "id": "agent",
+                                "type": "agent",
+                                "data": {"label": "HTTP Workflow Cancel Child", "agent_id": agent_id},
+                            },
+                            {"id": "summary", "type": "artifact", "data": {"label": "Summary"}},
+                        ],
+                        "edges": [
+                            {"source": "start", "target": "agent"},
+                            {"source": "agent", "target": "summary"},
+                        ],
+                    },
+                )
+                workflow_response.raise_for_status()
+                workflow_id = workflow_response.json()["workflow_id"]
+
+                run_response = client.post(
+                    "/ui/workflow-runs",
+                    json={"workflow_id": workflow_id, "user_goal": "Cancel workflow child through HTTP"},
+                    headers={"Idempotency-Key": "http-workflow-child-cancel-run-1"},
+                )
+                run_response.raise_for_status()
+                waiting_parent = run_response.json()
+                parent_run_id = waiting_parent["run_id"]
+
+                group_response = client.get(f"/ui/run-groups/{waiting_parent['run_group_id']}")
+                group_response.raise_for_status()
+                child_run_id = next(
+                    run_id
+                    for run_id in group_response.json()["child_run_ids"]
+                    if run_id != parent_run_id
+                )
+
+                parent_detail_before = client.get(f"/ui/workflow-runs/{parent_run_id}")
+                child_detail_before = client.get(f"/ui/runs/{child_run_id}")
+                parent_replay_before = client.get(f"/runs/{parent_run_id}/events?after_sequence=0&limit=200")
+                child_replay_before = client.get(f"/runs/{child_run_id}/events?after_sequence=0&limit=200")
+                cancel_response = client.post(f"/ui/runs/{child_run_id}/cancel")
+                parent_detail_after = client.get(f"/ui/workflow-runs/{parent_run_id}")
+                child_detail_after = client.get(f"/ui/runs/{child_run_id}")
+                group_after = client.get(f"/ui/run-groups/{waiting_parent['run_group_id']}")
+                parent_replay_after = client.get(f"/runs/{parent_run_id}/events?after_sequence=0&limit=200")
+                child_replay_after = client.get(f"/runs/{child_run_id}/events?after_sequence=0&limit=200")
+
+            assert waiting_parent["client_request_id"] == "http-workflow-child-cancel-run-1"
+            assert waiting_parent["status"] == "approval_required"
+            assert waiting_parent["pending_approval"] == {}
+            assert parent_detail_before.status_code == 200
+            assert parent_detail_before.json()["status"] == "approval_required"
+            assert child_detail_before.status_code == 200
+            assert child_detail_before.json()["status"] == "approval_required"
+            assert child_detail_before.json()["pending_approval"]["tool"] == "terminal.run"
+            assert child_detail_before.json()["pending_approval"]["input_preview"]["command"] == (
+                "printf workflow-http-cancelled"
+            )
+
+            parent_before_types = [event["event_type"] for event in parent_replay_before.json()["events"]]
+            child_before_types = [event["event_type"] for event in child_replay_before.json()["events"]]
+            assert parent_replay_before.status_code == 200
+            assert child_replay_before.status_code == 200
+            assert "workflow.run.approval_required" in parent_before_types
+            assert "agent.tool.approval_required" in child_before_types
+
+            assert cancel_response.status_code == 200
+            cancelled_child = cancel_response.json()
+            assert cancelled_child["status"] == "cancelled"
+            assert cancelled_child["pending_approval"] == {}
+            assert cancelled_child["result"] == "Run cancelled"
+            assert child_detail_after.status_code == 200
+            assert child_detail_after.json()["status"] == "cancelled"
+            assert child_detail_after.json()["pending_approval"] == {}
+            assert child_detail_after.json()["result"] == "Run cancelled"
+            assert parent_detail_after.status_code == 200
+            assert parent_detail_after.json()["status"] == "cancelled"
+            assert parent_detail_after.json()["result"] == "Run cancelled"
+            assert group_after.status_code == 200
+            assert group_after.json()["status"] == "cancelled"
+            assert group_after.json()["summary"] == "Run cancelled"
+
+            parent_after_events = parent_replay_after.json()["events"]
+            parent_after_types = [event["event_type"] for event in parent_after_events]
+            child_after_events = child_replay_after.json()["events"]
+            child_after_types = [event["event_type"] for event in child_after_events]
+            assert parent_replay_after.status_code == 200
+            assert child_replay_after.status_code == 200
+            assert parent_after_types.count("workflow.run.approval_required") == 1
+            assert parent_after_types.count("workflow.run.cancelled") == 1
+            assert "workflow.run.completed" not in parent_after_types
+            assert child_after_types.count("agent.tool.approval_required") == 1
+            assert child_after_types.count("run.cancelled") == 1
+            assert "agent.tool.approval_approved" not in child_after_types
+            assert "agent.tool.approval_rejected" not in child_after_types
+            assert "agent.run.completed" not in child_after_types
+            agent_node_events = [
+                event
+                for event in parent_after_events
+                if event["event_type"] == "workflow.node.agent"
+                and event["payload"].get("child_run_id") == child_run_id
+            ]
+            assert [event["payload"].get("status") for event in agent_node_events] == [
+                "approval_required",
+                "cancelled",
+            ]
+            child_cancelled_fact = next(
+                event
+                for event in child_after_events
+                if event["event_type"] == "run.cancelled"
+            )
+            parent_cancelled_fact = next(
+                event
+                for event in parent_after_events
+                if event["event_type"] == "workflow.run.cancelled"
+            )
+            assert child_cancelled_fact["payload"]["kind"] == "agent_run"
+            assert child_cancelled_fact["payload"]["result"] == "Run cancelled"
+            assert parent_cancelled_fact["payload"]["child_run_id"] == child_run_id
+            assert parent_cancelled_fact["payload"]["workflow_node_id"] == "agent"
+            assert parent_cancelled_fact["payload"]["result"] == "Run cancelled"
+            assert len(model_calls) == 1
+        finally:
+            service.close()
+    finally:
+        sys.modules.pop("_oha_agent_workflow_route_http_child_cancel_roundtrip_under_test", None)
+        sys.modules.pop("_oha_run_workflow_route_http_child_cancel_roundtrip_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_workflow_approval_node_http_roundtrip_approve_detail_and_replay(tmp_path, monkeypatch):
     saved_modules = _unload_module_prefixes(("fastapi",))
     try:

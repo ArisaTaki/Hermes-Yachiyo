@@ -7694,6 +7694,7 @@ class NativeRunEngine:
             result_text = f"Workflow 已取消：{label}"
         else:
             timeline.append(self._timeline("run.cancelled", "Run cancelled"))
+            result_text = "Run cancelled"
         result = self._update_run(
             run_id,
             status="cancelled",
