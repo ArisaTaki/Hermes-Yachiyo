@@ -1315,14 +1315,45 @@ def test_agent_and_workflow_run_http_routes_map_idempotency_key_header(monkeypat
         spec.loader.exec_module(agent_route_module)
 
         class FakeRuntimeService:
+            def __init__(self):
+                self.calls: list[tuple[str, dict]] = []
+
             def create_agent_run(self, payload):
+                self.calls.append(("create_agent_run", dict(payload)))
                 return {"ok": True, "client_run_id": payload.get("client_run_id", "")}
 
             def create_workflow_run(self, payload):
+                self.calls.append(("create_workflow_run", dict(payload)))
                 return {"ok": True, "client_run_id": payload.get("client_run_id", "")}
 
-        monkeypatch.setattr(agent_route_module, "get_agent_runtime_service", lambda: FakeRuntimeService())
+            def list_runs(self, limit):
+                self.calls.append(("list_runs", {"limit": limit}))
+                return {"runs": [{"run_id": "run-1"}], "limit": limit}
+
+            def get_run(self, run_id):
+                self.calls.append(("get_run", {"run_id": run_id}))
+                return {"run_id": run_id, "status": "approval_required"}
+
+            def approve_run_approval(self, run_id):
+                self.calls.append(("approve_run_approval", {"run_id": run_id}))
+                return {"run_id": run_id, "status": "running"}
+
+            def reject_run_approval(self, run_id, reason):
+                self.calls.append(("reject_run_approval", {"run_id": run_id, "reason": reason}))
+                return {"run_id": run_id, "status": "cancelled", "result": reason}
+
+            def cancel_run(self, run_id):
+                self.calls.append(("cancel_run", {"run_id": run_id}))
+                return {"run_id": run_id, "status": "cancelled"}
+
+        service = FakeRuntimeService()
+        monkeypatch.setattr(
+            agent_route_module,
+            "get_agent_runtime_service",
+            lambda: (_ for _ in ()).throw(AssertionError("agent routes should use AppRuntime service")),
+        )
         route_app = FastAPI()
+        route_app.state.runtime = SimpleNamespace(agent_runtime_service=service)
         route_app.include_router(agent_route_module.router)
 
         with TestClient(route_app) as client:
@@ -1336,11 +1367,52 @@ def test_agent_and_workflow_run_http_routes_map_idempotency_key_header(monkeypat
                 json={"workflow_id": "workflow-1", "user_goal": "hello"},
                 headers={"Idempotency-Key": "header-workflow-run-1"},
             )
+            runs_response = client.get("/ui/runs?limit=7")
+            detail_response = client.get("/ui/runs/run-1")
+            approve_response = client.post("/ui/runs/run-1/approval/approve")
+            reject_response = client.post(
+                "/ui/runs/run-1/approval/reject",
+                json={"reason": "Rejected from HTTP"},
+            )
+            cancel_response = client.post("/ui/runs/run-1/cancel")
 
         assert agent_response.status_code == 200
         assert agent_response.json()["client_run_id"] == "header-run-1"
         assert workflow_response.status_code == 200
         assert workflow_response.json()["client_run_id"] == "header-workflow-run-1"
+        assert runs_response.status_code == 200
+        assert runs_response.json()["limit"] == 7
+        assert detail_response.status_code == 200
+        assert detail_response.json()["run_id"] == "run-1"
+        assert approve_response.status_code == 200
+        assert approve_response.json()["status"] == "running"
+        assert reject_response.status_code == 200
+        assert reject_response.json()["result"] == "Rejected from HTTP"
+        assert cancel_response.status_code == 200
+        assert cancel_response.json()["status"] == "cancelled"
+        assert service.calls == [
+            (
+                "create_agent_run",
+                {
+                    "agent_id": "agent-1",
+                    "user_goal": "hello",
+                    "client_run_id": "header-run-1",
+                },
+            ),
+            (
+                "create_workflow_run",
+                {
+                    "workflow_id": "workflow-1",
+                    "user_goal": "hello",
+                    "client_run_id": "header-workflow-run-1",
+                },
+            ),
+            ("list_runs", {"limit": 7}),
+            ("get_run", {"run_id": "run-1"}),
+            ("approve_run_approval", {"run_id": "run-1"}),
+            ("reject_run_approval", {"run_id": "run-1", "reason": "Rejected from HTTP"}),
+            ("cancel_run", {"run_id": "run-1"}),
+        ]
     finally:
         sys.modules.pop("_oha_agent_route_http_under_test", None)
         _restore_module_prefixes(("fastapi",), saved_modules)

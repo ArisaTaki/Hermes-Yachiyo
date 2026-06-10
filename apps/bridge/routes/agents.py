@@ -116,6 +116,21 @@ def _bad_request(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=redact_api_error_detail(exc))
 
 
+def _agent_runtime_service(request: Request | None = None) -> Any:
+    state = getattr(getattr(request, "app", None), "state", None)
+    runtime = getattr(state, "runtime", None)
+    if runtime is not None:
+        service = getattr(runtime, "agent_runtime_service", None)
+        if service is not None:
+            return service
+        getter = getattr(runtime, "get_agent_runtime_service", None)
+        if callable(getter):
+            service = getter()
+            if service is not None:
+                return service
+    return get_agent_runtime_service()
+
+
 @router.get("/agents")
 async def list_agents() -> dict[str, Any]:
     return await asyncio.to_thread(get_agent_runtime_service().list_agents)
@@ -319,32 +334,35 @@ async def list_runnables() -> dict[str, Any]:
 
 
 @router.get("/runs")
-async def list_runs(limit: int = 50) -> dict[str, Any]:
-    return await asyncio.to_thread(get_agent_runtime_service().list_runs, limit)
+async def list_runs(limit: int = 50, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    return await asyncio.to_thread(_agent_runtime_service(http_request).list_runs, limit)
 
 
 @router.get("/run-groups")
-async def list_run_groups(limit: int = 50) -> dict[str, Any]:
-    return await asyncio.to_thread(get_agent_runtime_service().list_run_groups, limit)
+async def list_run_groups(limit: int = 50, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    return await asyncio.to_thread(_agent_runtime_service(http_request).list_run_groups, limit)
 
 
 @router.get("/run-groups/{run_group_id}")
-async def get_run_group(run_group_id: str) -> dict[str, Any]:
+async def get_run_group(
+    run_group_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().get_run_group, run_group_id)
+        return await asyncio.to_thread(_agent_runtime_service(http_request).get_run_group, run_group_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="RunGroup 不存在") from exc
 
 
 @router.get("/runs/{run_id}")
-async def get_any_run(run_id: str) -> dict[str, Any]:
-    return await get_run(run_id)
+async def get_any_run(run_id: str, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    return await get_run(run_id, http_request)
 
 
 @router.delete("/runs/{run_id}")
-async def delete_run(run_id: str) -> dict[str, Any]:
+async def delete_run(run_id: str, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().delete_run, run_id)
+        return await asyncio.to_thread(_agent_runtime_service(http_request).delete_run, run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Run 不存在") from exc
     except AgentRuntimeError as exc:
@@ -352,9 +370,17 @@ async def delete_run(run_id: str) -> dict[str, Any]:
 
 
 @router.get("/runs/{run_id}/artifacts/{artifact_path:path}")
-async def get_run_artifact(run_id: str, artifact_path: str) -> dict[str, Any]:
+async def get_run_artifact(
+    run_id: str,
+    artifact_path: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().read_run_artifact, run_id, artifact_path)
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).read_run_artifact,
+            run_id,
+            artifact_path,
+        )
     except (AgentRuntimeError, KeyError) as exc:
         raise HTTPException(status_code=404, detail="Artifact 不存在") from exc
 
@@ -365,14 +391,17 @@ async def create_agent_run(
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().create_agent_run, _payload_with_idempotency(request, http_request))
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).create_agent_run,
+            _payload_with_idempotency(request, http_request),
+        )
     except (AgentRuntimeError, KeyError) as exc:
         raise _bad_request(exc) from exc
 
 
 @router.get("/agent-runs/{run_id}")
-async def get_agent_run(run_id: str) -> dict[str, Any]:
-    return await get_run(run_id)
+async def get_agent_run(run_id: str, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    return await get_run(run_id, http_request)
 
 
 @router.post("/workflow-runs")
@@ -381,27 +410,30 @@ async def create_workflow_run(
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().create_workflow_run, _payload_with_idempotency(request, http_request))
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).create_workflow_run,
+            _payload_with_idempotency(request, http_request),
+        )
     except (AgentRuntimeError, KeyError) as exc:
         raise _bad_request(exc) from exc
 
 
 @router.get("/workflow-runs/{run_id}")
-async def get_workflow_run(run_id: str) -> dict[str, Any]:
-    return await get_run(run_id)
+async def get_workflow_run(run_id: str, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
+    return await get_run(run_id, http_request)
 
 
-async def get_run(run_id: str) -> dict[str, Any]:
+async def get_run(run_id: str, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().get_run, run_id)
+        return await asyncio.to_thread(_agent_runtime_service(http_request).get_run, run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Run 不存在") from exc
 
 
 @router.post("/runs/{run_id}/rerun")
-async def rerun_run(run_id: str) -> dict[str, Any]:
+async def rerun_run(run_id: str, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().rerun_run, run_id)
+        return await asyncio.to_thread(_agent_runtime_service(http_request).rerun_run, run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Run 不存在") from exc
     except AgentRuntimeError as exc:
@@ -409,17 +441,20 @@ async def rerun_run(run_id: str) -> dict[str, Any]:
 
 
 @router.post("/runs/{run_id}/cancel")
-async def cancel_run(run_id: str) -> dict[str, Any]:
+async def cancel_run(run_id: str, http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().cancel_run, run_id)
+        return await asyncio.to_thread(_agent_runtime_service(http_request).cancel_run, run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Run 不存在") from exc
 
 
 @router.post("/runs/{run_id}/approval/approve")
-async def approve_run_approval(run_id: str) -> dict[str, Any]:
+async def approve_run_approval(
+    run_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_agent_runtime_service().approve_run_approval, run_id)
+        return await asyncio.to_thread(_agent_runtime_service(http_request).approve_run_approval, run_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Run 不存在") from exc
     except AgentRuntimeError as exc:
@@ -427,10 +462,18 @@ async def approve_run_approval(run_id: str) -> dict[str, Any]:
 
 
 @router.post("/runs/{run_id}/approval/reject")
-async def reject_run_approval(run_id: str, request: ApprovalRejectRequest | None = None) -> dict[str, Any]:
+async def reject_run_approval(
+    run_id: str,
+    request: ApprovalRejectRequest | None = None,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
     try:
         reason = request.reason if request is not None else ""
-        return await asyncio.to_thread(get_agent_runtime_service().reject_run_approval, run_id, reason or "")
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).reject_run_approval,
+            run_id,
+            reason or "",
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Run 不存在") from exc
     except AgentRuntimeError as exc:
