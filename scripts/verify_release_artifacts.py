@@ -285,6 +285,22 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover ToolBroker symlink workspace escape guard",
     ),
     (
+        "tests/test_agent_runtime.py::test_tool_descriptor_schema_and_validation_share_patch_contract",
+        "macOS release workflow smoke tests must cover workspace.write_patch schema validation contract",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_workspace_write_patch_applies_single_file_unified_diff_with_hash",
+        "macOS release workflow smoke tests must cover workspace.write_patch single-file hash application",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_workspace_write_patch_rejects_hash_or_context_mismatch_without_writing",
+        "macOS release workflow smoke tests must cover workspace.write_patch hash and context mismatch refusal",
+    ),
+    (
+        "tests/test_agent_runtime.py::test_workspace_write_patch_rejects_multifile_or_binary_patch",
+        "macOS release workflow smoke tests must cover workspace.write_patch multifile and binary patch refusal",
+    ),
+    (
         "tests/test_agent_runtime.py::test_terminal_run_uses_workspace_argv_and_scrubbed_environment",
         "macOS release workflow smoke tests must cover terminal workspace argv and env scrub",
     ),

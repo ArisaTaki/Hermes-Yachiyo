@@ -377,6 +377,10 @@ def test_verifier_requires_release_workflow_smoke_tests_before_packaging(tmp_pat
     assert "macOS release workflow smoke tests must cover Native runtime shutdown resource closure" in messages
     assert "macOS release workflow smoke tests must cover write_patch boundary validation before approval" in messages
     assert "macOS release workflow smoke tests must cover ToolBroker symlink workspace escape guard" in messages
+    assert "macOS release workflow smoke tests must cover workspace.write_patch schema validation contract" in messages
+    assert "macOS release workflow smoke tests must cover workspace.write_patch single-file hash application" in messages
+    assert "macOS release workflow smoke tests must cover workspace.write_patch hash and context mismatch refusal" in messages
+    assert "macOS release workflow smoke tests must cover workspace.write_patch multifile and binary patch refusal" in messages
     assert "macOS release workflow smoke tests must cover terminal workspace argv and env scrub" in messages
     assert "macOS release workflow smoke tests must cover terminal startup structured sanitized errors" in messages
     assert "macOS release workflow smoke tests must cover terminal output redaction and truncation" in messages

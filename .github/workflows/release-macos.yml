@@ -70,6 +70,10 @@ jobs:
             tests/test_agent_runtime.py::test_runtime_shutdown_close_db_closes_runtime_resources \
             tests/test_agent_runtime.py::test_agent_run_validates_write_patch_workspace_boundary_before_approval \
             tests/test_agent_runtime.py::test_tool_broker_rejects_symlink_workspace_escape \
+            tests/test_agent_runtime.py::test_tool_descriptor_schema_and_validation_share_patch_contract \
+            tests/test_agent_runtime.py::test_workspace_write_patch_applies_single_file_unified_diff_with_hash \
+            tests/test_agent_runtime.py::test_workspace_write_patch_rejects_hash_or_context_mismatch_without_writing \
+            tests/test_agent_runtime.py::test_workspace_write_patch_rejects_multifile_or_binary_patch \
             tests/test_agent_runtime.py::test_terminal_run_uses_workspace_argv_and_scrubbed_environment \
             tests/test_agent_runtime.py::test_terminal_run_startup_failure_returns_structured_sanitized_error \
             tests/test_agent_runtime.py::test_terminal_run_truncates_and_sanitizes_outputs \
