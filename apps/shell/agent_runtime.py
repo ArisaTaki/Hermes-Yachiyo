@@ -2272,6 +2272,17 @@ class WorkflowParentResumeCoordinator:
             and str(artifact.get("source_run_id") or "") == child_run_id
         )
 
+    @staticmethod
+    def _timeline_has_child_event(timeline: list[dict[str, Any]], event_name: str, child_run_id: str) -> bool:
+        if not child_run_id:
+            return False
+        return any(
+            event.get("event") == event_name
+            and str(event.get("child_run_id") or "") == child_run_id
+            for event in timeline
+            if isinstance(event, dict)
+        )
+
     def _append_child_agent_state_event(
         self,
         workflow_run: dict[str, Any],
@@ -2316,11 +2327,10 @@ class WorkflowParentResumeCoordinator:
             "status": "running",
             **child_node_info,
         }
-        already_child_resumed = any(
-            event.get("event") == "workflow.run.child_resumed"
-            and str(event.get("child_run_id") or "") == child_run_id
-            for event in timeline
-            if isinstance(event, dict)
+        already_child_resumed = self._timeline_has_child_event(
+            timeline,
+            "workflow.run.child_resumed",
+            child_run_id,
         )
         if not already_child_resumed:
             self._append_child_agent_state_event(
@@ -2373,6 +2383,12 @@ class WorkflowParentResumeCoordinator:
         child_result = str(child_run.get("result") or "")
         child_run_id = str(child_run.get("run_id") or "")
         run_group_id = str(workflow_run.get("run_group_id") or "")
+        if child_status == "completed" and self._timeline_has_child_event(
+            timeline,
+            "workflow.run.resumed",
+            child_run_id,
+        ):
+            return workflow_run
         child_label, child_node_info = self._workflow_child_node_context(timeline, child_run)
         self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, child_label)
         if child_status == "approval_required":
