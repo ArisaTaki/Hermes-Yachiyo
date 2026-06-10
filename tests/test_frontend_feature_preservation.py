@@ -177,6 +177,9 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "className=\"composer-approval-nav\"",
             "className=\"chat-stop-btn\"",
             "aria-label={processingCount > 1 ? `停止当前 ${processingCount} 项任务` : '停止当前任务'}",
+            "const eventStatus = String(event?.status || '').trim();",
+            "if (['completed', 'success', 'failed', 'error', 'cancelled'].includes(eventStatus)) return false;",
+            "(eventStatus === 'approval_required' || String(event?.metadata?.run_status || '').trim() === 'approval_required')",
         ],
     )
 

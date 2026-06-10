@@ -3754,9 +3754,11 @@ function hasActionableApproval(message?: ChatMessage | null) {
 }
 
 function hasActionableActivityApproval(event?: ChatActivityEvent | null) {
+  const eventStatus = String(event?.status || '').trim();
+  if (['completed', 'success', 'failed', 'error', 'cancelled'].includes(eventStatus)) return false;
   const pending = event?.metadata?.pending_approval;
   return (
-    (event?.status === 'approval_required' || String(event?.metadata?.run_status || '').trim() === 'approval_required')
+    (eventStatus === 'approval_required' || String(event?.metadata?.run_status || '').trim() === 'approval_required')
     && Boolean(activityRunId(event))
     && Boolean(pending && typeof pending === 'object' && String(pending.tool || '').trim())
   );
