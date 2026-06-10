@@ -28,6 +28,42 @@ def test_verifier_reports_legacy_product_tokens(tmp_path):
     assert "contains legacy product token" in findings[0].message
 
 
+def test_verifier_rejects_non_utf8_targets_by_default(tmp_path):
+    artifact = tmp_path / "Oha-Yachiyo-test.dmg"
+    artifact.write_bytes(b"\xff\x00Oha-Yachiyo\xfe")
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[artifact],
+        check_required_files=False,
+    )
+
+    assert findings == [
+        verifier.Finding(artifact, "release verification target is not UTF-8 text")
+    ]
+
+
+def test_verifier_binary_mode_scans_legacy_tokens(tmp_path):
+    clean_artifact = tmp_path / "Oha-Yachiyo-clean.dmg"
+    clean_artifact.write_bytes(b"\xff\x00Oha-Yachiyo\xfe")
+    legacy_artifact = tmp_path / "Oha-Yachiyo-legacy.dmg"
+    legacy_artifact.write_bytes(b"\x00" + verifier.FORBIDDEN_TOKENS[1].encode("utf-8") + b"\x00\xff")
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[clean_artifact, legacy_artifact],
+        check_required_files=False,
+        allow_binary_targets=True,
+    )
+
+    assert findings == [
+        verifier.Finding(
+            legacy_artifact,
+            f"contains legacy product token {verifier.FORBIDDEN_TOKENS[1]!r}",
+        )
+    ]
+
+
 def test_verifier_rejects_legacy_build_metadata_filename(tmp_path):
     required = tmp_path / verifier.REQUIRED_FILES[0]
     required.parent.mkdir(parents=True)

@@ -94,6 +94,7 @@ def verify_release_artifacts(
     paths: Sequence[Path | str] | None = None,
     check_required_files: bool = True,
     check_release_security_guards: bool = True,
+    allow_binary_targets: bool = False,
 ) -> list[Finding]:
     root_path = Path(root)
     findings: list[Finding] = []
@@ -114,13 +115,18 @@ def verify_release_artifacts(
             findings.append(Finding(path, "release verification target is missing"))
             continue
         try:
-            content = path.read_text(encoding="utf-8")
-        except UnicodeDecodeError:
-            findings.append(Finding(path, "release verification target is not UTF-8 text"))
+            content_bytes = path.read_bytes()
+        except OSError as exc:
+            findings.append(Finding(path, f"release verification target could not be read: {exc}"))
             continue
         for token in FORBIDDEN_TOKENS:
-            if token in content:
+            if token.encode("utf-8") in content_bytes:
                 findings.append(Finding(path, f"contains legacy product token {token!r}"))
+        if not allow_binary_targets:
+            try:
+                content_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                findings.append(Finding(path, "release verification target is not UTF-8 text"))
 
     if check_release_security_guards:
         findings.extend(_verify_release_security_guards(root_path))
@@ -228,9 +234,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         nargs="*",
         help="Optional files or directories to scan. Defaults to release-facing project files.",
     )
+    parser.add_argument(
+        "--allow-binary",
+        action="store_true",
+        help="Allow binary artifact targets and scan their raw bytes for legacy product tokens.",
+    )
     args = parser.parse_args(argv)
 
-    findings = verify_release_artifacts(paths=args.paths or None)
+    findings = verify_release_artifacts(paths=args.paths or None, allow_binary_targets=args.allow_binary)
     if not findings:
         print("release artifact verification passed")
         return 0

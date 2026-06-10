@@ -1262,7 +1262,7 @@ Info.plist uses Oha-Yachiyo identifiers and permission strings
 - Skill library source API / UI 已从 `Yachiyo` 来源命名收敛为 `Installed`，仅保留角色/产品人格层面的 Yachiyo 命名。
 - Workspace 初始化、备份、恢复和卸载协议已收敛到 OHA 命名：`.oha_yachiyo_init`、`configs/oha-yachiyo.json`、`oha_workspace`、`oha-workspace`、`oha_only`；旧 workspace 标记和旧卸载 scope 不再是有效入口。
 - release-like source guard 已验证：release/alpha/stable metadata 下 debug routes 关闭，development credential fallback 不会被 factory 选中，macOS release-like factory 会选择 Keychain，release verifier 会阻断 stable 渠道误放行开发能力的回归。
-- release-facing artifact guard 已接入 macOS release workflow，构建 metadata 文件名、release 文档、workflow 和实际本地 `.app` / DMG 产物旧产品身份已有检查。
+- release-facing artifact guard 已接入 macOS release workflow，构建 metadata 文件名、release 文档、workflow 和实际本地 `.app` / DMG 产物旧产品身份已有检查；workflow 现在也会在生成 release DMG/JSON 后用 binary-safe verifier 扫描 `release/` 目录。
 - Backend import、route registration、standalone packaged backend startup、packaged desktop startup 均已验证。
 - `/status` 发布版本与产品版本已同步，版本同步脚本也覆盖该路径。
 - 成熟 UI 入口已有 pytest 级 feature-preservation guard，覆盖 Chat、群聊、Agent Studio、Workflow、Run Detail、approval、Activity、Proactive TTS、local screenshot、manual TTS、Live2D。
@@ -1295,7 +1295,7 @@ Info.plist uses Oha-Yachiyo identifiers and permission strings
 - Secret 清洗已补主路径回归、旧 chat.db 迁移清洗、标准 logging、桌面后端 excepthook、crash 文件生成扫描、HTTPException detail、UI JSON error/message、provider catalog 失败缓存、artifact 文件清洗、provider/tool exception 端到端落盘扫描和默认 runtime 落盘扫描；仍建议继续补真实 provider / terminal / tool 集成环境下的异常日志联调。
 - `workspace.write_patch` 已收敛为单文件 UTF-8 unified diff patch；content 全量写入已从 tool schema 移除，并在 validator / ToolBroker direct 入口拒绝。
 - Runtime 发起的 skill 安装子进程已复用敏感环境变量清洗，避免 `SSH_AUTH_SOCK`、`GITHUB_TOKEN`、云厂商凭据和 `*_API_KEY` / `*_TOKEN` / `*_SECRET` / `*_PASSWORD` 从旁路传入外部命令；`terminal.run` 与 skill install 现在使用同一套 env scrub helper。
-- release/alpha/stable 源码级 guard 与 release-facing verifier 已覆盖；本地 unsigned `.app` / DMG 产物已验证不包含旧产品身份 token。Electron Framework 内部自带的通用 `Hermes` 字符串不属于本项目产品身份或执行内核残留。
+- release/alpha/stable 源码级 guard、release-facing verifier 与 release 目录 binary-safe artifact scan 已覆盖；本地 unsigned `.app` / DMG 产物已验证不包含旧产品身份 token。Electron Framework 内部自带的通用 `Hermes` 字符串不属于本项目产品身份或执行内核残留。
 - 桌面 `.app` 已实际启动并验证 bridge；主要 UI 页面已有静态入口 guard、浏览器级 route smoke 和部分按钮级交互 smoke，但仍缺少完整成熟功能 E2E。
 
 ## 下一步建议

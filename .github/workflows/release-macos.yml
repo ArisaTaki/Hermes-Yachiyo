@@ -358,6 +358,9 @@ jobs:
           echo "latest_dmg=${LATEST_DMG}" >> "$GITHUB_OUTPUT"
           echo "latest_json=${LATEST_JSON}" >> "$GITHUB_OUTPUT"
 
+      - name: Verify packaged release artifacts
+        run: python scripts/verify_release_artifacts.py --allow-binary release
+
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
