@@ -179,8 +179,28 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must binary-scan final release artifacts",
     ),
     (
+        'cp "${dmg_files[0]}" "release/${VERSIONED_DMG}"',
+        "macOS release workflow must stage the versioned DMG for final artifact scanning",
+    ),
+    (
+        'cp "${dmg_files[0]}" "release/${LATEST_DMG}"',
+        "macOS release workflow must stage the latest DMG for final artifact scanning",
+    ),
+    (
+        'VERSIONED_SHA256="$(shasum -a 256 "release/${VERSIONED_DMG}"',
+        "macOS release workflow must compute a SHA256 checksum for the versioned DMG",
+    ),
+    (
         "release/*.json",
         "macOS release workflow must upload release metadata JSON artifacts",
+    ),
+    (
+        "release/*.dmg",
+        "macOS release workflow must upload release DMG artifacts",
+    ),
+    (
+        "release/*.sha256",
+        "macOS release workflow must upload release checksum artifacts",
     ),
     (
         '"release/${LATEST_JSON}"',
