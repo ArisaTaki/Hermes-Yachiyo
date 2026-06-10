@@ -1337,11 +1337,11 @@ def test_chat_image_bridge_route_reaches_native_run_events(tmp_path, monkeypatch
         captured_messages.append(messages)
         content = messages[-1]["content"]
         assert isinstance(content, list)
-        assert content[0] == {"type": "text", "text": "请从 HTTP route 看图"}
+        assert content[0] == {"type": "text", "text": "请识别并分析这张图片。"}
         image_parts = [part for part in content if part.get("type") == "image_url"]
         assert len(image_parts) == 1
         assert image_parts[0]["image_url"]["url"] == data_url
-        return {"role": "assistant", "content": "HTTP route image reply"}
+        return {"role": "assistant", "content": "HTTP route image-only reply"}
 
     monkeypatch.setattr(chat_store_mod, "get_chat_store", lambda: store)
     monkeypatch.setattr(activity_store_mod, "get_activity_store", lambda: activity_store)
@@ -1385,7 +1385,7 @@ def test_chat_image_bridge_route_reaches_native_run_events(tmp_path, monkeypatch
                 sent = client.post(
                     "/ui/chat/messages",
                     json={
-                        "text": "请从 HTTP route 看图",
+                        "text": "",
                         "attachments": [{"name": "screen.png", "data_url": data_url}],
                         "client_message_id": "http-image-client-1",
                     },
@@ -1396,7 +1396,7 @@ def test_chat_image_bridge_route_reaches_native_run_events(tmp_path, monkeypatch
             payload = asyncio.run(
                 ui_routes.send_chat_message(
                     ui_routes.SendChatMessageRequest(
-                        text="请从 HTTP route 看图",
+                        text="",
                         attachments=[{"name": "screen.png", "data_url": data_url}],
                         client_message_id="http-image-client-1",
                     )
@@ -1410,6 +1410,7 @@ def test_chat_image_bridge_route_reaches_native_run_events(tmp_path, monkeypatch
 
         task = state.get_task(payload["task_id"])
         assert task is not None
+        assert task.description == "请识别并分析这张图片。"
         assert task.attachments[0]["kind"] == "image"
 
         asyncio.run(runner._execute_with_state(task.task_id))
@@ -1417,7 +1418,7 @@ def test_chat_image_bridge_route_reaches_native_run_events(tmp_path, monkeypatch
         updated = state.get_task(task.task_id)
         assert updated is not None
         assert updated.status == TaskStatus.COMPLETED
-        assert updated.result == "HTTP route image reply"
+        assert updated.result == "HTTP route image-only reply"
         run = service.get_run(service.get_task_run_link(task.task_id)["run_id"])
 
         if FastAPI is not None and TestClient is not None:
@@ -1436,9 +1437,13 @@ def test_chat_image_bridge_route_reaches_native_run_events(tmp_path, monkeypatch
         assert "task.linked" in event_types
         assert event_types.count("model.output.completed") == 1
         assert "run.completed" in event_types
+        user = next(message for message in messages_payload["messages"] if message["role"] == "user")
+        assert user["content"] == "请识别并分析这张图片。"
+        assert user["attachments"][0]["url"].startswith("http://127.0.0.1:9999/ui/chat/attachments/")
+        assert "path" not in user["attachments"][0]
         assistant = next(message for message in messages_payload["messages"] if message["role"] == "assistant")
         assert assistant["task_id"] == task.task_id
-        assert assistant["content"] == "HTTP route image reply"
+        assert assistant["content"] == "HTTP route image-only reply"
         assert assistant["status"] == "completed"
     finally:
         service.close()
