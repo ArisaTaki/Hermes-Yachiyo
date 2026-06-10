@@ -44,16 +44,27 @@ def _chunk_text(chunk: Any) -> str:
     return "".join(parts)
 
 
-def _chunk_tool_calls(chunk: Any) -> list[Any]:
+def _normalized_index(value: Any, fallback: int) -> int:
+    try:
+        return int(value) if value is not None else fallback
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _chunk_tool_calls(chunk: Any) -> list[tuple[int, int, Any]]:
     choices = _field(chunk, "choices")
+    direct = _field(chunk, "tool_calls")
+    if isinstance(direct, list):
+        return [(0, index, call) for index, call in enumerate(direct)]
     if not isinstance(choices, list):
         return []
-    calls: list[Any] = []
-    for choice in choices:
+    calls: list[tuple[int, int, Any]] = []
+    for choice_position, choice in enumerate(choices):
+        choice_index = _normalized_index(_field(choice, "index"), choice_position)
         delta = _field(choice, "delta")
         delta_calls = _field(delta, "tool_calls") if delta is not None else None
         if isinstance(delta_calls, list):
-            calls.extend(delta_calls)
+            calls.extend((choice_index, index, call) for index, call in enumerate(delta_calls))
     return calls
 
 
@@ -69,13 +80,16 @@ def _chunk_finish_reasons(chunk: Any) -> list[str]:
     return reasons
 
 
-def _merge_tool_delta(accumulator: dict[int, dict[str, Any]], raw_call: Any, fallback_index: int) -> None:
+def _merge_tool_delta(
+    accumulator: dict[tuple[int, int], dict[str, Any]],
+    raw_call: Any,
+    choice_index: int,
+    fallback_index: int,
+) -> None:
     raw_index = _field(raw_call, "index")
-    try:
-        index = int(raw_index) if raw_index is not None else fallback_index
-    except (TypeError, ValueError):
-        index = fallback_index
-    entry = accumulator.setdefault(index, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+    index = _normalized_index(raw_index, fallback_index)
+    key = (choice_index, index)
+    entry = accumulator.setdefault(key, {"id": "", "type": "function", "function": {"name": "", "arguments": ""}})
     call_id = _field(raw_call, "id")
     if call_id:
         entry["id"] = str(call_id)
@@ -102,7 +116,7 @@ def summarize_stream_chunks(
     chunk_count = 0
     content_parts: list[str] = []
     finish_reasons: list[str] = []
-    tool_deltas: dict[int, dict[str, Any]] = {}
+    tool_deltas: dict[tuple[int, int], dict[str, Any]] = {}
     tool_delta_count = 0
     for chunk in chunks:
         chunk_count += 1
@@ -112,8 +126,8 @@ def summarize_stream_chunks(
         finish_reasons.extend(_chunk_finish_reasons(chunk))
         calls = _chunk_tool_calls(chunk)
         tool_delta_count += len(calls)
-        for index, call in enumerate(calls):
-            _merge_tool_delta(tool_deltas, call, index)
+        for choice_index, fallback_index, call in calls:
+            _merge_tool_delta(tool_deltas, call, choice_index, fallback_index)
 
     tool_calls = [tool_deltas[index] for index in sorted(tool_deltas)]
     content = "".join(content_parts)

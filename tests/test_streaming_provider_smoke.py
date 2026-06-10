@@ -160,6 +160,101 @@ def test_stream_smoke_tolerates_role_and_usage_only_provider_chunks(monkeypatch)
     assert "README.md" not in json.dumps(summary)
 
 
+def test_stream_smoke_keeps_multi_choice_tool_call_deltas_separate():
+    chunks = [
+        {
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_readme",
+                                "type": "function",
+                                "function": {
+                                    "name": "workspace_",
+                                    "arguments": '{"path":"READ',
+                                },
+                            }
+                        ]
+                    },
+                },
+                {
+                    "index": 1,
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_notes",
+                                "type": "function",
+                                "function": {
+                                    "name": "workspace_",
+                                    "arguments": '{"path":"NOT',
+                                },
+                            }
+                        ]
+                    },
+                },
+            ]
+        },
+        {
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "function": {
+                                    "name": "read",
+                                    "arguments": 'ME.md"}',
+                                },
+                            }
+                        ]
+                    },
+                },
+                {
+                    "index": 1,
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "function": {
+                                    "name": "read",
+                                    "arguments": 'ES.md"}',
+                                },
+                            }
+                        ]
+                    },
+                    "finish_reason": "tool_calls",
+                },
+            ]
+        },
+    ]
+
+    summary = smoke.summarize_stream_chunks(chunks, include_tool_arguments=True)
+
+    assert summary["ok"] is True
+    assert summary["tool_call_delta_count"] == 4
+    assert summary["tool_call_count"] == 2
+    assert summary["finish_reasons"] == ["tool_calls"]
+    assert summary["tool_calls"] == [
+        {
+            "id": "call_readme",
+            "name": "workspace_read",
+            "argument_chars": len('{"path":"README.md"}'),
+            "arguments": '{"path":"README.md"}',
+        },
+        {
+            "id": "call_notes",
+            "name": "workspace_read",
+            "argument_chars": len('{"path":"NOTES.md"}'),
+            "arguments": '{"path":"NOTES.md"}',
+        },
+    ]
+
+
 def test_stream_smoke_fails_when_expected_content_or_tool_is_missing(monkeypatch):
     class FakeResponse:
         def __enter__(self):
