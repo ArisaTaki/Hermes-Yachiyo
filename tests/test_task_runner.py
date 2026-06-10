@@ -757,6 +757,183 @@ async def test_task_runner_direct_group_agent_summary_uses_native_runtime(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_task_runner_direct_group_agent_rejected_summary_uses_native_runtime(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    session = ChatSession(session_id="direct-group-agent-rejected-summary-session")
+    session.attach_store(store, load_existing=False)
+    state = AppState()
+    runtime = SimpleNamespace(
+        state=state,
+        chat_session=session,
+        store=store,
+        agent_runtime_service=service,
+        activity_store=activity_store,
+    )
+    model_calls: list[list[dict]] = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        model_calls.append(messages)
+        last_content = str(messages[-1]["content"])
+        if "[Yachiyo 群组直接 Agent 汇总]" in last_content:
+            assert "Design：已取消" in last_content
+            assert "汇报：工具审批已拒绝：Rejected by user" in last_content
+            assert "不要再派发新的 Agent 任务" in last_content
+            return {"role": "assistant", "content": "主模型整理：Design 的审批拒绝已告知用户。"}
+        assert "# Agent\nName: Design Agent" in last_content
+        assert "# User Goal\n运行需要审批的终端命令" in last_content
+        assert any((tool.get("function") or {}).get("name") == "terminal_run" for tool in tools or [])
+        return {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_terminal",
+                    "type": "function",
+                    "function": {
+                        "name": "terminal_run",
+                        "arguments": json.dumps(
+                            {"command": "printf should-not-run", "timeout_seconds": 30},
+                            ensure_ascii=False,
+                        ),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr(chat_store_mod, "get_chat_store", lambda: store)
+    monkeypatch.setattr(activity_store_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
+    monkeypatch.setattr("apps.shell.agent_runtime.get_model_profile_service", lambda: _FakeDefaultProfileService())
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    design = service.create_agent(
+        {
+            "name": "Design Agent",
+            "nickname": "Design",
+            "description": "runs native rejected direct group summary tests",
+            "model_mode": "custom_api",
+            "model_config": {
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-secret",
+            },
+            "tool_policy": {
+                "allowed_tools": ["terminal.run"],
+                "approval_required": {"terminal.run": True},
+            },
+            "workspace_policy": {
+                "default_workdir": str(tmp_path),
+                "readable_scopes": ["."],
+            },
+        }
+    )
+    executor = NativeAgentExecutor(
+        chat_session=session,
+        runtime_service_getter=lambda: service,
+        tool_policy_getter=lambda: {"allowed_tools": []},
+        workspace_policy_getter=lambda: {},
+        activity_store_getter=lambda: activity_store,
+    )
+    runner = TaskRunner(state, executor=executor, activity_store=activity_store)
+    api = ChatAPI(runtime)
+    try:
+        created = api.create_group_session(name="Native Direct Reject Group", participant_ids=[design["agent_id"]])
+        assert created["ok"] is True
+        assert created["session_context"]["conversation_kind"] == "group"
+
+        sent = api.send_message("运行需要审批的终端命令", runnable_id=design["agent_id"])
+        assert sent["ok"] is True
+        assert sent["agent_run_id"]
+
+        waiting = await _wait_for(
+            lambda: (
+                service.get_run(sent["agent_run_id"])
+                if service.get_run(sent["agent_run_id"])["status"] == "approval_required"
+                else None
+            )
+        )
+        assert waiting["kind"] == "agent_run"
+        assert waiting["pending_approval"]["tool"] == "terminal.run"
+
+        rejected = await asyncio.to_thread(service.reject_run_approval, waiting["run_id"], "Rejected by user")
+        assert rejected["status"] == "cancelled"
+        assert rejected["result"] == "工具审批已拒绝：Rejected by user"
+        rejected_event_types = [event["event_type"] for event in service.list_run_events(waiting["run_id"])["events"]]
+        assert "agent.tool.approval_required" in rejected_event_types
+        assert "agent.tool.approval_rejected" in rejected_event_types
+
+        rejected_agent = await _wait_for(
+            lambda: next(
+                (
+                    message
+                    for message in api.get_messages()["messages"]
+                    if message["role"] == "assistant"
+                    and message["metadata"].get("sender", {}).get("nickname") == "Design"
+                    and message["metadata"].get("run_status") == "cancelled"
+                ),
+                None,
+            )
+        )
+        assert rejected_agent["status"] == "failed"
+        assert rejected_agent["metadata"]["agent_report"] == "工具审批已拒绝：Rejected by user"
+        assert rejected_agent["metadata"]["group_agent_summary_pending"] is True
+
+        summary_message = next(
+            message
+            for message in api.get_messages()["messages"]
+            if message["metadata"].get("group_direct_agent_summary_for_message_id") == rejected_agent["id"]
+        )
+        summary_task = state.get_task(summary_message["task_id"])
+        assert summary_task is not None
+        assert summary_task.chat_session_id == session.session_id
+        assert "[Yachiyo 群组直接 Agent 汇总]" in summary_task.description
+        assert "Design：已取消" in summary_task.description
+        assert "汇报：工具审批已拒绝：Rejected by user" in summary_task.description
+
+        await runner._execute_with_state(summary_task.task_id)
+
+        completed_summary_task = state.get_task(summary_task.task_id)
+        assert completed_summary_task is not None
+        assert completed_summary_task.status == TaskStatus.COMPLETED
+        assert completed_summary_task.result == "主模型整理：Design 的审批拒绝已告知用户。"
+        summary_run = service.get_run(service.get_task_run_link(summary_task.task_id)["run_id"])
+        assert summary_run["kind"] == "main_chat_run"
+        assert summary_run["status"] == "completed"
+        assert summary_run["result"] == "主模型整理：Design 的审批拒绝已告知用户。"
+        summary_event_types = [event["event_type"] for event in service.list_run_events(summary_run["run_id"])["events"]]
+        assert "task.linked" in summary_event_types
+        assert summary_event_types.count("model.output.completed") == 1
+        assert "run.completed" in summary_event_types
+
+        final_payload = api.get_messages()
+        final_summary = next(
+            message
+            for message in final_payload["messages"]
+            if message["task_id"] == summary_task.task_id
+        )
+        final_agent = next(
+            message
+            for message in final_payload["messages"]
+            if message["id"] == rejected_agent["id"]
+        )
+        assert final_summary["status"] == "completed"
+        assert final_summary["content"] == "主模型整理：Design 的审批拒绝已告知用户。"
+        assert final_agent["metadata"]["group_agent_summary_pending"] is False
+        assert final_agent["metadata"]["group_agent_summary_status"] == "completed"
+        assert len(model_calls) == 2
+    finally:
+        service.close()
+        activity_store.close()
+        store.close()
+
+
+@pytest.mark.asyncio
 async def test_task_runner_main_chat_image_attachment_reaches_native_model(tmp_path, monkeypatch):
     from apps.bridge.routes import agents as agent_routes
     from apps.bridge.routes import runs as run_routes
