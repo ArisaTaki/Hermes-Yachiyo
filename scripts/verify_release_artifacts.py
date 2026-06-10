@@ -187,6 +187,36 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must publish latest channel JSON metadata",
     ),
 )
+RELEASE_WORKFLOW_METADATA_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        'LATEST_SHA256="$(shasum -a 256 "release/${LATEST_DMG}"',
+        "macOS release workflow must compute a SHA256 checksum for the latest DMG",
+    ),
+    (
+        '"version": "${RELEASE_VERSION}"',
+        "macOS release workflow latest JSON must include the release version",
+    ),
+    (
+        '"commit": "${GITHUB_SHA}"',
+        "macOS release workflow latest JSON must include the source commit",
+    ),
+    (
+        '"build_number": ${BUILD_NUMBER}',
+        "macOS release workflow latest JSON must include the build number",
+    ),
+    (
+        '"dmg_name": "${LATEST_DMG}"',
+        "macOS release workflow latest JSON must include the DMG filename",
+    ),
+    (
+        '"sha256": "${LATEST_SHA256}"',
+        "macOS release workflow latest JSON must include the latest DMG SHA256",
+    ),
+    (
+        '"download_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_DMG}"',
+        "macOS release workflow latest JSON must include the DMG download URL",
+    ),
+)
 _BUILD_GUARD_ENV_KEYS: tuple[str, ...] = (
     "OHA_YACHIYO_DEV",
     "OHA_YACHIYO_BUILD_METADATA",
@@ -435,6 +465,9 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
         return [Finding(workflow_path, f"could not read macOS release workflow: {exc}")]
 
     for required_text, message in RELEASE_WORKFLOW_REQUIRED_TEXT:
+        if required_text not in workflow:
+            findings.append(Finding(workflow_path, message))
+    for required_text, message in RELEASE_WORKFLOW_METADATA_REQUIRED_TEXT:
         if required_text not in workflow:
             findings.append(Finding(workflow_path, message))
 
