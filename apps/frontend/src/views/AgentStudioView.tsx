@@ -4677,6 +4677,15 @@ export function AgentStudioView() {
                   <span>Updated {formatRunDate(selectedRun.updated_at || selectedRun.created_at)}</span>
                   {selectedRunIsLive ? <span className="run-live-pill">实时更新</span> : null}
                   {selectedRun.run_group_id ? <span>Group {selectedRun.run_group_id}</span> : null}
+                  {selectedRun.task_id ? <code>Task {selectedRun.task_id}</code> : null}
+                  {selectedRun.session_id ? <code>Session {selectedRun.session_id}</code> : null}
+                  {selectedRun.task_run_link_run_status ? <span>Task link {runStatusLabel(selectedRun.task_run_link_run_status)}</span> : null}
+                  {selectedRun.task_run_link_last_event_sequence !== undefined && selectedRun.task_run_link_last_event_sequence !== null ? (
+                    <span>Replay #{selectedRun.task_run_link_last_event_sequence}</span>
+                  ) : null}
+                  {selectedRun.task_run_link_updated_at || selectedRun.task_run_link_created_at ? (
+                    <span>Task link updated {formatRunDate(selectedRun.task_run_link_updated_at || selectedRun.task_run_link_created_at)}</span>
+                  ) : null}
                   <code>{selectedRun.run_id}</code>
                   <button
                     type="button"

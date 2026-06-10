@@ -16448,6 +16448,14 @@ button.activity-item {
   font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
 }
 
+.run-detail-meta span,
+.run-detail-meta code {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
 .run-detail-meta button {
   cursor: pointer;
 }

@@ -155,6 +155,12 @@ export type RunSpec = {
   run_id: string;
   run_group_id?: string;
   run_group_source?: string;
+  task_id?: string;
+  session_id?: string;
+  task_run_link_created_at?: string;
+  task_run_link_updated_at?: string;
+  task_run_link_run_status?: string;
+  task_run_link_last_event_sequence?: number;
   kind: 'agent_run' | 'workflow_run' | string;
   runnable_id: string;
   runnable_name?: string;
