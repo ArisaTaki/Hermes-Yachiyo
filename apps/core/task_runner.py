@@ -59,6 +59,59 @@ def _terminal_task_message_metadata(assistant: Any | None, run_status: str) -> d
     return next_metadata
 
 
+def _sync_group_summary_parent_status(
+    session: Any,
+    *,
+    summary_task_id: str,
+    summary_metadata: dict[str, Any],
+    summary_status: str,
+    summary_error: str = "",
+) -> None:
+    if not summary_task_id:
+        return
+    parent_task_id = str(summary_metadata.get("group_agent_summary_for_task_id") or "").strip()
+    direct_message_id = str(summary_metadata.get("group_direct_agent_summary_for_message_id") or "").strip()
+    all_messages = session.get_all_messages()
+    if parent_task_id:
+        parent = session.get_assistant_message_for_task(parent_task_id)
+    elif direct_message_id:
+        parent = next((msg for msg in all_messages if msg.message_id == direct_message_id), None)
+    else:
+        parent = next(
+            (
+                msg
+                for msg in all_messages
+                if isinstance(getattr(msg, "metadata", None), dict)
+                and str(msg.metadata.get("group_agent_summary_task_id") or "") == summary_task_id
+            ),
+            None,
+        )
+    if parent is None:
+        return
+    parent_metadata = getattr(parent, "metadata", None)
+    if not isinstance(parent_metadata, dict):
+        return
+    if str(parent_metadata.get("group_agent_summary_task_id") or "") != summary_task_id:
+        return
+    if not parent_metadata.get("group_agent_summary_pending"):
+        return
+    next_metadata: dict[str, Any] = {
+        "group_agent_summary_pending": False if direct_message_id else None,
+        "group_agent_summary_status": summary_status,
+    }
+    if summary_error:
+        next_metadata["group_agent_summary_error"] = summary_error
+    else:
+        next_metadata["group_agent_summary_error"] = None
+    session.update_assistant_message(
+        parent.message_id,
+        parent.content,
+        status=parent.status,
+        error=parent.error,
+        metadata=next_metadata,
+    )
+
+
 class TaskRunner:
     """任务调度器
 
@@ -250,21 +303,38 @@ class TaskRunner:
             )
             if task.status == TaskStatus.COMPLETED:
                 assistant = session.get_assistant_message_for_task(task.task_id)
+                assistant_metadata = getattr(assistant, "metadata", None)
+                assistant_metadata = assistant_metadata if isinstance(assistant_metadata, dict) else {}
                 session.upsert_assistant_message(
                     task_id=task.task_id,
                     content=task.result or "[任务已完成，无输出]",
                     status=MessageStatus.COMPLETED,
                     metadata=_terminal_task_message_metadata(assistant, "completed"),
                 )
+                _sync_group_summary_parent_status(
+                    session,
+                    summary_task_id=task.task_id,
+                    summary_metadata=assistant_metadata,
+                    summary_status="completed",
+                )
             elif task.status == TaskStatus.FAILED:
                 error = task.error or "任务执行失败"
                 assistant = session.get_assistant_message_for_task(task.task_id)
+                assistant_metadata = getattr(assistant, "metadata", None)
+                assistant_metadata = assistant_metadata if isinstance(assistant_metadata, dict) else {}
                 session.upsert_assistant_message(
                     task_id=task.task_id,
                     content=f"❌ {error}",
                     status=MessageStatus.FAILED,
                     error=error,
                     metadata=_terminal_task_message_metadata(assistant, "failed"),
+                )
+                _sync_group_summary_parent_status(
+                    session,
+                    summary_task_id=task.task_id,
+                    summary_metadata=assistant_metadata,
+                    summary_status="failed",
+                    summary_error=error,
                 )
             elif task.status == TaskStatus.RUNNING:
                 assistant = session.get_assistant_message_for_task(task.task_id)

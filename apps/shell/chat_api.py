@@ -77,6 +77,24 @@ _GROUP_SUMMARY_METADATA_KEYS: tuple[str, ...] = (
     "group_agent_summary_for_task_id",
     "group_direct_agent_summary_for_message_id",
 )
+_GROUP_CONTEXT_MARKER = "[Oha-Yachiyo 群组上下文]"
+_LEGACY_GROUP_CONTEXT_MARKER = "[Yachiyo 群组上下文]"
+_GROUP_CONTEXT_MARKERS = (_GROUP_CONTEXT_MARKER, _LEGACY_GROUP_CONTEXT_MARKER)
+_GROUP_FOLLOWUP_MARKER = "[Oha-Yachiyo 群组补充/纠偏]"
+_LEGACY_GROUP_FOLLOWUP_MARKER = "[Yachiyo 群组补充/纠偏]"
+_GROUP_FOLLOWUP_MARKERS = (_GROUP_FOLLOWUP_MARKER, _LEGACY_GROUP_FOLLOWUP_MARKER)
+_GROUP_AGENT_UPSTREAM_MARKER = "[Oha-Yachiyo 群组执行约定]"
+
+
+def _has_any_marker(text: str, markers: tuple[str, ...]) -> bool:
+    return any(marker in text for marker in markers)
+
+
+def _text_before_first_marker(text: str, markers: tuple[str, ...]) -> str:
+    marker_positions = [text.index(marker) for marker in markers if marker in text]
+    if not marker_positions:
+        return text
+    return text[: min(marker_positions)]
 
 
 def _terminal_task_message_metadata(metadata: dict[str, Any], run_status: str) -> dict[str, Any] | None:
@@ -2451,7 +2469,7 @@ class ChatAPI:
             return task_description
         member_lines = "\n".join(lines)
         note = (
-            "[Yachiyo 群组上下文]\n"
+            f"{_GROUP_CONTEXT_MARKER}\n"
             "当前会话是群组，群成员包括：\n"
             f"{member_lines}\n"
             "当用户没有 @ 指定其他成员时，用户正在对你（主模型/Yachiyo）说话；你可以直接回答，也可以作为团队调度者拆分任务。\n"
@@ -2467,7 +2485,7 @@ class ChatAPI:
 
     @staticmethod
     def _is_group_followup_task_description(task_description: str) -> bool:
-        return "[Yachiyo 群组补充/纠偏]" in str(task_description or "")
+        return _has_any_marker(str(task_description or ""), _GROUP_FOLLOWUP_MARKERS)
 
     @staticmethod
     def _group_followup_ack_content() -> str:
@@ -2496,7 +2514,7 @@ class ChatAPI:
         if target_agent_message_ids:
             target_lines.append(f"关联 Agent 消息：{', '.join(target_agent_message_ids)}")
         note_lines = [
-            "[Yachiyo 群组补充/纠偏]",
+            _GROUP_FOLLOWUP_MARKER,
             "这条用户消息是对当前正在执行、待审批或等待汇总的群组 Agent 批次的补充，不是新目标。",
             "不要派发新的 Agent 任务，不要输出 oha.group_dispatch / oha_group_dispatch 或任何机器可读派活 JSON。",
             "你只需要简短确认已收到；最终整理时会把这条补充并入当前批次。",
@@ -2523,7 +2541,7 @@ class ChatAPI:
         name = str(participant.get("nickname") or participant.get("name") or "Agent").strip() or "Agent"
         member_lines = "\n".join(lines) if lines else "- 群成员信息暂不可用"
         note = (
-            "[Yachiyo 群组执行约定]\n"
+            f"{_GROUP_AGENT_UPSTREAM_MARKER}\n"
             f"当前任务来自群聊，你在群内身份是：{name}。\n"
             "请把输出写成可以直接发到群里的进度、结果、失败原因或待审批说明；不要把过程省略成只有一句“完成”。\n"
             "如果需要用户批准工具调用，请明确写出工具名称、为什么需要、将要执行/读取/修改的关键输入摘要。\n"
@@ -4272,14 +4290,12 @@ class ChatAPI:
     @staticmethod
     def _group_dispatch_user_request_from_task(task_description: str) -> str:
         text = str(task_description or "")
-        if "[Yachiyo 群组上下文]" in text:
-            text = text.split("[Yachiyo 群组上下文]", 1)[0]
-        return text.strip()
+        return _text_before_first_marker(text, _GROUP_CONTEXT_MARKERS).strip()
 
     @staticmethod
     def _group_dispatch_agent_names_from_task(task_description: str) -> list[str]:
         text = str(task_description or "")
-        if "[Yachiyo 群组上下文]" not in text:
+        if not _has_any_marker(text, _GROUP_CONTEXT_MARKERS):
             return []
         names: list[str] = []
         for line in text.splitlines():
@@ -4324,7 +4340,7 @@ class ChatAPI:
     ) -> bool:
         if context.get("conversation_kind") != "group":
             return False
-        if "[Yachiyo 群组上下文]" not in (task_description or ""):
+        if not _has_any_marker(str(task_description or ""), _GROUP_CONTEXT_MARKERS):
             return False
         text = (content or "").strip()
         if not text:
@@ -5294,21 +5310,32 @@ class ChatAPI:
         context = self._session_context()
         if context.get("conversation_kind") != "group":
             return
-        for summary in self._session.get_all_messages():
+        all_messages = self._session.get_all_messages()
+        for summary in all_messages:
             if summary.role != MessageRole.ASSISTANT or not summary.task_id:
                 continue
             summary_metadata = summary.metadata if isinstance(summary.metadata, dict) else {}
             parent_task_id = str(summary_metadata.get("group_agent_summary_for_task_id") or "").strip()
             direct_message_id = str(summary_metadata.get("group_direct_agent_summary_for_message_id") or "").strip()
-            if not parent_task_id and not direct_message_id:
-                continue
             if summary.status not in (MessageStatus.COMPLETED, MessageStatus.FAILED):
                 continue
             if parent_task_id:
                 parent = self._session.get_assistant_message_for_task(parent_task_id)
+            elif direct_message_id:
+                parent = next(
+                    (msg for msg in all_messages if msg.message_id == direct_message_id),
+                    None,
+                )
             else:
                 parent = next(
-                    (msg for msg in self._session.get_all_messages() if msg.message_id == direct_message_id),
+                    (
+                        msg
+                        for msg in all_messages
+                        if msg.role == MessageRole.ASSISTANT
+                        and msg.message_id != summary.message_id
+                        and isinstance(msg.metadata, dict)
+                        and str(msg.metadata.get("group_agent_summary_task_id") or "") == summary.task_id
+                    ),
                     None,
                 )
             if parent is None:
@@ -5340,11 +5367,19 @@ class ChatAPI:
                     error=parent.error,
                     metadata=cleaned_metadata,
                 )
-            else:
+            elif direct_message_id:
                 cleaned_metadata["group_agent_summary_pending"] = False
                 self._session.update_assistant_message(
                     parent.message_id,
                     parent.content,
+                    status=parent.status,
+                    error=parent.error,
+                    metadata=cleaned_metadata,
+                )
+            else:
+                self._session.update_assistant_message(
+                    parent.message_id,
+                    content=parent.content,
                     status=parent.status,
                     error=parent.error,
                     metadata=cleaned_metadata,

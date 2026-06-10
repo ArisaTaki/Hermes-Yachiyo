@@ -972,7 +972,7 @@ def test_chat_group_dispatch_bridge_route_runs_native_summary(tmp_path, monkeypa
             return {"role": "assistant", "content": "群组总结：Coding 已完成 Bridge route Native 派发。"}
         if "# Agent\nName: Coding Agent" in last_content:
             assert "# User Goal\n做 Bridge route Native 群聊派发验证" in last_content
-            assert "[Yachiyo 群组执行约定]" in last_content
+            assert "[Oha-Yachiyo 群组执行约定]" in last_content
             assert "你在群内身份是：Coding" in last_content
             return {"role": "assistant", "content": "Coding bridge dispatch result"}
         assert "请安排 Coding 做 Bridge route Native 群聊派发验证" in last_content

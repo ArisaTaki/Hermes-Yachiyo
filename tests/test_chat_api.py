@@ -1688,7 +1688,7 @@ def test_manual_group_session_keeps_context_for_agent_mentions(tmp_path, monkeyp
         task = runtime.state.get_task(main["task_id"])
         assert task is not None
         assert task.description.startswith("总结一下群组状态")
-        assert "[Yachiyo 群组上下文]" in task.description
+        assert "[Oha-Yachiyo 群组上下文]" in task.description
         assert "- 月見八千代（主模型" in task.description
         assert "- Design（Agent；Design Agent）" in task.description
         assert "- Design（Agent；Design Agent） - 类别：design；交付：markdown；职责：负责 UI 方案、视觉验收和信息架构。" in task.description
@@ -2339,7 +2339,7 @@ def test_manual_group_plain_message_routes_to_main_model(tmp_path, monkeypatch):
         task = runtime.state.get_task(result["task_id"])
         assert task is not None
         assert task.description.startswith("总结一下现在的方案")
-        assert "[Yachiyo 群组上下文]" in task.description
+        assert "[Oha-Yachiyo 群组上下文]" in task.description
         assert "当用户没有 @ 指定其他成员时" in task.description
         assert "- Design（Agent；Design Agent）" in task.description
     finally:
@@ -2425,7 +2425,7 @@ def test_manual_group_generic_workflow_mention_stays_plain_message(tmp_path, mon
         task = runtime.state.get_task(result["task_id"])
         assert task is not None
         assert "普通说明：这次不使用 @Workflow" in task.description
-        assert "[Yachiyo 群组上下文]" in task.description
+        assert "[Oha-Yachiyo 群组上下文]" in task.description
         messages = api.get_messages()["messages"]
         assert not any(message.get("content") == "未找到指定 Agent 或 Workflow" for message in messages)
     finally:
@@ -2529,7 +2529,7 @@ def test_manual_group_agent_mention_posts_visible_progress(tmp_path, monkeypatch
         assert assistant["metadata"]["run_id"] == "design_run_processing"
         assert assistant["metadata"]["run_group_id"] == "run_group_manual"
         assert calls[0]["user_goal"] == "做一版视觉方向"
-        assert "[Yachiyo 群组执行约定]" in calls[0]["upstream"]
+        assert "[Oha-Yachiyo 群组执行约定]" in calls[0]["upstream"]
         assert "你在群内身份是：Design" in calls[0]["upstream"]
         assert "- Design（Agent；Design Agent）" in calls[0]["upstream"]
     finally:
@@ -3429,7 +3429,7 @@ def test_plain_group_message_can_dispatch_agents_via_main_model_result(tmp_path,
         main_task = runtime.state.get_task(sent["task_id"])
         assert main_task is not None
         assert main_task.description.startswith("我想让群里合适的 Agent 做个视觉测试")
-        assert "[Yachiyo 群组上下文]" in main_task.description
+        assert "[Oha-Yachiyo 群组上下文]" in main_task.description
         assert '"tool":"oha.group_dispatch"' in main_task.description
 
         runtime.state.update_task_status(
@@ -3538,7 +3538,7 @@ def test_plain_group_goal_dispatches_two_agents_and_summarizes(tmp_path, monkeyp
         main_task = runtime.state.get_task(sent["task_id"])
         assert main_task is not None
         assert main_task.description.startswith("我想让群里合适的 Agent 分别做 UI 验收和验证脚本方案")
-        assert "[Yachiyo 群组上下文]" in main_task.description
+        assert "[Oha-Yachiyo 群组上下文]" in main_task.description
         assert "Design Agent" in main_task.description
         assert "Coding Agent" in main_task.description
 
@@ -3574,7 +3574,7 @@ def test_plain_group_goal_dispatches_two_agents_and_summarizes(tmp_path, monkeyp
         assert [call["user_goal"] for call in calls] == ["整理 UI 验收点", "整理验证脚本方案"]
         assert calls[0]["run_group_id"] == ""
         assert calls[1]["run_group_id"] == "run_group_plain_acceptance"
-        assert all("[Yachiyo 群组执行约定]" in call["upstream"] for call in calls)
+        assert all("[Oha-Yachiyo 群组执行约定]" in call["upstream"] for call in calls)
         assert parent["metadata"]["group_dispatch_handled"] is True
         assert parent["metadata"]["group_dispatch_count"] == 2
         assert parent["metadata"]["group_agent_summary_pending"] is True
@@ -3755,7 +3755,7 @@ def test_plain_group_goal_mixed_agent_outcomes_waits_and_summarizes(tmp_path, mo
         assert [call["runnable_id"] for call in calls] == ["agent_design", "agent_coding"]
         assert calls[0]["run_group_id"] == ""
         assert calls[1]["run_group_id"] == "run_group_plain_mixed"
-        assert all("[Yachiyo 群组执行约定]" in call["upstream"] for call in calls)
+        assert all("[Oha-Yachiyo 群组执行约定]" in call["upstream"] for call in calls)
         assert parent["metadata"]["group_dispatch_count"] == 2
         assert "dispatch_group_agent" not in parent["content"]
         assert approval_payload["approval_count"] == 2
@@ -4580,6 +4580,26 @@ def test_group_dispatch_parser_exposes_structured_directives_and_legacy_requests
     assert "旧协议块后缀" in old_tag_visible
     assert legacy_requests == [directive.as_request() for directive in directives]
     assert all(isinstance(request, dict) for request in legacy_requests)
+
+
+def test_group_dispatch_context_markers_use_oha_yachiyo_and_keep_legacy_read_compatibility():
+    current = (
+        "请安排 Design 做验收\n\n"
+        "[Oha-Yachiyo 群组上下文]\n"
+        "- Design（Agent；Design Agent）\n"
+    )
+    legacy = (
+        "请安排 Design 做验收\n\n"
+        "[Yachiyo 群组上下文]\n"
+        "- Design（Agent；Design Agent）\n"
+    )
+
+    assert ChatAPI._group_dispatch_user_request_from_task(current) == "请安排 Design 做验收"
+    assert ChatAPI._group_dispatch_user_request_from_task(legacy) == "请安排 Design 做验收"
+    assert ChatAPI._group_dispatch_agent_names_from_task(current) == ["Design"]
+    assert ChatAPI._group_dispatch_agent_names_from_task(legacy) == ["Design"]
+    assert ChatAPI._is_group_followup_task_description("[Oha-Yachiyo 群组补充/纠偏]\n补充上下文")
+    assert ChatAPI._is_group_followup_task_description("[Yachiyo 群组补充/纠偏]\n旧补充上下文")
 
 
 def test_group_main_model_dispatch_accepts_model_field_variants(tmp_path, monkeypatch):
@@ -5605,7 +5625,7 @@ def test_group_main_model_dispatch_posts_agent_progress(tmp_path, monkeypatch):
         assert agent_message["metadata"]["run_group_id"] == "run_group_dispatch"
         assert agent_message["metadata"]["delegated_goal"] == "做视觉测试"
         assert calls[0]["user_goal"] == "做视觉测试"
-        assert "[Yachiyo 群组执行约定]" in calls[0]["upstream"]
+        assert "[Oha-Yachiyo 群组执行约定]" in calls[0]["upstream"]
         assert "你在群内身份是：Design" in calls[0]["upstream"]
         assert "- Design（Agent；Design Agent）" in calls[0]["upstream"]
         messages_payload = api.get_messages()
@@ -6205,7 +6225,7 @@ def test_group_dispatch_uses_runtime_native_service_end_to_end(tmp_path, monkeyp
         captured_contexts.append(context)
         assert "# Agent\nName: Coding Agent" in context
         assert "# User Goal\n做真实 Native 群聊派发验证" in context
-        assert "[Yachiyo 群组执行约定]" in context
+        assert "[Oha-Yachiyo 群组执行约定]" in context
         assert "你在群内身份是：Coding" in context
         return {"content": "Coding native dispatch result"}
 
@@ -7378,7 +7398,7 @@ def test_group_followup_dispatch_payload_is_ignored_and_stays_in_current_summary
         assert followup_message["metadata"]["group_followup_for_task_ids"] == [sent["task_id"]]
         followup_task = runtime.state.get_task(followup["task_id"])
         assert followup_task is not None
-        assert "[Yachiyo 群组补充/纠偏]" in followup_task.description
+        assert "[Oha-Yachiyo 群组补充/纠偏]" in followup_task.description
         runtime.state.update_task_status(
             followup["task_id"],
             TaskStatus.COMPLETED,

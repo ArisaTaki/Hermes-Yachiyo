@@ -648,7 +648,7 @@ class TestNativeAgentExecutor:
 
         executor = NativeAgentExecutor(runtime_service_getter=FakeRuntimeService)
         result = await executor.run(
-            _make_task("[Yachiyo 群组上下文]\n群成员包括：\n- Research Agent（Agent）\n\n请安排")
+            _make_task("[Oha-Yachiyo 群组上下文]\n群成员包括：\n- Research Agent（Agent）\n\n请安排")
         )
 
         system_prompt = calls[0][0]["content"]
@@ -660,6 +660,12 @@ class TestNativeAgentExecutor:
         assert "只输出 JSON" not in system_prompt
         assert "single chat catalog" not in system_prompt
         assert delegated == []
+
+
+def test_group_coordinator_detection_accepts_current_and_legacy_context_markers():
+    assert executor_mod._is_oha_yachiyo_group_coordinator_task("[Oha-Yachiyo 群组上下文]\n请安排")
+    assert executor_mod._is_oha_yachiyo_group_coordinator_task("[Yachiyo 群组上下文]\n请安排")
+    assert not executor_mod._is_oha_yachiyo_group_coordinator_task("普通聊天任务")
 
 
 class TestExecutorHelpers:

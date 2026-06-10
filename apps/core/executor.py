@@ -203,8 +203,11 @@ def _oha_delegation_catalog_context(service: Any | None = None) -> str:
     )
 
 
-def _is_yachiyo_group_coordinator_task(description: str) -> bool:
-    return "[Yachiyo 群组上下文]" in (description or "")
+_GROUP_CONTEXT_MARKERS = ("[Oha-Yachiyo 群组上下文]", "[Yachiyo 群组上下文]")
+
+
+def _is_oha_yachiyo_group_coordinator_task(description: str) -> bool:
+    return any(marker in (description or "") for marker in _GROUP_CONTEXT_MARKERS)
 
 
 def _oha_group_dispatch_context() -> str:
@@ -1050,7 +1053,7 @@ class NativeAgentExecutor(ExecutionStrategy):
                     messages[-1]["content"] = (
                         f"{task.description}\n\n[图片识别结果]\n{vision_result}"
                     )
-            group_coordinator = _is_yachiyo_group_coordinator_task(task.description)
+            group_coordinator = _is_oha_yachiyo_group_coordinator_task(task.description)
             delegation_count = 0
             while True:
                 output = await self._call_main_chat_model_loop(
@@ -1155,7 +1158,7 @@ class NativeAgentExecutor(ExecutionStrategy):
         profile_context = self._safe_get(self._profile_context_getter)
         profile_context = _append_oha_delegation_context(
             profile_context,
-            group_coordinator=_is_yachiyo_group_coordinator_task(task.description),
+            group_coordinator=_is_oha_yachiyo_group_coordinator_task(task.description),
             runtime_service=runtime_service,
         )
         system_prompt = format_persona_description(

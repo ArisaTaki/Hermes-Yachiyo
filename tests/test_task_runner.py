@@ -8,10 +8,11 @@ import pytest
 
 import apps.core.activity_store as activity_store_mod
 import apps.core.chat_store as chat_store_mod
+import apps.core.task_runner as task_runner_mod
 import apps.shell.proactive as proactive_mod
 import apps.shell.chat_api as chat_api_mod
 from apps.core.activity_store import ActivityStore
-from apps.core.chat_session import ChatSession
+from apps.core.chat_session import ChatSession, MessageStatus
 from apps.core.chat_store import ChatStore
 from apps.core.executor import NativeAgentExecutor
 from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID
@@ -50,6 +51,70 @@ class _FakeDefaultProfileService:
             "status": "available",
             "enabled": True,
         }
+
+
+def test_task_runner_group_summary_parent_sync_clears_pending_metadata(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    session = ChatSession(session_id="task-runner-group-summary-parent-sync")
+    session.attach_store(store, load_existing=False)
+    try:
+        parent_task_id = "parent_group_dispatch_task"
+        summary_task_id = "summary_group_dispatch_task"
+        session.upsert_assistant_message(
+            task_id=parent_task_id,
+            content="群组派发已完成，等待主模型汇总。",
+            status=MessageStatus.COMPLETED,
+            metadata={
+                "group_agent_summary_task_id": summary_task_id,
+                "group_agent_summary_pending": True,
+            },
+        )
+
+        task_runner_mod._sync_group_summary_parent_status(
+            session,
+            summary_task_id=summary_task_id,
+            summary_metadata={"group_agent_summary_for_task_id": parent_task_id},
+            summary_status="completed",
+        )
+
+        parent = session.get_assistant_message_for_task(parent_task_id)
+        assert parent is not None
+        assert "group_agent_summary_pending" not in parent.metadata
+        assert parent.metadata["group_agent_summary_status"] == "completed"
+    finally:
+        store.close()
+
+
+def test_task_runner_direct_group_summary_parent_sync_marks_pending_false(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    session = ChatSession(session_id="task-runner-direct-group-summary-parent-sync")
+    session.attach_store(store, load_existing=False)
+    try:
+        direct_task_id = "direct_agent_message_task"
+        summary_task_id = "direct_summary_task"
+        direct_message_id = session.upsert_assistant_message(
+            task_id=direct_task_id,
+            content="Design 已完成，等待主模型整理。",
+            status=MessageStatus.COMPLETED,
+            metadata={
+                "group_agent_summary_task_id": summary_task_id,
+                "group_agent_summary_pending": True,
+            },
+        )
+
+        task_runner_mod._sync_group_summary_parent_status(
+            session,
+            summary_task_id=summary_task_id,
+            summary_metadata={"group_direct_agent_summary_for_message_id": direct_message_id},
+            summary_status="completed",
+        )
+
+        parent = session.get_assistant_message_for_task(direct_task_id)
+        assert parent is not None
+        assert parent.metadata["group_agent_summary_pending"] is False
+        assert parent.metadata["group_agent_summary_status"] == "completed"
+    finally:
+        store.close()
 
 
 async def _wait_for(condition, *, timeout: float = 3.0):
