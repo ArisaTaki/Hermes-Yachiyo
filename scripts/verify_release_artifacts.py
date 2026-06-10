@@ -58,6 +58,29 @@ PACKAGING_CONFIG_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release packaging must exclude rebuilt node-pty native artifacts",
     ),
 )
+RELEASE_WORKFLOW_FILE = Path(".github/workflows/release-macos.yml")
+RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "Verify release-facing product identity and security guards",
+        "macOS release workflow must run the release verifier before dependency installation",
+    ),
+    (
+        "package_scan_paths=(dist/backend)",
+        "macOS release workflow must scan the packaged backend binary",
+    ),
+    (
+        "find dist/electron -path '*/Oha-Yachiyo.app/Contents/Resources'",
+        "macOS release workflow must discover packaged app resource directories",
+    ),
+    (
+        'python scripts/verify_release_artifacts.py --allow-binary "${package_scan_paths[@]}"',
+        "macOS release workflow must binary-scan packaged app resources",
+    ),
+    (
+        "python scripts/verify_release_artifacts.py --allow-binary release",
+        "macOS release workflow must binary-scan final release artifacts",
+    ),
+)
 _BUILD_GUARD_ENV_KEYS: tuple[str, ...] = (
     "OHA_YACHIYO_DEV",
     "OHA_YACHIYO_BUILD_METADATA",
@@ -142,6 +165,7 @@ def verify_release_artifacts(
     if check_release_security_guards:
         findings.extend(_verify_release_security_guards(root_path))
         findings.extend(_verify_release_packaging_guards(root_path))
+        findings.extend(_verify_release_workflow_guards(root_path))
 
     return findings
 
@@ -245,6 +269,32 @@ def _verify_release_packaging_guards(root: Path) -> list[Finding]:
     for required_text, message in PACKAGING_CONFIG_REQUIRED_TEXT:
         if required_text not in config:
             findings.append(Finding(config_path, message))
+    return findings
+
+
+def _verify_release_workflow_guards(root: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    workflow_path = _resolve(root, RELEASE_WORKFLOW_FILE)
+    try:
+        workflow = workflow_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [Finding(workflow_path, f"could not read macOS release workflow: {exc}")]
+
+    for required_text, message in RELEASE_WORKFLOW_REQUIRED_TEXT:
+        if required_text not in workflow:
+            findings.append(Finding(workflow_path, message))
+
+    preinstall_guard = workflow.find("Verify release-facing product identity and security guards")
+    install_deps = workflow.find("Install Python dependencies")
+    if preinstall_guard < 0:
+        return findings
+    if install_deps < 0 or preinstall_guard > install_deps:
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must verify release guards before installing dependencies",
+            )
+        )
     return findings
 
 

@@ -1262,7 +1262,7 @@ Info.plist uses Oha-Yachiyo identifiers and permission strings
 - Skill library source API / UI 已从 `Yachiyo` 来源命名收敛为 `Installed`，仅保留角色/产品人格层面的 Yachiyo 命名。
 - Workspace 初始化、备份、恢复和卸载协议已收敛到 OHA 命名：`.oha_yachiyo_init`、`configs/oha-yachiyo.json`、`oha_workspace`、`oha-workspace`、`oha_only`；旧 workspace 标记和旧卸载 scope 不再是有效入口。
 - release-like source guard 已验证：release/alpha/stable metadata 下 debug routes 关闭，development credential fallback 不会被 factory 选中，macOS release-like factory 会选择 Keychain，release verifier 会阻断 stable 渠道误放行开发能力的回归。
-- release-facing artifact guard 已接入 macOS release workflow，构建 metadata 文件名、release 文档、workflow 和实际本地 `.app` / DMG 产物旧产品身份已有检查；workflow 现在会先用 binary-safe verifier 扫描 `dist/backend` 与 unpacked `.app/Contents/Resources`，再在生成 release DMG/JSON 后扫描 `release/` 目录；release verifier 也会阻断重新打包本地 `node-pty/build` native artifact，避免旧 workspace 路径进入 `.app`。
+- release-facing artifact guard 已接入 macOS release workflow，构建 metadata 文件名、release 文档、workflow 和实际本地 `.app` / DMG 产物旧产品身份已有检查；workflow 现在会先用 binary-safe verifier 扫描 `dist/backend` 与 unpacked `.app/Contents/Resources`，再在生成 release DMG/JSON 后扫描 `release/` 目录；release verifier 自身也会阻断 workflow 丢失依赖安装前 security guard、packaged resources scan 或 release 目录 binary scan；release verifier 也会阻断重新打包本地 `node-pty/build` native artifact，避免旧 workspace 路径进入 `.app`。
 - Backend import、route registration、standalone packaged backend startup、packaged desktop startup 均已验证。
 - `/status` 发布版本与产品版本已同步，版本同步脚本也覆盖该路径。
 - 成熟 UI 入口已有 pytest 级 feature-preservation guard，覆盖 Chat、群聊、Agent Studio、Workflow、Run Detail、approval、Activity、Proactive TTS、local screenshot、manual TTS、Live2D。

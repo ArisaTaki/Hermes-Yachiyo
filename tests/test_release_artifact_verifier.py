@@ -116,6 +116,64 @@ def test_verifier_requires_packaging_to_exclude_rebuilt_node_pty(tmp_path):
     ]
 
 
+def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "name: Build macOS DMG\n"
+        "jobs:\n"
+        "  package-macos:\n"
+        "    steps:\n"
+        "      - name: Verify release-facing product identity and security guards\n"
+        "        run: python scripts/verify_release_artifacts.py\n"
+        "      - name: Install Python dependencies\n"
+        "        run: python -m pip install -e .\n"
+        "      - name: Build Electron DMG\n"
+        "        run: npm --prefix apps/frontend run dist:mac\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert "macOS release workflow must scan the packaged backend binary" in messages
+    assert "macOS release workflow must discover packaged app resource directories" in messages
+    assert "macOS release workflow must binary-scan packaged app resources" in messages
+    assert "macOS release workflow must binary-scan final release artifacts" in messages
+
+
+def test_verifier_requires_release_workflow_guard_before_dependency_install(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "name: Build macOS DMG\n"
+        "jobs:\n"
+        "  package-macos:\n"
+        "    steps:\n"
+        "      - name: Install Python dependencies\n"
+        "        run: python -m pip install -e .\n"
+        "      - name: Verify release-facing product identity and security guards\n"
+        "        run: python scripts/verify_release_artifacts.py\n"
+        "      - name: Verify packaged app resources\n"
+        "        run: |\n"
+        "          package_scan_paths=(dist/backend)\n"
+        "          find dist/electron -path '*/Oha-Yachiyo.app/Contents/Resources'\n"
+        "          python scripts/verify_release_artifacts.py --allow-binary \"${package_scan_paths[@]}\"\n"
+        "      - name: Verify packaged release artifacts\n"
+        "        run: python scripts/verify_release_artifacts.py --allow-binary release\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+
+    assert findings == [
+        verifier.Finding(
+            workflow,
+            "macOS release workflow must verify release guards before installing dependencies",
+        )
+    ]
+
+
 def test_verifier_rejects_legacy_build_metadata_filename(tmp_path):
     required = tmp_path / verifier.REQUIRED_FILES[0]
     required.parent.mkdir(parents=True)
