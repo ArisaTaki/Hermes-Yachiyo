@@ -2413,6 +2413,27 @@ export function AgentStudioView() {
     });
   }
 
+  function pruneDeletedRunState(deletedRunIds: Set<string>) {
+    if (!deletedRunIds.size) return;
+    setRuns((current) => current.filter((run) => !deletedRunIds.has(run.run_id)));
+    setRunDetailCache((current) => current.filter((run) => !deletedRunIds.has(run.run_id)));
+    setRunEventReplayByRunId((current) => {
+      let changed = false;
+      const next = { ...current };
+      deletedRunIds.forEach((runId) => {
+        if (Object.prototype.hasOwnProperty.call(next, runId)) {
+          delete next[runId];
+          changed = true;
+        }
+      });
+      return changed ? next : current;
+    });
+    setRunGroups((current) => current.filter((group) => {
+      const childRunIds = group.child_run_ids || [];
+      return !childRunIds.length || childRunIds.some((runId) => !deletedRunIds.has(runId));
+    }));
+  }
+
   async function pollApprovedRunProgress(runId: string, selectedAfterAction: string) {
     const pollRunIds = Array.from(new Set([runId, selectedAfterAction].filter(Boolean)));
     if (!pollRunIds.length) return;
@@ -3139,6 +3160,7 @@ export function AgentStudioView() {
             if (id) deletedRunIds.add(id);
           });
         }
+        pruneDeletedRunState(deletedRunIds);
         setSelectedRunIds((current) => current.filter((id) => !deletedRunIds.has(id)));
         if (selectedRunId && deletedRunIds.has(selectedRunId)) {
           setSelectedRunId('');
