@@ -636,6 +636,102 @@ def test_skill_library_bridge_contract_preserves_skill_lifecycle(monkeypatch):
     ]
 
 
+def test_skill_library_bridge_contract_preserves_folders_and_agent_mounts(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeRuntimeService:
+        def attach_skill(self, agent_id, skill_id):
+            calls.append(("attach_skill", {"agent_id": agent_id, "skill_id": skill_id}))
+            return {"agent_id": agent_id, "skill_ids": [skill_id]}
+
+        def detach_skill(self, agent_id, skill_id):
+            calls.append(("detach_skill", {"agent_id": agent_id, "skill_id": skill_id}))
+            return {"agent_id": agent_id, "skill_ids": []}
+
+        def list_skill_folders(self):
+            calls.append(("list_skill_folders", {}))
+            return {
+                "folders": [
+                    {
+                        "folder_id": "folder-1",
+                        "name": "Installed",
+                        "skill_count": 2,
+                    }
+                ]
+            }
+
+        def create_skill_folder(self, payload):
+            calls.append(("create_skill_folder", payload))
+            return {
+                "folder_id": "folder-1",
+                **payload,
+            }
+
+        def update_skill_folder(self, folder_id, payload):
+            calls.append(("update_skill_folder", {"folder_id": folder_id, **payload}))
+            return {
+                "folder_id": folder_id,
+                **payload,
+            }
+
+        def delete_skill_folder(self, folder_id, *, delete_skills=False):
+            calls.append(("delete_skill_folder", {"folder_id": folder_id, "delete_skills": delete_skills}))
+            return {
+                "ok": True,
+                "folder_id": folder_id,
+                "delete_skills": delete_skills,
+                "deleted_skill_count": 2 if delete_skills else 0,
+            }
+
+    monkeypatch.setattr(agents, "get_agent_runtime_service", lambda: FakeRuntimeService())
+
+    attached = asyncio.run(
+        agents.attach_agent_skill("agent-1", agents.AgentSkillRequest(skill_id="skill-1"))
+    )
+    detached = asyncio.run(agents.detach_agent_skill("agent-1", "skill-1"))
+    folders = asyncio.run(agents.list_skill_folders())
+    created = asyncio.run(
+        agents.create_skill_folder(
+            agents.SkillFolderRequest(name="Installed", description="Installed skills")
+        )
+    )
+    updated = asyncio.run(
+        agents.update_skill_folder(
+            "folder-1",
+            agents.SkillFolderRequest(name="Renamed", sort_order=20),
+        )
+    )
+    deleted = asyncio.run(agents.delete_skill_folder("folder-1", delete_skills=True))
+
+    assert attached == {"agent_id": "agent-1", "skill_ids": ["skill-1"]}
+    assert detached == {"agent_id": "agent-1", "skill_ids": []}
+    assert folders["folders"][0]["skill_count"] == 2
+    assert created == {
+        "folder_id": "folder-1",
+        "name": "Installed",
+        "description": "Installed skills",
+    }
+    assert updated == {
+        "folder_id": "folder-1",
+        "name": "Renamed",
+        "sort_order": 20,
+    }
+    assert deleted == {
+        "ok": True,
+        "folder_id": "folder-1",
+        "delete_skills": True,
+        "deleted_skill_count": 2,
+    }
+    assert calls == [
+        ("attach_skill", {"agent_id": "agent-1", "skill_id": "skill-1"}),
+        ("detach_skill", {"agent_id": "agent-1", "skill_id": "skill-1"}),
+        ("list_skill_folders", {}),
+        ("create_skill_folder", {"name": "Installed", "description": "Installed skills"}),
+        ("update_skill_folder", {"folder_id": "folder-1", "name": "Renamed", "sort_order": 20}),
+        ("delete_skill_folder", {"folder_id": "folder-1", "delete_skills": True}),
+    ]
+
+
 def test_workflow_studio_bridge_contract_preserves_definition_lifecycle(monkeypatch):
     calls: list[tuple[str, dict]] = []
 
