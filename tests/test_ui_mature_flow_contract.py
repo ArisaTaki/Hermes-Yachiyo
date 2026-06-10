@@ -399,6 +399,111 @@ def test_run_detail_approval_bridge_contract_preserves_approve_reject_and_cancel
     ]
 
 
+def test_workflow_studio_bridge_contract_preserves_definition_lifecycle(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeRuntimeService:
+        def list_workflows(self):
+            calls.append(("list_workflows", {}))
+            return {
+                "workflows": [
+                    {
+                        "workflow_id": "workflow-1",
+                        "name": "Native Workflow",
+                        "enabled": True,
+                    }
+                ]
+            }
+
+        def create_workflow(self, payload):
+            calls.append(("create_workflow", payload))
+            return {
+                "workflow_id": "workflow-1",
+                **payload,
+            }
+
+        def update_workflow(self, workflow_id, payload):
+            calls.append(("update_workflow", {"workflow_id": workflow_id, **payload}))
+            return {
+                "workflow_id": workflow_id,
+                **payload,
+            }
+
+        def delete_workflow(self, workflow_id):
+            calls.append(("delete_workflow", {"workflow_id": workflow_id}))
+            return {"ok": True, "workflow_id": workflow_id}
+
+    monkeypatch.setattr(agents, "get_agent_runtime_service", lambda: FakeRuntimeService())
+
+    workflow_request = agents.WorkflowRequest(
+        name="Native Workflow",
+        description="Run two native Agent steps",
+        nodes=[
+            {"id": "start", "type": "start"},
+            {"id": "agent", "type": "agent", "agent_id": "agent-1"},
+        ],
+        edges=[{"source": "start", "target": "agent"}],
+        enabled=True,
+    )
+
+    workflows = asyncio.run(agents.list_workflows())
+    created = asyncio.run(agents.create_workflow(workflow_request))
+    updated = asyncio.run(
+        agents.update_workflow(
+            "workflow-1",
+            agents.WorkflowRequest(
+                name="Native Workflow v2",
+                description="Updated native Agent steps",
+                nodes=[{"id": "start", "type": "start"}],
+                edges=[],
+                enabled=False,
+            ),
+        )
+    )
+    deleted = asyncio.run(agents.delete_workflow("workflow-1"))
+
+    assert workflows["workflows"][0]["workflow_id"] == "workflow-1"
+    assert created["name"] == "Native Workflow"
+    assert created["nodes"][1]["agent_id"] == "agent-1"
+    assert updated == {
+        "workflow_id": "workflow-1",
+        "name": "Native Workflow v2",
+        "description": "Updated native Agent steps",
+        "nodes": [{"id": "start", "type": "start"}],
+        "edges": [],
+        "enabled": False,
+    }
+    assert deleted == {"ok": True, "workflow_id": "workflow-1"}
+    assert calls == [
+        ("list_workflows", {}),
+        (
+            "create_workflow",
+            {
+                "name": "Native Workflow",
+                "description": "Run two native Agent steps",
+                "nodes": [
+                    {"id": "start", "type": "start"},
+                    {"id": "agent", "type": "agent", "agent_id": "agent-1"},
+                ],
+                "edges": [{"source": "start", "target": "agent"}],
+                "enabled": True,
+            },
+        ),
+        (
+            "update_workflow",
+            {
+                "workflow_id": "workflow-1",
+                "name": "Native Workflow v2",
+                "description": "Updated native Agent steps",
+                "nodes": [{"id": "start", "type": "start"}],
+                "edges": [],
+                "enabled": False,
+            },
+        ),
+        ("delete_workflow", {"workflow_id": "workflow-1"}),
+    ]
+
+
 def test_agent_studio_bridge_contract_preserves_run_detail_workflow_artifact_and_rerun(monkeypatch):
     calls: list[tuple[str, dict]] = []
 
