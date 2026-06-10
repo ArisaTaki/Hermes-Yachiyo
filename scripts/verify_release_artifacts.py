@@ -261,6 +261,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover TaskRunner approval timeout projection",
     ),
     (
+        "tests/test_agent_runtime.py::test_main_chat_approval_timeout_records_replayable_fact_and_is_idempotent",
+        "macOS release workflow smoke tests must cover Native approval timeout replay idempotency",
+    ),
+    (
         "tests/test_agent_runtime.py::test_main_chat_repeated_approval_does_not_execute_tool_twice",
         "macOS release workflow smoke tests must cover main chat repeated approval idempotency",
     ),
