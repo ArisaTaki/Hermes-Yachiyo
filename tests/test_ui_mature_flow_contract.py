@@ -1647,6 +1647,82 @@ def test_run_detail_bridge_contract_preserves_replay_events(monkeypatch):
     assert calls == [{"run_id": "run_detail_1", "after_sequence": 7, "limit": 50}]
 
 
+def test_chat_approval_run_detail_bridge_contract_preserves_detail_and_replay(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeRuntimeService:
+        def get_run(self, run_id):
+            calls.append(("get_run", {"run_id": run_id}))
+            return {
+                "run_id": run_id,
+                "kind": "main_chat_run",
+                "status": "approval_required",
+                "session_id": "session-chat-approval",
+                "task_id": "task-chat-approval",
+                "task_run_link_run_status": "running",
+                "task_run_link_last_event_sequence": 12,
+                "pending_approval": {
+                    "approval_id": "approval-1",
+                    "tool": "workspace.write_patch",
+                    "input_preview": {"path": "docs/demo.md"},
+                },
+                "timeline": [
+                    {
+                        "event": "agent.tool.approval_required",
+                        "status": "approval_required",
+                        "tool": "workspace.write_patch",
+                    }
+                ],
+            }
+
+        def list_run_events(self, run_id, *, after_sequence=0, limit=200):
+            calls.append(
+                (
+                    "list_run_events",
+                    {"run_id": run_id, "after_sequence": after_sequence, "limit": limit},
+                )
+            )
+            return {
+                "run_id": run_id,
+                "after_sequence": after_sequence,
+                "limit": limit,
+                "events": [
+                    {
+                        "run_id": run_id,
+                        "sequence": 12,
+                        "event_type": "agent.tool.approval_required",
+                        "payload": {
+                            "tool": "workspace.write_patch",
+                            "approval_id": "approval-1",
+                            "input_preview": {"path": "docs/demo.md"},
+                        },
+                    }
+                ],
+            }
+
+    service = FakeRuntimeService()
+    monkeypatch.setattr(agents, "get_agent_runtime_service", lambda: service)
+    monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
+
+    run_detail = asyncio.run(agents.get_any_run("run_chat_approval"))
+    replay = asyncio.run(run_routes.list_run_events("run_chat_approval", after_sequence=0, limit=200))
+
+    assert run_detail["kind"] == "main_chat_run"
+    assert run_detail["status"] == "approval_required"
+    assert run_detail["session_id"] == "session-chat-approval"
+    assert run_detail["task_run_link_last_event_sequence"] == 12
+    assert run_detail["pending_approval"]["tool"] == "workspace.write_patch"
+    assert replay["events"][0]["event_type"] == "agent.tool.approval_required"
+    assert replay["events"][0]["payload"]["input_preview"]["path"] == "docs/demo.md"
+    assert calls == [
+        ("get_run", {"run_id": "run_chat_approval"}),
+        (
+            "list_run_events",
+            {"run_id": "run_chat_approval", "after_sequence": 0, "limit": 200},
+        ),
+    ]
+
+
 def test_desktop_presence_bridge_contract_preserves_screenshot_tts_proactive_and_live2d(monkeypatch):
     config = SimpleNamespace(
         tts=SimpleNamespace(enabled=True, provider="command"),
