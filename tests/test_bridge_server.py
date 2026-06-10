@@ -589,6 +589,113 @@ def test_chat_delegated_summary_http_route_returns_followup_projection(monkeypat
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_chat_group_http_routes_preserve_create_update_payloads(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "ui.py"
+        spec = importlib.util.spec_from_file_location("_oha_ui_group_route_http_under_test", route_path)
+        assert spec is not None
+        assert spec.loader is not None
+        ui_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = ui_route_module
+        spec.loader.exec_module(ui_route_module)
+
+        calls: list[tuple[str, dict[str, object]]] = []
+
+        class FakeChatAPI:
+            def __init__(self, runtime):
+                assert runtime is fake_runtime
+
+            def create_group_session(self, *, name="", avatar_url="", participant_ids=None):
+                payload = {
+                    "name": name,
+                    "avatar_url": avatar_url,
+                    "participant_ids": participant_ids or [],
+                }
+                calls.append(("create", payload))
+                return {"ok": True, "session_id": "group-http-1", **payload}
+
+            def update_group_session(self, session_id, *, name="", avatar_url="", participant_ids=None):
+                payload = {
+                    "session_id": session_id,
+                    "name": name,
+                    "avatar_url": avatar_url,
+                    "participant_ids": participant_ids or [],
+                }
+                calls.append(("update", payload))
+                return {"ok": True, **payload}
+
+        fake_runtime = SimpleNamespace()
+        monkeypatch.setattr(ui_route_module, "get_runtime", lambda: fake_runtime)
+        monkeypatch.setattr(ui_route_module, "ChatAPI", FakeChatAPI)
+        route_app = FastAPI()
+        route_app.include_router(ui_route_module.router)
+
+        avatar = "data:image/png;base64,AAAA"
+        with TestClient(route_app) as client:
+            created = client.post(
+                "/ui/chat/groups",
+                json={
+                    "name": "HTTP 产品群聊",
+                    "avatar_url": avatar,
+                    "participant_ids": ["agent_design", "agent_coding"],
+                },
+            )
+            updated = client.patch(
+                "/ui/chat/groups/group-http-1",
+                json={
+                    "name": "HTTP 产品群聊 v2",
+                    "avatar_url": "https://example.test/group.png",
+                    "participant_ids": ["agent_design"],
+                },
+            )
+
+        assert created.status_code == 200
+        assert created.json() == {
+            "ok": True,
+            "session_id": "group-http-1",
+            "name": "HTTP 产品群聊",
+            "avatar_url": avatar,
+            "participant_ids": ["agent_design", "agent_coding"],
+        }
+        assert updated.status_code == 200
+        assert updated.json() == {
+            "ok": True,
+            "session_id": "group-http-1",
+            "name": "HTTP 产品群聊 v2",
+            "avatar_url": "https://example.test/group.png",
+            "participant_ids": ["agent_design"],
+        }
+        assert calls == [
+            (
+                "create",
+                {
+                    "name": "HTTP 产品群聊",
+                    "avatar_url": avatar,
+                    "participant_ids": ["agent_design", "agent_coding"],
+                },
+            ),
+            (
+                "update",
+                {
+                    "session_id": "group-http-1",
+                    "name": "HTTP 产品群聊 v2",
+                    "avatar_url": "https://example.test/group.png",
+                    "participant_ids": ["agent_design"],
+                },
+            ),
+        ]
+    finally:
+        sys.modules.pop("_oha_ui_group_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_chat_image_bridge_route_reaches_native_run_events(tmp_path, monkeypatch):
     try:
         from fastapi import FastAPI
