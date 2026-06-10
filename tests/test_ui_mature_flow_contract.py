@@ -510,6 +510,132 @@ def test_agent_studio_bridge_contract_preserves_agent_definition_lifecycle(monke
     ]
 
 
+def test_skill_library_bridge_contract_preserves_skill_lifecycle(monkeypatch):
+    calls: list[tuple[str, dict]] = []
+
+    class FakeRuntimeService:
+        def list_skills(self):
+            calls.append(("list_skills", {}))
+            return {
+                "skills": [
+                    {
+                        "skill_id": "skill-1",
+                        "name": "Native Skill",
+                        "source_type": "native_global",
+                        "enabled": True,
+                    }
+                ]
+            }
+
+        def import_skill(self, source_path, folder_id=None):
+            calls.append(("import_skill", {"source_path": source_path, "folder_id": folder_id}))
+            return {
+                "skill_id": "skill-imported",
+                "name": "Imported Skill",
+                "source_path": source_path,
+                "folder_id": folder_id,
+                "enabled": True,
+            }
+
+        def list_native_skill_sources(self):
+            calls.append(("list_native_skill_sources", {}))
+            return {
+                "roots": [
+                    {
+                        "source_type": "native_global",
+                        "path": "/tmp/native-skills",
+                        "exists": True,
+                        "skill_count": 1,
+                    }
+                ]
+            }
+
+        def sync_native_skills(self):
+            calls.append(("sync_native_skills", {}))
+            return {
+                "ok": True,
+                "results": [{"source": "native_global", "status": "success"}],
+            }
+
+        def install_skill_command(self, command, folder_id=None):
+            calls.append(("install_skill_command", {"command": command, "folder_id": folder_id}))
+            return {
+                "ok": True,
+                "returncode": 0,
+                "stdout": "installed",
+                "folder_id": folder_id,
+            }
+
+        def get_skill(self, skill_id):
+            calls.append(("get_skill", {"skill_id": skill_id}))
+            return {
+                "skill_id": skill_id,
+                "name": "Native Skill",
+                "enabled": True,
+            }
+
+        def update_skill(self, skill_id, payload):
+            calls.append(("update_skill", {"skill_id": skill_id, **payload}))
+            return {
+                "skill_id": skill_id,
+                "name": "Native Skill",
+                **payload,
+            }
+
+        def delete_skill(self, skill_id):
+            calls.append(("delete_skill", {"skill_id": skill_id}))
+            return {"ok": True, "skill_id": skill_id}
+
+    monkeypatch.setattr(agents, "get_agent_runtime_service", lambda: FakeRuntimeService())
+
+    listed = asyncio.run(agents.list_skills())
+    imported = asyncio.run(
+        agents.import_skill(
+            agents.SkillImportRequest(source_path="/tmp/installed-skill", folder_id="folder-1")
+        )
+    )
+    sources = asyncio.run(agents.list_skill_sources())
+    synced = asyncio.run(agents.sync_native_skills())
+    installed = asyncio.run(
+        agents.install_skill(
+            agents.SkillInstallRequest(command="npx skills add owner/repo", folder_id="folder-1")
+        )
+    )
+    skill = asyncio.run(agents.get_skill("skill-1"))
+    updated = asyncio.run(
+        agents.update_skill(
+            "skill-1",
+            agents.SkillUpdateRequest(enabled=False, folder_id="folder-2"),
+        )
+    )
+    deleted = asyncio.run(agents.delete_skill("skill-1"))
+
+    assert listed["skills"][0]["source_type"] == "native_global"
+    assert imported["source_path"] == "/tmp/installed-skill"
+    assert imported["folder_id"] == "folder-1"
+    assert sources["roots"][0]["path"] == "/tmp/native-skills"
+    assert synced["results"][0]["status"] == "success"
+    assert installed["stdout"] == "installed"
+    assert skill["skill_id"] == "skill-1"
+    assert updated == {
+        "skill_id": "skill-1",
+        "name": "Native Skill",
+        "enabled": False,
+        "folder_id": "folder-2",
+    }
+    assert deleted == {"ok": True, "skill_id": "skill-1"}
+    assert calls == [
+        ("list_skills", {}),
+        ("import_skill", {"source_path": "/tmp/installed-skill", "folder_id": "folder-1"}),
+        ("list_native_skill_sources", {}),
+        ("sync_native_skills", {}),
+        ("install_skill_command", {"command": "npx skills add owner/repo", "folder_id": "folder-1"}),
+        ("get_skill", {"skill_id": "skill-1"}),
+        ("update_skill", {"skill_id": "skill-1", "enabled": False, "folder_id": "folder-2"}),
+        ("delete_skill", {"skill_id": "skill-1"}),
+    ]
+
+
 def test_workflow_studio_bridge_contract_preserves_definition_lifecycle(monkeypatch):
     calls: list[tuple[str, dict]] = []
 
