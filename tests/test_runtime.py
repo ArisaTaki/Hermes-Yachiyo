@@ -11,10 +11,14 @@ def _make_runtime(tmp_path, monkeypatch):
 
     import apps.core.chat_session as chat_session_mod
     import apps.core.chat_store as chat_store_mod
+    import apps.core.activity_store as activity_store_mod
 
     if chat_store_mod._global_store is not None:
         chat_store_mod._global_store.close()
     chat_store_mod._global_store = None
+    if activity_store_mod._global_store is not None:
+        activity_store_mod._global_store.close()
+    activity_store_mod._global_store = None
     chat_session_mod._global_session = None
 
     return AppRuntime(AppConfig())
@@ -67,6 +71,22 @@ def test_stop_closes_injected_native_runtime_service(tmp_path, monkeypatch):
     assert runtime.running is False
     assert closed == [True]
     assert closed_global == [True]
+
+
+def test_runtime_exposes_and_closes_activity_store(tmp_path, monkeypatch):
+    import apps.core.activity_store as activity_store_mod
+
+    runtime = _make_runtime(tmp_path, monkeypatch)
+    runtime._running = True
+    monkeypatch.setattr(runtime, "_stop_task_runner", lambda: None)
+    monkeypatch.setattr("apps.shell.agent_runtime.close_agent_runtime_service", lambda: None)
+
+    assert runtime.activity_store is activity_store_mod.get_activity_store()
+
+    runtime.stop()
+
+    assert runtime.running is False
+    assert activity_store_mod._global_store is None
 
 
 def test_refresh_task_runner_executor_without_runner_is_noop(tmp_path, monkeypatch):

@@ -22,6 +22,7 @@ from apps.core.state import AppState
 from apps.core.version import get_app_version
 
 if TYPE_CHECKING:
+    from apps.core.activity_store import ActivityStore
     from apps.core.task_runner import TaskRunner
     from apps.shell.config import AppConfig
 
@@ -35,6 +36,9 @@ class AppRuntime:
         self._config = config
         self._state = AppState()
         self._chat_session: ChatSession = get_chat_session()
+        from apps.core.activity_store import get_activity_store
+
+        self._activity_store = get_activity_store()
         self._start_time: float | None = None
         self._running = False
         self._task_runner: "TaskRunner | None" = None
@@ -54,6 +58,10 @@ class AppRuntime:
     @property
     def chat_session(self) -> ChatSession:
         return self._chat_session
+
+    @property
+    def activity_store(self) -> "ActivityStore":
+        return self._activity_store
 
     @property
     def running(self) -> bool:
@@ -91,6 +99,7 @@ class AppRuntime:
         # 停止 TaskRunner
         self._stop_task_runner()
         self._stop_native_runtime()
+        self._stop_activity_store()
 
         self._running = False
         logger.info("App Runtime 已停止")
@@ -108,6 +117,14 @@ class AppRuntime:
             close_agent_runtime_service()
         except Exception as exc:
             logger.warning("Native Runtime shutdown 异常: %s", exc)
+
+    def _stop_activity_store(self) -> None:
+        try:
+            from apps.core.activity_store import close_activity_store
+
+            close_activity_store()
+        except Exception as exc:
+            logger.warning("ActivityStore shutdown 异常: %s", exc)
 
     def _start_task_runner(self) -> None:
         """在独立线程中启动 TaskRunner 事件循环"""

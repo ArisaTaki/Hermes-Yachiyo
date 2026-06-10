@@ -720,7 +720,7 @@ RunEvent sequence:
 
 - Runtime SQLite 初始化直接覆盖 `runtime_schema_metadata.schema_version=1`、`PRAGMA foreign_keys=ON`、`journal_mode=WAL`、`busy_timeout=5000`，并验证删除 Run 会通过 FK cascade 清理 `TaskRunLink`。
 - NativeRunEngine shutdown 直接覆盖终止 terminal process groups、取消非终态 Run、写入 `run.cancelled` fact、拒绝新 Run，以及 `close_db=True` 关闭 runtime DB 连接。
-- AppRuntime shutdown 直接覆盖 runtime 注入的 NativeRunEngine service 会被关闭，同时仍调用全局兼容 service shutdown，避免桌面/测试注入路径漏过执行内核生命周期收口。
+- AppRuntime shutdown 直接覆盖 runtime 注入的 NativeRunEngine service 会被关闭，同时仍调用全局兼容 service shutdown；AppRuntime 也显式暴露并关闭进程 ActivityStore，避免桌面/测试注入路径漏过执行内核和活动投影生命周期收口。
 - 并发 RunEvent 写入 sequence 连续唯一。
 - `GET /runs/{run_id}/events` 的 `after_sequence` 归一化、limit 最大 1000、默认隐藏 internal events。
 - `GET /runs/{run_id}/events` 路由层覆盖默认隐藏 internal / secret events、limit clamp、after_sequence 分页和 missing run 404。
@@ -1252,7 +1252,7 @@ Info.plist uses Oha-Yachiyo identifiers and permission strings
 - `POST /runs` 支持 `client_run_id` / `client_request_id` / `Idempotency-Key`，并复用 `create_run_for_runnable()` 到 Agent/Workflow Run 的幂等链路；`POST /ui/chat/messages` 支持 `client_message_id` / `Idempotency-Key`，`POST /ui/agent-runs` 和 `POST /ui/workflow-runs` 支持 `client_run_id` / `Idempotency-Key`，上述入口均已有真实 FastAPI/TestClient HTTP 层映射回归。
 - `terminal.run` 已具备审批、workspace 边界、scrubbed env、timeout、进程组取消和输出截断/清洗。
 - NativeRunEngine 执行预算已覆盖 `max_model_calls`、`max_tool_calls`、`max_terminal_calls`、`max_run_duration_seconds`、`max_model_output_chars`、`max_tool_output_chars` 和 `max_context_chars`；duration budget 过期时会在继续执行工具前失败。
-- NativeRunEngine shutdown 已具备停止接收新 Run、取消运行中 Run、终止 terminal 进程组、写入取消 RunEvent fact 和关闭 runtime DB 连接的回归覆盖；AppRuntime stop 也已覆盖关闭 runtime 注入的 NativeRunEngine service，同时保留全局兼容 service shutdown。
+- NativeRunEngine shutdown 已具备停止接收新 Run、取消运行中 Run、终止 terminal 进程组、写入取消 RunEvent fact 和关闭 runtime DB 连接的回归覆盖；AppRuntime stop 也已覆盖关闭 runtime 注入的 NativeRunEngine service、进程 ActivityStore，并保留全局兼容 service shutdown。
 - `workspace.write_patch` 已具备 workspace 边界、审批、hash precondition、hunk context 校验、单文件 unified diff 限制和原子写入；workspace boundary validation 已前置到 approval 前，避免用户审批越界写请求。
 - `approval_wait_timeout` 已具备可回放事实日志：RunEngine 超时时写入 `approval.timeout` RunEvent、清理 pending approval，并保持重复 timeout 幂等。
 - Approval approve/reject/timeout 端点已具备 focused 幂等回归；route handler 级 approve/reject 重试不会重复执行工具或追加重复 rejection fact；主聊天重复 approval 通过内存 guard 与 SQLite pending→approved 持久化 claim 防止重复执行已批准工具，双 `NativeRunEngine` 实例共享同一 DB 的回归已覆盖该窗口；`cancel_run()` 新增 per-run cancel lock，focused 并发回归确认同一 Run 并发取消只写一条 `run.cancelled` fact 和一条 timeline cancel；`/ui/runs/{run_id}/cancel` 新增 route handler 级重复请求回归，确认 endpoint handler 重试不会追加第二条取消事实。Task cancel 仍保持 v0.5 既有 Task API 语义：已终态任务返回 409，不在本轮改成 Native Run 风格的 200 幂等响应。
