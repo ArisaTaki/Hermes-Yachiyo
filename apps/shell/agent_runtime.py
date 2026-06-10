@@ -901,7 +901,7 @@ def _coalesce_model_message(message: Any) -> dict[str, Any]:
     if isinstance(message, str):
         return {"role": "assistant", "content": message}
     if not isinstance(message, IterableABC):
-        result = {"role": "assistant", "content": _message_content_text(message)}
+        result = {"role": "assistant", "content": _message_visible_content_text(message)}
         tool_calls = _coerce_tool_calls(_message_field(message, "tool_calls"))
         if tool_calls is not None:
             result["tool_calls"] = tool_calls
@@ -6097,7 +6097,7 @@ class NativeRunEngine:
                     stream=True,
                 )
             )
-            content, output_truncated = self._limit_model_output(_message_content_text(message))
+            content, output_truncated = self._limit_model_output(_message_visible_content_text(message))
             content = content.strip()
             if not content:
                 raise AgentRuntimeError("Native Agent 模型返回了空回复")
@@ -6704,11 +6704,13 @@ class NativeRunEngine:
             message = _coalesce_model_message(
                 _call_model_profile_chat_message(base_url, model, api_key, messages, tools=tools, stream=True)
             )
-            content = _message_content_text(message)
+            content = _message_visible_content_text(message)
             tool_requests = self._tool_requests_from_message(message, content)
             detail = content[:500] if content else ", ".join(request["tool"] for request in tool_requests)[:500]
             timeline.append(self._timeline("agent.model.response", detail))
             if not tool_requests:
+                if not content.strip():
+                    raise AgentRuntimeError("Native Agent 模型返回了空回复")
                 result_text, _truncated = self._limit_model_output(content)
                 return result_text
 

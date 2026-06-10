@@ -1701,6 +1701,90 @@ def test_main_chat_model_does_not_persist_streaming_reasoning_as_visible_output(
         service.close()
 
 
+def test_main_chat_model_rejects_non_stream_reasoning_only_output(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    private_reasoning = "provider private non-stream reasoning"
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
+        assert stream is True
+        return {
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": private_reasoning,
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-non-stream-reasoning-only",
+            session_id="session-main-non-stream-reasoning-only",
+            user_goal="Do not persist provider reasoning",
+        )
+
+        with pytest.raises(AgentRuntimeError, match="空回复"):
+            service.call_main_chat_model(
+                run["run_id"],
+                [{"role": "user", "content": "Do not persist provider reasoning"}],
+            )
+
+        events = service.list_run_events(run["run_id"], include_internal=True)["events"]
+        event_types = [event["event_type"] for event in events]
+        serialized_events = json.dumps(events, ensure_ascii=False)
+        assert "model.request.failed" in event_types
+        assert "model.output.completed" not in event_types
+        assert private_reasoning not in serialized_events
+    finally:
+        service.close()
+
+
+def test_main_chat_model_loop_rejects_non_stream_reasoning_only_output(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    private_reasoning = "provider private loop reasoning"
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None, stream=False):
+        assert stream is True
+        assert tools is not None
+        return {
+            "role": "assistant",
+            "content": "",
+            "reasoning_content": private_reasoning,
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-loop-non-stream-reasoning-only",
+            session_id="session-main-loop-non-stream-reasoning-only",
+            user_goal="Do not persist loop provider reasoning",
+        )
+
+        with pytest.raises(AgentRuntimeError, match="空回复"):
+            service.execute_main_chat_model_loop(
+                run["run_id"],
+                [{"role": "user", "content": "Do not persist loop provider reasoning"}],
+                tool_policy={"allowed_tools": ["workspace.read"]},
+                workspace_policy={"default_workdir": str(tmp_path), "readable_scopes": ["."]},
+            )
+
+        events = service.list_run_events(run["run_id"], include_internal=True)["events"]
+        event_types = [event["event_type"] for event in events]
+        serialized_events = json.dumps(events, ensure_ascii=False)
+        assert "model.request.failed" in event_types
+        assert "model.output.completed" not in event_types
+        assert "agent.tool.call" not in event_types
+        assert private_reasoning not in serialized_events
+    finally:
+        service.close()
+
+
 def test_main_chat_model_consumes_coalesced_openai_compatible_sse_frames(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     requests = []
