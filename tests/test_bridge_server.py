@@ -2622,6 +2622,140 @@ def test_workflow_delete_http_roundtrip_removes_group_child_runs_and_artifacts(t
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_agent_rerun_http_roundtrip_detail_and_replay(tmp_path, monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_root = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes"
+        agent_spec = importlib.util.spec_from_file_location(
+            "_oha_agent_rerun_http_roundtrip_under_test",
+            route_root / "agents.py",
+        )
+        run_spec = importlib.util.spec_from_file_location(
+            "_oha_agent_rerun_run_http_roundtrip_under_test",
+            route_root / "runs.py",
+        )
+        assert agent_spec is not None and agent_spec.loader is not None
+        assert run_spec is not None and run_spec.loader is not None
+        agent_route_module = importlib.util.module_from_spec(agent_spec)
+        run_route_module = importlib.util.module_from_spec(run_spec)
+        sys.modules[agent_spec.name] = agent_route_module
+        sys.modules[run_spec.name] = run_route_module
+        agent_spec.loader.exec_module(agent_route_module)
+        run_spec.loader.exec_module(run_route_module)
+
+        service = AgentRuntimeService(
+            db_path=tmp_path / "agent-runtime.db",
+            workspace_dir=tmp_path / "runtime",
+            credential_store=MemoryCredentialStore(),
+            seed_templates=False,
+        )
+        model_calls: list[list[dict[str, object]]] = []
+
+        def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+            model_calls.append(messages)
+            return {"content": f"Agent HTTP rerun result {len(model_calls)}"}
+
+        monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+        monkeypatch.setattr(
+            agent_route_module,
+            "get_agent_runtime_service",
+            lambda: (_ for _ in ()).throw(AssertionError("agent routes should use AppRuntime service")),
+        )
+        monkeypatch.setattr(
+            run_route_module,
+            "get_native_run_engine",
+            lambda: (_ for _ in ()).throw(AssertionError("run routes should use AppRuntime service")),
+        )
+
+        route_app = FastAPI()
+        route_app.state.runtime = SimpleNamespace(agent_runtime_service=service)
+        route_app.include_router(agent_route_module.router)
+        route_app.include_router(run_route_module.router)
+        try:
+            with TestClient(route_app) as client:
+                agent_response = client.post(
+                    "/ui/agents",
+                    json={
+                        "name": "HTTP Agent Rerun",
+                        "model_mode": "custom_api",
+                        "model_config": {
+                            "base_url": "https://api.example.test/v1",
+                            "model": "demo-model",
+                            "api_key": "sk-secret",
+                        },
+                    },
+                )
+                agent_response.raise_for_status()
+                agent_id = agent_response.json()["agent_id"]
+
+                run_response = client.post(
+                    "/ui/agent-runs",
+                    json={"agent_id": agent_id, "user_goal": "Run and rerun agent through HTTP"},
+                    headers={"Idempotency-Key": "http-agent-rerun-original-1"},
+                )
+                run_response.raise_for_status()
+                original = run_response.json()
+                original_run_id = original["run_id"]
+
+                original_detail = client.get(f"/ui/runs/{original_run_id}")
+                original_replay = client.get(f"/runs/{original_run_id}/events?after_sequence=0&limit=200")
+                rerun_response = client.post(f"/ui/runs/{original_run_id}/rerun")
+                rerun = rerun_response.json()
+                rerun_run_id = rerun["run_id"]
+                rerun_detail = client.get(f"/ui/runs/{rerun_run_id}")
+                rerun_replay = client.get(f"/runs/{rerun_run_id}/events?after_sequence=0&limit=200")
+
+            assert original["client_request_id"] == "http-agent-rerun-original-1"
+            assert original["status"] == "completed"
+            assert original["result"] == "Agent HTTP rerun result 1"
+            assert original_detail.status_code == 200
+            assert original_detail.json()["status"] == "completed"
+            assert original_replay.status_code == 200
+            original_replay_types = [event["event_type"] for event in original_replay.json()["events"]]
+            assert "agent.run.completed" in original_replay_types
+
+            assert rerun_response.status_code == 200
+            assert rerun_run_id != original_run_id
+            assert rerun["agent_run_id"] == rerun_run_id
+            assert rerun["status"] == "completed"
+            assert rerun["result"] == "Agent HTTP rerun result 2"
+            assert rerun["run_group_source"] == "rerun"
+            assert rerun["timeline"][0]["event"] == "run.rerun.started"
+            assert rerun["timeline"][0]["rerun_of_run_id"] == original_run_id
+            assert rerun["timeline"][0]["rerun_of_kind"] == "agent_run"
+            assert rerun_detail.status_code == 200
+            assert rerun_detail.json()["run_id"] == rerun_run_id
+            assert rerun_detail.json()["run_group_source"] == "rerun"
+
+            rerun_replay_payload = rerun_replay.json()
+            rerun_replay_types = [event["event_type"] for event in rerun_replay_payload["events"]]
+            assert rerun_replay.status_code == 200
+            assert rerun_replay_types.count("run.rerun.started") == 1
+            assert "agent.run.completed" in rerun_replay_types
+            rerun_fact = next(
+                event
+                for event in rerun_replay_payload["events"]
+                if event["event_type"] == "run.rerun.started"
+            )
+            assert rerun_fact["payload"]["rerun_of_run_id"] == original_run_id
+            assert rerun_fact["payload"]["rerun_of_kind"] == "agent_run"
+            assert rerun_fact["payload"]["input_preview"]["original_status"] == "completed"
+            assert rerun_fact["payload"]["input_preview"]["original_goal"] == original["user_goal"]
+            assert len(model_calls) == 2
+        finally:
+            service.close()
+    finally:
+        sys.modules.pop("_oha_agent_rerun_http_roundtrip_under_test", None)
+        sys.modules.pop("_oha_agent_rerun_run_http_roundtrip_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_agent_run_http_routes_roundtrip_approval_detail_and_replay(tmp_path, monkeypatch):
     saved_modules = _unload_module_prefixes(("fastapi",))
     try:
