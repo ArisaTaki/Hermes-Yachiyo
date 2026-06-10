@@ -3462,6 +3462,269 @@ def test_main_chat_reject_and_timeout_use_approval_coordinator_boundaries(tmp_pa
         service.close()
 
 
+def test_agent_run_reject_and_timeout_use_approval_coordinator_boundaries(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+        return {
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_terminal",
+                    "type": "function",
+                    "function": {
+                        "name": "terminal_run",
+                        "arguments": json.dumps({"command": "printf boundary-check"}),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    reject_calls: list[dict[str, object]] = []
+    timeout_calls: list[dict[str, object]] = []
+    original_reject = service.approvals.reject_tool_run
+    original_timeout = service.approvals.timeout_tool_run
+
+    def spy_reject_tool_run(
+        run_id,
+        *,
+        timeline,
+        reason,
+        tool_name,
+        input_preview,
+    ):
+        reject_calls.append(
+            {
+                "run_id": run_id,
+                "timeline_events": [event.get("event") for event in timeline if isinstance(event, dict)],
+                "reason": reason,
+                "tool_name": tool_name,
+                "input_preview": input_preview,
+            }
+        )
+        return original_reject(
+            run_id,
+            timeline=timeline,
+            reason=reason,
+            tool_name=tool_name,
+            input_preview=input_preview,
+        )
+
+    def spy_timeout_tool_run(
+        run_id,
+        *,
+        timeline,
+        reason,
+        tool_name,
+        input_preview,
+    ):
+        timeout_calls.append(
+            {
+                "run_id": run_id,
+                "timeline_events": [event.get("event") for event in timeline if isinstance(event, dict)],
+                "reason": reason,
+                "tool_name": tool_name,
+                "input_preview": input_preview,
+            }
+        )
+        return original_timeout(
+            run_id,
+            timeline=timeline,
+            reason=reason,
+            tool_name=tool_name,
+            input_preview=input_preview,
+        )
+
+    monkeypatch.setattr(service.approvals, "reject_tool_run", spy_reject_tool_run)
+    monkeypatch.setattr(service.approvals, "timeout_tool_run", spy_timeout_tool_run)
+
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Boundary Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {"allowed_tools": ["terminal.run"]},
+                "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
+            }
+        )
+
+        rejected_run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Reject it"})
+        timed_out_run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Timeout it"})
+
+        assert rejected_run["status"] == "approval_required"
+        assert timed_out_run["status"] == "approval_required"
+
+        rejected = service.reject_run_approval(rejected_run["run_id"], "not now")
+        timed_out = service.timeout_run_approval(timed_out_run["run_id"], reason="approval_wait_timeout")
+
+        assert rejected["status"] == "cancelled"
+        assert timed_out["status"] == "cancelled"
+        assert len(reject_calls) == 1
+        assert len(timeout_calls) == 1
+        assert reject_calls[0]["run_id"] == rejected_run["run_id"]
+        assert reject_calls[0]["reason"] == "not now"
+        assert reject_calls[0]["tool_name"] == "terminal.run"
+        assert "agent.tool.approval_required" in reject_calls[0]["timeline_events"]
+        assert reject_calls[0]["input_preview"]["command"] == "printf boundary-check"
+        assert timeout_calls[0]["run_id"] == timed_out_run["run_id"]
+        assert timeout_calls[0]["reason"] == "approval_wait_timeout"
+        assert timeout_calls[0]["tool_name"] == "terminal.run"
+        assert "agent.tool.approval_required" in timeout_calls[0]["timeline_events"]
+        assert timeout_calls[0]["input_preview"]["command"] == "printf boundary-check"
+    finally:
+        service.close()
+
+
+def test_workflow_approval_reject_and_timeout_use_approval_coordinator_boundaries(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+
+    def fake_chat(_base_url, _model, _api_key, _messages, *, tools=None):
+        return {"content": "Before gate complete"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    reject_calls: list[dict[str, object]] = []
+    timeout_calls: list[dict[str, object]] = []
+    original_reject = service.approvals.reject_workflow_node
+    original_timeout = service.approvals.timeout_workflow_node
+
+    def spy_reject_workflow_node(
+        run_id,
+        *,
+        timeline,
+        reason,
+        workflow_node_id,
+        label,
+        criteria,
+        input_preview,
+    ):
+        reject_calls.append(
+            {
+                "run_id": run_id,
+                "timeline_events": [event.get("event") for event in timeline if isinstance(event, dict)],
+                "reason": reason,
+                "workflow_node_id": workflow_node_id,
+                "label": label,
+                "criteria": criteria,
+                "input_preview": input_preview,
+            }
+        )
+        return original_reject(
+            run_id,
+            timeline=timeline,
+            reason=reason,
+            workflow_node_id=workflow_node_id,
+            label=label,
+            criteria=criteria,
+            input_preview=input_preview,
+        )
+
+    def spy_timeout_workflow_node(
+        run_id,
+        *,
+        timeline,
+        reason,
+        workflow_node_id,
+        label,
+        criteria,
+        input_preview,
+    ):
+        timeout_calls.append(
+            {
+                "run_id": run_id,
+                "timeline_events": [event.get("event") for event in timeline if isinstance(event, dict)],
+                "reason": reason,
+                "workflow_node_id": workflow_node_id,
+                "label": label,
+                "criteria": criteria,
+                "input_preview": input_preview,
+            }
+        )
+        return original_timeout(
+            run_id,
+            timeline=timeline,
+            reason=reason,
+            workflow_node_id=workflow_node_id,
+            label=label,
+            criteria=criteria,
+            input_preview=input_preview,
+        )
+
+    monkeypatch.setattr(service.approvals, "reject_workflow_node", spy_reject_workflow_node)
+    monkeypatch.setattr(service.approvals, "timeout_workflow_node", spy_timeout_workflow_node)
+
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Workflow Boundary Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+            }
+        )
+        workflow = service.create_workflow(
+            {
+                "name": "Workflow Boundary",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {"id": "agent", "type": "agent", "data": {"label": "Before Gate", "agent_id": agent["agent_id"]}},
+                    {
+                        "id": "gate",
+                        "type": "approval",
+                        "data": {
+                            "label": "Human Gate",
+                            "criteria": "Review before continuing.",
+                        },
+                    },
+                ],
+                "edges": [
+                    {"source": "start", "target": "agent"},
+                    {"source": "agent", "target": "gate"},
+                ],
+            }
+        )
+
+        rejected_run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "Reject it"})
+        timed_out_run = service.create_workflow_run({"workflow_id": workflow["workflow_id"], "user_goal": "Timeout it"})
+
+        assert rejected_run["status"] == "approval_required"
+        assert timed_out_run["status"] == "approval_required"
+
+        rejected = service.reject_run_approval(rejected_run["run_id"], "not now")
+        timed_out = service.timeout_run_approval(timed_out_run["run_id"], reason="approval_wait_timeout")
+
+        assert rejected["status"] == "cancelled"
+        assert timed_out["status"] == "cancelled"
+        assert len(reject_calls) == 1
+        assert len(timeout_calls) == 1
+        assert reject_calls[0]["run_id"] == rejected_run["run_id"]
+        assert reject_calls[0]["reason"] == "not now"
+        assert reject_calls[0]["workflow_node_id"] == "gate"
+        assert reject_calls[0]["label"] == "Human Gate"
+        assert reject_calls[0]["criteria"] == "Review before continuing."
+        assert reject_calls[0]["input_preview"]["checkpoint"] == "Human Gate"
+        assert "workflow.node.approval_required" in reject_calls[0]["timeline_events"]
+        assert timeout_calls[0]["run_id"] == timed_out_run["run_id"]
+        assert timeout_calls[0]["reason"] == "approval_wait_timeout"
+        assert timeout_calls[0]["workflow_node_id"] == "gate"
+        assert timeout_calls[0]["label"] == "Human Gate"
+        assert timeout_calls[0]["criteria"] == "Review before continuing."
+        assert timeout_calls[0]["input_preview"]["checkpoint"] == "Human Gate"
+        assert "workflow.node.approval_required" in timeout_calls[0]["timeline_events"]
+    finally:
+        service.close()
+
+
 def test_main_chat_repeated_approval_does_not_execute_tool_twice(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     monkeypatch.setattr(
